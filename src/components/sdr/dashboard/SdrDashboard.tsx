@@ -1,0 +1,1184 @@
+import React, { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
+import { fetchDashboardStats, fetchQsUsers } from "@/lib/qs/queries";
+import type { GoalType } from "../types";
+import type { SdrUser } from "../types";
+import RankingPanel from "./RankingPanel";
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+interface KpiCard {
+  label: string;
+  value: string;
+  metaPercent: number;
+  metaLabel: string;
+  predicted: string;
+  type: GoalType;
+}
+
+interface LossReasonData {
+  label: string;
+  count: number;
+}
+
+interface CadenceEfficiency {
+  cadence: string;
+  total: number;
+  ganhos: number;
+  taxa: number;
+}
+
+interface SdrMeetings {
+  name: string;
+  count: number;
+}
+
+interface ChannelPerformanceRow {
+  channel: string;
+  total: number;
+  atendeu: number;
+  taxa: number;
+}
+
+interface HeatmapCell {
+  day: number; // 0=Seg...4=Sex
+  hour: number; // 6..20
+  count: number;
+}
+
+// ── SVG Area Chart ──────────────────────────────────────────────────────────
+
+const CHART_W = 720;
+const CHART_H = 220;
+const CHART_PAD_L = 40;
+const CHART_PAD_R = 16;
+const CHART_PAD_T = 16;
+const CHART_PAD_B = 28;
+
+function buildPath(data: number[], maxVal: number, totalDays: number): string {
+  const usableW = CHART_W - CHART_PAD_L - CHART_PAD_R;
+  const usableH = CHART_H - CHART_PAD_T - CHART_PAD_B;
+
+  return data
+    .map((v, i) => {
+      const x = CHART_PAD_L + (i / (totalDays - 1)) * usableW;
+      const y = CHART_PAD_T + usableH - (v / maxVal) * usableH;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+function buildAreaPath(
+  data: number[],
+  maxVal: number,
+  totalDays: number
+): string {
+  const usableW = CHART_W - CHART_PAD_L - CHART_PAD_R;
+  const usableH = CHART_H - CHART_PAD_T - CHART_PAD_B;
+  const baseline = CHART_PAD_T + usableH;
+
+  const linePath = data
+    .map((v, i) => {
+      const x = CHART_PAD_L + (i / (totalDays - 1)) * usableW;
+      const y = CHART_PAD_T + usableH - (v / maxVal) * usableH;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  const lastX =
+    CHART_PAD_L + ((data.length - 1) / (totalDays - 1)) * usableW;
+  const firstX = CHART_PAD_L;
+
+  return `${linePath} L${lastX.toFixed(1)},${baseline} L${firstX.toFixed(1)},${baseline} Z`;
+}
+
+function AreaChart({ realData, predictedData }: { realData: number[]; predictedData: number[] }) {
+  const maxVal = Math.max(...predictedData, ...realData) * 1.1 || 100;
+  const totalDays = 30;
+
+  const yTicks = [0, 25, 50, 75, 100];
+  const xTicks = [1, 5, 10, 15, 20, 25, 30];
+
+  const usableW = CHART_W - CHART_PAD_L - CHART_PAD_R;
+  const usableH = CHART_H - CHART_PAD_T - CHART_PAD_B;
+
+  return (
+    <svg
+      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+      className="w-full h-auto"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      {/* Grid lines */}
+      {yTicks.map((tick) => {
+        const y = CHART_PAD_T + usableH - (tick / maxVal) * usableH;
+        return (
+          <g key={tick}>
+            <line x1={CHART_PAD_L} y1={y} x2={CHART_W - CHART_PAD_R} y2={y} stroke="#E5E7EB" strokeWidth="0.5" />
+            <text x={CHART_PAD_L - 6} y={y + 3} textAnchor="end" fill="#9CA3AF" fontSize="9">{tick}</text>
+          </g>
+        );
+      })}
+
+      {/* X-axis labels */}
+      {xTicks.map((day) => {
+        const x = CHART_PAD_L + ((day - 1) / (totalDays - 1)) * usableW;
+        return (
+          <text key={day} x={x} y={CHART_H - 4} textAnchor="middle" fill="#9CA3AF" fontSize="9">{day}</text>
+        );
+      })}
+
+      {/* Predicted line (dashed) */}
+      {predictedData.length > 1 && (
+        <path d={buildPath(predictedData, maxVal, totalDays)} fill="none" stroke="#9CA3AF" strokeWidth="1.5" strokeDasharray="5 3" />
+      )}
+
+      {/* Real area fill */}
+      {realData.length > 1 && (
+        <path d={buildAreaPath(realData, maxVal, totalDays)} fill="url(#orangeGradient)" opacity="0.15" />
+      )}
+
+      {/* Real line (solid) */}
+      {realData.length > 1 && (
+        <path d={buildPath(realData, maxVal, totalDays)} fill="none" stroke="#F97316" strokeWidth="2" />
+      )}
+
+      {/* Current day dot */}
+      {realData.length > 0 && (() => {
+        const lastIdx = realData.length - 1;
+        const x = CHART_PAD_L + (lastIdx / (totalDays - 1)) * usableW;
+        const y = CHART_PAD_T + usableH - (realData[lastIdx] / maxVal) * usableH;
+        return <circle cx={x} cy={y} r="4" fill="#F97316" />;
+      })()}
+
+      <defs>
+        <linearGradient id="orangeGradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#F97316" />
+          <stop offset="100%" stopColor="#F97316" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
+// ── Horizontal Bar Chart ────────────────────────────────────────────────────
+
+function LossReasonsChart() {
+  const [lossReasons, setLossReasons] = useState<LossReasonData[]>([]);
+  const [loadingReasons, setLoadingReasons] = useState(true);
+
+  useEffect(() => {
+    async function fetchLossReasons() {
+      setLoadingReasons(true);
+      // Get leads with status=perdido and their loss reason labels
+      const { data, error } = await supabase
+        .from("qs_leads")
+        .select("loss_reason:qs_loss_reasons(label)")
+        .eq("status", "perdido")
+        .not("loss_reason_id", "is", null);
+
+      if (error) {
+        console.warn("Erro ao buscar motivos de perda:", error);
+        setLoadingReasons(false);
+        return;
+      }
+
+      // Aggregate counts by label
+      const counts: Record<string, number> = {};
+      ((data ?? []) as any[]).forEach((row) => {
+        const label = row.loss_reason?.label;
+        if (label) counts[label] = (counts[label] || 0) + 1;
+      });
+
+      const sorted = Object.entries(counts)
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count);
+
+      setLossReasons(sorted);
+      setLoadingReasons(false);
+    }
+    fetchLossReasons();
+  }, []);
+
+  if (loadingReasons) {
+    return <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>;
+  }
+
+  if (lossReasons.length === 0) {
+    return <p className="text-sm text-gray-400 text-center py-4">Nenhum dado de perda disponível.</p>;
+  }
+
+  const maxCount = Math.max(...lossReasons.map((r) => r.count));
+
+  return (
+    <div className="space-y-3">
+      {lossReasons.map((reason) => (
+        <div key={reason.label} className="flex items-center gap-3">
+          <span className="text-sm text-gray-600 w-44 text-right shrink-0 truncate">
+            {reason.label}
+          </span>
+          <div className="flex-1 h-7 bg-gray-100 rounded-md overflow-hidden relative">
+            <div
+              className="h-full rounded-md bg-[#F97316]"
+              style={{ width: `${(reason.count / maxCount) * 100}%`, opacity: 0.75 }}
+            />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-700">
+              {reason.count}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── KPI Card ────────────────────────────────────────────────────────────────
+
+function KpiCardComponent({ card }: { card: KpiCard }) {
+  const isAbove = card.metaPercent >= 60;
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+      <span className="text-xs text-gray-500">{card.label}</span>
+      <span className="text-2xl font-bold text-gray-900">{card.value}</span>
+      <div className="flex items-center gap-2 mt-1">
+        <span
+          className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+            isAbove ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+          }`}
+        >
+          {card.metaPercent}% da meta
+        </span>
+      </div>
+      <span className="text-xs text-gray-400">{card.metaLabel}</span>
+      <span className="text-xs text-gray-400">{card.predicted}</span>
+    </div>
+  );
+}
+
+// ── Speed-to-Lead KPI Card (Change 20) ──────────────────────────────────────
+
+function SpeedToLeadCard({ avgMinutes, loading }: { avgMinutes: number | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+        <span className="text-xs text-gray-500">Tempo Médio de Contato</span>
+        <span className="text-sm text-gray-400">Carregando...</span>
+      </div>
+    );
+  }
+
+  const value = avgMinutes !== null ? avgMinutes : 0;
+  const color = value < 5 ? "#22C55E" : value < 15 ? "#EAB308" : "#EF4444";
+  const bgColor = value < 5 ? "bg-green-50" : value < 15 ? "bg-yellow-50" : "bg-red-50";
+  const label = value < 5 ? "Excelente" : value < 15 ? "Bom" : "Precisa melhorar";
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+      <span className="text-xs text-gray-500">Tempo Médio de Contato</span>
+      <span className="text-2xl font-bold" style={{ color }}>
+        {avgMinutes !== null ? `${value.toFixed(1)} min` : "N/A"}
+      </span>
+      <div className="flex items-center gap-2 mt-1">
+        <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${bgColor}`} style={{ color }}>
+          {label}
+        </span>
+      </div>
+      <span className="text-xs text-gray-400">Meta: &lt; 5 minutos</span>
+    </div>
+  );
+}
+
+// ── Channel Performance Table (Change 18) ───────────────────────────────────
+
+function ChannelPerformanceTable({ data, loading }: { data: ChannelPerformanceRow[]; loading: boolean }) {
+  const CHANNEL_DISPLAY: Record<string, string> = {
+    pesquisa: "Pesquisa",
+    email: "E-mail",
+    ligacao: "Ligação",
+    whatsapp: "WhatsApp",
+    linkedin: "LinkedIn",
+    instagram: "Instagram",
+    tiktok: "TikTok",
+    youtube: "YouTube",
+  };
+
+  if (loading) {
+    return <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>;
+  }
+
+  if (data.length === 0) {
+    return <p className="text-sm text-gray-400 text-center py-4">Nenhum dado de canal disponível.</p>;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-100">
+            <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Canal</th>
+            <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Atividades</th>
+            <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Atendeu</th>
+            <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Taxa</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row) => (
+            <tr key={row.channel} className="border-b border-gray-50 hover:bg-gray-50/50">
+              <td className="py-2.5 px-3 text-sm font-medium text-gray-900">
+                {CHANNEL_DISPLAY[row.channel] || row.channel}
+              </td>
+              <td className="py-2.5 px-3 text-center text-sm text-gray-700">{row.total}</td>
+              <td className="py-2.5 px-3 text-center text-sm text-gray-700">{row.atendeu}</td>
+              <td className="py-2.5 px-3 text-center">
+                <span
+                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+                  style={{
+                    background: row.taxa >= 50 ? "#D1FAE5" : row.taxa >= 25 ? "#FEF3C7" : "#FEE2E2",
+                    color: row.taxa >= 50 ? "#059669" : row.taxa >= 25 ? "#D97706" : "#DC2626",
+                  }}
+                >
+                  {row.taxa.toFixed(1)}%
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Heatmap (Change 19) ─────────────────────────────────────────────────────
+
+const HEATMAP_DAYS = ["Seg", "Ter", "Qua", "Qui", "Sex"];
+const HEATMAP_HOURS = Array.from({ length: 15 }, (_, i) => i + 6); // 6h-20h
+
+function ContactHeatmap({ cells, loading }: { cells: HeatmapCell[]; loading: boolean }) {
+  if (loading) {
+    return <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>;
+  }
+
+  const cellMap = new Map<string, number>();
+  cells.forEach((c) => cellMap.set(`${c.day}-${c.hour}`, c.count));
+  const maxCount = Math.max(1, ...cells.map((c) => c.count));
+
+  function getIntensity(count: number): string {
+    if (count === 0) return "#F3F4F6";
+    const ratio = count / maxCount;
+    if (ratio < 0.25) return "#FED7AA";
+    if (ratio < 0.5) return "#FDBA74";
+    if (ratio < 0.75) return "#FB923C";
+    return "#EA580C";
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="inline-flex flex-col gap-1">
+        {/* Header row */}
+        <div className="flex items-center gap-1">
+          <div className="w-10" />
+          {HEATMAP_HOURS.map((h) => (
+            <div key={h} className="w-10 text-center text-[10px] text-gray-400 font-medium">
+              {h}h
+            </div>
+          ))}
+        </div>
+        {/* Data rows */}
+        {HEATMAP_DAYS.map((dayLabel, dayIdx) => (
+          <div key={dayLabel} className="flex items-center gap-1">
+            <div className="w-10 text-right text-[11px] text-gray-500 font-medium pr-1">{dayLabel}</div>
+            {HEATMAP_HOURS.map((h) => {
+              const count = cellMap.get(`${dayIdx}-${h}`) || 0;
+              return (
+                <div
+                  key={h}
+                  className="w-10 h-8 rounded-md flex items-center justify-center text-[10px] font-medium transition-colors"
+                  style={{ background: getIntensity(count), color: count > 0 ? "#fff" : "#9CA3AF" }}
+                  title={`${dayLabel} ${h}h: ${count} atendeu`}
+                >
+                  {count > 0 ? count : ""}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        {/* Legend */}
+        <div className="flex items-center gap-2 mt-2 ml-10">
+          <span className="text-[10px] text-gray-400">Menos</span>
+          {["#F3F4F6", "#FED7AA", "#FDBA74", "#FB923C", "#EA580C"].map((color) => (
+            <div key={color} className="w-6 h-4 rounded-sm" style={{ background: color }} />
+          ))}
+          <span className="text-[10px] text-gray-400">Mais</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Component ──────────────────────────────────────────────────────────
+
+const PERIOD_OPTIONS = [
+  { id: "today", label: "Hoje" },
+  { id: "yesterday", label: "Ontem" },
+  { id: "last7", label: "Últimos 7 dias" },
+  { id: "last15", label: "Últimos 15 dias" },
+  { id: "mtd", label: "Mês atual" },
+  { id: "last30", label: "Últimos 30 dias" },
+  { id: "last90", label: "Últimos 90 dias" },
+  { id: "custom", label: "Personalizado" },
+];
+
+function getDateRange(periodId: string, customStart: string, customEnd: string): { from: string; to: string } {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const endOfDay = new Date(today);
+  endOfDay.setHours(23, 59, 59, 999);
+
+  switch (periodId) {
+    case "today":
+      return { from: today.toISOString(), to: endOfDay.toISOString() };
+    case "yesterday": {
+      const y = new Date(today);
+      y.setDate(y.getDate() - 1);
+      const ye = new Date(y);
+      ye.setHours(23, 59, 59, 999);
+      return { from: y.toISOString(), to: ye.toISOString() };
+    }
+    case "last7": {
+      const d = new Date(today);
+      d.setDate(d.getDate() - 7);
+      return { from: d.toISOString(), to: endOfDay.toISOString() };
+    }
+    case "last15": {
+      const d = new Date(today);
+      d.setDate(d.getDate() - 15);
+      return { from: d.toISOString(), to: endOfDay.toISOString() };
+    }
+    case "mtd": {
+      const d = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { from: d.toISOString(), to: endOfDay.toISOString() };
+    }
+    case "last30": {
+      const d = new Date(today);
+      d.setDate(d.getDate() - 30);
+      return { from: d.toISOString(), to: endOfDay.toISOString() };
+    }
+    case "last90": {
+      const d = new Date(today);
+      d.setDate(d.getDate() - 90);
+      return { from: d.toISOString(), to: endOfDay.toISOString() };
+    }
+    case "custom":
+      return {
+        from: customStart ? new Date(customStart).toISOString() : today.toISOString(),
+        to: customEnd ? new Date(customEnd + "T23:59:59.999").toISOString() : endOfDay.toISOString(),
+      };
+    default:
+      return { from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), to: endOfDay.toISOString() };
+  }
+}
+
+export default function SdrDashboard() {
+  const [selectedUser, setSelectedUser] = useState("all");
+  const [selectedPeriod, setSelectedPeriod] = useState("mtd");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+
+  // Real data states
+  const [users, setUsers] = useState<SdrUser[]>([]);
+  const [kpiCards, setKpiCards] = useState<KpiCard[]>([]);
+  const [realData, setRealData] = useState<number[]>([]);
+  const [predictedData, setPredictedData] = useState<number[]>([]);
+  const [channelPerformance, setChannelPerformance] = useState<ChannelPerformanceRow[]>([]);
+  const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
+  const [speedToLead, setSpeedToLead] = useState<number | null>(null);
+  const [loadingKpis, setLoadingKpis] = useState(true);
+  const [loadingChannels, setLoadingChannels] = useState(true);
+  const [loadingHeatmap, setLoadingHeatmap] = useState(true);
+  const [loadingSpeed, setLoadingSpeed] = useState(true);
+
+  // Operational KPIs states
+  const [cicloMedio, setCicloMedio] = useState<number | null>(null);
+  const [cadenceEfficiency, setCadenceEfficiency] = useState<CadenceEfficiency[]>([]);
+  const [connectRate, setConnectRate] = useState<number | null>(null);
+  const [tasksOverdueRate, setTasksOverdueRate] = useState<number | null>(null);
+  const [sdrMeetings, setSdrMeetings] = useState<SdrMeetings[]>([]);
+  const [loadingOperational, setLoadingOperational] = useState(true);
+
+  const periodLabel = PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label || "Mês atual";
+
+  // Fetch users
+  useEffect(() => {
+    async function loadUsers() {
+      const data = await fetchQsUsers();
+      setUsers(data);
+    }
+    loadUsers();
+  }, []);
+
+  const allUsers = [{ id: "all", name: "Todos os qualificadores" } as any, ...users];
+  const userName = allUsers.find((u: any) => u.id === selectedUser)?.name || "Todos";
+
+  // Fetch KPIs and chart data
+  useEffect(() => {
+    async function loadKpis() {
+      setLoadingKpis(true);
+      const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      const ownerId = selectedUser === "all" ? undefined : selectedUser;
+
+      const stats = await fetchDashboardStats(ownerId, from, to);
+
+      // Build KPI cards from real data
+      // We use reasonable meta values - these should come from qs_goals in the future
+      const metaGanhos = 87;
+      const metaFinalizados = 250;
+      const metaAtividades = 450;
+      const metaConversao = 30;
+
+      const cards: KpiCard[] = [
+        {
+          label: "Ganhos",
+          value: String(stats.ganhos),
+          metaPercent: metaGanhos > 0 ? Math.round((stats.ganhos / metaGanhos) * 100) : 0,
+          metaLabel: `Meta: ${metaGanhos}`,
+          predicted: "",
+          type: "ganhos",
+        },
+        {
+          label: "Leads Finalizados",
+          value: String(stats.leadsFinalizados),
+          metaPercent: metaFinalizados > 0 ? Math.round((stats.leadsFinalizados / metaFinalizados) * 100) : 0,
+          metaLabel: `Meta: ${metaFinalizados}`,
+          predicted: "",
+          type: "leads_finalizados",
+        },
+        {
+          label: "Atividades Realizadas",
+          value: String(stats.atividadesRealizadas),
+          metaPercent: metaAtividades > 0 ? Math.round((stats.atividadesRealizadas / metaAtividades) * 100) : 0,
+          metaLabel: `Meta: ${metaAtividades}`,
+          predicted: "",
+          type: "atividades",
+        },
+        {
+          label: "Taxa de Conversão",
+          value: `${stats.taxaConversao.toFixed(1).replace(".", ",")}%`,
+          metaPercent: metaConversao > 0 ? Math.round((stats.taxaConversao / metaConversao) * 100) : 0,
+          metaLabel: `Meta: ${metaConversao}%`,
+          predicted: "",
+          type: "conversao",
+        },
+      ];
+
+      setKpiCards(cards);
+
+      // Build monthly chart data: ganhos accumulated by day
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const currentDay = now.getDate();
+
+      let qGanhosByDay = supabase
+        .from("qs_leads")
+        .select("updated_at")
+        .eq("status", "ganho")
+        .gte("updated_at", monthStart.toISOString());
+      if (ownerId) qGanhosByDay = qGanhosByDay.eq("owner_id", ownerId);
+
+      const { data: ganhosDays } = await qGanhosByDay;
+
+      // Build cumulative array
+      const dayCounts = new Array(currentDay).fill(0);
+      (ganhosDays ?? []).forEach((row: any) => {
+        const d = new Date(row.updated_at).getDate();
+        if (d >= 1 && d <= currentDay) {
+          dayCounts[d - 1]++;
+        }
+      });
+
+      const cumulative: number[] = [];
+      let acc = 0;
+      for (let i = 0; i < dayCounts.length; i++) {
+        acc += dayCounts[i];
+        cumulative.push(acc);
+      }
+
+      setRealData(cumulative.length > 0 ? cumulative : [0]);
+
+      // Simple linear prediction
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const predicted: number[] = [];
+      for (let i = 0; i < daysInMonth; i++) {
+        predicted.push(Math.round((metaGanhos / daysInMonth) * (i + 1)));
+      }
+      setPredictedData(predicted);
+
+      setLoadingKpis(false);
+    }
+    loadKpis();
+  }, [selectedUser, selectedPeriod, customStart, customEnd]);
+
+  // Fetch Channel Performance (Change 18)
+  useEffect(() => {
+    async function loadChannelPerformance() {
+      setLoadingChannels(true);
+      const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      const ownerId = selectedUser === "all" ? undefined : selectedUser;
+
+      let q = supabase
+        .from("qs_tasks")
+        .select("channel_type, contact_result")
+        .eq("status", "concluida");
+      if (ownerId) q = q.eq("owner_id", ownerId);
+      if (from) q = q.gte("completed_at", from);
+      if (to) q = q.lte("completed_at", to);
+
+      const { data, error } = await q;
+      if (error) {
+        console.warn("Erro ao buscar desempenho por canal:", error);
+        setLoadingChannels(false);
+        return;
+      }
+
+      const channelMap = new Map<string, { total: number; atendeu: number }>();
+      (data ?? []).forEach((row: any) => {
+        const ch = row.channel_type;
+        if (!ch) return;
+        const entry = channelMap.get(ch) || { total: 0, atendeu: 0 };
+        entry.total++;
+        if (row.contact_result === "atendeu") entry.atendeu++;
+        channelMap.set(ch, entry);
+      });
+
+      const rows: ChannelPerformanceRow[] = Array.from(channelMap.entries())
+        .map(([channel, { total, atendeu }]) => ({
+          channel,
+          total,
+          atendeu,
+          taxa: total > 0 ? (atendeu / total) * 100 : 0,
+        }))
+        .sort((a, b) => b.total - a.total);
+
+      setChannelPerformance(rows);
+      setLoadingChannels(false);
+    }
+    loadChannelPerformance();
+  }, [selectedUser, selectedPeriod, customStart, customEnd]);
+
+  // Fetch Heatmap Data (Change 19)
+  useEffect(() => {
+    async function loadHeatmap() {
+      setLoadingHeatmap(true);
+      const ownerId = selectedUser === "all" ? undefined : selectedUser;
+
+      let q = supabase
+        .from("qs_tasks")
+        .select("completed_at")
+        .eq("status", "concluida")
+        .eq("contact_result", "atendeu")
+        .not("completed_at", "is", null);
+      if (ownerId) q = q.eq("owner_id", ownerId);
+
+      const { data, error } = await q;
+      if (error) {
+        console.warn("Erro ao buscar dados do heatmap:", error);
+        setLoadingHeatmap(false);
+        return;
+      }
+
+      const cellMap = new Map<string, number>();
+      (data ?? []).forEach((row: any) => {
+        if (!row.completed_at) return;
+        const d = new Date(row.completed_at);
+        const jsDay = d.getDay(); // 0=Sun...6=Sat
+        if (jsDay === 0 || jsDay === 6) return; // Skip weekends
+        const dayIdx = jsDay - 1; // 0=Mon...4=Fri
+        const hour = d.getHours();
+        if (hour < 6 || hour > 20) return;
+        const key = `${dayIdx}-${hour}`;
+        cellMap.set(key, (cellMap.get(key) || 0) + 1);
+      });
+
+      const cells: HeatmapCell[] = Array.from(cellMap.entries()).map(([key, count]) => {
+        const [day, hour] = key.split("-").map(Number);
+        return { day, hour, count };
+      });
+
+      setHeatmapCells(cells);
+      setLoadingHeatmap(false);
+    }
+    loadHeatmap();
+  }, [selectedUser]);
+
+  // Fetch Speed-to-Lead (Change 20)
+  useEffect(() => {
+    async function loadSpeedToLead() {
+      setLoadingSpeed(true);
+      const ownerId = selectedUser === "all" ? undefined : selectedUser;
+
+      // Get leads with arrived_at
+      let qLeads = supabase
+        .from("qs_leads")
+        .select("id, arrived_at")
+        .not("arrived_at", "is", null);
+      if (ownerId) qLeads = qLeads.eq("owner_id", ownerId);
+
+      const { data: leadsData, error: leadsErr } = await qLeads;
+      if (leadsErr || !leadsData || leadsData.length === 0) {
+        setSpeedToLead(null);
+        setLoadingSpeed(false);
+        return;
+      }
+
+      // Get first completed task for each lead
+      let qTasks = supabase
+        .from("qs_tasks")
+        .select("lead_id, completed_at")
+        .eq("status", "concluida")
+        .not("completed_at", "is", null)
+        .order("completed_at", { ascending: true });
+      if (ownerId) qTasks = qTasks.eq("owner_id", ownerId);
+
+      const { data: tasksData, error: tasksErr } = await qTasks;
+      if (tasksErr || !tasksData) {
+        setSpeedToLead(null);
+        setLoadingSpeed(false);
+        return;
+      }
+
+      // Build map of first task completion per lead
+      const firstTaskMap = new Map<string, string>();
+      (tasksData as any[]).forEach((t) => {
+        if (!firstTaskMap.has(t.lead_id)) {
+          firstTaskMap.set(t.lead_id, t.completed_at);
+        }
+      });
+
+      // Calculate average time
+      let totalMinutes = 0;
+      let count = 0;
+      (leadsData as any[]).forEach((lead) => {
+        const firstTask = firstTaskMap.get(lead.id);
+        if (!firstTask || !lead.arrived_at) return;
+        const arrivedMs = new Date(lead.arrived_at).getTime();
+        const taskMs = new Date(firstTask).getTime();
+        const diffMin = (taskMs - arrivedMs) / 60000;
+        if (diffMin >= 0 && diffMin < 1440) {
+          // Only count reasonable values (< 24h)
+          totalMinutes += diffMin;
+          count++;
+        }
+      });
+
+      setSpeedToLead(count > 0 ? totalMinutes / count : null);
+      setLoadingSpeed(false);
+    }
+    loadSpeedToLead();
+  }, [selectedUser]);
+
+  // Fetch Operational KPIs
+  useEffect(() => {
+    async function loadOperationalKpis() {
+      setLoadingOperational(true);
+      const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      const ownerId = selectedUser === "all" ? undefined : selectedUser;
+
+      // 1. Ciclo Médio de Qualificação
+      let qCiclo = supabase
+        .from("qs_leads")
+        .select("arrived_at, updated_at")
+        .in("status", ["ganho", "perdido"])
+        .not("arrived_at", "is", null);
+      if (ownerId) qCiclo = qCiclo.eq("owner_id", ownerId);
+      if (from) qCiclo = qCiclo.gte("updated_at", from);
+      if (to) qCiclo = qCiclo.lte("updated_at", to);
+
+      const { data: cicloData } = await qCiclo;
+      if (cicloData && cicloData.length > 0) {
+        let totalDays = 0;
+        let count = 0;
+        (cicloData as any[]).forEach((row) => {
+          if (!row.arrived_at || !row.updated_at) return;
+          const diff = (new Date(row.updated_at).getTime() - new Date(row.arrived_at).getTime()) / 86400000;
+          if (diff >= 0) {
+            totalDays += diff;
+            count++;
+          }
+        });
+        setCicloMedio(count > 0 ? totalDays / count : null);
+      } else {
+        setCicloMedio(null);
+      }
+
+      // 2. Eficiência da Cadência
+      let qCadence = supabase
+        .from("qs_leads")
+        .select("cadence_id, status, cadence:qs_cadences(name)")
+        .in("status", ["ganho", "perdido"])
+        .not("cadence_id", "is", null);
+      if (ownerId) qCadence = qCadence.eq("owner_id", ownerId);
+      if (from) qCadence = qCadence.gte("updated_at", from);
+      if (to) qCadence = qCadence.lte("updated_at", to);
+
+      const { data: cadenceData } = await qCadence;
+      const cadenceMap = new Map<string, { name: string; total: number; ganhos: number }>();
+      ((cadenceData ?? []) as any[]).forEach((row) => {
+        const name = row.cadence?.name || "Sem cadência";
+        const entry = cadenceMap.get(name) || { name, total: 0, ganhos: 0 };
+        entry.total++;
+        if (row.status === "ganho") entry.ganhos++;
+        cadenceMap.set(name, entry);
+      });
+      const cadenceRows: CadenceEfficiency[] = Array.from(cadenceMap.values())
+        .map((e) => ({ cadence: e.name, total: e.total, ganhos: e.ganhos, taxa: e.total > 0 ? (e.ganhos / e.total) * 100 : 0 }))
+        .sort((a, b) => b.total - a.total);
+      setCadenceEfficiency(cadenceRows);
+
+      // 3. Taxa de Contato Efetivo (Connect Rate)
+      let qConnect = supabase
+        .from("qs_tasks")
+        .select("contact_result")
+        .eq("status", "concluida");
+      if (ownerId) qConnect = qConnect.eq("owner_id", ownerId);
+      if (from) qConnect = qConnect.gte("completed_at", from);
+      if (to) qConnect = qConnect.lte("completed_at", to);
+
+      const { data: connectData } = await qConnect;
+      if (connectData && connectData.length > 0) {
+        const total = connectData.length;
+        const atendeu = (connectData as any[]).filter((r) => r.contact_result === "atendeu").length;
+        setConnectRate(total > 0 ? (atendeu / total) * 100 : null);
+      } else {
+        setConnectRate(null);
+      }
+
+      // 4. Taxa de Tarefas Atrasadas
+      let qOverdue = supabase
+        .from("qs_tasks")
+        .select("status, scheduled_at")
+        .in("status", ["pendente", "atrasada"]);
+      if (ownerId) qOverdue = qOverdue.eq("owner_id", ownerId);
+
+      const { data: overdueData } = await qOverdue;
+      if (overdueData && overdueData.length > 0) {
+        const now = new Date().toISOString();
+        const total = overdueData.length;
+        const overdue = (overdueData as any[]).filter(
+          (r) => r.status === "atrasada" || (r.status === "pendente" && r.scheduled_at && r.scheduled_at < now)
+        ).length;
+        setTasksOverdueRate(total > 0 ? (overdue / total) * 100 : null);
+      } else {
+        setTasksOverdueRate(null);
+      }
+
+      // 5. Reuniões Agendadas por SDR
+      let qMeetings = supabase
+        .from("qs_meetings")
+        .select("owner_id, status, owner:qs_users(name)")
+        .in("status", ["agendada", "realizada"]);
+      if (ownerId) qMeetings = qMeetings.eq("owner_id", ownerId);
+      if (from) qMeetings = qMeetings.gte("created_at", from);
+      if (to) qMeetings = qMeetings.lte("created_at", to);
+
+      const { data: meetingsData } = await qMeetings;
+      const meetingsMap = new Map<string, number>();
+      ((meetingsData ?? []) as any[]).forEach((row) => {
+        const name = row.owner?.name || "Sem nome";
+        meetingsMap.set(name, (meetingsMap.get(name) || 0) + 1);
+      });
+      const meetingsRows: SdrMeetings[] = Array.from(meetingsMap.entries())
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+      setSdrMeetings(meetingsRows);
+
+      setLoadingOperational(false);
+    }
+    loadOperationalKpis();
+  }, [selectedUser, selectedPeriod, customStart, customEnd]);
+
+  return (
+    <div className="space-y-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      {/* Header */}
+      <div>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 3v18h18" />
+                <path d="M18 9l-5 5-4-4-3 3" />
+              </svg>
+              Visão Geral - QS
+            </h1>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {userName} · {periodLabel}
+            </p>
+          </div>
+        </div>
+
+        {/* Filtros */}
+        <div className="flex items-center gap-3 mt-4 flex-wrap">
+          {/* Selecionar usuário */}
+          <div className="flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+            </svg>
+            <select
+              value={selectedUser}
+              onChange={(e) => setSelectedUser(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316] focus:ring-2 focus:ring-orange-100"
+            >
+              {allUsers.map((u: any) => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="w-px h-6 bg-gray-200" />
+
+          {/* Período */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {PERIOD_OPTIONS.map(p => (
+              <button
+                key={p.id}
+                onClick={() => setSelectedPeriod(p.id)}
+                className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+                style={{
+                  background: selectedPeriod === p.id ? "#F97316" : "transparent",
+                  color: selectedPeriod === p.id ? "#fff" : "#6B7280",
+                  border: selectedPeriod === p.id ? "1px solid #F97316" : "1px solid #E5E7EB",
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Datas customizadas */}
+          {selectedPeriod === "custom" && (
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316]"
+              />
+              <span className="text-xs text-gray-400">até</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316]"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Area Chart */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-medium text-gray-700">
+            Ganhos ao longo do mês
+          </h2>
+          <div className="flex items-center gap-4 text-xs text-gray-500">
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-0.5 bg-[#F97316] rounded-full inline-block" />
+              Real
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span
+                className="w-4 h-0.5 rounded-full inline-block"
+                style={{
+                  backgroundImage: "repeating-linear-gradient(90deg, #9CA3AF 0 4px, transparent 4px 7px)",
+                  backgroundColor: "transparent",
+                }}
+              />
+              Previsto
+            </span>
+          </div>
+        </div>
+        {loadingKpis ? (
+          <p className="text-sm text-gray-500 text-center py-8">Carregando...</p>
+        ) : (
+          <AreaChart realData={realData} predictedData={predictedData} />
+        )}
+      </div>
+
+      {/* KPI Cards + Speed-to-Lead */}
+      {loadingKpis ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex items-center justify-center">
+              <span className="text-sm text-gray-400">Carregando...</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {kpiCards.map((card) => (
+            <KpiCardComponent key={card.type} card={card} />
+          ))}
+          <SpeedToLeadCard avgMinutes={speedToLead} loading={loadingSpeed} />
+        </div>
+      )}
+
+      {/* Indicadores Operacionais */}
+      <div>
+        <h2 className="text-sm font-medium text-gray-700 mb-3">Indicadores Operacionais</h2>
+        {loadingOperational ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex items-center justify-center">
+                <span className="text-sm text-gray-400">Carregando...</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {/* 1. Ciclo Médio de Qualificação */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+              <span className="text-xs text-gray-500 uppercase">Ciclo Médio de Qualificação</span>
+              <span
+                className="text-2xl font-bold"
+                style={{
+                  color: cicloMedio === null ? "#9CA3AF" : cicloMedio < 7 ? "#059669" : cicloMedio < 14 ? "#D97706" : "#DC2626",
+                }}
+              >
+                {cicloMedio !== null ? `${cicloMedio.toFixed(1)} dias` : "N/A"}
+              </span>
+              <span className="text-xs text-gray-400">
+                {cicloMedio === null ? "Sem dados" : cicloMedio < 7 ? "Excelente" : cicloMedio < 14 ? "Aceitável" : "Acima do ideal"}
+              </span>
+            </div>
+
+            {/* 3. Taxa de Contato Efetivo */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+              <span className="text-xs text-gray-500 uppercase">Taxa de Contato Efetivo</span>
+              <span
+                className="text-2xl font-bold"
+                style={{
+                  color: connectRate === null ? "#9CA3AF" : connectRate > 40 ? "#059669" : connectRate > 20 ? "#D97706" : "#DC2626",
+                }}
+              >
+                {connectRate !== null ? `${connectRate.toFixed(1)}%` : "N/A"}
+              </span>
+              <span className="text-xs text-gray-400">
+                {connectRate === null ? "Sem dados" : connectRate > 40 ? "Excelente" : connectRate > 20 ? "Bom" : "Precisa melhorar"}
+              </span>
+            </div>
+
+            {/* 4. Taxa de Tarefas Atrasadas */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+              <span className="text-xs text-gray-500 uppercase">Taxa de Tarefas Atrasadas</span>
+              <span
+                className="text-2xl font-bold"
+                style={{
+                  color: tasksOverdueRate === null ? "#9CA3AF" : tasksOverdueRate < 10 ? "#059669" : tasksOverdueRate < 25 ? "#D97706" : "#DC2626",
+                }}
+              >
+                {tasksOverdueRate !== null ? `${tasksOverdueRate.toFixed(1)}%` : "N/A"}
+              </span>
+              <span className="text-xs text-gray-400">
+                {tasksOverdueRate === null ? "Sem dados" : tasksOverdueRate < 10 ? "Sob controle" : tasksOverdueRate < 25 ? "Atenção" : "Crítico"}
+              </span>
+            </div>
+
+            {/* 2. Eficiência da Cadência (table) */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+              <span className="text-xs text-gray-500 uppercase">Eficiência da Cadência</span>
+              {cadenceEfficiency.length === 0 ? (
+                <span className="text-sm text-gray-400">Sem dados</span>
+              ) : (
+                <div className="overflow-x-auto mt-1">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        <th className="text-left py-1.5 text-[11px] font-semibold text-gray-500 uppercase">Cadência</th>
+                        <th className="text-center py-1.5 text-[11px] font-semibold text-gray-500 uppercase">Leads</th>
+                        <th className="text-center py-1.5 text-[11px] font-semibold text-gray-500 uppercase">Ganhos</th>
+                        <th className="text-center py-1.5 text-[11px] font-semibold text-gray-500 uppercase">Taxa</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cadenceEfficiency.map((row) => (
+                        <tr key={row.cadence} className="border-b border-gray-50">
+                          <td className="py-1.5 text-xs font-medium text-gray-900 truncate max-w-[120px]">{row.cadence}</td>
+                          <td className="py-1.5 text-center text-xs text-gray-700">{row.total}</td>
+                          <td className="py-1.5 text-center text-xs text-gray-700">{row.ganhos}</td>
+                          <td className="py-1.5 text-center">
+                            <span
+                              className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
+                              style={{
+                                background: row.taxa > 20 ? "#D1FAE5" : row.taxa > 10 ? "#FEF3C7" : "#FEE2E2",
+                                color: row.taxa > 20 ? "#059669" : row.taxa > 10 ? "#D97706" : "#DC2626",
+                              }}
+                            >
+                              {row.taxa.toFixed(1)}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* 5. Reuniões Agendadas por SDR (table) */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+              <span className="text-xs text-gray-500 uppercase">Reuniões por SDR</span>
+              {sdrMeetings.length === 0 ? (
+                <span className="text-sm text-gray-400">Sem dados</span>
+              ) : (
+                <div className="overflow-x-auto mt-1">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        <th className="text-left py-1.5 text-[11px] font-semibold text-gray-500 uppercase">SDR</th>
+                        <th className="text-center py-1.5 text-[11px] font-semibold text-gray-500 uppercase">Reuniões</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sdrMeetings.map((row) => (
+                        <tr key={row.name} className="border-b border-gray-50">
+                          <td className="py-1.5 text-xs font-medium text-gray-900 truncate max-w-[140px]">{row.name}</td>
+                          <td className="py-1.5 text-center text-xs font-bold text-gray-700">{row.count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Channel Performance (Change 18) */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
+        <h2 className="text-sm font-medium text-gray-700 mb-4">
+          Desempenho por Canal
+        </h2>
+        <ChannelPerformanceTable data={channelPerformance} loading={loadingChannels} />
+      </div>
+
+      {/* Heatmap (Change 19) */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
+        <h2 className="text-sm font-medium text-gray-700 mb-4">
+          Melhores Horários de Contato
+        </h2>
+        <ContactHeatmap cells={heatmapCells} loading={loadingHeatmap} />
+      </div>
+
+      {/* Loss Reasons */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
+        <h2 className="text-sm font-medium text-gray-700 mb-4">
+          Motivos de Perda
+        </h2>
+        <LossReasonsChart />
+      </div>
+
+      {/* Ranking de SDRs */}
+      <RankingPanel />
+    </div>
+  );
+}

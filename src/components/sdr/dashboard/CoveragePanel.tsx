@@ -1,0 +1,436 @@
+// src/components/sdr/dashboard/CoveragePanel.tsx — Leads sem contato
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface Lead {
+  id: string;
+  name: string;
+  company: string;
+  channel: string;
+  arrivedAt: Date;
+  contacted: boolean;
+  ownerId: string | null;
+  ownerName: string | null;
+}
+
+interface QsUser {
+  id: string;
+  name: string;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function getWaitMinutes(arrivedAt: Date): number {
+  return Math.round((Date.now() - arrivedAt.getTime()) / 60000);
+}
+
+function formatWaitTime(minutes: number): string {
+  if (minutes < 60) return `${minutes}min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m > 0 ? `${h}h ${m}min` : `${h}h`;
+}
+
+function getStatusColor(minutes: number): string {
+  if (minutes <= 5) return "#22C55E";   // green
+  if (minutes <= 15) return "#EAB308";  // yellow
+  return "#EF4444";                     // red
+}
+
+function getTimeTextColor(minutes: number): string {
+  if (minutes <= 5) return "#16A34A";
+  if (minutes <= 15) return "#CA8A04";
+  if (minutes <= 30) return "#EA580C";
+  return "#DC2626";
+}
+
+function getChannelStyle(channel: string): { bg: string; text: string } {
+  switch (channel) {
+    case "Instagram": return { bg: "#FDF2F8", text: "#BE185D" };
+    case "WhatsApp": return { bg: "#F0FDF4", text: "#15803D" };
+    case "Site": return { bg: "#EFF6FF", text: "#1D4ED8" };
+    case "Indicação": return { bg: "#FFF7ED", text: "#C2410C" };
+    default: return { bg: "#F3F4F6", text: "#374151" };
+  }
+}
+
+function getSlaColor(value: number, thresholdGreen: number, thresholdYellow: number): string {
+  if (value >= thresholdGreen) return "#22C55E";
+  if (value >= thresholdYellow) return "#EAB308";
+  return "#EF4444";
+}
+
+// ── Icons (inline SVG) ─────────────────────────────────────────────────────
+
+function IconClock() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+function IconCheck() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <polyline points="22 4 12 14.01 9 11.01" />
+    </svg>
+  );
+}
+
+function IconPhone() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+    </svg>
+  );
+}
+
+function IconShield() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
+// ── Component ───────────────────────────────────────────────────────────────
+
+export default function CoveragePanel() {
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [allLeads, setAllLeads] = useState<Lead[]>([]);
+  const [users, setUsers] = useState<QsUser[]>([]);
+  const [selectedUser, setSelectedUser] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [slaMetrics, setSlaMetrics] = useState([
+    { label: "Contatados em < 5min", value: 0, unit: "%", greenThreshold: 80, yellowThreshold: 60 },
+    { label: "Contatados em < 15min", value: 0, unit: "%", greenThreshold: 85, yellowThreshold: 70 },
+    { label: "Contatados em < 30min", value: 0, unit: "%", greenThreshold: 90, yellowThreshold: 75 },
+  ]);
+  const [semContato, setSemContato] = useState({ label: "Sem contato (> 30min)", value: 0, unit: "leads" });
+
+  // Fetch real leads from Supabase
+  useEffect(() => {
+    async function fetchLeads() {
+      setLoading(true);
+
+      // Leads that arrived but have no cadence started (or no completed tasks)
+      // Strategy: leads with arrived_at but status = nao_iniciado or no completed task
+      // Fetch users
+      const { data: usersData } = await supabase.from("qs_users").select("id, name").eq("is_active", true).order("name");
+      if (usersData) setUsers(usersData as QsUser[]);
+
+      const { data: leadsData, error: leadsErr } = await supabase
+        .from("qs_leads")
+        .select("id, full_name, company_name, source, arrived_at, owner_id, owner:qs_users(name)")
+        .not("arrived_at", "is", null)
+        .in("status", ["nao_iniciado", "em_prospeccao"])
+        .order("arrived_at", { ascending: true });
+
+      if (leadsErr) {
+        console.warn("Erro ao buscar leads para cobertura:", leadsErr);
+        setLoading(false);
+        return;
+      }
+
+      if (!leadsData || leadsData.length === 0) {
+        setLeads([]);
+        setLoading(false);
+        return;
+      }
+
+      // Check which leads have at least one completed task
+      const leadIds = leadsData.map((l: any) => l.id);
+      const { data: tasksData, error: tasksErr } = await supabase
+        .from("qs_tasks")
+        .select("lead_id, completed_at")
+        .in("lead_id", leadIds)
+        .eq("status", "concluida");
+
+      const contactedSet = new Set<string>();
+      const firstContactMap = new Map<string, Date>();
+      if (!tasksErr && tasksData) {
+        (tasksData as any[]).forEach((t) => {
+          contactedSet.add(t.lead_id);
+          if (t.completed_at) {
+            const existing = firstContactMap.get(t.lead_id);
+            const completed = new Date(t.completed_at);
+            if (!existing || completed < existing) {
+              firstContactMap.set(t.lead_id, completed);
+            }
+          }
+        });
+      }
+
+      // Build lead list — only leads WITHOUT completed tasks
+      const sourceMap: Record<string, string> = {
+        manual: "Manual",
+        levantada_de_mao: "Instagram",
+        indicacao: "Indicação",
+        prospeccao_ativa: "Prospecção",
+        site: "Site",
+        whatsapp: "WhatsApp",
+      };
+
+      const pendingLeads: Lead[] = (leadsData as any[])
+        .filter((l) => !contactedSet.has(l.id))
+        .map((l) => ({
+          id: l.id,
+          name: l.full_name || "Sem nome",
+          company: l.company_name || "",
+          channel: sourceMap[l.source] || l.source || "Manual",
+          arrivedAt: new Date(l.arrived_at),
+          contacted: false,
+          ownerId: l.owner_id,
+          ownerName: l.owner?.name || null,
+        }));
+
+      setAllLeads(pendingLeads);
+      setLeads(pendingLeads);
+
+      // Calculate SLA metrics based on all arrived leads (contacted + pending)
+      const totalLeads = leadsData.length;
+      if (totalLeads > 0) {
+        let under5 = 0;
+        let under15 = 0;
+        let under30 = 0;
+        let over30 = 0;
+
+        (leadsData as any[]).forEach((lead) => {
+          const arrivedAt = new Date(lead.arrived_at);
+          const firstContact = firstContactMap.get(lead.id);
+
+          if (firstContact) {
+            const diffMin = (firstContact.getTime() - arrivedAt.getTime()) / 60000;
+            if (diffMin <= 5) under5++;
+            if (diffMin <= 15) under15++;
+            if (diffMin <= 30) under30++;
+            else over30++;
+          } else {
+            // Not contacted = counts toward over30 if waiting > 30min
+            const waitMin = getWaitMinutes(arrivedAt);
+            if (waitMin > 30) over30++;
+          }
+        });
+
+        const contactedCount = contactedSet.size;
+        setSlaMetrics([
+          { label: "Contatados em < 5min", value: contactedCount > 0 ? Math.round((under5 / contactedCount) * 100) : 0, unit: "%", greenThreshold: 80, yellowThreshold: 60 },
+          { label: "Contatados em < 15min", value: contactedCount > 0 ? Math.round((under15 / contactedCount) * 100) : 0, unit: "%", greenThreshold: 85, yellowThreshold: 70 },
+          { label: "Contatados em < 30min", value: contactedCount > 0 ? Math.round((under30 / contactedCount) * 100) : 0, unit: "%", greenThreshold: 90, yellowThreshold: 75 },
+        ]);
+        setSemContato({ label: "Sem contato (> 30min)", value: over30, unit: "leads" });
+      }
+
+      setLoading(false);
+    }
+    fetchLeads();
+  }, []);
+
+  const pendingLeads = leads.filter((l) => !l.contacted);
+  const allContacted = pendingLeads.length === 0;
+  const hasUrgent = pendingLeads.some((l) => getWaitMinutes(l.arrivedAt) > 15);
+
+  // Summary stats
+  const avgWait = pendingLeads.length > 0
+    ? Math.round(pendingLeads.reduce((sum, l) => sum + getWaitMinutes(l.arrivedAt), 0) / pendingLeads.length)
+    : 0;
+  const sla5min = pendingLeads.length > 0
+    ? Math.round((pendingLeads.filter((l) => getWaitMinutes(l.arrivedAt) <= 5).length / pendingLeads.length) * 100)
+    : 100;
+
+  // Sort by longest wait first
+  const sortedLeads = [...pendingLeads].sort(
+    (a, b) => a.arrivedAt.getTime() - b.arrivedAt.getTime()
+  );
+
+  function handleContact(leadId: string) {
+    setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, contacted: true } : l)));
+  }
+
+  if (loading) {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-8 flex items-center justify-center">
+        <p className="text-sm text-gray-500">Carregando leads aguardando contato...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+      {/* ── Panel: Leads Aguardando ─────────────────────────────────────── */}
+      <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <h2 className="text-[16px] font-semibold text-gray-900">Leads Aguardando Contato</h2>
+            <span
+              className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 rounded-full text-[12px] font-bold text-white"
+              style={{ background: pendingLeads.length > 0 ? "#F97316" : "#22C55E" }}
+            >
+              {pendingLeads.length}
+            </span>
+            {hasUrgent && (
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <select
+              value={selectedUser}
+              onChange={(e) => {
+                setSelectedUser(e.target.value);
+                if (e.target.value) {
+                  setLeads(allLeads.filter(l => l.ownerId === e.target.value));
+                } else {
+                  setLeads(allLeads);
+                }
+              }}
+              className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-orange-400"
+            >
+              <option value="">Todos os SDRs</option>
+              {users.map(u => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Summary bar */}
+        {!allContacted && (
+          <div className="px-6 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-4 text-[13px] text-gray-600">
+            <span>
+              <strong className="text-gray-900">{pendingLeads.length}</strong> leads aguardando
+            </span>
+            <span className="text-gray-300">|</span>
+            <span>
+              Tempo médio: <strong className="text-gray-900">{avgWait}min</strong>
+            </span>
+            <span className="text-gray-300">|</span>
+            <span>
+              SLA (5min):{" "}
+              <strong style={{ color: getSlaColor(sla5min, 80, 60) }}>{sla5min}%</strong>
+            </span>
+          </div>
+        )}
+
+        {/* Lead list or empty state */}
+        {allContacted ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="text-green-500 mb-3">
+              <IconCheck />
+            </div>
+            <p className="text-[16px] font-semibold text-gray-900 mb-1">
+              Todos os leads foram contatados!
+            </p>
+            <p className="text-[13px] text-gray-400">Nenhum lead aguardando no momento.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {sortedLeads.map((lead) => {
+              const waitMin = getWaitMinutes(lead.arrivedAt);
+              const statusColor = getStatusColor(waitMin);
+              const timeColor = getTimeTextColor(waitMin);
+              const channelStyle = getChannelStyle(lead.channel);
+
+              return (
+                <div
+                  key={lead.id}
+                  className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center gap-4">
+                    {/* Status dot */}
+                    <span
+                      className="flex-shrink-0 w-3 h-3 rounded-full"
+                      style={{ background: statusColor }}
+                    />
+
+                    {/* Name + company + responsável */}
+                    <div className="min-w-0">
+                      <p className="text-[14px] font-medium text-gray-900 truncate">{lead.name}</p>
+                      <p className="text-[12px] text-gray-400 truncate">
+                        {lead.company}
+                        {lead.ownerName && <span> · SDR: <span className="font-medium text-gray-500">{lead.ownerName}</span></span>}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    {/* Wait time */}
+                    <div className="flex items-center gap-1.5" style={{ color: timeColor }}>
+                      <IconClock />
+                      <span className="text-[13px] font-medium whitespace-nowrap">
+                        Chegou há {formatWaitTime(waitMin)}
+                      </span>
+                    </div>
+
+                    {/* Channel tag */}
+                    <span
+                      className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium"
+                      style={{ background: channelStyle.bg, color: channelStyle.text }}
+                    >
+                      {lead.channel}
+                    </span>
+
+                    {/* Contact button */}
+                    <button
+                      onClick={() => handleContact(lead.id)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold text-white transition-colors hover:opacity-90"
+                      style={{ background: "#F97316" }}
+                    >
+                      <IconPhone />
+                      Contatar agora
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── SLA Report ────────────────────────────────────────────────────── */}
+      <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+        <div className="flex items-center gap-2.5 px-6 py-4 border-b border-gray-100">
+          <span className="text-gray-500">
+            <IconShield />
+          </span>
+          <h2 className="text-[16px] font-semibold text-gray-900">Relatório de Cobertura SLA</h2>
+        </div>
+
+        <div className="grid grid-cols-4 gap-4 p-6">
+          {slaMetrics.map((metric) => {
+            const color = getSlaColor(metric.value, metric.greenThreshold, metric.yellowThreshold);
+            return (
+              <div
+                key={metric.label}
+                className="bg-gray-50 rounded-xl p-5 flex flex-col gap-2"
+              >
+                <span className="text-[12px] text-gray-500 font-medium">{metric.label}</span>
+                <span className="text-[28px] font-bold" style={{ color }}>
+                  {metric.value}
+                  <span className="text-[16px] font-semibold ml-0.5">{metric.unit}</span>
+                </span>
+              </div>
+            );
+          })}
+
+          {/* Sem contato card */}
+          <div className="bg-gray-50 rounded-xl p-5 flex flex-col gap-2">
+            <span className="text-[12px] text-gray-500 font-medium">{semContato.label}</span>
+            <span className="text-[28px] font-bold" style={{ color: semContato.value > 0 ? "#EF4444" : "#22C55E" }}>
+              {semContato.value}
+              <span className="text-[16px] font-semibold ml-1 text-gray-400">{semContato.unit}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

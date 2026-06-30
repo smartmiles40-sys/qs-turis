@@ -1,0 +1,855 @@
+import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
+import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
+import type {
+  Lead,
+  LeadStatus,
+  LeadSource,
+  SdrUser,
+  Cadence,
+  LossReason,
+} from "../types";
+import { STATUS_LABELS, SOURCE_LABELS } from "../types";
+
+// ── Props ────────────────────────────────────────────────────────────────────
+
+interface LeadsPageProps {
+  onOpenLead: (leadId: string) => void;
+  onOpenCadenceCreate: () => void;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const STATUS_COLORS: Record<LeadStatus, { bg: string; text: string }> = {
+  nao_iniciado: { bg: "bg-gray-100", text: "text-gray-700" },
+  em_prospeccao: { bg: "bg-blue-50", text: "text-blue-700" },
+  ganho: { bg: "bg-green-50", text: "text-green-700" },
+  perdido: { bg: "bg-red-50", text: "text-red-700" },
+};
+
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+const ITEMS_PER_PAGE = 10;
+
+// ── Component ────────────────────────────────────────────────────────────────
+
+export default function LeadsPage({ onOpenLead, onOpenCadenceCreate }: LeadsPageProps) {
+  const { currentUser } = useQsAuth();
+  const [search, setSearch] = useState("");
+  const [filterSource, setFilterSource] = useState<LeadSource | "">("");
+  const [filterStatus, setFilterStatus] = useState<LeadStatus | "">("");
+  const [filterCadence, setFilterCadence] = useState("");
+  const [filterOwner, setFilterOwner] = useState("");
+  const [filterLossReason, setFilterLossReason] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvRows, setCsvRows] = useState<Array<{ nome: string; empresa: string; telefone: string; email: string; segmento: string }>>([]);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [csvImportedCount, setCsvImportedCount] = useState<number | null>(null);
+
+  // ── Data state ──
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [users, setUsers] = useState<SdrUser[]>([]);
+  const [cadences, setCadences] = useState<Cadence[]>([]);
+  const [lossReasons, setLossReasons] = useState<LossReason[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // ── Create Lead form state ──
+  const [formFirstName, setFormFirstName] = useState("");
+  const [formLastName, setFormLastName] = useState("");
+  const [formEmail, setFormEmail] = useState("");
+  const [formPhone, setFormPhone] = useState("");
+  const [formCompany, setFormCompany] = useState("");
+  const [formSource, setFormSource] = useState<LeadSource>("manual");
+  const [saving, setSaving] = useState(false);
+
+  // ── Fetch data ──
+  const fetchLeads = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("qs_leads")
+      .select("*, owner:qs_users(*), loss_reason:qs_loss_reasons(*)")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.warn("Erro ao buscar leads:", error);
+      return;
+    }
+    setLeads((data as Lead[]) ?? []);
+  }, []);
+
+  useEffect(() => {
+    async function loadAll() {
+      setLoading(true);
+      await fetchLeads();
+
+      const [usersRes, cadencesRes, lossRes] = await Promise.all([
+        supabase.from("qs_users").select("*").eq("is_active", true),
+        supabase.from("qs_cadences").select("id, name"),
+        supabase.from("qs_loss_reasons").select("*").eq("is_archived", false),
+      ]);
+
+      if (usersRes.error) console.warn("Erro ao buscar users:", usersRes.error);
+      else setUsers((usersRes.data as SdrUser[]) ?? []);
+
+      if (cadencesRes.error) console.warn("Erro ao buscar cadences:", cadencesRes.error);
+      else setCadences((cadencesRes.data as Cadence[]) ?? []);
+
+      if (lossRes.error) console.warn("Erro ao buscar loss reasons:", lossRes.error);
+      else setLossReasons((lossRes.data as LossReason[]) ?? []);
+
+      setLoading(false);
+    }
+    loadAll();
+  }, [fetchLeads]);
+
+  // ── Create Lead ──
+  async function handleCreateLead() {
+    if (!formFirstName.trim()) return;
+    setSaving(true);
+    const fullName = [formFirstName.trim(), formLastName.trim()].filter(Boolean).join(" ");
+    const { error } = await supabase.from("qs_leads").insert({
+      first_name: formFirstName.trim(),
+      last_name: formLastName.trim() || null,
+      full_name: fullName,
+      email: formEmail.trim() || null,
+      phone: formPhone.trim() || null,
+      company_name: formCompany.trim() || null,
+      source: formSource,
+      status: "nao_iniciado" as LeadStatus,
+    });
+    if (error) {
+      console.warn("Erro ao cadastrar lead:", error);
+    } else {
+      await fetchLeads();
+      setShowCreateModal(false);
+      resetForm();
+    }
+    setSaving(false);
+  }
+
+  // ── Delete selected ──
+  async function handleDeleteSelected() {
+    if (selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
+    const { error } = await supabase.from("qs_leads").delete().in("id", ids);
+    if (error) {
+      console.warn("Erro ao excluir leads:", error);
+    } else {
+      await fetchLeads();
+      setSelectedIds(new Set());
+    }
+  }
+
+  // ── Filtering (client-side) ──
+  const filteredLeads = useMemo(() => {
+    let result = [...leads];
+
+    // Role-based filtering: SDR and closer only see their own leads
+    if (currentUser && !canSeeAllData(currentUser.role)) {
+      result = result.filter((l) => l.owner_id === currentUser.id);
+    }
+
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (l) =>
+          l.full_name?.toLowerCase().includes(q) ||
+          l.company_name?.toLowerCase().includes(q) ||
+          l.email?.toLowerCase().includes(q) ||
+          l.phone?.includes(q)
+      );
+    }
+    if (filterSource) result = result.filter((l) => l.source === filterSource);
+    if (filterStatus) result = result.filter((l) => l.status === filterStatus);
+    if (filterCadence) result = result.filter((l) => l.cadence_id === filterCadence);
+    if (filterOwner) result = result.filter((l) => l.owner_id === filterOwner);
+    if (filterLossReason) result = result.filter((l) => l.loss_reason_id === filterLossReason);
+    return result;
+  }, [leads, search, filterSource, filterStatus, filterCadence, filterOwner, filterLossReason, currentUser]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / ITEMS_PER_PAGE));
+  const paginatedLeads = filteredLeads.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+
+  // ── Selection ──
+  const allOnPageSelected =
+    paginatedLeads.length > 0 && paginatedLeads.every((l) => selectedIds.has(l.id));
+
+  function toggleAll() {
+    if (allOnPageSelected) {
+      const next = new Set(selectedIds);
+      paginatedLeads.forEach((l) => next.delete(l.id));
+      setSelectedIds(next);
+    } else {
+      const next = new Set(selectedIds);
+      paginatedLeads.forEach((l) => next.add(l.id));
+      setSelectedIds(next);
+    }
+  }
+
+  function toggleOne(id: string) {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  }
+
+  function resetForm() {
+    setFormFirstName("");
+    setFormLastName("");
+    setFormEmail("");
+    setFormPhone("");
+    setFormCompany("");
+    setFormSource("manual");
+  }
+
+  // ── Cadence name helper ──
+  function cadenceName(id: string | null) {
+    if (!id) return "\u2014";
+    return cadences.find((c) => c.id === id)?.name ?? "\u2014";
+  }
+
+  // ── Active filter helpers ──
+  const hasActiveFilters = filterSource || filterStatus || filterCadence || filterOwner || filterLossReason;
+
+  function clearFilters() {
+    setFilterSource("");
+    setFilterStatus("");
+    setFilterCadence("");
+    setFilterOwner("");
+    setFilterLossReason("");
+    setCurrentPage(1);
+  }
+
+  // ── Loading state ──
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] px-6 py-6 flex items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+        <p className="text-sm text-gray-500">Carregando...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] px-6 py-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-lg font-bold text-gray-900">Gerenciamento de Leads</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {leads.length} leads cadastrados &middot; {filteredLeads.length} visíveis
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {}}
+            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            Realizar Handover
+          </button>
+          <button
+            onClick={() => setShowCsvModal(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Importar CSV
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Cadastrar Lead
+          </button>
+        </div>
+      </div>
+
+      {/* ── Search ──────────────────────────────────────────────────────── */}
+      <div className="relative mb-4">
+        <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+          <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
+          placeholder="Pesquise pelo nome, empresa, e-mail ou telefone..."
+          className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316] transition-colors"
+        />
+      </div>
+
+      {/* ── Filter Pills ─────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        {/* Source */}
+        {(Object.keys(SOURCE_LABELS) as LeadSource[]).map((k) => (
+          <button
+            key={k}
+            onClick={() => { setFilterSource(filterSource === k ? "" : k); setCurrentPage(1); }}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              filterSource === k
+                ? "bg-[#F97316] text-white"
+                : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            {SOURCE_LABELS[k]}
+          </button>
+        ))}
+
+        <span className="w-px h-5 bg-gray-200" />
+
+        {/* Status */}
+        {(Object.keys(STATUS_LABELS) as LeadStatus[]).map((k) => (
+          <button
+            key={k}
+            onClick={() => { setFilterStatus(filterStatus === k ? "" : k); setCurrentPage(1); }}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              filterStatus === k
+                ? "bg-[#F97316] text-white"
+                : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            {STATUS_LABELS[k]}
+          </button>
+        ))}
+
+        <span className="w-px h-5 bg-gray-200" />
+
+        {/* Cadence select */}
+        <select
+          value={filterCadence}
+          onChange={(e) => { setFilterCadence(e.target.value); setCurrentPage(1); }}
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20"
+        >
+          <option value="">Cadência</option>
+          {cadences.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+
+        {/* Owner select */}
+        <select
+          value={filterOwner}
+          onChange={(e) => { setFilterOwner(e.target.value); setCurrentPage(1); }}
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20"
+        >
+          <option value="">Responsável</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>{u.name}</option>
+          ))}
+        </select>
+
+        {/* Loss Reason select */}
+        <select
+          value={filterLossReason}
+          onChange={(e) => { setFilterLossReason(e.target.value); setCurrentPage(1); }}
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20"
+        >
+          <option value="">Motivo de Perda</option>
+          {lossReasons.map((lr) => (
+            <option key={lr.id} value={lr.id}>{lr.label}</option>
+          ))}
+        </select>
+
+        {hasActiveFilters && (
+          <button
+            onClick={clearFilters}
+            className="rounded-full px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 bg-white hover:bg-red-50 transition-colors"
+          >
+            Limpar filtros
+          </button>
+        )}
+      </div>
+
+      {/* ── Bulk Actions ────────────────────────────────────────────────── */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl bg-[#F97316]/5 border border-[#F97316]/10">
+          <span className="text-sm font-medium text-[#F97316]">
+            {selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selecionado{selectedIds.size > 1 ? "s" : ""}
+          </span>
+          <div className="flex items-center gap-2 ml-auto">
+            <select
+              onChange={async (e) => {
+                const cadId = e.target.value;
+                if (!cadId) return;
+                const ids = Array.from(selectedIds);
+                await supabase.from("qs_leads").update({ cadence_id: cadId, status: "em_prospeccao" }).in("id", ids);
+                setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, cadence_id: cadId, status: "em_prospeccao" as any } : l));
+                setSelectedIds(new Set());
+                e.target.value = "";
+              }}
+              className="px-3 py-1.5 rounded-lg bg-[#F97316] text-xs font-medium text-white cursor-pointer"
+              defaultValue=""
+            >
+              <option value="" disabled>Vincular à Cadência</option>
+              {cadences.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select
+              onChange={async (e) => {
+                const ownerId = e.target.value;
+                if (!ownerId) return;
+                const ids = Array.from(selectedIds);
+                await supabase.from("qs_leads").update({ owner_id: ownerId }).in("id", ids);
+                const owner = users.find(u => u.id === ownerId);
+                setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, owner_id: ownerId, owner: owner || null } as any : l));
+                setSelectedIds(new Set());
+                e.target.value = "";
+              }}
+              className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-700 cursor-pointer"
+              defaultValue=""
+            >
+              <option value="" disabled>Atribuir Responsável</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+            <button
+              onClick={handleDeleteSelected}
+              className="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
+            >
+              Excluir selecionados
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Table ───────────────────────────────────────────────────────── */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-100">
+                <th className="w-12 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allOnPageSelected}
+                    onChange={toggleAll}
+                    className="w-4 h-4 rounded border-gray-300 text-[#F97316] focus:ring-[#F97316]/20"
+                  />
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Lead
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Origem
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Cadência Vinculada
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Responsável
+                </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Contato
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedLeads.map((lead) => {
+                const statusColor = STATUS_COLORS[lead.status];
+                return (
+                  <tr
+                    key={lead.id}
+                    className="border-b border-gray-100 last:border-0 hover:bg-gray-50/50 transition-colors cursor-pointer"
+                    onClick={() => onOpenLead(lead.id)}
+                  >
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(lead.id)}
+                        onChange={() => toggleOne(lead.id)}
+                        className="w-4 h-4 rounded border-gray-300 text-[#F97316] focus:ring-[#F97316]/20"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{lead.full_name}</p>
+                        <p className="text-xs text-gray-500">{lead.company_name ?? "\u2014"}</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div>
+                        <p className="text-sm text-gray-700">{SOURCE_LABELS[lead.source]}</p>
+                        <p className="text-xs text-gray-400">{formatDate(lead.created_at)}</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${statusColor.bg} ${statusColor.text}`}
+                      >
+                        {STATUS_LABELS[lead.status]}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm text-gray-700">{cadenceName(lead.cadence_id)}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm text-gray-700">{lead.owner?.name ?? <span className="text-gray-400">Não atribuído</span>}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div
+                        className="flex items-center justify-center gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {lead.phone && (
+                          <button
+                            title={lead.phone}
+                            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                          >
+                            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                            </svg>
+                          </button>
+                        )}
+                        {lead.email && (
+                          <button
+                            title={lead.email}
+                            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                          >
+                            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {paginatedLeads.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">
+                    Nenhum lead encontrado com os filtros atuais.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* ── Pagination ──────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+          <span className="text-xs text-gray-500">
+            Mostrando {Math.min((currentPage - 1) * ITEMS_PER_PAGE + 1, filteredLeads.length)}-
+            {Math.min(currentPage * ITEMS_PER_PAGE, filteredLeads.length)} de {filteredLeads.length}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => p - 1)}
+              className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+              <button
+                key={page}
+                onClick={() => setCurrentPage(page)}
+                className={`w-8 h-8 rounded-lg text-xs font-medium transition-colors ${
+                  page === currentPage
+                    ? "bg-[#F97316] text-white"
+                    : "text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                {page}
+              </button>
+            ))}
+            <button
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => p + 1)}
+              className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Create Lead Modal ─────────────────────────────────────────── */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => { setShowCreateModal(false); resetForm(); }}
+          />
+          <div className="relative bg-white rounded-xl border border-gray-100 shadow-none w-full max-w-lg mx-4 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold text-gray-900">Cadastrar Lead</h2>
+              <button
+                onClick={() => { setShowCreateModal(false); resetForm(); }}
+                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Nome</label>
+                  <input
+                    type="text"
+                    value={formFirstName}
+                    onChange={(e) => setFormFirstName(e.target.value)}
+                    placeholder="Nome"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Sobrenome</label>
+                  <input
+                    type="text"
+                    value={formLastName}
+                    onChange={(e) => setFormLastName(e.target.value)}
+                    placeholder="Sobrenome"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">E-mail</label>
+                <input
+                  type="email"
+                  value={formEmail}
+                  onChange={(e) => setFormEmail(e.target.value)}
+                  placeholder="email@exemplo.com.br"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Telefone</label>
+                <input
+                  type="tel"
+                  value={formPhone}
+                  onChange={(e) => setFormPhone(e.target.value)}
+                  placeholder="(00) 00000-0000"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Empresa</label>
+                <input
+                  type="text"
+                  value={formCompany}
+                  onChange={(e) => setFormCompany(e.target.value)}
+                  placeholder="Nome da empresa"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Tipo de Origem</label>
+                <select
+                  value={formSource}
+                  onChange={(e) => setFormSource(e.target.value as LeadSource)}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                >
+                  {(Object.keys(SOURCE_LABELS) as LeadSource[]).map((k) => (
+                    <option key={k} value={k}>{SOURCE_LABELS[k]}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+              <button
+                onClick={() => { setShowCreateModal(false); resetForm(); }}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateLead}
+                disabled={saving || !formFirstName.trim()}
+                className="px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] disabled:opacity-50 transition-colors"
+              >
+                {saving ? "Salvando..." : "Cadastrar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CSV Import Modal (Change 15) ──────────────────────────────── */}
+      {showCsvModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvImportedCount(null); }}
+          />
+          <div className="relative bg-white rounded-xl border border-gray-100 shadow-none w-full max-w-2xl mx-4 p-6 max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold text-gray-900">Importar Leads via CSV</h2>
+              <button
+                onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvImportedCount(null); }}
+                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {csvImportedCount !== null ? (
+              <div className="text-center py-8">
+                <div className="w-12 h-12 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <p className="text-lg font-semibold text-gray-900 mb-2">{csvImportedCount} leads importados</p>
+                <button
+                  onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvImportedCount(null); }}
+                  className="px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] transition-colors"
+                >
+                  Fechar
+                </button>
+              </div>
+            ) : (
+              <>
+                {csvRows.length === 0 ? (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-4">
+                      Selecione um arquivo CSV com as colunas: <strong>nome, empresa, telefone, email, segmento</strong>
+                    </p>
+                    <input
+                      type="file"
+                      accept=".csv"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          const text = ev.target?.result as string;
+                          if (!text) return;
+                          const lines = text.split("\n").filter((l) => l.trim());
+                          if (lines.length < 2) return;
+
+                          // Parse header
+                          const header = lines[0].split(/[,;]/).map((h) => h.trim().toLowerCase().replace(/['"]/g, ""));
+                          const colNome = header.findIndex((h) => h === "nome" || h === "name");
+                          const colEmpresa = header.findIndex((h) => h === "empresa" || h === "company" || h === "company_name");
+                          const colTelefone = header.findIndex((h) => h === "telefone" || h === "phone" || h === "tel");
+                          const colEmail = header.findIndex((h) => h === "email" || h === "e-mail");
+                          const colSegmento = header.findIndex((h) => h === "segmento" || h === "segment");
+
+                          const rows = lines.slice(1).map((line) => {
+                            const cols = line.split(/[,;]/).map((c) => c.trim().replace(/^["']|["']$/g, ""));
+                            return {
+                              nome: colNome >= 0 ? cols[colNome] || "" : "",
+                              empresa: colEmpresa >= 0 ? cols[colEmpresa] || "" : "",
+                              telefone: colTelefone >= 0 ? cols[colTelefone] || "" : "",
+                              email: colEmail >= 0 ? cols[colEmail] || "" : "",
+                              segmento: colSegmento >= 0 ? cols[colSegmento] || "" : "",
+                            };
+                          }).filter((r) => r.nome.trim());
+
+                          setCsvRows(rows);
+                        };
+                        reader.readAsText(file);
+                      }}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-[#F97316]/10 file:text-[#F97316] hover:file:bg-[#F97316]/20"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-sm text-gray-700 mb-4 font-medium">
+                      {csvRows.length} lead{csvRows.length !== 1 ? "s" : ""} encontrado{csvRows.length !== 1 ? "s" : ""}
+                    </p>
+                    <div className="overflow-x-auto max-h-64 overflow-y-auto border border-gray-100 rounded-lg mb-4">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-semibold text-gray-500">Nome</th>
+                            <th className="px-3 py-2 text-left font-semibold text-gray-500">Empresa</th>
+                            <th className="px-3 py-2 text-left font-semibold text-gray-500">Telefone</th>
+                            <th className="px-3 py-2 text-left font-semibold text-gray-500">E-mail</th>
+                            <th className="px-3 py-2 text-left font-semibold text-gray-500">Segmento</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {csvRows.map((row, idx) => (
+                            <tr key={idx} className="border-t border-gray-50">
+                              <td className="px-3 py-2 text-gray-900">{row.nome}</td>
+                              <td className="px-3 py-2 text-gray-700">{row.empresa}</td>
+                              <td className="px-3 py-2 text-gray-700">{row.telefone}</td>
+                              <td className="px-3 py-2 text-gray-700">{row.email}</td>
+                              <td className="px-3 py-2 text-gray-700">{row.segmento}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => setCsvRows([])}
+                        className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setCsvImporting(true);
+                          const inserts = csvRows.map((row) => {
+                            const nameParts = row.nome.trim().split(/\s+/);
+                            const firstName = nameParts[0] || "";
+                            const lastName = nameParts.slice(1).join(" ") || "";
+                            return {
+                              first_name: firstName,
+                              last_name: lastName || null,
+                              full_name: row.nome.trim(),
+                              email: row.email.trim() || null,
+                              phone: row.telefone.trim() || null,
+                              company_name: row.empresa.trim() || null,
+                              segment: row.segmento.trim() || null,
+                              source: "manual" as LeadSource,
+                              status: "nao_iniciado" as LeadStatus,
+                            };
+                          });
+
+                          const { error } = await supabase.from("qs_leads").insert(inserts);
+                          if (error) {
+                            console.warn("Erro ao importar CSV:", error);
+                          } else {
+                            setCsvImportedCount(inserts.length);
+                            await fetchLeads();
+                          }
+                          setCsvImporting(false);
+                        }}
+                        disabled={csvImporting}
+                        className="px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] disabled:opacity-50 transition-colors"
+                      >
+                        {csvImporting ? "Importando..." : `Confirmar importação (${csvRows.length})`}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
