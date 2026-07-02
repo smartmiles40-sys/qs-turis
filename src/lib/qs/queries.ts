@@ -17,7 +17,6 @@ import type {
   Meeting,
   MeetingStatus,
   Goal,
-  GoalType,
   GoalPeriod,
   Note,
   LossReason,
@@ -941,10 +940,15 @@ export async function fetchLossReasonsStats(): Promise<LossReasonStat[]> {
       .not("loss_reason_id", "is", null);
     if (error) throw error;
 
-    // Aggregate counts by reason label
+    // Aggregate counts by reason label.
+    // O embed do Supabase pode vir como objeto (FK to-one) ou array — normalizamos.
     const counts = new Map<string, number>();
-    (data ?? []).forEach((row: { loss_reason: { label: string } | null }) => {
-      const label = row.loss_reason?.label ?? "Sem motivo";
+    const rows = (data ?? []) as unknown as {
+      loss_reason: { label: string } | { label: string }[] | null;
+    }[];
+    rows.forEach((row) => {
+      const lr = Array.isArray(row.loss_reason) ? row.loss_reason[0] : row.loss_reason;
+      const label = lr?.label ?? "Sem motivo";
       counts.set(label, (counts.get(label) ?? 0) + 1);
     });
 

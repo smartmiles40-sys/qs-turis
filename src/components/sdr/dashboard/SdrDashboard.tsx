@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchDashboardStats, fetchQsUsers } from "@/lib/qs/queries";
 import type { GoalType } from "../types";
@@ -528,12 +528,49 @@ export default function SdrDashboard() {
 
       const stats = await fetchDashboardStats(ownerId, from, to);
 
-      // Build KPI cards from real data
-      // We use reasonable meta values - these should come from qs_goals in the future
-      const metaGanhos = 87;
-      const metaFinalizados = 250;
-      const metaAtividades = 450;
-      const metaConversao = 30;
+      // Metas mensais reais (qs_goals). Se o dashboard estiver filtrado por
+      // usuário, usa as metas daquele usuário; senão soma as metas de todos.
+      // Fallback para os defaults se não houver meta cadastrada (não quebra o layout).
+      const META_DEFAULTS: Record<GoalType, number> = {
+        ganhos: 87,
+        leads_finalizados: 250,
+        atividades: 450,
+        conversao: 30,
+      };
+
+      let qGoals = supabase
+        .from("qs_goals")
+        .select("owner_id, type, target_value, period_start")
+        .eq("period", "mensal")
+        .order("period_start", { ascending: false });
+      if (ownerId) qGoals = qGoals.eq("owner_id", ownerId);
+      const { data: goalsData } = await qGoals;
+
+      const goalSum: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0 };
+      const goalCount: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0 };
+      const seenGoal = new Set<string>();
+      ((goalsData ?? []) as any[]).forEach((g) => {
+        const type = g.type as GoalType;
+        if (!(type in goalSum)) return;
+        // Dedupe por (owner, tipo) mantendo a meta mais recente — evita somar meses antigos
+        const key = `${g.owner_id ?? "none"}-${type}`;
+        if (seenGoal.has(key)) return;
+        seenGoal.add(key);
+        goalSum[type] += Number(g.target_value) || 0;
+        goalCount[type] += 1;
+      });
+
+      const metaFor = (type: GoalType): number => {
+        if (goalCount[type] === 0) return META_DEFAULTS[type];
+        // Conversão é percentual: usa a média das metas em vez de somar
+        if (type === "conversao") return Math.round(goalSum[type] / goalCount[type]);
+        return goalSum[type];
+      };
+
+      const metaGanhos = metaFor("ganhos");
+      const metaFinalizados = metaFor("leads_finalizados");
+      const metaAtividades = metaFor("atividades");
+      const metaConversao = metaFor("conversao");
 
       const cards: KpiCard[] = [
         {

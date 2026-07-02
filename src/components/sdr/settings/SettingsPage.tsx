@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { createQsAuthUser, updateQsAuthUser, deleteQsAuthUser } from "@/lib/adminUsers";
 import type {
   CustomField,
   CustomFieldScope,
@@ -134,23 +135,79 @@ function ChannelSvgIcon({ type }: { type: string }) {
 
 // ── Campos Personalizados ────────────────────────────────────────────────────
 
+const FIELD_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "text", label: "Texto" },
+  { value: "number", label: "Número" },
+  { value: "date", label: "Data" },
+  { value: "select", label: "Seleção" },
+];
+
 function CamposSection() {
   const [activeScope, setActiveScope] = useState<CustomFieldScope>("pessoal");
   const [allFields, setAllFields] = useState<CustomField[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editField, setEditField] = useState<CustomField | null>(null);
+  const [form, setForm] = useState({ label: "", scope: "pessoal" as CustomFieldScope, field_type: "text" });
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetch() {
-      setLoading(true);
-      const { data, error } = await supabase.from("qs_custom_fields").select("*").order("label");
-      if (error) console.warn("Erro ao buscar campos:", error);
-      else setAllFields((data as CustomField[]) ?? []);
-      setLoading(false);
-    }
-    fetch();
-  }, []);
+  async function loadFields() {
+    setLoading(true);
+    const { data, error } = await supabase.from("qs_custom_fields").select("*").order("label");
+    if (error) console.warn("Erro ao buscar campos:", error);
+    else setAllFields((data as CustomField[]) ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => { loadFields(); }, []);
 
   const fields = allFields.filter((f) => f.scope === activeScope);
+
+  function openAdd() {
+    setEditField(null);
+    setForm({ label: "", scope: activeScope, field_type: "text" });
+    setErrorMsg(null);
+    setShowModal(true);
+  }
+
+  function openEdit(field: CustomField) {
+    setEditField(field);
+    setForm({ label: field.label, scope: field.scope, field_type: field.field_type });
+    setErrorMsg(null);
+    setShowModal(true);
+  }
+
+  async function handleSave() {
+    if (!form.label.trim()) return;
+    setSaving(true);
+    setErrorMsg(null);
+    if (editField) {
+      const { error } = await supabase
+        .from("qs_custom_fields")
+        .update({ label: form.label.trim(), scope: form.scope, field_type: form.field_type })
+        .eq("id", editField.id);
+      if (error) {
+        console.warn("Erro ao atualizar campo:", error);
+        setErrorMsg("Não foi possível salvar o campo. Tente novamente.");
+        setSaving(false);
+        return;
+      }
+    } else {
+      const { error } = await supabase
+        .from("qs_custom_fields")
+        .insert({ label: form.label.trim(), scope: form.scope, field_type: form.field_type, is_system: false, is_archived: false });
+      if (error) {
+        console.warn("Erro ao criar campo:", error);
+        setErrorMsg("Não foi possível criar o campo. Tente novamente.");
+        setSaving(false);
+        return;
+      }
+    }
+    setSaving(false);
+    setShowModal(false);
+    await loadFields();
+  }
 
   if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
 
@@ -158,7 +215,7 @@ function CamposSection() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-900">Campos Personalizados</h2>
-        <button className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] transition-colors">
+        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] transition-colors">
           <PlusIcon /> Novo Campo
         </button>
       </div>
@@ -212,7 +269,7 @@ function CamposSection() {
                       <span className="text-xs text-gray-300">--</span>
                     ) : (
                       <div className="inline-flex items-center gap-1">
-                        <button className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" title="Editar"><PencilIcon /></button>
+                        <button onClick={() => openEdit(field)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" title="Editar"><PencilIcon /></button>
                         <button
                           onClick={async () => {
                             const { error } = await supabase.from("qs_custom_fields").delete().eq("id", field.id);
@@ -232,6 +289,44 @@ function CamposSection() {
           </table>
         )}
       </div>
+
+      {/* Modal Criar/Editar Campo */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-base font-bold text-gray-900 mb-4">{editField ? "Editar Campo" : "Novo Campo"}</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Nome do campo *</label>
+                <input type="text" value={form.label} onChange={(e) => setForm(p => ({ ...p, label: e.target.value }))} placeholder="Ex.: Orçamento estimado" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" autoFocus />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Escopo</label>
+                <select value={form.scope} onChange={(e) => setForm(p => ({ ...p, scope: e.target.value as CustomFieldScope }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                  <option value="pessoal">Pessoal</option>
+                  <option value="empresa">Empresa</option>
+                  <option value="contato">Contato</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Tipo</label>
+                <select value={form.field_type} onChange={(e) => setForm(p => ({ ...p, field_type: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                  {FIELD_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
+            </div>
+            <div className="flex items-center gap-3 mt-5">
+              <button onClick={handleSave} disabled={saving || !form.label.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#F97316" }}>
+                {saving ? "Salvando..." : editField ? "Salvar" : "Criar"}
+              </button>
+              <button onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -242,17 +337,61 @@ function MotivosSection() {
   const [showArchived, setShowArchived] = useState(false);
   const [reasons, setReasons] = useState<LossReason[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editReason, setEditReason] = useState<LossReason | null>(null);
+  const [form, setForm] = useState({ label: "" });
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetch() {
-      setLoading(true);
-      const { data, error } = await supabase.from("qs_loss_reasons").select("*").order("label");
-      if (error) console.warn("Erro ao buscar motivos:", error);
-      else setReasons((data as LossReason[]) ?? []);
-      setLoading(false);
+  async function loadReasons() {
+    setLoading(true);
+    const { data, error } = await supabase.from("qs_loss_reasons").select("*").order("label");
+    if (error) console.warn("Erro ao buscar motivos:", error);
+    else setReasons((data as LossReason[]) ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => { loadReasons(); }, []);
+
+  function openAdd() {
+    setEditReason(null);
+    setForm({ label: "" });
+    setErrorMsg(null);
+    setShowModal(true);
+  }
+
+  function openEdit(reason: LossReason) {
+    setEditReason(reason);
+    setForm({ label: reason.label });
+    setErrorMsg(null);
+    setShowModal(true);
+  }
+
+  async function handleSave() {
+    if (!form.label.trim()) return;
+    setSaving(true);
+    setErrorMsg(null);
+    if (editReason) {
+      const { error } = await supabase.from("qs_loss_reasons").update({ label: form.label.trim() }).eq("id", editReason.id);
+      if (error) {
+        console.warn("Erro ao atualizar motivo:", error);
+        setErrorMsg("Não foi possível salvar o motivo. Tente novamente.");
+        setSaving(false);
+        return;
+      }
+    } else {
+      const { error } = await supabase.from("qs_loss_reasons").insert({ label: form.label.trim(), is_predefined: false, is_archived: false });
+      if (error) {
+        console.warn("Erro ao criar motivo:", error);
+        setErrorMsg("Não foi possível criar o motivo. Tente novamente.");
+        setSaving(false);
+        return;
+      }
     }
-    fetch();
-  }, []);
+    setSaving(false);
+    setShowModal(false);
+    await loadReasons();
+  }
 
   const predefined = reasons.filter((r) => r.is_predefined);
   const custom = reasons.filter((r) => !r.is_predefined && (showArchived || !r.is_archived));
@@ -275,7 +414,7 @@ function MotivosSection() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-900">Motivos de Perda</h2>
-        <button className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] transition-colors">
+        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] transition-colors">
           <PlusIcon /> Novo Motivo
         </button>
       </div>
@@ -329,7 +468,7 @@ function MotivosSection() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-1">
-                        <button className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" title="Editar"><PencilIcon /></button>
+                        <button onClick={() => openEdit(reason)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" title="Editar"><PencilIcon /></button>
                         <button onClick={() => toggleArchive(reason)} className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors" title={reason.is_archived ? "Desarquivar" : "Arquivar"}><ArchiveIcon /></button>
                         <button onClick={() => deleteReason(reason.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors" title="Excluir"><TrashIcon /></button>
                       </div>
@@ -341,6 +480,28 @@ function MotivosSection() {
           )}
         </div>
       </div>
+
+      {/* Modal Criar/Editar Motivo */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-base font-bold text-gray-900 mb-4">{editReason ? "Editar Motivo" : "Novo Motivo"}</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Motivo *</label>
+                <input type="text" value={form.label} onChange={(e) => setForm({ label: e.target.value })} placeholder="Ex.: Sem orçamento no momento" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" autoFocus />
+              </div>
+              {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
+            </div>
+            <div className="flex items-center gap-3 mt-5">
+              <button onClick={handleSave} disabled={saving || !form.label.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#F97316" }}>
+                {saving ? "Salvando..." : editReason ? "Salvar" : "Criar"}
+              </button>
+              <button onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -352,8 +513,9 @@ function UsuariosSection() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState<SdrUser | null>(null);
-  const [form, setForm] = useState({ name: "", email: "", role: "sdr" as UserRole, password: "setuforeuvou" });
+  const [form, setForm] = useState({ name: "", email: "", role: "sdr" as UserRole, password: "", whatsapp_number: "" });
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function loadUsers() {
     setLoading(true);
@@ -366,27 +528,41 @@ function UsuariosSection() {
 
   function openAdd() {
     setEditUser(null);
-    setForm({ name: "", email: "", role: "sdr", password: "setuforeuvou" });
+    setForm({ name: "", email: "", role: "sdr", password: "", whatsapp_number: "" });
+    setSaveError(null);
     setShowModal(true);
   }
 
   function openEdit(u: SdrUser) {
     setEditUser(u);
-    setForm({ name: u.name, email: u.email, role: u.role, password: "" });
+    setForm({ name: u.name, email: u.email, role: u.role, password: "", whatsapp_number: u.whatsapp_number ?? "" });
+    setSaveError(null);
     setShowModal(true);
   }
 
   async function handleSave() {
     if (!form.name || !form.email) return;
+    if (!editUser && !form.password) { setSaveError("Defina uma senha para o novo usuário (mín. 6 caracteres)."); return; }
     setSaving(true);
-    if (editUser) {
-      const updateData: any = { name: form.name, email: form.email, role: form.role };
-      if (form.password) updateData.password = form.password;
-      await supabase.from("qs_users").update(updateData).eq("id", editUser.id);
-    } else {
-      await supabase.from("qs_users").insert({ name: form.name, email: form.email, role: form.role, password: form.password || "setuforeuvou" });
-    }
+    setSaveError(null);
+    const res = editUser
+      ? await updateQsAuthUser({
+          id: editUser.id,
+          name: form.name,
+          email: form.email,
+          role: form.role,
+          whatsapp_number: form.whatsapp_number.trim() || null,
+          ...(form.password ? { password: form.password } : {}),
+        })
+      : await createQsAuthUser({
+          name: form.name,
+          email: form.email,
+          role: form.role,
+          whatsapp_number: form.whatsapp_number.trim() || null,
+          password: form.password,
+        });
     setSaving(false);
+    if (!res.success) { setSaveError(res.error || "Falha ao salvar usuário."); return; }
     setShowModal(false);
     loadUsers();
   }
@@ -398,17 +574,10 @@ function UsuariosSection() {
 
   async function deleteUser(u: SdrUser) {
     if (!confirm(`Excluir ${u.name} permanentemente? Os leads dele ficarão sem responsável.`)) return;
-    // Remover referências antes de deletar
-    await supabase.from("qs_leads").update({ owner_id: null }).eq("owner_id", u.id);
-    await supabase.from("qs_tasks").update({ owner_id: null }).eq("owner_id", u.id);
-    await supabase.from("qs_cadence_owners").delete().eq("user_id", u.id);
-    await supabase.from("qs_handovers").update({ from_user_id: null }).eq("from_user_id", u.id);
-    await supabase.from("qs_handovers").update({ to_user_id: null }).eq("to_user_id", u.id);
-    await supabase.from("qs_notes").update({ author_id: null }).eq("author_id", u.id);
-    await supabase.from("qs_meetings").update({ owner_id: null }).eq("owner_id", u.id);
-    await supabase.from("qs_goals").delete().eq("owner_id", u.id);
-    // Agora deleta o usuário
-    await supabase.from("qs_users").delete().eq("id", u.id);
+    // O endpoint remove a conta de autenticação; o perfil sai via regras de FK
+    // (leads/tarefas/reuniões ficam sem responsável; metas são apagadas).
+    const res = await deleteQsAuthUser(u.id);
+    if (!res.success) { alert(res.error || "Falha ao excluir usuário."); return; }
     setUsers(prev => prev.filter(x => x.id !== u.id));
   }
 
@@ -509,9 +678,17 @@ function UsuariosSection() {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">{editUser ? "Nova senha (deixe vazio para manter)" : "Senha *"}</label>
-                <input type="password" value={form.password} onChange={(e) => setForm(p => ({ ...p, password: e.target.value }))} placeholder={editUser ? "••••••••" : "Senha de acesso"} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" />
+                <input type="password" value={form.password} onChange={(e) => setForm(p => ({ ...p, password: e.target.value }))} placeholder={editUser ? "••••••••" : "Senha de acesso (mín. 6)"} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">WhatsApp do SDR (opcional)</label>
+                <input type="tel" value={form.whatsapp_number} onChange={(e) => setForm(p => ({ ...p, whatsapp_number: e.target.value }))} placeholder="Ex.: (11) 99999-8888" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" />
+                <p className="text-[10px] text-gray-400 mt-1">Número que este SDR usa para atender no WhatsApp.</p>
               </div>
             </div>
+            {saveError && (
+              <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{saveError}</div>
+            )}
             <div className="flex items-center gap-3 mt-5">
               <button onClick={handleSave} disabled={saving || !form.name || !form.email} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#F97316" }}>
                 {saving ? "Salvando..." : editUser ? "Salvar" : "Adicionar"}
@@ -726,91 +903,28 @@ function CanaisSection() {
 // ── VoIP Config ─────────────────────────────────────────────────────────────
 
 function VoipSection() {
-  const [provider, setProvider] = React.useState("manual");
-  const [sipUri, setSipUri] = React.useState("");
-  const [apiKey, setApiKey] = React.useState("");
-
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-bold text-gray-900">Configuração VoIP</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Configure a integração de telefonia para ligações diretas pelo sistema</p>
+        <p className="text-sm text-gray-500 mt-0.5">Telefonia integrada para ligações diretas pelo sistema</p>
       </div>
 
-      {/* Modo de ligação */}
-      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">Modo de Ligação</h3>
-        <div className="space-y-2">
-          {[
-            { id: "manual", label: "Manual", desc: "O qualificador liga pelo telefone e registra manualmente no sistema" },
-            { id: "voip", label: "VoIP Integrado", desc: "Ligação direta pelo sistema com gravação e métricas" },
-            { id: "click-to-call", label: "Click-to-Call", desc: "Sistema inicia a chamada no softphone configurado" },
-          ].map((opt) => (
-            <label
-              key={opt.id}
-              className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                provider === opt.id ? "border-[#F97316] bg-[#F97316]/5" : "border-gray-200"
-              }`}
-            >
-              <input
-                type="radio"
-                name="voip-mode"
-                checked={provider === opt.id}
-                onChange={() => setProvider(opt.id)}
-                className="mt-0.5"
-              />
-              <div>
-                <span className="text-sm font-medium text-gray-900">{opt.label}</span>
-                <p className="text-xs text-gray-400 mt-0.5">{opt.desc}</p>
-              </div>
-            </label>
-          ))}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-8 flex flex-col items-center text-center">
+        <div className="w-12 h-12 rounded-xl bg-[#F97316]/10 text-[#F97316] flex items-center justify-center mb-4">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+          </svg>
         </div>
-      </div>
-
-      {/* Config VoIP */}
-      {provider === "voip" && (
-        <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">Configuração do Provedor VoIP</h3>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">SIP URI / Servidor</label>
-              <input
-                type="text"
-                value={sipUri}
-                onChange={(e) => setSipUri(e.target.value)}
-                placeholder="sip.provedor.com.br"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/10"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">API Key / Token</label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="••••••••••••••"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/10"
-              />
-            </div>
-            <button className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] transition-colors">
-              Testar Conexão
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Status */}
-      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">Status</h3>
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full" style={{ background: provider === "voip" ? "#059669" : "#D97706" }} />
-          <span className="text-sm text-gray-600">
-            {provider === "manual" && "Modo manual — qualificadores registram ligações manualmente"}
-            {provider === "voip" && "VoIP integrado — pronto para configurar provedor"}
-            {provider === "click-to-call" && "Click-to-Call — abre softphone externo"}
-          </span>
-        </div>
+        <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[#F97316]/10 text-[#F97316] mb-3">
+          Em breve
+        </span>
+        <h3 className="text-base font-semibold text-gray-900">Telefonia VoIP será configurada em uma próxima etapa</h3>
+        <p className="text-sm text-gray-500 mt-2 max-w-md">
+          A integração de telefonia (ligação direta pelo sistema, gravação e métricas de chamada) ainda não está
+          disponível. Por enquanto, as ligações continuam sendo registradas manualmente pelos qualificadores.
+          Você será avisado quando esta configuração estiver liberada.
+        </p>
       </div>
     </div>
   );

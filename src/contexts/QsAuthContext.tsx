@@ -44,65 +44,69 @@ export function canSeeAllData(role: UserRole): boolean {
 }
 
 // ── Provider ───────────────────────────────────────────────────────────────
-
-const DEFAULT_PASSWORD = "setuforeuvou";
+// Autenticação via Supabase Auth (email + senha). A tabela qs_users guarda o
+// PERFIL (nome, role, ativo), vinculada 1:1 pelo id ao usuário de auth.
 
 export function QsAuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<SdrUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // On mount: check localStorage for saved session
-  useEffect(() => {
-    const stored = localStorage.getItem("qs_user");
-    if (stored) {
-      try {
-        const user = JSON.parse(stored) as SdrUser;
-        // Validate the user is still active in the database
-        supabase
-          .from("qs_users")
-          .select("*")
-          .eq("id", user.id)
-          .eq("is_active", true)
-          .single()
-          .then(({ data }) => {
-            if (data) {
-              setCurrentUser(data as SdrUser);
-              localStorage.setItem("qs_user", JSON.stringify(data));
-            } else {
-              localStorage.removeItem("qs_user");
-              setCurrentUser(null);
-            }
-            setLoading(false);
-          });
-      } catch {
-        localStorage.removeItem("qs_user");
-        setLoading(false);
-      }
-    } else {
-      setLoading(false);
-    }
-  }, []);
-
-  async function login(email: string, password: string): Promise<boolean> {
+  // Carrega o perfil qs_users do usuário autenticado (id = auth.uid()).
+  async function loadProfile(userId: string): Promise<SdrUser | null> {
     const { data } = await supabase
       .from("qs_users")
       .select("*")
-      .eq("email", email.toLowerCase().trim())
+      .eq("id", userId)
       .eq("is_active", true)
       .single();
-
-    if (data && (data.password === password || password === DEFAULT_PASSWORD)) {
-      const user = data as SdrUser;
-      setCurrentUser(user);
-      localStorage.setItem("qs_user", JSON.stringify(user));
-      return true;
-    }
-    return false;
+    return (data as SdrUser) ?? null;
   }
 
-  function logout() {
+  useEffect(() => {
+    let active = true;
+
+    // Sessão atual (o supabase-js persiste sozinho no localStorage).
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!active) return;
+      if (session?.user) {
+        const profile = await loadProfile(session.user.id);
+        if (!active) return;
+        if (profile) setCurrentUser(profile);
+        else await supabase.auth.signOut(); // sem perfil ativo → derruba a sessão
+      }
+      setLoading(false);
+    });
+
+    // Reage a logout externo / troca de sessão.
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") setCurrentUser(null);
+      if (event === "SIGNED_IN" && session?.user) {
+        loadProfile(session.user.id).then((p) => { if (active && p) setCurrentUser(p); });
+      }
+    });
+
+    return () => { active = false; sub.subscription.unsubscribe(); };
+  }, []);
+
+  async function login(email: string, password: string): Promise<boolean> {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.toLowerCase().trim(),
+      password,
+    });
+    if (error || !data.user) return false;
+
+    const profile = await loadProfile(data.user.id);
+    if (!profile) {
+      await supabase.auth.signOut();
+      return false;
+    }
+    setCurrentUser(profile);
+    return true;
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
     setCurrentUser(null);
-    localStorage.removeItem("qs_user");
   }
 
   return (

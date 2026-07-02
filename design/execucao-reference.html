@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="pt-BR"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turis · Execução (referência de design)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--blue:#2563EB;--blue-ink:#1D4FD8;--orange:#F5821F;--green:#12A18A;--yellow:#F5B400;--red:#E5484D;--amber:#E8920B;--bg:#F5F6F8;--card:#FFFFFF;--line:#E8EBF0;--line2:#EEF1F5;--ink:#182231;--ink2:#586274;--ink3:#8B95A4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font-family:'Hanken Grotesk',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.i{width:16px;height:16px;flex:none}.ib{width:18px;height:18px;flex:none}
+.nav{display:flex;align-items:center;gap:30px;padding:0 30px;height:66px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.brand{display:flex;align-items:center;gap:11px}
+.logo{width:40px;height:40px;border-radius:12px;background:linear-gradient(150deg,#2f6bf0,#1d4fd8);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;letter-spacing:.5px}
+.bn{font-weight:800;font-size:15px;line-height:1.05}.bs{font-size:11px;color:var(--ink3);font-weight:600}
+.tabs{display:flex;gap:2px}
+.tab{padding:9px 14px;border-radius:10px;font-size:14px;font-weight:600;color:var(--ink2);display:flex;align-items:center;gap:6px;cursor:pointer}
+.tab .i{width:14px;height:14px;opacity:.7}
+.tab.on{color:var(--blue);background:rgba(37,99,235,.09);font-weight:700}
+.tab:hover:not(.on){background:var(--line2)}
+.nav-r{margin-left:auto;display:flex;align-items:center;gap:12px}
+.iconbtn{width:40px;height:40px;border-radius:11px;border:1px solid var(--line);background:#fff;color:var(--ink2);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.iconbtn:hover{background:var(--line2)}
+.avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(150deg,#2f6bf0,#1d4fd8);color:#fff;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center}
+.vr{width:1px;height:26px;background:var(--line)}
+.page{max-width:1400px;margin:0 auto;padding:26px 30px 60px}
+.greet{display:flex;align-items:baseline;gap:12px}
+.greet h2{font-size:20px;font-weight:800;margin:0;letter-spacing:-.2px}
+.subline{font-size:14px;color:var(--ink2)}.hl-o{color:var(--orange);font-weight:800}
+.cmd{display:flex;align-items:center;gap:12px;margin:18px 0 0}
+.search{flex:1;display:flex;align-items:center;gap:11px;height:48px;padding:0 16px;background:#fff;border:1px solid var(--line);border-radius:14px;color:var(--ink3);font-size:14.5px;font-weight:500}
+.search .i{color:var(--ink3)}
+.btn{height:48px;padding:0 18px;border-radius:14px;font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;border:0;color:#fff;cursor:pointer;white-space:nowrap}
+.btn:hover{filter:brightness(1.05)}
+.btn-green{background:var(--green);box-shadow:0 8px 18px -8px rgba(18,161,138,.6)}
+.btn-blue{background:var(--blue);box-shadow:0 8px 18px -8px rgba(37,99,235,.6)}
+.btn-orange{background:var(--orange);box-shadow:0 8px 18px -8px rgba(245,130,31,.6)}
+.btn-ghost{background:#fff;border:1px solid var(--line);color:var(--ink)}
+.btn-ghost:hover{background:var(--line2);filter:none}
+.context{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:18px 0 20px}
+.metrics{display:flex;gap:30px}
+.metric{display:flex;flex-direction:column;gap:7px;min-width:172px}
+.metric-top{display:flex;align-items:center;gap:7px}
+.mdot{width:9px;height:9px;border-radius:50%}.dot-y{background:var(--yellow)}.dot-b{background:var(--blue)}
+.mlab{font-size:10.5px;font-weight:800;letter-spacing:.9px;text-transform:uppercase;color:var(--ink3)}
+.mnums{margin-left:auto;font-weight:800;font-size:14px;font-variant-numeric:tabular-nums}.mnums span{color:var(--ink3);font-weight:700}
+.bar{height:7px;border-radius:999px;background:var(--line2);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:999px}
+.fill-y{background:var(--yellow)}.fill-b{background:var(--blue)}
+.pace{display:flex;align-items:center;gap:9px;padding:9px 15px;background:#fff;border:1px solid var(--line);border-radius:999px;font-size:13px;color:var(--ink2);font-weight:600}
+.pace b{color:var(--ink);font-weight:800}.pace .i{color:var(--orange);width:15px;height:15px}
+.pace-sep{width:4px;height:4px;border-radius:50%;background:var(--line);flex:none}
+.hero{display:flex;background:#fff;border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 18px 40px -30px rgba(23,32,46,.4)}
+.hero-accent{width:6px;flex:none}.acc-alta{background:var(--red)}.acc-media{background:var(--amber)}.acc-baixa{background:var(--ink3)}
+.hero-main{flex:1;padding:26px 28px;display:flex;flex-direction:column;gap:18px}
+.hero-top{display:flex;align-items:center;gap:12px}
+.eyebrow{font-size:11px;font-weight:800;letter-spacing:1.3px;text-transform:uppercase;color:var(--orange)}
+.badge-soon{font-size:12px;font-weight:800;color:var(--green);background:rgba(18,161,138,.11);padding:5px 11px;border-radius:999px;display:flex;align-items:center;gap:6px}
+.badge-soon .i{width:13px;height:13px}
+.hero-time{margin-left:auto;font-size:15px;font-weight:800;color:var(--ink2);font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:7px}
+.hero-lead{display:flex;align-items:center;gap:16px}
+.hln{font-size:23px;font-weight:800;letter-spacing:-.3px;margin:0}
+.hco{font-size:14.5px;color:var(--ink2);font-weight:600;margin-top:2px}
+.hero-chips{display:flex;gap:8px;margin-left:auto}
+.hbox{background:#FAFBFC;border:1px solid var(--line2);border-radius:15px;padding:15px 18px;font-size:14.5px;color:var(--ink2);line-height:1.5}
+.hbox b{color:var(--ink);font-weight:700}
+.hero-acts{display:flex;align-items:center;gap:10px}
+.hero-side{width:298px;flex:none;border-left:1px solid var(--line);padding:22px;background:#FAFBFC;display:flex;flex-direction:column;gap:6px}
+.side-lab{font-size:11px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:var(--ink3);margin-bottom:8px}
+.mini{display:flex;align-items:center;gap:12px;padding:11px;border-radius:14px;cursor:pointer}
+.mini:hover{background:#fff;box-shadow:0 2px 10px -4px rgba(23,32,46,.15)}
+.mini-time{font-size:13px;font-weight:800;color:var(--ink2);width:42px;font-variant-numeric:tabular-nums}
+.mini-b{flex:1;min-width:0}.mini-n{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mini-c{font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side-more{margin-top:auto;font-size:13px;font-weight:700;color:var(--blue);display:flex;align-items:center;gap:6px;padding-top:10px;cursor:pointer}
+.chan-ic{width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;flex:none}
+.ic-call{background:rgba(18,161,138,.12);color:var(--green)}
+.ic-whats{background:rgba(37,187,108,.13);color:#1DA453}
+.ic-mail{background:rgba(37,99,235,.11);color:var(--blue)}
+.chip{height:26px;padding:0 11px;border-radius:999px;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.prio-alta{background:rgba(229,72,77,.11);color:var(--red)}
+.prio-media{background:rgba(232,146,11,.13);color:var(--amber)}
+.prio-baixa{background:var(--line2);color:var(--ink2)}
+.ctag{font-size:12.5px;font-weight:700;color:var(--ink2);display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}.dot-alta{background:var(--red)}.dot-media{background:var(--amber)}.dot-baixa{background:var(--ink3)}
+.filters{display:flex;gap:8px;flex-wrap:wrap}
+.fchip{height:36px;padding:0 15px;border-radius:999px;background:#fff;border:1px solid var(--line);font-size:13px;font-weight:600;color:var(--ink2);display:flex;align-items:center;gap:7px;cursor:pointer}
+.fchip .i{width:13px;height:13px;opacity:.7}
+.fchip:hover{border-color:#d5dae2}
+.fchip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.sechead{display:flex;align-items:baseline;justify-content:space-between;margin:28px 2px 14px}
+.sectitle{font-size:16px;font-weight:800;letter-spacing:-.1px}
+.glabel{font-size:11px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:var(--ink3);margin:22px 2px 11px;display:flex;align-items:center;gap:9px}
+.glabel:before{content:'';flex:none;width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.35}
+.list{display:flex;flex-direction:column;gap:10px}
+.pill{display:flex;align-items:center;gap:16px;min-height:78px;padding:0 12px 0 22px;background:#fff;border:1px solid var(--line);border-radius:999px;cursor:pointer;transition:box-shadow .16s,border-color .16s,transform .16s}
+.pill:hover{border-color:#d3dae5;box-shadow:0 14px 30px -20px rgba(23,32,46,.4);transform:translateY(-1px)}
+.time{font-variant-numeric:tabular-nums;font-weight:800;color:var(--ink);font-size:15px;width:50px;flex:none}
+.pbody{flex:1;min-width:0}
+.prow{display:flex;align-items:center;gap:9px}
+.lname{font-weight:700;font-size:15.5px}
+.pco{font-size:13px;color:var(--ink3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.pco b{color:var(--ink2);font-weight:700}
+.pacts{display:flex;align-items:center;gap:8px;flex:none}
+.pa{width:42px;height:42px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--ink2);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.pa:hover{background:var(--line2)}
+.pa-go{background:var(--blue);color:#fff;border:0;box-shadow:0 8px 16px -8px rgba(37,99,235,.7)}
+.pa-go:hover{background:var(--blue-ink)}
+.compact .pill{min-height:64px}
+.compact .pco{display:none}
+</style></head>
+<body>
+<!-- ============================================================= -->
+<!-- NAV: já existe no app (SdrLayout). NÃO reimplementar; só alinhar estilo. -->
+<!-- ============================================================= -->
+<div class="nav">
+  <div class="brand"><div class="logo">QS</div><div><div class="bn">Turis</div><div class="bs">by Inovatur</div></div></div>
+  <div class="tabs"><div class="tab on">Execução</div><div class="tab">Gestão</div><div class="tab">Desempenho</div><div class="tab">Configurações</div></div>
+  <div class="nav-r"><div class="iconbtn">🔔</div><div class="vr"></div><div class="avatar">A</div></div>
+</div>
+
+<!-- ============================================================= -->
+<!-- PAGE: isto é o que o TasksPanel (Execução) deve renderizar. -->
+<!-- ============================================================= -->
+<div class="page">
+
+  <!-- Saudação: nome do SDR logado + contagem de atividades de hoje + data -->
+  <div class="greet"><h2>Bom dia, Ana</h2><span class="subline">Você tem <span class="hl-o">8 atividades</span> agendadas para hoje · quinta, 2 jul</span></div>
+
+  <!-- Barra de comando: busca + 3 ações (abrem os modais existentes) -->
+  <div class="cmd">
+    <div class="search">🔍 Pesquisar lead, empresa, e-mail ou telefone…</div>
+    <button class="btn btn-green">📞 Ligação Manual</button>
+    <button class="btn btn-blue">＋ Atividade Extra</button>
+    <button class="btn btn-orange">＋ Cadastrar Lead</button>
+  </div>
+
+  <!-- Contexto: metas (reais de qs_goals/tarefas) + ritmo do dia -->
+  <div class="context">
+    <div class="metrics">
+      <div class="metric"><div class="metric-top"><span class="mdot dot-y"></span><span class="mlab">Meta de hoje</span><span class="mnums">137<span>/350</span></span></div><div class="bar"><i class="fill-y" style="width:39%"></i></div></div>
+      <div class="metric"><div class="metric-top"><span class="mdot dot-b"></span><span class="mlab">Meta do mês</span><span class="mnums">4.820<span>/7.350</span></span></div><div class="bar"><i class="fill-b" style="width:66%"></i></div></div>
+    </div>
+    <div class="pace">⏱ Ritmo <b>18/h</b><span class="pace-sep"></span>faltam <b>213</b><span class="pace-sep"></span><b>~2h50</b> restantes</div>
+  </div>
+
+  <!-- HERO: a PRÓXIMA tarefa pendente do SDR (a de menor horário). Ações reais. -->
+  <div class="hero">
+    <div class="hero-accent acc-alta"></div>
+    <div class="hero-main">
+      <div class="hero-top"><span class="eyebrow">Próxima atividade</span><span class="badge-soon">⏱ em 2 min</span><span class="hero-time">09:40</span></div>
+      <div class="hero-lead">
+        <div class="chan-ic ic-call" style="width:58px;height:58px;border-radius:17px">📞</div>
+        <div><h2 class="hln">Marcos Antunes</h2><div class="hco">Hotel Fazenda Vale Verde · Campos do Jordão/SP</div></div>
+        <div class="hero-chips"><span class="chip prio-alta"><span class="dot dot-alta"></span>Alta</span><span class="chip prio-baixa">Ligação · 2ª tentativa</span></div>
+      </div>
+      <div class="hbox">Retornar a proposta enviada ontem. <b>Decisor confirmou interesse</b> no pacote corporativo para 40 colaboradores em setembro. <em>(nota vem de qs_notes/notes do lead)</em></div>
+      <div class="hero-acts">
+        <button class="btn btn-green">📞 Iniciar ligação</button>
+        <button class="btn btn-ghost">💬 WhatsApp</button>
+        <button class="btn btn-ghost">⏱ Reagendar</button>
+        <button class="btn btn-ghost" style="margin-left:auto">✓ Concluir</button>
+      </div>
+    </div>
+    <!-- Painel lateral "A seguir": as próximas 2 tarefas -->
+    <div class="hero-side">
+      <div class="side-lab">A seguir</div>
+      <div class="mini"><span class="mini-time">10:15</span><span class="chan-ic ic-whats" style="width:34px;height:34px;border-radius:10px">💬</span><div class="mini-b"><div class="mini-n">Juliana Prado</div><div class="mini-c">Agência Rotas do Sul</div></div><span class="dot dot-media"></span></div>
+      <div class="mini"><span class="mini-time">10:40</span><span class="chan-ic ic-call" style="width:34px;height:34px;border-radius:10px">📞</span><div class="mini-b"><div class="mini-n">Ricardo Menezes</div><div class="mini-c">Turismo Litoral S.A.</div></div><span class="dot dot-alta"></span></div>
+      <div class="side-more">Ver fila completa →</div>
+    </div>
+  </div>
+
+  <!-- Cabeçalho da fila + filtros (Status/Canal/Prioridade/Responsável) -->
+  <div class="sechead"><span class="sectitle">Fila de hoje</span><div class="filters"><span class="fchip on">Todos</span><span class="fchip">Status ▾</span><span class="fchip">Canal ▾</span><span class="fchip">Prioridade ▾</span><span class="fchip">Responsável ▾</span></div></div>
+
+  <!-- Grupo MANHÃ: tarefas com horário < 12:00 -->
+  <div class="glabel" style="color:var(--ink3);margin-top:0">Manhã · 4 restantes</div>
+  <div class="list">
+    <!-- pill = uma qs_task. Repetir para cada tarefa do período. -->
+    <div class="pill">
+      <div class="time">10:15</div>
+      <span class="chan-ic ic-whats">💬</span>
+      <div class="pbody"><div class="prow"><span class="lname">Juliana Prado</span><span class="chip prio-media"><span class="dot dot-media"></span>Média</span></div><div class="pco"><b>Agência Rotas do Sul</b> · Enviar roteiro personalizado — Bariloche em julho</div></div>
+      <span class="ctag">WhatsApp</span>
+      <div class="pacts"><button class="pa">💬</button><button class="pa pa-go">→</button></div>
+    </div>
+    <div class="pill">
+      <div class="time">10:40</div>
+      <span class="chan-ic ic-call">📞</span>
+      <div class="pbody"><div class="prow"><span class="lname">Ricardo Menezes</span><span class="chip prio-alta"><span class="dot dot-alta"></span>Alta</span></div><div class="pco"><b>Turismo Litoral S.A.</b> · 3ª tentativa de contato</div></div>
+      <span class="ctag">Ligação</span>
+      <div class="pacts"><button class="pa">📞</button><button class="pa pa-go">→</button></div>
+    </div>
+    <div class="pill">
+      <div class="time">11:10</div>
+      <span class="chan-ic ic-mail">✉</span>
+      <div class="pbody"><div class="prow"><span class="lname">Fernanda Lopes</span><span class="chip prio-baixa"><span class="dot dot-baixa"></span>Baixa</span></div><div class="pco"><b>Vem Viajar Ltda</b> · Follow-up da cotação de grupo (18 pax)</div></div>
+      <span class="ctag">E-mail</span>
+      <div class="pacts"><button class="pa">✉</button><button class="pa pa-go">→</button></div>
+    </div>
+    <div class="pill">
+      <div class="time">11:40</div>
+      <span class="chan-ic ic-call">📞</span>
+      <div class="pbody"><div class="prow"><span class="lname">Paulo Rocha</span><span class="chip prio-media"><span class="dot dot-media"></span>Média</span></div><div class="pco"><b>Serra Azul Eventos</b> · Confirmar datas do congresso</div></div>
+      <span class="ctag">Ligação</span>
+      <div class="pacts"><button class="pa">📞</button><button class="pa pa-go">→</button></div>
+    </div>
+  </div>
+
+  <!-- Grupo TARDE: tarefas com horário >= 12:00 -->
+  <div class="glabel" style="color:var(--ink3)">Tarde · 3 restantes</div>
+  <div class="list">
+    <div class="pill">
+      <div class="time">14:00</div>
+      <span class="chan-ic ic-whats">💬</span>
+      <div class="pbody"><div class="prow"><span class="lname">Camila Duarte</span><span class="chip prio-alta"><span class="dot dot-alta"></span>Alta</span></div><div class="pco"><b>MundoTur Viagens</b> · Enviar link de pagamento — pacote Nordeste</div></div>
+      <span class="ctag">WhatsApp</span>
+      <div class="pacts"><button class="pa">💬</button><button class="pa pa-go">→</button></div>
+    </div>
+    <div class="pill">
+      <div class="time">15:20</div>
+      <span class="chan-ic ic-call">📞</span>
+      <div class="pbody"><div class="prow"><span class="lname">Eduardo Nunes</span><span class="chip prio-media"><span class="dot dot-media"></span>Média</span></div><div class="pco"><b>Best Trip</b> · Apresentar condições de parcelamento</div></div>
+      <span class="ctag">Ligação</span>
+      <div class="pacts"><button class="pa">📞</button><button class="pa pa-go">→</button></div>
+    </div>
+    <div class="pill">
+      <div class="time">16:30</div>
+      <span class="chan-ic ic-mail">✉</span>
+      <div class="pbody"><div class="prow"><span class="lname">Beatriz Salles</span><span class="chip prio-baixa"><span class="dot dot-baixa"></span>Baixa</span></div><div class="pco"><b>Horizonte Turismo</b> · Enviar contrato revisado</div></div>
+      <span class="ctag">E-mail</span>
+      <div class="pacts"><button class="pa">✉</button><button class="pa pa-go">→</button></div>
+    </div>
+  </div>
+
+</div>
+<!-- NOTA: os emojis acima (📞💬✉🔍🔔⏱✓→) são placeholders — no app use os SVGs
+     inline do design (call/whats/mail/relógio/check/seta), que estão no HTML original. -->
+</body></html>

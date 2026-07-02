@@ -1,6 +1,7 @@
 // src/components/sdr/dashboard/CoveragePanel.tsx — Leads sem contato
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { useQsAuth } from "@/contexts/QsAuthContext";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -101,11 +102,13 @@ function IconShield() {
 // ── Component ───────────────────────────────────────────────────────────────
 
 export default function CoveragePanel() {
+  const { currentUser } = useQsAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
   const [users, setUsers] = useState<QsUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [contactingId, setContactingId] = useState<string | null>(null);
   const [slaMetrics, setSlaMetrics] = useState([
     { label: "Contatados em < 5min", value: 0, unit: "%", greenThreshold: 80, yellowThreshold: 60 },
     { label: "Contatados em < 15min", value: 0, unit: "%", greenThreshold: 85, yellowThreshold: 70 },
@@ -248,8 +251,47 @@ export default function CoveragePanel() {
     (a, b) => a.arrivedAt.getTime() - b.arrivedAt.getTime()
   );
 
-  function handleContact(leadId: string) {
+  async function handleContact(leadId: string) {
+    if (contactingId) return;
+    setContactingId(leadId);
+
+    const lead = allLeads.find((l) => l.id === leadId);
+    const nowIso = new Date().toISOString();
+    // Owner da atividade: dono do lead; senão o usuário logado (ignora o admin demo)
+    const ownerId =
+      lead?.ownerId ??
+      (currentUser && currentUser.id !== "demo-skip" ? currentUser.id : null);
+
+    // Registra o contato como uma atividade extra concluída (persiste de verdade)
+    const { error: taskErr } = await supabase.from("qs_tasks").insert({
+      lead_id: leadId,
+      owner_id: ownerId,
+      channel_type: "ligacao",
+      priority: "media",
+      scheduled_at: nowIso,
+      status: "concluida",
+      is_extra: true,
+      completed_at: nowIso,
+    });
+
+    if (taskErr) {
+      console.warn("Erro ao registrar contato:", taskErr);
+      setContactingId(null);
+      return;
+    }
+
+    // Move o lead sem contato para "em prospecção" (deixa a fila de aguardando)
+    const { error: leadErr } = await supabase
+      .from("qs_leads")
+      .update({ status: "em_prospeccao", updated_at: nowIso })
+      .eq("id", leadId)
+      .eq("status", "nao_iniciado");
+    if (leadErr) console.warn("Erro ao atualizar status do lead:", leadErr);
+
+    // Atualiza as listas locais (remove da fila de aguardando)
+    setAllLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, contacted: true } : l)));
     setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, contacted: true } : l)));
+    setContactingId(null);
   }
 
   if (loading) {
@@ -381,11 +423,12 @@ export default function CoveragePanel() {
                     {/* Contact button */}
                     <button
                       onClick={() => handleContact(lead.id)}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold text-white transition-colors hover:opacity-90"
+                      disabled={contactingId === lead.id}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold text-white transition-colors hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
                       style={{ background: "#F97316" }}
                     >
                       <IconPhone />
-                      Contatar agora
+                      {contactingId === lead.id ? "Registrando..." : "Contatar agora"}
                     </button>
                   </div>
                 </div>

@@ -1,10 +1,9 @@
 // src/components/sdr/cadences/CadencesPage.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type {
   Cadence,
   CadenceDay,
-  CadenceActivity,
   AcquisitionChannel,
   CadenceStatus,
   PriorityLevel,
@@ -139,6 +138,9 @@ const CHANNEL_COLORS: Record<ChannelType, string> = {
   ligacao: "#F59E0B",
   whatsapp: "#22C55E",
   linkedin: "#0A66C2",
+  instagram: "#E1306C",
+  tiktok: "#010101",
+  youtube: "#FF0000",
 };
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -153,23 +155,68 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
 
   const [cadences, setCadences] = useState<Cadence[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const loadCadences = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("qs_cadences")
+      .select("*, days:qs_cadence_days(*, activities:qs_cadence_activities(*)), owners:qs_cadence_owners(*, user:qs_users(*))")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.warn("Erro ao buscar cadences:", error);
+      setLoading(false);
+      return;
+    }
+
+    // Contagem real de leads por cadência: uma única query, agregada no cliente
+    // (evita N queries head:true e não estoura performance com muitas cadências).
+    const { data: leadRows, error: leadErr } = await supabase
+      .from("qs_leads")
+      .select("cadence_id, status")
+      .not("cadence_id", "is", null);
+    if (leadErr) console.warn("Erro ao contar leads das cadências:", leadErr);
+
+    const totalMap = new Map<string, number>();
+    const activeMap = new Map<string, number>();
+    ((leadRows as { cadence_id: string | null; status: string }[]) ?? []).forEach((r) => {
+      if (!r.cadence_id) return;
+      totalMap.set(r.cadence_id, (totalMap.get(r.cadence_id) ?? 0) + 1);
+      if (r.status === "em_prospeccao") {
+        activeMap.set(r.cadence_id, (activeMap.get(r.cadence_id) ?? 0) + 1);
+      }
+    });
+
+    const withCounts = ((data as Cadence[]) ?? []).map((c) => ({
+      ...c,
+      _leads_count: totalMap.get(c.id) ?? 0,
+      _active_leads_count: activeMap.get(c.id) ?? 0,
+    }));
+    setCadences(withCounts);
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
-    async function fetchCadences() {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("qs_cadences")
-        .select("*, days:qs_cadence_days(*, activities:qs_cadence_activities(*)), owners:qs_cadence_owners(*, user:qs_users(*))")
-        .order("created_at", { ascending: false });
-      if (error) {
-        console.warn("Erro ao buscar cadences:", error);
-      } else {
-        setCadences((data as Cadence[]) ?? []);
-      }
-      setLoading(false);
+    loadCadences();
+  }, [loadCadences]);
+
+  // Congelar / Retomar em massa nas cadências selecionadas.
+  async function bulkSetCadenceStatus(status: CadenceStatus) {
+    if (selectedIds.size === 0) return;
+    setActionError(null);
+    const ids = Array.from(selectedIds);
+    const { error } = await supabase
+      .from("qs_cadences")
+      .update({ status })
+      .in("id", ids);
+    if (error) {
+      console.warn("Erro ao atualizar status das cadências:", error);
+      setActionError("Não foi possível atualizar as cadências selecionadas. Tente novamente.");
+      return;
     }
-    fetchCadences();
-  }, []);
+    setSelectedIds(new Set());
+    await loadCadences();
+  }
 
   // Filter cadences
   const filtered = cadences.filter((c) => {
@@ -338,27 +385,38 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
       </div>
 
       {/* ── Bulk Actions ───────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between mb-4">
-        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={selectedIds.size === filtered.length && filtered.length > 0}
-            onChange={toggleSelectAll}
-            className="w-3.5 h-3.5 rounded border-gray-300 text-[#F97316] focus:ring-[#F97316]/20"
-          />
-          Selecionar todas ({selectedIds.size}/{filtered.length})
-        </label>
-        {selectedIds.size > 0 && (
-          <div className="flex items-center gap-2">
-            <button className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition">
-              <IconSnowflake />
-              Congelar
-            </button>
-            <button className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 transition">
-              <IconPlay />
-              Retomar
-            </button>
-          </div>
+      <div className="mb-4">
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={selectedIds.size === filtered.length && filtered.length > 0}
+              onChange={toggleSelectAll}
+              className="w-3.5 h-3.5 rounded border-gray-300 text-[#F97316] focus:ring-[#F97316]/20"
+            />
+            Selecionar todas ({selectedIds.size}/{filtered.length})
+          </label>
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => bulkSetCadenceStatus("congelada")}
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition"
+              >
+                <IconSnowflake />
+                Congelar
+              </button>
+              <button
+                onClick={() => bulkSetCadenceStatus("disponivel")}
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 transition"
+              >
+                <IconPlay />
+                Retomar
+              </button>
+            </div>
+          )}
+        </div>
+        {actionError && (
+          <p className="mt-2 text-xs text-red-600">{actionError}</p>
         )}
       </div>
 

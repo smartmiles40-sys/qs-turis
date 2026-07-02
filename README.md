@@ -1,32 +1,45 @@
-# React + TypeScript + Vite
+# QS Turis — Sistema de Qualificação de Leads (SDR)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+CRM de prospecção/qualificação: leads, cadências de contato, painel de tarefas do dia
+(com follow-up automático), reuniões, metas, dashboard e WhatsApp integrado.
 
-Currently, two official plugins are available:
+**Stack:** React 19 + Vite + TypeScript + Tailwind + Supabase. Funções serverless em `/api`
+(Vercel) para a integração de WhatsApp (ChatApp).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Rodar localmente
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+cp .env.example .env        # preencha VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY
+npm run dev                 # http://localhost:3000
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Primeiro acesso: **admin@qsturis.com / admin123** (troque a senha depois).
+
+## Configuração
+
+- **Banco (obrigatório):** crie o projeto Supabase e aplique o schema — passo a passo em
+  [`docs/SUPABASE.md`](docs/SUPABASE.md). Schema: [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql).
+- **WhatsApp (opcional):** para enviar mensagem pelo sistema, preencha `.env.chatapp.local`
+  (ver `.env.chatapp.example`). Detalhes e o que dá pra fazer com ligação em
+  [`docs/WHATSAPP.md`](docs/WHATSAPP.md).
+
+## Estrutura
+
+```
+src/
+  components/sdr/     páginas do CRM (leads, cadences, tasks, meetings, goals, dashboard, settings)
+  components/sdr/whatsapp/  modal reutilizável de WhatsApp
+  contexts/          autenticação (QsAuthContext)
+  lib/               supabase, chatapp, whatsapp, qs/queries
+api/                 funções serverless (chatapp-send)
+supabase/            migrations + seed
+docs/                guias (Supabase, WhatsApp)
+```
+
+## Scripts
+
+- `npm run dev` — servidor de desenvolvimento (com ponte de `/api`)
+- `npm run build` — type-check + build de produção
+- `npm run preview` — pré-visualiza o build
+- `npm run lint` — oxlint

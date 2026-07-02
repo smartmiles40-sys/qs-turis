@@ -1,10 +1,7 @@
 // src/components/sdr/cadences/CadenceCreatePage.tsx
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import type {
-  Cadence,
-  CadenceDay,
-  CadenceActivity,
   ChannelType,
   AcquisitionChannel,
   CadenceObjective,
@@ -111,6 +108,9 @@ const CHANNEL_COLORS: Record<ChannelType, string> = {
   ligacao: "#F59E0B",
   whatsapp: "#22C55E",
   linkedin: "#0A66C2",
+  instagram: "#E1306C",
+  tiktok: "#010101",
+  youtube: "#FF0000",
 };
 
 const ALL_CHANNELS: ChannelType[] = ["pesquisa", "email", "ligacao", "whatsapp", "linkedin"];
@@ -158,48 +158,6 @@ function getDefaultForm(): FormState {
         day_number: 1,
         activities: [
           { id: nextId("act"), cadence_day_id: "", channel_type: "whatsapp", scheduled_time: "09:00", order_index: 0, script_text: "" },
-        ],
-      },
-    ],
-    weekdays: [1, 2, 3, 4, 5],
-    distribution_mode: "alternado",
-    offday_policy: "aguardar_proximo_dia",
-  };
-}
-
-function getMockEditForm(): FormState {
-  return {
-    execution_mode: "manual",
-    objective: "agendar_reuniao",
-    name: "Levantada de Mao - Padrao INVT",
-    description: "Cadência para leads que demonstraram interesse ativo.",
-    acquisition_channel: "levantada_de_mao",
-    priority: "alta",
-    status: "disponivel",
-    auto_loss_enabled: true,
-    auto_loss_days: 14,
-    days: [
-      {
-        id: "ed-d1",
-        day_number: 1,
-        activities: [
-          { id: "ed-a1", cadence_day_id: "ed-d1", channel_type: "whatsapp", scheduled_time: "09:00", order_index: 0, script_text: "" },
-          { id: "ed-a2", cadence_day_id: "ed-d1", channel_type: "ligacao", scheduled_time: "10:30", order_index: 1, script_text: "" },
-        ],
-      },
-      {
-        id: "ed-d2",
-        day_number: 2,
-        activities: [
-          { id: "ed-a3", cadence_day_id: "ed-d2", channel_type: "email", scheduled_time: "09:00", order_index: 0, script_text: "" },
-        ],
-      },
-      {
-        id: "ed-d3",
-        day_number: 4,
-        activities: [
-          { id: "ed-a4", cadence_day_id: "ed-d3", channel_type: "whatsapp", scheduled_time: "09:00", order_index: 0, script_text: "" },
-          { id: "ed-a5", cadence_day_id: "ed-d3", channel_type: "ligacao", scheduled_time: "14:00", order_index: 1, script_text: "" },
         ],
       },
     ],

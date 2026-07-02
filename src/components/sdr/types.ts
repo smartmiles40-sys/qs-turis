@@ -23,6 +23,7 @@ export interface SdrUser {
   email: string;
   role: UserRole;
   is_active: boolean;
+  whatsapp_number?: string | null;
   created_at: string;
 }
 
@@ -139,8 +140,29 @@ export interface Meeting {
   lead_id: string;
   lead?: Lead;
   owner_id: string | null;
+  owner?: SdrUser;
+  title: string | null;
   scheduled_at: string;
+  duration_min: number | null;
+  location: string | null;
+  meeting_link: string | null;
+  notes: string | null;
   status: MeetingStatus;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface WhatsAppMessage {
+  id: string;
+  lead_id: string | null;
+  owner_id: string | null;
+  phone: string | null;
+  chat_id: string | null;
+  body: string | null;
+  direction: "out" | "in";
+  kind: "message" | "call";
+  status: "sent" | "failed" | "pending";
+  error: string | null;
   created_at: string;
 }
 

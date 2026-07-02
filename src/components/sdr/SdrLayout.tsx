@@ -1,7 +1,6 @@
 // src/components/sdr/SdrLayout.tsx — QS (Qualificação System)
 import { useState, useRef, useEffect, Component, type ReactNode } from "react";
 import { useQsAuth, canAccessNav } from "@/contexts/QsAuthContext";
-import type { UserRole } from "./types";
 
 // ── Error Boundary ─────────────────────────────────────────────────────────
 
@@ -65,6 +64,7 @@ import MeetingsPage from "./meetings/MeetingsPage";
 import GoalsPage from "./goals/GoalsPage";
 import SettingsPage from "./settings/SettingsPage";
 import CoveragePanel from "./dashboard/CoveragePanel";
+import NotificationsPanel from "./notifications/NotificationsPanel";
 
 export type SdrNav =
   | "painel"
@@ -136,34 +136,6 @@ function ChevronDown() {
   );
 }
 
-function IconGrid() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="7" height="7" rx="1" />
-      <rect x="14" y="3" width="7" height="7" rx="1" />
-      <rect x="3" y="14" width="7" height="7" rx="1" />
-      <rect x="14" y="14" width="7" height="7" rx="1" />
-    </svg>
-  );
-}
-
-function IconBell() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-    </svg>
-  );
-}
-
-function IconBack() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m15 18-6-6 6-6" />
-    </svg>
-  );
-}
-
 // ── Dropdown Component ───────────────────────────────────────────────────────
 
 function NavDropdown({
@@ -230,7 +202,7 @@ function NavDropdown({
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
-export default function SdrLayout({ onClose }: { onClose?: () => void }) {
+export default function SdrLayout() {
   const { currentUser, logout } = useQsAuth();
   const [activeNav, setActiveNav] = useState<SdrNav>("painel");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
@@ -350,8 +322,13 @@ export default function SdrLayout({ onClose }: { onClose?: () => void }) {
           </nav>
         </div>
 
-        {/* Right: Avatar */}
-        <div className="flex items-center gap-3">
+        {/* Right: Notificações + Avatar */}
+        <div className="flex items-center gap-2">
+          {/* Sino de notificações/lembretes */}
+          <NotificationsPanel
+            onGoToTasks={() => setActiveNav("painel")}
+            onOpenLead={openLeadDetail}
+          />
           <div ref={userMenuRef} className="relative">
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}

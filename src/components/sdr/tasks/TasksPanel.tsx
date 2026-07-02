@@ -9,7 +9,6 @@ import type {
 } from "../types";
 import {
   CHANNEL_LABELS,
-  PRIORITY_LABELS,
   ACQUISITION_LABELS,
 } from "../types";
 import { supabase } from "@/lib/supabase";
@@ -27,15 +26,6 @@ interface TasksPanelProps {
 
 type StatusFilter = "extras" | "para_hoje" | "atrasadas";
 type PeriodFilter = "manha" | "tarde";
-
-function formatDate(d: Date): string {
-  return d.toLocaleDateString("pt-BR", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-}
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -112,24 +102,6 @@ function IconCopy() {
   );
 }
 
-function IconClock() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </svg>
-  );
-}
-
-function IconArrowRight() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 12h14" />
-      <path d="m12 5 7 7-7 7" />
-    </svg>
-  );
-}
-
 function IconChevronRight() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -143,19 +115,6 @@ function IconClose() {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M18 6 6 18" />
       <path d="m6 6 12 12" />
-    </svg>
-  );
-}
-
-function IconTimer() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="13" r="8" />
-      <path d="M12 9v4l2 2" />
-      <path d="M5 3 2 6" />
-      <path d="m22 6-3-3" />
-      <path d="M12 5V3" />
-      <path d="M10 3h4" />
     </svg>
   );
 }
@@ -188,26 +147,10 @@ function IconSkip() {
   );
 }
 
-function IconStar() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1">
-      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-    </svg>
-  );
-}
-
 function IconFilter() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-    </svg>
-  );
-}
-
-function IconPlay() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-      <polygon points="5 3 19 12 5 21 5 3" />
     </svg>
   );
 }
@@ -248,95 +191,6 @@ function IconPhoneCall({ size = 16 }: { size?: number }) {
   );
 }
 
-function IconGear({ size = 12 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-    </svg>
-  );
-}
-
-function IconTag({ size = 12 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.42 0l6.58-6.58a1 1 0 0 0 0-1.42L12 2z" />
-      <circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" />
-    </svg>
-  );
-}
-
-function IconUser({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
-}
-
-function IconBuilding({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
-      <path d="M9 22V12h6v10" />
-      <path d="M8 6h.01M16 6h.01M12 6h.01M8 10h.01M16 10h.01M12 10h.01" />
-    </svg>
-  );
-}
-
-function IconCalendar({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-      <line x1="16" y1="2" x2="16" y2="6" />
-      <line x1="8" y1="2" x2="8" y2="6" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-    </svg>
-  );
-}
-
-function IconChevronDown({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function IconUsers({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-function IconList({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="8" y1="6" x2="21" y2="6" />
-      <line x1="8" y1="12" x2="21" y2="12" />
-      <line x1="8" y1="18" x2="21" y2="18" />
-      <line x1="3" y1="6" x2="3.01" y2="6" />
-      <line x1="3" y1="12" x2="3.01" y2="12" />
-      <line x1="3" y1="18" x2="3.01" y2="18" />
-    </svg>
-  );
-}
-
-function IconRefresh({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="23 4 23 10 17 10" />
-      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-    </svg>
-  );
-}
-
 function ChannelIcon({ type, size = 22 }: { type: ChannelType; size?: number }) {
   switch (type) {
     case "pesquisa":  return <IconResearch size={size} />;
@@ -361,12 +215,6 @@ const CHANNEL_COLORS: Record<ChannelType, { bg: string; fg: string }> = {
   instagram: { bg: "#FCE7F3", fg: "#DB2777" },
   tiktok:    { bg: "#F3F4F6", fg: "#111827" },
   youtube:   { bg: "#FEE2E2", fg: "#DC2626" },
-};
-
-const PRIORITY_COLORS: Record<PriorityLevel, string> = {
-  alta: "#DC2626",
-  media: "#D97706",
-  baixa: "#6B7280",
 };
 
 // ── SLA Alert helper ────────────────────────────────────────────────────────
@@ -420,6 +268,20 @@ function getActivityLabel(channel: ChannelType, _cadenceName?: string): string {
   return channelNames[channel];
 }
 
+// ── Tentativas de contato ────────────────────────────────────────────────────
+// A coluna qs_tasks NÃO tem `contact_attempts`. Cada tarefa de follow-up carrega a
+// tag `tentativa:N`; a primeira tarefa da cadência (sem tag) conta como tentativa 1.
+function getAttemptCount(task: Task): number {
+  const tags = (task as unknown as { tags?: string[] | null }).tags;
+  if (Array.isArray(tags)) {
+    for (const tag of tags) {
+      const m = /^tentativa:(\d+)$/.exec(tag);
+      if (m) return Number(m[1]);
+    }
+  }
+  return 1;
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
@@ -436,19 +298,24 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   useEffect(() => {
     async function loadData() {
       setLoading(true);
-      const [tasksRes, leadsRes, cadencesRes, usersData, productsRes] = await Promise.all([
-        supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
-        supabase.from("qs_leads").select("*"),
-        supabase.from("qs_cadences").select("*"),
-        fetchQsUsers(),
-        supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
-      ]);
-      setTasks((tasksRes.data || []) as Task[]);
-      setLeads((leadsRes.data || []) as Lead[]);
-      setCadences((cadencesRes.data || []) as Cadence[]);
-      setQsUsers(usersData);
-      setProducts((productsRes.data || []) as { id: string; name: string }[]);
-      setLoading(false);
+      try {
+        const [tasksRes, leadsRes, cadencesRes, usersData, productsRes] = await Promise.all([
+          supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
+          supabase.from("qs_leads").select("*"),
+          supabase.from("qs_cadences").select("*"),
+          fetchQsUsers(),
+          supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
+        ]);
+        setTasks((tasksRes.data || []) as Task[]);
+        setLeads((leadsRes.data || []) as Lead[]);
+        setCadences((cadencesRes.data || []) as Cadence[]);
+        setQsUsers(usersData);
+        setProducts((productsRes.data || []) as { id: string; name: string }[]);
+      } catch (err) {
+        console.warn("[TasksPanel] falha ao carregar dados:", err);
+      } finally {
+        setLoading(false);
+      }
     }
     loadData();
   }, []);
@@ -514,13 +381,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [flashResult, setFlashResult] = useState<string | null>(null);
   const [pendingResult, setPendingResult] = useState<{ taskId: string; result: string } | null>(null);
 
-  // Daily briefing (shown once per session)
-  const [showBriefing, setShowBriefing] = useState(true);
-
   // New Lead Modal
   const [showNewLeadModal, setShowNewLeadModal] = useState(false);
   const [showExtraTaskModal, setShowExtraTaskModal] = useState(false);
-  const [extraTask, setExtraTask] = useState({ lead_id: "", channel_type: "ligacao" as ChannelType, date: "", time: "09:00", notes: "" });
+  const [extraTask, setExtraTask] = useState({ lead_id: "", channel_type: "ligacao" as ChannelType, date: "", time: "09:00", notes: "", _searchText: "" });
   const [savingExtra, setSavingExtra] = useState(false);
   const [showDialer, setShowDialer] = useState(false);
   const [dialNumber, setDialNumber] = useState("");
@@ -534,10 +398,77 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Toast notification
   const [toast, setToast] = useState<{ message: string; visible: boolean } | null>(null);
 
+  function showToast(message: string) {
+    setToast({ message, visible: true });
+    setTimeout(() => setToast(prev => prev ? { ...prev, visible: false } : null), 3000);
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  // Persiste o PRÓXIMO PASSO do lead conforme o desfecho do contato.
+  // Cria uma nova tarefa 'pendente' em qs_tasks (mesmo canal, data futura) e a devolve
+  // para o estado local. Assim NENHUM lead fica sem próxima tarefa.
+  async function insertFollowUp(task: Task, result: string): Promise<Task | null> {
+    const next = new Date();
+    next.setDate(next.getDate() + 1);
+    next.setHours(9, 0, 0, 0);
+
+    const attempt = getAttemptCount(task) + 1;
+
+    // "Número errado" → o canal atual está furado; o próximo passo é repesquisar o contato.
+    const isBadNumber = result === "numero_errado";
+    const channel: ChannelType = isBadNumber ? "pesquisa" : task.channel_type;
+
+    const resultNote: Record<string, string> = {
+      atendeu: "Lead pediu retorno — retomar contato",
+      nao_atendeu: "Não atendeu na tentativa anterior",
+      caixa_postal: "Caiu na caixa postal na tentativa anterior",
+      desligou: "Ligação caiu / desligou na tentativa anterior",
+      numero_errado: "Número/contato inválido — pesquisar dado correto",
+    };
+
+    const tags = isBadNumber
+      ? ["follow-up", "dado-invalido", `tentativa:${attempt}`]
+      : ["follow-up", `tentativa:${attempt}`];
+
+    const { data, error } = await supabase
+      .from("qs_tasks")
+      .insert({
+        lead_id: task.lead_id,
+        cadence_id: task.cadence_id,
+        owner_id: task.owner_id,
+        channel_type: channel,
+        priority: task.priority,
+        scheduled_at: next.toISOString(),
+        status: "pendente",
+        is_extra: false,
+        notes: `Follow-up (tentativa ${attempt}): ${resultNote[result] ?? "Retomar contato"}`,
+        tags,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("[QS] Falha ao criar follow-up:", error);
+      return null;
+    }
+    return (data as Task) ?? null;
+  }
+
+  // Encerra (ignora) as demais tarefas pendentes do lead — usado quando o lead é ganho/perdido.
+  async function closeRemainingLeadTasks(leadId: string, exceptTaskId: string, reason: string) {
+    const others = tasks.filter(t => t.lead_id === leadId && t.id !== exceptTaskId);
+    if (others.length === 0) return;
+    await supabase
+      .from("qs_tasks")
+      .update({ status: "ignorada", skip_reason: reason })
+      .in("id", others.map(t => t.id));
+  }
+
   async function handleContactResult(taskId: string, result: string) {
     const currentTask = tasks.find(t => t.id === taskId);
+    if (!currentTask) return;
 
-    // Use completeTask from queries.ts
+    // 1. Conclui a tentativa atual (marca 'concluida' + registra contact_result/notas/tags).
     await completeTask(
       taskId,
       result,
@@ -545,49 +476,44 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       selectedTags.length > 0 ? selectedTags : undefined
     );
 
-    // Show toast notification
-    const leadName = currentTask ? getLeadForTask(currentTask)?.full_name || "Lead" : "Lead";
-    setToast({ message: `Atividade registrada - ${leadName}`, visible: true });
-    setTimeout(() => setToast(prev => prev ? { ...prev, visible: false } : null), 3000);
-    setTimeout(() => setToast(null), 3500);
+    const leadName = getLeadForTask(currentTask)?.full_name || "Lead";
 
-    // Se não atendeu/caixa postal/desligou → criar follow-up para amanhã
-    if (currentTask && ["nao_atendeu", "caixa_postal", "desligou"].includes(result)) {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(9, 0, 0, 0);
-      const { data: followUp } = await supabase.from("qs_tasks").insert({
-        lead_id: currentTask.lead_id,
-        cadence_id: currentTask.cadence_id,
-        owner_id: currentTask.owner_id,
-        channel_type: currentTask.channel_type,
-        priority: currentTask.priority,
-        scheduled_at: tomorrow.toISOString(),
-        status: "pendente",
-        contact_attempts: (currentTask.contact_attempts || 0) + 1,
-        notes: `Follow-up: ${result === "nao_atendeu" ? "Não atendeu" : result === "caixa_postal" ? "Caixa postal" : "Desligou"} na tentativa anterior`,
-      }).select().single();
-      // Remove da lista local (follow-up é pra amanhã, não aparece hoje)
-      setTasks(prev => prev.filter(t => t.id !== taskId));
+    // 2. Desfecho: ganho/perdido encerram o lead; qualquer outro gera o próximo passo.
+    if (result === "ganho") {
+      await supabase.from("qs_leads").update({ status: "ganho" }).eq("id", currentTask.lead_id);
+      await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead ganho");
+      setLeads(prev => prev.map((l): Lead => l.id === currentTask.lead_id ? { ...l, status: "ganho" } : l));
+      setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
+      showToast(`Ganho! ${leadName}`);
+    } else if (result === "sem_interesse") {
+      await supabase.from("qs_leads").update({ status: "perdido" }).eq("id", currentTask.lead_id);
+      await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead perdido — sem interesse");
+      setLeads(prev => prev.map((l): Lead => l.id === currentTask.lead_id ? { ...l, status: "perdido" } : l));
+      setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
+      showToast(`Lead perdido — ${leadName}`);
     } else {
-      // Atendeu ou número errado → não cria follow-up
-      setTasks(prev => prev.filter(t => t.id !== taskId));
+      // atendeu (pediu retorno), nao_atendeu, caixa_postal, desligou, numero_errado
+      // → SEMPRE cria a próxima tarefa. Nenhum lead fica órfão.
+      const followUp = await insertFollowUp(currentTask, result);
+      setTasks(prev => {
+        const rest = prev.filter(t => t.id !== taskId);
+        return followUp ? [...rest, followUp] : rest;
+      });
+      showToast(`Atividade registrada — ${leadName}`);
     }
 
-    // Flash effect
-    if (result === "atendeu") {
+    // 3. Flash + reset dos campos para a próxima tarefa.
+    if (result === "atendeu" || result === "ganho") {
       setFlashResult("green");
       setTimeout(() => setFlashResult(null), 400);
     } else {
       setFlashResult("gray");
       setTimeout(() => setFlashResult(null), 200);
     }
-    // Reset tags and notes for next task
     setSelectedTags([]);
     setShowNoteField(false);
     setExecutionNotes("");
     setShowSkipReason(false);
-    // Close execution panel after result
     setTimeout(() => {
       setSelectedTaskId(null);
       setTimerSeconds(0);
@@ -712,18 +638,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return null;
   }, [tasks, leads, cadences]);
 
-  // Notes for hover tooltip — will come from qs_notes later
-  const leadNotes: Record<string, string> = useMemo(() => ({}), []);
-
   // Days in funnel helper
   function getDaysInFunnel(lead: Lead): number {
     const created = new Date(lead.created_at).getTime();
     const now = Date.now();
     return Math.floor((now - created) / (1000 * 60 * 60 * 24));
   }
-
-  const timerMinutes = Math.floor(timerSeconds / 60);
-  const timerSecs = timerSeconds % 60;
 
   function handleCopy(text: string, field: string) {
     navigator.clipboard.writeText(text);
@@ -735,7 +655,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setSelectedTaskId(taskId);
     setExecutionNotes("");
     setTimerSeconds(0);
-    setTimerRunning(false);
+    setTimerRunning(true); // cronômetro da atividade começa ao abrir a tarefa
     setSelectedTags([]);
     setShowNoteField(false);
     setShowSkipReason(false);
@@ -869,23 +789,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     ];
     const missing: string[] = [];
     let filled = 0;
+    const record = lead as unknown as Record<string, unknown>;
     for (const f of fields) {
-      if ((lead as Record<string, unknown>)[f.key]) {
+      if (record[f.key]) {
         filled++;
       } else {
         missing.push(f.label);
       }
     }
     return { filled, total: fields.length, missing };
-  }
-
-  // Score display helper
-  function getScoreDisplay(priority: PriorityLevel): { label: string; color: string } {
-    switch (priority) {
-      case "alta": return { label: "10/10", color: "#F97316" };
-      case "media": return { label: "7/10", color: "#D97706" };
-      case "baixa": return { label: "4/10", color: "#9CA3AF" };
-    }
   }
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
@@ -1275,9 +1187,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               const lead = getLeadForTask(task);
               const cadence = getCadenceForTask(task);
               const isSelected = selectedTaskId === task.id;
-              const isOverdue = task.status === "atrasada";
               const slaAlert = getSlaAlert(lead, task, cadence);
-              const attempts = (task as any).contact_attempts ?? 0;
+              // Tentativas já feitas (0 na primeira tarefa; follow-ups marcam a borda âmbar).
+              const attempts = getAttemptCount(task) - 1;
 
               // Change 5: Colored left border by contact status
               const isLevantadaQuente = cadence?.acquisition_channel === "levantada_de_mao" && slaAlert?.pulse;
@@ -1586,9 +1498,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
                 {/* RIGHT: Activity details */}
                 <div className="space-y-4">
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                    Detalhes da Atividade
-                  </h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                      Detalhes da Atividade
+                    </h3>
+                    <span className="text-[11px] font-mono font-semibold text-gray-400 tabular-nums" title="Tempo nesta atividade">
+                      {String(Math.floor(timerSeconds / 60)).padStart(2, "0")}:{String(timerSeconds % 60).padStart(2, "0")}
+                    </span>
+                  </div>
 
                   {/* Ações diretas */}
                   <div className="flex items-center gap-2 flex-wrap">
@@ -1633,7 +1550,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                     className="rounded-xl p-4 border border-gray-100"
                   >
                     <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide mb-3 block">
-                      Resultado do contato · Tentativa {(selectedTask as any).contact_attempts ?? 0}/{MAX_CONTACT_ATTEMPTS}
+                      Resultado do contato · Tentativa {getAttemptCount(selectedTask)}/{MAX_CONTACT_ATTEMPTS}
                       <span className="ml-2 text-[10px] font-normal text-gray-300">(finaliza atividade)</span>
                     </label>
                     <div className="flex items-center gap-2.5 flex-wrap">
@@ -1715,25 +1632,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                           <button
                             onClick={async () => {
                               const { taskId, result } = pendingResult;
-                              const task = tasks.find(t => t.id === taskId);
-                              if (result === "ganho") {
-                                await handleContactResult(taskId, "atendeu");
-                                await supabase.from("qs_leads").update({ status: "ganho" }).eq("id", task?.lead_id);
-                                setLeads(prev => prev.map(l => l.id === task?.lead_id ? { ...l, status: "ganho" as any } : l));
-                              } else if (result === "sem_interesse") {
-                                await handleContactResult(taskId, "atendeu");
-                                await supabase.from("qs_leads").update({ status: "perdido" }).eq("id", task?.lead_id);
-                                setLeads(prev => prev.map(l => l.id === task?.lead_id ? { ...l, status: "perdido" as any } : l));
-                                const otherTasks = tasks.filter(t => t.lead_id === task?.lead_id && t.id !== taskId);
-                                for (const t of otherTasks) {
-                                  await supabase.from("qs_tasks").update({ status: "ignorada", skip_reason: "Lead perdido - sem interesse" }).eq("id", t.id);
-                                }
-                                setTasks(prev => prev.filter(t => t.lead_id !== task?.lead_id));
-                              } else {
-                                await handleContactResult(taskId, result);
-                              }
+                              // Todo o roteamento de desfecho (ganho/perdido/follow-up) mora
+                              // em handleContactResult — fonte única de verdade do FUP.
+                              await handleContactResult(taskId, result);
                               setPendingResult(null);
-                              setSelectedTaskId(null);
                             }}
                             className="flex-1 py-2.5 rounded-lg text-sm font-bold text-white"
                             style={{ background: "#F97316" }}
@@ -2019,26 +1921,26 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <label className="text-xs font-medium text-gray-500 block mb-1">Lead *</label>
                 <input
                   type="text"
-                  value={extraTask._searchText ?? ""}
+                  value={extraTask._searchText}
                   onChange={(e) => {
                     const val = e.target.value;
-                    setExtraTask(p => ({ ...p, _searchText: val, lead_id: "" } as any));
+                    setExtraTask(p => ({ ...p, _searchText: val, lead_id: "" }));
                   }}
                   placeholder="Digite o nome do lead..."
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400"
                 />
-                {(extraTask as any)._searchText && !(extraTask.lead_id) && (
+                {extraTask._searchText && !extraTask.lead_id && (
                   <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
                     {leads
                       .filter(l => {
-                        const q = ((extraTask as any)._searchText || "").toLowerCase();
+                        const q = extraTask._searchText.toLowerCase();
                         return (l.full_name?.toLowerCase().includes(q) || l.email?.toLowerCase().includes(q) || l.phone?.includes(q) || l.id.includes(q));
                       })
                       .slice(0, 10)
                       .map(l => (
                         <button
                           key={l.id}
-                          onClick={() => setExtraTask(p => ({ ...p, lead_id: l.id, _searchText: l.full_name + (l.company_name ? ` · ${l.company_name}` : "") } as any))}
+                          onClick={() => setExtraTask(p => ({ ...p, lead_id: l.id, _searchText: (l.full_name ?? "") + (l.company_name ? ` · ${l.company_name}` : "") }))}
                           className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-50 last:border-0"
                         >
                           <span className="font-medium text-gray-900">{l.full_name}</span>
@@ -2048,7 +1950,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                       ))
                     }
                     {leads.filter(l => {
-                      const q = ((extraTask as any)._searchText || "").toLowerCase();
+                      const q = extraTask._searchText.toLowerCase();
                       return (l.full_name?.toLowerCase().includes(q) || l.email?.toLowerCase().includes(q) || l.phone?.includes(q) || l.id.includes(q));
                     }).length === 0 && (
                       <p className="px-3 py-2 text-xs text-gray-400">Nenhum lead encontrado</p>
@@ -2119,14 +2021,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                     scheduled_at: scheduled.toISOString(),
                     status: "pendente",
                     is_extra: true,
-                    contact_attempts: 0,
                     notes: extraTask.notes || null,
                   }).select().single();
                   setSavingExtra(false);
                   if (data) {
                     setTasks(prev => [...prev, data as Task]);
                     setShowExtraTaskModal(false);
-                    setExtraTask({ lead_id: "", channel_type: "ligacao", date: "", time: "09:00", notes: "" });
+                    setExtraTask({ lead_id: "", channel_type: "ligacao", date: "", time: "09:00", notes: "", _searchText: "" });
                   }
                 }}
                 disabled={savingExtra || !extraTask.lead_id || !extraTask.date}
@@ -2294,7 +2195,6 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                             priority: "alta",
                             scheduled_at: scheduled.toISOString(),
                             status: "pendente",
-                            contact_attempts: 0,
                           };
                         })
                       );
@@ -2331,58 +2231,5 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         </div>
       )}
     </div>
-  );
-}
-
-// ── Filter Pill Component ────────────────────────────────────────────────────
-
-function FilterPill({
-  label,
-  active,
-  onClick,
-  count,
-  activeColor = "#0147FF",
-  icon,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  count?: number;
-  activeColor?: string;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150 whitespace-nowrap"
-      style={
-        active
-          ? {
-              background: activeColor,
-              color: "#fff",
-              boxShadow: `0 1px 4px ${activeColor}44`,
-            }
-          : {
-              background: "#fff",
-              color: "#6B7280",
-              border: "1px solid #E5E7EB",
-            }
-      }
-    >
-      {icon && <span className={active ? "text-white" : "text-gray-400"}>{icon}</span>}
-      {label}
-      {count !== undefined && (
-        <span
-          className="px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none"
-          style={
-            active
-              ? { background: "rgba(255,255,255,0.25)", color: "#fff" }
-              : { background: "#F3F4F6", color: "#6B7280" }
-          }
-        >
-          {count}
-        </span>
-      )}
-    </button>
   );
 }
