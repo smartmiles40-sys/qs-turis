@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { createQsAuthUser, updateQsAuthUser, deleteQsAuthUser } from "@/lib/adminUsers";
+import { loadWorkHours, saveWorkHours, DEFAULT_WORK_HOURS, WEEKDAY_NAMES, type WorkHours } from "@/lib/workHours";
 import type {
   CustomField,
   CustomFieldScope,
@@ -43,7 +44,7 @@ const FIELD_TYPE_LABELS: Record<string, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "voip" | "usuarios";
+type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "horario" | "usuarios";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -56,7 +57,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "canais", label: "Canais de Contato", group: "PLATAFORMA" },
   { key: "campos", label: "Campos Personalizados", group: "PLATAFORMA" },
   { key: "motivos", label: "Motivos de Perda", group: "PLATAFORMA" },
-  { key: "voip", label: "Configuração VoIP", group: "PLATAFORMA" },
+  { key: "horario", label: "Horário de Trabalho", group: "EMPRESA" },
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
 ];
 
@@ -900,31 +901,75 @@ function CanaisSection() {
   );
 }
 
-// ── VoIP Config ─────────────────────────────────────────────────────────────
+// ── Horário de Trabalho ─────────────────────────────────────────────────────
 
-function VoipSection() {
+function HorarioSection() {
+  const [wh, setWh] = useState<WorkHours>(DEFAULT_WORK_HOURS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    loadWorkHours().then((data) => { setWh(data); setLoading(false); });
+  }, []);
+
+  function setDay(day: number, patch: Partial<WorkHours[number]>) {
+    setWh((prev) => ({ ...prev, [day]: { ...prev[day], ...patch } }));
+    setSaved(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    const ok = await saveWorkHours(wh);
+    setSaving(false);
+    setSaved(ok);
+    if (ok) setTimeout(() => setSaved(false), 2500);
+  }
+
+  if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-bold text-gray-900">Configuração VoIP</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Telefonia integrada para ligações diretas pelo sistema</p>
+        <h2 className="text-lg font-bold text-gray-900">Horário de Trabalho</h2>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Define o expediente da empresa. As métricas de tempo do Painel (ritmo, tempo restante) contam só o que está dentro do horário.
+        </p>
       </div>
 
-      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-8 flex flex-col items-center text-center">
-        <div className="w-12 h-12 rounded-xl bg-[#F97316]/10 text-[#F97316] flex items-center justify-center mb-4">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
-          </svg>
-        </div>
-        <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[#F97316]/10 text-[#F97316] mb-3">
-          Em breve
-        </span>
-        <h3 className="text-base font-semibold text-gray-900">Telefonia VoIP será configurada em uma próxima etapa</h3>
-        <p className="text-sm text-gray-500 mt-2 max-w-md">
-          A integração de telefonia (ligação direta pelo sistema, gravação e métricas de chamada) ainda não está
-          disponível. Por enquanto, as ligações continuam sendo registradas manualmente pelos qualificadores.
-          Você será avisado quando esta configuração estiver liberada.
-        </p>
+      <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+        {[1, 2, 3, 4, 5, 6, 0].map((day) => {
+          const d = wh[day];
+          return (
+            <div key={day} className={`flex items-center gap-4 px-4 py-3 border-b border-gray-100 last:border-0 ${d.enabled ? "" : "opacity-60"}`}>
+              <button
+                onClick={() => setDay(day, { enabled: !d.enabled })}
+                className="relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0"
+                style={{ background: d.enabled ? "#2563EB" : "#D1D5DB" }}
+                title={d.enabled ? "Dia de trabalho" : "Folga"}
+              >
+                <span className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200" style={{ transform: d.enabled ? "translateX(20px)" : "translateX(0)" }} />
+              </button>
+              <span className="w-24 text-sm font-semibold text-gray-800">{WEEKDAY_NAMES[day]}</span>
+              {d.enabled ? (
+                <div className="flex items-center gap-2 text-sm">
+                  <input type="time" value={d.start} onChange={(e) => setDay(day, { start: e.target.value })} className="px-2.5 py-1.5 border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
+                  <span className="text-gray-400">até</span>
+                  <input type="time" value={d.end} onChange={(e) => setDay(day, { end: e.target.value })} className="px-2.5 py-1.5 border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
+                </div>
+              ) : (
+                <span className="text-sm text-gray-400">Folga</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button onClick={handleSave} disabled={saving} className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#2563EB" }}>
+          {saving ? "Salvando..." : "Salvar horário"}
+        </button>
+        {saved && <span className="text-sm font-medium text-green-600">Salvo ✓</span>}
       </div>
     </div>
   );
@@ -991,7 +1036,7 @@ export default function SettingsPage() {
         {activeSection === "canais" && <CanaisSection />}
         {activeSection === "campos" && <CamposSection />}
         {activeSection === "motivos" && <MotivosSection />}
-        {activeSection === "voip" && <VoipSection />}
+        {activeSection === "horario" && <HorarioSection />}
         {activeSection === "usuarios" && <UsuariosSection />}
       </main>
     </div>

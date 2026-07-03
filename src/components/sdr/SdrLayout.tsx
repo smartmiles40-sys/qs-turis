@@ -65,6 +65,7 @@ import GoalsPage from "./goals/GoalsPage";
 import SettingsPage from "./settings/SettingsPage";
 import CoveragePanel from "./dashboard/CoveragePanel";
 import NotificationsPanel from "./notifications/NotificationsPanel";
+import ChatAppDock from "./chatapp/ChatAppDock";
 
 export type SdrNav =
   | "painel"
@@ -264,10 +265,12 @@ export default function SdrLayout() {
     activeNav;
 
   return (
-    <div className="min-h-screen" style={{ background: "#F8F9FA" }}>
+    <div className="h-screen flex overflow-hidden" style={{ background: "#F8F9FA" }}>
+      {/* ── COLUNA PRINCIPAL (topo + conteúdo) — divide a tela com o ChatApp ── */}
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {/* ── TOP BAR ────────────────────────────────────────────────────── */}
       <header
-        className="sticky top-0 z-50 flex items-center justify-between px-4 h-[52px] select-none"
+        className="shrink-0 z-50 flex items-center justify-between px-4 h-[52px] select-none"
         style={{
           background: "#FFFFFF",
           borderBottom: "1px solid #E5E7EB",
@@ -378,7 +381,7 @@ export default function SdrLayout() {
       </header>
 
       {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
-      <main>
+      <main className="flex-1 min-h-0 overflow-y-auto">
         {activeNav === "painel" && (
           <PageErrorBoundary pageName="Painel de Atividades">
             <TasksPanel onOpenLead={openLeadDetail} />
@@ -442,6 +445,10 @@ export default function SdrLayout() {
           </PageErrorBoundary>
         )}
       </main>
+      </div>
+
+      {/* Coluna do ChatApp — divide a tela; montada uma única vez e persistente */}
+      <ChatAppDock />
     </div>
   );
 }

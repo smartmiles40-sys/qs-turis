@@ -257,6 +257,45 @@ export async function handoverLead(
   }
 }
 
+/**
+ * Transfere UM lead de um SDR para outro (troca o dono e reatribui as tarefas
+ * pendentes), SEM mexer no status do lead. Registra em qs_handovers pra histórico
+ * e pra notificar o destinatário. Diferente de handoverLead (que qualifica p/ closer).
+ */
+export async function transferLead(
+  leadId: string,
+  fromUserId: string | null,
+  toUserId: string,
+  note?: string
+): Promise<boolean> {
+  try {
+    await supabase.from("qs_handovers").insert({
+      lead_id: leadId,
+      from_user_id: fromUserId,
+      to_user_id: toUserId,
+      briefing: note?.trim() || "Lead transferido",
+    });
+
+    const { error: leadError } = await supabase
+      .from("qs_leads")
+      .update({ owner_id: toUserId, updated_at: new Date().toISOString() })
+      .eq("id", leadId);
+    if (leadError) throw leadError;
+
+    // Reatribui as tarefas pendentes/atrasadas do lead ao novo dono
+    await supabase
+      .from("qs_tasks")
+      .update({ owner_id: toUserId })
+      .eq("lead_id", leadId)
+      .in("status", ["pendente", "atrasada"]);
+
+    return true;
+  } catch (err) {
+    console.warn("[QS] transferLead failed:", err);
+    return false;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TASKS
 // ═══════════════════════════════════════════════════════════════════════════════

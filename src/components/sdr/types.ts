@@ -3,7 +3,7 @@
 export type UserRole = "admin" | "gestor" | "sdr" | "closer";
 export type LeadStatus = "nao_iniciado" | "em_prospeccao" | "ganho" | "perdido";
 export type LeadSource = "manual" | "api" | "integracao" | "importacao";
-export type ChannelType = "pesquisa" | "email" | "ligacao" | "whatsapp" | "linkedin" | "instagram" | "tiktok" | "youtube";
+export type ChannelType = "pesquisa" | "email" | "ligacao" | "ligacao_whatsapp" | "whatsapp" | "linkedin" | "instagram" | "tiktok" | "youtube";
 export type PriorityLevel = "alta" | "media" | "baixa";
 export type CadenceStatus = "rascunho" | "disponivel" | "congelada";
 export type AcquisitionChannel = "levantada_de_mao" | "resgate" | "indicacao" | "outbound";
@@ -204,6 +204,7 @@ export const CHANNEL_LABELS: Record<ChannelType, string> = {
   pesquisa: "Pesquisa",
   email: "E-mail",
   ligacao: "Ligação",
+  ligacao_whatsapp: "Ligação WhatsApp",
   whatsapp: "WhatsApp",
   linkedin: "LinkedIn",
   instagram: "Instagram",
@@ -221,6 +222,7 @@ export const DEFAULT_CHANNEL_CONFIG: ChannelConfig[] = [
   { type: "pesquisa", enabled: true, label: "Pesquisa" },
   { type: "email", enabled: true, label: "E-mail" },
   { type: "ligacao", enabled: true, label: "Ligação" },
+  { type: "ligacao_whatsapp", enabled: true, label: "Ligação WhatsApp" },
   { type: "whatsapp", enabled: true, label: "WhatsApp" },
   { type: "linkedin", enabled: true, label: "LinkedIn" },
   { type: "instagram", enabled: false, label: "Instagram" },

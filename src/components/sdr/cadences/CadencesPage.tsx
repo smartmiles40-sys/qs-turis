@@ -136,6 +136,7 @@ const CHANNEL_COLORS: Record<ChannelType, string> = {
   pesquisa: "#6366F1",
   email: "#0EA5E9",
   ligacao: "#F59E0B",
+  ligacao_whatsapp: "#12A18A",
   whatsapp: "#22C55E",
   linkedin: "#0A66C2",
   instagram: "#E1306C",

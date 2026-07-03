@@ -1,5 +1,5 @@
 // src/components/sdr/tasks/TasksPanel.tsx
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import type {
   Task,
   Lead,
@@ -7,13 +7,14 @@ import type {
   ChannelType,
   PriorityLevel,
 } from "../types";
-import {
-  CHANNEL_LABELS,
-  ACQUISITION_LABELS,
-} from "../types";
+import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
-import { completeTask, skipTask, fetchQsUsers } from "@/lib/qs/queries";
+import { completeTask, skipTask, fetchQsUsers, transferLead } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
+import { useChatAppDock } from "@/contexts/ChatAppDockContext";
+import { computeLeadScore } from "@/lib/leadScore";
+import { startWhatsAppCall } from "@/lib/whatsapp";
+import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 import type { SdrUser } from "../types";
 
 // ── Props ────────────────────────────────────────────────────────────────────
@@ -30,11 +31,6 @@ type PeriodFilter = "manha" | "tarde";
 function formatTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatShortDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 // ── SVG Icons (inline, no external deps) ────────────────────────────────────
@@ -93,51 +89,6 @@ function IconLinkedIn({ size = 22 }: { size?: number }) {
   );
 }
 
-function IconCopy() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  );
-}
-
-function IconChevronRight() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m9 18 6-6-6-6" />
-    </svg>
-  );
-}
-
-function IconClose() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
-    </svg>
-  );
-}
-
-function IconGoogle() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
-      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-      <path d="M5.84 14.09A6.01 6.01 0 0 1 5.52 12c0-.72.12-1.42.32-2.09V7.07H2.18A10 10 0 0 0 2 12c0 1.61.39 3.14 1.07 4.49l3.77-2.4z" fill="#FBBC05" />
-      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-    </svg>
-  );
-}
-
-function IconCheck() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
 function IconSkip() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -191,30 +142,47 @@ function IconPhoneCall({ size = 16 }: { size?: number }) {
   );
 }
 
+// Ligação via WhatsApp: bolha do zap com um handset dentro (separa da ligação normal)
+function IconWhatsAppCall({ size = 22 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 21l2.1-5.7A8.4 8.4 0 1 1 21 11.5z" />
+      <path d="M14.7 13.4c-.25-.13-1.02-.5-1.18-.56-.16-.06-.27-.09-.39.09-.11.17-.44.55-.54.66-.1.12-.2.13-.37.05-.17-.09-.72-.27-1.37-.85-.5-.45-.85-1.01-.95-1.18-.1-.17-.01-.26.08-.35.08-.08.17-.2.26-.3.09-.11.11-.18.17-.3.06-.11.03-.21-.01-.3-.05-.09-.39-.93-.53-1.28-.14-.33-.28-.29-.39-.29h-.33c-.11 0-.3.04-.45.21-.16.17-.6.58-.6 1.42s.61 1.65.7 1.76c.09.12 1.2 1.84 2.92 2.58.41.18.72.28.97.36.41.13.78.11 1.07.07.33-.05 1.02-.42 1.16-.82.14-.4.14-.74.1-.82-.04-.07-.15-.11-.32-.19z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 function ChannelIcon({ type, size = 22 }: { type: ChannelType; size?: number }) {
   switch (type) {
-    case "pesquisa":  return <IconResearch size={size} />;
-    case "email":     return <IconEmail size={size} />;
-    case "whatsapp":  return <IconWhatsApp size={size} />;
-    case "ligacao":   return <IconPhone size={size} />;
-    case "linkedin":  return <IconLinkedIn size={size} />;
-    case "instagram": return <IconInstagram size={size} />;
-    case "tiktok":    return <IconTikTok size={size} />;
-    case "youtube":   return <IconYouTube size={size} />;
+    case "pesquisa":         return <IconResearch size={size} />;
+    case "email":            return <IconEmail size={size} />;
+    case "whatsapp":         return <IconWhatsApp size={size} />;
+    case "ligacao":          return <IconPhone size={size} />;
+    case "ligacao_whatsapp": return <IconWhatsAppCall size={size} />;
+    case "linkedin":         return <IconLinkedIn size={size} />;
+    case "instagram":        return <IconInstagram size={size} />;
+    case "tiktok":           return <IconTikTok size={size} />;
+    case "youtube":          return <IconYouTube size={size} />;
   }
 }
 
-// ── Channel Colors ───────────────────────────────────────────────────────────
+// ── Mapa canal → classe do ícone redondo (design Execução) ──────────────────
+const CHANNEL_IC_CLASS: Record<ChannelType, string> = {
+  ligacao: "ic-call",
+  ligacao_whatsapp: "ic-whats",
+  whatsapp: "ic-whats",
+  email: "ic-mail",
+  pesquisa: "ic-pesquisa",
+  linkedin: "ic-linkedin",
+  instagram: "ic-social",
+  tiktok: "ic-social",
+  youtube: "ic-social",
+};
 
-const CHANNEL_COLORS: Record<ChannelType, { bg: string; fg: string }> = {
-  pesquisa:  { bg: "#EEF2FF", fg: "#4F46E5" },
-  email:     { bg: "#FEF3C7", fg: "#D97706" },
-  whatsapp:  { bg: "#D1FAE5", fg: "#059669" },
-  ligacao:   { bg: "#DBEAFE", fg: "#2563EB" },
-  linkedin:  { bg: "#E0E7FF", fg: "#4338CA" },
-  instagram: { bg: "#FCE7F3", fg: "#DB2777" },
-  tiktok:    { bg: "#F3F4F6", fg: "#111827" },
-  youtube:   { bg: "#FEE2E2", fg: "#DC2626" },
+const PRIORITY_LABELS: Record<PriorityLevel, string> = {
+  alta: "Alta",
+  media: "Média",
+  baixa: "Baixa",
 };
 
 // ── SLA Alert helper ────────────────────────────────────────────────────────
@@ -252,6 +220,10 @@ const MAX_CONTACT_ATTEMPTS = 5;
 const DAILY_GOAL = 350; // Will come from qs_goals later
 const MONTHLY_GOAL = 7350;
 
+// Agendamento da reunião (ao dar "Ganho") — nomes fixos por enquanto.
+const AGENDADORES = ["Mariana Rodrigues - SDR", "Victor Hugo - SDR"];
+const RESPONSAVEIS_REUNIAO = ["Talita Carvalho", "Victor Maldonado", "Bruno Matheus", "John Italo"];
+
 // ── Activity type labels ─────────────────────────────────────────────────────
 
 function getActivityLabel(channel: ChannelType, _cadenceName?: string): string {
@@ -259,6 +231,7 @@ function getActivityLabel(channel: ChannelType, _cadenceName?: string): string {
     pesquisa: "Atividade de Pesquisa",
     email: "Enviar E-mail",
     ligacao: "Fazer Ligação",
+    ligacao_whatsapp: "Ligar no WhatsApp",
     whatsapp: "Enviar WhatsApp",
     linkedin: "Contato pelo LinkedIn",
     instagram: "Contato pelo Instagram",
@@ -286,6 +259,18 @@ function getAttemptCount(task: Task): number {
 
 export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const { currentUser } = useQsAuth();
+  const chatDock = useChatAppDock();
+
+  // Abre o dock do ChatApp focando um lead (copia o telefone pra colar na busca).
+  const openWhatsApp = useCallback((lead: Lead | undefined | null) => {
+    if (!lead) return;
+    chatDock.openForLead({
+      leadId: lead.id,
+      name: lead.full_name ?? lead.first_name ?? null,
+      phone: lead.phone ?? null,
+      ownerId: lead.owner_id ?? null,
+    });
+  }, [chatDock]);
 
   // ── Supabase data ──────────────────────────────────────────────────
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -320,6 +305,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     loadData();
   }, []);
 
+  // Horário de funcionamento (Configurações) — alimenta as métricas de tempo.
+  const [workHours, setWorkHours] = useState<WorkHours>(DEFAULT_WORK_HOURS);
+  useEffect(() => { loadWorkHours().then(setWorkHours); }, []);
+
   // ── Lookup maps ────────────────────────────────────────────────────
   const leadsMap = useMemo(() => new Map(leads.map(l => [l.id, l])), [leads]);
   const cadencesMap = useMemo(() => new Map(cadences.map(c => [c.id, c])), [cadences]);
@@ -339,53 +328,28 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter | null>(null);
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
 
-  // Execution
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [executionNotes, setExecutionNotes] = useState("");
-  const [timerSeconds, setTimerSeconds] = useState(0);
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
-
-  // Script Dinâmico
-  const [scriptExpanded, setScriptExpanded] = useState(true);
-
-  // Hover tooltip state (Change 1)
-  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
-  const hoverTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleMouseEnter = useCallback((taskId: string) => {
-    hoverTimeout.current = setTimeout(() => {
-      setHoveredTaskId(taskId);
-    }, 300);
-  }, []);
-
-  const handleMouseLeave = useCallback(() => {
-    if (hoverTimeout.current) {
-      clearTimeout(hoverTimeout.current);
-      hoverTimeout.current = null;
-    }
-    setHoveredTaskId(null);
-  }, []);
-
-  // Quick tags for notes (Change 3)
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [showNoteField, setShowNoteField] = useState(false);
-
-  // Skip reason (Change 4)
-  const [showSkipReason, setShowSkipReason] = useState(false);
-
-  // Loaded script from cadence activity (Change 14 display)
-  const [loadedScript, setLoadedScript] = useState<string | null>(null);
-
-  // Green flash animation (Change 2)
-  const [flashResult, setFlashResult] = useState<string | null>(null);
+  // Confirmação do desfecho no card da "Próxima atividade"
   const [pendingResult, setPendingResult] = useState<{ taskId: string; result: string } | null>(null);
+  // Item 7 — o SDR pode escolher qual lead atender (vira o card ativo). Sem seleção, o topo da fila.
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  // Itens 1 e 4 — observações da atividade (viram resumo no Bitrix via qs_notes)
+  const [obsText, setObsText] = useState("");
+  const [savingObs, setSavingObs] = useState(false);
+  // Item 5 — transferir 1 lead pra outro SDR
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferTo, setTransferTo] = useState("");
+  // "Ganho" → formulário de agendamento da reunião
+  const [meetingFor, setMeetingFor] = useState<{ taskId: string; leadId: string; leadName: string } | null>(null);
+  const [meeting, setMeeting] = useState({ agendadoPor: "", emailCliente: "", dataAgendamento: "", responsavel: "", dataHora: "" });
+  const [savingMeeting, setSavingMeeting] = useState(false);
 
   // New Lead Modal
   const [showNewLeadModal, setShowNewLeadModal] = useState(false);
   const [showExtraTaskModal, setShowExtraTaskModal] = useState(false);
   const [extraTask, setExtraTask] = useState({ lead_id: "", channel_type: "ligacao" as ChannelType, date: "", time: "09:00", notes: "", _searchText: "" });
   const [savingExtra, setSavingExtra] = useState(false);
+  // Quando a extra vem de "Pediu retorno", guarda a tarefa original pra concluí-la no salvar.
+  const [extraFromTaskId, setExtraFromTaskId] = useState<string | null>(null);
   const [showDialer, setShowDialer] = useState(false);
   const [dialNumber, setDialNumber] = useState("");
   const [newLead, setNewLead] = useState({ full_name: "", phone: "", email: "", company_name: "", owner_id: currentUser?.id ?? "", cadence_id: "", notes: "" });
@@ -468,15 +432,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const currentTask = tasks.find(t => t.id === taskId);
     if (!currentTask) return;
 
-    // 1. Conclui a tentativa atual (marca 'concluida' + registra contact_result/notas/tags).
-    await completeTask(
-      taskId,
-      result,
-      executionNotes || undefined,
-      selectedTags.length > 0 ? selectedTags : undefined
-    );
+    // 1. Conclui a tentativa atual (marca 'concluida' + registra contact_result).
+    await completeTask(taskId, result);
 
     const leadName = getLeadForTask(currentTask)?.full_name || "Lead";
+
+    // 1b. Resumo da atividade → nota do lead (vai pro Bitrix via n8n). Itens 1 e 4.
+    const outcomeLabels: Record<string, string> = {
+      ganho: "Ganho / Agendou", sem_interesse: "Perdido", atendeu: "Pediu retorno",
+      nao_atendeu: "Não atendeu", caixa_postal: "Caixa postal", numero_errado: "Nº errado", desligou: "Desligou",
+    };
+    const resumo = `${CHANNEL_LABELS[currentTask.channel_type]} — ${outcomeLabels[result] ?? result}${obsText.trim() ? `: ${obsText.trim()}` : ""}`;
+    await persistObservation(currentTask.lead_id, resumo, ["bitrix", "desfecho", result]);
+    setObsText("");
+    setActiveTaskId(null);
 
     // 2. Desfecho: ganho/perdido encerram o lead; qualquer outro gera o próximo passo.
     if (result === "ganho") {
@@ -501,34 +470,172 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       });
       showToast(`Atividade registrada — ${leadName}`);
     }
-
-    // 3. Flash + reset dos campos para a próxima tarefa.
-    if (result === "atendeu" || result === "ganho") {
-      setFlashResult("green");
-      setTimeout(() => setFlashResult(null), 400);
-    } else {
-      setFlashResult("gray");
-      setTimeout(() => setFlashResult(null), 200);
-    }
-    setSelectedTags([]);
-    setShowNoteField(false);
-    setExecutionNotes("");
-    setShowSkipReason(false);
-    setTimeout(() => {
-      setSelectedTaskId(null);
-      setTimerSeconds(0);
-      setTimerRunning(false);
-    }, 300);
   }
 
-  // Timer effect
-  useEffect(() => {
-    if (!timerRunning) return;
-    const interval = setInterval(() => {
-      setTimerSeconds((s) => s + 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [timerRunning]);
+  // Salva a observação como nota do lead (n8n empurra pro Bitrix — itens 1 e 4).
+  async function persistObservation(leadId: string, body: string, tags: string[] = ["bitrix"]) {
+    const text = body.trim();
+    if (!text) return;
+    try {
+      await supabase.from("qs_notes").insert({
+        lead_id: leadId,
+        author_id: currentUser?.id ?? null,
+        body: text,
+        tags,
+      });
+    } catch (e) {
+      console.warn("[QS] não foi possível salvar a observação:", e);
+    }
+  }
+
+  // "Salvar no Bitrix" avulso (sem finalizar a atividade) — item 4.
+  async function handleSaveObs(leadId: string) {
+    if (!obsText.trim()) return;
+    setSavingObs(true);
+    await persistObservation(leadId, obsText, ["bitrix", "observacao"]);
+    setSavingObs(false);
+    setObsText("");
+    showToast("Observação salva e enviada ao Bitrix");
+  }
+
+  // Transfere 1 lead pra outro SDR (item 5).
+  async function handleTransfer(task: Task) {
+    if (!transferTo) return;
+    const ok = await transferLead(task.lead_id, currentUser?.id ?? null, transferTo, "Lead transferido pelo SDR");
+    if (ok) {
+      setTasks(prev => prev.filter(t => t.lead_id !== task.lead_id));
+      const to = qsUsers.find(u => u.id === transferTo);
+      showToast(`Lead transferido para ${to?.name ?? "outro SDR"}`);
+    } else {
+      showToast("Não foi possível transferir o lead");
+    }
+    setTransferOpen(false);
+    setTransferTo("");
+    setActiveTaskId(null);
+  }
+
+  // "Ganho" abre o formulário de agendamento da reunião (prefill do e-mail + data de hoje).
+  function openMeetingGanho(task: Task) {
+    const lead = getLeadForTask(task);
+    const hoje = new Date();
+    const yyyy = hoje.getFullYear();
+    const mm = String(hoje.getMonth() + 1).padStart(2, "0");
+    const dd = String(hoje.getDate()).padStart(2, "0");
+    setMeeting({ agendadoPor: "", emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", dataHora: "" });
+    setPendingResult(null);
+    setMeetingFor({ taskId: task.id, leadId: task.lead_id, leadName: lead?.full_name ?? "Lead" });
+  }
+
+  // Confirma o "Ganho": cria a reunião (qs_meetings), marca o lead ganho e encerra as tarefas.
+  async function handleConfirmMeeting() {
+    if (!meetingFor) return;
+    if (!meeting.agendadoPor || !meeting.responsavel || !meeting.dataHora) return;
+    setSavingMeeting(true);
+    const { taskId, leadId, leadName } = meetingFor;
+    const currentTask = tasks.find((t) => t.id === taskId);
+    const obs = obsText.trim();
+    const resumo = [
+      meeting.agendadoPor && `Agendado por: ${meeting.agendadoPor}`,
+      meeting.responsavel && `Responsável: ${meeting.responsavel}`,
+      meeting.emailCliente && `E-mail: ${meeting.emailCliente}`,
+      meeting.dataAgendamento && `Data do agendamento: ${meeting.dataAgendamento}`,
+      obs && `Observações: ${obs}`,
+    ].filter(Boolean).join(" · ");
+    try {
+      await supabase.from("qs_meetings").insert({
+        lead_id: leadId,
+        owner_id: currentUser?.id ?? null,
+        title: `Reunião — ${leadName}`,
+        scheduled_at: new Date(meeting.dataHora).toISOString(),
+        location: "Google Meet",
+        notes: resumo,
+        status: "agendada",
+      });
+      if (meeting.emailCliente) {
+        await supabase.from("qs_leads").update({ email: meeting.emailCliente }).eq("id", leadId);
+      }
+      await completeTask(taskId, "ganho");
+      await supabase.from("qs_leads").update({ status: "ganho" }).eq("id", leadId);
+      if (currentTask) await closeRemainingLeadTasks(leadId, taskId, "Lead ganho — reunião agendada");
+      await persistObservation(leadId, `Ganho — reunião agendada para ${meeting.dataHora}. ${resumo}`, ["bitrix", "ganho", "reuniao"]);
+    } catch (e) {
+      console.warn("[QS] falha ao registrar a reunião do ganho:", e);
+    }
+    setLeads((prev) => prev.map((l): Lead => l.id === leadId ? { ...l, status: "ganho" } : l));
+    setTasks((prev) => prev.filter((t) => t.lead_id !== leadId));
+    setActiveTaskId(null);
+    setObsText("");
+    setSavingMeeting(false);
+    setMeetingFor(null);
+    showToast(`Ganho! Reunião agendada — ${leadName}`);
+  }
+
+  // Cria a atividade extra e aplica a REGRA: encerra todas as outras tarefas
+  // pendentes do lead — ele fica só com a extra (destacada em azul).
+  async function handleSaveExtra() {
+    if (!extraTask.lead_id || !extraTask.date) return;
+    setSavingExtra(true);
+    const [h, m] = extraTask.time.split(":").map(Number);
+    const scheduled = new Date(extraTask.date);
+    scheduled.setHours(h || 9, m || 0, 0, 0);
+    const lead = leads.find((l) => l.id === extraTask.lead_id);
+    const { data } = await supabase.from("qs_tasks").insert({
+      lead_id: extraTask.lead_id,
+      cadence_id: lead?.cadence_id || null,
+      owner_id: currentUser?.id || null,
+      channel_type: extraTask.channel_type,
+      priority: "alta",
+      scheduled_at: scheduled.toISOString(),
+      status: "pendente",
+      is_extra: true,
+      notes: extraTask.notes || null,
+    }).select().single();
+    const extra = data as Task | null;
+
+    // REGRA: encerra as demais tarefas pendentes/atrasadas do lead (menos a extra e a de origem)
+    const exclude = [extra?.id, extraFromTaskId].filter(Boolean) as string[];
+    let q = supabase.from("qs_tasks").update({ status: "ignorada", skip_reason: "Substituída por atividade extra" })
+      .eq("lead_id", extraTask.lead_id).in("status", ["pendente", "atrasada"]);
+    if (exclude.length) q = q.not("id", "in", `(${exclude.join(",")})`);
+    await q;
+
+    // Se veio de "Pediu retorno", conclui a tarefa original + registra pro Bitrix
+    const fromRetorno = extraFromTaskId;
+    if (fromRetorno) {
+      await completeTask(fromRetorno, "atendeu");
+      await persistObservation(extraTask.lead_id, `Pediu retorno — atividade extra agendada para ${extraTask.date} ${extraTask.time}.${obsText.trim() ? " " + obsText.trim() : ""}`, ["bitrix", "retorno"]);
+    }
+
+    setSavingExtra(false);
+    if (extra) {
+      // Estado local: o lead fica só com a extra
+      setTasks((prev) => [...prev.filter((t) => t.lead_id !== extraTask.lead_id), extra]);
+      setShowExtraTaskModal(false);
+      setExtraFromTaskId(null);
+      setActiveTaskId(null);
+      setObsText("");
+      setExtraTask({ lead_id: "", channel_type: "ligacao", date: "", time: "09:00", notes: "", _searchText: "" });
+      showToast(fromRetorno ? "Retorno agendado — atividade extra criada" : "Atividade extra criada");
+    }
+  }
+
+  // "Pediu retorno" abre o modal de atividade extra já preenchido pro lead.
+  function openExtraFromRetorno(task: Task) {
+    const lead = getLeadForTask(task);
+    const d = new Date(); d.setDate(d.getDate() + 1);
+    const yyyy = d.getFullYear(), mm = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
+    setExtraTask({
+      lead_id: task.lead_id,
+      channel_type: task.channel_type,
+      date: `${yyyy}-${mm}-${dd}`,
+      time: "09:00",
+      notes: obsText.trim() || "Retorno solicitado pelo lead",
+      _searchText: (lead?.full_name ?? "Lead") + (lead?.company_name ? ` · ${lead.company_name}` : ""),
+    });
+    setExtraFromTaskId(task.id);
+    setPendingResult(null);
+    setShowExtraTaskModal(true);
+  }
 
   // Filter logic
   const filteredTasks = useMemo(() => {
@@ -580,41 +687,26 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       });
     }
 
-    // ── Smart Queue (Fila Inteligente) ──────────────────────────────
-    // 1. Levantada de mão com maior tempo de espera primeiro (URGENTE)
-    // 2. Tarefas atrasadas
-    // 3. Prioridade alta
-    // 4. Prioridade média por horário agendado
-    // 5. Prioridade baixa por horário agendado
-    function getSmartQueueWeight(t: Task): number {
-      const cadence = getCadenceForTask(t);
+    // ── Ordem da fila: MAIS NOVOS PRIMEIRO (item 7) ─────────────────
+    // O topo é sempre o lead que chegou mais recentemente. O SDR pode clicar
+    // em qualquer lead pra atendê-lo antes (vira o card ativo), mas o padrão
+    // prioriza sempre os mais novos.
+    const recencyTs = (t: Task): number => {
       const lead = getLeadForTask(t);
-      const isLevantada = cadence?.acquisition_channel === "levantada_de_mao";
-      const isOverdue = t.status === "atrasada";
-
-      if (isLevantada && lead?.arrived_at) {
-        const waitMs = Date.now() - new Date(lead.arrived_at).getTime();
-        return -1_000_000_000 - waitMs; // tier 1
-      }
-      if (isOverdue) return -500_000_000; // tier 2
-      if (t.priority === "alta") return -100_000_000; // tier 3
-      if (t.priority === "media") return 0; // tier 4
-      return 100_000_000; // tier 5 (baixa)
-    }
-
+      const iso = lead?.arrived_at || lead?.created_at || t.scheduled_at;
+      return new Date(iso).getTime();
+    };
+    const prioRank: Record<PriorityLevel, number> = { alta: 0, media: 1, baixa: 2 };
     filtered.sort((a, b) => {
-      const wa = getSmartQueueWeight(a);
-      const wb = getSmartQueueWeight(b);
-      if (wa !== wb) return wa - wb;
+      const ra = recencyTs(a), rb = recencyTs(b);
+      if (ra !== rb) return rb - ra; // desc → mais novo primeiro
+      const pa = prioRank[a.priority], pb = prioRank[b.priority];
+      if (pa !== pb) return pa - pb; // desempate por prioridade
       return new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime();
     });
 
     return filtered;
   }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter]);
-
-  const selectedTask = selectedTaskId ? tasks.find((t) => t.id === selectedTaskId) : null;
-  const selectedLead = selectedTask ? getLeadForTask(selectedTask) : null;
-  const selectedCadence = selectedTask ? getCadenceForTask(selectedTask) : null;
 
   const todayTasks = tasks.filter((t) => t.status === "pendente");
   const overdueTasks = tasks.filter((t) => t.status === "atrasada");
@@ -638,133 +730,27 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return null;
   }, [tasks, leads, cadences]);
 
-  // Days in funnel helper
-  function getDaysInFunnel(lead: Lead): number {
-    const created = new Date(lead.created_at).getTime();
-    const now = Date.now();
-    return Math.floor((now - created) / (1000 * 60 * 60 * 24));
-  }
-
-  function handleCopy(text: string, field: string) {
-    navigator.clipboard.writeText(text);
-    setCopiedField(field);
-    setTimeout(() => setCopiedField(null), 2000);
-  }
-
-  function handleSelectTask(taskId: string) {
-    setSelectedTaskId(taskId);
-    setExecutionNotes("");
-    setTimerSeconds(0);
-    setTimerRunning(true); // cronômetro da atividade começa ao abrir a tarefa
-    setSelectedTags([]);
-    setShowNoteField(false);
-    setShowSkipReason(false);
-    setLoadedScript(null);
-
-    // Try to load script from cadence activity (Change 14 display)
-    const task = tasks.find((t) => t.id === taskId);
-    if ((task as any)?.cadence_activity_id) {
-      supabase
-        .from("qs_cadence_activities")
-        .select("script_text")
-        .eq("id", (task as any).cadence_activity_id)
-        .single()
-        .then(({ data }: { data: any }) => {
-          if (data?.script_text) setLoadedScript(data.script_text);
-        });
-    }
-  }
-
-  function handleCloseExecution() {
-    setSelectedTaskId(null);
-    setExecutionNotes("");
-    setTimerSeconds(0);
-    setTimerRunning(false);
-  }
-
-  // Skip with reason handler (Change 4)
-  async function handleSkipWithReason(reason: string) {
-    if (selectedTaskId) {
-      // Use skipTask from queries.ts
-      await skipTask(selectedTaskId, reason);
-      setTasks(prev => prev.filter(t => t.id !== selectedTaskId));
-    }
-    setShowSkipReason(false);
-    setSelectedTags([]);
-    setShowNoteField(false);
-    setExecutionNotes("");
-    setSelectedTaskId(null);
-    setTimerSeconds(0);
-    setTimerRunning(false);
-  }
-
-  // Toggle tag selection (Change 3)
-  const toggleTag = useCallback((tag: string) => {
-    setSelectedTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-    );
-  }, []);
-
-  // Script Dinâmico helper
-  function getScript(channel: ChannelType, lead: Lead): string {
-    const nome = lead.full_name || lead.first_name || "[NOME]";
-    const empresa = lead.company_name || "[EMPRESA]";
-    const segmento = lead.segment || "[SEGMENTO]";
-
-    switch (channel) {
-      case "pesquisa":
-        return `1. Verificar LinkedIn do lead\n2. Anotar cargo, empresa, conexões em comum\n3. Preparar abordagem personalizada`;
-      case "ligacao":
-        return `Olá ${nome}, aqui é [SEU NOME] da Inovvatur. Vi que você atua no segmento de ${segmento}. Tenho ajudado agências como a ${empresa} a escalar o faturamento com processos comerciais estruturados. Podemos conversar 2 minutos sobre isso?`;
-      case "whatsapp":
-        return `Oi ${nome}, tudo bem? 👋 Sou [SEU NOME] da Inovvatur. Vi seu interesse em estruturar processos comerciais. Posso te enviar um material sobre como agências estão escalando o faturamento com um time de SDR profissional?`;
-      case "email":
-        return `Assunto: ${empresa} + Inovvatur — Escalar faturamento com processos\n\nOlá ${nome},\n\nNotei que a ${empresa} atua no segmento de ${segmento}. Tenho ajudado agências de viagens a estruturar processos comerciais que escalam faturamento de forma previsível.\n\nPodemos agendar 15 minutos para te mostrar como funciona?`;
-      case "linkedin":
-        return `Olá ${nome}, vi que você lidera o comercial da ${empresa}. Tenho ajudado agências de viagens a estruturar processos de prospecção que aumentam a taxa de conversão em até 3x. Gostaria de trocar uma ideia sobre isso?`;
-      default:
-        return `Abordagem para ${nome} da ${empresa} via ${CHANNEL_LABELS[channel]}.`;
-    }
-  }
-
   // Progress calc — uses task count as placeholder until dashboard queries are built
   const DAILY_DONE = tasks.length;
   const TOTAL_SCHEDULED = tasks.length;
-  const TOTAL_DONE_RATIO = `0/${tasks.length}`;
   const MONTHLY_DONE = tasks.length;
   const dailyPct = DAILY_GOAL > 0 ? Math.min((DAILY_DONE / DAILY_GOAL) * 100, 100) : 0;
   const monthlyPct = MONTHLY_GOAL > 0 ? Math.min((MONTHLY_DONE / MONTHLY_GOAL) * 100, 100) : 0;
   const monthlyBeat = MONTHLY_DONE >= MONTHLY_GOAL;
-  // Horário comercial: Seg-Qui 09:30-19:30, Sex 10:00-19:00
+  // Métricas de tempo dentro do horário de funcionamento (Configurações → Horário de Trabalho)
   const now = new Date();
-  const dayOfWeek = now.getDay(); // 0=dom, 1=seg...5=sex, 6=sab
-  const isFriday = dayOfWeek === 5;
-  const endHour = isFriday ? 19 : 19;
-  const endMin = isFriday ? 0 : 30;
-  const endToday = new Date(now);
-  endToday.setHours(endHour, endMin, 0, 0);
-  const diffMs = Math.max(0, endToday.getTime() - now.getTime());
-  const totalMinLeft = Math.floor(diffMs / 60000);
+  const totalMinLeft = minutesLeftToday(workHours, now);
   const hoursLeft = Math.floor(totalMinLeft / 60);
   const minutesLeft = totalMinLeft % 60;
-  const hoursWorked = (() => {
-    const startHour = isFriday ? 10 : 9;
-    const startMin = isFriday ? 0 : 30;
-    const startToday = new Date(now);
-    startToday.setHours(startHour, startMin, 0, 0);
-    return Math.max(0.1, (now.getTime() - startToday.getTime()) / 3600000);
-  })();
+  const hoursWorked = Math.max(0.1, minutesWorkedToday(workHours, now) / 60);
   const rhythm = Math.round((DAILY_DONE / hoursWorked) * 10) / 10;
 
-  // Motivational micro-copy based on daily progress
-  const motivationalText = useMemo(() => {
-    const remaining = DAILY_GOAL - DAILY_DONE;
-    if (dailyPct >= 100) return "META BATIDA! Você é demais! 🎉";
-    if (dailyPct >= 75) return `Quase lá! Faltam ${remaining} para bater a meta!`;
-    if (dailyPct >= 50) return "Mais da metade! Está voando! 🚀";
-    if (dailyPct >= 25) return "Bom ritmo, continue assim!";
-    return "Bora começar! 💪";
-  }, [dailyPct, DAILY_DONE]);
+  // Saudação (design Execução)
+  const greetHour = now.getHours();
+  const greetWord = greetHour < 12 ? "Bom dia" : greetHour < 18 ? "Boa tarde" : "Boa noite";
+  const firstName = currentUser?.name?.split(" ")[0] ?? "";
+  const todayLabel = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "short" });
+  const remainingGoal = Math.max(0, DAILY_GOAL - DAILY_DONE);
 
   // Celebration effect when daily goal is hit
   useEffect(() => {
@@ -775,36 +761,305 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     }
   }, [DAILY_DONE, celebrationShown]);
 
-  // Lead data completeness
-  function getLeadCompleteness(lead: Lead): { filled: number; total: number; missing: string[] } {
-    const fields = [
-      { key: "email", label: "E-mail" },
-      { key: "phone", label: "Telefone" },
-      { key: "linkedin_url", label: "LinkedIn" },
-      { key: "company_name", label: "Empresa" },
-      { key: "job_title", label: "Cargo" },
-      { key: "department", label: "Departamento" },
-      { key: "city", label: "Cidade" },
-      { key: "segment", label: "Segmento" },
-    ];
-    const missing: string[] = [];
-    let filled = 0;
-    const record = lead as unknown as Record<string, unknown>;
-    for (const f of fields) {
-      if (record[f.key]) {
-        filled++;
-      } else {
-        missing.push(f.label);
-      }
+  // ── Renderizadores do design "Execução" (hero + pílulas) ───────────────────
+
+  const periodOf = (task: Task): PeriodFilter =>
+    new Date(task.scheduled_at).getHours() < 12 ? "manha" : "tarde";
+
+  // Item 7 — escolher qual lead atender (vira o card ativo); reseta os campos.
+  function selectActive(taskId: string) {
+    setActiveTaskId(taskId);
+    setObsText("");
+    setPendingResult(null);
+    setTransferOpen(false);
+    setTransferTo("");
+  }
+
+  // Card compacto da coluna de Atividades extras (retornos), destacado em azul.
+  function renderExtraPill(task: Task) {
+    const lead = getLeadForTask(task);
+    const isActive = activeTaskId === task.id;
+    const d = new Date(task.scheduled_at);
+    const when = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " · " + formatTime(task.scheduled_at);
+    return (
+      <div key={task.id} onClick={() => selectActive(task.id)} className={`qsx-extra-card${isActive ? " on" : ""}`} title="Clique para atender">
+        <div className="flex items-center gap-2">
+          <span className={`qsx-chan-ic ${CHANNEL_IC_CLASS[task.channel_type]}`} style={{ width: 30, height: 30, borderRadius: 9 }}>
+            <ChannelIcon type={task.channel_type} size={14} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[14px] font-bold truncate" style={{ color: "var(--ink)" }}>{lead?.full_name || "Lead"}</div>
+            <div className="text-[11.5px] font-semibold" style={{ color: "var(--blue)" }}>{when}</div>
+          </div>
+        </div>
+        <div className="text-[12px] mt-1.5 line-clamp-2" style={{ color: "var(--ink2)" }}>{task.notes || getActivityLabel(task.channel_type)}</div>
+      </div>
+    );
+  }
+
+  function renderPill(task: Task) {
+    const lead = getLeadForTask(task);
+    const cadence = getCadenceForTask(task);
+    const slaAlert = getSlaAlert(lead, task, cadence);
+    const prio = task.priority as PriorityLevel;
+    const temp = computeLeadScore(lead, cadence, getAttemptCount(task) - 1);
+    const isActive = activeTaskId === task.id;
+    return (
+      <div key={task.id} onClick={() => selectActive(task.id)} className={`qsx-pill${isActive ? " sel" : ""}`} title="Clique para atender este lead">
+        <div className="qsx-time">{formatTime(task.scheduled_at)}</div>
+        <span className={`qsx-chan-ic ${CHANNEL_IC_CLASS[task.channel_type]}`} style={{ width: 44, height: 44, borderRadius: 13 }}>
+          <ChannelIcon type={task.channel_type} size={19} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            {lead ? (
+              <button onClick={(e) => { e.stopPropagation(); onOpenLead(lead.id); }} className="qsx-name-btn qsx-lname truncate" title="Ver informações do lead">
+                {lead.full_name || "Lead"}
+              </button>
+            ) : (
+              <span className="qsx-lname truncate">Lead desconhecido</span>
+            )}
+            <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Lead score ${temp.score}/100`}>{temp.emoji} {temp.label}</span>
+            <span className={`qsx-chip prio-${prio}`}><span className={`qsx-dot dot-${prio}`} />{PRIORITY_LABELS[prio]}</span>
+            {slaAlert && (
+              <span className="qsx-chip" style={{ background: slaAlert.bg, color: slaAlert.text, animation: slaAlert.pulse ? "pulseRed 1.5s ease-in-out infinite" : undefined }}>
+                {slaAlert.label}
+              </span>
+            )}
+            {task.is_extra && <span className="qsx-chip prio-baixa">Extra</span>}
+          </div>
+          <div className="qsx-pco mt-1">
+            {lead?.company_name && <b>{lead.company_name}</b>}
+            {lead?.company_name ? " · " : ""}
+            {getActivityLabel(task.channel_type)}
+            {cadence ? ` · ${cadence.name}` : ""}
+          </div>
+        </div>
+        <div className="hidden lg:block shrink-0" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink2)", marginRight: 2 }}>
+          {CHANNEL_LABELS[task.channel_type]}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {task.channel_type === "whatsapp" && lead?.phone && (
+            <button onClick={(e) => { e.stopPropagation(); openWhatsApp(lead); }} className="qsx-pa qsx-pa-wa" title="Abrir no ChatApp e copiar o número">
+              <IconWhatsApp size={18} />
+            </button>
+          )}
+          {(task.channel_type === "ligacao_whatsapp" || task.channel_type === "ligacao") && lead?.phone && (
+            <button onClick={(e) => { e.stopPropagation(); startWhatsAppCall(lead.phone); }} className="qsx-pa qsx-pa-wa" title="Ligar no WhatsApp">
+              <IconWhatsApp size={18} />
+            </button>
+          )}
+          {lead && (
+            <button onClick={(e) => { e.stopPropagation(); onOpenLead(lead.id); }} className="qsx-pa" title="Ver informações do lead">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Só o botão do canal da tarefa (item 3). Ligação = via WhatsApp (sem VoIP).
+  function renderChannelAction(task: Task, lead: Lead | undefined) {
+    switch (task.channel_type) {
+      case "ligacao":
+        return lead?.phone ? <button onClick={() => startWhatsAppCall(lead.phone)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Ligar</button> : null;
+      case "ligacao_whatsapp":
+        return lead?.phone ? <button onClick={() => startWhatsAppCall(lead.phone)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Ligar no WhatsApp</button> : null;
+      case "whatsapp":
+        return lead?.phone ? <button onClick={() => openWhatsApp(lead)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Abrir conversa</button> : null;
+      case "email":
+        return lead?.email ? <a href={`mailto:${lead.email}`} className="qsx-btn qsx-btn-green"><ChannelIcon type="email" size={16} />Escrever e-mail</a> : null;
+      case "linkedin":
+        return (
+          <a href={lead?.linkedin_url ? (lead.linkedin_url.startsWith("http") ? lead.linkedin_url : `https://${lead.linkedin_url}`) : `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(lead?.full_name || "")}`} target="_blank" rel="noopener noreferrer" className="qsx-btn qsx-btn-green">
+            <ChannelIcon type="linkedin" size={16} />Abrir LinkedIn
+          </a>
+        );
+      default:
+        return lead ? <button onClick={() => onOpenLead(lead.id)} className="qsx-btn qsx-btn-green">Ver informações</button> : null;
     }
-    return { filled, total: fields.length, missing };
+  }
+
+  function renderHero(task: Task, upNext: Task[]) {
+    const lead = getLeadForTask(task);
+    const cadence = getCadenceForTask(task);
+    const slaAlert = getSlaAlert(lead, task, cadence);
+    const prio = task.priority as PriorityLevel;
+    const temp = computeLeadScore(lead, cadence, getAttemptCount(task) - 1);
+    const isActiveCard = activeTaskId === task.id;
+    const otherSdrs = qsUsers.filter((u) => u.id !== currentUser?.id);
+    const outcomes: { key: string; label: string; tone: "win" | "lose" | "neutral" }[] = [
+      { key: "ganho", label: "Ganho / Agendou", tone: "win" },
+      { key: "sem_interesse", label: "Perdido", tone: "lose" },
+      { key: "atendeu", label: "Pediu retorno", tone: "neutral" },
+      { key: "nao_atendeu", label: "Não atendeu", tone: "neutral" },
+      { key: "caixa_postal", label: "Caixa postal", tone: "neutral" },
+      { key: "numero_errado", label: "Nº errado", tone: "lose" },
+      { key: "desligou", label: "Desligou", tone: "neutral" },
+    ];
+    const pending = pendingResult && pendingResult.taskId === task.id ? pendingResult.result : null;
+
+    return (
+      <div className="qsx-hero mb-2">
+        <div className={`qsx-hero-accent acc-${prio}`} style={task.is_extra ? { background: "var(--blue)" } : undefined} />
+        <div className="qsx-hero-main">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <span className="qsx-eyebrow" style={task.is_extra ? { color: "var(--blue)" } : undefined}>
+              {task.is_extra ? "Atividade extra" : isActiveCard ? "Atendendo agora" : "Próxima atividade"}
+            </span>
+            <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Lead score ${temp.score}/100`}>{temp.emoji} {temp.label}</span>
+            {slaAlert && (
+              <span className="qsx-chip" style={{ background: slaAlert.bg, color: slaAlert.text, animation: slaAlert.pulse ? "pulseRed 1.5s ease-in-out infinite" : undefined }}>
+                {slaAlert.label}
+              </span>
+            )}
+            <div className="ml-auto flex items-center gap-2.5">
+              <span style={{ fontSize: 15, fontWeight: 800, color: "var(--ink2)", fontVariantNumeric: "tabular-nums" }}>
+                {formatTime(task.scheduled_at)}
+              </span>
+              {lead && (
+                <button onClick={() => setTransferOpen((o) => !o)} className={`qsx-icon-sm${transferOpen ? " on" : ""}`} title="Transferir lead para outro SDR" aria-label="Transferir lead">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5" /><path d="M21 3l-7 7" /><path d="M8 21H3v-5" /><path d="M3 21l7-7" /></svg>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <span className={`qsx-chan-ic ${CHANNEL_IC_CLASS[task.channel_type]}`} style={{ width: 56, height: 56, borderRadius: 17 }}>
+              <ChannelIcon type={task.channel_type} size={24} />
+            </span>
+            <div className="min-w-0">
+              {lead ? (
+                <button onClick={() => onOpenLead(lead.id)} className="qsx-name-btn" title="Ver informações do lead">
+                  <h2 className="qsx-hln truncate">{lead.full_name || "Lead"}</h2>
+                </button>
+              ) : (
+                <h2 className="qsx-hln truncate">Lead</h2>
+              )}
+              <div className="qsx-hco truncate">
+                {lead?.company_name || "—"}{lead?.job_title ? ` · ${lead.job_title}` : ""}
+              </div>
+            </div>
+            <div className="ml-auto flex gap-2 shrink-0">
+              <span className={`qsx-chip prio-${prio}`}><span className={`qsx-dot dot-${prio}`} />{PRIORITY_LABELS[prio]}</span>
+              <span className="qsx-chip prio-baixa">{getActivityLabel(task.channel_type)}</span>
+            </div>
+          </div>
+
+          {task.notes && <div className="qsx-hbox">{task.notes}</div>}
+
+          {/* Ações: só o botão do canal (item 3) + pular */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {renderChannelAction(task, lead)}
+            <button
+              onClick={async () => { await skipTask(task.id, "Pulada na fila"); setTasks((prev) => prev.filter((t) => t.id !== task.id)); setActiveTaskId(null); }}
+              className="qsx-btn qsx-btn-ghost"
+              style={{ marginLeft: "auto" }}
+            >
+              <IconSkip />
+              Pular
+            </button>
+          </div>
+
+          {/* Transferir 1 lead pra outro SDR (item 5) */}
+          {transferOpen && lead && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "var(--line2)" }}>
+              <span className="text-[13px] font-semibold" style={{ color: "var(--ink2)" }}>Transferir este lead para:</span>
+              <select value={transferTo} onChange={(e) => setTransferTo(e.target.value)} className="qsx-fchip" style={{ height: 38 }}>
+                <option value="">Escolha um SDR…</option>
+                {otherSdrs.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+              <button onClick={() => handleTransfer(task)} disabled={!transferTo} className="qsx-btn qsx-btn-blue" style={{ height: 38, opacity: transferTo ? 1 : 0.5 }}>Enviar lead</button>
+              <button onClick={() => { setTransferOpen(false); setTransferTo(""); }} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }}>Cancelar</button>
+            </div>
+          )}
+
+          {/* Observações + desfecho (itens 1 e 4) */}
+          <div style={{ borderTop: "1px solid var(--line2)", paddingTop: 14 }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="qsx-side-lab" style={{ margin: 0 }}>Observações da atividade</div>
+              <button onClick={() => handleSaveObs(task.lead_id)} disabled={!obsText.trim() || savingObs} className="text-[12px] font-bold" style={{ color: obsText.trim() ? "#0E7C6A" : "var(--ink3)" }}>
+                {savingObs ? "Salvando…" : "Salvar no Bitrix"}
+              </button>
+            </div>
+            <textarea
+              value={obsText}
+              onChange={(e) => setObsText(e.target.value)}
+              rows={2}
+              placeholder="Anote o que rolou no contato… (vai como resumo para o Bitrix)"
+              className="w-full px-3 py-2 text-sm rounded-xl resize-none"
+              style={{ border: "1px solid var(--line)", background: "#fff", outline: "none", fontFamily: "inherit", color: "var(--ink)" }}
+            />
+
+            <div className="qsx-side-lab" style={{ margin: "12px 0 9px" }}>
+              Como foi o contato? · Tentativa {getAttemptCount(task)}/{MAX_CONTACT_ATTEMPTS}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {outcomes.map((o) => (
+                <button
+                  key={o.key}
+                  onClick={() => {
+                    if (o.key === "ganho") openMeetingGanho(task);
+                    else if (o.key === "atendeu") openExtraFromRetorno(task);
+                    else setPendingResult({ taskId: task.id, result: o.key });
+                  }}
+                  className="qsx-out"
+                  data-tone={o.tone}
+                  data-on={pending === o.key ? "1" : undefined}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {pending && (
+              <div className="mt-3 flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "#FFF7ED", border: "1px solid #FED7AA" }}>
+                <span className="text-[13px]" style={{ color: "var(--ink2)" }}>
+                  Confirmar: <b style={{ color: "var(--ink)" }}>{outcomes.find((o) => o.key === pending)?.label}</b>? {obsText.trim() && <span style={{ color: "var(--ink3)" }}>(a observação vai junto no resumo)</span>}
+                </span>
+                <button onClick={async () => { await handleContactResult(task.id, pending); setPendingResult(null); }} className="qsx-btn qsx-btn-orange" style={{ height: 38, marginLeft: "auto" }}>
+                  Finalizar
+                </button>
+                <button onClick={() => setPendingResult(null)} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }}>
+                  Cancelar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {upNext.length > 0 && !chatDock.isOpen && (
+          <div className="qsx-hero-side">
+            <div className="qsx-side-lab">A seguir · clique para atender</div>
+            {upNext.map((t) => {
+              const l = getLeadForTask(t);
+              const p = t.priority as PriorityLevel;
+              return (
+                <div key={t.id} className="qsx-mini" onClick={() => selectActive(t.id)} title="Atender este lead">
+                  <span className="qsx-mini-time">{formatTime(t.scheduled_at)}</span>
+                  <span className={`qsx-chan-ic ${CHANNEL_IC_CLASS[t.channel_type]}`} style={{ width: 34, height: 34, borderRadius: 10 }}>
+                    <ChannelIcon type={t.channel_type} size={15} />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="qsx-mini-n">{l?.full_name || "Lead"}</div>
+                    <div className="qsx-mini-c">{l?.company_name || "—"}</div>
+                  </div>
+                  <span className={`qsx-dot dot-${p}`} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   }
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen" style={{ background: "#F8F9FA" }}>
+      <div className="flex flex-col items-center justify-center h-full" style={{ background: "var(--bg)" }}>
         <div className="w-8 h-8 border-3 border-gray-200 border-t-orange-500 rounded-full animate-spin mb-4" />
         <p className="text-sm text-gray-400">Carregando atividades...</p>
       </div>
@@ -812,7 +1067,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   }
 
   return (
-    <div className="flex flex-col h-screen" style={{ background: "#F8F9FA" }}>
+    <div className="flex flex-col h-full" style={{ background: "var(--bg)" }}>
       {/* CSS Keyframes */}
       <style>{`
         @keyframes pulseRed { 0%,100% { opacity:1 } 50% { opacity:0.5 } }
@@ -826,6 +1081,124 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         }
         @keyframes toastIn { 0% { opacity: 0; transform: translateY(20px); } 100% { opacity: 1; transform: translateY(0); } }
         @keyframes toastOut { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(20px); } }
+
+        /* ── Design "Execução" (Turis) — usado no Painel de Atividades ── */
+        .qsx-page { max-width: 1400px; margin: 0 auto; }
+        .qsx-greet h2 { font-size: 20px; font-weight: 800; letter-spacing: -.2px; color: var(--ink); margin: 0; }
+        .qsx-sub { font-size: 14px; color: var(--ink2); }
+        .qsx-hl { color: var(--orange); font-weight: 800; }
+
+        .qsx-search { flex: 1; display: flex; align-items: center; gap: 11px; height: 48px; padding: 0 16px; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
+        .qsx-search input { border: 0; outline: 0; background: transparent; flex: 1; font-size: 14.5px; color: var(--ink); font-family: inherit; }
+        .qsx-search input::placeholder { color: var(--ink3); }
+        .qsx-btn { height: 48px; padding: 0 18px; border-radius: 14px; font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px; border: 0; color: #fff; cursor: pointer; white-space: nowrap; transition: filter .15s; }
+        .qsx-btn:hover { filter: brightness(1.06); }
+        .qsx-btn-green { background: var(--green); box-shadow: 0 8px 18px -8px rgba(18,161,138,.6); }
+        .qsx-btn-blue { background: var(--blue); box-shadow: 0 8px 18px -8px rgba(37,99,235,.6); }
+        .qsx-btn-orange { background: var(--orange); box-shadow: 0 8px 18px -8px rgba(245,130,31,.6); }
+        .qsx-btn-ghost { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+        .qsx-btn-ghost:hover { background: var(--line2); filter: none; }
+
+        .qsx-metric { display: flex; flex-direction: column; gap: 7px; min-width: 168px; }
+        .qsx-mtop { display: flex; align-items: center; gap: 7px; }
+        .qsx-mdot { width: 9px; height: 9px; border-radius: 50%; }
+        .qsx-mlab { font-size: 10.5px; font-weight: 800; letter-spacing: .9px; text-transform: uppercase; color: var(--ink3); }
+        .qsx-mnums { margin-left: auto; font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--ink); }
+        .qsx-mnums span { color: var(--ink3); font-weight: 700; }
+        .qsx-bar { height: 7px; border-radius: 999px; background: var(--line2); overflow: hidden; }
+        .qsx-bar i { display: block; height: 100%; border-radius: 999px; }
+        .qsx-pace { display: flex; align-items: center; gap: 9px; padding: 9px 15px; background: #fff; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; color: var(--ink2); font-weight: 600; white-space: nowrap; }
+        .qsx-pace b { color: var(--ink); font-weight: 800; }
+        .qsx-pace .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--line); flex: none; }
+
+        /* Hero — Próxima atividade */
+        .qsx-hero { display: flex; background: #fff; border: 1px solid var(--line); border-radius: 22px; overflow: hidden; box-shadow: 0 18px 40px -30px rgba(23,32,46,.4); }
+        .qsx-hero-accent { width: 6px; flex: none; }
+        .acc-alta { background: var(--red); } .acc-media { background: var(--amber); } .acc-baixa { background: var(--ink3); }
+        .qsx-hero-main { flex: 1; padding: 24px 26px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+        .qsx-eyebrow { font-size: 11px; font-weight: 800; letter-spacing: 1.3px; text-transform: uppercase; color: var(--orange); }
+        .qsx-hln { font-size: 22px; font-weight: 800; letter-spacing: -.3px; margin: 0; color: var(--ink); }
+        .qsx-hco { font-size: 14px; color: var(--ink2); font-weight: 600; margin-top: 2px; }
+        .qsx-hbox { background: #FAFBFC; border: 1px solid var(--line2); border-radius: 15px; padding: 14px 16px; font-size: 14px; color: var(--ink2); line-height: 1.5; }
+        .qsx-hbox b { color: var(--ink); font-weight: 700; }
+        .qsx-hero-side { width: 280px; flex: none; border-left: 1px solid var(--line); padding: 20px; background: #FAFBFC; display: flex; flex-direction: column; gap: 4px; }
+        .qsx-side-lab { font-size: 11px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--ink3); margin-bottom: 8px; }
+        .qsx-mini { display: flex; align-items: center; gap: 11px; padding: 10px; border-radius: 13px; cursor: pointer; }
+        .qsx-mini:hover { background: #fff; box-shadow: 0 2px 10px -4px rgba(23,32,46,.15); }
+        .qsx-mini-time { font-size: 13px; font-weight: 800; color: var(--ink2); width: 42px; font-variant-numeric: tabular-nums; }
+        .qsx-mini-n { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+        .qsx-mini-c { font-size: 12px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* Ícone de canal (redondo colorido) */
+        .qsx-chan-ic { display: flex; align-items: center; justify-content: center; flex: none; }
+        .ic-call { background: rgba(18,161,138,.12); color: var(--green); }
+        .ic-whats { background: rgba(37,187,108,.13); color: #1DA453; }
+        .ic-mail { background: rgba(37,99,235,.11); color: var(--blue); }
+        .ic-pesquisa { background: rgba(79,70,229,.11); color: #4F46E5; }
+        .ic-linkedin { background: rgba(10,102,194,.12); color: #0A66C2; }
+        .ic-social { background: rgba(219,39,119,.10); color: #DB2777; }
+
+        /* Chips de prioridade */
+        .qsx-chip { height: 26px; padding: 0 11px; border-radius: 999px; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+        .prio-alta { background: rgba(229,72,77,.11); color: var(--red); }
+        .prio-media { background: rgba(232,146,11,.13); color: var(--amber); }
+        .prio-baixa { background: var(--line2); color: var(--ink2); }
+        .qsx-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+        .dot-alta { background: var(--red); } .dot-media { background: var(--amber); } .dot-baixa { background: var(--ink3); }
+
+        /* Rótulo de grupo (Manhã / Tarde) */
+        .qsx-glabel { font-size: 11px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--ink3); margin: 20px 2px 10px; display: flex; align-items: center; gap: 9px; }
+        .qsx-glabel:before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .35; }
+
+        /* Pílula da fila */
+        .qsx-pill { display: flex; align-items: center; gap: 15px; min-height: 76px; padding: 0 14px 0 20px; background: #fff; border: 1px solid var(--line); border-radius: 20px; cursor: pointer; transition: box-shadow .16s, border-color .16s, transform .16s; }
+        .qsx-pill:hover { border-color: #d3dae5; box-shadow: 0 14px 30px -20px rgba(23,32,46,.4); transform: translateY(-1px); }
+        .qsx-pill.sel { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+        .qsx-time { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--ink); font-size: 15px; width: 48px; flex: none; }
+        .qsx-lname { font-weight: 700; font-size: 15px; color: var(--ink); }
+        .qsx-pco { font-size: 13px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+        .qsx-pco b { color: var(--ink2); font-weight: 700; }
+        .qsx-pa { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line); background: #fff; color: var(--ink2); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; transition: background .15s; }
+        .qsx-pa:hover { background: var(--line2); }
+        .qsx-pa-wa { background: rgba(18,161,138,.12); color: var(--green); border: 0; }
+        .qsx-pa-wa:hover { background: rgba(18,161,138,.2); }
+        .qsx-pa-go { background: var(--blue); color: #fff; border: 0; box-shadow: 0 8px 16px -8px rgba(37,99,235,.7); }
+        .qsx-pa-go:hover { background: var(--blue-ink); }
+
+        /* Chip de filtro (select estilizado) */
+        .qsx-fchip { height: 36px; padding: 0 12px; border-radius: 999px; background: #fff; border: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink2); cursor: pointer; font-family: inherit; outline: 0; transition: border-color .15s; }
+        .qsx-fchip:hover { border-color: #d5dae2; }
+        .qsx-fchip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+        /* Nome do lead clicável (abre as informações) */
+        .qsx-name-btn { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; min-width: 0; max-width: 100%; }
+        .qsx-name-btn.qsx-lname:hover { color: var(--blue); text-decoration: underline; }
+        .qsx-name-btn:hover .qsx-hln { color: var(--blue); text-decoration: underline; }
+
+        /* Botões de desfecho do contato (no card da próxima atividade) */
+        .qsx-out { height: 34px; padding: 0 12px; border-radius: 10px; font-size: 12.5px; font-weight: 700; border: 1.5px solid var(--line); background: #fff; color: var(--ink2); cursor: pointer; white-space: nowrap; font-family: inherit; transition: background .12s, border-color .12s; }
+        .qsx-out:hover { border-color: #d3dae5; background: var(--line2); }
+        .qsx-out[data-tone="win"] { border-color: rgba(18,161,138,.4); color: #0E7C6A; background: rgba(18,161,138,.06); }
+        .qsx-out[data-tone="lose"] { border-color: rgba(229,72,77,.35); color: var(--red); background: rgba(229,72,77,.05); }
+        .qsx-out[data-on="1"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+        /* Botão pequeno de ícone (ex.: Transferir, ao lado do horário) */
+        .qsx-icon-sm { width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: #fff; color: var(--ink3); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; transition: background .12s, color .12s, border-color .12s; }
+        .qsx-icon-sm:hover { background: var(--line2); color: var(--ink2); }
+        .qsx-icon-sm.on { background: rgba(37,99,235,.10); color: var(--blue); border-color: rgba(37,99,235,.3); }
+
+        /* Coluna de Atividades extras (retornos) — à esquerda, destacada em azul */
+        .qsx-extras-col { width: 300px; flex: none; }
+        .qsx-extras-head { font-size: 11px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--blue); margin: 0 2px 10px; display: flex; align-items: center; gap: 8px; }
+        .qsx-extra-card { background: rgba(37,99,235,.06); border: 1.5px solid rgba(37,99,235,.35); border-radius: 16px; padding: 12px 14px; cursor: pointer; transition: box-shadow .15s, border-color .15s; }
+        .qsx-extra-card:hover { border-color: var(--blue); box-shadow: 0 10px 24px -16px rgba(37,99,235,.6); }
+        .qsx-extra-card.on { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+        @media (max-width: 1100px) { .qsx-extras-col { width: 240px; } }
+
+        /* Fila centralizada — atividades no centro, extras no espaço em branco da esquerda */
+        .qsx-fila-centered { display: grid; grid-template-columns: 1fr auto 1fr; gap: 20px; align-items: start; }
+        .qsx-fila-extras { grid-column: 1; justify-self: end; width: 280px; }
+        .qsx-fila-main { grid-column: 2; width: min(820px, 100%); }
       `}</style>
 
       {/* ══════════════════════════════════════════════════════════════════════
@@ -884,7 +1257,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </span>
           </div>
           <button
-            onClick={() => handleSelectTask(hotLead.task.id)}
+            onClick={() => openWhatsApp(hotLead.lead)}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-white text-red-600 hover:bg-red-50 transition-colors"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -904,973 +1277,288 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══════════════════════════════════════════════════════════════════════
           HEADER SECTION
           ══════════════════════════════════════════════════════════════════════ */}
-      <header className="shrink-0 bg-white border-b border-gray-200">
-        <div className="px-6 pt-4 pb-0">
-          {/* Row 1: Activity count + ratio + META DE HOJE + META DESTE MES */}
-          <div className="flex items-center justify-between mb-3">
-            {/* Left: sentence with bold orange number */}
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-700">
-                Existem{" "}
-                <span className="font-bold" style={{ color: "#F97316" }}>
-                  {TOTAL_SCHEDULED} atividades
-                </span>{" "}
-                agendadas para hoje
-              </span>
-              <span className="text-xs text-gray-400 font-medium ml-2">{TOTAL_DONE_RATIO}</span>
-            </div>
-
-            {/* Right: META DE HOJE + META DESTE MES inline */}
-            <div className="flex items-center gap-6">
-              {/* META DE HOJE */}
-              <div className="flex items-center gap-2">
-                <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
-                  style={{ background: dailyPct >= 100 ? "#10B981" : "#EAB308" }}
-                />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                  Meta de hoje
-                </span>
-                <span className="text-xs font-bold text-gray-700">
-                  {DAILY_DONE}/{DAILY_GOAL}
-                </span>
-                <div className="w-16 h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${dailyPct}%`,
-                      background: dailyPct >= 100 ? "#10B981" : "#EAB308",
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* META DESTE MES */}
-              <div className="flex items-center gap-2">
-                <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
-                  style={{ background: monthlyBeat ? "#10B981" : "#3B82F6" }}
-                />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                  Meta deste m&#234;s
-                </span>
-                <span className="text-xs font-bold" style={{ color: monthlyBeat ? "#059669" : "#1D4ED8" }}>
-                  {MONTHLY_DONE.toLocaleString("pt-BR")}/{MONTHLY_GOAL.toLocaleString("pt-BR")}
-                </span>
-                <div className="w-16 h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${monthlyPct}%`,
-                      background: monthlyBeat ? "#10B981" : "#3B82F6",
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Row 2: Full-width progress bar */}
-          <div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden mb-2">
-            <div
-              className="h-full rounded-full transition-all duration-700"
-              style={{
-                width: `${dailyPct}%`,
-                background: monthlyBeat
-                  ? "linear-gradient(90deg, #10B981, #34D399)"
-                  : "linear-gradient(90deg, #3B82F6, #60A5FA)",
-              }}
-            />
-          </div>
-
-          {/* Row 3: Rhythm info + motivational text + action icons */}
-          <div className="flex items-center justify-between pb-3">
-            <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
-              <span className="font-semibold" style={{ color: dailyPct >= 100 ? "#059669" : dailyPct >= 50 ? "#3B82F6" : "#F97316" }}>
-                {motivationalText}
-              </span>
-              <span className="text-gray-300 mx-0.5">&#183;</span>
-              <span>~{hoursLeft}h{String(minutesLeft).padStart(2, "0")}min restantes</span>
-              <span className="text-gray-300 mx-0.5">&#183;</span>
-              <span>Ritmo: {rhythm.toFixed(1)}/h</span>
-              {monthlyBeat && (
-                <>
-                  <span className="text-gray-300 mx-0.5">&#183;</span>
-                  <span className="text-emerald-600 font-semibold">Meta mensal batida!</span>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* ══════════════════════════════════════════════════════════════════════
-          SEARCH + ACTION BUTTONS (same row)
-          ══════════════════════════════════════════════════════════════════════ */}
-      <div className="shrink-0 bg-white border-b border-gray-200 px-6 py-3">
-        <div className="flex items-center gap-3">
-          {/* Search input */}
-          <div className="relative flex-1">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-              <IconSearch size={15} />
+      <div className="shrink-0 px-6 pt-5 pb-4" style={{ background: "#fff", borderBottom: "1px solid var(--line)" }}>
+        <div className="qsx-page">
+          {/* Saudação */}
+          <div className="qsx-greet flex items-baseline gap-3 flex-wrap">
+            <h2>{greetWord}{firstName ? `, ${firstName}` : ""}</h2>
+            <span className="qsx-sub">
+              Você tem <span className="qsx-hl">{TOTAL_SCHEDULED} atividade{TOTAL_SCHEDULED !== 1 ? "s" : ""}</span> na fila de hoje · <span className="capitalize">{todayLabel}</span>
             </span>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Pesquisar lead, empresa, e-mail ou telefone..."
-              className="w-full pl-9 pr-4 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
-            />
           </div>
 
-          {/* Quick actions */}
-          <button
-            onClick={() => setShowDialer(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90 whitespace-nowrap shrink-0"
-            style={{ background: "#059669" }}
-          >
-            <IconPhoneCall size={14} />
-            Ligação Manual
-          </button>
-          <button
-            onClick={() => setShowExtraTaskModal(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90 whitespace-nowrap shrink-0"
-            style={{ background: "#0147FF" }}
-          >
-            + Atividade Extra
-          </button>
-          <button
-            onClick={() => setShowNewLeadModal(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90 whitespace-nowrap shrink-0"
-            style={{ background: "#F97316" }}
-          >
-            + Cadastrar Lead
-          </button>
+          {/* Comando: busca + ações rápidas */}
+          <div className="flex items-center gap-3 mt-4">
+            <div className="qsx-search">
+              <span style={{ color: "var(--ink3)", display: "flex" }}><IconSearch size={16} /></span>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Pesquisar lead, empresa, e-mail ou telefone…"
+              />
+            </div>
+            <button onClick={() => setShowDialer(true)} className="qsx-btn qsx-btn-green">
+              <IconPhoneCall size={16} />
+              Ligação Manual
+            </button>
+            <button onClick={() => setShowExtraTaskModal(true)} className="qsx-btn qsx-btn-blue">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+              Atividade Extra
+            </button>
+            <button onClick={() => setShowNewLeadModal(true)} className="qsx-btn qsx-btn-orange">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+              Cadastrar Lead
+            </button>
+          </div>
+
+          {/* Contexto: métricas + ritmo */}
+          <div className="flex items-center justify-between gap-5 mt-5 flex-wrap">
+            <div className="flex items-center gap-8">
+              <div className="qsx-metric">
+                <div className="qsx-mtop">
+                  <span className="qsx-mdot" style={{ background: dailyPct >= 100 ? "var(--green)" : "var(--yellow)" }} />
+                  <span className="qsx-mlab">Meta de hoje</span>
+                  <span className="qsx-mnums">{DAILY_DONE}<span>/{DAILY_GOAL}</span></span>
+                </div>
+                <div className="qsx-bar"><i style={{ width: `${dailyPct}%`, background: dailyPct >= 100 ? "var(--green)" : "var(--yellow)" }} /></div>
+              </div>
+              <div className="qsx-metric">
+                <div className="qsx-mtop">
+                  <span className="qsx-mdot" style={{ background: monthlyBeat ? "var(--green)" : "var(--blue)" }} />
+                  <span className="qsx-mlab">Meta do mês</span>
+                  <span className="qsx-mnums">{MONTHLY_DONE.toLocaleString("pt-BR")}<span>/{MONTHLY_GOAL.toLocaleString("pt-BR")}</span></span>
+                </div>
+                <div className="qsx-bar"><i style={{ width: `${monthlyPct}%`, background: monthlyBeat ? "var(--green)" : "var(--blue)" }} /></div>
+              </div>
+            </div>
+            <div className="qsx-pace">
+              <span style={{ color: "var(--orange)", display: "flex" }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+              </span>
+              Ritmo <b>{rhythm.toFixed(1)}/h</b><span className="sep" />faltam <b>{remainingGoal}</b><span className="sep" /><b>~{hoursLeft}h{String(minutesLeft).padStart(2, "0")}</b> restantes
+              {monthlyBeat && <><span className="sep" /><b style={{ color: "var(--green)" }}>Meta mensal batida!</b></>}
+            </div>
+          </div>
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           FILTERS SECTION
           ══════════════════════════════════════════════════════════════════════ */}
-      <div className="shrink-0 bg-white border-b border-gray-200 px-6 py-2.5">
-        <div className="flex items-center gap-2 flex-wrap text-xs">
-          {/* Status dropdown */}
-          <select
-            value={statusFilter || ""}
-            onChange={(e) => setStatusFilter(e.target.value as any || null)}
-            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316]"
-            style={statusFilter ? { borderColor: "#F97316", color: "#F97316", fontWeight: 600 } : {}}
-          >
-            <option value="">Status</option>
-            <option value="extras">Extras ({extraTasks.length})</option>
-            <option value="para_hoje">Para hoje ({todayTasks.length})</option>
-            <option value="atrasadas">Atrasadas ({overdueTasks.length})</option>
-          </select>
-
-          {/* Canal dropdown */}
-          <select
-            value={channelFilter || ""}
-            onChange={(e) => setChannelFilter(e.target.value as any || null)}
-            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316]"
-            style={channelFilter ? { borderColor: "#F97316", color: "#F97316", fontWeight: 600 } : {}}
-          >
-            <option value="">Canal</option>
-            {(["pesquisa", "email", "ligacao", "whatsapp", "linkedin", "instagram", "tiktok", "youtube"] as ChannelType[]).map((ch) => (
-              <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}</option>
-            ))}
-          </select>
-
-          {/* Prioridade dropdown */}
-          <select
-            value={priorityFilter || ""}
-            onChange={(e) => setPriorityFilter(e.target.value as any || null)}
-            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316]"
-            style={priorityFilter ? { borderColor: "#F97316", color: "#F97316", fontWeight: 600 } : {}}
-          >
-            <option value="">Prioridade</option>
-            <option value="alta">Alta</option>
-            <option value="media">Média</option>
-            <option value="baixa">Baixa</option>
-          </select>
-
-          {/* Período dropdown */}
-          <select
-            value={periodFilter || ""}
-            onChange={(e) => setPeriodFilter(e.target.value as any || null)}
-            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316]"
-            style={periodFilter ? { borderColor: "#F97316", color: "#F97316", fontWeight: 600 } : {}}
-          >
-            <option value="">Período</option>
-            <option value="manha">Manhã</option>
-            <option value="tarde">Tarde</option>
-          </select>
-
-          {/* Responsável dropdown (Change 17) */}
-          <select
-            value={ownerFilter || ""}
-            onChange={(e) => setOwnerFilter(e.target.value || null)}
-            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316]"
-            style={ownerFilter ? { borderColor: "#F97316", color: "#F97316", fontWeight: 600 } : {}}
-          >
-            <option value="">Responsável</option>
-            {qsUsers.map((u) => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </select>
-
-          {/* Limpar filtros */}
-          {(statusFilter || channelFilter || priorityFilter || periodFilter || ownerFilter) && (
-            <button
-              onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setPeriodFilter(null); setOwnerFilter(null); }}
-              className="text-xs text-[#F97316] font-medium hover:underline"
+      <div className="shrink-0 px-6 pt-4 pb-1" style={{ background: "var(--bg)" }}>
+        <div className="qsx-page flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-[16px] font-extrabold" style={{ color: "var(--ink)", letterSpacing: "-.1px" }}>Fila de hoje</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={statusFilter || ""}
+              onChange={(e) => setStatusFilter(e.target.value as any || null)}
+              className={`qsx-fchip${statusFilter ? " on" : ""}`}
             >
-              Limpar filtros
-            </button>
-          )}
+              <option value="">Status</option>
+              <option value="extras">Extras ({extraTasks.length})</option>
+              <option value="para_hoje">Para hoje ({todayTasks.length})</option>
+              <option value="atrasadas">Atrasadas ({overdueTasks.length})</option>
+            </select>
+
+            <select
+              value={channelFilter || ""}
+              onChange={(e) => setChannelFilter(e.target.value as any || null)}
+              className={`qsx-fchip${channelFilter ? " on" : ""}`}
+            >
+              <option value="">Canal</option>
+              {(["pesquisa", "email", "ligacao", "ligacao_whatsapp", "whatsapp", "linkedin", "instagram", "tiktok", "youtube"] as ChannelType[]).map((ch) => (
+                <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}</option>
+              ))}
+            </select>
+
+            <select
+              value={priorityFilter || ""}
+              onChange={(e) => setPriorityFilter(e.target.value as any || null)}
+              className={`qsx-fchip${priorityFilter ? " on" : ""}`}
+            >
+              <option value="">Prioridade</option>
+              <option value="alta">Alta</option>
+              <option value="media">Média</option>
+              <option value="baixa">Baixa</option>
+            </select>
+
+            <select
+              value={periodFilter || ""}
+              onChange={(e) => setPeriodFilter(e.target.value as any || null)}
+              className={`qsx-fchip${periodFilter ? " on" : ""}`}
+            >
+              <option value="">Período</option>
+              <option value="manha">Manhã</option>
+              <option value="tarde">Tarde</option>
+            </select>
+
+            <select
+              value={ownerFilter || ""}
+              onChange={(e) => setOwnerFilter(e.target.value || null)}
+              className={`qsx-fchip${ownerFilter ? " on" : ""}`}
+            >
+              <option value="">Responsável</option>
+              {qsUsers.map((u) => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+
+            {(statusFilter || channelFilter || priorityFilter || periodFilter || ownerFilter) && (
+              <button
+                onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setPeriodFilter(null); setOwnerFilter(null); }}
+                className="text-[13px] font-semibold hover:underline"
+                style={{ color: "var(--orange)" }}
+              >
+                Limpar
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           MAIN CONTENT — TASK LIST + EXECUTION VIEW
           ══════════════════════════════════════════════════════════════════════ */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* ── TASK LIST ──────────────────────────────────────────────────── */}
-        <div
-          className="overflow-y-auto"
-          style={{
-            width: selectedTask ? "480px" : "100%",
-            transition: "width 0.2s ease",
-          }}
-        >
-          <div className="bg-white">
-            {/* Results count */}
-            <div className="flex items-center justify-between px-6 py-2 border-b border-gray-100">
-              <span className="text-xs text-gray-400 font-medium">
-                {filteredTasks.length} atividade{filteredTasks.length !== 1 ? "s" : ""}
-              </span>
+      <div className="flex-1 min-h-0 overflow-y-auto" style={{ background: "var(--bg)" }}>
+        <div className="qsx-page px-5 lg:px-6 pt-3 pb-24">
+          {filteredTasks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              {(statusFilter || channelFilter || priorityFilter || periodFilter || search.trim()) ? (
+                <>
+                  <span style={{ color: "var(--ink3)" }}><IconFilter /></span>
+                  <p className="mt-4 text-sm font-medium" style={{ color: "var(--ink2)" }}>Nenhuma atividade com esses filtros.</p>
+                  <button
+                    onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setPeriodFilter(null); setSearch(""); }}
+                    className="mt-4 qsx-btn qsx-btn-orange"
+                  >
+                    Limpar filtros
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-3xl mb-2">🎯</span>
+                  <p className="mt-2 text-sm font-bold" style={{ color: "var(--ink)" }}>Tudo limpo!</p>
+                  <p className="text-xs mt-1" style={{ color: "var(--ink3)" }}>Nenhuma atividade pendente. Cadastre um novo lead para começar.</p>
+                  <button onClick={() => setShowNewLeadModal(true)} className="mt-4 qsx-btn qsx-btn-orange">
+                    + Cadastrar Lead
+                  </button>
+                </>
+              )}
             </div>
+          ) : (() => {
+            const extras = filteredTasks.filter((t) => t.is_extra);
+            const normais = filteredTasks.filter((t) => !t.is_extra);
+            const activeInList = activeTaskId ? filteredTasks.find((t) => t.id === activeTaskId) : undefined;
+            const heroTask = activeInList ?? normais[0];
+            const restNormais = normais.filter((t) => t.id !== heroTask?.id);
+            const extrasCol = extras.filter((t) => t.id !== heroTask?.id);
+            const manha = restNormais.filter((t) => periodOf(t) === "manha");
+            const tarde = restNormais.filter((t) => periodOf(t) === "tarde");
 
-            {filteredTasks.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-20 text-gray-300">
-                {(statusFilter || channelFilter || priorityFilter || periodFilter || search.trim()) ? (
+            const extrasInner = extrasCol.length > 0 ? (
+              <>
+                <div className="qsx-extras-head">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7z" /></svg>
+                  Atividades extras · {extrasCol.length}
+                </div>
+                <div className="flex flex-col gap-2.5">{extrasCol.map(renderExtraPill)}</div>
+              </>
+            ) : null;
+
+            const mainInner = (
+              <>
+                {heroTask ? renderHero(heroTask, restNormais.slice(0, 3)) : (
+                  <div className="text-center py-16 text-sm" style={{ color: "var(--ink3)" }}>
+                    Nenhum lead novo na fila agora.{extrasCol.length > 0 ? " ⚡ Foque nas atividades extras à esquerda." : ""}
+                  </div>
+                )}
+                {manha.length > 0 && (
                   <>
-                    <IconFilter />
-                    <p className="mt-4 text-sm text-gray-500 font-medium">Nenhuma atividade com esses filtros.</p>
-                    <button
-                      onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setPeriodFilter(null); setSearch(""); }}
-                      className="mt-3 px-4 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90"
-                      style={{ background: "#F97316" }}
-                    >
-                      Limpar filtros
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-3xl mb-2">🎯</span>
-                    <p className="mt-2 text-sm text-gray-500 font-medium">Tudo limpo!</p>
-                    <p className="text-xs text-gray-400 mt-1">Nenhuma atividade pendente. Cadastre um novo lead para começar.</p>
-                    <div className="flex items-center gap-2 mt-4">
-                      <button
-                        onClick={() => setShowNewLeadModal(true)}
-                        className="px-4 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90"
-                        style={{ background: "#F97316" }}
-                      >
-                        + Cadastrar Lead
-                      </button>
-                    </div>
+                    <div className="qsx-glabel">Manhã · {manha.length} {manha.length === 1 ? "atividade" : "atividades"}</div>
+                    <div className="flex flex-col gap-2.5">{manha.map(renderPill)}</div>
                   </>
                 )}
+                {tarde.length > 0 && (
+                  <>
+                    <div className="qsx-glabel">Tarde · {tarde.length} {tarde.length === 1 ? "atividade" : "atividades"}</div>
+                    <div className="flex flex-col gap-2.5">{tarde.map(renderPill)}</div>
+                  </>
+                )}
+              </>
+            );
+
+            // ChatApp aberto = sem espaço em branco → extras inline à esquerda.
+            // ChatApp fechado = fila centralizada + extras no espaço em branco da esquerda.
+            return chatDock.isOpen ? (
+              <div className="flex gap-5 items-start">
+                {extrasInner && <div className="qsx-extras-col">{extrasInner}</div>}
+                <div className="flex-1 min-w-0">{mainInner}</div>
               </div>
-            )}
-
-            {filteredTasks.map((task, idx) => {
-              const lead = getLeadForTask(task);
-              const cadence = getCadenceForTask(task);
-              const isSelected = selectedTaskId === task.id;
-              const slaAlert = getSlaAlert(lead, task, cadence);
-              // Tentativas já feitas (0 na primeira tarefa; follow-ups marcam a borda âmbar).
-              const attempts = getAttemptCount(task) - 1;
-
-              // Change 5: Colored left border by contact status
-              const isLevantadaQuente = cadence?.acquisition_channel === "levantada_de_mao" && slaAlert?.pulse;
-              const leftBorderColor = isLevantadaQuente
-                ? "#EF4444"
-                : attempts > 0
-                  ? "#F59E0B"
-                  : "#3B82F6";
-              const leftBorderAnimation = isLevantadaQuente
-                ? "pulseBorderRed 1.5s ease-in-out infinite"
-                : undefined;
-
-              return (
-                <div
-                  key={task.id}
-                  onClick={() => handleSelectTask(task.id)}
-                  onMouseEnter={() => handleMouseEnter(task.id)}
-                  onMouseLeave={handleMouseLeave}
-                  className="group cursor-pointer transition-colors duration-100 hover:bg-gray-50 border-b border-gray-100 relative"
-                  style={{
-                    background: isSelected ? "#FFFBF5" : undefined,
-                    borderLeft: `3px solid ${leftBorderColor}`,
-                    animation: leftBorderAnimation,
-                  }}
-                >
-                  {/* ── Hover Tooltip (Change 1) ── */}
-
-                  {/* Hover tooltip */}
-                  {hoveredTaskId === task.id && lead && (() => {
-                    const isFirst = idx === 0;
-                    return (
-                      <div
-                        className="absolute z-50 bg-gray-900 text-white rounded-lg shadow-xl p-3 text-xs pointer-events-none"
-                        style={{
-                          ...(isFirst ? { top: "100%", marginTop: 8 } : { bottom: "100%", marginBottom: 8 }),
-                          left: "50%",
-                          transform: "translateX(-50%)",
-                          maxWidth: 280,
-                          minWidth: 220,
-                        }}
-                      >
-                        {lead.phone && (
-                          <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <span className="text-gray-400">Tel:</span>
-                            <span>{lead.phone}</span>
-                          </div>
-                        )}
-                        {lead.email && (
-                          <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <span className="text-gray-400">Email:</span>
-                            <span className="truncate max-w-[180px]">{lead.email}</span>
-                          </div>
-                        )}
-                        <div className="mb-1.5">
-                          <span className="text-gray-400">Empresa:</span>{" "}
-                          <span>{lead.company_name || "--"}</span>
-                          {lead.job_title && <span className="text-gray-400"> · {lead.job_title}</span>}
-                        </div>
-                        <div className="text-gray-400">
-                          Há {getDaysInFunnel(lead)} dias no funil
-                        </div>
-                        <div
-                          style={{
-                            position: "absolute",
-                            ...(isFirst ? { top: -6 } : { bottom: -6 }),
-                            left: "50%",
-                            transform: "translateX(-50%)",
-                            width: 0, height: 0,
-                            borderLeft: "6px solid transparent",
-                            borderRight: "6px solid transparent",
-                            ...(isFirst ? { borderBottom: "6px solid #111827" } : { borderTop: "6px solid #111827" }),
-                          }}
-                        />
-                      </div>
-                    );
-                  })()}
-
-                  {/* ── Simplified Card Layout (Change 4) ── */}
-                  <div className="flex items-center gap-4 px-6 py-3">
-                    {/* Channel icon — colored by channel */}
-                    <div
-                      className="shrink-0 flex items-center justify-center rounded-xl"
-                      style={{ width: 48, height: 48, background: CHANNEL_COLORS[task.channel_type].bg, color: CHANNEL_COLORS[task.channel_type].fg }}
-                    >
-                      <ChannelIcon type={task.channel_type} size={20} />
-                    </div>
-
-                    {/* Center content - 3 essential lines */}
-                    <div className="flex-1 min-w-0">
-                      {/* Line 1: Lead Name . Company  [SLA badge] [Ligar button] */}
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-sm font-semibold text-gray-900 truncate">
-                          {lead?.full_name || "Lead desconhecido"}
-                        </span>
-                        {lead?.company_name && (
-                          <>
-                            <span className="text-gray-300">&middot;</span>
-                            <span className="text-xs text-gray-500 truncate">{lead.company_name}</span>
-                          </>
-                        )}
-                        <div className="flex items-center gap-1.5 ml-auto shrink-0">
-                          {slaAlert && (
-                            <span
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
-                              style={{
-                                background: slaAlert.bg,
-                                color: slaAlert.text,
-                                animation: slaAlert.pulse ? "pulseRed 1.5s ease-in-out infinite" : undefined,
-                              }}
-                            >
-                              {slaAlert.label}
-                            </span>
-                          )}
-                          {lead?.phone && (
-                            <a
-                              href={`tel:${lead.phone.replace(/\D/g, "")}`}
-                              onClick={(e) => { e.stopPropagation(); handleSelectTask(task.id); }}
-                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-white transition-all hover:opacity-90"
-                              style={{ background: "#059669" }}
-                              title={`Ligar para ${lead.phone}`}
-                            >
-                              <IconPhoneCall size={12} />
-                              Ligar
-                            </a>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Line 2: Activity type bold . Tentativa X/5 */}
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[13px] font-bold text-gray-800">
-                          {getActivityLabel(task.channel_type, cadence?.name)}
-                        </span>
-                        <span className="text-gray-300">&middot;</span>
-                        <span
-                          className="text-[11px] font-medium"
-                          style={{ color: attempts >= MAX_CONTACT_ATTEMPTS ? "#DC2626" : "#6B7280" }}
-                        >
-                          Tentativa {attempts}/{MAX_CONTACT_ATTEMPTS}
-                        </span>
-                      </div>
-
-                      {/* Line 3: Chegou em + tempo espera + Cadência */}
-                      <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                        {lead?.arrived_at && (
-                          <span className="font-medium">
-                            Chegou {formatShortDate(lead.arrived_at)} às {formatTime(lead.arrived_at)}
-                          </span>
-                        )}
-                        {lead?.arrived_at && (() => {
-                          const waitMin = Math.floor((Date.now() - new Date(lead.arrived_at).getTime()) / 60000);
-                          const waitColor = waitMin > 30 ? "#DC2626" : waitMin > 10 ? "#D97706" : "#059669";
-                          const waitLabel = waitMin >= 60 ? `${Math.floor(waitMin/60)}h${waitMin%60}min em espera` : `${waitMin}min em espera`;
-                          return (
-                            <>
-                              <span className="text-gray-300">&middot;</span>
-                              <span className="font-semibold" style={{ color: waitColor }}>{waitLabel}</span>
-                            </>
-                          );
-                        })()}
-                        {cadence && (
-                          <>
-                            <span className="text-gray-300">&middot;</span>
-                            <span>{ACQUISITION_LABELS[cadence.acquisition_channel]}</span>
-                          </>
-                        )}
-                        {cadence && (
-                          <>
-                            <span className="text-gray-300">&middot;</span>
-                            <span className="truncate max-w-[160px]">{cadence.name}</span>
-                          </>
-                        )}
-                        {task.is_extra && (
-                          <>
-                            <span className="text-gray-300">&middot;</span>
-                            <span className="text-green-600 font-semibold">Extra</span>
-                          </>
-                        )}
-                        <span className="text-gray-300">&middot;</span>
-                        <div className="flex items-center gap-0.5">
-                          {lead?.email && <span className="text-gray-400" title="Email"><IconEmail size={13} /></span>}
-                          {lead?.phone && <span className="text-gray-400" title="Telefone"><IconPhone size={13} /></span>}
-                          {lead?.linkedin_url && <span className="text-gray-400" title="LinkedIn"><IconLinkedIn size={13} /></span>}
-                        </div>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleSelectTask(task.id); }}
-                          className="ml-auto text-[11px] text-gray-400 hover:text-blue-600 hover:underline transition-colors"
-                        >
-                          Ver detalhes
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+            ) : (
+              <div className="qsx-fila-centered">
+                {extrasInner && <div className="qsx-fila-extras">{extrasInner}</div>}
+                <div className="qsx-fila-main">{mainInner}</div>
+              </div>
+            );
+          })()}
         </div>
-
-        {/* ── EXECUTION VIEW (split panel) ──────────────────────────────── */}
-        {selectedTask && selectedLead && (
-          <div
-            className="flex-1 border-l border-gray-200 overflow-y-auto bg-white"
-            style={{ minWidth: 480 }}
-          >
-            {/* Execution header */}
-            <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center"
-                  style={{ background: "#F3F4F6", color: "#6B7280" }}
-                >
-                  <ChannelIcon type={selectedTask.channel_type} size={20} />
-                </div>
-                <div>
-                  <h2 className="text-sm font-bold text-gray-900">
-                    {getActivityLabel(selectedTask.channel_type)}
-                  </h2>
-                  <p className="text-xs text-gray-500">
-                    {selectedLead.full_name} &#183; {selectedLead.company_name}
-                  </p>
-                </div>
+      </div>
+      {/* ══ MODAL AGENDAMENTO (ao dar Ganho) ════════════════════════════════ */}
+      {meetingFor && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !savingMeeting && setMeetingFor(null)} />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4" style={{ background: "var(--green)" }}>
+              <div className="text-white">
+                <p className="text-sm font-bold leading-tight">Agendar reunião — Ganho</p>
+                <p className="text-[11px] opacity-90 leading-tight">{meetingFor.leadName}</p>
               </div>
-              <button
-                onClick={handleCloseExecution}
-                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"
-              >
-                <IconClose />
+              <button onClick={() => setMeetingFor(null)} className="text-white/90 hover:text-white" aria-label="Fechar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
               </button>
             </div>
-
-            <div className="p-6 space-y-6">
-              {/* Split: Lead Info + Activity */}
-              <div className="grid grid-cols-2 gap-6">
-                {/* LEFT: Lead Info */}
-                <div className="space-y-4">
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                    Informa&#231;&#245;es do Lead
-                  </h3>
-
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Nome</label>
-                      <p className="text-sm font-semibold text-gray-900 mt-0.5">
-                        {selectedLead.full_name}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">E-mail</label>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-sm text-gray-700">{selectedLead.email || "--"}</p>
-                        {selectedLead.email && (
-                          <button
-                            onClick={() => handleCopy(selectedLead.email!, "email")}
-                            className="p-1 rounded hover:bg-gray-100 text-gray-400 transition-colors"
-                            title="Copiar e-mail"
-                          >
-                            {copiedField === "email" ? <IconCheck /> : <IconCopy />}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Telefone</label>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-sm text-gray-700">{selectedLead.phone || "--"}</p>
-                        {selectedLead.phone && (
-                          <button
-                            onClick={() => handleCopy(selectedLead.phone!, "phone")}
-                            className="p-1 rounded hover:bg-gray-100 text-gray-400 transition-colors"
-                            title="Copiar telefone"
-                          >
-                            {copiedField === "phone" ? <IconCheck /> : <IconCopy />}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Departamento</label>
-                      <p className="text-sm text-gray-700 mt-0.5">{selectedLead.department || "--"}</p>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Cargo</label>
-                      <p className="text-sm text-gray-700 mt-0.5">{selectedLead.job_title || "--"}</p>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Empresa</label>
-                      <p className="text-sm text-gray-700 mt-0.5">{selectedLead.company_name || "--"}</p>
-                    </div>
-
-                    <button
-                      onClick={() => onOpenLead(selectedLead.id)}
-                      className="mt-2 flex items-center gap-1.5 text-xs font-medium transition-colors"
-                      style={{ color: "#0147FF" }}
-                    >
-                      Ver perfil completo
-                      <IconChevronRight />
-                    </button>
-                  </div>
-                </div>
-
-                {/* RIGHT: Activity details */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                      Detalhes da Atividade
-                    </h3>
-                    <span className="text-[11px] font-mono font-semibold text-gray-400 tabular-nums" title="Tempo nesta atividade">
-                      {String(Math.floor(timerSeconds / 60)).padStart(2, "0")}:{String(timerSeconds % 60).padStart(2, "0")}
-                    </span>
-                  </div>
-
-                  {/* Ações diretas */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {selectedLead.phone && (
-                      <button
-                        onClick={() => alert(`Ligando para ${selectedLead.phone}...`)}
-                        className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
-                        style={{ background: "#059669" }}
-                      >
-                        <IconPhoneCall size={16} />
-                        Ligar ({selectedLead.phone})
-                      </button>
-                    )}
-                    {selectedLead.phone && (
-                      <a
-                        href={`https://wa.me/55${selectedLead.phone.replace(/\D/g, "")}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
-                        style={{ background: "#25D366" }}
-                      >
-                        <IconWhatsApp size={16} />
-                        WhatsApp
-                      </a>
-                    )}
-                    {selectedLead.email && (
-                      <a
-                        href={`mailto:${selectedLead.email}`}
-                        className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-all"
-                      >
-                        <IconEmail size={16} />
-                        E-mail
-                      </a>
-                    )}
-                  </div>
-
-                  {/* Resultado do contato — clicking finalizes activity (Change 1) */}
-                  <div
-                    style={{
-                      animation: flashResult === "green" ? "flashGreen 0.4s ease-out" : flashResult === "gray" ? "flashGray 0.2s ease-out" : undefined,
-                    }}
-                    className="rounded-xl p-4 border border-gray-100"
-                  >
-                    <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide mb-3 block">
-                      Resultado do contato · Tentativa {getAttemptCount(selectedTask)}/{MAX_CONTACT_ATTEMPTS}
-                      <span className="ml-2 text-[10px] font-normal text-gray-300">(finaliza atividade)</span>
-                    </label>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      {/* Ganho / Agendou */}
-                      <button
-                        onClick={() => setPendingResult({ taskId: selectedTask.id, result: "ganho" })}
-                        className="flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 hover:scale-[1.02]"
-                        style={{ background: "#059669", boxShadow: "0 2px 8px rgba(5,150,105,0.3)" }}
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                        Ganho / Agendou
-                      </button>
-                      {/* Sem interesse = perdido */}
-                      <button
-                        onClick={() => setPendingResult({ taskId: selectedTask.id, result: "sem_interesse" })}
-                        className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
-                        style={{ background: "#DC2626" }}
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                        Sem interesse
-                      </button>
-                      {/* Separador */}
-                      <div className="w-full border-t border-gray-100 my-1" />
-                      {/* Atendeu (mantém em prospecção) */}
-                      <button
-                        onClick={() => setPendingResult({ taskId: selectedTask.id, result: "atendeu" })}
-                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-gray-700 border-2 border-gray-200 bg-white hover:bg-gray-50 transition-all"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                        Pediu retorno
-                      </button>
-                      <button
-                        onClick={() => setPendingResult({ taskId: selectedTask.id, result: "nao_atendeu" })}
-                        className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold text-gray-700 border-2 border-gray-200 bg-white hover:bg-gray-50 hover:border-gray-300 transition-all"
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                        N&#227;o atendeu
-                      </button>
-                      <button
-                        onClick={() => setPendingResult({ taskId: selectedTask.id, result: "caixa_postal" })}
-                        className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold text-gray-700 border-2 border-gray-200 bg-white hover:bg-gray-50 hover:border-gray-300 transition-all"
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 12h7l2 3h2l2-3h7"/></svg>
-                        Caixa postal
-                      </button>
-                      <button
-                        onClick={() => setPendingResult({ taskId: selectedTask.id, result: "numero_errado" })}
-                        className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
-                        style={{ background: "#DC2626" }}
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                        N&#186; errado
-                      </button>
-                      <button
-                        onClick={() => setPendingResult({ taskId: selectedTask.id, result: "desligou" })}
-                        className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
-                        style={{ background: "#EA580C" }}
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07"/><path d="M1 1l22 22"/><path d="M4.22 4.22A19.79 19.79 0 0 0 2.12 12.67 2 2 0 0 0 4.11 15h3a2 2 0 0 0 2-1.72"/></svg>
-                        Desligou
-                      </button>
-                    </div>
-
-                    {/* Botão Finalizar Atividade — aparece após selecionar resultado */}
-                    {pendingResult && pendingResult.taskId === selectedTask.id && (
-                      <div className="mt-3 p-3 rounded-xl border-2 border-orange-200 bg-orange-50">
-                        <p className="text-sm text-gray-700 mb-2">
-                          Resultado selecionado: <strong>{
-                            pendingResult.result === "ganho" ? "Ganho / Agendou" :
-                            pendingResult.result === "sem_interesse" ? "Sem interesse" :
-                            pendingResult.result === "atendeu" ? "Pediu retorno" :
-                            pendingResult.result === "nao_atendeu" ? "Não atendeu" :
-                            pendingResult.result === "caixa_postal" ? "Caixa postal" :
-                            pendingResult.result === "numero_errado" ? "Nº errado" :
-                            "Desligou"
-                          }</strong>
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={async () => {
-                              const { taskId, result } = pendingResult;
-                              // Todo o roteamento de desfecho (ganho/perdido/follow-up) mora
-                              // em handleContactResult — fonte única de verdade do FUP.
-                              await handleContactResult(taskId, result);
-                              setPendingResult(null);
-                            }}
-                            className="flex-1 py-2.5 rounded-lg text-sm font-bold text-white"
-                            style={{ background: "#F97316" }}
-                          >
-                            Finalizar Atividade
-                          </button>
-                          <button
-                            onClick={() => setPendingResult(null)}
-                            className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-500 border border-gray-200 hover:bg-gray-50"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Quick search buttons */}
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide mb-2 block">
-                      Pesquisa r&#225;pida
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={selectedLead.linkedin_url
-                          ? `https://${selectedLead.linkedin_url}`
-                          : `https://linkedin.com/search/results/all/?keywords=${encodeURIComponent(selectedLead.full_name || "")}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-gray-200 hover:bg-gray-50 transition-colors text-gray-700"
-                      >
-                        <span style={{ color: "#0A66C2" }}><IconLinkedIn size={16} /></span>
-                        LinkedIn
-                      </a>
-                      <a
-                        href={`https://google.com/search?q=${encodeURIComponent((selectedLead.full_name || "") + " " + (selectedLead.company_name || ""))}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-gray-200 hover:bg-gray-50 transition-colors text-gray-700"
-                      >
-                        <IconGoogle />
-                        Google
-                      </a>
-                      {selectedLead.email && (
-                        <a
-                          href={`mailto:${selectedLead.email}`}
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-gray-200 hover:bg-gray-50 transition-colors text-gray-700"
-                        >
-                          <span style={{ color: "#D97706" }}><IconEmail size={16} /></span>
-                          E-mail
-                        </a>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Lead data completeness */}
-                  {(() => {
-                    const comp = getLeadCompleteness(selectedLead);
-                    const pct = Math.round((comp.filled / comp.total) * 100);
-                    return (
-                      <div>
-                        <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide mb-2 block">
-                          Dados do lead &#183; {comp.filled}/{comp.total} preenchidos
-                        </label>
-                        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden mb-2">
-                          <div
-                            className="h-full rounded-full transition-all"
-                            style={{
-                              width: `${pct}%`,
-                              background: pct === 100 ? "#059669" : pct >= 75 ? "#0147FF" : "#D97706",
-                            }}
-                          />
-                        </div>
-                        {comp.missing.length > 0 && (
-                          <div className="flex flex-wrap gap-1">
-                            {comp.missing.map((m) => (
-                              <span key={m} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-600 border border-amber-200">
-                                {m}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {/* Cadence info */}
-                  {selectedCadence && (
-                    <div>
-                      <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide mb-1 block">Cad&#234;ncia</label>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-700">{selectedCadence.name}</span>
-                        <span
-                          className="px-2 py-0.5 rounded-full text-[10px] font-medium border"
-                          style={{
-                            background: selectedCadence.acquisition_channel === "levantada_de_mao" ? "#FFF7ED" : "#F0FDF4",
-                            color: selectedCadence.acquisition_channel === "levantada_de_mao" ? "#EA580C" : "#15803D",
-                            borderColor: selectedCadence.acquisition_channel === "levantada_de_mao" ? "#FDBA74" : "#BBF7D0",
-                          }}
-                        >
-                          {ACQUISITION_LABELS[selectedCadence.acquisition_channel]}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Script da Atividade */}
-              <div className="bg-white border border-gray-100 rounded-xl shadow-none">
-                <button
-                  onClick={() => setScriptExpanded(!scriptExpanded)}
-                  className="w-full flex items-center justify-between px-4 py-3 text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F97316" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                      <line x1="16" y1="13" x2="8" y2="13" />
-                      <line x1="16" y1="17" x2="8" y2="17" />
-                    </svg>
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                      Script da Atividade
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-50 text-[#F97316] border border-orange-200">
-                      {CHANNEL_LABELS[selectedTask.channel_type]}
-                    </span>
-                  </div>
-                  <svg
-                    width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                    className={`text-gray-400 transition-transform duration-200 ${scriptExpanded ? "rotate-180" : ""}`}
-                  >
-                    <path d="m6 9 6 6 6-6" />
-                  </svg>
-                </button>
-                {scriptExpanded && (
-                  <div className="px-4 pb-4">
-                    {loadedScript && (
-                      <div className="mb-2">
-                        <span className="text-[10px] text-green-600 font-medium uppercase tracking-wide">Script da cadência</span>
-                      </div>
-                    )}
-                    <pre className="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed bg-[#F8F9FA] rounded-lg p-4 border border-gray-100 font-sans">
-                      {loadedScript || getScript(selectedTask.channel_type, selectedLead)}
-                    </pre>
-                    <button
-                      onClick={() => handleCopy(loadedScript || getScript(selectedTask.channel_type, selectedLead), "script")}
-                      className="mt-2 flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors"
-                    >
-                      {copiedField === "script" ? <IconCheck /> : <IconCopy />}
-                      {copiedField === "script" ? "Copiado!" : "Copiar script"}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Quick tags for notes (Change 3) */}
+            <div className="p-5 space-y-3">
               <div>
-                <label className="text-[10px] text-gray-400 font-medium uppercase tracking-wide mb-2 block">
-                  Anota&#231;&#245;es da atividade
-                </label>
-                <div className="flex items-center gap-1.5 flex-wrap mb-2">
-                  {["Interessado", "Pediu retorno", "Sem interesse", "Enviar proposta", "Agendar reuni\u00e3o", "Ocupado", "Ligar depois"].map((tag) => (
-                    <button
-                      key={tag}
-                      onClick={() => toggleTag(tag)}
-                      className="px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150"
-                      style={
-                        selectedTags.includes(tag)
-                          ? { background: "#F97316", color: "#fff", border: "1px solid #F97316" }
-                          : { background: "#F9FAFB", color: "#6B7280", border: "1px solid #E5E7EB" }
-                      }
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-                {!showNoteField ? (
-                  <button
-                    onClick={() => setShowNoteField(true)}
-                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-1.5"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    Adicionar observa&#231;&#227;o...
-                  </button>
-                ) : (
-                  <textarea
-                    value={executionNotes}
-                    onChange={(e) => setExecutionNotes(e.target.value)}
-                    placeholder="Registre observa&#231;&#245;es sobre essa atividade..."
-                    className="w-full h-24 px-4 py-3 text-sm rounded-xl border border-gray-200 bg-gray-50 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none transition-all"
-                    autoFocus
-                  />
-                )}
+                <label className="text-xs font-medium text-gray-500 block mb-1">Quem fez o agendamento *</label>
+                <select value={meeting.agendadoPor} onChange={(e) => setMeeting((m) => ({ ...m, agendadoPor: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400">
+                  <option value="">Selecione...</option>
+                  {AGENDADORES.map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
               </div>
-
-              {/* Action buttons — only Pular (Change 1: removed "Atividade Executada") */}
-              <div className="flex items-center gap-3 pt-2">
-                {!showSkipReason ? (
-                  <button
-                    onClick={() => setShowSkipReason(true)}
-                    className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-all duration-150"
-                  >
-                    <IconSkip />
-                    Pular atividade
-                  </button>
-                ) : (
-                  /* Skip reason inline (Change 4) */
-                  <div className="flex-1">
-                    <p className="text-xs font-medium text-gray-500 mb-2">Por que est&#225; pulando?</p>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {["Aguardando retorno", "Hor\u00e1rio inadequado", "Priorizar outro", "Outro"].map((reason) => (
-                        <button
-                          key={reason}
-                          onClick={() => handleSkipWithReason(reason)}
-                          className="px-3.5 py-2 rounded-lg text-xs font-medium text-gray-700 border border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-gray-300 transition-all"
-                        >
-                          {reason}
-                        </button>
-                      ))}
-                      <button
-                        onClick={() => setShowSkipReason(false)}
-                        className="px-2 py-2 rounded-lg text-xs text-gray-400 hover:text-gray-600 transition-colors"
-                      >
-                        <IconClose />
-                      </button>
-                    </div>
-                  </div>
-                )}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">E-mail do cliente</label>
+                <input type="email" value={meeting.emailCliente} onChange={(e) => setMeeting((m) => ({ ...m, emailCliente: e.target.value }))} placeholder="email@cliente.com" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400" />
               </div>
-
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Data do agendamento</label>
+                <input type="date" value={meeting.dataAgendamento} onChange={(e) => setMeeting((m) => ({ ...m, dataAgendamento: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Responsável pela reunião *</label>
+                <select value={meeting.responsavel} onChange={(e) => setMeeting((m) => ({ ...m, responsavel: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400">
+                  <option value="">Selecione...</option>
+                  {RESPONSAVEIS_REUNIAO.map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Data e hora da reunião (Google Meet) *</label>
+                <input type="datetime-local" value={meeting.dataHora} onChange={(e) => setMeeting((m) => ({ ...m, dataHora: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Observações da atividade</label>
+                <textarea value={obsText} onChange={(e) => setObsText(e.target.value)} rows={2} placeholder="Anotações do contato — vão junto para o Bitrix" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400 resize-none" />
+              </div>
+            </div>
+            <div className="flex gap-2 px-5 pb-5">
+              <button onClick={() => setMeetingFor(null)} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
+              <button onClick={handleConfirmMeeting} disabled={savingMeeting || !meeting.agendadoPor || !meeting.responsavel || !meeting.dataHora} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
+                {savingMeeting ? "Salvando..." : "Confirmar ganho"}
+              </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ══ MODAL LIGAÇÃO MANUAL ═════════════════════════════════════════════ */}
       {showDialer && (
@@ -1883,7 +1571,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </button>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1">Número de telefone</label>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Número (WhatsApp)</label>
               <input
                 type="tel"
                 value={dialNumber}
@@ -1893,15 +1581,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 autoFocus
               />
             </div>
-            <a
-              href={dialNumber.trim() ? `tel:${dialNumber.replace(/\D/g, "")}` : "#"}
-              onClick={() => { if (dialNumber.trim()) { setShowDialer(false); setDialNumber(""); } }}
-              className={`mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-semibold text-white transition-all ${dialNumber.trim() ? "hover:opacity-90" : "opacity-50 pointer-events-none"}`}
-              style={{ background: "#059669" }}
+            <button
+              onClick={() => { if (dialNumber.trim()) { startWhatsAppCall(dialNumber); setShowDialer(false); setDialNumber(""); } }}
+              disabled={!dialNumber.trim()}
+              className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
+              style={{ background: "#12A18A" }}
             >
-              <IconPhoneCall size={18} />
-              Ligar
-            </a>
+              <IconWhatsApp size={18} />
+              Ligar no WhatsApp
+            </button>
           </div>
         </div>
       )}
@@ -1911,8 +1599,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-bold text-gray-900">Atividade Extra</h2>
-              <button onClick={() => setShowExtraTaskModal(false)} className="text-gray-400 hover:text-gray-600">
+              <h2 className="text-base font-bold text-gray-900">{extraFromTaskId ? "Agendar retorno" : "Atividade Extra"}</h2>
+              <button onClick={() => { setShowExtraTaskModal(false); setExtraFromTaskId(null); }} className="text-gray-400 hover:text-gray-600">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
             </div>
@@ -1966,6 +1654,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400"
                 >
                   <option value="ligacao">Fazer Ligação</option>
+                  <option value="ligacao_whatsapp">Ligar no WhatsApp</option>
                   <option value="whatsapp">Enviar WhatsApp</option>
                   <option value="email">Enviar E-mail</option>
                   <option value="linkedin">Contato pelo LinkedIn</option>
@@ -2005,39 +1694,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </div>
             <div className="flex items-center gap-3 mt-5">
               <button
-                onClick={async () => {
-                  if (!extraTask.lead_id || !extraTask.date) return;
-                  setSavingExtra(true);
-                  const [h, m] = extraTask.time.split(":").map(Number);
-                  const scheduled = new Date(extraTask.date);
-                  scheduled.setHours(h, m, 0, 0);
-                  const lead = leads.find(l => l.id === extraTask.lead_id);
-                  const { data } = await supabase.from("qs_tasks").insert({
-                    lead_id: extraTask.lead_id,
-                    cadence_id: lead?.cadence_id || null,
-                    owner_id: currentUser?.id || null,
-                    channel_type: extraTask.channel_type,
-                    priority: "alta",
-                    scheduled_at: scheduled.toISOString(),
-                    status: "pendente",
-                    is_extra: true,
-                    notes: extraTask.notes || null,
-                  }).select().single();
-                  setSavingExtra(false);
-                  if (data) {
-                    setTasks(prev => [...prev, data as Task]);
-                    setShowExtraTaskModal(false);
-                    setExtraTask({ lead_id: "", channel_type: "ligacao", date: "", time: "09:00", notes: "", _searchText: "" });
-                  }
-                }}
+                onClick={handleSaveExtra}
                 disabled={savingExtra || !extraTask.lead_id || !extraTask.date}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-                style={{ background: "#0147FF" }}
+                style={{ background: "#2563EB" }}
               >
                 {savingExtra ? "Salvando..." : "Agendar Atividade"}
               </button>
               <button
-                onClick={() => setShowExtraTaskModal(false)}
+                onClick={() => { setShowExtraTaskModal(false); setExtraFromTaskId(null); }}
                 className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
               >
                 Cancelar

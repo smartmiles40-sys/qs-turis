@@ -55,10 +55,16 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
   // ── Handover state ──
   const [showHandover, setShowHandover] = useState(false);
-  const [handoverCloserId, setHandoverCloserId] = useState("");
+  const [handoverCloserId, setHandoverCloserId] = useState(""); // destino
   const [handoverBriefing, setHandoverBriefing] = useState("");
   const [handoverSaving, setHandoverSaving] = useState(false);
   const [handoverError, setHandoverError] = useState<string | null>(null);
+  // Item 6 — handover por quantidade (admin): tira N leads de um SDR e manda pra outro
+  const [handoverMode, setHandoverMode] = useState<"selecao" | "quantidade">("selecao");
+  const [handoverFromId, setHandoverFromId] = useState("");
+  const [handoverQty, setHandoverQty] = useState("10");
+  const [handoverAge, setHandoverAge] = useState<"novos" | "antigos">("novos");
+  const isHandoverAdmin = currentUser?.role === "admin" || currentUser?.role === "gestor";
 
   // ── WhatsApp modal state ──
   const [waLead, setWaLead] = useState<{ id: string; name: string | null; phone: string | null } | null>(null);
@@ -187,6 +193,48 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     } catch (err) {
       console.warn("Erro ao realizar handover:", err);
       setHandoverError("Não foi possível realizar o handover. Verifique os dados e tente novamente.");
+    } finally {
+      setHandoverSaving(false);
+    }
+  }
+
+  // ── Handover por quantidade (item 6): tira N leads de um SDR e manda pra outro ──
+  const handoverPoolSize = useMemo(
+    () => leads.filter((l) => l.owner_id === handoverFromId && l.status !== "ganho" && l.status !== "perdido").length,
+    [leads, handoverFromId]
+  );
+
+  async function handleHandoverQuantity() {
+    const qty = parseInt(handoverQty, 10);
+    if (!handoverFromId || !handoverCloserId || !qty || qty < 1) return;
+    if (handoverFromId === handoverCloserId) { setHandoverError("Origem e destino devem ser SDRs diferentes."); return; }
+    setHandoverSaving(true);
+    setHandoverError(null);
+    try {
+      // leads ativos do SDR de origem (ignora ganhos/perdidos), ordenados por chegada
+      const pool = leads
+        .filter((l) => l.owner_id === handoverFromId && l.status !== "ganho" && l.status !== "perdido")
+        .sort((a, b) => {
+          const ta = new Date(a.arrived_at || a.created_at).getTime();
+          const tb = new Date(b.arrived_at || b.created_at).getTime();
+          return handoverAge === "novos" ? tb - ta : ta - tb;
+        })
+        .slice(0, qty);
+      if (pool.length === 0) { setHandoverError("Esse SDR não tem leads ativos para transferir."); setHandoverSaving(false); return; }
+      const ids = pool.map((l) => l.id);
+      const briefing = handoverBriefing.trim() || `Handover de ${pool.length} lead(s) — ${handoverAge === "novos" ? "mais novos" : "mais antigos"}`;
+      const rows = ids.map((leadId) => ({ lead_id: leadId, from_user_id: handoverFromId, to_user_id: handoverCloserId, briefing }));
+      const { error: hErr } = await supabase.from("qs_handovers").insert(rows);
+      if (hErr) throw hErr;
+      const { error: lErr } = await supabase.from("qs_leads").update({ owner_id: handoverCloserId }).in("id", ids);
+      if (lErr) throw lErr;
+      await supabase.from("qs_tasks").update({ owner_id: handoverCloserId }).in("lead_id", ids).in("status", ["pendente", "atrasada"]);
+      await fetchLeads();
+      setShowHandover(false);
+      setHandoverCloserId(""); setHandoverBriefing(""); setHandoverFromId(""); setHandoverQty("10");
+    } catch (err) {
+      console.warn("Erro no handover por quantidade:", err);
+      setHandoverError("Não foi possível transferir os leads. Tente novamente.");
     } finally {
       setHandoverSaving(false);
     }
@@ -920,30 +968,79 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             onClick={() => !handoverSaving && setShowHandover(false)}
           />
           <div className="relative bg-white rounded-xl border border-gray-100 shadow-xl w-full max-w-md mx-4 p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-1">Realizar Handover</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              Passar {selectedIds.size} lead{selectedIds.size !== 1 ? "s" : ""} selecionado{selectedIds.size !== 1 ? "s" : ""} para um closer.
-            </p>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Closer *</label>
-                <select
-                  value={handoverCloserId}
-                  onChange={(e) => setHandoverCloserId(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400"
-                >
-                  <option value="">Selecione um closer...</option>
-                  {users.filter((u) => u.role === "closer" && u.is_active).map((u) => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
-                  ))}
-                </select>
+            <h2 className="text-lg font-bold text-gray-900 mb-1">Handover de leads</h2>
+
+            {isHandoverAdmin && (
+              <div className="flex gap-1 p-1 rounded-lg bg-gray-100 mt-2 mb-3">
+                <button onClick={() => { setHandoverMode("selecao"); setHandoverError(null); }} className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${handoverMode === "selecao" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                  Por seleção ({selectedIds.size})
+                </button>
+                <button onClick={() => { setHandoverMode("quantidade"); setHandoverError(null); }} className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${handoverMode === "quantidade" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                  Por quantidade
+                </button>
               </div>
+            )}
+
+            <div className="space-y-3">
+              {handoverMode === "selecao" ? (
+                <>
+                  <p className="text-sm text-gray-500">
+                    Passar {selectedIds.size} lead{selectedIds.size !== 1 ? "s" : ""} selecionado{selectedIds.size !== 1 ? "s" : ""} para outro usuário.
+                  </p>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 block mb-1">Destino *</label>
+                    <select value={handoverCloserId} onChange={(e) => setHandoverCloserId(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                      <option value="">Selecione um usuário...</option>
+                      {users.filter((u) => u.is_active && u.id !== currentUser?.id).map((u) => (
+                        <option key={u.id} value={u.id}>{u.name} · {u.role}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 block mb-1">De (SDR de origem) *</label>
+                    <select value={handoverFromId} onChange={(e) => setHandoverFromId(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                      <option value="">Selecione o SDR de origem...</option>
+                      {users.filter((u) => u.is_active).map((u) => (
+                        <option key={u.id} value={u.id}>{u.name} · {u.role}</option>
+                      ))}
+                    </select>
+                    {handoverFromId && (
+                      <p className="text-[11px] text-gray-400 mt-1">{handoverPoolSize} lead(s) ativo(s) disponível(is) para transferir.</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 block mb-1">Para (destino) *</label>
+                    <select value={handoverCloserId} onChange={(e) => setHandoverCloserId(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                      <option value="">Selecione o destino...</option>
+                      {users.filter((u) => u.is_active && u.id !== handoverFromId).map((u) => (
+                        <option key={u.id} value={u.id}>{u.name} · {u.role}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 block mb-1">Quantidade *</label>
+                      <input type="number" min={1} value={handoverQty} onChange={(e) => setHandoverQty(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 block mb-1">Quais leads?</label>
+                      <select value={handoverAge} onChange={(e) => setHandoverAge(e.target.value as "novos" | "antigos")} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                        <option value="novos">Os mais novos</option>
+                        <option value="antigos">Os mais antigos</option>
+                      </select>
+                    </div>
+                  </div>
+                </>
+              )}
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Briefing</label>
                 <textarea
                   value={handoverBriefing}
                   onChange={(e) => setHandoverBriefing(e.target.value)}
-                  rows={4}
+                  rows={3}
                   placeholder="Contexto do lead, próximos passos, combinados..."
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400 resize-none"
                 />
@@ -961,8 +1058,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 Cancelar
               </button>
               <button
-                onClick={handleHandover}
-                disabled={handoverSaving || !handoverCloserId || selectedIds.size === 0}
+                onClick={handoverMode === "quantidade" ? handleHandoverQuantity : handleHandover}
+                disabled={handoverSaving || !handoverCloserId || (handoverMode === "selecao" ? selectedIds.size === 0 : (!handoverFromId || !parseInt(handoverQty, 10)))}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50"
                 style={{ background: "#F97316" }}
               >

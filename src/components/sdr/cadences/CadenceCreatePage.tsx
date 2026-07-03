@@ -106,6 +106,7 @@ const CHANNEL_COLORS: Record<ChannelType, string> = {
   pesquisa: "#6366F1",
   email: "#0EA5E9",
   ligacao: "#F59E0B",
+  ligacao_whatsapp: "#12A18A",
   whatsapp: "#22C55E",
   linkedin: "#0A66C2",
   instagram: "#E1306C",
@@ -113,7 +114,7 @@ const CHANNEL_COLORS: Record<ChannelType, string> = {
   youtube: "#FF0000",
 };
 
-const ALL_CHANNELS: ChannelType[] = ["pesquisa", "email", "ligacao", "whatsapp", "linkedin"];
+const ALL_CHANNELS: ChannelType[] = ["pesquisa", "email", "ligacao", "ligacao_whatsapp", "whatsapp", "linkedin"];
 
 // ── Step Definition ─────────────────────────────────────────────────────────
 

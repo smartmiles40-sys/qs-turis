@@ -2,6 +2,7 @@ import { Component, type ReactNode } from "react";
 import SdrLayout from "@/components/sdr/SdrLayout";
 import LoginPage from "@/components/sdr/auth/LoginPage";
 import { QsAuthProvider, useQsAuth } from "@/contexts/QsAuthContext";
+import { ChatAppDockProvider } from "@/contexts/ChatAppDockContext";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -47,7 +48,11 @@ function AppContent() {
     return <LoginPage />;
   }
 
-  return <SdrLayout />;
+  return (
+    <ChatAppDockProvider>
+      <SdrLayout />
+    </ChatAppDockProvider>
+  );
 }
 
 export default function App() {
