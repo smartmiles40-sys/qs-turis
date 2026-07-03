@@ -1195,10 +1195,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-extra-card.on { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
         @media (max-width: 1100px) { .qsx-extras-col { width: 240px; } }
 
-        /* Fila centralizada — atividades no centro, extras no espaço em branco da esquerda */
-        .qsx-fila-centered { display: grid; grid-template-columns: 1fr auto 1fr; gap: 20px; align-items: start; }
-        .qsx-fila-extras { grid-column: 1; justify-self: end; width: 280px; }
-        .qsx-fila-main { grid-column: 2; width: min(820px, 100%); }
+        /* Fila centralizada — cards largos (retangulares), extras no espaço em branco da esquerda */
+        .qsx-fila-centered { display: flex; gap: 20px; align-items: flex-start; justify-content: center; }
+        .qsx-fila-extras { width: 250px; flex: none; }
+        .qsx-fila-main { flex: 0 1 1080px; min-width: 0; }
       `}</style>
 
       {/* ══════════════════════════════════════════════════════════════════════
