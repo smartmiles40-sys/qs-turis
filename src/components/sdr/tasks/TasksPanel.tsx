@@ -1187,18 +1187,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-icon-sm:hover { background: var(--line2); color: var(--ink2); }
         .qsx-icon-sm.on { background: rgba(37,99,235,.10); color: var(--blue); border-color: rgba(37,99,235,.3); }
 
-        /* Coluna de Atividades extras (retornos) — à esquerda, destacada em azul */
-        .qsx-extras-col { width: 300px; flex: none; }
+        /* Atividades extras (retornos) — coluna à esquerda alinhada ao cabeçalho, em azul */
         .qsx-extras-head { font-size: 11px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--blue); margin: 0 2px 10px; display: flex; align-items: center; gap: 8px; }
         .qsx-extra-card { background: rgba(37,99,235,.06); border: 1.5px solid rgba(37,99,235,.35); border-radius: 16px; padding: 12px 14px; cursor: pointer; transition: box-shadow .15s, border-color .15s; }
         .qsx-extra-card:hover { border-color: var(--blue); box-shadow: 0 10px 24px -16px rgba(37,99,235,.6); }
         .qsx-extra-card.on { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
-        @media (max-width: 1100px) { .qsx-extras-col { width: 240px; } }
 
-        /* Fila centralizada — cards largos (retangulares), extras no espaço em branco da esquerda */
-        .qsx-fila-centered { display: flex; gap: 20px; align-items: flex-start; justify-content: center; }
-        .qsx-fila-extras { width: 250px; flex: none; }
-        .qsx-fila-main { flex: 0 1 1080px; min-width: 0; }
+        /* Fila: extras à esquerda (alinhado ao topo) + card largo ocupando o resto */
+        .qsx-fila-row { display: flex; gap: 20px; align-items: flex-start; }
+        .qsx-fila-extras { width: 260px; flex: none; }
+        .qsx-fila-main { flex: 1 1 auto; min-width: 0; }
+        @media (max-width: 1100px) { .qsx-fila-extras { width: 230px; } }
       `}</style>
 
       {/* ══════════════════════════════════════════════════════════════════════
@@ -1421,7 +1420,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           MAIN CONTENT — TASK LIST + EXECUTION VIEW
           ══════════════════════════════════════════════════════════════════════ */}
       <div className="flex-1 min-h-0 overflow-y-auto" style={{ background: "var(--bg)" }}>
-        <div className="qsx-page px-5 lg:px-6 pt-3 pb-24">
+        <div className="px-6 pt-3 pb-24">
+        <div className="qsx-page">
           {filteredTasks.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               {(statusFilter || channelFilter || priorityFilter || periodFilter || search.trim()) ? (
@@ -1488,20 +1488,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </>
             );
 
-            // ChatApp aberto = sem espaço em branco → extras inline à esquerda.
-            // ChatApp fechado = fila centralizada + extras no espaço em branco da esquerda.
-            return chatDock.isOpen ? (
-              <div className="flex gap-5 items-start">
-                {extrasInner && <div className="qsx-extras-col">{extrasInner}</div>}
-                <div className="flex-1 min-w-0">{mainInner}</div>
-              </div>
-            ) : (
-              <div className="qsx-fila-centered">
+            // Extras à esquerda (na linha do cabeçalho) + card largo ocupando o resto.
+            return (
+              <div className="qsx-fila-row">
                 {extrasInner && <div className="qsx-fila-extras">{extrasInner}</div>}
                 <div className="qsx-fila-main">{mainInner}</div>
               </div>
             );
           })()}
+        </div>
         </div>
       </div>
       {/* ══ MODAL AGENDAMENTO (ao dar Ganho) ════════════════════════════════ */}
