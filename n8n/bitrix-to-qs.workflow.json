@@ -1,0 +1,150 @@
+{
+  "name": "QS Turis - Bitrix -> QS (negocio novo vira card)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-bitrix-inbound",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "w1b0c3e2-0001-4a10-9b01-0d2e3f4a5b60",
+      "name": "Webhook Bitrix (ONCRMDEALADD)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "e5d4a7b6-0001-4d40-8e34-3051627c8e94"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.deal.get.json?id={{ $json.body?.['data[FIELDS][ID]'] || $json.body?.data?.FIELDS?.ID || $json.data?.FIELDS?.ID }}",
+        "options": {}
+      },
+      "id": "w2b0c3e2-0002-4a10-9b01-0d2e3f4a5b61",
+      "name": "Buscar negocio (crm.deal.get)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.contact.get.json?id={{ $json.result?.CONTACT_ID || 0 }}",
+        "options": {}
+      },
+      "id": "w3b0c3e2-0003-4a10-9b01-0d2e3f4a5b62",
+      "name": "Buscar contato (crm.contact.get)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "m1-bitrixid",
+              "name": "bitrix_id",
+              "type": "string",
+              "value": "={{ String($('Buscar negocio (crm.deal.get)').item.json.result?.ID || '') }}"
+            },
+            {
+              "id": "m2-fullname",
+              "name": "full_name",
+              "type": "string",
+              "value": "={{ [$json.result?.NAME, $json.result?.LAST_NAME].filter(Boolean).join(' ') || $('Buscar negocio (crm.deal.get)').item.json.result?.TITLE || '' }}"
+            },
+            {
+              "id": "m3-phone",
+              "name": "phone",
+              "type": "string",
+              "value": "={{ $json.result?.PHONE?.[0]?.VALUE || '' }}"
+            },
+            {
+              "id": "m4-email",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $json.result?.EMAIL?.[0]?.VALUE || '' }}"
+            },
+            {
+              "id": "m5-value",
+              "name": "estimated_value",
+              "type": "string",
+              "value": "={{ $('Buscar negocio (crm.deal.get)').item.json.result?.OPPORTUNITY || '' }}"
+            },
+            {
+              "id": "m6-source",
+              "name": "source",
+              "type": "string",
+              "value": "integracao"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "w4b0c3e2-0004-4a10-9b01-0d2e3f4a5b63",
+      "name": "Mapear campos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qs-turis.vercel.app/api/lead-inbound",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "bitrix_id", "value": "={{ $json.bitrix_id }}" },
+            { "name": "full_name", "value": "={{ $json.full_name }}" },
+            { "name": "phone", "value": "={{ $json.phone }}" },
+            { "name": "email", "value": "={{ $json.email }}" },
+            { "name": "estimated_value", "value": "={{ $json.estimated_value }}" },
+            { "name": "source", "value": "={{ $json.source }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "w5b0c3e2-0005-4a10-9b01-0d2e3f4a5b64",
+      "name": "Enviar ao QS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 300],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_COM_ID_DA_CREDENCIAL",
+          "name": "QS Lead Secret (x-lead-secret)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Bitrix (ONCRMDEALADD)": {
+      "main": [[{ "node": "Buscar negocio (crm.deal.get)", "type": "main", "index": 0 }]]
+    },
+    "Buscar negocio (crm.deal.get)": {
+      "main": [[{ "node": "Buscar contato (crm.contact.get)", "type": "main", "index": 0 }]]
+    },
+    "Buscar contato (crm.contact.get)": {
+      "main": [[{ "node": "Mapear campos", "type": "main", "index": 0 }]]
+    },
+    "Mapear campos": {
+      "main": [[{ "node": "Enviar ao QS", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "instanceId": "qs-turis-bitrix-to-qs" },
+  "tags": []
+}

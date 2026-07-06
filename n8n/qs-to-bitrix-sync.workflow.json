@@ -1,0 +1,279 @@
+{
+  "name": "QS Turis - QS -> Bitrix (perdido/ganho, reunioes, notas)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] }
+      },
+      "id": "s0a0c3e2-0000-4a10-9b01-0d2e3f4a5b00",
+      "name": "A cada 1 minuto",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 460]
+    },
+
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://eabfjomrnucymduqnbci.supabase.co/rest/v1/qs_leads?select=id,bitrix_id,status,bitrix_status_synced,full_name&status=in.(perdido,ganho)&bitrix_id=not.is.null",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "s1a0c3e2-0001-4a10-9b01-0d2e3f4a5b01",
+      "name": "Leads perdido/ganho pendentes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 200],
+      "alwaysOutputData": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_ID_CRED_SUPABASE", "name": "Supabase QS (apikey service_role)" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Só o que ainda NÃO foi espelhado no Bitrix (status difere do sincronizado)\nreturn items.filter((i) => i.json && i.json.id && i.json.status !== i.json.bitrix_status_synced);"
+      },
+      "id": "s2a0c3e2-0002-4a10-9b01-0d2e3f4a5b02",
+      "name": "Filtrar nao sincronizados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.deal.update.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $json.bitrix_id, fields: { STAGE_ID: $json.status === 'perdido' ? 'LOSE' : 'WON' } }) }}",
+        "options": {}
+      },
+      "id": "s3a0c3e2-0003-4a10-9b01-0d2e3f4a5b03",
+      "name": "Mover coluna no Bitrix",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://eabfjomrnucymduqnbci.supabase.co/rest/v1/qs_leads?id=eq.{{ $('Filtrar nao sincronizados').item.json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ bitrix_status_synced: $('Filtrar nao sincronizados').item.json.status }) }}",
+        "options": {}
+      },
+      "id": "s4a0c3e2-0004-4a10-9b01-0d2e3f4a5b04",
+      "name": "Marcar lead sincronizado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 200],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_ID_CRED_SUPABASE", "name": "Supabase QS (apikey service_role)" }
+      }
+    },
+
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://eabfjomrnucymduqnbci.supabase.co/rest/v1/qs_meetings?select=id,title,scheduled_at,notes,scheduled_by,meeting_owner,client_email,booking_date,qs_leads(bitrix_id,full_name)&bitrix_synced=eq.false",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "s5a0c3e2-0005-4a10-9b01-0d2e3f4a5b05",
+      "name": "Reunioes pendentes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 460],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_ID_CRED_SUPABASE", "name": "Supabase QS (apikey service_role)" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reunioes com vinculo Bitrix seguem; sem vinculo sao marcadas com erro (nao re-tenta)\nreturn items.filter((i) => i.json && i.json.id);"
+      },
+      "id": "s6a0c3e2-0006-4a10-9b01-0d2e3f4a5b06",
+      "name": "Filtrar reunioes validas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 460]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: $json.qs_leads?.bitrix_id || 0, ENTITY_TYPE: 'deal', COMMENT: '📅 REUNIÃO AGENDADA (QS Turis)\\n' + 'Quando: ' + ($json.scheduled_at || '') + '\\n' + 'Agendado por: ' + ($json.scheduled_by || '-') + '\\n' + 'Responsável: ' + ($json.meeting_owner || '-') + '\\n' + 'E-mail do cliente: ' + ($json.client_email || '-') + '\\n' + 'Data do agendamento: ' + ($json.booking_date || '-') + '\\n' + ($json.notes || '') } }) }}",
+        "options": {}
+      },
+      "id": "s7a0c3e2-0007-4a10-9b01-0d2e3f4a5b07",
+      "name": "Reuniao -> comentario no Bitrix",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 460],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.deal.update.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $('Filtrar reunioes validas').item.json.qs_leads?.bitrix_id || 0, fields: { 'PREENCHA_UF_DATA_REUNIAO': $('Filtrar reunioes validas').item.json.scheduled_at, 'PREENCHA_UF_RESPONSAVEL': $('Filtrar reunioes validas').item.json.meeting_owner, 'PREENCHA_UF_AGENDADO_POR': $('Filtrar reunioes validas').item.json.scheduled_by, 'PREENCHA_UF_EMAIL_CLIENTE': $('Filtrar reunioes validas').item.json.client_email } }) }}",
+        "options": {}
+      },
+      "id": "s8a0c3e2-0008-4a10-9b01-0d2e3f4a5b08",
+      "name": "Preencher campos do negocio (AJUSTAR UF_*)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 460],
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://eabfjomrnucymduqnbci.supabase.co/rest/v1/qs_meetings?id=eq.{{ $('Filtrar reunioes validas').item.json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ bitrix_synced: true, bitrix_synced_at: new Date().toISOString(), bitrix_error: $('Filtrar reunioes validas').item.json.qs_leads?.bitrix_id ? null : 'lead sem bitrix_id' }) }}",
+        "options": {}
+      },
+      "id": "s9a0c3e2-0009-4a10-9b01-0d2e3f4a5b09",
+      "name": "Marcar reuniao sincronizada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1420, 460],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_ID_CRED_SUPABASE", "name": "Supabase QS (apikey service_role)" }
+      }
+    },
+
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://eabfjomrnucymduqnbci.supabase.co/rest/v1/qs_notes?select=id,body,created_at,qs_leads(bitrix_id)&bitrix_synced=eq.false&tags=cs.{bitrix}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "sa10c3e2-0010-4a10-9b01-0d2e3f4a5b10",
+      "name": "Notas pendentes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 720],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_ID_CRED_SUPABASE", "name": "Supabase QS (apikey service_role)" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.filter((i) => i.json && i.json.id);"
+      },
+      "id": "sb10c3e2-0011-4a10-9b01-0d2e3f4a5b11",
+      "name": "Filtrar notas validas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 720]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: $json.qs_leads?.bitrix_id || 0, ENTITY_TYPE: 'deal', COMMENT: '📝 QS Turis: ' + ($json.body || '') } }) }}",
+        "options": {}
+      },
+      "id": "sc10c3e2-0012-4a10-9b01-0d2e3f4a5b12",
+      "name": "Nota -> comentario no Bitrix",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 720],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://eabfjomrnucymduqnbci.supabase.co/rest/v1/qs_notes?id=eq.{{ $('Filtrar notas validas').item.json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ bitrix_synced: true, bitrix_synced_at: new Date().toISOString(), bitrix_error: $('Filtrar notas validas').item.json.qs_leads?.bitrix_id ? null : 'lead sem bitrix_id' }) }}",
+        "options": {}
+      },
+      "id": "sd10c3e2-0013-4a10-9b01-0d2e3f4a5b13",
+      "name": "Marcar nota sincronizada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 720],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_ID_CRED_SUPABASE", "name": "Supabase QS (apikey service_role)" }
+      }
+    }
+  ],
+  "connections": {
+    "A cada 1 minuto": {
+      "main": [[
+        { "node": "Leads perdido/ganho pendentes", "type": "main", "index": 0 },
+        { "node": "Reunioes pendentes", "type": "main", "index": 0 },
+        { "node": "Notas pendentes", "type": "main", "index": 0 }
+      ]]
+    },
+    "Leads perdido/ganho pendentes": {
+      "main": [[{ "node": "Filtrar nao sincronizados", "type": "main", "index": 0 }]]
+    },
+    "Filtrar nao sincronizados": {
+      "main": [[{ "node": "Mover coluna no Bitrix", "type": "main", "index": 0 }]]
+    },
+    "Mover coluna no Bitrix": {
+      "main": [[{ "node": "Marcar lead sincronizado", "type": "main", "index": 0 }]]
+    },
+    "Reunioes pendentes": {
+      "main": [[{ "node": "Filtrar reunioes validas", "type": "main", "index": 0 }]]
+    },
+    "Filtrar reunioes validas": {
+      "main": [[{ "node": "Reuniao -> comentario no Bitrix", "type": "main", "index": 0 }]]
+    },
+    "Reuniao -> comentario no Bitrix": {
+      "main": [[{ "node": "Marcar reuniao sincronizada", "type": "main", "index": 0 }]]
+    },
+    "Notas pendentes": {
+      "main": [[{ "node": "Filtrar notas validas", "type": "main", "index": 0 }]]
+    },
+    "Filtrar notas validas": {
+      "main": [[{ "node": "Nota -> comentario no Bitrix", "type": "main", "index": 0 }]]
+    },
+    "Nota -> comentario no Bitrix": {
+      "main": [[{ "node": "Marcar nota sincronizada", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "instanceId": "qs-turis-qs-to-bitrix" },
+  "tags": []
+}

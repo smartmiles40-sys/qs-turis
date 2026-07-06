@@ -87,8 +87,34 @@ function buildFullName(input) {
 /**
  * Cria um lead a partir de um payload externo, aplicando distribuição automática
  * e gerando as tarefas da cadência. Retorna { lead, ownerId, cadenceId, tasks }.
+ *
+ * Dedupe por Bitrix: se vier payload.bitrix_id e JÁ existir um lead com esse id,
+ * NÃO cria de novo — atualiza os dados de contato e devolve o existente (sem
+ * regenerar tarefas). Assim o webhook do Bitrix pode disparar mais de uma vez
+ * pro mesmo negócio sem duplicar card no QS.
  */
 export async function createInboundLead(payload) {
+  // 0) Dedupe por bitrix_id (defensivo: se a coluna ainda não existir no banco,
+  //    o filtro falha e seguimos pro fluxo normal de criação).
+  const bitrixId = payload.bitrix_id ? String(payload.bitrix_id).trim() : null;
+  if (bitrixId) {
+    try {
+      const existing = await rest(`qs_leads?select=*&bitrix_id=eq.${encodeURIComponent(bitrixId)}&limit=1`);
+      if (existing && existing[0]) {
+        const patch = {};
+        if (payload.email) patch.email = payload.email;
+        if (payload.phone) patch.phone = payload.phone;
+        if (buildFullName(payload)) patch.full_name = buildFullName(payload);
+        if (Object.keys(patch).length > 0) {
+          await rest(`qs_leads?id=eq.${existing[0].id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' });
+        }
+        return { lead: existing[0], ownerId: existing[0].owner_id, cadenceId: existing[0].cadence_id, tasks: 0, deduped: true };
+      }
+    } catch (e) {
+      console.warn('[leads] dedupe por bitrix_id indisponível (coluna existe?):', e?.message);
+    }
+  }
+
   // 1) Responsável: usa o informado ou distribui por round-robin.
   let ownerId = payload.owner_id || null;
   if (!ownerId) ownerId = await pickNextSdr();
@@ -128,7 +154,19 @@ export async function createInboundLead(payload) {
     arrived_at: nowIso,
   };
 
-  const created = await insert('qs_leads', leadRow);
+  // bitrix_id entra defensivamente: se a coluna ainda não existir no banco,
+  // repetimos o insert sem ela (o vínculo fica de fora, mas o lead entra).
+  let created;
+  try {
+    created = await insert('qs_leads', bitrixId ? { ...leadRow, bitrix_id: bitrixId } : leadRow);
+  } catch (e) {
+    if (bitrixId) {
+      console.warn('[leads] insert com bitrix_id falhou; tentando sem (aplicar migration 0006):', e?.message);
+      created = await insert('qs_leads', leadRow);
+    } else {
+      throw e;
+    }
+  }
   const lead = Array.isArray(created) ? created[0] : created;
 
   let tasks = 0;

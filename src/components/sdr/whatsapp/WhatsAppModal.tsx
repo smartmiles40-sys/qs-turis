@@ -18,6 +18,7 @@ import {
   isDialablePhone,
   fillTemplate,
   logWhatsApp,
+  sendWhatsAppMessage,
   WA_TEMPLATES,
 } from "@/lib/whatsapp";
 import { dialViaWavoip } from "@/lib/wavoip";
@@ -47,6 +48,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   const [text, setText] = useState(defaultText ?? "");
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [calling, setCalling] = useState(false);
+  const [sending, setSending] = useState(false);
   const [sipOn, setSipOn] = useState(false);
 
   const phone = useMemo(() => normalizePhoneBR(lead.phone), [lead.phone]);
@@ -75,8 +77,30 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   }
 
   async function handleOpenChatApp() {
+    const t = text.trim();
+
+    // 1º: tenta ENVIAR DIRETO pela API do ChatApp (token mantido pelo n8n em
+    //     qs_settings). Se funcionar, nem precisa abrir o cabinet.
+    if (t && dialable && !sending) {
+      setSending(true);
+      const r = await sendWhatsAppMessage({
+        leadId: lead.id ?? null,
+        ownerId: ownerId ?? null,
+        phone: lead.phone,
+        text: t,
+      });
+      setSending(false);
+      if (r.ok) {
+        setResult({ ok: true, msg: "✓ Mensagem enviada ao lead pelo ChatApp!" });
+        onSent?.();
+        return;
+      }
+      console.warn("[chatapp] envio direto falhou, caindo pro cabinet:", r.error);
+    }
+
+    // 2º (fallback): copia a mensagem e abre o cabinet pra enviar manualmente.
     const copied = await copyText();
-    logWhatsApp({ leadId: lead.id ?? null, ownerId: ownerId ?? null, phone, body: text.trim() || null, status: "pending", kind: "message" });
+    logWhatsApp({ leadId: lead.id ?? null, ownerId: ownerId ?? null, phone, body: t || null, status: "pending", kind: "message" });
     openChatApp();
     setResult({
       ok: true,
@@ -185,18 +209,38 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
             </div>
           )}
 
-          {/* Ações */}
+          {/* ── MENSAGEM ─────────────────────────────────────────────────── */}
           <div className="space-y-2">
-            <button
-              onClick={handleOpenChatApp}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
-              style={{ background: CHATAPP_BLUE }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><path d="M15 3h6v6" /><path d="M10 14 21 3" />
-              </svg>
-              Enviar pelo ChatApp
-            </button>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Mensagem</p>
+            <div className="grid grid-cols-[2fr_1fr] gap-2">
+              <button
+                onClick={handleOpenChatApp}
+                disabled={sending}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
+                style={{ background: CHATAPP_BLUE }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7z" />
+                </svg>
+                {sending ? "Enviando…" : "Enviar pelo ChatApp"}
+              </button>
+              <button
+                onClick={handleOpenChat}
+                disabled={!dialable}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all disabled:opacity-50"
+                title="Abrir a conversa no seu WhatsApp"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                WhatsApp
+              </button>
+            </div>
+          </div>
+
+          {/* ── LIGAÇÃO ──────────────────────────────────────────────────── */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Ligação</p>
             <button
               onClick={handleWebfoneCall}
               disabled={!dialable || calling}
@@ -206,46 +250,38 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
               </svg>
-              {calling ? "Ligando…" : "Ligar pelo Webfone"}
+              {calling ? "Ligando…" : "Ligar pelo Webfone (no sistema)"}
             </button>
-            {sipOn && (
-              <button
-                onClick={handleSipCall}
-                disabled={!dialable}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
-                style={{ background: "#334155" }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
-                </svg>
-                Ligar (SIP / telefone)
-              </button>
-            )}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={handleOpenChat}
-                disabled={!dialable}
-                className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all disabled:opacity-50"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-                WhatsApp
-              </button>
+            <div className={`grid gap-2 ${sipOn ? "grid-cols-2" : "grid-cols-1"}`}>
               <button
                 onClick={handleCall}
                 disabled={!dialable}
                 className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all disabled:opacity-50"
+                title="Abre a conversa; a chamada fica a 1 toque no app"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
                 </svg>
-                Ligar (WhatsApp)
+                Pelo WhatsApp
               </button>
+              {sipOn && (
+                <button
+                  onClick={handleSipCall}
+                  disabled={!dialable}
+                  className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all disabled:opacity-50"
+                  title="Disca pelo softphone (MicroSIP/Zoiper) instalado no PC"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+                  </svg>
+                  SIP / telefone
+                </button>
+              )}
             </div>
           </div>
           <p className="text-[10px] text-gray-400 text-center">
-            "Ligar pelo Webfone" faz a chamada de voz dentro do sistema (precisa do token em Configurações → Webfone).{sipOn ? " \"Ligar (SIP / telefone)\" disca pelo softphone (MicroSIP/Zoiper) instalado no PC." : ""} "Enviar pelo ChatApp" abre o ChatApp com a mensagem copiada. "WhatsApp" abre a conversa. "Ligar (WhatsApp)" abre a conversa para você iniciar a chamada pelo app.
+            "Enviar pelo ChatApp" tenta mandar direto; se não der, abre o ChatApp com a mensagem copiada.
+            O Webfone liga dentro do sistema (token em Configurações → Webfone).
           </p>
         </div>
       </div>

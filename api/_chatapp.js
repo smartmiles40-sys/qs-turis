@@ -12,17 +12,21 @@
 // isto é só um módulo auxiliar, importado por api/chatapp-send.js.
 // -----------------------------------------------------------------------------
 
+import { rest } from './_supabaseAdmin.js';
+
 const BASE_URL = (process.env.CHATAPP_BASE_URL || 'https://api.chatapp.online').replace(/\/$/, '');
 
 // Configuração vinda das Environment Variables (Vercel) / .env local.
+// licenseId/messenger podem também vir do registro qs_settings['chatapp_token']
+// gravado pelo n8n (ver getSettingsToken) — a env, quando existir, tem prioridade.
 function config() {
   return {
     email: process.env.CHATAPP_EMAIL,
     password: process.env.CHATAPP_PASSWORD,
     appId: process.env.CHATAPP_APP_ID,
-    licenseId: process.env.CHATAPP_LICENSE_ID,
+    licenseId: process.env.CHATAPP_LICENSE_ID || settingsCache.licenseId,
     // grWhatsApp | telegram | whatsApp | max ... (ver doc). Default = WhatsApp via GreenAPI.
-    messenger: process.env.CHATAPP_MESSENGER || 'grWhatsApp',
+    messenger: process.env.CHATAPP_MESSENGER || settingsCache.messenger || 'grWhatsApp',
   };
 }
 
@@ -77,16 +81,51 @@ class ChatAppError extends Error {
 // usa Supabase) pra sobreviver a cold starts — ver CHATAPP.md.
 // -----------------------------------------------------------------------------
 let tokenCache = { accessToken: null, expiresAt: 0 };
+// licenseId/messenger vindos do qs_settings (preenchidos junto do token do n8n).
+let settingsCache = { licenseId: null, messenger: null };
+
+/**
+ * Token mantido pelo n8n em qs_settings (chave 'chatapp_token').
+ * O workflow "ChatApp token" renova a cada 6h — assim o QS nunca gera token
+ * por conta própria (limite de 100/dia) nem depende das CHATAPP_* na Vercel.
+ */
+async function getSettingsToken() {
+  try {
+    const rows = await rest("qs_settings?select=value&key=eq.chatapp_token&limit=1");
+    const v = rows && rows[0] && rows[0].value;
+    if (!v || !v.accessToken) return null;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (v.expiresAt && nowSec >= v.expiresAt - 300) return null; // vencido/na borda
+    if (v.licenseId && String(v.licenseId).indexOf('PREENCHA') === -1) settingsCache.licenseId = v.licenseId;
+    if (v.messenger) settingsCache.messenger = v.messenger;
+    return { accessToken: v.accessToken, expiresAt: v.expiresAt || nowSec + 3600 };
+  } catch (e) {
+    console.warn('[chatapp] qs_settings indisponível:', e?.message);
+    return null;
+  }
+}
 
 async function getAccessToken() {
-  const { email, password, appId } = config();
-  if (!email || !password || !appId) {
-    throw new ChatAppError('Faltam CHATAPP_EMAIL / CHATAPP_PASSWORD / CHATAPP_APP_ID nas variáveis de ambiente', 500, 'CONFIG');
-  }
-
   const nowSec = Math.floor(Date.now() / 1000);
   if (tokenCache.accessToken && nowSec < tokenCache.expiresAt - 300) {
     return tokenCache.accessToken;
+  }
+
+  // 1º: token mantido pelo n8n no banco (caminho preferido).
+  const fromSettings = await getSettingsToken();
+  if (fromSettings) {
+    tokenCache = fromSettings;
+    return tokenCache.accessToken;
+  }
+
+  // 2º: fallback — gerar por credenciais (se existirem nas envs).
+  const { email, password, appId } = config();
+  if (!email || !password || !appId) {
+    throw new ChatAppError(
+      'Sem token do ChatApp: ative o workflow "ChatApp token" no n8n (grava em qs_settings) ou preencha CHATAPP_EMAIL / CHATAPP_PASSWORD / CHATAPP_APP_ID',
+      500,
+      'CONFIG'
+    );
   }
 
   const data = await callApi('/v1/tokens', {
@@ -123,30 +162,40 @@ function onlyDigits(phone) {
   return String(phone || '').replace(/\D/g, '');
 }
 
-async function resolveChatId(phone) {
+// O licenseId pode chegar junto do token (qs_settings, preenchido pelo n8n),
+// então a config é lida DENTRO do callback autenticado — depois do token.
+function requireLicense() {
   const { licenseId, messenger } = config();
+  if (!licenseId) {
+    throw new ChatAppError('Sem licenseId do ChatApp: preencha no workflow do n8n (chatapp_token.licenseId) ou na env CHATAPP_LICENSE_ID', 500, 'CONFIG');
+  }
+  return { licenseId, messenger };
+}
+
+async function resolveChatId(phone) {
   const num = onlyDigits(phone);
   if (!num) throw new ChatAppError('Telefone vazio/inválido', 400, 'BAD_PHONE');
 
-  const data = await withAuth((token) =>
-    callApi(`/v1/licenses/${licenseId}/messengers/${messenger}/phones/${num}/check`, { token })
-  );
+  const data = await withAuth((token) => {
+    const { licenseId, messenger } = requireLicense();
+    return callApi(`/v1/licenses/${licenseId}/messengers/${messenger}/phones/${num}/check`, { token });
+  });
 
   if (!data?.exist || !data?.chatId) {
-    throw new ChatAppError(`Número ${num} não está registrado no ${messenger}`, 404, 'NOT_ON_MESSENGER');
+    throw new ChatAppError(`Número ${num} não está registrado no WhatsApp/messenger configurado`, 404, 'NOT_ON_MESSENGER');
   }
   return data.chatId;
 }
 
 async function sendText(chatId, text) {
-  const { licenseId, messenger } = config();
-  return withAuth((token) =>
-    callApi(`/v1/licenses/${licenseId}/messengers/${messenger}/chats/${chatId}/messages-text`, {
+  return withAuth((token) => {
+    const { licenseId, messenger } = requireLicense();
+    return callApi(`/v1/licenses/${licenseId}/messengers/${messenger}/chats/${chatId}/messages-text`, {
       method: 'POST',
       token,
       body: { [MESSAGE_TEXT_FIELD]: text },
-    })
-  );
+    });
+  });
 }
 
 // -----------------------------------------------------------------------------

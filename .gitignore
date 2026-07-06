@@ -27,4 +27,7 @@ dist-ssr
 .env
 .env*.local
 
+# Credenciais locais do n8n (nunca versionar)
+n8n/*.local.*
+
 .vercel

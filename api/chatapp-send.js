@@ -8,11 +8,32 @@
 //   ou
 //   { "chatId": "5511999998888@c.us", "text": "Olá! ..." }
 //
-// Segurança: se a env INTERNAL_API_SECRET estiver setada, a rota exige o header
-//   x-internal-secret com esse valor. Assim ninguém de fora dispara mensagens.
+// Segurança — a rota aceita DUAS formas de autorização:
+//   1. Servidor-a-servidor: header x-internal-secret = INTERNAL_API_SECRET.
+//   2. Usuário logado no QS: header Authorization: Bearer <access_token do
+//      Supabase Auth> — validado no endpoint /auth/v1/user do Supabase. É assim
+//      que o botão "Enviar pelo ChatApp" do app envia direto.
 // -----------------------------------------------------------------------------
 
 import { sendMessageToLead, ChatAppError } from './_chatapp.js';
+
+async function isValidSupabaseUser(authHeader) {
+  const jwt = String(authHeader || '').replace(/^Bearer\s+/i, '').trim();
+  if (!jwt) return false;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return false;
+  try {
+    const r = await fetch(`${url.replace(/\/$/, '')}/auth/v1/user`, {
+      headers: { apikey: key, Authorization: `Bearer ${jwt}` },
+    });
+    if (!r.ok) return false;
+    const user = await r.json();
+    return Boolean(user && user.id);
+  } catch {
+    return false;
+  }
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -20,9 +41,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: 'Use POST' });
   }
 
-  // Proteção opcional por segredo compartilhado.
+  // Autorização: segredo interno OU usuário autenticado do QS.
   const secret = process.env.INTERNAL_API_SECRET;
-  if (secret && req.headers['x-internal-secret'] !== secret) {
+  const bySecret = secret && req.headers['x-internal-secret'] === secret;
+  const byUser = !bySecret && (await isValidSupabaseUser(req.headers['authorization']));
+  if (secret && !bySecret && !byUser) {
     return res.status(401).json({ success: false, error: 'Não autorizado' });
   }
 

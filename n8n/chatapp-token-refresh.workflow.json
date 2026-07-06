@@ -1,0 +1,84 @@
+{
+  "name": "QS Turis - ChatApp token (valida e renova sempre)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 6 }] }
+      },
+      "id": "t0a0c3e2-0000-4a10-9b01-0d2e3f4a5c00",
+      "name": "A cada 6 horas",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.chatapp.online/v1/tokens",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ email: 'PREENCHA_CHATAPP_EMAIL', password: 'PREENCHA_CHATAPP_SENHA', appId: 'PREENCHA_CHATAPP_APP_ID' }) }}",
+        "options": {}
+      },
+      "id": "t1a0c3e2-0001-4a10-9b01-0d2e3f4a5c01",
+      "name": "Gerar token (POST v1/tokens)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Valida a resposta e monta o registro que o QS vai ler em qs_settings.\n// Limite do ChatApp: 100 tokens/dia por email+appId -> a cada 6h gastamos só 4/dia.\nconst d = items[0]?.json?.data;\nif (!d || !d.accessToken) {\n  throw new Error('ChatApp não devolveu accessToken — confira email/senha/appId no nó anterior. Resposta: ' + JSON.stringify(items[0]?.json));\n}\nreturn [{ json: {\n  key: 'chatapp_token',\n  value: {\n    accessToken: d.accessToken,\n    expiresAt: d.accessTokenEndTime || Math.floor(Date.now() / 1000) + 23 * 3600,\n    refreshToken: d.refreshToken || null,\n    licenseId: 'PREENCHA_CHATAPP_LICENSE_ID',\n    messenger: 'grWhatsApp',\n    updatedBy: 'n8n',\n    updatedAtIso: new Date().toISOString(),\n  },\n} }];"
+      },
+      "id": "t2a0c3e2-0002-4a10-9b01-0d2e3f4a5c02",
+      "name": "Validar e montar registro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://eabfjomrnucymduqnbci.supabase.co/rest/v1/qs_settings?on_conflict=key",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Prefer", "value": "resolution=merge-duplicates,return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ key: $json.key, value: $json.value, updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "t3a0c3e2-0003-4a10-9b01-0d2e3f4a5c03",
+      "name": "Gravar em qs_settings (upsert)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 300],
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_ID_CRED_SUPABASE", "name": "Supabase QS (apikey service_role)" }
+      }
+    }
+  ],
+  "connections": {
+    "A cada 6 horas": {
+      "main": [[{ "node": "Gerar token (POST v1/tokens)", "type": "main", "index": 0 }]]
+    },
+    "Gerar token (POST v1/tokens)": {
+      "main": [[{ "node": "Validar e montar registro", "type": "main", "index": 0 }]]
+    },
+    "Validar e montar registro": {
+      "main": [[{ "node": "Gravar em qs_settings (upsert)", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "instanceId": "qs-turis-chatapp-token" },
+  "tags": []
+}

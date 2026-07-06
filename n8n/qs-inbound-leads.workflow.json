@@ -1,0 +1,186 @@
+{
+  "name": "QS Turis - Entrada de Leads (inbound)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-lead-inbound",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "a1f0c3e2-1111-4a10-9b01-0d2e3f4a5b60",
+      "name": "Webhook (teste)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "d4c3f6b5-4444-4d40-6e34-3051627c8e93"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1-full-name-0001",
+              "name": "full_name",
+              "type": "string",
+              "value": "={{ $json.body?.nome || $json.nome || [$json.body?.first_name, $json.body?.last_name].filter(Boolean).join(' ') }}"
+            },
+            {
+              "id": "f2-email-0002",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $json.body?.email || $json.email || '' }}"
+            },
+            {
+              "id": "f3-phone-0003",
+              "name": "phone",
+              "type": "string",
+              "value": "={{ $json.body?.telefone || $json.body?.whatsapp || $json.telefone || $json.whatsapp || '' }}"
+            },
+            {
+              "id": "f4-company-0004",
+              "name": "company_name",
+              "type": "string",
+              "value": "={{ $json.body?.empresa || $json.empresa || '' }}"
+            },
+            {
+              "id": "f5-city-0005",
+              "name": "city",
+              "type": "string",
+              "value": "={{ $json.body?.cidade || $json.cidade || '' }}"
+            },
+            {
+              "id": "f6-state-0006",
+              "name": "state",
+              "type": "string",
+              "value": "={{ $json.body?.estado || $json.estado || '' }}"
+            },
+            {
+              "id": "f7-segment-0007",
+              "name": "segment",
+              "type": "string",
+              "value": "={{ $json.body?.segmento || $json.segmento || '' }}"
+            },
+            {
+              "id": "f8-source-0008",
+              "name": "source",
+              "type": "string",
+              "value": "integracao"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "b2e1d4f3-2222-4b20-8c12-1e3f405a6c71",
+      "name": "Normalizar",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qs-turis.vercel.app/api/lead-inbound",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "full_name",
+              "value": "={{ $json.full_name || $json.nome || [$json.first_name, $json.last_name].filter(Boolean).join(' ') }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.email || '' }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.phone || $json.telefone || $json.whatsapp || '' }}"
+            },
+            {
+              "name": "company_name",
+              "value": "={{ $json.company_name || $json.empresa || '' }}"
+            },
+            {
+              "name": "city",
+              "value": "={{ $json.city || $json.cidade || '' }}"
+            },
+            {
+              "name": "state",
+              "value": "={{ $json.state || $json.estado || '' }}"
+            },
+            {
+              "name": "segment",
+              "value": "={{ $json.segment || $json.segmento || '' }}"
+            },
+            {
+              "name": "source",
+              "value": "={{ $json.source || 'integracao' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c3d2e5a4-3333-4c30-7d23-2f405167d820",
+      "name": "Enviar ao QS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_COM_ID_DA_CREDENCIAL",
+          "name": "QS Lead Secret (x-lead-secret)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (teste)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar": {
+      "main": [
+        [
+          {
+            "node": "Enviar ao QS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "qs-turis-inbound-leads"
+  },
+  "tags": []
+}

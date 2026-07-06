@@ -14,6 +14,7 @@ import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { computeLeadScore } from "@/lib/leadScore";
 import { startWhatsAppCall, formatPhoneDisplay } from "@/lib/whatsapp";
+import { dialViaWavoip } from "@/lib/wavoip";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
 import type { SdrUser } from "../types";
@@ -591,7 +592,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       obs && `Observações: ${obs}`,
     ].filter(Boolean).join(" · ");
     try {
-      await supabase.from("qs_meetings").insert({
+      const meetingRow = {
         lead_id: leadId,
         owner_id: currentUser?.id ?? null,
         title: `Reunião — ${leadName}`,
@@ -599,7 +600,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         location: "Google Meet",
         notes: resumo,
         status: "agendada",
+      };
+      // Campos estruturados (migration 0006) — o n8n usa pra preencher o Bitrix.
+      // Se a migration ainda não foi aplicada, o insert com eles falha e
+      // repetimos no formato antigo (só notes) pra nunca travar o Ganho.
+      const { error: insErr } = await supabase.from("qs_meetings").insert({
+        ...meetingRow,
+        scheduled_by: meeting.agendadoPor || null,
+        meeting_owner: meeting.responsavel || null,
+        client_email: meeting.emailCliente || null,
+        booking_date: meeting.dataAgendamento || null,
       });
+      if (insErr) {
+        console.warn("[QS] insert com campos estruturados falhou (aplicar 0006?); usando formato antigo:", insErr.message);
+        await supabase.from("qs_meetings").insert(meetingRow);
+      }
       if (meeting.emailCliente) {
         await supabase.from("qs_leads").update({ email: meeting.emailCliente }).eq("id", leadId);
       }
@@ -919,11 +934,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     );
   }
 
-  // Só o botão do canal da tarefa (item 3). Ligação = via WhatsApp (sem VoIP).
+  // Liga pelo WEBFONE (voz dentro do sistema). Se o webfone não estiver
+  // configurado/disponível, cai pro WhatsApp (abre a conversa pra ligar por lá).
+  async function callViaWebfone(phone?: string | null, name?: string | null) {
+    const r = await dialViaWavoip(phone, name ?? undefined);
+    if (!r.ok) {
+      console.warn("[QS] webfone indisponível, caindo pro WhatsApp:", r.error);
+      startWhatsAppCall(phone);
+    }
+  }
+
+  // Só o botão do canal da tarefa (item 3). Ligação = webfone (fallback WhatsApp).
   function renderChannelAction(task: Task, lead: Lead | undefined) {
     switch (task.channel_type) {
       case "ligacao":
-        return lead?.phone ? <button onClick={() => startWhatsAppCall(lead.phone)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Ligar</button> : null;
+        return lead?.phone ? <button onClick={() => callViaWebfone(lead.phone, lead.full_name)} className="qsx-btn qsx-btn-green"><ChannelIcon type="ligacao" size={16} />Ligar</button> : null;
       case "ligacao_whatsapp":
         return lead?.phone ? <button onClick={() => startWhatsAppCall(lead.phone)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Ligar no WhatsApp</button> : null;
       case "whatsapp":
@@ -1700,7 +1725,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </button>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1">Número (WhatsApp)</label>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Número</label>
               <input
                 type="tel"
                 value={dialNumber}
@@ -1711,12 +1736,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               />
             </div>
             <button
-              onClick={() => { if (dialNumber.trim()) { startWhatsAppCall(dialNumber); setShowDialer(false); setDialNumber(""); } }}
+              onClick={() => { if (dialNumber.trim()) { callViaWebfone(dialNumber); setShowDialer(false); setDialNumber(""); } }}
               disabled={!dialNumber.trim()}
               className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
               style={{ background: "#12A18A" }}
             >
-              <IconWhatsApp size={18} />
+              <ChannelIcon type="ligacao" size={18} />
+              Ligar (webfone)
+            </button>
+            <button
+              onClick={() => { if (dialNumber.trim()) { startWhatsAppCall(dialNumber); setShowDialer(false); setDialNumber(""); } }}
+              disabled={!dialNumber.trim()}
+              className="mt-2 w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all disabled:opacity-50"
+            >
+              <IconWhatsApp size={16} />
               Ligar no WhatsApp
             </button>
           </div>

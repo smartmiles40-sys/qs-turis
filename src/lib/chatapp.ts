@@ -19,12 +19,24 @@ export type SendLeadMessageResult =
   | { success: false; error: string; code?: string };
 
 export async function sendLeadMessage(input: SendLeadMessageInput): Promise<SendLeadMessageResult> {
-  const res = await fetch('/api/chatapp-send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  return (await res.json()) as SendLeadMessageResult;
+  // Autoriza como usuário logado do QS (a rota valida o JWT no Supabase Auth).
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const { supabase } = await import('./supabase');
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) headers['Authorization'] = `Bearer ${data.session.access_token}`;
+  } catch { /* sem sessão — a rota decide */ }
+
+  try {
+    const res = await fetch('/api/chatapp-send', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(input),
+    });
+    return (await res.json()) as SendLeadMessageResult;
+  } catch {
+    return { success: false, error: 'Falha de rede ao chamar /api/chatapp-send' };
+  }
 }
 
 /*
