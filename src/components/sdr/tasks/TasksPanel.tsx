@@ -1,5 +1,5 @@
 // src/components/sdr/tasks/TasksPanel.tsx
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type {
   Task,
   Lead,
@@ -9,12 +9,13 @@ import type {
 } from "../types";
 import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
-import { completeTask, skipTask, fetchQsUsers, transferLead } from "@/lib/qs/queries";
+import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { computeLeadScore } from "@/lib/leadScore";
-import { startWhatsAppCall } from "@/lib/whatsapp";
+import { startWhatsAppCall, formatPhoneDisplay } from "@/lib/whatsapp";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
+import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
 import type { SdrUser } from "../types";
 
 // ── Props ────────────────────────────────────────────────────────────────────
@@ -220,9 +221,8 @@ const MAX_CONTACT_ATTEMPTS = 5;
 const DAILY_GOAL = 350; // Will come from qs_goals later
 const MONTHLY_GOAL = 7350;
 
-// Agendamento da reunião (ao dar "Ganho") — nomes fixos por enquanto.
-const AGENDADORES = ["Mariana Rodrigues - SDR", "Victor Hugo - SDR"];
-const RESPONSAVEIS_REUNIAO = ["Talita Carvalho", "Victor Maldonado", "Bruno Matheus", "John Italo"];
+// Agendamento da reunião (ao dar "Ganho") — as listas vêm de Configurações →
+// Equipe da reunião (qs_settings), com estes defaults como fallback.
 
 // ── Activity type labels ─────────────────────────────────────────────────────
 
@@ -309,6 +309,42 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [workHours, setWorkHours] = useState<WorkHours>(DEFAULT_WORK_HOURS);
   useEffect(() => { loadWorkHours().then(setWorkHours); }, []);
 
+  // Equipe da reunião (Configurações) — listas do modal de Ganho.
+  const [meetingTeam, setMeetingTeam] = useState({ schedulers: DEFAULT_MEETING_SCHEDULERS, owners: DEFAULT_MEETING_OWNERS });
+  useEffect(() => { loadMeetingTeam().then(setMeetingTeam); }, []);
+
+  // ── Auto-atualização da fila (60s) ─────────────────────────────────
+  // Lead quente novo aparece sem F5. Não atualiza quando o SDR está no meio
+  // de algo (modal aberto, desfecho pendente, observação digitada) nem com a
+  // aba oculta. O guard vive num ref pra não recriar o intervalo a cada render.
+  const pollBusyRef = useRef(false);
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (document.hidden || pollBusyRef.current) return;
+      try {
+        const [tasksRes, leadsRes] = await Promise.all([
+          supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
+          supabase.from("qs_leads").select("*"),
+        ]);
+        if (tasksRes.data) setTasks(tasksRes.data as Task[]);
+        if (leadsRes.data) setLeads(leadsRes.data as Lead[]);
+      } catch { /* silencioso — próxima rodada tenta de novo */ }
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Placar REAL: atividades concluídas (hoje/mês) + metas de qs_goals.
+  const [doneCounts, setDoneCounts] = useState({ doneToday: 0, doneMonth: 0 });
+  const [goalTargets, setGoalTargets] = useState<{ daily: number | null; monthly: number | null }>({ daily: null, monthly: null });
+  const countsScope = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
+  const refreshCounts = useCallback(() => {
+    fetchActivityCounts(countsScope).then(setDoneCounts);
+  }, [countsScope]);
+  useEffect(() => {
+    refreshCounts();
+    fetchActivityGoals(countsScope).then(setGoalTargets);
+  }, [countsScope, refreshCounts]);
+
   // ── Lookup maps ────────────────────────────────────────────────────
   const leadsMap = useMemo(() => new Map(leads.map(l => [l.id, l])), [leads]);
   const cadencesMap = useMemo(() => new Map(cadences.map(c => [c.id, c])), [cadences]);
@@ -335,6 +371,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Itens 1 e 4 — observações da atividade (viram resumo no Bitrix via qs_notes)
   const [obsText, setObsText] = useState("");
   const [savingObs, setSavingObs] = useState(false);
+  // Feedback do "copiar telefone" no card hero
+  const [phoneCopied, setPhoneCopied] = useState(false);
+  // Anti duplo-clique: trava os desfechos enquanto um finaliza
+  const [finalizing, setFinalizing] = useState(false);
+  // "Pular" abre um mini-menu de motivos (vai pro skip_reason)
+  const [skipMenuOpen, setSkipMenuOpen] = useState(false);
   // Item 5 — transferir 1 lead pra outro SDR
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTo, setTransferTo] = useState("");
@@ -354,6 +396,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [dialNumber, setDialNumber] = useState("");
   const [newLead, setNewLead] = useState({ full_name: "", phone: "", email: "", company_name: "", owner_id: currentUser?.id ?? "", cadence_id: "", notes: "" });
   const [savingLead, setSavingLead] = useState(false);
+
+  // O polling pausa enquanto o SDR está no meio de algo (atualizado a cada render).
+  pollBusyRef.current = Boolean(
+    meetingFor || transferOpen || pendingResult || obsText.trim() || savingObs ||
+    showNewLeadModal || showExtraTaskModal || showDialer || skipMenuOpen || finalizing
+  );
 
   // Celebration (shown once per session when daily goal hit)
   const [celebrationShown, setCelebrationShown] = useState(false);
@@ -470,6 +518,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       });
       showToast(`Atividade registrada — ${leadName}`);
     }
+    refreshCounts(); // placar de metas atualiza na hora
   }
 
   // Salva a observação como nota do lead (n8n empurra pro Bitrix — itens 1 e 4).
@@ -567,6 +616,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setObsText("");
     setSavingMeeting(false);
     setMeetingFor(null);
+    refreshCounts();
     showToast(`Ganho! Reunião agendada — ${leadName}`);
   }
 
@@ -615,6 +665,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       setActiveTaskId(null);
       setObsText("");
       setExtraTask({ lead_id: "", channel_type: "ligacao", date: "", time: "09:00", notes: "", _searchText: "" });
+      if (fromRetorno) refreshCounts();
       showToast(fromRetorno ? "Retorno agendado — atividade extra criada" : "Atividade extra criada");
     }
   }
@@ -640,6 +691,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Filter logic
   const filteredTasks = useMemo(() => {
     let filtered = [...tasks];
+
+    // Guard: tarefas de leads já encerrados (ganho/perdido) não aparecem na fila
+    filtered = filtered.filter((t) => {
+      const st = getLeadForTask(t)?.status;
+      return st !== "ganho" && st !== "perdido";
+    });
 
     // Role-based filtering: SDR only sees their own tasks
     if (currentUser && !canSeeAllData(currentUser.role)) {
@@ -730,13 +787,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return null;
   }, [tasks, leads, cadences]);
 
-  // Progress calc — uses task count as placeholder until dashboard queries are built
-  const DAILY_DONE = tasks.length;
+  // Placar real: concluídas hoje/mês vs metas (qs_goals, com fallback nos padrões)
+  const DAILY_DONE = doneCounts.doneToday;
   const TOTAL_SCHEDULED = tasks.length;
-  const MONTHLY_DONE = tasks.length;
-  const dailyPct = DAILY_GOAL > 0 ? Math.min((DAILY_DONE / DAILY_GOAL) * 100, 100) : 0;
-  const monthlyPct = MONTHLY_GOAL > 0 ? Math.min((MONTHLY_DONE / MONTHLY_GOAL) * 100, 100) : 0;
-  const monthlyBeat = MONTHLY_DONE >= MONTHLY_GOAL;
+  const MONTHLY_DONE = doneCounts.doneMonth;
+  const dailyGoal = goalTargets.daily ?? DAILY_GOAL;
+  const monthlyGoal = goalTargets.monthly ?? MONTHLY_GOAL;
+  const dailyPct = dailyGoal > 0 ? Math.min((DAILY_DONE / dailyGoal) * 100, 100) : 0;
+  const monthlyPct = monthlyGoal > 0 ? Math.min((MONTHLY_DONE / monthlyGoal) * 100, 100) : 0;
+  const monthlyBeat = MONTHLY_DONE >= monthlyGoal;
   // Métricas de tempo dentro do horário de funcionamento (Configurações → Horário de Trabalho)
   const now = new Date();
   const totalMinLeft = minutesLeftToday(workHours, now);
@@ -750,11 +809,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const greetWord = greetHour < 12 ? "Bom dia" : greetHour < 18 ? "Boa tarde" : "Boa noite";
   const firstName = currentUser?.name?.split(" ")[0] ?? "";
   const todayLabel = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "short" });
-  const remainingGoal = Math.max(0, DAILY_GOAL - DAILY_DONE);
+  const remainingGoal = Math.max(0, dailyGoal - DAILY_DONE);
 
   // Celebration effect when daily goal is hit
   useEffect(() => {
-    if (DAILY_DONE >= DAILY_GOAL && !celebrationShown) {
+    if (DAILY_DONE >= dailyGoal && !celebrationShown) {
       setCelebrationShown(true);
       setShowCelebration(true);
       setTimeout(() => setShowCelebration(false), 3000);
@@ -773,6 +832,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setPendingResult(null);
     setTransferOpen(false);
     setTransferTo("");
+    setSkipMenuOpen(false);
   }
 
   // Card compacto da coluna de Atividades extras (retornos), destacado em azul.
@@ -941,6 +1001,24 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <div className="qsx-hco truncate">
                 {lead?.company_name || "—"}{lead?.job_title ? ` · ${lead.job_title}` : ""}
               </div>
+              {lead?.phone && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(formatPhoneDisplay(lead.phone));
+                      setPhoneCopied(true);
+                      setTimeout(() => setPhoneCopied(false), 2000);
+                    } catch { /* clipboard bloqueado */ }
+                  }}
+                  className="flex items-center gap-1.5 mt-1 text-[13px] font-bold hover:underline"
+                  style={{ color: phoneCopied ? "#0E7C6A" : "var(--ink2)", fontVariantNumeric: "tabular-nums" }}
+                  title="Copiar telefone"
+                >
+                  {formatPhoneDisplay(lead.phone)}
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                  {phoneCopied && <span className="text-[11px] font-semibold">copiado!</span>}
+                </button>
+              )}
             </div>
             <div className="ml-auto flex gap-2 shrink-0">
               <span className={`qsx-chip prio-${prio}`}><span className={`qsx-dot dot-${prio}`} />{PRIORITY_LABELS[prio]}</span>
@@ -954,7 +1032,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           <div className="flex items-center gap-2.5 flex-wrap">
             {renderChannelAction(task, lead)}
             <button
-              onClick={async () => { await skipTask(task.id, "Pulada na fila"); setTasks((prev) => prev.filter((t) => t.id !== task.id)); setActiveTaskId(null); }}
+              onClick={() => setSkipMenuOpen((o) => !o)}
               className="qsx-btn qsx-btn-ghost"
               style={{ marginLeft: "auto" }}
             >
@@ -962,6 +1040,30 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               Pular
             </button>
           </div>
+
+          {/* Motivo do pulo (vai pro skip_reason) */}
+          {skipMenuOpen && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "var(--line2)" }}>
+              <span className="text-[13px] font-semibold" style={{ color: "var(--ink2)" }}>Por que está pulando?</span>
+              {["Aguardando retorno", "Horário inadequado", "Priorizar outro", "Outro"].map((reason) => (
+                <button
+                  key={reason}
+                  onClick={async () => {
+                    await skipTask(task.id, reason);
+                    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+                    setActiveTaskId(null);
+                    setSkipMenuOpen(false);
+                  }}
+                  className="qsx-out"
+                >
+                  {reason}
+                </button>
+              ))}
+              <button onClick={() => setSkipMenuOpen(false)} className="text-[13px] font-semibold hover:underline" style={{ color: "var(--ink3)", marginLeft: "auto" }}>
+                Cancelar
+              </button>
+            </div>
+          )}
 
           {/* Transferir 1 lead pra outro SDR (item 5) */}
           {transferOpen && lead && (
@@ -1018,10 +1120,24 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <span className="text-[13px]" style={{ color: "var(--ink2)" }}>
                   Confirmar: <b style={{ color: "var(--ink)" }}>{outcomes.find((o) => o.key === pending)?.label}</b>? {obsText.trim() && <span style={{ color: "var(--ink3)" }}>(a observação vai junto no resumo)</span>}
                 </span>
-                <button onClick={async () => { await handleContactResult(task.id, pending); setPendingResult(null); }} className="qsx-btn qsx-btn-orange" style={{ height: 38, marginLeft: "auto" }}>
-                  Finalizar
+                <button
+                  onClick={async () => {
+                    if (finalizing) return; // anti duplo-clique
+                    setFinalizing(true);
+                    try {
+                      await handleContactResult(task.id, pending);
+                      setPendingResult(null);
+                    } finally {
+                      setFinalizing(false);
+                    }
+                  }}
+                  disabled={finalizing}
+                  className="qsx-btn qsx-btn-orange"
+                  style={{ height: 38, marginLeft: "auto", opacity: finalizing ? 0.6 : 1 }}
+                >
+                  {finalizing ? "Finalizando…" : "Finalizar"}
                 </button>
-                <button onClick={() => setPendingResult(null)} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }}>
+                <button onClick={() => setPendingResult(null)} disabled={finalizing} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }}>
                   Cancelar
                 </button>
               </div>
@@ -1058,10 +1174,28 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // ── RENDER ─────────────────────────────────────────────────────────────────
 
   if (loading) {
+    // Skeleton no formato da tela real (saudação + hero + pílulas)
+    const sk = (w: string | number, h: number, r = 12) => (
+      <div style={{ width: w, height: h, borderRadius: r, background: "var(--line2, #EEF1F5)", animation: "skPulse 1.4s ease-in-out infinite" }} />
+    );
     return (
-      <div className="flex flex-col items-center justify-center h-full" style={{ background: "var(--bg)" }}>
-        <div className="w-8 h-8 border-3 border-gray-200 border-t-orange-500 rounded-full animate-spin mb-4" />
-        <p className="text-sm text-gray-400">Carregando atividades...</p>
+      <div className="flex flex-col h-full overflow-hidden" style={{ background: "var(--bg)" }}>
+        <style>{`@keyframes skPulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }`}</style>
+        <div className="px-6 pt-5 pb-4" style={{ background: "#fff", borderBottom: "1px solid var(--line)" }}>
+          <div className="flex flex-col gap-4" style={{ maxWidth: 1400, margin: "0 auto" }}>
+            <div className="flex items-center gap-3">{sk(180, 24)}{sk(300, 16)}</div>
+            <div className="flex items-center gap-3">{sk("40%", 48, 14)}{sk(150, 48, 14)}{sk(140, 48, 14)}{sk(140, 48, 14)}</div>
+            <div className="flex items-center gap-8">{sk(180, 30)}{sk(180, 30)}</div>
+          </div>
+        </div>
+        <div className="px-6 pt-4">
+          <div className="flex flex-col gap-3" style={{ maxWidth: 1400, margin: "0 auto" }}>
+            {sk("100%", 260, 22)}
+            {sk("100%", 76, 20)}
+            {sk("100%", 76, 20)}
+            {sk("100%", 76, 20)}
+          </div>
+        </div>
       </div>
     );
   }
@@ -1318,7 +1452,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <div className="qsx-mtop">
                   <span className="qsx-mdot" style={{ background: dailyPct >= 100 ? "var(--green)" : "var(--yellow)" }} />
                   <span className="qsx-mlab">Meta de hoje</span>
-                  <span className="qsx-mnums">{DAILY_DONE}<span>/{DAILY_GOAL}</span></span>
+                  <span className="qsx-mnums">{DAILY_DONE}<span>/{dailyGoal}</span></span>
                 </div>
                 <div className="qsx-bar"><i style={{ width: `${dailyPct}%`, background: dailyPct >= 100 ? "var(--green)" : "var(--yellow)" }} /></div>
               </div>
@@ -1326,7 +1460,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <div className="qsx-mtop">
                   <span className="qsx-mdot" style={{ background: monthlyBeat ? "var(--green)" : "var(--blue)" }} />
                   <span className="qsx-mlab">Meta do mês</span>
-                  <span className="qsx-mnums">{MONTHLY_DONE.toLocaleString("pt-BR")}<span>/{MONTHLY_GOAL.toLocaleString("pt-BR")}</span></span>
+                  <span className="qsx-mnums">{MONTHLY_DONE.toLocaleString("pt-BR")}<span>/{monthlyGoal.toLocaleString("pt-BR")}</span></span>
                 </div>
                 <div className="qsx-bar"><i style={{ width: `${monthlyPct}%`, background: monthlyBeat ? "var(--green)" : "var(--blue)" }} /></div>
               </div>
@@ -1518,7 +1652,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <label className="text-xs font-medium text-gray-500 block mb-1">Quem fez o agendamento *</label>
                 <select value={meeting.agendadoPor} onChange={(e) => setMeeting((m) => ({ ...m, agendadoPor: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400">
                   <option value="">Selecione...</option>
-                  {AGENDADORES.map((n) => <option key={n} value={n}>{n}</option>)}
+                  {meetingTeam.schedulers.map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
               <div>
@@ -1533,7 +1667,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <label className="text-xs font-medium text-gray-500 block mb-1">Responsável pela reunião *</label>
                 <select value={meeting.responsavel} onChange={(e) => setMeeting((m) => ({ ...m, responsavel: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400">
                   <option value="">Selecione...</option>
-                  {RESPONSAVEIS_REUNIAO.map((n) => <option key={n} value={n}>{n}</option>)}
+                  {meetingTeam.owners.map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
               <div>

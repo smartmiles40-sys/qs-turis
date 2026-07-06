@@ -140,7 +140,7 @@ function nextId(prefix: string) {
   return `${prefix}-${++_idCounter}`;
 }
 
-// ── Mock Data for Edit Mode ─────────────────────────────────────────────────
+// ── Formulário padrão (criação). Na edição, os dados reais vêm do Supabase ──
 
 function getDefaultForm(): FormState {
   return {
@@ -236,18 +236,25 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
         status: c.status ?? "rascunho",
         auto_loss_enabled: c.auto_loss_days !== null && c.auto_loss_days !== undefined,
         auto_loss_days: c.auto_loss_days ?? 14,
-        days: (c.days ?? []).map((d: any) => ({
-          id: d.id,
-          day_number: d.day_number,
-          activities: (d.activities ?? []).map((a: any) => ({
-            id: a.id,
-            cadence_day_id: a.cadence_day_id,
-            channel_type: a.channel_type,
-            scheduled_time: a.scheduled_time,
-            order_index: a.order_index,
-            script_text: a.script_text || "",
+        // Joins aninhados do Supabase não garantem ordem → ordena dias e atividades.
+        days: (c.days ?? [])
+          .slice()
+          .sort((a: any, b: any) => (a.day_number ?? 0) - (b.day_number ?? 0))
+          .map((d: any) => ({
+            id: d.id,
+            day_number: d.day_number,
+            activities: (d.activities ?? [])
+              .slice()
+              .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+              .map((a: any) => ({
+                id: a.id,
+                cadence_day_id: a.cadence_day_id,
+                channel_type: a.channel_type,
+                scheduled_time: a.scheduled_time,
+                order_index: a.order_index,
+                script_text: a.script_text || "",
+              })),
           })),
-        })),
         weekdays: c.execution_weekdays ?? [1, 2, 3, 4, 5],
         distribution_mode: c.distribution_mode ?? "alternado",
         offday_policy: c.offday_policy ?? "aguardar_proximo_dia",

@@ -351,6 +351,12 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                     {meeting.title && (
                       <span className="block text-xs text-gray-400">{meeting.title}</span>
                     )}
+                    {meeting.location && (
+                      <span className="inline-flex items-center gap-1 mt-0.5 text-[11px] font-semibold text-emerald-600">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
+                        {meeting.location}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <button
@@ -367,6 +373,11 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700">
                     {(meeting as any).owner?.name ?? "—"}
+                    {meeting.notes && (
+                      <span className="block text-xs text-gray-400 truncate max-w-[260px]" title={meeting.notes}>
+                        {meeting.notes}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span

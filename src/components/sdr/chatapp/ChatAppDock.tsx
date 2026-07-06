@@ -9,7 +9,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
-import { getChatAppUrl } from "@/lib/whatsapp";
+import { getChatAppUrl, fillTemplate, WA_TEMPLATES } from "@/lib/whatsapp";
 
 const WA_GREEN = "#12A18A"; // --green da paleta Turis
 const MIN_W = 360;
@@ -58,6 +58,17 @@ export default function ChatAppDock() {
   });
   const [dragging, setDragging] = useState(false);
   const draggingRef = useRef(false);
+  // Template copiado por último (feedback "Copiado!" no chip)
+  const [copiedTpl, setCopiedTpl] = useState<string | null>(null);
+
+  async function copyTemplate(label: string, text: string) {
+    const filled = fillTemplate(text, { name: target?.name ?? null });
+    try {
+      await navigator.clipboard.writeText(filled);
+      setCopiedTpl(label);
+      setTimeout(() => setCopiedTpl(null), 2000);
+    } catch { /* clipboard bloqueado — ignora */ }
+  }
 
   const startDrag = useCallback((e: React.PointerEvent) => {
     draggingRef.current = true;
@@ -151,6 +162,28 @@ export default function ChatAppDock() {
                 <IconCopy size={13} />
               </button>
               <span className="ml-auto text-[10.5px] text-[#6B7280]">cole na busca · Ctrl+V</span>
+            </div>
+          )}
+
+          {/* Templates rápidos — copia a mensagem preenchida com o nome do lead */}
+          {target && (
+            <div className="shrink-0 flex items-center gap-1.5 px-4 py-2 border-b flex-wrap bg-white" style={{ borderColor: "var(--line2)" }}>
+              <span className="text-[10.5px] font-bold uppercase tracking-wider" style={{ color: "var(--ink3, #8B95A4)" }}>Mensagens</span>
+              {WA_TEMPLATES.map((t) => (
+                <button
+                  key={t.label}
+                  onClick={() => copyTemplate(t.label, t.text)}
+                  className="text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors"
+                  style={
+                    copiedTpl === t.label
+                      ? { background: "#0E7C6A", color: "#fff", borderColor: "#0E7C6A" }
+                      : { background: "#fff", color: "#586274", borderColor: "var(--line, #E8EBF0)" }
+                  }
+                  title={`Copiar: ${fillTemplate(t.text, { name: target.name ?? null })}`}
+                >
+                  {copiedTpl === t.label ? "Copiado!" : t.label}
+                </button>
+              ))}
             </div>
           )}
 

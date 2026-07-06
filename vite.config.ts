@@ -90,5 +90,17 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // Separa as libs pesadas do código do app: carrega mais rápido e
+          // o chunk do app fica pequeno (cache de vendor sobrevive a deploys).
+          manualChunks: {
+            react: ["react", "react-dom"],
+            supabase: ["@supabase/supabase-js"],
+          },
+        },
+      },
+    },
   };
 });

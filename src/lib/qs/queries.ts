@@ -240,10 +240,11 @@ export async function handoverLead(
       });
     if (handoverError) throw handoverError;
 
+    // Só troca o dono — "qualificado" não é um status válido do CHECK do banco
+    // (nao_iniciado | em_prospeccao | ganho | perdido); o status atual é mantido.
     const { error: leadError } = await supabase
       .from("qs_leads")
       .update({
-        status: "qualificado" as LeadStatus,
         owner_id: toUserId,
         updated_at: new Date().toISOString(),
       })
@@ -293,6 +294,66 @@ export async function transferLead(
   } catch (err) {
     console.warn("[QS] transferLead failed:", err);
     return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MÉTRICAS / METAS (placar real do Painel)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface ActivityCounts {
+  doneToday: number;
+  doneMonth: number;
+}
+
+/**
+ * Conta as atividades CONCLUÍDAS hoje e no mês (placar real do Painel).
+ * Se ownerId vier, conta só as do SDR; senão, do time inteiro.
+ */
+export async function fetchActivityCounts(ownerId?: string | null): Promise<ActivityCounts> {
+  const now = new Date();
+  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  try {
+    let qDay = supabase.from("qs_tasks").select("id", { count: "exact", head: true })
+      .eq("status", "concluida").gte("completed_at", dayStart.toISOString());
+    let qMonth = supabase.from("qs_tasks").select("id", { count: "exact", head: true })
+      .eq("status", "concluida").gte("completed_at", monthStart.toISOString());
+    if (ownerId) { qDay = qDay.eq("owner_id", ownerId); qMonth = qMonth.eq("owner_id", ownerId); }
+    const [d, m] = await Promise.all([qDay, qMonth]);
+    return { doneToday: d.count ?? 0, doneMonth: m.count ?? 0 };
+  } catch (err) {
+    console.warn("[QS] fetchActivityCounts failed:", err);
+    return { doneToday: 0, doneMonth: 0 };
+  }
+}
+
+/**
+ * Metas de ATIVIDADES vindas de qs_goals (period diario/mensal).
+ * Com ownerId: prioriza a meta do próprio SDR; sem: soma as metas do time.
+ * Retorna null quando não há meta cadastrada (o Painel usa o fallback).
+ */
+export async function fetchActivityGoals(ownerId?: string | null): Promise<{ daily: number | null; monthly: number | null }> {
+  try {
+    const { data, error } = await supabase.from("qs_goals").select("*").eq("type", "atividades");
+    if (error || !data) return { daily: null, monthly: null };
+    const goals = data as { owner_id: string | null; period: string; target_value: number }[];
+    const pick = (period: string): number | null => {
+      const list = goals.filter((g) => g.period === period);
+      if (list.length === 0) return null;
+      if (ownerId) {
+        const own = list.find((g) => g.owner_id === ownerId);
+        if (own) return own.target_value;
+        const global = list.find((g) => !g.owner_id);
+        return global ? global.target_value : null;
+      }
+      // visão do time: soma todas as metas do período
+      return list.reduce((acc, g) => acc + (g.target_value || 0), 0) || null;
+    };
+    return { daily: pick("diario"), monthly: pick("mensal") };
+  } catch (err) {
+    console.warn("[QS] fetchActivityGoals failed:", err);
+    return { daily: null, monthly: null };
   }
 }
 

@@ -38,6 +38,15 @@ interface NotifLead {
   created_at: string;
 }
 
+interface NotifHandover {
+  id: string;
+  lead_id: string;
+  briefing: string | null;
+  created_at: string;
+  lead: NotifTaskLead | null;
+  from_user: { name: string } | null;
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function timeAgo(iso: string): string {
@@ -105,6 +114,17 @@ function IconSpark() {
       <path d="M18 12h4" />
       <path d="M4.93 19.07l2.83-2.83" />
       <path d="M16.24 7.76l2.83-2.83" />
+    </svg>
+  );
+}
+
+function IconSwap() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 3h5v5" />
+      <path d="M21 3l-7 7" />
+      <path d="M8 21H3v-5" />
+      <path d="M3 21l7-7" />
     </svg>
   );
 }
@@ -188,9 +208,10 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
   const [overdue, setOverdue] = useState<NotifTask[]>([]);
   const [today, setToday] = useState<NotifTask[]>([]);
   const [hotLeads, setHotLeads] = useState<NotifLead[]>([]);
+  const [received, setReceived] = useState<NotifHandover[]>([]);
   const ref = useRef<HTMLDivElement>(null);
 
-  const total = overdue.length + today.length + hotLeads.length;
+  const total = overdue.length + today.length + hotLeads.length + received.length;
 
   // ── Carregamento dos dados ─────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -241,15 +262,27 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
       .limit(20);
     if (!seeAll) leadsQ = leadsQ.eq("owner_id", ownerId);
 
-    const [overdueRes, todayRes, leadsRes] = await Promise.all([overdueQ, todayQ, leadsQ]);
+    // 4. Leads recebidos por transferência/handover nas últimas 24h (pessoal).
+    const h24Iso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const receivedQ = supabase
+      .from("qs_handovers")
+      .select("id, lead_id, briefing, created_at, lead:qs_leads(full_name, company_name), from_user:qs_users!qs_handovers_from_user_id_fkey(name)")
+      .eq("to_user_id", ownerId)
+      .gte("created_at", h24Iso)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    const [overdueRes, todayRes, leadsRes, receivedRes] = await Promise.all([overdueQ, todayQ, leadsQ, receivedQ]);
 
     if (overdueRes.error) console.warn("[QS] notificações — atrasados:", overdueRes.error);
     if (todayRes.error) console.warn("[QS] notificações — hoje:", todayRes.error);
     if (leadsRes.error) console.warn("[QS] notificações — leads:", leadsRes.error);
+    if (receivedRes.error) console.warn("[QS] notificações — recebidos:", receivedRes.error);
 
     setOverdue((overdueRes.data ?? []) as unknown as NotifTask[]);
     setToday((todayRes.data ?? []) as unknown as NotifTask[]);
     setHotLeads((leadsRes.data ?? []) as unknown as NotifLead[]);
+    setReceived((receivedRes.data ?? []) as unknown as NotifHandover[]);
     setLoading(false);
   }, [currentUser]);
 
@@ -390,7 +423,31 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                   </div>
                 )}
 
-                {/* 3. Leads quentes / novos */}
+                {/* 3. Leads recebidos (transferência/handover) */}
+                {received.length > 0 && (
+                  <div className="pb-2 border-b border-gray-50">
+                    <SectionHeader
+                      icon={<IconSwap />}
+                      label="Leads recebidos"
+                      count={received.length}
+                      color="#12A18A"
+                      bg="#D1FAE5"
+                    />
+                    {received.map((h) => (
+                      <NotifRow
+                        key={h.id}
+                        onClick={() => openLead(h.lead_id)}
+                        accent="#12A18A"
+                        title={leadTitle(h.lead)}
+                        subtitle={`${h.from_user?.name ? `de ${h.from_user.name}` : "transferido"}${h.briefing ? ` · ${h.briefing}` : ""}`}
+                        meta={`há ${timeAgo(h.created_at)}`}
+                        metaColor="#12A18A"
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* 4. Leads quentes / novos */}
                 {hotLeads.length > 0 && (
                   <div className="pb-2">
                     <SectionHeader
