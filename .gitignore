@@ -26,3 +26,5 @@ dist-ssr
 # Env local (nunca versionar)
 .env
 .env*.local
+
+.vercel

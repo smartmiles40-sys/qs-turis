@@ -20,6 +20,8 @@ import {
   logWhatsApp,
   WA_TEMPLATES,
 } from "@/lib/whatsapp";
+import { dialViaWavoip } from "@/lib/wavoip";
+import { dialViaSip, isSipEnabled } from "@/lib/sip";
 
 export interface WhatsAppLead {
   id?: string | null;
@@ -44,6 +46,8 @@ const CHATAPP_BLUE = "#0147FF";
 export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultText, onSent }: Props) {
   const [text, setText] = useState(defaultText ?? "");
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [calling, setCalling] = useState(false);
+  const [sipOn, setSipOn] = useState(false);
 
   const phone = useMemo(() => normalizePhoneBR(lead.phone), [lead.phone]);
   const dialable = isDialablePhone(lead.phone);
@@ -53,6 +57,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
     if (open) {
       setText(defaultText ?? "");
       setResult(null);
+      isSipEnabled().then(setSipOn).catch(() => setSipOn(false));
     }
   }, [open, defaultText]);
 
@@ -97,6 +102,22 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
     if (!dialable) return;
     logWhatsApp({ leadId: lead.id ?? null, ownerId: ownerId ?? null, phone, status: "pending", kind: "call", body: "Ligação iniciada via WhatsApp" });
     startWhatsAppCall(lead.phone);
+  }
+
+  async function handleWebfoneCall() {
+    if (!dialable || calling) return;
+    setCalling(true);
+    logWhatsApp({ leadId: lead.id ?? null, ownerId: ownerId ?? null, phone, status: "pending", kind: "call", body: "Ligação iniciada via Webfone (Wavoip)" });
+    const r = await dialViaWavoip(lead.phone, lead.name ?? undefined);
+    setResult(r.ok ? { ok: true, msg: "Ligando pelo webfone… atenda pelo painel que abriu." } : { ok: false, msg: r.error });
+    setCalling(false);
+  }
+
+  async function handleSipCall() {
+    if (!dialable) return;
+    logWhatsApp({ leadId: lead.id ?? null, ownerId: ownerId ?? null, phone, status: "pending", kind: "call", body: "Ligação iniciada via SIP (softphone)" });
+    const r = await dialViaSip(lead.phone);
+    setResult(r.ok ? { ok: true, msg: "Abrindo o softphone para discar… (precisa do MicroSIP/Zoiper instalado)." } : { ok: false, msg: r.error });
   }
 
   return (
@@ -176,6 +197,30 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               </svg>
               Enviar pelo ChatApp
             </button>
+            <button
+              onClick={handleWebfoneCall}
+              disabled={!dialable || calling}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
+              style={{ background: WA_GREEN }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+              {calling ? "Ligando…" : "Ligar pelo Webfone"}
+            </button>
+            {sipOn && (
+              <button
+                onClick={handleSipCall}
+                disabled={!dialable}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
+                style={{ background: "#334155" }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+                Ligar (SIP / telefone)
+              </button>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={handleOpenChat}
@@ -195,12 +240,12 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
                 </svg>
-                Ligar
+                Ligar (WhatsApp)
               </button>
             </div>
           </div>
           <p className="text-[10px] text-gray-400 text-center">
-            "Enviar pelo ChatApp" abre o ChatApp em nova aba com a mensagem copiada. "WhatsApp" abre a conversa direto no WhatsApp. "Ligar" abre a conversa para você iniciar a chamada.
+            "Ligar pelo Webfone" faz a chamada de voz dentro do sistema (precisa do token em Configurações → Webfone).{sipOn ? " \"Ligar (SIP / telefone)\" disca pelo softphone (MicroSIP/Zoiper) instalado no PC." : ""} "Enviar pelo ChatApp" abre o ChatApp com a mensagem copiada. "WhatsApp" abre a conversa. "Ligar (WhatsApp)" abre a conversa para você iniciar a chamada pelo app.
           </p>
         </div>
       </div>

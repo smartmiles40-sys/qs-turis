@@ -66,6 +66,7 @@ import SettingsPage from "./settings/SettingsPage";
 import CoveragePanel from "./dashboard/CoveragePanel";
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import ChatAppDock from "./chatapp/ChatAppDock";
+import WavoipWebphone from "./webphone/WavoipWebphone";
 
 export type SdrNav =
   | "painel"
@@ -449,6 +450,9 @@ export default function SdrLayout() {
 
       {/* Coluna do ChatApp — divide a tela; montada uma única vez e persistente */}
       <ChatAppDock />
+
+      {/* Webfone (Wavoip) — botão flutuante montado uma única vez (canto inferior esquerdo) */}
+      <WavoipWebphone />
     </div>
   );
 }

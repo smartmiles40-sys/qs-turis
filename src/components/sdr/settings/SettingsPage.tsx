@@ -2,7 +2,9 @@ import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { createQsAuthUser, updateQsAuthUser, deleteQsAuthUser } from "@/lib/adminUsers";
 import { loadWorkHours, saveWorkHours, DEFAULT_WORK_HOURS, WEEKDAY_NAMES, type WorkHours } from "@/lib/workHours";
-import { loadMeetingTeam, saveMeetingTeam } from "@/lib/qsSettings";
+import { loadMeetingTeam, saveMeetingTeam, getSetting, setSetting } from "@/lib/qsSettings";
+import { WAVOIP_TOKEN_KEY } from "@/lib/wavoip";
+import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PASSWORD_KEY, DEFAULT_SIP_HOST } from "@/lib/sip";
 import type {
   CustomField,
   CustomFieldScope,
@@ -45,7 +47,7 @@ const FIELD_TYPE_LABELS: Record<string, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "horario" | "equipe" | "usuarios";
+type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "horario" | "equipe" | "webfone" | "telefone-sip" | "usuarios";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -60,6 +62,8 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "motivos", label: "Motivos de Perda", group: "PLATAFORMA" },
   { key: "horario", label: "Horário de Trabalho", group: "EMPRESA" },
   { key: "equipe", label: "Equipe da Reunião", group: "EMPRESA" },
+  { key: "webfone", label: "Webfone (Wavoip)", group: "EMPRESA" },
+  { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
 ];
 
@@ -1060,6 +1064,219 @@ function EquipeSection() {
   );
 }
 
+// ── Webfone (Wavoip) ─────────────────────────────────────────────────────────
+// Token do dispositivo Wavoip (instância do WhatsApp) usado pelo webfone para
+// fazer/receber chamadas de voz. Salvo em qs_settings (chave "wavoip_token").
+
+function WebfoneSection() {
+  const [token, setToken] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    getSetting<string>(WAVOIP_TOKEN_KEY).then((t) => {
+      setToken((t ?? "").trim());
+      setLoading(false);
+    });
+  }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    const ok = await setSetting(WAVOIP_TOKEN_KEY, token.trim());
+    setSaving(false);
+    setSaved(ok);
+    if (ok) setTimeout(() => setSaved(false), 2500);
+  }
+
+  if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Webfone (Wavoip)</h2>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Ligações de voz pelo WhatsApp <b>dentro do sistema</b>. Cole aqui o token do dispositivo
+          Wavoip (instância do WhatsApp). O botão do webfone fica no canto inferior esquerdo.
+        </p>
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-xl p-4 max-w-xl">
+        <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-2">
+          Token do dispositivo
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type={show ? "text" : "password"}
+            value={token}
+            onChange={(e) => { setToken(e.target.value); setSaved(false); }}
+            placeholder="Ex.: a1b2c3d4-1234-5678-90ab-cdef12345678"
+            className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            onClick={() => setShow((s) => !s)}
+            className="px-3 py-2 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50"
+          >
+            {show ? "Ocultar" : "Mostrar"}
+          </button>
+        </div>
+        <p className="text-[11px] text-gray-400 mt-2">
+          Onde encontrar: painel da Wavoip → sua instância do WhatsApp → token do dispositivo.
+          Um <code className="text-gray-500">VITE_WAVOIP_TOKEN</code> definido no ambiente, se existir, tem prioridade sobre este campo.
+        </p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+          style={{ background: "#2563EB" }}
+        >
+          {saving ? "Salvando..." : "Salvar token"}
+        </button>
+        {saved && <span className="text-sm font-medium text-green-600">Salvo ✓ — recarregue a página para o webfone reconectar.</span>}
+      </div>
+    </div>
+  );
+}
+
+// ── Telefone (SIP) ───────────────────────────────────────────────────────────
+// Discagem por SIP como 2ª forma de contato. O navegador não fala SIP direto:
+// quem disca é um softphone (MicroSIP/Zoiper) instalado no PC do SDR, registrado
+// com estas credenciais. O CRM só monta o link sip: (click-to-dial). Guia: docs/SIP.md.
+
+function SipSection() {
+  const [enabled, setEnabled] = useState(false);
+  const [host, setHost] = useState(DEFAULT_SIP_HOST);
+  const [user, setUser] = useState("");
+  const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      getSetting<boolean>(SIP_ENABLED_KEY),
+      getSetting<string>(SIP_HOST_KEY),
+      getSetting<string>(SIP_USER_KEY),
+      getSetting<string>(SIP_PASSWORD_KEY),
+    ]).then(([en, h, u, p]) => {
+      setEnabled(en === true);
+      setHost((h ?? "").trim() || DEFAULT_SIP_HOST);
+      setUser((u ?? "").trim());
+      setPassword((p ?? "").trim());
+      setLoading(false);
+    });
+  }, []);
+
+  function markDirty() { setSaved(false); }
+
+  async function handleSave() {
+    setSaving(true);
+    const ok = (await Promise.all([
+      setSetting(SIP_ENABLED_KEY, enabled),
+      setSetting(SIP_HOST_KEY, host.trim() || DEFAULT_SIP_HOST),
+      setSetting(SIP_USER_KEY, user.trim()),
+      setSetting(SIP_PASSWORD_KEY, password.trim()),
+    ])).every(Boolean);
+    setSaving(false);
+    setSaved(ok);
+    if (ok) setTimeout(() => setSaved(false), 2500);
+  }
+
+  if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Telefone (SIP)</h2>
+        <p className="text-sm text-gray-500 mt-0.5">
+          2ª forma de ligar: por um <b>softphone no computador</b> (MicroSIP no Windows, Zoiper).
+          O botão "Ligar (SIP)" no lead abre o softphone e disca. Não roda dentro do navegador —
+          o SDR instala o softphone uma vez com as credenciais abaixo. Passo a passo em <code className="text-gray-500">docs/SIP.md</code>.
+        </p>
+      </div>
+
+      {/* Liga/desliga o botão SIP no CRM */}
+      <div className="flex items-center justify-between bg-white border border-gray-100 rounded-xl px-4 py-3 max-w-xl">
+        <div>
+          <p className="text-sm font-semibold text-gray-900">Mostrar botão "Ligar (SIP)"</p>
+          <p className="text-xs text-gray-400 mt-0.5">Só ative depois que o softphone estiver instalado e registrado.</p>
+        </div>
+        <button
+          onClick={() => { setEnabled((v) => !v); markDirty(); }}
+          className="relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0"
+          style={{ background: enabled ? "#2563EB" : "#D1D5DB" }}
+          title={enabled ? "Ativado" : "Desativado"}
+        >
+          <span className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200" style={{ transform: enabled ? "translateX(20px)" : "translateX(0)" }} />
+        </button>
+      </div>
+
+      {/* Credenciais (referência p/ configurar o softphone) */}
+      <div className="bg-white border border-gray-100 rounded-xl p-4 max-w-xl space-y-3">
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-1">Servidor (host/domínio)</label>
+          <input
+            type="text"
+            value={host}
+            onChange={(e) => { setHost(e.target.value); markDirty(); }}
+            placeholder={DEFAULT_SIP_HOST}
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
+            spellCheck={false}
+          />
+        </div>
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-1">Usuário SIP</label>
+          <input
+            type="text"
+            value={user}
+            onChange={(e) => { setUser(e.target.value); markDirty(); }}
+            placeholder="Ex.: seu-usuario-sip"
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-1">Senha SIP</label>
+          <div className="flex items-center gap-2">
+            <input
+              type={show ? "text" : "password"}
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); markDirty(); }}
+              placeholder="senha do dispositivo SIP"
+              className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <button type="button" onClick={() => setShow((s) => !s)} className="px-3 py-2 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
+              {show ? "Ocultar" : "Mostrar"}
+            </button>
+          </div>
+        </div>
+        <p className="text-[11px] text-gray-400">
+          Usuário e senha são só <b>referência</b> para configurar o softphone — o CRM não liga por eles,
+          quem autentica é o softphone. O click-to-dial usa apenas o servidor acima.
+        </p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button onClick={handleSave} disabled={saving} className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#2563EB" }}>
+          {saving ? "Salvando..." : "Salvar"}
+        </button>
+        {saved && <span className="text-sm font-medium text-green-600">Salvo ✓</span>}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -1123,6 +1340,8 @@ export default function SettingsPage() {
         {activeSection === "motivos" && <MotivosSection />}
         {activeSection === "horario" && <HorarioSection />}
         {activeSection === "equipe" && <EquipeSection />}
+        {activeSection === "webfone" && <WebfoneSection />}
+        {activeSection === "telefone-sip" && <SipSection />}
         {activeSection === "usuarios" && <UsuariosSection />}
       </main>
     </div>
