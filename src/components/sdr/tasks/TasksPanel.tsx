@@ -243,6 +243,15 @@ function getActivityLabel(channel: ChannelType, _cadenceName?: string): string {
   return channelNames[channel];
 }
 
+/** Conta observações (qs_notes) por lead_id — alimenta a mini-notificação. */
+function buildNoteCounts(rows: { lead_id: string | null }[] | null): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const r of rows || []) {
+    if (r.lead_id) m.set(r.lead_id, (m.get(r.lead_id) || 0) + 1);
+  }
+  return m;
+}
+
 // ── Tentativas de contato ────────────────────────────────────────────────────
 // A coluna qs_tasks NÃO tem `contact_attempts`. Cada tarefa de follow-up carrega a
 // tag `tentativa:N`; a primeira tarefa da cadência (sem tag) conta como tentativa 1.
@@ -281,23 +290,27 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [qsUsers, setQsUsers] = useState<SdrUser[]>([]);
   const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  // Quantas observações (notas) cada lead tem — pra mostrar a mini-notificação (item 6).
+  const [noteCounts, setNoteCounts] = useState<Map<string, number>>(new Map());
 
   useEffect(() => {
     async function loadData() {
       setLoading(true);
       try {
-        const [tasksRes, leadsRes, cadencesRes, usersData, productsRes] = await Promise.all([
+        const [tasksRes, leadsRes, cadencesRes, usersData, productsRes, notesRes] = await Promise.all([
           supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
           supabase.from("qs_leads").select("*"),
           supabase.from("qs_cadences").select("*"),
           fetchQsUsers(),
           supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
+          supabase.from("qs_notes").select("lead_id"),
         ]);
         setTasks((tasksRes.data || []) as Task[]);
         setLeads((leadsRes.data || []) as Lead[]);
         setCadences((cadencesRes.data || []) as Cadence[]);
         setQsUsers(usersData);
         setProducts((productsRes.data || []) as { id: string; name: string }[]);
+        setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[] | null));
       } catch (err) {
         console.warn("[TasksPanel] falha ao carregar dados:", err);
       } finally {
@@ -324,12 +337,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const id = setInterval(async () => {
       if (document.hidden || pollBusyRef.current) return;
       try {
-        const [tasksRes, leadsRes] = await Promise.all([
+        const [tasksRes, leadsRes, notesRes] = await Promise.all([
           supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
           supabase.from("qs_leads").select("*"),
+          supabase.from("qs_notes").select("lead_id"),
         ]);
         if (tasksRes.data) setTasks(tasksRes.data as Task[]);
         if (leadsRes.data) setLeads(leadsRes.data as Lead[]);
+        if (notesRes.data) setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[]));
       } catch { /* silencioso — próxima rodada tenta de novo */ }
     }, 60_000);
     return () => clearInterval(id);
@@ -526,11 +541,28 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     refreshCounts(); // placar de metas atualiza na hora
   }
 
+  // Marca a atividade como CONCLUÍDA (conta no placar do dia), some da fila e
+  // libera a próxima. A observação (se houver) fica salva no perfil do lead.
+  async function handleConcludeActivity(task: Task) {
+    const obs = obsText.trim();
+    if (obs) {
+      await persistObservation(task.lead_id, `${CHANNEL_LABELS[task.channel_type]} — Concluída: ${obs}`, ["bitrix", "observacao"]);
+    }
+    await completeTask(task.id, "concluida", obs || undefined, obs ? ["observacao"] : undefined);
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+    setActiveTaskId(null);
+    setObsText("");
+    refreshCounts();
+    showToast("Atividade concluída");
+  }
+
   // Salva a observação como nota do lead (n8n empurra pro Bitrix — itens 1 e 4).
   async function persistObservation(leadId: string, body: string, tags: string[] = ["bitrix"]) {
     const text = body.trim();
     if (!text) return;
     try {
+      // Mini-notificação (item 6): incrementa o contador de observações do lead na hora.
+      setNoteCounts((prev) => { const m = new Map(prev); m.set(leadId, (m.get(leadId) || 0) + 1); return m; });
       await supabase.from("qs_notes").insert({
         lead_id: leadId,
         author_id: currentUser?.id ?? null,
@@ -742,6 +774,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       filtered = filtered.filter((t) => t.owner_id === currentUser.id);
     }
 
+    // Só o que é pra HOJE (ou atrasado). As atividades de dias FUTUROS da cadência
+    // ficam guardadas e só entram na fila quando o dia chega — não poluem o hoje.
+    const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+    const endMs = endOfToday.getTime();
+    filtered = filtered.filter((t) => new Date(t.scheduled_at).getTime() <= endMs);
+
     if (statusFilter === "extras") {
       filtered = filtered.filter((t) => t.is_extra);
     } else if (statusFilter === "para_hoje") {
@@ -778,7 +816,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           (lead.full_name?.toLowerCase().includes(q)) ||
           (lead.company_name?.toLowerCase().includes(q)) ||
           (lead.email?.toLowerCase().includes(q)) ||
-          (lead.phone?.includes(q))
+          (lead.phone?.includes(q)) ||
+          (lead.bitrix_id?.toLowerCase().includes(q))
         );
       });
     }
@@ -804,7 +843,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return filtered;
   }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter]);
 
-  const todayTasks = tasks.filter((t) => t.status === "pendente");
+  const endTodayMs = (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d.getTime(); })();
+  const todayTasks = tasks.filter((t) => t.status === "pendente" && new Date(t.scheduled_at).getTime() <= endTodayMs);
   const overdueTasks = tasks.filter((t) => t.status === "atrasada");
   const extraTasks = tasks.filter((t) => t.is_extra);
 
@@ -1044,8 +1084,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           </div>
 
           <div className="flex items-center gap-4">
-            <span className={`qsx-chan-ic ${CHANNEL_IC_CLASS[task.channel_type]}`} style={{ width: 56, height: 56, borderRadius: 17 }}>
-              <ChannelIcon type={task.channel_type} size={24} />
+            <span className={`qsx-chan-ic ${CHANNEL_IC_CLASS[task.channel_type]}`} style={{ width: 46, height: 46, borderRadius: 14 }}>
+              <ChannelIcon type={task.channel_type} size={20} />
             </span>
             <div className="min-w-0">
               {lead ? (
@@ -1058,6 +1098,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <div className="qsx-hco truncate">
                 {lead?.company_name || "—"}{lead?.job_title ? ` · ${lead.job_title}` : ""}
               </div>
+              {(lead?.bitrix_id || (lead && (noteCounts.get(lead.id) || 0) > 0)) && (
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  {lead?.bitrix_id && (
+                    <span className="qsx-chip prio-baixa" style={{ fontVariantNumeric: "tabular-nums" }} title="ID do cliente (Bitrix)">ID {lead.bitrix_id}</span>
+                  )}
+                  {lead && (noteCounts.get(lead.id) || 0) > 0 && (
+                    <span className="qsx-chip" style={{ background: "rgba(37,99,235,.10)", color: "var(--blue)" }} title="Este lead tem observações no perfil">
+                      📝 {noteCounts.get(lead.id)} obs.
+                    </span>
+                  )}
+                </div>
+              )}
               {lead?.phone && (
                 <button
                   onClick={async () => {
@@ -1084,9 +1136,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
           {task.notes && <div className="qsx-hbox">{task.notes}</div>}
 
-          {/* Ações: só o botão do canal (item 3) + pular */}
+          {/* Ações: botão do canal + concluir atividade + pular */}
           <div className="flex items-center gap-2.5 flex-wrap">
             {renderChannelAction(task, lead)}
+            <button onClick={() => handleConcludeActivity(task)} className="qsx-btn qsx-btn-green" title="Marcar como concluída (conta no placar do dia)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              Concluir atividade
+            </button>
             <button
               onClick={() => setSkipMenuOpen((o) => !o)}
               className="qsx-btn qsx-btn-ghost"
@@ -1319,13 +1375,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-hero { display: flex; background: #fff; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 28px -22px rgba(16,24,40,.30); }
         .qsx-hero-accent { width: 4px; flex: none; opacity: .9; }
         .acc-alta { background: var(--red); } .acc-media { background: var(--amber); } .acc-baixa { background: var(--ink3); }
-        .qsx-hero-main { flex: 1; padding: 26px 28px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-        .qsx-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .2px; color: var(--ink3); }
-        .qsx-hln { font-size: 23px; font-weight: 800; letter-spacing: -.4px; margin: 0; color: var(--ink); }
-        .qsx-hco { font-size: 14px; color: var(--ink2); font-weight: 500; margin-top: 3px; }
-        .qsx-hbox { background: #FAFBFC; border: 1px solid var(--line2); border-radius: 15px; padding: 14px 16px; font-size: 14px; color: var(--ink2); line-height: 1.5; }
+        .qsx-hero-main { flex: 1; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+        .qsx-eyebrow { font-size: 11.5px; font-weight: 700; letter-spacing: .2px; color: var(--ink3); }
+        .qsx-hln { font-size: 18px; font-weight: 800; letter-spacing: -.3px; margin: 0; color: var(--ink); }
+        .qsx-hco { font-size: 13px; color: var(--ink2); font-weight: 500; margin-top: 2px; }
+        .qsx-hbox { background: #FAFBFC; border: 1px solid var(--line2); border-radius: 13px; padding: 10px 13px; font-size: 13px; color: var(--ink2); line-height: 1.45; }
         .qsx-hbox b { color: var(--ink); font-weight: 700; }
-        .qsx-hero-side { width: 280px; flex: none; border-left: 1px solid var(--line); padding: 20px; background: #FAFBFC; display: flex; flex-direction: column; gap: 4px; }
+        .qsx-hero-side { width: 260px; flex: none; border-left: 1px solid var(--line); padding: 16px; background: #FAFBFC; display: flex; flex-direction: column; gap: 4px; }
         .qsx-side-lab { font-size: 11.5px; font-weight: 700; letter-spacing: .2px; color: var(--ink3); margin-bottom: 8px; }
         .qsx-mini { display: flex; align-items: center; gap: 11px; padding: 10px; border-radius: 13px; cursor: pointer; }
         .qsx-mini:hover { background: #fff; box-shadow: 0 2px 10px -4px rgba(23,32,46,.15); }
@@ -1532,7 +1588,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Pesquisar lead, empresa, e-mail ou telefone…"
+                placeholder="Pesquisar por ID, lead, empresa, e-mail ou telefone…"
                 aria-label="Pesquisar leads na fila"
               />
             </div>

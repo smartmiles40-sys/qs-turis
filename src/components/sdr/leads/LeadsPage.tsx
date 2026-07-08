@@ -256,7 +256,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           l.full_name?.toLowerCase().includes(q) ||
           l.company_name?.toLowerCase().includes(q) ||
           l.email?.toLowerCase().includes(q) ||
-          l.phone?.includes(q)
+          l.phone?.includes(q) ||
+          l.bitrix_id?.toLowerCase().includes(q)
       );
     }
     if (filterSource) result = result.filter((l) => l.source === filterSource);
@@ -381,7 +382,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           type="text"
           value={search}
           onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
-          placeholder="Pesquise pelo nome, empresa, e-mail ou telefone..."
+          placeholder="Pesquise por ID, nome, empresa, e-mail ou telefone..."
           className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316] transition-colors"
         />
       </div>
@@ -572,7 +573,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     <td className="px-4 py-3">
                       <div>
                         <p className="text-sm font-medium text-gray-900">{lead.full_name}</p>
-                        <p className="text-xs text-gray-500">{lead.company_name ?? "\u2014"}</p>
+                        <p className="text-xs text-gray-500">
+                          {lead.company_name ?? "\u2014"}
+                          {lead.bitrix_id && <span className="ml-2 text-gray-400 tabular-nums">\u00b7 ID {lead.bitrix_id}</span>}
+                        </p>
                       </div>
                     </td>
                     <td className="px-4 py-3">

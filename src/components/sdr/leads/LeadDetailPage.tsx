@@ -1047,7 +1047,18 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             </span>
           </div>
           <div>
-            <h1 className="text-lg font-bold text-gray-900">{lead.full_name}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-lg font-bold text-gray-900">{lead.full_name}</h1>
+              {lead.bitrix_id && (
+                <button
+                  onClick={async () => { try { await navigator.clipboard.writeText(lead.bitrix_id!); } catch { /* ignore */ } }}
+                  title="ID do cliente (Bitrix) — clique para copiar"
+                  className="text-xs font-bold tabular-nums px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 transition"
+                >
+                  ID {lead.bitrix_id}
+                </button>
+              )}
+            </div>
             <p className="text-sm text-gray-500">
               {lead.job_title} {lead.company_name ? `na ${lead.company_name}` : ""}
             </p>
@@ -1184,6 +1195,11 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               }`}
             >
               {tab.label}
+              {tab.key === "anotacoes" && notes.length > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-[#F97316]/15 text-[#F97316] align-middle">
+                  {notes.length}
+                </span>
+              )}
             </button>
           ))}
         </div>
