@@ -1,0 +1,74 @@
+{
+  "name": "QS Turis - Bitrix -> QS (INBOUND: lead vira card)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-lead-inbound",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "in-wh-0001-4a10-9b01-0d2e3f4a6001",
+      "name": "Webhook Bitrix (lead)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "d4c3f6b5-4444-4d40-6e34-3051627c8e93"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a1-full_name", "name": "full_name", "type": "string", "value": "={{ ($json.query?.Nome || $json.body?.Nome || '').toString().trim() }}" },
+            { "id": "a2-email", "name": "email", "type": "string", "value": "={{ ($json.query?.['E-mail'] || $json.body?.['E-mail'] || '').toString().trim() }}" },
+            { "id": "a3-phone", "name": "phone", "type": "string", "value": "={{ ($json.query?.telefone || $json.body?.telefone || '').toString().trim() }}" },
+            { "id": "a4-bitrix_id", "name": "bitrix_id", "type": "string", "value": "={{ ($json.query?.ID || $json.body?.ID || '').toString().trim() }}" },
+            { "id": "a5-segment", "name": "segment", "type": "string", "value": "={{ ($json.query?.Fonte || $json.body?.Fonte || '').toString().trim() }}" },
+            { "id": "a6-source", "name": "source", "type": "string", "value": "integracao" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "in-set-0002-4a10-9b01-0d2e3f4a6002",
+      "name": "Normalizar",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qs-turis.vercel.app/api/lead-inbound",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ full_name: $json.full_name, phone: $json.phone, email: $json.email, bitrix_id: $json.bitrix_id, segment: $json.segment, source: $json.source }) }}",
+        "options": {}
+      },
+      "id": "in-http-0003-4a10-9b01-0d2e3f4a6003",
+      "name": "Enviar ao QS (/api/lead-inbound)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 300],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_COM_ID_DA_CREDENCIAL", "name": "QS Lead Secret (x-lead-secret)" }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Bitrix (lead)": {
+      "main": [[{ "node": "Normalizar", "type": "main", "index": 0 }]]
+    },
+    "Normalizar": {
+      "main": [[{ "node": "Enviar ao QS (/api/lead-inbound)", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "instanceId": "qs-turis-bitrix-inbound-to-qs" },
+  "tags": []
+}

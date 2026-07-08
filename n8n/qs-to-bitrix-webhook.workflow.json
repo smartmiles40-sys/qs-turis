@@ -1,0 +1,240 @@
+{
+  "name": "QS Turis - QS -> Bitrix (WEBHOOK: perdido/ganho/reuniao/nota)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-perdido",
+        "responseMode": "onReceived",
+        "options": { "allowedOrigins": "*" }
+      },
+      "id": "wh-perdido-0001-4a10-9b01-0d2e3f4a5c01",
+      "name": "Webhook Perdido (qs-perdido)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 120],
+      "webhookId": "qs-perdido-b6f0-4d40-8e34-3051627c0001"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.deal.get.json?id={{ $json.body.bitrix_id }}",
+        "options": {}
+      },
+      "id": "get-perdido-0002-4a10-9b01-0d2e3f4a5c02",
+      "name": "Buscar negocio (perdido)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 120],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.deal.update.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $('Webhook Perdido (qs-perdido)').item.json.body.bitrix_id, fields: { STAGE_ID: 'C25:LOSE' } }) }}",
+        "options": {}
+      },
+      "id": "upd-perdido-0003-4a10-9b01-0d2e3f4a5c03",
+      "name": "Mover pra Perdido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 120],
+      "onError": "continueRegularOutput"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-ganho",
+        "responseMode": "onReceived",
+        "options": { "allowedOrigins": "*" }
+      },
+      "id": "wh-ganho-0004-4a10-9b01-0d2e3f4a5c04",
+      "name": "Webhook Ganho (qs-ganho)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 320],
+      "webhookId": "qs-ganho-b6f0-4d40-8e34-3051627c0002"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.deal.get.json?id={{ $json.body.bitrix_id }}",
+        "options": {}
+      },
+      "id": "get-ganho-0005-4a10-9b01-0d2e3f4a5c05",
+      "name": "Buscar negocio (ganho)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 320],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.deal.update.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $('Webhook Ganho (qs-ganho)').item.json.body.bitrix_id, fields: { STAGE_ID: 'C25:WON' } }) }}",
+        "options": {}
+      },
+      "id": "upd-ganho-0006-4a10-9b01-0d2e3f4a5c06",
+      "name": "Mover pra Ganho",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 320],
+      "onError": "continueRegularOutput"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-reuniao",
+        "responseMode": "onReceived",
+        "options": { "allowedOrigins": "*" }
+      },
+      "id": "wh-reuniao-0007-4a10-9b01-0d2e3f4a5c07",
+      "name": "Webhook Reuniao (qs-reuniao)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 520],
+      "webhookId": "qs-reuniao-b6f0-4d40-8e34-3051627c0003"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.deal.get.json?id={{ $json.body.bitrix_id }}",
+        "options": {}
+      },
+      "id": "get-reuniao-0008-4a10-9b01-0d2e3f4a5c08",
+      "name": "Buscar negocio (reuniao)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 520],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.deal.update.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $('Webhook Reuniao (qs-reuniao)').item.json.body.bitrix_id, fields: { STAGE_ID: 'C25:WON' } }) }}",
+        "options": {}
+      },
+      "id": "upd-reuniao-0009-4a10-9b01-0d2e3f4a5c09",
+      "name": "Mover pra Reuniao Agendada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 520],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: $('Webhook Reuniao (qs-reuniao)').item.json.body.bitrix_id, ENTITY_TYPE: 'deal', COMMENT: '📅 REUNIÃO AGENDADA (QS Turis)\\n' + 'Quando: ' + ($('Webhook Reuniao (qs-reuniao)').item.json.body.scheduled_at || '-') + '\\n' + 'Título: ' + ($('Webhook Reuniao (qs-reuniao)').item.json.body.title || '-') + '\\n' + 'Agendado por: ' + ($('Webhook Reuniao (qs-reuniao)').item.json.body.scheduled_by || '-') + '\\n' + 'Responsável: ' + ($('Webhook Reuniao (qs-reuniao)').item.json.body.meeting_owner || '-') + '\\n' + 'E-mail do cliente: ' + ($('Webhook Reuniao (qs-reuniao)').item.json.body.client_email || '-') + '\\n' + 'Local/Link: ' + ($('Webhook Reuniao (qs-reuniao)').item.json.body.location || $('Webhook Reuniao (qs-reuniao)').item.json.body.meeting_link || '-') + '\\n' + 'Data do agendamento: ' + ($('Webhook Reuniao (qs-reuniao)').item.json.body.booking_date || '-') + '\\n' + ($('Webhook Reuniao (qs-reuniao)').item.json.body.notes || '') } }) }}",
+        "options": {}
+      },
+      "id": "cmt-reuniao-0010-4a10-9b01-0d2e3f4a5c10",
+      "name": "Comentario da reuniao",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 520],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.deal.update.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $('Webhook Reuniao (qs-reuniao)').item.json.body.bitrix_id, fields: { 'PREENCHA_UF_DATA_REUNIAO': $('Webhook Reuniao (qs-reuniao)').item.json.body.scheduled_at, 'PREENCHA_UF_RESPONSAVEL': $('Webhook Reuniao (qs-reuniao)').item.json.body.meeting_owner, 'PREENCHA_UF_AGENDADO_POR': $('Webhook Reuniao (qs-reuniao)').item.json.body.scheduled_by, 'PREENCHA_UF_EMAIL_CLIENTE': $('Webhook Reuniao (qs-reuniao)').item.json.body.client_email } }) }}",
+        "options": {}
+      },
+      "id": "uf-reuniao-0011-4a10-9b01-0d2e3f4a5c11",
+      "name": "Preencher campos da reuniao (AJUSTAR UF_*)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 520],
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-nota",
+        "responseMode": "onReceived",
+        "options": { "allowedOrigins": "*" }
+      },
+      "id": "wh-nota-0012-4a10-9b01-0d2e3f4a5c12",
+      "name": "Webhook Nota (qs-nota)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 740],
+      "webhookId": "qs-nota-b6f0-4d40-8e34-3051627c0004"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=PREENCHA_BITRIX_WEBHOOK_BASE/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: $json.body.bitrix_id, ENTITY_TYPE: 'deal', COMMENT: '📝 QS Turis: ' + ($json.body.body || '') } }) }}",
+        "options": {}
+      },
+      "id": "cmt-nota-0013-4a10-9b01-0d2e3f4a5c13",
+      "name": "Comentario da nota",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 740],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook Perdido (qs-perdido)": {
+      "main": [[{ "node": "Buscar negocio (perdido)", "type": "main", "index": 0 }]]
+    },
+    "Buscar negocio (perdido)": {
+      "main": [[{ "node": "Mover pra Perdido", "type": "main", "index": 0 }]]
+    },
+    "Webhook Ganho (qs-ganho)": {
+      "main": [[{ "node": "Buscar negocio (ganho)", "type": "main", "index": 0 }]]
+    },
+    "Buscar negocio (ganho)": {
+      "main": [[{ "node": "Mover pra Ganho", "type": "main", "index": 0 }]]
+    },
+    "Webhook Reuniao (qs-reuniao)": {
+      "main": [[{ "node": "Buscar negocio (reuniao)", "type": "main", "index": 0 }]]
+    },
+    "Buscar negocio (reuniao)": {
+      "main": [[{ "node": "Mover pra Reuniao Agendada", "type": "main", "index": 0 }]]
+    },
+    "Mover pra Reuniao Agendada": {
+      "main": [[{ "node": "Comentario da reuniao", "type": "main", "index": 0 }]]
+    },
+    "Comentario da reuniao": {
+      "main": [[{ "node": "Preencher campos da reuniao (AJUSTAR UF_*)", "type": "main", "index": 0 }]]
+    },
+    "Webhook Nota (qs-nota)": {
+      "main": [[{ "node": "Comentario da nota", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "instanceId": "qs-turis-qs-to-bitrix-webhook" },
+  "tags": []
+}

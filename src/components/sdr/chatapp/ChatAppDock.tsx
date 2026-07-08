@@ -47,6 +47,14 @@ function IconExternal({ size = 14 }: { size?: number }) {
     </svg>
   );
 }
+function IconReload({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 4v6h-6" />
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
+  );
+}
 
 export default function ChatAppDock() {
   const { isOpen, target, copiedPhone, open, close, recopyPhone } = useChatAppDock();
@@ -60,6 +68,20 @@ export default function ChatAppDock() {
   const draggingRef = useRef(false);
   // Template copiado por último (feedback "Copiado!" no chip)
   const [copiedTpl, setCopiedTpl] = useState<string | null>(null);
+
+  // iframe + aviso de login (reCAPTCHA não roda embutido — ver banner)
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [helpSeen, setHelpSeen] = useState<boolean>(() => {
+    try { return localStorage.getItem("qs_chatdock_help_seen") === "1"; } catch { return false; }
+  });
+  const reloadIframe = useCallback(() => {
+    // Reatribuir o src força o reload (não dá pra tocar no contentWindow: cross-origin).
+    if (iframeRef.current) iframeRef.current.src = chatUrl;
+  }, [chatUrl]);
+  function dismissHelp() {
+    setHelpSeen(true);
+    try { localStorage.setItem("qs_chatdock_help_seen", "1"); } catch { /* ignore */ }
+  }
 
   async function copyTemplate(label: string, text: string) {
     const filled = fillTemplate(text, { name: target?.name ?? null });
@@ -97,8 +119,10 @@ export default function ChatAppDock() {
   }, [width]);
 
   function openInWindow() {
-    // Reusa sempre a MESMA janela nomeada — clicar de novo foca, não abre nova.
-    window.open(chatUrl, "chatapp_window", "noopener");
+    // Reusa sempre a MESMA aba/janela nomeada — clicar de novo foca, não abre nova.
+    // (Sem "noopener": ele zera a referência e impede o foco/reuso da janela.)
+    const w = window.open(chatUrl, "chatapp_window");
+    w?.focus();
   }
 
   return (
@@ -145,6 +169,9 @@ export default function ChatAppDock() {
                 {target?.name ? `Conversando com ${target.name}` : "WhatsApp dos leads"}
               </p>
             </div>
+            <button onClick={reloadIframe} title="Recarregar o ChatApp (após logar em janela)" className="p-1.5 rounded-lg hover:bg-white/15 transition-colors" aria-label="Recarregar">
+              <IconReload size={16} />
+            </button>
             <button onClick={openInWindow} title="Abrir em janela separada" className="p-1.5 rounded-lg hover:bg-white/15 transition-colors" aria-label="Abrir em janela">
               <IconExternal size={16} />
             </button>
@@ -187,9 +214,30 @@ export default function ChatAppDock() {
             </div>
           )}
 
-          {/* IFRAME persistente — nunca desmonta */}
+          {/* Aviso de login (reCAPTCHA não roda em iframe cross-origin) */}
+          {!helpSeen && (
+            <div className="shrink-0 flex items-start gap-2 px-4 py-2.5 border-b" style={{ background: "#FFF7ED", borderColor: "var(--line2)" }}>
+              <span className="text-[14px] leading-none mt-0.5">⚠️</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-bold leading-snug" style={{ color: "#9A3412" }}>
+                  O login do ChatApp (reCAPTCHA) não funciona embutido.
+                </p>
+                <p className="text-[10.5px] leading-snug mt-0.5" style={{ color: "#B45309" }}>
+                  1) <button onClick={openInWindow} className="font-bold underline">entre em janela separada</button> ·
+                  2) libere <b>cookies de terceiros</b> para <b>chatapp.online</b> ·
+                  3) volte e <button onClick={reloadIframe} className="font-bold underline">recarregue aqui</button>.
+                </p>
+              </div>
+              <button onClick={dismissHelp} title="Entendi" aria-label="Dispensar aviso" className="shrink-0 p-0.5 rounded hover:bg-black/5" style={{ color: "#9A3412" }}>
+                <IconClose size={14} />
+              </button>
+            </div>
+          )}
+
+          {/* IFRAME persistente — nunca desmonta (só recarrega no botão) */}
           <div className="flex-1 min-h-0 relative bg-[#F5F6F8]">
             <iframe
+              ref={iframeRef}
               src={chatUrl}
               title="ChatApp"
               className="absolute inset-0 w-full h-full border-0"
@@ -200,9 +248,10 @@ export default function ChatAppDock() {
           {/* Rodapé de ajuda / fallback */}
           <div className="shrink-0 px-4 py-2 border-t bg-white" style={{ borderColor: "var(--line2)" }}>
             <p className="text-[10.5px] text-[#8B95A4] leading-snug">
-              Não carregou ou pediu login de novo?{" "}
-              <button onClick={openInWindow} className="font-semibold text-[#0E7C6A] hover:underline">abra em janela separada</button>{" "}
-              (a sessão fica mais estável).
+              Pediu login de novo?{" "}
+              <button onClick={openInWindow} className="font-semibold text-[#0E7C6A] hover:underline">abra em janela</button>,
+              faça login, e{" "}
+              <button onClick={reloadIframe} className="font-semibold text-[#0E7C6A] hover:underline">recarregue aqui</button>.
             </p>
           </div>
         </div>

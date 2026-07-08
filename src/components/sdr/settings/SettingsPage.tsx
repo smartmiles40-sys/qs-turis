@@ -125,6 +125,8 @@ function ChannelSvgIcon({ type }: { type: string }) {
       return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>;
     case "ligacao":
       return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" /></svg>;
+    case "ligacao_whatsapp":
+      return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 21l2.1-5.7A8.4 8.4 0 1 1 21 11.5z" /><path d="M14.7 13.4c-.25-.13-1.02-.5-1.18-.56-.16-.06-.27-.09-.39.09-.11.17-.44.55-.54.66-.1.12-.2.13-.37.05-.17-.09-.72-.27-1.37-.85-.5-.45-.85-1.01-.95-1.18-.1-.17-.01-.26.08-.35.08-.08.17-.2.26-.3.09-.11.11-.18.17-.3.06-.11.03-.21-.01-.3-.05-.09-.39-.93-.53-1.28-.14-.33-.28-.29-.39-.29h-.33c-.11 0-.3.04-.45.21-.16.17-.6.58-.6 1.42s.61 1.65.7 1.76c.09.12 1.2 1.84 2.92 2.58.41.18.72.28.97.36.41.13.78.11 1.07.07.33-.05 1.02-.42 1.16-.82.14-.4.14-.74.1-.82-.04-.07-.15-.11-.32-.19z" fill="currentColor" stroke="none" /></svg>;
     case "whatsapp":
       return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /><path d="M8 12h.01M12 12h.01M16 12h.01" /></svg>;
     case "linkedin":
@@ -808,7 +810,8 @@ function CanaisSection() {
   const [channels, setChannels] = React.useState([
     { type: "pesquisa", label: "Pesquisa", enabled: true, description: "Pesquisa prévia sobre o lead antes do contato" },
     { type: "email", label: "E-mail", enabled: true, description: "Envio de e-mails de prospecção" },
-    { type: "ligacao", label: "Ligação", enabled: true, description: "Ligações telefônicas via VoIP ou manual" },
+    { type: "ligacao", label: "Ligação", enabled: true, description: "Ligações de voz pelo Webfone (Wavoip) — cai pro WhatsApp se indisponível" },
+    { type: "ligacao_whatsapp", label: "Ligação WhatsApp", enabled: true, description: "Ligação de voz pelo WhatsApp (abre a conversa do lead)" },
     { type: "whatsapp", label: "WhatsApp", enabled: true, description: "Mensagens via WhatsApp Business" },
     { type: "linkedin", label: "LinkedIn", enabled: true, description: "Conexão e mensagens via LinkedIn" },
     { type: "instagram", label: "Instagram", enabled: false, description: "Contato via DM do Instagram" },
@@ -879,7 +882,7 @@ function CanaisSection() {
             <div className="flex items-center gap-3">
               {ch.type === "ligacao" && ch.enabled && (
                 <span className="rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-green-50 text-green-600 border border-green-200">
-                  VoIP Disponível
+                  Webfone
                 </span>
               )}
               <button

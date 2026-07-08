@@ -131,8 +131,14 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   async function handleWebfoneCall() {
     if (!dialable || calling) return;
     setCalling(true);
-    logWhatsApp({ leadId: lead.id ?? null, ownerId: ownerId ?? null, phone, status: "pending", kind: "call", body: "Ligação iniciada via Webfone (Wavoip)" });
-    const r = await dialViaWavoip(lead.phone, lead.name ?? undefined);
+    // O log da ligação sai automaticamente no fim (call:ended) com desfecho+duração
+    // — ver setupCallLogging em @/lib/wavoip; por isso não gravamos "pending" aqui.
+    const r = await dialViaWavoip(lead.phone, {
+      displayName: lead.name ?? undefined,
+      leadName: lead.name ?? undefined,
+      leadId: lead.id ?? null,
+      ownerId: ownerId ?? null,
+    });
     setResult(r.ok ? { ok: true, msg: "Ligando pelo webfone… atenda pelo painel que abriu." } : { ok: false, msg: r.error });
     setCalling(false);
   }

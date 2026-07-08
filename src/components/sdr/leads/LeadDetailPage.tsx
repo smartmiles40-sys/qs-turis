@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import type {
@@ -77,6 +78,12 @@ const CHANNEL_ICONS: Record<string, React.ReactNode> = {
   ligacao: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+    </svg>
+  ),
+  ligacao_whatsapp: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 21l2.1-5.7A8.4 8.4 0 1 1 21 11.5z" />
+      <path d="M14.7 13.4c-.25-.13-1.02-.5-1.18-.56-.16-.06-.27-.09-.39.09-.11.17-.44.55-.54.66-.1.12-.2.13-.37.05-.17-.09-.72-.27-1.37-.85-.5-.45-.85-1.01-.95-1.18-.1-.17-.01-.26.08-.35.08-.08.17-.2.26-.3.09-.11.11-.18.17-.3.06-.11.03-.21-.01-.3-.05-.09-.39-.93-.53-1.28-.14-.33-.28-.29-.39-.29h-.33c-.11 0-.3.04-.45.21-.16.17-.6.58-.6 1.42s.61 1.65.7 1.76c.09.12 1.2 1.84 2.92 2.58.41.18.72.28.97.36.41.13.78.11 1.07.07.33-.05 1.02-.42 1.16-.82.14-.4.14-.74.1-.82-.04-.07-.15-.11-.32-.19z" fill="currentColor" stroke="none" />
     </svg>
   ),
   whatsapp: (
@@ -310,6 +317,12 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       console.warn("Erro ao adicionar nota:", error);
       return;
     }
+    // Espelha a nota como comentário na timeline do negócio no Bitrix.
+    notifyBitrix("nota", {
+      lead_id: lead.id,
+      bitrix_id: lead.bitrix_id,
+      body: newNote.trim(),
+    });
     setNotes([data as Note, ...notes]);
     setNewNote("");
   }
@@ -322,7 +335,15 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       .update({ status: "ganho" as LeadStatus })
       .eq("id", lead.id);
     if (error) console.warn("Erro ao marcar como ganho:", error);
-    else await fetchLead();
+    else {
+      // Move o negócio pra coluna de Ganho no Bitrix.
+      notifyBitrix("ganho", {
+        lead_id: lead.id,
+        bitrix_id: lead.bitrix_id,
+        full_name: lead.full_name,
+      });
+      await fetchLead();
+    }
   }
 
   // ── Mark as lost (with re-engagement check — Change 16) ──
@@ -339,6 +360,14 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       console.warn("Erro ao marcar como perdido:", error);
       return;
     }
+
+    // Move o negócio pra coluna de Perdido no Bitrix (com o motivo).
+    notifyBitrix("perdido", {
+      lead_id: lead.id,
+      bitrix_id: lead.bitrix_id,
+      full_name: lead.full_name,
+      loss_reason: lossReasonId ? lossReasons.find((r) => r.id === lossReasonId)?.label ?? null : null,
+    });
 
     // Check if loss reason suggests re-engagement
     if (lossReasonId) {
@@ -397,6 +426,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       .update({ status: "ganho" as LeadStatus, owner_id: selectedCloser })
       .eq("id", lead.id);
     if (upError) console.warn("Erro ao atualizar lead após handover:", upError);
+    else notifyBitrix("ganho", { lead_id: lead.id, bitrix_id: lead.bitrix_id, full_name: lead.full_name });
 
     setShowHandoverModal(false);
     setHandoverSuccess(true);
@@ -435,6 +465,23 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       setMeetingError("Não foi possível agendar a reunião: " + error.message);
       return;
     }
+
+    // Preenche os campos da reunião no Bitrix e move o negócio pra "Reunião agendada".
+    notifyBitrix("reuniao", {
+      lead_id: lead.id,
+      bitrix_id: lead.bitrix_id,
+      full_name: lead.full_name,
+      title: meetingForm.title.trim() || null,
+      scheduled_at: new Date(meetingForm.scheduled_at).toISOString(),
+      duration_min: Number.isFinite(durationParsed) && durationParsed > 0 ? durationParsed : 30,
+      location: meetingForm.location.trim() || null,
+      meeting_link: meetingForm.meeting_link.trim() || null,
+      notes: meetingForm.notes.trim() || null,
+      scheduled_by: currentUser?.name ?? null,
+      meeting_owner: currentUser?.name ?? null,
+      client_email: lead.email ?? null,
+      booking_date: new Date().toISOString().slice(0, 10),
+    });
 
     await reloadMeetings();
     setShowMeetingModal(false);

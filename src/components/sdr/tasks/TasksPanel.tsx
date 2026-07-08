@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
+import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
@@ -497,14 +498,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setActiveTaskId(null);
 
     // 2. Desfecho: ganho/perdido encerram o lead; qualquer outro gera o próximo passo.
+    const desfechoLead = getLeadForTask(currentTask);
     if (result === "ganho") {
       await supabase.from("qs_leads").update({ status: "ganho" }).eq("id", currentTask.lead_id);
+      notifyBitrix("ganho", { lead_id: currentTask.lead_id, bitrix_id: desfechoLead?.bitrix_id, full_name: desfechoLead?.full_name });
       await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead ganho");
       setLeads(prev => prev.map((l): Lead => l.id === currentTask.lead_id ? { ...l, status: "ganho" } : l));
       setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
       showToast(`Ganho! ${leadName}`);
     } else if (result === "sem_interesse") {
       await supabase.from("qs_leads").update({ status: "perdido" }).eq("id", currentTask.lead_id);
+      notifyBitrix("perdido", { lead_id: currentTask.lead_id, bitrix_id: desfechoLead?.bitrix_id, full_name: desfechoLead?.full_name });
       await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead perdido — sem interesse");
       setLeads(prev => prev.map((l): Lead => l.id === currentTask.lead_id ? { ...l, status: "perdido" } : l));
       setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
@@ -532,6 +536,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         author_id: currentUser?.id ?? null,
         body: text,
         tags,
+      });
+      // Espelha como comentário na timeline do negócio no Bitrix.
+      notifyBitrix("nota", {
+        lead_id: leadId,
+        bitrix_id: leads.find((l) => l.id === leadId)?.bitrix_id,
+        body: text,
       });
     } catch (e) {
       console.warn("[QS] não foi possível salvar a observação:", e);
@@ -622,6 +632,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       await supabase.from("qs_leads").update({ status: "ganho" }).eq("id", leadId);
       if (currentTask) await closeRemainingLeadTasks(leadId, taskId, "Lead ganho — reunião agendada");
       await persistObservation(leadId, `Ganho — reunião agendada para ${meeting.dataHora}. ${resumo}`, ["bitrix", "ganho", "reuniao"]);
+      // Preenche os campos da reunião no Bitrix e move o negócio pra "Reunião agendada".
+      notifyBitrix("reuniao", {
+        lead_id: leadId,
+        bitrix_id: leads.find((l) => l.id === leadId)?.bitrix_id,
+        full_name: leadName,
+        title: meetingRow.title,
+        scheduled_at: meetingRow.scheduled_at,
+        location: meetingRow.location,
+        notes: resumo,
+        scheduled_by: meeting.agendadoPor || null,
+        meeting_owner: meeting.responsavel || null,
+        client_email: meeting.emailCliente || null,
+        booking_date: meeting.dataAgendamento || null,
+      });
     } catch (e) {
       console.warn("[QS] falha ao registrar a reunião do ganho:", e);
     }
@@ -894,7 +918,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             ) : (
               <span className="qsx-lname truncate">Lead desconhecido</span>
             )}
-            <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Lead score ${temp.score}/100`}>{temp.emoji} {temp.label}</span>
+            <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Lead score ${temp.score}/100`}>{temp.label}</span>
             <span className={`qsx-chip prio-${prio}`}><span className={`qsx-dot dot-${prio}`} />{PRIORITY_LABELS[prio]}</span>
             {slaAlert && (
               <span className="qsx-chip" style={{ background: slaAlert.bg, color: slaAlert.text, animation: slaAlert.pulse ? "pulseRed 1.5s ease-in-out infinite" : undefined }}>
@@ -936,8 +960,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
   // Liga pelo WEBFONE (voz dentro do sistema). Se o webfone não estiver
   // configurado/disponível, cai pro WhatsApp (abre a conversa pra ligar por lá).
-  async function callViaWebfone(phone?: string | null, name?: string | null) {
-    const r = await dialViaWavoip(phone, name ?? undefined);
+  async function callViaWebfone(
+    phone?: string | null,
+    opts?: { leadName?: string | null; leadId?: string | null },
+  ) {
+    const r = await dialViaWavoip(phone, {
+      displayName: opts?.leadName ?? undefined,
+      leadName: opts?.leadName ?? undefined,
+      leadId: opts?.leadId ?? null,
+      ownerId: currentUser?.id ?? null,
+    });
     if (!r.ok) {
       console.warn("[QS] webfone indisponível, caindo pro WhatsApp:", r.error);
       startWhatsAppCall(phone);
@@ -948,7 +980,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   function renderChannelAction(task: Task, lead: Lead | undefined) {
     switch (task.channel_type) {
       case "ligacao":
-        return lead?.phone ? <button onClick={() => callViaWebfone(lead.phone, lead.full_name)} className="qsx-btn qsx-btn-green"><ChannelIcon type="ligacao" size={16} />Ligar</button> : null;
+        return lead?.phone ? <button onClick={() => callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id })} className="qsx-btn qsx-btn-green"><ChannelIcon type="ligacao" size={16} />Ligar</button> : null;
       case "ligacao_whatsapp":
         return lead?.phone ? <button onClick={() => startWhatsAppCall(lead.phone)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Ligar no WhatsApp</button> : null;
       case "whatsapp":
@@ -993,7 +1025,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             <span className="qsx-eyebrow" style={task.is_extra ? { color: "var(--blue)" } : undefined}>
               {task.is_extra ? "Atividade extra" : isActiveCard ? "Atendendo agora" : "Próxima atividade"}
             </span>
-            <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Lead score ${temp.score}/100`}>{temp.emoji} {temp.label}</span>
+            <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Lead score ${temp.score}/100`}>{temp.label}</span>
             {slaAlert && (
               <span className="qsx-chip" style={{ background: slaAlert.bg, color: slaAlert.text, animation: slaAlert.pulse ? "pulseRed 1.5s ease-in-out infinite" : undefined }}>
                 {slaAlert.label}
@@ -1046,7 +1078,6 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               )}
             </div>
             <div className="ml-auto flex gap-2 shrink-0">
-              <span className={`qsx-chip prio-${prio}`}><span className={`qsx-dot dot-${prio}`} />{PRIORITY_LABELS[prio]}</span>
               <span className="qsx-chip prio-baixa">{getActivityLabel(task.channel_type)}</span>
             </div>
           </div>
@@ -1123,20 +1154,34 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             <div className="qsx-side-lab" style={{ margin: "12px 0 9px" }}>
               Como foi o contato? · Tentativa {getAttemptCount(task)}/{MAX_CONTACT_ATTEMPTS}
             </div>
+            {/* Caminho principal: positivo em destaque, retorno/perdido médios */}
             <div className="flex items-center gap-2 flex-wrap">
-              {outcomes.map((o) => (
+              <button onClick={() => openMeetingGanho(task)} className="qsx-out-primary">
+                Ganho / Agendou
+              </button>
+              <button onClick={() => openExtraFromRetorno(task)} className="qsx-out" data-tone="neutral">
+                Pediu retorno
+              </button>
+              <button
+                onClick={() => setPendingResult({ taskId: task.id, result: "sem_interesse" })}
+                className="qsx-out"
+                data-tone="lose"
+                data-on={pending === "sem_interesse" ? "1" : undefined}
+              >
+                Perdido
+              </button>
+            </div>
+            {/* Desfechos "sem contato" — recuados, o SDR só olha quando precisa */}
+            <div className="flex items-center gap-2 flex-wrap mt-2.5">
+              <span className="text-[12px] font-semibold" style={{ color: "var(--ink3)" }}>Sem contato:</span>
+              {["nao_atendeu", "caixa_postal", "numero_errado", "desligou"].map((key) => (
                 <button
-                  key={o.key}
-                  onClick={() => {
-                    if (o.key === "ganho") openMeetingGanho(task);
-                    else if (o.key === "atendeu") openExtraFromRetorno(task);
-                    else setPendingResult({ taskId: task.id, result: o.key });
-                  }}
-                  className="qsx-out"
-                  data-tone={o.tone}
-                  data-on={pending === o.key ? "1" : undefined}
+                  key={key}
+                  onClick={() => setPendingResult({ taskId: task.id, result: key })}
+                  className="qsx-out-mini"
+                  data-on={pending === key ? "1" : undefined}
                 >
-                  {o.label}
+                  {outcomes.find((o) => o.key === key)?.label}
                 </button>
               ))}
             </div>
@@ -1271,17 +1316,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-pace .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--line); flex: none; }
 
         /* Hero — Próxima atividade */
-        .qsx-hero { display: flex; background: #fff; border: 1px solid var(--line); border-radius: 22px; overflow: hidden; box-shadow: 0 18px 40px -30px rgba(23,32,46,.4); }
-        .qsx-hero-accent { width: 6px; flex: none; }
+        .qsx-hero { display: flex; background: #fff; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 28px -22px rgba(16,24,40,.30); }
+        .qsx-hero-accent { width: 4px; flex: none; opacity: .9; }
         .acc-alta { background: var(--red); } .acc-media { background: var(--amber); } .acc-baixa { background: var(--ink3); }
-        .qsx-hero-main { flex: 1; padding: 24px 26px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-        .qsx-eyebrow { font-size: 11px; font-weight: 800; letter-spacing: 1.3px; text-transform: uppercase; color: var(--orange); }
-        .qsx-hln { font-size: 22px; font-weight: 800; letter-spacing: -.3px; margin: 0; color: var(--ink); }
-        .qsx-hco { font-size: 14px; color: var(--ink2); font-weight: 600; margin-top: 2px; }
+        .qsx-hero-main { flex: 1; padding: 26px 28px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+        .qsx-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .2px; color: var(--ink3); }
+        .qsx-hln { font-size: 23px; font-weight: 800; letter-spacing: -.4px; margin: 0; color: var(--ink); }
+        .qsx-hco { font-size: 14px; color: var(--ink2); font-weight: 500; margin-top: 3px; }
         .qsx-hbox { background: #FAFBFC; border: 1px solid var(--line2); border-radius: 15px; padding: 14px 16px; font-size: 14px; color: var(--ink2); line-height: 1.5; }
         .qsx-hbox b { color: var(--ink); font-weight: 700; }
         .qsx-hero-side { width: 280px; flex: none; border-left: 1px solid var(--line); padding: 20px; background: #FAFBFC; display: flex; flex-direction: column; gap: 4px; }
-        .qsx-side-lab { font-size: 11px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--ink3); margin-bottom: 8px; }
+        .qsx-side-lab { font-size: 11.5px; font-weight: 700; letter-spacing: .2px; color: var(--ink3); margin-bottom: 8px; }
         .qsx-mini { display: flex; align-items: center; gap: 11px; padding: 10px; border-radius: 13px; cursor: pointer; }
         .qsx-mini:hover { background: #fff; box-shadow: 0 2px 10px -4px rgba(23,32,46,.15); }
         .qsx-mini-time { font-size: 13px; font-weight: 800; color: var(--ink2); width: 42px; font-variant-numeric: tabular-nums; }
@@ -1306,7 +1351,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .dot-alta { background: var(--red); } .dot-media { background: var(--amber); } .dot-baixa { background: var(--ink3); }
 
         /* Rótulo de grupo (Manhã / Tarde) */
-        .qsx-glabel { font-size: 11px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--ink3); margin: 20px 2px 10px; display: flex; align-items: center; gap: 9px; }
+        .qsx-glabel { font-size: 12.5px; font-weight: 700; letter-spacing: .1px; color: var(--ink3); margin: 22px 2px 11px; display: flex; align-items: center; gap: 9px; }
         .qsx-glabel:before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .35; }
 
         /* Pílula da fila */
@@ -1347,7 +1392,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-icon-sm.on { background: rgba(37,99,235,.10); color: var(--blue); border-color: rgba(37,99,235,.3); }
 
         /* Atividades extras (retornos) — coluna à esquerda alinhada ao cabeçalho, em azul */
-        .qsx-extras-head { font-size: 11px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--blue); margin: 0 2px 10px; display: flex; align-items: center; gap: 8px; }
+        .qsx-extras-head { font-size: 12.5px; font-weight: 700; letter-spacing: .1px; color: var(--blue); margin: 0 2px 11px; display: flex; align-items: center; gap: 8px; }
         .qsx-extra-card { background: rgba(37,99,235,.06); border: 1.5px solid rgba(37,99,235,.35); border-radius: 16px; padding: 12px 14px; cursor: pointer; transition: box-shadow .15s, border-color .15s; }
         .qsx-extra-card:hover { border-color: var(--blue); box-shadow: 0 10px 24px -16px rgba(37,99,235,.6); }
         .qsx-extra-card.on { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
@@ -1357,6 +1402,28 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-fila-extras { width: 260px; flex: none; }
         .qsx-fila-main { flex: 1 1 auto; min-width: 0; }
         @media (max-width: 1100px) { .qsx-fila-extras { width: 230px; } }
+
+        /* Botão do topo em versão calma (só a ação principal fica cheia) */
+        .qsx-btn-soft { background: #fff; border: 1px solid var(--line); color: var(--ink); box-shadow: none; }
+        .qsx-btn-soft:hover { background: var(--line2); filter: none; }
+
+        /* Desfecho — hierarquia: caminho positivo salta, os raros recuam */
+        .qsx-out-primary { height: 40px; padding: 0 20px; border-radius: 11px; font-size: 13.5px; font-weight: 800; border: 0; background: var(--green); color: #fff; cursor: pointer; white-space: nowrap; font-family: inherit; box-shadow: 0 8px 18px -10px rgba(18,161,138,.65); transition: filter .12s; }
+        .qsx-out-primary:hover { filter: brightness(1.05); }
+        .qsx-out-mini { height: 30px; padding: 0 11px; border-radius: 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); background: #fff; color: var(--ink3); cursor: pointer; white-space: nowrap; font-family: inherit; transition: background .12s, color .12s; }
+        .qsx-out-mini:hover { background: var(--line2); color: var(--ink2); }
+        .qsx-out-mini[data-on="1"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+        /* Foco visível — conforto pra quem navega por teclado o dia todo */
+        .qsx-btn:focus-visible, .qsx-out:focus-visible, .qsx-out-primary:focus-visible, .qsx-out-mini:focus-visible,
+        .qsx-fchip:focus-visible, .qsx-pill:focus-visible, .qsx-icon-sm:focus-visible, .qsx-name-btn:focus-visible,
+        .qsx-extra-card:focus-visible, .qsx-mini:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+        .qsx-search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+
+        /* Respeita quem prefere menos movimento (uso o dia inteiro) */
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+        }
       `}</style>
 
       {/* ══════════════════════════════════════════════════════════════════════
@@ -1454,14 +1521,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Pesquisar lead, empresa, e-mail ou telefone…"
+                aria-label="Pesquisar leads na fila"
               />
             </div>
-            <button onClick={() => setShowDialer(true)} className="qsx-btn qsx-btn-green">
-              <IconPhoneCall size={16} />
+            <button onClick={() => setShowDialer(true)} className="qsx-btn qsx-btn-soft">
+              <span style={{ color: "var(--green)", display: "flex" }}><IconPhoneCall size={16} /></span>
               Ligação Manual
             </button>
-            <button onClick={() => setShowExtraTaskModal(true)} className="qsx-btn qsx-btn-blue">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+            <button onClick={() => setShowExtraTaskModal(true)} className="qsx-btn qsx-btn-soft">
+              <span style={{ color: "var(--blue)", display: "flex" }}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg></span>
               Atividade Extra
             </button>
             <button onClick={() => setShowNewLeadModal(true)} className="qsx-btn qsx-btn-orange">
@@ -1475,11 +1543,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             <div className="flex items-center gap-8">
               <div className="qsx-metric">
                 <div className="qsx-mtop">
-                  <span className="qsx-mdot" style={{ background: dailyPct >= 100 ? "var(--green)" : "var(--yellow)" }} />
+                  <span className="qsx-mdot" style={{ background: dailyPct >= 100 ? "var(--green)" : "var(--amber)" }} />
                   <span className="qsx-mlab">Meta de hoje</span>
                   <span className="qsx-mnums">{DAILY_DONE}<span>/{dailyGoal}</span></span>
                 </div>
-                <div className="qsx-bar"><i style={{ width: `${dailyPct}%`, background: dailyPct >= 100 ? "var(--green)" : "var(--yellow)" }} /></div>
+                <div className="qsx-bar"><i style={{ width: `${dailyPct}%`, background: dailyPct >= 100 ? "var(--green)" : "var(--amber)" }} /></div>
               </div>
               <div className="qsx-metric">
                 <div className="qsx-mtop">
@@ -1512,6 +1580,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               value={statusFilter || ""}
               onChange={(e) => setStatusFilter(e.target.value as any || null)}
               className={`qsx-fchip${statusFilter ? " on" : ""}`}
+              aria-label="Filtrar por status"
             >
               <option value="">Status</option>
               <option value="extras">Extras ({extraTasks.length})</option>
@@ -1523,6 +1592,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               value={channelFilter || ""}
               onChange={(e) => setChannelFilter(e.target.value as any || null)}
               className={`qsx-fchip${channelFilter ? " on" : ""}`}
+              aria-label="Filtrar por canal"
             >
               <option value="">Canal</option>
               {(["pesquisa", "email", "ligacao", "ligacao_whatsapp", "whatsapp", "linkedin", "instagram", "tiktok", "youtube"] as ChannelType[]).map((ch) => (
@@ -1534,6 +1604,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               value={priorityFilter || ""}
               onChange={(e) => setPriorityFilter(e.target.value as any || null)}
               className={`qsx-fchip${priorityFilter ? " on" : ""}`}
+              aria-label="Filtrar por prioridade"
             >
               <option value="">Prioridade</option>
               <option value="alta">Alta</option>
@@ -1545,6 +1616,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               value={periodFilter || ""}
               onChange={(e) => setPeriodFilter(e.target.value as any || null)}
               className={`qsx-fchip${periodFilter ? " on" : ""}`}
+              aria-label="Filtrar por período"
             >
               <option value="">Período</option>
               <option value="manha">Manhã</option>
@@ -1555,6 +1627,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               value={ownerFilter || ""}
               onChange={(e) => setOwnerFilter(e.target.value || null)}
               className={`qsx-fchip${ownerFilter ? " on" : ""}`}
+              aria-label="Filtrar por responsável"
             >
               <option value="">Responsável</option>
               {qsUsers.map((u) => (

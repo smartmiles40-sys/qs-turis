@@ -295,6 +295,7 @@ function ChannelPerformanceTable({ data, loading }: { data: ChannelPerformanceRo
     pesquisa: "Pesquisa",
     email: "E-mail",
     ligacao: "Ligação",
+    ligacao_whatsapp: "Ligação WhatsApp",
     whatsapp: "WhatsApp",
     linkedin: "LinkedIn",
     instagram: "Instagram",
