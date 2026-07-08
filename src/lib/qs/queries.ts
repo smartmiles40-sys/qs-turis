@@ -1,5 +1,6 @@
 // src/lib/qs/queries.ts — Data access layer for the QS (Qualificacao SDR) system
 import { supabase } from "@/lib/supabase";
+import { notifyError } from "@/lib/qs/notify";
 import type {
   SdrUser,
   Lead,
@@ -72,6 +73,7 @@ export async function createQsUser(
     return row as SdrUser;
   } catch (err) {
     console.warn("[QS] createQsUser failed:", err);
+    notifyError("Não foi possível criar o usuário — tente novamente.");
     return null;
   }
 }
@@ -91,6 +93,7 @@ export async function updateQsUser(
     return row as SdrUser;
   } catch (err) {
     console.warn("[QS] updateQsUser failed:", err);
+    notifyError("Não foi possível salvar o usuário — a alteração NÃO foi gravada.");
     return null;
   }
 }
@@ -105,6 +108,7 @@ export async function deleteQsUser(id: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.warn("[QS] deleteQsUser (soft) failed:", err);
+    notifyError("Não foi possível desativar o usuário.");
     return false;
   }
 }
@@ -175,6 +179,7 @@ export async function createQsLead(
     return row as Lead;
   } catch (err) {
     console.warn("[QS] createQsLead failed:", err);
+    notifyError("Não foi possível criar o lead — tente novamente.");
     return null;
   }
 }
@@ -194,6 +199,7 @@ export async function updateQsLead(
     return row as Lead;
   } catch (err) {
     console.warn("[QS] updateQsLead failed:", err);
+    notifyError("Não foi possível salvar o lead — a alteração NÃO foi gravada.");
     return null;
   }
 }
@@ -208,6 +214,7 @@ export async function deleteQsLead(id: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.warn("[QS] deleteQsLead failed:", err);
+    notifyError("Não foi possível excluir o lead.");
     return false;
   }
 }
@@ -254,6 +261,7 @@ export async function handoverLead(
     return true;
   } catch (err) {
     console.warn("[QS] handoverLead failed:", err);
+    notifyError("Não foi possível fazer o handover — tente novamente.");
     return false;
   }
 }
@@ -293,6 +301,7 @@ export async function transferLead(
     return true;
   } catch (err) {
     console.warn("[QS] transferLead failed:", err);
+    notifyError("Não foi possível transferir o lead — tente novamente.");
     return false;
   }
 }
@@ -433,6 +442,7 @@ export async function completeTask(
     return data as Task;
   } catch (err) {
     console.warn("[QS] completeTask failed:", err);
+    notifyError("Não foi possível concluir a atividade — tente novamente.");
     return null;
   }
 }
@@ -455,6 +465,7 @@ export async function skipTask(
     return data as Task;
   } catch (err) {
     console.warn("[QS] skipTask failed:", err);
+    notifyError("Não foi possível pular a atividade — tente novamente.");
     return null;
   }
 }
@@ -472,6 +483,7 @@ export async function createExtraTask(
     return row as Task;
   } catch (err) {
     console.warn("[QS] createExtraTask failed:", err);
+    notifyError("Não foi possível criar a atividade extra.");
     return null;
   }
 }
@@ -599,6 +611,7 @@ export async function createQsCadence(
     return fetchQsCadence(cadenceId);
   } catch (err) {
     console.warn("[QS] createQsCadence failed:", err);
+    notifyError("Não foi possível criar a cadência — tente novamente.");
     return null;
   }
 }
@@ -616,6 +629,7 @@ export async function updateQsCadence(
     return fetchQsCadence(id);
   } catch (err) {
     console.warn("[QS] updateQsCadence failed:", err);
+    notifyError("Não foi possível salvar a cadência.");
     return null;
   }
 }
@@ -630,6 +644,7 @@ export async function deleteQsCadence(id: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.warn("[QS] deleteQsCadence failed:", err);
+    notifyError("Não foi possível excluir a cadência.");
     return false;
   }
 }
@@ -681,6 +696,7 @@ export async function createQsMeeting(
     return row as Meeting;
   } catch (err) {
     console.warn("[QS] createQsMeeting failed:", err);
+    notifyError("Não foi possível agendar a reunião — tente novamente.");
     return null;
   }
 }
@@ -700,6 +716,7 @@ export async function updateQsMeeting(
     return row as Meeting;
   } catch (err) {
     console.warn("[QS] updateQsMeeting failed:", err);
+    notifyError("Não foi possível salvar a reunião — a alteração NÃO foi gravada.");
     return null;
   }
 }
@@ -747,6 +764,7 @@ export async function createQsGoal(
     return row as Goal;
   } catch (err) {
     console.warn("[QS] createQsGoal failed:", err);
+    notifyError("Não foi possível criar a meta.");
     return null;
   }
 }
@@ -766,6 +784,7 @@ export async function updateQsGoal(
     return row as Goal;
   } catch (err) {
     console.warn("[QS] updateQsGoal failed:", err);
+    notifyError("Não foi possível salvar a meta.");
     return null;
   }
 }
@@ -780,6 +799,7 @@ export async function deleteQsGoal(id: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.warn("[QS] deleteQsGoal failed:", err);
+    notifyError("Não foi possível excluir a meta.");
     return false;
   }
 }
@@ -826,6 +846,7 @@ export async function createQsNote(
     return data as Note;
   } catch (err) {
     console.warn("[QS] createQsNote failed:", err);
+    notifyError("Não foi possível salvar a observação — tente novamente.");
     return null;
   }
 }
@@ -860,6 +881,7 @@ export async function createLossReason(label: string): Promise<LossReason | null
     return data as LossReason;
   } catch (err) {
     console.warn("[QS] createLossReason failed:", err);
+    notifyError("Não foi possível criar o motivo de perda.");
     return null;
   }
 }
@@ -874,6 +896,7 @@ export async function archiveLossReason(id: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.warn("[QS] archiveLossReason failed:", err);
+    notifyError("Não foi possível arquivar o motivo de perda.");
     return false;
   }
 }
@@ -909,6 +932,7 @@ export async function toggleChannel(
     return true;
   } catch (err) {
     console.warn("[QS] toggleChannel failed:", err);
+    notifyError("Não foi possível alterar o canal.");
     return false;
   }
 }
@@ -951,6 +975,7 @@ export async function createCustomField(
     return row as CustomField;
   } catch (err) {
     console.warn("[QS] createCustomField failed:", err);
+    notifyError("Não foi possível criar o campo personalizado.");
     return null;
   }
 }

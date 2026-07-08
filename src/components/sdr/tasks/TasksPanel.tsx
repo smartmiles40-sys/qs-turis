@@ -10,6 +10,7 @@ import type {
 import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
+import { notifyError } from "@/lib/qs/notify";
 import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
@@ -194,7 +195,11 @@ function getSlaAlert(
   lead: Lead | undefined,
   task: Task,
   cadence: Cadence | undefined,
+  alreadyContacted: boolean,
 ): { label: string; bg: string; text: string; pulse: boolean } | null {
+  // Primeiro contato já feito → o lead não é mais "sem contato" (as atividades
+  // seguintes da cadência não voltam a marcar SEM CONTATO).
+  if (alreadyContacted) return null;
   if (!lead?.arrived_at || task.completed_at || task.status === "concluida") return null;
   const now = Date.now();
   const arrivedMs = new Date(lead.arrived_at).getTime();
@@ -252,6 +257,13 @@ function buildNoteCounts(rows: { lead_id: string | null }[] | null): Map<string,
   return m;
 }
 
+/** Set de lead_ids a partir de linhas {lead_id} (ex.: tarefas concluídas = já contatados). */
+function buildLeadIdSet(rows: { lead_id: string | null }[] | null): Set<string> {
+  const s = new Set<string>();
+  for (const r of rows || []) if (r.lead_id) s.add(r.lead_id);
+  return s;
+}
+
 // ── Tentativas de contato ────────────────────────────────────────────────────
 // A coluna qs_tasks NÃO tem `contact_attempts`. Cada tarefa de follow-up carrega a
 // tag `tentativa:N`; a primeira tarefa da cadência (sem tag) conta como tentativa 1.
@@ -292,18 +304,24 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [loading, setLoading] = useState(true);
   // Quantas observações (notas) cada lead tem — pra mostrar a mini-notificação (item 6).
   const [noteCounts, setNoteCounts] = useState<Map<string, number>>(new Map());
+  // Leads que JÁ tiveram o primeiro contato (≥1 atividade concluída) — some o "SEM CONTATO".
+  const [contactedLeadIds, setContactedLeadIds] = useState<Set<string>>(new Set());
+  const markContacted = useCallback((leadId: string) => {
+    setContactedLeadIds((prev) => { const s = new Set(prev); s.add(leadId); return s; });
+  }, []);
 
   useEffect(() => {
     async function loadData() {
       setLoading(true);
       try {
-        const [tasksRes, leadsRes, cadencesRes, usersData, productsRes, notesRes] = await Promise.all([
+        const [tasksRes, leadsRes, cadencesRes, usersData, productsRes, notesRes, contactedRes] = await Promise.all([
           supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
           supabase.from("qs_leads").select("*"),
           supabase.from("qs_cadences").select("*"),
           fetchQsUsers(),
           supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
           supabase.from("qs_notes").select("lead_id"),
+          supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
         ]);
         setTasks((tasksRes.data || []) as Task[]);
         setLeads((leadsRes.data || []) as Lead[]);
@@ -311,6 +329,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         setQsUsers(usersData);
         setProducts((productsRes.data || []) as { id: string; name: string }[]);
         setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[] | null));
+        setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[] | null));
       } catch (err) {
         console.warn("[TasksPanel] falha ao carregar dados:", err);
       } finally {
@@ -337,14 +356,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const id = setInterval(async () => {
       if (document.hidden || pollBusyRef.current) return;
       try {
-        const [tasksRes, leadsRes, notesRes] = await Promise.all([
+        const [tasksRes, leadsRes, notesRes, contactedRes] = await Promise.all([
           supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
           supabase.from("qs_leads").select("*"),
           supabase.from("qs_notes").select("lead_id"),
+          supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
         ]);
         if (tasksRes.data) setTasks(tasksRes.data as Task[]);
         if (leadsRes.data) setLeads(leadsRes.data as Lead[]);
         if (notesRes.data) setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[]));
+        if (contactedRes.data) setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[]));
       } catch { /* silencioso — próxima rodada tenta de novo */ }
     }, 60_000);
     return () => clearInterval(id);
@@ -478,6 +499,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
     if (error) {
       console.error("[QS] Falha ao criar follow-up:", error);
+      notifyError("Não foi possível criar o follow-up — o lead pode ficar sem próxima atividade!");
       return null;
     }
     return (data as Task) ?? null;
@@ -499,6 +521,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
     // 1. Conclui a tentativa atual (marca 'concluida' + registra contact_result).
     await completeTask(taskId, result);
+    markContacted(currentTask.lead_id); // lead trabalhado → some o "sem contato" nas próximas
 
     const leadName = getLeadForTask(currentTask)?.full_name || "Lead";
 
@@ -549,6 +572,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       await persistObservation(task.lead_id, `${CHANNEL_LABELS[task.channel_type]} — Concluída: ${obs}`, ["bitrix", "observacao"]);
     }
     await completeTask(task.id, "concluida", obs || undefined, obs ? ["observacao"] : undefined);
+    markContacted(task.lead_id); // primeiro contato feito → não é mais "sem contato"
     setTasks((prev) => prev.filter((t) => t.id !== task.id));
     setActiveTaskId(null);
     setObsText("");
@@ -577,6 +601,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       });
     } catch (e) {
       console.warn("[QS] não foi possível salvar a observação:", e);
+      notifyError("Não foi possível salvar a observação — tente novamente.");
     }
   }
 
@@ -680,6 +705,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       });
     } catch (e) {
       console.warn("[QS] falha ao registrar a reunião do ganho:", e);
+      notifyError("Não foi possível registrar a reunião — confira em Reuniões antes de seguir.");
     }
     setLeads((prev) => prev.map((l): Lead => l.id === leadId ? { ...l, status: "ganho" } : l));
     setTasks((prev) => prev.filter((t) => t.lead_id !== leadId));
@@ -939,7 +965,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   function renderPill(task: Task) {
     const lead = getLeadForTask(task);
     const cadence = getCadenceForTask(task);
-    const slaAlert = getSlaAlert(lead, task, cadence);
+    const slaAlert = getSlaAlert(lead, task, cadence, contactedLeadIds.has(lead?.id ?? ""));
     const prio = task.priority as PriorityLevel;
     const temp = computeLeadScore(lead, cadence, getAttemptCount(task) - 1);
     const isActive = activeTaskId === task.id;
@@ -1041,7 +1067,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   function renderHero(task: Task, upNext: Task[]) {
     const lead = getLeadForTask(task);
     const cadence = getCadenceForTask(task);
-    const slaAlert = getSlaAlert(lead, task, cadence);
+    const slaAlert = getSlaAlert(lead, task, cadence, contactedLeadIds.has(lead?.id ?? ""));
     const prio = task.priority as PriorityLevel;
     const temp = computeLeadScore(lead, cadence, getAttemptCount(task) - 1);
     const isActiveCard = activeTaskId === task.id;
@@ -1327,7 +1353,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   }
 
   return (
-    <div className="flex flex-col h-full" style={{ background: "var(--bg)" }}>
+    <div className="flex flex-col min-h-full" style={{ background: "var(--bg)" }}>
       {/* CSS Keyframes */}
       <style>{`
         @keyframes pulseRed { 0%,100% { opacity:1 } 50% { opacity:0.5 } }
@@ -1719,7 +1745,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══════════════════════════════════════════════════════════════════════
           MAIN CONTENT — TASK LIST + EXECUTION VIEW
           ══════════════════════════════════════════════════════════════════════ */}
-      <div className="flex-1 min-h-0 overflow-y-auto" style={{ background: "var(--bg)" }}>
+      <div className="flex-1" style={{ background: "var(--bg)" }}>
         <div className="px-4 md:px-6 pt-3 pb-24">
         <div className="qsx-page">
           {filteredTasks.length === 0 ? (

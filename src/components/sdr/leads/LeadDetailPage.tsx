@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
+import { notifyError } from "@/lib/qs/notify";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import type {
@@ -315,6 +316,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       .single();
     if (error) {
       console.warn("Erro ao adicionar nota:", error);
+      notifyError("Não foi possível salvar a anotação — tente novamente.");
       return;
     }
     // Espelha a nota como comentário na timeline do negócio no Bitrix.
@@ -358,6 +360,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       .eq("id", lead.id);
     if (error) {
       console.warn("Erro ao marcar como perdido:", error);
+      notifyError("Não foi possível marcar como perdido — tente novamente.");
       return;
     }
 
@@ -402,6 +405,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
 
     if (error) {
       console.warn("Erro ao agendar re-contato:", error);
+      notifyError("Não foi possível agendar o re-contato.");
     } else {
       setReEngagementScheduled(true);
       setTimeout(() => {
@@ -419,6 +423,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       .insert({ lead_id: lead.id, from_user_id: lead.owner_id, to_user_id: selectedCloser });
     if (hoError) {
       console.warn("Erro ao criar handover:", hoError);
+      notifyError("Não foi possível fazer o handover — tente novamente.");
       return;
     }
     const { error: upError } = await supabase

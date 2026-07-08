@@ -506,6 +506,13 @@ export default function SdrDashboard() {
   const [sdrMeetings, setSdrMeetings] = useState<SdrMeetings[]>([]);
   const [loadingOperational, setLoadingOperational] = useState(true);
 
+  // KPIs de negócio (auditoria): reuniões do período, pipeline e conversão por fonte
+  const [meetingKpis, setMeetingKpis] = useState<{ agendadas: number; realizadas: number; noShow: number; showRate: number | null; meta: number } | null>(null);
+  const [pipelineOpen, setPipelineOpen] = useState<number | null>(null);
+  const [revenueWon, setRevenueWon] = useState<number | null>(null);
+  const [sourceRows, setSourceRows] = useState<{ source: string; total: number; ganhos: number; taxa: number }[]>([]);
+  const [loadingBusiness, setLoadingBusiness] = useState(true);
+
   const periodLabel = PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label || "Mês atual";
 
   // Fetch users
@@ -537,6 +544,7 @@ export default function SdrDashboard() {
         leads_finalizados: 250,
         atividades: 450,
         conversao: 30,
+        reunioes: 40,
       };
 
       let qGoals = supabase
@@ -547,8 +555,8 @@ export default function SdrDashboard() {
       if (ownerId) qGoals = qGoals.eq("owner_id", ownerId);
       const { data: goalsData } = await qGoals;
 
-      const goalSum: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0 };
-      const goalCount: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0 };
+      const goalSum: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
+      const goalCount: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
       const seenGoal = new Set<string>();
       ((goalsData ?? []) as any[]).forEach((g) => {
         const type = g.type as GoalType;
@@ -933,6 +941,93 @@ export default function SdrDashboard() {
     loadOperationalKpis();
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
+  // KPIs de negócio: reuniões (show rate), pipeline em R$ e conversão por fonte.
+  useEffect(() => {
+    async function loadBusinessKpis() {
+      setLoadingBusiness(true);
+      const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      const ownerId = selectedUser === "all" ? undefined : selectedUser;
+
+      // 1. Reuniões do período (agendadas no período, pelo created_at)
+      let qM = supabase.from("qs_meetings").select("status, created_at");
+      if (ownerId) qM = qM.eq("owner_id", ownerId);
+      if (from) qM = qM.gte("created_at", from);
+      if (to) qM = qM.lte("created_at", to);
+
+      // 1b. Meta de reuniões (qs_goals type=reunioes, mensal)
+      let qMGoal = supabase.from("qs_goals").select("owner_id, target_value, period_start")
+        .eq("type", "reunioes").eq("period", "mensal").order("period_start", { ascending: false });
+      if (ownerId) qMGoal = qMGoal.eq("owner_id", ownerId);
+
+      // 2. Pipeline em aberto (foto atual, não depende do período)
+      let qPipe = supabase.from("qs_leads").select("estimated_value")
+        .in("status", ["nao_iniciado", "em_prospeccao"]);
+      if (ownerId) qPipe = qPipe.eq("owner_id", ownerId);
+
+      // 3. Receita ganha no período
+      let qWon = supabase.from("qs_leads").select("estimated_value, closed_value")
+        .eq("status", "ganho");
+      if (ownerId) qWon = qWon.eq("owner_id", ownerId);
+      if (from) qWon = qWon.gte("updated_at", from);
+      if (to) qWon = qWon.lte("updated_at", to);
+
+      // 4. Conversão por fonte (leads criados no período)
+      let qSrc = supabase.from("qs_leads").select("segment, status, created_at");
+      if (ownerId) qSrc = qSrc.eq("owner_id", ownerId);
+      if (from) qSrc = qSrc.gte("created_at", from);
+      if (to) qSrc = qSrc.lte("created_at", to);
+
+      const [mRes, mGoalRes, pipeRes, wonRes, srcRes] = await Promise.all([qM, qMGoal, qPipe, qWon, qSrc]);
+
+      // Reuniões
+      const meetings = (mRes.data ?? []) as { status: string }[];
+      const agendadas = meetings.filter((m) => m.status !== "cancelada").length;
+      const realizadas = meetings.filter((m) => m.status === "realizada").length;
+      const noShow = meetings.filter((m) => m.status === "no_show").length;
+      const decididas = realizadas + noShow;
+      const seenOwner = new Set<string>();
+      let meta = 0;
+      ((mGoalRes.data ?? []) as any[]).forEach((g) => {
+        const key = g.owner_id ?? "none";
+        if (seenOwner.has(key)) return; // mais recente por owner
+        seenOwner.add(key);
+        meta += Number(g.target_value) || 0;
+      });
+      setMeetingKpis({
+        agendadas, realizadas, noShow,
+        showRate: decididas > 0 ? (realizadas / decididas) * 100 : null,
+        meta,
+      });
+
+      // Pipeline / receita
+      const sum = (rows: any[] | null, pick: (r: any) => number) =>
+        (rows ?? []).reduce((acc, r) => acc + (pick(r) || 0), 0);
+      setPipelineOpen(sum(pipeRes.data as any[], (r) => Number(r.estimated_value)));
+      setRevenueWon(sum(wonRes.data as any[], (r) => Number(r.closed_value ?? r.estimated_value)));
+
+      // Fonte
+      const srcMap = new Map<string, { total: number; ganhos: number }>();
+      ((srcRes.data ?? []) as any[]).forEach((r) => {
+        const key = (r.segment || "Sem fonte").trim() || "Sem fonte";
+        const e = srcMap.get(key) || { total: 0, ganhos: 0 };
+        e.total++;
+        if (r.status === "ganho") e.ganhos++;
+        srcMap.set(key, e);
+      });
+      setSourceRows(
+        Array.from(srcMap.entries())
+          .map(([source, { total, ganhos }]) => ({ source, total, ganhos, taxa: total > 0 ? (ganhos / total) * 100 : 0 }))
+          .sort((a, b) => b.total - a.total)
+          .slice(0, 12)
+      );
+
+      setLoadingBusiness(false);
+    }
+    loadBusinessKpis();
+  }, [selectedUser, selectedPeriod, customStart, customEnd]);
+
+  const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+
   return (
     <div className="space-y-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* Header */}
@@ -1187,6 +1282,104 @@ export default function SdrDashboard() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Reuniões, Pipeline e Receita (auditoria) ─────────────────────── */}
+      <div>
+        <h2 className="text-sm font-medium text-gray-700 mb-3">Reuniões e Receita</h2>
+        {loadingBusiness ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex items-center justify-center">
+                <span className="text-sm text-gray-400">Carregando...</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Reuniões do período + show rate */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+              <span className="text-xs text-gray-500 uppercase">Reuniões no Período</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-bold text-gray-900">{meetingKpis?.agendadas ?? 0}</span>
+                {meetingKpis && meetingKpis.meta > 0 && (
+                  <span className="text-xs text-gray-400">/ meta {meetingKpis.meta}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-emerald-600 font-semibold">{meetingKpis?.realizadas ?? 0} realizadas</span>
+                <span className="text-red-500 font-semibold">{meetingKpis?.noShow ?? 0} no-show</span>
+              </div>
+              <span className="text-xs text-gray-400">
+                {meetingKpis?.showRate != null
+                  ? `Show rate: ${meetingKpis.showRate.toFixed(0)}% das reuniões decididas`
+                  : "Show rate: sem reuniões decididas ainda"}
+              </span>
+            </div>
+
+            {/* Pipeline em aberto */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+              <span className="text-xs text-gray-500 uppercase">Pipeline em Aberto</span>
+              <span className="text-2xl font-bold text-gray-900" style={{ fontVariantNumeric: "tabular-nums" }}>
+                {fmtBRL.format(pipelineOpen ?? 0)}
+              </span>
+              <span className="text-xs text-gray-400">Valor estimado dos leads em prospecção (foto de agora)</span>
+            </div>
+
+            {/* Receita ganha */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
+              <span className="text-xs text-gray-500 uppercase">Receita Ganha no Período</span>
+              <span className="text-2xl font-bold text-emerald-600" style={{ fontVariantNumeric: "tabular-nums" }}>
+                {fmtBRL.format(revenueWon ?? 0)}
+              </span>
+              <span className="text-xs text-gray-400">Soma dos leads ganhos (valor fechado ou estimado)</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Conversão por Fonte (auditoria) ──────────────────────────────── */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
+        <h2 className="text-sm font-medium text-gray-700 mb-1">Conversão por Fonte</h2>
+        <p className="text-xs text-gray-400 mb-4">Qual campanha/LP traz lead que fecha — leads criados no período, agrupados pela fonte que veio do Bitrix.</p>
+        {loadingBusiness ? (
+          <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>
+        ) : sourceRows.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-4">Nenhum lead criado no período.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fonte</th>
+                  <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Leads</th>
+                  <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Ganhos</th>
+                  <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Conversão</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sourceRows.map((row) => (
+                  <tr key={row.source} className="border-b border-gray-50">
+                    <td className="py-2 px-3 text-xs font-medium text-gray-900 truncate max-w-[240px]">{row.source}</td>
+                    <td className="py-2 px-3 text-center text-xs text-gray-700" style={{ fontVariantNumeric: "tabular-nums" }}>{row.total}</td>
+                    <td className="py-2 px-3 text-center text-xs text-gray-700" style={{ fontVariantNumeric: "tabular-nums" }}>{row.ganhos}</td>
+                    <td className="py-2 px-3 text-center">
+                      <span
+                        className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
+                        style={{
+                          background: row.taxa > 20 ? "#D1FAE5" : row.taxa > 10 ? "#FEF3C7" : "#FEE2E2",
+                          color: row.taxa > 20 ? "#059669" : row.taxa > 10 ? "#D97706" : "#DC2626",
+                        }}
+                      >
+                        {row.taxa.toFixed(1)}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

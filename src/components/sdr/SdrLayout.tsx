@@ -66,6 +66,7 @@ import SettingsPage from "./settings/SettingsPage";
 import CoveragePanel from "./dashboard/CoveragePanel";
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import ChatAppDock from "./chatapp/ChatAppDock";
+import GlobalToasts from "./GlobalToasts";
 import { toggleWebphone } from "@/lib/wavoip";
 
 export type SdrNav =
@@ -568,6 +569,9 @@ export default function SdrLayout() {
 
       {/* Coluna do ChatApp — divide a tela; montada uma única vez e persistente */}
       <ChatAppDock />
+
+      {/* Toasts globais (erros de gravação, confirmações) */}
+      <GlobalToasts />
     </div>
   );
 }

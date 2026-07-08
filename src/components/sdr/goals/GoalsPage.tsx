@@ -50,6 +50,19 @@ async function computeGoalCurrent(goal: Goal): Promise<number> {
     return count ?? 0;
   }
 
+  if (goal.type === "reunioes") {
+    // Reuniões agendadas no período (canceladas ficam de fora).
+    let q = supabase
+      .from("qs_meetings")
+      .select("id", { count: "exact", head: true })
+      .neq("status", "cancelada")
+      .gte("created_at", from)
+      .lte("created_at", to);
+    if (owner) q = q.eq("owner_id", owner);
+    const { count } = await q;
+    return count ?? 0;
+  }
+
   if (goal.type === "leads_finalizados") {
     let q = supabase
       .from("qs_leads")
@@ -92,6 +105,7 @@ const GOAL_TYPE_LABELS: Record<GoalType, string> = {
   leads_finalizados: "Leads Finalizados",
   atividades: "Atividades",
   conversao: "Taxa de Conversão",
+  reunioes: "Reuniões Agendadas",
 };
 
 const GOAL_PERIOD_LABELS: Record<GoalPeriod, string> = {
