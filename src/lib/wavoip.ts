@@ -9,6 +9,7 @@
 //   1. carregar o script (uma única vez)                → ensureWavoipLoaded()
 //   2. registrar o dispositivo (instância do WhatsApp)  → device.add(token, true)
 //   3. discar para um lead                              → dialViaWavoip(phone)
+//   4. registrar o RESULTADO da ligação (call:ended)    → setupCallLogging()
 //
 // O token do dispositivo é configurável em Configurações → Webfone (tabela
 // qs_settings, chave "wavoip_token"); um VITE_WAVOIP_TOKEN, se existir, tem
@@ -16,7 +17,7 @@
 // -----------------------------------------------------------------------------
 
 import { getSetting } from "./qsSettings";
-import { normalizePhoneBR } from "./whatsapp";
+import { normalizePhoneBR, logWhatsApp } from "./whatsapp";
 
 export const WAVOIP_TOKEN_KEY = "wavoip_token";
 
@@ -32,7 +33,7 @@ interface WavoipApi {
     start: (
       to: string,
       config?: { displayName?: string; fromTokens?: string[] },
-    ) => Promise<{ call?: unknown; err?: unknown }>;
+    ) => Promise<{ call?: { id?: string } | null; err?: unknown }>;
     setInput: (n: string) => void;
   };
   device: {
@@ -47,6 +48,8 @@ interface WavoipApi {
     buttonPosition: { set: (p: string | { x: number; y: number }) => void };
   };
   theme: { set: (t: "dark" | "light" | "system") => void };
+  /** Assinatura de eventos de ciclo de vida da chamada (versões recentes). */
+  on?: (event: string, cb: (payload: unknown) => void) => (() => void);
 }
 
 declare global {
@@ -68,6 +71,107 @@ export async function getWavoipToken(): Promise<string> {
   return (stored ?? "").trim();
 }
 
+// ── Registro (log) de chamadas via eventos ───────────────────────────────────
+// A API pública emite call:started / call:accepted / call:ended / offer:received.
+// Guardamos o contexto do lead por callId (setado no dial) e, no call:ended,
+// gravamos UMA linha em qs_whatsapp_messages (kind "call") com desfecho+duração.
+
+interface TrackedCall {
+  leadId?: string | null;
+  ownerId?: string | null;
+  phone?: string | null;
+  direction: "out" | "in";
+  startedAt: number;
+  acceptedAt?: number;
+}
+
+const trackedCalls = new Map<string, TrackedCall>();
+let loggingSetup = false;
+
+function extractCallId(p: unknown): string | undefined {
+  if (p && typeof p === "object") {
+    const o = p as Record<string, unknown>;
+    if (typeof o.id === "string") return o.id;
+    const c = o.call as Record<string, unknown> | undefined;
+    if (c && typeof c.id === "string") return c.id;
+  }
+  return undefined;
+}
+
+function extractPhone(p: unknown): string | undefined {
+  if (p && typeof p === "object") {
+    const o = p as Record<string, unknown>;
+    const peer = o.peer as Record<string, unknown> | undefined;
+    const phone = peer?.phone ?? o.phone ?? o.to;
+    if (typeof phone === "string") return phone;
+  }
+  return undefined;
+}
+
+function formatDuration(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}m${String(s).padStart(2, "0")}s` : `${s}s`;
+}
+
+/** Registra os listeners de ciclo de vida da chamada (uma única vez). */
+function setupCallLogging(api: WavoipApi): void {
+  if (loggingSetup || typeof api.on !== "function") return;
+  loggingSetup = true;
+  const on = api.on.bind(api);
+
+  on("call:started", (p) => {
+    const id = extractCallId(p);
+    if (id && !trackedCalls.has(id)) {
+      trackedCalls.set(id, { direction: "out", startedAt: Date.now(), phone: extractPhone(p) });
+    }
+  });
+
+  on("offer:received", (p) => {
+    const id = extractCallId(p);
+    if (id && !trackedCalls.has(id)) {
+      trackedCalls.set(id, { direction: "in", startedAt: Date.now(), phone: extractPhone(p) });
+    }
+  });
+
+  on("call:accepted", (p) => {
+    const id = extractCallId(p);
+    if (!id) return;
+    const c = trackedCalls.get(id) ?? { direction: "out" as const, startedAt: Date.now() };
+    c.acceptedAt = Date.now();
+    trackedCalls.set(id, c);
+  });
+
+  on("call:ended", (p) => {
+    const id = extractCallId(p);
+    if (!id) return;
+    const c = trackedCalls.get(id);
+    trackedCalls.delete(id);
+    const answered = !!c?.acceptedAt;
+    const durSec = answered ? Math.max(0, Math.round((Date.now() - c!.acceptedAt!) / 1000)) : 0;
+    const rawStatus =
+      p && typeof p === "object" && typeof (p as Record<string, unknown>).status === "string"
+        ? String((p as Record<string, unknown>).status)
+        : "";
+    const via = c?.direction === "in" ? "recebida" : "webfone";
+    const desfecho = answered ? "atendida" : "não atendida";
+    const body =
+      `📞 Ligação (${via}) — ${desfecho}` +
+      (durSec ? ` · ${formatDuration(durSec)}` : "") +
+      (rawStatus ? ` [${rawStatus}]` : "");
+
+    void logWhatsApp({
+      leadId: c?.leadId ?? null,
+      ownerId: c?.ownerId ?? null,
+      phone: c?.phone ?? extractPhone(p) ?? null,
+      body,
+      status: answered ? "sent" : "failed",
+      direction: c?.direction ?? "out",
+      kind: "call",
+    });
+  });
+}
+
 // ── Carregamento do script (singleton) ───────────────────────────────────────
 
 let loadPromise: Promise<WavoipApi> | null = null;
@@ -87,6 +191,7 @@ export function ensureWavoipLoaded(): Promise<WavoipApi> {
     }
     // Já carregado por outra rota?
     if (window.wavoip) {
+      setupCallLogging(window.wavoip);
       resolve(window.wavoip);
       return;
     }
@@ -99,7 +204,13 @@ export function ensureWavoipLoaded(): Promise<WavoipApi> {
         if (!window.wavoipWebphone) throw new Error("wavoipWebphone não encontrado após o load.");
         const api = await window.wavoipWebphone.render();
         // render() resolve com a API, que também fica em window.wavoip.
-        resolve(api ?? window.wavoip!);
+        const resolved = api ?? window.wavoip!;
+        setupCallLogging(resolved);
+        // Ajustes visuais (não críticos): tema claro + botão no canto inferior
+        // esquerdo. Ficam aqui pra valer em qualquer rota que carregue a lib.
+        try { resolved.theme?.set?.("light"); } catch { /* versão sem theme */ }
+        try { resolved.widget?.buttonPosition?.set?.("bottom-left"); } catch { /* sem posição */ }
+        resolve(resolved);
       } catch (e) {
         loadPromise = null; // permite nova tentativa
         reject(e);
@@ -136,12 +247,28 @@ export async function ensureWavoipDevice(): Promise<{ ok: boolean; error?: strin
 
 export type DialResult = { ok: true } | { ok: false; error: string };
 
+/** Contexto do lead pra enriquecer o log da ligação (call:ended). */
+export interface WavoipDialContext {
+  displayName?: string;
+  leadId?: string | null;
+  ownerId?: string | null;
+  leadName?: string | null;
+}
+
 /**
  * Liga para um telefone pelo webfone: garante lib+dispositivo, abre o widget e
  * inicia a chamada. `phone` pode vir em qualquer formato BR — é normalizado para
- * E.164 sem "+".
+ * E.164 sem "+". A ligação sai SEMPRE do dispositivo configurado (fromTokens), e
+ * o desfecho é registrado automaticamente quando a chamada termina (call:ended).
+ *
+ * `ctx` aceita uma string (legado = displayName) ou um objeto com o contexto do
+ * lead/dono pra o log.
  */
-export async function dialViaWavoip(phone?: string | null, displayName?: string): Promise<DialResult> {
+export async function dialViaWavoip(
+  phone?: string | null,
+  ctx?: WavoipDialContext | string,
+): Promise<DialResult> {
+  const context: WavoipDialContext = typeof ctx === "string" ? { displayName: ctx, leadName: ctx } : ctx ?? {};
   const to = normalizePhoneBR(phone);
   if (!to || to.length < 11) return { ok: false, error: "Telefone inválido para ligar." };
 
@@ -149,11 +276,53 @@ export async function dialViaWavoip(phone?: string | null, displayName?: string)
   if (!dev.ok) return { ok: false, error: dev.error ?? "Webfone indisponível." };
 
   try {
+    const token = await getWavoipToken();
     window.wavoip!.widget.open();
-    const { err } = await window.wavoip!.call.start(to, displayName ? { displayName } : undefined);
-    if (err) return { ok: false, error: "Não foi possível iniciar a chamada." };
+
+    const config: { displayName?: string; fromTokens?: string[] } = {};
+    const displayName = context.displayName ?? context.leadName ?? undefined;
+    if (displayName) config.displayName = displayName;
+    if (token) config.fromTokens = [token]; // determinístico: sai do dispositivo configurado
+
+    const res = await window.wavoip!.call.start(to, Object.keys(config).length ? config : undefined);
+    if (res?.err) return { ok: false, error: "Não foi possível iniciar a chamada." };
+
+    // Guarda o contexto do lead pra o log do call:ended (mescla com o que o
+    // evento call:started possa já ter setado, sem perder acceptedAt).
+    const id = res?.call?.id;
+    if (id) {
+      const prev = trackedCalls.get(id);
+      trackedCalls.set(id, {
+        direction: "out",
+        startedAt: prev?.startedAt ?? Date.now(),
+        acceptedAt: prev?.acceptedAt,
+        leadId: context.leadId ?? null,
+        ownerId: context.ownerId ?? null,
+        phone: to,
+      });
+    }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Erro ao iniciar a chamada." };
+  }
+}
+
+/**
+ * Abre/fecha o painel do webfone a partir de um gatilho do próprio QS (ex.: o
+ * botão "Telefone" no topo). Carrega a lib + registra o dispositivo SOB DEMANDA —
+ * assim o widget não aparece sozinho ao abrir o sistema; só quando o SDR chama.
+ */
+export async function toggleWebphone(): Promise<DialResult> {
+  try {
+    await ensureWavoipLoaded();
+    const dev = await ensureWavoipDevice(); // registra o token; não bloqueia a abertura
+    if (!dev.ok) console.warn("[webfone]", dev.error);
+    const w = window.wavoip?.widget;
+    if (!w) return { ok: false, error: "Webfone indisponível." };
+    if (typeof w.toggle === "function") w.toggle();
+    else w.open();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Erro ao abrir o webfone." };
   }
 }
