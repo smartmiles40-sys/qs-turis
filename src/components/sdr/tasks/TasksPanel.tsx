@@ -910,13 +910,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           <ChannelIcon type={task.channel_type} size={19} />
         </span>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
             {lead ? (
-              <button onClick={(e) => { e.stopPropagation(); onOpenLead(lead.id); }} className="qsx-name-btn qsx-lname truncate" title="Ver informações do lead">
+              <button onClick={(e) => { e.stopPropagation(); onOpenLead(lead.id); }} className="qsx-name-btn qsx-lname truncate min-w-0 max-w-full" title="Ver informações do lead">
                 {lead.full_name || "Lead"}
               </button>
             ) : (
-              <span className="qsx-lname truncate">Lead desconhecido</span>
+              <span className="qsx-lname truncate min-w-0 max-w-full">Lead desconhecido</span>
             )}
             <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Lead score ${temp.score}/100`}>{temp.label}</span>
             <span className={`qsx-chip prio-${prio}`}><span className={`qsx-dot dot-${prio}`} />{PRIORITY_LABELS[prio]}</span>
@@ -1251,14 +1251,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return (
       <div className="flex flex-col h-full overflow-hidden" style={{ background: "var(--bg)" }}>
         <style>{`@keyframes skPulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }`}</style>
-        <div className="px-6 pt-5 pb-4" style={{ background: "#fff", borderBottom: "1px solid var(--line)" }}>
+        <div className="px-4 md:px-6 pt-5 pb-4" style={{ background: "#fff", borderBottom: "1px solid var(--line)" }}>
           <div className="flex flex-col gap-4" style={{ maxWidth: 1400, margin: "0 auto" }}>
-            <div className="flex items-center gap-3">{sk(180, 24)}{sk(300, 16)}</div>
-            <div className="flex items-center gap-3">{sk("40%", 48, 14)}{sk(150, 48, 14)}{sk(140, 48, 14)}{sk(140, 48, 14)}</div>
-            <div className="flex items-center gap-8">{sk(180, 30)}{sk(180, 30)}</div>
+            <div className="flex flex-wrap items-center gap-3">{sk(180, 24)}{sk(300, 16)}</div>
+            <div className="flex flex-wrap items-center gap-3">{sk("40%", 48, 14)}{sk(150, 48, 14)}{sk(140, 48, 14)}{sk(140, 48, 14)}</div>
+            <div className="flex flex-wrap items-center gap-8">{sk(180, 30)}{sk(180, 30)}</div>
           </div>
         </div>
-        <div className="px-6 pt-4">
+        <div className="px-4 md:px-6 pt-4">
           <div className="flex flex-col gap-3" style={{ maxWidth: 1400, margin: "0 auto" }}>
             {sk("100%", 260, 22)}
             {sk("100%", 76, 20)}
@@ -1403,6 +1403,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-fila-main { flex: 1 1 auto; min-width: 0; }
         @media (max-width: 1100px) { .qsx-fila-extras { width: 230px; } }
 
+        /* ── Celular (≤767px): empilha as colunas do hero e da fila ── */
+        @media (max-width: 767px) {
+          .qsx-hero { flex-direction: column; }
+          .qsx-hero-accent { width: 100%; height: 4px; }
+          .qsx-hero-main { padding: 20px 18px; gap: 14px; }
+          .qsx-hero-side { width: 100%; border-left: 0; border-top: 1px solid var(--line); }
+          .qsx-hln { font-size: 20px; }
+          .qsx-fila-row { flex-direction: column; align-items: stretch; gap: 14px; }
+          .qsx-fila-extras { width: 100%; }
+          .qsx-fila-main { width: 100%; }
+        }
+
         /* Botão do topo em versão calma (só a ação principal fica cheia) */
         .qsx-btn-soft { background: #fff; border: 1px solid var(--line); color: var(--ink); box-shadow: none; }
         .qsx-btn-soft:hover { background: var(--line2); filter: none; }
@@ -1468,10 +1480,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           ══════════════════════════════════════════════════════════════════════ */}
       {hotLead && (
         <div
-          className="shrink-0 bg-red-500 text-white px-6 py-3 flex items-center justify-between"
+          className="shrink-0 bg-red-500 text-white px-4 md:px-6 py-3 flex flex-wrap items-center justify-between gap-y-2"
           style={{ animation: "pulseBanner 2s ease-in-out infinite" }}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="text-lg">&#128308;</span>
             <span className="text-sm font-bold">Lead quente chegou!</span>
             <span className="text-sm font-medium">
@@ -1502,7 +1514,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══════════════════════════════════════════════════════════════════════
           HEADER SECTION
           ══════════════════════════════════════════════════════════════════════ */}
-      <div className="shrink-0 px-6 pt-5 pb-4" style={{ background: "#fff", borderBottom: "1px solid var(--line)" }}>
+      <div className="shrink-0 px-4 md:px-6 pt-5 pb-4" style={{ background: "#fff", borderBottom: "1px solid var(--line)" }}>
         <div className="qsx-page">
           {/* Saudação */}
           <div className="qsx-greet flex items-baseline gap-3 flex-wrap">
@@ -1513,7 +1525,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           </div>
 
           {/* Comando: busca + ações rápidas */}
-          <div className="flex items-center gap-3 mt-4">
+          <div className="flex flex-wrap items-center gap-3 mt-4">
             <div className="qsx-search">
               <span style={{ color: "var(--ink3)", display: "flex" }}><IconSearch size={16} /></span>
               <input
@@ -1540,7 +1552,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
           {/* Contexto: métricas + ritmo */}
           <div className="flex items-center justify-between gap-5 mt-5 flex-wrap">
-            <div className="flex items-center gap-8">
+            <div className="flex flex-wrap items-center gap-8">
               <div className="qsx-metric">
                 <div className="qsx-mtop">
                   <span className="qsx-mdot" style={{ background: dailyPct >= 100 ? "var(--green)" : "var(--amber)" }} />
@@ -1572,7 +1584,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══════════════════════════════════════════════════════════════════════
           FILTERS SECTION
           ══════════════════════════════════════════════════════════════════════ */}
-      <div className="shrink-0 px-6 pt-4 pb-1" style={{ background: "var(--bg)" }}>
+      <div className="shrink-0 px-4 md:px-6 pt-4 pb-1" style={{ background: "var(--bg)" }}>
         <div className="qsx-page flex items-center justify-between gap-3 flex-wrap">
           <span className="text-[16px] font-extrabold" style={{ color: "var(--ink)", letterSpacing: "-.1px" }}>Fila de hoje</span>
           <div className="flex items-center gap-2 flex-wrap">
@@ -1652,7 +1664,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           MAIN CONTENT — TASK LIST + EXECUTION VIEW
           ══════════════════════════════════════════════════════════════════════ */}
       <div className="flex-1 min-h-0 overflow-y-auto" style={{ background: "var(--bg)" }}>
-        <div className="px-6 pt-3 pb-24">
+        <div className="px-4 md:px-6 pt-3 pb-24">
         <div className="qsx-page">
           {filteredTasks.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -1790,7 +1802,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══ MODAL LIGAÇÃO MANUAL ═════════════════════════════════════════════ */}
       {showDialer && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-base font-bold text-gray-900">Ligação Manual</h2>
               <button onClick={() => { setShowDialer(false); setDialNumber(""); }} className="text-gray-400 hover:text-gray-600">
@@ -1832,7 +1844,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══ MODAL ATIVIDADE EXTRA ═════════════════════════════════════════════ */}
       {showExtraTaskModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-base font-bold text-gray-900">{extraFromTaskId ? "Agendar retorno" : "Atividade Extra"}</h2>
               <button onClick={() => { setShowExtraTaskModal(false); setExtraFromTaskId(null); }} className="text-gray-400 hover:text-gray-600">
@@ -1896,7 +1908,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   <option value="pesquisa">Atividade de Pesquisa</option>
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-500 block mb-1">Data *</label>
                   <input
@@ -1950,7 +1962,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══ MODAL CADASTRAR LEAD ══════════════════════════════════════════════ */}
       {showNewLeadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-base font-bold text-gray-900">Cadastrar Lead</h2>
               <button onClick={() => setShowNewLeadModal(false)} className="text-gray-400 hover:text-gray-600">

@@ -256,7 +256,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   return (
     <div className="space-y-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap gap-y-2 items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -298,7 +298,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       )}
 
       {/* Filter Tabs */}
-      <div className="flex gap-1">
+      <div className="flex flex-wrap gap-1 gap-y-2">
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -319,7 +319,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
 
       {/* Table or Empty State */}
       {filtered.length === 0 ? (
-        <div className="bg-white border border-gray-100 rounded-xl shadow-none p-12 flex flex-col items-center justify-center text-center">
+        <div className="bg-white border border-gray-100 rounded-xl shadow-none p-6 md:p-12 flex flex-col items-center justify-center text-center">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
             <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
@@ -330,7 +330,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
         </div>
       ) : (
         <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Data/Hora</th>
@@ -441,6 +442,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -489,7 +491,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>Data e hora</label>
                   <input

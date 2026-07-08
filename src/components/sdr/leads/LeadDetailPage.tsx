@@ -521,7 +521,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // ── Loading / Not found ──
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F8F9FA] px-6 py-6 flex items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
         <p className="text-sm text-gray-500">Carregando...</p>
       </div>
     );
@@ -529,7 +529,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
 
   if (!lead) {
     return (
-      <div className="min-h-screen bg-[#F8F9FA] px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
         <p className="text-sm text-gray-500 mb-4">Lead não encontrado.</p>
         <button onClick={onBack} className="text-sm text-[#F97316] hover:underline">Voltar para Leads</button>
       </div>
@@ -565,7 +565,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                   {STATUS_LABELS[lead.status]}
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="p-3 rounded-lg bg-[#F8F9FA]">
                   <p className="text-xs text-gray-500 mb-1">Criado em</p>
                   <p className="text-sm font-medium text-gray-900">{formatDate(lead.created_at)}</p>
@@ -578,7 +578,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             </div>
 
             {/* Details Grid */}
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Cadência</h3>
                 <p className="text-sm text-gray-700">{cadence?.name ?? "\u2014"}</p>
@@ -1026,7 +1026,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] px-6 py-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* Back Button */}
       <button
         onClick={onBack}
@@ -1039,7 +1039,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       </button>
 
       {/* Lead Header */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-[#F97316]/10 flex items-center justify-center">
             <span className="text-base font-bold text-[#F97316]">
@@ -1053,7 +1053,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={() => setShowHandoverModal(true)}
             className="px-4 py-2 rounded-lg bg-[#2563EB] text-sm font-semibold text-white hover:bg-[#1D4ED8] transition-colors flex items-center gap-2"
@@ -1205,7 +1205,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       {/* Re-engagement Modal (Change 16) */}
       {showReEngagement && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-4 md:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-2">Agendar Re-contato</h2>
             <p className="text-sm text-gray-500 mb-6">
               Este lead foi perdido por um motivo que pode ser temporário. Deseja agendar um re-contato futuro?
@@ -1393,7 +1393,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       {/* Meeting Modal (Task 1) */}
       {showMeetingModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto p-6">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto p-4 md:p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-gray-900">Agendar Reunião</h2>
               <button
@@ -1422,7 +1422,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1.5">Data e hora</label>
                   <input

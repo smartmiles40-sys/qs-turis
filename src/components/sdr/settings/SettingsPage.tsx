@@ -248,11 +248,11 @@ function CamposSection() {
         ))}
       </div>
 
-      <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-x-auto">
         {fields.length === 0 ? (
           <div className="px-4 py-6 text-center text-sm text-gray-400">Nenhum campo neste escopo.</div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[560px]">
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Campo</th>
@@ -301,8 +301,8 @@ function CamposSection() {
 
       {/* Modal Criar/Editar Campo */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 md:p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-bold text-gray-900 mb-4">{editField ? "Editar Campo" : "Novo Campo"}</h3>
             <div className="space-y-3">
               <div>
@@ -430,7 +430,7 @@ function MotivosSection() {
 
       <div>
         <h3 className="text-xs font-medium text-gray-500 mb-3 flex items-center gap-1.5"><LockIcon /> Predefinidos</h3>
-        <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
+        <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-x-auto">
           {predefined.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-gray-400">Nenhum motivo predefinido.</div>
           ) : (
@@ -461,7 +461,7 @@ function MotivosSection() {
             Mostrar arquivados
           </label>
         </div>
-        <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
+        <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-x-auto">
           {custom.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-gray-400">Nenhum motivo personalizado.</div>
           ) : (
@@ -492,8 +492,8 @@ function MotivosSection() {
 
       {/* Modal Criar/Editar Motivo */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 md:p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-bold text-gray-900 mb-4">{editReason ? "Editar Motivo" : "Novo Motivo"}</h3>
             <div className="space-y-3">
               <div>
@@ -601,11 +601,11 @@ function UsuariosSection() {
         </button>
       </div>
 
-      <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-x-auto">
         {users.length === 0 ? (
           <div className="px-4 py-6 text-center text-sm text-gray-400">Nenhum usuário cadastrado.</div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[560px]">
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Nome</th>
@@ -664,8 +664,8 @@ function UsuariosSection() {
 
       {/* Modal Adicionar/Editar */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 md:p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-bold text-gray-900 mb-4">{editUser ? "Editar Usuário" : "Adicionar Usuário"}</h3>
             <div className="space-y-3">
               <div>
@@ -744,10 +744,10 @@ function ProdutosSection() {
     setProducts(prev => prev.filter(p => p.id !== id));
   }
 
-  if (loading) return <div className="p-6 text-gray-400">Carregando...</div>;
+  if (loading) return <div className="p-4 md:p-6 text-gray-400">Carregando...</div>;
 
   return (
-    <div className="p-6">
+    <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-bold text-gray-900">Produtos</h2>
@@ -1295,9 +1295,9 @@ export default function SettingsPage() {
   );
 
   return (
-    <div className="flex gap-6 min-h-[600px]" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="flex flex-col md:flex-row gap-6 min-h-[600px]" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* Internal Sidebar */}
-      <aside className="w-56 shrink-0">
+      <aside className="w-full md:w-56 shrink-0">
         <div className="sticky top-0 space-y-5">
           <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

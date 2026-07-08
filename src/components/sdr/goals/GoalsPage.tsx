@@ -266,7 +266,7 @@ export default function GoalsPage() {
   return (
     <div className="space-y-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap gap-y-2 items-center justify-between">
         <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" />
@@ -328,7 +328,8 @@ export default function GoalsPage() {
                 Nenhuma meta definida para este período.
               </div>
             ) : (
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[560px]">
                 <thead>
                   <tr className="border-b border-gray-100">
                     <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider w-44">Tipo</th>
@@ -371,12 +372,13 @@ export default function GoalsPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         ))}
 
         {users.length === 0 && (
-          <div className="bg-white border border-gray-100 rounded-xl shadow-none p-12 text-center">
+          <div className="bg-white border border-gray-100 rounded-xl shadow-none p-6 md:p-12 text-center">
             <p className="text-sm text-gray-400">Nenhum usuário encontrado.</p>
           </div>
         )}

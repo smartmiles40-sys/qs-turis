@@ -295,14 +295,14 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
 
   if (loading) {
     return (
-      <div className="px-6 py-6 max-w-[1400px] mx-auto flex items-center justify-center min-h-[400px]" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="px-4 md:px-6 py-6 max-w-[1400px] mx-auto flex items-center justify-center min-h-[400px]" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
         <p className="text-sm text-gray-500">Carregando...</p>
       </div>
     );
   }
 
   return (
-    <div className="px-6 py-6 max-w-[1400px] mx-auto" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="px-4 md:px-6 py-6 max-w-[1400px] mx-auto" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -394,7 +394,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
 
       {/* ── Bulk Actions ───────────────────────────────────────────────── */}
       <div className="mb-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-y-2">
           <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
             <input
               type="checkbox"

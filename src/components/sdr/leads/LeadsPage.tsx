@@ -326,23 +326,23 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   // ── Loading state ──
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F8F9FA] px-6 py-6 flex items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
         <p className="text-sm text-gray-500">Carregando...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] px-6 py-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-lg font-bold text-gray-900">Gerenciamento de Leads</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {leads.length} leads cadastrados &middot; {filteredLeads.length} visíveis
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={() => { setHandoverError(null); setShowHandover(true); }}
             className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -470,7 +470,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
       {/* ── Bulk Actions ────────────────────────────────────────────────── */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl bg-[#F97316]/5 border border-[#F97316]/10">
+        <div className="flex flex-wrap items-center gap-3 mb-4 px-4 py-3 rounded-xl bg-[#F97316]/5 border border-[#F97316]/10">
           <span className="text-sm font-medium text-[#F97316]">
             {selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selecionado{selectedIds.size > 1 ? "s" : ""}
           </span>
@@ -521,7 +521,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
       {/* ── Table ───────────────────────────────────────────────────────── */}
       <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[720px]">
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="w-12 px-4 py-3">
@@ -697,7 +697,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => { setShowCreateModal(false); resetForm(); }}
           />
-          <div className="relative bg-white rounded-xl border border-gray-100 shadow-none w-full max-w-lg mx-4 p-6">
+          <div className="relative bg-white rounded-xl border border-gray-100 shadow-none w-full max-w-lg mx-4 p-4 md:p-6 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-bold text-gray-900">Cadastrar Lead</h2>
               <button
@@ -711,7 +711,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             </div>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Nome</label>
                   <input
@@ -807,7 +807,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvImportedCount(null); }}
           />
-          <div className="relative bg-white rounded-xl border border-gray-100 shadow-none w-full max-w-2xl mx-4 p-6 max-h-[80vh] overflow-y-auto">
+          <div className="relative bg-white rounded-xl border border-gray-100 shadow-none w-full max-w-2xl mx-4 p-4 md:p-6 max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-bold text-gray-900">Importar Leads via CSV</h2>
               <button
@@ -967,7 +967,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => !handoverSaving && setShowHandover(false)}
           />
-          <div className="relative bg-white rounded-xl border border-gray-100 shadow-xl w-full max-w-md mx-4 p-6">
+          <div className="relative bg-white rounded-xl border border-gray-100 shadow-xl w-full max-w-md mx-4 p-4 md:p-6 max-h-[85vh] overflow-y-auto">
             <h2 className="text-lg font-bold text-gray-900 mb-1">Handover de leads</h2>
 
             {isHandoverAdmin && (

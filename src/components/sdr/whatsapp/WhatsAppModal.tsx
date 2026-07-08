@@ -153,7 +153,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-y-auto md:max-h-none md:overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4" style={{ background: WA_GREEN }}>
           <div className="flex items-center gap-3 text-white">
@@ -218,7 +218,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
           {/* ── MENSAGEM ─────────────────────────────────────────────────── */}
           <div className="space-y-2">
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Mensagem</p>
-            <div className="grid grid-cols-[2fr_1fr] gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr] gap-2">
               <button
                 onClick={handleOpenChatApp}
                 disabled={sending}
@@ -258,7 +258,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               </svg>
               {calling ? "Ligando…" : "Ligar pelo Webfone (no sistema)"}
             </button>
-            <div className={`grid gap-2 ${sipOn ? "grid-cols-2" : "grid-cols-1"}`}>
+            <div className={`grid gap-2 ${sipOn ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
               <button
                 onClick={handleCall}
                 disabled={!dialable}

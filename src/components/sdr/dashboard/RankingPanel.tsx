@@ -140,7 +140,7 @@ export default function RankingPanel() {
   return (
     <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between flex-wrap gap-y-3 mb-5">
         <div className="flex items-center gap-2">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
@@ -174,7 +174,7 @@ export default function RankingPanel() {
         <p className="text-sm text-gray-400 text-center py-8">Nenhum qualificador ativo encontrado.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[600px] text-sm">
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 pb-3 pl-2 w-10">#</th>

@@ -56,9 +56,24 @@ function IconReload({ size = 16 }: { size?: number }) {
   );
 }
 
+// No celular o dock ocupa a tela inteira (não faz sentido "dividir" 375px).
+function useIsMobile() {
+  const [m, setM] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const on = () => setM(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return m;
+}
+
 export default function ChatAppDock() {
   const { isOpen, target, copiedPhone, open, close, recopyPhone } = useChatAppDock();
   const chatUrl = getChatAppUrl();
+  const isMobile = useIsMobile();
+  const fullScreen = isMobile && isOpen;
 
   const [width, setWidth] = useState<number>(() => {
     const saved = Number(typeof localStorage !== "undefined" ? localStorage.getItem("qs_chatdock_w") : 0);
@@ -133,8 +148,8 @@ export default function ChatAppDock() {
           onClick={open}
           title="Abrir ChatApp"
           aria-label="Abrir ChatApp"
-          className="fixed z-[45] bottom-6 right-6 flex items-center gap-2 h-12 pl-3.5 pr-4 rounded-full text-white font-bold text-[13px] shadow-lg transition-transform hover:scale-105"
-          style={{ background: WA_GREEN, boxShadow: "0 10px 24px -8px rgba(18,161,138,.7)" }}
+          className="fixed z-[45] right-4 sm:right-6 flex items-center gap-2 h-12 pl-3.5 pr-4 rounded-full text-white font-bold text-[13px] shadow-lg transition-transform hover:scale-105"
+          style={{ background: WA_GREEN, boxShadow: "0 10px 24px -8px rgba(18,161,138,.7)", bottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
         >
           <IconChat size={20} />
           ChatApp
@@ -143,21 +158,31 @@ export default function ChatAppDock() {
 
       {/* ── COLUNA DE SPLIT — sempre montada; encolhe pra 0 quando fechada ─── */}
       <aside
-        className="shrink-0 h-full overflow-hidden flex bg-white"
-        style={{
-          width: isOpen ? width : 0,
-          transition: dragging ? "none" : "width .28s cubic-bezier(.4,0,.2,1)",
-          borderLeft: isOpen ? "1px solid var(--line)" : "none",
-        }}
+        className={
+          fullScreen
+            ? "fixed inset-0 z-[60] overflow-hidden flex bg-white pt-safe pb-safe"
+            : "shrink-0 h-full overflow-hidden flex bg-white"
+        }
+        style={
+          fullScreen
+            ? { transition: "none" }
+            : {
+                width: isOpen ? width : 0,
+                transition: dragging ? "none" : "width .28s cubic-bezier(.4,0,.2,1)",
+                borderLeft: isOpen ? "1px solid var(--line)" : "none",
+              }
+        }
         aria-hidden={!isOpen}
       >
-        {/* Alça de redimensionar */}
-        <div
-          onPointerDown={startDrag}
-          title="Arraste para redimensionar"
-          className="shrink-0 h-full cursor-col-resize"
-          style={{ width: 6, background: dragging ? "rgba(18,161,138,.35)" : "transparent" }}
-        />
+        {/* Alça de redimensionar — só no desktop (no mobile é tela cheia) */}
+        {!isMobile && (
+          <div
+            onPointerDown={startDrag}
+            title="Arraste para redimensionar"
+            className="shrink-0 h-full cursor-col-resize"
+            style={{ width: 6, background: dragging ? "rgba(18,161,138,.35)" : "transparent" }}
+          />
+        )}
 
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Cabeçalho */}

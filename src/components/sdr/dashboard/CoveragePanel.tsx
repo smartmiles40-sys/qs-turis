@@ -296,18 +296,18 @@ export default function CoveragePanel() {
 
   if (loading) {
     return (
-      <div className="max-w-5xl mx-auto px-6 py-8 flex items-center justify-center">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8 flex items-center justify-center">
         <p className="text-sm text-gray-500">Carregando leads aguardando contato...</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+    <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6">
       {/* ── Panel: Leads Aguardando ─────────────────────────────────────── */}
       <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        <div className="flex items-center justify-between flex-wrap gap-y-2 px-4 md:px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-3">
             <h2 className="text-[16px] font-semibold text-gray-900">Leads Aguardando Contato</h2>
             <span
@@ -346,7 +346,7 @@ export default function CoveragePanel() {
 
         {/* Summary bar */}
         {!allContacted && (
-          <div className="px-6 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-4 text-[13px] text-gray-600">
+          <div className="px-4 md:px-6 py-3 bg-gray-50 border-b border-gray-100 flex items-center flex-wrap gap-4 text-[13px] text-gray-600">
             <span>
               <strong className="text-gray-900">{pendingLeads.length}</strong> leads aguardando
             </span>
@@ -384,7 +384,7 @@ export default function CoveragePanel() {
               return (
                 <div
                   key={lead.id}
-                  className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+                  className="flex items-center justify-between flex-wrap gap-y-3 px-4 md:px-6 py-4 hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex items-center gap-4">
                     {/* Status dot */}
@@ -440,14 +440,14 @@ export default function CoveragePanel() {
 
       {/* ── SLA Report ────────────────────────────────────────────────────── */}
       <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-        <div className="flex items-center gap-2.5 px-6 py-4 border-b border-gray-100">
+        <div className="flex items-center gap-2.5 px-4 md:px-6 py-4 border-b border-gray-100">
           <span className="text-gray-500">
             <IconShield />
           </span>
           <h2 className="text-[16px] font-semibold text-gray-900">Relatório de Cobertura SLA</h2>
         </div>
 
-        <div className="grid grid-cols-4 gap-4 p-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 md:p-6">
           {slaMetrics.map((metric) => {
             const color = getSlaColor(metric.value, metric.greenThreshold, metric.yellowThreshold);
             return (

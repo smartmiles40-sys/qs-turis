@@ -413,7 +413,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       <div className="space-y-8">
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-3">Modo de Execução</label>
-          <div className="flex gap-3">
+          <div className="flex flex-col md:flex-row gap-3">
             {(["manual", "ia"] as ExecutionMode[]).map((mode) => (
               <button
                 key={mode}
@@ -535,7 +535,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   function renderStepSpecific() {
     return (
       <div className="space-y-6">
-        <div className="bg-white border border-gray-100 rounded-xl p-6">
+        <div className="bg-white border border-gray-100 rounded-xl p-4 md:p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-bold text-gray-900">Perda Automática</h3>
@@ -623,7 +623,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                 )}
                 {day.activities.map((act) => (
                   <div key={act.id} className="space-y-2 p-3 rounded-lg bg-[#F8F9FA] border border-gray-100">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center flex-wrap gap-3">
                       <div className="flex items-center gap-1">
                         {ALL_CHANNELS.map((ch) => {
                           const selected = act.channel_type === ch;
@@ -678,7 +678,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       <div className="space-y-8">
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-3">Distribuição de Leads</label>
-          <div className="flex gap-3">
+          <div className="flex flex-col md:flex-row gap-3">
             {(["alternado", "balanceado"] as DistributionMode[]).map((mode) => (
               <button key={mode} onClick={() => updateForm("distribution_mode", mode)}
                 className={`flex-1 p-4 rounded-xl border-2 transition-all text-left ${
@@ -764,10 +764,10 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   }
 
   return (
-    <div className="flex min-h-screen bg-[#F8F9FA]" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="flex flex-col md:flex-row min-h-screen bg-[#F8F9FA]" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* ── Step Sidebar ──────────────────────────────────────────────── */}
-      <div className="w-64 shrink-0 border-r border-gray-100 bg-white" style={{ minHeight: "100vh" }}>
-        <div className="p-6">
+      <div className="w-full md:w-64 shrink-0 border-b md:border-b-0 md:border-r border-gray-100 bg-white md:min-h-screen">
+        <div className="p-4 md:p-6">
           <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-gray-900 transition mb-6">
             <IconBack /> Voltar
           </button>
@@ -806,7 +806,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
 
       {/* ── Main Content ──────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col">
-        <div className="flex items-center justify-between px-8 py-5 bg-white border-b border-gray-100">
+        <div className="flex items-center flex-wrap gap-y-3 justify-between px-4 md:px-8 py-5 bg-white border-b border-gray-100">
           <div>
             <h1 className="text-lg font-bold text-gray-900">{isEdit ? "Editar Cadência" : "Criar Cadência"}</h1>
             <p className="text-sm text-gray-500 mt-0.5">
@@ -836,7 +836,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
             )}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-8 py-8">
+        <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 md:py-8">
           <div className="max-w-2xl mx-auto">{renderStep()}</div>
         </div>
       </div>

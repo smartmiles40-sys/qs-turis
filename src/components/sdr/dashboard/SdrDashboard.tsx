@@ -313,7 +313,7 @@ function ChannelPerformanceTable({ data, loading }: { data: ChannelPerformanceRo
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="w-full min-w-[560px] text-sm">
         <thead>
           <tr className="border-b border-gray-100">
             <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Canal</th>
@@ -1013,7 +1013,7 @@ export default function SdrDashboard() {
 
       {/* Area Chart */}
       <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between flex-wrap gap-y-2 mb-4">
           <h2 className="text-sm font-medium text-gray-700">
             Ganhos ao longo do mês
           </h2>
@@ -1043,7 +1043,7 @@ export default function SdrDashboard() {
 
       {/* KPI Cards + Speed-to-Lead */}
       {loadingKpis ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex items-center justify-center">
               <span className="text-sm text-gray-400">Carregando...</span>
@@ -1051,7 +1051,7 @@ export default function SdrDashboard() {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {kpiCards.map((card) => (
             <KpiCardComponent key={card.type} card={card} />
           ))}
