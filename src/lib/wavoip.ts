@@ -277,7 +277,7 @@ export async function dialViaWavoip(
 
   try {
     const token = await getWavoipToken();
-    window.wavoip!.widget.open();
+    revealWebphone(); // abre CENTRALIZADO com moldura (não no canto)
 
     const config: { displayName?: string; fromTokens?: string[] } = {};
     const displayName = context.displayName ?? context.leadName ?? undefined;
@@ -307,20 +307,59 @@ export async function dialViaWavoip(
   }
 }
 
+// ── Apresentação: discador CENTRALIZADO com moldura (não no canto) ────────────
+// A lib da Wavoip monta a UI num <div id="webphone"> fixo no body. Por padrão ele
+// fica ESCONDIDO (nada de widget solto no canto). Quando o SDR chama, revelamos
+// esse container CENTRALIZADO na tela, com um fundo escurecido por trás — cara de
+// "parte do sistema", não de app externo. As regras de layout de #webphone e do
+// backdrop ficam no src/index.css (escopo .qs-webfone-open).
+
+const WEBFONE_OPEN_CLASS = "qs-webfone-open";
+const BACKDROP_ID = "qs-webfone-backdrop";
+
+function onWebfoneEsc(e: KeyboardEvent) {
+  if (e.key === "Escape") hideWebphone();
+}
+
+/** Revela o discador centralizado + fundo escurecido. Idempotente. */
+export function revealWebphone(): void {
+  if (typeof document === "undefined") return;
+  if (!document.getElementById(BACKDROP_ID)) {
+    const bd = document.createElement("div");
+    bd.id = BACKDROP_ID;
+    bd.addEventListener("click", () => hideWebphone()); // clicar fora fecha
+    document.body.appendChild(bd);
+  }
+  document.documentElement.classList.add(WEBFONE_OPEN_CLASS);
+  document.addEventListener("keydown", onWebfoneEsc);
+  try { window.wavoip?.widget?.open?.(); } catch { /* lib ainda carregando */ }
+}
+
+/** Esconde o discador e remove o fundo. */
+export function hideWebphone(): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.classList.remove(WEBFONE_OPEN_CLASS);
+  document.getElementById(BACKDROP_ID)?.remove();
+  document.removeEventListener("keydown", onWebfoneEsc);
+  try { window.wavoip?.widget?.close?.(); } catch { /* ignora */ }
+}
+
+function isWebphoneOpen(): boolean {
+  return typeof document !== "undefined" &&
+    document.documentElement.classList.contains(WEBFONE_OPEN_CLASS);
+}
+
 /**
- * Abre/fecha o painel do webfone a partir de um gatilho do próprio QS (ex.: o
- * botão "Telefone" no topo). Carrega a lib + registra o dispositivo SOB DEMANDA —
- * assim o widget não aparece sozinho ao abrir o sistema; só quando o SDR chama.
+ * Botão "Telefone" (topo do QS): abre/fecha o discador CENTRALIZADO. Carrega a
+ * lib + registra o dispositivo SOB DEMANDA — nada aparece sozinho no canto.
  */
 export async function toggleWebphone(): Promise<DialResult> {
+  if (isWebphoneOpen()) { hideWebphone(); return { ok: true }; }
   try {
     await ensureWavoipLoaded();
     const dev = await ensureWavoipDevice(); // registra o token; não bloqueia a abertura
     if (!dev.ok) console.warn("[webfone]", dev.error);
-    const w = window.wavoip?.widget;
-    if (!w) return { ok: false, error: "Webfone indisponível." };
-    if (typeof w.toggle === "function") w.toggle();
-    else w.open();
+    revealWebphone();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Erro ao abrir o webfone." };
