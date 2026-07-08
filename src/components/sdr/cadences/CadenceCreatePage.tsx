@@ -14,7 +14,6 @@ import type {
 import {
   CHANNEL_LABELS,
   ACQUISITION_LABELS,
-  OBJECTIVE_LABELS,
   CADENCE_STATUS_LABELS,
   PRIORITY_LABELS,
   WEEKDAY_LABELS,
@@ -132,13 +131,23 @@ interface StepDef {
 }
 
 const STEPS: StepDef[] = [
-  { id: 1, label: "Objetivo", sublabel: "Modo e objetivo" },
-  { id: 2, label: "Informações Básicas", sublabel: "Nome e canal" },
-  { id: 3, label: "Config. Específicas", sublabel: "Perda automática" },
-  { id: 4, label: "Construção", sublabel: "Dias e atividades" },
-  { id: 5, label: "Gestão de Entrada", sublabel: "Distribuição" },
-  { id: 6, label: "Integrações", sublabel: "Conectores" },
+  { id: 1, label: "Informações Básicas", sublabel: "Nome e canal" },
+  { id: 2, label: "Construção", sublabel: "Dias e atividades" },
+  { id: 3, label: "Gestão de Entrada", sublabel: "Distribuição" },
+  { id: 4, label: "Integrações", sublabel: "Conectores" },
 ];
+
+// ── Períodos de execução (substituem o horário exato) ───────────────────────
+
+const PERIODS = [
+  { key: "manha", label: "Manhã", time: "09:00", hint: "09:00 às 12:30" },
+  { key: "tarde", label: "Tarde", time: "12:30", hint: "12:30 às 19:00" },
+] as const;
+
+/** Deriva o período (manhã/tarde) a partir do horário salvo. */
+function periodOf(time: string | null): "manha" | "tarde" {
+  return time && time >= "12:30" ? "tarde" : "manha";
+}
 
 // ── ID generator ────────────────────────────────────────────────────────────
 
@@ -394,87 +403,19 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   }
 
   const cadenceDuration = form.days.length > 0 ? Math.max(...form.days.map((d) => d.day_number)) : 0;
+  const isBuilderStep = STEPS[activeStep - 1]?.label === "Construção";
 
   function renderStep() {
     switch (activeStep) {
-      case 1: return renderStepObjective();
-      case 2: return renderStepBasicInfo();
-      case 3: return renderStepSpecific();
-      case 4: return renderStepBuilder();
-      case 5: return renderStepEntryManagement();
-      case 6: return renderStepIntegrations();
+      case 1: return renderStepBasicInfo();
+      case 2: return renderStepBuilder();
+      case 3: return renderStepEntryManagement();
+      case 4: return renderStepIntegrations();
       default: return null;
     }
   }
 
-  // ── Step 1: Objetivo ──
-  function renderStepObjective() {
-    return (
-      <div className="space-y-8">
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-3">Modo de Execução</label>
-          <div className="flex flex-col md:flex-row gap-3">
-            {(["manual", "ia"] as ExecutionMode[]).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => updateForm("execution_mode", mode)}
-                className={`flex-1 p-4 rounded-xl border-2 transition-all text-left ${
-                  form.execution_mode === mode ? "border-[#F97316] bg-[#F97316]/5" : "border-gray-200 bg-white"
-                }`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                    form.execution_mode === mode ? "border-[#F97316]" : "border-gray-300"
-                  }`}>
-                    {form.execution_mode === mode && <div className="w-2.5 h-2.5 rounded-full bg-[#F97316]" />}
-                  </div>
-                  <span className="text-sm font-bold text-gray-900">
-                    {mode === "manual" ? "Manual" : "Inteligência Artificial"}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-500 ml-8">
-                  {mode === "manual"
-                    ? "O qualificador executa cada atividade manualmente conforme a cadência."
-                    : "A IA sugere e automatiza interações com base no comportamento do lead."}
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-3">Objetivo da Cadência</label>
-          <div className="space-y-3">
-            {(Object.keys(OBJECTIVE_LABELS) as CadenceObjective[]).map((obj) => (
-              <button
-                key={obj}
-                onClick={() => updateForm("objective", obj)}
-                className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 transition-all text-left ${
-                  form.objective === obj ? "border-[#F97316] bg-[#F97316]/5" : "border-gray-200 bg-white"
-                }`}
-              >
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                  form.objective === obj ? "border-[#F97316]" : "border-gray-300"
-                }`}>
-                  {form.objective === obj && <div className="w-2.5 h-2.5 rounded-full bg-[#F97316]" />}
-                </div>
-                <div>
-                  <span className="text-sm font-bold text-gray-900">{OBJECTIVE_LABELS[obj]}</span>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {obj === "dar_ganho" && "O lead é marcado como ganho ao concluir a cadência."}
-                    {obj === "agendar_reuniao" && "O objetivo é agendar uma reunião com o especialista."}
-                    {obj === "redirecionar" && "Ao final, o lead é redirecionado para outra cadência."}
-                  </p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Step 2: Informações Básicas ──
+  // ── Step: Informações Básicas ──
   function renderStepBasicInfo() {
     return (
       <div className="space-y-6">
@@ -531,39 +472,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
     );
   }
 
-  // ── Step 3: Config Específicas ──
-  function renderStepSpecific() {
-    return (
-      <div className="space-y-6">
-        <div className="bg-white border border-gray-100 rounded-xl p-4 md:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-bold text-gray-900">Perda Automática</h3>
-              <p className="text-xs text-gray-500 mt-0.5">Marcar lead como perdido automaticamente após um período sem resposta.</p>
-            </div>
-            <button onClick={() => updateForm("auto_loss_enabled", !form.auto_loss_enabled)}
-              className="relative w-11 h-6 rounded-full transition-colors duration-200"
-              style={{ background: form.auto_loss_enabled ? "#F97316" : "#D1D5DB" }}>
-              <span className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
-                style={{ transform: form.auto_loss_enabled ? "translateX(20px)" : "translateX(0)" }} />
-            </button>
-          </div>
-          {form.auto_loss_enabled && (
-            <div className="pt-4 border-t border-gray-100">
-              <label className="block text-xs font-medium text-gray-700 mb-1.5">Dias até perda automática</label>
-              <div className="flex items-center gap-3">
-                <input type="number" min={1} max={90} value={form.auto_loss_days} onChange={(e) => updateForm("auto_loss_days", parseInt(e.target.value) || 14)}
-                  className="w-24 px-4 py-2 rounded-lg border border-gray-200 text-sm text-center focus:outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/10" />
-                <span className="text-sm text-gray-500">dias sem resposta</span>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Step 4: Builder ──
+  // ── Step: Construção ──
   function renderStepBuilder() {
     return (
       <div className="space-y-6">
@@ -597,77 +506,84 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
           </div>
         </div>
 
-        <div className="space-y-3">
-          {form.days.sort((a, b) => a.day_number - b.day_number).map((day) => (
-            <div key={day.id} className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-3 bg-[#F8F9FA] border-b border-gray-100">
-                <div className="flex items-center gap-3">
+        {/* Dias lado a lado (colunas) — role na horizontal pra ver a cadência inteira */}
+        <div className="flex gap-4 overflow-x-auto pb-3 items-start">
+          {[...form.days].sort((a, b) => a.day_number - b.day_number).map((day) => (
+            <div key={day.id} className="w-[300px] shrink-0 bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 bg-[#F8F9FA] border-b border-gray-100">
+                <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-gray-900">Dia</span>
                   <input type="number" min={1} value={day.day_number} onChange={(e) => updateDayNumber(day.id, parseInt(e.target.value) || 1)}
-                    className="w-16 px-2 py-1 rounded-lg border border-gray-200 text-sm text-center font-bold focus:outline-none focus:border-[#F97316]" />
+                    className="w-14 px-2 py-1 rounded-lg border border-gray-200 text-sm text-center font-bold focus:outline-none focus:border-[#F97316]" />
                 </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => addActivity(day.id)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#F97316] hover:bg-[#F97316]/5 transition">
-                    <IconPlus /> Atividade
+                {form.days.length > 1 && (
+                  <button onClick={() => removeDay(day.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition">
+                    <IconTrash />
                   </button>
-                  {form.days.length > 1 && (
-                    <button onClick={() => removeDay(day.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition">
-                      <IconTrash />
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
-              <div className="p-4 space-y-3">
+              <div className="p-3 space-y-3">
                 {day.activities.length === 0 && (
-                  <p className="text-xs text-gray-400 text-center py-4">Nenhuma atividade. Clique em "+ Atividade" para adicionar.</p>
+                  <p className="text-xs text-gray-400 text-center py-3">Sem atividades ainda.</p>
                 )}
                 {day.activities.map((act) => (
                   <div key={act.id} className="space-y-2 p-3 rounded-lg bg-[#F8F9FA] border border-gray-100">
-                    <div className="flex items-center flex-wrap gap-3">
-                      <div className="flex items-center gap-1">
-                        {ALL_CHANNELS.map((ch) => {
-                          const selected = act.channel_type === ch;
-                          return (
-                            <button key={ch} onClick={() => updateActivity(day.id, act.id, { channel_type: ch })}
-                              className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
-                              style={{ background: selected ? CHANNEL_COLORS[ch] + "18" : "transparent", color: selected ? CHANNEL_COLORS[ch] : "#9CA3AF", border: selected ? `1.5px solid ${CHANNEL_COLORS[ch]}40` : "1.5px solid transparent" }}
-                              title={CHANNEL_LABELS[ch]}>
-                              <ChannelIcon type={ch} size={14} />
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <span className="text-xs font-medium min-w-[70px]" style={{ color: CHANNEL_COLORS[act.channel_type] }}>
-                        {CHANNEL_LABELS[act.channel_type]}
-                      </span>
-                      <input type="time" value={act.scheduled_time || "09:00"} onChange={(e) => updateActivity(day.id, act.id, { scheduled_time: e.target.value })}
-                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium focus:outline-none focus:border-[#F97316]" />
-                      <button onClick={() => removeActivity(day.id, act.id)} className="ml-auto p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition">
+                    {/* Canal */}
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {ALL_CHANNELS.map((ch) => {
+                        const selected = act.channel_type === ch;
+                        return (
+                          <button key={ch} onClick={() => updateActivity(day.id, act.id, { channel_type: ch })}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                            style={{ background: selected ? CHANNEL_COLORS[ch] + "18" : "transparent", color: selected ? CHANNEL_COLORS[ch] : "#9CA3AF", border: selected ? `1.5px solid ${CHANNEL_COLORS[ch]}40` : "1.5px solid transparent" }}
+                            title={CHANNEL_LABELS[ch]}>
+                            <ChannelIcon type={ch} size={14} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {/* Período: Manhã / Tarde (+ excluir) */}
+                    <div className="flex items-center gap-1.5">
+                      {PERIODS.map((p) => {
+                        const selected = periodOf(act.scheduled_time) === p.key;
+                        return (
+                          <button key={p.key} onClick={() => updateActivity(day.id, act.id, { scheduled_time: p.time })}
+                            title={p.hint}
+                            className="flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
+                            style={selected
+                              ? { background: "#F97316", color: "#fff", borderColor: "#F97316" }
+                              : { background: "#fff", color: "#6B7280", borderColor: "#E5E7EB" }}>
+                            {p.label}
+                          </button>
+                        );
+                      })}
+                      <button onClick={() => removeActivity(day.id, act.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition">
                         <IconTrash />
                       </button>
                     </div>
-                    {/* Script textarea (Change 14) */}
-                    <div>
-                      <label className="block text-[10px] font-medium text-gray-400 uppercase tracking-wide mb-1">Script</label>
-                      <textarea
-                        value={act.script_text || ""}
-                        onChange={(e) => updateActivity(day.id, act.id, { script_text: e.target.value })}
-                        placeholder="Escreva o script para esta atividade... (opcional)"
-                        rows={2}
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/10 resize-none bg-white"
-                      />
-                    </div>
+                    {/* Script */}
+                    <textarea
+                      value={act.script_text || ""}
+                      onChange={(e) => updateActivity(day.id, act.id, { script_text: e.target.value })}
+                      placeholder="Script (opcional)..."
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/10 resize-none bg-white"
+                    />
                   </div>
                 ))}
+                <button onClick={() => addActivity(day.id)} className="w-full inline-flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-medium text-[#F97316] border border-dashed border-[#F97316]/40 hover:bg-[#F97316]/5 transition">
+                  <IconPlus /> Atividade
+                </button>
               </div>
             </div>
           ))}
-        </div>
 
-        <button onClick={addDay}
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-gray-300 text-sm font-medium text-gray-500 hover:border-[#F97316] hover:text-[#F97316] hover:bg-[#F97316]/5 transition-all">
-          <IconPlus /> Adicionar Dia
-        </button>
+          {/* Coluna "adicionar dia" */}
+          <button onClick={addDay}
+            className="w-[140px] shrink-0 self-stretch min-h-[160px] flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 text-sm font-medium text-gray-500 hover:border-[#F97316] hover:text-[#F97316] hover:bg-[#F97316]/5 transition-all">
+            <IconPlus /> Dia
+          </button>
+        </div>
       </div>
     );
   }
@@ -837,7 +753,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 md:py-8">
-          <div className="max-w-2xl mx-auto">{renderStep()}</div>
+          <div className={isBuilderStep ? "" : "max-w-2xl mx-auto"}>{renderStep()}</div>
         </div>
       </div>
     </div>
