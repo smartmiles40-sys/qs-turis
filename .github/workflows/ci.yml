@@ -1,0 +1,35 @@
+# CI do QS Turis — roda em todo push/PR na main.
+# Rede de proteção mínima (P0 da auditoria): typecheck + lint + build.
+# Se este workflow falhar, NÃO faça merge/deploy — algo quebrou de verdade.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Typecheck · Lint · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Typecheck (tsc)
+        run: npx tsc -b
+
+      - name: Lint (oxlint)
+        run: npm run lint
+
+      - name: Build (vite)
+        run: npm run build
