@@ -253,21 +253,58 @@ export function ensureWavoipLoaded(): Promise<WavoipApi> {
 
 // ── Ações ─────────────────────────────────────────────────────────────────────
 
+/** Forma dos itens de device.get() que usamos (defensivo — a lib pode evoluir). */
+interface WavoipDeviceInfo {
+  token?: string;
+  status?: string;            // "open" = WhatsApp conectado
+  connectionStatus?: string;  // "connected" = socket ok
+}
+
 /**
- * Garante que o webfone está carregado e com o dispositivo (token) registrado.
- * Idempotente: se o token já estiver na lista de dispositivos, não registra de novo.
+ * Garante que o webfone está carregado e com o dispositivo CERTO registrado.
+ * RECONCILIA o estado persistido no navegador: remove dispositivos antigos/errados
+ * (ex.: alguém colou credencial SIP no lugar do token) e registra o token atual.
+ * Sem isso, um dispositivo fantasma persistido fazia TODA ligação falhar.
  */
 export async function ensureWavoipDevice(): Promise<{ ok: boolean; error?: string }> {
   try {
     const api = await ensureWavoipLoaded();
     const token = await getWavoipToken();
     if (!token) return { ok: false, error: "Nenhum token do Webfone configurado (Configurações → Webfone)." };
-    const already = api.device.get?.().length > 0;
-    if (!already) api.device.add(token, true); // true = persiste no navegador
+
+    const devices = (api.device.get?.() ?? []) as WavoipDeviceInfo[];
+    const hasCurrent = devices.some((d) => d?.token === token);
+
+    // Limpa dispositivos que NÃO são o token configurado (estado velho de testes).
+    for (const d of devices) {
+      if (d?.token && d.token !== token) {
+        try { api.device.remove(d.token); } catch { /* segue */ }
+      }
+    }
+    if (!hasCurrent) api.device.add(token, true); // true = persiste no navegador
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Erro ao iniciar o webfone." };
   }
+}
+
+/**
+ * Espera o dispositivo do token ficar CONECTADO (socket + WhatsApp) antes de
+ * discar — evita a falha de "primeiro clique" enquanto a conexão sobe.
+ */
+async function waitForDeviceReady(token: string, timeoutMs = 9000): Promise<{ ready: boolean; status?: string }> {
+  const api = window.wavoip;
+  if (!api) return { ready: false };
+  const deadline = Date.now() + timeoutMs;
+  let last: WavoipDeviceInfo | undefined;
+  while (Date.now() < deadline) {
+    last = ((api.device.get?.() ?? []) as WavoipDeviceInfo[]).find((d) => d?.token === token);
+    if (last?.connectionStatus === "connected" && (last.status === "open" || last.status === undefined)) {
+      return { ready: true, status: last.status };
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return { ready: false, status: last?.status ?? last?.connectionStatus };
 }
 
 export type DialResult = { ok: true } | { ok: false; error: string };
@@ -303,6 +340,18 @@ export async function dialViaWavoip(
   try {
     const token = await getWavoipToken();
     revealWebphone(); // abre CENTRALIZADO com moldura (não no canto)
+
+    // Espera o dispositivo conectar (socket + WhatsApp) antes de discar —
+    // sem isso o primeiro clique falhava enquanto a conexão ainda subia.
+    const readiness = await waitForDeviceReady(token);
+    if (!readiness.ready) {
+      return {
+        ok: false,
+        error: readiness.status === "close"
+          ? "O WhatsApp do webfone está desconectado — reescaneie o QR no painel da Wavoip."
+          : "O webfone não conectou a tempo — confira o dispositivo no painel da Wavoip e tente de novo.",
+      };
+    }
 
     const config: { displayName?: string; fromTokens?: string[] } = {};
     const displayName = context.displayName ?? context.leadName ?? undefined;
