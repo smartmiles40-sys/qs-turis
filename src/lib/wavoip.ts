@@ -359,7 +359,13 @@ export async function dialViaWavoip(
     if (token) config.fromTokens = [token]; // determinístico: sai do dispositivo configurado
 
     const res = await window.wavoip!.call.start(to, Object.keys(config).length ? config : undefined);
-    if (res?.err) return { ok: false, error: "Não foi possível iniciar a chamada." };
+    if (res?.err) {
+      // Mostra a CAUSA real que a lib devolveu (antes engolíamos o detalhe).
+      const raw = res.err as { message?: string } | string;
+      const detail = typeof raw === "string" ? raw : raw?.message ?? JSON.stringify(raw).slice(0, 140);
+      console.warn("[webfone] call.start falhou:", res.err);
+      return { ok: false, error: `Não foi possível iniciar a chamada${detail ? ` — ${detail}` : "."}` };
+    }
 
     // Guarda o contexto do lead pra o log do call:ended (mescla com o que o
     // evento call:started possa já ter setado, sem perder acceptedAt).
@@ -391,30 +397,21 @@ export async function dialViaWavoip(
 const WEBFONE_OPEN_CLASS = "qs-webfone-open";
 const BACKDROP_ID = "qs-webfone-backdrop";
 
-function onWebfoneEsc(e: KeyboardEvent) {
-  if (e.key === "Escape") hideWebphone();
-}
-
-/** Revela o discador centralizado + fundo escurecido. Idempotente. */
+/** Revela o softphone flutuante (canto da tela, sem bloquear nada). Idempotente. */
 export function revealWebphone(): void {
   if (typeof document === "undefined") return;
-  if (!document.getElementById(BACKDROP_ID)) {
-    const bd = document.createElement("div");
-    bd.id = BACKDROP_ID;
-    bd.addEventListener("click", () => hideWebphone()); // clicar fora fecha
-    document.body.appendChild(bd);
-  }
+  // FLUTUANTE, sem backdrop/blur: o softphone abre no canto e a tela inteira
+  // continua clicável — dá pra falar e navegar no sistema ao mesmo tempo.
   document.documentElement.classList.add(WEBFONE_OPEN_CLASS);
-  document.addEventListener("keydown", onWebfoneEsc);
+  document.getElementById(BACKDROP_ID)?.remove(); // limpa resquício de versões antigas
   try { window.wavoip?.widget?.open?.(); } catch { /* lib ainda carregando */ }
 }
 
-/** Esconde o discador e remove o fundo. */
+/** Esconde o discador. */
 export function hideWebphone(): void {
   if (typeof document === "undefined") return;
   document.documentElement.classList.remove(WEBFONE_OPEN_CLASS);
   document.getElementById(BACKDROP_ID)?.remove();
-  document.removeEventListener("keydown", onWebfoneEsc);
   try { window.wavoip?.widget?.close?.(); } catch { /* ignora */ }
 }
 
