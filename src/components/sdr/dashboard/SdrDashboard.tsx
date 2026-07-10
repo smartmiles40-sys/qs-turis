@@ -139,7 +139,7 @@ function AreaChart({ realData, predictedData }: { realData: number[]; predictedD
 
       {/* Real line (solid) */}
       {realData.length > 1 && (
-        <path d={buildPath(realData, maxVal, totalDays)} fill="none" stroke="#F97316" strokeWidth="2" />
+        <path d={buildPath(realData, maxVal, totalDays)} fill="none" stroke="#0147FF" strokeWidth="2" />
       )}
 
       {/* Current day dot */}
@@ -147,13 +147,13 @@ function AreaChart({ realData, predictedData }: { realData: number[]; predictedD
         const lastIdx = realData.length - 1;
         const x = CHART_PAD_L + (lastIdx / (totalDays - 1)) * usableW;
         const y = CHART_PAD_T + usableH - (realData[lastIdx] / maxVal) * usableH;
-        return <circle cx={x} cy={y} r="4" fill="#F97316" />;
+        return <circle cx={x} cy={y} r="4" fill="#0147FF" />;
       })()}
 
       <defs>
         <linearGradient id="orangeGradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#F97316" />
-          <stop offset="100%" stopColor="#F97316" stopOpacity="0" />
+          <stop offset="0%" stopColor="#0147FF" />
+          <stop offset="100%" stopColor="#0147FF" stopOpacity="0" />
         </linearGradient>
       </defs>
     </svg>
@@ -218,7 +218,7 @@ function LossReasonsChart() {
           </span>
           <div className="flex-1 h-7 bg-gray-100 rounded-md overflow-hidden relative">
             <div
-              className="h-full rounded-md bg-[#F97316]"
+              className="h-full rounded-md bg-[#0147FF]"
               style={{ width: `${(reason.count / maxCount) * 100}%`, opacity: 0.75 }}
             />
             <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-700">
@@ -1074,7 +1074,7 @@ export default function SdrDashboard() {
   const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
   return (
-    <div className="space-y-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="space-y-6" style={{ fontFamily: "inherit" }}>
       {/* Header */}
       <div>
         <div className="flex items-center justify-between">
@@ -1102,7 +1102,7 @@ export default function SdrDashboard() {
             <select
               value={selectedUser}
               onChange={(e) => setSelectedUser(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316] focus:ring-2 focus:ring-orange-100"
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#0147FF] focus:ring-2 focus:ring-blue-100"
             >
               {allUsers.map((u: any) => (
                 <option key={u.id} value={u.id}>{u.name}</option>
@@ -1120,9 +1120,9 @@ export default function SdrDashboard() {
                 onClick={() => setSelectedPeriod(p.id)}
                 className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
                 style={{
-                  background: selectedPeriod === p.id ? "#F97316" : "transparent",
+                  background: selectedPeriod === p.id ? "#0147FF" : "transparent",
                   color: selectedPeriod === p.id ? "#fff" : "#6B7280",
-                  border: selectedPeriod === p.id ? "1px solid #F97316" : "1px solid #E5E7EB",
+                  border: selectedPeriod === p.id ? "1px solid #0147FF" : "1px solid #E5E7EB",
                 }}
               >
                 {p.label}
@@ -1137,14 +1137,14 @@ export default function SdrDashboard() {
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316]"
+                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#0147FF]"
               />
               <span className="text-xs text-gray-400">até</span>
               <input
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#F97316]"
+                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#0147FF]"
               />
             </div>
           )}
@@ -1159,7 +1159,7 @@ export default function SdrDashboard() {
           </h2>
           <div className="flex items-center gap-4 text-xs text-gray-500">
             <span className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 bg-[#F97316] rounded-full inline-block" />
+              <span className="w-4 h-0.5 bg-[#0147FF] rounded-full inline-block" />
               Real
             </span>
             <span className="flex items-center gap-1.5">

@@ -445,17 +445,17 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1.5">Nome da Cadência</label>
           <input type="text" value={form.name} onChange={(e) => updateForm("name", e.target.value)} placeholder="Ex: Levantada de Mao - Padrao INVT"
-            className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/10 transition" />
+            className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-[#0147FF] focus:ring-2 focus:ring-[#0147FF]/10 transition" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1.5">Descrição</label>
           <textarea value={form.description} onChange={(e) => updateForm("description", e.target.value)} placeholder="Descreva o propósito desta cadência..." rows={3}
-            className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/10 transition resize-none" />
+            className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-[#0147FF] focus:ring-2 focus:ring-[#0147FF]/10 transition resize-none" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1.5">Canal de Aquisição</label>
           <select value={form.acquisition_channel} onChange={(e) => updateForm("acquisition_channel", e.target.value as AcquisitionChannel)}
-            className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-[#F97316] bg-white">
+            className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-[#0147FF] bg-white">
             {(Object.keys(ACQUISITION_LABELS) as AcquisitionChannel[]).map((ch) => (
               <option key={ch} value={ch}>{ACQUISITION_LABELS[ch]}</option>
             ))}
@@ -485,7 +485,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1.5">Status</label>
           <select value={form.status} onChange={(e) => updateForm("status", e.target.value as CadenceStatus)}
-            className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-[#F97316] bg-white">
+            className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-[#0147FF] bg-white">
             {(Object.keys(CADENCE_STATUS_LABELS) as CadenceStatus[]).map((s) => (
               <option key={s} value={s}>{CADENCE_STATUS_LABELS[s]}</option>
             ))}
@@ -501,8 +501,8 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="px-3 py-1.5 rounded-full bg-[#F97316]/10 border border-[#F97316]/20">
-              <span className="text-xs font-medium text-[#F97316]">
+            <div className="px-3 py-1.5 rounded-full bg-[#0147FF]/10 border border-[#0147FF]/20">
+              <span className="text-xs font-medium text-[#0147FF]">
                 Tempo: {cadenceDuration} {cadenceDuration === 1 ? "dia" : "dias"}
               </span>
             </div>
@@ -520,7 +520,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
               return (
                 <button key={idx} onClick={() => toggleWeekday(idx)}
                   className={`w-10 h-10 rounded-lg text-xs font-bold transition-all border-2 ${
-                    active ? "border-[#F97316] bg-[#F97316] text-white" : "border-gray-200 bg-white text-gray-400"
+                    active ? "border-[#0147FF] bg-[#0147FF] text-white" : "border-gray-200 bg-white text-gray-400"
                   }`}>
                   {label}
                 </button>
@@ -537,7 +537,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-gray-900">Dia</span>
                   <input type="number" min={1} value={day.day_number} onChange={(e) => updateDayNumber(day.id, parseInt(e.target.value) || 1)}
-                    className="w-14 px-2 py-1 rounded-lg border border-gray-200 text-sm text-center font-bold focus:outline-none focus:border-[#F97316]" />
+                    className="w-14 px-2 py-1 rounded-lg border border-gray-200 text-sm text-center font-bold focus:outline-none focus:border-[#0147FF]" />
                 </div>
                 {form.days.length > 1 && (
                   <button onClick={() => removeDay(day.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition">
@@ -574,7 +574,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                             title={p.hint}
                             className="flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
                             style={selected
-                              ? { background: "#F97316", color: "#fff", borderColor: "#F97316" }
+                              ? { background: "#0147FF", color: "#fff", borderColor: "#0147FF" }
                               : { background: "#fff", color: "#6B7280", borderColor: "#E5E7EB" }}>
                             {p.label}
                           </button>
@@ -590,11 +590,11 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                       onChange={(e) => updateActivity(day.id, act.id, { script_text: e.target.value })}
                       placeholder="Script (opcional)..."
                       rows={2}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/10 resize-none bg-white"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-[#0147FF] focus:ring-2 focus:ring-[#0147FF]/10 resize-none bg-white"
                     />
                   </div>
                 ))}
-                <button onClick={() => addActivity(day.id)} className="w-full inline-flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-medium text-[#F97316] border border-dashed border-[#F97316]/40 hover:bg-[#F97316]/5 transition">
+                <button onClick={() => addActivity(day.id)} className="w-full inline-flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-medium text-[#0147FF] border border-dashed border-[#0147FF]/40 hover:bg-[#0147FF]/5 transition">
                   <IconPlus /> Atividade
                 </button>
               </div>
@@ -603,7 +603,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
 
           {/* Coluna "adicionar dia" */}
           <button onClick={addDay}
-            className="w-[140px] shrink-0 self-stretch min-h-[160px] flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 text-sm font-medium text-gray-500 hover:border-[#F97316] hover:text-[#F97316] hover:bg-[#F97316]/5 transition-all">
+            className="w-[140px] shrink-0 self-stretch min-h-[160px] flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 text-sm font-medium text-gray-500 hover:border-[#0147FF] hover:text-[#0147FF] hover:bg-[#0147FF]/5 transition-all">
             <IconPlus /> Dia
           </button>
         </div>
@@ -636,7 +636,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                     onClick={() => updateForm("owner_ids", on ? form.owner_ids.filter((id) => id !== u.id) : [...form.owner_ids, u.id])}
                     className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full border-2 text-sm font-medium transition-all"
                     style={on
-                      ? { borderColor: "#F97316", background: "#F97316", color: "#fff" }
+                      ? { borderColor: "#0147FF", background: "#0147FF", color: "#fff" }
                       : { borderColor: "#E5E7EB", background: "#fff", color: "#4B5563" }}
                   >
                     <span className="flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold"
@@ -663,13 +663,13 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
             {(["alternado", "balanceado"] as DistributionMode[]).map((mode) => (
               <button key={mode} onClick={() => updateForm("distribution_mode", mode)}
                 className={`flex-1 p-4 rounded-xl border-2 transition-all text-left ${
-                  form.distribution_mode === mode ? "border-[#F97316] bg-[#F97316]/5" : "border-gray-200 bg-white"
+                  form.distribution_mode === mode ? "border-[#0147FF] bg-[#0147FF]/5" : "border-gray-200 bg-white"
                 }`}>
                 <div className="flex items-center gap-3 mb-2">
                   <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                    form.distribution_mode === mode ? "border-[#F97316]" : "border-gray-300"
+                    form.distribution_mode === mode ? "border-[#0147FF]" : "border-gray-300"
                   }`}>
-                    {form.distribution_mode === mode && <div className="w-2.5 h-2.5 rounded-full bg-[#F97316]" />}
+                    {form.distribution_mode === mode && <div className="w-2.5 h-2.5 rounded-full bg-[#0147FF]" />}
                   </div>
                   <span className="text-sm font-bold text-gray-900 capitalize">{mode}</span>
                 </div>
@@ -689,12 +689,12 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
             {(["iniciar_imediato", "aguardar_proximo_dia"] as OffdayPolicy[]).map((policy) => (
               <button key={policy} onClick={() => updateForm("offday_policy", policy)}
                 className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 transition-all text-left ${
-                  form.offday_policy === policy ? "border-[#F97316] bg-[#F97316]/5" : "border-gray-200 bg-white"
+                  form.offday_policy === policy ? "border-[#0147FF] bg-[#0147FF]/5" : "border-gray-200 bg-white"
                 }`}>
                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                  form.offday_policy === policy ? "border-[#F97316]" : "border-gray-300"
+                  form.offday_policy === policy ? "border-[#0147FF]" : "border-gray-300"
                 }`}>
-                  {form.offday_policy === policy && <div className="w-2.5 h-2.5 rounded-full bg-[#F97316]" />}
+                  {form.offday_policy === policy && <div className="w-2.5 h-2.5 rounded-full bg-[#0147FF]" />}
                 </div>
                 <div>
                   <span className="text-sm font-bold text-gray-900">
@@ -738,14 +738,14 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   // ── Main Render ──
   if (loading) {
     return (
-      <div className="flex min-h-screen bg-[#F8F9FA] items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="flex min-h-screen bg-[#F8F9FA] items-center justify-center" style={{ fontFamily: "inherit" }}>
         <p className="text-sm text-gray-500">Carregando...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col md:flex-row min-h-screen bg-[#F8F9FA]" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="flex flex-col md:flex-row min-h-screen bg-[#F8F9FA]" style={{ fontFamily: "inherit" }}>
       {/* ── Step Sidebar ──────────────────────────────────────────────── */}
       <div className="w-full md:w-64 shrink-0 border-b md:border-b-0 md:border-r border-gray-100 bg-white md:min-h-screen">
         <div className="p-4 md:p-6">
@@ -762,21 +762,21 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
               return (
                 <button key={step.id} onClick={() => setActiveStep(step.id)}
                   className={`flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-all relative ${
-                    isActive ? "bg-[#F97316]/5" : ""
+                    isActive ? "bg-[#0147FF]/5" : ""
                   }`}>
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 transition-all ${
-                    isActive ? "bg-[#F97316] text-white" : isCompleted ? "bg-green-50 text-green-600" : "bg-gray-100 text-gray-400"
+                    isActive ? "bg-[#0147FF] text-white" : isCompleted ? "bg-green-50 text-green-600" : "bg-gray-100 text-gray-400"
                   }`}>
                     {isCompleted ? <IconCheck /> : step.id}
                   </div>
                   <div className="min-w-0">
-                    <span className={`block text-sm font-medium truncate ${isActive ? "text-[#F97316]" : "text-gray-700"}`}>
+                    <span className={`block text-sm font-medium truncate ${isActive ? "text-[#0147FF]" : "text-gray-700"}`}>
                       {step.label}
                     </span>
                     <span className="block text-[11px] text-gray-400 truncate">{step.sublabel}</span>
                   </div>
                   {isActive && (
-                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-r-full bg-[#F97316]" />
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-r-full bg-[#0147FF]" />
                   )}
                 </button>
               );
@@ -803,14 +803,14 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
             )}
             {activeStep < STEPS.length ? (
               <button onClick={() => setActiveStep((s) => s + 1)}
-                className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-[#F97316] hover:bg-[#EA6C0E] transition">
+                className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-[#0147FF] hover:bg-[#0139D6] transition">
                 Próximo
               </button>
             ) : (
               <button
                 onClick={handleSave}
                 disabled={saving || !form.name.trim()}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium text-white bg-[#F97316] hover:bg-[#EA6C0E] disabled:opacity-50 transition"
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium text-white bg-[#0147FF] hover:bg-[#0139D6] disabled:opacity-50 transition"
               >
                 <IconCheck /> {saving ? "Salvando..." : "Salvar cadência"}
               </button>

@@ -271,14 +271,14 @@ export default function GoalsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="flex items-center justify-center py-12" style={{ fontFamily: "inherit" }}>
         <p className="text-sm text-gray-500">Carregando...</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="space-y-6" style={{ fontFamily: "inherit" }}>
       {/* Header */}
       <div className="flex flex-wrap gap-y-2 items-center justify-between">
         <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
@@ -291,7 +291,7 @@ export default function GoalsPage() {
         </h1>
         <button
           onClick={openAddModal}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19" />
@@ -309,7 +309,7 @@ export default function GoalsPage() {
             onClick={() => setPeriodView(p)}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
               periodView === p
-                ? "bg-[#F97316] text-white"
+                ? "bg-[#0147FF] text-white"
                 : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -327,7 +327,7 @@ export default function GoalsPage() {
           >
             {/* User header */}
             <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-[#F97316] flex items-center justify-center text-white text-xs font-semibold">
+              <div className="w-8 h-8 rounded-full bg-[#0147FF] flex items-center justify-center text-white text-xs font-semibold">
                 {user.name.split(" ").map((w) => w[0]).join("").slice(0, 2)}
               </div>
               <div>
@@ -419,14 +419,14 @@ export default function GoalsPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Responsável</label>
                 <select value={modal.owner_id} onChange={(e) => setModal({ ...modal, owner_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]">
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]">
                   {users.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
                 </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Tipo de Meta</label>
                 <select value={modal.type} onChange={(e) => setModal({ ...modal, type: e.target.value as GoalType })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]">
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]">
                   {(Object.entries(GOAL_TYPE_LABELS) as [GoalType, string][]).map(([key, label]) => (
                     <option key={key} value={key}>{label}</option>
                   ))}
@@ -435,7 +435,7 @@ export default function GoalsPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Período</label>
                 <select value={modal.period} onChange={(e) => setModal({ ...modal, period: e.target.value as GoalPeriod })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]">
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]">
                   {(Object.entries(GOAL_PERIOD_LABELS) as [GoalPeriod, string][]).map(([key, label]) => (
                     <option key={key} value={key}>{label}</option>
                   ))}
@@ -445,7 +445,7 @@ export default function GoalsPage() {
                 <label className="block text-xs font-medium text-gray-700 mb-1">Valor da Meta</label>
                 <input type="number" value={modal.target_value} onChange={(e) => setModal({ ...modal, target_value: e.target.value })}
                   placeholder={modal.type === "conversao" ? "Ex: 30 (%)" : "Ex: 50"}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]" />
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]" />
               </div>
             </div>
 
@@ -457,7 +457,7 @@ export default function GoalsPage() {
               <button
                 onClick={handleSaveGoal}
                 disabled={saving || !modal.target_value}
-                className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] disabled:opacity-50 transition-colors"
+                className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
               >
                 {saving ? "Salvando..." : modal.editingId ? "Salvar" : "Criar Meta"}
               </button>

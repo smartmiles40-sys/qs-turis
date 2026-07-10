@@ -3,8 +3,20 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import type { Meeting, MeetingStatus, Lead } from "../types";
 import { MEETING_STATUS_LABELS } from "../types";
+import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Converte a reunião no evento de agenda (Google/.ics). */
+function meetingToEvent(m: Meeting): CalendarEvent {
+  return {
+    title: m.title || `Reunião — ${m.lead?.full_name ?? "cliente"}`,
+    startsAt: m.scheduled_at,
+    durationMin: m.duration_min,
+    description: [m.lead?.full_name ? `Cliente: ${m.lead.full_name}` : null, m.notes].filter(Boolean).join("\n"),
+    location: m.meeting_link || m.location || null,
+  };
+}
 
 type FilterTab = "todas" | MeetingStatus;
 
@@ -61,7 +73,7 @@ interface MeetingsPageProps {
 }
 
 const inputClass =
-  "w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316] transition-colors";
+  "w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] transition-colors";
 const labelClass = "block text-xs font-medium text-gray-700 mb-1";
 
 export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
@@ -247,14 +259,14 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="flex items-center justify-center py-12" style={{ fontFamily: "inherit" }}>
         <p className="text-sm text-gray-500">Carregando...</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="space-y-6" style={{ fontFamily: "inherit" }}>
       {/* Header */}
       <div className="flex flex-wrap gap-y-2 items-center justify-between">
         <div>
@@ -270,7 +282,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
         </div>
         <button
           onClick={openCreate}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19" />
@@ -305,7 +317,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
             onClick={() => setActiveTab(tab.key)}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
               activeTab === tab.key
-                ? "bg-[#F97316] text-white"
+                ? "bg-[#0147FF] text-white"
                 : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -410,6 +422,33 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                               <circle cx="9" cy="7" r="4" />
                               <line x1="17" y1="8" x2="23" y2="14" />
                               <line x1="23" y1="8" x2="17" y2="14" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
+                      {meeting.status === "agendada" && (
+                        <>
+                          <a
+                            href={googleCalendarUrl(meetingToEvent(meeting))}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                            title="Adicionar ao Google Agenda"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                              <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+                              <line x1="12" y1="14" x2="12" y2="18" /><line x1="10" y1="16" x2="14" y2="16" />
+                            </svg>
+                          </a>
+                          <button
+                            onClick={() => downloadIcs(meetingToEvent(meeting))}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                            title="Baixar convite (.ics) — Outlook/Apple"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                              <polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
                             </svg>
                           </button>
                         </>
@@ -576,7 +615,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
               <button
                 onClick={handleSave}
                 disabled={saving || !fLeadId || !fWhen}
-                className="px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] disabled:opacity-50 transition-colors"
+                className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
               >
                 {saving ? "Salvando..." : editingId ? "Salvar alterações" : "Agendar"}
               </button>

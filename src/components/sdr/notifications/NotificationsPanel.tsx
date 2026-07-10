@@ -454,18 +454,18 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                       icon={<IconSpark />}
                       label="Leads quentes / novos"
                       count={hotLeads.length}
-                      color="#F97316"
+                      color="#0147FF"
                       bg="#FFEDD5"
                     />
                     {hotLeads.map((l) => (
                       <NotifRow
                         key={l.id}
                         onClick={() => openLead(l.id)}
-                        accent="#F97316"
+                        accent="#0147FF"
                         title={l.full_name?.trim() || "Lead sem nome"}
                         subtitle={`${l.company_name?.trim() || "Sem empresa"} · ${sourceLabel(l.source)}`}
                         meta={`há ${timeAgo(l.arrived_at ?? l.created_at)}`}
-                        metaColor="#F97316"
+                        metaColor="#0147FF"
                       />
                     ))}
                   </div>

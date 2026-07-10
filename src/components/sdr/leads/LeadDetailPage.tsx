@@ -528,7 +528,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // ── Loading / Not found ──
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex items-center justify-center" style={{ fontFamily: "inherit" }}>
         <p className="text-sm text-gray-500">Carregando...</p>
       </div>
     );
@@ -536,9 +536,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
 
   if (!lead) {
     return (
-      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "inherit" }}>
         <p className="text-sm text-gray-500 mb-4">Lead não encontrado.</p>
-        <button onClick={onBack} className="text-sm text-[#F97316] hover:underline">Voltar para Leads</button>
+        <button onClick={onBack} className="text-sm text-[#0147FF] hover:underline">Voltar para Leads</button>
       </div>
     );
   }
@@ -665,8 +665,8 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Responsável</h3>
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-[#F97316]/10 flex items-center justify-center">
-                    <span className="text-xs font-bold text-[#F97316]">
+                  <div className="w-8 h-8 rounded-full bg-[#0147FF]/10 flex items-center justify-center">
+                    <span className="text-xs font-bold text-[#0147FF]">
                       {lead.owner?.name?.split(" ").map((n: string) => n[0]).join("").slice(0, 2) ?? "?"}
                     </span>
                   </div>
@@ -697,8 +697,8 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                 )}
                 {cadenceDays.slice(0, 3).map((day) => (
                   <div key={day.id} className="flex items-center gap-3 p-3 rounded-lg bg-[#F8F9FA]">
-                    <div className="w-8 h-8 rounded-full bg-[#F97316]/10 flex items-center justify-center shrink-0">
-                      <span className="text-xs font-bold text-[#F97316]">D{day.day_number}</span>
+                    <div className="w-8 h-8 rounded-full bg-[#0147FF]/10 flex items-center justify-center shrink-0">
+                      <span className="text-xs font-bold text-[#0147FF]">D{day.day_number}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       {day.activities?.map((act) => (
@@ -772,13 +772,13 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                 onChange={(e) => setNewNote(e.target.value)}
                 rows={3}
                 placeholder="Escreva sua anotação..."
-                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316] resize-none"
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] resize-none"
               />
               <div className="flex justify-end mt-3">
                 <button
                   onClick={addNote}
                   disabled={!newNote.trim()}
-                  className="px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   Adicionar Anotação
                 </button>
@@ -791,8 +791,8 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                 <div key={note.id} className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-[#F97316]/10 flex items-center justify-center">
-                        <span className="text-[10px] font-bold text-[#F97316]">
+                      <div className="w-6 h-6 rounded-full bg-[#0147FF]/10 flex items-center justify-center">
+                        <span className="text-[10px] font-bold text-[#0147FF]">
                           {lead.owner?.name?.split(" ").map((n: string) => n[0]).join("").slice(0, 2) ?? "?"}
                         </span>
                       </div>
@@ -839,7 +839,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                     </div>
                   </div>
                   {contact.is_primary && (
-                    <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-[#F97316]/10 text-[#F97316]">
+                    <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-[#0147FF]/10 text-[#0147FF]">
                       Principal
                     </span>
                   )}
@@ -947,7 +947,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                       <div
                         className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-2 ${
                           isPast
-                            ? "bg-[#F97316] border-[#F97316] text-white"
+                            ? "bg-[#0147FF] border-[#0147FF] text-white"
                             : "bg-white border-gray-200 text-gray-500"
                         }`}
                       >
@@ -1033,7 +1033,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                       const onChange = (v: string) =>
                         setCustomValues((prev) => ({ ...prev, [field.id]: v }));
                       const inputClass =
-                        "w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]";
+                        "w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]";
                       return (
                         <div key={field.id}>
                           <label className="block text-xs font-medium text-gray-500 mb-1.5">
@@ -1085,7 +1085,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               <button
                 onClick={saveCustomFields}
                 disabled={savingCustom}
-                className="px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {savingCustom ? "Salvando..." : "Salvar Campos"}
               </button>
@@ -1102,7 +1102,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6" style={{ fontFamily: "inherit" }}>
       {/* Back Button */}
       <button
         onClick={onBack}
@@ -1117,8 +1117,8 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       {/* Lead Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-[#F97316]/10 flex items-center justify-center">
-            <span className="text-base font-bold text-[#F97316]">
+          <div className="w-12 h-12 rounded-full bg-[#0147FF]/10 flex items-center justify-center">
+            <span className="text-base font-bold text-[#0147FF]">
               {lead.first_name?.[0]}{lead.last_name?.[0]}
             </span>
           </div>
@@ -1266,13 +1266,13 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               onClick={() => setActiveTab(tab.key)}
               className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2 ${
                 activeTab === tab.key
-                  ? "border-[#F97316] text-[#F97316]"
+                  ? "border-[#0147FF] text-[#0147FF]"
                   : "border-transparent text-gray-500 hover:text-gray-700"
               }`}
             >
               {tab.label}
               {tab.key === "anotacoes" && notes.length > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-[#F97316]/15 text-[#F97316] align-middle">
+                <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-[#0147FF]/15 text-[#0147FF] align-middle">
                   {notes.length}
                 </span>
               )}
@@ -1315,19 +1315,19 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => scheduleReEngagement(30)}
-                  className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#F97316] hover:bg-[#F97316]/5 transition-all"
+                  className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#0147FF] hover:bg-[#0147FF]/5 transition-all"
                 >
                   30 dias
                 </button>
                 <button
                   onClick={() => scheduleReEngagement(60)}
-                  className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#F97316] hover:bg-[#F97316]/5 transition-all"
+                  className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#0147FF] hover:bg-[#0147FF]/5 transition-all"
                 >
                   60 dias
                 </button>
                 <button
                   onClick={() => scheduleReEngagement(90)}
-                  className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#F97316] hover:bg-[#F97316]/5 transition-all"
+                  className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#0147FF] hover:bg-[#0147FF]/5 transition-all"
                 >
                   90 dias
                 </button>
@@ -1405,8 +1405,8 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                 <div className="space-y-2 max-h-32 overflow-y-auto">
                   {cadenceDays.slice(0, 3).map((day) => (
                     <div key={day.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-[#F8F9FA]">
-                      <div className="w-6 h-6 rounded-full bg-[#F97316]/10 flex items-center justify-center shrink-0">
-                        <span className="text-[9px] font-bold text-[#F97316]">D{day.day_number}</span>
+                      <div className="w-6 h-6 rounded-full bg-[#0147FF]/10 flex items-center justify-center shrink-0">
+                        <span className="text-[9px] font-bold text-[#0147FF]">D{day.day_number}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         {day.activities?.map((act) => (
@@ -1510,7 +1510,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                   value={meetingForm.title}
                   onChange={(e) => setMeetingForm((prev) => ({ ...prev, title: e.target.value }))}
                   placeholder="Ex.: Reunião de apresentação"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
               </div>
 
@@ -1521,7 +1521,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                     type="datetime-local"
                     value={meetingForm.scheduled_at}
                     onChange={(e) => setMeetingForm((prev) => ({ ...prev, scheduled_at: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                   />
                 </div>
                 <div>
@@ -1531,7 +1531,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                     min={1}
                     value={meetingForm.duration_min}
                     onChange={(e) => setMeetingForm((prev) => ({ ...prev, duration_min: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                   />
                 </div>
               </div>
@@ -1543,7 +1543,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                   value={meetingForm.location}
                   onChange={(e) => setMeetingForm((prev) => ({ ...prev, location: e.target.value }))}
                   placeholder="Ex.: Escritório, Google Meet, telefone..."
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
               </div>
 
@@ -1554,7 +1554,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                   value={meetingForm.meeting_link}
                   onChange={(e) => setMeetingForm((prev) => ({ ...prev, meeting_link: e.target.value }))}
                   placeholder="https://..."
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
               </div>
 
@@ -1565,7 +1565,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                   onChange={(e) => setMeetingForm((prev) => ({ ...prev, notes: e.target.value }))}
                   rows={3}
                   placeholder="Pauta, contexto ou observações..."
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316] resize-none"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] resize-none"
                 />
               </div>
 
@@ -1589,7 +1589,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               <button
                 onClick={saveMeeting}
                 disabled={savingMeeting}
-                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-[#F97316] hover:bg-[#EA6C0E] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-[#0147FF] hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {savingMeeting ? "Salvando..." : "Agendar"}
               </button>

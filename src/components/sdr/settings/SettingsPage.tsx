@@ -224,7 +224,7 @@ function CamposSection() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-900">Campos Personalizados</h2>
-        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] transition-colors">
+        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors">
           <PlusIcon /> Novo Campo
         </button>
       </div>
@@ -236,7 +236,7 @@ function CamposSection() {
             onClick={() => setActiveScope(scope)}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
               activeScope === scope
-                ? "bg-[#F97316] text-white"
+                ? "bg-[#0147FF] text-white"
                 : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -270,7 +270,7 @@ function CamposSection() {
                     {field.is_system ? (
                       <span className="inline-flex items-center gap-1 text-xs text-gray-400"><LockIcon /> Sistema</span>
                     ) : (
-                      <span className="text-xs text-[#F97316] font-medium">Personalizado</span>
+                      <span className="text-xs text-[#0147FF] font-medium">Personalizado</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -307,11 +307,11 @@ function CamposSection() {
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Nome do campo *</label>
-                <input type="text" value={form.label} onChange={(e) => setForm(p => ({ ...p, label: e.target.value }))} placeholder="Ex.: Orçamento estimado" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" autoFocus />
+                <input type="text" value={form.label} onChange={(e) => setForm(p => ({ ...p, label: e.target.value }))} placeholder="Ex.: Orçamento estimado" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" autoFocus />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Escopo</label>
-                <select value={form.scope} onChange={(e) => setForm(p => ({ ...p, scope: e.target.value as CustomFieldScope }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                <select value={form.scope} onChange={(e) => setForm(p => ({ ...p, scope: e.target.value as CustomFieldScope }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400">
                   <option value="pessoal">Pessoal</option>
                   <option value="empresa">Empresa</option>
                   <option value="contato">Contato</option>
@@ -319,7 +319,7 @@ function CamposSection() {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Tipo</label>
-                <select value={form.field_type} onChange={(e) => setForm(p => ({ ...p, field_type: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                <select value={form.field_type} onChange={(e) => setForm(p => ({ ...p, field_type: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400">
                   {FIELD_TYPE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
@@ -328,7 +328,7 @@ function CamposSection() {
               {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
             </div>
             <div className="flex items-center gap-3 mt-5">
-              <button onClick={handleSave} disabled={saving || !form.label.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#F97316" }}>
+              <button onClick={handleSave} disabled={saving || !form.label.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#0147FF" }}>
                 {saving ? "Salvando..." : editField ? "Salvar" : "Criar"}
               </button>
               <button onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
@@ -423,7 +423,7 @@ function MotivosSection() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-900">Motivos de Perda</h2>
-        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] transition-colors">
+        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors">
           <PlusIcon /> Novo Motivo
         </button>
       </div>
@@ -454,7 +454,7 @@ function MotivosSection() {
           <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none">
             <span
               onClick={() => setShowArchived(!showArchived)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${showArchived ? "bg-[#F97316]" : "bg-gray-200"}`}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${showArchived ? "bg-[#0147FF]" : "bg-gray-200"}`}
             >
               <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${showArchived ? "translate-x-4" : "translate-x-0.5"}`} />
             </span>
@@ -498,12 +498,12 @@ function MotivosSection() {
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Motivo *</label>
-                <input type="text" value={form.label} onChange={(e) => setForm({ label: e.target.value })} placeholder="Ex.: Sem orçamento no momento" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" autoFocus />
+                <input type="text" value={form.label} onChange={(e) => setForm({ label: e.target.value })} placeholder="Ex.: Sem orçamento no momento" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" autoFocus />
               </div>
               {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
             </div>
             <div className="flex items-center gap-3 mt-5">
-              <button onClick={handleSave} disabled={saving || !form.label.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#F97316" }}>
+              <button onClick={handleSave} disabled={saving || !form.label.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#0147FF" }}>
                 {saving ? "Salvando..." : editReason ? "Salvar" : "Criar"}
               </button>
               <button onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
@@ -596,7 +596,7 @@ function UsuariosSection() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-900">Usuários e Permissões</h2>
-        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#F97316] hover:bg-[#EA6C0E] transition-colors">
+        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors">
           <PlusIcon /> Adicionar Usuário
         </button>
       </div>
@@ -620,7 +620,7 @@ function UsuariosSection() {
                 <tr key={user.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50/40 transition-colors">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-[#F97316] flex items-center justify-center text-white text-xs font-semibold shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-[#0147FF] flex items-center justify-center text-white text-xs font-semibold shrink-0">
                         {user.name.split(" ").map((w) => w[0]).join("").slice(0, 2)}
                       </div>
                       <span className="text-sm text-gray-900 font-medium">{user.name}</span>
@@ -670,15 +670,15 @@ function UsuariosSection() {
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Nome *</label>
-                <input type="text" value={form.name} onChange={(e) => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Nome completo" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" autoFocus />
+                <input type="text" value={form.name} onChange={(e) => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Nome completo" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" autoFocus />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">E-mail *</label>
-                <input type="email" value={form.email} onChange={(e) => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@empresa.com" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" />
+                <input type="email" value={form.email} onChange={(e) => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@empresa.com" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Papel</label>
-                <select value={form.role} onChange={(e) => setForm(p => ({ ...p, role: e.target.value as UserRole }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                <select value={form.role} onChange={(e) => setForm(p => ({ ...p, role: e.target.value as UserRole }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400">
                   <option value="sdr">Qualificador</option>
                   <option value="closer">Closer</option>
                   <option value="gestor">Gestor</option>
@@ -687,11 +687,11 @@ function UsuariosSection() {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">{editUser ? "Nova senha (deixe vazio para manter)" : "Senha *"}</label>
-                <input type="password" value={form.password} onChange={(e) => setForm(p => ({ ...p, password: e.target.value }))} placeholder={editUser ? "••••••••" : "Senha de acesso (mín. 6)"} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" />
+                <input type="password" value={form.password} onChange={(e) => setForm(p => ({ ...p, password: e.target.value }))} placeholder={editUser ? "••••••••" : "Senha de acesso (mín. 6)"} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">WhatsApp do SDR (opcional)</label>
-                <input type="tel" value={form.whatsapp_number} onChange={(e) => setForm(p => ({ ...p, whatsapp_number: e.target.value }))} placeholder="Ex.: (11) 99999-8888" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" />
+                <input type="tel" value={form.whatsapp_number} onChange={(e) => setForm(p => ({ ...p, whatsapp_number: e.target.value }))} placeholder="Ex.: (11) 99999-8888" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
                 <p className="text-[10px] text-gray-400 mt-1">Número que este SDR usa para atender no WhatsApp.</p>
               </div>
             </div>
@@ -699,7 +699,7 @@ function UsuariosSection() {
               <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{saveError}</div>
             )}
             <div className="flex items-center gap-3 mt-5">
-              <button onClick={handleSave} disabled={saving || !form.name || !form.email} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#F97316" }}>
+              <button onClick={handleSave} disabled={saving || !form.name || !form.email} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#0147FF" }}>
                 {saving ? "Salvando..." : editUser ? "Salvar" : "Adicionar"}
               </button>
               <button onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
@@ -762,13 +762,13 @@ function ProdutosSection() {
           onChange={(e) => setNewProduct(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && addProduct()}
           placeholder="Nome do produto..."
-          className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400"
+          className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400"
         />
         <button
           onClick={addProduct}
           disabled={!newProduct.trim()}
           className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50"
-          style={{ background: "#F97316" }}
+          style={{ background: "#0147FF" }}
         >
           + Adicionar
         </button>
@@ -782,7 +782,7 @@ function ProdutosSection() {
               <button
                 onClick={() => toggleProduct(p.id, p.is_active)}
                 className="relative w-10 h-5 rounded-full transition-colors"
-                style={{ background: p.is_active ? "#F97316" : "#D1D5DB" }}
+                style={{ background: p.is_active ? "#0147FF" : "#D1D5DB" }}
               >
                 <span
                   className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
@@ -865,12 +865,12 @@ function CanaisSection() {
           <div
             key={ch.type}
             className={`flex items-center justify-between p-4 bg-white border rounded-xl ${
-              ch.enabled ? "border-[#F97316]/20" : "border-gray-100"
+              ch.enabled ? "border-[#0147FF]/20" : "border-gray-100"
             }`}
           >
             <div className="flex items-center gap-4">
               <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                ch.enabled ? "bg-[#F97316]/10 text-[#F97316]" : "bg-gray-100 text-gray-400"
+                ch.enabled ? "bg-[#0147FF]/10 text-[#0147FF]" : "bg-gray-100 text-gray-400"
               }`}>
                 <ChannelSvgIcon type={ch.type} />
               </div>
@@ -888,7 +888,7 @@ function CanaisSection() {
               <button
                 onClick={() => toggleChannel(ch.type)}
                 className="relative w-11 h-6 rounded-full transition-colors duration-200"
-                style={{ background: ch.enabled ? "#F97316" : "#D1D5DB" }}
+                style={{ background: ch.enabled ? "#0147FF" : "#D1D5DB" }}
               >
                 <span
                   className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
@@ -900,8 +900,8 @@ function CanaisSection() {
         ))}
       </div>
 
-      <div className="p-4 bg-[#F97316]/5 border border-[#F97316]/10 rounded-xl">
-        <p className="text-xs text-[#F97316]">
+      <div className="p-4 bg-[#0147FF]/5 border border-[#0147FF]/10 rounded-xl">
+        <p className="text-xs text-[#0147FF]">
           <strong>Dica:</strong> Os canais habilitados aparecerão como opções na construção de cadências e no painel de atividades.
           Canais desabilitados não serão removidos de cadências existentes.
         </p>
@@ -1295,7 +1295,7 @@ export default function SettingsPage() {
   );
 
   return (
-    <div className="flex flex-col md:flex-row gap-6 min-h-[600px]" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="flex flex-col md:flex-row gap-6 min-h-[600px]" style={{ fontFamily: "inherit" }}>
       {/* Internal Sidebar */}
       <aside className="w-full md:w-56 shrink-0">
         <div className="sticky top-0 space-y-5">
@@ -1320,7 +1320,7 @@ export default function SettingsPage() {
                         onClick={() => setActiveSection(item.key)}
                         className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${
                           activeSection === item.key
-                            ? "bg-[#F97316]/5 text-[#F97316] font-medium"
+                            ? "bg-[#0147FF]/5 text-[#0147FF] font-medium"
                             : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                         }`}
                       >

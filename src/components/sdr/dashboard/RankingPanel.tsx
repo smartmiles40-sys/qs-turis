@@ -156,9 +156,9 @@ export default function RankingPanel() {
               onClick={() => setPeriod(p.key)}
               className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
               style={{
-                background: period === p.key ? "#F97316" : "transparent",
+                background: period === p.key ? "#0147FF" : "transparent",
                 color: period === p.key ? "#fff" : "#6B7280",
-                border: period === p.key ? "1px solid #F97316" : "1px solid #E5E7EB",
+                border: period === p.key ? "1px solid #0147FF" : "1px solid #E5E7EB",
               }}
             >
               {p.label}
@@ -227,14 +227,14 @@ export default function RankingPanel() {
 
                     {/* Atividades */}
                     <td className="py-3 text-center">
-                      <span className={`text-sm ${isTop ? "font-bold text-[#F97316]" : "font-medium text-gray-700"}`}>
+                      <span className={`text-sm ${isTop ? "font-bold text-[#0147FF]" : "font-medium text-gray-700"}`}>
                         {sdr.atividades}
                       </span>
                     </td>
 
                     {/* Ganhos */}
                     <td className="py-3 text-center">
-                      <span className={`text-sm ${isTop ? "font-bold text-[#F97316]" : "font-medium text-gray-700"}`}>
+                      <span className={`text-sm ${isTop ? "font-bold text-[#0147FF]" : "font-medium text-gray-700"}`}>
                         {sdr.ganhos}
                       </span>
                     </td>

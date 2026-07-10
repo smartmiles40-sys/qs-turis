@@ -330,14 +330,14 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   // ── Loading state ──
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex items-center justify-center" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex items-center justify-center" style={{ fontFamily: "inherit" }}>
         <p className="text-sm text-gray-500">Carregando...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6" style={{ fontFamily: "inherit" }}>
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
@@ -390,7 +390,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           </button>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -412,7 +412,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           value={search}
           onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
           placeholder="Pesquise por ID, nome, empresa, e-mail ou telefone..."
-          className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316] transition-colors"
+          className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] transition-colors"
         />
       </div>
 
@@ -425,7 +425,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             onClick={() => { setFilterSource(filterSource === k ? "" : k); setCurrentPage(1); }}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
               filterSource === k
-                ? "bg-[#F97316] text-white"
+                ? "bg-[#0147FF] text-white"
                 : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -442,7 +442,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             onClick={() => { setFilterStatus(filterStatus === k ? "" : k); setCurrentPage(1); }}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
               filterStatus === k
-                ? "bg-[#F97316] text-white"
+                ? "bg-[#0147FF] text-white"
                 : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -456,7 +456,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         <select
           value={filterCadence}
           onChange={(e) => { setFilterCadence(e.target.value); setCurrentPage(1); }}
-          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20"
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
         >
           <option value="">Cadência</option>
           {cadences.map((c) => (
@@ -468,7 +468,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         <select
           value={filterOwner}
           onChange={(e) => { setFilterOwner(e.target.value); setCurrentPage(1); }}
-          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20"
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
         >
           <option value="">Responsável</option>
           {users.map((u) => (
@@ -480,7 +480,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         <select
           value={filterLossReason}
           onChange={(e) => { setFilterLossReason(e.target.value); setCurrentPage(1); }}
-          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20"
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
         >
           <option value="">Motivo de Perda</option>
           {lossReasons.map((lr) => (
@@ -500,8 +500,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
       {/* ── Bulk Actions ────────────────────────────────────────────────── */}
       {selectedIds.size > 0 && (
-        <div className="flex flex-wrap items-center gap-3 mb-4 px-4 py-3 rounded-xl bg-[#F97316]/5 border border-[#F97316]/10">
-          <span className="text-sm font-medium text-[#F97316]">
+        <div className="flex flex-wrap items-center gap-3 mb-4 px-4 py-3 rounded-xl bg-[#0147FF]/5 border border-[#0147FF]/10">
+          <span className="text-sm font-medium text-[#0147FF]">
             {selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selecionado{selectedIds.size > 1 ? "s" : ""}
           </span>
           <div className="flex items-center gap-2 ml-auto">
@@ -515,7 +515,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 setSelectedIds(new Set());
                 e.target.value = "";
               }}
-              className="px-3 py-1.5 rounded-lg bg-[#F97316] text-xs font-medium text-white cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-xs font-medium text-white cursor-pointer"
               defaultValue=""
             >
               <option value="" disabled>Vincular à Cadência</option>
@@ -559,7 +559,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     type="checkbox"
                     checked={allOnPageSelected}
                     onChange={toggleAll}
-                    className="w-4 h-4 rounded border-gray-300 text-[#F97316] focus:ring-[#F97316]/20"
+                    className="w-4 h-4 rounded border-gray-300 text-[#0147FF] focus:ring-[#0147FF]/20"
                   />
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -596,7 +596,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                         type="checkbox"
                         checked={selectedIds.has(lead.id)}
                         onChange={() => toggleOne(lead.id)}
-                        className="w-4 h-4 rounded border-gray-300 text-[#F97316] focus:ring-[#F97316]/20"
+                        className="w-4 h-4 rounded border-gray-300 text-[#0147FF] focus:ring-[#0147FF]/20"
                       />
                     </td>
                     <td className="px-4 py-3">
@@ -703,7 +703,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 onClick={() => setCurrentPage(page)}
                 className={`w-8 h-8 rounded-lg text-xs font-medium transition-colors ${
                   page === currentPage
-                    ? "bg-[#F97316] text-white"
+                    ? "bg-[#0147FF] text-white"
                     : "text-gray-600 hover:bg-gray-100"
                 }`}
               >
@@ -752,7 +752,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     value={formFirstName}
                     onChange={(e) => setFormFirstName(e.target.value)}
                     placeholder="Nome"
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                   />
                 </div>
                 <div>
@@ -762,7 +762,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     value={formLastName}
                     onChange={(e) => setFormLastName(e.target.value)}
                     placeholder="Sobrenome"
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                   />
                 </div>
               </div>
@@ -774,7 +774,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   value={formEmail}
                   onChange={(e) => setFormEmail(e.target.value)}
                   placeholder="email@exemplo.com.br"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
               </div>
 
@@ -785,7 +785,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   value={formPhone}
                   onChange={(e) => setFormPhone(e.target.value)}
                   placeholder="(00) 00000-0000"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
               </div>
 
@@ -796,7 +796,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   value={formCompany}
                   onChange={(e) => setFormCompany(e.target.value)}
                   placeholder="Nome da empresa"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
               </div>
 
@@ -805,7 +805,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 <select
                   value={formSource}
                   onChange={(e) => setFormSource(e.target.value as LeadSource)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 >
                   {(Object.keys(SOURCE_LABELS) as LeadSource[]).map((k) => (
                     <option key={k} value={k}>{SOURCE_LABELS[k]}</option>
@@ -824,7 +824,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
               <button
                 onClick={handleCreateLead}
                 disabled={saving || !formFirstName.trim()}
-                className="px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] disabled:opacity-50 transition-colors"
+                className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
               >
                 {saving ? "Salvando..." : "Cadastrar"}
               </button>
@@ -863,7 +863,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 <p className="text-lg font-semibold text-gray-900 mb-2">{csvImportedCount} leads importados</p>
                 <button
                   onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvImportedCount(null); }}
-                  className="px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] transition-colors"
+                  className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
                 >
                   Fechar
                 </button>
@@ -911,7 +911,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                         };
                         reader.readAsText(file);
                       }}
-                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-[#F97316]/10 file:text-[#F97316] hover:file:bg-[#F97316]/20"
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-[#0147FF]/10 file:text-[#0147FF] hover:file:bg-[#0147FF]/20"
                     />
                   </div>
                 ) : (
@@ -949,7 +949,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                       <select
                         value={csvCadenceId}
                         onChange={(e) => setCsvCadenceId(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:border-[#F97316]"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:border-[#0147FF]"
                       >
                         <option value="">Sem cadência (distribuição geral, sem atividades)</option>
                         {cadences.filter((c) => c.status === "disponivel").map((c) => (
@@ -960,7 +960,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     {csvImporting && (
                       <div className="mb-3">
                         <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                          <div className="h-full rounded-full bg-[#F97316] transition-all" style={{ width: `${Math.round((csvProgress / Math.max(csvRows.length, 1)) * 100)}%` }} />
+                          <div className="h-full rounded-full bg-[#0147FF] transition-all" style={{ width: `${Math.round((csvProgress / Math.max(csvRows.length, 1)) * 100)}%` }} />
                         </div>
                         <p className="text-xs text-gray-500 mt-1 tabular-nums">Importando {csvProgress}/{csvRows.length}…</p>
                       </div>
@@ -1057,7 +1057,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                           setCsvImporting(false);
                         }}
                         disabled={csvImporting}
-                        className="px-4 py-2 rounded-lg bg-[#F97316] text-sm font-medium text-white hover:bg-[#EA6C0E] disabled:opacity-50 transition-colors"
+                        className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
                       >
                         {csvImporting ? "Importando..." : `Confirmar importação (${csvRows.length})`}
                       </button>
@@ -1099,7 +1099,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   </p>
                   <div>
                     <label className="text-xs font-medium text-gray-500 block mb-1">Destino *</label>
-                    <select value={handoverCloserId} onChange={(e) => setHandoverCloserId(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                    <select value={handoverCloserId} onChange={(e) => setHandoverCloserId(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400">
                       <option value="">Selecione um usuário...</option>
                       {users.filter((u) => u.is_active && u.id !== currentUser?.id).map((u) => (
                         <option key={u.id} value={u.id}>{u.name} · {u.role}</option>
@@ -1111,7 +1111,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 <>
                   <div>
                     <label className="text-xs font-medium text-gray-500 block mb-1">De (SDR de origem) *</label>
-                    <select value={handoverFromId} onChange={(e) => setHandoverFromId(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                    <select value={handoverFromId} onChange={(e) => setHandoverFromId(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400">
                       <option value="">Selecione o SDR de origem...</option>
                       {users.filter((u) => u.is_active).map((u) => (
                         <option key={u.id} value={u.id}>{u.name} · {u.role}</option>
@@ -1123,7 +1123,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   </div>
                   <div>
                     <label className="text-xs font-medium text-gray-500 block mb-1">Para (destino) *</label>
-                    <select value={handoverCloserId} onChange={(e) => setHandoverCloserId(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                    <select value={handoverCloserId} onChange={(e) => setHandoverCloserId(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400">
                       <option value="">Selecione o destino...</option>
                       {users.filter((u) => u.is_active && u.id !== handoverFromId).map((u) => (
                         <option key={u.id} value={u.id}>{u.name} · {u.role}</option>
@@ -1133,11 +1133,11 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-medium text-gray-500 block mb-1">Quantidade *</label>
-                      <input type="number" min={1} value={handoverQty} onChange={(e) => setHandoverQty(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400" />
+                      <input type="number" min={1} value={handoverQty} onChange={(e) => setHandoverQty(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
                     </div>
                     <div>
                       <label className="text-xs font-medium text-gray-500 block mb-1">Quais leads?</label>
-                      <select value={handoverAge} onChange={(e) => setHandoverAge(e.target.value as "novos" | "antigos")} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400">
+                      <select value={handoverAge} onChange={(e) => setHandoverAge(e.target.value as "novos" | "antigos")} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400">
                         <option value="novos">Os mais novos</option>
                         <option value="antigos">Os mais antigos</option>
                       </select>
@@ -1152,7 +1152,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   onChange={(e) => setHandoverBriefing(e.target.value)}
                   rows={3}
                   placeholder="Contexto do lead, próximos passos, combinados..."
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400 resize-none"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 resize-none"
                 />
               </div>
               {handoverError && (
@@ -1171,7 +1171,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 onClick={handoverMode === "quantidade" ? handleHandoverQuantity : handleHandover}
                 disabled={handoverSaving || !handoverCloserId || (handoverMode === "selecao" ? selectedIds.size === 0 : (!handoverFromId || !parseInt(handoverQty, 10)))}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50"
-                style={{ background: "#F97316" }}
+                style={{ background: "#0147FF" }}
               >
                 {handoverSaving ? "Enviando..." : "Confirmar handover"}
               </button>

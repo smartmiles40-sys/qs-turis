@@ -312,7 +312,7 @@ export default function CoveragePanel() {
             <h2 className="text-[16px] font-semibold text-gray-900">Leads Aguardando Contato</h2>
             <span
               className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 rounded-full text-[12px] font-bold text-white"
-              style={{ background: pendingLeads.length > 0 ? "#F97316" : "#22C55E" }}
+              style={{ background: pendingLeads.length > 0 ? "#0147FF" : "#22C55E" }}
             >
               {pendingLeads.length}
             </span>
@@ -334,7 +334,7 @@ export default function CoveragePanel() {
                   setLeads(allLeads);
                 }
               }}
-              className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-orange-400"
+              className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-blue-400"
             >
               <option value="">Todos os SDRs</option>
               {users.map(u => (
@@ -425,7 +425,7 @@ export default function CoveragePanel() {
                       onClick={() => handleContact(lead.id)}
                       disabled={contactingId === lead.id}
                       className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold text-white transition-colors hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
-                      style={{ background: "#F97316" }}
+                      style={{ background: "#0147FF" }}
                     >
                       <IconPhone />
                       {contactingId === lead.id ? "Registrando..." : "Contatar agora"}

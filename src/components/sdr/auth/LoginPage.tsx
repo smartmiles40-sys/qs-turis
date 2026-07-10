@@ -29,7 +29,7 @@ export default function LoginPage() {
   return (
     <div
       className="min-h-screen flex items-center justify-center px-4"
-      style={{ background: "#F8F9FA", fontFamily: "system-ui, -apple-system, sans-serif" }}
+      style={{ background: "#F8F9FA", fontFamily: "inherit" }}
     >
       <div className="w-full max-w-sm">
         {/* Logo */}
@@ -102,7 +102,7 @@ export default function LoginPage() {
             type="submit"
             disabled={loading}
             className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
-            style={{ background: "#F97316" }}
+            style={{ background: "#0147FF" }}
           >
             {loading ? "Entrando..." : "Entrar"}
           </button>

@@ -1176,8 +1176,25 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         return lead?.phone ? <button onClick={() => startWhatsAppCall(lead.phone)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Ligar no WhatsApp</button> : null;
       case "whatsapp":
         return lead?.phone ? <button onClick={() => openWhatsApp(lead)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Abrir conversa</button> : null;
-      case "email":
-        return lead?.email ? <a href={`mailto:${lead.email}`} className="qsx-btn qsx-btn-green"><ChannelIcon type="email" size={16} />Escrever e-mail</a> : null;
+      case "email": {
+        if (!lead?.email) return null;
+        // Fase 1 do e-mail integrado: abre o e-mail JÁ ESCRITO (script da atividade
+        // ou template padrão) e registra a ação no histórico do lead.
+        const firstName = (lead.full_name || "").split(/\s+/)[0] || "";
+        const emailBody = (task.notes && task.notes.trim().length > 10 ? task.notes : null)
+          ?? `Olá ${firstName},\n\nTudo bem? Sou da Se Tu For, Eu Vou! Viagens.\n\nVi seu interesse em viajar com a gente e queria te ajudar a dar o próximo passo. Podemos conversar?\n\nAbraço!`;
+        const subject = `Sua viagem com a Se Tu For, Eu Vou!${lead.segment ? ` — ${lead.segment.replace(/[[\]]/g, "")}` : ""}`;
+        const href = `mailto:${lead.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
+        return (
+          <a
+            href={href}
+            onClick={() => persistObservation(lead.id, `E-mail — mensagem enviada para ${lead.email}`, ["bitrix", "email"])}
+            className="qsx-btn qsx-btn-green"
+          >
+            <ChannelIcon type="email" size={16} />Escrever e-mail
+          </a>
+        );
+      }
       case "linkedin":
         return (
           <a href={lead?.linkedin_url ? (lead.linkedin_url.startsWith("http") ? lead.linkedin_url : `https://${lead.linkedin_url}`) : `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(lead?.full_name || "")}`} target="_blank" rel="noopener noreferrer" className="qsx-btn qsx-btn-green">
@@ -1667,7 +1684,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 height: 8 + Math.random() * 8,
                 left: `${Math.random() * 100}%`,
                 top: -10,
-                background: ["#F97316", "#3B82F6", "#10B981", "#EAB308", "#8B5CF6", "#EC4899"][i % 6],
+                background: ["#0147FF", "#3B82F6", "#10B981", "#EAB308", "#8B5CF6", "#EC4899"][i % 6],
                 animation: `confettiFall ${1.5 + Math.random() * 2}s ease-out forwards`,
                 animationDelay: `${Math.random() * 0.5}s`,
               }}
@@ -2191,7 +2208,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   value={newLead.full_name}
                   onChange={(e) => setNewLead(p => ({ ...p, full_name: e.target.value }))}
                   placeholder="Ex: João da Silva"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   autoFocus
                 />
               </div>
@@ -2202,7 +2219,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   value={newLead.phone}
                   onChange={(e) => setNewLead(p => ({ ...p, phone: e.target.value }))}
                   placeholder="(11) 99999-9999"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 />
               </div>
               <div>
@@ -2212,7 +2229,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   value={newLead.email}
                   onChange={(e) => setNewLead(p => ({ ...p, email: e.target.value }))}
                   placeholder="email@empresa.com"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 />
               </div>
               <div>
@@ -2220,7 +2237,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <select
                   value={newLead.company_name}
                   onChange={(e) => setNewLead(p => ({ ...p, company_name: e.target.value }))}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 >
                   <option value="">Selecione o produto</option>
                   {products.map(p => (
@@ -2233,7 +2250,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <select
                   value={newLead.owner_id}
                   onChange={(e) => setNewLead(p => ({ ...p, owner_id: e.target.value }))}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 >
                   <option value="">Selecione o responsável</option>
                   {qsUsers.filter(u => u.role === "sdr" || u.role === "admin" || u.role === "gestor").map(u => (
@@ -2246,7 +2263,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <select
                   value={newLead.cadence_id}
                   onChange={(e) => setNewLead(p => ({ ...p, cadence_id: e.target.value }))}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 >
                   <option value="">Selecione a cadência</option>
                   {cadences.map(c => (
@@ -2261,7 +2278,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   onChange={(e) => setNewLead(p => ({ ...p, notes: e.target.value }))}
                   placeholder="Informações adicionais sobre o lead..."
                   rows={2}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 resize-none"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none"
                 />
               </div>
             </div>
@@ -2342,7 +2359,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 }}
                 disabled={savingLead || !newLead.full_name || !newLead.phone}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
-                style={{ background: "#F97316" }}
+                style={{ background: "#0147FF" }}
               >
                 {savingLead ? "Salvando..." : "Cadastrar"}
               </button>
