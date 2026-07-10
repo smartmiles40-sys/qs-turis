@@ -360,11 +360,20 @@ export async function dialViaWavoip(
 
     const res = await window.wavoip!.call.start(to, Object.keys(config).length ? config : undefined);
     if (res?.err) {
-      // Mostra a CAUSA real que a lib devolveu (antes engolíamos o detalhe).
-      const raw = res.err as { message?: string } | string;
-      const detail = typeof raw === "string" ? raw : raw?.message ?? JSON.stringify(raw).slice(0, 140);
       console.warn("[webfone] call.start falhou:", res.err);
-      return { ok: false, error: `Não foi possível iniciar a chamada${detail ? ` — ${detail}` : "."}` };
+      // Traduz os motivos da Wavoip pra mensagens ACIONÁVEIS.
+      const raw = res.err as { message?: string; devices?: { reason?: string }[] } | string;
+      const reason = typeof raw === "object" ? raw?.devices?.[0]?.reason : undefined;
+      const REASONS: Record<string, string> = {
+        PHONE_DONT_EXIST: "este número NÃO tem WhatsApp — confira o telefone do lead (a ligação sai pelo WhatsApp dele).",
+        CALLING_SAME_PHONE: "esse é o número do próprio webfone — escolha outro destino.",
+        DEVICE_NOT_FOUND: "o dispositivo do webfone não foi encontrado — reabra o telefone e tente de novo.",
+        LIMIT_REACHED: "limite de chamadas simultâneas atingido — encerre a chamada atual primeiro.",
+      };
+      const detail = (reason && (REASONS[reason] ?? reason))
+        ?? (typeof raw === "string" ? raw : raw?.message)
+        ?? "";
+      return { ok: false, error: `Não foi possível ligar${detail ? ` — ${detail}` : "."}` };
     }
 
     // Guarda o contexto do lead pra o log do call:ended (mescla com o que o
