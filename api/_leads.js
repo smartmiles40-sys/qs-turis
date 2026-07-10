@@ -84,15 +84,49 @@ function buildFullName(input) {
   return parts.join(' ').trim() || null;
 }
 
+// Vocabulário fechado de temperatura (PT + EN). Usado pra achar o score PELO
+// VALOR, sem depender do nome do campo que o Bitrix mandou.
+const TEMP_WORD = /^(quente|morno|frio|hot|warm|cold)$/i;
+
+// Nomes de campo que NUNCA são o score (evita falso-positivo no scan por valor).
+const NON_SCORE_KEYS = new Set([
+  'source', 'segment', 'full_name', 'first_name', 'last_name', 'email', 'phone',
+  'company', 'company_name', 'city', 'state', 'website', 'linkedin_url',
+  'job_title', 'bitrix_id', 'id', 'cadence_id', 'owner_id', 'location',
+]);
+
 /**
- * Temperatura do lead vinda do Bitrix (rótulo). Aceita vários nomes de campo e
- * guarda o rótulo cru (a app normaliza pra quente/morno/frio na hora de exibir).
- * Sem valor → null (o card fica sem chip; nada de "Quente" inventado).
+ * Temperatura do lead vinda do Bitrix (rótulo). Estratégia à prova de nome de
+ * campo, porque o Bitrix pode mandar sob qualquer rótulo:
+ *   1) campos com nome conhecido (lead_score/temperatura/score/pontuacao/…);
+ *   2) fallback: varre TODO o payload (inclui _raw) atrás de um VALOR que seja
+ *      uma temperatura (Quente/Morno/Frio) — assim funciona mesmo que o campo
+ *      no Bitrix se chame "Grau", "Classificação" ou um código UF_CRM_*.
+ * Guarda o rótulo cru; a app normaliza pra quente/morno/frio ao exibir.
+ * Sem valor → null (card sem chip; nada de "Quente" inventado).
  */
 function pickLeadScore(input) {
-  const raw = input.lead_score ?? input.temperatura ?? input.leadScore ?? input.temperature ?? input.Temperatura ?? null;
-  const s = raw == null ? '' : String(raw).trim();
-  return s || null;
+  // 1) por nome de campo conhecido
+  const named = input.lead_score ?? input.temperatura ?? input.Temperatura ?? input.leadScore ??
+    input.temperature ?? input.score ?? input.pontuacao ?? input.Pontuacao ?? input.classificacao ?? null;
+  const s = named == null ? '' : String(named).trim();
+  if (s) return s;
+
+  // 2) fallback: procura um valor de temperatura em qualquer campo (menos os que
+  //    sabemos que não são score). Inclui um objeto _raw, se o n8n repassar.
+  const seen = new Set();
+  const scan = (obj, depth) => {
+    if (!obj || typeof obj !== 'object' || depth > 3 || seen.has(obj)) return null;
+    seen.add(obj);
+    for (const [k, v] of Object.entries(obj)) {
+      if (v && typeof v === 'object') { const hit = scan(v, depth + 1); if (hit) return hit; continue; }
+      if (NON_SCORE_KEYS.has(String(k).toLowerCase())) continue;
+      const val = v == null ? '' : String(v).trim();
+      if (TEMP_WORD.test(val)) return val;
+    }
+    return null;
+  };
+  return scan(input, 0) || null;
 }
 
 /**

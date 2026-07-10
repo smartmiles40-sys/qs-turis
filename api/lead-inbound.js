@@ -38,6 +38,10 @@ export default async function handler(req, res) {
 
   const body = typeof req.body === 'string' ? safeJson(req.body) : req.body || {};
 
+  // Log de diagnóstico: mostra EXATAMENTE o que chegou (útil pra descobrir sob
+  // qual nome o Bitrix mandou a temperatura). Aparece nos Runtime Logs da Vercel.
+  try { console.log('[lead-inbound] payload recebido:', JSON.stringify(body)); } catch { /* ignora */ }
+
   // precisa de ao menos um identificador
   if (!body.email && !body.phone && !body.full_name && !body.first_name) {
     return res.status(400).json({ success: false, error: 'Informe ao menos email, phone ou nome do lead' });

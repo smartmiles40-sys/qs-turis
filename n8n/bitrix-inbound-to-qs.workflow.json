@@ -45,7 +45,7 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ full_name: $json.full_name, phone: $json.phone, email: $json.email, bitrix_id: $json.bitrix_id, segment: $json.segment, lead_score: $json.lead_score, source: $json.source }) }}",
+        "jsonBody": "={{ JSON.stringify({ full_name: $json.full_name, phone: $json.phone, email: $json.email, bitrix_id: $json.bitrix_id, segment: $json.segment, lead_score: $json.lead_score, source: $json.source, _raw: Object.assign({}, $('Webhook Bitrix (lead)').item.json.query, $('Webhook Bitrix (lead)').item.json.body) }) }}",
         "options": {}
       },
       "id": "in-http-0003-4a10-9b01-0d2e3f4a6003",
