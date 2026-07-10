@@ -115,9 +115,10 @@ export async function createInboundLead(payload) {
     }
   }
 
-  // 1) Responsável: usa o informado ou distribui por round-robin.
-  let ownerId = payload.owner_id || null;
-  if (!ownerId) ownerId = await pickNextSdr();
+  // 1) Responsável: se o payload não trouxer, o GATILHO do banco decide
+  //    (round-robin POR CADÊNCIA — ver migration 0008). Não escolhemos aqui pra
+  //    ter UM algoritmo só e não divergir do que entra direto (n8n).
+  const ownerId = payload.owner_id || null;
 
   // 2) Cadência: usa a informada ou uma disponível padrão.
   let cadenceId = payload.cadence_id || null;
@@ -169,10 +170,14 @@ export async function createInboundLead(payload) {
   }
   const lead = Array.isArray(created) ? created[0] : created;
 
+  // O dono FINAL é o que o gatilho gravou (round-robin por cadência) — as tarefas
+  // têm que ficar com o MESMO SDR do lead, senão o card não aparece pra ele.
+  const finalOwner = (lead && lead.owner_id) || ownerId;
+
   let tasks = 0;
   if (cadenceId && lead) {
-    tasks = await generateCadenceTasks({ leadId: lead.id, cadenceId, ownerId, priority, baseDate: nowIso });
+    tasks = await generateCadenceTasks({ leadId: lead.id, cadenceId, ownerId: finalOwner, priority, baseDate: nowIso });
   }
 
-  return { lead, ownerId, cadenceId, tasks };
+  return { lead, ownerId: finalOwner, cadenceId, tasks };
 }

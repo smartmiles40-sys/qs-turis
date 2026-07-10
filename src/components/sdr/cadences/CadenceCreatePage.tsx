@@ -1,6 +1,8 @@
 // src/components/sdr/cadences/CadenceCreatePage.tsx
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { fetchQsUsers } from "@/lib/qs/queries";
+import { notifyError } from "@/lib/qs/notify";
 import type {
   ChannelType,
   AcquisitionChannel,
@@ -10,6 +12,7 @@ import type {
   ExecutionMode,
   DistributionMode,
   OffdayPolicy,
+  SdrUser,
 } from "../types";
 import {
   CHANNEL_LABELS,
@@ -181,6 +184,7 @@ function getDefaultForm(): FormState {
     weekdays: [1, 2, 3, 4, 5],
     distribution_mode: "alternado",
     offday_policy: "aguardar_proximo_dia",
+    owner_ids: [],
   };
 }
 
@@ -215,6 +219,7 @@ interface FormState {
   weekdays: number[];
   distribution_mode: DistributionMode;
   offday_policy: OffdayPolicy;
+  owner_ids: string[]; // SDRs que recebem os leads desta cadência (round-robin)
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -225,6 +230,12 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   const [form, setForm] = useState<FormState>(getDefaultForm);
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
+  const [sdrs, setSdrs] = useState<SdrUser[]>([]);
+
+  // SDRs disponíveis para atribuir à cadência (só quem qualifica: sdr/closer).
+  useEffect(() => {
+    fetchQsUsers().then((all) => setSdrs(all.filter((u) => u.role === "sdr" || u.role === "closer")));
+  }, []);
 
   // Fetch existing cadence for edit mode
   useEffect(() => {
@@ -233,7 +244,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       setLoading(true);
       const { data: cad, error } = await supabase
         .from("qs_cadences")
-        .select("*, days:qs_cadence_days(*, activities:qs_cadence_activities(*))")
+        .select("*, days:qs_cadence_days(*, activities:qs_cadence_activities(*)), owners:qs_cadence_owners(user_id)")
         .eq("id", cadenceId)
         .single();
       if (error || !cad) {
@@ -274,6 +285,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
         weekdays: c.execution_weekdays ?? [1, 2, 3, 4, 5],
         distribution_mode: c.distribution_mode ?? "alternado",
         offday_policy: c.offday_policy ?? "aguardar_proximo_dia",
+        owner_ids: ((c.owners ?? []) as { user_id: string }[]).map((o) => o.user_id),
       });
       setLoading(false);
     }
@@ -304,14 +316,14 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
     if (isEdit && cadenceId) {
       // Update existing
       const { error } = await supabase.from("qs_cadences").update(cadencePayload).eq("id", cadenceId);
-      if (error) { console.warn("Erro ao atualizar cadência:", error); setSaving(false); return; }
+      if (error) { console.warn("Erro ao atualizar cadência:", error); notifyError("Não foi possível salvar a cadência — tente novamente."); setSaving(false); return; }
 
       // Delete old days (cascade should handle activities)
       await supabase.from("qs_cadence_days").delete().eq("cadence_id", cadenceId);
     } else {
       // Insert new
       const { data, error } = await supabase.from("qs_cadences").insert(cadencePayload).select("id").single();
-      if (error || !data) { console.warn("Erro ao criar cadência:", error); setSaving(false); return; }
+      if (error || !data) { console.warn("Erro ao criar cadência:", error); notifyError("Não foi possível criar a cadência — tente novamente."); setSaving(false); return; }
       savedCadenceId = data.id;
     }
 
@@ -334,6 +346,17 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
         }));
         const { error: actErr } = await supabase.from("qs_cadence_activities").insert(acts);
         if (actErr) console.warn("Erro ao criar atividades:", actErr);
+      }
+    }
+
+    // Donos da cadência (quem recebe os leads no round-robin). Substitui o conjunto.
+    if (savedCadenceId) {
+      await supabase.from("qs_cadence_owners").delete().eq("cadence_id", savedCadenceId);
+      if (form.owner_ids.length > 0) {
+        const { error: ownErr } = await supabase.from("qs_cadence_owners").insert(
+          form.owner_ids.map((userId) => ({ cadence_id: savedCadenceId, user_id: userId, rr_pointer: false }))
+        );
+        if (ownErr) { console.warn("Erro ao salvar os SDRs da cadência:", ownErr); notifyError("Cadência salva, mas os SDRs responsáveis NÃO foram gravados — reabra e tente de novo."); }
       }
     }
 
@@ -592,6 +615,48 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   function renderStepEntryManagement() {
     return (
       <div className="space-y-8">
+        {/* SDRs responsáveis — quem recebe os leads DESTA cadência (round-robin) */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">SDRs responsáveis por esta cadência</label>
+          <p className="text-xs text-gray-500 mb-3">
+            Os leads que entrarem nesta cadência são divididos <b>igualmente entre os SDRs marcados</b> (rodízio). Se nenhum for marcado, caem na distribuição geral (o SDR com menos leads no momento).
+          </p>
+          {sdrs.length === 0 ? (
+            <div className="p-4 rounded-xl border-2 border-dashed border-amber-200 bg-amber-50 text-[13px] text-amber-800">
+              Nenhum SDR cadastrado ainda. Crie os SDRs em <b>Configurações → Usuários</b> pra poder atribuí-los aqui.
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {sdrs.map((u) => {
+                const on = form.owner_ids.includes(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => updateForm("owner_ids", on ? form.owner_ids.filter((id) => id !== u.id) : [...form.owner_ids, u.id])}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full border-2 text-sm font-medium transition-all"
+                    style={on
+                      ? { borderColor: "#F97316", background: "#F97316", color: "#fff" }
+                      : { borderColor: "#E5E7EB", background: "#fff", color: "#4B5563" }}
+                  >
+                    <span className="flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold"
+                      style={{ background: on ? "rgba(255,255,255,.25)" : "#F3F4F6", color: on ? "#fff" : "#6B7280" }}>
+                      {u.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)}
+                    </span>
+                    {u.name}
+                    {on && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {form.owner_ids.length > 0 && (
+            <p className="text-xs text-gray-400 mt-2">{form.owner_ids.length} SDR{form.owner_ids.length > 1 ? "s" : ""} no rodízio desta cadência.</p>
+          )}
+        </div>
+
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-3">Distribuição de Leads</label>
           <div className="flex flex-col md:flex-row gap-3">
