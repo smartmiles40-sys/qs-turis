@@ -67,6 +67,7 @@ import CoveragePanel from "./dashboard/CoveragePanel";
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import ChatAppDock from "./chatapp/ChatAppDock";
 import GlobalToasts from "./GlobalToasts";
+import CommandPalette from "./CommandPalette";
 import { toggleWebphone } from "@/lib/wavoip";
 
 export type SdrNav =
@@ -346,8 +347,19 @@ export default function SdrLayout() {
           </nav>
         </div>
 
-        {/* Right: Telefone + Notificações + Avatar */}
+        {/* Right: Busca + Telefone + Notificações + Avatar */}
         <div className="flex items-center gap-2">
+          {/* Busca global (Ctrl+K) */}
+          <button
+            onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}
+            title="Buscar cliente (Ctrl+K)"
+            aria-label="Buscar cliente"
+            className="flex items-center gap-2 h-9 px-3 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors border border-gray-200"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <span className="hidden lg:inline text-[12px] font-medium">Buscar</span>
+            <kbd className="hidden lg:inline text-[10px] font-bold px-1 py-0.5 rounded border border-gray-200 text-gray-400">Ctrl K</kbd>
+          </button>
           {/* Webfone (Wavoip) — abre o discador dentro do QS, sob demanda */}
           <button
             onClick={handleOpenPhone}
@@ -572,6 +584,9 @@ export default function SdrLayout() {
 
       {/* Toasts globais (erros de gravação, confirmações) */}
       <GlobalToasts />
+
+      {/* Busca global Ctrl+K */}
+      <CommandPalette onOpenLead={openLeadDetail} />
     </div>
   );
 }

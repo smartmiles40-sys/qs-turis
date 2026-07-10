@@ -16,7 +16,7 @@ import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { computeLeadScore } from "@/lib/leadScore";
 import { startWhatsAppCall, formatPhoneDisplay } from "@/lib/whatsapp";
-import { dialViaWavoip } from "@/lib/wavoip";
+import { dialViaWavoip, setOnCallEnded } from "@/lib/wavoip";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
 import type { SdrUser } from "../types";
@@ -347,29 +347,73 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [meetingTeam, setMeetingTeam] = useState({ schedulers: DEFAULT_MEETING_SCHEDULERS, owners: DEFAULT_MEETING_OWNERS });
   useEffect(() => { loadMeetingTeam().then(setMeetingTeam); }, []);
 
-  // ── Auto-atualização da fila (60s) ─────────────────────────────────
-  // Lead quente novo aparece sem F5. Não atualiza quando o SDR está no meio
-  // de algo (modal aberto, desfecho pendente, observação digitada) nem com a
-  // aba oculta. O guard vive num ref pra não recriar o intervalo a cada render.
+  // ── Fila em TEMPO REAL + fallback de polling ───────────────────────
+  // Realtime: mudança em qs_tasks/qs_leads → refetch (debounced 1,2s). O poll de
+  // 60s vira rede de segurança (pega o que o realtime perder). Nada atualiza com
+  // modal aberto/desfecho pendente (pollBusyRef) nem com a aba oculta.
   const pollBusyRef = useRef(false);
-  useEffect(() => {
-    const id = setInterval(async () => {
-      if (document.hidden || pollBusyRef.current) return;
-      try {
-        const [tasksRes, leadsRes, notesRes, contactedRes] = await Promise.all([
-          supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
-          supabase.from("qs_leads").select("*"),
-          supabase.from("qs_notes").select("lead_id"),
-          supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
-        ]);
-        if (tasksRes.data) setTasks(tasksRes.data as Task[]);
-        if (leadsRes.data) setLeads(leadsRes.data as Lead[]);
-        if (notesRes.data) setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[]));
-        if (contactedRes.data) setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[]));
-      } catch { /* silencioso — próxima rodada tenta de novo */ }
-    }, 60_000);
-    return () => clearInterval(id);
+  const refreshQueue = useCallback(async () => {
+    if (document.hidden || pollBusyRef.current) return;
+    try {
+      const [tasksRes, leadsRes, notesRes, contactedRes] = await Promise.all([
+        supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
+        supabase.from("qs_leads").select("*"),
+        supabase.from("qs_notes").select("lead_id"),
+        supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
+      ]);
+      if (tasksRes.data) setTasks(tasksRes.data as Task[]);
+      if (leadsRes.data) setLeads(leadsRes.data as Lead[]);
+      if (notesRes.data) setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[]));
+      if (contactedRes.data) setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[]));
+    } catch { /* silencioso — próxima rodada tenta de novo */ }
   }, []);
+
+  useEffect(() => {
+    const id = setInterval(refreshQueue, 60_000); // fallback
+    // Realtime (precisa das tabelas na publication — migration 0009)
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const onChange = () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(refreshQueue, 1_200);
+    };
+    const channel = supabase
+      .channel("qs_fila_changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "qs_tasks" }, onChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "qs_leads" }, onChange)
+      .subscribe();
+    return () => {
+      clearInterval(id);
+      if (debounce) clearTimeout(debounce);
+      supabase.removeChannel(channel);
+    };
+  }, [refreshQueue]);
+
+  // ── Presença: "em atendimento por Fulano" ──────────────────────────
+  // Cada SDR anuncia em qual lead está (card ativo). Se OUTRO usuário estiver no
+  // mesmo lead, o card mostra o aviso — fim da ligação duplicada.
+  const [othersOnLead, setOthersOnLead] = useState<Map<string, string>>(new Map());
+  const presenceRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  useEffect(() => {
+    if (!currentUser) return;
+    const ch = supabase.channel("qs_painel_presence", { config: { presence: { key: currentUser.id } } });
+    presenceRef.current = ch;
+    const rebuild = () => {
+      const state = ch.presenceState<{ name: string; leadId: string | null }>();
+      const m = new Map<string, string>();
+      Object.entries(state).forEach(([userId, metas]) => {
+        if (userId === currentUser.id) return;
+        const meta = metas[metas.length - 1];
+        if (meta?.leadId) m.set(meta.leadId, meta.name);
+      });
+      setOthersOnLead(m);
+    };
+    ch.on("presence", { event: "sync" }, rebuild)
+      .on("presence", { event: "join" }, rebuild)
+      .on("presence", { event: "leave" }, rebuild)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); presenceRef.current = null; };
+  }, [currentUser]);
+
 
   // Placar REAL: atividades concluídas (hoje/mês) + metas de qs_goals.
   const [doneCounts, setDoneCounts] = useState({ doneToday: 0, doneMonth: 0 });
@@ -869,6 +913,87 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return filtered;
   }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter]);
 
+  // Card "hero" atual (o que o SDR está atendendo) — usado no render E nos atalhos.
+  const heroTaskMemo = useMemo(() => {
+    const normais = filteredTasks.filter((t) => !t.is_extra);
+    const activeInList = activeTaskId ? filteredTasks.find((t) => t.id === activeTaskId) : undefined;
+    return activeInList ?? normais[0];
+  }, [filteredTasks, activeTaskId]);
+
+  // ── Atalhos de teclado (item 2 da Sprint Velocidade) ──────────────────────
+  // 1 Ganho/Agendou · 2 Pediu retorno · 3 Perdido · 4-7 sem contato ·
+  // C concluir · Enter confirma desfecho pendente · N próxima da fila.
+  // Só agem com um card na tela e NENHUM campo de texto focado (e sem modal aberto).
+  const shortcutCtx = useRef<{ hero?: Task; pending: typeof pendingResult; busy: boolean }>({ hero: undefined, pending: null, busy: false });
+  shortcutCtx.current = {
+    hero: heroTaskMemo,
+    pending: pendingResult,
+    busy: !!(meetingFor || transferOpen || skipMenuOpen || showExtraTaskModal || showDialer || showNewLeadModal || finalizing),
+  };
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const { hero, pending, busy } = shortcutCtx.current;
+      if (!hero || busy || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+
+      const k = e.key.toLowerCase();
+      const noContact = ["nao_atendeu", "caixa_postal", "numero_errado", "desligou"];
+      if (k === "1") { e.preventDefault(); openMeetingGanho(hero); }
+      else if (k === "2") { e.preventDefault(); openExtraFromRetorno(hero); }
+      else if (k === "3") { e.preventDefault(); setPendingResult({ taskId: hero.id, result: "sem_interesse" }); }
+      else if (["4", "5", "6", "7"].includes(k)) { e.preventDefault(); setPendingResult({ taskId: hero.id, result: noContact[Number(k) - 4] }); }
+      else if (k === "c") { e.preventDefault(); handleConcludeActivity(hero); }
+      else if (k === "enter" && pending && pending.taskId === hero.id) {
+        e.preventDefault();
+        shortcutCtx.current.busy = true; // anti repetição até o próximo render
+        handleContactResult(hero.id, pending.result).finally(() => setPendingResult(null));
+      }
+      else if (k === "n" || k === "arrowright") {
+        e.preventDefault();
+        // próxima da fila (depois do hero)
+        const normais = filteredTasks.filter((t) => !t.is_extra && t.id !== hero.id);
+        if (normais[0]) selectActive(normais[0].id);
+      }
+      else if (k === "escape" && pending) { setPendingResult(null); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredTasks]);
+
+  // Anuncia o lead do card ativo (hero) sempre que ele muda — presença.
+  const heroLeadIdForPresence = heroTaskMemo?.lead_id ?? null;
+  useEffect(() => {
+    const ch = presenceRef.current;
+    if (!ch || !currentUser) return;
+    ch.track({ name: currentUser.name, leadId: heroLeadIdForPresence }).catch(() => { /* offline */ });
+  }, [heroLeadIdForPresence, currentUser]);
+
+  // ── Desfecho automático pós-ligação (webfone) ─────────────────────────────
+  // A chamada terminou → seleciona o card do lead e abre o desfecho. Se não foi
+  // atendida, já pré-seleciona "Não atendeu" (o SDR só confirma com Enter).
+  const tasksRef = useRef<Task[]>(tasks);
+  tasksRef.current = tasks;
+  useEffect(() => {
+    setOnCallEnded((info) => {
+      if (!info.leadId) return;
+      const task = tasksRef.current.find((t) => t.lead_id === info.leadId && (t.status === "pendente" || t.status === "atrasada"));
+      if (!task) return;
+      setActiveTaskId(task.id);
+      if (!info.answered) {
+        setPendingResult({ taskId: task.id, result: "nao_atendeu" });
+        showToast("Ligação não atendida — confirme o desfecho (Enter)");
+      } else {
+        showToast(`Ligação encerrada (${Math.round(info.durationSec / 60)}min) — registre o desfecho`);
+      }
+      // traz o card pra vista
+      setTimeout(() => document.querySelector(".qsx-hero")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+    });
+    return () => setOnCallEnded(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const endTodayMs = (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d.getTime(); })();
   const todayTasks = tasks.filter((t) => t.status === "pendente" && new Date(t.scheduled_at).getTime() <= endTodayMs);
   const overdueTasks = tasks.filter((t) => t.status === "atrasada");
@@ -1092,6 +1217,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               {task.is_extra ? "Atividade extra" : isActiveCard ? "Atendendo agora" : "Próxima atividade"}
             </span>
             <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Lead score ${temp.score}/100`}>{temp.label}</span>
+            {othersOnLead.has(task.lead_id) && (
+              <span className="qsx-chip" style={{ background: "rgba(229,72,77,.12)", color: "var(--red)", animation: "pulseRed 1.6s ease-in-out infinite" }} title="Outro usuário está com este lead aberto agora">
+                👤 em atendimento por {othersOnLead.get(task.lead_id)}
+              </span>
+            )}
             {slaAlert && (
               <span className="qsx-chip" style={{ background: slaAlert.bg, color: slaAlert.text, animation: slaAlert.pulse ? "pulseRed 1.5s ease-in-out infinite" : undefined }}>
                 {slaAlert.label}
@@ -1165,9 +1295,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           {/* Ações: botão do canal + concluir atividade + pular */}
           <div className="flex items-center gap-2.5 flex-wrap">
             {renderChannelAction(task, lead)}
-            <button onClick={() => handleConcludeActivity(task)} className="qsx-btn qsx-btn-green" title="Marcar como concluída (conta no placar do dia)">
+            <button onClick={() => handleConcludeActivity(task)} className="qsx-btn qsx-btn-green" title="Marcar como concluída — atalho: C">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-              Concluir atividade
+              Concluir atividade <span className="qsx-kbd" style={{ background: "rgba(255,255,255,.25)", color: "#fff", borderColor: "transparent" }}>C</span>
             </button>
             <button
               onClick={() => setSkipMenuOpen((o) => !o)}
@@ -1239,10 +1369,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             {/* Caminho principal: positivo em destaque, retorno/perdido médios */}
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={() => openMeetingGanho(task)} className="qsx-out-primary">
-                Ganho / Agendou
+                Ganho / Agendou <span className="qsx-kbd">1</span>
               </button>
               <button onClick={() => openExtraFromRetorno(task)} className="qsx-out" data-tone="neutral">
-                Pediu retorno
+                Pediu retorno <span className="qsx-kbd">2</span>
               </button>
               <button
                 onClick={() => setPendingResult({ taskId: task.id, result: "sem_interesse" })}
@@ -1250,20 +1380,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 data-tone="lose"
                 data-on={pending === "sem_interesse" ? "1" : undefined}
               >
-                Perdido
+                Perdido <span className="qsx-kbd">3</span>
               </button>
             </div>
             {/* Desfechos "sem contato" — recuados, o SDR só olha quando precisa */}
             <div className="flex items-center gap-2 flex-wrap mt-2.5">
               <span className="text-[12px] font-semibold" style={{ color: "var(--ink3)" }}>Sem contato:</span>
-              {["nao_atendeu", "caixa_postal", "numero_errado", "desligou"].map((key) => (
+              {["nao_atendeu", "caixa_postal", "numero_errado", "desligou"].map((key, idx) => (
                 <button
                   key={key}
                   onClick={() => setPendingResult({ taskId: task.id, result: key })}
                   className="qsx-out-mini"
                   data-on={pending === key ? "1" : undefined}
                 >
-                  {outcomes.find((o) => o.key === key)?.label}
+                  {outcomes.find((o) => o.key === key)?.label} <span className="qsx-kbd">{idx + 4}</span>
                 </button>
               ))}
             </div>
@@ -1503,6 +1633,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
         /* Desfecho — hierarquia: caminho positivo salta, os raros recuam */
         .qsx-out-primary { height: 40px; padding: 0 20px; border-radius: 11px; font-size: 13.5px; font-weight: 800; border: 0; background: var(--green); color: #fff; cursor: pointer; white-space: nowrap; font-family: inherit; box-shadow: 0 8px 18px -10px rgba(18,161,138,.65); transition: filter .12s; }
+        /* Dica de atalho de teclado dentro dos botões */
+        .qsx-kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 4px; border-radius: 4px; border: 1px solid var(--line); background: var(--line2); color: var(--ink3); font-size: 10px; font-weight: 800; vertical-align: 1px; }
+        .qsx-out-primary .qsx-kbd { background: rgba(255,255,255,.25); color: #fff; border-color: transparent; }
         .qsx-out-primary:hover { filter: brightness(1.05); }
         .qsx-out-mini { height: 30px; padding: 0 11px; border-radius: 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); background: #fff; color: var(--ink3); cursor: pointer; white-space: nowrap; font-family: inherit; transition: background .12s, color .12s; }
         .qsx-out-mini:hover { background: var(--line2); color: var(--ink2); }
@@ -1775,8 +1908,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           ) : (() => {
             const extras = filteredTasks.filter((t) => t.is_extra);
             const normais = filteredTasks.filter((t) => !t.is_extra);
-            const activeInList = activeTaskId ? filteredTasks.find((t) => t.id === activeTaskId) : undefined;
-            const heroTask = activeInList ?? normais[0];
+            const heroTask = heroTaskMemo;
             const restNormais = normais.filter((t) => t.id !== heroTask?.id);
             const extrasCol = extras.filter((t) => t.id !== heroTask?.id);
             const manha = restNormais.filter((t) => periodOf(t) === "manha");

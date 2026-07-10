@@ -941,6 +941,51 @@ export default function SdrDashboard() {
     loadOperationalKpis();
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
+  // ── Funil por etapa (Sprint Velocidade): coorte de leads criados no período ──
+  const [funnel, setFunnel] = useState<{ label: string; count: number }[]>([]);
+  const [loadingFunnel, setLoadingFunnel] = useState(true);
+  useEffect(() => {
+    async function loadFunnel() {
+      setLoadingFunnel(true);
+      const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      const ownerId = selectedUser === "all" ? undefined : selectedUser;
+
+      let qLeads = supabase.from("qs_leads").select("id, status");
+      if (ownerId) qLeads = qLeads.eq("owner_id", ownerId);
+      if (from) qLeads = qLeads.gte("created_at", from);
+      if (to) qLeads = qLeads.lte("created_at", to);
+
+      const [leadsRes, tasksRes, meetsRes] = await Promise.all([
+        qLeads,
+        supabase.from("qs_tasks").select("lead_id, contact_result").eq("status", "concluida"),
+        supabase.from("qs_meetings").select("lead_id").neq("status", "cancelada"),
+      ]);
+
+      const cohort = (leadsRes.data ?? []) as { id: string; status: string }[];
+      const ids = new Set(cohort.map((l) => l.id));
+      const contacted = new Set<string>();
+      const connected = new Set<string>();
+      ((tasksRes.data ?? []) as { lead_id: string; contact_result: string | null }[]).forEach((t) => {
+        if (!ids.has(t.lead_id)) return;
+        contacted.add(t.lead_id);
+        if (t.contact_result === "atendeu" || t.contact_result === "ganho") connected.add(t.lead_id);
+      });
+      const met = new Set<string>();
+      ((meetsRes.data ?? []) as { lead_id: string }[]).forEach((m) => { if (ids.has(m.lead_id)) met.add(m.lead_id); });
+      const won = cohort.filter((l) => l.status === "ganho").length;
+
+      setFunnel([
+        { label: "Leads novos", count: cohort.length },
+        { label: "Contatados", count: contacted.size },
+        { label: "Conectados (atenderam)", count: connected.size },
+        { label: "Reunião agendada", count: met.size },
+        { label: "Ganhos", count: won },
+      ]);
+      setLoadingFunnel(false);
+    }
+    loadFunnel();
+  }, [selectedUser, selectedPeriod, customStart, customEnd]);
+
   // KPIs de negócio: reuniões (show rate), pipeline em R$ e conversão por fonte.
   useEffect(() => {
     async function loadBusinessKpis() {
@@ -1282,6 +1327,40 @@ export default function SdrDashboard() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Funil por etapa (Sprint Velocidade) ──────────────────────────── */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
+        <h2 className="text-sm font-medium text-gray-700 mb-1">Funil por Etapa</h2>
+        <p className="text-xs text-gray-400 mb-4">Leads criados no período e até onde chegaram — a % mostra quanto passa de uma etapa pra próxima.</p>
+        {loadingFunnel ? (
+          <p className="text-sm text-gray-500 text-center py-6">Carregando...</p>
+        ) : funnel.length === 0 || funnel[0].count === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-6">Nenhum lead criado no período.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {funnel.map((stage, i) => {
+              const base = funnel[0].count || 1;
+              const widthPct = Math.max((stage.count / base) * 100, 2);
+              const prev = i > 0 ? funnel[i - 1].count : null;
+              const stepPct = prev != null ? (prev > 0 ? Math.round((stage.count / prev) * 100) : 0) : null;
+              const colors = ["#0147FF", "#3B6FF7", "#6D3BEB", "#E8920B", "#12A18A"];
+              return (
+                <div key={stage.label} className="flex items-center gap-3">
+                  <span className="w-44 shrink-0 text-xs font-semibold text-gray-600 text-right">{stage.label}</span>
+                  <div className="flex-1 h-8 rounded-lg bg-gray-50 relative overflow-hidden">
+                    <div className="h-full rounded-lg flex items-center px-2.5 transition-all" style={{ width: `${widthPct}%`, background: colors[i] }}>
+                      <span className="text-[12px] font-extrabold text-white tabular-nums">{stage.count}</span>
+                    </div>
+                  </div>
+                  <span className="w-14 shrink-0 text-[11px] font-bold text-right tabular-nums" style={{ color: stepPct == null ? "#9CA3AF" : stepPct >= 50 ? "#059669" : stepPct >= 25 ? "#D97706" : "#DC2626" }}>
+                    {stepPct == null ? "100%" : `${stepPct}%`}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

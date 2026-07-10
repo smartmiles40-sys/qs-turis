@@ -35,6 +35,7 @@ interface LeadDetailPageProps {
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type TabKey =
+  | "historico"
   | "visao_geral"
   | "informacoes_pessoais"
   | "empresa"
@@ -142,6 +143,7 @@ const SCOPE_ORDER: CustomFieldScope[] = ["pessoal", "empresa", "contato"];
 // ── Tabs Definition ──────────────────────────────────────────────────────────
 
 const TABS: TabItem[] = [
+  { key: "historico", label: "Histórico" },
   { key: "visao_geral", label: "Visão Geral" },
   { key: "informacoes_pessoais", label: "Informações Pessoais" },
   { key: "empresa", label: "Empresa" },
@@ -156,7 +158,7 @@ const TABS: TabItem[] = [
 
 export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) {
   const { currentUser } = useQsAuth();
-  const [activeTab, setActiveTab] = useState<TabKey>("visao_geral");
+  const [activeTab, setActiveTab] = useState<TabKey>("historico");
   const [newNote, setNewNote] = useState("");
   const [showHandoverModal, setShowHandoverModal] = useState(false);
   const [selectedCloser, setSelectedCloser] = useState("");
@@ -557,6 +559,75 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
 
   function renderTabContent(lead: Lead) {
     switch (activeTab) {
+      // ── Histórico (timeline unificada) ──
+      case "historico": {
+        type Ev = { ts: string; icon: string; color: string; title: string; body?: string };
+        const outcomeLabels: Record<string, string> = {
+          ganho: "Ganho / Agendou", concluida: "Concluída", sem_interesse: "Perdido", atendeu: "Atendeu (pediu retorno)",
+          nao_atendeu: "Não atendeu", caixa_postal: "Caixa postal", numero_errado: "Nº errado", desligou: "Desligou",
+        };
+        const meetingLabels: Record<string, string> = { agendada: "agendada", realizada: "realizada", no_show: "no-show", cancelada: "cancelada" };
+        const events: Ev[] = [];
+
+        // Chegada do lead
+        const chegada = lead.arrived_at || lead.created_at;
+        if (chegada) events.push({ ts: chegada, icon: "📥", color: "#0147FF", title: "Lead entrou no sistema", body: `Origem: ${SOURCE_LABELS[lead.source] ?? lead.source}${lead.segment ? ` · ${lead.segment}` : ""}` });
+
+        // Anotações
+        notes.forEach((n) => events.push({ ts: n.created_at, icon: "📝", color: "#6D3BEB", title: "Anotação", body: n.body }));
+
+        // Atividades concluídas (com desfecho)
+        tasks.filter((t) => t.status === "concluida" && t.completed_at).forEach((t) => {
+          const res = (t as unknown as { contact_result?: string }).contact_result;
+          events.push({
+            ts: t.completed_at!, icon: "✅", color: "#12A18A",
+            title: `${CHANNEL_LABELS[t.channel_type] ?? t.channel_type} — ${res ? (outcomeLabels[res] ?? res) : "concluída"}`,
+            body: t.notes || undefined,
+          });
+        });
+
+        // Reuniões
+        meetings.forEach((m) => events.push({
+          ts: m.created_at, icon: "📅", color: "#E8920B",
+          title: `Reunião ${meetingLabels[m.status] ?? m.status} — ${formatDateTime(m.scheduled_at)}`,
+          body: [m.title, m.location].filter(Boolean).join(" · ") || undefined,
+        }));
+
+        // Desfecho do lead
+        if (lead.status === "ganho") events.push({ ts: lead.updated_at, icon: "🏆", color: "#12A18A", title: "Lead GANHO" });
+        if (lead.status === "perdido") events.push({ ts: lead.updated_at, icon: "🚫", color: "#E5484D", title: "Lead perdido", body: lead.loss_reason?.label ? `Motivo: ${lead.loss_reason.label}` : undefined });
+
+        events.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+
+        return (
+          <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Linha do tempo</h3>
+            <p className="text-xs text-gray-400 mb-5">Tudo que aconteceu com este cliente, do mais recente ao mais antigo.</p>
+            {events.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">Nenhum evento ainda.</p>
+            ) : (
+              <div className="relative pl-6">
+                <span className="absolute left-[9px] top-2 bottom-2 w-px bg-gray-200" aria-hidden />
+                <div className="flex flex-col gap-4">
+                  {events.map((ev, i) => (
+                    <div key={i} className="relative">
+                      <span className="absolute -left-6 top-0.5 w-[19px] h-[19px] rounded-full flex items-center justify-center text-[10px] bg-white border" style={{ borderColor: ev.color }}>
+                        {ev.icon}
+                      </span>
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-[13.5px] font-semibold text-gray-900">{ev.title}</span>
+                        <span className="text-[11px] text-gray-400 tabular-nums">{formatDateTime(ev.ts)}</span>
+                      </div>
+                      {ev.body && <p className="text-[12.5px] text-gray-500 mt-0.5 whitespace-pre-wrap max-w-[70ch]">{ev.body}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
       // ── Visão Geral ──
       case "visao_geral":
         return (

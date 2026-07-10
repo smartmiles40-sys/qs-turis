@@ -88,6 +88,19 @@ interface TrackedCall {
 const trackedCalls = new Map<string, TrackedCall>();
 let loggingSetup = false;
 
+// ── Callback de fim de chamada (desfecho automático no Painel) ───────────────
+export interface CallEndedInfo {
+  leadId: string | null;
+  phone: string | null;
+  answered: boolean;
+  durationSec: number;
+}
+let onCallEndedCb: ((info: CallEndedInfo) => void) | null = null;
+/** Registra quem reage ao fim de uma chamada (ex.: o Painel abre o desfecho). */
+export function setOnCallEnded(cb: ((info: CallEndedInfo) => void) | null): void {
+  onCallEndedCb = cb;
+}
+
 function extractCallId(p: unknown): string | undefined {
   if (p && typeof p === "object") {
     const o = p as Record<string, unknown>;
@@ -169,6 +182,18 @@ function setupCallLogging(api: WavoipApi): void {
       direction: c?.direction ?? "out",
       kind: "call",
     });
+
+    // Avisa o app (Painel abre o desfecho do card na hora).
+    if (onCallEndedCb) {
+      try {
+        onCallEndedCb({
+          leadId: c?.leadId ?? null,
+          phone: c?.phone ?? extractPhone(p) ?? null,
+          answered,
+          durationSec: durSec,
+        });
+      } catch { /* callback do app não pode derrubar o webfone */ }
+    }
   });
 }
 
