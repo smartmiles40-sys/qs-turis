@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
+import { getLeadScore } from "@/lib/leadScore";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import type {
@@ -1125,6 +1126,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg font-bold text-gray-900">{lead.full_name}</h1>
+              {(() => { const t = getLeadScore(lead); return t ? (
+                <span className="text-xs font-bold px-2 py-0.5 rounded-md" style={{ background: t.bg, color: t.color }} title="Temperatura vinda do Bitrix">{t.label}</span>
+              ) : null; })()}
               {lead.bitrix_id && (
                 <button
                   onClick={async () => { try { await navigator.clipboard.writeText(lead.bitrix_id!); } catch { /* ignore */ } }}
@@ -1138,6 +1142,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             <p className="text-sm text-gray-500">
               {lead.job_title} {lead.company_name ? `na ${lead.company_name}` : ""}
             </p>
+            {lead.segment && (
+              <p className="text-[13px] font-semibold text-gray-600 mt-0.5">Fonte: <span className="text-gray-800">{lead.segment}</span></p>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">

@@ -1,21 +1,22 @@
 // src/lib/leadScore.ts
 // -----------------------------------------------------------------------------
-// Lead Score / temperatura calculado no próprio QS a partir dos sinais que já
-// temos (sem depender de dado externo). Dá pra trocar por um score vindo do
-// Bitrix/LP depois — basta preencher lead.estimated_value ou um campo dedicado
-// e ajustar aqui. Retorna nível (quente/morno/frio) + número 0–100 + cores.
+// Temperatura do lead = REFLEXO do rótulo que veio do Bitrix (lead.lead_score).
+// NÃO calculamos mais nada localmente: o QS não inventa "Quente". Se o Bitrix não
+// mandou temperatura, a função devolve null e o card simplesmente não mostra chip.
+//
+// O Bitrix manda um rótulo cru ("Quente"/"Morno"/"Frio", ou "hot"/"warm"/"cold");
+// aqui a gente normaliza pra quente|morno|frio e devolve as cores do chip.
 // -----------------------------------------------------------------------------
 
-import type { Lead, Cadence } from "@/components/sdr/types";
+import type { Lead } from "@/components/sdr/types";
 
 export type LeadTemperature = "quente" | "morno" | "frio";
 
 export interface LeadScore {
-  score: number; // 0–100
   level: LeadTemperature;
   label: string; // "Quente" | "Morno" | "Frio"
   emoji: string;
-  color: string; // cor do texto/borda
+  color: string; // cor do texto/borda do chip
   bg: string; // fundo do chip
 }
 
@@ -25,53 +26,27 @@ const TEMP_META: Record<LeadTemperature, { label: string; emoji: string; color: 
   frio:   { label: "Frio",   emoji: "❄️", color: "#2563EB", bg: "rgba(37,99,235,.10)" },
 };
 
-function daysSince(iso: string | null | undefined): number | null {
-  if (!iso) return null;
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return null;
-  return Math.max(0, (Date.now() - t) / 86_400_000);
+/**
+ * Traduz o rótulo cru do Bitrix para um nível de temperatura conhecido.
+ * Aceita PT (quente/morno/frio), EN (hot/warm/cold) e sinônimos comuns.
+ * Devolve null quando não reconhece (aí o card fica sem chip).
+ */
+export function normalizeTemperature(raw: string | null | undefined): LeadTemperature | null {
+  if (!raw) return null;
+  const s = raw.trim().toLowerCase();
+  if (!s) return null;
+  if (/(quente|hot|alta|high)/.test(s)) return "quente";
+  if (/(morno|warm|m[eé]dia|medium|med)/.test(s)) return "morno";
+  if (/(frio|cold|baixa|low)/.test(s)) return "frio";
+  return null;
 }
 
 /**
- * Calcula a temperatura do lead.
- * @param attempts nº de tentativas de contato já feitas (0 = ainda não contatado)
+ * Temperatura do lead a partir do rótulo do Bitrix (lead.lead_score).
+ * @returns o chip pronto, ou null se o lead não tem score do Bitrix.
  */
-export function computeLeadScore(
-  lead: Lead | undefined | null,
-  cadence?: Cadence | undefined | null,
-  attempts = 0
-): LeadScore {
-  let score = 50;
-
-  // Recência da chegada (lead novo = mais quente)
-  const d = daysSince(lead?.arrived_at) ?? daysSince(lead?.created_at);
-  if (d !== null) {
-    if (d < 1) score += 30;
-    else if (d < 3) score += 15;
-    else if (d < 7) score += 5;
-    else if (d < 15) score -= 5;
-    else score -= 15;
-  }
-
-  // Canal de aquisição
-  switch (cadence?.acquisition_channel) {
-    case "levantada_de_mao": score += 20; break;
-    case "indicacao": score += 10; break;
-    case "resgate": score -= 5; break;
-    default: break; // outbound / desconhecido
-  }
-
-  // Tentativas sem sucesso esfriam o lead
-  if (attempts > 1) score -= (attempts - 1) * 8;
-
-  // Completude do cadastro (lead mais "trabalhável")
-  if (lead?.email) score += 5;
-  if (lead?.phone) score += 5;
-  if (lead?.linkedin_url) score += 3;
-
-  score = Math.max(0, Math.min(100, Math.round(score)));
-
-  const level: LeadTemperature = score >= 70 ? "quente" : score >= 40 ? "morno" : "frio";
-  const meta = TEMP_META[level];
-  return { score, level, ...meta };
+export function getLeadScore(lead: Lead | undefined | null): LeadScore | null {
+  const level = normalizeTemperature(lead?.lead_score);
+  if (!level) return null;
+  return { level, ...TEMP_META[level] };
 }

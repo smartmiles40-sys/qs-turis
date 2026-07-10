@@ -24,6 +24,7 @@
             { "id": "a3-phone", "name": "phone", "type": "string", "value": "={{ ($json.query?.telefone || $json.body?.telefone || '').toString().trim() }}" },
             { "id": "a4-bitrix_id", "name": "bitrix_id", "type": "string", "value": "={{ ($json.query?.ID || $json.body?.ID || '').toString().trim() }}" },
             { "id": "a5-segment", "name": "segment", "type": "string", "value": "={{ ($json.query?.Fonte || $json.body?.Fonte || '').toString().trim() }}" },
+            { "id": "a7-lead_score", "name": "lead_score", "type": "string", "value": "={{ ($json.query?.Temperatura || $json.body?.Temperatura || $json.query?.Pontuacao || $json.body?.Pontuacao || '').toString().trim() }}" },
             { "id": "a6-source", "name": "source", "type": "string", "value": "integracao" }
           ]
         },
@@ -44,7 +45,7 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ full_name: $json.full_name, phone: $json.phone, email: $json.email, bitrix_id: $json.bitrix_id, segment: $json.segment, source: $json.source }) }}",
+        "jsonBody": "={{ JSON.stringify({ full_name: $json.full_name, phone: $json.phone, email: $json.email, bitrix_id: $json.bitrix_id, segment: $json.segment, lead_score: $json.lead_score, source: $json.source }) }}",
         "options": {}
       },
       "id": "in-http-0003-4a10-9b01-0d2e3f4a6003",

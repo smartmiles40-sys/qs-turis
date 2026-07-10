@@ -85,6 +85,17 @@ function buildFullName(input) {
 }
 
 /**
+ * Temperatura do lead vinda do Bitrix (rótulo). Aceita vários nomes de campo e
+ * guarda o rótulo cru (a app normaliza pra quente/morno/frio na hora de exibir).
+ * Sem valor → null (o card fica sem chip; nada de "Quente" inventado).
+ */
+function pickLeadScore(input) {
+  const raw = input.lead_score ?? input.temperatura ?? input.leadScore ?? input.temperature ?? input.Temperatura ?? null;
+  const s = raw == null ? '' : String(raw).trim();
+  return s || null;
+}
+
+/**
  * Cria um lead a partir de um payload externo, aplicando distribuição automática
  * e gerando as tarefas da cadência. Retorna { lead, ownerId, cadenceId, tasks }.
  *
@@ -105,6 +116,8 @@ export async function createInboundLead(payload) {
         if (payload.email) patch.email = payload.email;
         if (payload.phone) patch.phone = payload.phone;
         if (buildFullName(payload)) patch.full_name = buildFullName(payload);
+        if (payload.segment) patch.segment = payload.segment; // Fonte do Bitrix
+        { const ls = pickLeadScore(payload); if (ls) patch.lead_score = ls; } // temperatura do Bitrix
         if (Object.keys(patch).length > 0) {
           await rest(`qs_leads?id=eq.${existing[0].id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' });
         }
@@ -151,6 +164,7 @@ export async function createInboundLead(payload) {
     owner_id: ownerId,
     cadence_id: cadenceId,
     estimated_value: payload.estimated_value ?? null,
+    lead_score: pickLeadScore(payload),
     cadence_started_at: cadenceId ? nowIso : null,
     arrived_at: nowIso,
   };

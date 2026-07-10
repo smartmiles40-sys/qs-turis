@@ -14,7 +14,7 @@ import { notifyError } from "@/lib/qs/notify";
 import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
-import { computeLeadScore } from "@/lib/leadScore";
+import { getLeadScore } from "@/lib/leadScore";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { dialViaWavoip, setOnCallEnded } from "@/lib/wavoip";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
@@ -227,6 +227,29 @@ function getSlaAlert(
 const MAX_CONTACT_ATTEMPTS = 5;
 const DAILY_GOAL = 350; // Will come from qs_goals later
 const MONTHLY_GOAL = 7350;
+
+// Canais que são LIGAÇÃO (recebem o bloco de classificação ao concluir).
+const CALL_CHANNELS: ChannelType[] = ["ligacao", "ligacao_whatsapp"];
+
+// Classificação da ligação (Growth Station): motivo/resultado da chamada, seleção
+// única. `positive` = o SDR falou com a persona e avançou; `reached` = falou com
+// alguém (conta como contato feito). O enum salvo vai em qs_tasks.contact_result.
+const CALL_CLASSIFICATIONS: {
+  key: string; label: string; desc: string; positive?: boolean; reached?: boolean;
+}[] = [
+  { key: "com_avanco", label: "Com avanço significativo", positive: true, reached: true,
+    desc: "A conversa resultou em progresso tangível rumo ao objetivo — como agendar uma reunião ou demonstração." },
+  { key: "sem_avanco", label: "Sem avanço significativo", reached: true,
+    desc: "A conversa não avançou de forma significativa — não identificou as necessidades do lead ou não gerou interesse." },
+  { key: "gatekeeper", label: "Parado no Gatekeeper",
+    desc: "A conversa foi interrompida por um gatekeeper (assistente/secretária), impedindo o acesso à pessoa de interesse." },
+  { key: "persona_indisponivel", label: "Persona indisponível",
+    desc: "A pessoa com quem o SDR precisa falar não estava disponível durante a ligação." },
+  { key: "telefone_incorreto", label: "Telefone incorreto",
+    desc: "O número fornecido não corresponde ao telefone de contato da pessoa desejada." },
+  { key: "sem_conexao", label: "Sem conexão",
+    desc: "Não foi possível falar com ninguém — caixa postal, ocupado, chamando sem atender ou fora de serviço." },
+];
 
 // Agendamento da reunião (ao dar "Ganho") — as listas vêm de Configurações →
 // Equipe da reunião (qs_settings), com estes defaults como fallback.
@@ -479,10 +502,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [newLead, setNewLead] = useState({ full_name: "", phone: "", email: "", company_name: "", owner_id: currentUser?.id ?? "", cadence_id: "", notes: "" });
   const [savingLead, setSavingLead] = useState(false);
 
+  // Classificação da ligação: ao concluir uma atividade de LIGAÇÃO, o SDR escolhe
+  // o motivo do resultado da chamada (radio único). Guarda o contexto pro título.
+  const [classifyFor, setClassifyFor] = useState<{ taskId: string; leadName: string; phone: string | null; atLabel: string } | null>(null);
+  const [classifySel, setClassifySel] = useState<string | null>(null);
+
   // O polling pausa enquanto o SDR está no meio de algo (atualizado a cada render).
   pollBusyRef.current = Boolean(
     meetingFor || transferOpen || pendingResult || obsText.trim() || savingObs ||
-    showNewLeadModal || showExtraTaskModal || showDialer || skipMenuOpen || finalizing
+    showNewLeadModal || showExtraTaskModal || showDialer || skipMenuOpen || finalizing || classifyFor
   );
 
   // Celebration (shown once per session when daily goal hit)
@@ -610,7 +638,25 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
   // Marca a atividade como CONCLUÍDA (conta no placar do dia), some da fila e
   // libera a próxima. A observação (se houver) fica salva no perfil do lead.
+  //
+  // LIGAÇÃO: em vez de concluir direto, abre o bloco de CLASSIFICAÇÃO — o SDR
+  // escolhe o motivo do resultado da chamada (só um clique pra registrar o que
+  // aconteceu, mesmo quando o cliente não atende).
   async function handleConcludeActivity(task: Task) {
+    if (CALL_CHANNELS.includes(task.channel_type)) {
+      const lead = getLeadForTask(task);
+      const now = new Date();
+      const data = now.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+      const hora = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      setClassifySel(null);
+      setClassifyFor({
+        taskId: task.id,
+        leadName: lead?.full_name || "o lead",
+        phone: lead?.phone ? formatPhoneDisplay(lead.phone) : null,
+        atLabel: `${data} às ${hora}`,
+      });
+      return;
+    }
     const obs = obsText.trim();
     if (obs) {
       await persistObservation(task.lead_id, `${CHANNEL_LABELS[task.channel_type]} — Concluída: ${obs}`, ["bitrix", "observacao"]);
@@ -622,6 +668,55 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setObsText("");
     refreshCounts();
     showToast("Atividade concluída");
+  }
+
+  // Finaliza a ligação com a classificação escolhida (radio único). Salva o enum
+  // em contact_result, registra a nota (vai pro Bitrix) e gera o próximo passo —
+  // nenhum lead fica órfão. "com_avanco" leva ao agendamento da reunião.
+  async function handleClassifyCall() {
+    if (!classifyFor || !classifySel) return;
+    const task = tasks.find((t) => t.id === classifyFor.taskId);
+    if (!task) { setClassifyFor(null); return; }
+    const meta = CALL_CLASSIFICATIONS.find((c) => c.key === classifySel);
+    if (finalizing) return;
+    setFinalizing(true);
+    try {
+      const obs = obsText.trim();
+      const leadName = getLeadForTask(task)?.full_name || "Lead";
+
+      // 1) Conclui a tarefa gravando a classificação como resultado do contato.
+      await completeTask(task.id, classifySel, obs || undefined, ["classificacao", classifySel]);
+
+      // 2) Falou com alguém? então marca contato feito (some "sem contato").
+      if (meta?.reached) markContacted(task.lead_id);
+
+      // 3) Resumo pro perfil do lead / Bitrix.
+      const resumo = `Ligação — ${meta?.label ?? classifySel}${obs ? `: ${obs}` : ""}`;
+      await persistObservation(task.lead_id, resumo, ["bitrix", "ligacao", "classificacao", classifySel]);
+      setObsText("");
+
+      // 4) "Com avanço" (agendou reunião/demo) → vai pro agendamento.
+      if (meta?.positive) {
+        setClassifyFor(null);
+        setClassifySel(null);
+        openMeetingGanho(task);
+        return;
+      }
+
+      // 5) Demais casos → cria o próximo passo da cadência (lead segue trabalhado).
+      const followUp = await insertFollowUp(task, classifySel);
+      setTasks((prev) => {
+        const rest = prev.filter((t) => t.id !== task.id);
+        return followUp ? [...rest, followUp] : rest;
+      });
+      setActiveTaskId(null);
+      setClassifyFor(null);
+      setClassifySel(null);
+      refreshCounts();
+      showToast(`Ligação classificada — ${leadName}`);
+    } finally {
+      setFinalizing(false);
+    }
   }
 
   // Salva a observação como nota do lead (n8n empurra pro Bitrix — itens 1 e 4).
@@ -1092,7 +1187,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const cadence = getCadenceForTask(task);
     const slaAlert = getSlaAlert(lead, task, cadence, contactedLeadIds.has(lead?.id ?? ""));
     const prio = task.priority as PriorityLevel;
-    const temp = computeLeadScore(lead, cadence, getAttemptCount(task) - 1);
+    const temp = getLeadScore(lead);
     const isActive = activeTaskId === task.id;
     return (
       <div key={task.id} onClick={() => selectActive(task.id)} className={`qsx-pill${isActive ? " sel" : ""}`} title="Clique para atender este lead">
@@ -1109,7 +1204,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             ) : (
               <span className="qsx-lname truncate min-w-0 max-w-full">Lead desconhecido</span>
             )}
-            <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Lead score ${temp.score}/100`}>{temp.label}</span>
+            {temp && <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Temperatura vinda do Bitrix`}>{temp.label}</span>}
             <span className={`qsx-chip prio-${prio}`}><span className={`qsx-dot dot-${prio}`} />{PRIORITY_LABELS[prio]}</span>
             {slaAlert && (
               <span className="qsx-chip" style={{ background: slaAlert.bg, color: slaAlert.text, animation: slaAlert.pulse ? "pulseRed 1.5s ease-in-out infinite" : undefined }}>
@@ -1121,6 +1216,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           <div className="qsx-pco mt-1">
             {lead?.company_name && <b>{lead.company_name}</b>}
             {lead?.company_name ? " · " : ""}
+            {lead?.segment ? <>Fonte: <b>{lead.segment}</b> · </> : ""}
             {getActivityLabel(task.channel_type)}
             {cadence ? ` · ${cadence.name}` : ""}
           </div>
@@ -1212,7 +1308,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const cadence = getCadenceForTask(task);
     const slaAlert = getSlaAlert(lead, task, cadence, contactedLeadIds.has(lead?.id ?? ""));
     const prio = task.priority as PriorityLevel;
-    const temp = computeLeadScore(lead, cadence, getAttemptCount(task) - 1);
+    const temp = getLeadScore(lead);
     const isActiveCard = activeTaskId === task.id;
     const otherSdrs = qsUsers.filter((u) => u.id !== currentUser?.id);
     const outcomes: { key: string; label: string; tone: "win" | "lose" | "neutral" }[] = [
@@ -1234,7 +1330,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             <span className="qsx-eyebrow" style={task.is_extra ? { color: "var(--blue)" } : undefined}>
               {task.is_extra ? "Atividade extra" : isActiveCard ? "Atendendo agora" : "Próxima atividade"}
             </span>
-            <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title={`Lead score ${temp.score}/100`}>{temp.label}</span>
+            {temp && <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title="Temperatura vinda do Bitrix">{temp.label}</span>}
             {othersOnLead.has(task.lead_id) && (
               <span className="qsx-chip" style={{ background: "rgba(229,72,77,.12)", color: "var(--red)", animation: "pulseRed 1.6s ease-in-out infinite" }} title="Outro usuário está com este lead aberto agora">
                 👤 em atendimento por {othersOnLead.get(task.lead_id)}
@@ -1272,6 +1368,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <div className="qsx-hco truncate">
                 {lead?.company_name || "—"}{lead?.job_title ? ` · ${lead.job_title}` : ""}
               </div>
+              {/* Fonte do lead (campo Fonte do Bitrix) — sempre embaixo do nome pra
+                  o SDR saber na hora de onde veio quem ele está atendendo. */}
+              {lead?.segment && (
+                <div className="flex items-center gap-1.5 mt-1" title="Fonte do lead (Bitrix)">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--ink3)" }}>
+                    <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                  </svg>
+                  <span className="text-[12.5px] font-semibold" style={{ color: "var(--ink3)" }}>Fonte:</span>
+                  <span className="text-[12.5px] font-bold" style={{ color: "var(--ink2)" }}>{lead.segment}</span>
+                </div>
+              )}
               {(lead?.bitrix_id || (lead && (noteCounts.get(lead.id) || 0) > 0)) && (
                 <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                   {lead?.bitrix_id && (
@@ -1326,6 +1433,76 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               Pular
             </button>
           </div>
+
+          {/* Classificação da ligação (abre ao Concluir uma atividade de ligação) */}
+          {classifyFor?.taskId === task.id && (
+            <div className="mt-1 rounded-2xl overflow-hidden" style={{ border: "1px solid var(--line)", background: "#fff" }}>
+              <div className="px-4 pt-3.5 pb-3" style={{ borderBottom: "1px solid var(--line2)" }}>
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0" style={{ background: "rgba(18,161,138,.12)", color: "#0E7C6A" }}>
+                    <ChannelIcon type="ligacao" size={15} />
+                  </span>
+                  <h3 className="text-[15px] font-extrabold leading-tight" style={{ color: "var(--ink)" }}>
+                    Classifique a sua ligação com {classifyFor.leadName}
+                  </h3>
+                </div>
+                <p className="text-[12.5px] mt-1.5 ml-9" style={{ color: "var(--ink3)" }}>
+                  {classifyFor.phone ? `Ligação para ${classifyFor.phone}, ` : "Ligação "}realizada em {classifyFor.atLabel}
+                </p>
+              </div>
+
+              <div className="p-3 grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))" }} role="radiogroup" aria-label="Classificação da ligação">
+                {CALL_CLASSIFICATIONS.map((opt) => {
+                  const on = classifySel === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => setClassifySel(opt.key)}
+                      className="text-left rounded-xl p-3 transition-all"
+                      style={{
+                        border: on ? "1.5px solid var(--blue)" : "1.5px solid var(--line)",
+                        background: on ? "rgba(1,71,255,.05)" : "#fff",
+                        boxShadow: on ? "0 0 0 3px rgba(1,71,255,.10)" : "none",
+                      }}
+                    >
+                      <div className="flex items-start gap-2">
+                        <span
+                          className="mt-0.5 flex items-center justify-center rounded-full shrink-0"
+                          style={{ width: 16, height: 16, border: on ? "5px solid var(--blue)" : "2px solid var(--line-strong, #C7CDD6)" }}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-[13.5px] font-bold leading-tight" style={{ color: on ? "var(--blue)" : "var(--ink)" }}>{opt.label}</div>
+                          <div className="text-[11.5px] mt-1 leading-snug" style={{ color: "var(--ink3)" }}>{opt.desc}</div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center gap-2 px-3 pb-3">
+                <button
+                  onClick={handleClassifyCall}
+                  disabled={!classifySel || finalizing}
+                  className="qsx-btn qsx-btn-green"
+                  style={{ opacity: !classifySel || finalizing ? 0.5 : 1 }}
+                >
+                  {finalizing ? "Registrando…" : "Concluir ligação"}
+                </button>
+                <button
+                  onClick={() => { setClassifyFor(null); setClassifySel(null); }}
+                  className="qsx-btn qsx-btn-ghost"
+                >
+                  Cancelar
+                </button>
+                {classifySel === "com_avanco" && (
+                  <span className="text-[11.5px] ml-1" style={{ color: "var(--ink3)" }}>→ abre o agendamento da reunião</span>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Motivo do pulo (vai pro skip_reason) */}
           {skipMenuOpen && (

@@ -56,6 +56,7 @@ export interface Lead {
   closed_value: number | null;
   cadence_started_at: string | null;
   arrived_at: string | null;        // horário que o lead chegou
+  lead_score: string | null;        // temperatura vinda do Bitrix (rótulo cru: Quente/Morno/Frio). NULL = sem score
   bitrix_id: string | null;         // vínculo com o negócio no Bitrix (APLICAR-PENDENTES.sql)
   created_at: string;
   updated_at: string;
