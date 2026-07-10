@@ -15,7 +15,7 @@ import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { computeLeadScore } from "@/lib/leadScore";
-import { startWhatsAppCall, formatPhoneDisplay } from "@/lib/whatsapp";
+import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { dialViaWavoip, setOnCallEnded } from "@/lib/wavoip";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
@@ -1135,8 +1135,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </button>
           )}
           {(task.channel_type === "ligacao_whatsapp" || task.channel_type === "ligacao") && lead?.phone && (
-            <button onClick={(e) => { e.stopPropagation(); startWhatsAppCall(lead.phone); }} className="qsx-pa qsx-pa-wa" title="Ligar no WhatsApp">
-              <IconWhatsApp size={18} />
+            <button onClick={(e) => { e.stopPropagation(); callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-pa qsx-pa-wa" title="Ligar pelo webfone (Wavoip)">
+              <ChannelIcon type="ligacao" size={17} />
             </button>
           )}
           {lead && (
@@ -1149,8 +1149,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     );
   }
 
-  // Liga pelo WEBFONE (voz dentro do sistema). Se o webfone não estiver
-  // configurado/disponível, cai pro WhatsApp (abre a conversa pra ligar por lá).
+  // Liga pelo WEBFONE (Wavoip) — TODA ligação do sistema sai por aqui.
+  // Sem fallback pra WhatsApp externo: se o webfone não estiver configurado,
+  // o SDR vê o erro na tela (e configura o token em Config → Webfone).
   async function callViaWebfone(
     phone?: string | null,
     opts?: { leadName?: string | null; leadId?: string | null },
@@ -1162,18 +1163,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       ownerId: currentUser?.id ?? null,
     });
     if (!r.ok) {
-      console.warn("[QS] webfone indisponível, caindo pro WhatsApp:", r.error);
-      startWhatsAppCall(phone);
+      console.warn("[QS] webfone indisponível:", r.error);
+      notifyError(r.error || "Webfone indisponível — confira o token em Configurações → Webfone.");
     }
   }
 
-  // Só o botão do canal da tarefa (item 3). Ligação = webfone (fallback WhatsApp).
+  // Só o botão do canal da tarefa. TODA ligação (normal ou WhatsApp) = webfone Wavoip.
   function renderChannelAction(task: Task, lead: Lead | undefined) {
     switch (task.channel_type) {
       case "ligacao":
         return lead?.phone ? <button onClick={() => callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id })} className="qsx-btn qsx-btn-green"><ChannelIcon type="ligacao" size={16} />Ligar</button> : null;
       case "ligacao_whatsapp":
-        return lead?.phone ? <button onClick={() => startWhatsAppCall(lead.phone)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Ligar no WhatsApp</button> : null;
+        return lead?.phone ? <button onClick={() => callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id })} className="qsx-btn qsx-btn-green"><IconWhatsAppCall size={16} />Ligar no WhatsApp</button> : null;
       case "whatsapp":
         return lead?.phone ? <button onClick={() => openWhatsApp(lead)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Abrir conversa</button> : null;
       case "email": {
@@ -2032,42 +2033,67 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
       {/* ══ MODAL LIGAÇÃO MANUAL ═════════════════════════════════════════════ */}
       {showDialer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-bold text-gray-900">Ligação Manual</h2>
-              <button onClick={() => { setShowDialer(false); setDialNumber(""); }} className="text-gray-400 hover:text-gray-600">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(16,24,40,0.55)", backdropFilter: "blur(2px)" }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-[340px] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Cabeçalho */}
+            <div className="flex items-center justify-between px-5 pt-4 pb-1">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center justify-center w-7 h-7 rounded-lg" style={{ background: "rgba(18,161,138,.12)", color: "var(--green)" }}>
+                  <ChannelIcon type="ligacao" size={15} />
+                </span>
+                <span className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>Telefone</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: "var(--line2)", color: "var(--ink3)" }}>Wavoip</span>
+              </div>
+              <button onClick={() => { setShowDialer(false); setDialNumber(""); }} className="text-gray-400 hover:text-gray-600" aria-label="Fechar">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
             </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1">Número</label>
-              <input
-                type="tel"
-                value={dialNumber}
-                onChange={(e) => setDialNumber(e.target.value)}
-                placeholder="(11) 99999-9999"
-                className="w-full px-4 py-3 text-lg text-center font-mono border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400 focus:ring-2 focus:ring-green-100"
-                autoFocus
-              />
+
+            {/* Display do número */}
+            <input
+              type="tel"
+              value={dialNumber}
+              onChange={(e) => setDialNumber(e.target.value.replace(/[^\d+() -]/g, ""))}
+              placeholder="Digite o número"
+              className="w-full px-6 pt-3 pb-2 text-[26px] text-center font-extrabold tracking-wide bg-transparent outline-none"
+              style={{ color: "var(--ink)", fontVariantNumeric: "tabular-nums" }}
+              autoFocus
+            />
+            <p className="text-center text-[11px] -mt-1 mb-2 h-4" style={{ color: "var(--ink3)" }}>
+              {dialNumber.trim() ? formatPhoneDisplay(dialNumber) : "a chamada sai pelo WhatsApp do número, via webfone"}
+            </p>
+
+            {/* Teclado */}
+            <div className="grid grid-cols-3 gap-2 px-6 pb-2">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "+", "0", "⌫"].map((k) => (
+                <button
+                  key={k}
+                  onClick={() => setDialNumber((n) => (k === "⌫" ? n.slice(0, -1) : n + k))}
+                  className="h-[52px] rounded-2xl text-[19px] font-bold transition-colors select-none"
+                  style={{ background: "var(--line2)", color: k === "⌫" ? "var(--ink3)" : "var(--ink)" }}
+                  onMouseDown={(e) => e.preventDefault()}
+                  aria-label={k === "⌫" ? "Apagar" : k}
+                >
+                  {k}
+                </button>
+              ))}
             </div>
-            <button
-              onClick={() => { if (dialNumber.trim()) { callViaWebfone(dialNumber); setShowDialer(false); setDialNumber(""); } }}
-              disabled={!dialNumber.trim()}
-              className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
-              style={{ background: "#12A18A" }}
-            >
-              <ChannelIcon type="ligacao" size={18} />
-              Ligar (webfone)
-            </button>
-            <button
-              onClick={() => { if (dialNumber.trim()) { startWhatsAppCall(dialNumber); setShowDialer(false); setDialNumber(""); } }}
-              disabled={!dialNumber.trim()}
-              className="mt-2 w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all disabled:opacity-50"
-            >
-              <IconWhatsApp size={16} />
-              Ligar no WhatsApp
-            </button>
+
+            {/* Botão de chamada */}
+            <div className="flex justify-center pb-5 pt-2">
+              <button
+                onClick={() => { if (dialNumber.trim()) { callViaWebfone(dialNumber); setShowDialer(false); setDialNumber(""); } }}
+                disabled={!dialNumber.trim()}
+                className="flex items-center justify-center w-16 h-16 rounded-full text-white transition-transform hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+                style={{ background: "var(--green)", boxShadow: "0 12px 26px -10px rgba(18,161,138,.75)" }}
+                title="Ligar pelo webfone"
+                aria-label="Ligar"
+              >
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       )}
