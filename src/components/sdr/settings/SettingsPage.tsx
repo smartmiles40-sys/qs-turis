@@ -1310,7 +1310,7 @@ function SipSection() {
 // (sip_ramais) em qs_settings. Alimenta o onboarding guiado que aparece pro SDR.
 function SipProvisioning() {
   const [installerUrl, setInstallerUrl] = useState("");
-  const [users, setUsers] = useState<{ id: string; full_name: string | null }[]>([]);
+  const [users, setUsers] = useState<{ id: string; name: string | null }[]>([]);
   const [map, setMap] = useState<Record<string, { ramal: string; login: string }>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1321,14 +1321,14 @@ function SipProvisioning() {
       const [urlRes, mapRes, usersRes] = await Promise.all([
         getSetting<string>(SIP_INSTALLER_URL_KEY),
         getSetting<Record<string, { ramal?: string; login?: string }>>(SIP_RAMAIS_KEY),
-        supabase.from("qs_users").select("id, full_name").eq("is_active", true).order("full_name"),
+        supabase.from("qs_users").select("id, name").eq("is_active", true).order("name"),
       ]);
       setInstallerUrl((urlRes ?? "").trim());
       const m: Record<string, { ramal: string; login: string }> = {};
       const src = mapRes ?? {};
       Object.keys(src).forEach((k) => { m[k] = { ramal: src[k]?.ramal ?? "", login: src[k]?.login ?? "" }; });
       setMap(m);
-      if (!usersRes.error) setUsers((usersRes.data as { id: string; full_name: string | null }[]) ?? []);
+      if (!usersRes.error) setUsers((usersRes.data as { id: string; name: string | null }[]) ?? []);
       setLoading(false);
     }
     load();
@@ -1372,10 +1372,13 @@ function SipProvisioning() {
           type="text"
           value={installerUrl}
           onChange={(e) => { setInstallerUrl(e.target.value); setSaved(false); }}
-          placeholder="https://… (link do instalador que o dev enviar)"
+          placeholder="Deixe vazio para usar o instalador embarcado"
           className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
           spellCheck={false}
         />
+        <p className="text-[11px] text-gray-400 mt-1">
+          Vazio = o SDR baixa o BravoTech já embarcado no QS. Preencha só se quiser servir uma versão diferente.
+        </p>
       </div>
 
       <div className="max-w-xl">
@@ -1383,7 +1386,7 @@ function SipProvisioning() {
         <div className="space-y-2">
           {users.map((u) => (
             <div key={u.id} className="flex items-center gap-2">
-              <span className="flex-1 text-sm text-gray-700 truncate">{u.full_name ?? "—"}</span>
+              <span className="flex-1 text-sm text-gray-700 truncate">{u.name ?? "—"}</span>
               <input
                 type="text"
                 value={map[u.id]?.ramal ?? ""}

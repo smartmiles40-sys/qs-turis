@@ -83,15 +83,21 @@ export async function dialViaSip(phone?: string | null): Promise<SipDialResult> 
 export const SIP_INSTALLER_URL_KEY = "sip_installer_url";
 export const SIP_RAMAIS_KEY = "sip_ramais";
 
+// Instalador do BravoTech embarcado em /public — servido pelo próprio domínio do
+// QS (ex.: https://qs-turis.vercel.app/BravoTech-setup.exe). Vale de fallback
+// quando o admin não colou um link próprio em Configurações → Telefone SIP.
+export const DEFAULT_INSTALLER_PATH = "/BravoTech-setup.exe";
+
 export interface SipRamalInfo {
   ramal: string;   // ex.: "2001"
   login?: string;  // ex.: "atendimento01@setufor"
 }
 export type SipRamaisMap = Record<string, SipRamalInfo>;
 
-/** Link do instalador do softphone BravoTech (admin cola em Configurações). */
+/** Link do instalador do softphone BravoTech. Usa o que o admin colou em
+ *  Configurações; se estiver vazio, cai no instalador embarcado em /public. */
 export async function getSipInstallerUrl(): Promise<string> {
-  return ((await getSetting<string>(SIP_INSTALLER_URL_KEY)) ?? "").trim();
+  return ((await getSetting<string>(SIP_INSTALLER_URL_KEY)) ?? "").trim() || DEFAULT_INSTALLER_PATH;
 }
 
 /** Mapa completo usuário→ramal (definido pelo admin). */

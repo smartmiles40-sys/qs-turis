@@ -18,8 +18,13 @@ interface Props {
   user: { id: string; name: string } | null;
 }
 
+// "Configurado" é permanente por máquina (localStorage). "Adiado" ("Fazer
+// depois") vale só até fechar a aba (sessionStorage) — reabre na próxima sessão.
 function doneKey(userId: string): string {
   return `qs_tel_setup_done_${userId}`;
+}
+function snoozeKey(userId: string): string {
+  return `qs_tel_setup_snoozed_${userId}`;
 }
 
 export default function TelefoneOnboarding({ user }: Props) {
@@ -28,12 +33,17 @@ export default function TelefoneOnboarding({ user }: Props) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
+  // Depende do ID (string estável), não do objeto `user` — o SdrLayout recria
+  // esse objeto a cada render, e depender dele reabria o modal em loop.
+  const userId = user?.id ?? null;
+
   useEffect(() => {
     let alive = true;
-    if (!user) return;
-    // Já marcou como configurado nesta máquina? Então não incomoda.
-    if (localStorage.getItem(doneKey(user.id)) === "1") return;
-    Promise.all([getSipRamalForUser(user.id), getSipInstallerUrl()]).then(([r, url]) => {
+    if (!userId) return;
+    // Já configurou nesta máquina (permanente) ou adiou nesta sessão? Não incomoda.
+    if (localStorage.getItem(doneKey(userId)) === "1") return;
+    if (sessionStorage.getItem(snoozeKey(userId)) === "1") return;
+    Promise.all([getSipRamalForUser(userId), getSipInstallerUrl()]).then(([r, url]) => {
       if (!alive) return;
       setRamal(r);
       setInstallerUrl(url);
@@ -41,7 +51,7 @@ export default function TelefoneOnboarding({ user }: Props) {
       if (r) setOpen(true);
     });
     return () => { alive = false; };
-  }, [user]);
+  }, [userId]);
 
   if (!open || !user || !ramal) return null;
 
@@ -52,14 +62,21 @@ export default function TelefoneOnboarding({ user }: Props) {
     }).catch(() => { /* clipboard bloqueado — ignora */ });
   }
 
+  // "Já configurei": marca a máquina como pronta pra sempre.
   function finish() {
-    if (user) localStorage.setItem(doneKey(user.id), "1");
+    if (userId) localStorage.setItem(doneKey(userId), "1");
+    setOpen(false);
+  }
+
+  // "Fazer depois"/fechar: silencia só nesta sessão (reabre depois).
+  function snooze() {
+    if (userId) sessionStorage.setItem(snoozeKey(userId), "1");
     setOpen(false);
   }
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setOpen(false)} />
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={snooze} />
       <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
         {/* Cabeçalho */}
         <div className="px-6 pt-6 pb-4 shrink-0" style={{ background: "linear-gradient(135deg,#0147FF,#3B82F6)" }}>
@@ -122,7 +139,7 @@ export default function TelefoneOnboarding({ user }: Props) {
 
         {/* Rodapé */}
         <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3 shrink-0">
-          <button onClick={() => setOpen(false)} className="text-[13px] text-gray-500 hover:text-gray-700">Fazer depois</button>
+          <button onClick={snooze} className="text-[13px] text-gray-500 hover:text-gray-700">Fazer depois</button>
           <button onClick={finish} className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white" style={{ background: "#16A34A" }}>
             Já configurei ✓
           </button>
