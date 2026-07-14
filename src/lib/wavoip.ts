@@ -21,10 +21,12 @@ import { normalizePhoneBR, logWhatsApp } from "./whatsapp";
 
 export const WAVOIP_TOKEN_KEY = "wavoip_token";
 
-// CDN (build UMD). @latest deixa a lib se auto-atualizar; para travar numa versão
-// específica troque por, ex.: @1.3.9 e adicione data-auto-update="false" no script.
+// CDN (build UMD) com VERSÃO TRAVADA: @latest deixava um script de terceiro se
+// auto-atualizar dentro de um CRM autenticado (pacote/CDN comprometido viraria
+// execução de código com a sessão do SDR). Para atualizar: teste a versão nova
+// e troque o número aqui de propósito.
 const WAVOIP_CDN =
-  "https://cdn.jsdelivr.net/npm/@wavoip/wavoip-webphone@latest/dist/index.umd.min.js";
+  "https://cdn.jsdelivr.net/npm/@wavoip/wavoip-webphone@1.6.1/dist/index.umd.min.js";
 
 // ── Tipos mínimos da API pública que usamos (window.wavoip) ──────────────────
 

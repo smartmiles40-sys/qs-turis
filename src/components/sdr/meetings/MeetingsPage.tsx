@@ -232,12 +232,19 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
 
   // ── Status quick actions / cancel ──
   async function updateStatus(id: string, status: MeetingStatus) {
+    // Cancelar é um clique num ícone — misclick não pode cancelar reunião de cliente.
+    if (status === "cancelada") {
+      const m = meetings.find((x) => x.id === id);
+      const who = m?.lead?.full_name ? ` com ${m.lead.full_name}` : "";
+      if (!window.confirm(`Cancelar a reunião${who}?`)) return;
+    }
     const { error } = await supabase
       .from("qs_meetings")
       .update({ status, updated_at: new Date().toISOString() })
       .eq("id", id);
     if (error) {
-      setPageError(`Erro ao atualizar status: ${error.message}`);
+      console.warn("Erro ao atualizar status da reunião:", error);
+      setPageError("Não foi possível atualizar a reunião — tente novamente.");
     } else {
       setPageError(null);
       await fetchMeetings();

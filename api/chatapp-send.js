@@ -41,11 +41,14 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: 'Use POST' });
   }
 
-  // Autorização: segredo interno OU usuário autenticado do QS.
+  // Autorização: segredo interno OU usuário autenticado do QS — SEMPRE exigida.
+  // (Antes, sem INTERNAL_API_SECRET configurado na Vercel, a checagem inteira era
+  // pulada e QUALQUER pessoa na internet podia mandar WhatsApp pelo número da
+  // agência. Agora fail-CLOSED: sem secret, só o caminho de usuário autenticado.)
   const secret = process.env.INTERNAL_API_SECRET;
-  const bySecret = secret && req.headers['x-internal-secret'] === secret;
+  const bySecret = Boolean(secret) && req.headers['x-internal-secret'] === secret;
   const byUser = !bySecret && (await isValidSupabaseUser(req.headers['authorization']));
-  if (secret && !bySecret && !byUser) {
+  if (!bySecret && !byUser) {
     return res.status(401).json({ success: false, error: 'Não autorizado' });
   }
 

@@ -69,6 +69,8 @@ import ChatAppDock from "./chatapp/ChatAppDock";
 import GlobalToasts from "./GlobalToasts";
 import CommandPalette from "./CommandPalette";
 import { toggleWebphone } from "@/lib/wavoip";
+import { notifyError } from "@/lib/qs/notify";
+import TelefoneOnboarding from "@/components/sdr/telefone/TelefoneOnboarding";
 
 export type SdrNav =
   | "painel"
@@ -266,7 +268,11 @@ export default function SdrLayout() {
   // Abre o webfone (Wavoip) a partir do topo — carrega sob demanda (sem widget solto).
   async function handleOpenPhone() {
     const r = await toggleWebphone();
-    if (!r.ok) console.warn("[webfone]", r.error);
+    if (!r.ok) {
+      console.warn("[webfone]", r.error);
+      // Sem isso o clique "não fazia nada" — o SDR precisa saber o que configurar.
+      notifyError(r.error || "Webfone indisponível — confira o token em Configurações → Webfone.");
+    }
   }
 
   const visualActiveNav: SdrNav =
@@ -424,6 +430,9 @@ export default function SdrLayout() {
           </div>
         </div>
       </header>
+
+      {/* Onboarding do telefone (BravoTech) — só na 1ª vez, por máquina */}
+      <TelefoneOnboarding user={currentUser ? { id: currentUser.id, name: currentUser.name } : null} />
 
       {/* ── MENU LATERAL (MOBILE) ────────────────────────────────────────── */}
       {mobileNavOpen && (

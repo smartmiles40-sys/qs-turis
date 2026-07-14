@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { getClosedAtColumn } from "@/lib/qs/queries";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,9 @@ export default function RankingPanel() {
     async function load() {
       setLoading(true);
       const { from, to } = getRankRange(period);
+      // Data de FECHAMENTO (closed_at) — updated_at re-contava ganhos antigos
+      // no período atual a cada edição do lead.
+      const closedCol = await getClosedAtColumn();
 
       const [usersRes, tasksRes, leadsRes] = await Promise.all([
         supabase
@@ -84,8 +88,8 @@ export default function RankingPanel() {
           .from("qs_leads")
           .select("owner_id, status")
           .in("status", ["ganho", "perdido"])
-          .gte("updated_at", from)
-          .lte("updated_at", to),
+          .gte(closedCol, from)
+          .lte(closedCol, to),
       ]);
 
       if (cancelled) return;

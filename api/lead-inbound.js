@@ -38,9 +38,9 @@ export default async function handler(req, res) {
 
   const body = typeof req.body === 'string' ? safeJson(req.body) : req.body || {};
 
-  // Log de diagnóstico: mostra EXATAMENTE o que chegou (útil pra descobrir sob
-  // qual nome o Bitrix mandou a temperatura). Aparece nos Runtime Logs da Vercel.
-  try { console.log('[lead-inbound] payload recebido:', JSON.stringify(body)); } catch { /* ignora */ }
+  // Log de diagnóstico SEM PII (LGPD): só as CHAVES do payload + bitrix_id.
+  // (O log completo já cumpriu o papel de descobrir o campo da temperatura.)
+  try { console.log('[lead-inbound] payload recebido (chaves):', Object.keys(body).join(', '), '| bitrix_id:', body.bitrix_id ?? '-'); } catch { /* ignora */ }
 
   // precisa de ao menos um identificador
   if (!body.email && !body.phone && !body.full_name && !body.first_name) {

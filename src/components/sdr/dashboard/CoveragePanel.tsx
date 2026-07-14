@@ -1,7 +1,8 @@
 // src/components/sdr/dashboard/CoveragePanel.tsx — Leads sem contato
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
+import { notifyError } from "@/lib/qs/notify";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -103,7 +104,6 @@ function IconShield() {
 
 export default function CoveragePanel() {
   const { currentUser } = useQsAuth();
-  const [leads, setLeads] = useState<Lead[]>([]);
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
   const [users, setUsers] = useState<QsUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<string>("");
@@ -116,10 +116,11 @@ export default function CoveragePanel() {
   ]);
   const [semContato, setSemContato] = useState({ label: "Sem contato (> 30min)", value: 0, unit: "leads" });
 
-  // Fetch real leads from Supabase
-  useEffect(() => {
-    async function fetchLeads() {
-      setLoading(true);
+  // Fetch real leads from Supabase — roda no mount e a cada 60s (este painel
+  // vigia SLA em MINUTOS; congelado até o F5 ele não serve pra nada).
+  const fetchLeads = useCallback(async (initial = false) => {
+    {
+      if (initial) setLoading(true);
 
       // Leads that arrived but have no cadence started (or no completed tasks)
       // Strategy: leads with arrived_at but status = nao_iniciado or no completed task
@@ -141,7 +142,7 @@ export default function CoveragePanel() {
       }
 
       if (!leadsData || leadsData.length === 0) {
-        setLeads([]);
+        setAllLeads([]);
         setLoading(false);
         return;
       }
@@ -172,7 +173,10 @@ export default function CoveragePanel() {
       // Build lead list — only leads WITHOUT completed tasks
       const sourceMap: Record<string, string> = {
         manual: "Manual",
-        levantada_de_mao: "Instagram",
+        api: "API",
+        integracao: "Integração",
+        importacao: "Importação",
+        levantada_de_mao: "Levantada de mão",
         indicacao: "Indicação",
         prospeccao_ativa: "Prospecção",
         site: "Site",
@@ -193,7 +197,6 @@ export default function CoveragePanel() {
         }));
 
       setAllLeads(pendingLeads);
-      setLeads(pendingLeads);
 
       // Calculate SLA metrics based on all arrived leads (contacted + pending)
       const totalLeads = leadsData.length;
@@ -231,10 +234,23 @@ export default function CoveragePanel() {
 
       setLoading(false);
     }
-    fetchLeads();
   }, []);
 
-  const pendingLeads = leads.filter((l) => !l.contacted);
+  useEffect(() => {
+    fetchLeads(true);
+    const id = setInterval(() => {
+      if (!document.hidden) fetchLeads(false);
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [fetchLeads]);
+
+  // Lista visível DERIVADA (fonte única = allLeads): o filtro por SDR não se
+  // perde quando o refresh de 60s recarrega os dados.
+  const visibleLeads = useMemo(
+    () => (selectedUser ? allLeads.filter((l) => l.ownerId === selectedUser) : allLeads),
+    [allLeads, selectedUser]
+  );
+  const pendingLeads = visibleLeads.filter((l) => !l.contacted);
   const allContacted = pendingLeads.length === 0;
   const hasUrgent = pendingLeads.some((l) => getWaitMinutes(l.arrivedAt) > 15);
 
@@ -253,9 +269,13 @@ export default function CoveragePanel() {
 
   async function handleContact(leadId: string) {
     if (contactingId) return;
+    const leadToContact = allLeads.find((l) => l.id === leadId);
+    // Este botão REGISTRA um contato concluído (conta no placar do SDR) — não
+    // pode ser um clique acidental sem ligação de verdade.
+    if (!window.confirm(`Registrar contato feito com ${leadToContact?.name ?? "este lead"}? Isso marca uma ligação concluída no histórico.`)) return;
     setContactingId(leadId);
 
-    const lead = allLeads.find((l) => l.id === leadId);
+    const lead = leadToContact;
     const nowIso = new Date().toISOString();
     // Owner da atividade: dono do lead; senão o usuário logado (ignora o admin demo)
     const ownerId =
@@ -276,6 +296,7 @@ export default function CoveragePanel() {
 
     if (taskErr) {
       console.warn("Erro ao registrar contato:", taskErr);
+      notifyError("Não foi possível registrar o contato — tente novamente.");
       setContactingId(null);
       return;
     }
@@ -288,9 +309,8 @@ export default function CoveragePanel() {
       .eq("status", "nao_iniciado");
     if (leadErr) console.warn("Erro ao atualizar status do lead:", leadErr);
 
-    // Atualiza as listas locais (remove da fila de aguardando)
+    // Atualiza a lista local (remove da fila de aguardando)
     setAllLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, contacted: true } : l)));
-    setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, contacted: true } : l)));
     setContactingId(null);
   }
 
@@ -326,14 +346,7 @@ export default function CoveragePanel() {
           <div className="flex items-center gap-3">
             <select
               value={selectedUser}
-              onChange={(e) => {
-                setSelectedUser(e.target.value);
-                if (e.target.value) {
-                  setLeads(allLeads.filter(l => l.ownerId === e.target.value));
-                } else {
-                  setLeads(allLeads);
-                }
-              }}
+              onChange={(e) => setSelectedUser(e.target.value)}
               className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-blue-400"
             >
               <option value="">Todos os SDRs</option>

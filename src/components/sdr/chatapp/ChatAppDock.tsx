@@ -13,6 +13,7 @@
 import { useState } from "react";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getChatAppUrl, fillTemplate, WA_TEMPLATES, formatPhoneDisplay } from "@/lib/whatsapp";
+import { notifyError } from "@/lib/qs/notify";
 
 const WA_GREEN = "#12A18A"; // --green da paleta Turis
 const PANEL_W = 320;
@@ -62,7 +63,10 @@ export default function ChatAppDock() {
       await navigator.clipboard.writeText(filled);
       setCopiedTpl(label);
       setTimeout(() => setCopiedTpl(null), 2000);
-    } catch { /* clipboard bloqueado — ignora */ }
+    } catch {
+      // Clipboard bloqueado pelo navegador — sem feedback o toque parece quebrado.
+      notifyError("Não consegui copiar — selecione e copie o texto manualmente.");
+    }
   }
 
   function openChatWindow() {
@@ -87,9 +91,11 @@ export default function ChatAppDock() {
         </button>
       )}
 
-      {/* ── PAINEL lateral (cockpit) — encolhe pra 0 quando fechado ─────────── */}
+      {/* ── PAINEL lateral (cockpit) — encolhe pra 0 quando fechado.
+          No CELULAR vira overlay em tela cheia: como coluna de 320px ele
+          esmagava o conteúdo principal para ~40px e o app ficava inutilizável. */}
       <aside
-        className="shrink-0 h-full overflow-hidden flex flex-col bg-white"
+        className={`qs-chatdock shrink-0 h-full overflow-hidden flex flex-col bg-white ${isOpen ? "qs-chatdock-open" : ""}`}
         style={{
           width: isOpen ? PANEL_W : 0,
           transition: "width .28s cubic-bezier(.4,0,.2,1)",
@@ -97,6 +103,13 @@ export default function ChatAppDock() {
         }}
         aria-hidden={!isOpen}
       >
+        <style>{`
+          @media (max-width: 767px) {
+            .qs-chatdock { position: fixed; inset: 0; z-index: 80; width: 0 !important; border-left: none !important; }
+            .qs-chatdock:not(.qs-chatdock-open) { pointer-events: none; }
+            .qs-chatdock-open { width: 100vw !important; }
+          }
+        `}</style>
         {/* Cabeçalho */}
         <div className="shrink-0 flex items-center gap-3 px-4 h-14 text-white" style={{ background: WA_GREEN, minWidth: PANEL_W }}>
           <IconChat size={20} />

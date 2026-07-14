@@ -3,8 +3,9 @@ import { supabase } from "@/lib/supabase";
 import { createQsAuthUser, updateQsAuthUser, deleteQsAuthUser } from "@/lib/adminUsers";
 import { loadWorkHours, saveWorkHours, DEFAULT_WORK_HOURS, WEEKDAY_NAMES, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, saveMeetingTeam, getSetting, setSetting } from "@/lib/qsSettings";
+import { notifyError } from "@/lib/qs/notify";
 import { WAVOIP_TOKEN_KEY } from "@/lib/wavoip";
-import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PASSWORD_KEY, DEFAULT_SIP_HOST } from "@/lib/sip";
+import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PREFIX_KEY, SIP_INSTALLER_URL_KEY, SIP_RAMAIS_KEY, DEFAULT_SIP_HOST } from "@/lib/sip";
 import type {
   CustomField,
   CustomFieldScope,
@@ -281,8 +282,13 @@ function CamposSection() {
                         <button onClick={() => openEdit(field)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" title="Editar"><PencilIcon /></button>
                         <button
                           onClick={async () => {
+                            // Excluir um campo apaga também os valores preenchidos nos leads.
+                            if (!window.confirm(`Excluir o campo "${field.label}"? Os valores já preenchidos nos leads serão apagados.`)) return;
                             const { error } = await supabase.from("qs_custom_fields").delete().eq("id", field.id);
-                            if (error) console.warn("Erro ao excluir campo:", error);
+                            if (error) {
+                              console.warn("Erro ao excluir campo:", error);
+                              notifyError("Não foi possível excluir o campo — tente novamente.");
+                            }
                             else setAllFields((prev) => prev.filter((f) => f.id !== field.id));
                           }}
                           className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors" title="Excluir"
@@ -412,8 +418,13 @@ function MotivosSection() {
   }
 
   async function deleteReason(id: string) {
+    const label = reasons.find((r) => r.id === id)?.label ?? "este motivo";
+    if (!window.confirm(`Excluir o motivo de perda "${label}"? Se preferir manter o histórico, use Arquivar.`)) return;
     const { error } = await supabase.from("qs_loss_reasons").delete().eq("id", id);
-    if (error) console.warn("Erro ao excluir motivo:", error);
+    if (error) {
+      console.warn("Erro ao excluir motivo:", error);
+      notifyError("Não foi possível excluir — provavelmente há leads perdidos usando esse motivo. Use Arquivar.");
+    }
     else setReasons((prev) => prev.filter((r) => r.id !== id));
   }
 
@@ -740,7 +751,14 @@ function ProdutosSection() {
   }
 
   async function deleteProduct(id: string) {
-    await supabase.from("qs_products").delete().eq("id", id);
+    const name = products.find((p) => p.id === id)?.name ?? "este produto";
+    if (!window.confirm(`Excluir o produto "${name}"? Se ele já foi usado em leads, prefira desativar.`)) return;
+    const { error } = await supabase.from("qs_products").delete().eq("id", id);
+    if (error) {
+      console.warn("Erro ao excluir produto:", error);
+      notifyError("Não foi possível excluir o produto — tente desativar em vez de excluir.");
+      return;
+    }
     setProducts(prev => prev.filter(p => p.id !== id));
   }
 
@@ -810,7 +828,7 @@ function CanaisSection() {
   const [channels, setChannels] = React.useState([
     { type: "pesquisa", label: "Pesquisa", enabled: true, description: "Pesquisa prévia sobre o lead antes do contato" },
     { type: "email", label: "E-mail", enabled: true, description: "Envio de e-mails de prospecção" },
-    { type: "ligacao", label: "Ligação", enabled: true, description: "Ligações de voz pelo Webfone (Wavoip) — cai pro WhatsApp se indisponível" },
+    { type: "ligacao", label: "Ligação", enabled: true, description: "Ligações de voz pelo softphone BravoTech (SIP) instalado no PC do SDR" },
     { type: "ligacao_whatsapp", label: "Ligação WhatsApp", enabled: true, description: "Ligação de voz pelo WhatsApp (abre a conversa do lead)" },
     { type: "whatsapp", label: "WhatsApp", enabled: true, description: "Mensagens via WhatsApp Business" },
     { type: "linkedin", label: "LinkedIn", enabled: true, description: "Conexão e mensagens via LinkedIn" },
@@ -848,7 +866,12 @@ function CanaisSection() {
     const { error } = await supabase
       .from("qs_channel_config")
       .upsert({ type, enabled: newEnabled }, { onConflict: "type" });
-    if (error) console.warn("Erro ao atualizar canal:", error);
+    if (error) {
+      console.warn("Erro ao atualizar canal:", error);
+      // Reverte o switch — sem isso ele aparentava salvo mesmo sem persistir.
+      setChannels((prev) => prev.map((c) => c.type === type ? { ...c, enabled: !newEnabled } : c));
+      notifyError("Não foi possível salvar o canal — tente novamente.");
+    }
   }
 
   if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
@@ -1156,9 +1179,8 @@ function WebfoneSection() {
 function SipSection() {
   const [enabled, setEnabled] = useState(false);
   const [host, setHost] = useState(DEFAULT_SIP_HOST);
+  const [prefix, setPrefix] = useState("");
   const [user, setUser] = useState("");
-  const [password, setPassword] = useState("");
-  const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1168,12 +1190,12 @@ function SipSection() {
       getSetting<boolean>(SIP_ENABLED_KEY),
       getSetting<string>(SIP_HOST_KEY),
       getSetting<string>(SIP_USER_KEY),
-      getSetting<string>(SIP_PASSWORD_KEY),
-    ]).then(([en, h, u, p]) => {
+      getSetting<string>(SIP_PREFIX_KEY),
+    ]).then(([en, h, u, pf]) => {
       setEnabled(en === true);
       setHost((h ?? "").trim() || DEFAULT_SIP_HOST);
       setUser((u ?? "").trim());
-      setPassword((p ?? "").trim());
+      setPrefix((pf ?? "").trim());
       setLoading(false);
     });
   }, []);
@@ -1182,11 +1204,14 @@ function SipSection() {
 
   async function handleSave() {
     setSaving(true);
+    // A SENHA SIP não é mais persistida: qs_settings é legível por qualquer
+    // usuário autenticado e o CRM nunca usa a senha (ela vive no softphone).
+    // A migration 0011 apaga a linha antiga do banco.
     const ok = (await Promise.all([
       setSetting(SIP_ENABLED_KEY, enabled),
       setSetting(SIP_HOST_KEY, host.trim() || DEFAULT_SIP_HOST),
       setSetting(SIP_USER_KEY, user.trim()),
-      setSetting(SIP_PASSWORD_KEY, password.trim()),
+      setSetting(SIP_PREFIX_KEY, prefix.trim()),
     ])).every(Boolean);
     setSaving(false);
     setSaved(ok);
@@ -1236,6 +1261,20 @@ function SipSection() {
           />
         </div>
         <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-1">Prefixo de discagem</label>
+          <input
+            type="text"
+            value={prefix}
+            onChange={(e) => { setPrefix(e.target.value); markDirty(); }}
+            placeholder="ex.: 1*  ou  01*"
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
+            spellCheck={false}
+          />
+          <p className="text-[11px] text-gray-400 mt-1">
+            Vai na <b>frente do número</b> pra completar a ligação (a BravoTech pediu <code>1*</code> ou <code>01*</code> — teste e ajuste). Vazio = disca o número puro.
+          </p>
+        </div>
+        <div>
           <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-1">Usuário SIP</label>
           <input
             type="text"
@@ -1247,32 +1286,129 @@ function SipSection() {
             spellCheck={false}
           />
         </div>
-        <div>
-          <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-1">Senha SIP</label>
-          <div className="flex items-center gap-2">
-            <input
-              type={show ? "text" : "password"}
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); markDirty(); }}
-              placeholder="senha do dispositivo SIP"
-              className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <button type="button" onClick={() => setShow((s) => !s)} className="px-3 py-2 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
-              {show ? "Ocultar" : "Mostrar"}
-            </button>
-          </div>
-        </div>
         <p className="text-[11px] text-gray-400">
-          Usuário e senha são só <b>referência</b> para configurar o softphone — o CRM não liga por eles,
-          quem autentica é o softphone. O click-to-dial usa apenas o servidor acima.
+          O usuário é só <b>referência</b> para configurar o softphone — o CRM não liga por ele,
+          quem autentica é o softphone. A <b>senha do ramal fica SÓ no softphone</b> (por segurança o QS
+          não guarda senha). O click-to-dial disca <b>prefixo + número</b> (o servidor só entra se você preencher um domínio próprio).
         </p>
       </div>
 
       <div className="flex items-center gap-3">
         <button onClick={handleSave} disabled={saving} className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#2563EB" }}>
           {saving ? "Salvando..." : "Salvar"}
+        </button>
+        {saved && <span className="text-sm font-medium text-green-600">Salvo ✓</span>}
+      </div>
+
+      <SipProvisioning />
+    </div>
+  );
+}
+
+// ── Provisionamento: link do instalador + ramal de cada SDR (admin) ──────────
+// Guarda o link do instalador (sip_installer_url) e o mapa usuário→ramal
+// (sip_ramais) em qs_settings. Alimenta o onboarding guiado que aparece pro SDR.
+function SipProvisioning() {
+  const [installerUrl, setInstallerUrl] = useState("");
+  const [users, setUsers] = useState<{ id: string; full_name: string | null }[]>([]);
+  const [map, setMap] = useState<Record<string, { ramal: string; login: string }>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    async function load() {
+      const [urlRes, mapRes, usersRes] = await Promise.all([
+        getSetting<string>(SIP_INSTALLER_URL_KEY),
+        getSetting<Record<string, { ramal?: string; login?: string }>>(SIP_RAMAIS_KEY),
+        supabase.from("qs_users").select("id, full_name").eq("is_active", true).order("full_name"),
+      ]);
+      setInstallerUrl((urlRes ?? "").trim());
+      const m: Record<string, { ramal: string; login: string }> = {};
+      const src = mapRes ?? {};
+      Object.keys(src).forEach((k) => { m[k] = { ramal: src[k]?.ramal ?? "", login: src[k]?.login ?? "" }; });
+      setMap(m);
+      if (!usersRes.error) setUsers((usersRes.data as { id: string; full_name: string | null }[]) ?? []);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  function setUserField(id: string, field: "ramal" | "login", value: string) {
+    setMap((prev) => ({ ...prev, [id]: { ramal: prev[id]?.ramal ?? "", login: prev[id]?.login ?? "", [field]: value } }));
+    setSaved(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    // Só guarda quem tem ramal preenchido (limpa os vazios).
+    const clean: Record<string, { ramal: string; login?: string }> = {};
+    Object.entries(map).forEach(([id, v]) => {
+      if (v.ramal.trim()) clean[id] = { ramal: v.ramal.trim(), login: v.login.trim() || undefined };
+    });
+    const ok = (await Promise.all([
+      setSetting(SIP_INSTALLER_URL_KEY, installerUrl.trim()),
+      setSetting(SIP_RAMAIS_KEY, clean),
+    ])).every(Boolean);
+    setSaving(false);
+    setSaved(ok);
+    if (ok) setTimeout(() => setSaved(false), 2500);
+  }
+
+  if (loading) return null;
+
+  return (
+    <div className="border-t border-gray-100 pt-5 space-y-4">
+      <div>
+        <h3 className="text-sm font-bold text-gray-900">Onboarding do SDR (instalação guiada)</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Quando o SDR abre o QS, aparece um passo a passo pra instalar o telefone sem procurar nada — com o ramal dele já preenchido.
+        </p>
+      </div>
+
+      <div className="max-w-xl">
+        <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-1">Link do instalador (BravoTech)</label>
+        <input
+          type="text"
+          value={installerUrl}
+          onChange={(e) => { setInstallerUrl(e.target.value); setSaved(false); }}
+          placeholder="https://… (link do instalador que o dev enviar)"
+          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
+          spellCheck={false}
+        />
+      </div>
+
+      <div className="max-w-xl">
+        <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Ramal de cada SDR</p>
+        <div className="space-y-2">
+          {users.map((u) => (
+            <div key={u.id} className="flex items-center gap-2">
+              <span className="flex-1 text-sm text-gray-700 truncate">{u.full_name ?? "—"}</span>
+              <input
+                type="text"
+                value={map[u.id]?.ramal ?? ""}
+                onChange={(e) => setUserField(u.id, "ramal", e.target.value)}
+                placeholder="ramal"
+                className="w-24 px-2 py-1.5 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
+                spellCheck={false}
+              />
+              <input
+                type="text"
+                value={map[u.id]?.login ?? ""}
+                onChange={(e) => setUserField(u.id, "login", e.target.value)}
+                placeholder="login SIP (opcional)"
+                className="w-44 px-2 py-1.5 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
+                spellCheck={false}
+              />
+            </div>
+          ))}
+          {users.length === 0 && <p className="text-xs text-gray-400">Nenhum usuário ativo encontrado.</p>}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button onClick={handleSave} disabled={saving} className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#2563EB" }}>
+          {saving ? "Salvando..." : "Salvar onboarding"}
         </button>
         {saved && <span className="text-sm font-medium text-green-600">Salvo ✓</span>}
       </div>

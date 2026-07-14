@@ -5,6 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "qs-perdido",
+        "authentication": "headerAuth",
         "responseMode": "onReceived",
         "options": { "allowedOrigins": "*" }
       },
@@ -13,7 +14,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [220, 120],
-      "webhookId": "qs-perdido-b6f0-4d40-8e34-3051627c0001"
+      "webhookId": "qs-perdido-b6f0-4d40-8e34-3051627c0001",
+      "credentials": { "httpHeaderAuth": { "name": "QS Sync Secret (x-qs-sync-secret)" } }
     },
     {
       "parameters": {
@@ -50,6 +52,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "qs-ganho",
+        "authentication": "headerAuth",
         "responseMode": "onReceived",
         "options": { "allowedOrigins": "*" }
       },
@@ -58,7 +61,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [220, 320],
-      "webhookId": "qs-ganho-b6f0-4d40-8e34-3051627c0002"
+      "webhookId": "qs-ganho-b6f0-4d40-8e34-3051627c0002",
+      "credentials": { "httpHeaderAuth": { "name": "QS Sync Secret (x-qs-sync-secret)" } }
     },
     {
       "parameters": {
@@ -95,6 +99,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "qs-reuniao",
+        "authentication": "headerAuth",
         "responseMode": "onReceived",
         "options": { "allowedOrigins": "*" }
       },
@@ -103,7 +108,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [220, 520],
-      "webhookId": "qs-reuniao-b6f0-4d40-8e34-3051627c0003"
+      "webhookId": "qs-reuniao-b6f0-4d40-8e34-3051627c0003",
+      "credentials": { "httpHeaderAuth": { "name": "QS Sync Secret (x-qs-sync-secret)" } }
     },
     {
       "parameters": {
@@ -175,6 +181,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "qs-nota",
+        "authentication": "headerAuth",
         "responseMode": "onReceived",
         "options": { "allowedOrigins": "*" }
       },
@@ -183,7 +190,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [220, 740],
-      "webhookId": "qs-nota-b6f0-4d40-8e34-3051627c0004"
+      "webhookId": "qs-nota-b6f0-4d40-8e34-3051627c0004",
+      "credentials": { "httpHeaderAuth": { "name": "QS Sync Secret (x-qs-sync-secret)" } }
     },
     {
       "parameters": {

@@ -165,7 +165,12 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               <button
                 key={t.label}
                 type="button"
-                onClick={() => setText(fillTemplate(t.text, lead))}
+                onClick={() => {
+                  // Não descarta texto digitado à mão sem perguntar.
+                  const filled = fillTemplate(t.text, lead);
+                  if (text.trim() && text.trim() !== filled.trim() && !window.confirm("Substituir a mensagem que você já escreveu por este template?")) return;
+                  setText(filled);
+                }}
                 className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-colors"
               >
                 {t.label}

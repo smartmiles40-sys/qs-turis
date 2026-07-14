@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
+import { createCadenceTasks } from "@/lib/qs/queries";
 import { getLeadScore } from "@/lib/leadScore";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
@@ -166,6 +167,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [handoverSuccess, setHandoverSuccess] = useState(false);
   const [showReEngagement, setShowReEngagement] = useState(false);
   const [reEngagementScheduled, setReEngagementScheduled] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
   const [lossReasons, setLossReasons] = useState<{ id: string; label: string }[]>([]);
   const [selectedLossReason, setSelectedLossReason] = useState("");
 
@@ -194,6 +196,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [cadence, setCadence] = useState<Cadence | null>(null);
   const [cadenceDays, setCadenceDays] = useState<CadenceDay[]>([]);
   const [closers, setClosers] = useState<SdrUser[]>([]);
+  const [allUsers, setAllUsers] = useState<SdrUser[]>([]);
   const [loading, setLoading] = useState(true);
 
   // ── Fetch lead and related data ──
@@ -256,7 +259,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
         supabase.from("qs_contacts").select("*").eq("lead_id", leadId),
         supabase.from("qs_meetings").select("*, lead:qs_leads(*)").eq("lead_id", leadId).order("scheduled_at", { ascending: false }),
         supabase.from("qs_tasks").select("*").eq("lead_id", leadId).order("scheduled_at", { ascending: true }),
-        supabase.from("qs_users").select("*").eq("role", "closer"),
+        supabase.from("qs_users").select("*"),
       ]);
 
       if (notesRes.error) console.warn("Erro ao buscar notes:", notesRes.error);
@@ -271,9 +274,11 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       if (tasksRes.error) console.warn("Erro ao buscar tasks:", tasksRes.error);
       else setTasks((tasksRes.data as Task[]) ?? []);
 
-      if (closersRes.error) console.warn("Erro ao buscar closers:", closersRes.error);
+      if (closersRes.error) console.warn("Erro ao buscar usuários:", closersRes.error);
       else {
-        const closersList = (closersRes.data as SdrUser[]) ?? [];
+        const usersList = (closersRes.data as SdrUser[]) ?? [];
+        setAllUsers(usersList); // usado pra exibir o autor real das anotações
+        const closersList = usersList.filter((u) => u.role === "closer" && u.is_active);
         setClosers(closersList);
         if (closersList.length > 0) setSelectedCloser(closersList[0].id);
       }
@@ -314,7 +319,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     if (!newNote.trim() || !lead) return;
     const { data, error } = await supabase
       .from("qs_notes")
-      .insert({ lead_id: lead.id, author_id: lead.owner_id, body: newNote.trim() })
+      .insert({ lead_id: lead.id, author_id: currentUser?.id ?? lead.owner_id, body: newNote.trim() })
       .select()
       .single();
     if (error) {
@@ -335,25 +340,41 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // ── Mark as won ──
   async function markAsWon() {
     if (!lead) return;
+    if (!window.confirm(`Marcar ${lead.full_name ?? "este lead"} como GANHO?`)) return;
     const { error } = await supabase
       .from("qs_leads")
       .update({ status: "ganho" as LeadStatus })
       .eq("id", lead.id);
-    if (error) console.warn("Erro ao marcar como ganho:", error);
-    else {
-      // Move o negócio pra coluna de Ganho no Bitrix.
-      notifyBitrix("ganho", {
-        lead_id: lead.id,
-        bitrix_id: lead.bitrix_id,
-        full_name: lead.full_name,
-      });
-      await fetchLead();
+    if (error) {
+      console.warn("Erro ao marcar como ganho:", error);
+      notifyError("Não foi possível marcar como ganho — tente novamente.");
+      return;
     }
+    // Encerra as atividades ainda abertas do lead (mesmo comportamento do Painel);
+    // sem isso elas ficam "pendente" pra sempre e inflam contadores e a taxa de atraso.
+    await supabase
+      .from("qs_tasks")
+      .update({ status: "ignorada", skip_reason: "Lead ganho" })
+      .eq("lead_id", lead.id)
+      .in("status", ["pendente", "atrasada"]);
+    // Move o negócio pra coluna de Ganho no Bitrix.
+    notifyBitrix("ganho", {
+      lead_id: lead.id,
+      bitrix_id: lead.bitrix_id,
+      full_name: lead.full_name,
+    });
+    await fetchLead();
   }
 
   // ── Mark as lost (with re-engagement check — Change 16) ──
   async function markAsLost(lossReasonId?: string) {
     if (!lead) return;
+    // Confirmação: o "Perdido" é um select — um toque errado não pode encerrar o lead.
+    const reasonLabel = lossReasonId ? lossReasons.find((r) => r.id === lossReasonId)?.label : null;
+    if (!window.confirm(`Marcar ${lead.full_name ?? "este lead"} como PERDIDO${reasonLabel ? ` (${reasonLabel})` : ""}?`)) {
+      setSelectedLossReason("");
+      return;
+    }
     const updateData: Record<string, unknown> = { status: "perdido" as LeadStatus };
     if (lossReasonId) updateData.loss_reason_id = lossReasonId;
 
@@ -364,8 +385,17 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     if (error) {
       console.warn("Erro ao marcar como perdido:", error);
       notifyError("Não foi possível marcar como perdido — tente novamente.");
+      setSelectedLossReason("");
       return;
     }
+
+    // Encerra as atividades ainda abertas do lead (mesmo comportamento do Painel).
+    await supabase
+      .from("qs_tasks")
+      .update({ status: "ignorada", skip_reason: "Lead perdido" })
+      .eq("lead_id", lead.id)
+      .in("status", ["pendente", "atrasada"]);
+    setSelectedLossReason("");
 
     // Move o negócio pra coluna de Perdido no Bitrix (com o motivo).
     notifyBitrix("perdido", {
@@ -395,6 +425,8 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     const scheduledAt = new Date();
     scheduledAt.setDate(scheduledAt.getDate() + days);
 
+    // A tag "re_contato" faz o Painel exibir esta tarefa mesmo com o lead perdido
+    // (o filtro padrão esconde tarefas de leads ganhos/perdidos).
     const { error } = await supabase.from("qs_tasks").insert({
       lead_id: lead.id,
       owner_id: lead.owner_id,
@@ -403,6 +435,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       priority: "media",
       scheduled_at: scheduledAt.toISOString(),
       is_extra: true,
+      tags: ["re_contato"],
       notes: `Re-contato agendado (${days} dias) - Lead marcado como perdido`,
     });
 
@@ -419,6 +452,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   }
 
   // ── Handover to closer ──
+  // Handover NÃO é ganho: só troca o dono e encerra as atividades de prospecção.
+  // (Antes marcava status "ganho", inflando o placar/ranking sem venda — o ganho
+  // de verdade continua sendo dado pelo fluxo de desfecho, com reunião.)
   async function handleHandover() {
     if (!lead || !selectedCloser) return;
     const { error: hoError } = await supabase
@@ -431,10 +467,28 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     }
     const { error: upError } = await supabase
       .from("qs_leads")
-      .update({ status: "ganho" as LeadStatus, owner_id: selectedCloser })
+      .update({ owner_id: selectedCloser })
       .eq("id", lead.id);
-    if (upError) console.warn("Erro ao atualizar lead após handover:", upError);
-    else notifyBitrix("ganho", { lead_id: lead.id, bitrix_id: lead.bitrix_id, full_name: lead.full_name });
+    if (upError) {
+      console.warn("Erro ao atualizar lead após handover:", upError);
+      notifyError("O handover foi registrado, mas o dono do lead não mudou — tente novamente.");
+      return;
+    }
+
+    // A prospecção acabou: encerra as atividades abertas pra não ficarem na fila do SDR antigo.
+    await supabase
+      .from("qs_tasks")
+      .update({ status: "ignorada", skip_reason: "Handover para closer" })
+      .eq("lead_id", lead.id)
+      .in("status", ["pendente", "atrasada"]);
+
+    // Registra o handover na timeline do Bitrix (sem mover coluna).
+    const closerName = closers.find((c) => c.id === selectedCloser)?.name ?? "closer";
+    notifyBitrix("nota", {
+      lead_id: lead.id,
+      bitrix_id: lead.bitrix_id,
+      body: `Lead enviado para o closer ${closerName} (handover no QS).`,
+    });
 
     setShowHandoverModal(false);
     setHandoverSuccess(true);
@@ -595,8 +649,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
         }));
 
         // Desfecho do lead
-        if (lead.status === "ganho") events.push({ ts: lead.updated_at, icon: "🏆", color: "#12A18A", title: "Lead GANHO" });
-        if (lead.status === "perdido") events.push({ ts: lead.updated_at, icon: "🚫", color: "#E5484D", title: "Lead perdido", body: lead.loss_reason?.label ? `Motivo: ${lead.loss_reason.label}` : undefined });
+        // closed_at não "anda" com edições posteriores (updated_at andava)
+        if (lead.status === "ganho") events.push({ ts: lead.closed_at ?? lead.updated_at, icon: "🏆", color: "#12A18A", title: "Lead GANHO" });
+        if (lead.status === "perdido") events.push({ ts: lead.closed_at ?? lead.updated_at, icon: "🚫", color: "#E5484D", title: "Lead perdido", body: lead.loss_reason?.label ? `Motivo: ${lead.loss_reason.label}` : undefined });
 
         events.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
 
@@ -788,22 +843,27 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
 
             {/* Notes List */}
             <div className="space-y-3">
-              {notes.map((note) => (
+              {notes.map((note) => {
+                // Autor REAL da nota (antes exibia sempre o dono do lead — num
+                // handover, as notas antigas "mudavam" de autor).
+                const authorName = allUsers.find((u) => u.id === note.author_id)?.name ?? lead.owner?.name ?? "Autor";
+                return (
                 <div key={note.id} className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <div className="w-6 h-6 rounded-full bg-[#0147FF]/10 flex items-center justify-center">
                         <span className="text-[10px] font-bold text-[#0147FF]">
-                          {lead.owner?.name?.split(" ").map((n: string) => n[0]).join("").slice(0, 2) ?? "?"}
+                          {authorName.split(" ").map((n: string) => n[0]).join("").slice(0, 2) || "?"}
                         </span>
                       </div>
-                      <span className="text-sm font-medium text-gray-900">{lead.owner?.name ?? "Autor"}</span>
+                      <span className="text-sm font-medium text-gray-900">{authorName}</span>
                     </div>
                     <span className="text-xs text-gray-400">{formatDateTime(note.created_at)}</span>
                   </div>
                   <p className="text-sm text-gray-700 leading-relaxed">{note.body}</p>
                 </div>
-              ))}
+                );
+              })}
               {notes.length === 0 && (
                 <div className="text-center py-12">
                   <p className="text-sm text-gray-400">Nenhuma anotação registrada.</p>
@@ -1143,7 +1203,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               {lead.job_title} {lead.company_name ? `na ${lead.company_name}` : ""}
             </p>
             {lead.segment && (
-              <p className="text-[13px] font-semibold text-gray-600 mt-0.5">Fonte: <span className="text-gray-800">{lead.segment}</span></p>
+              <p className="text-[13px] font-semibold text-gray-600 mt-0.5">Fonte/Produto: <span className="text-gray-800">{lead.segment}</span></p>
             )}
           </div>
         </div>
@@ -1207,58 +1267,39 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           {(lead.status === "ganho" || lead.status === "perdido") && (
             <button
               onClick={async () => {
-                // Reativar lead
-                await supabase.from("qs_leads").update({
-                  status: "em_prospeccao",
-                  loss_reason_id: null,
-                  cadence_started_at: new Date().toISOString(),
-                  arrived_at: new Date().toISOString(),
-                }).eq("id", lead.id);
-
-                // Criar tasks baseado na cadência vinculada
-                if (lead.cadence_id) {
-                  const { data: days } = await supabase
-                    .from("qs_cadence_days")
-                    .select("*, activities:qs_cadence_activities(*)")
-                    .eq("cadence_id", lead.cadence_id)
-                    .order("day_number");
-
-                  if (days && days.length > 0) {
-                    const now = new Date();
-                    const tasksToCreate = days.flatMap((day: any) =>
-                      (day.activities || []).map((act: any) => {
-                        const scheduled = new Date(now);
-                        scheduled.setDate(scheduled.getDate() + (day.day_number - 1));
-                        if (act.scheduled_time) {
-                          const [h, m] = act.scheduled_time.split(":").map(Number);
-                          scheduled.setHours(h, m, 0, 0);
-                        } else {
-                          scheduled.setHours(9, 0, 0, 0);
-                        }
-                        return {
-                          lead_id: lead.id,
-                          cadence_id: lead.cadence_id,
-                          owner_id: lead.owner_id,
-                          channel_type: act.channel_type,
-                          priority: "media",
-                          scheduled_at: scheduled.toISOString(),
-                          status: "pendente",
-                          contact_attempts: 0,
-                        };
-                      })
-                    );
-                    if (tasksToCreate.length > 0) {
-                      await supabase.from("qs_tasks").insert(tasksToCreate);
-                    }
+                if (reactivating) return;
+                if (!window.confirm(`Reativar ${lead.full_name ?? "este lead"}? As atividades da cadência serão recriadas do dia 1.`)) return;
+                setReactivating(true);
+                try {
+                  const { error } = await supabase.from("qs_leads").update({
+                    status: "em_prospeccao",
+                    loss_reason_id: null,
+                    cadence_started_at: new Date().toISOString(),
+                    arrived_at: new Date().toISOString(),
+                  }).eq("id", lead.id);
+                  if (error) {
+                    console.warn("Erro ao reativar lead:", error);
+                    notifyError("Não foi possível reativar o lead — tente novamente.");
+                    return;
                   }
-                }
 
-                setLead({ ...lead, status: "em_prospeccao" as any, loss_reason_id: null });
+                  // Recria as tarefas pela função única da cadência (a versão antiga
+                  // inseria uma coluna inexistente e falhava em silêncio: o lead
+                  // voltava a "em prospecção" com ZERO atividades e sumia da fila).
+                  if (lead.cadence_id) {
+                    await createCadenceTasks(lead.id, lead.cadence_id, lead.owner_id);
+                  }
+
+                  setLead({ ...lead, status: "em_prospeccao" as LeadStatus, loss_reason_id: null });
+                } finally {
+                  setReactivating(false);
+                }
               }}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+              disabled={reactivating}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-60"
               style={{ background: "#0147FF" }}
             >
-              ↩ Reativar Lead
+              {reactivating ? "Reativando..." : "↩ Reativar Lead"}
             </button>
           )}
         </div>

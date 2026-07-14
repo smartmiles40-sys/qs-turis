@@ -13,13 +13,16 @@
 // Guia de instalação: docs/SIP.md.
 // -----------------------------------------------------------------------------
 
-import { getSetting } from "./qsSettings";
+import { getSetting, setSetting } from "./qsSettings";
 import { normalizePhoneBR } from "./whatsapp";
 
 export const SIP_ENABLED_KEY = "sip_enabled";
 export const SIP_HOST_KEY = "sip_host";
 export const SIP_USER_KEY = "sip_user";
 export const SIP_PASSWORD_KEY = "sip_password";
+// Prefixo de rota que a operadora (BravoTech) pede na frente do número para
+// completar a ligação — ex.: "1*" ou "01*". Vazio = disca o número puro.
+export const SIP_PREFIX_KEY = "sip_prefix";
 
 export const DEFAULT_SIP_HOST = "sipv2.wavoip.com";
 
@@ -34,10 +37,11 @@ export async function getSipHost(): Promise<string> {
   return h || DEFAULT_SIP_HOST;
 }
 
-/** Monta o URI sip: para o softphone. Número em E.164 sem "+". */
-export function buildSipUri(phone?: string | null, host: string = DEFAULT_SIP_HOST): string {
+/** Monta o URI sip: para o softphone. Número em E.164 sem "+". Sem host = URI
+ *  "pelada" (sip:NUMERO), que o softphone disca pela própria conta registrada. */
+export function buildSipUri(phone?: string | null, host?: string): string {
   const to = normalizePhoneBR(phone);
-  return `sip:${to}@${host}`;
+  return host ? `sip:${to}@${host}` : `sip:${to}`;
 }
 
 export type SipDialResult = { ok: true; uri: string } | { ok: false; error: string };
@@ -49,8 +53,14 @@ export type SipDialResult = { ok: true; uri: string } | { ok: false; error: stri
 export async function dialViaSip(phone?: string | null): Promise<SipDialResult> {
   const to = normalizePhoneBR(phone);
   if (!to || to.length < 11) return { ok: false, error: "Telefone inválido para ligar." };
-  const host = await getSipHost();
-  const uri = `sip:${to}@${host}`;
+  // BravoTech: o softphone disca pela PRÓPRIA conta (ramal) registrada, então a
+  // URI vai "pelada" — sip:NUMERO. Só anexa @host se o admin configurou um
+  // domínio SIP próprio (diferente do default herdado da Wavoip).
+  const raw = (await getSetting<string>(SIP_HOST_KEY))?.trim() ?? "";
+  const host = raw && raw !== DEFAULT_SIP_HOST ? raw : "";
+  // Prefixo de rota que a BravoTech pede na frente do número (ex.: "1*"/"01*").
+  const prefix = ((await getSetting<string>(SIP_PREFIX_KEY)) ?? "").trim();
+  const uri = host ? `sip:${prefix}${to}@${host}` : `sip:${prefix}${to}`;
   try {
     if (typeof document === "undefined") throw new Error("Sem navegador.");
     const a = document.createElement("a");
@@ -63,4 +73,44 @@ export async function dialViaSip(phone?: string | null): Promise<SipDialResult> 
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Não foi possível abrir o softphone." };
   }
+}
+
+// ── Provisionamento (onboarding guiado do SDR) ───────────────────────────────
+// A configuração é por MÁQUINA (o softphone é instalado no PC de cada SDR). O QS
+// guarda: o LINK do instalador (botão "Baixar") e o MAPA usuário→ramal (o admin
+// define em Configurações). O onboarding mostra ao SDR o ramal dele já pronto.
+
+export const SIP_INSTALLER_URL_KEY = "sip_installer_url";
+export const SIP_RAMAIS_KEY = "sip_ramais";
+
+export interface SipRamalInfo {
+  ramal: string;   // ex.: "2001"
+  login?: string;  // ex.: "atendimento01@setufor"
+}
+export type SipRamaisMap = Record<string, SipRamalInfo>;
+
+/** Link do instalador do softphone BravoTech (admin cola em Configurações). */
+export async function getSipInstallerUrl(): Promise<string> {
+  return ((await getSetting<string>(SIP_INSTALLER_URL_KEY)) ?? "").trim();
+}
+
+/** Mapa completo usuário→ramal (definido pelo admin). */
+export async function getSipRamais(): Promise<SipRamaisMap> {
+  return (await getSetting<SipRamaisMap>(SIP_RAMAIS_KEY)) ?? {};
+}
+
+/** Ramal de um SDR específico — null se o admin ainda não mapeou. */
+export async function getSipRamalForUser(userId: string): Promise<SipRamalInfo | null> {
+  const info = (await getSipRamais())[userId];
+  return info && info.ramal ? info : null;
+}
+
+/** Salva o mapa usuário→ramal. */
+export async function setSipRamais(map: SipRamaisMap): Promise<boolean> {
+  return setSetting(SIP_RAMAIS_KEY, map);
+}
+
+/** Salva o link do instalador. */
+export async function setSipInstallerUrl(url: string): Promise<boolean> {
+  return setSetting(SIP_INSTALLER_URL_KEY, url.trim());
 }

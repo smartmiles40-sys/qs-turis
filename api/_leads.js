@@ -44,23 +44,33 @@ export async function pickDefaultCadence() {
  */
 export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priority = 'media', baseDate }) {
   const days = await rest(
-    `qs_cadence_days?select=id,day_number,qs_cadence_activities(channel_type,scheduled_time,order_index)&cadence_id=eq.${cadenceId}&order=day_number.asc`
+    `qs_cadence_days?select=id,day_number,qs_cadence_activities(channel_type,scheduled_time,order_index)&cadence_id=eq.${encodeURIComponent(cadenceId)}&order=day_number.asc`
   );
   if (!days || days.length === 0) return 0;
 
-  const base = baseDate ? new Date(baseDate) : new Date();
+  // FUSO: este código roda na Vercel (relógio UTC). Os horários da cadência
+  // ("09:00") são de BRASÍLIA (UTC-3, sem horário de verão desde 2019). Antes
+  // usávamos setHours() direto → a tarefa "09:00" nascia 09:00 UTC = 06:00 BRT
+  // e a fila da manhã amanhecia às 6h. Agora: dia-base calculado no relógio de
+  // Brasília e horário gravado como (h + 3) UTC.
+  const BRT_OFFSET_H = 3;
+  const baseMs = baseDate ? new Date(baseDate).getTime() : Date.now();
+  const brtBase = new Date(baseMs - BRT_OFFSET_H * 3600_000); // "agora" em Brasília, lido pelos campos UTC
   const rows = [];
   for (const day of days) {
     const acts = (day.qs_cadence_activities || []).slice().sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
     for (const act of acts) {
-      const when = new Date(base);
-      when.setDate(when.getDate() + Math.max(0, (day.day_number ?? 1) - 1));
+      let h = 9, m = 0;
       if (act.scheduled_time && /^\d{1,2}:\d{2}/.test(act.scheduled_time)) {
-        const [h, m] = act.scheduled_time.split(':');
-        when.setHours(Number(h), Number(m), 0, 0);
-      } else {
-        when.setHours(9, 0, 0, 0);
+        const [hh, mm] = act.scheduled_time.split(':');
+        h = Number(hh) || 9; m = Number(mm) || 0;
       }
+      const when = new Date(Date.UTC(
+        brtBase.getUTCFullYear(),
+        brtBase.getUTCMonth(),
+        brtBase.getUTCDate() + Math.max(0, (day.day_number ?? 1) - 1),
+        h + BRT_OFFSET_H, m, 0, 0
+      ));
       rows.push({
         lead_id: leadId,
         cadence_id: cadenceId,
@@ -162,6 +172,26 @@ export async function createInboundLead(payload) {
     }
   }
 
+  // 0b) Dedupe secundário SEM bitrix_id (form de LP, retry do n8n): mesmo e-mail
+  //     ou telefone nas últimas 24h → devolve o existente em vez de duplicar
+  //     card + tarefas da cadência.
+  if (!bitrixId && (payload.email || payload.phone)) {
+    try {
+      const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+      const ors = [];
+      if (payload.email) ors.push(`email.eq.${encodeURIComponent(String(payload.email).trim().toLowerCase())}`);
+      if (payload.phone) ors.push(`phone.eq.${encodeURIComponent(String(payload.phone).trim())}`);
+      const dup = await rest(
+        `qs_leads?select=*&or=(${ors.join(',')})&created_at=gte.${encodeURIComponent(since)}&limit=1`
+      );
+      if (dup && dup[0]) {
+        return { lead: dup[0], ownerId: dup[0].owner_id, cadenceId: dup[0].cadence_id, tasks: 0, deduped: true };
+      }
+    } catch (e) {
+      console.warn('[leads] dedupe por email/telefone falhou (segue criando):', e?.message);
+    }
+  }
+
   // 1) Responsável: se o payload não trouxer, o GATILHO do banco decide
   //    (round-robin POR CADÊNCIA — ver migration 0008). Não escolhemos aqui pra
   //    ter UM algoritmo só e não divergir do que entra direto (n8n).
@@ -174,7 +204,7 @@ export async function createInboundLead(payload) {
     const c = await pickDefaultCadence();
     if (c) { cadenceId = c.id; priority = c.priority || 'media'; }
   } else {
-    const c = await rest(`qs_cadences?select=priority&id=eq.${cadenceId}&limit=1`);
+    const c = await rest(`qs_cadences?select=priority&id=eq.${encodeURIComponent(cadenceId)}&limit=1`);
     if (c && c[0]) priority = c[0].priority || 'media';
   }
 
@@ -203,14 +233,25 @@ export async function createInboundLead(payload) {
     arrived_at: nowIso,
   };
 
-  // bitrix_id entra defensivamente: se a coluna ainda não existir no banco,
-  // repetimos o insert sem ela (o vínculo fica de fora, mas o lead entra).
+  // bitrix_id entra defensivamente, mas o catch agora DIFERENCIA o erro:
+  //  • coluna inexistente (42703/PGRST204) → repete sem bitrix_id (migration 0006 pendente);
+  //  • violação do índice único (23505) → outro webhook criou o lead no meio do
+  //    caminho (corrida do check-then-insert) → busca e devolve o EXISTENTE.
+  //    Antes esse caso caía no retry sem bitrix_id = card DUPLICADO e sem vínculo.
   let created;
   try {
     created = await insert('qs_leads', bitrixId ? { ...leadRow, bitrix_id: bitrixId } : leadRow);
   } catch (e) {
-    if (bitrixId) {
-      console.warn('[leads] insert com bitrix_id falhou; tentando sem (aplicar migration 0006):', e?.message);
+    const code = e?.details?.code || e?.code || '';
+    if (bitrixId && code === '23505') {
+      const existing = await rest(`qs_leads?select=*&bitrix_id=eq.${encodeURIComponent(bitrixId)}&limit=1`);
+      if (existing && existing[0]) {
+        return { lead: existing[0], ownerId: existing[0].owner_id, cadenceId: existing[0].cadence_id, tasks: 0, deduped: true };
+      }
+      throw e;
+    }
+    if (bitrixId && (code === '42703' || code === 'PGRST204')) {
+      console.warn('[leads] coluna bitrix_id não existe; inserindo sem (aplicar migration 0006):', e?.message);
       created = await insert('qs_leads', leadRow);
     } else {
       throw e;

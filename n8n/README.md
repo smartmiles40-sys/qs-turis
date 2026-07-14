@@ -116,7 +116,7 @@ linha do canvas:
 `crm.deal.get` (acha o deal) → `crm.deal.update` (move a coluna / preenche) →
 o **Bitrix faz o resto** pelas automações dele. Nota é só `crm.timeline.comment.add`.
 
-### Configurar (3 coisas)
+### Configurar (4 coisas)
 
 1. **`PREENCHA_BITRIX_WEBHOOK_BASE`** (nos nós HTTP do Bitrix): a mesma base REST
    dos outros workflows (`https://SEUPORTAL.bitrix24.com.br/rest/USERID/CODIGO`).
@@ -128,10 +128,21 @@ o **Bitrix faz o resto** pelas automações dele. Nota é só `crm.timeline.comm
    - Conferidos via `crm.status.list?filter[ENTITY_ID]=DEAL_STAGE_25` em 2026-07.
      Se mudar o funil, reliste (CRM → Configurações → Funis e etapas; ou
      `crm.dealcategory.stage.list?id=25`).
-3. **App (Vercel):** defina `VITE_N8N_SYNC_BASE` = a base dos webhooks **SEM barra
-   final** (ex.: `https://SEU-N8N/webhook`). O app acrescenta `/qs-<evento>`.
-   Depois **ative** o workflow (é aí que os paths passam a existir) e faça um
-   **redeploy** do app pra env var entrar no bundle.
+3. **Segurança (obrigatório desde 2026-07-13):** os 4 nós Webhook exigem
+   **Header Auth**. No n8n, crie uma credencial "Header Auth" chamada
+   `QS Sync Secret (x-qs-sync-secret)` com:
+   - **Name:** `x-qs-sync-secret`
+   - **Value:** um segredo forte (ex.: saída de `openssl rand -hex 24`)
+   e selecione-a nos 4 nós Webhook depois de importar. Sem o header certo o n8n
+   responde 403 — ninguém "de fora" move negócio no Bitrix.
+4. **App (Vercel):** o navegador NÃO chama mais o n8n direto (a URL saiu do
+   bundle). O front chama **`/api/bitrix-sync`** (autenticado pelo login do SDR)
+   e a rota encaminha pro n8n com o segredo. Defina as envs **server-side** na
+   Vercel e faça redeploy:
+   - `N8N_SYNC_BASE` = base dos webhooks **SEM barra final** (ex.: `https://SEU-N8N/webhook`)
+   - `N8N_SYNC_SECRET` = o MESMO valor da credencial Header Auth do passo 3
+   - `VITE_N8N_SYNC_BASE` ficou **obsoleta** — remova se tiver setado.
+   Depois **ative** o workflow (é aí que os paths passam a existir).
 
 **Opcional — preencher campos do negócio na reunião:** o nó
 **"Preencher campos da reunião (AJUSTAR UF_*)"** vem **DESATIVADO**. Quando você

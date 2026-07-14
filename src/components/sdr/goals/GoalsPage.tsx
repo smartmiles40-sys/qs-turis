@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { notifyError } from "@/lib/qs/notify";
+import { getClosedAtColumn } from "@/lib/qs/queries";
 import type { Goal, GoalPeriod, GoalType, SdrUser } from "../types";
 
 // ── Realizado por meta ────────────────────────────────────────────────────────
@@ -25,6 +27,9 @@ function getGoalRange(goal: Pick<Goal, "period" | "period_start">): { from: stri
 async function computeGoalCurrent(goal: Goal): Promise<number> {
   const { from, to } = getGoalRange(goal);
   const owner = goal.owner_id;
+  // Data de FECHAMENTO do lead (closed_at, migration 0012) — updated_at mudava
+  // em qualquer edição e re-contava ganhos antigos na meta do mês atual.
+  const closedCol = await getClosedAtColumn();
 
   if (goal.type === "atividades") {
     let q = supabase
@@ -43,8 +48,8 @@ async function computeGoalCurrent(goal: Goal): Promise<number> {
       .from("qs_leads")
       .select("id", { count: "exact", head: true })
       .eq("status", "ganho")
-      .gte("updated_at", from)
-      .lte("updated_at", to);
+      .gte(closedCol, from)
+      .lte(closedCol, to);
     if (owner) q = q.eq("owner_id", owner);
     const { count } = await q;
     return count ?? 0;
@@ -68,8 +73,8 @@ async function computeGoalCurrent(goal: Goal): Promise<number> {
       .from("qs_leads")
       .select("id", { count: "exact", head: true })
       .in("status", ["ganho", "perdido"])
-      .gte("updated_at", from)
-      .lte("updated_at", to);
+      .gte(closedCol, from)
+      .lte(closedCol, to);
     if (owner) q = q.eq("owner_id", owner);
     const { count } = await q;
     return count ?? 0;
@@ -80,14 +85,14 @@ async function computeGoalCurrent(goal: Goal): Promise<number> {
     .from("qs_leads")
     .select("id", { count: "exact", head: true })
     .eq("status", "ganho")
-    .gte("updated_at", from)
-    .lte("updated_at", to);
+    .gte(closedCol, from)
+    .lte(closedCol, to);
   let qFinal = supabase
     .from("qs_leads")
     .select("id", { count: "exact", head: true })
     .in("status", ["ganho", "perdido"])
-    .gte("updated_at", from)
-    .lte("updated_at", to);
+    .gte(closedCol, from)
+    .lte(closedCol, to);
   if (owner) {
     qGanhos = qGanhos.eq("owner_id", owner);
     qFinal = qFinal.eq("owner_id", owner);
@@ -247,12 +252,17 @@ export default function GoalsPage() {
       period_start: new Date().toISOString().slice(0, 10),
     };
 
-    if (modal.editingId) {
-      const { error } = await supabase.from("qs_goals").update(payload).eq("id", modal.editingId);
-      if (error) console.warn("Erro ao atualizar meta:", error);
-    } else {
-      const { error } = await supabase.from("qs_goals").insert(payload);
-      if (error) console.warn("Erro ao criar meta:", error);
+    const { error } = modal.editingId
+      ? await supabase.from("qs_goals").update(payload).eq("id", modal.editingId)
+      : await supabase.from("qs_goals").insert(payload);
+
+    if (error) {
+      // Meta que falhou não pode simplesmente "não aparecer" — mantém o modal
+      // aberto pra pessoa tentar de novo sem perder o que digitou.
+      console.warn("Erro ao salvar meta:", error);
+      notifyError("Não foi possível salvar a meta — tente novamente.");
+      setSaving(false);
+      return;
     }
 
     await fetchGoals();

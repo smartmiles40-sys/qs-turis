@@ -58,6 +58,7 @@ export interface Lead {
   arrived_at: string | null;        // horário que o lead chegou
   lead_score: string | null;        // temperatura vinda do Bitrix (rótulo cru: Quente/Morno/Frio). NULL = sem score
   bitrix_id: string | null;         // vínculo com o negócio no Bitrix (APLICAR-PENDENTES.sql)
+  closed_at?: string | null;        // data REAL do ganho/perda (migration 0012; trigger na transição de status)
   created_at: string;
   updated_at: string;
 }
@@ -90,6 +91,7 @@ export interface Task {
   status: TaskStatus;
   is_extra: boolean;
   notes: string | null;
+  tags?: string[] | null;
   completed_at: string | null;
   created_at: string;
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { fetchDashboardStats, fetchQsUsers } from "@/lib/qs/queries";
+import { fetchDashboardStats, fetchQsUsers, getClosedAtColumn } from "@/lib/qs/queries";
 import type { GoalType } from "../types";
 import type { SdrUser } from "../types";
 import RankingPanel from "./RankingPanel";
@@ -623,11 +623,14 @@ export default function SdrDashboard() {
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
       const currentDay = now.getDate();
 
+      // Data de FECHAMENTO (closed_at, migration 0012) — updated_at re-contava
+      // ganhos antigos no mês atual a cada edição do lead.
+      const closedCol = await getClosedAtColumn();
       let qGanhosByDay = supabase
         .from("qs_leads")
-        .select("updated_at")
+        .select(closedCol)
         .eq("status", "ganho")
-        .gte("updated_at", monthStart.toISOString());
+        .gte(closedCol, monthStart.toISOString());
       if (ownerId) qGanhosByDay = qGanhosByDay.eq("owner_id", ownerId);
 
       const { data: ganhosDays } = await qGanhosByDay;
@@ -635,7 +638,7 @@ export default function SdrDashboard() {
       // Build cumulative array
       const dayCounts = new Array(currentDay).fill(0);
       (ganhosDays ?? []).forEach((row: any) => {
-        const d = new Date(row.updated_at).getDate();
+        const d = new Date(row[closedCol]).getDate();
         if (d >= 1 && d <= currentDay) {
           dayCounts[d - 1]++;
         }
@@ -828,23 +831,26 @@ export default function SdrDashboard() {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
+      // Data de FECHAMENTO real (closed_at, migration 0012; fallback updated_at).
+      const closedCol = await getClosedAtColumn();
+
       // 1. Ciclo Médio de Qualificação
       let qCiclo = supabase
         .from("qs_leads")
-        .select("arrived_at, updated_at")
+        .select(`arrived_at, ${closedCol}`)
         .in("status", ["ganho", "perdido"])
         .not("arrived_at", "is", null);
       if (ownerId) qCiclo = qCiclo.eq("owner_id", ownerId);
-      if (from) qCiclo = qCiclo.gte("updated_at", from);
-      if (to) qCiclo = qCiclo.lte("updated_at", to);
+      if (from) qCiclo = qCiclo.gte(closedCol, from);
+      if (to) qCiclo = qCiclo.lte(closedCol, to);
 
       const { data: cicloData } = await qCiclo;
       if (cicloData && cicloData.length > 0) {
         let totalDays = 0;
         let count = 0;
         (cicloData as any[]).forEach((row) => {
-          if (!row.arrived_at || !row.updated_at) return;
-          const diff = (new Date(row.updated_at).getTime() - new Date(row.arrived_at).getTime()) / 86400000;
+          if (!row.arrived_at || !row[closedCol]) return;
+          const diff = (new Date(row[closedCol]).getTime() - new Date(row.arrived_at).getTime()) / 86400000;
           if (diff >= 0) {
             totalDays += diff;
             count++;
@@ -862,8 +868,8 @@ export default function SdrDashboard() {
         .in("status", ["ganho", "perdido"])
         .not("cadence_id", "is", null);
       if (ownerId) qCadence = qCadence.eq("owner_id", ownerId);
-      if (from) qCadence = qCadence.gte("updated_at", from);
-      if (to) qCadence = qCadence.lte("updated_at", to);
+      if (from) qCadence = qCadence.gte(closedCol, from);
+      if (to) qCadence = qCadence.lte(closedCol, to);
 
       const { data: cadenceData } = await qCadence;
       const cadenceMap = new Map<string, { name: string; total: number; ganhos: number }>();
@@ -1009,12 +1015,13 @@ export default function SdrDashboard() {
         .in("status", ["nao_iniciado", "em_prospeccao"]);
       if (ownerId) qPipe = qPipe.eq("owner_id", ownerId);
 
-      // 3. Receita ganha no período
+      // 3. Receita ganha no período (pela data de FECHAMENTO — ver migration 0012)
+      const closedColWon = await getClosedAtColumn();
       let qWon = supabase.from("qs_leads").select("estimated_value, closed_value")
         .eq("status", "ganho");
       if (ownerId) qWon = qWon.eq("owner_id", ownerId);
-      if (from) qWon = qWon.gte("updated_at", from);
-      if (to) qWon = qWon.lte("updated_at", to);
+      if (from) qWon = qWon.gte(closedColWon, from);
+      if (to) qWon = qWon.lte(closedColWon, to);
 
       // 4. Conversão por fonte (leads criados no período)
       let qSrc = supabase.from("qs_leads").select("segment, status, created_at");

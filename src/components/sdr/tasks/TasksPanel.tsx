@@ -11,12 +11,13 @@ import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
-import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals } from "@/lib/qs/queries";
+import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, createCadenceTasks } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getLeadScore } from "@/lib/leadScore";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { dialViaWavoip, setOnCallEnded } from "@/lib/wavoip";
+import { dialViaSip } from "@/lib/sip";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
 import type { SdrUser } from "../types";
@@ -333,34 +334,43 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setContactedLeadIds((prev) => { const s = new Set(prev); s.add(leadId); return s; });
   }, []);
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      try {
-        const [tasksRes, leadsRes, cadencesRes, usersData, productsRes, notesRes, contactedRes] = await Promise.all([
-          supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
-          supabase.from("qs_leads").select("*"),
-          supabase.from("qs_cadences").select("*"),
-          fetchQsUsers(),
-          supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
-          supabase.from("qs_notes").select("lead_id"),
-          supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
-        ]);
-        setTasks((tasksRes.data || []) as Task[]);
-        setLeads((leadsRes.data || []) as Lead[]);
-        setCadences((cadencesRes.data || []) as Cadence[]);
-        setQsUsers(usersData);
-        setProducts((productsRes.data || []) as { id: string; name: string }[]);
-        setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[] | null));
-        setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[] | null));
-      } catch (err) {
-        console.warn("[TasksPanel] falha ao carregar dados:", err);
-      } finally {
-        setLoading(false);
+  // Falha no carregamento NÃO pode virar "Tudo limpo!" — guarda o erro pra
+  // mostrar um estado próprio com "Tentar de novo".
+  const [loadError, setLoadError] = useState(false);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [tasksRes, leadsRes, cadencesRes, usersData, productsRes, notesRes, contactedRes] = await Promise.all([
+        supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
+        supabase.from("qs_leads").select("*"),
+        supabase.from("qs_cadences").select("*"),
+        fetchQsUsers(),
+        supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
+        supabase.from("qs_notes").select("lead_id"),
+        supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
+      ]);
+      // supabase-js não lança em erro de query — checa as duas leituras vitais.
+      if (tasksRes.error || leadsRes.error) {
+        console.warn("[TasksPanel] falha ao carregar dados:", tasksRes.error ?? leadsRes.error);
+        setLoadError(true);
+      } else {
+        setLoadError(false);
       }
+      setTasks((tasksRes.data || []) as Task[]);
+      setLeads((leadsRes.data || []) as Lead[]);
+      setCadences((cadencesRes.data || []) as Cadence[]);
+      setQsUsers(usersData);
+      setProducts((productsRes.data || []) as { id: string; name: string }[]);
+      setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[] | null));
+      setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[] | null));
+    } catch (err) {
+      console.warn("[TasksPanel] falha ao carregar dados:", err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-    loadData();
   }, []);
+  useEffect(() => { loadData(); }, [loadData]);
 
   // Horário de funcionamento (Configurações) — alimenta as métricas de tempo.
   const [workHours, setWorkHours] = useState<WorkHours>(DEFAULT_WORK_HOURS);
@@ -501,6 +511,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [dialNumber, setDialNumber] = useState("");
   const [newLead, setNewLead] = useState({ full_name: "", phone: "", email: "", company_name: "", owner_id: currentUser?.id ?? "", cadence_id: "", notes: "" });
   const [savingLead, setSavingLead] = useState(false);
+  const [newLeadError, setNewLeadError] = useState<string | null>(null);
 
   // Classificação da ligação: ao concluir uma atividade de LIGAÇÃO, o SDR escolhe
   // o motivo do resultado da chamada (radio único). Guarda o contexto pro título.
@@ -519,19 +530,31 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
   // Toast notification
   const [toast, setToast] = useState<{ message: string; visible: boolean } | null>(null);
+  const toastTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   function showToast(message: string) {
+    // Cancela os timers do toast anterior — senão o timer velho apaga o toast novo no meio.
+    toastTimersRef.current.forEach(clearTimeout);
     setToast({ message, visible: true });
-    setTimeout(() => setToast(prev => prev ? { ...prev, visible: false } : null), 3000);
-    setTimeout(() => setToast(null), 3500);
+    toastTimersRef.current = [
+      setTimeout(() => setToast(prev => prev ? { ...prev, visible: false } : null), 3000),
+      setTimeout(() => setToast(null), 3500),
+    ];
   }
 
   // Persiste o PRÓXIMO PASSO do lead conforme o desfecho do contato.
   // Cria uma nova tarefa 'pendente' em qs_tasks (mesmo canal, data futura) e a devolve
   // para o estado local. Assim NENHUM lead fica sem próxima tarefa.
   async function insertFollowUp(task: Task, result: string): Promise<Task | null> {
+    // Próximo dia ÚTIL da cadência (execution_weekdays; padrão seg–sex).
+    // O "amanhã 09:00" fixo caía em sábado/domingo e amanhecia atrasado na segunda.
+    const cadDays = getCadenceForTask(task)?.execution_weekdays;
+    const allowed = cadDays && cadDays.length > 0 ? cadDays : [1, 2, 3, 4, 5];
     const next = new Date();
-    next.setDate(next.getDate() + 1);
+    for (let i = 0; i < 14; i++) {
+      next.setDate(next.getDate() + 1);
+      if (allowed.includes(next.getDay())) break;
+    }
     next.setHours(9, 0, 0, 0);
 
     const attempt = getAttemptCount(task) + 1;
@@ -587,53 +610,76 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       .in("id", others.map(t => t.id));
   }
 
+  // Guarda anti-reentrada dos desfechos: protege Enter+clique e tecla repetida
+  // independente de quem seta `finalizing` (o botão "Finalizar" seta antes de chamar).
+  const outcomeBusyRef = useRef(false);
+
   async function handleContactResult(taskId: string, result: string) {
+    if (outcomeBusyRef.current) return;
     const currentTask = tasks.find(t => t.id === taskId);
     if (!currentTask) return;
+    outcomeBusyRef.current = true;
+    try {
+      // 1. Conclui a tentativa atual (marca 'concluida' + registra contact_result).
+      // Se a gravação FALHAR (ou a tarefa já tiver sido concluída), aborta aqui:
+      // nada de toast verde, nada de sumir da fila, nada de Bitrix — antes o erro
+      // e o "sucesso" apareciam juntos e o QS divergia do Bitrix em silêncio.
+      const completed = await completeTask(taskId, result);
+      if (!completed) return;
+      markContacted(currentTask.lead_id); // lead trabalhado → some o "sem contato" nas próximas
 
-    // 1. Conclui a tentativa atual (marca 'concluida' + registra contact_result).
-    await completeTask(taskId, result);
-    markContacted(currentTask.lead_id); // lead trabalhado → some o "sem contato" nas próximas
+      const leadName = getLeadForTask(currentTask)?.full_name || "Lead";
 
-    const leadName = getLeadForTask(currentTask)?.full_name || "Lead";
+      // 1b. Resumo da atividade → nota do lead (vai pro Bitrix via n8n). Itens 1 e 4.
+      const outcomeLabels: Record<string, string> = {
+        ganho: "Ganho / Agendou", sem_interesse: "Perdido", atendeu: "Pediu retorno",
+        nao_atendeu: "Não atendeu", caixa_postal: "Caixa postal", numero_errado: "Nº errado", desligou: "Desligou",
+      };
+      const resumo = `${CHANNEL_LABELS[currentTask.channel_type]} — ${outcomeLabels[result] ?? result}${obsText.trim() ? `: ${obsText.trim()}` : ""}`;
+      await persistObservation(currentTask.lead_id, resumo, ["bitrix", "desfecho", result]);
+      setObsText("");
+      setActiveTaskId(null);
 
-    // 1b. Resumo da atividade → nota do lead (vai pro Bitrix via n8n). Itens 1 e 4.
-    const outcomeLabels: Record<string, string> = {
-      ganho: "Ganho / Agendou", sem_interesse: "Perdido", atendeu: "Pediu retorno",
-      nao_atendeu: "Não atendeu", caixa_postal: "Caixa postal", numero_errado: "Nº errado", desligou: "Desligou",
-    };
-    const resumo = `${CHANNEL_LABELS[currentTask.channel_type]} — ${outcomeLabels[result] ?? result}${obsText.trim() ? `: ${obsText.trim()}` : ""}`;
-    await persistObservation(currentTask.lead_id, resumo, ["bitrix", "desfecho", result]);
-    setObsText("");
-    setActiveTaskId(null);
-
-    // 2. Desfecho: ganho/perdido encerram o lead; qualquer outro gera o próximo passo.
-    const desfechoLead = getLeadForTask(currentTask);
-    if (result === "ganho") {
-      await supabase.from("qs_leads").update({ status: "ganho" }).eq("id", currentTask.lead_id);
-      notifyBitrix("ganho", { lead_id: currentTask.lead_id, bitrix_id: desfechoLead?.bitrix_id, full_name: desfechoLead?.full_name });
-      await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead ganho");
-      setLeads(prev => prev.map((l): Lead => l.id === currentTask.lead_id ? { ...l, status: "ganho" } : l));
-      setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
-      showToast(`Ganho! ${leadName}`);
-    } else if (result === "sem_interesse") {
-      await supabase.from("qs_leads").update({ status: "perdido" }).eq("id", currentTask.lead_id);
-      notifyBitrix("perdido", { lead_id: currentTask.lead_id, bitrix_id: desfechoLead?.bitrix_id, full_name: desfechoLead?.full_name });
-      await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead perdido — sem interesse");
-      setLeads(prev => prev.map((l): Lead => l.id === currentTask.lead_id ? { ...l, status: "perdido" } : l));
-      setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
-      showToast(`Lead perdido — ${leadName}`);
-    } else {
-      // atendeu (pediu retorno), nao_atendeu, caixa_postal, desligou, numero_errado
-      // → SEMPRE cria a próxima tarefa. Nenhum lead fica órfão.
-      const followUp = await insertFollowUp(currentTask, result);
-      setTasks(prev => {
-        const rest = prev.filter(t => t.id !== taskId);
-        return followUp ? [...rest, followUp] : rest;
-      });
-      showToast(`Atividade registrada — ${leadName}`);
+      // 2. Desfecho: ganho/perdido encerram o lead; qualquer outro gera o próximo passo.
+      const desfechoLead = getLeadForTask(currentTask);
+      if (result === "ganho") {
+        const { error: updErr } = await supabase.from("qs_leads").update({ status: "ganho" }).eq("id", currentTask.lead_id);
+        if (updErr) {
+          notifyError("A atividade foi concluída, mas o lead NÃO foi marcado como ganho — marque pelo perfil do lead.");
+          setTasks(prev => prev.filter(t => t.id !== taskId));
+          return;
+        }
+        notifyBitrix("ganho", { lead_id: currentTask.lead_id, bitrix_id: desfechoLead?.bitrix_id, full_name: desfechoLead?.full_name });
+        await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead ganho");
+        setLeads(prev => prev.map((l): Lead => l.id === currentTask.lead_id ? { ...l, status: "ganho" } : l));
+        setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
+        showToast(`Ganho! ${leadName}`);
+      } else if (result === "sem_interesse") {
+        const { error: updErr } = await supabase.from("qs_leads").update({ status: "perdido" }).eq("id", currentTask.lead_id);
+        if (updErr) {
+          notifyError("A atividade foi concluída, mas o lead NÃO foi marcado como perdido — marque pelo perfil do lead.");
+          setTasks(prev => prev.filter(t => t.id !== taskId));
+          return;
+        }
+        notifyBitrix("perdido", { lead_id: currentTask.lead_id, bitrix_id: desfechoLead?.bitrix_id, full_name: desfechoLead?.full_name });
+        await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead perdido — sem interesse");
+        setLeads(prev => prev.map((l): Lead => l.id === currentTask.lead_id ? { ...l, status: "perdido" } : l));
+        setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
+        showToast(`Lead perdido — ${leadName}`);
+      } else {
+        // atendeu (pediu retorno), nao_atendeu, caixa_postal, desligou, numero_errado
+        // → SEMPRE cria a próxima tarefa. Nenhum lead fica órfão.
+        const followUp = await insertFollowUp(currentTask, result);
+        setTasks(prev => {
+          const rest = prev.filter(t => t.id !== taskId);
+          return followUp ? [...rest, followUp] : rest;
+        });
+        showToast(`Atividade registrada — ${leadName}`);
+      }
+      refreshCounts(); // placar de metas atualiza na hora
+    } finally {
+      outcomeBusyRef.current = false;
     }
-    refreshCounts(); // placar de metas atualiza na hora
   }
 
   // Marca a atividade como CONCLUÍDA (conta no placar do dia), some da fila e
@@ -657,17 +703,26 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       });
       return;
     }
-    const obs = obsText.trim();
-    if (obs) {
-      await persistObservation(task.lead_id, `${CHANNEL_LABELS[task.channel_type]} — Concluída: ${obs}`, ["bitrix", "observacao"]);
+    if (outcomeBusyRef.current) return; // anti duplo clique / tecla "C" repetida
+    outcomeBusyRef.current = true;
+    try {
+      const obs = obsText.trim();
+      // Conclui PRIMEIRO; a observação só é gravada se a conclusão pegou — senão
+      // a nota ia pro Bitrix sem a atividade existir concluída no QS.
+      const completed = await completeTask(task.id, "concluida", obs || undefined, obs ? ["observacao"] : undefined);
+      if (!completed) return; // falhou (ou já concluída): mantém o card e a observação digitada
+      if (obs) {
+        await persistObservation(task.lead_id, `${CHANNEL_LABELS[task.channel_type]} — Concluída: ${obs}`, ["bitrix", "observacao"]);
+      }
+      markContacted(task.lead_id); // primeiro contato feito → não é mais "sem contato"
+      setTasks((prev) => prev.filter((t) => t.id !== task.id));
+      setActiveTaskId(null);
+      setObsText("");
+      refreshCounts();
+      showToast("Atividade concluída");
+    } finally {
+      outcomeBusyRef.current = false;
     }
-    await completeTask(task.id, "concluida", obs || undefined, obs ? ["observacao"] : undefined);
-    markContacted(task.lead_id); // primeiro contato feito → não é mais "sem contato"
-    setTasks((prev) => prev.filter((t) => t.id !== task.id));
-    setActiveTaskId(null);
-    setObsText("");
-    refreshCounts();
-    showToast("Atividade concluída");
   }
 
   // Finaliza a ligação com a classificação escolhida (radio único). Salva o enum
@@ -685,7 +740,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       const leadName = getLeadForTask(task)?.full_name || "Lead";
 
       // 1) Conclui a tarefa gravando a classificação como resultado do contato.
-      await completeTask(task.id, classifySel, obs || undefined, ["classificacao", classifySel]);
+      // Falhou? mantém o modal aberto pro SDR tentar de novo (nada foi gravado).
+      const completed = await completeTask(task.id, classifySel, obs || undefined, ["classificacao", classifySel]);
+      if (!completed) return;
 
       // 2) Falou com alguém? então marca contato feito (some "sem contato").
       if (meta?.reached) markContacted(task.lead_id);
@@ -724,14 +781,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const text = body.trim();
     if (!text) return;
     try {
-      // Mini-notificação (item 6): incrementa o contador de observações do lead na hora.
-      setNoteCounts((prev) => { const m = new Map(prev); m.set(leadId, (m.get(leadId) || 0) + 1); return m; });
-      await supabase.from("qs_notes").insert({
+      // Grava PRIMEIRO — o contador e o espelho no Bitrix só acontecem se a nota
+      // existir de verdade (supabase-js não lança: o erro vem no retorno).
+      const { error } = await supabase.from("qs_notes").insert({
         lead_id: leadId,
         author_id: currentUser?.id ?? null,
         body: text,
         tags,
       });
+      if (error) {
+        console.warn("[QS] não foi possível salvar a observação:", error);
+        notifyError("Não foi possível salvar a observação — tente novamente.");
+        return;
+      }
+      // Mini-notificação (item 6): incrementa o contador de observações do lead.
+      setNoteCounts((prev) => { const m = new Map(prev); m.set(leadId, (m.get(leadId) || 0) + 1); return m; });
       // Espelha como comentário na timeline do negócio no Bitrix.
       notifyBitrix("nota", {
         lead_id: leadId,
@@ -862,10 +926,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     if (!extraTask.lead_id || !extraTask.date) return;
     setSavingExtra(true);
     const [h, m] = extraTask.time.split(":").map(Number);
-    const scheduled = new Date(extraTask.date);
-    scheduled.setHours(h || 9, m || 0, 0, 0);
+    // Monta a data no FUSO LOCAL: `new Date("YYYY-MM-DD")` interpreta como meia-noite
+    // UTC (= 21h do dia ANTERIOR no Brasil) e o retorno "de amanhã" nascia hoje, atrasado.
+    const [yy, mo, dd] = extraTask.date.split("-").map(Number);
+    const scheduled = new Date(yy, (mo || 1) - 1, dd || 1, h || 9, m || 0, 0, 0);
     const lead = leads.find((l) => l.id === extraTask.lead_id);
-    const { data } = await supabase.from("qs_tasks").insert({
+    const { data, error: extraError } = await supabase.from("qs_tasks").insert({
       lead_id: extraTask.lead_id,
       cadence_id: lead?.cadence_id || null,
       owner_id: currentUser?.id || null,
@@ -876,10 +942,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       is_extra: true,
       notes: extraTask.notes || null,
     }).select().single();
-    const extra = data as Task | null;
+    const extra = (data as Task | null) ?? null;
+
+    // A extra NÃO foi criada? Aborta TUDO aqui — antes o código seguia e ignorava
+    // as outras tarefas do lead, deixando-o órfão de atividades sem nenhum aviso.
+    if (extraError || !extra) {
+      console.warn("[QS] falha ao criar atividade extra:", extraError);
+      notifyError("Não foi possível criar a atividade extra — nada foi alterado. Tente novamente.");
+      setSavingExtra(false);
+      return;
+    }
 
     // REGRA: encerra as demais tarefas pendentes/atrasadas do lead (menos a extra e a de origem)
-    const exclude = [extra?.id, extraFromTaskId].filter(Boolean) as string[];
+    const exclude = [extra.id, extraFromTaskId].filter(Boolean) as string[];
     let q = supabase.from("qs_tasks").update({ status: "ignorada", skip_reason: "Substituída por atividade extra" })
       .eq("lead_id", extraTask.lead_id).in("status", ["pendente", "atrasada"]);
     if (exclude.length) q = q.not("id", "in", `(${exclude.join(",")})`);
@@ -928,8 +1003,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const filteredTasks = useMemo(() => {
     let filtered = [...tasks];
 
-    // Guard: tarefas de leads já encerrados (ganho/perdido) não aparecem na fila
+    // Guard: tarefas de leads já encerrados (ganho/perdido) não aparecem na fila.
+    // Exceção: re-contato agendado (tag "re_contato") — o lead está perdido de
+    // propósito e a tarefa PRECISA aparecer quando a data chegar.
     filtered = filtered.filter((t) => {
+      if (t.tags?.includes("re_contato")) return true;
       const st = getLeadForTask(t)?.status;
       return st !== "ganho" && st !== "perdido";
     });
@@ -945,12 +1023,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const endMs = endOfToday.getTime();
     filtered = filtered.filter((t) => new Date(t.scheduled_at).getTime() <= endMs);
 
+    // "Atrasada" é DERIVADA da data (venceu antes de hoje) — o status 'atrasada'
+    // nunca é gravado pelo sistema, então filtrar por ele mostrava sempre 0
+    // enquanto o sino de notificações mostrava atrasadas de verdade.
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+    const startMs = startOfToday.getTime();
+    const isOverdue = (t: Task) => new Date(t.scheduled_at).getTime() < startMs;
     if (statusFilter === "extras") {
       filtered = filtered.filter((t) => t.is_extra);
     } else if (statusFilter === "para_hoje") {
-      filtered = filtered.filter((t) => t.status === "pendente");
+      filtered = filtered.filter((t) => !isOverdue(t));
     } else if (statusFilter === "atrasadas") {
-      filtered = filtered.filter((t) => t.status === "atrasada");
+      filtered = filtered.filter(isOverdue);
     }
 
     if (channelFilter) {
@@ -974,6 +1058,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
     if (search.trim()) {
       const q = search.toLowerCase();
+      const qDigits = q.replace(/\D/g, ""); // telefone busca só por dígitos
       filtered = filtered.filter((t) => {
         const lead = getLeadForTask(t);
         if (!lead) return false;
@@ -981,7 +1066,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           (lead.full_name?.toLowerCase().includes(q)) ||
           (lead.company_name?.toLowerCase().includes(q)) ||
           (lead.email?.toLowerCase().includes(q)) ||
-          (lead.phone?.includes(q)) ||
+          (qDigits.length >= 4 && (lead.phone ?? "").replace(/\D/g, "").includes(qDigits)) ||
           (lead.bitrix_id?.toLowerCase().includes(q))
         );
       });
@@ -1006,7 +1091,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
 
     return filtered;
-  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter]);
+  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser]);
 
   // Card "hero" atual (o que o SDR está atendendo) — usado no render E nos atalhos.
   const heroTaskMemo = useMemo(() => {
@@ -1089,10 +1174,25 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Contadores na MESMA base da fila exibida: só as tarefas do próprio SDR
+  // (quando não é gestor/admin), de leads ainda ativos, até hoje. Antes contavam
+  // a fila inteira do time + dias futuros e o número da saudação não batia.
   const endTodayMs = (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d.getTime(); })();
-  const todayTasks = tasks.filter((t) => t.status === "pendente" && new Date(t.scheduled_at).getTime() <= endTodayMs);
-  const overdueTasks = tasks.filter((t) => t.status === "atrasada");
-  const extraTasks = tasks.filter((t) => t.is_extra);
+  const startTodayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+  const counterBase = useMemo(() => {
+    let base = tasks.filter((t) => {
+      if (t.tags?.includes("re_contato")) return true;
+      const st = leadsMap.get(t.lead_id)?.status;
+      return st !== "ganho" && st !== "perdido";
+    });
+    if (currentUser && !canSeeAllData(currentUser.role)) {
+      base = base.filter((t) => t.owner_id === currentUser.id);
+    }
+    return base.filter((t) => new Date(t.scheduled_at).getTime() <= endTodayMs);
+  }, [tasks, leadsMap, currentUser, endTodayMs]);
+  const todayTasks = counterBase.filter((t) => new Date(t.scheduled_at).getTime() >= startTodayMs);
+  const overdueTasks = counterBase.filter((t) => new Date(t.scheduled_at).getTime() < startTodayMs);
+  const extraTasks = counterBase.filter((t) => t.is_extra);
 
   // Hot lead detection (Change 2)
   const hotLead = useMemo(() => {
@@ -1114,7 +1214,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
   // Placar real: concluídas hoje/mês vs metas (qs_goals, com fallback nos padrões)
   const DAILY_DONE = doneCounts.doneToday;
-  const TOTAL_SCHEDULED = tasks.length;
+  const TOTAL_SCHEDULED = counterBase.length; // fila de hoje do PRÓPRIO SDR, não do time inteiro
   const MONTHLY_DONE = doneCounts.doneMonth;
   const dailyGoal = goalTargets.daily ?? DAILY_GOAL;
   const monthlyGoal = goalTargets.monthly ?? MONTHLY_GOAL;
@@ -1143,7 +1243,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       setShowCelebration(true);
       setTimeout(() => setShowCelebration(false), 3000);
     }
-  }, [DAILY_DONE, celebrationShown]);
+  }, [DAILY_DONE, dailyGoal, celebrationShown]);
 
   // ── Renderizadores do design "Execução" (hero + pílulas) ───────────────────
 
@@ -1216,7 +1316,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           <div className="qsx-pco mt-1">
             {lead?.company_name && <b>{lead.company_name}</b>}
             {lead?.company_name ? " · " : ""}
-            {lead?.segment ? <>Fonte: <b>{lead.segment}</b> · </> : ""}
+            {lead?.segment ? <>Fonte/Produto: <b>{lead.segment}</b> · </> : ""}
             {getActivityLabel(task.channel_type)}
             {cadence ? ` · ${cadence.name}` : ""}
           </div>
@@ -1231,7 +1331,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </button>
           )}
           {(task.channel_type === "ligacao_whatsapp" || task.channel_type === "ligacao") && lead?.phone && (
-            <button onClick={(e) => { e.stopPropagation(); callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-pa qsx-pa-wa" title="Ligar pelo webfone (Wavoip)">
+            <button onClick={(e) => { e.stopPropagation(); pinTaskForCall(task); if (task.channel_type === "ligacao") callViaSip(lead.phone); else callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-pa qsx-pa-wa" title={task.channel_type === "ligacao" ? "Ligar (BravoTech)" : "Ligar pelo webfone (Wavoip)"}>
               <ChannelIcon type="ligacao" size={17} />
             </button>
           )}
@@ -1243,6 +1343,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         </div>
       </div>
     );
+  }
+
+  // Pina o card do lead ANTES de discar: a fila é "mais novo primeiro" e o
+  // realtime pode trocar o hero no meio da ligação — sem o pin, o SDR
+  // registraria o desfecho no lead errado.
+  function pinTaskForCall(task: Task) {
+    if (heroTaskMemo?.id === task.id) { setActiveTaskId(task.id); return; } // já é o hero — não apaga a observação digitada
+    selectActive(task.id);
   }
 
   // Liga pelo WEBFONE (Wavoip) — TODA ligação do sistema sai por aqui.
@@ -1264,13 +1372,23 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     }
   }
 
-  // Só o botão do canal da tarefa. TODA ligação (normal ou WhatsApp) = webfone Wavoip.
+  // Liga pelo SOFTPHONE (BravoTech/SIP): monta "sip:NUMERO" e entrega ao softphone
+  // instalado no PC do SDR (registrado no ramal BravoTech). A ligação acontece FORA
+  // do navegador — não há evento de fim, então o SDR registra o desfecho na mão.
+  async function callViaSip(phone?: string | null) {
+    const r = await dialViaSip(phone);
+    if (r.ok) showToast("Discando no softphone (BravoTech)… registre o desfecho ao terminar");
+    else notifyError(r.error || "Não foi possível abrir o softphone (BravoTech).");
+  }
+
+  // Botão do canal da tarefa. "Ligação" = softphone BravoTech (SIP); "Ligação
+  // WhatsApp" continua no webfone Wavoip.
   function renderChannelAction(task: Task, lead: Lead | undefined) {
     switch (task.channel_type) {
       case "ligacao":
-        return lead?.phone ? <button onClick={() => callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id })} className="qsx-btn qsx-btn-green"><ChannelIcon type="ligacao" size={16} />Ligar</button> : null;
+        return lead?.phone ? <button onClick={() => { pinTaskForCall(task); callViaSip(lead.phone); }} className="qsx-btn qsx-btn-green"><ChannelIcon type="ligacao" size={16} />Ligar</button> : null;
       case "ligacao_whatsapp":
-        return lead?.phone ? <button onClick={() => callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id })} className="qsx-btn qsx-btn-green"><IconWhatsAppCall size={16} />Ligar no WhatsApp</button> : null;
+        return lead?.phone ? <button onClick={() => { pinTaskForCall(task); callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-btn qsx-btn-green"><IconWhatsAppCall size={16} />Ligar no WhatsApp</button> : null;
       case "whatsapp":
         return lead?.phone ? <button onClick={() => openWhatsApp(lead)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Abrir conversa</button> : null;
       case "email": {
@@ -1371,11 +1489,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               {/* Fonte do lead (campo Fonte do Bitrix) — sempre embaixo do nome pra
                   o SDR saber na hora de onde veio quem ele está atendendo. */}
               {lead?.segment && (
-                <div className="flex items-center gap-1.5 mt-1" title="Fonte do lead (Bitrix)">
+                <div className="flex items-center gap-1.5 mt-1" title="Fonte do lead (Bitrix) ou produto de interesse (cadastro manual)">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--ink3)" }}>
                     <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
                   </svg>
-                  <span className="text-[12.5px] font-semibold" style={{ color: "var(--ink3)" }}>Fonte:</span>
+                  <span className="text-[12.5px] font-semibold" style={{ color: "var(--ink3)" }}>Fonte/Produto:</span>
                   <span className="text-[12.5px] font-bold" style={{ color: "var(--ink2)" }}>{lead.segment}</span>
                 </div>
               )}
@@ -1512,7 +1630,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <button
                   key={reason}
                   onClick={async () => {
-                    await skipTask(task.id, reason);
+                    // Só some da fila se o pulo realmente gravou (senão o card
+                    // sumia e voltava no refresh de 60s, parecendo bug).
+                    const skipped = await skipTask(task.id, reason);
+                    if (!skipped) return;
                     setTasks((prev) => prev.filter((t) => t.id !== task.id));
                     setActiveTaskId(null);
                     setSkipMenuOpen(false);
@@ -1559,7 +1680,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             />
 
             <div className="qsx-side-lab" style={{ margin: "12px 0 9px" }}>
-              Como foi o contato? · Tentativa {getAttemptCount(task)}/{MAX_CONTACT_ATTEMPTS}
+              Como foi o contato? · Tentativa {Math.min(getAttemptCount(task), MAX_CONTACT_ATTEMPTS)}/{MAX_CONTACT_ATTEMPTS}
+              {getAttemptCount(task) >= MAX_CONTACT_ATTEMPTS && (
+                <span className="ml-2 text-[11px] font-bold" style={{ color: "#B45309" }} title="Limite de tentativas sem contato atingido — considere dar Perdido ou mudar o canal">
+                  ⚠ última tentativa
+                </span>
+              )}
             </div>
             {/* Caminho principal: positivo em destaque, retorno/perdido médios */}
             <div className="flex items-center gap-2 flex-wrap">
@@ -2078,12 +2204,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         <div className="qsx-page">
           {filteredTasks.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
-              {(statusFilter || channelFilter || priorityFilter || periodFilter || search.trim()) ? (
+              {loadError ? (
+                <>
+                  <span className="text-3xl mb-2">⚠️</span>
+                  <p className="mt-2 text-sm font-bold" style={{ color: "var(--ink)" }}>Não consegui carregar a fila.</p>
+                  <p className="text-xs mt-1" style={{ color: "var(--ink3)" }}>Confira sua conexão — suas atividades continuam salvas.</p>
+                  <button onClick={() => loadData()} className="mt-4 qsx-btn qsx-btn-orange">
+                    Tentar de novo
+                  </button>
+                </>
+              ) : (statusFilter || channelFilter || priorityFilter || periodFilter || ownerFilter || search.trim()) ? (
                 <>
                   <span style={{ color: "var(--ink3)" }}><IconFilter /></span>
                   <p className="mt-4 text-sm font-medium" style={{ color: "var(--ink2)" }}>Nenhuma atividade com esses filtros.</p>
                   <button
-                    onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setPeriodFilter(null); setSearch(""); }}
+                    onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setPeriodFilter(null); setOwnerFilter(null); setSearch(""); }}
                     className="mt-4 qsx-btn qsx-btn-orange"
                   >
                     Limpar filtros
@@ -2219,7 +2354,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   <ChannelIcon type="ligacao" size={15} />
                 </span>
                 <span className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>Telefone</span>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: "var(--line2)", color: "var(--ink3)" }}>Wavoip</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: "var(--line2)", color: "var(--ink3)" }}>BravoTech</span>
               </div>
               <button onClick={() => { setShowDialer(false); setDialNumber(""); }} className="text-gray-400 hover:text-gray-600" aria-label="Fechar">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -2237,7 +2372,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               autoFocus
             />
             <p className="text-center text-[11px] -mt-1 mb-2 h-4" style={{ color: "var(--ink3)" }}>
-              {dialNumber.trim() ? formatPhoneDisplay(dialNumber) : "a chamada sai pelo WhatsApp do número, via webfone"}
+              {dialNumber.trim() ? formatPhoneDisplay(dialNumber) : "a chamada abre no softphone BravoTech do seu PC"}
             </p>
 
             {/* Teclado */}
@@ -2259,11 +2394,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             {/* Botão de chamada */}
             <div className="flex justify-center pb-5 pt-2">
               <button
-                onClick={() => { if (dialNumber.trim()) { callViaWebfone(dialNumber); setShowDialer(false); setDialNumber(""); } }}
+                onClick={() => { if (dialNumber.trim()) { callViaSip(dialNumber); setShowDialer(false); setDialNumber(""); } }}
                 disabled={!dialNumber.trim()}
                 className="flex items-center justify-center w-16 h-16 rounded-full text-white transition-transform hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
                 style={{ background: "var(--green)", boxShadow: "0 12px 26px -10px rgba(18,161,138,.75)" }}
-                title="Ligar pelo webfone"
+                title="Ligar (BravoTech)"
                 aria-label="Ligar"
               >
                 <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2485,11 +2620,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 />
               </div>
             </div>
+            {newLeadError && (
+              <div className="mt-4 px-3 py-2 rounded-lg text-[13px] font-medium" style={{ background: "#FEF2F2", color: "#B91C1C", border: "1px solid #FECACA" }}>
+                {newLeadError}
+              </div>
+            )}
             <div className="flex items-center gap-3 mt-5">
               <button
                 onClick={async () => {
                   if (!newLead.full_name || !newLead.phone) return;
                   setSavingLead(true);
+                  setNewLeadError(null);
                   const names = newLead.full_name.trim().split(" ");
                   const hasCadence = !!newLead.cadence_id;
                   const { data: inserted, error } = await supabase.from("qs_leads").insert({
@@ -2506,59 +2647,36 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                     arrived_at: new Date().toISOString(),
                     cadence_started_at: hasCadence ? new Date().toISOString() : null,
                   }).select().single();
+                  if (error || !inserted) {
+                    // Antes o erro era 100% silencioso: o botão voltava a "Cadastrar"
+                    // e parecia que o clique não tinha funcionado.
+                    console.warn("[QS] falha ao cadastrar lead:", error);
+                    setNewLeadError("Não foi possível cadastrar o lead. Confira os dados e tente novamente.");
+                    setSavingLead(false);
+                    return;
+                  }
                   // Salvar observação
-                  if (!error && inserted && newLead.notes?.trim()) {
+                  if (newLead.notes?.trim()) {
                     await supabase.from("qs_notes").insert({
                       lead_id: inserted.id,
+                      author_id: currentUser?.id ?? null,
                       body: newLead.notes.trim(),
                       tags: [],
                     });
                   }
-                  // Criar tasks da cadência automaticamente
-                  if (!error && inserted && hasCadence) {
-                    const { data: days } = await supabase
-                      .from("qs_cadence_days")
-                      .select("*, activities:qs_cadence_activities(*)")
-                      .eq("cadence_id", newLead.cadence_id)
-                      .order("day_number");
-                    if (days && days.length > 0) {
-                      const now = new Date();
-                      const newTasks = days.flatMap((day: any) =>
-                        (day.activities || []).map((act: any) => {
-                          const scheduled = new Date(now);
-                          scheduled.setDate(scheduled.getDate() + (day.day_number - 1));
-                          if (act.scheduled_time) {
-                            const [h, m] = act.scheduled_time.split(":").map(Number);
-                            scheduled.setHours(h, m, 0, 0);
-                          } else {
-                            scheduled.setHours(9, 0, 0, 0);
-                          }
-                          return {
-                            lead_id: inserted.id,
-                            cadence_id: newLead.cadence_id,
-                            owner_id: newLead.owner_id || null,
-                            channel_type: act.channel_type,
-                            priority: "alta",
-                            scheduled_at: scheduled.toISOString(),
-                            status: "pendente",
-                          };
-                        })
-                      );
-                      if (newTasks.length > 0) {
-                        const { data: createdTasks } = await supabase.from("qs_tasks").insert(newTasks).select();
-                        if (createdTasks) {
-                          setTasks(prev => [...prev, ...(createdTasks as Task[])]);
-                        }
-                      }
+                  // Tarefas da cadência pela função única (mesma regra do CSV e do Reativar)
+                  if (hasCadence) {
+                    const createdTasks = await createCadenceTasks(inserted.id, newLead.cadence_id, newLead.owner_id || null);
+                    if (createdTasks && createdTasks.length > 0) {
+                      setTasks(prev => [...prev, ...createdTasks]);
                     }
                   }
                   setSavingLead(false);
-                  if (!error) {
-                    setShowNewLeadModal(false);
-                    setNewLead({ full_name: "", phone: "", email: "", company_name: "", owner_id: currentUser?.id ?? "", cadence_id: "", notes: "" });
-                    const { data } = await supabase.from("qs_leads").select("*");
-                    if (data) setLeads(data as Lead[]);
-                  }
+                  setShowNewLeadModal(false);
+                  setNewLead({ full_name: "", phone: "", email: "", company_name: "", owner_id: currentUser?.id ?? "", cadence_id: "", notes: "" });
+                  showToast(`Lead cadastrado — ${inserted.full_name ?? ""}`);
+                  const { data } = await supabase.from("qs_leads").select("*");
+                  if (data) setLeads(data as Lead[]);
                 }}
                 disabled={savingLead || !newLead.full_name || !newLead.phone}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"

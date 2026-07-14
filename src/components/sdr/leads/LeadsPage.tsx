@@ -11,8 +11,9 @@ import type {
   LossReason,
 } from "../types";
 import { STATUS_LABELS, SOURCE_LABELS } from "../types";
-import { notifyError } from "@/lib/qs/notify";
-import { dialViaWavoip } from "@/lib/wavoip";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import { createCadenceTasks } from "@/lib/qs/queries";
+import { dialViaSip } from "@/lib/sip";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -144,7 +145,9 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     });
     if (error) {
       console.warn("Erro ao cadastrar lead:", error);
+      notifyError("Não foi possível cadastrar o lead — confira os dados e tente novamente.");
     } else {
+      notifySuccess(`Lead ${fullName} cadastrado.`);
       await fetchLeads();
       setShowCreateModal(false);
       resetForm();
@@ -156,10 +159,18 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   async function handleDeleteSelected() {
     if (selectedIds.size === 0) return;
     const ids = Array.from(selectedIds);
+    // Exclusão em massa é DEFINITIVA (leva junto tarefas, notas e reuniões) —
+    // um clique errado não pode apagar a carteira sem confirmação.
+    const ok = window.confirm(
+      `Excluir ${ids.length} lead(s) DEFINITIVAMENTE?\n\nIsso apaga também o histórico, as atividades e as reuniões desses leads. Essa ação não pode ser desfeita.`
+    );
+    if (!ok) return;
     const { error } = await supabase.from("qs_leads").delete().in("id", ids);
     if (error) {
       console.warn("Erro ao excluir leads:", error);
+      notifyError("Não foi possível excluir os leads — tente novamente.");
     } else {
+      notifySuccess(`${ids.length} lead(s) excluído(s).`);
       await fetchLeads();
       setSelectedIds(new Set());
     }
@@ -188,6 +199,14 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         .update({ owner_id: handoverCloserId })
         .in("id", ids);
       if (leadErr) throw leadErr;
+
+      // 3. Reatribui as tarefas abertas — sem isso elas ficavam na fila do SDR
+      // antigo (que nem vê mais o lead) e o novo dono não recebia nada.
+      await supabase
+        .from("qs_tasks")
+        .update({ owner_id: handoverCloserId })
+        .in("lead_id", ids)
+        .in("status", ["pendente", "atrasada"]);
 
       await fetchLeads();
       setSelectedIds(new Set());
@@ -255,12 +274,14 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
     if (search) {
       const q = search.toLowerCase();
+      // Telefone: compara só os DÍGITOS — "(85) 9…" precisa achar "5585…".
+      const qDigits = q.replace(/\D/g, "");
       result = result.filter(
         (l) =>
           l.full_name?.toLowerCase().includes(q) ||
           l.company_name?.toLowerCase().includes(q) ||
           l.email?.toLowerCase().includes(q) ||
-          l.phone?.includes(q) ||
+          (qDigits.length >= 4 && (l.phone ?? "").replace(/\D/g, "").includes(qDigits)) ||
           l.bitrix_id?.toLowerCase().includes(q)
       );
     }
@@ -273,6 +294,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   }, [leads, search, filterSource, filterStatus, filterCadence, filterOwner, filterLossReason, currentUser]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / ITEMS_PER_PAGE));
+  // Filtro/exclusão pode reduzir o total: sem o clamp a página atual fica vazia.
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
   const paginatedLeads = filteredLeads.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
@@ -510,11 +535,31 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
               onChange={async (e) => {
                 const cadId = e.target.value;
                 if (!cadId) return;
-                const ids = Array.from(selectedIds);
-                await supabase.from("qs_leads").update({ cadence_id: cadId, status: "em_prospeccao" }).in("id", ids);
-                setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, cadence_id: cadId, status: "em_prospeccao" as any } : l));
-                setSelectedIds(new Set());
                 e.target.value = "";
+                const ids = Array.from(selectedIds);
+                const cadName = cadences.find((c) => c.id === cadId)?.name ?? "cadência";
+                if (!window.confirm(`Vincular ${ids.length} lead(s) à cadência "${cadName}" e criar as atividades a partir de hoje?`)) return;
+                const { error } = await supabase
+                  .from("qs_leads")
+                  .update({ cadence_id: cadId, status: "em_prospeccao", cadence_started_at: new Date().toISOString() })
+                  .in("id", ids);
+                if (error) {
+                  console.warn("Erro ao vincular cadência:", error);
+                  notifyError("Não foi possível vincular a cadência — tente novamente.");
+                  return;
+                }
+                // Gera as TAREFAS da cadência pra cada lead — antes o vínculo em massa
+                // não criava atividade nenhuma e os leads sumiam da fila de todo mundo.
+                let tasksFail = 0;
+                for (const id of ids) {
+                  const leadOwner = leads.find((l) => l.id === id)?.owner_id ?? null;
+                  const created = await createCadenceTasks(id, cadId, leadOwner);
+                  if (created === null) tasksFail++;
+                }
+                setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, cadence_id: cadId, status: "em_prospeccao" as LeadStatus } : l));
+                setSelectedIds(new Set());
+                if (tasksFail === 0) notifySuccess(`${ids.length} lead(s) vinculados à ${cadName} — atividades criadas.`);
+                else notifyError(`${tasksFail} lead(s) ficaram sem atividades — vincule a cadência deles de novo.`);
               }}
               className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-xs font-medium text-white cursor-pointer"
               defaultValue=""
@@ -646,10 +691,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                             </button>
                             <button
                               onClick={async () => {
-                                const r = await dialViaWavoip(lead.phone, { displayName: lead.full_name ?? undefined, leadName: lead.full_name, leadId: lead.id, ownerId: lead.owner_id ?? null });
-                                if (!r.ok) notifyError(r.error || "Webfone indisponível — confira o token em Configurações → Webfone.");
+                                const r = await dialViaSip(lead.phone);
+                                if (!r.ok) notifyError(r.error || "Não foi possível abrir o softphone (BravoTech).");
                               }}
-                              title={`Ligar pelo webfone (Wavoip): ${lead.phone}`}
+                              title={`Ligar (BravoTech): ${lead.phone}`}
                               className="inline-flex p-1.5 rounded-lg hover:bg-green-50 transition-colors"
                             >
                               <svg className="w-3.5 h-3.5 text-[#12A18A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

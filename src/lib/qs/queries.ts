@@ -432,14 +432,17 @@ export async function completeTask(
     if (notes !== undefined) updateData.notes = notes;
     if (tags !== undefined) updateData.tags = tags;
 
+    // Só conclui se ainda estiver aberta: duplo clique / Enter+clique / dois SDRs
+    // no mesmo lead não geram segunda conclusão (nem follow-up duplicado).
     const { data, error } = await supabase
       .from("qs_tasks")
       .update(updateData)
       .eq("id", id)
-      .select("*, lead:qs_leads(*), owner:qs_users(*)")
-      .single();
+      .in("status", ["pendente", "atrasada"])
+      .select("*, lead:qs_leads(*), owner:qs_users(*)");
     if (error) throw error;
-    return data as Task;
+    if (!data || data.length === 0) return null; // já concluída — no-op silencioso
+    return data[0] as Task;
   } catch (err) {
     console.warn("[QS] completeTask failed:", err);
     notifyError("Não foi possível concluir a atividade — tente novamente.");
@@ -452,6 +455,7 @@ export async function skipTask(
   skipReason: string
 ): Promise<Task | null> {
   try {
+    // Mesma guarda de idempotência do completeTask: só pula tarefa ainda aberta.
     const { data, error } = await supabase
       .from("qs_tasks")
       .update({
@@ -459,10 +463,11 @@ export async function skipTask(
         skip_reason: skipReason,
       })
       .eq("id", id)
-      .select("*, lead:qs_leads(*), owner:qs_users(*)")
-      .single();
+      .in("status", ["pendente", "atrasada"])
+      .select("*, lead:qs_leads(*), owner:qs_users(*)");
     if (error) throw error;
-    return data as Task;
+    if (!data || data.length === 0) return null; // já encerrada — no-op silencioso
+    return data[0] as Task;
   } catch (err) {
     console.warn("[QS] skipTask failed:", err);
     notifyError("Não foi possível pular a atividade — tente novamente.");
@@ -484,6 +489,61 @@ export async function createExtraTask(
   } catch (err) {
     console.warn("[QS] createExtraTask failed:", err);
     notifyError("Não foi possível criar a atividade extra.");
+    return null;
+  }
+}
+
+// Gera as tarefas de um lead a partir dos dias/atividades da cadência.
+// Fonte ÚNICA usada por: cadastro de lead (TasksPanel), importação de CSV e
+// vínculo em massa (LeadsPage) e Reativar Lead (LeadDetailPage) — antes eram
+// 3 cópias divergentes (prioridade diferente em cada uma e uma coluna
+// inexistente no Reativar, que fazia o insert inteiro falhar em silêncio).
+export async function createCadenceTasks(
+  leadId: string,
+  cadenceId: string,
+  ownerId: string | null
+): Promise<Task[] | null> {
+  try {
+    const [{ data: cad }, { data: days, error: daysError }] = await Promise.all([
+      supabase.from("qs_cadences").select("priority").eq("id", cadenceId).single(),
+      supabase
+        .from("qs_cadence_days")
+        .select("*, activities:qs_cadence_activities(*)")
+        .eq("cadence_id", cadenceId)
+        .order("day_number"),
+    ]);
+    if (daysError) throw daysError;
+    if (!days || days.length === 0) return [];
+
+    const base = new Date();
+    const rows = (days as (CadenceDay & { activities: CadenceActivity[] })[]).flatMap((day) =>
+      [...(day.activities ?? [])]
+        .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+        .map((act) => {
+          const scheduled = new Date(base);
+          scheduled.setDate(scheduled.getDate() + Math.max(0, (day.day_number ?? 1) - 1));
+          const [h, m] = (act.scheduled_time || "09:00").split(":").map(Number);
+          scheduled.setHours(h || 9, m || 0, 0, 0);
+          return {
+            lead_id: leadId,
+            cadence_id: cadenceId,
+            owner_id: ownerId,
+            channel_type: act.channel_type,
+            priority: (cad?.priority as PriorityLevel) ?? "media",
+            scheduled_at: scheduled.toISOString(),
+            status: "pendente" as TaskStatus,
+            is_extra: false,
+          };
+        })
+    );
+    if (rows.length === 0) return [];
+
+    const { data: created, error } = await supabase.from("qs_tasks").insert(rows).select();
+    if (error) throw error;
+    return (created ?? []) as Task[];
+  } catch (err) {
+    console.warn("[QS] createCadenceTasks failed:", err);
+    notifyError("O lead foi salvo, mas as atividades da cadência não foram criadas — tente vincular a cadência de novo.");
     return null;
   }
 }
@@ -984,6 +1044,19 @@ export async function createCustomField(
 // DASHBOARD / STATS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Coluna da DATA DE FECHAMENTO do lead. `closed_at` (migration 0012) só muda na
+// transição pra ganho/perdido — updated_at muda em QUALQUER edição e fazia ganhos
+// antigos "reaparecerem" no período atual. Fallback pra updated_at enquanto a
+// migration não foi aplicada (sondagem 1x por sessão).
+let closedAtCol: "closed_at" | "updated_at" | null = null;
+export async function getClosedAtColumn(): Promise<"closed_at" | "updated_at"> {
+  if (closedAtCol) return closedAtCol;
+  const { error } = await supabase.from("qs_leads").select("closed_at").limit(1);
+  closedAtCol = error ? "updated_at" : "closed_at";
+  if (error) console.warn("[QS] qs_leads.closed_at não existe — aplique a migration 0012 (usando updated_at).");
+  return closedAtCol;
+}
+
 export interface DashboardStats {
   ganhos: number;
   leadsFinalizados: number;
@@ -997,14 +1070,16 @@ export async function fetchDashboardStats(
   dateTo?: string
 ): Promise<DashboardStats> {
   try {
+    const closedCol = await getClosedAtColumn();
+
     // Leads ganhos
     let qGanhos = supabase
       .from("qs_leads")
       .select("id", { count: "exact", head: true })
       .eq("status", "ganho");
     if (ownerId) qGanhos = qGanhos.eq("owner_id", ownerId);
-    if (dateFrom) qGanhos = qGanhos.gte("updated_at", dateFrom);
-    if (dateTo) qGanhos = qGanhos.lte("updated_at", dateTo);
+    if (dateFrom) qGanhos = qGanhos.gte(closedCol, dateFrom);
+    if (dateTo) qGanhos = qGanhos.lte(closedCol, dateTo);
 
     // Leads finalizados (ganho + perdido)
     let qFinalizados = supabase
@@ -1012,8 +1087,8 @@ export async function fetchDashboardStats(
       .select("id", { count: "exact", head: true })
       .in("status", ["ganho", "perdido"]);
     if (ownerId) qFinalizados = qFinalizados.eq("owner_id", ownerId);
-    if (dateFrom) qFinalizados = qFinalizados.gte("updated_at", dateFrom);
-    if (dateTo) qFinalizados = qFinalizados.lte("updated_at", dateTo);
+    if (dateFrom) qFinalizados = qFinalizados.gte(closedCol, dateFrom);
+    if (dateTo) qFinalizados = qFinalizados.lte(closedCol, dateTo);
 
     // Atividades realizadas
     let qAtividades = supabase
