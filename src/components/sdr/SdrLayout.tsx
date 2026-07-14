@@ -71,6 +71,7 @@ import CommandPalette from "./CommandPalette";
 import { toggleWebphone } from "@/lib/wavoip";
 import { notifyError } from "@/lib/qs/notify";
 import TelefoneOnboarding from "@/components/sdr/telefone/TelefoneOnboarding";
+import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
 
 export type SdrNav =
   | "painel"
@@ -433,6 +434,9 @@ export default function SdrLayout() {
 
       {/* Onboarding do telefone (BravoTech) — só na 1ª vez, por máquina */}
       <TelefoneOnboarding user={currentUser ? { id: currentUser.id, name: currentUser.name } : null} />
+
+      {/* UI flutuante da ligação WebRTC (VoxFree) — só aparece durante a chamada */}
+      <WebphoneWidget />
 
       {/* ── MENU LATERAL (MOBILE) ────────────────────────────────────────── */}
       {mobileNavOpen && (

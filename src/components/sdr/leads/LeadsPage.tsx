@@ -14,6 +14,7 @@ import { STATUS_LABELS, SOURCE_LABELS } from "../types";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { createCadenceTasks } from "@/lib/qs/queries";
 import { dialViaSip } from "@/lib/sip";
+import { dialViaWebphone, isWebphoneConfigured } from "@/lib/webphone";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -691,10 +692,16 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                             </button>
                             <button
                               onClick={async () => {
+                                // Webfone WebRTC (VoxFree) se o ramal estiver provisionado; senão softphone.
+                                if (await isWebphoneConfigured()) {
+                                  const r = await dialViaWebphone(lead.phone, { leadName: lead.full_name, leadId: lead.id });
+                                  if (!r.ok) notifyError(r.error || "Webfone WebRTC indisponível.");
+                                  return;
+                                }
                                 const r = await dialViaSip(lead.phone);
                                 if (!r.ok) notifyError(r.error || "Não foi possível abrir o softphone (BravoTech).");
                               }}
-                              title={`Ligar (BravoTech): ${lead.phone}`}
+                              title={`Ligar: ${lead.phone}`}
                               className="inline-flex p-1.5 rounded-lg hover:bg-green-50 transition-colors"
                             >
                               <svg className="w-3.5 h-3.5 text-[#12A18A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

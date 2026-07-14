@@ -18,6 +18,7 @@ import { getLeadScore } from "@/lib/leadScore";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { dialViaWavoip, setOnCallEnded } from "@/lib/wavoip";
 import { dialViaSip } from "@/lib/sip";
+import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
 import type { SdrUser } from "../types";
@@ -1156,7 +1157,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const tasksRef = useRef<Task[]>(tasks);
   tasksRef.current = tasks;
   useEffect(() => {
-    setOnCallEnded((info) => {
+    // Mesmo desfecho automático pros DOIS webfones: Wavoip (WhatsApp) e WebRTC
+    // (VoxFree). Ambos emitem o mesmo formato de CallEndedInfo.
+    const handleCallEnded = (info: { leadId: string | null; phone: string | null; answered: boolean; durationSec: number }) => {
       if (!info.leadId) return;
       const task = tasksRef.current.find((t) => t.lead_id === info.leadId && (t.status === "pendente" || t.status === "atrasada"));
       if (!task) return;
@@ -1169,8 +1172,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       }
       // traz o card pra vista
       setTimeout(() => document.querySelector(".qsx-hero")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
-    });
-    return () => setOnCallEnded(null);
+    };
+    setOnCallEnded(handleCallEnded);
+    setOnCallEndedWebphone(handleCallEnded);
+    return () => { setOnCallEnded(null); setOnCallEndedWebphone(null); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1372,10 +1377,22 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     }
   }
 
-  // Liga pelo SOFTPHONE (BravoTech/SIP): monta "sip:NUMERO" e entrega ao softphone
-  // instalado no PC do SDR (registrado no ramal BravoTech). A ligação acontece FORA
-  // do navegador — não há evento de fim, então o SDR registra o desfecho na mão.
-  async function callViaSip(phone?: string | null) {
+  // Liga pelo canal "Ligação". Prefere o WEBFONE WebRTC (VoxFree): registra o
+  // ramal e fala DENTRO do navegador, com desfecho automático ao encerrar. Se o
+  // ramal do SDR ainda não estiver provisionado, cai no click-to-dial do
+  // softphone (BravoTech/SIP) instalado no PC — a ligação acontece fora do
+  // navegador e o SDR registra o desfecho na mão.
+  async function callViaSip(phone?: string | null, opts?: { leadName?: string | null; leadId?: string | null }) {
+    if (await isWebphoneConfigured()) {
+      showToast("Ligando pelo webfone…");
+      const r = await dialViaWebphone(phone, {
+        leadName: opts?.leadName ?? null,
+        leadId: opts?.leadId ?? null,
+        ownerId: currentUser?.id ?? null,
+      });
+      if (!r.ok) notifyError(r.error || "Webfone WebRTC indisponível.");
+      return;
+    }
     const r = await dialViaSip(phone);
     if (r.ok) showToast("Discando no softphone (BravoTech)… registre o desfecho ao terminar");
     else notifyError(r.error || "Não foi possível abrir o softphone (BravoTech).");
@@ -1386,7 +1403,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   function renderChannelAction(task: Task, lead: Lead | undefined) {
     switch (task.channel_type) {
       case "ligacao":
-        return lead?.phone ? <button onClick={() => { pinTaskForCall(task); callViaSip(lead.phone); }} className="qsx-btn qsx-btn-green"><ChannelIcon type="ligacao" size={16} />Ligar</button> : null;
+        return lead?.phone ? <button onClick={() => { pinTaskForCall(task); callViaSip(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-btn qsx-btn-green"><ChannelIcon type="ligacao" size={16} />Ligar</button> : null;
       case "ligacao_whatsapp":
         return lead?.phone ? <button onClick={() => { pinTaskForCall(task); callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-btn qsx-btn-green"><IconWhatsAppCall size={16} />Ligar no WhatsApp</button> : null;
       case "whatsapp":
