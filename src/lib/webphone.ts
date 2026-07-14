@@ -24,6 +24,7 @@ import { UA, WebSocketInterface } from "jssip";
 import { supabase } from "./supabase";
 import { getSetting, setSetting } from "./qsSettings";
 import { normalizePhoneBR, logWhatsApp } from "./whatsapp";
+import { notifyBitrix } from "./qs/bitrixSync";
 
 // Tipo da sessão de chamada (o JsSIP não reexporta RTCSession pelo índice).
 type RTCSession = ReturnType<InstanceType<typeof UA>["call"]>;
@@ -142,6 +143,8 @@ export interface WebphoneState {
   status: CallStatus;
   peerName?: string | null;
   peerNumber?: string | null;
+  /** lead da chamada — permite a anotação rápida do widget gravar no lead certo. */
+  leadId?: string | null;
   muted: boolean;
   /** epoch ms de quando a chamada foi ATENDIDA (pra o cronômetro); null até atender. */
   answeredAt: number | null;
@@ -352,6 +355,7 @@ export async function dialViaWebphone(phone?: string | null, ctx?: WebphoneDialC
       status: "connecting",
       peerName: ctx?.leadName ?? null,
       peerNumber: to,
+      leadId: ctx?.leadId ?? null,
       muted: false,
       answeredAt: null,
       error: null,
@@ -380,7 +384,7 @@ export async function dialViaWebphone(phone?: string | null, ctx?: WebphoneDialC
         : "";
       setState({ status: "ended", answeredAt: null });
       // Volta pra "idle" depois de um instante (o widget mostra "encerrada" e some).
-      setTimeout(() => { if (state.status === "ended") setState({ status: "idle", peerName: null, peerNumber: null }); }, 2500);
+      setTimeout(() => { if (state.status === "ended") setState({ status: "idle", peerName: null, peerNumber: null, leadId: null }); }, 2500);
 
       const desfecho = answered ? "atendida" : "não atendida";
       void logWhatsApp({
@@ -407,9 +411,33 @@ export async function dialViaWebphone(phone?: string | null, ctx?: WebphoneDialC
     return { ok: true };
   } catch (e) {
     currentSession = null;
-    setState({ status: "idle", peerName: null, peerNumber: null, error: null });
+    setState({ status: "idle", peerName: null, peerNumber: null, leadId: null, error: null });
     return { ok: false, error: e instanceof Error ? e.message : "Erro ao iniciar a chamada." };
   }
+}
+
+/**
+ * Salva uma anotação rápida no lead da chamada (qs_notes) e espelha na timeline
+ * do Bitrix (pula sozinho se o lead não tem bitrix_id). Usado pelo botão "Anotar"
+ * do widget durante a ligação.
+ */
+export async function saveCallNote(leadId: string, body: string): Promise<boolean> {
+  const text = body.trim();
+  if (!leadId || !text) return false;
+  const { data: sess } = await supabase.auth.getSession();
+  const authorId = sess?.session?.user?.id ?? null;
+  const { error } = await supabase.from("qs_notes").insert({
+    lead_id: leadId,
+    author_id: authorId,
+    body: text,
+    tags: ["bitrix", "ligacao", "observacao"],
+  });
+  if (error) { console.warn("[webphone] saveCallNote:", error.message); return false; }
+  try {
+    const { data: lead } = await supabase.from("qs_leads").select("bitrix_id").eq("id", leadId).maybeSingle();
+    notifyBitrix("nota", { lead_id: leadId, bitrix_id: (lead as { bitrix_id?: string | null } | null)?.bitrix_id, body: text });
+  } catch { /* espelho é best-effort */ }
+  return true;
 }
 
 /** Desliga a chamada atual (se houver). */
