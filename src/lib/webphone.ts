@@ -63,6 +63,11 @@ export async function saveSipSharedConfig(cfg: SipSharedConfig): Promise<boolean
   return a && b && c;
 }
 
+/** Extrai o host (domínio/realm) de uma URL wss:// — ex.: wss://box30...:5080 → box30... */
+export function hostFromWs(wsUrl: string): string {
+  try { return new URL(wsUrl).hostname; } catch { return ""; }
+}
+
 // ── Linha SIP do SDR (qs_sip_lines — RLS por dono) ───────────────────────────
 export interface SipLineRow {
   user_id: string;
@@ -106,9 +111,14 @@ export async function getMySipLine(): Promise<ResolvedSipLine | null> {
   const line = row as SipLineRow | null;
   if (!line || !line.active || !line.auth_user || !line.password) return null;
 
+  // No VoxFree o "box" muda POR RAMAL (o número do box = 2 últimos dígitos da
+  // porta de registro do ramal: 50049→box49, 50030→box30). Logo a URL WSS é
+  // por-SDR, e o domínio/realm é o HOST dessa URL (acompanha o box). line.domain
+  // sobrepõe se um dia precisar; shared.* são só fallback de tenant single-box.
   const wsUrl = (line.ws_url || shared.wsUrl || "").trim();
-  const domain = (line.domain || shared.domain || "").trim();
-  if (!wsUrl || !domain) return null; // sem WSS/domínio não dá pra registrar
+  if (!wsUrl) return null;
+  const domain = (line.domain || hostFromWs(wsUrl) || shared.domain || "").trim();
+  if (!domain) return null; // sem WSS/domínio não dá pra registrar
 
   return {
     wsUrl,
@@ -234,7 +244,9 @@ function buildUa(line: ResolvedSipLine): UA {
     uri: `sip:${line.authUser}@${line.domain}`,
     authorization_user: line.authUser,
     password: line.password,
-    realm: line.domain,
+    // NÃO forçamos `realm`: o JsSIP responde ao realm que o servidor manda no
+    // desafio 401 (igual ao tryit.jssip.net). Forçar realm ≠ do servidor derruba
+    // a autenticação com "Authentication Error".
     display_name: line.displayName,
     register: true,
     session_timers: false, // muitos PABX não usam; evita RE-INVITE desnecessário
@@ -434,6 +446,7 @@ export interface SipLineAdmin {
   user_id: string;
   auth_user: string;
   password: string;
+  ws_url: string | null; // URL WSS do box DESTE ramal (box muda por ramal no VoxFree)
   display_name: string | null;
   active: boolean;
 }
@@ -442,7 +455,7 @@ export interface SipLineAdmin {
 export async function listSipLines(): Promise<SipLineAdmin[]> {
   const { data, error } = await supabase
     .from("qs_sip_lines")
-    .select("user_id, auth_user, password, display_name, active");
+    .select("user_id, auth_user, password, ws_url, display_name, active");
   if (error) { console.warn("[webphone] listSipLines:", error.message); return []; }
   return (data ?? []) as SipLineAdmin[];
 }
@@ -454,6 +467,7 @@ export async function saveSipLine(line: SipLineAdmin): Promise<boolean> {
       user_id: line.user_id,
       auth_user: line.auth_user.trim(),
       password: line.password,
+      ws_url: line.ws_url?.trim() || null,
       display_name: line.display_name?.trim() || null,
       active: line.active,
       updated_at: new Date().toISOString(),

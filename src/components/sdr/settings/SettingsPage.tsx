@@ -1431,7 +1431,6 @@ type QsUserLite = { id: string; name: string; email: string; role: string };
 
 function WebfoneWebrtcSection() {
   const [wsUrl, setWsUrl] = useState("");
-  const [domain, setDomain] = useState("");
   const [prefix, setPrefix] = useState("");
   const [savingShared, setSavingShared] = useState(false);
   const [sharedSaved, setSharedSaved] = useState(false);
@@ -1450,7 +1449,7 @@ function WebfoneWebrtcSection() {
       listSipLines(),
       supabase.from("qs_users").select("id, name, email, role").eq("is_active", true).order("name"),
     ]);
-    setWsUrl(cfg.wsUrl); setDomain(cfg.domain); setPrefix(cfg.prefix);
+    setWsUrl(cfg.wsUrl); setPrefix(cfg.prefix);
     const map: Record<string, SipLineAdmin> = {};
     for (const l of allLines) map[l.user_id] = l;
     setLines(map);
@@ -1460,7 +1459,7 @@ function WebfoneWebrtcSection() {
 
   async function handleSaveShared() {
     setSavingShared(true);
-    const ok = await saveSipSharedConfig({ wsUrl, domain, prefix });
+    const ok = await saveSipSharedConfig({ wsUrl, domain: "", prefix });
     setSavingShared(false);
     if (ok) { setSharedSaved(true); setTimeout(() => setSharedSaved(false), 2000); }
     else notifyError("Não foi possível salvar a configuração (apenas admin/gestor).");
@@ -1468,7 +1467,7 @@ function WebfoneWebrtcSection() {
 
   function updateLine(userId: string, patch: Partial<SipLineAdmin>) {
     setLines((prev) => {
-      const base: SipLineAdmin = prev[userId] ?? { user_id: userId, auth_user: "", password: "", display_name: null, active: true };
+      const base: SipLineAdmin = prev[userId] ?? { user_id: userId, auth_user: "", password: "", ws_url: null, display_name: null, active: true };
       return { ...prev, [userId]: { ...base, ...patch, user_id: userId } };
     });
   }
@@ -1499,29 +1498,28 @@ function WebfoneWebrtcSection() {
         </p>
       </div>
 
-      {/* Config compartilhada (todos os SDRs usam o mesmo servidor) */}
+      {/* Config compartilhada: modelo de URL + prefixo. ATENÇÃO: no VoxFree o
+          "box" muda POR RAMAL, então a URL WSS certa vai no ramal de cada SDR
+          (abaixo). Aqui é só o modelo pra copiar/colar e o prefixo de saída. */}
       <div className="rounded-xl border border-gray-200 p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-900">Servidor (compartilhado)</h3>
+        <h3 className="text-sm font-semibold text-gray-900">Padrões (compartilhados)</h3>
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">URL do WebSocket (WSS)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">URL do WebSocket — modelo</label>
           <input value={wsUrl} onChange={(e) => setWsUrl(e.target.value)} placeholder="wss://box49.voxfree.com:5080"
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
+          <p className="text-[11px] text-gray-400 mt-1">
+            Modelo pré-preenchido no campo de cada SDR. O <b>box muda por ramal</b>
+            (o número do box = 2 últimos dígitos da porta de registro: 50049→box49, 50030→box30) — ajuste por SDR abaixo.
+          </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Domínio / Registrar</label>
-            <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="box49.voxfree.com"
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Prefixo de rota (saída)</label>
-            <input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="(vazio = disca o número puro)"
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
-          </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Prefixo de rota (saída)</label>
+          <input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="(vazio = disca o número puro)"
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
         </div>
         <div className="flex items-center gap-3">
           <button onClick={handleSaveShared} disabled={savingShared} className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#2563EB" }}>
-            {savingShared ? "Salvando..." : "Salvar servidor"}
+            {savingShared ? "Salvando..." : "Salvar padrões"}
           </button>
           {sharedSaved && <span className="text-sm font-medium text-green-600">Salvo ✓</span>}
         </div>
@@ -1559,6 +1557,15 @@ function WebfoneWebrtcSection() {
                         Ativo
                       </label>
                     )}
+                  </div>
+                  <div className="mb-2">
+                    <input
+                      value={line?.ws_url ?? ""}
+                      onChange={(e) => updateLine(u.id, { ws_url: e.target.value })}
+                      placeholder={wsUrl ? `URL WSS do box deste ramal (vazio = ${wsUrl})` : "URL WSS do box deste ramal — ex.: wss://box30.voxfree.com:5080"}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-blue-400 font-mono"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">O box muda por ramal (ex.: 2001→box49, 2002→box30). Vazio usa o modelo acima.</p>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     <input

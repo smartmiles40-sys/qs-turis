@@ -32,15 +32,20 @@ fica em `qs_settings`.
 cole `supabase/migrations/0013_sip_lines.sql` e rode. Cria a tabela `qs_sip_lines`
 com RLS. Idempotente.
 
-**2. Config compartilhada** — Config → **Webfone WebRTC (VoxFree)** → "Servidor":
-- URL do WebSocket (WSS): `wss://box49.voxfree.com:5080`
-- Domínio / Registrar: `box49.voxfree.com`
+**2. Padrões** — Config → **Webfone WebRTC (VoxFree)** → "Padrões":
+- URL do WebSocket — modelo: `wss://box49.voxfree.com:5080`
 - Prefixo de rota: deixe **vazio** (ajuste só se o VoxFree pedir um prefixo de saída)
-- Salvar servidor.
+- Salvar padrões.
+
+> ⚠️ **O `box` muda por RAMAL.** No VoxFree o número do box = os 2 últimos dígitos
+> da porta de registro daquele ramal: ramal 2001 → porta 500**49** → `box49`;
+> ramal 2002 → porta 500**30** → `box30`. Por isso a URL WSS certa vai **em cada
+> SDR** (passo 3), não no padrão. O domínio/realm é derivado do host da URL WSS.
 
 **3. Ramal por SDR** — na mesma tela, seção "Ramais por SDR": para cada SDR preencha
-o **ramal (auth user)** e a **senha SIP** e salve. Ex. de ramal: `2272_2001`
-(a senha é a que o VoxFree entregou para aquele ramal — nunca comitada aqui).
+a **URL WSS do box daquele ramal** (ex.: `wss://box30.voxfree.com:5080` — vazio usa
+o modelo do passo 2), o **ramal (auth user)** e a **senha SIP**, e salve. Ex. de
+ramal: `2272_2001` (a senha é a que o VoxFree entregou — nunca comitada aqui).
 
 **4. Testar** — logado como esse SDR, abra um lead e clique **Ligar** no canal
 "Ligação". O navegador vai pedir permissão do **microfone** (aceite). O widget
@@ -52,21 +57,21 @@ Em vez dos passos 2 e 3 pela tela, dá pra colar isto no SQL Editor (troque o e-
 pelo do seu login no QS):
 
 ```sql
--- config compartilhada
+-- padrão compartilhado (modelo da URL + prefixo)
 insert into qs_settings(key, value) values
   ('sip_ws_url',    '"wss://box49.voxfree.com:5080"'::jsonb),
-  ('sip_ws_domain', '"box49.voxfree.com"'::jsonb),
   ('sip_ws_prefix', '""'::jsonb)
 on conflict (key) do update set value = excluded.value, updated_at = now();
 
--- o SEU ramal (o user_id vem do qs_users pelo e-mail de login).
--- Troque RAMAL e SENHA pelos dados que o VoxFree entregou (NÃO comite este SQL preenchido).
-insert into qs_sip_lines(user_id, auth_user, password, display_name, active)
-select id, 'SEU-RAMAL', 'SUA-SENHA-SIP', name, true
+-- o SEU ramal (user_id vem do qs_users pelo e-mail de login). O ws_url leva o
+-- BOX daquele ramal (box49 p/ 2001, box30 p/ 2002, ...); o domínio é derivado dele.
+-- Troque BOX/RAMAL/SENHA pelos dados do VoxFree (NÃO comite este SQL preenchido).
+insert into qs_sip_lines(user_id, auth_user, password, ws_url, display_name, active)
+select id, 'SEU-RAMAL', 'SUA-SENHA-SIP', 'wss://boxNN.voxfree.com:5080', name, true
   from qs_users where email = 'SEU-EMAIL-DE-LOGIN'
 on conflict (user_id) do update
   set auth_user = excluded.auth_user, password = excluded.password,
-      active = true, updated_at = now();
+      ws_url = excluded.ws_url, active = true, updated_at = now();
 ```
 
 ## Pendências / o que pode faltar
