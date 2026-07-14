@@ -48,13 +48,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { lead, ownerId, cadenceId, tasks } = await createInboundLead(body);
+    const { lead, ownerId, cadenceId, tasks, deduped } = await createInboundLead(body);
     return res.status(200).json({
       success: true,
       lead_id: lead.id,
       owner_id: ownerId,
       cadence_id: cadenceId,
       tasks_created: tasks,
+      // true = o lead JÁ existia (dedupe) — o n8n usa isso pra não repetir a nota de origem
+      deduped: Boolean(deduped),
     });
   } catch (err) {
     console.error('[lead-inbound]', err?.code || '', err?.message || err);
