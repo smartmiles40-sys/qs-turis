@@ -472,9 +472,30 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return task.cadence_id ? cadencesMap.get(task.cadence_id) : undefined;
   }
 
+  // Classifica a tarefa pro controle Novo / FUP / Atrasada (pedido do Bruno):
+  //  • novo   = lead ainda SEM atividade concluída (primeiro contato pendente)
+  //  • fupDay = dia da cadência da tarefa (dia 1 = FUP 1, dia 2 = FUP 2…), derivado
+  //             da data agendada vs. a chegada do lead (o task não guarda o dia)
+  //  • overdue= venceu ANTES de hoje (a "atrasada" é sempre derivada da data)
+  function classifyTask(task: Task): { novo: boolean; fupDay: number; overdue: boolean } {
+    const lead = getLeadForTask(task);
+    const novo = !!lead && !contactedLeadIds.has(lead.id);
+    const base = lead?.arrived_at || lead?.created_at || task.created_at;
+    let fupDay = 1;
+    if (base) {
+      const d0 = new Date(base); d0.setHours(0, 0, 0, 0);
+      const d1 = new Date(task.scheduled_at); d1.setHours(0, 0, 0, 0);
+      fupDay = Math.max(1, Math.round((d1.getTime() - d0.getTime()) / 86400000) + 1);
+    }
+    const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
+    const overdue = new Date(task.scheduled_at).getTime() < startToday.getTime();
+    return { novo, fupDay, overdue };
+  }
+
   // Filters
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter | null>(null);
+  const [typeFilter, setTypeFilter] = useState<"novos" | "fup" | null>(null);
   const [channelFilter, setChannelFilter] = useState<ChannelType | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<PriorityLevel | null>(null);
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter | null>(null);
@@ -1041,6 +1062,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       filtered = filtered.filter(isOverdue);
     }
 
+    // Tipo: lead novo (sem contato) x em cadência (FUP). Ortogonal ao tempo acima.
+    if (typeFilter === "novos") {
+      filtered = filtered.filter((t) => classifyTask(t).novo);
+    } else if (typeFilter === "fup") {
+      filtered = filtered.filter((t) => !classifyTask(t).novo);
+    }
+
     if (channelFilter) {
       filtered = filtered.filter((t) => t.channel_type === channelFilter);
     }
@@ -1095,7 +1123,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
 
     return filtered;
-  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser]);
+  }, [tasks, leads, cadences, search, statusFilter, typeFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser, contactedLeadIds]);
 
   // Card "hero" atual (o que o SDR está atendendo) — usado no render E nos atalhos.
   const heroTaskMemo = useMemo(() => {
@@ -1238,6 +1266,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const todayTasks = counterBase.filter((t) => new Date(t.scheduled_at).getTime() >= startTodayMs);
   const overdueTasks = counterBase.filter((t) => new Date(t.scheduled_at).getTime() < startTodayMs);
   const extraTasks = counterBase.filter((t) => t.is_extra);
+  // Controle Novo / FUP / Atrasada (métrica que o Bruno pediu — sempre à vista).
+  const novoTasks = counterBase.filter((t) => classifyTask(t).novo);
+  const fupTasks = counterBase.filter((t) => !classifyTask(t).novo);
 
 
   // Placar real: concluídas hoje/mês vs metas (qs_goals, com fallback nos padrões)
@@ -1571,7 +1602,22 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 </button>
               )}
             </div>
-            <div className="ml-auto flex gap-2 shrink-0">
+            <div className="ml-auto flex items-center gap-2 shrink-0 flex-wrap justify-end">
+              {(() => {
+                const c = classifyTask(task);
+                return (
+                  <>
+                    {c.novo ? (
+                      <span className="qsx-chip" style={{ background: "rgba(14,124,106,.12)", color: "#0E7C6A", fontWeight: 700 }} title="Lead novo — primeiro contato ainda não feito">🆕 Novo</span>
+                    ) : (
+                      <span className="qsx-chip" style={{ background: "rgba(180,83,9,.12)", color: "#B45309", fontWeight: 700 }} title={`Seguindo a cadência — dia ${c.fupDay}`}>FUP {c.fupDay}</span>
+                    )}
+                    {c.overdue && (
+                      <span className="qsx-chip" style={{ background: "rgba(220,38,38,.12)", color: "#DC2626", fontWeight: 700 }} title="Atividade atrasada (venceu antes de hoje)">⚠ Atrasada</span>
+                    )}
+                  </>
+                );
+              })()}
               <span className="qsx-chip prio-baixa">{getActivityLabel(task.channel_type)}</span>
             </div>
           </div>
@@ -2174,7 +2220,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           ══════════════════════════════════════════════════════════════════════ */}
       <div className="shrink-0 px-4 md:px-6 pt-4 pb-1" style={{ background: "var(--bg)" }}>
         <div className="qsx-page flex items-center justify-between gap-3 flex-wrap">
-          <span className="text-[16px] font-extrabold" style={{ color: "var(--ink)", letterSpacing: "-.1px" }}>Fila de hoje</span>
+          <div className="flex items-baseline gap-2.5 flex-wrap">
+            <span className="text-[16px] font-extrabold" style={{ color: "var(--ink)", letterSpacing: "-.1px" }}>Fila de hoje</span>
+            {/* Controle Novo / FUP / Atrasada sempre à vista (pedido do Bruno) */}
+            <span className="text-[12px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ color: "#0E7C6A" }}>{novoTasks.length} novos</span>
+              <span style={{ color: "var(--ink3)" }}> · </span>
+              <span style={{ color: "#B45309" }}>{fupTasks.length} em FUP</span>
+              <span style={{ color: "var(--ink3)" }}> · </span>
+              <span style={{ color: "#DC2626" }}>{overdueTasks.length} atrasadas</span>
+            </span>
+          </div>
           <div className="flex items-center gap-2 flex-wrap">
             <select
               value={statusFilter || ""}
@@ -2186,6 +2242,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <option value="extras">Extras ({extraTasks.length})</option>
               <option value="para_hoje">Para hoje ({todayTasks.length})</option>
               <option value="atrasadas">Atrasadas ({overdueTasks.length})</option>
+            </select>
+
+            <select
+              value={typeFilter || ""}
+              onChange={(e) => setTypeFilter((e.target.value as "novos" | "fup") || null)}
+              className={`qsx-fchip${typeFilter ? " on" : ""}`}
+              aria-label="Filtrar por tipo (novo/FUP)"
+            >
+              <option value="">Tipo</option>
+              <option value="novos">Novos ({novoTasks.length})</option>
+              <option value="fup">Em FUP ({fupTasks.length})</option>
             </select>
 
             <select
