@@ -216,7 +216,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
       setHandoverBriefing("");
     } catch (err) {
       console.warn("Erro ao realizar handover:", err);
-      setHandoverError("Não foi possível realizar o handover. Verifique os dados e tente novamente.");
+      // Mostra a CAUSA real (mensagem do Supabase) em vez de um texto genérico —
+      // sem isso, um erro de RLS/constraint fica invisível e não dá pra corrigir.
+      const msg = (err as { message?: string })?.message || "erro desconhecido";
+      setHandoverError(`Não foi possível realizar o handover: ${msg}`);
     } finally {
       setHandoverSaving(false);
     }
@@ -258,7 +261,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
       setHandoverCloserId(""); setHandoverBriefing(""); setHandoverFromId(""); setHandoverQty("10");
     } catch (err) {
       console.warn("Erro no handover por quantidade:", err);
-      setHandoverError("Não foi possível transferir os leads. Tente novamente.");
+      const msg = (err as { message?: string })?.message || "erro desconhecido";
+      setHandoverError(`Não foi possível transferir os leads: ${msg}`);
     } finally {
       setHandoverSaving(false);
     }
@@ -573,11 +577,28 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 const ownerId = e.target.value;
                 if (!ownerId) return;
                 const ids = Array.from(selectedIds);
-                await supabase.from("qs_leads").update({ owner_id: ownerId }).in("id", ids);
                 const owner = users.find(u => u.id === ownerId);
-                setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, owner_id: ownerId, owner: owner || null } as any : l));
+                // 1. Reatribui o lead — e CHECA o erro (antes ele era ignorado e a
+                //    tela fingia sucesso mesmo quando a gravação falhava).
+                const { error: leadErr } = await supabase.from("qs_leads").update({ owner_id: ownerId }).in("id", ids);
+                if (leadErr) {
+                  notifyError(`Não foi possível atribuir o responsável: ${leadErr.message}`);
+                  e.target.value = "";
+                  return;
+                }
+                // 2. Leva as tarefas abertas junto — senão o novo dono recebe o lead
+                //    mas fica SEM atividades no Painel (e o antigo fica com tarefas órfãs).
+                const { error: taskErr } = await supabase
+                  .from("qs_tasks")
+                  .update({ owner_id: ownerId })
+                  .in("lead_id", ids)
+                  .in("status", ["pendente", "atrasada"]);
+                if (taskErr) console.warn("Reatribuição de tarefas falhou:", taskErr);
+                // 3. Recarrega do banco (fonte da verdade) em vez de assumir sucesso.
+                await fetchLeads();
                 setSelectedIds(new Set());
                 e.target.value = "";
+                notifySuccess(`${ids.length} lead(s) atribuído(s) a ${owner?.name ?? "o responsável"}.`);
               }}
               className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-700 cursor-pointer"
               defaultValue=""
