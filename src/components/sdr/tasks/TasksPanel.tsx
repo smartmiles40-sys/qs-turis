@@ -1403,11 +1403,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   function renderChannelAction(task: Task, lead: Lead | undefined) {
     switch (task.channel_type) {
       case "ligacao":
-        return lead?.phone ? <button onClick={() => { pinTaskForCall(task); callViaSip(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-btn qsx-btn-green"><ChannelIcon type="ligacao" size={16} />Ligar</button> : null;
+        // O "Ligar" (VoIP) agora vive na barra de contato fixa do card (sempre
+        // visível), então aqui não repetimos o botão.
+        return null;
       case "ligacao_whatsapp":
         return lead?.phone ? <button onClick={() => { pinTaskForCall(task); callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-btn qsx-btn-green"><IconWhatsAppCall size={16} />Ligar no WhatsApp</button> : null;
       case "whatsapp":
-        return lead?.phone ? <button onClick={() => openWhatsApp(lead)} className="qsx-btn qsx-btn-green"><IconWhatsApp size={16} />Abrir conversa</button> : null;
+        // "WhatsApp" (abrir conversa) já está na barra de contato fixa do card.
+        return null;
       case "email": {
         if (!lead?.email) return null;
         // Fase 1 do e-mail integrado: abre o e-mail JÁ ESCRITO (script da atividade
@@ -1550,7 +1553,30 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </div>
           </div>
 
-          {task.notes && <div className="qsx-hbox">{task.notes}</div>}
+          {/* Barra de contato FIXA: o SDR pode ligar (VoIP/webfone) ou abrir o
+            WhatsApp a QUALQUER momento, não importa o canal da tarefa atual. */}
+        {lead?.phone && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => { pinTaskForCall(task); callViaSip(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13.5px] font-bold text-white"
+              style={{ background: "#12A18A", boxShadow: "0 6px 14px -8px rgba(18,161,138,.6)" }}
+              title="Ligar pelo webfone (VoIP)"
+            >
+              <ChannelIcon type="ligacao" size={16} />Ligar
+            </button>
+            <button
+              onClick={() => openWhatsApp(lead)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13.5px] font-bold text-white"
+              style={{ background: "#25D366", boxShadow: "0 6px 14px -8px rgba(37,211,102,.6)" }}
+              title="Abrir conversa no WhatsApp"
+            >
+              <IconWhatsApp size={16} />WhatsApp
+            </button>
+          </div>
+        )}
+
+        {task.notes && <div className="qsx-hbox">{task.notes}</div>}
 
           {/* Ações: botão do canal + concluir atividade + pular */}
           <div className="flex items-center gap-2.5 flex-wrap">
