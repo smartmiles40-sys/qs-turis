@@ -1553,9 +1553,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </div>
           </div>
 
-          {/* Barra de contato FIXA: o SDR pode ligar (VoIP/webfone) ou abrir o
-            WhatsApp a QUALQUER momento, não importa o canal da tarefa atual. */}
-        {lead?.phone && (
+          {/* Ação de contato do card: UMA por atividade, conforme o canal da tarefa.
+            Atividade de "Ligação" mostra só "Ligar"; atividade de "WhatsApp" mostra só
+            "WhatsApp" — nunca as duas juntas (evita 2 execuções na mesma atividade).
+            Os demais canais (e-mail, LinkedIn, Ligação-WhatsApp) usam o botão do
+            renderChannelAction logo abaixo. */}
+        {lead?.phone && task.channel_type === "ligacao" && (
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => { pinTaskForCall(task); callViaSip(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }}
@@ -1565,6 +1568,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             >
               <ChannelIcon type="ligacao" size={16} />Ligar
             </button>
+          </div>
+        )}
+        {lead?.phone && task.channel_type === "whatsapp" && (
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => openWhatsApp(lead)}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13.5px] font-bold text-white"
