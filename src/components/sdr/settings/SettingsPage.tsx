@@ -7,6 +7,7 @@ import { notifyError } from "@/lib/qs/notify";
 import { WAVOIP_TOKEN_KEY } from "@/lib/wavoip";
 import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PREFIX_KEY, SIP_INSTALLER_URL_KEY, SIP_RAMAIS_KEY, DEFAULT_SIP_HOST } from "@/lib/sip";
 import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, deleteSipLine, type SipLineAdmin } from "@/lib/webphone";
+import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
 import type {
   CustomField,
   CustomFieldScope,
@@ -49,7 +50,7 @@ const FIELD_TYPE_LABELS: Record<string, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "horario" | "equipe" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios";
+type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "horario" | "equipe" | "agenda" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -64,6 +65,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "motivos", label: "Motivos de Perda", group: "PLATAFORMA" },
   { key: "horario", label: "Horário de Trabalho", group: "EMPRESA" },
   { key: "equipe", label: "Equipe da Reunião", group: "EMPRESA" },
+  { key: "agenda", label: "Agenda (Google)", group: "EMPRESA" },
   { key: "webfone", label: "Webfone (Wavoip)", group: "EMPRESA" },
   { key: "webfone-webrtc", label: "Webfone WebRTC (VoxFree)", group: "EMPRESA" },
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
@@ -1609,6 +1611,72 @@ function WebfoneWebrtcSection() {
   );
 }
 
+// ── Agenda (Google) ──────────────────────────────────────────────────────────
+// Embed da Google Agenda compartilhada dos closers (só visualização). O admin
+// cola o ID da agenda ou a URL de incorporação; a aba "Agenda" monta o iframe.
+
+function AgendaSection() {
+  const [value, setValue] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { void getAgendaEmbed().then((v) => { setValue(v); setLoaded(true); }); }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    const ok = await saveAgendaEmbed(value);
+    setSaving(false);
+    if (ok) { setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    else notifyError("Não foi possível salvar (apenas admin/gestor).");
+  }
+
+  const previewSrc = buildAgendaEmbedSrc(value, "WEEK");
+
+  return (
+    <div className="max-w-3xl space-y-5">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Agenda (Google)</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          A aba <b>Agenda</b> mostra a Google Agenda compartilhada dos closers embutida, pros SDRs verem
+          todas as reuniões num lugar só. Só visualização — a criação segue pelo Bitrix.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+        <label className="block text-xs font-medium text-gray-500">ID da agenda compartilhada ou URL de incorporação</label>
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="ex.: abc123@group.calendar.google.com  (ou a URL completa do 'Incorporar')"
+          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
+        />
+        <div className="flex items-center gap-3">
+          <button onClick={handleSave} disabled={saving || !loaded} className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#2563EB" }}>
+            {saving ? "Salvando..." : "Salvar agenda"}
+          </button>
+          {saved && <span className="text-sm font-medium text-green-600">Salvo ✓</span>}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-4 text-xs text-gray-500 space-y-1.5">
+        <p className="font-semibold text-gray-700 text-sm">Onde achar o ID e como liberar pros SDRs</p>
+        <p>1. Google Agenda → passe o mouse na agenda dos closers → <b>⋮ → Configurações e compartilhamento</b>.</p>
+        <p>2. Em <b>Integrar agenda</b>, copie o <b>ID da agenda</b> (<code>…@group.calendar.google.com</code>) ou a URL do campo "Incorporar agenda".</p>
+        <p>3. Em <b>Permissões de acesso</b>, deixe a agenda visível pro time (compartilhe com as contas Google dos SDRs) — ou "Tornar disponível ao público → Ver todos os detalhes". ⚠️ público expõe os títulos das reuniões; prefira compartilhar só com o time.</p>
+        <p>Duas agendas (uma por closer)? Cole os dois IDs <b>separados por vírgula</b>.</p>
+      </div>
+
+      {previewSrc && (
+        <div>
+          <p className="text-xs font-medium text-gray-500 mb-1">Prévia</p>
+          <iframe src={previewSrc} title="Prévia da agenda" className="w-full h-72 rounded-xl border border-gray-200" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -1672,6 +1740,7 @@ export default function SettingsPage() {
         {activeSection === "motivos" && <MotivosSection />}
         {activeSection === "horario" && <HorarioSection />}
         {activeSection === "equipe" && <EquipeSection />}
+        {activeSection === "agenda" && <AgendaSection />}
         {activeSection === "webfone" && <WebfoneSection />}
         {activeSection === "webfone-webrtc" && <WebfoneWebrtcSection />}
         {activeSection === "telefone-sip" && <SipSection />}

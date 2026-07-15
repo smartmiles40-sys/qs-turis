@@ -61,6 +61,7 @@ import CadencesPage from "./cadences/CadencesPage";
 import CadenceCreatePage from "./cadences/CadenceCreatePage";
 import TasksPanel from "./tasks/TasksPanel";
 import MeetingsPage from "./meetings/MeetingsPage";
+import AgendaPage from "./agenda/AgendaPage";
 import GoalsPage from "./goals/GoalsPage";
 import SettingsPage from "./settings/SettingsPage";
 import CoveragePanel from "./dashboard/CoveragePanel";
@@ -82,6 +83,7 @@ export type SdrNav =
   | "cadencia-editar"
   | "dashboard"
   | "reunioes"
+  | "agenda"
   | "metas"
   | "declaracao"
   | "historicos"
@@ -118,6 +120,7 @@ const MENU: (MenuGroup | MenuItem)[] = [
       { id: "leads", label: "Leads", description: "Cadastro e gestão de leads" },
       { id: "cadencias", label: "Cadências", description: "Fluxos de prospecção" },
       { id: "reunioes", label: "Reuniões", description: "Agenda de reuniões" },
+      { id: "agenda", label: "Agenda", description: "Reuniões dos closers (Google)" },
     ],
   },
   {
@@ -577,6 +580,11 @@ export default function SdrLayout() {
         {activeNav === "reunioes" && (
           <PageErrorBoundary pageName="Reuniões">
             <MeetingsPage onOpenLead={openLeadDetail} />
+          </PageErrorBoundary>
+        )}
+        {activeNav === "agenda" && (
+          <PageErrorBoundary pageName="Agenda">
+            <AgendaPage />
           </PageErrorBoundary>
         )}
         {activeNav === "metas" && (
