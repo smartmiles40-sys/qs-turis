@@ -482,6 +482,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
   // Confirmação do desfecho no card da "Próxima atividade"
   const [pendingResult, setPendingResult] = useState<{ taskId: string; result: string } | null>(null);
+  // Timer de auto-conclusão pós-ligação NÃO ATENDIDA (item sprint): 10s pra o SDR
+  // agir; senão conclui como "Não atendeu" e libera o próximo card.
+  const [autoFinish, setAutoFinish] = useState<{ taskId: string; secs: number } | null>(null);
   // Item 7 — o SDR pode escolher qual lead atender (vira o card ativo). Sem seleção, o topo da fila.
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   // Itens 1 e 4 — observações da atividade (viram resumo no Bitrix via qs_notes)
@@ -1166,7 +1169,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       setActiveTaskId(task.id);
       if (!info.answered) {
         setPendingResult({ taskId: task.id, result: "nao_atendeu" });
-        showToast("Ligação não atendida — confirme o desfecho (Enter)");
+        setAutoFinish({ taskId: task.id, secs: 10 });
+        showToast("Ligação não atendida — concluindo em 10s (ou registre outro desfecho)");
       } else {
         showToast(`Ligação encerrada (${Math.round(info.durationSec / 60)}min) — registre o desfecho`);
       }
@@ -1178,6 +1182,42 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return () => { setOnCallEnded(null); setOnCallEndedWebphone(null); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Auto-conclusão da ligação NÃO atendida ────────────────────────────────
+  // 10s de contagem; se o SDR não agir, conclui como "Não atendeu" e libera o
+  // próximo card. Usa um ref pra sempre chamar o handleContactResult mais atual.
+  const finishRef = useRef<(taskId: string) => void>(() => {});
+  finishRef.current = async (taskId: string) => {
+    if (finalizing) return;
+    setFinalizing(true);
+    try { await handleContactResult(taskId, "nao_atendeu"); setPendingResult(null); }
+    finally { setFinalizing(false); }
+  };
+  const autoFinishRef = useRef(autoFinish);
+  autoFinishRef.current = autoFinish;
+  useEffect(() => {
+    if (!autoFinish) return;
+    if (autoFinish.secs <= 0) {
+      const tid = autoFinish.taskId;
+      setAutoFinish(null);
+      finishRef.current(tid);
+      return;
+    }
+    const id = setTimeout(
+      () => setAutoFinish((a) => (a && a.taskId === autoFinish.taskId ? { ...a, secs: a.secs - 1 } : a)),
+      1000,
+    );
+    return () => clearTimeout(id);
+  }, [autoFinish]);
+  // Qualquer interação para o timer: mudar o desfecho, digitar observação, trocar
+  // de card ou cancelar. (Lê autoFinish por ref pra não reiniciar a cada segundo.)
+  useEffect(() => {
+    const af = autoFinishRef.current;
+    if (!af) return;
+    const keep = pendingResult && pendingResult.taskId === af.taskId && pendingResult.result === "nao_atendeu" && !obsText.trim();
+    if (!keep) setAutoFinish(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingResult, obsText]);
 
   // Contadores na MESMA base da fila exibida: só as tarefas do próprio SDR
   // (quando não é gestor/admin), de leads ainda ativos, até hoje. Antes contavam
@@ -1754,11 +1794,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             {pending && (
               <div className="mt-3 flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "#FFF7ED", border: "1px solid #FED7AA" }}>
                 <span className="text-[13px]" style={{ color: "var(--ink2)" }}>
-                  Confirmar: <b style={{ color: "var(--ink)" }}>{outcomes.find((o) => o.key === pending)?.label}</b>? {obsText.trim() && <span style={{ color: "var(--ink3)" }}>(a observação vai junto no resumo)</span>}
+                  Confirmar: <b style={{ color: "var(--ink)" }}>{outcomes.find((o) => o.key === pending)?.label}</b>?
+                  {autoFinish?.taskId === task.id && <b style={{ color: "#C2410C" }}> · concluindo em {autoFinish.secs}s</b>}
+                  {obsText.trim() && <span style={{ color: "var(--ink3)" }}> (a observação vai junto no resumo)</span>}
                 </span>
                 <button
                   onClick={async () => {
                     if (finalizing) return; // anti duplo-clique
+                    setAutoFinish(null);
                     setFinalizing(true);
                     try {
                       await handleContactResult(task.id, pending);
@@ -1773,7 +1816,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 >
                   {finalizing ? "Finalizando…" : "Finalizar"}
                 </button>
-                <button onClick={() => setPendingResult(null)} disabled={finalizing} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }}>
+                {autoFinish?.taskId === task.id && (
+                  <button onClick={() => setAutoFinish(null)} disabled={finalizing} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }} title="Parar o auto-concluir e decidir com calma">
+                    Manter aberto
+                  </button>
+                )}
+                <button onClick={() => { setAutoFinish(null); setPendingResult(null); }} disabled={finalizing} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }}>
                   Cancelar
                 </button>
               </div>
