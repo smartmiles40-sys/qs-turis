@@ -1199,23 +1199,6 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const overdueTasks = counterBase.filter((t) => new Date(t.scheduled_at).getTime() < startTodayMs);
   const extraTasks = counterBase.filter((t) => t.is_extra);
 
-  // Hot lead detection (Change 2)
-  const hotLead = useMemo(() => {
-    const now = Date.now();
-    for (const task of tasks) {
-      if (task.completed_at || task.status === "concluida") continue;
-      const cadence = getCadenceForTask(task);
-      if (cadence?.acquisition_channel !== "levantada_de_mao") continue;
-      const lead = getLeadForTask(task);
-      if (!lead?.arrived_at) continue;
-      const arrivedMs = new Date(lead.arrived_at).getTime();
-      const diffMin = Math.floor((now - arrivedMs) / 60000);
-      if (diffMin >= 0 && diffMin <= 3) {
-        return { task, lead, diffMin };
-      }
-    }
-    return null;
-  }, [tasks, leads, cadences]);
 
   // Placar real: concluídas hoje/mês vs metas (qs_goals, com fallback nos padrões)
   const DAILY_DONE = doneCounts.doneToday;
@@ -2061,37 +2044,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          HOT LEAD NOTIFICATION BANNER (Change 2)
-          ══════════════════════════════════════════════════════════════════════ */}
-      {hotLead && (
-        <div
-          className="shrink-0 bg-red-500 text-white px-4 md:px-6 py-3 flex flex-wrap items-center justify-between gap-y-2"
-          style={{ animation: "pulseBanner 2s ease-in-out infinite" }}
-        >
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-lg">&#128308;</span>
-            <span className="text-sm font-bold">Lead quente chegou!</span>
-            <span className="text-sm font-medium">
-              {hotLead.lead.full_name} &mdash; {hotLead.lead.company_name}
-            </span>
-            <span className="text-xs opacity-80">
-              &middot; H&aacute; {hotLead.diffMin} min
-            </span>
-          </div>
-          <button
-            onClick={() => openWhatsApp(hotLead.lead)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-white text-red-600 hover:bg-red-50 transition-colors"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-              <path d="M14.05 2a9 9 0 0 1 8 7.94"/>
-              <path d="M14.05 6A5 5 0 0 1 18 10"/>
-            </svg>
-            Atender agora
-          </button>
-        </div>
-      )}
+      {/* Faixa "Lead quente chegou!" REMOVIDA do cabeçalho (poluía o Painel).
+          Leads quentes seguem no sino de notificações, sem faixa fixa no topo. */}
 
       {/* ══════════════════════════════════════════════════════════════════════
           DAILY BRIEFING (Change 3)
