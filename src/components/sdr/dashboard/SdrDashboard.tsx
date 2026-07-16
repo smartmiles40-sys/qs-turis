@@ -170,19 +170,40 @@ function AreaChart({ realData, predictedData }: { realData: number[]; predictedD
 
 // ── Horizontal Bar Chart ────────────────────────────────────────────────────
 
-function LossReasonsChart() {
+function LossReasonsChart({
+  selectedUser,
+  selectedPeriod,
+  customStart,
+  customEnd,
+}: {
+  selectedUser: string;
+  selectedPeriod: string;
+  customStart: string;
+  customEnd: string;
+}) {
   const [lossReasons, setLossReasons] = useState<LossReasonData[]>([]);
   const [loadingReasons, setLoadingReasons] = useState(true);
 
   useEffect(() => {
     async function fetchLossReasons() {
       setLoadingReasons(true);
+      // agora respeita o período selecionado (data de fechamento) e o SDR —
+      // antes era all-time/global e não respondia "esse mês"
+      const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      // Data de FECHAMENTO real (closed_at, migration 0012; fallback updated_at).
+      const closedCol = await getClosedAtColumn();
+
       // Get leads with status=perdido and their loss reason labels
-      const { data, error } = await supabase
+      let q = supabase
         .from("qs_leads")
         .select("loss_reason:qs_loss_reasons(label)")
         .eq("status", "perdido")
         .not("loss_reason_id", "is", null);
+      if (selectedUser !== "all") q = q.eq("owner_id", selectedUser);
+      if (from) q = q.gte(closedCol, from);
+      if (to) q = q.lte(closedCol, to);
+
+      const { data, error } = await q;
 
       if (error) {
         console.warn("Erro ao buscar motivos de perda:", error);
@@ -205,7 +226,7 @@ function LossReasonsChart() {
       setLoadingReasons(false);
     }
     fetchLossReasons();
-  }, []);
+  }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
   if (loadingReasons) {
     return <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>;
@@ -725,6 +746,8 @@ export default function SdrDashboard() {
   useEffect(() => {
     async function loadHeatmap() {
       setLoadingHeatmap(true);
+      // agora respeita o período selecionado — antes era all-time e não respondia "esse mês"
+      const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
       let q = supabase
@@ -734,6 +757,8 @@ export default function SdrDashboard() {
         .in("contact_result", CONNECTED_RESULTS)
         .not("completed_at", "is", null);
       if (ownerId) q = q.eq("owner_id", ownerId);
+      if (from) q = q.gte("completed_at", from);
+      if (to) q = q.lte("completed_at", to);
 
       const { data, error } = await q;
       if (error) {
@@ -764,12 +789,15 @@ export default function SdrDashboard() {
       setLoadingHeatmap(false);
     }
     loadHeatmap();
-  }, [selectedUser]);
+  }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
   // Fetch Speed-to-Lead (Change 20)
   useEffect(() => {
     async function loadSpeedToLead() {
       setLoadingSpeed(true);
+      // agora respeita o período selecionado (leads que CHEGARAM no período) —
+      // antes era all-time e não respondia "esse mês"
+      const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
       // Get leads with arrived_at
@@ -778,6 +806,8 @@ export default function SdrDashboard() {
         .select("id, arrived_at")
         .not("arrived_at", "is", null);
       if (ownerId) qLeads = qLeads.eq("owner_id", ownerId);
+      if (from) qLeads = qLeads.gte("arrived_at", from);
+      if (to) qLeads = qLeads.lte("arrived_at", to);
 
       const { data: leadsData, error: leadsErr } = await qLeads;
       if (leadsErr || !leadsData || leadsData.length === 0) {
@@ -830,7 +860,7 @@ export default function SdrDashboard() {
       setLoadingSpeed(false);
     }
     loadSpeedToLead();
-  }, [selectedUser]);
+  }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
   // Fetch Operational KPIs
   useEffect(() => {
@@ -1499,7 +1529,12 @@ export default function SdrDashboard() {
         <h2 className="text-sm font-medium text-gray-700 mb-4">
           Motivos de Perda
         </h2>
-        <LossReasonsChart />
+        <LossReasonsChart
+          selectedUser={selectedUser}
+          selectedPeriod={selectedPeriod}
+          customStart={customStart}
+          customEnd={customEnd}
+        />
       </div>
 
       {/* Ranking de SDRs */}
