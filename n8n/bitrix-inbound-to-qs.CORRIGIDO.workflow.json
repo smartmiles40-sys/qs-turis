@@ -1,0 +1,188 @@
+{
+  "name": "QS Turis - Bitrix -> QS (INBOUND) [CORRIGIDO telefone]",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qs-turis.vercel.app/api/lead-inbound",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lead-secret",
+              "value": "08398293d8622dd3f9f24c8578c38918a398b5ce7ec3f853"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ full_name: $json.full_name, phone: $json.phone, email: $json.email, bitrix_id: $json.ID, segment: $json.Fonte, source: $json.source }) }}",
+        "options": {}
+      },
+      "id": "26ce78ed-defc-4577-b7c0-0a8191d4432d",
+      "name": "Enviar ao QS (/api/lead-inbound)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        272,
+        320
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-lead-inbound",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "7deead8e-e7c4-465c-a79a-811255e28c19",
+      "name": "Webhook Bitrix -> Supabase1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -192,
+        320
+      ],
+      "webhookId": "d4c3f6b5-4444-4d40-6e34-3051627c8e93"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1-full-name-0001",
+              "name": "full_name",
+              "type": "string",
+              "value": "={{ $json.query.Nome }}"
+            },
+            {
+              "id": "f2-email-0002",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $json.query['E-mail'] }}"
+            },
+            {
+              "id": "f3-phone-0003",
+              "name": "phone",
+              "type": "string",
+              "value": "={{ $json.query.Telefone || $json.query.telefone }}"
+            },
+            {
+              "id": "f4-company-0004",
+              "name": "Fonte",
+              "type": "string",
+              "value": "={{ $json.query.Fonte }}"
+            },
+            {
+              "id": "f5-city-0005",
+              "name": "Morno",
+              "type": "string",
+              "value": "={{ $json.query.LeadScoring || $json.query.Score }}"
+            },
+            {
+              "id": "f6-state-0006",
+              "name": "ID",
+              "type": "string",
+              "value": "={{ $json.query.ID }}"
+            },
+            {
+              "id": "f8-source-0008",
+              "name": "source",
+              "type": "string",
+              "value": "integracao"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fff2bf91-0b84-4803-a34d-b9b549585bbd",
+      "name": "Normalizar2",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        32,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://eabfjomrnucymduqnbci.supabase.co/rest/v1/qs_notes",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.lead_id, body: '📥 Origem Bitrix\\nFonte: ' + ($('Normalizar2').item.json.Fonte || '-') + '\\nTemperatura: ' + ($('Normalizar2').item.json.Morno || '-'), tags: ['bitrix','origem'] }) }}",
+        "options": {}
+      },
+      "id": "02d5d2d3-053e-49fe-96eb-011792c31b2b",
+      "name": "Nota: origem Bitrix (Fonte/Score)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        496,
+        320
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "eskrddYHVWzOtA9g",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Enviar ao QS (/api/lead-inbound)": {
+      "main": [
+        [
+          {
+            "node": "Nota: origem Bitrix (Fonte/Score)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Bitrix -> Supabase1": {
+      "main": [
+        [
+          {
+            "node": "Normalizar2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar2": {
+      "main": [
+        [
+          {
+            "node": "Enviar ao QS (/api/lead-inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "91aa63e4f74d7cbe350736303e89cc11603c939156428dd97f3f611c857dbb64"
+  }
+}
