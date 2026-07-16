@@ -63,12 +63,18 @@ export default function MyDayPanel() {
           .eq("owner_id", uid).in("status", ["pendente", "atrasada"]).lte("scheduled_at", endOfToday().toISOString()).order("scheduled_at"),
         supabase.from("qs_tasks").select("id, lead_id, channel_type, priority, scheduled_at, completed_at")
           .eq("owner_id", uid).eq("status", "concluida").gte("completed_at", start0.toISOString()).order("completed_at", { ascending: false }),
-        supabase.from("qs_leads").select("id, full_name"),
+        supabase.from("qs_leads").select("id, full_name, status"),
       ]);
       if (pendRes.error) throw pendRes.error;
       if (doneRes.error) throw doneRes.error;
 
-      const names = new Map((leadsRes.data ?? []).map((l: any) => [l.id, l.full_name]));
+      const leadRows = (leadsRes.data ?? []) as { id: string; full_name: string | null; status: string | null }[];
+      const names = new Map(leadRows.map((l) => [l.id, l.full_name]));
+      // Lead já fechado (ganho/perdido) sai do "A fazer": a tarefa residual dele
+      // (ex.: reunião de recontato de lead ganho) não é mais trabalho pendente e
+      // travava o "100% do dia". "Feitas hoje" fica intacta — trabalho feito é
+      // trabalho feito.
+      const closedLeadIds = new Set(leadRows.filter((l) => l.status === "ganho" || l.status === "perdido").map((l) => l.id));
       const start0ms = start0.getTime();
       const map = (rows: any[]): DayTask[] => rows.map((t) => ({
         id: t.id,
@@ -78,9 +84,10 @@ export default function MyDayPanel() {
         priority: t.priority,
         scheduled_at: t.scheduled_at,
         completed_at: t.completed_at ?? null,
+        // Definição unificada de "atrasada": agendada ANTES de hoje 00:00 local.
         overdue: new Date(t.scheduled_at).getTime() < start0ms,
       }));
-      setTodo(map(pendRes.data ?? []));
+      setTodo(map(pendRes.data ?? []).filter((t) => !closedLeadIds.has(t.lead_id)));
       setDone(map(doneRes.data ?? []));
     } catch (e: any) {
       console.warn("[meu-dia] falha:", e?.message);

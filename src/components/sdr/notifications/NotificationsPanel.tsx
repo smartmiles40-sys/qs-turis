@@ -20,6 +20,7 @@ interface NotificationsPanelProps {
 interface NotifTaskLead {
   full_name: string | null;
   company_name: string | null;
+  status?: string | null; // pra filtrar tarefas de leads já ganho/perdido
 }
 
 interface NotifTask {
@@ -222,31 +223,36 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
     const ownerId = currentUser.id;
 
     const now = new Date();
+    // Definição OFICIAL de "atrasada" (unificada entre as telas): tarefa aberta
+    // (pendente/atrasada) agendada ANTES DE HOJE 00:00 local — o que é de hoje
+    // ainda não está atrasado — ignorando tarefas de leads já ganho/perdido.
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(now);
     endOfDay.setHours(23, 59, 59, 999);
-    const nowIso = now.toISOString();
+    const startIso = startOfDay.toISOString();
     const endIso = endOfDay.toISOString();
     const h48Iso = new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString();
 
-    const taskSelect = "id, channel_type, scheduled_at, lead:qs_leads(full_name, company_name)";
+    const taskSelect = "id, channel_type, scheduled_at, lead:qs_leads(full_name, company_name, status)";
 
-    // 1. Follow-ups atrasados: pendentes com horário já vencido.
+    // 1. Follow-ups atrasados: abertos agendados antes de hoje 00:00.
     let overdueQ = supabase
       .from("qs_tasks")
       .select(taskSelect)
-      .eq("status", "pendente")
-      .lt("scheduled_at", nowIso)
+      .in("status", ["pendente", "atrasada"])
+      .lt("scheduled_at", startIso)
       .order("scheduled_at", { ascending: true })
       .limit(30);
     if (!seeAll) overdueQ = overdueQ.eq("owner_id", ownerId);
 
-    // 2. Tarefas de hoje: pendentes de agora até o fim do dia
-    //    (as já vencidas aparecem em "atrasados", evitando duplicidade).
+    // 2. Tarefas de hoje: abertas de hoje 00:00 até o fim do dia
+    //    (antes de 00:00 é "atrasados", então não há duplicidade).
     let todayQ = supabase
       .from("qs_tasks")
       .select(taskSelect)
-      .eq("status", "pendente")
-      .gte("scheduled_at", nowIso)
+      .in("status", ["pendente", "atrasada"])
+      .gte("scheduled_at", startIso)
       .lte("scheduled_at", endIso)
       .order("scheduled_at", { ascending: true })
       .limit(30);
@@ -279,8 +285,11 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
     if (leadsRes.error) console.warn("[QS] notificações — leads:", leadsRes.error);
     if (receivedRes.error) console.warn("[QS] notificações — recebidos:", receivedRes.error);
 
-    setOverdue((overdueRes.data ?? []) as unknown as NotifTask[]);
-    setToday((todayRes.data ?? []) as unknown as NotifTask[]);
+    // Lead fechado (ganho/perdido) sai dos lembretes de tarefa — não é mais
+    // trabalho pendente (mesma regra do "A fazer" do Meu Dia).
+    const isOpenLead = (t: NotifTask) => t.lead?.status !== "ganho" && t.lead?.status !== "perdido";
+    setOverdue(((overdueRes.data ?? []) as unknown as NotifTask[]).filter(isOpenLead));
+    setToday(((todayRes.data ?? []) as unknown as NotifTask[]).filter(isOpenLead));
     setHotLeads((leadsRes.data ?? []) as unknown as NotifLead[]);
     setReceived((receivedRes.data ?? []) as unknown as NotifHandover[]);
     setLoading(false);

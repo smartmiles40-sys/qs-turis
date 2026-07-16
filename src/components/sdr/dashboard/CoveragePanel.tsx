@@ -1,8 +1,9 @@
 // src/components/sdr/dashboard/CoveragePanel.tsx — Leads sem contato
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth } from "@/contexts/QsAuthContext";
-import { notifyError } from "@/lib/qs/notify";
+import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import { createCadenceTasks } from "@/lib/qs/queries";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,17 @@ function getSlaColor(value: number, thresholdGreen: number, thresholdYellow: num
   if (value >= thresholdGreen) return "#22C55E";
   if (value >= thresholdYellow) return "#EAB308";
   return "#EF4444";
+}
+
+// Próximo dia ÚTIL (seg–sex) às 09:00 local — o "amanhã" fixo cairia no fim de
+// semana e a tarefa amanheceria atrasada na segunda (mesma regra do TasksPanel).
+function nextBusinessDayAt9(): Date {
+  const d = new Date();
+  do {
+    d.setDate(d.getDate() + 1);
+  } while (d.getDay() === 0 || d.getDay() === 6);
+  d.setHours(9, 0, 0, 0);
+  return d;
 }
 
 // ── Icons (inline SVG) ─────────────────────────────────────────────────────
@@ -128,12 +140,19 @@ export default function CoveragePanel() {
       const { data: usersData } = await supabase.from("qs_users").select("id, name").eq("is_active", true).order("name");
       if (usersData) setUsers(usersData as QsUser[]);
 
-      const { data: leadsData, error: leadsErr } = await supabase
+      // Isolamento por dono: o SDR só enxerga a cobertura dos PRÓPRIOS leads.
+      // Gestor/admin veem o time todo (e podem filtrar por SDR no seletor acima).
+      // Backstop de tela — a garantia real é a RLS 0007/0008 no banco.
+      let leadsQ = supabase
         .from("qs_leads")
         .select("id, full_name, company_name, source, arrived_at, owner_id, owner:qs_users(name)")
         .not("arrived_at", "is", null)
         .in("status", ["nao_iniciado", "em_prospeccao"])
         .order("arrived_at", { ascending: true });
+      if (currentUser && !canSeeAllData(currentUser.role)) {
+        leadsQ = leadsQ.eq("owner_id", currentUser.id);
+      }
+      const { data: leadsData, error: leadsErr } = await leadsQ;
 
       if (leadsErr) {
         console.warn("Erro ao buscar leads para cobertura:", leadsErr);
@@ -234,7 +253,7 @@ export default function CoveragePanel() {
 
       setLoading(false);
     }
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     fetchLeads(true);
@@ -308,6 +327,94 @@ export default function CoveragePanel() {
       .eq("id", leadId)
       .eq("status", "nao_iniciado");
     if (leadErr) console.warn("Erro ao atualizar status do lead:", leadErr);
+
+    // ── Anti-zumbi (lead task-driven): sem NENHUMA tarefa aberta o lead fica
+    // invisível em todas as filas (Painel, Meu Dia, notificações). Registrar o
+    // contato tira o lead da lista de "sem contato" — então ele PRECISA sair
+    // daqui com cadência e/ou pelo menos uma próxima atividade pendente.
+    let nextActivityMsg: string | null = null;
+    let followUpFailed = false;
+    try {
+      // Estado fresco do lead: o cadence_id pode ter mudado desde o fetch da lista.
+      const { data: freshLead } = await supabase
+        .from("qs_leads")
+        .select("cadence_id")
+        .eq("id", leadId)
+        .maybeSingle();
+      const hasCadence = Boolean((freshLead as { cadence_id: string | null } | null)?.cadence_id);
+
+      // 1. Lead SEM cadência: vincula a primeira disponível e cria o plano de tarefas.
+      if (!hasCadence) {
+        const { data: cadRows } = await supabase
+          .from("qs_cadences")
+          .select("id, name")
+          .eq("status", "disponivel")
+          .order("created_at", { ascending: true })
+          .limit(1);
+        const cad = (cadRows as { id: string; name: string | null }[] | null)?.[0];
+        if (cad) {
+          // `.is("cadence_id", null)` + select: só vincula se ninguém vinculou no
+          // meio do caminho (evita plano de tarefas duplicado numa corrida).
+          const { data: linked, error: linkErr } = await supabase
+            .from("qs_leads")
+            .update({ cadence_id: cad.id, cadence_started_at: new Date().toISOString() })
+            .eq("id", leadId)
+            .is("cadence_id", null)
+            .select("id");
+          if (linkErr) {
+            console.warn("Erro ao vincular cadência ao lead:", linkErr);
+          } else if (linked && linked.length > 0) {
+            const created = await createCadenceTasks(leadId, cad.id, ownerId);
+            if (created && created.length > 0) {
+              nextActivityMsg = `cadência "${cad.name ?? "sem nome"}" vinculada e atividades do plano criadas`;
+            }
+          }
+        }
+        // Sem cadência disponível: segue pro passo 2 mesmo assim (não trava).
+      }
+
+      // 2. Rede de segurança: garante ao menos UMA tarefa aberta. Se não houver,
+      //    cria um follow-up no próximo dia útil às 09:00.
+      if (!nextActivityMsg) {
+        const { data: openTasks } = await supabase
+          .from("qs_tasks")
+          .select("id")
+          .eq("lead_id", leadId)
+          .in("status", ["pendente", "atrasada"])
+          .limit(1);
+        if (!openTasks || openTasks.length === 0) {
+          const followUpAt = nextBusinessDayAt9();
+          const { error: fupErr } = await supabase.from("qs_tasks").insert({
+            lead_id: leadId,
+            owner_id: ownerId,
+            channel_type: "ligacao",
+            priority: "alta",
+            scheduled_at: followUpAt.toISOString(),
+            status: "pendente",
+            is_extra: false,
+            notes: "Follow-up: retomar contato (registrado pela Cobertura)",
+            tags: ["follow-up"],
+          });
+          if (fupErr) {
+            console.warn("Erro ao criar follow-up de cobertura:", fupErr);
+            followUpFailed = true;
+          } else {
+            nextActivityMsg = `follow-up agendado para ${followUpAt.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" })} às 09:00`;
+          }
+        }
+      }
+    } catch (err) {
+      // O contato em si já foi registrado — a garantia da próxima atividade não
+      // pode desfazer isso; avisa e deixa o SDR agir manualmente.
+      console.warn("Erro ao garantir próxima atividade do lead:", err);
+      followUpFailed = true;
+    }
+
+    if (followUpFailed) {
+      notifyError("Contato registrado, mas não foi possível criar a próxima atividade — agende um follow-up manual para este lead não sumir da fila!");
+    } else {
+      notifySuccess(nextActivityMsg ? `Contato registrado — ${nextActivityMsg}.` : "Contato registrado.");
+    }
 
     // Atualiza a lista local (remove da fila de aguardando)
     setAllLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, contacted: true } : l)));
