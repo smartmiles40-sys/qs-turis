@@ -1815,32 +1815,66 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </div>
           )}
 
-          {/* Motivo do pulo (vai pro skip_reason) */}
-          {skipMenuOpen && (
-            <div className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "var(--line2)" }}>
-              <span className="text-[13px] font-semibold" style={{ color: "var(--ink2)" }}>Por que está pulando?</span>
-              {["Aguardando retorno", "Horário inadequado", "Priorizar outro", "Outro"].map((reason) => (
-                <button
-                  key={reason}
-                  onClick={async () => {
-                    // Só some da fila se o pulo realmente gravou (senão o card
-                    // sumia e voltava no refresh de 60s, parecendo bug).
-                    const skipped = await skipTask(task.id, reason);
-                    if (!skipped) return;
-                    setTasks((prev) => prev.filter((t) => t.id !== task.id));
-                    setActiveTaskId(null);
-                    setSkipMenuOpen(false);
-                  }}
-                  className="qsx-out"
-                >
-                  {reason}
+          {/* Motivo do pulo (vai pro skip_reason). A ÚLTIMA atividade do lead é
+              INTOCÁVEL (decisão do Bruno): pular deixaria o lead sem próximo
+              passo — fora da fila de todo mundo. O SDR conclui com desfecho. */}
+          {skipMenuOpen && (() => {
+            const isLastOfLead = !tasks.some(
+              (t) => t.lead_id === task.lead_id && t.id !== task.id && (t.status === "pendente" || t.status === "atrasada"),
+            );
+            if (isLastOfLead) {
+              return (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "rgba(220,38,38,.08)", border: "1px solid rgba(220,38,38,.25)" }}>
+                  <span className="text-[13px] font-semibold" style={{ color: "#B91C1C" }}>
+                    🚫 Esta é a ÚLTIMA atividade deste lead — não dá pra pular. Conclua com um desfecho
+                    (Ganho, Pediu retorno, Perdido, Não atendeu…) pra ele não ficar sem próximo passo.
+                  </span>
+                  <button onClick={() => setSkipMenuOpen(false)} className="text-[13px] font-semibold hover:underline" style={{ color: "var(--ink3)", marginLeft: "auto" }}>
+                    Entendi
+                  </button>
+                </div>
+              );
+            }
+            return (
+              <div className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "var(--line2)" }}>
+                <span className="text-[13px] font-semibold" style={{ color: "var(--ink2)" }}>Por que está pulando?</span>
+                {["Aguardando retorno", "Horário inadequado", "Priorizar outro", "Outro"].map((reason) => (
+                  <button
+                    key={reason}
+                    onClick={async () => {
+                      // Guarda extra no banco: se ESTA virou a última atividade aberta
+                      // no meio do caminho (corrida), o pulo é barrado do mesmo jeito.
+                      const { data: others } = await supabase
+                        .from("qs_tasks")
+                        .select("id")
+                        .eq("lead_id", task.lead_id)
+                        .in("status", ["pendente", "atrasada"])
+                        .neq("id", task.id)
+                        .limit(1);
+                      if (!others || others.length === 0) {
+                        notifyError("Esta virou a última atividade do lead — pular não é permitido. Conclua com um desfecho.");
+                        setSkipMenuOpen(false);
+                        return;
+                      }
+                      // Só some da fila se o pulo realmente gravou (senão o card
+                      // sumia e voltava no refresh de 60s, parecendo bug).
+                      const skipped = await skipTask(task.id, reason);
+                      if (!skipped) return;
+                      setTasks((prev) => prev.filter((t) => t.id !== task.id));
+                      setActiveTaskId(null);
+                      setSkipMenuOpen(false);
+                    }}
+                    className="qsx-out"
+                  >
+                    {reason}
+                  </button>
+                ))}
+                <button onClick={() => setSkipMenuOpen(false)} className="text-[13px] font-semibold hover:underline" style={{ color: "var(--ink3)", marginLeft: "auto" }}>
+                  Cancelar
                 </button>
-              ))}
-              <button onClick={() => setSkipMenuOpen(false)} className="text-[13px] font-semibold hover:underline" style={{ color: "var(--ink3)", marginLeft: "auto" }}>
-                Cancelar
-              </button>
-            </div>
-          )}
+              </div>
+            );
+          })()}
 
           {/* Transferir 1 lead pra outro SDR (item 5) */}
           {transferOpen && lead && (
