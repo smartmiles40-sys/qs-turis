@@ -1064,7 +1064,6 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                           });
 
                           // Dias/atividades da cadência (1 busca só, reusada em todos os leads).
-                          const cad = cadences.find((c) => c.id === csvCadenceId);
                           let cadDays: { day_number: number; activities: { channel_type: string; scheduled_time: string | null; order_index: number }[] }[] = [];
                           if (csvCadenceId) {
                             const { data } = await supabase
@@ -1116,7 +1115,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                                     cadence_id: csvCadenceId,
                                     owner_id: inserted.owner_id,
                                     channel_type: a.channel_type,
-                                    priority: cad?.priority ?? "media",
+                                    // Prioridade pelo PERÍODO da atividade (manhã=alta,
+                                    // tarde>=12:30=média, dia todo/sem horário=baixa) —
+                                    // mesma regra do createCadenceTasks e do serverless.
+                                    priority: (!a.scheduled_time ? "baixa" : a.scheduled_time >= "12:30" ? "media" : "alta"),
                                     scheduled_at: when.toISOString(),
                                     status: "pendente",
                                     is_extra: false,

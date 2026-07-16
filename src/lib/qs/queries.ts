@@ -504,14 +504,13 @@ export async function createCadenceTasks(
   ownerId: string | null
 ): Promise<Task[] | null> {
   try {
-    const [{ data: cad }, { data: days, error: daysError }] = await Promise.all([
-      supabase.from("qs_cadences").select("priority").eq("id", cadenceId).single(),
-      supabase
-        .from("qs_cadence_days")
-        .select("*, activities:qs_cadence_activities(*)")
-        .eq("cadence_id", cadenceId)
-        .order("day_number"),
-    ]);
+    // A prioridade de cada tarefa agora vem do PERÍODO da atividade (manhã/tarde/
+    // dia todo), não mais da prioridade da cadência — então não buscamos mais ela.
+    const { data: days, error: daysError } = await supabase
+      .from("qs_cadence_days")
+      .select("*, activities:qs_cadence_activities(*)")
+      .eq("cadence_id", cadenceId)
+      .order("day_number");
     if (daysError) throw daysError;
     if (!days || days.length === 0) return [];
 
@@ -529,7 +528,10 @@ export async function createCadenceTasks(
             cadence_id: cadenceId,
             owner_id: ownerId,
             channel_type: act.channel_type,
-            priority: (cad?.priority as PriorityLevel) ?? "media",
+            // Prioridade vem do PERÍODO da atividade (pedido do Bruno): manhã = alta,
+            // tarde (>= 12:30) = média, "dia todo" (sem horário) = baixa. O horário
+            // acima ainda agenda (dia todo cai no default 09:00), mas a prioridade é baixa.
+            priority: (!act.scheduled_time ? "baixa" : act.scheduled_time >= "12:30" ? "media" : "alta") as PriorityLevel,
             scheduled_at: scheduled.toISOString(),
             status: "pendente" as TaskStatus,
             is_extra: false,

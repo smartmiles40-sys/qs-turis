@@ -76,7 +76,10 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
         cadence_id: cadenceId,
         owner_id: ownerId,
         channel_type: act.channel_type,
-        priority,
+        // Prioridade vem do PERÍODO da atividade: manhã = alta, tarde (>= 12:30) =
+        // média, "dia todo" (sem horário) = baixa. Mesma regra do createCadenceTasks
+        // (front) — assim o lead do Bitrix/serverless também respeita a prioridade.
+        priority: (!act.scheduled_time ? 'baixa' : act.scheduled_time >= '12:30' ? 'media' : 'alta'),
         scheduled_at: when.toISOString(),
         status: 'pendente',
         is_extra: false,

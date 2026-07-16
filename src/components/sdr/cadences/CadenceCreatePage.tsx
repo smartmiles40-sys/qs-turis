@@ -142,14 +142,22 @@ const STEPS: StepDef[] = [
 
 // ── Períodos de execução (substituem o horário exato) ───────────────────────
 
+// O período define a PRIORIDADE da atividade no FUP (pedido do Bruno):
+//   Manhã = alta · Tarde = média · Dia todo = baixa ("não é importante").
+// Sem coluna nova no banco: "Dia todo" grava scheduled_time = null; manhã/tarde
+// gravam o horário. A prioridade da tarefa é derivada disso em createCadenceTasks.
 const PERIODS = [
-  { key: "manha", label: "Manhã", time: "09:00", hint: "09:00 às 12:30" },
-  { key: "tarde", label: "Tarde", time: "12:30", hint: "12:30 às 19:00" },
+  { key: "manha", label: "Manhã", time: "09:00" as string | null, priority: "alta", hint: "Prioridade alta" },
+  { key: "tarde", label: "Tarde", time: "12:30" as string | null, priority: "media", hint: "Prioridade média" },
+  { key: "dia_todo", label: "Dia todo", time: null as string | null, priority: "baixa", hint: "Baixa prioridade (não é importante)" },
 ] as const;
 
-/** Deriva o período (manhã/tarde) a partir do horário salvo. */
-function periodOf(time: string | null): "manha" | "tarde" {
-  return time && time >= "12:30" ? "tarde" : "manha";
+const PRIORITY_LABEL: Record<string, string> = { alta: "alta", media: "média", baixa: "baixa" };
+
+/** Deriva o período (manhã/tarde/dia todo) a partir do horário salvo. */
+function periodOf(time: string | null): "manha" | "tarde" | "dia_todo" {
+  if (!time) return "dia_todo";
+  return time >= "12:30" ? "tarde" : "manha";
 }
 
 // ── ID generator ────────────────────────────────────────────────────────────
@@ -565,18 +573,19 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                         );
                       })}
                     </div>
-                    {/* Período: Manhã / Tarde (+ excluir) */}
+                    {/* Período = prioridade no FUP: Manhã (alta) / Tarde (média) / Dia todo (baixa) */}
                     <div className="flex items-center gap-1.5">
                       {PERIODS.map((p) => {
                         const selected = periodOf(act.scheduled_time) === p.key;
                         return (
                           <button key={p.key} onClick={() => updateActivity(day.id, act.id, { scheduled_time: p.time })}
                             title={p.hint}
-                            className="flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
+                            className="flex-1 px-2 py-1 rounded-lg text-xs font-semibold border transition leading-tight"
                             style={selected
                               ? { background: "#0147FF", color: "#fff", borderColor: "#0147FF" }
                               : { background: "#fff", color: "#6B7280", borderColor: "#E5E7EB" }}>
                             {p.label}
+                            <span className="block text-[9px] font-medium opacity-70">{PRIORITY_LABEL[p.priority]}</span>
                           </button>
                         );
                       })}
