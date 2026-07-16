@@ -55,6 +55,7 @@ class PageErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   }
 }
 import SdrDashboard from "./dashboard/SdrDashboard";
+import CadenceHealthPanel from "./dashboard/CadenceHealthPanel";
 import LeadsPage from "./leads/LeadsPage";
 import LeadDetailPage from "./leads/LeadDetailPage";
 import CadencesPage from "./cadences/CadencesPage";
@@ -82,6 +83,7 @@ export type SdrNav =
   | "cadencia-criar"
   | "cadencia-editar"
   | "dashboard"
+  | "saude-cadencia"
   | "reunioes"
   | "agenda"
   | "metas"
@@ -128,6 +130,7 @@ const MENU: (MenuGroup | MenuItem)[] = [
     label: "Desempenho",
     items: [
       { id: "dashboard", label: "Visão Geral", description: "Indicadores operacionais" },
+      { id: "saude-cadencia", label: "Saúde da Cadência", description: "FUP por etapa, atrasadas e backlog" },
       { id: "metas", label: "Metas", description: "Planejamento diário e mensal" },
     ],
   },
@@ -570,6 +573,11 @@ export default function SdrLayout() {
         {activeNav === "dashboard" && (
           <PageErrorBoundary pageName="Visão Geral">
             <SdrDashboard />
+          </PageErrorBoundary>
+        )}
+        {activeNav === "saude-cadencia" && (
+          <PageErrorBoundary pageName="Saúde da Cadência">
+            <CadenceHealthPanel />
           </PageErrorBoundary>
         )}
         {activeNav === "cobertura" && (
