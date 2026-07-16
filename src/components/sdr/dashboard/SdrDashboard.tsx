@@ -4,6 +4,7 @@ import { fetchDashboardStats, fetchQsUsers, getClosedAtColumn } from "@/lib/qs/q
 import type { GoalType } from "../types";
 import type { SdrUser } from "../types";
 import RankingPanel from "./RankingPanel";
+import DailyFlowPanel from "./DailyFlowPanel";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -1496,6 +1497,9 @@ export default function SdrDashboard() {
 
       {/* Ranking de SDRs */}
       <RankingPanel />
+
+      {/* Análise dia a dia (leads que chegaram / agendamentos por dia) */}
+      <DailyFlowPanel />
     </div>
   );
 }
