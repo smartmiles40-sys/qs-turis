@@ -180,6 +180,7 @@ function getDefaultForm(): FormState {
     status: "rascunho",
     auto_loss_enabled: false,
     auto_loss_days: 14,
+    redirect_cadence_id: "",
     days: [
       {
         id: nextId("day"),
@@ -223,6 +224,7 @@ interface FormState {
   status: CadenceStatus;
   auto_loss_enabled: boolean;
   auto_loss_days: number;
+  redirect_cadence_id: string; // ao terminar o plano sem desfecho, mover o lead pra esta cadência ("" = não redirecionar)
   days: FormDay[];
   weekdays: number[];
   distribution_mode: DistributionMode;
@@ -239,11 +241,16 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [sdrs, setSdrs] = useState<SdrUser[]>([]);
+  // Outras cadências (pro seletor "redirecionar ao terminar o plano").
+  const [otherCadences, setOtherCadences] = useState<{ id: string; name: string }[]>([]);
 
   // SDRs disponíveis para atribuir à cadência (só quem qualifica: sdr/closer).
   useEffect(() => {
     fetchQsUsers().then((all) => setSdrs(all.filter((u) => u.role === "sdr" || u.role === "closer")));
-  }, []);
+    supabase.from("qs_cadences").select("id, name").order("name").then(({ data }) => {
+      setOtherCadences(((data ?? []) as { id: string; name: string }[]).filter((c) => c.id !== cadenceId));
+    });
+  }, [cadenceId]);
 
   // Fetch existing cadence for edit mode
   useEffect(() => {
@@ -271,6 +278,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
         status: c.status ?? "rascunho",
         auto_loss_enabled: c.auto_loss_days !== null && c.auto_loss_days !== undefined,
         auto_loss_days: c.auto_loss_days ?? 14,
+        redirect_cadence_id: c.redirect_cadence_id ?? "",
         // Joins aninhados do Supabase não garantem ordem → ordena dias e atividades.
         days: (c.days ?? [])
           .slice()
@@ -315,6 +323,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       status: form.status,
       execution_weekdays: form.weekdays,
       auto_loss_days: form.auto_loss_enabled ? form.auto_loss_days : null,
+      redirect_cadence_id: form.redirect_cadence_id || null,
       distribution_mode: form.distribution_mode,
       offday_policy: form.offday_policy,
     };
@@ -717,6 +726,56 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                 </div>
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Fim da cadência: o que acontece quando o plano termina sem ganho/perdido.
+            Sem isso o lead ficava "em prospecção" pra sempre, sem nenhuma tarefa. */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Fim da cadência</label>
+          <p className="text-xs text-gray-500 mb-3">O que fazer com o lead que terminar todas as atividades sem virar ganho nem perdido.</p>
+
+          <div className="space-y-3">
+            <div className={`p-4 rounded-xl border-2 transition-all ${form.redirect_cadence_id ? "border-[#0147FF] bg-[#0147FF]/5" : "border-gray-200 bg-white"}`}>
+              <span className="text-sm font-bold text-gray-900 block mb-1">Redirecionar para outra cadência</span>
+              <p className="text-xs text-gray-500 mb-2">Ao terminar o plano, o lead entra automaticamente na cadência escolhida (novas atividades são criadas).</p>
+              <select
+                value={form.redirect_cadence_id}
+                onChange={(e) => updateForm("redirect_cadence_id", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 bg-white focus:outline-none focus:border-[#0147FF]"
+              >
+                <option value="">Não redirecionar</option>
+                {otherCadences.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+
+            <div className={`p-4 rounded-xl border-2 transition-all ${form.auto_loss_enabled ? "border-[#0147FF] bg-[#0147FF]/5" : "border-gray-200 bg-white"}`}>
+              <button onClick={() => updateForm("auto_loss_enabled", !form.auto_loss_enabled)} className="flex items-center gap-3 text-left w-full">
+                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 ${form.auto_loss_enabled ? "border-[#0147FF] bg-[#0147FF]" : "border-gray-300"}`}>
+                  {form.auto_loss_enabled && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+                </div>
+                <div>
+                  <span className="text-sm font-bold text-gray-900">Perda automática</span>
+                  <p className="text-xs text-gray-500 mt-0.5">Terminou o plano e passou dos dias abaixo sem desfecho → o lead vira perdido sozinho (e a perda vai pro Bitrix).</p>
+                </div>
+              </button>
+              {form.auto_loss_enabled && (
+                <div className="flex items-center gap-2 mt-3 pl-8">
+                  <span className="text-xs text-gray-500">Perder após</span>
+                  <input
+                    type="number" min={1} max={365}
+                    value={form.auto_loss_days}
+                    onChange={(e) => updateForm("auto_loss_days", Math.max(1, Number(e.target.value) || 1))}
+                    className="w-20 px-2 py-1.5 rounded-lg border border-gray-200 text-sm text-center tabular-nums focus:outline-none focus:border-[#0147FF]"
+                  />
+                  <span className="text-xs text-gray-500">dias na cadência</span>
+                </div>
+              )}
+            </div>
+
+            {form.redirect_cadence_id && form.auto_loss_enabled && (
+              <p className="text-[11.5px] text-gray-500">Com os dois ligados, o redirecionamento vence: o lead só vira perdido se a cadência de destino também esgotar (e ela tiver perda automática).</p>
+            )}
           </div>
         </div>
       </div>

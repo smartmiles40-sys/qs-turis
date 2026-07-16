@@ -449,10 +449,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   }, [currentUser]);
 
 
+  // Filtro "Responsável" — declarado aqui em cima porque o PLACAR também o usa.
+  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
+
   // Placar REAL: atividades concluídas (hoje/mês) + metas de qs_goals.
+  // ESCOPO: SDR vê sempre o próprio placar; admin/gestor vê o da UNIDADE
+  // selecionada no filtro "Responsável". A meta é sempre POR UNIDADE (pedido do
+  // Bruno) — sem unidade selecionada cai na meta global, nunca na soma do time.
   const [doneCounts, setDoneCounts] = useState({ doneToday: 0, doneMonth: 0 });
   const [goalTargets, setGoalTargets] = useState<{ daily: number | null; monthly: number | null }>({ daily: null, monthly: null });
-  const countsScope = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
+  const countsScope = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : (ownerFilter || null);
   const refreshCounts = useCallback(() => {
     fetchActivityCounts(countsScope).then(setDoneCounts);
   }, [countsScope]);
@@ -499,7 +505,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [channelFilter, setChannelFilter] = useState<ChannelType | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<PriorityLevel | null>(null);
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter | null>(null);
-  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
+  // (ownerFilter é declarado lá em cima, junto do placar, que também depende dele)
 
   // Confirmação do desfecho no card da "Próxima atividade"
   const [pendingResult, setPendingResult] = useState<{ taskId: string; result: string } | null>(null);
@@ -636,6 +642,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       console.error("[QS] Falha ao criar follow-up:", error);
       notifyError("Não foi possível criar o follow-up — o lead pode ficar sem próxima atividade!");
       return null;
+    }
+    // Teto de tentativas (decisão do Bruno: AVISAR, não perder automático).
+    // O follow-up é criado mesmo assim, mas o SDR fica sabendo que estourou.
+    if (attempt > MAX_CONTACT_ATTEMPTS) {
+      const leadName = getLeadForTask(task)?.full_name || "o lead";
+      notifyError(`${leadName} passou de ${MAX_CONTACT_ATTEMPTS} tentativas sem contato (esta é a ${attempt}ª) — avalie dar Perdido, transferir ou mudar o canal.`);
     }
     return (data as Task) ?? null;
   }
@@ -997,6 +1009,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const [yy, mo, dd] = extraTask.date.split("-").map(Number);
     const scheduled = new Date(yy, (mo || 1) - 1, dd || 1, h || 9, m || 0, 0, 0);
     const lead = leads.find((l) => l.id === extraTask.lead_id);
+    // "Pediu retorno" é MAIS UMA atividade do FUP (decisão do Bruno): herda a
+    // contagem de tentativas da tarefa de origem — antes nascia sem tag e o
+    // contador voltava pra 1, apagando o histórico do FUP.
+    const originTask = extraFromTaskId ? tasks.find((t) => t.id === extraFromTaskId) : null;
+    const extraTags = originTask ? ["follow-up", "retorno", `tentativa:${getAttemptCount(originTask) + 1}`] : [];
     const { data, error: extraError } = await supabase.from("qs_tasks").insert({
       lead_id: extraTask.lead_id,
       cadence_id: lead?.cadence_id || null,
@@ -1007,6 +1024,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       status: "pendente",
       is_extra: true,
       notes: extraTask.notes || null,
+      tags: extraTags,
     }).select().single();
     const extra = (data as Task | null) ?? null;
 
@@ -1655,12 +1673,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             <div className="ml-auto flex items-center gap-2 shrink-0 flex-wrap justify-end">
               {(() => {
                 const c = classifyTask(task);
+                const attempt = getAttemptCount(task);
                 return (
                   <>
                     {c.novo ? (
                       <span className="qsx-chip" style={{ background: "rgba(14,124,106,.12)", color: "#0E7C6A", fontWeight: 700 }} title="Lead novo — primeiro contato ainda não feito">🆕 Novo</span>
                     ) : (
-                      <span className="qsx-chip" style={{ background: "rgba(180,83,9,.12)", color: "#B45309", fontWeight: 700 }} title={`Seguindo a cadência — dia ${c.fupDay}`}>FUP {c.fupDay}</span>
+                      // As DUAS visões, com nomes distintos (decisão do Bruno):
+                      // o DIA do plano da cadência e a TENTATIVA real de contato.
+                      <>
+                        <span className="qsx-chip" style={{ background: "rgba(180,83,9,.12)", color: "#B45309", fontWeight: 700 }} title={`Dia ${c.fupDay} do plano da cadência (pela data)`}>FUP dia {c.fupDay}</span>
+                        <span className="qsx-chip" style={{ background: "rgba(1,71,255,.10)", color: "var(--blue, #0147FF)", fontWeight: 700 }} title={`${attempt}ª tentativa real de contato (independe de atraso)`}>{attempt}ª tentativa</span>
+                      </>
                     )}
                     {c.overdue && (
                       <span className="qsx-chip" style={{ background: "rgba(220,38,38,.12)", color: "#DC2626", fontWeight: 700 }} title="Atividade atrasada (venceu antes de hoje)">⚠ Atrasada</span>
@@ -1849,10 +1873,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             />
 
             <div className="qsx-side-lab" style={{ margin: "12px 0 9px" }}>
-              Como foi o contato? · Tentativa {Math.min(getAttemptCount(task), MAX_CONTACT_ATTEMPTS)}/{MAX_CONTACT_ATTEMPTS}
+              {/* Número REAL da tentativa, sem clampar em 5 — o clamp escondia a 6ª, 7ª… */}
+              Como foi o contato? · Tentativa {getAttemptCount(task)}/{MAX_CONTACT_ATTEMPTS}
               {getAttemptCount(task) >= MAX_CONTACT_ATTEMPTS && (
-                <span className="ml-2 text-[11px] font-bold" style={{ color: "#B45309" }} title="Limite de tentativas sem contato atingido — considere dar Perdido ou mudar o canal">
-                  ⚠ última tentativa
+                <span className="ml-2 text-[11px] font-bold" style={{ color: getAttemptCount(task) > MAX_CONTACT_ATTEMPTS ? "#DC2626" : "#B45309" }} title="Limite de tentativas sem contato atingido — considere dar Perdido, transferir ou mudar o canal">
+                  {getAttemptCount(task) > MAX_CONTACT_ATTEMPTS ? "⚠ acima do limite de tentativas" : "⚠ última tentativa"}
                 </span>
               )}
             </div>

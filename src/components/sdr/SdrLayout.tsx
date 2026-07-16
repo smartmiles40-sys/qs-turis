@@ -72,7 +72,8 @@ import ChatAppDock from "./chatapp/ChatAppDock";
 import GlobalToasts from "./GlobalToasts";
 import CommandPalette from "./CommandPalette";
 import { toggleWebphone } from "@/lib/wavoip";
-import { notifyError } from "@/lib/qs/notify";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import { sweepCadenceEndings } from "@/lib/qs/cadenceSweep";
 import TelefoneOnboarding from "@/components/sdr/telefone/TelefoneOnboarding";
 import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
 
@@ -242,6 +243,18 @@ export default function SdrLayout() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  // Fim de cadência (redirecionamento / perda automática) — roda 1x por sessão,
+  // depois do login. Idempotente; se nada foi tratado, fica em silêncio.
+  const sweepRan = useRef(false);
+  useEffect(() => {
+    if (!currentUser || sweepRan.current) return;
+    sweepRan.current = true;
+    sweepCadenceEndings().then(({ redirected, lost }) => {
+      if (redirected > 0) notifySuccess(`${redirected} lead(s) terminaram a cadência e foram redirecionados automaticamente.`);
+      if (lost > 0) notifySuccess(`${lost} lead(s) marcados como perdidos automaticamente (fim de cadência) — perda espelhada no Bitrix.`);
+    });
+  }, [currentUser]);
 
   // Filter menu items based on role
   const filteredMenu = MENU.map((item) => {

@@ -364,8 +364,11 @@ export async function fetchActivityGoals(ownerId?: string | null): Promise<{ dai
         const global = list.find((g) => !g.owner_id);
         return global ? global.target_value : null;
       }
-      // visão do time: soma todas as metas do período
-      return list.reduce((acc, g) => acc + (g.target_value || 0), 0) || null;
+      // Visão do admin SEM unidade selecionada: usa a meta GLOBAL (sem dono).
+      // NUNCA soma as metas individuais do time — a meta exibida é sempre a da
+      // unidade (pedido do Bruno: "selecionada na unidade, não no time todo").
+      const global = list.find((g) => !g.owner_id);
+      return global ? global.target_value : null;
     };
     return { daily: pick("diario"), monthly: pick("mensal") };
   } catch (err) {
