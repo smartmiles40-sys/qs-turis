@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { STATUS_LABELS } from "./types";
 import type { LeadStatus } from "./types";
@@ -30,6 +31,7 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 export default function CommandPalette({ onOpenLead }: { onOpenLead: (leadId: string) => void }) {
+  const { currentUser } = useQsAuth();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
@@ -79,18 +81,22 @@ export default function CommandPalette({ onOpenLead }: { onOpenLead: (leadId: st
         `bitrix_id.ilike.${like}`,
       ];
       if (digits.length >= 4) ors.push(`phone.ilike.%${digits.slice(-8)}%`);
-      const { data } = await supabase
+      let sq = supabase
         .from("qs_leads")
         .select("id, full_name, company_name, phone, email, bitrix_id, status")
-        .or(ors.join(","))
-        .order("updated_at", { ascending: false })
-        .limit(8);
+        .or(ors.join(","));
+      // Isolamento por dono: SDR/closer só acham o PRÓPRIO lead na busca global.
+      // Backstop de tela — a garantia real é a RLS 0007/0008 no banco.
+      if (currentUser && !canSeeAllData(currentUser.role)) {
+        sq = sq.eq("owner_id", currentUser.id);
+      }
+      const { data } = await sq.order("updated_at", { ascending: false }).limit(8);
       setHits((data ?? []) as Hit[]);
       setSel(0);
       setSearching(false);
     }, 220);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [query]);
+  }, [query, currentUser]);
 
   const pick = useCallback((h: Hit | undefined) => {
     if (!h) return;

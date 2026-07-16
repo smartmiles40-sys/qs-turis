@@ -4,7 +4,7 @@ import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
 import { createCadenceTasks } from "@/lib/qs/queries";
 import { getLeadScore } from "@/lib/leadScore";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import type {
   Lead,
@@ -593,6 +593,23 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     return (
       <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "inherit" }}>
         <p className="text-sm text-gray-500 mb-4">Lead não encontrado.</p>
+        <button onClick={onBack} className="text-sm text-[#0147FF] hover:underline">Voltar para Leads</button>
+      </div>
+    );
+  }
+
+  // ── Isolamento por dono ──────────────────────────────────────────────────────
+  // SDR/closer só abrem o PRÓPRIO lead (esta tela abre por ID direto — via busca
+  // global, link ou URL — sem passar pelo filtro da lista). Gestor/admin veem tudo.
+  // Backstop de tela: a garantia REAL é a RLS 0007/0008 no banco.
+  const canView =
+    !!currentUser &&
+    (canSeeAllData(currentUser.role) || lead.owner_id === currentUser.id);
+  if (!canView) {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "inherit" }}>
+        <p className="text-sm text-gray-700 font-medium mb-1">Este lead é de outro SDR.</p>
+        <p className="text-sm text-gray-500 mb-4">Você só tem acesso aos seus próprios leads.</p>
         <button onClick={onBack} className="text-sm text-[#0147FF] hover:underline">Voltar para Leads</button>
       </div>
     );
