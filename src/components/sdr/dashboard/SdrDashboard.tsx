@@ -6,6 +6,13 @@ import type { SdrUser } from "../types";
 import RankingPanel from "./RankingPanel";
 import DailyFlowPanel from "./DailyFlowPanel";
 
+// Desfechos que contam como CONEXÃO (falou com a pessoa certa): o legado
+// "atendeu"/"ganho" + as classificações novas de ligação em que houve conversa
+// com o decisor (com/sem avanço). Sem isso, Connect Rate, funil, heatmap e
+// canal SUBESTIMAM — toda ligação classificada pelo bloco novo era ignorada.
+const CONNECTED_RESULTS = ["atendeu", "ganho", "com_avanco", "sem_avanco"];
+const isConnected = (r?: string | null): boolean => !!r && CONNECTED_RESULTS.includes(r);
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 interface KpiCard {
@@ -695,7 +702,7 @@ export default function SdrDashboard() {
         if (!ch) return;
         const entry = channelMap.get(ch) || { total: 0, atendeu: 0 };
         entry.total++;
-        if (row.contact_result === "atendeu") entry.atendeu++;
+        if (isConnected(row.contact_result)) entry.atendeu++;
         channelMap.set(ch, entry);
       });
 
@@ -724,7 +731,7 @@ export default function SdrDashboard() {
         .from("qs_tasks")
         .select("completed_at")
         .eq("status", "concluida")
-        .eq("contact_result", "atendeu")
+        .in("contact_result", CONNECTED_RESULTS)
         .not("completed_at", "is", null);
       if (ownerId) q = q.eq("owner_id", ownerId);
 
@@ -898,7 +905,7 @@ export default function SdrDashboard() {
       const { data: connectData } = await qConnect;
       if (connectData && connectData.length > 0) {
         const total = connectData.length;
-        const atendeu = (connectData as any[]).filter((r) => r.contact_result === "atendeu").length;
+        const atendeu = (connectData as any[]).filter((r) => isConnected(r.contact_result)).length;
         setConnectRate(total > 0 ? (atendeu / total) * 100 : null);
       } else {
         setConnectRate(null);
@@ -975,7 +982,7 @@ export default function SdrDashboard() {
       ((tasksRes.data ?? []) as { lead_id: string; contact_result: string | null }[]).forEach((t) => {
         if (!ids.has(t.lead_id)) return;
         contacted.add(t.lead_id);
-        if (t.contact_result === "atendeu" || t.contact_result === "ganho") connected.add(t.lead_id);
+        if (isConnected(t.contact_result)) connected.add(t.lead_id);
       });
       const met = new Set<string>();
       ((meetsRes.data ?? []) as { lead_id: string }[]).forEach((m) => { if (ids.has(m.lead_id)) met.add(m.lead_id); });
