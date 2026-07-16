@@ -12,7 +12,8 @@ import type {
 } from "../types";
 import { STATUS_LABELS, SOURCE_LABELS } from "../types";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { createCadenceTasks } from "@/lib/qs/queries";
+import { createCadenceTasks, closeOpenCadenceTasks, transferLead } from "@/lib/qs/queries";
+import { planCadenceDates } from "@/lib/workHours";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured } from "@/lib/webphone";
 
@@ -50,6 +51,9 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const [filterOwner, setFilterOwner] = useState("");
   const [filterLossReason, setFilterLossReason] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Vínculo em massa à cadência em andamento — desabilita o select durante o
+  // loop (evita disparar um segundo vínculo por cima do primeiro).
+  const [cadenceLinking, setCadenceLinking] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCsvModal, setShowCsvModal] = useState(false);
@@ -166,15 +170,31 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
       `Excluir ${ids.length} lead(s) DEFINITIVAMENTE?\n\nIsso apaga também o histórico, as atividades e as reuniões desses leads. Essa ação não pode ser desfeita.`
     );
     if (!ok) return;
-    const { error } = await supabase.from("qs_leads").delete().in("id", ids);
+    // Mede o que foi REALMENTE excluído: o `.select('id')` devolve as linhas
+    // que o banco apagou. Sem isso, a RLS recusa em SILÊNCIO (sem erro, 0
+    // linhas — ex.: SDR não pode excluir) e a tela dizia "excluído" mesmo assim.
+    const { data: deleted, error } = await supabase
+      .from("qs_leads")
+      .delete()
+      .in("id", ids)
+      .select("id");
     if (error) {
       console.warn("Erro ao excluir leads:", error);
       notifyError("Não foi possível excluir os leads — tente novamente.");
-    } else {
-      notifySuccess(`${ids.length} lead(s) excluído(s).`);
-      await fetchLeads();
-      setSelectedIds(new Set());
+      return;
     }
+    const deletedIds = new Set((deleted ?? []).map((d) => d.id));
+    const refused = ids.length - deletedIds.size;
+    if (deletedIds.size === 0) {
+      notifyError("Nenhum lead foi excluído — o banco recusou por falta de permissão (excluir leads é restrito a gestor/admin).");
+    } else if (refused > 0) {
+      notifyError(`${deletedIds.size} lead(s) excluído(s), mas ${refused} foram recusados por falta de permissão.`);
+    } else {
+      notifySuccess(`${deletedIds.size} lead(s) excluído(s).`);
+    }
+    await fetchLeads();
+    // Mantém selecionados só os recusados (que continuam na lista).
+    setSelectedIds(new Set(ids.filter((id) => !deletedIds.has(id))));
   }
 
   // ── Handover: passa o(s) lead(s) selecionado(s) para um Closer ──
@@ -183,46 +203,33 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     setHandoverSaving(true);
     setHandoverError(null);
     const ids = Array.from(selectedIds);
-    try {
-      // 1. Registra um handover por lead
-      const rows = ids.map((leadId) => ({
-        lead_id: leadId,
-        from_user_id: currentUser.id,
-        to_user_id: handoverCloserId,
-        briefing: handoverBriefing.trim(),
-      }));
-      const { error: handoverErr } = await supabase.from("qs_handovers").insert(rows);
-      if (handoverErr) throw handoverErr;
-
-      // 2. Transfere a titularidade dos leads para o closer
-      const { error: leadErr } = await supabase
-        .from("qs_leads")
-        .update({ owner_id: handoverCloserId })
-        .in("id", ids);
-      if (leadErr) throw leadErr;
-
-      // 3. Reatribui as tarefas abertas — sem isso elas ficavam na fila do SDR
-      // antigo (que nem vê mais o lead) e o novo dono não recebia nada.
-      await supabase
-        .from("qs_tasks")
-        .update({ owner_id: handoverCloserId })
-        .in("lead_id", ids)
-        .in("status", ["pendente", "atrasada"]);
-
-      await fetchLeads();
-      setSelectedIds(new Set());
+    // Reusa o MESMO fluxo da transferência individual (transferLead): troca o
+    // dono, registra o histórico em qs_handovers (DEPOIS da troca — antes o
+    // histórico era gravado primeiro e ficava registrado mesmo com a troca
+    // recusada) e leva as tarefas abertas junto. E MEDE lead a lead o que o
+    // banco aceitou — a RLS pode recusar em silêncio (sem erro, 0 linhas).
+    const okIds = new Set<string>();
+    for (const leadId of ids) {
+      const ok = await transferLead(leadId, currentUser.id, handoverCloserId, handoverBriefing, { notify: false });
+      if (ok) okIds.add(leadId);
+    }
+    const fail = ids.length - okIds.size;
+    await fetchLeads();
+    // Mantém selecionados só os que falharam (pra dar pra tentar de novo).
+    setSelectedIds(new Set(ids.filter((id) => !okIds.has(id))));
+    if (fail > 0) {
+      setHandoverError(
+        okIds.size === 0
+          ? "Nenhum lead foi transferido — o banco recusou (sem permissão ou erro; detalhes no console)."
+          : `${okIds.size} lead(s) transferido(s), mas ${fail} foram recusados (sem permissão ou erro; detalhes no console).`
+      );
+    } else {
+      notifySuccess(`${okIds.size} lead(s) transferido(s) — histórico registrado e atividades abertas levadas junto.`);
       setShowHandover(false);
       setHandoverCloserId("");
       setHandoverBriefing("");
-    } catch (err) {
-      console.warn("Erro ao realizar handover:", err);
-      // Mostra a CAUSA real (mensagem do Supabase) em vez de um texto genérico —
-      // sem isso, um erro de RLS/constraint fica invisível e não dá pra corrigir.
-      const msg = (err as { message?: string })?.message || "erro desconhecido";
-      setHandoverError(`Não foi possível realizar o handover: ${msg}`);
-    } finally {
-      setHandoverSaving(false);
     }
+    setHandoverSaving(false);
   }
 
   // ── Handover por quantidade (item 6): tira N leads de um SDR e manda pra outro ──
@@ -250,13 +257,25 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
       if (pool.length === 0) { setHandoverError("Esse SDR não tem leads ativos para transferir."); setHandoverSaving(false); return; }
       const ids = pool.map((l) => l.id);
       const briefing = handoverBriefing.trim() || `Handover de ${pool.length} lead(s) — ${handoverAge === "novos" ? "mais novos" : "mais antigos"}`;
-      const rows = ids.map((leadId) => ({ lead_id: leadId, from_user_id: handoverFromId, to_user_id: handoverCloserId, briefing }));
-      const { error: hErr } = await supabase.from("qs_handovers").insert(rows);
-      if (hErr) throw hErr;
-      const { error: lErr } = await supabase.from("qs_leads").update({ owner_id: handoverCloserId }).in("id", ids);
-      if (lErr) throw lErr;
-      await supabase.from("qs_tasks").update({ owner_id: handoverCloserId }).in("lead_id", ids).in("status", ["pendente", "atrasada"]);
+      // Reusa o MESMO fluxo da transferência individual (transferLead): dono +
+      // histórico + tarefas abertas, MEDINDO lead a lead o que o banco aceitou
+      // (a RLS pode recusar em silêncio — antes a tela fingia sucesso total).
+      let okCount = 0;
+      for (const leadId of ids) {
+        const ok = await transferLead(leadId, handoverFromId, handoverCloserId, briefing, { notify: false });
+        if (ok) okCount++;
+      }
+      const fail = ids.length - okCount;
       await fetchLeads();
+      if (fail > 0) {
+        setHandoverError(
+          okCount === 0
+            ? "Nenhum lead foi transferido — o banco recusou (sem permissão ou erro; detalhes no console)."
+            : `${okCount} lead(s) transferido(s), mas ${fail} foram recusados (sem permissão ou erro; detalhes no console).`
+        );
+        return; // o finally reseta o handoverSaving
+      }
+      notifySuccess(`${okCount} lead(s) transferido(s) — histórico registrado e atividades abertas levadas junto.`);
       setShowHandover(false);
       setHandoverCloserId(""); setHandoverBriefing(""); setHandoverFromId(""); setHandoverQty("10");
     } catch (err) {
@@ -539,34 +558,59 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             <select
               onChange={async (e) => {
                 const cadId = e.target.value;
-                if (!cadId) return;
+                if (!cadId || cadenceLinking) return;
                 e.target.value = "";
                 const ids = Array.from(selectedIds);
                 const cadName = cadences.find((c) => c.id === cadId)?.name ?? "cadência";
                 if (!window.confirm(`Vincular ${ids.length} lead(s) à cadência "${cadName}" e criar as atividades a partir de hoje?`)) return;
-                const { error } = await supabase
-                  .from("qs_leads")
-                  .update({ cadence_id: cadId, status: "em_prospeccao", cadence_started_at: new Date().toISOString() })
-                  .in("id", ids);
-                if (error) {
-                  console.warn("Erro ao vincular cadência:", error);
-                  notifyError("Não foi possível vincular a cadência — tente novamente.");
-                  return;
+                setCadenceLinking(true);
+                try {
+                  // Mede o que o banco REALMENTE vinculou: a RLS pode recusar em
+                  // silêncio (sem erro, 0 linhas) e a tela fingia sucesso total.
+                  const { data: linked, error } = await supabase
+                    .from("qs_leads")
+                    .update({ cadence_id: cadId, status: "em_prospeccao", cadence_started_at: new Date().toISOString() })
+                    .in("id", ids)
+                    .select("id");
+                  if (error) {
+                    console.warn("Erro ao vincular cadência:", error);
+                    notifyError("Não foi possível vincular a cadência — tente novamente.");
+                    return;
+                  }
+                  const linkedIds = new Set((linked ?? []).map((l) => l.id));
+                  const refused = ids.length - linkedIds.size;
+                  if (linkedIds.size === 0) {
+                    notifyError("Nenhum lead foi vinculado — o banco recusou por falta de permissão.");
+                    return;
+                  }
+                  // Gera as TAREFAS da cadência SÓ pros leads que o banco aceitou —
+                  // antes o vínculo em massa não criava atividade nenhuma e os leads
+                  // sumiam da fila de todo mundo.
+                  let tasksFail = 0;
+                  for (const id of linkedIds) {
+                    const leadOwner = leads.find((l) => l.id === id)?.owner_id ?? null;
+                    // Encerra o plano ANTIGO antes de criar o novo — sem isso, trocar
+                    // o lead de cadência DUPLICAVA a carga (as duas sequências
+                    // conviviam na fila e o SDR contatava em dobro). Se o encerramento
+                    // falhar, NÃO cria o plano novo por cima: o lead cai no aviso de
+                    // "vincule de novo" e a retentativa encerra e recria.
+                    const closed = await closeOpenCadenceTasks(id);
+                    if (!closed) { tasksFail++; continue; }
+                    const created = await createCadenceTasks(id, cadId, leadOwner);
+                    if (created === null) tasksFail++;
+                  }
+                  setLeads(prev => prev.map(l => linkedIds.has(l.id) ? { ...l, cadence_id: cadId, status: "em_prospeccao" as LeadStatus } : l));
+                  // Mantém selecionados só os recusados (pra dar pra tentar de novo).
+                  setSelectedIds(new Set(ids.filter((id) => !linkedIds.has(id))));
+                  if (refused > 0) notifyError(`${linkedIds.size} lead(s) vinculados à ${cadName}, mas ${refused} foram recusados por falta de permissão.`);
+                  else if (tasksFail === 0) notifySuccess(`${linkedIds.size} lead(s) vinculados à ${cadName} — atividades criadas.`);
+                  if (tasksFail > 0) notifyError(`${tasksFail} lead(s) ficaram sem atividades — vincule a cadência deles de novo.`);
+                } finally {
+                  setCadenceLinking(false);
                 }
-                // Gera as TAREFAS da cadência pra cada lead — antes o vínculo em massa
-                // não criava atividade nenhuma e os leads sumiam da fila de todo mundo.
-                let tasksFail = 0;
-                for (const id of ids) {
-                  const leadOwner = leads.find((l) => l.id === id)?.owner_id ?? null;
-                  const created = await createCadenceTasks(id, cadId, leadOwner);
-                  if (created === null) tasksFail++;
-                }
-                setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, cadence_id: cadId, status: "em_prospeccao" as LeadStatus } : l));
-                setSelectedIds(new Set());
-                if (tasksFail === 0) notifySuccess(`${ids.length} lead(s) vinculados à ${cadName} — atividades criadas.`);
-                else notifyError(`${tasksFail} lead(s) ficaram sem atividades — vincule a cadência deles de novo.`);
               }}
-              className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-xs font-medium text-white cursor-pointer"
+              disabled={cadenceLinking}
+              className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-xs font-medium text-white cursor-pointer disabled:opacity-60 disabled:cursor-wait"
               defaultValue=""
             >
               <option value="" disabled>Vincular à Cadência</option>
@@ -576,29 +620,32 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
               onChange={async (e) => {
                 const ownerId = e.target.value;
                 if (!ownerId) return;
+                e.target.value = "";
                 const ids = Array.from(selectedIds);
                 const owner = users.find(u => u.id === ownerId);
-                // 1. Reatribui o lead — e CHECA o erro (antes ele era ignorado e a
-                //    tela fingia sucesso mesmo quando a gravação falhava).
-                const { error: leadErr } = await supabase.from("qs_leads").update({ owner_id: ownerId }).in("id", ids);
-                if (leadErr) {
-                  notifyError(`Não foi possível atribuir o responsável: ${leadErr.message}`);
-                  e.target.value = "";
-                  return;
+                // Reusa o MESMO fluxo da transferência individual (transferLead):
+                // troca o dono, registra o histórico em qs_handovers e leva as
+                // tarefas abertas junto — e MEDE lead a lead o que o banco aceitou
+                // (RLS pode recusar em silêncio; antes a tela fingia sucesso total).
+                const okIds = new Set<string>();
+                for (const id of ids) {
+                  const fromId = leads.find((l) => l.id === id)?.owner_id ?? null;
+                  if (fromId === ownerId) { okIds.add(id); continue; } // já é o dono — nada a fazer
+                  const ok = await transferLead(id, fromId, ownerId, "Atribuição em massa de responsável", { notify: false });
+                  if (ok) okIds.add(id);
                 }
-                // 2. Leva as tarefas abertas junto — senão o novo dono recebe o lead
-                //    mas fica SEM atividades no Painel (e o antigo fica com tarefas órfãs).
-                const { error: taskErr } = await supabase
-                  .from("qs_tasks")
-                  .update({ owner_id: ownerId })
-                  .in("lead_id", ids)
-                  .in("status", ["pendente", "atrasada"]);
-                if (taskErr) console.warn("Reatribuição de tarefas falhou:", taskErr);
-                // 3. Recarrega do banco (fonte da verdade) em vez de assumir sucesso.
+                const fail = ids.length - okIds.size;
+                // Recarrega do banco (fonte da verdade) em vez de assumir sucesso.
                 await fetchLeads();
-                setSelectedIds(new Set());
-                e.target.value = "";
-                notifySuccess(`${ids.length} lead(s) atribuído(s) a ${owner?.name ?? "o responsável"}.`);
+                // Mantém selecionados só os que falharam (pra dar pra tentar de novo).
+                setSelectedIds(new Set(ids.filter((id) => !okIds.has(id))));
+                if (fail === 0) {
+                  notifySuccess(`${okIds.size} lead(s) atribuído(s) a ${owner?.name ?? "o responsável"} — atividades abertas levadas junto.`);
+                } else if (okIds.size === 0) {
+                  notifyError("Nenhum lead foi atribuído — o banco recusou (sem permissão ou erro; detalhes no console).");
+                } else {
+                  notifyError(`${okIds.size} lead(s) atribuído(s) a ${owner?.name ?? "o responsável"}, mas ${fail} foram recusados (sem permissão ou erro).`);
+                }
               }}
               className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-700 cursor-pointer"
               defaultValue=""
@@ -1065,13 +1112,30 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
                           // Dias/atividades da cadência (1 busca só, reusada em todos os leads).
                           let cadDays: { day_number: number; activities: { channel_type: string; scheduled_time: string | null; order_index: number }[] }[] = [];
+                          // Datas reais de cada "Dia N" respeitando os dias de execução da
+                          // cadência (mesmo helper do createCadenceTasks) — antes o "Dia 2"
+                          // de uma importação na sexta caía no sábado.
+                          let csvDateByDay = new Map<number, Date>();
                           if (csvCadenceId) {
-                            const { data } = await supabase
-                              .from("qs_cadence_days")
-                              .select("day_number, activities:qs_cadence_activities(channel_type, scheduled_time, order_index)")
-                              .eq("cadence_id", csvCadenceId)
-                              .order("day_number");
+                            const [{ data }, { data: cadRow }] = await Promise.all([
+                              supabase
+                                .from("qs_cadence_days")
+                                .select("day_number, activities:qs_cadence_activities(channel_type, scheduled_time, order_index)")
+                                .eq("cadence_id", csvCadenceId)
+                                .order("day_number"),
+                              supabase
+                                .from("qs_cadences")
+                                .select("execution_weekdays, offday_policy")
+                                .eq("id", csvCadenceId)
+                                .maybeSingle(),
+                            ]);
                             cadDays = (data ?? []) as typeof cadDays;
+                            const plan = cadRow as { execution_weekdays: number[] | null; offday_policy: string | null } | null;
+                            csvDateByDay = planCadenceDates(
+                              cadDays.map((d) => d.day_number ?? 1),
+                              plan?.execution_weekdays ?? null,
+                              plan?.offday_policy ?? null
+                            );
                           }
 
                           // Insere UM POR VEZ: cada insert é uma transação própria, então o
@@ -1103,11 +1167,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
                             // Tarefas da cadência pro DONO que o gatilho escolheu.
                             if (csvCadenceId && cadDays.length > 0) {
-                              const base = new Date();
                               const taskRows = cadDays.flatMap((d) =>
                                 [...d.activities].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)).map((a) => {
-                                  const when = new Date(base);
-                                  when.setDate(when.getDate() + Math.max(0, (d.day_number ?? 1) - 1));
+                                  // Data do dia já ajustada pros dias de execução (csvDateByDay).
+                                  const when = new Date(csvDateByDay.get(d.day_number ?? 1) ?? new Date());
                                   const [h, m] = (a.scheduled_time || "09:00").split(":");
                                   when.setHours(Number(h) || 9, Number(m) || 0, 0, 0);
                                   return {

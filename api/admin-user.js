@@ -102,6 +102,16 @@ export default async function handler(req, res) {
 
     if (action === 'update') {
       if (!user?.id) return res.status(400).json({ success: false, error: 'Informe o id' });
+      // A6: o chamador (admin verificado acima) não pode se desativar nem
+      // rebaixar o próprio papel — ficaria trancado pra fora do sistema.
+      if (user.id === callerId) {
+        if (user.is_active === false) {
+          return res.status(400).json({ success: false, error: 'Você não pode desativar a própria conta' });
+        }
+        if (user.role !== undefined && user.role !== 'admin') {
+          return res.status(400).json({ success: false, error: 'Você não pode remover o próprio papel de admin' });
+        }
+      }
       // atualiza o perfil
       const fields = {};
       for (const k of ['name', 'role', 'whatsapp_number', 'is_active']) {

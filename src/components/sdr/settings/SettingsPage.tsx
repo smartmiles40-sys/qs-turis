@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { useQsAuth } from "@/contexts/QsAuthContext";
 import { createQsAuthUser, updateQsAuthUser, deleteQsAuthUser } from "@/lib/adminUsers";
 import { loadWorkHours, saveWorkHours, DEFAULT_WORK_HOURS, WEEKDAY_NAMES, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, saveMeetingTeam, getSetting, setSetting } from "@/lib/qsSettings";
@@ -533,6 +534,7 @@ function MotivosSection() {
 // ── Usuários ─────────────────────────────────────────────────────────────────
 
 function UsuariosSection() {
+  const { currentUser } = useQsAuth();
   const [users, setUsers] = useState<SdrUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -567,6 +569,12 @@ function UsuariosSection() {
   async function handleSave() {
     if (!form.name || !form.email) return;
     if (!editUser && !form.password) { setSaveError("Defina uma senha para o novo usuário (mín. 6 caracteres)."); return; }
+    // A6: não deixa o admin rebaixar o PRÓPRIO papel — só admin acessa esta
+    // tela, então ele perderia o acesso à gestão de usuários (o servidor também bloqueia).
+    if (editUser && editUser.id === currentUser?.id && form.role !== editUser.role) {
+      setSaveError("Você não pode alterar o próprio papel. Peça a outro administrador.");
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     const res = editUser
@@ -592,11 +600,27 @@ function UsuariosSection() {
   }
 
   async function toggleActive(u: SdrUser) {
-    await supabase.from("qs_users").update({ is_active: !u.is_active }).eq("id", u.id);
+    // A6: ninguém desativa a PRÓPRIA conta — o admin ficaria trancado pra fora
+    // (a desativação derruba a sessão e barra o próximo login).
+    if (u.is_active && u.id === currentUser?.id) {
+      notifyError("Você não pode desativar a própria conta. Peça a outro administrador.");
+      return;
+    }
+    const { error } = await supabase.from("qs_users").update({ is_active: !u.is_active }).eq("id", u.id);
+    if (error) {
+      console.warn("Erro ao ativar/desativar usuário:", error);
+      notifyError("Não foi possível alterar o status do usuário — tente novamente.");
+      return;
+    }
     setUsers(prev => prev.map(x => x.id === u.id ? { ...x, is_active: !x.is_active } : x));
   }
 
   async function deleteUser(u: SdrUser) {
+    // Mesmo motivo do A6: excluir a si mesmo = trancar-se pra fora (o servidor também bloqueia).
+    if (u.id === currentUser?.id) {
+      notifyError("Você não pode excluir a própria conta. Peça a outro administrador.");
+      return;
+    }
     if (!confirm(`Excluir ${u.name} permanentemente? Os leads dele ficarão sem responsável.`)) return;
     // O endpoint remove a conta de autenticação; o perfil sai via regras de FK
     // (leads/tarefas/reuniões ficam sem responsável; metas são apagadas).
@@ -631,14 +655,20 @@ function UsuariosSection() {
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
+              {users.map((user) => {
+                // A6: a própria conta não pode ser desativada nem excluída aqui.
+                const isSelf = user.id === currentUser?.id;
+                return (
                 <tr key={user.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50/40 transition-colors">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full bg-[#0147FF] flex items-center justify-center text-white text-xs font-semibold shrink-0">
                         {user.name.split(" ").map((w) => w[0]).join("").slice(0, 2)}
                       </div>
-                      <span className="text-sm text-gray-900 font-medium">{user.name}</span>
+                      <span className="text-sm text-gray-900 font-medium">
+                        {user.name}
+                        {isSelf && <span className="ml-2 text-[10px] font-medium text-gray-400">(você)</span>}
+                      </span>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">{user.email}</td>
@@ -648,7 +678,12 @@ function UsuariosSection() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <button onClick={() => toggleActive(user)} className="cursor-pointer" title={user.is_active ? "Desativar" : "Ativar"}>
+                    <button
+                      onClick={() => toggleActive(user)}
+                      disabled={isSelf && user.is_active}
+                      className={isSelf && user.is_active ? "cursor-not-allowed" : "cursor-pointer"}
+                      title={isSelf && user.is_active ? "Você não pode desativar a própria conta" : user.is_active ? "Desativar" : "Ativar"}
+                    >
                       {user.is_active ? (
                         <span className="inline-flex items-center gap-1.5 text-xs text-green-600">
                           <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Ativo
@@ -665,13 +700,19 @@ function UsuariosSection() {
                       <button onClick={() => openEdit(user)} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Editar">
                         <PencilIcon />
                       </button>
-                      <button onClick={() => deleteUser(user)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors" title="Excluir">
+                      <button
+                        onClick={() => deleteUser(user)}
+                        disabled={isSelf}
+                        className={`p-1.5 rounded-lg transition-colors ${isSelf ? "text-gray-200 cursor-not-allowed" : "text-gray-400 hover:text-red-600 hover:bg-red-50"}`}
+                        title={isSelf ? "Você não pode excluir a própria conta" : "Excluir"}
+                      >
                         <TrashIcon />
                       </button>
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -693,12 +734,20 @@ function UsuariosSection() {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Papel</label>
-                <select value={form.role} onChange={(e) => setForm(p => ({ ...p, role: e.target.value as UserRole }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400">
+                <select
+                  value={form.role}
+                  onChange={(e) => setForm(p => ({ ...p, role: e.target.value as UserRole }))}
+                  disabled={!!editUser && editUser.id === currentUser?.id}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
                   <option value="sdr">Qualificador</option>
                   <option value="closer">Closer</option>
                   <option value="gestor">Gestor</option>
                   <option value="admin">Admin</option>
                 </select>
+                {editUser && editUser.id === currentUser?.id && (
+                  <p className="text-[10px] text-gray-400 mt-1">Você não pode alterar o próprio papel — peça a outro administrador.</p>
+                )}
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">{editUser ? "Nova senha (deixe vazio para manter)" : "Senha *"}</label>

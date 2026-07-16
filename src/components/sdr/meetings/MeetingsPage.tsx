@@ -4,6 +4,7 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import type { Meeting, MeetingStatus, Lead } from "../types";
 import { MEETING_STATUS_LABELS } from "../types";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
+import { notifyBitrix } from "@/lib/qs/bitrixSync";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,30 @@ function leadLabel(l: Lead): string {
   return l.company_name ? `${name} — ${l.company_name}` : name;
 }
 
+// Espelha a mudança de status da reunião (realizada / no-show / cancelada) na
+// timeline do negócio no Bitrix. O sync só conhece os eventos
+// perdido|ganho|reuniao|nota (whitelist do /api/bitrix-sync e do n8n), então
+// segue o padrão do handover na LeadDetailPage: evento "nota" vira comentário
+// na timeline, sem mover coluna. Fire-and-forget — sem bitrix_id o notifyBitrix
+// pula sozinho (lead que não veio do Bitrix).
+function notifyMeetingStatusToBitrix(
+  meeting: Pick<Meeting, "lead_id" | "scheduled_at" | "title"> & { lead?: Lead },
+  status: MeetingStatus
+): void {
+  const phrases: Partial<Record<MeetingStatus, string>> = {
+    realizada: "foi REALIZADA",
+    no_show: "teve NO-SHOW (cliente não compareceu)",
+    cancelada: "foi CANCELADA",
+  };
+  const phrase = phrases[status];
+  if (!phrase) return; // "agendada" não tem nota própria — a criação já dispara o evento "reuniao"
+  notifyBitrix("nota", {
+    lead_id: meeting.lead_id,
+    bitrix_id: meeting.lead?.bitrix_id,
+    body: `Reunião de ${formatDateTime(meeting.scheduled_at)}${meeting.title ? ` (${meeting.title})` : ""} ${phrase} no QS.`,
+  });
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 interface MeetingsPageProps {
@@ -117,7 +142,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const fetchLeads = useCallback(async () => {
     const { data, error } = await supabase
       .from("qs_leads")
-      .select("id, full_name, first_name, last_name, company_name, phone, email, owner_id")
+      .select("id, full_name, first_name, last_name, company_name, phone, email, owner_id, bitrix_id")
       .order("full_name", { ascending: true });
     if (error) {
       setPageError(`Erro ao buscar leads: ${error.message}`);
@@ -225,6 +250,45 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       return;
     }
 
+    // ── Espelho no Bitrix (fire-and-forget, mesmo padrão da LeadDetailPage) ──
+    const selLead = leads.find((l) => l.id === fLeadId);
+    if (editingId) {
+      // Edição: se o status mudou pelo modal (ex.: marcada como realizada),
+      // registra na timeline do Bitrix — mesmo efeito das ações rápidas.
+      const prev = meetings.find((m) => m.id === editingId);
+      if (prev && prev.status !== fStatus) {
+        notifyMeetingStatusToBitrix(
+          { lead_id: fLeadId, scheduled_at: base.scheduled_at, title: base.title, lead: selLead ?? prev.lead },
+          fStatus
+        );
+      }
+    } else {
+      // Criação: preenche os campos da reunião no Bitrix e move o negócio pra
+      // "Reunião agendada" — mesmo evento/payload do agendamento na página do lead.
+      notifyBitrix("reuniao", {
+        lead_id: fLeadId,
+        bitrix_id: selLead?.bitrix_id,
+        full_name: selLead?.full_name ?? null,
+        title: base.title,
+        scheduled_at: base.scheduled_at,
+        duration_min: base.duration_min,
+        location: base.location,
+        meeting_link: base.meeting_link,
+        notes: base.notes,
+        scheduled_by: currentUser?.name ?? null,
+        meeting_owner: currentUser?.name ?? null,
+        client_email: selLead?.email ?? null,
+        booking_date: new Date().toISOString().slice(0, 10),
+      });
+      // Criada já com desfecho (raro): registra o status também na timeline.
+      if (fStatus !== "agendada") {
+        notifyMeetingStatusToBitrix(
+          { lead_id: fLeadId, scheduled_at: base.scheduled_at, title: base.title, lead: selLead },
+          fStatus
+        );
+      }
+    }
+
     setSaving(false);
     closeModal();
     await fetchMeetings();
@@ -232,9 +296,9 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
 
   // ── Status quick actions / cancel ──
   async function updateStatus(id: string, status: MeetingStatus) {
+    const m = meetings.find((x) => x.id === id);
     // Cancelar é um clique num ícone — misclick não pode cancelar reunião de cliente.
     if (status === "cancelada") {
-      const m = meetings.find((x) => x.id === id);
       const who = m?.lead?.full_name ? ` com ${m.lead.full_name}` : "";
       if (!window.confirm(`Cancelar a reunião${who}?`)) return;
     }
@@ -247,6 +311,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       setPageError("Não foi possível atualizar a reunião — tente novamente.");
     } else {
       setPageError(null);
+      // Espelha o desfecho na timeline do negócio no Bitrix (fire-and-forget).
+      if (m) notifyMeetingStatusToBitrix(m, status);
       await fetchMeetings();
     }
   }

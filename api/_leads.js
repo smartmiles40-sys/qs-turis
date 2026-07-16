@@ -48,6 +48,34 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
   );
   if (!days || days.length === 0) return 0;
 
+  // DIAS DE EXECUÇÃO: o "Dia N" não pode cair em dia sem execução (lead que
+  // entra na sexta ganhava o "Dia 2" no sábado). Espelha a regra do front
+  // (planCadenceDates em src/lib/workHours.ts — mesmo runtime não dá pra
+  // importar TS aqui): cada dia pula pro próximo permitido; offday_policy
+  // "iniciar_imediato" mantém o Dia 1 na entrada; dias distintos não colapsam.
+  let allowedWeekdays = [1, 2, 3, 4, 5];
+  let offdayPolicy = 'aguardar_proximo_dia';
+  try {
+    const cad = await rest(
+      `qs_cadences?select=execution_weekdays,offday_policy&id=eq.${encodeURIComponent(cadenceId)}&limit=1`
+    );
+    if (cad && cad[0]) {
+      if (Array.isArray(cad[0].execution_weekdays) && cad[0].execution_weekdays.length > 0) {
+        allowedWeekdays = cad[0].execution_weekdays;
+      }
+      if (cad[0].offday_policy) offdayPolicy = cad[0].offday_policy;
+    }
+  } catch (e) {
+    console.warn('[leads] execution_weekdays indisponível, usando seg–sex:', e?.message);
+  }
+  const DAY_MS = 86_400_000;
+  // Avança `d` (meia-noite UTC = dia no calendário BRT) até um dia permitido (máx. 14).
+  const nextAllowed = (d) => {
+    let out = d;
+    for (let i = 0; i < 14 && !allowedWeekdays.includes(out.getUTCDay()); i++) out = new Date(out.getTime() + DAY_MS);
+    return out;
+  };
+
   // FUSO: este código roda na Vercel (relógio UTC). Os horários da cadência
   // ("09:00") são de BRASÍLIA (UTC-3, sem horário de verão desde 2019). Antes
   // usávamos setHours() direto → a tarefa "09:00" nascia 09:00 UTC = 06:00 BRT
@@ -57,7 +85,21 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
   const baseMs = baseDate ? new Date(baseDate).getTime() : Date.now();
   const brtBase = new Date(baseMs - BRT_OFFSET_H * 3600_000); // "agora" em Brasília, lido pelos campos UTC
   const rows = [];
+  let prevDayUtc = null; // meia-noite UTC do último dia agendado (guarda anti-colapso)
   for (const day of days) {
+    // Dia-base do "Dia N" (meia-noite UTC representando o dia no calendário BRT).
+    let dayUtc = new Date(Date.UTC(
+      brtBase.getUTCFullYear(),
+      brtBase.getUTCMonth(),
+      brtBase.getUTCDate() + Math.max(0, (day.day_number ?? 1) - 1)
+    ));
+    const isFirst = prevDayUtc === null;
+    if (!(isFirst && offdayPolicy === 'iniciar_imediato')) dayUtc = nextAllowed(dayUtc);
+    if (prevDayUtc && dayUtc.getTime() <= prevDayUtc.getTime()) {
+      dayUtc = nextAllowed(new Date(prevDayUtc.getTime() + DAY_MS));
+    }
+    prevDayUtc = dayUtc;
+
     const acts = (day.qs_cadence_activities || []).slice().sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
     for (const act of acts) {
       let h = 9, m = 0;
@@ -65,12 +107,7 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
         const [hh, mm] = act.scheduled_time.split(':');
         h = Number(hh) || 9; m = Number(mm) || 0;
       }
-      const when = new Date(Date.UTC(
-        brtBase.getUTCFullYear(),
-        brtBase.getUTCMonth(),
-        brtBase.getUTCDate() + Math.max(0, (day.day_number ?? 1) - 1),
-        h + BRT_OFFSET_H, m, 0, 0
-      ));
+      const when = new Date(dayUtc.getTime() + (h + BRT_OFFSET_H) * 3600_000 + m * 60_000);
       rows.push({
         lead_id: leadId,
         cadence_id: cadenceId,

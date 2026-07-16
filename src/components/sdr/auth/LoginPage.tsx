@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 
 export default function LoginPage() {
-  const { login } = useQsAuth();
+  const { login, sessionNotice } = useQsAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -19,10 +19,11 @@ export default function LoginPage() {
     }
 
     setLoading(true);
-    const success = await login(email, password);
-    if (!success) {
+    const result = await login(email, password);
+    if (result === false) {
       setError("E-mail ou senha incorretos. Verifique suas credenciais.");
     }
+    // result === "inactive": conta desativada — o aviso vem pelo sessionNotice.
     setLoading(false);
   }
 
@@ -54,8 +55,9 @@ export default function LoginPage() {
           onSubmit={handleSubmit}
           className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4"
         >
-          {/* Error */}
-          {error && (
+          {/* Erro do formulário tem prioridade; sem erro, mostra o aviso de
+              sessão encerrada (ex.: conta desativada pelo administrador). */}
+          {error ? (
             <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-red-50 border border-red-100">
               <svg className="w-4 h-4 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <circle cx="12" cy="12" r="10" />
@@ -64,7 +66,16 @@ export default function LoginPage() {
               </svg>
               <p className="text-xs text-red-700">{error}</p>
             </div>
-          )}
+          ) : sessionNotice ? (
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200">
+              <svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <p className="text-xs text-amber-800">{sessionNotice}</p>
+            </div>
+          ) : null}
 
           {/* Email */}
           <div>

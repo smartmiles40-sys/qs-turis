@@ -1,5 +1,5 @@
 // src/components/sdr/cadences/CadenceCreatePage.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchQsUsers } from "@/lib/qs/queries";
 import { notifyError } from "@/lib/qs/notify";
@@ -239,6 +239,10 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   const [activeStep, setActiveStep] = useState(1);
   const [form, setForm] = useState<FormState>(getDefaultForm);
   const [loading, setLoading] = useState(isEdit);
+  // Falha ao carregar a cadência na EDIÇÃO: com isso ligado, salvar é bloqueado.
+  // Sem essa guarda, o editor abria com o form default vazio e o salvamento
+  // apagava os dias/atividades REAIS da cadência, gravando um esqueleto por cima.
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sdrs, setSdrs] = useState<SdrUser[]>([]);
   // Outras cadências (pro seletor "redirecionar ao terminar o plano").
@@ -252,65 +256,88 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
     });
   }, [cadenceId]);
 
-  // Fetch existing cadence for edit mode
-  useEffect(() => {
+  // Fetch existing cadence for edit mode. Extraído em useCallback pra tela de
+  // erro poder "Tentar de novo" sem sair do editor.
+  const loadCadence = useCallback(async () => {
     if (!cadenceId) return;
-    async function fetchCadence() {
-      setLoading(true);
-      const { data: cad, error } = await supabase
-        .from("qs_cadences")
-        .select("*, days:qs_cadence_days(*, activities:qs_cadence_activities(*)), owners:qs_cadence_owners(user_id)")
-        .eq("id", cadenceId)
-        .single();
-      if (error || !cad) {
-        console.warn("Erro ao buscar cadência para edição:", error);
-        setLoading(false);
-        return;
-      }
-      const c = cad as any;
-      setForm({
-        execution_mode: c.execution_mode ?? "manual",
-        objective: c.objective ?? "agendar_reuniao",
-        name: c.name ?? "",
-        description: c.description ?? "",
-        acquisition_channel: c.acquisition_channel ?? "levantada_de_mao",
-        priority: c.priority ?? "media",
-        status: c.status ?? "rascunho",
-        auto_loss_enabled: c.auto_loss_days !== null && c.auto_loss_days !== undefined,
-        auto_loss_days: c.auto_loss_days ?? 14,
-        redirect_cadence_id: c.redirect_cadence_id ?? "",
-        // Joins aninhados do Supabase não garantem ordem → ordena dias e atividades.
-        days: (c.days ?? [])
-          .slice()
-          .sort((a: any, b: any) => (a.day_number ?? 0) - (b.day_number ?? 0))
-          .map((d: any) => ({
-            id: d.id,
-            day_number: d.day_number,
-            activities: (d.activities ?? [])
-              .slice()
-              .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
-              .map((a: any) => ({
-                id: a.id,
-                cadence_day_id: a.cadence_day_id,
-                channel_type: a.channel_type,
-                scheduled_time: a.scheduled_time,
-                order_index: a.order_index,
-                script_text: a.script_text || "",
-              })),
-          })),
-        weekdays: c.execution_weekdays ?? [1, 2, 3, 4, 5],
-        distribution_mode: c.distribution_mode ?? "alternado",
-        offday_policy: c.offday_policy ?? "aguardar_proximo_dia",
-        owner_ids: ((c.owners ?? []) as { user_id: string }[]).map((o) => o.user_id),
-      });
+    setLoading(true);
+    setLoadError(false);
+    const { data: cad, error } = await supabase
+      .from("qs_cadences")
+      .select("*, days:qs_cadence_days(*, activities:qs_cadence_activities(*)), owners:qs_cadence_owners(user_id)")
+      .eq("id", cadenceId)
+      .single();
+    if (error || !cad) {
+      // Sem os passos reais carregados, salvar sobrescreveria a cadência com um
+      // esqueleto vazio — marca a falha e o resto da tela bloqueia o salvamento.
+      console.warn("Erro ao buscar cadência para edição:", error);
+      setLoadError(true);
       setLoading(false);
+      return;
     }
-    fetchCadence();
+    const c = cad as any;
+    setForm({
+      execution_mode: c.execution_mode ?? "manual",
+      objective: c.objective ?? "agendar_reuniao",
+      name: c.name ?? "",
+      description: c.description ?? "",
+      acquisition_channel: c.acquisition_channel ?? "levantada_de_mao",
+      priority: c.priority ?? "media",
+      status: c.status ?? "rascunho",
+      auto_loss_enabled: c.auto_loss_days !== null && c.auto_loss_days !== undefined,
+      auto_loss_days: c.auto_loss_days ?? 14,
+      redirect_cadence_id: c.redirect_cadence_id ?? "",
+      // Joins aninhados do Supabase não garantem ordem → ordena dias e atividades.
+      days: (c.days ?? [])
+        .slice()
+        .sort((a: any, b: any) => (a.day_number ?? 0) - (b.day_number ?? 0))
+        .map((d: any) => ({
+          id: d.id,
+          day_number: d.day_number,
+          activities: (d.activities ?? [])
+            .slice()
+            .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+            .map((a: any) => ({
+              id: a.id,
+              cadence_day_id: a.cadence_day_id,
+              channel_type: a.channel_type,
+              scheduled_time: a.scheduled_time,
+              order_index: a.order_index,
+              script_text: a.script_text || "",
+            })),
+        })),
+      weekdays: c.execution_weekdays ?? [1, 2, 3, 4, 5],
+      distribution_mode: c.distribution_mode ?? "alternado",
+      offday_policy: c.offday_policy ?? "aguardar_proximo_dia",
+      owner_ids: ((c.owners ?? []) as { user_id: string }[]).map((o) => o.user_id),
+    });
+    setLoading(false);
   }, [cadenceId]);
+
+  useEffect(() => {
+    loadCadence();
+  }, [loadCadence]);
 
   // Save cadence
   async function handleSave() {
     if (!form.name.trim()) return;
+
+    // GUARDA (edição): se os passos reais NÃO carregaram, salvar apagaria a
+    // estrutura da cadência e gravaria um esqueleto vazio por cima. Bloqueia.
+    if (isEdit && loadError) {
+      notifyError("Os dados da cadência não carregaram — salvar agora apagaria as atividades reais. Clique em \"Tentar de novo\" antes de salvar.");
+      return;
+    }
+
+    // Cadência sem NENHUMA atividade gera 0 tarefas: o lead vinculado fica
+    // invisível na fila de todo mundo. Bloqueia o salvamento.
+    const totalActivities = form.days.reduce((sum, d) => sum + d.activities.length, 0);
+    if (totalActivities === 0) {
+      notifyError("A cadência precisa de pelo menos 1 atividade — adicione uma na etapa \"Construção\" antes de salvar.");
+      setActiveStep(2);
+      return;
+    }
+
     setSaving(true);
 
     const cadencePayload = {
@@ -808,6 +835,35 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
     return (
       <div className="flex min-h-screen bg-[#F8F9FA] items-center justify-center" style={{ fontFamily: "inherit" }}>
         <p className="text-sm text-gray-500">Carregando...</p>
+      </div>
+    );
+  }
+
+  // Edição com fetch falho: NUNCA mostra o editor vazio (salvar por cima
+  // apagaria a cadência real). Só sai daqui recarregando com sucesso ou voltando.
+  if (isEdit && loadError) {
+    return (
+      <div className="flex min-h-screen bg-[#F8F9FA] items-center justify-center px-4" style={{ fontFamily: "inherit" }}>
+        <div className="bg-white border border-gray-100 rounded-xl p-8 max-w-md w-full text-center">
+          <h2 className="text-lg font-bold text-gray-900 mb-2">Não foi possível carregar a cadência</h2>
+          <p className="text-sm text-gray-500 mb-6">
+            Os dias e atividades desta cadência não carregaram. Para proteger os dados, a edição fica bloqueada — salvar agora apagaria a estrutura real da cadência.
+          </p>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={onBack}
+              className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              Voltar
+            </button>
+            <button
+              onClick={loadCadence}
+              className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-[#0147FF] hover:bg-[#0139D6] transition"
+            >
+              Tentar de novo
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

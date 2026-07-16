@@ -244,12 +244,22 @@ export default function GoalsPage() {
     if (!modal.target_value || !modal.owner_id) return;
     setSaving(true);
 
+    // period_start ancora o mês da meta mensal e só é definido na CRIAÇÃO.
+    // Na edição ele é preservado — regravar com "hoje" mudava a meta de mês
+    // (ex.: ajustar a meta de julho em agosto virava meta de agosto). A única
+    // exceção é quando a pessoa troca o Período (diário ↔ mensal) de propósito
+    // no modal: aí a meta é re-ancorada no período atual.
+    const editingGoal = modal.editingId ? goals.find((g) => g.id === modal.editingId) : null;
+    const periodChanged = editingGoal != null && editingGoal.period !== modal.period;
+
     const payload = {
       owner_id: modal.owner_id,
       type: modal.type,
       period: modal.period,
       target_value: parseInt(modal.target_value) || 0,
-      period_start: new Date().toISOString().slice(0, 10),
+      ...(!modal.editingId || periodChanged
+        ? { period_start: new Date().toISOString().slice(0, 10) }
+        : {}),
     };
 
     const { error } = modal.editingId

@@ -88,3 +88,66 @@ export function minutesLeftToday(wh: WorkHours, now = new Date()): number {
   const end = new Date(now); end.setHours(eh, em, 0, 0);
   return Math.max(0, Math.round((end.getTime() - now.getTime()) / 60000));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIAS DE EXECUÇÃO DA CADÊNCIA (dia útil)
+// Mesmo ajuste de calendário que o follow-up já fazia (TasksPanel): tarefa não
+// cai em dia sem execução. Centralizado aqui pra geração INICIAL do plano usar
+// a MESMA regra — antes o "Dia 2" de um lead que entrava na sexta caía no sábado.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Próximo dia de execução válido a partir de `date` (INCLUSIVE: se a própria
+ * data já cai num dia permitido, devolve ela). `allowedWeekdays` são os dias da
+ * cadência (`execution_weekdays`, 0=Dom…6=Sáb); vazio/ausente = seg–sex.
+ * Avança no máximo 14 dias (mesma trava do follow-up). Não mexe no horário.
+ */
+export function nextExecutionDay(date: Date, allowedWeekdays?: number[] | null): Date {
+  const allowed = allowedWeekdays && allowedWeekdays.length > 0 ? allowedWeekdays : [1, 2, 3, 4, 5];
+  const d = new Date(date);
+  for (let i = 0; i < 14 && !allowed.includes(d.getDay()); i++) d.setDate(d.getDate() + 1);
+  return d;
+}
+
+/**
+ * Datas reais do PLANO INICIAL de uma cadência: converte cada `day_number`
+ * ("Dia 1", "Dia 2"…) em uma data que respeita os dias de execução:
+ *  • cada dia cai no próximo dia PERMITIDO (nextExecutionDay);
+ *  • offday_policy "iniciar_imediato" mantém o Dia 1 na data de entrada mesmo
+ *    fora dos dias de execução (é o que a opção promete na tela);
+ *  • dias distintos do plano nunca colapsam na MESMA data (Dia 6 no sábado e
+ *    Dia 7 no domingo não viram duas cobranças na segunda — o seguinte pula
+ *    pro próximo dia permitido).
+ * Retorna um Map de day_number → Date (com o horário de `base`; o chamador
+ * aplica o scheduled_time da atividade por cima).
+ */
+export function planCadenceDates(
+  dayNumbers: number[],
+  allowedWeekdays?: number[] | null,
+  offdayPolicy?: string | null,
+  base: Date = new Date()
+): Map<number, Date> {
+  const sorted = [...new Set(dayNumbers)].sort((a, b) => a - b);
+  const result = new Map<number, Date>();
+  let prevMidnight: number | null = null;
+  for (const n of sorted) {
+    let d = new Date(base);
+    d.setDate(d.getDate() + Math.max(0, n - 1));
+    const isFirst = prevMidnight === null;
+    if (!(isFirst && offdayPolicy === "iniciar_imediato")) {
+      d = nextExecutionDay(d, allowedWeekdays);
+    }
+    if (prevMidnight !== null) {
+      const mid = new Date(d); mid.setHours(0, 0, 0, 0);
+      if (mid.getTime() <= prevMidnight) {
+        const bumped = new Date(prevMidnight + 86_400_000);
+        bumped.setHours(d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds());
+        d = nextExecutionDay(bumped, allowedWeekdays);
+      }
+    }
+    const mid = new Date(d); mid.setHours(0, 0, 0, 0);
+    prevMidnight = mid.getTime();
+    result.set(n, d);
+  }
+  return result;
+}

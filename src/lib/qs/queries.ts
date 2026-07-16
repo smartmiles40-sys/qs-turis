@@ -1,6 +1,7 @@
 // src/lib/qs/queries.ts — Data access layer for the QS (Qualificacao SDR) system
 import { supabase } from "@/lib/supabase";
 import { notifyError } from "@/lib/qs/notify";
+import { planCadenceDates } from "@/lib/workHours";
 import type {
   SdrUser,
   Lead,
@@ -275,41 +276,61 @@ export async function transferLead(
   leadId: string,
   fromUserId: string | null,
   toUserId: string,
-  note?: string
+  note?: string,
+  // `notify: false` = uso em LOTE (LeadsPage): quem chama agrega o resultado
+  // num toast só, em vez de N toasts individuais. Padrão true (fluxo individual).
+  opts?: { notify?: boolean }
 ): Promise<boolean> {
+  const notify = opts?.notify !== false;
   try {
+    // 1. Troca o dono e MEDE o efeito: o `.select('id')` devolve as linhas que
+    //    o banco realmente alterou. Sem isso, a RLS recusa em SILÊNCIO (sem
+    //    erro, 0 linhas) e a função dizia "transferido" mesmo sem transferir.
+    const { data: updated, error: leadError } = await supabase
+      .from("qs_leads")
+      .update({ owner_id: toUserId, updated_at: new Date().toISOString() })
+      .eq("id", leadId)
+      .select("id");
+    if (leadError) throw leadError;
+    if (!updated || updated.length === 0) {
+      console.warn("[QS] transferLead: banco recusou (RLS/0 linhas) o lead", leadId);
+      if (notify) notifyError("Transferência recusada pelo banco — você não tem permissão sobre este lead.");
+      return false;
+    }
+
+    // 2. Histórico DEPOIS que a troca aconteceu de verdade — antes o handover
+    //    era gravado primeiro e ficava registrado mesmo quando a RLS recusava
+    //    a transferência (auditoria mentirosa). Falha aqui não desfaz a troca:
+    //    avisa em vez de fingir que nada aconteceu.
     const { error: hoError } = await supabase.from("qs_handovers").insert({
       lead_id: leadId,
       from_user_id: fromUserId,
       to_user_id: toUserId,
       briefing: note?.trim() || "Lead transferido",
     });
-    if (hoError) throw hoError;
+    if (hoError) {
+      console.warn("[QS] transferLead: handover não registrado:", hoError);
+      if (notify) notifyError("Lead transferido, mas o HISTÓRICO do handover não foi registrado — avise o gestor.");
+    }
 
-    const { error: leadError } = await supabase
-      .from("qs_leads")
-      .update({ owner_id: toUserId, updated_at: new Date().toISOString() })
-      .eq("id", leadId);
-    if (leadError) throw leadError;
-
-    // Reatribui as tarefas pendentes/atrasadas do lead ao novo dono. Se ISTO
-    // falhar, o lead é do novo dono mas as tarefas ficam com o antigo (zumbi
-    // pro novo SDR) — então avisamos em vez de fingir sucesso.
+    // 3. Reatribui as tarefas pendentes/atrasadas do lead ao novo dono. Se ISTO
+    //    falhar, o lead é do novo dono mas as tarefas ficam com o antigo (zumbi
+    //    pro novo SDR) — então avisamos em vez de fingir sucesso.
     const { error: taskError } = await supabase
       .from("qs_tasks")
       .update({ owner_id: toUserId })
       .eq("lead_id", leadId)
       .in("status", ["pendente", "atrasada"]);
     if (taskError) {
-      notifyError("Lead transferido, mas as ATIVIDADES não foram — transfira de novo ou avise o gestor.");
       console.warn("[QS] transferLead: tarefas não reatribuídas:", taskError);
+      if (notify) notifyError("Lead transferido, mas as ATIVIDADES não foram — transfira de novo ou avise o gestor.");
     }
 
     return true;
   } catch (err) {
     const msg = (err as { message?: string })?.message || "erro desconhecido";
     console.warn("[QS] transferLead failed:", err);
-    notifyError(`Não foi possível transferir o lead: ${msg}`);
+    if (notify) notifyError(`Não foi possível transferir o lead: ${msg}`);
     return false;
   }
 }
@@ -525,13 +546,29 @@ export async function createCadenceTasks(
     if (daysError) throw daysError;
     if (!days || days.length === 0) return [];
 
-    const base = new Date();
-    const rows = (days as (CadenceDay & { activities: CadenceActivity[] })[]).flatMap((day) =>
+    // Dias de execução da cadência: a data inicial de cada "Dia N" não pode cair
+    // em dia sem execução (antes, lead de sexta ganhava o "Dia 2" no sábado — o
+    // follow-up já respeitava dia útil, a geração inicial não). Mesmo helper de
+    // calendário do plano (planCadenceDates / nextExecutionDay em workHours.ts).
+    const { data: cadRow } = await supabase
+      .from("qs_cadences")
+      .select("execution_weekdays, offday_policy")
+      .eq("id", cadenceId)
+      .maybeSingle();
+    const cadPlan = cadRow as { execution_weekdays: number[] | null; offday_policy: string | null } | null;
+
+    const dayList = days as (CadenceDay & { activities: CadenceActivity[] })[];
+    const dateByDay = planCadenceDates(
+      dayList.map((d) => d.day_number ?? 1),
+      cadPlan?.execution_weekdays ?? null,
+      cadPlan?.offday_policy ?? null
+    );
+
+    const rows = dayList.flatMap((day) =>
       [...(day.activities ?? [])]
         .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
         .map((act) => {
-          const scheduled = new Date(base);
-          scheduled.setDate(scheduled.getDate() + Math.max(0, (day.day_number ?? 1) - 1));
+          const scheduled = new Date(dateByDay.get(day.day_number ?? 1) ?? new Date());
           const [h, m] = (act.scheduled_time || "09:00").split(":").map(Number);
           scheduled.setHours(h || 9, m || 0, 0, 0);
           return {
@@ -558,6 +595,32 @@ export async function createCadenceTasks(
     console.warn("[QS] createCadenceTasks failed:", err);
     notifyError("O lead foi salvo, mas as atividades da cadência não foram criadas — tente vincular a cadência de novo.");
     return null;
+  }
+}
+
+// Encerra as tarefas de cadência ainda ABERTAS de um lead (pendente/atrasada,
+// não-extra) antes de vincular um plano novo. Sem isso, trocar o lead de
+// cadência DUPLICA a carga: as sequências antiga e nova convivem na fila e o
+// SDR contata o mesmo lead em dobro. Mesmo padrão de encerramento do restante
+// do app (skipTask / "Lead perdido" / "Handover para closer"): status
+// "ignorada" + skip_reason. As atividades EXTRAS (manuais) são preservadas.
+// Retorna false se o encerramento falhar — o chamador decide se prossegue.
+export async function closeOpenCadenceTasks(
+  leadId: string,
+  reason = "Lead movido de cadência — plano anterior encerrado"
+): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from("qs_tasks")
+      .update({ status: "ignorada" as TaskStatus, skip_reason: reason })
+      .eq("lead_id", leadId)
+      .eq("is_extra", false)
+      .in("status", ["pendente", "atrasada"]);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.warn("[QS] closeOpenCadenceTasks failed:", err);
+    return false;
   }
 }
 
