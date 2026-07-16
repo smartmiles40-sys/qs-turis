@@ -42,10 +42,15 @@ export default function CadenceHealthPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // Não-gestor: só o que é DELE. A RLS deixa passar lead/tarefa SEM dono
+      // (owner_id is null), que senão apareceria na conta de todos os SDRs.
+      const own = !isManager && currentUser ? currentUser.id : null;
+      let tasksQ = supabase.from("qs_tasks").select("lead_id, owner_id, scheduled_at").in("status", ["pendente", "atrasada"]);
+      let leadsQ = supabase.from("qs_leads").select("id, arrived_at, created_at, status, owner_id");
+      let concludedQ = supabase.from("qs_tasks").select("lead_id").eq("status", "concluida");
+      if (own) { tasksQ = tasksQ.eq("owner_id", own); leadsQ = leadsQ.eq("owner_id", own); concludedQ = concludedQ.eq("owner_id", own); }
       const [tasksRes, leadsRes, concludedRes, usersRes] = await Promise.all([
-        supabase.from("qs_tasks").select("lead_id, owner_id, scheduled_at").in("status", ["pendente", "atrasada"]),
-        supabase.from("qs_leads").select("id, arrived_at, created_at, status, owner_id"),
-        supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
+        tasksQ, leadsQ, concludedQ,
         supabase.from("qs_users").select("id, name").eq("is_active", true),
       ]);
       if (tasksRes.error) throw tasksRes.error;
@@ -90,7 +95,7 @@ export default function CadenceHealthPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUser, isManager]);
 
   useEffect(() => { load(); }, [load]);
 

@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifyError } from "@/lib/qs/notify";
 
 const BLUE = "#0147FF";
@@ -42,21 +43,26 @@ function endOfToday(): Date { const d = new Date(); d.setHours(23, 59, 59, 999);
 function hhmm(iso: string): string { return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }); }
 
 export default function MyDayPanel() {
+  const { currentUser } = useQsAuth();
   const [todo, setTodo] = useState<DayTask[]>([]);
   const [done, setDone] = useState<DayTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
+    if (!currentUser) return;
     setLoading(true);
     setError(false);
     try {
       const start0 = startOfToday();
+      // "Meu Dia" = SEMPRE as atividades do próprio usuário (mesmo gestor/admin vê
+      // só o dele aqui) — filtro explícito por owner_id, não confia só na RLS.
+      const uid = currentUser.id;
       const [pendRes, doneRes, leadsRes] = await Promise.all([
         supabase.from("qs_tasks").select("id, lead_id, channel_type, priority, scheduled_at, completed_at")
-          .in("status", ["pendente", "atrasada"]).lte("scheduled_at", endOfToday().toISOString()).order("scheduled_at"),
+          .eq("owner_id", uid).in("status", ["pendente", "atrasada"]).lte("scheduled_at", endOfToday().toISOString()).order("scheduled_at"),
         supabase.from("qs_tasks").select("id, lead_id, channel_type, priority, scheduled_at, completed_at")
-          .eq("status", "concluida").gte("completed_at", start0.toISOString()).order("completed_at", { ascending: false }),
+          .eq("owner_id", uid).eq("status", "concluida").gte("completed_at", start0.toISOString()).order("completed_at", { ascending: false }),
         supabase.from("qs_leads").select("id, full_name"),
       ]);
       if (pendRes.error) throw pendRes.error;
@@ -83,7 +89,7 @@ export default function MyDayPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => { load(); }, [load]);
 
