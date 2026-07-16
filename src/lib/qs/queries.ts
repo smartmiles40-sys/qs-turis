@@ -278,12 +278,13 @@ export async function transferLead(
   note?: string
 ): Promise<boolean> {
   try {
-    await supabase.from("qs_handovers").insert({
+    const { error: hoError } = await supabase.from("qs_handovers").insert({
       lead_id: leadId,
       from_user_id: fromUserId,
       to_user_id: toUserId,
       briefing: note?.trim() || "Lead transferido",
     });
+    if (hoError) throw hoError;
 
     const { error: leadError } = await supabase
       .from("qs_leads")
@@ -291,17 +292,24 @@ export async function transferLead(
       .eq("id", leadId);
     if (leadError) throw leadError;
 
-    // Reatribui as tarefas pendentes/atrasadas do lead ao novo dono
-    await supabase
+    // Reatribui as tarefas pendentes/atrasadas do lead ao novo dono. Se ISTO
+    // falhar, o lead é do novo dono mas as tarefas ficam com o antigo (zumbi
+    // pro novo SDR) — então avisamos em vez de fingir sucesso.
+    const { error: taskError } = await supabase
       .from("qs_tasks")
       .update({ owner_id: toUserId })
       .eq("lead_id", leadId)
       .in("status", ["pendente", "atrasada"]);
+    if (taskError) {
+      notifyError("Lead transferido, mas as ATIVIDADES não foram — transfira de novo ou avise o gestor.");
+      console.warn("[QS] transferLead: tarefas não reatribuídas:", taskError);
+    }
 
     return true;
   } catch (err) {
+    const msg = (err as { message?: string })?.message || "erro desconhecido";
     console.warn("[QS] transferLead failed:", err);
-    notifyError("Não foi possível transferir o lead — tente novamente.");
+    notifyError(`Não foi possível transferir o lead: ${msg}`);
     return false;
   }
 }

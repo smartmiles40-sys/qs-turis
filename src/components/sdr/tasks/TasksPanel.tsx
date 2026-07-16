@@ -571,6 +571,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Cria uma nova tarefa 'pendente' em qs_tasks (mesmo canal, data futura) e a devolve
   // para o estado local. Assim NENHUM lead fica sem próxima tarefa.
   async function insertFollowUp(task: Task, result: string): Promise<Task | null> {
+    // ANTI-DUPLICAÇÃO: a cadência cria as tarefas de TODOS os dias na entrada do
+    // lead. Se o lead JÁ tem outra atividade aberta (ex.: o dia 2 do plano), NÃO
+    // criamos follow-up dinâmico — senão a fila duplica (2+ cards do mesmo lead
+    // no mesmo dia), o SDR liga 2x pro mesmo lead e o FUP/placar inflam. O
+    // follow-up dinâmico é a REDE DE SEGURANÇA pra quando o plano acabou.
+    const { data: nextOpen } = await supabase
+      .from("qs_tasks")
+      .select("id")
+      .eq("lead_id", task.lead_id)
+      .in("status", ["pendente", "atrasada"])
+      .neq("id", task.id)
+      .limit(1);
+    if (nextOpen && nextOpen.length > 0) return null;
+
     // Próximo dia ÚTIL da cadência (execution_weekdays; padrão seg–sex).
     // O "amanhã 09:00" fixo caía em sábado/domingo e amanhecia atrasado na segunda.
     const cadDays = getCadenceForTask(task)?.execution_weekdays;
@@ -594,6 +608,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       caixa_postal: "Caiu na caixa postal na tentativa anterior",
       desligou: "Ligação caiu / desligou na tentativa anterior",
       numero_errado: "Número/contato inválido — pesquisar dado correto",
+      com_avanco: "Reunião ficou de ser agendada — retomar o agendamento",
     };
 
     const tags = isBadNumber
@@ -871,6 +886,32 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setMeetingFor({ taskId: task.id, leadId: task.lead_id, leadName: lead?.full_name ?? "Lead" });
   }
 
+  // Cancela o modal de agendamento COM rede de segurança. No caminho "com avanço"
+  // a tarefa já foi CONCLUÍDA antes de abrir o agendamento — cancelar aqui deixava
+  // o lead sem nenhuma atividade aberta (zumbi invisível pra fila de todo mundo).
+  // Se o lead ficou sem tarefa aberta, criamos um follow-up de "retomar o
+  // agendamento". No caminho "Ganho/Agendou" a tarefa segue pendente e nada muda.
+  async function cancelMeetingModal() {
+    const ctx = meetingFor;
+    setMeetingFor(null);
+    if (!ctx) return;
+    const { data: open } = await supabase
+      .from("qs_tasks")
+      .select("id")
+      .eq("lead_id", ctx.leadId)
+      .in("status", ["pendente", "atrasada"])
+      .limit(1);
+    if (open && open.length > 0) return; // ainda tem próxima atividade — ok
+    const src = tasksRef.current.find((t) => t.id === ctx.taskId);
+    if (!src) return;
+    const followUp = await insertFollowUp(src, "com_avanco");
+    setTasks((prev) => {
+      const rest = prev.filter((t) => t.id !== ctx.taskId); // a origem já está concluída no banco
+      return followUp ? [...rest, followUp] : rest;
+    });
+    if (followUp) showToast("Agendamento cancelado — criei um follow-up pra retomar com o lead.");
+  }
+
   // Confirma o "Ganho": cria a reunião (qs_meetings), marca o lead ganho e encerra as tarefas.
   async function handleConfirmMeeting() {
     if (!meetingFor) return;
@@ -1009,7 +1050,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // "Pediu retorno" abre o modal de atividade extra já preenchido pro lead.
   function openExtraFromRetorno(task: Task) {
     const lead = getLeadForTask(task);
-    const d = new Date(); d.setDate(d.getDate() + 1);
+    // Próximo dia ÚTIL da cadência (padrão seg–sex) — o "amanhã" fixo caía no
+    // sábado/domingo e o retorno amanhecia atrasado na segunda (mesma regra do
+    // insertFollowUp). O SDR ainda pode trocar a data no modal.
+    const cadDays = getCadenceForTask(task)?.execution_weekdays;
+    const allowed = cadDays && cadDays.length > 0 ? cadDays : [1, 2, 3, 4, 5];
+    const d = new Date();
+    for (let i = 0; i < 14; i++) {
+      d.setDate(d.getDate() + 1);
+      if (allowed.includes(d.getDay())) break;
+    }
     const yyyy = d.getFullYear(), mm = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
     setExtraTask({
       lead_id: task.lead_id,
@@ -2409,14 +2459,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══ MODAL AGENDAMENTO (ao dar Ganho) ════════════════════════════════ */}
       {meetingFor && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !savingMeeting && setMeetingFor(null)} />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !savingMeeting && cancelMeetingModal()} />
           <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4" style={{ background: "var(--green)" }}>
               <div className="text-white">
                 <p className="text-sm font-bold leading-tight">Agendar reunião — Ganho</p>
                 <p className="text-[11px] opacity-90 leading-tight">{meetingFor.leadName}</p>
               </div>
-              <button onClick={() => setMeetingFor(null)} className="text-white/90 hover:text-white" aria-label="Fechar">
+              <button onClick={() => cancelMeetingModal()} className="text-white/90 hover:text-white" aria-label="Fechar">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
               </button>
             </div>
@@ -2453,7 +2503,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </div>
             </div>
             <div className="flex gap-2 px-5 pb-5">
-              <button onClick={() => setMeetingFor(null)} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
+              <button onClick={() => cancelMeetingModal()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
               <button onClick={handleConfirmMeeting} disabled={savingMeeting || !meeting.agendadoPor || !meeting.responsavel || !meeting.dataHora} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
                 {savingMeeting ? "Salvando..." : "Confirmar ganho"}
               </button>
@@ -2783,9 +2833,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                       tags: [],
                     });
                   }
-                  // Tarefas da cadência pela função única (mesma regra do CSV e do Reativar)
+                  // Tarefas da cadência pela função única (mesma regra do CSV e do Reativar).
+                  // Dono = o que o BANCO gravou no lead (o trigger 0008 faz round-robin
+                  // quando o form vem sem responsável) — antes usava o valor do form e
+                  // tarefa nascia com owner NULL = invisível pra todo SDR (RLS).
                   if (hasCadence) {
-                    const createdTasks = await createCadenceTasks(inserted.id, newLead.cadence_id, newLead.owner_id || null);
+                    const createdTasks = await createCadenceTasks(inserted.id, newLead.cadence_id, inserted.owner_id ?? newLead.owner_id ?? null);
                     if (createdTasks && createdTasks.length > 0) {
                       setTasks(prev => [...prev, ...createdTasks]);
                     }

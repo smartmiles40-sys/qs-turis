@@ -1076,7 +1076,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
                           // Insere UM POR VEZ: cada insert é uma transação própria, então o
                           // round-robin do banco rotaciona os SDRs (em lote cairia tudo no mesmo).
-                          let ok = 0, fail = 0;
+                          let ok = 0, fail = 0, tasksFail = 0;
                           for (const row of rows) {
                             const nameParts = row.nome.trim().split(/\s+/);
                             const { data: inserted, error } = await supabase
@@ -1125,12 +1125,19 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                                   };
                                 })
                               );
-                              if (taskRows.length > 0) await supabase.from("qs_tasks").insert(taskRows);
+                              if (taskRows.length > 0) {
+                                // Erro aqui NÃO pode ser silencioso: o lead ficaria
+                                // em prospecção sem NENHUMA atividade (zumbi fora da
+                                // fila de todo mundo).
+                                const { error: taskErr } = await supabase.from("qs_tasks").insert(taskRows);
+                                if (taskErr) { tasksFail++; console.warn("[CSV] tarefas não criadas p/ lead", inserted.id, taskErr.message); }
+                              }
                             }
                             setCsvProgress((p) => p + 1);
                           }
 
                           if (fail > 0) notifyError(`${fail} lead(s) não puderam ser importados — confira o arquivo.`);
+                          if (tasksFail > 0) notifyError(`${tasksFail} lead(s) entraram SEM atividades — vincule a cadência deles de novo (senão ficam fora da fila).`);
                           setCsvImportedCount(ok);
                           await fetchLeads();
                           setCsvImporting(false);
