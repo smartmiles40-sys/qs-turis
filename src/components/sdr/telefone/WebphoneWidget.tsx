@@ -60,16 +60,20 @@ const LABELS: Record<WebphoneState["status"], string> = {
 
 const DTMF_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
 
-export default function WebphoneWidget() {
-  const [st, setSt] = useState<WebphoneState | null>(null);
+// `demo` é usado só pela página de preview (webfone-preview.html) para renderizar
+// o widget com dados de mentira, sem chamada real. Em produção nunca é passado.
+export default function WebphoneWidget({ demo }: { demo?: WebphoneState } = {}) {
+  const [subscribed, setSubscribed] = useState<WebphoneState | null>(null);
   const [panel, setPanel] = useState<"none" | "keypad" | "notes">("none");
   const [dtmf, setDtmf] = useState("");
   const [note, setNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [noteSaved, setNoteSaved] = useState(false);
+  const [localMuted, setLocalMuted] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => subscribeWebphone(setSt), []);
+  useEffect(() => { if (demo) return; return subscribeWebphone(setSubscribed); }, [demo]);
+  const st = demo ?? subscribed;
 
   const inCall = st?.status === "in_call";
   const now = useNow(inCall);
@@ -88,6 +92,7 @@ export default function WebphoneWidget() {
   const name = st.peerName?.trim();
   const number = st.peerNumber;
   const inits = initials(name);
+  const muted = demo ? localMuted : !!st.muted;
 
   function pressDtmf(k: string) {
     sendDtmf(k);
@@ -97,6 +102,7 @@ export default function WebphoneWidget() {
   async function handleSaveNote() {
     const text = note.trim();
     if (!text || !st?.leadId) return;
+    if (demo) { setNote(""); setNoteSaved(true); setTimeout(() => setNoteSaved(false), 2500); return; }
     setSavingNote(true);
     const ok = await saveCallNote(st.leadId, text);
     setSavingNote(false);
@@ -178,8 +184,8 @@ export default function WebphoneWidget() {
       {/* Ações */}
       {active && (
         <div className="px-3 pb-3 pt-1 flex items-center gap-1.5 border-t border-gray-100">
-          <ActionBtn label="Mudo" active={st.muted} onClick={() => toggleMuteWebphone()} tone="amber">
-            {st.muted ? <IconMicOff /> : <IconMic />}
+          <ActionBtn label="Mudo" active={muted} onClick={() => (demo ? setLocalMuted((m) => !m) : toggleMuteWebphone())} tone="amber">
+            {muted ? <IconMicOff /> : <IconMic />}
           </ActionBtn>
           <ActionBtn label="Teclado" active={panel === "keypad"} onClick={() => setPanel((p) => (p === "keypad" ? "none" : "keypad"))}>
             <IconKeypad />
