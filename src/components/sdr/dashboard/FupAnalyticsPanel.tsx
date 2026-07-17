@@ -38,6 +38,28 @@ const BAD_PHONE = new Set(["telefone_incorreto", "numero_errado"]);
 // sentido como curva (e-mail/WhatsApp não têm o conceito de "atendeu").
 const CALL_CHANNELS = new Set(["ligacao", "ligacao_whatsapp"]);
 
+// "Pulada" REAL = o SDR clicou em Pular e escolheu um motivo. Mas o status
+// "ignorada" também é gravado AUTOMATICAMENTE quando o lead sai da fila (ganho,
+// perdido, handover, troca/exclusão de cadência, substituição por atividade
+// extra). Esses fechamentos automáticos NÃO são pulos do SDR — se contados,
+// inflam "Puladas" e derrubam injustamente a aderência de quem fecha muito lead.
+// Filtramos pelo skip_reason: tudo que casa aqui é fechamento do sistema.
+const SYSTEM_SKIP_REASONS = new Set([
+  "Lead ganho",
+  "Lead perdido",
+  "Handover para closer",
+  "Substituída por atividade extra",
+  "Lead removido da cadência",
+  "Lead movido de cadência — plano anterior encerrado",
+]);
+function isSystemSkip(reason: string | null): boolean {
+  if (!reason) return false;
+  if (SYSTEM_SKIP_REASONS.has(reason)) return true;
+  // Exclusão de cadência inclui o nome: `Cadência "X" excluída — plano encerrado`.
+  if (reason.startsWith("Cadência") && reason.includes("encerrado")) return true;
+  return false;
+}
+
 const PERIODS = [7, 30, 90] as const;
 type PeriodDays = (typeof PERIODS)[number];
 
@@ -154,10 +176,14 @@ export default function FupAnalyticsPanel() {
         })),
       );
       setSkipped(
-        (skipRows as any[]).map((t) => ({
-          ownerId: t.owner_id ?? null,
-          reason: t.skip_reason ?? null,
-        })),
+        (skipRows as any[])
+          // Fora os fechamentos AUTOMÁTICOS (ganho/perdido/handover/cadência) —
+          // "Puladas" e a aderência só contam o pulo consciente do SDR.
+          .filter((t) => !isSystemSkip(t.skip_reason ?? null))
+          .map((t) => ({
+            ownerId: t.owner_id ?? null,
+            reason: t.skip_reason ?? null,
+          })),
       );
       setUserNames(new Map(((usersRes.data ?? []) as any[]).map((u) => [u.id, u.name])));
     } catch (e: any) {
@@ -418,7 +444,7 @@ export default function FupAnalyticsPanel() {
                 <div className="px-5 pt-4 pb-3">
                   <h2 className="text-sm font-bold text-gray-900">Aderência ao planejado por SDR</h2>
                   <p className="text-[12px] text-gray-400 mt-0.5">
-                    "No dia" compara o dia local de conclusão com o agendado. % do plano = concluídas ÷ (concluídas + puladas).
+                    "No dia" compara o dia local de conclusão com o agendado. % do plano = concluídas ÷ (concluídas + puladas). "Puladas" conta só o pulo manual do SDR — fechamentos automáticos (lead ganho/perdido/transferido, troca de cadência) não entram.
                   </p>
                 </div>
                 {adhRows.length === 0 ? (
