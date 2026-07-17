@@ -705,6 +705,13 @@ export async function createCadenceTasks(
       cadPlan?.offday_policy ?? null
     );
 
+    // 1º dia da cadência (menor day_number, que cai HOJE na chegada do lead): o
+    // horário da atividade não pode jogar a tarefa no PASSADO. Ex.: lead chega à
+    // tarde e o "Dia 1" às 09:00 nasceria atrasado. O horário serve só de fonte
+    // de PRIORIDADE — então clampamos o agendamento pra "agora + 5 min".
+    const firstDayNumber = Math.min(...dayList.map((d) => d.day_number ?? 1));
+    const nowMs = Date.now();
+
     const rows = dayList.flatMap((day) =>
       [...(day.activities ?? [])]
         .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
@@ -712,6 +719,12 @@ export async function createCadenceTasks(
           const scheduled = new Date(dateByDay.get(day.day_number ?? 1) ?? new Date());
           const [h, m] = (act.scheduled_time || "09:00").split(":").map(Number);
           scheduled.setHours(h || 9, m || 0, 0, 0);
+          // Só o 1º dia precisa do clamp (os demais são futuros). A PRIORIDADE
+          // abaixo continua vindo do scheduled_time e NÃO muda com o clamp.
+          let scheduledMs = scheduled.getTime();
+          if ((day.day_number ?? 1) === firstDayNumber && scheduledMs < nowMs) {
+            scheduledMs = nowMs + 5 * 60 * 1000;
+          }
           return {
             lead_id: leadId,
             cadence_id: cadenceId,
@@ -721,7 +734,7 @@ export async function createCadenceTasks(
             // tarde (>= 12:30) = média, "dia todo" (sem horário) = baixa. O horário
             // acima ainda agenda (dia todo cai no default 09:00), mas a prioridade é baixa.
             priority: (!act.scheduled_time ? "baixa" : act.scheduled_time >= "12:30" ? "media" : "alta") as PriorityLevel,
-            scheduled_at: scheduled.toISOString(),
+            scheduled_at: new Date(scheduledMs).toISOString(),
             status: "pendente" as TaskStatus,
             is_extra: false,
           };

@@ -1014,7 +1014,12 @@ export default function SdrDashboard() {
 
       // Data de FECHAMENTO real (closed_at, migration 0012; fallback updated_at).
       const closedCol = await getClosedAtColumn();
-      const nowIso = new Date().toISOString();
+      // "Atrasada" é POR DIA (mesma definição de classifyTask / notificações):
+      // conta só o que venceu ANTES de hoje 00:00 local. Antes o corte era "agora"
+      // (nowIso), então uma tarefa de HOJE 09h vista às 15h já entrava como
+      // atrasada e inflava a "Taxa de Tarefas Atrasadas".
+      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+      const startOfTodayIso = startOfToday.toISOString();
 
       // 1. Ciclo Médio de Qualificação — paginado (cap 1000 do PostgREST)
       const cicloPromise = fetchAllRows<any>((f, t) => {
@@ -1081,7 +1086,7 @@ export default function SdrDashboard() {
         .from("qs_tasks")
         .select("id", { count: "exact", head: true })
         .eq("status", "pendente")
-        .lt("scheduled_at", nowIso);
+        .lt("scheduled_at", startOfTodayIso);
       if (ownerId) {
         qOpenTotal = qOpenTotal.eq("owner_id", ownerId);
         qLate = qLate.eq("owner_id", ownerId);

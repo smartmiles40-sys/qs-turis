@@ -2,9 +2,9 @@
 // -----------------------------------------------------------------------------
 // "Saúde da Cadência" — a análise agregada do FUP que o Bruno pediu.
 // Segmenta a fila ATIVA por PESSOAS (leads), no estágio atual de cada uma:
-//   • Novo         = lead sem nenhuma atividade concluída (1º contato pendente)
-//   • FUP N        = lead já trabalhado; N = dia da cadência da atividade atual
-//                    (derivado da data agendada vs. a chegada do lead)
+//   • FUP N        = dia da cadência da atividade atual (lead sem 1º contato =
+//                    FUP 1; a categoria "Novo" foi extinta). N = data agendada
+//                    vs. a chegada do lead.
 //   • Atrasada     = a atividade atual venceu antes de hoje (selo, não balde)
 // Mostra: números-chave, distribuição por etapa (funil de FUP), backlog por SDR
 // e uma leitura rápida (gargalo / sobrecarga). Manager vê o time; SDR vê o dele
@@ -20,8 +20,7 @@ import { fetchAllRows } from "@/lib/qs/queries";
 interface LeadStage {
   leadId: string;
   ownerId: string | null;
-  novo: boolean;
-  fupDay: number; // 1,2,3… (dia da cadência da atividade atual)
+  fupDay: number; // 1,2,3… (dia da cadência da atividade atual; sem 1º contato = 1)
   overdue: boolean;
   daysOverdue: number;
 }
@@ -46,9 +45,9 @@ export default function CadenceHealthPanel() {
       // Não-gestor: só o que é DELE. A RLS deixa passar lead/tarefa SEM dono
       // (owner_id is null), que senão apareceria na conta de todos os SDRs.
       const own = !isManager && currentUser ? currentUser.id : null;
-      // Tudo paginado (cap 1000 do PostgREST): as concluídas são ALL-TIME e
-      // passam de 1000 rápido — sem paginação, lead já trabalhado "renascia"
-      // como Novo e a fila inteira mentia em silêncio.
+      // Tudo paginado (cap 1000 do PostgREST): a fila aberta e a base de leads
+      // passam de 1000 rápido — sem paginação, a distribuição por FUP mentiria
+      // em silêncio (leads a mais simplesmente sumiriam da conta).
       const tasksP = fetchAllRows<any>((f, t) => {
         let q = supabase.from("qs_tasks").select("lead_id, owner_id, scheduled_at").in("status", ["pendente", "atrasada"]).order("id");
         if (own) q = q.eq("owner_id", own);
@@ -59,19 +58,12 @@ export default function CadenceHealthPanel() {
         if (own) q = q.eq("owner_id", own);
         return q.range(f, t);
       });
-      // Concluídas SEM filtro de dono: o histórico segue o LEAD (migration 0015)
-      // — um lead transferido com 4 tentativas não pode renascer como "Novo".
-      // A classificação só olha leads do próprio SDR, então não vaza nada.
-      const concludedP = fetchAllRows<{ lead_id: string }>((f, t) =>
-        supabase.from("qs_tasks").select("lead_id").eq("status", "concluida").order("id").range(f, t)
-      );
-      const [tasks, leads, concluded, usersRes] = await Promise.all([
-        tasksP, leadsP, concludedP,
+      const [tasks, leads, usersRes] = await Promise.all([
+        tasksP, leadsP,
         supabase.from("qs_users").select("id, name").eq("is_active", true),
       ]);
 
       const leadsById = new Map(leads.map((l: any) => [l.id, l]));
-      const contacted = new Set(concluded.map((r) => r.lead_id));
       setUserNames(new Map((usersRes.data ?? []).map((u: any) => [u.id, u.name])));
 
       // Uma tarefa por lead: a ATUAL = a de menor scheduled_at (a que vence antes).
@@ -97,7 +89,6 @@ export default function CadenceHealthPanel() {
         built.push({
           leadId,
           ownerId: t.owner_id ?? lead.owner_id ?? null,
-          novo: !contacted.has(leadId),
           fupDay,
           overdue,
           daysOverdue: overdue ? Math.round((today0 - sched0) / 86400000) : 0,
@@ -116,40 +107,40 @@ export default function CadenceHealthPanel() {
 
   // ── Agregações ──────────────────────────────────────────────────────────────
   const total = stages.length;
-  const novos = stages.filter((s) => s.novo).length;
-  const emFup = total - novos;
+  // "Novo" foi extinto: todo lead aberto é FUP N (sem 1º contato = FUP 1), então
+  // a fila inteira conta como "em FUP" — ninguém some da conta.
+  const emFup = total;
   const atrasadas = stages.filter((s) => s.overdue).length;
   const backlogDias = stages.reduce((m, s) => Math.max(m, s.daysOverdue), 0);
 
-  // Distribuição por etapa: Novos + FUP 1..4 + FUP 5+ (cada um com quantos atrasados).
+  // Distribuição por etapa: o funil começa em FUP 1 (cada um com quantos atrasados).
   const buckets: { key: string; label: string; count: number; overdue: number; color: string }[] = [
-    { key: "novo", label: "Novos", count: 0, overdue: 0, color: GREEN },
-    { key: "fup1", label: "FUP 1", count: 0, overdue: 0, color: AMBER },
+    { key: "fup1", label: "FUP 1", count: 0, overdue: 0, color: GREEN },
     { key: "fup2", label: "FUP 2", count: 0, overdue: 0, color: AMBER },
     { key: "fup3", label: "FUP 3", count: 0, overdue: 0, color: AMBER },
     { key: "fup4", label: "FUP 4", count: 0, overdue: 0, color: AMBER },
     { key: "fup5", label: "FUP 5+", count: 0, overdue: 0, color: AMBER },
   ];
   for (const s of stages) {
-    const idx = s.novo ? 0 : Math.min(5, s.fupDay);
+    const idx = Math.min(5, s.fupDay) - 1; // FUP 1→0 … FUP 5+→4
     buckets[idx].count++;
     if (s.overdue) buckets[idx].overdue++;
   }
   const maxBucket = Math.max(1, ...buckets.map((b) => b.count));
 
   // Por SDR (só faz sentido pro gestor; SDR só se enxerga).
-  const bySdr = new Map<string, { novos: number; emFup: number; atrasadas: number; backlog: number }>();
+  const bySdr = new Map<string, { emFup: number; atrasadas: number; backlog: number }>();
   for (const s of stages) {
     const k = s.ownerId ?? "—";
-    const row = bySdr.get(k) ?? { novos: 0, emFup: 0, atrasadas: 0, backlog: 0 };
-    if (s.novo) row.novos++; else row.emFup++;
+    const row = bySdr.get(k) ?? { emFup: 0, atrasadas: 0, backlog: 0 };
+    row.emFup++; // todo lead aberto é FUP (categoria "Novo" extinta)
     if (s.overdue) row.atrasadas++;
     row.backlog = Math.max(row.backlog, s.daysOverdue);
     bySdr.set(k, row);
   }
   const sdrRows = [...bySdr.entries()]
     .map(([id, v]) => ({ id, name: userNames.get(id) ?? "Sem dono", ...v }))
-    .sort((a, b) => b.atrasadas - a.atrasadas || b.emFup + b.novos - (a.emFup + a.novos));
+    .sort((a, b) => b.atrasadas - a.atrasadas || b.emFup - a.emFup);
 
   // Leitura rápida (heurística simples de gargalo/sobrecarga).
   const insights: string[] = [];
@@ -158,7 +149,7 @@ export default function CadenceHealthPanel() {
     const pctAtrasada = Math.round((atrasadas / total) * 100);
     if (pctAtrasada >= 25) insights.push(`⚠ ${pctAtrasada}% da fila está atrasada — sinal de sobrecarga: talvez a cadência tenha atividades demais pro tamanho do time.`);
     else if (pctAtrasada > 0) insights.push(`${pctAtrasada}% da fila está atrasada (sob controle abaixo de 25%).`);
-    if (buckets[2].count > 0 && buckets[1].count > 0 && buckets[2].count <= buckets[1].count * 0.4)
+    if (buckets[1].count > 0 && buckets[0].count > 0 && buckets[1].count <= buckets[0].count * 0.4)
       insights.push("Queda forte do FUP 1 → FUP 2: muita gente para na 1ª tentativa (revisar abordagem/roteiro do 1º toque).");
     if (backlogDias >= 3) insights.push(`A atividade atrasada mais antiga está parada há ${backlogDias} dias.`);
   }
@@ -171,7 +162,7 @@ export default function CadenceHealthPanel() {
           <button onClick={load} className="text-sm font-semibold" style={{ color: BLUE }}>Atualizar</button>
         </div>
         <p className="text-sm text-gray-500 mb-5">
-          Quem é lead <b style={{ color: GREEN }}>novo</b>, quem está <b style={{ color: AMBER }}>seguindo a cadência (FUP N)</b> e quem está com <b style={{ color: RED }}>atividade atrasada</b> — por pessoa, no estágio atual.
+          Em que <b style={{ color: AMBER }}>FUP (dia da cadência)</b> está cada pessoa e quem tem <b style={{ color: RED }}>atividade atrasada</b> — por pessoa, no estágio atual. Lead sem 1º contato já entra como <b style={{ color: GREEN }}>FUP 1</b>.
         </p>
 
         {loading ? (
@@ -179,9 +170,8 @@ export default function CadenceHealthPanel() {
         ) : (
           <>
             {/* Números-chave */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
               <StatTile label="Na fila" value={total} color="#111827" />
-              <StatTile label="Novos" value={novos} color={GREEN} />
               <StatTile label="Em FUP" value={emFup} color={AMBER} />
               <StatTile label="Atrasadas" value={atrasadas} color={RED} />
               <StatTile label="Backlog (dias)" value={backlogDias} color={backlogDias >= 3 ? RED : "#111827"} hint="atividade parada há mais tempo" />
@@ -225,7 +215,6 @@ export default function CadenceHealthPanel() {
                     <thead>
                       <tr className="text-left text-[12px] uppercase text-gray-400 border-t border-gray-100">
                         <th className="px-5 py-2 font-semibold">SDR</th>
-                        <th className="px-3 py-2 font-semibold text-right">Novos</th>
                         <th className="px-3 py-2 font-semibold text-right">Em FUP</th>
                         <th className="px-3 py-2 font-semibold text-right">Atrasadas</th>
                         <th className="px-5 py-2 font-semibold text-right">Mais antiga</th>
@@ -235,7 +224,6 @@ export default function CadenceHealthPanel() {
                       {sdrRows.map((r) => (
                         <tr key={r.id} className="border-t border-gray-50">
                           <td className="px-5 py-2.5 font-medium text-gray-800">{r.name}</td>
-                          <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: GREEN }}>{r.novos}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: AMBER }}>{r.emFup}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums font-bold" style={{ color: r.atrasadas > 0 ? RED : "#6B7280" }}>{r.atrasadas}</td>
                           <td className="px-5 py-2.5 text-right tabular-nums" style={{ color: r.backlog >= 3 ? RED : "#6B7280" }}>{r.backlog > 0 ? `${r.backlog}d` : "—"}</td>

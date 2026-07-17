@@ -107,7 +107,13 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
         const [hh, mm] = act.scheduled_time.split(':');
         h = Number(hh) || 9; m = Number(mm) || 0;
       }
-      const when = new Date(dayUtc.getTime() + (h + BRT_OFFSET_H) * 3600_000 + m * 60_000);
+      let whenMs = dayUtc.getTime() + (h + BRT_OFFSET_H) * 3600_000 + m * 60_000;
+      // 1º dia (chegada = hoje): o horário define só a PRIORIDADE, não pode
+      // nascer no passado (lead da tarde não pode ganhar o "Dia 1" às 09h já
+      // atrasado). Se já passou, agenda "agora + 5 min". A priority abaixo NÃO
+      // muda — segue vindo do scheduled_time.
+      if (isFirst && whenMs < Date.now()) whenMs = Date.now() + 5 * 60_000;
+      const when = new Date(whenMs);
       rows.push({
         lead_id: leadId,
         cadence_id: cadenceId,
