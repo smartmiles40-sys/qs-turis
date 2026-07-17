@@ -703,6 +703,14 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
           </div>
         </div>
 
+        {duplicatedDayNumbers.size > 0 && (
+          <div className="px-4 py-2.5 rounded-lg border border-red-200 bg-red-50 text-xs text-red-700">
+            Há mais de um cartão com o mesmo número de dia (
+            {Array.from(duplicatedDayNumbers).sort((a, b) => a - b).map((n) => `Dia ${n}`).join(", ")}
+            ) — ajuste os números antes de salvar: cada "Dia N" deve aparecer uma única vez.
+          </div>
+        )}
+
         <div>
           <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Dias de Execução</label>
           <div className="flex gap-2">
@@ -728,7 +736,12 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-gray-900">Dia</span>
                   <input type="number" min={1} value={day.day_number} onChange={(e) => updateDayNumber(day.id, parseInt(e.target.value) || 1)}
-                    className="w-14 px-2 py-1 rounded-lg border border-gray-200 text-sm text-center font-bold focus:outline-none focus:border-[#0147FF]" />
+                    title={duplicatedDayNumbers.has(day.day_number) ? "Número de dia repetido — ajuste antes de salvar" : undefined}
+                    className={`w-14 px-2 py-1 rounded-lg border text-sm text-center font-bold focus:outline-none ${
+                      duplicatedDayNumbers.has(day.day_number)
+                        ? "border-red-400 bg-red-50 text-red-700 focus:border-red-500"
+                        : "border-gray-200 focus:border-[#0147FF]"
+                    }`} />
                 </div>
                 {form.days.length > 1 && (
                   <button onClick={() => removeDay(day.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition">
@@ -908,14 +921,34 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
             <div className={`p-4 rounded-xl border-2 transition-all ${form.redirect_cadence_id ? "border-[#0147FF] bg-[#0147FF]/5" : "border-gray-200 bg-white"}`}>
               <span className="text-sm font-bold text-gray-900 block mb-1">Redirecionar para outra cadência</span>
               <p className="text-xs text-gray-500 mb-2">Ao terminar o plano, o lead entra automaticamente na cadência escolhida (novas atividades são criadas).</p>
+              {/* Só cadência DISPONÍVEL pode ser escolhida como destino novo
+                  (congelada não recebe vínculo novo — mesma regra do
+                  fetchAvailableCadences). Um destino JÁ GRAVADO que congelou
+                  continua listado, rotulado, pro select não perder o valor. */}
               <select
                 value={form.redirect_cadence_id}
                 onChange={(e) => updateForm("redirect_cadence_id", e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 bg-white focus:outline-none focus:border-[#0147FF]"
               >
                 <option value="">Não redirecionar</option>
-                {otherCadences.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {otherCadences
+                  .filter((c) => c.status === "disponivel" || c.id === form.redirect_cadence_id)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {c.status !== "disponivel" ? ` (${CADENCE_STATUS_LABELS[c.status].toLowerCase()} — não recebe leads)` : ""}
+                    </option>
+                  ))}
               </select>
+              {(() => {
+                const sel = otherCadences.find((c) => c.id === form.redirect_cadence_id);
+                if (!sel || sel.status === "disponivel") return null;
+                return (
+                  <p className="text-[11px] text-amber-600 mt-1.5">
+                    A cadência de destino está {CADENCE_STATUS_LABELS[sel.status].toLowerCase()} — os leads que terminarem o plano vão <b>esperar</b> até ela ser retomada (não caem na perda automática).
+                  </p>
+                );
+              })()}
             </div>
 
             <div className={`p-4 rounded-xl border-2 transition-all ${form.auto_loss_enabled ? "border-[#0147FF] bg-[#0147FF]/5" : "border-gray-200 bg-white"}`}>

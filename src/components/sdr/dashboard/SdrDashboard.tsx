@@ -1482,7 +1482,9 @@ export default function SdrDashboard() {
             </span>
           </div>
         </div>
-        {loadingKpis ? (
+        {errKpis ? (
+          <SectionError message={errKpis} onRetry={() => loadKpis()} />
+        ) : loadingKpis ? (
           <p className="text-sm text-gray-500 text-center py-8">Carregando...</p>
         ) : (
           <AreaChart realData={realData} predictedData={predictedData} />
@@ -1490,7 +1492,9 @@ export default function SdrDashboard() {
       </div>
 
       {/* KPI Cards + Speed-to-Lead */}
-      {loadingKpis ? (
+      {errKpis ? (
+        <SectionError message="Não foi possível carregar os cards de indicadores." onRetry={() => loadKpis()} />
+      ) : loadingKpis ? (
         <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex items-center justify-center">
@@ -1503,14 +1507,29 @@ export default function SdrDashboard() {
           {kpiCards.map((card) => (
             <KpiCardComponent key={card.type} card={card} />
           ))}
-          <SpeedToLeadCard avgMinutes={speedToLead} loading={loadingSpeed} />
+          {errSpeed ? (
+            <div className="bg-white border border-red-200 rounded-xl shadow-none p-5 flex flex-col gap-2">
+              <span className="text-xs text-gray-500">Tempo Médio de Contato</span>
+              <span className="text-sm text-red-600">{errSpeed}</span>
+              <button
+                onClick={() => loadSpeedToLead()}
+                className="self-start text-xs font-semibold text-red-700 border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-50 transition-colors"
+              >
+                Tentar de novo
+              </button>
+            </div>
+          ) : (
+            <SpeedToLeadCard avgMinutes={speedToLead} loading={loadingSpeed} />
+          )}
         </div>
       )}
 
       {/* Indicadores Operacionais */}
       <div>
         <h2 className="text-sm font-medium text-gray-700 mb-3">Indicadores Operacionais</h2>
-        {loadingOperational ? (
+        {errOperational ? (
+          <SectionError message={errOperational} onRetry={() => loadOperationalKpis()} />
+        ) : loadingOperational ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex items-center justify-center">
@@ -1643,7 +1662,9 @@ export default function SdrDashboard() {
       <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
         <h2 className="text-sm font-medium text-gray-700 mb-1">Funil por Etapa</h2>
         <p className="text-xs text-gray-400 mb-4">Leads criados no período e até onde chegaram — a % mostra quanto passa de uma etapa pra próxima.</p>
-        {loadingFunnel ? (
+        {errFunnel ? (
+          <SectionError message={errFunnel} onRetry={() => loadFunnel()} />
+        ) : loadingFunnel ? (
           <p className="text-sm text-gray-500 text-center py-6">Carregando...</p>
         ) : funnel.length === 0 || funnel[0].count === 0 ? (
           <p className="text-sm text-gray-400 text-center py-6">Nenhum lead criado no período.</p>
@@ -1676,7 +1697,9 @@ export default function SdrDashboard() {
       {/* ── Reuniões, Pipeline e Receita (auditoria) ─────────────────────── */}
       <div>
         <h2 className="text-sm font-medium text-gray-700 mb-3">Reuniões e Receita</h2>
-        {loadingBusiness ? (
+        {errBusiness ? (
+          <SectionError message={errBusiness} onRetry={() => loadBusinessKpis()} />
+        ) : loadingBusiness ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[1, 2, 3].map((i) => (
               <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex items-center justify-center">
@@ -1731,7 +1754,9 @@ export default function SdrDashboard() {
       <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
         <h2 className="text-sm font-medium text-gray-700 mb-1">Conversão por Fonte</h2>
         <p className="text-xs text-gray-400 mb-4">Qual campanha/LP traz lead que fecha — leads criados no período, agrupados pela fonte que veio do Bitrix.</p>
-        {loadingBusiness ? (
+        {errBusiness ? (
+          <SectionError message={errBusiness} onRetry={() => loadBusinessKpis()} />
+        ) : loadingBusiness ? (
           <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>
         ) : sourceRows.length === 0 ? (
           <p className="text-sm text-gray-400 text-center py-4">Nenhum lead criado no período.</p>
@@ -1776,7 +1801,11 @@ export default function SdrDashboard() {
         <h2 className="text-sm font-medium text-gray-700 mb-4">
           Desempenho por Canal
         </h2>
-        <ChannelPerformanceTable data={channelPerformance} loading={loadingChannels} />
+        {errChannels ? (
+          <SectionError message={errChannels} onRetry={() => loadChannelPerformance()} />
+        ) : (
+          <ChannelPerformanceTable data={channelPerformance} loading={loadingChannels} />
+        )}
       </div>
 
       {/* Heatmap (Change 19) */}
@@ -1784,7 +1813,11 @@ export default function SdrDashboard() {
         <h2 className="text-sm font-medium text-gray-700 mb-4">
           Melhores Horários de Contato
         </h2>
-        <ContactHeatmap cells={heatmapCells} loading={loadingHeatmap} />
+        {errHeatmap ? (
+          <SectionError message={errHeatmap} onRetry={() => loadHeatmap()} />
+        ) : (
+          <ContactHeatmap cells={heatmapCells} loading={loadingHeatmap} />
+        )}
       </div>
 
       {/* Loss Reasons */}
@@ -1797,6 +1830,7 @@ export default function SdrDashboard() {
           selectedPeriod={selectedPeriod}
           customStart={customStart}
           customEnd={customEnd}
+          refreshTick={refreshTick}
         />
       </div>
 

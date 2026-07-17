@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { getClosedAtColumn } from "@/lib/qs/queries";
+import { getClosedAtColumn, fetchAllRows } from "@/lib/qs/queries";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +54,11 @@ export default function RankingPanel() {
   const [period, setPeriod] = useState<RankingPeriod>("mes");
   const [entries, setEntries] = useState<RankEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  // Erro NÃO vira ranking zerado parecendo dado real (FASE 2): banner + retry.
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Sequência de requisições: descarta resposta atrasada de um período antigo
+  // (troca rápida de Hoje→Mês não pode ser sobrescrita pela query anterior).
+  const seqRef = useRef(0);
 
   const periods: { key: RankingPeriod; label: string }[] = [
     { key: "hoje", label: "Hoje" },
@@ -61,46 +66,50 @@ export default function RankingPanel() {
     { key: "mes", label: "Mês" },
   ];
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    const seq = ++seqRef.current;
+    if (!silent) setLoading(true);
+    try {
       const { from, to } = getRankRange(period);
       // Data de FECHAMENTO (closed_at) — updated_at re-contava ganhos antigos
       // no período atual a cada edição do lead.
       const closedCol = await getClosedAtColumn();
 
-      const [usersRes, tasksRes, leadsRes] = await Promise.all([
+      // Atividades/leads paginados (cap 1000 do PostgREST): num mês cheio o
+      // ranking parava de contar na linha 1000 e favorecia quem veio primeiro.
+      const [usersRes, tasks, leads] = await Promise.all([
         supabase
           .from("qs_users")
           .select("id, name")
           .eq("is_active", true)
           .in("role", ["sdr", "closer", "gestor"])
           .order("name"),
-        supabase
-          .from("qs_tasks")
-          .select("owner_id")
-          .eq("status", "concluida")
-          .gte("completed_at", from)
-          .lte("completed_at", to),
-        supabase
-          .from("qs_leads")
-          .select("owner_id, status")
-          .in("status", ["ganho", "perdido"])
-          .gte(closedCol, from)
-          .lte(closedCol, to),
+        fetchAllRows<{ owner_id: string | null }>((f, t) =>
+          supabase
+            .from("qs_tasks")
+            .select("owner_id")
+            .eq("status", "concluida")
+            .gte("completed_at", from)
+            .lte("completed_at", to)
+            .order("id")
+            .range(f, t)
+        ),
+        fetchAllRows<{ owner_id: string | null; status: string }>((f, t) =>
+          supabase
+            .from("qs_leads")
+            .select("owner_id, status")
+            .in("status", ["ganho", "perdido"])
+            .gte(closedCol, from)
+            .lte(closedCol, to)
+            .order("id")
+            .range(f, t)
+        ),
       ]);
 
-      if (cancelled) return;
-
-      if (usersRes.error) console.warn("Erro ao buscar usuários (ranking):", usersRes.error);
-      if (tasksRes.error) console.warn("Erro ao buscar atividades (ranking):", tasksRes.error);
-      if (leadsRes.error) console.warn("Erro ao buscar leads (ranking):", leadsRes.error);
+      if (seq !== seqRef.current) return;
+      if (usersRes.error) throw usersRes.error;
 
       const users = (usersRes.data ?? []) as { id: string; name: string }[];
-      const tasks = (tasksRes.data ?? []) as { owner_id: string | null }[];
-      const leads = (leadsRes.data ?? []) as { owner_id: string | null; status: string }[];
 
       // Agrega atividades concluídas por owner
       const atividadesMap = new Map<string, number>();
@@ -132,14 +141,27 @@ export default function RankingPanel() {
       );
 
       setEntries(rows);
-      setLoading(false);
+      setErrorMsg(null);
+    } catch (err) {
+      console.warn("Erro ao carregar ranking:", err);
+      if (seq === seqRef.current) setErrorMsg("Não foi possível carregar o ranking.");
+    } finally {
+      if (seq === seqRef.current) setLoading(false);
     }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
   }, [period]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Auto-refresh silencioso (TV do time) — mesmo guard de aba oculta do resto
+  // do dashboard.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!document.hidden) load(true);
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [load]);
 
   return (
     <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
@@ -172,7 +194,17 @@ export default function RankingPanel() {
       </div>
 
       {/* Table */}
-      {loading ? (
+      {errorMsg ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm text-red-700">{errorMsg}</p>
+          <button
+            onClick={() => load()}
+            className="shrink-0 text-xs font-semibold text-red-700 border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-100 transition-colors"
+          >
+            Tentar de novo
+          </button>
+        </div>
+      ) : loading ? (
         <p className="text-sm text-gray-500 text-center py-8">Carregando ranking...</p>
       ) : entries.length === 0 ? (
         <p className="text-sm text-gray-400 text-center py-8">Nenhum qualificador ativo encontrado.</p>

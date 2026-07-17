@@ -349,7 +349,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [tasksRes, leadsRes, cadencesRes, usersData, productsRes, notesRes, contactedRes, scriptsData] = await Promise.all([
+      const [tasksRes, leadsRes, cadencesRes, usersData, productsRes, notesRes, contactedRes, scriptsData, availableData] = await Promise.all([
         supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
         supabase.from("qs_leads").select("*"),
         supabase.from("qs_cadences").select("*"),
@@ -358,6 +358,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         supabase.from("qs_notes").select("lead_id"),
         supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
         fetchCadenceScripts(), // roteiros por atividade da cadência (item 6 — script_text)
+        fetchAvailableCadences(), // só disponíveis — dropdown do Cadastrar Lead (item 12)
       ]);
       // supabase-js não lança em erro de query — checa as duas leituras vitais.
       if (tasksRes.error || leadsRes.error) {
@@ -374,6 +375,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[] | null));
       setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[] | null));
       setCadenceScripts(scriptsData);
+      setAvailableCadences(availableData);
     } catch (err) {
       console.warn("[TasksPanel] falha ao carregar dados:", err);
       setLoadError(true);
@@ -3274,7 +3276,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 >
                   <option value="">Selecione a cadência</option>
-                  {cadences.map(c => (
+                  {/* Só cadências DISPONÍVEIS (item 12) — congelada/rascunho não
+                      recebe lead novo (fetchAvailableCadences, criada pelo A3). */}
+                  {availableCadences.map(c => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
@@ -3366,6 +3370,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ══ MODAL WHATSAPP COM ROTEIRO (Sprint 4, item 6) ════════════════════
+          Abre quando a atividade de WhatsApp tem script_text: a mensagem já vem
+          preenchida com o roteiro do gestor ({nome}/{primeiro_nome} resolvidos). */}
+      {waModal && (
+        <WhatsAppModal
+          open
+          onClose={() => setWaModal(null)}
+          lead={{ id: waModal.lead.id, name: waModal.lead.full_name, phone: waModal.lead.phone }}
+          ownerId={currentUser?.id ?? null}
+          defaultText={waModal.text}
+        />
       )}
     </div>
   );

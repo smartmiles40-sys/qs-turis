@@ -2515,6 +2515,135 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
         </div>
       )}
 
+      {/* Editar Lead Modal (Sprint 4) */}
+      {showEditModal && editForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto p-4 md:p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-gray-900">Editar Lead</h2>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"
+                aria-label="Fechar"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {(
+                [
+                  { key: "full_name", label: "Nome completo *", type: "text", placeholder: "Nome do lead" },
+                  { key: "phone", label: "Telefone", type: "text", placeholder: "(11) 99999-9999" },
+                  { key: "email", label: "E-mail", type: "email", placeholder: "nome@empresa.com" },
+                  { key: "company_name", label: "Empresa", type: "text", placeholder: "Nome da empresa" },
+                  { key: "job_title", label: "Cargo", type: "text", placeholder: "Ex.: Diretor Comercial" },
+                  { key: "department", label: "Departamento", type: "text", placeholder: "Ex.: Comercial" },
+                  { key: "city", label: "Cidade", type: "text", placeholder: "Ex.: São Paulo" },
+                  { key: "state", label: "Estado", type: "text", placeholder: "Ex.: SP" },
+                  { key: "estimated_value", label: "Valor estimado (R$)", type: "text", placeholder: "Ex.: 1.500,00" },
+                  { key: "company_linkedin", label: "LinkedIn da empresa", type: "text", placeholder: "linkedin.com/company/..." },
+                  { key: "company_size", label: "Porte da empresa", type: "text", placeholder: "Ex.: 11-50 funcionários" },
+                ] as { key: keyof LeadEditForm; label: string; type: string; placeholder: string }[]
+              ).map((field) => (
+                <div key={field.key}>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">{field.label}</label>
+                  <input
+                    type={field.type}
+                    value={editForm[field.key] as string}
+                    onChange={(e) => setEditForm((prev) => (prev ? { ...prev, [field.key]: e.target.value } : prev))}
+                    placeholder={field.placeholder}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Origem</label>
+                <select
+                  value={editForm.source}
+                  onChange={(e) => setEditForm((prev) => (prev ? { ...prev, source: e.target.value as LeadSource } : prev))}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+                >
+                  {Object.entries(SOURCE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {editError && (
+              <div className="mt-4 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {editError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={saveLeadEdit}
+                disabled={savingEdit}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-[#0147FF] hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {savingEdit ? "Salvando..." : "Salvar alterações"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ganho Modal (Sprint 4: pede o valor fechado — closed_value alimentava
+          o dashboard com R$ 0 porque nunca era escrito) */}
+      {showWonModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-4 md:p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-2">Marcar como GANHO</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              {lead.full_name ?? "Este lead"} vai pra coluna de Ganho (aqui e no Bitrix) e as atividades abertas serão encerradas.
+            </p>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">Valor fechado (R$)</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={wonValue}
+              onChange={(e) => setWonValue(e.target.value)}
+              placeholder="Ex.: 1.500,00"
+              autoFocus
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-600/20 focus:border-green-600"
+            />
+            <p className="text-[11px] text-gray-400 mt-1.5">
+              Opcional, mas é ele que vira a receita ganha no dashboard — sem valor, o ganho conta como R$ 0.
+            </p>
+            {wonError && (
+              <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {wonError}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-3 mt-5">
+              <button
+                onClick={() => setShowWonModal(false)}
+                className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmWon}
+                disabled={savingWon}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {savingWon ? "Salvando..." : "Confirmar GANHO"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* WhatsApp Modal (Task 3) */}
       <WhatsAppModal
         open={showWhatsApp}
