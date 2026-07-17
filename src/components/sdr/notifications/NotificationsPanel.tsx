@@ -25,6 +25,7 @@ interface NotifTaskLead {
 
 interface NotifTask {
   id: string;
+  lead_id: string; // pra abrir o LEAD certo direto da linha (item 7)
   channel_type: ChannelType;
   scheduled_at: string;
   lead: NotifTaskLead | null;
@@ -46,6 +47,14 @@ interface NotifHandover {
   created_at: string;
   lead: NotifTaskLead | null;
   from_user: { name: string } | null;
+}
+
+interface NotifMeeting {
+  id: string;
+  lead_id: string;
+  scheduled_at: string;
+  title: string | null;
+  lead: NotifTaskLead | null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -119,6 +128,17 @@ function IconSpark() {
   );
 }
 
+function IconCalendar() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+  );
+}
+
 function IconSwap() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -170,6 +190,7 @@ function SectionHeader({
 
 function NotifRow({
   onClick,
+  onDismiss,
   accent,
   title,
   subtitle,
@@ -177,26 +198,44 @@ function NotifRow({
   metaColor,
 }: {
   onClick: () => void;
+  /** "x" discreto pra dispensar/limpar a notificação (item 9). */
+  onDismiss?: () => void;
   accent: string;
   title: string;
   subtitle: string;
   meta: string;
   metaColor: string;
 }) {
+  // Container é <div> (não <button>) pra poder abrigar DOIS botões: abrir e dispensar
+  // — botão dentro de botão é HTML inválido.
   return (
-    <button
-      onClick={onClick}
-      className="w-full text-left px-4 py-2.5 flex items-start gap-3 hover:bg-gray-50 transition-colors border-l-2"
+    <div
+      className="flex items-stretch hover:bg-gray-50 transition-colors border-l-2"
       style={{ borderLeftColor: accent }}
     >
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-semibold text-gray-900 truncate">{title}</p>
-        <p className="text-[11px] text-gray-400 truncate">{subtitle}</p>
-      </div>
-      <span className="text-[11px] font-semibold whitespace-nowrap shrink-0 mt-0.5" style={{ color: metaColor }}>
-        {meta}
-      </span>
-    </button>
+      <button onClick={onClick} className="min-w-0 flex-1 text-left px-4 py-2.5 flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold text-gray-900 truncate">{title}</p>
+          <p className="text-[11px] text-gray-400 truncate">{subtitle}</p>
+        </div>
+        <span className="text-[11px] font-semibold whitespace-nowrap shrink-0 mt-0.5" style={{ color: metaColor }}>
+          {meta}
+        </span>
+      </button>
+      {onDismiss && (
+        <button
+          onClick={onDismiss}
+          title="Dispensar"
+          aria-label="Dispensar notificação"
+          className="shrink-0 px-2 flex items-center text-gray-300 hover:text-gray-600 transition-colors"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -208,11 +247,56 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
   const [loading, setLoading] = useState(false);
   const [overdue, setOverdue] = useState<NotifTask[]>([]);
   const [today, setToday] = useState<NotifTask[]>([]);
+  const [todayMeetings, setTodayMeetings] = useState<NotifMeeting[]>([]);
   const [hotLeads, setHotLeads] = useState<NotifLead[]>([]);
   const [received, setReceived] = useState<NotifHandover[]>([]);
+  // Itens dispensados ("lidos"). Como as notificações são DERIVADAS (não há tabela
+  // de notificações), a marca de leitura vive no localStorage, por usuário.
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const ref = useRef<HTMLDivElement>(null);
 
-  const total = overdue.length + today.length + hotLeads.length + received.length;
+  const dismissKey = currentUser ? `qs_notif_dismissed_${currentUser.id}` : null;
+
+  // Re-hidrata os dispensados ao montar / trocar de usuário.
+  useEffect(() => {
+    if (!dismissKey) { setDismissed(new Set()); return; }
+    try {
+      const raw = localStorage.getItem(dismissKey);
+      const arr = raw ? (JSON.parse(raw) as unknown) : [];
+      setDismissed(new Set(Array.isArray(arr) ? (arr as string[]) : []));
+    } catch {
+      setDismissed(new Set());
+    }
+  }, [dismissKey]);
+
+  function persistDismissed(next: Set<string>) {
+    if (!dismissKey) return;
+    try { localStorage.setItem(dismissKey, JSON.stringify([...next])); } catch { /* storage cheio/negado — ignora */ }
+  }
+
+  // Dispensa 1 item (id namespaced por tipo pra não colidir entre tabelas).
+  function dismiss(itemId: string) {
+    setDismissed((prev) => {
+      const next = new Set(prev);
+      next.add(itemId);
+      persistDismissed(next);
+      return next;
+    });
+  }
+
+  // Marca TODAS as notificações atuais como lidas de uma vez.
+  function dismissAll() {
+    setDismissed((prev) => {
+      const next = new Set(prev);
+      overdue.forEach((t) => next.add(`task:${t.id}`));
+      today.forEach((t) => next.add(`task:${t.id}`));
+      todayMeetings.forEach((m) => next.add(`meeting:${m.id}`));
+      received.forEach((h) => next.add(`handover:${h.id}`));
+      hotLeads.forEach((l) => next.add(`lead:${l.id}`));
+      persistDismissed(next);
+      return next;
+    });
+  }
 
   // ── Carregamento dos dados ─────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -234,7 +318,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
     const endIso = endOfDay.toISOString();
     const h48Iso = new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString();
 
-    const taskSelect = "id, channel_type, scheduled_at, lead:qs_leads(full_name, company_name, status)";
+    const taskSelect = "id, lead_id, channel_type, scheduled_at, lead:qs_leads(full_name, company_name, status)";
 
     // 1. Follow-ups atrasados: abertos agendados antes de hoje 00:00.
     let overdueQ = supabase
@@ -278,12 +362,25 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
       .order("created_at", { ascending: false })
       .limit(20);
 
-    const [overdueRes, todayRes, leadsRes, receivedRes] = await Promise.all([overdueQ, todayQ, leadsQ, receivedQ]);
+    // 5. Reuniões de HOJE: agendadas dentro do dia local (00:00–23:59), ordem
+    //    crescente por horário. Mesmo isolamento por owner_id das demais (RLS reforça).
+    let meetingsQ = supabase
+      .from("qs_meetings")
+      .select("id, lead_id, scheduled_at, title, lead:qs_leads(full_name, company_name, status)")
+      .eq("status", "agendada")
+      .gte("scheduled_at", startIso)
+      .lte("scheduled_at", endIso)
+      .order("scheduled_at", { ascending: true })
+      .limit(30);
+    if (!seeAll) meetingsQ = meetingsQ.eq("owner_id", ownerId);
+
+    const [overdueRes, todayRes, leadsRes, receivedRes, meetingsRes] = await Promise.all([overdueQ, todayQ, leadsQ, receivedQ, meetingsQ]);
 
     if (overdueRes.error) console.warn("[QS] notificações — atrasados:", overdueRes.error);
     if (todayRes.error) console.warn("[QS] notificações — hoje:", todayRes.error);
     if (leadsRes.error) console.warn("[QS] notificações — leads:", leadsRes.error);
     if (receivedRes.error) console.warn("[QS] notificações — recebidos:", receivedRes.error);
+    if (meetingsRes.error) console.warn("[QS] notificações — reuniões de hoje:", meetingsRes.error);
 
     // Lead fechado (ganho/perdido) sai dos lembretes de tarefa — não é mais
     // trabalho pendente (mesma regra do "A fazer" do Meu Dia).
@@ -292,13 +389,18 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
     setToday(((todayRes.data ?? []) as unknown as NotifTask[]).filter(isOpenLead));
     setHotLeads((leadsRes.data ?? []) as unknown as NotifLead[]);
     setReceived((receivedRes.data ?? []) as unknown as NotifHandover[]);
+    setTodayMeetings((meetingsRes.data ?? []) as unknown as NotifMeeting[]);
     setLoading(false);
   }, [currentUser]);
 
-  // Carrega ao montar + revalida a cada 60s.
+  // Carrega ao montar + revalida a cada 60s — mas o tick PULA com a aba em
+  // background (mesmo guard do QsAuthContext) pra não bater no banco à toa.
   useEffect(() => {
     loadData();
-    const id = setInterval(loadData, 60000);
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      loadData();
+    }, 60000);
     return () => clearInterval(id);
   }, [loadData]);
 
@@ -326,6 +428,16 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
     setOpen(false);
     onOpenLead(leadId);
   }
+
+  // Itens visíveis = os carregados MENOS os dispensados (item 9). As contagens e o
+  // badge saem daqui, então dispensar já reduz o número no sino.
+  const visibleOverdue = overdue.filter((t) => !dismissed.has(`task:${t.id}`));
+  const visibleToday = today.filter((t) => !dismissed.has(`task:${t.id}`));
+  const visibleMeetings = todayMeetings.filter((m) => !dismissed.has(`meeting:${m.id}`));
+  const visibleReceived = received.filter((h) => !dismissed.has(`handover:${h.id}`));
+  const visibleHot = hotLeads.filter((l) => !dismissed.has(`lead:${l.id}`));
+  const total =
+    visibleOverdue.length + visibleToday.length + visibleMeetings.length + visibleReceived.length + visibleHot.length;
 
   const badge = total > 9 ? "9+" : String(total);
 
@@ -367,9 +479,20 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                 </span>
               )}
             </div>
-            {loading && (
-              <span className="w-3.5 h-3.5 border-2 border-gray-200 border-t-[#0147FF] rounded-full animate-spin" />
-            )}
+            <div className="flex items-center gap-2">
+              {total > 0 && (
+                <button
+                  onClick={dismissAll}
+                  className="text-[11px] font-semibold text-[#0147FF] hover:underline"
+                  title="Dispensar todas as notificações atuais"
+                >
+                  Marcar todas como lidas
+                </button>
+              )}
+              {loading && (
+                <span className="w-3.5 h-3.5 border-2 border-gray-200 border-t-[#0147FF] rounded-full animate-spin" />
+              )}
+            </div>
           </div>
 
           {/* Corpo */}
@@ -384,20 +507,21 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
               </div>
             ) : (
               <>
-                {/* 1. Follow-ups atrasados */}
-                {overdue.length > 0 && (
+                {/* 1. Follow-ups atrasados — a linha abre o LEAD certo (item 7). */}
+                {visibleOverdue.length > 0 && (
                   <div className="pb-2 border-b border-gray-50">
                     <SectionHeader
                       icon={<IconAlert />}
                       label="Follow-ups atrasados"
-                      count={overdue.length}
+                      count={visibleOverdue.length}
                       color="#DC2626"
                       bg="#FEE2E2"
                     />
-                    {overdue.map((t) => (
+                    {visibleOverdue.map((t) => (
                       <NotifRow
                         key={t.id}
-                        onClick={goToTasks}
+                        onClick={() => openLead(t.lead_id)}
+                        onDismiss={() => dismiss(`task:${t.id}`)}
                         accent="#DC2626"
                         title={leadTitle(t.lead)}
                         subtitle={`${CHANNEL_LABELS[t.channel_type]}${t.lead?.company_name ? ` · ${t.lead.company_name}` : ""}`}
@@ -408,20 +532,21 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                   </div>
                 )}
 
-                {/* 2. Tarefas de hoje */}
-                {today.length > 0 && (
+                {/* 2. Tarefas de hoje — abre o LEAD certo (item 7). */}
+                {visibleToday.length > 0 && (
                   <div className="pb-2 border-b border-gray-50">
                     <SectionHeader
                       icon={<IconClock />}
                       label="Tarefas de hoje"
-                      count={today.length}
+                      count={visibleToday.length}
                       color="#0147FF"
                       bg="#DBEAFE"
                     />
-                    {today.map((t) => (
+                    {visibleToday.map((t) => (
                       <NotifRow
                         key={t.id}
-                        onClick={goToTasks}
+                        onClick={() => openLead(t.lead_id)}
+                        onDismiss={() => dismiss(`task:${t.id}`)}
                         accent="#0147FF"
                         title={leadTitle(t.lead)}
                         subtitle={`${CHANNEL_LABELS[t.channel_type]}${t.lead?.company_name ? ` · ${t.lead.company_name}` : ""}`}
@@ -432,20 +557,46 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                   </div>
                 )}
 
-                {/* 3. Leads recebidos (transferência/handover) */}
-                {received.length > 0 && (
+                {/* 3. Reuniões de hoje (item 8) — clique abre o lead. */}
+                {visibleMeetings.length > 0 && (
+                  <div className="pb-2 border-b border-gray-50">
+                    <SectionHeader
+                      icon={<IconCalendar />}
+                      label="Reuniões de hoje"
+                      count={visibleMeetings.length}
+                      color="#7C3AED"
+                      bg="#EDE9FE"
+                    />
+                    {visibleMeetings.map((m) => (
+                      <NotifRow
+                        key={m.id}
+                        onClick={() => openLead(m.lead_id)}
+                        onDismiss={() => dismiss(`meeting:${m.id}`)}
+                        accent="#7C3AED"
+                        title={leadTitle(m.lead)}
+                        subtitle={`${m.title?.trim() || "Reunião"}${m.lead?.company_name ? ` · ${m.lead.company_name}` : ""}`}
+                        meta={formatTime(m.scheduled_at)}
+                        metaColor="#7C3AED"
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* 4. Leads recebidos (transferência/handover) */}
+                {visibleReceived.length > 0 && (
                   <div className="pb-2 border-b border-gray-50">
                     <SectionHeader
                       icon={<IconSwap />}
                       label="Leads recebidos"
-                      count={received.length}
+                      count={visibleReceived.length}
                       color="#12A18A"
                       bg="#D1FAE5"
                     />
-                    {received.map((h) => (
+                    {visibleReceived.map((h) => (
                       <NotifRow
                         key={h.id}
                         onClick={() => openLead(h.lead_id)}
+                        onDismiss={() => dismiss(`handover:${h.id}`)}
                         accent="#12A18A"
                         title={leadTitle(h.lead)}
                         subtitle={`${h.from_user?.name ? `de ${h.from_user.name}` : "transferido"}${h.briefing ? ` · ${h.briefing}` : ""}`}
@@ -456,20 +607,21 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                   </div>
                 )}
 
-                {/* 4. Leads quentes / novos */}
-                {hotLeads.length > 0 && (
+                {/* 5. Leads quentes / novos */}
+                {visibleHot.length > 0 && (
                   <div className="pb-2">
                     <SectionHeader
                       icon={<IconSpark />}
                       label="Leads quentes / novos"
-                      count={hotLeads.length}
+                      count={visibleHot.length}
                       color="#0147FF"
                       bg="#FFEDD5"
                     />
-                    {hotLeads.map((l) => (
+                    {visibleHot.map((l) => (
                       <NotifRow
                         key={l.id}
                         onClick={() => openLead(l.id)}
+                        onDismiss={() => dismiss(`lead:${l.id}`)}
                         accent="#0147FF"
                         title={l.full_name?.trim() || "Lead sem nome"}
                         subtitle={`${l.company_name?.trim() || "Sem empresa"} · ${sourceLabel(l.source)}`}

@@ -5,6 +5,7 @@ import type { Meeting, MeetingStatus, Lead } from "../types";
 import { MEETING_STATUS_LABELS } from "../types";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,9 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
+  // Ação (status/exclusão) gravando por reunião — trava os botões da linha p/ não
+  // gravar duas vezes num duplo-clique.
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   // ── Modal (criar/editar) ──
   const [showModal, setShowModal] = useState(false);
@@ -125,6 +129,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const [fLink, setFLink] = useState("");
   const [fNotes, setFNotes] = useState("");
   const [fStatus, setFStatus] = useState<MeetingStatus>("agendada");
+  // Combobox de lead (item 5): texto digitado; fLeadId só é preenchido ao escolher.
+  const [fLeadSearch, setFLeadSearch] = useState("");
 
   const fetchMeetings = useCallback(async () => {
     const { data, error } = await supabase
@@ -165,6 +171,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     setEditingId(null);
     setFormError(null);
     setFLeadId("");
+    setFLeadSearch("");
     setFTitle("");
     setFWhen("");
     setFDuration("30");
@@ -179,6 +186,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     setEditingId(m.id);
     setFormError(null);
     setFLeadId(m.lead_id);
+    // Preenche o combobox com o rótulo do lead atual (join m.lead) pra não abrir vazio.
+    setFLeadSearch(m.lead ? leadLabel(m.lead) : "");
     setFTitle(m.title ?? "");
     setFWhen(m.scheduled_at ? isoToLocalInput(m.scheduled_at) : "");
     setFDuration(m.duration_min != null ? String(m.duration_min) : "30");
@@ -220,6 +229,27 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     setSaving(true);
     setFormError(null);
 
+    // Reunião sendo editada (estado anterior) — serve pra medir RLS, detectar
+    // remarcação e comparar o status.
+    const prev = editingId ? meetings.find((m) => m.id === editingId) : undefined;
+
+    // Remarcação com rastro (item 3): reunião que estava AGENDADA e teve o horário
+    // alterado ganha uma linha de auditoria no PRÓPRIO campo notes (sem migration),
+    // preservando as anotações antigas.
+    const rescheduled =
+      !!prev &&
+      prev.status === "agendada" &&
+      new Date(prev.scheduled_at).getTime() !== when.getTime();
+
+    let notesToSave = fNotes.trim();
+    if (rescheduled && prev) {
+      const now = new Date();
+      const changeDay = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const by = currentUser?.name ?? "alguém";
+      const audit = `↻ Remarcada de ${formatDateTime(prev.scheduled_at)} para ${formatDateTime(when.toISOString())} (por ${by} em ${changeDay})`;
+      notesToSave = notesToSave ? `${audit}\n${notesToSave}` : audit;
+    }
+
     const base = {
       lead_id: fLeadId,
       title: fTitle.trim() || null,
@@ -227,7 +257,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       duration_min: duration,
       location: fLocation.trim() || null,
       meeting_link: fLink.trim() || null,
-      notes: fNotes.trim() || null,
+      notes: notesToSave || null,
       status: fStatus,
     };
 
@@ -235,17 +265,27 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       currentUser && UUID_RE.test(currentUser.id) ? currentUser.id : null;
 
     // Na edição não sobrescrevemos owner_id (preserva o responsável original).
-    const { error } = editingId
+    // .select() MEDE o que o banco aceitou sob RLS: sem ele um write barrado volta
+    // "sucesso" com 0 linhas e a tela mentiria pro usuário.
+    const { data, error } = editingId
       ? await supabase
           .from("qs_meetings")
           .update({ ...base, updated_at: new Date().toISOString() })
           .eq("id", editingId)
+          .select()
       : await supabase
           .from("qs_meetings")
-          .insert({ ...base, owner_id: ownerId });
+          .insert({ ...base, owner_id: ownerId })
+          .select();
 
     if (error) {
       setFormError(`Não foi possível salvar: ${error.message}`);
+      setSaving(false);
+      return;
+    }
+    if (!data || data.length === 0) {
+      // Nenhuma linha retornada = RLS barrou (não é sua reunião) — não finge sucesso.
+      setFormError("Você não tem permissão para salvar esta reunião.");
       setSaving(false);
       return;
     }
@@ -255,12 +295,21 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     if (editingId) {
       // Edição: se o status mudou pelo modal (ex.: marcada como realizada),
       // registra na timeline do Bitrix — mesmo efeito das ações rápidas.
-      const prev = meetings.find((m) => m.id === editingId);
       if (prev && prev.status !== fStatus) {
         notifyMeetingStatusToBitrix(
           { lead_id: fLeadId, scheduled_at: base.scheduled_at, title: base.title, lead: selLead ?? prev.lead },
           fStatus
         );
+      }
+      // Remarcação: conta a mudança de horário na timeline do Bitrix (nota, sem
+      // mover coluna) e avisa o usuário que foi remarcada — não um "salvo" genérico.
+      if (rescheduled && prev) {
+        notifyBitrix("nota", {
+          lead_id: fLeadId,
+          bitrix_id: selLead?.bitrix_id ?? prev.lead?.bitrix_id,
+          body: `Reunião remarcada de ${formatDateTime(prev.scheduled_at)} para ${formatDateTime(base.scheduled_at)} no QS.`,
+        });
+        notifySuccess("Reunião remarcada — novo horário salvo.");
       }
     } else {
       // Criação: preenche os campos da reunião no Bitrix e move o negócio pra
@@ -302,19 +351,57 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       const who = m?.lead?.full_name ? ` com ${m.lead.full_name}` : "";
       if (!window.confirm(`Cancelar a reunião${who}?`)) return;
     }
-    const { error } = await supabase
+    setBusyId(id); // trava os botões da linha enquanto grava
+    // .select() MEDE o que o banco aceitou sob RLS: update barrado volta data vazio,
+    // então não recarregamos "como se tivesse dado certo".
+    const { data, error } = await supabase
       .from("qs_meetings")
       .update({ status, updated_at: new Date().toISOString() })
-      .eq("id", id);
+      .eq("id", id)
+      .select();
+    setBusyId(null);
     if (error) {
       console.warn("Erro ao atualizar status da reunião:", error);
-      setPageError("Não foi possível atualizar a reunião — tente novamente.");
-    } else {
-      setPageError(null);
-      // Espelha o desfecho na timeline do negócio no Bitrix (fire-and-forget).
-      if (m) notifyMeetingStatusToBitrix(m, status);
-      await fetchMeetings();
+      notifyError("Não foi possível atualizar a reunião — tente novamente.");
+      return;
     }
+    if (!data || data.length === 0) {
+      notifyError("Você não tem permissão para alterar esta reunião.");
+      return;
+    }
+    setPageError(null);
+    // Espelha o desfecho na timeline do negócio no Bitrix (fire-and-forget).
+    if (m) notifyMeetingStatusToBitrix(m, status);
+    await fetchMeetings();
+  }
+
+  // ── Excluir reunião (REMOVE a linha) ──
+  // Distinto de "Cancelar" (que mantém o registro com status cancelada). Serve pra
+  // reuniões criadas por engano/duplicadas. Reuniões "realizada" têm valor histórico
+  // (aconteceram de fato), então a exclusão só é oferecida em não-realizada.
+  async function deleteMeeting(id: string) {
+    const m = meetings.find((x) => x.id === id);
+    const who = m?.lead?.full_name ? ` com ${m.lead.full_name}` : "";
+    // window.confirm: misclick não pode apagar reunião de cliente.
+    if (!window.confirm(`Excluir permanentemente a reunião${who}? Esta ação não pode ser desfeita.`)) return;
+    setBusyId(id);
+    // .select() MEDE o que o banco aceitou sob RLS (delete barrado volta data vazio).
+    const { data, error } = await supabase
+      .from("qs_meetings")
+      .delete()
+      .eq("id", id)
+      .select();
+    setBusyId(null);
+    if (error) {
+      notifyError(`Não foi possível excluir a reunião: ${error.message}`);
+      return;
+    }
+    if (!data || data.length === 0) {
+      notifyError("Você não tem permissão para excluir esta reunião.");
+      return;
+    }
+    notifySuccess("Reunião excluída.");
+    await fetchMeetings();
   }
 
   const filtered =
@@ -329,6 +416,22 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     no_show: meetings.filter((m) => m.status === "no_show").length,
     cancelada: meetings.filter((m) => m.status === "cancelada").length,
   };
+
+  // Ordenação de EXIBIÇÃO (item 4): reuniões FUTURAS agendadas primeiro, em ordem
+  // crescente (a PRÓXIMA no topo); depois todo o resto em ordem decrescente (mais
+  // recente primeiro). Feito só aqui, na camada de exibição — as contagens das abas
+  // continuam saindo de `meetings`, sem serem afetadas.
+  const nowMs = Date.now();
+  const isUpcoming = (m: Meeting) =>
+    m.status === "agendada" && new Date(m.scheduled_at).getTime() >= nowMs;
+  const sorted = [...filtered].sort((a, b) => {
+    const au = isUpcoming(a);
+    const bu = isUpcoming(b);
+    if (au && bu) return new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime();
+    if (au) return -1;
+    if (bu) return 1;
+    return new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime();
+  });
 
   if (loading) {
     return (
@@ -427,7 +530,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((meeting) => (
+              {sorted.map((meeting) => (
                 <tr
                   key={meeting.id}
                   className="border-b border-gray-100 last:border-0 hover:bg-gray-50/40 transition-colors"
@@ -441,6 +544,21 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                       <span className="inline-flex items-center gap-1 mt-0.5 text-[11px] font-semibold text-emerald-600">
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
                         {meeting.location}
+                      </span>
+                    )}
+                    {/* Link da reunião clicável direto na lista (item 2) — atalho pra entrar. */}
+                    {meeting.meeting_link && (
+                      <span className="block mt-0.5">
+                        <a
+                          href={meeting.meeting_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0147FF] hover:underline"
+                          title="Entrar na reunião"
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
+                          Entrar
+                        </a>
                       </span>
                     )}
                   </td>
@@ -478,7 +596,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                         <>
                           <button
                             onClick={() => updateStatus(meeting.id, "realizada")}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"
+                            disabled={busyId === meeting.id}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             title="Marcar como realizada"
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -487,7 +606,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                           </button>
                           <button
                             onClick={() => updateStatus(meeting.id, "no_show")}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            disabled={busyId === meeting.id}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             title="Marcar como no-show"
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -539,12 +659,29 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                       {meeting.status !== "cancelada" && (
                         <button
                           onClick={() => updateStatus(meeting.id, "cancelada")}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          title="Cancelar"
+                          disabled={busyId === meeting.id}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Cancelar (mantém o registro)"
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <line x1="18" y1="6" x2="6" y2="18" />
                             <line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        </button>
+                      )}
+                      {/* Excluir (lixeira) — remove o registro; escondido em realizada (histórico). */}
+                      {meeting.status !== "realizada" && (
+                        <button
+                          onClick={() => deleteMeeting(meeting.id)}
+                          disabled={busyId === meeting.id}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Excluir reunião (remove o registro)"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
                           </svg>
                         </button>
                       )}
@@ -578,18 +715,46 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
             </div>
 
             <div className="space-y-4">
-              <div>
+              {/* Lead: combobox com busca (item 5) — filtra por nome/empresa/telefone/
+                  e-mail conforme digita; fLeadId só é fixado ao escolher um item. */}
+              <div className="relative">
                 <label className={labelClass}>Lead</label>
-                <select
-                  value={fLeadId}
-                  onChange={(e) => setFLeadId(e.target.value)}
+                <input
+                  type="text"
+                  value={fLeadSearch}
+                  onChange={(e) => { setFLeadSearch(e.target.value); setFLeadId(""); }}
+                  placeholder="Digite o nome, empresa ou telefone do lead..."
                   className={inputClass}
-                >
-                  <option value="">Selecione um lead...</option>
-                  {leads.map((l) => (
-                    <option key={l.id} value={l.id}>{leadLabel(l)}</option>
-                  ))}
-                </select>
+                  autoComplete="off"
+                />
+                {fLeadSearch && !fLeadId && (() => {
+                  const q = fLeadSearch.toLowerCase();
+                  const matches = leads.filter((l) =>
+                    l.full_name?.toLowerCase().includes(q) ||
+                    l.company_name?.toLowerCase().includes(q) ||
+                    l.email?.toLowerCase().includes(q) ||
+                    l.phone?.includes(fLeadSearch)
+                  );
+                  return (
+                    <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {matches.slice(0, 10).map((l) => (
+                        <button
+                          type="button"
+                          key={l.id}
+                          onClick={() => { setFLeadId(l.id); setFLeadSearch(leadLabel(l)); }}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-50 last:border-0"
+                        >
+                          <span className="font-medium text-gray-900">{l.full_name || "Sem nome"}</span>
+                          {l.company_name && <span className="text-gray-400"> · {l.company_name}</span>}
+                          {l.phone && <span className="text-gray-300 text-xs ml-2">{l.phone}</span>}
+                        </button>
+                      ))}
+                      {matches.length === 0 && (
+                        <p className="px-3 py-2 text-xs text-gray-400">Nenhum lead encontrado.</p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>
