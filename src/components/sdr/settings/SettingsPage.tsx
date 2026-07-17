@@ -4,10 +4,10 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { createQsAuthUser, updateQsAuthUser, deleteQsAuthUser } from "@/lib/adminUsers";
 import { loadWorkHours, saveWorkHours, DEFAULT_WORK_HOURS, WEEKDAY_NAMES, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, saveMeetingTeam, getSetting, setSetting } from "@/lib/qsSettings";
-import { notifyError } from "@/lib/qs/notify";
-import { WAVOIP_TOKEN_KEY } from "@/lib/wavoip";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import { WAVOIP_TOKEN_KEY, ensureWavoipDevice } from "@/lib/wavoip";
 import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PREFIX_KEY, SIP_INSTALLER_URL_KEY, SIP_RAMAIS_KEY, DEFAULT_SIP_HOST } from "@/lib/sip";
-import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, deleteSipLine, type SipLineAdmin } from "@/lib/webphone";
+import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, deleteSipLine, ensureRegistered, type SipLineAdmin } from "@/lib/webphone";
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
 import type {
   CustomField,
@@ -51,7 +51,7 @@ const FIELD_TYPE_LABELS: Record<string, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "horario" | "equipe" | "agenda" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios";
+type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "horario" | "equipe" | "agenda" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -71,6 +71,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "webfone-webrtc", label: "Webfone WebRTC (VoxFree)", group: "EMPRESA" },
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
+  { key: "integracoes", label: "Integrações (status)", group: "INTEGRAÇÕES" },
 ];
 
 // ── Inline SVG Icons ────────────────────────────────────────────────────────
@@ -417,20 +418,34 @@ function MotivosSection() {
   const custom = reasons.filter((r) => !r.is_predefined && (showArchived || !r.is_archived));
 
   async function toggleArchive(reason: LossReason) {
-    const { error } = await supabase.from("qs_loss_reasons").update({ is_archived: !reason.is_archived }).eq("id", reason.id);
-    if (error) console.warn("Erro ao arquivar/desarquivar:", error);
-    else setReasons((prev) => prev.map((r) => r.id === reason.id ? { ...r, is_archived: !r.is_archived } : r));
+    const next = !reason.is_archived;
+    // .select() mede o que a RLS deixou passar (update bloqueado volta vazio).
+    const { data, error } = await supabase.from("qs_loss_reasons").update({ is_archived: next }).eq("id", reason.id).select();
+    if (error || !data || data.length === 0) {
+      console.warn("Erro ao arquivar/desarquivar:", error);
+      notifyError("Não foi possível alterar o motivo — tente novamente.");
+      return;
+    }
+    setReasons((prev) => prev.map((r) => r.id === reason.id ? { ...r, is_archived: next } : r));
+    notifySuccess(next ? "Motivo arquivado." : "Motivo desarquivado.");
   }
 
   async function deleteReason(id: string) {
     const label = reasons.find((r) => r.id === id)?.label ?? "este motivo";
     if (!window.confirm(`Excluir o motivo de perda "${label}"? Se preferir manter o histórico, use Arquivar.`)) return;
-    const { error } = await supabase.from("qs_loss_reasons").delete().eq("id", id);
+    const { data, error } = await supabase.from("qs_loss_reasons").delete().eq("id", id).select();
     if (error) {
       console.warn("Erro ao excluir motivo:", error);
       notifyError("Não foi possível excluir — provavelmente há leads perdidos usando esse motivo. Use Arquivar.");
+      return;
     }
-    else setReasons((prev) => prev.filter((r) => r.id !== id));
+    if (!data || data.length === 0) {
+      // Delete que não removeu nada: RLS negou ou o motivo já sumiu.
+      notifyError("Nada foi excluído (sem permissão ou motivo já removido).");
+      return;
+    }
+    setReasons((prev) => prev.filter((r) => r.id !== id));
+    notifySuccess("Motivo excluído.");
   }
 
   if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
@@ -567,8 +582,12 @@ function UsuariosSection() {
   }
 
   async function handleSave() {
-    if (!form.name || !form.email) return;
-    if (!editUser && !form.password) { setSaveError("Defina uma senha para o novo usuário (mín. 6 caracteres)."); return; }
+    // Validação no cliente antes de bater no servidor (mensagens claras).
+    if (!form.name.trim() || !form.email.trim()) { setSaveError("Nome e e-mail são obrigatórios."); return; }
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+    if (!emailOk) { setSaveError("E-mail inválido — confira o formato (ex.: nome@empresa.com)."); return; }
+    if (!editUser && (!form.password || form.password.length < 6)) { setSaveError("Defina uma senha para o novo usuário (mín. 6 caracteres)."); return; }
+    if (editUser && form.password && form.password.length < 6) { setSaveError("A nova senha deve ter ao menos 6 caracteres."); return; }
     // A6: não deixa o admin rebaixar o PRÓPRIO papel — só admin acessa esta
     // tela, então ele perderia o acesso à gestão de usuários (o servidor também bloqueia).
     if (editUser && editUser.id === currentUser?.id && form.role !== editUser.role) {
@@ -577,26 +596,33 @@ function UsuariosSection() {
     }
     setSaving(true);
     setSaveError(null);
-    const res = editUser
-      ? await updateQsAuthUser({
-          id: editUser.id,
-          name: form.name,
-          email: form.email,
-          role: form.role,
-          whatsapp_number: form.whatsapp_number.trim() || null,
-          ...(form.password ? { password: form.password } : {}),
-        })
-      : await createQsAuthUser({
-          name: form.name,
-          email: form.email,
-          role: form.role,
-          whatsapp_number: form.whatsapp_number.trim() || null,
-          password: form.password,
-        });
-    setSaving(false);
-    if (!res.success) { setSaveError(res.error || "Falha ao salvar usuário."); return; }
-    setShowModal(false);
-    loadUsers();
+    try {
+      const res = editUser
+        ? await updateQsAuthUser({
+            id: editUser.id,
+            name: form.name,
+            email: form.email,
+            role: form.role,
+            whatsapp_number: form.whatsapp_number.trim() || null,
+            ...(form.password ? { password: form.password } : {}),
+          })
+        : await createQsAuthUser({
+            name: form.name,
+            email: form.email,
+            role: form.role,
+            whatsapp_number: form.whatsapp_number.trim() || null,
+            password: form.password,
+          });
+      if (!res.success) { setSaveError(res.error || "Falha ao salvar usuário."); return; }
+      setShowModal(false);
+      loadUsers();
+    } catch (e) {
+      // Falha de rede na rota /api/admin-user não pode quebrar a tela.
+      console.warn("Erro ao salvar usuário:", e);
+      setSaveError("Erro de rede ao salvar o usuário. Tente novamente.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function toggleActive(u: SdrUser) {
@@ -606,8 +632,9 @@ function UsuariosSection() {
       notifyError("Você não pode desativar a própria conta. Peça a outro administrador.");
       return;
     }
-    const { error } = await supabase.from("qs_users").update({ is_active: !u.is_active }).eq("id", u.id);
-    if (error) {
+    // .select() mede a RLS: um update negado volta vazio, sem erro.
+    const { data, error } = await supabase.from("qs_users").update({ is_active: !u.is_active }).eq("id", u.id).select();
+    if (error || !data || data.length === 0) {
       console.warn("Erro ao ativar/desativar usuário:", error);
       notifyError("Não foi possível alterar o status do usuário — tente novamente.");
       return;
@@ -621,12 +648,18 @@ function UsuariosSection() {
       notifyError("Você não pode excluir a própria conta. Peça a outro administrador.");
       return;
     }
-    if (!confirm(`Excluir ${u.name} permanentemente? Os leads dele ficarão sem responsável.`)) return;
+    if (!window.confirm(`Excluir ${u.name} permanentemente? Os leads dele ficarão sem responsável.`)) return;
     // O endpoint remove a conta de autenticação; o perfil sai via regras de FK
     // (leads/tarefas/reuniões ficam sem responsável; metas são apagadas).
-    const res = await deleteQsAuthUser(u.id);
-    if (!res.success) { alert(res.error || "Falha ao excluir usuário."); return; }
-    setUsers(prev => prev.filter(x => x.id !== u.id));
+    try {
+      const res = await deleteQsAuthUser(u.id);
+      if (!res.success) { notifyError(res.error || "Falha ao excluir usuário."); return; }
+      setUsers(prev => prev.filter(x => x.id !== u.id));
+      notifySuccess("Usuário excluído.");
+    } catch (e) {
+      console.warn("Erro ao excluir usuário:", e);
+      notifyError("Erro de rede ao excluir o usuário. Tente novamente.");
+    }
   }
 
   if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
@@ -781,6 +814,7 @@ function ProdutosSection() {
   const [products, setProducts] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
   const [newProduct, setNewProduct] = useState("");
   const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     supabase.from("qs_products").select("*").order("name").then(({ data }) => {
@@ -790,17 +824,30 @@ function ProdutosSection() {
   }, []);
 
   async function addProduct() {
-    if (!newProduct.trim()) return;
-    const { data } = await supabase.from("qs_products").insert({ name: newProduct.trim() }).select().single();
-    if (data) {
-      setProducts(prev => [...prev, data as any].sort((a, b) => a.name.localeCompare(b.name)));
-      setNewProduct("");
+    const name = newProduct.trim();
+    if (!name || adding) return; // trava texto vazio e duplo-disparo (Enter + clique)
+    setAdding(true);
+    const { data, error } = await supabase.from("qs_products").insert({ name }).select().single();
+    setAdding(false);
+    if (error || !data) {
+      console.warn("Erro ao adicionar produto:", error);
+      notifyError("Não foi possível adicionar o produto — tente novamente.");
+      return;
     }
+    setProducts(prev => [...prev, data as any].sort((a, b) => a.name.localeCompare(b.name)));
+    setNewProduct("");
   }
 
   async function toggleProduct(id: string, active: boolean) {
-    await supabase.from("qs_products").update({ is_active: !active }).eq("id", id);
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, is_active: !active } : p));
+    const next = !active;
+    // Otimista + reversão: sem medir a gravação, o switch mentia que salvou.
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, is_active: next } : p));
+    const { data, error } = await supabase.from("qs_products").update({ is_active: next }).eq("id", id).select();
+    if (error || !data || data.length === 0) {
+      console.warn("Erro ao alterar produto:", error);
+      setProducts(prev => prev.map(p => p.id === id ? { ...p, is_active: active } : p));
+      notifyError("Não foi possível alterar o produto — tente novamente.");
+    }
   }
 
   async function deleteProduct(id: string) {
@@ -831,17 +878,17 @@ function ProdutosSection() {
           type="text"
           value={newProduct}
           onChange={(e) => setNewProduct(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addProduct()}
+          onKeyDown={(e) => { if (e.key === "Enter") addProduct(); }}
           placeholder="Nome do produto..."
           className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400"
         />
         <button
           onClick={addProduct}
-          disabled={!newProduct.trim()}
+          disabled={adding || !newProduct.trim()}
           className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50"
           style={{ background: "#0147FF" }}
         >
-          + Adicionar
+          {adding ? "Adicionando..." : "+ Adicionar"}
         </button>
       </div>
 
@@ -916,12 +963,13 @@ function CanaisSection() {
     const newEnabled = !ch.enabled;
     setChannels((prev) => prev.map((c) => c.type === type ? { ...c, enabled: newEnabled } : c));
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("qs_channel_config")
-      .upsert({ type, enabled: newEnabled }, { onConflict: "type" });
-    if (error) {
+      .upsert({ type, enabled: newEnabled }, { onConflict: "type" })
+      .select();
+    if (error || !data || data.length === 0) {
       console.warn("Erro ao atualizar canal:", error);
-      // Reverte o switch — sem isso ele aparentava salvo mesmo sem persistir.
+      // Reverte o switch — sem isso ele aparentava salvo mesmo sem persistir (erro ou RLS).
       setChannels((prev) => prev.map((c) => c.type === type ? { ...c, enabled: !newEnabled } : c));
       notifyError("Não foi possível salvar o canal — tente novamente.");
     }
@@ -1004,11 +1052,21 @@ function HorarioSection() {
   }
 
   async function handleSave() {
+    // Início < fim em todo dia de trabalho (horas "HH:MM" comparam como string).
+    const invalidDay = [1, 2, 3, 4, 5, 6, 0].find((day) => {
+      const d = wh[day];
+      return d.enabled && d.start >= d.end;
+    });
+    if (invalidDay !== undefined) {
+      notifyError(`Horário inválido em ${WEEKDAY_NAMES[invalidDay]}: o início deve ser antes do fim.`);
+      return;
+    }
     setSaving(true);
     const ok = await saveWorkHours(wh);
     setSaving(false);
     setSaved(ok);
-    if (ok) setTimeout(() => setSaved(false), 2500);
+    if (ok) { notifySuccess("Horário de trabalho salvo."); setTimeout(() => setSaved(false), 2500); }
+    else notifyError("Não foi possível salvar o horário — tente novamente.");
   }
 
   if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
@@ -1084,12 +1142,16 @@ function EquipeSection() {
   async function handleSave() {
     const schedulers = parse(schedulersText);
     const owners = parse(ownersText);
-    if (schedulers.length === 0 || owners.length === 0) return;
+    if (schedulers.length === 0 || owners.length === 0) {
+      notifyError("Preencha pelo menos um nome em cada lista.");
+      return;
+    }
     setSaving(true);
     const ok = await saveMeetingTeam(schedulers, owners);
     setSaving(false);
     setSaved(ok);
-    if (ok) setTimeout(() => setSaved(false), 2500);
+    if (ok) { notifySuccess("Equipe da reunião salva."); setTimeout(() => setSaved(false), 2500); }
+    else notifyError("Não foi possível salvar a equipe — tente novamente.");
   }
 
   if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
@@ -1153,6 +1215,8 @@ function WebfoneSection() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [show, setShow] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
   useEffect(() => {
     getSetting<string>(WAVOIP_TOKEN_KEY).then((t) => {
@@ -1166,7 +1230,25 @@ function WebfoneSection() {
     const ok = await setSetting(WAVOIP_TOKEN_KEY, token.trim());
     setSaving(false);
     setSaved(ok);
-    if (ok) setTimeout(() => setSaved(false), 2500);
+    if (ok) { notifySuccess("Token do webfone salvo."); setTimeout(() => setSaved(false), 2500); }
+    else notifyError("Não foi possível salvar o token — tente novamente.");
+  }
+
+  // Testa registrando o dispositivo Wavoip com o token atual (carrega a lib +
+  // device.add). Não faz ligação — só confirma que o token é aceito.
+  async function handleTest() {
+    setTesting(true);
+    setTestResult(null);
+    const r = await ensureWavoipDevice();
+    setTesting(false);
+    if (r.ok) {
+      setTestResult({ ok: true, msg: "Token OK — dispositivo registrado. Abra o telefone para conectar." });
+      notifySuccess("Webfone: token válido e dispositivo registrado.");
+    } else {
+      const msg = r.error || "Não foi possível registrar o dispositivo.";
+      setTestResult({ ok: false, msg });
+      notifyError(`Webfone: ${msg}`);
+    }
   }
 
   if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
@@ -1209,7 +1291,7 @@ function WebfoneSection() {
         </p>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <button
           onClick={handleSave}
           disabled={saving}
@@ -1218,8 +1300,21 @@ function WebfoneSection() {
         >
           {saving ? "Salvando..." : "Salvar token"}
         </button>
+        <button
+          onClick={handleTest}
+          disabled={testing}
+          className="px-5 py-2.5 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          {testing ? "Testando..." : "Testar conexão"}
+        </button>
         {saved && <span className="text-sm font-medium text-green-600">Salvo ✓ — recarregue a página para o webfone reconectar.</span>}
       </div>
+
+      {testResult && (
+        <p className={`text-sm font-medium ${testResult.ok ? "text-green-600" : "text-red-600"}`}>
+          {testResult.ok ? "✓ " : "✗ "}{testResult.msg}
+        </p>
+      )}
     </div>
   );
 }
@@ -1268,7 +1363,8 @@ function SipSection() {
     ])).every(Boolean);
     setSaving(false);
     setSaved(ok);
-    if (ok) setTimeout(() => setSaved(false), 2500);
+    if (ok) { notifySuccess("Configuração do telefone (SIP) salva."); setTimeout(() => setSaved(false), 2500); }
+    else notifyError("Não foi possível salvar — tente novamente.");
   }
 
   if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
@@ -1405,7 +1501,8 @@ function SipProvisioning() {
     ])).every(Boolean);
     setSaving(false);
     setSaved(ok);
-    if (ok) setTimeout(() => setSaved(false), 2500);
+    if (ok) { notifySuccess("Onboarding do telefone salvo."); setTimeout(() => setSaved(false), 2500); }
+    else notifyError("Não foi possível salvar o onboarding — tente novamente.");
   }
 
   if (loading) return null;
@@ -1485,6 +1582,8 @@ function WebfoneWebrtcSection() {
   const [prefix, setPrefix] = useState("");
   const [savingShared, setSavingShared] = useState(false);
   const [sharedSaved, setSharedSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const [users, setUsers] = useState<QsUserLite[]>([]);
   const [lines, setLines] = useState<Record<string, SipLineAdmin>>({});
@@ -1512,8 +1611,25 @@ function WebfoneWebrtcSection() {
     setSavingShared(true);
     const ok = await saveSipSharedConfig({ wsUrl, domain: "", prefix });
     setSavingShared(false);
-    if (ok) { setSharedSaved(true); setTimeout(() => setSharedSaved(false), 2000); }
+    if (ok) { notifySuccess("Padrões do webfone WebRTC salvos."); setSharedSaved(true); setTimeout(() => setSharedSaved(false), 2000); }
     else notifyError("Não foi possível salvar a configuração (apenas admin/gestor).");
+  }
+
+  // Testa a conexão do SEU ramal (ensureRegistered lê a linha SIP do usuário
+  // logado). Confirma que o WSS/ramal/senha registram no VoxFree.
+  async function handleTest() {
+    setTesting(true);
+    setTestResult(null);
+    const r = await ensureRegistered();
+    setTesting(false);
+    if (r.ok) {
+      setTestResult({ ok: true, msg: "Ramal registrado no VoxFree ✓ — o webfone está pronto para ligar." });
+      notifySuccess("Webfone WebRTC: ramal registrado.");
+    } else {
+      const msg = r.error || "Não foi possível registrar o ramal.";
+      setTestResult({ ok: false, msg });
+      notifyError(`Webfone WebRTC: ${msg}`);
+    }
   }
 
   function updateLine(userId: string, patch: Partial<SipLineAdmin>) {
@@ -1568,12 +1684,20 @@ function WebfoneWebrtcSection() {
           <input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="(vazio = disca o número puro)"
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" />
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <button onClick={handleSaveShared} disabled={savingShared} className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#2563EB" }}>
             {savingShared ? "Salvando..." : "Salvar padrões"}
           </button>
+          <button onClick={handleTest} disabled={testing} className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+            {testing ? "Testando..." : "Testar minha conexão"}
+          </button>
           {sharedSaved && <span className="text-sm font-medium text-green-600">Salvo ✓</span>}
         </div>
+        {testResult && (
+          <p className={`text-sm font-medium ${testResult.ok ? "text-green-600" : "text-red-600"}`}>
+            {testResult.ok ? "✓ " : "✗ "}{testResult.msg}
+          </p>
+        )}
       </div>
 
       {/* Ramal + senha por SDR (secreto — só o dono lê a dele) */}
@@ -1726,6 +1850,119 @@ function AgendaSection() {
   );
 }
 
+// ── Integrações (status, read-only) ──────────────────────────────────────────
+// Mostra SE o ChatApp e o Bitrix estão configurados — sem expor nenhum segredo.
+//   • ChatApp: o token vive em qs_settings['chatapp_token'] (renovado pelo n8n).
+//     A RLS 0011 só libera essa chave pra gestor/admin — e só o admin abre as
+//     Configurações; lemos apenas pra dizer "configurado/expirado", nunca o valor.
+//   • Bitrix: o webhook (N8N_SYNC_BASE) vive numa env do SERVIDOR (Vercel) e NÃO
+//     é legível pelo navegador. O sinal honesto que dá pra medir aqui é quantos
+//     leads já estão VINCULADOS ao Bitrix (qs_leads.bitrix_id) — se há vínculos,
+//     a integração está trazendo dados.
+
+type ChatAppStatus = { configured: boolean; expired: boolean; hasLicense: boolean };
+
+function IntegracoesSection() {
+  const [loading, setLoading] = useState(true);
+  const [chatapp, setChatapp] = useState<ChatAppStatus | null>(null);
+  const [bitrixLinked, setBitrixLinked] = useState<number | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      const [tok, cnt] = await Promise.all([
+        getSetting<{ accessToken?: string; expiresAt?: number; licenseId?: string }>("chatapp_token"),
+        supabase.from("qs_leads").select("id", { count: "exact", head: true }).not("bitrix_id", "is", null),
+      ]);
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (tok && tok.accessToken) {
+        setChatapp({
+          configured: true,
+          expired: typeof tok.expiresAt === "number" && tok.expiresAt < nowSec,
+          hasLicense: !!tok.licenseId,
+        });
+      } else {
+        setChatapp({ configured: false, expired: false, hasLicense: false });
+      }
+      setBitrixLinked(cnt.error ? null : (cnt.count ?? 0));
+      setLoading(false);
+    }
+    void load();
+  }, []);
+
+  if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Integrações (status)</h2>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Só leitura — mostra se cada integração está ativa, sem exibir tokens ou segredos.
+        </p>
+      </div>
+
+      {/* ChatApp */}
+      <div className="bg-white border border-gray-100 rounded-xl p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">ChatApp (WhatsApp)</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Envio de mensagens ao lead. Token mantido pelo n8n em qs_settings.</p>
+          </div>
+          {chatapp?.configured ? (
+            <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${chatapp.expired ? "text-amber-600" : "text-green-600"}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${chatapp.expired ? "bg-amber-500" : "bg-green-500"}`} />
+              {chatapp.expired ? "Token expirado" : "Token configurado ✓"}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-300" /> Não configurado
+            </span>
+          )}
+        </div>
+        {chatapp?.configured ? (
+          <p className="text-[11px] text-gray-400 mt-2">
+            {chatapp.expired
+              ? "O token expirou — o workflow \"ChatApp token\" do n8n renova a cada 6h. Se persistir, verifique o n8n."
+              : "Licença: " + (chatapp.hasLicense ? "configurada ✓" : "faltando (preencha o licenseId no workflow do n8n).")}
+          </p>
+        ) : (
+          <p className="text-[11px] text-amber-600 mt-2">
+            Ative o workflow "ChatApp token" no n8n (grava o token em qs_settings) — sem ele o envio direto não funciona (o iframe segue normal).
+          </p>
+        )}
+      </div>
+
+      {/* Bitrix */}
+      <div className="bg-white border border-gray-100 rounded-xl p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Bitrix24</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Espelho de perdas/ganhos/reuniões via n8n. Webhook nas envs do servidor.</p>
+          </div>
+          {bitrixLinked === null ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-300" /> Não foi possível medir
+            </span>
+          ) : bitrixLinked > 0 ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-green-600">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Integração ativa
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-300" /> Sem vínculos ainda
+            </span>
+          )}
+        </div>
+        <p className="text-[11px] text-gray-400 mt-2">
+          {bitrixLinked === null
+            ? "Não deu pra consultar os leads agora."
+            : `${bitrixLinked} lead(s) vinculados ao Bitrix (com bitrix_id).`}
+          {" "}O webhook do QS→Bitrix fica na env <code className="text-gray-500">N8N_SYNC_BASE</code> (servidor) e não é visível aqui por segurança.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -1794,6 +2031,7 @@ export default function SettingsPage() {
         {activeSection === "webfone-webrtc" && <WebfoneWebrtcSection />}
         {activeSection === "telefone-sip" && <SipSection />}
         {activeSection === "usuarios" && <UsuariosSection />}
+        {activeSection === "integracoes" && <IntegracoesSection />}
       </main>
     </div>
   );

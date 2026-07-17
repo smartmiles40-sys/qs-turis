@@ -13,6 +13,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { getSipInstallerUrl, getSipRamalForUser, type SipRamalInfo } from "@/lib/sip";
+import { notifyError } from "@/lib/qs/notify";
 
 interface Props {
   user: { id: string; name: string } | null;
@@ -51,6 +52,26 @@ export default function TelefoneOnboarding({ user }: Props) {
       if (r) setOpen(true);
     });
     return () => { alive = false; };
+  }, [userId]);
+
+  // Reabertura MANUAL (menu do avatar → "Configurar telefone"): re-busca ramal/
+  // instalador e força a exibição, IGNORANDO as chaves done/snooze (só nesta
+  // reabertura — o comportamento automático de 1ª vez continua intacto).
+  useEffect(() => {
+    if (!userId) return;
+    let alive = true;
+    function onReopen() {
+      Promise.all([getSipRamalForUser(userId as string), getSipInstallerUrl()]).then(([r, url]) => {
+        if (!alive) return;
+        setRamal(r);
+        setInstallerUrl(url);
+        if (r) setOpen(true);
+        // Sem ramal mapeado não há o que mostrar — avisa em vez de "não fazer nada".
+        else notifyError("Seu ramal ainda não foi configurado — peça ao gestor em Configurações → Telefone (SIP).");
+      });
+    }
+    window.addEventListener("qs:reopen-tel-onboarding", onReopen);
+    return () => { alive = false; window.removeEventListener("qs:reopen-tel-onboarding", onReopen); };
   }, [userId]);
 
   if (!open || !user || !ramal) return null;
