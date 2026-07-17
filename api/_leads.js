@@ -204,6 +204,18 @@ function pickLeadScore(input) {
  * regenerar tarefas). Assim o webhook do Bitrix pode disparar mais de uma vez
  * pro mesmo negócio sem duplicar card no QS.
  */
+// A coluna qs_leads.source tem CHECK no banco: só aceita
+// 'manual'|'api'|'integracao'|'importacao'. Se o caller (ex.: n8n mandando o
+// CANAL cru "WhatsApp - ..." em source) enviar outro valor, o INSERT estoura
+// 23514 e — com o nó do n8n em continueRegularOutput — o lead SUMIA em silêncio.
+// Sanitiza: valor fora da lista cai em 'integracao'. O canal/fonte real continua
+// preservado em `segment` e na nota de origem.
+const ALLOWED_SOURCE = new Set(['manual', 'api', 'integracao', 'importacao']);
+function normSource(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return ALLOWED_SOURCE.has(s) ? s : 'integracao';
+}
+
 export async function createInboundLead(payload) {
   // Contato normalizado UMA vez — usado no dedupe, no patch e na gravação.
   const email = normEmail(payload.email);
@@ -282,7 +294,7 @@ export async function createInboundLead(payload) {
     phone,
     email,
     linkedin_url: payload.linkedin_url || null,
-    source: payload.source || 'integracao',
+    source: normSource(payload.source),
     // Lead que JÁ entra vinculado a uma cadência (com tarefas geradas logo
     // abaixo) nasce "em_prospeccao" — mesma regra do front ao vincular cadência
     // (LeadsPage/TasksPanel). Antes nascia "nao_iniciado" pra sempre e nada o
