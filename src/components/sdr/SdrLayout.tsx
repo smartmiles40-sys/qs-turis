@@ -58,7 +58,7 @@ import SdrDashboard from "./dashboard/SdrDashboard";
 import CadenceHealthPanel from "./dashboard/CadenceHealthPanel";
 import FupAnalyticsPanel from "./dashboard/FupAnalyticsPanel";
 import AdvancedAnalyticsPanel from "./dashboard/AdvancedAnalyticsPanel";
-import MyDayPanel from "./tasks/MyDayPanel";
+import RetrospectivaModal from "./tasks/RetrospectivaModal";
 import LeadsPage from "./leads/LeadsPage";
 import LeadDetailPage from "./leads/LeadDetailPage";
 import CadencesPage from "./cadences/CadencesPage";
@@ -82,7 +82,6 @@ import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 
 export type SdrNav =
   | "painel"
-  | "meu-dia"
   | "leads"
   | "lead-detail"
   | "cadencias"
@@ -120,7 +119,6 @@ const MENU: (MenuGroup | MenuItem)[] = [
     label: "Execução",
     items: [
       { id: "painel", label: "Painel de Atividades", description: "Fila de tarefas do dia" },
-      { id: "meu-dia", label: "Meu Dia", description: "Suas atividades do dia: feitas e a fazer" },
       { id: "cobertura", label: "Cobertura de Leads", description: "Leads aguardando contato" },
     ],
   },
@@ -499,6 +497,9 @@ export default function SdrLayout() {
       {/* Onboarding do telefone (BravoTech) — só na 1ª vez, por máquina */}
       <TelefoneOnboarding user={currentUser ? { id: currentUser.id, name: currentUser.name } : null} />
 
+      {/* Retrospectiva do dia — modal de boas-vindas, 1x por dia por usuário */}
+      <RetrospectivaModal user={currentUser ? { id: currentUser.id, name: currentUser.name } : null} />
+
       {/* UI flutuante da ligação WebRTC (VoxFree) — só aparece durante a chamada */}
       <WebphoneWidget />
 
@@ -610,11 +611,6 @@ export default function SdrLayout() {
         {activeNav === "painel" && (
           <PageErrorBoundary pageName="Painel de Atividades">
             <TasksPanel onOpenLead={openLeadDetail} />
-          </PageErrorBoundary>
-        )}
-        {activeNav === "meu-dia" && (
-          <PageErrorBoundary pageName="Meu Dia">
-            <MyDayPanel />
           </PageErrorBoundary>
         )}
         {activeNav === "leads" && (
