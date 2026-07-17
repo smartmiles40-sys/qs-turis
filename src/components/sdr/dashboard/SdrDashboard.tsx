@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchDashboardStats, fetchQsUsers, getClosedAtColumn, fetchAllRows, isGoalEffective } from "@/lib/qs/queries";
 import type { GoalType } from "../types";
 import type { SdrUser } from "../types";
+import { CHANNEL_LABELS } from "../types";
+import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import RankingPanel from "./RankingPanel";
 import DailyFlowPanel from "./DailyFlowPanel";
 
@@ -510,6 +512,154 @@ function ContactHeatmap({ cells, loading }: { cells: HeatmapCell[]; loading: boo
   );
 }
 
+// ── Redesign Onda 4: componentes/helpers visuais por papel ──────────────────
+// A Visão Geral foi separada por PAPEL (SDR foca no dia; gestor foca em
+// comparação + exceção). Toda a camada de DADOS (fetches auditados) foi
+// PRESERVADA; estes componentes só reorganizam como os números aparecem, com o
+// selo "como calculamos?" documentando a lógica exata de cada KPI.
+
+// Selo de transparência de métrica (o title= carrega a definição exata).
+function HintPill({ text }: { text: string }) {
+  return (
+    <span
+      title={text}
+      className="text-[11px] font-semibold text-gray-400 border border-dashed border-gray-300 rounded-full px-2 py-0.5 cursor-help select-none whitespace-nowrap"
+    >
+      como calculamos?
+    </span>
+  );
+}
+
+function SectionHeading({ title, hint, extra }: { title: string; hint?: string; extra?: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 mb-3 flex-wrap">
+      <h2 className="text-sm font-bold text-gray-800">{title}</h2>
+      {hint && <HintPill text={hint} />}
+      {extra}
+    </div>
+  );
+}
+
+// Card de KPI do "hero" (rótulo + bolinha semântica + número grande + barra
+// opcional de meta + legenda). Cores semânticas ficam SEPARADAS do azul de marca.
+function HeroCard({
+  label, dotColor, value, valueColor, sub, barPct, barColor, hint,
+}: {
+  label: string; dotColor: string; value: ReactNode; valueColor?: string;
+  sub?: string; barPct?: number | null; barColor?: string; hint?: string;
+}) {
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 flex flex-col gap-1.5">
+      <span className="text-xs font-semibold text-gray-500 flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full inline-block shrink-0" style={{ background: dotColor }} />
+        {label}
+        {hint && <span className="ml-auto"><HintPill text={hint} /></span>}
+      </span>
+      <span
+        className="text-[26px] font-extrabold leading-none tracking-tight tabular-nums"
+        style={{ color: valueColor ?? "#141C2B" }}
+      >
+        {value}
+      </span>
+      {barPct != null && (
+        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden mt-0.5">
+          <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.max(0, barPct))}%`, background: barColor ?? "#0147FF" }} />
+        </div>
+      )}
+      {sub && <span className="text-[11.5px] font-medium text-gray-400">{sub}</span>}
+    </div>
+  );
+}
+
+// Fila por FUP (dia da cadência), com a PARTE ATRASADA em vermelho por etapa.
+// Reaproveita a lógica do CadenceHealthPanel (não existe mais "Novo": quem não
+// teve 1º contato é FUP 1). Recebe os "stages" já calculados.
+function FupQueue({ stages, note }: { stages: { fupDay: number; overdue: boolean }[]; note?: string }) {
+  if (stages.length === 0) {
+    return <p className="text-sm text-gray-400 text-center py-4">Nenhum lead na fila.</p>;
+  }
+  const buckets = [
+    { label: "FUP 1", count: 0, late: 0 },
+    { label: "FUP 2", count: 0, late: 0 },
+    { label: "FUP 3", count: 0, late: 0 },
+    { label: "FUP 4", count: 0, late: 0 },
+    { label: "FUP 5+", count: 0, late: 0 },
+  ];
+  for (const s of stages) {
+    const idx = Math.min(5, Math.max(1, s.fupDay)) - 1;
+    buckets[idx].count++;
+    if (s.overdue) buckets[idx].late++;
+  }
+  const max = Math.max(1, ...buckets.map((b) => b.count));
+  const totalLate = stages.filter((s) => s.overdue).length;
+  return (
+    <div>
+      {buckets.map((b) => {
+        const totalPct = (b.count / max) * 100;
+        const latePct = b.count > 0 ? (b.late / b.count) * totalPct : 0;
+        const goodPct = Math.max(0, totalPct - latePct);
+        return (
+          <div
+            key={b.label}
+            className="grid items-center gap-3 py-1.5 border-b border-gray-50 last:border-0"
+            style={{ gridTemplateColumns: "56px 1fr 76px" }}
+          >
+            <span className="text-[12.5px] font-bold text-gray-500">{b.label}</span>
+            <div className="h-5 rounded-md bg-[#E8EEFF] overflow-hidden flex">
+              <div className="h-full" style={{ width: `${goodPct}%`, background: "#0147FF" }} />
+              <div className="h-full" style={{ width: `${latePct}%`, background: "#DC2626", opacity: 0.9 }} />
+            </div>
+            <span className="text-[12.5px] font-bold text-right tabular-nums text-gray-700">
+              {b.count}
+              {b.late > 0 && <span className="text-[#DC2626]"> · {b.late}</span>}
+            </span>
+          </div>
+        );
+      })}
+      <p className="text-[11.5px] font-medium text-gray-400 mt-2">
+        {stages.length} leads na fila ·{" "}
+        {totalLate > 0
+          ? <b className="text-[#DC2626]">{totalLate} atrasado{totalLate > 1 ? "s" : ""}</b>
+          : "nenhum atrasado"}
+        .{note ? ` ${note}` : ""}
+      </p>
+    </div>
+  );
+}
+
+// ── Tipos/helpers das buscas NOVAS (fila do SDR e visão do time) ─────────────
+interface QueueStage {
+  leadId: string;
+  ownerId: string | null;
+  leadName: string;
+  fupDay: number;
+  overdue: boolean;
+  daysOverdue: number;
+  channel: string | null;
+}
+interface HotLead { id: string; name: string; arrivedAt: string | null; }
+interface ComparativoRow {
+  id: string; name: string;
+  leads: number; contatados: number; reuniao: number; ganho: number;
+  conv: number; atrasadas: number; backlogDias: number;
+}
+interface ZombieSummary { total: number; bySdr: { name: string; count: number }[]; }
+
+// Início do dia LOCAL em ms (BRT é o fuso do negócio) — mesma definição de
+// "atrasada" do resto do sistema (venceu ANTES de hoje 00:00).
+function dayStartMs(d: Date): number { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); }
+
+// Nome de exibição do lead a partir das colunas disponíveis.
+function leadDisplayName(l: { full_name?: string | null; first_name?: string | null; last_name?: string | null }): string {
+  const composed = (l.full_name || [l.first_name, l.last_name].filter(Boolean).join(" ") || "").trim();
+  return composed || "Sem nome";
+}
+
+function channelLabel(ch: string | null): string {
+  if (!ch) return "Atividade";
+  return (CHANNEL_LABELS as Record<string, string>)[ch] ?? ch;
+}
+
 // ── Main Component ──────────────────────────────────────────────────────────
 
 const PERIOD_OPTIONS = [
@@ -620,6 +770,31 @@ export default function SdrDashboard() {
   const [revenueWon, setRevenueWon] = useState<number | null>(null);
   const [sourceRows, setSourceRows] = useState<{ source: string; total: number; ganhos: number; taxa: number }[]>([]);
   const [loadingBusiness, setLoadingBusiness] = useState(true);
+
+  // ── Onda 4: separação por PAPEL ────────────────────────────────────────────
+  // Gestor/admin veem a Visão do Gestor (time); SDR/closer veem a Visão do SDR
+  // (só o próprio). canSeeAllData é a MESMA regra usada no resto do app.
+  const { currentUser } = useQsAuth();
+  const isManager = !!currentUser && canSeeAllData(currentUser.role);
+
+  // Visão do SDR — "Minha fila" (FUP), leads quentes sem 1º contato e priorização.
+  const [myStages, setMyStages] = useState<QueueStage[]>([]);
+  const [hotLeads, setHotLeads] = useState<HotLead[]>([]);
+  const [loadingQueue, setLoadingQueue] = useState(true);
+  const [errQueue, setErrQueue] = useState<string | null>(null);
+
+  // Visão do Gestor — saúde da fila do time, comparativo por SDR e "zumbis".
+  const [teamStages, setTeamStages] = useState<QueueStage[]>([]);
+  const [comparativoRows, setComparativoRows] = useState<ComparativoRow[]>([]);
+  const [zombies, setZombies] = useState<ZombieSummary | null>(null);
+  const [loadingTeam, setLoadingTeam] = useState(true);
+  const [errTeam, setErrTeam] = useState<string | null>(null);
+
+  // SDR só enxerga o próprio: força o "qualificador" para ele e esconde o
+  // seletor (feito no render). Efeitos que dependem de selectedUser reagem sozinhos.
+  useEffect(() => {
+    if (currentUser && !canSeeAllData(currentUser.role)) setSelectedUser(currentUser.id);
+  }, [currentUser]);
 
   const periodLabel = PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label || "Mês atual";
 
@@ -864,9 +1039,10 @@ export default function SdrDashboard() {
     }
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
+  // Detalhamento é só do gestor: não dispara as buscas pesadas para o SDR.
   useEffect(() => {
-    loadChannelPerformance();
-  }, [loadChannelPerformance]);
+    if (isManager) loadChannelPerformance();
+  }, [loadChannelPerformance, isManager]);
 
   // Fetch Heatmap Data (Change 19)
   const loadHeatmap = useCallback(async (silent = false) => {
@@ -920,8 +1096,8 @@ export default function SdrDashboard() {
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
   useEffect(() => {
-    loadHeatmap();
-  }, [loadHeatmap]);
+    if (isManager) loadHeatmap();
+  }, [loadHeatmap, isManager]);
 
   // Fetch Speed-to-Lead (Change 20)
   const loadSpeedToLead = useCallback(async (silent = false) => {
@@ -1002,8 +1178,8 @@ export default function SdrDashboard() {
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
   useEffect(() => {
-    loadSpeedToLead();
-  }, [loadSpeedToLead]);
+    if (isManager) loadSpeedToLead();
+  }, [loadSpeedToLead, isManager]);
 
   // Fetch Operational KPIs
   const loadOperationalKpis = useCallback(async (silent = false) => {
@@ -1243,8 +1419,8 @@ export default function SdrDashboard() {
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
   useEffect(() => {
-    loadFunnel();
-  }, [loadFunnel]);
+    if (isManager) loadFunnel();
+  }, [loadFunnel, isManager]);
 
   // KPIs de negócio: reuniões (show rate), pipeline em R$ e conversão por fonte.
   const loadBusinessKpis = useCallback(async (silent = false) => {
@@ -1366,23 +1542,244 @@ export default function SdrDashboard() {
     loadBusinessKpis();
   }, [loadBusinessKpis]);
 
+  // ── Onda 4: Minha fila (Visão do SDR) ──────────────────────────────────────
+  // Reaproveita a lógica do CadenceHealthPanel escopada ao próprio SDR: a
+  // atividade ATUAL de cada lead (menor scheduled_at) define o FUP; venceu antes
+  // de hoje 00:00 = atrasada. Também separa leads QUENTES sem 1º contato
+  // (status "nao_iniciado" = nunca contatado) para a priorização.
+  const loadMyQueue = useCallback(async (silent = false) => {
+    if (!currentUser || isManager) return; // seção exclusiva do papel operacional
+    if (!silent) setLoadingQueue(true);
+    try {
+      const own = currentUser.id;
+      const [tasks, leads] = await Promise.all([
+        // Paginado (cap 1000 do PostgREST): fila cheia não pode "parar de contar".
+        fetchAllRows<{ lead_id: string; owner_id: string | null; scheduled_at: string; channel_type: string | null }>((f, t) =>
+          supabase
+            .from("qs_tasks")
+            .select("lead_id, owner_id, scheduled_at, channel_type")
+            .in("status", ["pendente", "atrasada"])
+            .eq("owner_id", own)
+            .order("id")
+            .range(f, t)
+        ),
+        fetchAllRows<any>((f, t) =>
+          supabase
+            .from("qs_leads")
+            .select("id, full_name, first_name, last_name, status, arrived_at, created_at, lead_score, owner_id")
+            .eq("owner_id", own)
+            .order("id")
+            .range(f, t)
+        ),
+      ]);
+
+      const leadsById = new Map(leads.map((l: any) => [l.id, l]));
+      const today0 = dayStartMs(new Date());
+
+      // Uma tarefa por lead: a ATUAL = a de menor scheduled_at (vence antes).
+      const currentByLead = new Map<string, any>();
+      for (const t of tasks) {
+        const lead = leadsById.get(t.lead_id);
+        if (!lead || lead.status === "ganho" || lead.status === "perdido") continue;
+        const prev = currentByLead.get(t.lead_id);
+        if (!prev || new Date(t.scheduled_at).getTime() < new Date(prev.scheduled_at).getTime()) currentByLead.set(t.lead_id, t);
+      }
+
+      const built: QueueStage[] = [];
+      for (const [leadId, t] of currentByLead) {
+        const lead = leadsById.get(leadId);
+        const base = lead.arrived_at || lead.created_at;
+        let fupDay = 1;
+        if (base) fupDay = Math.max(1, Math.round((dayStartMs(new Date(t.scheduled_at)) - dayStartMs(new Date(base))) / 86400000) + 1);
+        const sched0 = dayStartMs(new Date(t.scheduled_at));
+        const overdue = sched0 < today0;
+        built.push({
+          leadId,
+          ownerId: t.owner_id ?? lead.owner_id ?? null,
+          leadName: leadDisplayName(lead),
+          fupDay,
+          overdue,
+          daysOverdue: overdue ? Math.round((today0 - sched0) / 86400000) : 0,
+          channel: t.channel_type ?? null,
+        });
+      }
+
+      const hots: HotLead[] = leads
+        .filter((l: any) => l.status === "nao_iniciado" && /quente/i.test(String(l.lead_score ?? "")))
+        .map((l: any) => ({ id: l.id, name: leadDisplayName(l), arrivedAt: l.arrived_at ?? null }))
+        .sort((a: HotLead, b: HotLead) => String(b.arrivedAt ?? "").localeCompare(String(a.arrivedAt ?? "")));
+
+      setMyStages(built);
+      setHotLeads(hots);
+      setErrQueue(null);
+    } catch (e) {
+      console.warn("Erro ao carregar minha fila:", e);
+      setErrQueue("Não foi possível carregar sua fila.");
+    } finally {
+      setLoadingQueue(false);
+    }
+  }, [currentUser, isManager]);
+
+  useEffect(() => {
+    loadMyQueue();
+  }, [loadMyQueue]);
+
+  // ── Onda 4: Visão do time (saúde da fila + comparativo por SDR + zumbis) ────
+  // Time inteiro (ignora o seletor de drill-down, que só afeta o placar/fontes):
+  // são visões de comparação/exceção. Só roda para gestor/admin.
+  const loadTeamOps = useCallback(async (silent = false) => {
+    if (!isManager) return;
+    if (!silent) setLoadingTeam(true);
+    try {
+      // Tudo paginado (cap 1000 do PostgREST) — base do time passa de 1000 fácil.
+      const [leads, openTasks, doneTasks, meets, usersRes] = await Promise.all([
+        fetchAllRows<any>((f, t) =>
+          supabase.from("qs_leads").select("id, full_name, first_name, last_name, owner_id, status, arrived_at, created_at").order("id").range(f, t)
+        ),
+        fetchAllRows<{ lead_id: string; owner_id: string | null; scheduled_at: string }>((f, t) =>
+          supabase.from("qs_tasks").select("lead_id, owner_id, scheduled_at").in("status", ["pendente", "atrasada"]).order("id").range(f, t)
+        ),
+        fetchAllRows<{ lead_id: string; owner_id: string | null }>((f, t) =>
+          supabase.from("qs_tasks").select("lead_id, owner_id").eq("status", "concluida").order("id").range(f, t)
+        ),
+        fetchAllRows<{ lead_id: string; owner_id: string | null }>((f, t) =>
+          supabase.from("qs_meetings").select("lead_id, owner_id").neq("status", "cancelada").order("id").range(f, t)
+        ),
+        supabase.from("qs_users").select("id, name").eq("is_active", true).in("role", ["sdr", "closer", "gestor"]).order("name"),
+      ]);
+      if (usersRes.error) throw usersRes.error;
+      const users = (usersRes.data ?? []) as { id: string; name: string }[];
+      const leadsById = new Map(leads.map((l: any) => [l.id, l]));
+      const today0 = dayStartMs(new Date());
+
+      // Saúde da operação: FUP atual de cada lead aberto do time.
+      const currentByLead = new Map<string, any>();
+      for (const t of openTasks) {
+        const lead = leadsById.get(t.lead_id);
+        if (!lead || lead.status === "ganho" || lead.status === "perdido") continue;
+        const prev = currentByLead.get(t.lead_id);
+        if (!prev || new Date(t.scheduled_at).getTime() < new Date(prev.scheduled_at).getTime()) currentByLead.set(t.lead_id, t);
+      }
+      const stages: QueueStage[] = [];
+      const lateByOwner = new Map<string, number>();
+      const backlogByOwner = new Map<string, number>();
+      for (const [leadId, t] of currentByLead) {
+        const lead = leadsById.get(leadId);
+        const base = lead.arrived_at || lead.created_at;
+        let fupDay = 1;
+        if (base) fupDay = Math.max(1, Math.round((dayStartMs(new Date(t.scheduled_at)) - dayStartMs(new Date(base))) / 86400000) + 1);
+        const sched0 = dayStartMs(new Date(t.scheduled_at));
+        const overdue = sched0 < today0;
+        const dOver = overdue ? Math.round((today0 - sched0) / 86400000) : 0;
+        const owner = t.owner_id ?? lead.owner_id ?? null;
+        stages.push({ leadId, ownerId: owner, leadName: leadDisplayName(lead), fupDay, overdue, daysOverdue: dOver, channel: null });
+        if (owner && overdue) {
+          lateByOwner.set(owner, (lateByOwner.get(owner) ?? 0) + 1);
+          backlogByOwner.set(owner, Math.max(backlogByOwner.get(owner) ?? 0, dOver));
+        }
+      }
+      setTeamStages(stages);
+
+      // Comparativo por SDR (foto da carteira): Leads / Contatados / Reunião /
+      // Ganho / Conv. (ganho ÷ finalizados) + Atrasadas / Backlog (da fila).
+      const doneLeadIds = new Set<string>();
+      doneTasks.forEach((t) => doneLeadIds.add(t.lead_id));
+      const meetLeadIds = new Set<string>();
+      meets.forEach((m) => meetLeadIds.add(m.lead_id));
+      const perOwner = new Map<string, { leads: number; contatados: number; reuniao: number; ganho: number; finalizados: number }>();
+      const ensure = (id: string) => {
+        let r = perOwner.get(id);
+        if (!r) { r = { leads: 0, contatados: 0, reuniao: 0, ganho: 0, finalizados: 0 }; perOwner.set(id, r); }
+        return r;
+      };
+      for (const l of leads as any[]) {
+        if (!l.owner_id) continue;
+        const r = ensure(l.owner_id);
+        r.leads++;
+        // Contatado = status já saiu de "não iniciado" OU tem alguma atividade concluída.
+        if (l.status !== "nao_iniciado" || doneLeadIds.has(l.id)) r.contatados++;
+        if (meetLeadIds.has(l.id)) r.reuniao++;
+        if (l.status === "ganho") { r.ganho++; r.finalizados++; }
+        else if (l.status === "perdido") r.finalizados++;
+      }
+      const rows: ComparativoRow[] = users
+        .map((u) => {
+          const r = perOwner.get(u.id) ?? { leads: 0, contatados: 0, reuniao: 0, ganho: 0, finalizados: 0 };
+          return {
+            id: u.id, name: u.name,
+            leads: r.leads, contatados: r.contatados, reuniao: r.reuniao, ganho: r.ganho,
+            conv: r.finalizados > 0 ? (r.ganho / r.finalizados) * 100 : 0,
+            atrasadas: lateByOwner.get(u.id) ?? 0,
+            backlogDias: backlogByOwner.get(u.id) ?? 0,
+          };
+        })
+        .sort((a, b) => b.reuniao - a.reuniao || b.ganho - a.ganho);
+      setComparativoRows(rows);
+
+      // Atividade parada sem contato ("zumbis"): lead aberto, SEM 1º contato
+      // (nenhuma tarefa concluída) e cuja atividade aberta mais recente está
+      // parada há 3+ dias — ou que nem tem tarefa aberta (fora de qualquer fila).
+      const latestOpenByLead = new Map<string, number>();
+      for (const t of openTasks) {
+        const ms = new Date(t.scheduled_at).getTime();
+        const prev = latestOpenByLead.get(t.lead_id);
+        if (prev === undefined || ms > prev) latestOpenByLead.set(t.lead_id, ms);
+      }
+      const staleBefore = today0 - 3 * 86400000;
+      const zByOwner = new Map<string, number>();
+      let zTotal = 0;
+      for (const l of leads as any[]) {
+        if (l.status !== "nao_iniciado" && l.status !== "em_prospeccao") continue;
+        if (doneLeadIds.has(l.id)) continue; // já teve 1º contato → não é zumbi
+        const latestOpen = latestOpenByLead.get(l.id);
+        const stalled = latestOpen === undefined || latestOpen < staleBefore;
+        if (!stalled) continue;
+        zTotal++;
+        const k = l.owner_id ?? "—";
+        zByOwner.set(k, (zByOwner.get(k) ?? 0) + 1);
+      }
+      const nameById = new Map(users.map((u) => [u.id, u.name] as const));
+      const zRows = [...zByOwner.entries()]
+        .map(([id, count]) => ({ name: id === "—" ? "Sem dono" : (nameById.get(id) ?? "Sem dono"), count }))
+        .sort((a, b) => b.count - a.count);
+      setZombies({ total: zTotal, bySdr: zRows });
+
+      setErrTeam(null);
+    } catch (e) {
+      console.warn("Erro ao carregar visão do time:", e);
+      setErrTeam("Não foi possível carregar a visão do time (saúde da fila, comparativo e alertas).");
+    } finally {
+      setLoadingTeam(false);
+    }
+  }, [isManager]);
+
+  useEffect(() => {
+    loadTeamOps();
+  }, [loadTeamOps]);
+
   // ── Auto-refresh (item P2): a TV do time congelava até alguém dar F5. A cada
   // 60s, com a aba VISÍVEL (guard de document.hidden — mesmo padrão do
   // CoveragePanel), recarrega tudo em modo silencioso (sem piscar "Carregando").
+  // As buscas de detalhamento (canal/heatmap/speed/funil/motivos) e o refreshTick
+  // só rodam para o gestor — o SDR não vê essas seções.
   useEffect(() => {
     const id = setInterval(() => {
       if (document.hidden) return;
       loadKpis(true);
-      loadChannelPerformance(true);
-      loadHeatmap(true);
-      loadSpeedToLead(true);
       loadOperationalKpis(true);
-      loadFunnel(true);
       loadBusinessKpis(true);
-      setRefreshTick((t) => t + 1); // LossReasonsChart escuta este tick
+      loadMyQueue(true);
+      loadTeamOps(true);
+      if (isManager) {
+        loadChannelPerformance(true);
+        loadHeatmap(true);
+        loadSpeedToLead(true);
+        loadFunnel(true);
+        setRefreshTick((t) => t + 1); // LossReasonsChart escuta este tick
+      }
     }, 60_000);
     return () => clearInterval(id);
-  }, [loadKpis, loadChannelPerformance, loadHeatmap, loadSpeedToLead, loadOperationalKpis, loadFunnel, loadBusinessKpis]);
+  }, [loadKpis, loadChannelPerformance, loadHeatmap, loadSpeedToLead, loadOperationalKpis, loadFunnel, loadBusinessKpis, loadMyQueue, loadTeamOps, isManager]);
 
   const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
@@ -1401,29 +1798,39 @@ export default function SdrDashboard() {
             </h1>
             <p className="text-sm text-gray-500 mt-0.5">
               {userName} · {periodLabel}
+              {currentUser && (
+                <span className="ml-2 align-middle inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-gray-100 text-gray-500">
+                  {isManager ? "Visão do Gestor · equipe inteira" : "Visão do SDR · só os seus números"}
+                </span>
+              )}
             </p>
           </div>
         </div>
 
         {/* Filtros */}
         <div className="flex items-center gap-3 mt-4 flex-wrap">
-          {/* Selecionar usuário */}
-          <div className="flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
-            </svg>
-            <select
-              value={selectedUser}
-              onChange={(e) => setSelectedUser(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#0147FF] focus:ring-2 focus:ring-blue-100"
-            >
-              {allUsers.map((u: any) => (
-                <option key={u.id} value={u.id}>{u.name}</option>
-              ))}
-            </select>
-          </div>
+          {/* Selecionar usuário — drill-down por SDR. Só para o gestor: o SDR
+              enxerga apenas o próprio (selectedUser é forçado ao id dele). */}
+          {isManager && (
+            <>
+              <div className="flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+                </svg>
+                <select
+                  value={selectedUser}
+                  onChange={(e) => setSelectedUser(e.target.value)}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#0147FF] focus:ring-2 focus:ring-blue-100"
+                >
+                  {allUsers.map((u: any) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="w-px h-6 bg-gray-200" />
+              <div className="w-px h-6 bg-gray-200" />
+            </>
+          )}
 
           {/* Período */}
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -1462,6 +1869,378 @@ export default function SdrDashboard() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ═══════════════════ VISÃO DO SDR (não-gestor) ═══════════════════ */}
+      {currentUser && !isManager && (() => {
+        const atividadesCard = kpiCards.find((c) => c.type === "atividades");
+        const conversaoCard = kpiCards.find((c) => c.type === "conversao");
+        const conversaoValue = conversaoCard ? conversaoCard.value.replace("%", "") : "—";
+        const myOverdue = myStages.filter((s) => s.overdue).length;
+        const metaPct = meetingKpis && meetingKpis.meta > 0 ? (meetingKpis.agendadas / meetingKpis.meta) * 100 : null;
+        // Priorização: atrasados (mais dias parado no topo) + quentes sem 1º contato.
+        const overdueItems = [...myStages]
+          .filter((s) => s.overdue)
+          .sort((a, b) => b.daysOverdue - a.daysOverdue)
+          .slice(0, 6)
+          .map((s) => ({
+            key: s.leadId,
+            name: s.leadName,
+            meta: `${channelLabel(s.channel)} · atrasada há ${s.daysOverdue} dia${s.daysOverdue !== 1 ? "s" : ""}`,
+            tag: `FUP ${Math.min(5, s.fupDay)}${s.fupDay > 5 ? "+" : ""}`,
+            crit: true,
+          }));
+        const overdueSet = new Set(overdueItems.map((i) => i.key));
+        const hotItems = hotLeads
+          .filter((h) => !overdueSet.has(h.id))
+          .slice(0, 4)
+          .map((h) => ({ key: h.id, name: h.name, meta: "Lead quente · sem 1º contato", tag: "FUP 1", crit: false }));
+        const prioridade = [...overdueItems, ...hotItems].slice(0, 8);
+        return (
+          <>
+            {/* (1) Meu dia — hero de 4 KPIs */}
+            <div>
+              <SectionHeading
+                title="Meu dia"
+                hint="Meta de agendamentos = reuniões que você agendou no período ÷ meta mensal de reuniões. Atividades realizadas = tarefas concluídas no período. Atrasadas = leads cuja atividade atual venceu ANTES de hoje 00:00 (nunca as de hoje). Reuniões = agendadas no período."
+              />
+              {loadingKpis || loadingBusiness || loadingQueue ? (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 h-[104px] flex items-center justify-center">
+                      <span className="text-sm text-gray-400">Carregando...</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <HeroCard
+                    label="Meta de agendamentos"
+                    dotColor="#0147FF"
+                    value={<>{meetingKpis?.agendadas ?? 0}<span className="text-[15px] font-bold text-gray-400"> / {meetingKpis && meetingKpis.meta > 0 ? meetingKpis.meta : "—"}</span></>}
+                    barPct={metaPct}
+                    barColor="#0147FF"
+                    sub={metaPct != null ? `${Math.round(metaPct)}% da meta · faltam ${Math.max(0, (meetingKpis?.meta ?? 0) - (meetingKpis?.agendadas ?? 0))}` : "sem meta de reuniões definida"}
+                  />
+                  <HeroCard
+                    label="Atividades realizadas"
+                    dotColor="#059669"
+                    value={atividadesCard?.value ?? "0"}
+                    valueColor="#059669"
+                    sub={atividadesCard?.metaLabel ?? "no período"}
+                  />
+                  <HeroCard
+                    label="Atrasadas"
+                    dotColor="#DC2626"
+                    value={myOverdue}
+                    valueColor={myOverdue > 0 ? "#DC2626" : "#141C2B"}
+                    sub="venceram antes de hoje"
+                  />
+                  <HeroCard
+                    label="Reuniões agendadas"
+                    dotColor="#0147FF"
+                    value={meetingKpis?.agendadas ?? 0}
+                    sub={`${meetingKpis?.realizadas ?? 0} realizadas · ${meetingKpis?.noShow ?? 0} no-show`}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* (2) Minha fila (FUP) + (3) Minha conversão */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-5">
+                <SectionHeading
+                  title="Minha fila (FUP)"
+                  hint="A fila são seus leads com atividade aberta. FUP N = dia N da cadência (quem não teve 1º contato é FUP 1, não existe mais 'Novo'). A faixa vermelha é a parte atrasada de cada etapa."
+                />
+                {errQueue ? (
+                  <SectionError message={errQueue} onRetry={() => loadMyQueue()} />
+                ) : loadingQueue ? (
+                  <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>
+                ) : (
+                  <FupQueue stages={myStages} />
+                )}
+              </div>
+              <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-5">
+                <SectionHeading
+                  title="Minha conversão"
+                  hint="Connect rate = atividades que conectaram ÷ total (conexão = atendeu/ganho/com_avanço/sem_avanço). Conversão = ganhos ÷ finalizados. Show-rate = reuniões realizadas ÷ (realizadas + no-show). Janela = período selecionado."
+                />
+                {loadingOperational || loadingBusiness || loadingKpis ? (
+                  <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="px-2 py-4">
+                      <div className="text-[24px] font-extrabold tabular-nums text-gray-900">
+                        {connectRate != null ? connectRate.toFixed(0) : "—"}<span className="text-[14px] text-gray-400 font-bold">%</span>
+                      </div>
+                      <div className="text-[11.5px] font-medium text-gray-400 mt-1">Connect rate</div>
+                    </div>
+                    <div className="px-2 py-4 border-x border-gray-100">
+                      <div className="text-[24px] font-extrabold tabular-nums" style={{ color: "#059669" }}>
+                        {conversaoValue}<span className="text-[14px] text-gray-400 font-bold">%</span>
+                      </div>
+                      <div className="text-[11.5px] font-medium text-gray-400 mt-1">Conversão</div>
+                    </div>
+                    <div className="px-2 py-4">
+                      <div className="text-[24px] font-extrabold tabular-nums text-gray-900">
+                        {meetingKpis?.showRate != null ? meetingKpis.showRate.toFixed(0) : "—"}<span className="text-[14px] text-gray-400 font-bold">%</span>
+                      </div>
+                      <div className="text-[11.5px] font-medium text-gray-400 mt-1">Show-rate</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* (5) Priorize agora */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-5">
+              <SectionHeading
+                title="Priorize agora"
+                hint="Primeiro os leads atrasados (mais dias parado no topo), depois os leads quentes ainda sem 1º contato. Ordem por urgência."
+              />
+              {errQueue ? (
+                <SectionError message={errQueue} onRetry={() => loadMyQueue()} />
+              ) : loadingQueue ? (
+                <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>
+              ) : prioridade.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">Nada urgente agora — sem atrasados nem leads quentes sem contato. Bom trabalho!</p>
+              ) : (
+                <div className="flex flex-col">
+                  {prioridade.map((it) => (
+                    <div key={it.key} className="flex items-center gap-3 py-2.5 border-b border-gray-50 last:border-0">
+                      <span className="w-[3px] self-stretch rounded" style={{ background: it.crit ? "#DC2626" : "#D97706" }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-bold text-gray-800 truncate">{it.name}</div>
+                        <div className="text-[11.5px] font-medium text-gray-400 truncate">{it.meta}</div>
+                      </div>
+                      <span
+                        className="text-[10.5px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                        style={{ background: it.crit ? "#FBE3E1" : "#FCEFD6", color: it.crit ? "#D92D20" : "#C77700" }}
+                      >
+                        {it.tag}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* (4) Meu ritmo — reaproveita a Análise dia a dia (já escopada ao SDR) */}
+            <DailyFlowPanel />
+          </>
+        );
+      })()}
+
+      {/* ═══════════════════ VISÃO DO GESTOR — placar do time ═══════════════════ */}
+      {isManager && (() => {
+        const ganhosCard = kpiCards.find((c) => c.type === "ganhos");
+        const crColor = connectRate == null ? "#8792A6" : connectRate > 40 ? "#059669" : connectRate > 20 ? "#C77700" : "#D92D20";
+        const topZombie = zombies && zombies.bySdr.length > 0 ? `${zombies.bySdr[0].count} ${zombies.bySdr[0].count > 1 ? "são" : "é"} de ${zombies.bySdr[0].name}.` : "";
+        return (
+          <>
+            {/* (1) Placar da equipe — hero */}
+            <div>
+              <SectionHeading
+                title="Placar da equipe"
+                hint="Meta do time = ganhos do período ÷ meta mensal (equipe, se cadastrada). Reuniões = agendadas por todos no período. R$ em jogo = valor estimado dos leads em aberto (foto de agora). Connect rate = conexões ÷ atividades (30 dias / período)."
+              />
+              {loadingKpis || loadingBusiness || loadingOperational ? (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 h-[104px] flex items-center justify-center">
+                      <span className="text-sm text-gray-400">Carregando...</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <HeroCard
+                    label="Meta do time (ganhos)"
+                    dotColor="#0147FF"
+                    value={ganhosCard?.value ?? "0"}
+                    barPct={ganhosCard?.metaPercent ?? null}
+                    sub={ganhosCard?.metaLabel ?? ""}
+                  />
+                  <HeroCard
+                    label="Reuniões do time"
+                    dotColor="#0147FF"
+                    value={meetingKpis?.agendadas ?? 0}
+                    sub={meetingKpis && meetingKpis.meta > 0 ? `no período · meta ${meetingKpis.meta}` : "no período"}
+                  />
+                  <HeroCard
+                    label="R$ em jogo"
+                    dotColor="#059669"
+                    value={fmtBRL.format(pipelineOpen ?? 0)}
+                    valueColor="#059669"
+                    sub="pipeline em aberto"
+                  />
+                  <HeroCard
+                    label="Connect rate médio"
+                    dotColor="#C77700"
+                    value={<>{connectRate != null ? connectRate.toFixed(0) : "—"}<span className="text-[15px] font-bold text-gray-400">%</span></>}
+                    valueColor={crColor}
+                    sub="time · período selecionado"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* (2) Ranking + Saúde da operação */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+              <RankingPanel />
+              <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-5">
+                <SectionHeading
+                  title="Saúde da operação"
+                  hint="Fila total do time por etapa FUP + a parcela atrasada (vermelho). É o estoque de trabalho vivo, time inteiro (não muda com o seletor de SDR)."
+                />
+                {errTeam ? (
+                  <SectionError message={errTeam} onRetry={() => loadTeamOps()} />
+                ) : loadingTeam ? (
+                  <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>
+                ) : (
+                  <FupQueue stages={teamStages} note="Maior estoque no topo do funil = onde priorizar reforço." />
+                )}
+              </div>
+            </div>
+
+            {/* (3) Comparativo por SDR */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-5">
+              <SectionHeading
+                title="Comparativo por SDR"
+                hint="Foto da carteira de cada SDR: Leads = total da carteira; Contatados = saíram de 'não iniciado' ou têm atividade concluída; Reunião = têm reunião não-cancelada; Ganho = status ganho; Conv. = ganho ÷ finalizados; Atrasadas/Backlog = da fila atual (atividade vencida)."
+              />
+              {errTeam ? (
+                <SectionError message={errTeam} onRetry={() => loadTeamOps()} />
+              ) : loadingTeam ? (
+                <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>
+              ) : comparativoRows.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">Nenhum SDR ativo encontrado.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        <th className="text-left py-2 px-3 text-[11px] font-bold uppercase tracking-wider text-gray-400">SDR</th>
+                        <th className="text-right py-2 px-3 text-[11px] font-bold uppercase tracking-wider text-gray-400">Leads</th>
+                        <th className="text-right py-2 px-3 text-[11px] font-bold uppercase tracking-wider text-gray-400">Contatados</th>
+                        <th className="text-right py-2 px-3 text-[11px] font-bold uppercase tracking-wider text-gray-400">Reunião</th>
+                        <th className="text-right py-2 px-3 text-[11px] font-bold uppercase tracking-wider text-gray-400">Ganho</th>
+                        <th className="text-right py-2 px-3 text-[11px] font-bold uppercase tracking-wider text-gray-400">Conv.</th>
+                        <th className="text-right py-2 px-3 text-[11px] font-bold uppercase tracking-wider text-gray-400">Atrasadas</th>
+                        <th className="text-right py-2 px-3 text-[11px] font-bold uppercase tracking-wider text-gray-400">Backlog</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comparativoRows.map((r) => (
+                        <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                          <td className="py-2.5 px-3 text-[13px] font-bold text-gray-800">{r.name}</td>
+                          <td className="py-2.5 px-3 text-right tabular-nums text-gray-600">{r.leads}</td>
+                          <td className="py-2.5 px-3 text-right tabular-nums text-gray-600">{r.contatados}</td>
+                          <td className="py-2.5 px-3 text-right tabular-nums text-gray-600">{r.reuniao}</td>
+                          <td className="py-2.5 px-3 text-right tabular-nums text-gray-600">{r.ganho}</td>
+                          <td className="py-2.5 px-3 text-right tabular-nums font-semibold" style={{ color: r.conv >= 10 ? "#059669" : "#47536A" }}>{r.conv.toFixed(0)}%</td>
+                          <td className="py-2.5 px-3 text-right tabular-nums font-semibold" style={{ color: r.atrasadas > 0 ? "#D92D20" : "#8792A6" }}>{r.atrasadas}</td>
+                          <td className="py-2.5 px-3 text-right tabular-nums" style={{ color: r.backlogDias >= 3 ? "#D92D20" : "#8792A6" }}>{r.backlogDias > 0 ? `${r.backlogDias}d` : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* (4) Atividade parada sem contato (zumbis) — bloco de ALERTA */}
+            <div>
+              <SectionHeading
+                title="Atenção da gestão — atividade parada sem contato"
+                hint="Leads em aberto (não iniciado / em prospecção) SEM nenhuma atividade concluída (nunca contatados) cuja atividade aberta mais recente está parada há 3+ dias — ou que nem têm tarefa aberta (fora de qualquer fila). Some por SDR. Só aparece para gestor/admin."
+              />
+              {errTeam ? (
+                <SectionError message={errTeam} onRetry={() => loadTeamOps()} />
+              ) : loadingTeam ? (
+                <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>
+              ) : !zombies || zombies.total === 0 ? (
+                <div className="rounded-xl border p-4 flex items-center gap-3" style={{ background: "#E1F5F0", borderColor: "#0E9F8640" }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0E9F86" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                  <p className="text-sm font-semibold text-gray-600">Nenhum lead parado sem contato há 3+ dias. Operação limpa.</p>
+                </div>
+              ) : (
+                <div className="rounded-xl border p-4 flex gap-3 items-start" style={{ background: "#FBE3E1", borderColor: "#D92D2040" }}>
+                  <svg className="shrink-0" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D92D20" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-semibold text-gray-700 leading-relaxed">
+                      <b style={{ color: "#D92D20" }}>{zombies.total} lead{zombies.total > 1 ? "s" : ""} parado{zombies.total > 1 ? "s" : ""} sem nenhum contato</b> há 3+ dias — fora da fila de qualquer SDR (zumbis). {topZombie}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {zombies.bySdr.map((z) => (
+                        <span key={z.name} className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-white/70 text-gray-600 border border-red-100">
+                          {z.name}: {z.count}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* (5) Fontes & Receita — recap (o detalhamento completo fica abaixo) */}
+            <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-5">
+              <SectionHeading
+                title="Fontes & Receita"
+                hint="Receita ganha = valor fechado (ou estimado) dos ganhos no período. Pipeline = valor estimado dos leads em aberto. Show-rate = reuniões realizadas ÷ decididas. Top fontes = leads criados no período que mais convertem (ganho ÷ leads da fonte)."
+              />
+              {errBusiness ? (
+                <SectionError message={errBusiness} onRetry={() => loadBusinessKpis()} />
+              ) : loadingBusiness ? (
+                <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+                    <div className="px-2 py-3">
+                      <div className="text-[20px] font-extrabold tabular-nums" style={{ color: "#059669" }}>{fmtBRL.format(revenueWon ?? 0)}</div>
+                      <div className="text-[11.5px] font-medium text-gray-400 mt-1">Receita ganha</div>
+                    </div>
+                    <div className="px-2 py-3 border-x border-gray-100">
+                      <div className="text-[20px] font-extrabold tabular-nums text-gray-900">{fmtBRL.format(pipelineOpen ?? 0)}</div>
+                      <div className="text-[11.5px] font-medium text-gray-400 mt-1">Pipeline em aberto</div>
+                    </div>
+                    <div className="px-2 py-3">
+                      <div className="text-[20px] font-extrabold tabular-nums text-gray-900">{meetingKpis?.showRate != null ? `${meetingKpis.showRate.toFixed(0)}%` : "—"}</div>
+                      <div className="text-[11.5px] font-medium text-gray-400 mt-1">Show-rate</div>
+                    </div>
+                  </div>
+                  {sourceRows.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-2">Nenhum lead criado no período.</p>
+                  ) : (
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">Top fontes por conversão</p>
+                      {[...sourceRows].sort((a, b) => b.taxa - a.taxa || b.total - a.total).slice(0, 5).map((s) => {
+                        const maxTaxa = Math.max(1, ...sourceRows.map((r) => r.taxa));
+                        return (
+                          <div key={s.source} className="grid items-center gap-3 py-1" style={{ gridTemplateColumns: "120px 1fr 90px" }}>
+                            <span className="text-[11.5px] font-semibold text-gray-500 truncate">{s.source}</span>
+                            <div className="h-4 rounded bg-[#E1F5F0] overflow-hidden">
+                              <div className="h-full rounded" style={{ width: `${(s.taxa / maxTaxa) * 100}%`, background: "#0E9F86" }} />
+                            </div>
+                            <span className="text-[11.5px] font-bold text-right tabular-nums text-gray-700">{s.taxa.toFixed(0)}% · {s.ganhos}/{s.total}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </>
+        );
+      })()}
+
+      {/* ═══════════ DETALHAMENTO (gestor) — seções analíticas completas ═══════════ */}
+      {isManager && (<>
+      <div className="pt-2">
+        <h2 className="text-sm font-bold text-gray-800">Detalhamento</h2>
+        <p className="text-xs text-gray-400 mt-0.5">Séries históricas, canais, horários, funil e motivos de perda — a camada analítica completa da operação.</p>
       </div>
 
       {/* Area Chart */}
@@ -1839,11 +2618,9 @@ export default function SdrDashboard() {
         />
       </div>
 
-      {/* Ranking de SDRs */}
-      <RankingPanel />
-
       {/* Análise dia a dia (leads que chegaram / agendamentos por dia) */}
       <DailyFlowPanel />
+      </>)}
     </div>
   );
 }
