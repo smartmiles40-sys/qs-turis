@@ -11,7 +11,7 @@ import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
-import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, type CadenceScriptRow } from "@/lib/qs/queries";
+import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, type CadenceScriptRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getLeadScore } from "@/lib/leadScore";
@@ -325,6 +325,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [cadences, setCadences] = useState<Cadence[]>([]);
+  // Só cadências DISPONÍVEIS — pro dropdown do Cadastrar Lead (item 12; congeladas/
+  // rascunho não podem receber lead novo). `cadences` segue completo pro
+  // cadencesMap, que precisa das congeladas pras tarefas antigas.
+  const [availableCadences, setAvailableCadences] = useState<Cadence[]>([]);
   const [qsUsers, setQsUsers] = useState<SdrUser[]>([]);
   const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1645,6 +1649,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const isActive = activeTaskId === task.id;
     const d = new Date(task.scheduled_at);
     const when = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " · " + formatTime(task.scheduled_at);
+    // Atrasada derivada da data (item 9) — a data fica vermelha com o selo.
+    const overdue = classifyTask(task).overdue;
     return (
       <div key={task.id} onClick={() => selectActive(task.id)} className={`qsx-extra-card${isActive ? " on" : ""}`} title="Clique para atender">
         <div className="flex items-center gap-2">
@@ -1653,7 +1659,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[14px] font-bold truncate" style={{ color: "var(--ink)" }}>{lead?.full_name || "Lead"}</div>
-            <div className="text-[11.5px] font-semibold" style={{ color: "var(--blue)" }}>{when}</div>
+            <div className="text-[11.5px] font-semibold" style={{ color: overdue ? "#DC2626" : "var(--blue)" }} title={overdue ? "Atividade atrasada (venceu antes de hoje)" : undefined}>
+              {overdue ? "⚠ " : ""}{when}{overdue ? " · atrasada" : ""}
+            </div>
           </div>
         </div>
         <div className="text-[12px] mt-1.5 line-clamp-2" style={{ color: "var(--ink2)" }}>{task.notes || getActivityLabel(task.channel_type)}</div>
@@ -1668,6 +1676,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const prio = task.priority as PriorityLevel;
     const temp = getLeadScore(lead);
     const isActive = activeTaskId === task.id;
+    // Atrasada é DERIVADA da data (nunca gravada) — item 9: sem o selo, a tarefa
+    // atrasada era indistinguível da de hoje (o horário sozinho engana).
+    const overdue = classifyTask(task).overdue;
     return (
       <div key={task.id} onClick={() => selectActive(task.id)} className={`qsx-pill${isActive ? " sel" : ""}`} title="Clique para atender este lead">
         <div className="qsx-time">{formatTime(task.scheduled_at)}</div>
@@ -1691,6 +1702,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </span>
             )}
             {task.is_extra && <span className="qsx-chip prio-baixa">Extra</span>}
+            {overdue && (
+              <span className="qsx-chip" style={{ background: "rgba(220,38,38,.12)", color: "#DC2626", fontWeight: 700 }} title="Atividade atrasada (venceu antes de hoje)">
+                ⚠ Atrasada · era {new Date(task.scheduled_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
+              </span>
+            )}
           </div>
           <div className="qsx-pco mt-1">
             {lead?.company_name && <b>{lead.company_name}</b>}
@@ -1705,7 +1721,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {task.channel_type === "whatsapp" && lead?.phone && (
-            <button onClick={(e) => { e.stopPropagation(); openWhatsApp(lead); }} className="qsx-pa qsx-pa-wa" title="Abrir no ChatApp e copiar o número">
+            <button onClick={(e) => { e.stopPropagation(); openWhatsAppForTask(task, lead); }} className="qsx-pa qsx-pa-wa" title={getScriptForTask(task) ? "Abrir WhatsApp com o roteiro da atividade preenchido" : "Abrir no ChatApp e copiar o número"}>
               <IconWhatsApp size={18} />
             </button>
           )}
@@ -2572,6 +2588,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-icon-sm:hover { background: var(--line2); color: var(--ink2); }
         .qsx-icon-sm.on { background: rgba(37,99,235,.10); color: var(--blue); border-color: rgba(37,99,235,.3); }
 
+        /* Menu (⋯) do card — adiar/editar/excluir (Sprint 4) */
+        .qsx-menu-item { display: flex; width: 100%; align-items: center; gap: 8px; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--ink2); background: #fff; border: 0; cursor: pointer; text-align: left; font-family: inherit; white-space: nowrap; }
+        .qsx-menu-item:hover { background: var(--line2); }
+        .qsx-menu-item.danger { color: var(--red); }
+        .qsx-menu-item:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+
         /* Atividades extras (retornos) — coluna à esquerda alinhada ao cabeçalho, em azul */
         .qsx-extras-head { font-size: 12.5px; font-weight: 700; letter-spacing: .1px; color: var(--blue); margin: 0 2px 11px; display: flex; align-items: center; gap: 8px; }
         .qsx-extra-card { background: rgba(37,99,235,.06); border: 1.5px solid rgba(37,99,235,.35); border-radius: 16px; padding: 12px 14px; cursor: pointer; transition: box-shadow .15s, border-color .15s; }
@@ -2650,12 +2672,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           ══════════════════════════════════════════════════════════════════════ */}
       {toast && (
         <div
-          className="fixed bottom-4 right-4 z-[100] bg-gray-900 text-white px-4 py-3 rounded-lg shadow-xl text-sm font-medium"
+          className="fixed bottom-4 right-4 z-[100] bg-gray-900 text-white px-4 py-3 rounded-lg shadow-xl text-sm font-medium flex items-center gap-3"
           style={{
             animation: toast.visible ? "toastIn 0.3s ease-out" : "toastOut 0.3s ease-out forwards",
           }}
         >
-          {toast.message}
+          <span>{toast.message}</span>
+          {toast.action && (
+            <button
+              onClick={() => toast.action?.run()}
+              className="shrink-0 font-bold underline underline-offset-2"
+              style={{ color: "#7DD3FC", background: "none", border: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
 
@@ -3073,15 +3104,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   placeholder="Digite o nome do lead..."
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400"
                 />
-                {extraTask._searchText && !extraTask.lead_id && (
-                  <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                    {leads
-                      .filter(l => {
-                        const q = extraTask._searchText.toLowerCase();
-                        return (l.full_name?.toLowerCase().includes(q) || l.email?.toLowerCase().includes(q) || l.phone?.includes(q) || l.id.includes(q));
-                      })
-                      .slice(0, 10)
-                      .map(l => (
+                {extraTask._searchText && !extraTask.lead_id && (() => {
+                  // Lead ganho/perdido fica FORA da busca (Sprint 4, item 4): a tarefa
+                  // criada pra ele não passa no filtro da fila — nascia invisível.
+                  const q = extraTask._searchText.toLowerCase();
+                  const matches = leads.filter(l =>
+                    l.status !== "ganho" && l.status !== "perdido" &&
+                    (l.full_name?.toLowerCase().includes(q) || l.email?.toLowerCase().includes(q) || l.phone?.includes(q) || l.id.includes(q))
+                  );
+                  return (
+                    <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {matches.slice(0, 10).map(l => (
                         <button
                           key={l.id}
                           onClick={() => setExtraTask(p => ({ ...p, lead_id: l.id, _searchText: (l.full_name ?? "") + (l.company_name ? ` · ${l.company_name}` : "") }))}
@@ -3091,16 +3124,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                           {l.company_name && <span className="text-gray-400"> · {l.company_name}</span>}
                           {l.phone && <span className="text-gray-300 text-xs ml-2">{l.phone}</span>}
                         </button>
-                      ))
-                    }
-                    {leads.filter(l => {
-                      const q = extraTask._searchText.toLowerCase();
-                      return (l.full_name?.toLowerCase().includes(q) || l.email?.toLowerCase().includes(q) || l.phone?.includes(q) || l.id.includes(q));
-                    }).length === 0 && (
-                      <p className="px-3 py-2 text-xs text-gray-400">Nenhum lead encontrado</p>
-                    )}
-                  </div>
-                )}
+                      ))}
+                      {matches.length === 0 && (
+                        <p className="px-3 py-2 text-xs text-gray-400">Nenhum lead ativo encontrado (leads ganhos/perdidos ficam fora)</p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Canal *</label>

@@ -1068,6 +1068,11 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   }
 
   const statusColor = STATUS_COLORS[lead.status];
+  // Lead fechado não mostra Ganho/Perdido (re-clicar re-disparava o Bitrix e
+  // sobrescrevia o desfecho); a saída correta é "Reativar Lead".
+  const isClosed = lead.status === "ganho" || lead.status === "perdido";
+  // Excluir lead é ação de gestor/admin (RLS leads_delete = qs_is_manager()).
+  const canDeleteLead = !!currentUser && canSeeAllData(currentUser.role);
 
   // ── Info Row helper ──
   function InfoRow({ label, value }: { label: string; value: string | null | undefined }) {
@@ -2039,6 +2044,16 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {/* Editar lead (Sprint 4 — o maior buraco do app: nada era editável) */}
+          <button
+            onClick={openEditModal}
+            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            Editar
+          </button>
           <button
             onClick={() => setShowHandoverModal(true)}
             className="px-4 py-2 rounded-lg bg-[#2563EB] text-sm font-semibold text-white hover:bg-[#1D4ED8] transition-colors flex items-center gap-2"
@@ -2051,32 +2066,38 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             </svg>
             Enviar para Closer
           </button>
-          <button
-            onClick={markAsWon}
-            className="px-4 py-2 rounded-lg bg-green-600 text-sm font-medium text-white hover:bg-green-700 transition-colors"
-          >
-            Ganho
-          </button>
-          <div className="relative inline-block">
-            <select
-              value={selectedLossReason}
-              onChange={(e) => {
-                setSelectedLossReason(e.target.value);
-                if (e.target.value) {
-                  markAsLost(e.target.value);
-                } else {
-                  markAsLost();
-                }
-              }}
-              className="px-4 py-2 rounded-lg bg-red-600 text-sm font-medium text-white hover:bg-red-700 transition-colors appearance-none cursor-pointer pr-8"
-              style={{ backgroundImage: "none" }}
-            >
-              <option value="">Perdido</option>
-              {lossReasons.map((lr) => (
-                <option key={lr.id} value={lr.id}>{lr.label}</option>
-              ))}
-            </select>
-          </div>
+          {/* Lead fechado esconde Ganho/Perdido (Sprint 4): re-clicar re-disparava
+              o evento no Bitrix e sobrescrevia o desfecho já dado. */}
+          {!isClosed && (
+            <>
+              <button
+                onClick={openWonModal}
+                className="px-4 py-2 rounded-lg bg-green-600 text-sm font-medium text-white hover:bg-green-700 transition-colors"
+              >
+                Ganho
+              </button>
+              <div className="relative inline-block">
+                <select
+                  value={selectedLossReason}
+                  onChange={(e) => {
+                    setSelectedLossReason(e.target.value);
+                    if (e.target.value) {
+                      markAsLost(e.target.value);
+                    } else {
+                      markAsLost();
+                    }
+                  }}
+                  className="px-4 py-2 rounded-lg bg-red-600 text-sm font-medium text-white hover:bg-red-700 transition-colors appearance-none cursor-pointer pr-8"
+                  style={{ backgroundImage: "none" }}
+                >
+                  <option value="">Perdido</option>
+                  {lossReasons.map((lr) => (
+                    <option key={lr.id} value={lr.id}>{lr.label}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
           <button
             onClick={() => setShowMeetingModal(true)}
             className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -2121,7 +2142,17 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                     await createCadenceTasks(lead.id, lead.cadence_id, lead.owner_id);
                   }
 
+                  // Sprint 4: a reativação agora tem rastro no Bitrix — antes o
+                  // deal ficava em LOSE lá enquanto o QS trabalhava o lead de novo.
+                  // Whitelist do sync é perdido|ganho|reuniao|nota → vai como "nota".
+                  notifyBitrix("nota", {
+                    lead_id: lead.id,
+                    bitrix_id: lead.bitrix_id,
+                    body: `Lead REATIVADO no QS${currentUser?.name ? ` por ${currentUser.name}` : ""} — voltou pra prospecção com a cadência reiniciada do dia 1. Atualize a coluna do negócio no Bitrix se necessário.`,
+                  });
+
                   setLead({ ...lead, status: "em_prospeccao" as LeadStatus, loss_reason_id: null });
+                  await reloadTasks();
                 } finally {
                   setReactivating(false);
                 }
@@ -2131,6 +2162,20 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               style={{ background: "#0147FF" }}
             >
               {reactivating ? "Reativando..." : "↩ Reativar Lead"}
+            </button>
+          )}
+          {/* Excluir lead (Sprint 4 — só gestor/admin; RLS leads_delete confirma) */}
+          {canDeleteLead && (
+            <button
+              onClick={handleDeleteLead}
+              disabled={deletingLead}
+              className="px-4 py-2 rounded-lg border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+              title="Excluir o lead e todo o histórico (irreversível)"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              {deletingLead ? "Excluindo..." : "Excluir"}
             </button>
           )}
         </div>
@@ -2192,24 +2237,17 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               </div>
             ) : (
               <div className="flex items-center gap-3">
-                <button
-                  onClick={() => scheduleReEngagement(30)}
-                  className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#0147FF] hover:bg-[#0147FF]/5 transition-all"
-                >
-                  30 dias
-                </button>
-                <button
-                  onClick={() => scheduleReEngagement(60)}
-                  className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#0147FF] hover:bg-[#0147FF]/5 transition-all"
-                >
-                  60 dias
-                </button>
-                <button
-                  onClick={() => scheduleReEngagement(90)}
-                  className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#0147FF] hover:bg-[#0147FF]/5 transition-all"
-                >
-                  90 dias
-                </button>
+                {/* disabled durante a gravação (Sprint 4): dois toques criavam DUAS tarefas */}
+                {[30, 60, 90].map((days) => (
+                  <button
+                    key={days}
+                    onClick={() => scheduleReEngagement(days)}
+                    disabled={schedulingReContact}
+                    className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#0147FF] hover:bg-[#0147FF]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    {days} dias
+                  </button>
+                ))}
               </div>
             )}
             <div className="flex justify-end mt-4">
@@ -2348,13 +2386,13 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               </button>
               <button
                 onClick={handleHandover}
-                disabled={!selectedCloser}
+                disabled={!selectedCloser || savingHandover}
                 className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 transition-colors flex items-center gap-2"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
-                Confirmar Handover
+                {savingHandover ? "Enviando..." : "Confirmar Handover"}
               </button>
             </div>
           </div>

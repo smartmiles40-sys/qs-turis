@@ -1006,30 +1006,115 @@ export default function SdrDashboard() {
   }, [loadSpeedToLead]);
 
   // Fetch Operational KPIs
-  useEffect(() => {
-    async function loadOperationalKpis() {
-      setLoadingOperational(true);
+  const loadOperationalKpis = useCallback(async (silent = false) => {
+    if (!silent) setLoadingOperational(true);
+    try {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
       // Data de FECHAMENTO real (closed_at, migration 0012; fallback updated_at).
       const closedCol = await getClosedAtColumn();
+      const nowIso = new Date().toISOString();
 
-      // 1. Ciclo Médio de Qualificação
-      let qCiclo = supabase
-        .from("qs_leads")
-        .select(`arrived_at, ${closedCol}`)
-        .in("status", ["ganho", "perdido"])
-        .not("arrived_at", "is", null);
-      if (ownerId) qCiclo = qCiclo.eq("owner_id", ownerId);
-      if (from) qCiclo = qCiclo.gte(closedCol, from);
-      if (to) qCiclo = qCiclo.lte(closedCol, to);
+      // 1. Ciclo Médio de Qualificação — paginado (cap 1000 do PostgREST)
+      const cicloPromise = fetchAllRows<any>((f, t) => {
+        let q = supabase
+          .from("qs_leads")
+          .select(`arrived_at, ${closedCol}`)
+          .in("status", ["ganho", "perdido"])
+          .not("arrived_at", "is", null)
+          .order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        if (from) q = q.gte(closedCol, from);
+        if (to) q = q.lte(closedCol, to);
+        return q.range(f, t);
+      });
 
-      const { data: cicloData } = await qCiclo;
-      if (cicloData && cicloData.length > 0) {
+      // 2. Eficiência da Cadência — paginado
+      const cadencePromise = fetchAllRows<any>((f, t) => {
+        let q = supabase
+          .from("qs_leads")
+          .select("cadence_id, status, cadence:qs_cadences(name)")
+          .in("status", ["ganho", "perdido"])
+          .not("cadence_id", "is", null)
+          .order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        if (from) q = q.gte(closedCol, from);
+        if (to) q = q.lte(closedCol, to);
+        return q.range(f, t);
+      });
+
+      // 3. Taxa de Contato Efetivo — só precisamos CONTAR: `count exact + head`
+      // não sofre o cap de 1000 linhas nem baixa payload.
+      let qConnTotal = supabase
+        .from("qs_tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "concluida");
+      let qConnHit = supabase
+        .from("qs_tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "concluida")
+        .in("contact_result", CONNECTED_RESULTS);
+      if (ownerId) {
+        qConnTotal = qConnTotal.eq("owner_id", ownerId);
+        qConnHit = qConnHit.eq("owner_id", ownerId);
+      }
+      if (from) {
+        qConnTotal = qConnTotal.gte("completed_at", from);
+        qConnHit = qConnHit.gte("completed_at", from);
+      }
+      if (to) {
+        qConnTotal = qConnTotal.lte("completed_at", to);
+        qConnHit = qConnHit.lte("completed_at", to);
+      }
+
+      // 4. Taxa de Tarefas Atrasadas — idem, 3 contagens head
+      let qOpenTotal = supabase
+        .from("qs_tasks")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["pendente", "atrasada"]);
+      let qLate = supabase
+        .from("qs_tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "atrasada");
+      let qPendVencida = supabase
+        .from("qs_tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pendente")
+        .lt("scheduled_at", nowIso);
+      if (ownerId) {
+        qOpenTotal = qOpenTotal.eq("owner_id", ownerId);
+        qLate = qLate.eq("owner_id", ownerId);
+        qPendVencida = qPendVencida.eq("owner_id", ownerId);
+      }
+
+      // 5. Reuniões Agendadas por SDR — paginado
+      const meetingsPromise = fetchAllRows<any>((f, t) => {
+        let q = supabase
+          .from("qs_meetings")
+          .select("owner_id, status, owner:qs_users(name)")
+          .in("status", ["agendada", "realizada"])
+          .order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        if (from) q = q.gte("created_at", from);
+        if (to) q = q.lte("created_at", to);
+        return q.range(f, t);
+      });
+
+      // Tudo independente → uma rodada só (antes eram 5 idas em SÉRIE).
+      const [cicloData, cadenceData, connTotalRes, connHitRes, openTotalRes, lateRes, pendVencidaRes, meetingsData] =
+        await Promise.all([cicloPromise, cadencePromise, qConnTotal, qConnHit, qOpenTotal, qLate, qPendVencida, meetingsPromise]);
+      if (connTotalRes.error) throw connTotalRes.error;
+      if (connHitRes.error) throw connHitRes.error;
+      if (openTotalRes.error) throw openTotalRes.error;
+      if (lateRes.error) throw lateRes.error;
+      if (pendVencidaRes.error) throw pendVencidaRes.error;
+
+      // 1. Ciclo médio
+      if (cicloData.length > 0) {
         let totalDays = 0;
         let count = 0;
-        (cicloData as any[]).forEach((row) => {
+        cicloData.forEach((row) => {
           if (!row.arrived_at || !row[closedCol]) return;
           const diff = (new Date(row[closedCol]).getTime() - new Date(row.arrived_at).getTime()) / 86400000;
           if (diff >= 0) {
@@ -1042,20 +1127,11 @@ export default function SdrDashboard() {
         setCicloMedio(null);
       }
 
-      // 2. Eficiência da Cadência
-      let qCadence = supabase
-        .from("qs_leads")
-        .select("cadence_id, status, cadence:qs_cadences(name)")
-        .in("status", ["ganho", "perdido"])
-        .not("cadence_id", "is", null);
-      if (ownerId) qCadence = qCadence.eq("owner_id", ownerId);
-      if (from) qCadence = qCadence.gte(closedCol, from);
-      if (to) qCadence = qCadence.lte(closedCol, to);
-
-      const { data: cadenceData } = await qCadence;
+      // 2. Eficiência da cadência
       const cadenceMap = new Map<string, { name: string; total: number; ganhos: number }>();
-      ((cadenceData ?? []) as any[]).forEach((row) => {
-        const name = row.cadence?.name || "Sem cadência";
+      cadenceData.forEach((row) => {
+        const cad = Array.isArray(row.cadence) ? row.cadence[0] : row.cadence;
+        const name = cad?.name || "Sem cadência";
         const entry = cadenceMap.get(name) || { name, total: 0, ganhos: 0 };
         entry.total++;
         if (row.status === "ganho") entry.ganhos++;
@@ -1066,56 +1142,20 @@ export default function SdrDashboard() {
         .sort((a, b) => b.total - a.total);
       setCadenceEfficiency(cadenceRows);
 
-      // 3. Taxa de Contato Efetivo (Connect Rate)
-      let qConnect = supabase
-        .from("qs_tasks")
-        .select("contact_result")
-        .eq("status", "concluida");
-      if (ownerId) qConnect = qConnect.eq("owner_id", ownerId);
-      if (from) qConnect = qConnect.gte("completed_at", from);
-      if (to) qConnect = qConnect.lte("completed_at", to);
+      // 3. Connect rate
+      const connTotal = connTotalRes.count ?? 0;
+      setConnectRate(connTotal > 0 ? ((connHitRes.count ?? 0) / connTotal) * 100 : null);
 
-      const { data: connectData } = await qConnect;
-      if (connectData && connectData.length > 0) {
-        const total = connectData.length;
-        const atendeu = (connectData as any[]).filter((r) => isConnected(r.contact_result)).length;
-        setConnectRate(total > 0 ? (atendeu / total) * 100 : null);
-      } else {
-        setConnectRate(null);
-      }
+      // 4. Tarefas atrasadas
+      const openTotal = openTotalRes.count ?? 0;
+      const overdue = (lateRes.count ?? 0) + (pendVencidaRes.count ?? 0);
+      setTasksOverdueRate(openTotal > 0 ? (overdue / openTotal) * 100 : null);
 
-      // 4. Taxa de Tarefas Atrasadas
-      let qOverdue = supabase
-        .from("qs_tasks")
-        .select("status, scheduled_at")
-        .in("status", ["pendente", "atrasada"]);
-      if (ownerId) qOverdue = qOverdue.eq("owner_id", ownerId);
-
-      const { data: overdueData } = await qOverdue;
-      if (overdueData && overdueData.length > 0) {
-        const now = new Date().toISOString();
-        const total = overdueData.length;
-        const overdue = (overdueData as any[]).filter(
-          (r) => r.status === "atrasada" || (r.status === "pendente" && r.scheduled_at && r.scheduled_at < now)
-        ).length;
-        setTasksOverdueRate(total > 0 ? (overdue / total) * 100 : null);
-      } else {
-        setTasksOverdueRate(null);
-      }
-
-      // 5. Reuniões Agendadas por SDR
-      let qMeetings = supabase
-        .from("qs_meetings")
-        .select("owner_id, status, owner:qs_users(name)")
-        .in("status", ["agendada", "realizada"]);
-      if (ownerId) qMeetings = qMeetings.eq("owner_id", ownerId);
-      if (from) qMeetings = qMeetings.gte("created_at", from);
-      if (to) qMeetings = qMeetings.lte("created_at", to);
-
-      const { data: meetingsData } = await qMeetings;
+      // 5. Reuniões por SDR
       const meetingsMap = new Map<string, number>();
-      ((meetingsData ?? []) as any[]).forEach((row) => {
-        const name = row.owner?.name || "Sem nome";
+      meetingsData.forEach((row) => {
+        const owner = Array.isArray(row.owner) ? row.owner[0] : row.owner;
+        const name = owner?.name || "Sem nome";
         meetingsMap.set(name, (meetingsMap.get(name) || 0) + 1);
       });
       const meetingsRows: SdrMeetings[] = Array.from(meetingsMap.entries())
@@ -1123,42 +1163,62 @@ export default function SdrDashboard() {
         .sort((a, b) => b.count - a.count);
       setSdrMeetings(meetingsRows);
 
+      setErrOperational(null);
+    } catch (error) {
+      console.warn("Erro ao carregar indicadores operacionais:", error);
+      setErrOperational("Não foi possível carregar os indicadores operacionais.");
+    } finally {
       setLoadingOperational(false);
     }
-    loadOperationalKpis();
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
+
+  useEffect(() => {
+    loadOperationalKpis();
+  }, [loadOperationalKpis]);
 
   // ── Funil por etapa (Sprint Velocidade): coorte de leads criados no período ──
   const [funnel, setFunnel] = useState<{ label: string; count: number }[]>([]);
   const [loadingFunnel, setLoadingFunnel] = useState(true);
-  useEffect(() => {
-    async function loadFunnel() {
-      setLoadingFunnel(true);
+  const loadFunnel = useCallback(async (silent = false) => {
+    if (!silent) setLoadingFunnel(true);
+    try {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
-      let qLeads = supabase.from("qs_leads").select("id, status");
-      if (ownerId) qLeads = qLeads.eq("owner_id", ownerId);
-      if (from) qLeads = qLeads.gte("created_at", from);
-      if (to) qLeads = qLeads.lte("created_at", to);
-
-      const [leadsRes, tasksRes, meetsRes] = await Promise.all([
-        qLeads,
-        supabase.from("qs_tasks").select("lead_id, contact_result").eq("status", "concluida"),
-        supabase.from("qs_meetings").select("lead_id").neq("status", "cancelada"),
+      // Tudo paginado (cap 1000 do PostgREST) — o funil somava só os 1000
+      // primeiros e mentia em silêncio. Tarefas/reuniões de um lead da coorte
+      // acontecem DEPOIS da criação dele → o corte inferior em `from` não perde
+      // nada e evita varrer as tabelas inteiras.
+      const [cohort, tasks, meets] = await Promise.all([
+        fetchAllRows<{ id: string; status: string }>((f, t) => {
+          let q = supabase.from("qs_leads").select("id, status").order("id");
+          if (ownerId) q = q.eq("owner_id", ownerId);
+          if (from) q = q.gte("created_at", from);
+          if (to) q = q.lte("created_at", to);
+          return q.range(f, t);
+        }),
+        fetchAllRows<{ lead_id: string; contact_result: string | null }>((f, t) => {
+          let q = supabase.from("qs_tasks").select("lead_id, contact_result").eq("status", "concluida").order("id");
+          if (from) q = q.gte("completed_at", from);
+          return q.range(f, t);
+        }),
+        fetchAllRows<{ lead_id: string }>((f, t) => {
+          let q = supabase.from("qs_meetings").select("lead_id").neq("status", "cancelada").order("id");
+          if (from) q = q.gte("created_at", from);
+          return q.range(f, t);
+        }),
       ]);
 
-      const cohort = (leadsRes.data ?? []) as { id: string; status: string }[];
       const ids = new Set(cohort.map((l) => l.id));
       const contacted = new Set<string>();
       const connected = new Set<string>();
-      ((tasksRes.data ?? []) as { lead_id: string; contact_result: string | null }[]).forEach((t) => {
+      tasks.forEach((t) => {
         if (!ids.has(t.lead_id)) return;
         contacted.add(t.lead_id);
         if (isConnected(t.contact_result)) connected.add(t.lead_id);
       });
       const met = new Set<string>();
-      ((meetsRes.data ?? []) as { lead_id: string }[]).forEach((m) => { if (ids.has(m.lead_id)) met.add(m.lead_id); });
+      meets.forEach((m) => { if (ids.has(m.lead_id)) met.add(m.lead_id); });
       const won = cohort.filter((l) => l.status === "ganho").length;
 
       setFunnel([
@@ -1168,64 +1228,98 @@ export default function SdrDashboard() {
         { label: "Reunião agendada", count: met.size },
         { label: "Ganhos", count: won },
       ]);
+      setErrFunnel(null);
+    } catch (error) {
+      console.warn("Erro ao carregar funil por etapa:", error);
+      setErrFunnel("Não foi possível carregar o funil por etapa.");
+    } finally {
       setLoadingFunnel(false);
     }
-    loadFunnel();
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
-  // KPIs de negócio: reuniões (show rate), pipeline em R$ e conversão por fonte.
   useEffect(() => {
-    async function loadBusinessKpis() {
-      setLoadingBusiness(true);
+    loadFunnel();
+  }, [loadFunnel]);
+
+  // KPIs de negócio: reuniões (show rate), pipeline em R$ e conversão por fonte.
+  const loadBusinessKpis = useCallback(async (silent = false) => {
+    if (!silent) setLoadingBusiness(true);
+    try {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
+      const closedColWon = await getClosedAtColumn();
 
+      // Todas paginadas (cap 1000 do PostgREST) — pipeline com >1000 leads em
+      // aberto "perdia" dinheiro da soma sem avisar.
       // 1. Reuniões do período (agendadas no período, pelo created_at)
-      let qM = supabase.from("qs_meetings").select("status, created_at");
-      if (ownerId) qM = qM.eq("owner_id", ownerId);
-      if (from) qM = qM.gte("created_at", from);
-      if (to) qM = qM.lte("created_at", to);
+      const mPromise = fetchAllRows<{ status: string }>((f, t) => {
+        let q = supabase.from("qs_meetings").select("status, created_at").order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        if (from) q = q.gte("created_at", from);
+        if (to) q = q.lte("created_at", to);
+        return q.range(f, t);
+      });
 
-      // 1b. Meta de reuniões (qs_goals type=reunioes, mensal)
-      let qMGoal = supabase.from("qs_goals").select("owner_id, target_value, period_start")
+      // 1b. Meta de reuniões (qs_goals type=reunioes, mensal) — mesma regra de
+      // vigência/equipe/donos inativos dos KPIs (isGoalEffective).
+      let qMGoal = supabase.from("qs_goals")
+        .select("owner_id, target_value, period_start, owner:qs_users(is_active)")
         .eq("type", "reunioes").eq("period", "mensal").order("period_start", { ascending: false });
       if (ownerId) qMGoal = qMGoal.eq("owner_id", ownerId);
 
       // 2. Pipeline em aberto (foto atual, não depende do período)
-      let qPipe = supabase.from("qs_leads").select("estimated_value")
-        .in("status", ["nao_iniciado", "em_prospeccao"]);
-      if (ownerId) qPipe = qPipe.eq("owner_id", ownerId);
+      const pipePromise = fetchAllRows<{ estimated_value: number | null }>((f, t) => {
+        let q = supabase.from("qs_leads").select("estimated_value")
+          .in("status", ["nao_iniciado", "em_prospeccao"]).order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        return q.range(f, t);
+      });
 
       // 3. Receita ganha no período (pela data de FECHAMENTO — ver migration 0012)
-      const closedColWon = await getClosedAtColumn();
-      let qWon = supabase.from("qs_leads").select("estimated_value, closed_value")
-        .eq("status", "ganho");
-      if (ownerId) qWon = qWon.eq("owner_id", ownerId);
-      if (from) qWon = qWon.gte(closedColWon, from);
-      if (to) qWon = qWon.lte(closedColWon, to);
+      const wonPromise = fetchAllRows<{ estimated_value: number | null; closed_value: number | null }>((f, t) => {
+        let q = supabase.from("qs_leads").select("estimated_value, closed_value")
+          .eq("status", "ganho").order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        if (from) q = q.gte(closedColWon, from);
+        if (to) q = q.lte(closedColWon, to);
+        return q.range(f, t);
+      });
 
       // 4. Conversão por fonte (leads criados no período)
-      let qSrc = supabase.from("qs_leads").select("segment, status, created_at");
-      if (ownerId) qSrc = qSrc.eq("owner_id", ownerId);
-      if (from) qSrc = qSrc.gte("created_at", from);
-      if (to) qSrc = qSrc.lte("created_at", to);
+      const srcPromise = fetchAllRows<{ segment: string | null; status: string }>((f, t) => {
+        let q = supabase.from("qs_leads").select("segment, status, created_at").order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        if (from) q = q.gte("created_at", from);
+        if (to) q = q.lte("created_at", to);
+        return q.range(f, t);
+      });
 
-      const [mRes, mGoalRes, pipeRes, wonRes, srcRes] = await Promise.all([qM, qMGoal, qPipe, qWon, qSrc]);
+      const [meetings, mGoalRes, pipeRows, wonRows, srcRows] =
+        await Promise.all([mPromise, qMGoal, pipePromise, wonPromise, srcPromise]);
+      if (mGoalRes.error) throw mGoalRes.error;
 
       // Reuniões
-      const meetings = (mRes.data ?? []) as { status: string }[];
       const agendadas = meetings.filter((m) => m.status !== "cancelada").length;
       const realizadas = meetings.filter((m) => m.status === "realizada").length;
       const noShow = meetings.filter((m) => m.status === "no_show").length;
       const decididas = realizadas + noShow;
       const seenOwner = new Set<string>();
       let meta = 0;
+      let teamMeta: number | null = null;
       ((mGoalRes.data ?? []) as any[]).forEach((g) => {
-        const key = g.owner_id ?? "none";
-        if (seenOwner.has(key)) return; // mais recente por owner
-        seenOwner.add(key);
+        if (!isGoalEffective(g.period_start)) return; // meta de mês futuro não vigora
+        const ownerRow = Array.isArray(g.owner) ? g.owner[0] : g.owner;
+        if (g.owner_id && ownerRow && ownerRow.is_active === false) return; // dono desativado
+        if (g.owner_id == null) {
+          if (teamMeta === null) teamMeta = Number(g.target_value) || 0;
+          return;
+        }
+        if (seenOwner.has(g.owner_id)) return; // mais recente por owner
+        seenOwner.add(g.owner_id);
         meta += Number(g.target_value) || 0;
       });
+      // Meta de EQUIPE prevalece na visão "todos" (não soma com individuais).
+      if (!ownerId && teamMeta !== null) meta = teamMeta;
       setMeetingKpis({
         agendadas, realizadas, noShow,
         showRate: decididas > 0 ? (realizadas / decididas) * 100 : null,
@@ -1233,14 +1327,14 @@ export default function SdrDashboard() {
       });
 
       // Pipeline / receita
-      const sum = (rows: any[] | null, pick: (r: any) => number) =>
-        (rows ?? []).reduce((acc, r) => acc + (pick(r) || 0), 0);
-      setPipelineOpen(sum(pipeRes.data as any[], (r) => Number(r.estimated_value)));
-      setRevenueWon(sum(wonRes.data as any[], (r) => Number(r.closed_value ?? r.estimated_value)));
+      const sum = (rows: any[], pick: (r: any) => number) =>
+        rows.reduce((acc, r) => acc + (pick(r) || 0), 0);
+      setPipelineOpen(sum(pipeRows, (r) => Number(r.estimated_value)));
+      setRevenueWon(sum(wonRows, (r) => Number(r.closed_value ?? r.estimated_value)));
 
       // Fonte
       const srcMap = new Map<string, { total: number; ganhos: number }>();
-      ((srcRes.data ?? []) as any[]).forEach((r) => {
+      srcRows.forEach((r) => {
         const key = (r.segment || "Sem fonte").trim() || "Sem fonte";
         const e = srcMap.get(key) || { total: 0, ganhos: 0 };
         e.total++;
@@ -1254,10 +1348,36 @@ export default function SdrDashboard() {
           .slice(0, 12)
       );
 
+      setErrBusiness(null);
+    } catch (error) {
+      console.warn("Erro ao carregar KPIs de negócio:", error);
+      setErrBusiness("Não foi possível carregar reuniões, pipeline e conversão por fonte.");
+    } finally {
       setLoadingBusiness(false);
     }
-    loadBusinessKpis();
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
+
+  useEffect(() => {
+    loadBusinessKpis();
+  }, [loadBusinessKpis]);
+
+  // ── Auto-refresh (item P2): a TV do time congelava até alguém dar F5. A cada
+  // 60s, com a aba VISÍVEL (guard de document.hidden — mesmo padrão do
+  // CoveragePanel), recarrega tudo em modo silencioso (sem piscar "Carregando").
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      loadKpis(true);
+      loadChannelPerformance(true);
+      loadHeatmap(true);
+      loadSpeedToLead(true);
+      loadOperationalKpis(true);
+      loadFunnel(true);
+      loadBusinessKpis(true);
+      setRefreshTick((t) => t + 1); // LossReasonsChart escuta este tick
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [loadKpis, loadChannelPerformance, loadHeatmap, loadSpeedToLead, loadOperationalKpis, loadFunnel, loadBusinessKpis]);
 
   const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 

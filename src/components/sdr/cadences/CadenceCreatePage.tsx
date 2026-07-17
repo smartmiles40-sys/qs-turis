@@ -421,6 +421,23 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       return;
     }
 
+    // Dois "Dia 3" no plano viram duas linhas em qs_cadence_days e tarefas
+    // duplicadas no mesmo dia — bloqueia até o número ficar único.
+    if (duplicatedDayNumbers.size > 0) {
+      const dias = Array.from(duplicatedDayNumbers).sort((a, b) => a - b).join(", ");
+      notifyError(`Há mais de um cartão com o mesmo número de dia (Dia ${dias}) — cada "Dia N" deve aparecer uma única vez.`);
+      setActiveStep(2);
+      return;
+    }
+
+    // Objetivo "Redirecionar" sem destino é promessa vazia: o motor de fim de
+    // cadência (cadenceSweep) age pelo redirect_cadence_id, não pelo rótulo.
+    if (form.objective === "redirecionar" && !form.redirect_cadence_id) {
+      notifyError('O objetivo é "Redirecionar", mas nenhuma cadência de destino foi escolhida — defina na etapa "Gestão de Entrada" → Fim da cadência.');
+      setActiveStep(3);
+      return;
+    }
+
     setSaving(true);
 
     const cadencePayload = {
@@ -445,6 +462,14 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       const { error } = await supabase.from("qs_cadences").update(cadencePayload).eq("id", cadenceId);
       if (error) { console.warn("Erro ao atualizar cadência:", error); notifyError("Não foi possível salvar a cadência — tente novamente."); setSaving(false); return; }
 
+      // ⚠️ P1 conhecido (backlog 2026-07-13): esta edição é delete-tudo +
+      // reinsere SEM transação — se um insert de dia/atividade falhar no meio,
+      // a cadência fica com o plano parcial (a Sprint 3 já bloqueou o pior
+      // caso: salvar por cima com fetch falho). O conserto definitivo é uma
+      // RPC transacional no Postgres (função que recebe o plano inteiro em
+      // JSON e regrava dias+atividades num BEGIN/COMMIT). Decidimos NÃO criar
+      // migration nesta sprint (Sprint 4) — se falhar aqui, reabrir a cadência
+      // e salvar de novo regrava o plano inteiro e conserta.
       // Delete old days (cascade should handle activities)
       await supabase.from("qs_cadence_days").delete().eq("cadence_id", cadenceId);
     } else {
@@ -514,6 +539,18 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   }
 
   function removeDay(dayId: string) {
+    // Dia com atividades: confirma antes (apagar sem querer joga fora canais,
+    // períodos e scripts já preenchidos).
+    const day = form.days.find((d) => d.id === dayId);
+    if (
+      day &&
+      day.activities.length > 0 &&
+      !window.confirm(
+        `Excluir o Dia ${day.day_number} com ${day.activities.length} atividade${day.activities.length > 1 ? "s" : ""}? Os canais e scripts deste dia serão perdidos.`
+      )
+    ) {
+      return;
+    }
     setForm((prev) => ({ ...prev, days: prev.days.filter((d) => d.id !== dayId) }));
   }
 
@@ -555,6 +592,16 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   const cadenceDuration = form.days.length > 0 ? Math.max(...form.days.map((d) => d.day_number)) : 0;
   const isBuilderStep = STEPS[activeStep - 1]?.label === "Construção";
 
+  // Dias com número repetido (dois "Dia 3"): alerta visual no builder e o
+  // handleSave bloqueia até resolver.
+  const dayNumberCounts = new Map<number, number>();
+  form.days.forEach((d) => dayNumberCounts.set(d.day_number, (dayNumberCounts.get(d.day_number) ?? 0) + 1));
+  const duplicatedDayNumbers = new Set(
+    Array.from(dayNumberCounts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([n]) => n)
+  );
+
   function renderStep() {
     switch (activeStep) {
       case 1: return renderStepBasicInfo();
@@ -587,6 +634,23 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
               <option key={ch} value={ch}>{ACQUISITION_LABELS[ch]}</option>
             ))}
           </select>
+        </div>
+        {/* Objetivo: antes era exibido nos cards e no filtro, mas NUNCA era
+            editável (todo mundo nascia "Agendar reunião") — auditoria FASE 3.
+            "Redirecionar" exige a cadência de destino (validado no salvar). */}
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1.5">Objetivo</label>
+          <select value={form.objective} onChange={(e) => updateForm("objective", e.target.value as CadenceObjective)}
+            className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-[#0147FF] bg-white">
+            {(Object.keys(OBJECTIVE_LABELS) as CadenceObjective[]).map((o) => (
+              <option key={o} value={o}>{OBJECTIVE_LABELS[o]}</option>
+            ))}
+          </select>
+          {form.objective === "redirecionar" && (
+            <p className="text-[11px] text-amber-600 mt-1.5">
+              O redirecionamento só acontece com a cadência de destino definida na etapa "Gestão de Entrada" → Fim da cadência.
+            </p>
+          )}
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1.5">Prioridade</label>
@@ -785,29 +849,24 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
           )}
         </div>
 
+        {/* HONESTIDADE (auditoria FASE 3): a escolha "alternado × balanceado" era
+            decorativa — o trigger do banco (migration 0008) SEMPRE balanceia:
+            rodízio por menor carga DENTRO da cadência, desempate pela carga
+            global. Trocamos o seletor sem efeito por um cartão que descreve a
+            regra real. O valor gravado em distribution_mode é preservado. */}
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-3">Distribuição de Leads</label>
-          <div className="flex flex-col md:flex-row gap-3">
-            {(["alternado", "balanceado"] as DistributionMode[]).map((mode) => (
-              <button key={mode} onClick={() => updateForm("distribution_mode", mode)}
-                className={`flex-1 p-4 rounded-xl border-2 transition-all text-left ${
-                  form.distribution_mode === mode ? "border-[#0147FF] bg-[#0147FF]/5" : "border-gray-200 bg-white"
-                }`}>
-                <div className="flex items-center gap-3 mb-2">
-                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                    form.distribution_mode === mode ? "border-[#0147FF]" : "border-gray-300"
-                  }`}>
-                    {form.distribution_mode === mode && <div className="w-2.5 h-2.5 rounded-full bg-[#0147FF]" />}
-                  </div>
-                  <span className="text-sm font-bold text-gray-900 capitalize">{mode}</span>
-                </div>
-                <p className="text-xs text-gray-500 ml-8">
-                  {mode === "alternado"
-                    ? "Leads são distribuídos em rodízio entre os qualificadores responsáveis."
-                    : "Leads são distribuídos com base na carga atual de cada qualificador."}
-                </p>
-              </button>
-            ))}
+          <div className="p-4 rounded-xl border-2 border-gray-200 bg-white">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-sm font-bold text-gray-900">Automática (balanceada)</span>
+              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-gray-100 text-gray-500">
+                regra fixa do sistema
+              </span>
+            </div>
+            <p className="text-xs text-gray-500">
+              Cada lead que entra vai pro SDR do rodízio desta cadência com <b>menos leads ativos nela</b> (desempate
+              pela carga global do SDR). A regra roda no banco, na chegada do lead — não há outra opção por enquanto.
+            </p>
           </div>
         </div>
 
