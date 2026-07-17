@@ -46,9 +46,12 @@ drop policy if exists call_logs_select on qs_call_logs;
 create policy call_logs_select on qs_call_logs for select to authenticated
   using (qs_is_manager() or owner_id = auth.uid() or owner_id is null);
 
+-- INSERT: só pode gravar log em NOME PRÓPRIO (ou owner null do bypass "demo-skip").
+-- Impede um SDR forjar ligação no nome de outro (que adulteraria a estatística de
+-- duração/atendimento por SDR). O app sempre grava com a sessão atual.
 drop policy if exists call_logs_insert on qs_call_logs;
 create policy call_logs_insert on qs_call_logs for insert to authenticated
-  with check (true);
+  with check (owner_id = auth.uid() or owner_id is null);
 
 drop policy if exists call_logs_update on qs_call_logs;
 create policy call_logs_update on qs_call_logs for update to authenticated

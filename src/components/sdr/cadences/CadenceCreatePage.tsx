@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchQsUsers } from "@/lib/qs/queries";
 import { notifyError } from "@/lib/qs/notify";
-import { consumeDuplicateSource } from "./duplicateSource";
+import { peekDuplicateSource, clearDuplicateSource } from "./duplicateSource";
 import type {
   ChannelType,
   AcquisitionChannel,
@@ -313,8 +313,12 @@ interface FormState {
 export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePageProps) {
   const isEdit = cadenceId !== null;
   // DUPLICAÇÃO: em modo criação, o card "Duplicar" pode ter deixado a cadência
-  // de origem no duplicateSource — consumo único no primeiro render.
-  const [dupSourceId] = useState<string | null>(() => (cadenceId === null ? consumeDuplicateSource() : null));
+  // de origem no duplicateSource. LÊ com peek (não limpa) no inicializador — no
+  // StrictMode o inicializador roda 2x e um "consume" limparia a origem pro mount
+  // que fica, abrindo o builder em branco. A limpeza acontece uma vez no effect
+  // abaixo, já com o valor capturado no estado.
+  const [dupSourceId] = useState<string | null>(() => (cadenceId === null ? peekDuplicateSource() : null));
+  useEffect(() => { if (dupSourceId) clearDuplicateSource(); }, [dupSourceId]);
   const [activeStep, setActiveStep] = useState(1);
   const [form, setForm] = useState<FormState>(getDefaultForm);
   const [loading, setLoading] = useState(isEdit || dupSourceId !== null);

@@ -131,6 +131,9 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const [fStatus, setFStatus] = useState<MeetingStatus>("agendada");
   // Combobox de lead (item 5): texto digitado; fLeadId só é preenchido ao escolher.
   const [fLeadSearch, setFLeadSearch] = useState("");
+  // Lista aberta só com o campo em foco — fecha ao clicar fora / tabular (senão a
+  // lista de sugestões ficava flutuando por cima dos campos de baixo).
+  const [leadListOpen, setLeadListOpen] = useState(false);
 
   const fetchMeetings = useCallback(async () => {
     const { data, error } = await supabase
@@ -722,12 +725,15 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                 <input
                   type="text"
                   value={fLeadSearch}
-                  onChange={(e) => { setFLeadSearch(e.target.value); setFLeadId(""); }}
+                  onChange={(e) => { setFLeadSearch(e.target.value); setFLeadId(""); setLeadListOpen(true); }}
+                  onFocus={() => setLeadListOpen(true)}
+                  // Atraso pra o clique num item registrar antes de fechar a lista.
+                  onBlur={() => setTimeout(() => setLeadListOpen(false), 150)}
                   placeholder="Digite o nome, empresa ou telefone do lead..."
                   className={inputClass}
                   autoComplete="off"
                 />
-                {fLeadSearch && !fLeadId && (() => {
+                {leadListOpen && fLeadSearch && !fLeadId && (() => {
                   const q = fLeadSearch.toLowerCase();
                   const matches = leads.filter((l) =>
                     l.full_name?.toLowerCase().includes(q) ||

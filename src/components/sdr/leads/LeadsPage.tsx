@@ -1420,6 +1420,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                       <button
                         onClick={async () => {
                           setCsvImporting(true);
+                          // try/finally: se QUALQUER await lançar no meio, o modal não
+                          // pode ficar travado em "Importando..." (closeCsvModal barra
+                          // o fechamento enquanto csvImporting=true).
+                          try {
                           setCsvProgress(0);
                           setCsvSkipped(null);
                           setCsvPlanned(null);
@@ -1575,7 +1579,12 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                           if (tasksFail > 0) notifyError(`${tasksFail} lead(s) entraram SEM atividades — vincule a cadência deles de novo (senão ficam fora da fila).`);
                           setCsvImportedCount(ok);
                           await fetchLeads();
-                          setCsvImporting(false);
+                          } catch (e) {
+                            console.warn("[CSV] importação falhou:", e);
+                            notifyError("Falha inesperada na importação — tente novamente.");
+                          } finally {
+                            setCsvImporting(false);
+                          }
                         }}
                         disabled={csvImporting}
                         className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"

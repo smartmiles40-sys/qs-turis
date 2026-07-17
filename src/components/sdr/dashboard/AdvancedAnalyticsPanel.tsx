@@ -49,6 +49,14 @@ function pct(num: number, den: number): string {
   return den > 0 ? `${Math.round((num / den) * 100)}%` : "—";
 }
 
+// % de conversão entre etapas do funil, TRAVADA em 100%. As etapas não são
+// estritamente aninhadas (um ganho pode não ter reunião registrada; uma reunião
+// pode preceder o lead sair de "não iniciado"), então a razão crua passaria de
+// 100% e mostraria conversão impossível. O teto mantém o número honesto.
+function pctFunnel(num: number, den: number): string {
+  return den > 0 ? `${Math.min(100, Math.round((num / den) * 100))}%` : "—";
+}
+
 // Mediana de uma lista numérica (ordena e pega o meio; média dos 2 centrais se par).
 function median(nums: number[]): number {
   if (nums.length === 0) return 0;
@@ -139,6 +147,10 @@ export default function AdvancedAnalyticsPanel() {
           .from("qs_meetings")
           .select("lead_id")
           .not("lead_id", "is", null)
+          // Reunião CANCELADA não conta como "teve reunião" (mesmo critério do funil
+          // do dashboard principal, que usa .neq("status","cancelada")) — senão a
+          // etapa reunião infla e diverge do outro painel.
+          .neq("status", "cancelada")
           .order("id")
           .range(f, t),
       );
@@ -173,7 +185,7 @@ export default function AdvancedAnalyticsPanel() {
       const wonP = fetchAllRows<any>((f, t) =>
         supabase
           .from("qs_leads")
-          .select("source, closed_value")
+          .select("source, closed_value, estimated_value")
           .eq("status", "ganho")
           .gte(closedCol, cut)
           .order("id")
@@ -182,7 +194,10 @@ export default function AdvancedAnalyticsPanel() {
 
       const [callRows, meetTermRows, meetLeadRows, leadRows, taskRows, wonRows, usersRes] =
         await Promise.all([callsP, meetTermP, meetLeadsP, leadsP, tasksP, wonP,
-          supabase.from("qs_users").select("id, name").eq("is_active", true)]);
+          // TODOS os usuários (inclusive DESATIVADOS): um SDR desligado ainda tem
+          // ligações/leads/reuniões no período e precisa aparecer com o nome, não
+          // cair em "Sem dono" (mesmo cuidado que GoalsPage/SdrDashboard tomam).
+          supabase.from("qs_users").select("id, name")]);
 
       if (usersRes.error) throw usersRes.error;
 
@@ -224,7 +239,13 @@ export default function AdvancedAnalyticsPanel() {
 
       setWon(wonRows.map((r) => ({
         source: (r.source as string) ?? null,
-        closedValue: r.closed_value == null ? null : Number(r.closed_value),
+        // Fallback pro valor estimado quando o fechado ficou vazio — mesmo critério
+        // do "Reuniões e Receita" do dashboard (closed_value ?? estimated_value);
+        // sem isso o ganho entra como R$0 e deflaciona o ticket médio.
+        closedValue:
+          r.closed_value != null ? Number(r.closed_value)
+          : r.estimated_value != null ? Number(r.estimated_value)
+          : null,
       })));
 
       setUserNames(new Map(((usersRes.data ?? []) as { id: string; name: string }[]).map((u) => [u.id, u.name])));
@@ -576,9 +597,9 @@ export default function AdvancedAnalyticsPanel() {
                           <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{r.contatados}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">{pct(r.contatados, r.leads)}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{r.comReuniao}</td>
-                          <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">{pct(r.comReuniao, r.contatados)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">{pctFunnel(r.comReuniao, r.contatados)}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums font-semibold" style={{ color: GREEN }}>{r.ganho}</td>
-                          <td className="px-5 py-2.5 text-right tabular-nums font-bold" style={{ color: BLUE, background: "rgba(1,71,255,0.05)" }}>{pct(r.ganho, r.comReuniao)}</td>
+                          <td className="px-5 py-2.5 text-right tabular-nums font-bold" style={{ color: BLUE, background: "rgba(1,71,255,0.05)" }}>{pctFunnel(r.ganho, r.comReuniao)}</td>
                         </tr>
                       ))}
                       <tr className="border-t border-gray-200 bg-gray-50 font-bold">
@@ -587,9 +608,9 @@ export default function AdvancedAnalyticsPanel() {
                         <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{funnelTotal.contatados}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">{pct(funnelTotal.contatados, funnelTotal.leads)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{funnelTotal.comReuniao}</td>
-                        <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">{pct(funnelTotal.comReuniao, funnelTotal.contatados)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">{pctFunnel(funnelTotal.comReuniao, funnelTotal.contatados)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: GREEN }}>{funnelTotal.ganho}</td>
-                        <td className="px-5 py-2.5 text-right tabular-nums" style={{ color: BLUE, background: "rgba(1,71,255,0.05)" }}>{pct(funnelTotal.ganho, funnelTotal.comReuniao)}</td>
+                        <td className="px-5 py-2.5 text-right tabular-nums" style={{ color: BLUE, background: "rgba(1,71,255,0.05)" }}>{pctFunnel(funnelTotal.ganho, funnelTotal.comReuniao)}</td>
                       </tr>
                     </tbody>
                   </table>

@@ -123,9 +123,12 @@ export function QsAuthProvider({ children }: { children: ReactNode }) {
           setSessionNotice(DEACTIVATED_MSG);
           await supabase.auth.signOut();
         }
-        // status "error": rede oscilou no boot — NÃO desloga e NÃO mostra o aviso
-        // de "conta desativada" (era o bug). Mantém a sessão de auth; encerra o
-        // loading e deixa o watchdog de 60s / um refresh revalidarem o perfil.
+        // status "error": rede oscilou no boot (as 3 tentativas do resilient
+        // falharam) — NÃO desloga e NÃO mostra o aviso de "conta desativada" (era
+        // o bug). A sessão de auth do supabase-js fica preservada no localStorage,
+        // mas currentUser continua null, então a tela de Login aparece; um refresh
+        // (ou novo login) com a rede de volta recarrega o perfil. O watchdog de 60s
+        // NÃO cobre este caso — ele só roda com currentUser definido.
       }
       setLoading(false);
     });

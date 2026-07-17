@@ -74,6 +74,19 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+// Carimbo do dia local (YYYY-MM-DD). As tarefas (atrasada/hoje) persistem dia após
+// dia enquanto abertas, então "dispensar" precisa ser POR DIA: some hoje, volta a
+// cutucar amanhã. Reuniões-de-hoje/handover/lead saem sozinhos da própria janela,
+// então dispensam com o id puro.
+function todayStamp(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function taskDismissKey(id: string): string {
+  return `task:${id}:${todayStamp()}`;
+}
+
 function leadTitle(lead: NotifTaskLead | null): string {
   return lead?.full_name?.trim() || "Lead sem nome";
 }
@@ -263,7 +276,17 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
     try {
       const raw = localStorage.getItem(dismissKey);
       const arr = raw ? (JSON.parse(raw) as unknown) : [];
-      setDismissed(new Set(Array.isArray(arr) ? (arr as string[]) : []));
+      const all = new Set(Array.isArray(arr) ? (arr as string[]) : []);
+      // Poda dispensas de tarefa de dias ANTERIORES (chave `task:<id>:<data>`) —
+      // GC natural: mantém o storage enxuto e faz a tarefa atrasada voltar a nudge.
+      const stamp = todayStamp();
+      let changed = false;
+      for (const k of all) {
+        const m = /^task:.+:(\d{4}-\d{2}-\d{2})$/.exec(k);
+        if (m && m[1] < stamp) { all.delete(k); changed = true; }
+      }
+      setDismissed(all);
+      if (changed) { try { localStorage.setItem(dismissKey, JSON.stringify([...all])); } catch { /* ignora */ } }
     } catch {
       setDismissed(new Set());
     }
@@ -288,8 +311,8 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
   function dismissAll() {
     setDismissed((prev) => {
       const next = new Set(prev);
-      overdue.forEach((t) => next.add(`task:${t.id}`));
-      today.forEach((t) => next.add(`task:${t.id}`));
+      overdue.forEach((t) => next.add(taskDismissKey(t.id)));
+      today.forEach((t) => next.add(taskDismissKey(t.id)));
       todayMeetings.forEach((m) => next.add(`meeting:${m.id}`));
       received.forEach((h) => next.add(`handover:${h.id}`));
       hotLeads.forEach((l) => next.add(`lead:${l.id}`));
@@ -431,8 +454,8 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
 
   // Itens visíveis = os carregados MENOS os dispensados (item 9). As contagens e o
   // badge saem daqui, então dispensar já reduz o número no sino.
-  const visibleOverdue = overdue.filter((t) => !dismissed.has(`task:${t.id}`));
-  const visibleToday = today.filter((t) => !dismissed.has(`task:${t.id}`));
+  const visibleOverdue = overdue.filter((t) => !dismissed.has(taskDismissKey(t.id)));
+  const visibleToday = today.filter((t) => !dismissed.has(taskDismissKey(t.id)));
   const visibleMeetings = todayMeetings.filter((m) => !dismissed.has(`meeting:${m.id}`));
   const visibleReceived = received.filter((h) => !dismissed.has(`handover:${h.id}`));
   const visibleHot = hotLeads.filter((l) => !dismissed.has(`lead:${l.id}`));
@@ -521,7 +544,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                       <NotifRow
                         key={t.id}
                         onClick={() => openLead(t.lead_id)}
-                        onDismiss={() => dismiss(`task:${t.id}`)}
+                        onDismiss={() => dismiss(taskDismissKey(t.id))}
                         accent="#DC2626"
                         title={leadTitle(t.lead)}
                         subtitle={`${CHANNEL_LABELS[t.channel_type]}${t.lead?.company_name ? ` · ${t.lead.company_name}` : ""}`}
@@ -546,7 +569,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                       <NotifRow
                         key={t.id}
                         onClick={() => openLead(t.lead_id)}
-                        onDismiss={() => dismiss(`task:${t.id}`)}
+                        onDismiss={() => dismiss(taskDismissKey(t.id))}
                         accent="#0147FF"
                         title={leadTitle(t.lead)}
                         subtitle={`${CHANNEL_LABELS[t.channel_type]}${t.lead?.company_name ? ` · ${t.lead.company_name}` : ""}`}

@@ -22,3 +22,18 @@ export function consumeDuplicateSource(): string | null {
   sourceId = null;
   return id;
 }
+
+/**
+ * Só LÊ a origem, sem limpar. Serve pro inicializador do useState do builder:
+ * no StrictMode (dev) o componente monta→desmonta→remonta e o inicializador roda
+ * DUAS vezes; se ele limpasse (consume), o 2º mount — o que fica — leria null e o
+ * "Duplicar" abriria em branco. O builder lê com peek e limpa uma vez num effect.
+ */
+export function peekDuplicateSource(): string | null {
+  return sourceId;
+}
+
+/** Limpa a origem (chamado pelo builder num effect, após o commit). */
+export function clearDuplicateSource(): void {
+  sourceId = null;
+}
