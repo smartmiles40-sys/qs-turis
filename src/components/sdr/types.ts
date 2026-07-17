@@ -173,9 +173,10 @@ export interface WhatsAppMessage {
 export interface Contact {
   id: string;
   lead_id: string;
-  type: string;
+  type: string; // phone | email | whatsapp | linkedin (schema 0001: type+value, sem nome/cargo)
   value: string;
   is_primary: boolean;
+  created_at?: string;
 }
 
 export interface LeadCustomValue {

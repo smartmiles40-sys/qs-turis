@@ -15,6 +15,13 @@
 // e com guarda de corrida (updates condicionados ao estado atual — se outra
 // sessão tratou primeiro, o update afeta 0 linhas e nada duplica). O alcance
 // segue a RLS: SDR varre os próprios leads; gestor/admin varre todos.
+//
+// CONGELAR pausa este motor (Sprint 4): cadência congelada (ou rascunho) não
+// dispara redirecionamento nem perda automática — congelar = pausar a cadência
+// sem mexer nas tarefas já criadas. E o DESTINO do redirecionamento precisa
+// estar "disponivel": destino congelado não recebe lead novo — o lead espera
+// (sem cair na perda, porque o redirecionamento configurado vence a perda) até
+// o destino ser retomado.
 // -----------------------------------------------------------------------------
 
 import { supabase } from "@/lib/supabase";
@@ -46,14 +53,32 @@ interface SweepLead {
 export async function sweepCadenceEndings(): Promise<SweepResult> {
   const result: SweepResult = { redirected: 0, lost: 0 };
   try {
-    // 1. Cadências que têm alguma regra de fim configurada.
+    // 1. Cadências que têm alguma regra de fim configurada — só as DISPONÍVEIS:
+    //    congelada/rascunho = motor pausado (semântica do Congelar, Sprint 4).
     const { data: cadences } = await supabase
       .from("qs_cadences")
       .select("id, name, auto_loss_days, redirect_cadence_id")
+      .eq("status", "disponivel")
       .or("auto_loss_days.not.is.null,redirect_cadence_id.not.is.null");
     const rules = (cadences ?? []) as SweepCadence[];
     if (rules.length === 0) return result;
     const ruleById = new Map(rules.map((c) => [c.id, c]));
+
+    // 1b. Status dos DESTINOS de redirecionamento (podem não estar em `rules`):
+    //     destino que não está "disponivel" não recebe lead novo.
+    const redirectIds = Array.from(
+      new Set(rules.map((c) => c.redirect_cadence_id).filter(Boolean))
+    ) as string[];
+    let redirectStatus = new Map<string, string>();
+    if (redirectIds.length > 0) {
+      const { data: targets } = await supabase
+        .from("qs_cadences")
+        .select("id, status")
+        .in("id", redirectIds);
+      redirectStatus = new Map(
+        ((targets ?? []) as { id: string; status: string }[]).map((t) => [t.id, t.status])
+      );
+    }
 
     // 2. Leads ativos nessas cadências.
     const { data: leadsData } = await supabase
@@ -81,6 +106,11 @@ export async function sweepCadenceEndings(): Promise<SweepResult> {
 
       // 3a. REDIRECIONAR (vence a perda): move pra cadência de destino.
       if (rule.redirect_cadence_id && rule.redirect_cadence_id !== lead.cadence_id) {
+        // Destino congelado/rascunho NÃO recebe lead novo: o lead ESPERA (não
+        // redireciona nem cai na perda automática — o redirecionamento
+        // configurado vence a perda). Quando o destino for retomado, o próximo
+        // sweep move normalmente.
+        if (redirectStatus.get(rule.redirect_cadence_id) !== "disponivel") continue;
         const { data: updated } = await supabase
           .from("qs_leads")
           .update({

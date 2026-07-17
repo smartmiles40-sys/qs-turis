@@ -20,11 +20,16 @@ function cfg() {
   return { url: url.replace(/\/$/, ''), key };
 }
 
+// Timeout padrão das chamadas ao PostgREST. Sem isso, um Supabase lento
+// segurava a função serverless até o limite da Vercel (o caller ficava
+// pendurado). 10s é folgado pra qualquer query nossa e menor que o maxDuration.
+const REST_TIMEOUT_MS = 10_000;
+
 /**
  * Chamada genérica ao PostgREST. `path` é tudo depois de /rest/v1/, incluindo a
  * querystring do PostgREST (ex.: "qs_users?select=id&role=eq.sdr").
  */
-export async function rest(path, { method = 'GET', body, prefer } = {}) {
+export async function rest(path, { method = 'GET', body, prefer, timeoutMs = REST_TIMEOUT_MS } = {}) {
   const { url, key } = cfg();
   const headers = {
     apikey: key,
@@ -33,11 +38,28 @@ export async function rest(path, { method = 'GET', body, prefer } = {}) {
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (prefer) headers['Prefer'] = prefer;
 
-  const res = await fetch(`${url}/rest/v1/${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  // Aborta a requisição se o banco não responder no prazo (vira erro tratável
+  // nos callers, em vez de função pendurada).
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(`${url}/rest/v1/${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      const err = new Error(`PostgREST não respondeu em ${timeoutMs}ms`);
+      err.code = 'TIMEOUT';
+      throw err;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 
   const text = await res.text();
   let json = null;

@@ -30,10 +30,17 @@ function config() {
   };
 }
 
-// ⚠️ ÚNICO CAMPO A CONFIRMAR: a doc renderizada não mostrou o corpo do
-// endpoint messages-text. Pelo nome do endpoint e convenção da API, o campo do
-// texto é "text". Se ao enviar der erro de validação, troque aqui por "body"
-// ou "message" (é o único lugar que muda).
+// ⚠️ ÚNICO CAMPO A CONFIRMAR — NUNCA VALIDADO COM ENVIO REAL (sem credencial
+// ativa até 2026-07-16). A doc renderizada não mostrou o corpo do endpoint
+// messages-text; "text" é dedução pelo nome do endpoint e convenção da API.
+//
+// COMO VALIDAR (1 envio real, quando o token do n8n estiver ativo em qs_settings):
+//   POST https://qs-turis.vercel.app/api/chatapp-send
+//   header  x-internal-secret: <INTERNAL_API_SECRET>
+//   body    { "phone": "55DDDSEUNUMERO", "text": "teste QS" }
+//   → chegou no WhatsApp: campo certo. → erro de validação (400/422): troque
+//     abaixo por 'body' ou 'message' e repita (é o ÚNICO lugar que muda).
+// Passo a passo também em n8n/README.md (seção do chatapp-token-refresh).
 const MESSAGE_TEXT_FIELD = 'text';
 
 // -----------------------------------------------------------------------------

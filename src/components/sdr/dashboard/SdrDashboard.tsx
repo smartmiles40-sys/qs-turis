@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { fetchDashboardStats, fetchQsUsers, getClosedAtColumn } from "@/lib/qs/queries";
+import { fetchDashboardStats, fetchQsUsers, getClosedAtColumn, fetchAllRows, isGoalEffective } from "@/lib/qs/queries";
 import type { GoalType } from "../types";
 import type { SdrUser } from "../types";
 import RankingPanel from "./RankingPanel";
@@ -18,10 +18,29 @@ const isConnected = (r?: string | null): boolean => !!r && CONNECTED_RESULTS.inc
 interface KpiCard {
   label: string;
   value: string;
-  metaPercent: number;
+  // null = período não comparável com a meta MENSAL (só mostramos a % quando o
+  // período selecionado é "Mês atual" — ver comentário na montagem dos cards).
+  metaPercent: number | null;
   metaLabel: string;
   predicted: string;
   type: GoalType;
+}
+
+// ── Banner de erro por seção (padrão da MeetingsPage, com retry) ────────────
+// Erro de query NUNCA pode virar zero/lista vazia parecendo dado real — cada
+// seção que falhar mostra este banner no lugar do conteúdo.
+function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+      <p className="text-sm text-red-700">{message}</p>
+      <button
+        onClick={onRetry}
+        className="shrink-0 text-xs font-semibold text-red-700 border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-100 transition-colors"
+      >
+        Tentar de novo
+      </button>
+    </div>
+  );
 }
 
 interface LossReasonData {
@@ -175,58 +194,92 @@ function LossReasonsChart({
   selectedPeriod,
   customStart,
   customEnd,
+  refreshTick,
 }: {
   selectedUser: string;
   selectedPeriod: string;
   customStart: string;
   customEnd: string;
+  refreshTick: number; // auto-refresh de 60s do dashboard (recarga silenciosa)
 }) {
   const [lossReasons, setLossReasons] = useState<LossReasonData[]>([]);
   const [loadingReasons, setLoadingReasons] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
+  // Chave dos filtros: se ela NÃO mudou, o reload veio do tick de 60s e não
+  // deve piscar "Carregando..." na TV do time (recarga silenciosa).
+  const filtersKey = `${selectedUser}|${selectedPeriod}|${customStart}|${customEnd}`;
+  const lastKeyRef = useRef("");
 
   useEffect(() => {
+    let cancelled = false;
     async function fetchLossReasons() {
-      setLoadingReasons(true);
-      // agora respeita o período selecionado (data de fechamento) e o SDR —
-      // antes era all-time/global e não respondia "esse mês"
-      const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
-      // Data de FECHAMENTO real (closed_at, migration 0012; fallback updated_at).
-      const closedCol = await getClosedAtColumn();
+      const silent = lastKeyRef.current === filtersKey;
+      lastKeyRef.current = filtersKey;
+      if (!silent) setLoadingReasons(true);
+      try {
+        // Respeita o período selecionado (data de FECHAMENTO) e o SDR do header —
+        // o título promete "{userName} · {período}" e o gráfico cumpre.
+        const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+        // Data de FECHAMENTO real (closed_at, migration 0012; fallback updated_at).
+        const closedCol = await getClosedAtColumn();
 
-      // Get leads with status=perdido and their loss reason labels
-      let q = supabase
-        .from("qs_leads")
-        .select("loss_reason:qs_loss_reasons(label)")
-        .eq("status", "perdido")
-        .not("loss_reason_id", "is", null);
-      if (selectedUser !== "all") q = q.eq("owner_id", selectedUser);
-      if (from) q = q.gte(closedCol, from);
-      if (to) q = q.lte(closedCol, to);
+        // Paginado (cap de 1000 linhas do PostgREST) — sem isso a contagem
+        // congela no lead perdido nº 1000 sem nenhum aviso.
+        const data = await fetchAllRows<{ loss_reason: { label: string } | { label: string }[] | null }>(
+          (f, t) => {
+            let q = supabase
+              .from("qs_leads")
+              .select("loss_reason:qs_loss_reasons(label)")
+              .eq("status", "perdido")
+              .not("loss_reason_id", "is", null)
+              .order("id");
+            if (selectedUser !== "all") q = q.eq("owner_id", selectedUser);
+            if (from) q = q.gte(closedCol, from);
+            if (to) q = q.lte(closedCol, to);
+            return q.range(f, t);
+          }
+        );
+        if (cancelled) return;
 
-      const { data, error } = await q;
+        // Aggregate counts by label (embed pode vir objeto ou array — normaliza)
+        const counts: Record<string, number> = {};
+        data.forEach((row) => {
+          const lr = Array.isArray(row.loss_reason) ? row.loss_reason[0] : row.loss_reason;
+          const label = lr?.label;
+          if (label) counts[label] = (counts[label] || 0) + 1;
+        });
 
-      if (error) {
+        const sorted = Object.entries(counts)
+          .map(([label, count]) => ({ label, count }))
+          .sort((a, b) => b.count - a.count);
+
+        setLossReasons(sorted);
+        setErrorMsg(null);
+      } catch (error) {
         console.warn("Erro ao buscar motivos de perda:", error);
-        setLoadingReasons(false);
-        return;
+        if (!cancelled) setErrorMsg("Não foi possível carregar os motivos de perda.");
+      } finally {
+        if (!cancelled) setLoadingReasons(false);
       }
-
-      // Aggregate counts by label
-      const counts: Record<string, number> = {};
-      ((data ?? []) as any[]).forEach((row) => {
-        const label = row.loss_reason?.label;
-        if (label) counts[label] = (counts[label] || 0) + 1;
-      });
-
-      const sorted = Object.entries(counts)
-        .map(([label, count]) => ({ label, count }))
-        .sort((a, b) => b.count - a.count);
-
-      setLossReasons(sorted);
-      setLoadingReasons(false);
     }
     fetchLossReasons();
-  }, [selectedUser, selectedPeriod, customStart, customEnd]);
+    return () => {
+      cancelled = true;
+    };
+  }, [filtersKey, selectedUser, selectedPeriod, customStart, customEnd, refreshTick, retryTick]);
+
+  if (errorMsg) {
+    return (
+      <SectionError
+        message={errorMsg}
+        onRetry={() => {
+          lastKeyRef.current = ""; // força reload NÃO silencioso
+          setRetryTick((t) => t + 1);
+        }}
+      />
+    );
+  }
 
   if (loadingReasons) {
     return <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>;
@@ -263,20 +316,32 @@ function LossReasonsChart({
 // ── KPI Card ────────────────────────────────────────────────────────────────
 
 function KpiCardComponent({ card }: { card: KpiCard }) {
-  const isAbove = card.metaPercent >= 60;
+  const isAbove = (card.metaPercent ?? 0) >= 60;
 
   return (
     <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
       <span className="text-xs text-gray-500">{card.label}</span>
       <span className="text-2xl font-bold text-gray-900">{card.value}</span>
       <div className="flex items-center gap-2 mt-1">
-        <span
-          className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-            isAbove ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
-          }`}
-        >
-          {card.metaPercent}% da meta
-        </span>
+        {card.metaPercent !== null ? (
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+              isAbove ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+            }`}
+          >
+            {card.metaPercent}% da meta
+          </span>
+        ) : (
+          // A meta é MENSAL — comparar "Hoje"/"90 dias" com meta de mês inteiro
+          // mentia (3% vermelho num dia bom, 300% verde em 90 dias). Fora do
+          // "Mês atual" a % some e o card avisa onde ela mora.
+          <span
+            className="rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-gray-100 text-gray-500"
+            title={'A porcentagem compara o realizado do MÊS com a meta mensal — selecione o período "Mês atual" para vê-la.'}
+          >
+            % da meta: ver "Mês atual"
+          </span>
+        )}
       </div>
       <span className="text-xs text-gray-400">{card.metaLabel}</span>
       <span className="text-xs text-gray-400">{card.predicted}</span>
@@ -458,6 +523,16 @@ const PERIOD_OPTIONS = [
   { id: "custom", label: "Personalizado" },
 ];
 
+// Todas as janelas são calculadas em hora LOCAL (BRT é o fuso do negócio) e
+// convertidas pra ISO só na borda da query.
+// "Últimos N dias" INCLUI hoje: N dias de calendário = hoje - (N-1). O antigo
+// "- 7" cobria 8 dias (idem 15/30/90) e o rótulo mentia por um dia inteiro.
+function lastNDays(today: Date, endOfDay: Date, n: number): { from: string; to: string } {
+  const d = new Date(today);
+  d.setDate(d.getDate() - (n - 1));
+  return { from: d.toISOString(), to: endOfDay.toISOString() };
+}
+
 function getDateRange(periodId: string, customStart: string, customEnd: string): { from: string; to: string } {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -474,33 +549,24 @@ function getDateRange(periodId: string, customStart: string, customEnd: string):
       ye.setHours(23, 59, 59, 999);
       return { from: y.toISOString(), to: ye.toISOString() };
     }
-    case "last7": {
-      const d = new Date(today);
-      d.setDate(d.getDate() - 7);
-      return { from: d.toISOString(), to: endOfDay.toISOString() };
-    }
-    case "last15": {
-      const d = new Date(today);
-      d.setDate(d.getDate() - 15);
-      return { from: d.toISOString(), to: endOfDay.toISOString() };
-    }
+    case "last7":
+      return lastNDays(today, endOfDay, 7);
+    case "last15":
+      return lastNDays(today, endOfDay, 15);
     case "mtd": {
       const d = new Date(now.getFullYear(), now.getMonth(), 1);
       return { from: d.toISOString(), to: endOfDay.toISOString() };
     }
-    case "last30": {
-      const d = new Date(today);
-      d.setDate(d.getDate() - 30);
-      return { from: d.toISOString(), to: endOfDay.toISOString() };
-    }
-    case "last90": {
-      const d = new Date(today);
-      d.setDate(d.getDate() - 90);
-      return { from: d.toISOString(), to: endOfDay.toISOString() };
-    }
+    case "last30":
+      return lastNDays(today, endOfDay, 30);
+    case "last90":
+      return lastNDays(today, endOfDay, 90);
     case "custom":
+      // "T00:00:00" força o parse em hora LOCAL — `new Date("2026-07-01")` é
+      // interpretado como UTC e em BRT virava 21h do dia ANTERIOR, puxando pro
+      // range leads da noite do dia que a pessoa nem selecionou.
       return {
-        from: customStart ? new Date(customStart).toISOString() : today.toISOString(),
+        from: customStart ? new Date(customStart + "T00:00:00").toISOString() : today.toISOString(),
         to: customEnd ? new Date(customEnd + "T23:59:59.999").toISOString() : endOfDay.toISOString(),
       };
     default:
@@ -526,6 +592,19 @@ export default function SdrDashboard() {
   const [loadingChannels, setLoadingChannels] = useState(true);
   const [loadingHeatmap, setLoadingHeatmap] = useState(true);
   const [loadingSpeed, setLoadingSpeed] = useState(true);
+
+  // Erro por seção (item FASE 2): query que falha NÃO vira zero silencioso —
+  // a seção mostra banner com "Tentar de novo" no lugar de números mentirosos.
+  const [errKpis, setErrKpis] = useState<string | null>(null);
+  const [errChannels, setErrChannels] = useState<string | null>(null);
+  const [errHeatmap, setErrHeatmap] = useState<string | null>(null);
+  const [errSpeed, setErrSpeed] = useState<string | null>(null);
+  const [errOperational, setErrOperational] = useState<string | null>(null);
+  const [errFunnel, setErrFunnel] = useState<string | null>(null);
+  const [errBusiness, setErrBusiness] = useState<string | null>(null);
+
+  // Auto-refresh (TV do time): tick de 60s repassado ao LossReasonsChart.
+  const [refreshTick, setRefreshTick] = useState(0);
 
   // Operational KPIs states
   const [cicloMedio, setCicloMedio] = useState<number | null>(null);
@@ -557,17 +636,16 @@ export default function SdrDashboard() {
   const userName = allUsers.find((u: any) => u.id === selectedUser)?.name || "Todos";
 
   // Fetch KPIs and chart data
-  useEffect(() => {
-    async function loadKpis() {
-      setLoadingKpis(true);
+  const loadKpis = useCallback(async (silent = false) => {
+    if (!silent) setLoadingKpis(true);
+    try {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
-      const stats = await fetchDashboardStats(ownerId, from, to);
-
-      // Metas mensais reais (qs_goals). Se o dashboard estiver filtrado por
-      // usuário, usa as metas daquele usuário; senão soma as metas de todos.
-      // Fallback para os defaults se não houver meta cadastrada (não quebra o layout).
+      // Metas mensais reais (qs_goals). Filtrado por usuário: as metas dele;
+      // "todos": meta de EQUIPE (owner_id null) prevalece como placar do time —
+      // senão soma as metas individuais dos donos ATIVOS. Fallback para os
+      // defaults se não houver meta cadastrada (não quebra o layout).
       const META_DEFAULTS: Record<GoalType, number> = {
         ganhos: 87,
         leads_finalizados: 250,
@@ -578,31 +656,72 @@ export default function SdrDashboard() {
 
       let qGoals = supabase
         .from("qs_goals")
-        .select("owner_id, type, target_value, period_start")
+        .select("owner_id, type, target_value, period_start, owner:qs_users(is_active)")
         .eq("period", "mensal")
         .order("period_start", { ascending: false });
       if (ownerId) qGoals = qGoals.eq("owner_id", ownerId);
-      const { data: goalsData } = await qGoals;
+
+      // Data de FECHAMENTO (closed_at, migration 0012) — updated_at re-contava
+      // ganhos antigos no mês atual a cada edição do lead.
+      const closedCol = await getClosedAtColumn();
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const currentDay = now.getDate();
+
+      // As 3 buscas são independentes → paralelas (antes eram 3 idas em série).
+      const [stats, goalsRes, ganhosDays] = await Promise.all([
+        fetchDashboardStats(ownerId, from, to),
+        qGoals,
+        // Paginado (cap 1000 do PostgREST): mês forte não pode "parar de contar".
+        fetchAllRows<Record<string, string>>((f, t) => {
+          let q = supabase
+            .from("qs_leads")
+            .select(closedCol)
+            .eq("status", "ganho")
+            .gte(closedCol, monthStart.toISOString())
+            .order("id");
+          if (ownerId) q = q.eq("owner_id", ownerId);
+          return q.range(f, t);
+        }),
+      ]);
+      if (goalsRes.error) throw goalsRes.error;
 
       const goalSum: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
       const goalCount: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
+      const teamGoal: Partial<Record<GoalType, number>> = {};
       const seenGoal = new Set<string>();
-      ((goalsData ?? []) as any[]).forEach((g) => {
+      ((goalsRes.data ?? []) as any[]).forEach((g) => {
         const type = g.type as GoalType;
         if (!(type in goalSum)) return;
-        // Dedupe por (owner, tipo) mantendo a meta mais recente — evita somar meses antigos
-        const key = `${g.owner_id ?? "none"}-${type}`;
+        // Meta ancorada num mês FUTURO ainda não vigora (regra compartilhada
+        // com a página Metas — ver isGoalEffective em queries.ts).
+        if (!isGoalEffective(g.period_start)) return;
+        // Meta de dono DESATIVADO não entra no placar (ela ficava somada "pra
+        // sempre" e ainda sumia da página Metas — agora é ignorada aqui e
+        // aparece lá com badge pra excluir).
+        const ownerRow = Array.isArray(g.owner) ? g.owner[0] : g.owner;
+        if (g.owner_id && ownerRow && ownerRow.is_active === false) return;
+        // Meta de EQUIPE (owner_id null): guarda a mais recente por tipo.
+        if (g.owner_id == null) {
+          if (teamGoal[type] === undefined) teamGoal[type] = Number(g.target_value) || 0;
+          return;
+        }
+        // Dedupe por (owner, tipo) mantendo a meta vigente mais recente
+        const key = `${g.owner_id}-${type}`;
         if (seenGoal.has(key)) return;
         seenGoal.add(key);
         goalSum[type] += Number(g.target_value) || 0;
         goalCount[type] += 1;
       });
 
-      const metaFor = (type: GoalType): number => {
-        if (goalCount[type] === 0) return META_DEFAULTS[type];
+      const metaFor = (type: GoalType): { value: number; team: boolean } => {
+        // Visão "todos": a meta de equipe É o placar do time (não soma com as
+        // individuais — somar as duas contaria a mesma meta em dobro).
+        if (!ownerId && teamGoal[type] !== undefined) return { value: teamGoal[type]!, team: true };
+        if (goalCount[type] === 0) return { value: META_DEFAULTS[type], team: false };
         // Conversão é percentual: usa a média das metas em vez de somar
-        if (type === "conversao") return Math.round(goalSum[type] / goalCount[type]);
-        return goalSum[type];
+        if (type === "conversao") return { value: Math.round(goalSum[type] / goalCount[type]), team: false };
+        return { value: goalSum[type], team: false };
       };
 
       const metaGanhos = metaFor("ganhos");
@@ -610,36 +729,46 @@ export default function SdrDashboard() {
       const metaAtividades = metaFor("atividades");
       const metaConversao = metaFor("conversao");
 
+      // "% da meta" compara realizado do PERÍODO com meta MENSAL — só é honesto
+      // quando o período é o mês ("Hoje" dava 3% vermelho; "90 dias", 300%).
+      // Fora do "Mês atual" a % é omitida (badge explica). Exceção: Taxa de
+      // Conversão é um percentual — comparável em qualquer período.
+      const comparable = selectedPeriod === "mtd";
+      const pct = (value: number, meta: { value: number }): number =>
+        meta.value > 0 ? Math.round((value / meta.value) * 100) : 0;
+      const metaLabel = (meta: { value: number; team: boolean }, suffix = ""): string =>
+        `Meta mensal: ${meta.value}${suffix}${meta.team ? " (equipe)" : ""}`;
+
       const cards: KpiCard[] = [
         {
           label: "Ganhos",
           value: String(stats.ganhos),
-          metaPercent: metaGanhos > 0 ? Math.round((stats.ganhos / metaGanhos) * 100) : 0,
-          metaLabel: `Meta: ${metaGanhos}`,
+          metaPercent: comparable ? pct(stats.ganhos, metaGanhos) : null,
+          metaLabel: metaLabel(metaGanhos),
           predicted: "",
           type: "ganhos",
         },
         {
           label: "Leads Finalizados",
           value: String(stats.leadsFinalizados),
-          metaPercent: metaFinalizados > 0 ? Math.round((stats.leadsFinalizados / metaFinalizados) * 100) : 0,
-          metaLabel: `Meta: ${metaFinalizados}`,
+          metaPercent: comparable ? pct(stats.leadsFinalizados, metaFinalizados) : null,
+          metaLabel: metaLabel(metaFinalizados),
           predicted: "",
           type: "leads_finalizados",
         },
         {
           label: "Atividades Realizadas",
           value: String(stats.atividadesRealizadas),
-          metaPercent: metaAtividades > 0 ? Math.round((stats.atividadesRealizadas / metaAtividades) * 100) : 0,
-          metaLabel: `Meta: ${metaAtividades}`,
+          metaPercent: comparable ? pct(stats.atividadesRealizadas, metaAtividades) : null,
+          metaLabel: metaLabel(metaAtividades),
           predicted: "",
           type: "atividades",
         },
         {
           label: "Taxa de Conversão",
           value: `${stats.taxaConversao.toFixed(1).replace(".", ",")}%`,
-          metaPercent: metaConversao > 0 ? Math.round((stats.taxaConversao / metaConversao) * 100) : 0,
-          metaLabel: `Meta: ${metaConversao}%`,
+          metaPercent: pct(stats.taxaConversao, metaConversao),
+          metaLabel: metaLabel(metaConversao, "%"),
           predicted: "",
           type: "conversao",
         },
@@ -647,26 +776,9 @@ export default function SdrDashboard() {
 
       setKpiCards(cards);
 
-      // Build monthly chart data: ganhos accumulated by day
-      const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const currentDay = now.getDate();
-
-      // Data de FECHAMENTO (closed_at, migration 0012) — updated_at re-contava
-      // ganhos antigos no mês atual a cada edição do lead.
-      const closedCol = await getClosedAtColumn();
-      let qGanhosByDay = supabase
-        .from("qs_leads")
-        .select(closedCol)
-        .eq("status", "ganho")
-        .gte(closedCol, monthStart.toISOString());
-      if (ownerId) qGanhosByDay = qGanhosByDay.eq("owner_id", ownerId);
-
-      const { data: ganhosDays } = await qGanhosByDay;
-
-      // Build cumulative array
+      // Build cumulative array (ganhos accumulated by day, mês corrente)
       const dayCounts = new Array(currentDay).fill(0);
-      (ganhosDays ?? []).forEach((row: any) => {
+      ganhosDays.forEach((row: any) => {
         const d = new Date(row[closedCol]).getDate();
         if (d >= 1 && d <= currentDay) {
           dayCounts[d - 1]++;
@@ -686,39 +798,45 @@ export default function SdrDashboard() {
       const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
       const predicted: number[] = [];
       for (let i = 0; i < daysInMonth; i++) {
-        predicted.push(Math.round((metaGanhos / daysInMonth) * (i + 1)));
+        predicted.push(Math.round((metaGanhos.value / daysInMonth) * (i + 1)));
       }
       setPredictedData(predicted);
-
+      setErrKpis(null);
+    } catch (err) {
+      console.warn("Erro ao carregar KPIs do dashboard:", err);
+      setErrKpis("Não foi possível carregar os indicadores e o gráfico de ganhos.");
+    } finally {
       setLoadingKpis(false);
     }
-    loadKpis();
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
-  // Fetch Channel Performance (Change 18)
   useEffect(() => {
-    async function loadChannelPerformance() {
-      setLoadingChannels(true);
+    loadKpis();
+  }, [loadKpis]);
+
+  // Fetch Channel Performance (Change 18)
+  const loadChannelPerformance = useCallback(async (silent = false) => {
+    if (!silent) setLoadingChannels(true);
+    try {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
-      let q = supabase
-        .from("qs_tasks")
-        .select("channel_type, contact_result")
-        .eq("status", "concluida");
-      if (ownerId) q = q.eq("owner_id", ownerId);
-      if (from) q = q.gte("completed_at", from);
-      if (to) q = q.lte("completed_at", to);
-
-      const { data, error } = await q;
-      if (error) {
-        console.warn("Erro ao buscar desempenho por canal:", error);
-        setLoadingChannels(false);
-        return;
-      }
+      // Paginado (cap 1000 do PostgREST) — mês com >1000 atividades subestimava
+      // toda a tabela sem nenhum aviso.
+      const data = await fetchAllRows<{ channel_type: string | null; contact_result: string | null }>((f, t) => {
+        let q = supabase
+          .from("qs_tasks")
+          .select("channel_type, contact_result")
+          .eq("status", "concluida")
+          .order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        if (from) q = q.gte("completed_at", from);
+        if (to) q = q.lte("completed_at", to);
+        return q.range(f, t);
+      });
 
       const channelMap = new Map<string, { total: number; atendeu: number }>();
-      (data ?? []).forEach((row: any) => {
+      data.forEach((row: any) => {
         const ch = row.channel_type;
         if (!ch) return;
         const entry = channelMap.get(ch) || { total: 0, atendeu: 0 };
@@ -737,38 +855,44 @@ export default function SdrDashboard() {
         .sort((a, b) => b.total - a.total);
 
       setChannelPerformance(rows);
+      setErrChannels(null);
+    } catch (error) {
+      console.warn("Erro ao buscar desempenho por canal:", error);
+      setErrChannels("Não foi possível carregar o desempenho por canal.");
+    } finally {
       setLoadingChannels(false);
     }
-    loadChannelPerformance();
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
-  // Fetch Heatmap Data (Change 19)
   useEffect(() => {
-    async function loadHeatmap() {
-      setLoadingHeatmap(true);
-      // agora respeita o período selecionado — antes era all-time e não respondia "esse mês"
+    loadChannelPerformance();
+  }, [loadChannelPerformance]);
+
+  // Fetch Heatmap Data (Change 19)
+  const loadHeatmap = useCallback(async (silent = false) => {
+    if (!silent) setLoadingHeatmap(true);
+    try {
+      // respeita o período selecionado — antes era all-time e não respondia "esse mês"
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
-      let q = supabase
-        .from("qs_tasks")
-        .select("completed_at")
-        .eq("status", "concluida")
-        .in("contact_result", CONNECTED_RESULTS)
-        .not("completed_at", "is", null);
-      if (ownerId) q = q.eq("owner_id", ownerId);
-      if (from) q = q.gte("completed_at", from);
-      if (to) q = q.lte("completed_at", to);
-
-      const { data, error } = await q;
-      if (error) {
-        console.warn("Erro ao buscar dados do heatmap:", error);
-        setLoadingHeatmap(false);
-        return;
-      }
+      // Paginado (cap 1000 do PostgREST).
+      const data = await fetchAllRows<{ completed_at: string | null }>((f, t) => {
+        let q = supabase
+          .from("qs_tasks")
+          .select("completed_at")
+          .eq("status", "concluida")
+          .in("contact_result", CONNECTED_RESULTS)
+          .not("completed_at", "is", null)
+          .order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        if (from) q = q.gte("completed_at", from);
+        if (to) q = q.lte("completed_at", to);
+        return q.range(f, t);
+      });
 
       const cellMap = new Map<string, number>();
-      (data ?? []).forEach((row: any) => {
+      data.forEach((row: any) => {
         if (!row.completed_at) return;
         const d = new Date(row.completed_at);
         const jsDay = d.getDay(); // 0=Sun...6=Sat
@@ -786,55 +910,66 @@ export default function SdrDashboard() {
       });
 
       setHeatmapCells(cells);
+      setErrHeatmap(null);
+    } catch (error) {
+      console.warn("Erro ao buscar dados do heatmap:", error);
+      setErrHeatmap("Não foi possível carregar o heatmap de horários.");
+    } finally {
       setLoadingHeatmap(false);
     }
-    loadHeatmap();
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
 
-  // Fetch Speed-to-Lead (Change 20)
   useEffect(() => {
-    async function loadSpeedToLead() {
-      setLoadingSpeed(true);
-      // agora respeita o período selecionado (leads que CHEGARAM no período) —
+    loadHeatmap();
+  }, [loadHeatmap]);
+
+  // Fetch Speed-to-Lead (Change 20)
+  const loadSpeedToLead = useCallback(async (silent = false) => {
+    if (!silent) setLoadingSpeed(true);
+    try {
+      // respeita o período selecionado (leads que CHEGARAM no período) —
       // antes era all-time e não respondia "esse mês"
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
-      // Get leads with arrived_at
-      let qLeads = supabase
-        .from("qs_leads")
-        .select("id, arrived_at")
-        .not("arrived_at", "is", null);
-      if (ownerId) qLeads = qLeads.eq("owner_id", ownerId);
-      if (from) qLeads = qLeads.gte("arrived_at", from);
-      if (to) qLeads = qLeads.lte("arrived_at", to);
-
-      const { data: leadsData, error: leadsErr } = await qLeads;
-      if (leadsErr || !leadsData || leadsData.length === 0) {
+      // Leads chegados no período — paginado (cap 1000 do PostgREST).
+      const leadsData = await fetchAllRows<{ id: string; arrived_at: string }>((f, t) => {
+        let q = supabase
+          .from("qs_leads")
+          .select("id, arrived_at")
+          .not("arrived_at", "is", null)
+          .order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        if (from) q = q.gte("arrived_at", from);
+        if (to) q = q.lte("arrived_at", to);
+        return q.range(f, t);
+      });
+      if (leadsData.length === 0) {
         setSpeedToLead(null);
-        setLoadingSpeed(false);
+        setErrSpeed(null);
         return;
       }
 
-      // Get first completed task for each lead
-      let qTasks = supabase
-        .from("qs_tasks")
-        .select("lead_id, completed_at")
-        .eq("status", "concluida")
-        .not("completed_at", "is", null)
-        .order("completed_at", { ascending: true });
-      if (ownerId) qTasks = qTasks.eq("owner_id", ownerId);
-
-      const { data: tasksData, error: tasksErr } = await qTasks;
-      if (tasksErr || !tasksData) {
-        setSpeedToLead(null);
-        setLoadingSpeed(false);
-        return;
-      }
+      // Primeira tarefa concluída por lead. O 1º contato de um lead chegado no
+      // período acontece DEPOIS da chegada → o corte inferior em `from` não
+      // perde nada e evita varrer a tabela inteira. Ordenação estável
+      // (completed_at + id) pra paginação não duplicar/pular linhas.
+      const tasksData = await fetchAllRows<{ lead_id: string; completed_at: string }>((f, t) => {
+        let q = supabase
+          .from("qs_tasks")
+          .select("lead_id, completed_at")
+          .eq("status", "concluida")
+          .not("completed_at", "is", null)
+          .order("completed_at", { ascending: true })
+          .order("id");
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        if (from) q = q.gte("completed_at", from);
+        return q.range(f, t);
+      });
 
       // Build map of first task completion per lead
       const firstTaskMap = new Map<string, string>();
-      (tasksData as any[]).forEach((t) => {
+      tasksData.forEach((t) => {
         if (!firstTaskMap.has(t.lead_id)) {
           firstTaskMap.set(t.lead_id, t.completed_at);
         }
@@ -843,7 +978,7 @@ export default function SdrDashboard() {
       // Calculate average time
       let totalMinutes = 0;
       let count = 0;
-      (leadsData as any[]).forEach((lead) => {
+      leadsData.forEach((lead) => {
         const firstTask = firstTaskMap.get(lead.id);
         if (!firstTask || !lead.arrived_at) return;
         const arrivedMs = new Date(lead.arrived_at).getTime();
@@ -857,10 +992,18 @@ export default function SdrDashboard() {
       });
 
       setSpeedToLead(count > 0 ? totalMinutes / count : null);
+      setErrSpeed(null);
+    } catch (error) {
+      console.warn("Erro ao calcular speed-to-lead:", error);
+      setErrSpeed("Não foi possível calcular o tempo médio de contato.");
+    } finally {
       setLoadingSpeed(false);
     }
-    loadSpeedToLead();
   }, [selectedUser, selectedPeriod, customStart, customEnd]);
+
+  useEffect(() => {
+    loadSpeedToLead();
+  }, [loadSpeedToLead]);
 
   // Fetch Operational KPIs
   useEffect(() => {

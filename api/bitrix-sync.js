@@ -7,9 +7,12 @@
 // bundle + webhooks sem auth) — qualquer visitante podia extrair a URL e mover
 // negócios no Bitrix. Agora a URL do n8n e o segredo ficam SÓ no servidor.
 //
-// Body (JSON): { "event": "perdido"|"ganho"|"reuniao"|"nota", ...payload }
+// Body (JSON): { "event": "perdido"|"ganho"|"reuniao"|"nota", "lead_id": uuid, ...payload }
 //   → encaminhado para `${N8N_SYNC_BASE}/qs-<event>` com o header
 //     x-qs-sync-secret = N8N_SYNC_SECRET (validar no nó Webhook do n8n).
+//   O `bitrix_id` é resolvido AQUI a partir do lead_id (qs_leads via service
+//   role) — o valor enviado pelo cliente é ignorado. Lead sem bitrix_id → skip
+//   silencioso ({ success: true, code: "skipped_no_bitrix_id" }).
 //
 // Segurança (igual ao chatapp-send, fail-closed):
 //   1. Servidor-a-servidor: header x-internal-secret = INTERNAL_API_SECRET.
@@ -19,7 +22,11 @@
 // Sem N8N_SYNC_BASE → responde { code: "not_configured" } e o front ignora.
 // -----------------------------------------------------------------------------
 
+import { rest } from './_supabaseAdmin.js';
+
 const EVENTS = new Set(['perdido', 'ganho', 'reuniao', 'nota']);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function isValidSupabaseUser(authHeader) {
   const jwt = String(authHeader || '').replace(/^Bearer\s+/i, '').trim();
@@ -58,6 +65,29 @@ export default async function handler(req, res) {
   if (!EVENTS.has(event)) {
     return res.status(400).json({ success: false, error: 'event inválido (perdido|ganho|reuniao|nota)' });
   }
+
+  // bitrix_id NUNCA vem do cliente (auditoria 2026-07-14): qualquer usuário
+  // logado podia apontar o evento pra um deal ARBITRÁRIO do Bitrix. Agora o
+  // servidor resolve o bitrix_id a partir do lead_id, na fonte da verdade
+  // (qs_leads, via service_role), e ignora o que veio no payload.
+  const leadId = String(payload.lead_id || '').trim();
+  if (!UUID_RE.test(leadId)) {
+    return res.status(400).json({ success: false, error: 'lead_id inválido (esperado UUID)' });
+  }
+  let serverBitrixId = null;
+  try {
+    const rows = await rest(`qs_leads?select=bitrix_id&id=eq.${encodeURIComponent(leadId)}&limit=1`);
+    serverBitrixId = (rows && rows[0] && rows[0].bitrix_id) || null;
+  } catch (err) {
+    console.error('[bitrix-sync] falha ao resolver bitrix_id do lead', leadId, ':', err?.message);
+    return res.status(502).json({ success: false, error: 'Falha ao consultar o lead' });
+  }
+  if (!serverBitrixId) {
+    // Lead sem vínculo com o Bitrix (não veio de lá) — mesmo comportamento de
+    // sempre: pula sem erro (o front já pulava quando não tinha bitrix_id).
+    return res.status(200).json({ success: true, code: 'skipped_no_bitrix_id' });
+  }
+  payload.bitrix_id = serverBitrixId; // sobrescreve qualquer valor do cliente
 
   const base = (process.env.N8N_SYNC_BASE || '').trim().replace(/\/+$/, '');
   if (!base) {

@@ -8,7 +8,7 @@
 | `bitrix-to-qs.workflow.json` | Bitrix → QS via `crm.deal.get`/`crm.contact.get` (Etapa 1.1) | Webhook do Bitrix |
 | `bitrix-inbound-to-qs.workflow.json` | **⭐ Bitrix → QS pelos dados do próprio webhook** (querystring; NÃO chama o Bitrix de volta) → `/api/lead-inbound` | Webhook do Bitrix |
 | `qs-to-bitrix-webhook.workflow.json` | **⭐ QS → Bitrix por EVENTO**: cada botão (perdido/ganho/reunião/nota) dispara na hora | Webhook (por botão) |
-| `qs-to-bitrix-sync.workflow.json` | ⚠️ **APOSENTADO** — versão antiga por polling. Substituído pelo de cima. **Não deixe os dois ativos.** | A cada 1 min |
+| `qs-to-bitrix-sync.workflow.json` | ⚠️ **APOSENTADO — NÃO RELIGAR** (reenviaria TODO o histórico; ver seção do legado). Substituído pelo de cima. | A cada 1 min |
 | `chatapp-token-refresh.workflow.json` | **Valida/renova o token do ChatApp** e grava no banco (Etapa 2.4) | A cada 6 h |
 
 Antes de ativar qualquer um: aplique o `supabase/APLICAR-PENDENTES.sql` no SQL
@@ -160,8 +160,10 @@ webhook ativo**.
 
 - **Sem retry:** se a chamada falhar (rede caiu, n8n fora), aquele espelhamento
   se perde — o QS **não** re-tenta (a gravação no Supabase é a fonte da verdade;
-  o Bitrix é espelho). Se um dia quiser rede de segurança, dá pra reativar o
-  `qs-to-bitrix-sync` numa frequência baixa (ex.: 1×/dia) só como reconciliação.
+  o Bitrix é espelho). **NÃO use o `qs-to-bitrix-sync` como "rede de segurança"**
+  — ver o aviso na seção do legado abaixo: religá-lo reenvia TODO o histórico.
+  Se um dia precisar de reconciliação, é preciso construir um fluxo novo que
+  filtre por data/flag (o de eventos não marca `bitrix_synced`).
 - **CORS:** os webhooks vêm com `allowedOrigins: "*"`. Se o navegador reclamar de
   CORS, troque `*` pelo domínio do app (`https://qs-turis.vercel.app`) nos nós de
   webhook (aba **Options → Allowed Origins**).
@@ -179,8 +181,15 @@ webhook ativo**.
 
 Versão antiga: um Schedule de 1 min varria o Supabase em 3 faixas
 (perdido/ganho, reuniões, notas). **Substituído pelo `qs-to-bitrix-webhook`.**
-Mantido no repo só como referência / possível rede de segurança de baixa
-frequência. **Não deixe ativo junto com o webhook.**
+
+**⚠️ NÃO RELIGUE este workflow — nem "de vez em quando", nem como rede de
+segurança.** O polling seleciona pelo flag `bitrix_synced = false`, e o fluxo
+novo por evento **não marca esse flag** (ele nem toca nessas colunas). Ou seja:
+religar o polling hoje faria ele enxergar TODO o histórico como "não sincronizado"
+e **reenviar tudo em massa pro Bitrix** — mover colunas de negócios antigos e
+duplicar comentários na timeline. O arquivo fica no repo **só como referência
+de código**. Se um dia precisar de reconciliação de verdade, construa um fluxo
+novo com filtro por data/flag próprio.
 
 ---
 
@@ -202,6 +211,23 @@ comportamento antigo de abrir o cabinet com a mensagem copiada).
   licenseId da licença do WhatsApp.
 - Selecione a credencial Supabase no último nó. Ative e rode 1x manual
   (**Execute workflow**) pra já deixar o token gravado.
+
+### ⚠️ Pendência de validação: o campo do texto (`MESSAGE_TEXT_FIELD`)
+
+O envio usa `POST /v1/licenses/{id}/messengers/{m}/chats/{chatId}/messages-text`
+com o corpo `{ "text": "..." }`. O nome do campo (`text`) foi deduzido pelo nome
+do endpoint — a doc renderizada do ChatApp não mostrou o corpo, e **nunca foi
+confirmado com um envio real** (as credenciais estavam vazias). Como validar,
+assim que o token estiver ativo no `qs_settings` (este workflow rodando):
+
+1. Envie **1 mensagem de teste pro seu próprio número** via rota do app:
+   `POST https://qs-turis.vercel.app/api/chatapp-send` com header
+   `x-internal-secret: <INTERNAL_API_SECRET>` e body
+   `{ "phone": "55DDDNUMERO", "text": "teste QS" }`.
+2. **Chegou no WhatsApp** → campo certo, nada a fazer.
+3. **Veio erro de validação** (HTTP 400/422 reclamando de campo) → troque a
+   constante `MESSAGE_TEXT_FIELD` em `api/_chatapp.js` (linha ~37) por `"body"`
+   ou `"message"` e repita o teste. É o ÚNICO lugar que muda.
 
 ---
 
@@ -225,3 +251,12 @@ ver histórico deste README no git.
   do nó na SUA instância (não neste repositório — aqui só `PREENCHA_*`).
 - Se algo vazar: troque `LEAD_INBOUND_SECRET` na Vercel + credencial no n8n;
   gere outra service key no Supabase; troque a senha do ChatApp.
+- **Headers de segurança (`vercel.json`, 2026-07-16):** o app manda
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`,
+  `X-Frame-Options: DENY` (ninguém embeda o QS; os iframes de TERCEIROS dentro
+  do QS — ChatApp, Google Agenda — não são afetados por esse header) e HSTS
+  moderado. **CSP ficou de fora DE PROPÓSITO** (o `vercel.json` não aceita
+  comentário, então o registro é aqui): antes de ligar uma CSP enforce é preciso
+  mapear todas as origens — CDN do Wavoip, `*.supabase.co` (REST/Auth/Realtime
+  WSS), avatares/imagens externas, iframes do ChatApp e Google — senão o webfone
+  e o chat quebram em produção. Começar por `Content-Security-Policy-Report-Only`.

@@ -11,15 +11,16 @@ import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
-import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, createCadenceTasks } from "@/lib/qs/queries";
+import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, type CadenceScriptRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getLeadScore } from "@/lib/leadScore";
-import { formatPhoneDisplay } from "@/lib/whatsapp";
+import { formatPhoneDisplay, fillTemplate } from "@/lib/whatsapp";
+import WhatsAppModal from "../whatsapp/WhatsAppModal";
 import { dialViaWavoip, setOnCallEnded } from "@/lib/wavoip";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
-import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
+import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
 import type { SdrUser } from "../types";
 
@@ -329,6 +330,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [loading, setLoading] = useState(true);
   // Quantas observações (notas) cada lead tem — pra mostrar a mini-notificação (item 6).
   const [noteCounts, setNoteCounts] = useState<Map<string, number>>(new Map());
+  // Roteiros por atividade da cadência (script_text) — o gestor escreve e o SDR
+  // agora VÊ no card (antes era gravado e nunca lido — auditoria 2026-07-14).
+  const [cadenceScripts, setCadenceScripts] = useState<CadenceScriptRow[]>([]);
   // Leads que JÁ tiveram o primeiro contato (≥1 atividade concluída) — some o "SEM CONTATO".
   const [contactedLeadIds, setContactedLeadIds] = useState<Set<string>>(new Set());
   const markContacted = useCallback((leadId: string) => {
@@ -341,7 +345,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [tasksRes, leadsRes, cadencesRes, usersData, productsRes, notesRes, contactedRes] = await Promise.all([
+      const [tasksRes, leadsRes, cadencesRes, usersData, productsRes, notesRes, contactedRes, scriptsData] = await Promise.all([
         supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
         supabase.from("qs_leads").select("*"),
         supabase.from("qs_cadences").select("*"),
@@ -349,6 +353,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
         supabase.from("qs_notes").select("lead_id"),
         supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
+        fetchCadenceScripts(), // roteiros por atividade da cadência (item 6 — script_text)
       ]);
       // supabase-js não lança em erro de query — checa as duas leituras vitais.
       if (tasksRes.error || leadsRes.error) {
@@ -364,6 +369,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       setProducts((productsRes.data || []) as { id: string; name: string }[]);
       setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[] | null));
       setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[] | null));
+      setCadenceScripts(scriptsData);
     } catch (err) {
       console.warn("[TasksPanel] falha ao carregar dados:", err);
       setLoadError(true);
@@ -549,27 +555,41 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [classifyFor, setClassifyFor] = useState<{ taskId: string; leadName: string; phone: string | null; atLabel: string } | null>(null);
   const [classifySel, setClassifySel] = useState<string | null>(null);
 
+  // Menu (⋯) do card: adiar/reagendar/editar/excluir extra (Sprint 4 — item 1/3).
+  const [taskMenuOpen, setTaskMenuOpen] = useState(false);
+  // Edição inline da tarefa (data/horário/canal/notas) — aberta pelo menu (⋯).
+  const [editFor, setEditFor] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({ date: "", time: "09:00", channel: "ligacao" as ChannelType, notes: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
+  // Roteiro da atividade (script_text) — colapsável no hero (Sprint 4 — item 6).
+  const [scriptOpen, setScriptOpen] = useState(true);
+  // Modal de WhatsApp com o roteiro pré-preenchido (quando a atividade tem script).
+  const [waModal, setWaModal] = useState<{ lead: Lead; text: string } | null>(null);
+
   // O polling pausa enquanto o SDR está no meio de algo (atualizado a cada render).
   pollBusyRef.current = Boolean(
     meetingFor || transferOpen || pendingResult || obsText.trim() || savingObs ||
-    showNewLeadModal || showExtraTaskModal || showDialer || skipMenuOpen || finalizing || classifyFor
+    showNewLeadModal || showExtraTaskModal || showDialer || skipMenuOpen || finalizing || classifyFor ||
+    taskMenuOpen || editFor || waModal
   );
 
   // Celebration (shown once per session when daily goal hit)
   const [celebrationShown, setCelebrationShown] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
 
-  // Toast notification
-  const [toast, setToast] = useState<{ message: string; visible: boolean } | null>(null);
+  // Toast notification — com ação opcional (ex.: "Desfazer" na conclusão).
+  const [toast, setToast] = useState<{ message: string; visible: boolean; action?: { label: string; run: () => void } } | null>(null);
   const toastTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  function showToast(message: string) {
+  function showToast(message: string, action?: { label: string; run: () => void }) {
     // Cancela os timers do toast anterior — senão o timer velho apaga o toast novo no meio.
     toastTimersRef.current.forEach(clearTimeout);
-    setToast({ message, visible: true });
+    setToast({ message, visible: true, action });
+    // Toast com ação (Desfazer) fica ~10s na tela; o informativo, 3s.
+    const ttl = action ? 10_000 : 3_000;
     toastTimersRef.current = [
-      setTimeout(() => setToast(prev => prev ? { ...prev, visible: false } : null), 3000),
-      setTimeout(() => setToast(null), 3500),
+      setTimeout(() => setToast(prev => prev ? { ...prev, visible: false } : null), ttl),
+      setTimeout(() => setToast(null), ttl + 500),
     ];
   }
 
@@ -652,14 +672,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return (data as Task) ?? null;
   }
 
-  // Encerra (ignora) as demais tarefas pendentes do lead — usado quando o lead é ganho/perdido.
-  async function closeRemainingLeadTasks(leadId: string, exceptTaskId: string, reason: string) {
+  // Encerra (ignora) as demais tarefas pendentes do lead — usado quando o lead é
+  // ganho/perdido. MEDIDO (item 7 da Sprint 4): retorna false se o banco recusar —
+  // senão as tarefas "ressuscitavam" no refresh de 60s sem ninguém saber por quê.
+  async function closeRemainingLeadTasks(leadId: string, exceptTaskId: string, reason: string): Promise<boolean> {
     const others = tasks.filter(t => t.lead_id === leadId && t.id !== exceptTaskId);
-    if (others.length === 0) return;
-    await supabase
+    if (others.length === 0) return true;
+    const { error } = await supabase
       .from("qs_tasks")
       .update({ status: "ignorada", skip_reason: reason })
       .in("id", others.map(t => t.id));
+    if (error) {
+      console.warn("[QS] closeRemainingLeadTasks falhou:", error);
+      return false;
+    }
+    return true;
   }
 
   // Guarda anti-reentrada dos desfechos: protege Enter+clique e tecla repetida
@@ -702,7 +729,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           return;
         }
         notifyBitrix("ganho", { lead_id: currentTask.lead_id, bitrix_id: desfechoLead?.bitrix_id, full_name: desfechoLead?.full_name });
-        await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead ganho");
+        const okCloseG = await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead ganho");
+        if (!okCloseG) notifyError("O lead foi ganho, mas as demais atividades dele não foram encerradas — podem reaparecer na fila.");
         setLeads(prev => prev.map((l): Lead => l.id === currentTask.lead_id ? { ...l, status: "ganho" } : l));
         setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
         showToast(`Ganho! ${leadName}`);
@@ -714,7 +742,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           return;
         }
         notifyBitrix("perdido", { lead_id: currentTask.lead_id, bitrix_id: desfechoLead?.bitrix_id, full_name: desfechoLead?.full_name });
-        await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead perdido — sem interesse");
+        const okCloseP = await closeRemainingLeadTasks(currentTask.lead_id, taskId, "Lead perdido — sem interesse");
+        if (!okCloseP) notifyError("O lead foi marcado perdido, mas as demais atividades dele não foram encerradas — podem reaparecer na fila.");
         setLeads(prev => prev.map((l): Lead => l.id === currentTask.lead_id ? { ...l, status: "perdido" } : l));
         setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
         showToast(`Lead perdido — ${leadName}`);
@@ -726,7 +755,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           const rest = prev.filter(t => t.id !== taskId);
           return followUp ? [...rest, followUp] : rest;
         });
-        showToast(`Atividade registrada — ${leadName}`);
+        // Desfazer (~10s): volta a tarefa pra pendente e remove o follow-up criado junto.
+        showToast(`Atividade registrada — ${leadName}`, {
+          label: "Desfazer",
+          run: () => undoCompletion(currentTask, followUp?.id ?? null),
+        });
       }
       refreshCounts(); // placar de metas atualiza na hora
     } finally {
@@ -771,9 +804,47 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       setActiveTaskId(null);
       setObsText("");
       refreshCounts();
-      showToast("Atividade concluída");
+      // Desfazer (~10s): a tecla "C" concluía na hora sem NENHUM caminho de volta.
+      showToast("Atividade concluída", { label: "Desfazer", run: () => undoCompletion(task, null) });
     } finally {
       outcomeBusyRef.current = false;
+    }
+  }
+
+  // DESFAZ uma conclusão recém-feita (botão "Desfazer" do toast — Sprint 4, item 2):
+  // volta a tarefa pra 'pendente' no banco (medido em undoCompleteTask) e apaga o
+  // follow-up criado junto, se houver. A nota/observação já enviada permanece —
+  // ela reflete um contato que de fato aconteceu.
+  const undoBusyRef = useRef(false);
+  async function undoCompletion(original: Task, followUpId: string | null) {
+    if (undoBusyRef.current) return;
+    undoBusyRef.current = true;
+    // some o toast já — evita segundo clique no "Desfazer"
+    toastTimersRef.current.forEach(clearTimeout);
+    setToast(null);
+    try {
+      const ok = await undoCompleteTask(original.id);
+      if (!ok) return; // undoCompleteTask já avisou o motivo
+      if (followUpId) {
+        const { data: del, error: delErr } = await supabase
+          .from("qs_tasks")
+          .delete()
+          .eq("id", followUpId)
+          .in("status", ["pendente", "atrasada"])
+          .select("id");
+        if (delErr || !del || del.length === 0) {
+          console.warn("[QS] undoCompletion: follow-up não removido:", delErr);
+          notifyError("A conclusão foi desfeita, mas o follow-up criado junto não foi removido — ele continua na fila.");
+        }
+      }
+      setTasks((prev) => {
+        const rest = prev.filter((t) => t.id !== original.id && t.id !== followUpId);
+        return [...rest, { ...original, status: "pendente" as const, completed_at: null }];
+      });
+      refreshCounts(); // o placar devolve o ponto
+      showToast("Conclusão desfeita — a atividade voltou pra fila");
+    } finally {
+      undoBusyRef.current = false;
     }
   }
 
@@ -822,7 +893,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       setClassifyFor(null);
       setClassifySel(null);
       refreshCounts();
-      showToast(`Ligação classificada — ${leadName}`);
+      showToast(`Ligação classificada — ${leadName}`, {
+        label: "Desfazer",
+        run: () => undoCompletion(task, followUp?.id ?? null),
+      });
     } finally {
       setFinalizing(false);
     }
@@ -939,6 +1013,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       meeting.dataAgendamento && `Data do agendamento: ${meeting.dataAgendamento}`,
       obs && `Observações: ${obs}`,
     ].filter(Boolean).join(" · ");
+    // Item 7 (Sprint 4): cada passo secundário é MEDIDO — falha não some mais em
+    // silêncio (as tarefas "ressuscitavam" no refresh de 60s sem explicação).
+    const failures: string[] = [];
     try {
       const meetingRow = {
         lead_id: leadId,
@@ -961,14 +1038,33 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       });
       if (insErr) {
         console.warn("[QS] insert com campos estruturados falhou (aplicar 0006?); usando formato antigo:", insErr.message);
-        await supabase.from("qs_meetings").insert(meetingRow);
+        const { error: ins2Err } = await supabase.from("qs_meetings").insert(meetingRow);
+        if (ins2Err) {
+          console.warn("[QS] insert da reunião falhou também no formato antigo:", ins2Err);
+          failures.push("a reunião NÃO foi registrada em Reuniões");
+        }
       }
       if (meeting.emailCliente) {
-        await supabase.from("qs_leads").update({ email: meeting.emailCliente }).eq("id", leadId);
+        const { error: mailErr } = await supabase.from("qs_leads").update({ email: meeting.emailCliente }).eq("id", leadId);
+        if (mailErr) {
+          console.warn("[QS] e-mail do lead não atualizado:", mailErr);
+          failures.push("o e-mail do lead não foi atualizado");
+        }
       }
+      // completeTask é no-op se a tarefa já foi concluída (caminho "com avanço");
+      // erro REAL de gravação ele mesmo notifica lá dentro.
       await completeTask(taskId, "ganho");
-      await supabase.from("qs_leads").update({ status: "ganho" }).eq("id", leadId);
-      if (currentTask) await closeRemainingLeadTasks(leadId, taskId, "Lead ganho — reunião agendada");
+      // Ganho do lead MEDIDO (.select): sob RLS a recusa é silenciosa (0 linhas).
+      const { data: wonRows, error: wonErr } = await supabase
+        .from("qs_leads").update({ status: "ganho" }).eq("id", leadId).select("id");
+      if (wonErr || !wonRows || wonRows.length === 0) {
+        console.warn("[QS] lead não marcado como ganho:", wonErr);
+        failures.push("o lead NÃO foi marcado como ganho — marque pelo perfil do lead");
+      }
+      if (currentTask) {
+        const okClose = await closeRemainingLeadTasks(leadId, taskId, "Lead ganho — reunião agendada");
+        if (!okClose) failures.push("as demais atividades do lead não foram encerradas (podem reaparecer na fila)");
+      }
       await persistObservation(leadId, `Ganho — reunião agendada para ${meeting.dataHora}. ${resumo}`, ["bitrix", "ganho", "reuniao"]);
       // Preenche os campos da reunião no Bitrix e move o negócio pra "Reunião agendada".
       notifyBitrix("reuniao", {
@@ -987,6 +1083,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     } catch (e) {
       console.warn("[QS] falha ao registrar a reunião do ganho:", e);
       notifyError("Não foi possível registrar a reunião — confira em Reuniões antes de seguir.");
+    }
+    // Um aviso só, listando exatamente o que falhou (em vez de silêncio).
+    if (failures.length > 0) {
+      notifyError(`Ganho registrado com pendências: ${failures.join("; ")}.`);
     }
     setLeads((prev) => prev.map((l): Lead => l.id === leadId ? { ...l, status: "ganho" } : l));
     setTasks((prev) => prev.filter((t) => t.lead_id !== leadId));
@@ -1037,17 +1137,29 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       return;
     }
 
-    // REGRA: encerra as demais tarefas pendentes/atrasadas do lead (menos a extra e a de origem)
+    // REGRA: encerra as demais tarefas pendentes/atrasadas do lead (menos a extra e a de origem).
+    // MEDIDO (item 7 da Sprint 4): se o banco recusar, as tarefas "ressuscitavam" no
+    // refresh de 60s sem aviso nenhum — agora o SDR fica sabendo na hora.
     const exclude = [extra.id, extraFromTaskId].filter(Boolean) as string[];
     let q = supabase.from("qs_tasks").update({ status: "ignorada", skip_reason: "Substituída por atividade extra" })
       .eq("lead_id", extraTask.lead_id).in("status", ["pendente", "atrasada"]);
     if (exclude.length) q = q.not("id", "in", `(${exclude.join(",")})`);
-    await q;
+    const { error: closeErr } = await q;
+    if (closeErr) {
+      console.warn("[QS] falha ao encerrar as demais tarefas do lead:", closeErr);
+      notifyError("A atividade extra foi criada, mas as OUTRAS atividades do lead não foram encerradas — elas podem continuar na fila.");
+    }
 
-    // Se veio de "Pediu retorno", conclui a tarefa original + registra pro Bitrix
+    // Se veio de "Pediu retorno", conclui a tarefa original + registra pro Bitrix.
+    // completeTask devolve null quando NÃO gravou (erro real ele mesmo notifica;
+    // null também cobre o no-op de "já concluída") — avisamos pro SDR conferir.
     const fromRetorno = extraFromTaskId;
     if (fromRetorno) {
-      await completeTask(fromRetorno, "atendeu");
+      const done = await completeTask(fromRetorno, "atendeu");
+      if (!done) {
+        console.warn("[QS] retorno agendado, mas a atividade de origem não foi concluída agora:", fromRetorno);
+        notifyError("O retorno foi agendado, mas a atividade de origem não foi concluída agora (pode já ter sido finalizada) — confira a fila.");
+      }
       await persistObservation(extraTask.lead_id, `Pediu retorno — atividade extra agendada para ${extraTask.date} ${extraTask.time}.${obsText.trim() ? " " + obsText.trim() : ""}`, ["bitrix", "retorno"]);
     }
 
@@ -1090,6 +1202,114 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setExtraFromTaskId(task.id);
     setPendingResult(null);
     setShowExtraTaskModal(true);
+  }
+
+  // ── Sprint 4 — itens 1/3/5/6: adiar, editar, excluir extra, roteiro ────────
+
+  // ADIA a tarefa mantendo o horário: "amanhã" ou "próximo dia útil" (calendário
+  // central nextExecutionDay — respeita os execution_weekdays da cadência).
+  // Gravação MEDIDA em updateOpenTask; `reasonNote` registra o motivo nas notas
+  // (usado pelos motivos de pulo que REAGENDAM em vez de matar — item 5).
+  async function postponeTask(task: Task, mode: "amanha" | "dia_util", reasonNote?: string) {
+    setTaskMenuOpen(false);
+    const base = new Date(task.scheduled_at);
+    const target = new Date();
+    target.setDate(target.getDate() + 1);
+    target.setHours(base.getHours(), base.getMinutes(), 0, 0);
+    const next = mode === "dia_util"
+      ? nextExecutionDay(target, getCadenceForTask(task)?.execution_weekdays)
+      : target;
+    const patch: Partial<Pick<Task, "scheduled_at" | "notes">> = { scheduled_at: next.toISOString() };
+    if (reasonNote) patch.notes = task.notes ? `${task.notes} · ${reasonNote}` : reasonNote;
+    const updated = await updateOpenTask(task.id, patch);
+    if (!updated) return; // updateOpenTask já avisou
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    setActiveTaskId(null);
+    const when = next.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+    showToast(reasonNote ? `Atividade reagendada para ${when} — ${reasonNote}` : `Atividade adiada para ${when}`);
+  }
+
+  // Abre a edição inline (data/horário/canal/notas) pré-preenchida com a tarefa.
+  function openEditTask(task: Task) {
+    const d = new Date(task.scheduled_at);
+    setEditDraft({
+      date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
+      time: `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
+      channel: task.channel_type,
+      notes: task.notes ?? "",
+    });
+    setEditFor(task.id);
+    setTaskMenuOpen(false);
+  }
+
+  async function handleSaveEdit(task: Task) {
+    if (!editDraft.date || savingEdit) return;
+    setSavingEdit(true);
+    try {
+      // Data no FUSO LOCAL (mesma regra do modal de extra — new Date("YYYY-MM-DD")
+      // seria meia-noite UTC = dia anterior no Brasil).
+      const [yy, mo, dd] = editDraft.date.split("-").map(Number);
+      const [h, m] = editDraft.time.split(":").map(Number);
+      const scheduled = new Date(yy, (mo || 1) - 1, dd || 1, h || 9, m || 0, 0, 0);
+      const updated = await updateOpenTask(task.id, {
+        scheduled_at: scheduled.toISOString(),
+        channel_type: editDraft.channel,
+        notes: editDraft.notes.trim() || null,
+      });
+      if (!updated) return; // updateOpenTask já avisou
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+      setEditFor(null);
+      showToast("Atividade atualizada");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  // Exclui uma atividade EXTRA criada errada (item 3) — só is_extra, com confirmação.
+  async function handleDeleteExtra(task: Task) {
+    setTaskMenuOpen(false);
+    if (!task.is_extra) return;
+    const leadName = getLeadForTask(task)?.full_name || "o lead";
+    if (!window.confirm(`Excluir a atividade extra de ${leadName}? Essa ação não tem volta.`)) return;
+    const ok = await deleteExtraTask(task.id);
+    if (!ok) return; // deleteExtraTask já avisou
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+    setActiveTaskId(null);
+    showToast("Atividade extra excluída");
+  }
+
+  // Roteiro (script_text) da atividade da cadência que casa com a tarefa (item 6).
+  // Match: cadência + canal; desempate por horário (HH:MM) e depois pelo dia do plano.
+  function getScriptForTask(task: Task): string | null {
+    if (!task.cadence_id) return null;
+    let cands = cadenceScripts.filter(
+      (s) => s.cadence_id === task.cadence_id && s.channel_type === task.channel_type
+    );
+    if (cands.length === 0) return null;
+    if (cands.length > 1) {
+      const d = new Date(task.scheduled_at);
+      const hhmm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      const byTime = cands.filter((s) => (s.scheduled_time || "").slice(0, 5) === hhmm);
+      if (byTime.length > 0) cands = byTime;
+      if (cands.length > 1) {
+        const day = classifyTask(task).fupDay;
+        const byDay = cands.filter((s) => s.day_number === day);
+        if (byDay.length > 0) cands = byDay;
+      }
+    }
+    return cands[0]?.script_text ?? null;
+  }
+
+  // WhatsApp da tarefa: com roteiro → abre o modal com a mensagem PRONTA
+  // (defaultText); sem roteiro → segue no dock do ChatApp como antes.
+  function openWhatsAppForTask(task: Task, lead: Lead | undefined | null) {
+    if (!lead) return;
+    const script = task.channel_type === "whatsapp" ? getScriptForTask(task) : null;
+    if (script) {
+      setWaModal({ lead, text: fillTemplate(script, { name: lead.full_name }) });
+      return;
+    }
+    openWhatsApp(lead);
   }
 
   // Filter logic
@@ -1204,43 +1424,68 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // 1 Ganho/Agendou · 2 Pediu retorno · 3 Perdido · 4-7 sem contato ·
   // C concluir · Enter confirma desfecho pendente · N próxima da fila.
   // Só agem com um card na tela e NENHUM campo de texto focado (e sem modal aberto).
+  //
+  // TUDO que o listener lê vem de REFS atualizadas a cada render (Sprint 4, item
+  // 8): o efeito só re-rodava quando filteredTasks mudava, então os handlers
+  // capturados viam obsText/tasks VELHOS — a tecla "C" concluía com a observação
+  // vazia. Com as refs, o listener sempre chama a versão mais recente.
   const shortcutCtx = useRef<{ hero?: Task; pending: typeof pendingResult; busy: boolean }>({ hero: undefined, pending: null, busy: false });
   shortcutCtx.current = {
     hero: heroTaskMemo,
     pending: pendingResult,
-    busy: !!(meetingFor || transferOpen || skipMenuOpen || showExtraTaskModal || showDialer || showNewLeadModal || finalizing),
+    // classifyFor/editFor/menu/waModal também PAUSAM os atalhos (item 10): com a
+    // classificação de ligação aberta, "C"/números agiam por baixo do bloco.
+    busy: !!(meetingFor || transferOpen || skipMenuOpen || showExtraTaskModal || showDialer || showNewLeadModal || finalizing || classifyFor || editFor || taskMenuOpen || waModal),
+  };
+  const shortcutFnsRef = useRef({
+    conclude: handleConcludeActivity,
+    contact: handleContactResult,
+    ganho: openMeetingGanho,
+    retorno: openExtraFromRetorno,
+    select: selectActive,
+    filtered: [] as Task[],
+  });
+  shortcutFnsRef.current = {
+    conclude: handleConcludeActivity,
+    contact: handleContactResult,
+    ganho: openMeetingGanho,
+    retorno: openExtraFromRetorno,
+    select: selectActive,
+    filtered: filteredTasks,
   };
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const { hero, pending, busy } = shortcutCtx.current;
+      const fns = shortcutFnsRef.current;
       if (!hero || busy || e.ctrlKey || e.metaKey || e.altKey) return;
       const el = document.activeElement as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
 
       const k = e.key.toLowerCase();
       const noContact = ["nao_atendeu", "caixa_postal", "numero_errado", "desligou"];
-      if (k === "1") { e.preventDefault(); openMeetingGanho(hero); }
-      else if (k === "2") { e.preventDefault(); openExtraFromRetorno(hero); }
+      if (k === "1") { e.preventDefault(); fns.ganho(hero); }
+      else if (k === "2") { e.preventDefault(); fns.retorno(hero); }
       else if (k === "3") { e.preventDefault(); setPendingResult({ taskId: hero.id, result: "sem_interesse" }); }
       else if (["4", "5", "6", "7"].includes(k)) { e.preventDefault(); setPendingResult({ taskId: hero.id, result: noContact[Number(k) - 4] }); }
-      else if (k === "c") { e.preventDefault(); handleConcludeActivity(hero); }
+      else if (k === "c") { e.preventDefault(); fns.conclude(hero); }
       else if (k === "enter" && pending && pending.taskId === hero.id) {
         e.preventDefault();
         shortcutCtx.current.busy = true; // anti repetição até o próximo render
-        handleContactResult(hero.id, pending.result).finally(() => setPendingResult(null));
+        fns.contact(hero.id, pending.result).finally(() => setPendingResult(null));
       }
       else if (k === "n" || k === "arrowright") {
         e.preventDefault();
         // próxima da fila (depois do hero)
-        const normais = filteredTasks.filter((t) => !t.is_extra && t.id !== hero.id);
-        if (normais[0]) selectActive(normais[0].id);
+        const normais = fns.filtered.filter((t) => !t.is_extra && t.id !== hero.id);
+        if (normais[0]) fns.select(normais[0].id);
       }
       else if (k === "escape" && pending) { setPendingResult(null); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // Monta UMA vez — o estado fresco chega pelas refs acima (nada de stale closure).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredTasks]);
+  }, []);
 
   // Anuncia o lead do card ativo (hero) sempre que ele muda — presença.
   const heroLeadIdForPresence = heroTaskMemo?.lead_id ?? null;
@@ -1378,6 +1623,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     new Date(task.scheduled_at).getHours() < 12 ? "manha" : "tarde";
 
   // Item 7 — escolher qual lead atender (vira o card ativo); reseta os campos.
+  // Também limpa a classificação de ligação (item 10 — antes ela ficava "presa"
+  // ao trocar de card e pausava a fila), o menu (⋯) e a edição inline.
   function selectActive(taskId: string) {
     setActiveTaskId(taskId);
     setObsText("");
@@ -1385,6 +1632,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setTransferOpen(false);
     setTransferTo("");
     setSkipMenuOpen(false);
+    setClassifyFor(null);
+    setClassifySel(null);
+    setTaskMenuOpen(false);
+    setEditFor(null);
+    setScriptOpen(true); // roteiro volta aberto no card novo
   }
 
   // Card compacto da coluna de Atividades extras (retornos), destacado em azul.
@@ -1610,6 +1862,37 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5" /><path d="M21 3l-7 7" /><path d="M8 21H3v-5" /><path d="M3 21l7-7" /></svg>
                 </button>
               )}
+              {/* Menu (⋯): adiar/reagendar/editar/excluir extra — Sprint 4, itens 1 e 3 */}
+              <div className="relative">
+                <button
+                  onClick={() => { setTaskMenuOpen((o) => !o); setEditFor(null); }}
+                  className={`qsx-icon-sm${taskMenuOpen ? " on" : ""}`}
+                  title="Mais opções (adiar, editar, excluir)"
+                  aria-label="Mais opções da atividade"
+                  aria-haspopup="menu"
+                  aria-expanded={taskMenuOpen}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+                </button>
+                {taskMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-30 rounded-xl overflow-hidden" style={{ background: "#fff", border: "1px solid var(--line)", boxShadow: "0 12px 28px -14px rgba(16,24,40,.35)", minWidth: 230 }} role="menu">
+                    <button className="qsx-menu-item" role="menuitem" onClick={() => postponeTask(task, "amanha")}>
+                      Adiar para amanhã
+                    </button>
+                    <button className="qsx-menu-item" role="menuitem" onClick={() => postponeTask(task, "dia_util")}>
+                      Adiar para o próximo dia útil
+                    </button>
+                    <button className="qsx-menu-item" role="menuitem" onClick={() => openEditTask(task)}>
+                      Escolher data / editar…
+                    </button>
+                    {task.is_extra && (
+                      <button className="qsx-menu-item danger" role="menuitem" onClick={() => handleDeleteExtra(task)}>
+                        Excluir atividade extra…
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1687,7 +1970,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                       </>
                     )}
                     {c.overdue && (
-                      <span className="qsx-chip" style={{ background: "rgba(220,38,38,.12)", color: "#DC2626", fontWeight: 700 }} title="Atividade atrasada (venceu antes de hoje)">⚠ Atrasada</span>
+                      <span className="qsx-chip" style={{ background: "rgba(220,38,38,.12)", color: "#DC2626", fontWeight: 700 }} title="Atividade atrasada (venceu antes de hoje — o status é derivado da data, nunca gravado)">
+                        ⚠ Atrasada · era {new Date(task.scheduled_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
+                      </span>
                     )}
                   </>
                 );
@@ -1716,10 +2001,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         {lead?.phone && task.channel_type === "whatsapp" && (
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={() => openWhatsApp(lead)}
+              onClick={() => openWhatsAppForTask(task, lead)}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13.5px] font-bold text-white"
               style={{ background: "#25D366", boxShadow: "0 6px 14px -8px rgba(37,211,102,.6)" }}
-              title="Abrir conversa no WhatsApp"
+              title={getScriptForTask(task) ? "Abrir WhatsApp com o roteiro da atividade preenchido" : "Abrir conversa no WhatsApp"}
             >
               <IconWhatsApp size={16} />WhatsApp
             </button>
@@ -1727,6 +2012,51 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         )}
 
         {task.notes && <div className="qsx-hbox">{task.notes}</div>}
+
+        {/* Roteiro da atividade (script_text da cadência) — Sprint 4, item 6: o
+            gestor escrevia e o SDR nunca via. Colapsável; no WhatsApp ele também
+            vira a mensagem pré-preenchida do modal. */}
+        {(() => {
+          const script = getScriptForTask(task);
+          if (!script) return null;
+          const filled = fillTemplate(script, { name: lead?.full_name });
+          return (
+            <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(37,99,235,.28)", background: "rgba(37,99,235,.04)" }}>
+              <button
+                onClick={() => setScriptOpen((o) => !o)}
+                className="w-full flex items-center gap-2 px-3.5 py-2.5 text-left"
+                style={{ background: "transparent", border: 0, cursor: "pointer", fontFamily: "inherit" }}
+                aria-expanded={scriptOpen}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--blue)" }}>
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
+                <span className="text-[12.5px] font-bold" style={{ color: "var(--blue)" }}>Roteiro da atividade</span>
+                <svg
+                  width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+                  style={{ color: "var(--ink3)", marginLeft: "auto", transform: scriptOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }}
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              {scriptOpen && (
+                <div className="px-3.5 pb-3">
+                  <p className="text-[13px] leading-relaxed m-0" style={{ color: "var(--ink2)", whiteSpace: "pre-wrap" }}>{filled}</p>
+                  <button
+                    onClick={async () => {
+                      try { await navigator.clipboard.writeText(filled); showToast("Roteiro copiado"); }
+                      catch { notifyError("Não foi possível copiar o roteiro."); }
+                    }}
+                    className="mt-2 text-[12px] font-bold hover:underline"
+                    style={{ color: "var(--blue)", background: "none", border: 0, cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                  >
+                    Copiar roteiro
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
           {/* Ações: botão do canal + concluir atividade + pular */}
           <div className="flex items-center gap-2.5 flex-wrap">
@@ -1827,8 +2157,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <div className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "rgba(220,38,38,.08)", border: "1px solid rgba(220,38,38,.25)" }}>
                   <span className="text-[13px] font-semibold" style={{ color: "#B91C1C" }}>
                     🚫 Esta é a ÚLTIMA atividade deste lead — não dá pra pular. Conclua com um desfecho
-                    (Ganho, Pediu retorno, Perdido, Não atendeu…) pra ele não ficar sem próximo passo.
+                    (Ganho, Pediu retorno, Perdido, Não atendeu…) ou reagende:
                   </span>
+                  {/* Reagendar NÃO mata a tarefa — seguro mesmo sendo a última (item 5). */}
+                  {["Aguardando retorno", "Horário inadequado"].map((reason) => (
+                    <button
+                      key={reason}
+                      onClick={async () => { setSkipMenuOpen(false); await postponeTask(task, "dia_util", reason); }}
+                      className="qsx-out"
+                      title="Reagenda a atividade pro próximo dia útil (não a encerra)"
+                    >
+                      {reason}
+                    </button>
+                  ))}
                   <button onClick={() => setSkipMenuOpen(false)} className="text-[13px] font-semibold hover:underline" style={{ color: "var(--ink3)", marginLeft: "auto" }}>
                     Entendi
                   </button>
@@ -1842,6 +2183,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   <button
                     key={reason}
                     onClick={async () => {
+                      // "Aguardando retorno" e "Horário inadequado" REAGENDAM em vez
+                      // de matar (Sprint 4, item 5): a tarefa segue viva no próximo
+                      // dia útil da cadência — antes esses motivos encerravam a
+                      // atividade sem criar próximo passo nenhum.
+                      if (reason === "Aguardando retorno" || reason === "Horário inadequado") {
+                        setSkipMenuOpen(false);
+                        await postponeTask(task, "dia_util", reason);
+                        return;
+                      }
                       // Guarda extra no banco: se ESTA virou a última atividade aberta
                       // no meio do caminho (corrida), o pulo é barrado do mesmo jeito.
                       const { data: others } = await supabase
@@ -1865,6 +2215,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                       setSkipMenuOpen(false);
                     }}
                     className="qsx-out"
+                    title={reason === "Aguardando retorno" || reason === "Horário inadequado"
+                      ? "Reagenda a atividade pro próximo dia útil (não a encerra)"
+                      : undefined}
                   >
                     {reason}
                   </button>
@@ -1886,6 +2239,65 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </select>
               <button onClick={() => handleTransfer(task)} disabled={!transferTo} className="qsx-btn qsx-btn-blue" style={{ height: 38, opacity: transferTo ? 1 : 0.5 }}>Enviar lead</button>
               <button onClick={() => { setTransferOpen(false); setTransferTo(""); }} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }}>Cancelar</button>
+            </div>
+          )}
+
+          {/* Editar/reagendar a atividade (Sprint 4, item 1) — data, horário, canal e notas */}
+          {editFor === task.id && (
+            <div className="flex items-end gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "var(--line2)" }}>
+              <div>
+                <label className="block text-[11px] font-bold mb-1" style={{ color: "var(--ink3)" }}>Nova data</label>
+                <input
+                  type="date"
+                  value={editDraft.date}
+                  onChange={(e) => setEditDraft((p) => ({ ...p, date: e.target.value }))}
+                  className="qsx-fchip"
+                  style={{ height: 38, borderRadius: 10 }}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold mb-1" style={{ color: "var(--ink3)" }}>Horário</label>
+                <input
+                  type="time"
+                  value={editDraft.time}
+                  onChange={(e) => setEditDraft((p) => ({ ...p, time: e.target.value }))}
+                  className="qsx-fchip"
+                  style={{ height: 38, borderRadius: 10 }}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold mb-1" style={{ color: "var(--ink3)" }}>Canal</label>
+                <select
+                  value={editDraft.channel}
+                  onChange={(e) => setEditDraft((p) => ({ ...p, channel: e.target.value as ChannelType }))}
+                  className="qsx-fchip"
+                  style={{ height: 38, borderRadius: 10 }}
+                >
+                  {(["ligacao", "ligacao_whatsapp", "whatsapp", "email", "linkedin", "pesquisa"] as ChannelType[]).map((ch) => (
+                    <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1 min-w-[180px]">
+                <label className="block text-[11px] font-bold mb-1" style={{ color: "var(--ink3)" }}>Notas da atividade</label>
+                <input
+                  type="text"
+                  value={editDraft.notes}
+                  onChange={(e) => setEditDraft((p) => ({ ...p, notes: e.target.value }))}
+                  placeholder="Ex.: ligar depois das 14h"
+                  className="w-full px-3 text-[13px] rounded-[10px]"
+                  style={{ height: 38, border: "1px solid var(--line)", background: "#fff", outline: "none", fontFamily: "inherit", color: "var(--ink)" }}
+                />
+              </div>
+              <button
+                onClick={() => handleSaveEdit(task)}
+                disabled={!editDraft.date || savingEdit}
+                className="qsx-btn qsx-btn-blue"
+                style={{ height: 38, opacity: !editDraft.date || savingEdit ? 0.5 : 1 }}
+              >
+                {savingEdit ? "Salvando…" : "Salvar"}
+              </button>
+              <button onClick={() => setEditFor(null)} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }}>Cancelar</button>
             </div>
           )}
 

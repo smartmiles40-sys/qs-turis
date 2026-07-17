@@ -92,11 +92,25 @@ export default async function handler(req, res) {
       };
       // só inclui whatsapp_number se veio preenchido (a coluna pode ainda não existir)
       if (user.whatsapp_number) profileBody.whatsapp_number = user.whatsapp_number;
-      const profile = await rest('qs_users', {
-        method: 'POST',
-        prefer: 'return=representation',
-        body: profileBody,
-      });
+      let profile;
+      try {
+        profile = await rest('qs_users', {
+          method: 'POST',
+          prefer: 'return=representation',
+          body: profileBody,
+        });
+      } catch (profileErr) {
+        // ROLLBACK COMPENSATÓRIO: a conta de auth já existe mas o perfil falhou
+        // (e-mail duplicado em qs_users, coluna faltando…). Sem isso sobrava uma
+        // CREDENCIAL VÁLIDA sem perfil — logava mas o app não sabia quem era, e
+        // recriar o usuário dava "email already registered".
+        try {
+          await authAdmin(`/${authUser.id}`, { method: 'DELETE' });
+        } catch (rollbackErr) {
+          console.error('[admin-user] rollback da conta auth FALHOU (conta órfã', authUser.id, '):', rollbackErr?.message);
+        }
+        throw profileErr;
+      }
       return res.status(200).json({ success: true, user: Array.isArray(profile) ? profile[0] : profile });
     }
 
@@ -134,8 +148,18 @@ export default async function handler(req, res) {
     if (action === 'delete') {
       if (!user?.id) return res.status(400).json({ success: false, error: 'Informe o id' });
       if (user.id === callerId) return res.status(400).json({ success: false, error: 'Você não pode excluir a si mesmo' });
+      // ORDEM IMPORTA: a conta de AUTH sai PRIMEIRO. Na ordem antiga (perfil →
+      // auth "best-effort"), se o delete do auth falhasse sobrava uma credencial
+      // VÁLIDA sem perfil — a pessoa "excluída" continuava logando. Agora:
+      //  1. auth primeiro (404 = já não existia, segue);
+      //  2. perfil depois. Se o perfil falhar (ex.: FK de leads antigos), sobra
+      //     um perfil SEM credencial — inofensivo (ninguém loga) e visível na UI.
+      try {
+        await authAdmin(`/${user.id}`, { method: 'DELETE' });
+      } catch (authErr) {
+        if (authErr?.status !== 404) throw authErr; // aborta: credencial ainda existe
+      }
       await rest(`qs_users?id=eq.${user.id}`, { method: 'DELETE', prefer: 'return=minimal' });
-      try { await authAdmin(`/${user.id}`, { method: 'DELETE' }); } catch { /* conta de auth pode já não existir */ }
       return res.status(200).json({ success: true });
     }
 

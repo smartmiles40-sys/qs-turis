@@ -134,6 +134,22 @@ function buildFullName(input) {
   return parts.join(' ').trim() || null;
 }
 
+// ─── Normalização de contato (dedupe à prova de retry) ───────────────────────
+// O dedupe secundário compara email em lowercase e telefone "cru", mas antes a
+// GRAVAÇÃO ia sem normalizar — um retry do n8n com "João@X.com" / "+55 (11) 9..."
+// não batia com o card gravado como "joao@x.com" / "5511 9..." e DUPLICAVA.
+// Regra: normalizar UMA vez, na entrada, e comparar/gravar sempre normalizado.
+// (qs_leads não tem coluna separada de "telefone exibível" — o app já exibe e
+// disca por dígitos, então gravar só dígitos não perde nada.)
+function normEmail(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return s || null;
+}
+function normPhone(v) {
+  const d = String(v ?? '').replace(/\D/g, '');
+  return d || null;
+}
+
 // Vocabulário fechado de temperatura (PT + EN). Usado pra achar o score PELO
 // VALOR, sem depender do nome do campo que o Bitrix mandou.
 const TEMP_WORD = /^(quente|morno|frio|hot|warm|cold)$/i;
@@ -189,6 +205,10 @@ function pickLeadScore(input) {
  * pro mesmo negócio sem duplicar card no QS.
  */
 export async function createInboundLead(payload) {
+  // Contato normalizado UMA vez — usado no dedupe, no patch e na gravação.
+  const email = normEmail(payload.email);
+  const phone = normPhone(payload.phone);
+
   // 0) Dedupe por bitrix_id (defensivo: se a coluna ainda não existir no banco,
   //    o filtro falha e seguimos pro fluxo normal de criação).
   const bitrixId = payload.bitrix_id ? String(payload.bitrix_id).trim() : null;
@@ -197,8 +217,8 @@ export async function createInboundLead(payload) {
       const existing = await rest(`qs_leads?select=*&bitrix_id=eq.${encodeURIComponent(bitrixId)}&limit=1`);
       if (existing && existing[0]) {
         const patch = {};
-        if (payload.email) patch.email = payload.email;
-        if (payload.phone) patch.phone = payload.phone;
+        if (email) patch.email = email;
+        if (phone) patch.phone = phone;
         if (buildFullName(payload)) patch.full_name = buildFullName(payload);
         if (payload.segment) patch.segment = payload.segment; // Fonte do Bitrix
         { const ls = pickLeadScore(payload); if (ls) patch.lead_score = ls; } // temperatura do Bitrix
@@ -215,12 +235,12 @@ export async function createInboundLead(payload) {
   // 0b) Dedupe secundário SEM bitrix_id (form de LP, retry do n8n): mesmo e-mail
   //     ou telefone nas últimas 24h → devolve o existente em vez de duplicar
   //     card + tarefas da cadência.
-  if (!bitrixId && (payload.email || payload.phone)) {
+  if (!bitrixId && (email || phone)) {
     try {
       const since = new Date(Date.now() - 24 * 3600_000).toISOString();
       const ors = [];
-      if (payload.email) ors.push(`email.eq.${encodeURIComponent(String(payload.email).trim().toLowerCase())}`);
-      if (payload.phone) ors.push(`phone.eq.${encodeURIComponent(String(payload.phone).trim())}`);
+      if (email) ors.push(`email.eq.${encodeURIComponent(email)}`);
+      if (phone) ors.push(`phone.eq.${encodeURIComponent(phone)}`);
       const dup = await rest(
         `qs_leads?select=*&or=(${ors.join(',')})&created_at=gte.${encodeURIComponent(since)}&limit=1`
       );
@@ -259,11 +279,15 @@ export async function createInboundLead(payload) {
     city: payload.city || null,
     state: payload.state || null,
     website: payload.website || null,
-    phone: payload.phone || null,
-    email: payload.email || null,
+    phone,
+    email,
     linkedin_url: payload.linkedin_url || null,
     source: payload.source || 'integracao',
-    status: 'nao_iniciado',
+    // Lead que JÁ entra vinculado a uma cadência (com tarefas geradas logo
+    // abaixo) nasce "em_prospeccao" — mesma regra do front ao vincular cadência
+    // (LeadsPage/TasksPanel). Antes nascia "nao_iniciado" pra sempre e nada o
+    // promovia: métricas e filtros ignoravam o canal principal de entrada.
+    status: cadenceId ? 'em_prospeccao' : 'nao_iniciado',
     location: payload.location || null,
     owner_id: ownerId,
     cadence_id: cadenceId,

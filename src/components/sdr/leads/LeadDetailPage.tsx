@@ -1,20 +1,33 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
-import { notifyError } from "@/lib/qs/notify";
-import { createCadenceTasks } from "@/lib/qs/queries";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import {
+  createCadenceTasks,
+  closeOpenCadenceTasks,
+  updateQsLead,
+  deleteQsLead,
+  updateQsNote,
+  deleteQsNote,
+  createQsContact,
+  updateQsContact,
+  deleteQsContact,
+  updateQsMeeting,
+} from "@/lib/qs/queries";
 import { getLeadScore } from "@/lib/leadScore";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import type {
   Lead,
   LeadStatus,
+  LeadSource,
   SdrUser,
   Cadence,
   CadenceDay,
   Note,
   Contact,
   Meeting,
+  MeetingStatus,
   Task,
   CustomField,
   CustomFieldScope,
@@ -112,6 +125,91 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
+// ── Contatos (qs_contacts: type + value + is_primary) ───────────────────────
+
+const CONTACT_TYPE_LABELS: Record<string, string> = {
+  phone: "Telefone",
+  email: "E-mail",
+  whatsapp: "WhatsApp",
+  linkedin: "LinkedIn",
+};
+
+// ── Temperatura (lead_score editável pelo SDR) ──────────────────────────────
+// Gravamos o rótulo PT cru — o mesmo formato que vem do Bitrix; getLeadScore
+// (normalizeTemperature) entende os dois lados.
+
+const TEMPERATURE_OPTIONS: { label: string; color: string }[] = [
+  { label: "Quente", color: "#E5484D" },
+  { label: "Morno", color: "#E8920B" },
+  { label: "Frio", color: "#2563EB" },
+];
+
+// ── Espelho do desfecho da reunião no Bitrix ─────────────────────────────────
+// Mesma lógica do helper da MeetingsPage: o sync só conhece os eventos
+// perdido|ganho|reuniao|nota (whitelist do /api/bitrix-sync e do n8n), então o
+// desfecho (realizada/no-show/cancelada) vira comentário "nota" na timeline,
+// sem mover coluna. Fire-and-forget — sem bitrix_id o notifyBitrix pula sozinho.
+function notifyMeetingStatusToBitrix(
+  meeting: Pick<Meeting, "lead_id" | "scheduled_at" | "title">,
+  bitrixId: string | null | undefined,
+  status: MeetingStatus
+): void {
+  const phrases: Partial<Record<MeetingStatus, string>> = {
+    realizada: "foi REALIZADA",
+    no_show: "teve NO-SHOW (cliente não compareceu)",
+    cancelada: "foi CANCELADA",
+  };
+  const phrase = phrases[status];
+  if (!phrase) return; // "agendada" não tem nota própria — a criação já dispara o evento "reuniao"
+  notifyBitrix("nota", {
+    lead_id: meeting.lead_id,
+    bitrix_id: bitrixId,
+    body: `Reunião de ${formatDateTime(meeting.scheduled_at)}${meeting.title ? ` (${meeting.title})` : ""} ${phrase} no QS.`,
+  });
+}
+
+// ── Editar lead (modal do header) ────────────────────────────────────────────
+
+interface LeadEditForm {
+  full_name: string;
+  phone: string;
+  email: string;
+  company_name: string;
+  job_title: string;
+  department: string;
+  source: LeadSource;
+  city: string;
+  state: string;
+  estimated_value: string;
+  company_linkedin: string;
+  company_size: string;
+}
+
+function leadToEditForm(lead: Lead): LeadEditForm {
+  return {
+    full_name: lead.full_name ?? "",
+    phone: lead.phone ?? "",
+    email: lead.email ?? "",
+    company_name: lead.company_name ?? "",
+    job_title: lead.job_title ?? "",
+    department: lead.department ?? "",
+    source: lead.source,
+    city: lead.city ?? "",
+    state: lead.state ?? "",
+    estimated_value: lead.estimated_value != null ? String(lead.estimated_value) : "",
+    company_linkedin: lead.company_linkedin ?? "",
+    company_size: lead.company_size ?? "",
+  };
+}
+
+// Aceita "1.500,50", "1500.50" e "1500" — devolve null pra vazio e NaN pra inválido.
+function parseMoney(raw: string): number | null {
+  const s = raw.trim();
+  if (!s) return null;
+  const normalized = s.replace(/[R$\s]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".");
+  return Number(normalized);
+}
+
 // ── Meeting form (Agendar Reunião) ───────────────────────────────────────────
 
 interface MeetingForm {
@@ -187,6 +285,35 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // ── WhatsApp (Task 3) ──
   const [showWhatsApp, setShowWhatsApp] = useState(false);
 
+  // ── Sprint 4 (A1): editar/excluir lead, notas, contatos, reuniões etc. ──
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
+  const [savingNote, setSavingNote] = useState(false);
+  const [savingHandover, setSavingHandover] = useState(false);
+  const [schedulingReContact, setSchedulingReContact] = useState(false);
+  const [bitrixCopied, setBitrixCopied] = useState(false);
+  const [showScoreMenu, setShowScoreMenu] = useState(false);
+  const [savingScore, setSavingScore] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState<LeadEditForm | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deletingLead, setDeletingLead] = useState(false);
+  const [showWonModal, setShowWonModal] = useState(false);
+  const [wonValue, setWonValue] = useState("");
+  const [wonError, setWonError] = useState<string | null>(null);
+  const [savingWon, setSavingWon] = useState(false);
+  const [removingCadence, setRemovingCadence] = useState(false);
+  const [noteMenuId, setNoteMenuId] = useState<string | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteBody, setEditingNoteBody] = useState("");
+  const [savingNoteEdit, setSavingNoteEdit] = useState(false);
+  const [showContactForm, setShowContactForm] = useState(false);
+  const [contactEditingId, setContactEditingId] = useState<string | null>(null);
+  const [contactForm, setContactForm] = useState({ type: "phone", value: "", is_primary: false });
+  const [savingContact, setSavingContact] = useState(false);
+  const [updatingMeetingId, setUpdatingMeetingId] = useState<string | null>(null);
+
   // ── Data state ──
   const [lead, setLead] = useState<Lead | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -208,10 +335,30 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       .single();
     if (error) {
       console.warn("Erro ao buscar lead:", error);
+      // PGRST116 = zero linhas no .single() → o lead realmente não existe (ou a
+      // RLS escondeu). Qualquer OUTRO erro é falha de rede/servidor e não pode
+      // virar "Lead não encontrado" — vira estado de erro com "Tentar de novo".
+      if ((error as { code?: string }).code !== "PGRST116") {
+        setLoadError(error.message || "Falha de conexão ao buscar o lead.");
+      }
       return null;
     }
     setLead(data as Lead);
     return data as Lead;
+  }, [leadId]);
+
+  // ── Reload tasks (Sprint 4: "Próximas atividades" precisa refletir remoções) ──
+  const reloadTasks = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("qs_tasks")
+      .select("*")
+      .eq("lead_id", leadId)
+      .order("scheduled_at", { ascending: true });
+    if (error) {
+      console.warn("Erro ao recarregar tasks:", error);
+      return;
+    }
+    setTasks((data as Task[]) ?? []);
   }, [leadId]);
 
   // ── Reload meetings (Task 1) ──
@@ -251,6 +398,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   useEffect(() => {
     async function loadAll() {
       setLoading(true);
+      setLoadError(null);
       const leadData = await fetchLead();
       await reloadCustomFields();
 
@@ -312,58 +460,296 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       setLoading(false);
     }
     loadAll();
-  }, [leadId, fetchLead, reloadCustomFields]);
+  }, [leadId, fetchLead, reloadCustomFields, retryTick]);
 
   // ── Add note ──
   async function addNote() {
-    if (!newNote.trim() || !lead) return;
-    const { data, error } = await supabase
-      .from("qs_notes")
-      .insert({ lead_id: lead.id, author_id: currentUser?.id ?? lead.owner_id, body: newNote.trim() })
-      .select()
-      .single();
-    if (error) {
-      console.warn("Erro ao adicionar nota:", error);
-      notifyError("Não foi possível salvar a anotação — tente novamente.");
-      return;
+    // Guarda de duplo clique/Enter+clique: sem ela, dois inserts iguais entravam.
+    if (!newNote.trim() || !lead || savingNote) return;
+    setSavingNote(true);
+    try {
+      const { data, error } = await supabase
+        .from("qs_notes")
+        .insert({ lead_id: lead.id, author_id: currentUser?.id ?? lead.owner_id, body: newNote.trim() })
+        .select()
+        .single();
+      if (error) {
+        console.warn("Erro ao adicionar nota:", error);
+        notifyError("Não foi possível salvar a anotação — tente novamente.");
+        return;
+      }
+      // Espelha a nota como comentário na timeline do negócio no Bitrix.
+      notifyBitrix("nota", {
+        lead_id: lead.id,
+        bitrix_id: lead.bitrix_id,
+        body: newNote.trim(),
+      });
+      setNotes([data as Note, ...notes]);
+      setNewNote("");
+    } finally {
+      setSavingNote(false);
     }
-    // Espelha a nota como comentário na timeline do negócio no Bitrix.
-    notifyBitrix("nota", {
-      lead_id: lead.id,
-      bitrix_id: lead.bitrix_id,
-      body: newNote.trim(),
-    });
-    setNotes([data as Note, ...notes]);
-    setNewNote("");
   }
 
-  // ── Mark as won ──
-  async function markAsWon() {
-    if (!lead) return;
-    if (!window.confirm(`Marcar ${lead.full_name ?? "este lead"} como GANHO?`)) return;
-    const { error } = await supabase
-      .from("qs_leads")
-      .update({ status: "ganho" as LeadStatus })
-      .eq("id", lead.id);
-    if (error) {
-      console.warn("Erro ao marcar como ganho:", error);
-      notifyError("Não foi possível marcar como ganho — tente novamente.");
+  // ── Edit/delete note (Sprint 4) ──
+  function startEditNote(note: Note) {
+    setEditingNoteId(note.id);
+    setEditingNoteBody(note.body);
+  }
+
+  async function saveNoteEdit() {
+    if (!editingNoteId || !editingNoteBody.trim() || savingNoteEdit) return;
+    setSavingNoteEdit(true);
+    try {
+      const updated = await updateQsNote(editingNoteId, editingNoteBody.trim());
+      if (!updated) return; // updateQsNote já avisou por toast
+      setNotes(notes.map((n) => (n.id === updated.id ? updated : n)));
+      setEditingNoteId(null);
+      setEditingNoteBody("");
+    } finally {
+      setSavingNoteEdit(false);
+    }
+  }
+
+  async function handleDeleteNote(note: Note) {
+    if (!window.confirm("Excluir esta anotação? Ela sai do histórico do lead e não dá pra desfazer.")) return;
+    const ok = await deleteQsNote(note.id);
+    if (!ok) return; // deleteQsNote já avisou por toast
+    setNotes(notes.filter((n) => n.id !== note.id));
+    if (editingNoteId === note.id) {
+      setEditingNoteId(null);
+      setEditingNoteBody("");
+    }
+  }
+
+  // ── Contacts CRUD (Sprint 4 — primeiro caminho de escrita de qs_contacts) ──
+  function openContactCreate() {
+    setContactEditingId(null);
+    setContactForm({ type: "phone", value: "", is_primary: false });
+    setShowContactForm(true);
+  }
+
+  function openContactEdit(contact: Contact) {
+    setContactEditingId(contact.id);
+    setContactForm({ type: contact.type, value: contact.value, is_primary: contact.is_primary });
+    setShowContactForm(true);
+  }
+
+  async function saveContact() {
+    if (!lead || savingContact) return;
+    if (!contactForm.value.trim()) {
+      notifyError("Informe o telefone/e-mail/perfil do contato.");
       return;
     }
-    // Encerra as atividades ainda abertas do lead (mesmo comportamento do Painel);
-    // sem isso elas ficam "pendente" pra sempre e inflam contadores e a taxa de atraso.
-    await supabase
-      .from("qs_tasks")
-      .update({ status: "ignorada", skip_reason: "Lead ganho" })
-      .eq("lead_id", lead.id)
-      .in("status", ["pendente", "atrasada"]);
-    // Move o negócio pra coluna de Ganho no Bitrix.
-    notifyBitrix("ganho", {
-      lead_id: lead.id,
-      bitrix_id: lead.bitrix_id,
-      full_name: lead.full_name,
-    });
-    await fetchLead();
+    setSavingContact(true);
+    try {
+      if (contactEditingId) {
+        const updated = await updateQsContact(contactEditingId, {
+          type: contactForm.type,
+          value: contactForm.value.trim(),
+          is_primary: contactForm.is_primary,
+        });
+        if (!updated) return; // camada já avisou
+        setContacts(contacts.map((c) => (c.id === updated.id ? updated : c)));
+      } else {
+        const created = await createQsContact({
+          lead_id: lead.id,
+          type: contactForm.type,
+          value: contactForm.value.trim(),
+          is_primary: contactForm.is_primary,
+        });
+        if (!created) return; // camada já avisou
+        setContacts([...contacts, created]);
+      }
+      setShowContactForm(false);
+      setContactEditingId(null);
+      setContactForm({ type: "phone", value: "", is_primary: false });
+    } finally {
+      setSavingContact(false);
+    }
+  }
+
+  async function handleDeleteContact(contact: Contact) {
+    if (!window.confirm(`Excluir o contato ${contact.value}?`)) return;
+    const ok = await deleteQsContact(contact.id);
+    if (!ok) return; // camada já avisou
+    setContacts(contacts.filter((c) => c.id !== contact.id));
+    if (contactEditingId === contact.id) {
+      setShowContactForm(false);
+      setContactEditingId(null);
+    }
+  }
+
+  // ── Temperatura editável (Sprint 4) ──
+  // O badge deixa de ser só reflexo do Bitrix: o SDR classifica Quente/Morno/Frio.
+  async function setTemperature(label: string | null) {
+    if (!lead || savingScore) return;
+    setSavingScore(true);
+    try {
+      const updated = await updateQsLead(lead.id, { lead_score: label });
+      if (!updated) return; // updateQsLead já avisou por toast
+      setLead(updated);
+      notifySuccess(label ? `Temperatura atualizada: ${label}.` : "Temperatura removida.");
+      setShowScoreMenu(false);
+    } finally {
+      setSavingScore(false);
+    }
+  }
+
+  // ── Editar lead (Sprint 4 — o maior buraco do app) ──
+  function openEditModal() {
+    if (!lead) return;
+    setEditForm(leadToEditForm(lead));
+    setEditError(null);
+    setShowEditModal(true);
+  }
+
+  async function saveLeadEdit() {
+    if (!lead || !editForm || savingEdit) return;
+    const fullName = editForm.full_name.trim();
+    if (!fullName) {
+      setEditError("O nome do lead não pode ficar vazio.");
+      return;
+    }
+    const estimated = parseMoney(editForm.estimated_value);
+    if (estimated !== null && (Number.isNaN(estimated) || estimated < 0)) {
+      setEditError("Valor estimado inválido — use números (ex.: 1500 ou 1.500,50).");
+      return;
+    }
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      const payload: Partial<Lead> = {
+        full_name: fullName,
+        phone: editForm.phone.trim() || null,
+        email: editForm.email.trim() || null,
+        company_name: editForm.company_name.trim() || null,
+        job_title: editForm.job_title.trim() || null,
+        department: editForm.department.trim() || null,
+        source: editForm.source,
+        city: editForm.city.trim() || null,
+        state: editForm.state.trim() || null,
+        estimated_value: estimated,
+        company_linkedin: editForm.company_linkedin.trim() || null,
+        company_size: editForm.company_size.trim() || null,
+      };
+      // Mantém first/last coerentes com o nome exibido (iniciais do avatar) —
+      // só quando o nome realmente mudou, pra não sobrescrever dados do Bitrix.
+      if (fullName !== (lead.full_name ?? "")) {
+        const parts = fullName.split(/\s+/);
+        payload.first_name = parts[0] ?? null;
+        payload.last_name = parts.length > 1 ? parts.slice(1).join(" ") : null;
+      }
+      const updated = await updateQsLead(lead.id, payload);
+      if (!updated) return; // updateQsLead já avisou por toast (e mediu o efeito)
+      setLead(updated);
+      setShowEditModal(false);
+      notifySuccess("Lead atualizado.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  // ── Excluir lead no detalhe (Sprint 4 — só gestor/admin, cascade forte) ──
+  async function handleDeleteLead() {
+    if (!lead || deletingLead) return;
+    const ok = window.confirm(
+      `EXCLUIR o lead ${lead.full_name ?? "sem nome"}?\n\n` +
+        "Isso apaga DEFINITIVAMENTE o lead e, em cascata, todo o histórico: " +
+        "anotações, atividades, reuniões, contatos e handovers. Não dá pra desfazer.\n\n" +
+        "Se a intenção é só tirar da fila, prefira marcar como Perdido."
+    );
+    if (!ok) return;
+    setDeletingLead(true);
+    try {
+      const deleted = await deleteQsLead(lead.id); // camada mede RLS e avisa em falha
+      if (!deleted) return;
+      notifySuccess("Lead excluído.");
+      onBack();
+    } finally {
+      setDeletingLead(false);
+    }
+  }
+
+  // ── Remover da cadência (Sprint 4) ──
+  async function removeFromCadence() {
+    if (!lead || !lead.cadence_id || removingCadence) return;
+    const ok = window.confirm(
+      `Remover ${lead.full_name ?? "este lead"} da cadência${cadence?.name ? ` "${cadence.name}"` : ""}?\n\n` +
+        "As atividades ABERTAS do plano serão encerradas (as extras e as já concluídas ficam)."
+    );
+    if (!ok) return;
+    setRemovingCadence(true);
+    try {
+      const updated = await updateQsLead(lead.id, { cadence_id: null, cadence_started_at: null });
+      if (!updated) return; // updateQsLead já avisou por toast
+      const closed = await closeOpenCadenceTasks(lead.id, "Lead removido da cadência");
+      if (!closed) {
+        notifyError("O lead saiu da cadência, mas as atividades abertas do plano NÃO foram encerradas — encerre-as no Painel.");
+      }
+      setLead(updated);
+      setCadence(null);
+      setCadenceDays([]);
+      await reloadTasks();
+      notifySuccess("Lead removido da cadência.");
+    } finally {
+      setRemovingCadence(false);
+    }
+  }
+
+  // ── Mark as won (Sprint 4: modal pede o VALOR FECHADO — closed_value nunca
+  // era escrito e a "receita ganha" do dashboard vivia em R$ 0) ──
+  function openWonModal() {
+    if (!lead) return;
+    // Incentiva sem obrigar: pré-preenche com a estimativa quando existir.
+    setWonValue(lead.estimated_value != null ? String(lead.estimated_value) : "");
+    setWonError(null);
+    setShowWonModal(true);
+  }
+
+  async function confirmWon() {
+    if (!lead || savingWon) return;
+    const value = parseMoney(wonValue);
+    if (value !== null && (Number.isNaN(value) || value < 0)) {
+      setWonError("Valor inválido — use números (ex.: 1500 ou 1.500,50). Deixe vazio pra não informar.");
+      return;
+    }
+    setSavingWon(true);
+    setWonError(null);
+    try {
+      // updateQsLead MEDE o que o banco aceitou (erro OU .single() sem linha) e
+      // avisa por toast em falha — nada de sucesso otimista.
+      const updated = await updateQsLead(lead.id, {
+        status: "ganho" as LeadStatus,
+        closed_value: value,
+      });
+      if (!updated) return;
+      // Encerra as atividades ainda abertas do lead (mesmo comportamento do Painel);
+      // sem isso elas ficam "pendente" pra sempre e inflam contadores e a taxa de atraso.
+      const { error: tasksError } = await supabase
+        .from("qs_tasks")
+        .update({ status: "ignorada", skip_reason: "Lead ganho" })
+        .eq("lead_id", lead.id)
+        .in("status", ["pendente", "atrasada"]);
+      if (tasksError) {
+        console.warn("Erro ao encerrar atividades do lead ganho:", tasksError);
+        notifyError("Lead ganho, mas as atividades abertas não foram encerradas — encerre-as no Painel.");
+      }
+      // Move o negócio pra coluna de Ganho no Bitrix. O evento continua "ganho"
+      // (whitelist); closed_value vai como campo extra — o n8n usa se souber.
+      notifyBitrix("ganho", {
+        lead_id: lead.id,
+        bitrix_id: lead.bitrix_id,
+        full_name: lead.full_name,
+        closed_value: value,
+      });
+      setLead(updated);
+      setShowWonModal(false);
+      await reloadTasks();
+      notifySuccess("Lead marcado como GANHO.");
+    } finally {
+      setSavingWon(false);
+    }
   }
 
   // ── Mark as lost (with re-engagement check — Change 16) ──
@@ -396,6 +782,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       .eq("lead_id", lead.id)
       .in("status", ["pendente", "atrasada"]);
     setSelectedLossReason("");
+    await reloadTasks();
 
     // Move o negócio pra coluna de Perdido no Bitrix (com o motivo).
     notifyBitrix("perdido", {
@@ -421,7 +808,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
 
   // ── Schedule re-engagement (Change 16) ──
   async function scheduleReEngagement(days: number) {
-    if (!lead) return;
+    // Guarda de duplo clique: dois toques em "30 dias" criavam DUAS tarefas.
+    if (!lead || schedulingReContact) return;
+    setSchedulingReContact(true);
     const scheduledAt = new Date();
     scheduledAt.setDate(scheduledAt.getDate() + days);
 
@@ -442,11 +831,14 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     if (error) {
       console.warn("Erro ao agendar re-contato:", error);
       notifyError("Não foi possível agendar o re-contato.");
+      setSchedulingReContact(false);
     } else {
       setReEngagementScheduled(true);
+      await reloadTasks();
       setTimeout(() => {
         setReEngagementScheduled(false);
         setShowReEngagement(false);
+        setSchedulingReContact(false);
       }, 2000);
     }
   }
@@ -456,7 +848,10 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // (Antes marcava status "ganho", inflando o placar/ranking sem venda — o ganho
   // de verdade continua sendo dado pelo fluxo de desfecho, com reunião.)
   async function handleHandover() {
-    if (!lead || !selectedCloser) return;
+    // Guarda de duplo clique: sem ela, dois handovers idênticos eram registrados.
+    if (!lead || !selectedCloser || savingHandover) return;
+    setSavingHandover(true);
+    try {
     const { error: hoError } = await supabase
       .from("qs_handovers")
       .insert({ lead_id: lead.id, from_user_id: lead.owner_id, to_user_id: selectedCloser });
@@ -494,13 +889,28 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     setHandoverSuccess(true);
     setTimeout(() => setHandoverSuccess(false), 3000);
     await fetchLead();
+    await reloadTasks();
+    } finally {
+      setSavingHandover(false);
+    }
   }
 
   // ── Save meeting (Task 1) ──
   async function saveMeeting() {
-    if (!lead) return;
+    if (!lead || savingMeeting) return;
     if (!meetingForm.scheduled_at) {
       setMeetingError("Informe a data e o horário da reunião.");
+      return;
+    }
+    const when = new Date(meetingForm.scheduled_at);
+    if (isNaN(when.getTime())) {
+      setMeetingError("Data/hora inválida.");
+      return;
+    }
+    // Reunião no passado é quase sempre erro de digitação no datetime-local
+    // (ano/mês errado) — bloqueia com 1 min de tolerância pra "agora".
+    if (when.getTime() < Date.now() - 60_000) {
+      setMeetingError("A data da reunião está no passado — confira o dia e o horário.");
       return;
     }
     setSavingMeeting(true);
@@ -551,6 +961,29 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     setActiveTab("reunioes");
   }
 
+  // ── Meeting status quick actions (Sprint 4 — realizada / no-show / cancelar) ──
+  async function changeMeetingStatus(meeting: Meeting, status: MeetingStatus) {
+    if (!lead || updatingMeetingId) return;
+    // Cancelar é 1 clique — misclick não pode cancelar reunião de cliente.
+    if (status === "cancelada" && !window.confirm(`Cancelar a reunião de ${formatDateTime(meeting.scheduled_at)}?`)) return;
+    setUpdatingMeetingId(meeting.id);
+    try {
+      // updateQsMeeting MEDE a gravação (.single() falha com 0 linhas sob RLS)
+      // e avisa por toast quando o banco recusa.
+      const updated = await updateQsMeeting(meeting.id, {
+        status,
+        updated_at: new Date().toISOString(),
+      });
+      if (!updated) return;
+      // Espelha o desfecho na timeline do negócio no Bitrix (evento "nota").
+      notifyMeetingStatusToBitrix(meeting, lead.bitrix_id, status);
+      await reloadMeetings();
+      notifySuccess(`Reunião marcada como ${MEETING_STATUS_LABELS[status].toLowerCase()}.`);
+    } finally {
+      setUpdatingMeetingId(null);
+    }
+  }
+
   // ── Save custom fields (Task 2) ──
   async function saveCustomFields() {
     if (!lead || customFields.length === 0) return;
@@ -589,6 +1022,25 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     );
   }
 
+  // Falha de rede/servidor NÃO é "Lead não encontrado" — oferece tentar de novo.
+  if (!lead && loadError) {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "inherit" }}>
+        <p className="text-sm font-medium text-gray-700 mb-1">Não foi possível carregar o lead.</p>
+        <p className="text-xs text-gray-400 mb-4 max-w-sm text-center">{loadError}</p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setRetryTick((t) => t + 1)}
+            className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
+          >
+            Tentar de novo
+          </button>
+          <button onClick={onBack} className="text-sm text-[#0147FF] hover:underline">Voltar para Leads</button>
+        </div>
+      </div>
+    );
+  }
+
   if (!lead) {
     return (
       <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "inherit" }}>
@@ -623,6 +1075,49 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       <div className="flex items-start justify-between py-3 border-b border-gray-100 last:border-0">
         <span className="text-sm text-gray-500">{label}</span>
         <span className="text-sm font-medium text-gray-900 text-right max-w-[60%]">{value || "\u2014"}</span>
+      </div>
+    );
+  }
+
+  // ── Próximas atividades (Sprint 4) ───────────────────────────────────────────
+  // As tasks pendentes eram buscadas mas NUNCA exibidas — só as concluídas
+  // apareciam. O selo "Atrasada" é DERIVADO da data (regra da casa: status
+  // 'atrasada' nunca é gravado), por cima do que estiver no banco.
+  function renderUpcomingTasksBox() {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const openTasks = tasks
+      .filter((t) => t.status === "pendente" || t.status === "atrasada")
+      .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+    if (openTasks.length === 0) return null;
+    return (
+      <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <svg className="w-4 h-4 text-[#0147FF]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <h4 className="text-xs font-semibold text-blue-800">Próximas atividades ({openTasks.length})</h4>
+        </div>
+        <div className="space-y-2">
+          {openTasks.map((t) => {
+            const isLate = new Date(t.scheduled_at).getTime() < todayStart.getTime();
+            return (
+              <div key={t.id} className="flex items-center gap-2 flex-wrap">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-[#0147FF] flex items-center justify-center shrink-0">
+                  {CHANNEL_ICONS[t.channel_type]}
+                </span>
+                <span className="text-sm font-medium text-gray-800">{CHANNEL_LABELS[t.channel_type]}</span>
+                <span className="text-xs text-gray-400">{formatDateTime(t.scheduled_at)}</span>
+                {t.is_extra && <span className="text-[10px] font-medium text-gray-400 uppercase">extra</span>}
+                {isLate && (
+                  <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold bg-red-100 text-red-700">
+                    Atrasada
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   }
@@ -729,7 +1224,19 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             {/* Details Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-                <h3 className="text-sm font-semibold text-gray-900 mb-3">Cadência</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-900">Cadência</h3>
+                  {lead.cadence_id && (
+                    <button
+                      onClick={removeFromCadence}
+                      disabled={removingCadence}
+                      className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="Limpa o vínculo com a cadência e encerra as atividades abertas do plano"
+                    >
+                      {removingCadence ? "Removendo..." : "Remover da cadência"}
+                    </button>
+                  )}
+                </div>
                 <p className="text-sm text-gray-700">{cadence?.name ?? "\u2014"}</p>
                 <p className="text-xs text-gray-400 mt-1">
                   Iniciada em {lead.cadence_started_at ? formatDate(lead.cadence_started_at) : "\u2014"}
@@ -750,6 +1257,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                 </div>
               </div>
             </div>
+
+            {/* Próximas atividades (Sprint 4) */}
+            {renderUpcomingTasksBox()}
 
             {/* Contact / Function / Location / Source */}
             <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
@@ -850,10 +1360,10 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               <div className="flex justify-end mt-3">
                 <button
                   onClick={addNote}
-                  disabled={!newNote.trim()}
+                  disabled={!newNote.trim() || savingNote}
                   className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  Adicionar Anotação
+                  {savingNote ? "Salvando..." : "Adicionar Anotação"}
                 </button>
               </div>
             </div>
@@ -864,6 +1374,11 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                 // Autor REAL da nota (antes exibia sempre o dono do lead — num
                 // handover, as notas antigas "mudavam" de autor).
                 const authorName = allUsers.find((u) => u.id === note.author_id)?.name ?? lead.owner?.name ?? "Autor";
+                // A RLS (0007: notes_update/delete) só aceita autor ou gestor —
+                // o menu segue a mesma regra pra não oferecer ação que o banco recusa.
+                const canManageNote =
+                  !!currentUser && (canSeeAllData(currentUser.role) || note.author_id === currentUser.id);
+                const isEditingThis = editingNoteId === note.id;
                 return (
                 <div key={note.id} className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
                   <div className="flex items-center justify-between mb-2">
@@ -875,9 +1390,80 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                       </div>
                       <span className="text-sm font-medium text-gray-900">{authorName}</span>
                     </div>
-                    <span className="text-xs text-gray-400">{formatDateTime(note.created_at)}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400">{formatDateTime(note.created_at)}</span>
+                      {canManageNote && (
+                        <div className="relative">
+                          <button
+                            onClick={() => setNoteMenuId(noteMenuId === note.id ? null : note.id)}
+                            className="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                            title="Ações da anotação"
+                            aria-label="Ações da anotação"
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                              <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
+                            </svg>
+                          </button>
+                          {noteMenuId === note.id && (
+                            <>
+                              {/* backdrop transparente: clique fora fecha o menu */}
+                              <div className="fixed inset-0 z-10" onClick={() => setNoteMenuId(null)} />
+                              <div className="absolute right-0 top-7 z-20 w-32 rounded-lg border border-gray-100 bg-white shadow-lg py-1">
+                                <button
+                                  onClick={() => {
+                                    setNoteMenuId(null);
+                                    startEditNote(note);
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                                >
+                                  Editar
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setNoteMenuId(null);
+                                    handleDeleteNote(note);
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                >
+                                  Excluir
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-sm text-gray-700 leading-relaxed">{note.body}</p>
+                  {isEditingThis ? (
+                    <div>
+                      <textarea
+                        value={editingNoteBody}
+                        onChange={(e) => setEditingNoteBody(e.target.value)}
+                        rows={3}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] resize-none"
+                      />
+                      <div className="flex items-center justify-end gap-2 mt-2">
+                        <button
+                          onClick={() => {
+                            setEditingNoteId(null);
+                            setEditingNoteBody("");
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          onClick={saveNoteEdit}
+                          disabled={!editingNoteBody.trim() || savingNoteEdit}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-[#0147FF] hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {savingNoteEdit ? "Salvando..." : "Salvar"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-700 leading-relaxed">{note.body}</p>
+                  )}
                 </div>
                 );
               })}
@@ -890,13 +1476,88 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           </div>
         );
 
-      // ── Contatos ──
+      // ── Contatos (Sprint 4: primeiro caminho de escrita de qs_contacts) ──
       case "contatos":
         return (
           <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-            <h3 className="text-sm font-semibold text-gray-900 mb-4">Contatos do Lead</h3>
-            {contacts.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-6">Nenhum contato cadastrado.</p>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-gray-900">Contatos do Lead</h3>
+              {!showContactForm && (
+                <button
+                  onClick={openContactCreate}
+                  className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-xs font-medium text-white hover:bg-[#0139D6] transition-colors"
+                >
+                  + Adicionar contato
+                </button>
+              )}
+            </div>
+
+            {/* Form de criar/editar contato */}
+            {showContactForm && (
+              <div className="mb-4 p-4 rounded-lg border border-gray-200 bg-[#F8F9FA]">
+                <p className="text-xs font-semibold text-gray-700 mb-3">
+                  {contactEditingId ? "Editar contato" : "Novo contato"}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Tipo</label>
+                    <select
+                      value={contactForm.type}
+                      onChange={(e) => setContactForm((prev) => ({ ...prev, type: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+                    >
+                      {Object.entries(CONTACT_TYPE_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                      {contactForm.type === "email" ? "E-mail" : contactForm.type === "linkedin" ? "Perfil/URL" : "Número"}
+                    </label>
+                    <input
+                      type={contactForm.type === "email" ? "email" : "text"}
+                      value={contactForm.value}
+                      onChange={(e) => setContactForm((prev) => ({ ...prev, value: e.target.value }))}
+                      placeholder={contactForm.type === "email" ? "nome@empresa.com" : contactForm.type === "linkedin" ? "linkedin.com/in/..." : "(11) 99999-9999"}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+                    />
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-700 mb-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={contactForm.is_primary}
+                    onChange={(e) => setContactForm((prev) => ({ ...prev, is_primary: e.target.checked }))}
+                    className="rounded border-gray-300"
+                  />
+                  Contato principal
+                </label>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setShowContactForm(false);
+                      setContactEditingId(null);
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={saveContact}
+                    disabled={!contactForm.value.trim() || savingContact}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-[#0147FF] hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {savingContact ? "Salvando..." : contactEditingId ? "Salvar" : "Adicionar"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {contacts.length === 0 && !showContactForm && (
+              <p className="text-sm text-gray-400 text-center py-6">
+                Nenhum contato cadastrado. Use "+ Adicionar contato" pra registrar telefones e e-mails extras deste lead.
+              </p>
             )}
             <div className="space-y-3">
               {contacts.map((contact) => (
@@ -904,52 +1565,138 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                   key={contact.id}
                   className="flex items-center justify-between p-3 rounded-lg bg-[#F8F9FA]"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center shrink-0">
                       {contact.type === "phone" && CHANNEL_ICONS.ligacao}
                       {contact.type === "email" && CHANNEL_ICONS.email}
                       {contact.type === "whatsapp" && CHANNEL_ICONS.whatsapp}
                       {contact.type === "linkedin" && CHANNEL_ICONS.linkedin}
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{contact.value}</p>
-                      <p className="text-xs text-gray-400 capitalize">{contact.type}</p>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{contact.value}</p>
+                      <p className="text-xs text-gray-400">{CONTACT_TYPE_LABELS[contact.type] ?? contact.type}</p>
                     </div>
                   </div>
-                  {contact.is_primary && (
-                    <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-[#0147FF]/10 text-[#0147FF]">
-                      Principal
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {contact.is_primary && (
+                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-[#0147FF]/10 text-[#0147FF]">
+                        Principal
+                      </span>
+                    )}
+                    <button
+                      onClick={() => openContactEdit(contact)}
+                      className="p-1.5 rounded-md hover:bg-white text-gray-400 hover:text-gray-600 transition-colors"
+                      title="Editar contato"
+                      aria-label="Editar contato"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteContact(contact)}
+                      className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
+                      title="Excluir contato"
+                      aria-label="Excluir contato"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         );
 
-      // ── Reuniões ──
+      // ── Reuniões (Sprint 4: mostra o que foi coletado + ações de desfecho) ──
       case "reunioes":
         return (
           <div className="space-y-3">
             {meetings.map((meeting) => {
               const mColor = MEETING_COLORS[meeting.status] ?? MEETING_COLORS.agendada;
+              const busy = updatingMeetingId === meeting.id;
               return (
                 <div key={meeting.id} className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${mColor.bg} ${mColor.text}`}>
-                      {MEETING_STATUS_LABELS[meeting.status]}
-                    </span>
-                    <span className="text-xs text-gray-400">{formatDateTime(meeting.scheduled_at)}</span>
+                  <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${mColor.bg} ${mColor.text}`}>
+                        {MEETING_STATUS_LABELS[meeting.status]}
+                      </span>
+                      {meeting.title && (
+                        <span className="text-sm font-semibold text-gray-900 truncate">{meeting.title}</span>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-400">Criada em {formatDateTime(meeting.created_at)}</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    <span className="text-sm text-gray-700">{formatDateTime(meeting.scheduled_at)}</span>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      <span className="text-sm text-gray-700">
+                        {formatDateTime(meeting.scheduled_at)}
+                        {meeting.duration_min ? ` · ${meeting.duration_min} min` : ""}
+                      </span>
+                    </div>
+                    {meeting.location && (
+                      <div className="flex items-center gap-2">
+                        <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        <span className="text-sm text-gray-700">{meeting.location}</span>
+                      </div>
+                    )}
+                    {meeting.meeting_link && (
+                      <div className="flex items-center gap-2 min-w-0">
+                        <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m7.328-7.328a4 4 0 015.656 5.656l-1.5 1.5" />
+                        </svg>
+                        <a
+                          href={meeting.meeting_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-[#0147FF] hover:underline truncate"
+                          title="Abrir link da reunião"
+                        >
+                          {meeting.meeting_link}
+                        </a>
+                      </div>
+                    )}
+                    {meeting.notes && (
+                      <p className="text-[12.5px] text-gray-500 whitespace-pre-wrap pt-1">{meeting.notes}</p>
+                    )}
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">
-                    Criada em {formatDateTime(meeting.created_at)}
-                  </p>
+
+                  {/* Ações de desfecho — só pra reunião ainda agendada */}
+                  {meeting.status === "agendada" && (
+                    <div className="flex items-center gap-2 flex-wrap mt-4 pt-3 border-t border-gray-100">
+                      <button
+                        onClick={() => changeMeetingStatus(meeting, "realizada")}
+                        disabled={busy || !!updatingMeetingId}
+                        className="px-3 py-1.5 rounded-lg bg-green-50 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {busy ? "Salvando..." : "✓ Realizada"}
+                      </button>
+                      <button
+                        onClick={() => changeMeetingStatus(meeting, "no_show")}
+                        disabled={busy || !!updatingMeetingId}
+                        className="px-3 py-1.5 rounded-lg bg-orange-50 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        No-show
+                      </button>
+                      <button
+                        onClick={() => changeMeetingStatus(meeting, "cancelada")}
+                        disabled={busy || !!updatingMeetingId}
+                        className="px-3 py-1.5 rounded-lg bg-red-50 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -970,6 +1717,12 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               Cadência: {cadence?.name ?? "\u2014"}
               {lead.cadence_started_at && ` | Início: ${formatDate(lead.cadence_started_at)}`}
             </p>
+
+            {/* Próximas atividades (Sprint 4: pendentes/futuras, antes invisíveis) */}
+            {(() => {
+              const box = renderUpcomingTasksBox();
+              return box ? <div className="mb-6">{box}</div> : null;
+            })()}
 
             {/* Atividades realizadas (dados reais das tasks concluídas) */}
             {(() => {
@@ -1203,16 +1956,77 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg font-bold text-gray-900">{lead.full_name}</h1>
-              {(() => { const t = getLeadScore(lead); return t ? (
-                <span className="text-xs font-bold px-2 py-0.5 rounded-md" style={{ background: t.bg, color: t.color }} title="Temperatura vinda do Bitrix">{t.label}</span>
-              ) : null; })()}
+              {/* Temperatura EDITÁVEL (Sprint 4): o badge deixou de ser só reflexo
+                  do Bitrix — o SDR classifica Quente/Morno/Frio aqui mesmo. */}
+              <div className="relative">
+                {(() => {
+                  const t = getLeadScore(lead);
+                  return (
+                    <button
+                      onClick={() => setShowScoreMenu(!showScoreMenu)}
+                      disabled={savingScore}
+                      title="Temperatura do lead — clique para classificar"
+                      className={
+                        t
+                          ? "text-xs font-bold px-2 py-0.5 rounded-md transition hover:opacity-80 disabled:opacity-50"
+                          : "text-xs font-medium px-2 py-0.5 rounded-md border border-dashed border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400 transition disabled:opacity-50"
+                      }
+                      style={t ? { background: t.bg, color: t.color } : undefined}
+                    >
+                      {savingScore ? "..." : t ? t.label : "Classificar"}
+                    </button>
+                  );
+                })()}
+                {showScoreMenu && (
+                  <>
+                    {/* backdrop transparente: clique fora fecha o menu */}
+                    <div className="fixed inset-0 z-10" onClick={() => setShowScoreMenu(false)} />
+                    <div className="absolute left-0 top-7 z-20 w-40 rounded-lg border border-gray-100 bg-white shadow-lg py-1">
+                      {TEMPERATURE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.label}
+                          onClick={() => setTemperature(opt.label)}
+                          disabled={savingScore}
+                          className="w-full text-left px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                          style={{ color: opt.color }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                      {lead.lead_score && (
+                        <button
+                          onClick={() => setTemperature(null)}
+                          disabled={savingScore}
+                          className="w-full text-left px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50 disabled:opacity-50 transition-colors border-t border-gray-100"
+                        >
+                          Sem classificação
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
               {lead.bitrix_id && (
                 <button
-                  onClick={async () => { try { await navigator.clipboard.writeText(lead.bitrix_id!); } catch { /* ignore */ } }}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(lead.bitrix_id!);
+                      // Feedback visual (Sprint 4): antes o clique não dava sinal
+                      // nenhum de que o ID tinha ido pro clipboard.
+                      setBitrixCopied(true);
+                      setTimeout(() => setBitrixCopied(false), 1500);
+                    } catch {
+                      notifyError("Não foi possível copiar o ID — copie manualmente.");
+                    }
+                  }}
                   title="ID do cliente (Bitrix) — clique para copiar"
-                  className="text-xs font-bold tabular-nums px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 transition"
+                  className={`text-xs font-bold tabular-nums px-2 py-0.5 rounded-md transition ${
+                    bitrixCopied
+                      ? "bg-green-100 text-green-700"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
                 >
-                  ID {lead.bitrix_id}
+                  {bitrixCopied ? "Copiado ✓" : `ID ${lead.bitrix_id}`}
                 </button>
               )}
             </div>

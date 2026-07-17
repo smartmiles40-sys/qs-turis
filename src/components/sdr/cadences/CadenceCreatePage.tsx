@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchQsUsers } from "@/lib/qs/queries";
 import { notifyError } from "@/lib/qs/notify";
+import { consumeDuplicateSource } from "./duplicateSource";
 import type {
   ChannelType,
   AcquisitionChannel,
@@ -18,6 +19,7 @@ import {
   CHANNEL_LABELS,
   ACQUISITION_LABELS,
   CADENCE_STATUS_LABELS,
+  OBJECTIVE_LABELS,
   PRIORITY_LABELS,
   WEEKDAY_LABELS,
 } from "../types";
@@ -106,6 +108,27 @@ function ChannelIcon({ type, size = 16 }: { type: ChannelType; size?: number }) 
           <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
         </svg>
       );
+    case "instagram":
+      return (
+        <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+          <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+          <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+        </svg>
+      );
+    case "tiktok":
+      return (
+        <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z" />
+        </svg>
+      );
+    case "youtube":
+      return (
+        <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-1.92 29 29 0 0 0 .46-5.33 29 29 0 0 0-.46-5.33z" />
+          <polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02" fill="currentColor" stroke="none" />
+        </svg>
+      );
   }
 }
 
@@ -123,7 +146,9 @@ const CHANNEL_COLORS: Record<ChannelType, string> = {
   youtube: "#FF0000",
 };
 
-const ALL_CHANNELS: ChannelType[] = ["pesquisa", "email", "ligacao", "ligacao_whatsapp", "whatsapp", "linkedin"];
+// Todos os canais aceitos pelo banco (CHECK das migrations 0001/0004) — inclui
+// instagram/tiktok/youtube, que antes existiam no tipo mas não apareciam no builder.
+const ALL_CHANNELS: ChannelType[] = ["pesquisa", "email", "ligacao", "ligacao_whatsapp", "whatsapp", "linkedin", "instagram", "tiktok", "youtube"];
 
 // ── Step Definition ─────────────────────────────────────────────────────────
 
@@ -197,6 +222,57 @@ function getDefaultForm(): FormState {
   };
 }
 
+// Converte a linha do Supabase (com days/activities/owners aninhados) pro form.
+// Usada na EDIÇÃO e na DUPLICAÇÃO. freshIds: true = gera ids locais novos
+// (duplicação — nenhum id da origem é reaproveitado; no salvamento em modo
+// criação tudo vira INSERT novo de qualquer forma).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapCadenceToForm(c: any, opts?: { freshIds?: boolean }): FormState {
+  const fresh = opts?.freshIds === true;
+  return {
+    execution_mode: c.execution_mode ?? "manual",
+    objective: c.objective ?? "agendar_reuniao",
+    name: c.name ?? "",
+    description: c.description ?? "",
+    acquisition_channel: c.acquisition_channel ?? "levantada_de_mao",
+    priority: c.priority ?? "media",
+    status: c.status ?? "rascunho",
+    auto_loss_enabled: c.auto_loss_days !== null && c.auto_loss_days !== undefined,
+    auto_loss_days: c.auto_loss_days ?? 14,
+    redirect_cadence_id: c.redirect_cadence_id ?? "",
+    // Joins aninhados do Supabase não garantem ordem → ordena dias e atividades.
+    days: (c.days ?? [])
+      .slice()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .sort((a: any, b: any) => (a.day_number ?? 0) - (b.day_number ?? 0))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((d: any) => {
+        const dayId = fresh ? nextId("day") : d.id;
+        return {
+          id: dayId,
+          day_number: d.day_number,
+          activities: (d.activities ?? [])
+            .slice()
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .map((a: any) => ({
+              id: fresh ? nextId("act") : a.id,
+              cadence_day_id: dayId,
+              channel_type: a.channel_type,
+              scheduled_time: a.scheduled_time,
+              order_index: a.order_index,
+              script_text: a.script_text || "",
+            })),
+        };
+      }),
+    weekdays: c.execution_weekdays ?? [1, 2, 3, 4, 5],
+    distribution_mode: c.distribution_mode ?? "alternado",
+    offday_policy: c.offday_policy ?? "aguardar_proximo_dia",
+    owner_ids: ((c.owners ?? []) as { user_id: string }[]).map((o) => o.user_id),
+  };
+}
+
 // ── Form State ──────────────────────────────────────────────────────────────
 
 interface FormDay {
@@ -236,25 +312,67 @@ interface FormState {
 
 export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePageProps) {
   const isEdit = cadenceId !== null;
+  // DUPLICAÇÃO: em modo criação, o card "Duplicar" pode ter deixado a cadência
+  // de origem no duplicateSource — consumo único no primeiro render.
+  const [dupSourceId] = useState<string | null>(() => (cadenceId === null ? consumeDuplicateSource() : null));
   const [activeStep, setActiveStep] = useState(1);
   const [form, setForm] = useState<FormState>(getDefaultForm);
-  const [loading, setLoading] = useState(isEdit);
+  const [loading, setLoading] = useState(isEdit || dupSourceId !== null);
   // Falha ao carregar a cadência na EDIÇÃO: com isso ligado, salvar é bloqueado.
   // Sem essa guarda, o editor abria com o form default vazio e o salvamento
   // apagava os dias/atividades REAIS da cadência, gravando um esqueleto por cima.
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sdrs, setSdrs] = useState<SdrUser[]>([]);
-  // Outras cadências (pro seletor "redirecionar ao terminar o plano").
-  const [otherCadences, setOtherCadences] = useState<{ id: string; name: string }[]>([]);
+  // Outras cadências (pro seletor "redirecionar ao terminar o plano") COM status:
+  // só as "disponíveis" podem ser escolhidas como destino novo (congelar bloqueia
+  // vínculos novos), mas um destino já gravado que congelou continua listado —
+  // rotulado — pra o select não "sumir" com o valor salvo.
+  const [otherCadences, setOtherCadences] = useState<{ id: string; name: string; status: CadenceStatus }[]>([]);
 
   // SDRs disponíveis para atribuir à cadência (só quem qualifica: sdr/closer).
   useEffect(() => {
     fetchQsUsers().then((all) => setSdrs(all.filter((u) => u.role === "sdr" || u.role === "closer")));
-    supabase.from("qs_cadences").select("id, name").order("name").then(({ data }) => {
-      setOtherCadences(((data ?? []) as { id: string; name: string }[]).filter((c) => c.id !== cadenceId));
+    supabase.from("qs_cadences").select("id, name, status").order("name").then(({ data }) => {
+      setOtherCadences(
+        ((data ?? []) as { id: string; name: string; status: CadenceStatus }[]).filter((c) => c.id !== cadenceId)
+      );
     });
   }, [cadenceId]);
+
+  // DUPLICAÇÃO: carrega a cadência de origem e pré-preenche o form como CÓPIA
+  // ("Cópia de X", status rascunho, ids locais novos — nada aponta pra origem).
+  // Se o fetch falhar, o builder abre em branco (avisando) — sem risco de
+  // sobrescrever nada, porque em modo criação o salvamento é sempre INSERT.
+  useEffect(() => {
+    if (!dupSourceId) return;
+    let cancelled = false;
+    (async () => {
+      const { data: cad, error } = await supabase
+        .from("qs_cadences")
+        .select("*, days:qs_cadence_days(*, activities:qs_cadence_activities(*)), owners:qs_cadence_owners(user_id)")
+        .eq("id", dupSourceId)
+        .single();
+      if (cancelled) return;
+      if (error || !cad) {
+        console.warn("Erro ao carregar cadência para duplicar:", error);
+        notifyError("Não foi possível carregar a cadência de origem — o builder abriu em branco.");
+        setLoading(false);
+        return;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const c = cad as any;
+      setForm({
+        ...mapCadenceToForm(c, { freshIds: true }),
+        name: `Cópia de ${c.name ?? "cadência"}`,
+        status: "rascunho",
+      });
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dupSourceId]);
 
   // Fetch existing cadence for edit mode. Extraído em useCallback pra tela de
   // erro poder "Tentar de novo" sem sair do editor.
@@ -275,42 +393,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       setLoading(false);
       return;
     }
-    const c = cad as any;
-    setForm({
-      execution_mode: c.execution_mode ?? "manual",
-      objective: c.objective ?? "agendar_reuniao",
-      name: c.name ?? "",
-      description: c.description ?? "",
-      acquisition_channel: c.acquisition_channel ?? "levantada_de_mao",
-      priority: c.priority ?? "media",
-      status: c.status ?? "rascunho",
-      auto_loss_enabled: c.auto_loss_days !== null && c.auto_loss_days !== undefined,
-      auto_loss_days: c.auto_loss_days ?? 14,
-      redirect_cadence_id: c.redirect_cadence_id ?? "",
-      // Joins aninhados do Supabase não garantem ordem → ordena dias e atividades.
-      days: (c.days ?? [])
-        .slice()
-        .sort((a: any, b: any) => (a.day_number ?? 0) - (b.day_number ?? 0))
-        .map((d: any) => ({
-          id: d.id,
-          day_number: d.day_number,
-          activities: (d.activities ?? [])
-            .slice()
-            .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
-            .map((a: any) => ({
-              id: a.id,
-              cadence_day_id: a.cadence_day_id,
-              channel_type: a.channel_type,
-              scheduled_time: a.scheduled_time,
-              order_index: a.order_index,
-              script_text: a.script_text || "",
-            })),
-        })),
-      weekdays: c.execution_weekdays ?? [1, 2, 3, 4, 5],
-      distribution_mode: c.distribution_mode ?? "alternado",
-      offday_policy: c.offday_policy ?? "aguardar_proximo_dia",
-      owner_ids: ((c.owners ?? []) as { user_id: string }[]).map((o) => o.user_id),
-    });
+    setForm(mapCadenceToForm(cad));
     setLoading(false);
   }, [cadenceId]);
 

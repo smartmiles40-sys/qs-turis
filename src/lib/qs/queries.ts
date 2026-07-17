@@ -21,6 +21,7 @@ import type {
   Goal,
   GoalPeriod,
   Note,
+  Contact,
   LossReason,
   ChannelConfig,
   CustomField,
@@ -207,11 +208,20 @@ export async function updateQsLead(
 
 export async function deleteQsLead(id: string): Promise<boolean> {
   try {
-    const { error } = await supabase
+    // MEDE o que o banco aceitou: o `.select('id')` devolve as linhas realmente
+    // apagadas. Sem isso, a RLS (leads_delete = só gestor/admin) recusa em
+    // SILÊNCIO (0 linhas, sem erro) e a função dizia "excluído" sem excluir.
+    const { data, error } = await supabase
       .from("qs_leads")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .select("id");
     if (error) throw error;
+    if (!data || data.length === 0) {
+      console.warn("[QS] deleteQsLead: banco recusou (RLS/0 linhas) o lead", id);
+      notifyError("Exclusão recusada pelo banco — apenas gestor/admin podem excluir leads.");
+      return false;
+    }
     return true;
   } catch (err) {
     console.warn("[QS] deleteQsLead failed:", err);
@@ -482,6 +492,137 @@ export async function completeTask(
   }
 }
 
+/**
+ * DESFAZ a conclusão de uma atividade (botão "Desfazer" do toast): volta pra
+ * 'pendente' e limpa completed_at/contact_result. Só age se a tarefa estiver
+ * 'concluida' AGORA (idempotente) e MEDE o que o banco aceitou (.select) — em
+ * update sob RLS a recusa é silenciosa (0 linhas, sem erro).
+ */
+export async function undoCompleteTask(id: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from("qs_tasks")
+      .update({
+        status: "pendente" as TaskStatus,
+        completed_at: null,
+        contact_result: null,
+      })
+      .eq("id", id)
+      .eq("status", "concluida")
+      .select("id");
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      notifyError("Não deu pra desfazer — a atividade não está mais concluída ou o banco recusou.");
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("[QS] undoCompleteTask failed:", err);
+    notifyError("Não foi possível desfazer a conclusão — tente novamente.");
+    return false;
+  }
+}
+
+/**
+ * Edita uma tarefa AINDA ABERTA (adiar/reagendar data, trocar canal, notas).
+ * Guarda de idempotência igual ao completeTask (.in status) + gravação MEDIDA:
+ * 0 linhas = tarefa já encerrada ou RLS recusou — avisa em vez de fingir.
+ */
+export async function updateOpenTask(
+  id: string,
+  patch: Partial<Pick<Task, "scheduled_at" | "channel_type" | "notes" | "priority">>
+): Promise<Task | null> {
+  try {
+    const { data, error } = await supabase
+      .from("qs_tasks")
+      .update(patch)
+      .eq("id", id)
+      .in("status", ["pendente", "atrasada"])
+      .select("*");
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      notifyError("A atividade não foi alterada — ela já foi concluída/encerrada ou o banco recusou.");
+      return null;
+    }
+    return data[0] as Task;
+  } catch (err) {
+    console.warn("[QS] updateOpenTask failed:", err);
+    notifyError("Não foi possível salvar a alteração da atividade — nada mudou.");
+    return null;
+  }
+}
+
+/**
+ * Exclui uma atividade EXTRA criada por engano. Só extras (is_extra=true) podem
+ * sumir do histórico — tarefa de cadência se conclui/pula, nunca é apagada.
+ * O delete é MEDIDO (.select): 0 linhas = não era extra ou o banco recusou.
+ */
+export async function deleteExtraTask(id: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from("qs_tasks")
+      .delete()
+      .eq("id", id)
+      .eq("is_extra", true)
+      .select("id");
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      notifyError("A atividade não foi excluída — só atividades EXTRAS podem ser apagadas.");
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("[QS] deleteExtraTask failed:", err);
+    notifyError("Não foi possível excluir a atividade extra.");
+    return false;
+  }
+}
+
+/**
+ * Roteiros (script_text) escritos pelo gestor nas atividades da cadência —
+ * antes eram gravados e NUNCA lidos (auditoria 2026-07-14). O Painel usa pra
+ * mostrar o roteiro no card e pré-preencher o WhatsApp. A tabela é pequena;
+ * buscamos todos os que têm texto (best-effort: erro = sem roteiros, sem travar).
+ */
+export interface CadenceScriptRow {
+  cadence_id: string;
+  day_number: number;
+  channel_type: ChannelType;
+  scheduled_time: string | null;
+  script_text: string;
+}
+
+export async function fetchCadenceScripts(): Promise<CadenceScriptRow[]> {
+  try {
+    const { data, error } = await supabase
+      .from("qs_cadence_activities")
+      .select("channel_type, scheduled_time, script_text, day:qs_cadence_days!inner(cadence_id, day_number)")
+      .not("script_text", "is", null);
+    if (error) throw error;
+    const rows = (data ?? []) as unknown as {
+      channel_type: ChannelType;
+      scheduled_time: string | null;
+      script_text: string | null;
+      day: { cadence_id: string; day_number: number } | { cadence_id: string; day_number: number }[] | null;
+    }[];
+    return rows.flatMap((r) => {
+      const d = Array.isArray(r.day) ? r.day[0] : r.day;
+      const script = (r.script_text ?? "").trim();
+      if (!d || !script) return [];
+      return [{
+        cadence_id: d.cadence_id,
+        day_number: d.day_number,
+        channel_type: r.channel_type,
+        scheduled_time: r.scheduled_time,
+        script_text: script,
+      }];
+    });
+  } catch (err) {
+    console.warn("[QS] fetchCadenceScripts failed:", err);
+    return [];
+  }
+}
+
 export async function skipTask(
   id: string,
   skipReason: string
@@ -654,6 +795,17 @@ export async function fetchQsCadences(filters?: CadenceFilters): Promise<Cadence
   }
 }
 
+// Cadências que podem receber NOVOS vínculos de leads: apenas as "disponíveis".
+// Congelada NÃO aparece aqui — congelar bloqueia vínculos novos e pausa o fim
+// automático (redirecionamento/perda do cadenceSweep), mas as tarefas já
+// criadas CONTINUAM na fila dos SDRs (semântica documentada no botão Congelar
+// do card). Rascunho também fica de fora (ainda não publicada).
+// USAR ESTA FUNÇÃO em TODO dropdown/fluxo que vincula lead a cadência
+// (cadastro de lead, importação de CSV, vínculo em massa, reativação).
+export async function fetchAvailableCadences(): Promise<Cadence[]> {
+  return fetchQsCadences({ status: "disponivel" });
+}
+
 export async function fetchQsCadence(id: string): Promise<Cadence | null> {
   try {
     const { data, error } = await supabase
@@ -770,18 +922,72 @@ export async function updateQsCadence(
   }
 }
 
-export async function deleteQsCadence(id: string): Promise<boolean> {
+export interface DeleteCadenceResult {
+  ok: boolean;
+  /** true = cadência excluída, mas alguma tarefa aberta pode NÃO ter sido encerrada. */
+  tasksWarning: boolean;
+}
+
+// Exclui a cadência COM o efeito colateral coerente (decisão Sprint 4):
+//   • Leads vinculados ficam com cadence_id NULL (ON DELETE SET NULL do schema
+//     0001) — continuam vivos e prontos pra receber outra cadência.
+//   • As tarefas ABERTAS da cadência (pendente/atrasada, não-extra) são
+//     encerradas como "ignorada" + skip_reason — mesmo padrão do
+//     closeOpenCadenceTasks. Sem isso, o ON DELETE SET NULL de qs_tasks
+//     deixaria tarefas órfãs (sem cadência) vivas na fila dos SDRs.
+// ORDEM importa: captura os ids das tarefas ANTES do delete (depois dele o
+// cadence_id delas vira NULL e não dá mais pra achá-las), exclui a cadência
+// MEDIDO (.select — RLS que recusa em silêncio devolve 0 linhas → falha) e só
+// então encerra as tarefas. Se o encerramento falhar/for parcial, a exclusão
+// já valeu — devolvemos o aviso pro chamador mostrar.
+export async function deleteQsCadence(
+  id: string,
+  cadenceName?: string
+): Promise<DeleteCadenceResult> {
   try {
-    const { error } = await supabase
+    const { data: openTasks, error: fetchErr } = await supabase
+      .from("qs_tasks")
+      .select("id")
+      .eq("cadence_id", id)
+      .eq("is_extra", false)
+      .in("status", ["pendente", "atrasada"]);
+    if (fetchErr) throw fetchErr;
+    const taskIds = ((openTasks ?? []) as { id: string }[]).map((t) => t.id);
+
+    const { data: deleted, error } = await supabase
       .from("qs_cadences")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .select("id");
     if (error) throw error;
-    return true;
+    if (!deleted || deleted.length === 0) {
+      notifyError("O banco recusou a exclusão da cadência — você não tem permissão sobre ela.");
+      return { ok: false, tasksWarning: false };
+    }
+
+    let tasksWarning = false;
+    if (taskIds.length > 0) {
+      const reason = cadenceName
+        ? `Cadência "${cadenceName}" excluída — plano encerrado`
+        : "Cadência excluída — plano encerrado";
+      const { data: closed, error: closeErr } = await supabase
+        .from("qs_tasks")
+        .update({ status: "ignorada" as TaskStatus, skip_reason: reason })
+        .in("id", taskIds)
+        .in("status", ["pendente", "atrasada"]) // idempotência: outra sessão pode ter encerrado antes
+        .select("id");
+      // RLS: um SDR só encerra as PRÓPRIAS tarefas — as dos colegas ficariam
+      // órfãs na fila deles. Medimos e avisamos em vez de fingir sucesso.
+      if (closeErr || (closed ?? []).length < taskIds.length) {
+        console.warn("[QS] deleteQsCadence: tarefas abertas não encerradas por completo:", closeErr);
+        tasksWarning = true;
+      }
+    }
+    return { ok: true, tasksWarning };
   } catch (err) {
     console.warn("[QS] deleteQsCadence failed:", err);
     notifyError("Não foi possível excluir a cadência.");
-    return false;
+    return { ok: false, tasksWarning: false };
   }
 }
 
@@ -987,6 +1193,137 @@ export async function createQsNote(
   }
 }
 
+// Edita o TEXTO de uma anotação. RLS (0007: notes_update) permite autor ou
+// gestor — pra qualquer outro usuário o banco recusa em SILÊNCIO (0 linhas),
+// então MEDIMOS o efeito com `.select()` em vez de assumir sucesso.
+export async function updateQsNote(id: string, body: string): Promise<Note | null> {
+  try {
+    const { data, error } = await supabase
+      .from("qs_notes")
+      .update({ body })
+      .eq("id", id)
+      .select();
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      console.warn("[QS] updateQsNote: banco recusou (RLS/0 linhas) a nota", id);
+      notifyError("Edição recusada pelo banco — só o autor da anotação (ou um gestor) pode editá-la.");
+      return null;
+    }
+    return data[0] as Note;
+  } catch (err) {
+    console.warn("[QS] updateQsNote failed:", err);
+    notifyError("Não foi possível salvar a anotação — a alteração NÃO foi gravada.");
+    return null;
+  }
+}
+
+// Exclui uma anotação (RLS: autor ou gestor). Mesma medição do update.
+export async function deleteQsNote(id: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from("qs_notes")
+      .delete()
+      .eq("id", id)
+      .select("id");
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      console.warn("[QS] deleteQsNote: banco recusou (RLS/0 linhas) a nota", id);
+      notifyError("Exclusão recusada pelo banco — só o autor da anotação (ou um gestor) pode excluí-la.");
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("[QS] deleteQsNote failed:", err);
+    notifyError("Não foi possível excluir a anotação.");
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONTACTS (qs_contacts — multi telefone/e-mail/WhatsApp/LinkedIn do lead)
+// Primeiro caminho de ESCRITA da tabela no app (antes a aba Contatos era
+// somente-leitura de uma tabela que nada preenchia). Schema real (0001):
+// type + value + is_primary — não há colunas de nome/cargo.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export async function fetchQsContacts(leadId: string): Promise<Contact[]> {
+  try {
+    const { data, error } = await supabase
+      .from("qs_contacts")
+      .select("*")
+      .eq("lead_id", leadId)
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+    return (data ?? []) as Contact[];
+  } catch (err) {
+    console.warn("[QS] fetchQsContacts failed:", err);
+    return [];
+  }
+}
+
+export async function createQsContact(
+  data: Omit<Contact, "id" | "created_at">
+): Promise<Contact | null> {
+  try {
+    const { data: row, error } = await supabase
+      .from("qs_contacts")
+      .insert(data)
+      .select()
+      .single();
+    if (error) throw error;
+    return row as Contact;
+  } catch (err) {
+    console.warn("[QS] createQsContact failed:", err);
+    notifyError("Não foi possível adicionar o contato — tente novamente.");
+    return null;
+  }
+}
+
+export async function updateQsContact(
+  id: string,
+  data: Partial<Omit<Contact, "id" | "lead_id" | "created_at">>
+): Promise<Contact | null> {
+  try {
+    const { data: rows, error } = await supabase
+      .from("qs_contacts")
+      .update(data)
+      .eq("id", id)
+      .select();
+    if (error) throw error;
+    if (!rows || rows.length === 0) {
+      console.warn("[QS] updateQsContact: banco recusou (RLS/0 linhas) o contato", id);
+      notifyError("Edição recusada pelo banco — a alteração NÃO foi gravada.");
+      return null;
+    }
+    return rows[0] as Contact;
+  } catch (err) {
+    console.warn("[QS] updateQsContact failed:", err);
+    notifyError("Não foi possível salvar o contato — a alteração NÃO foi gravada.");
+    return null;
+  }
+}
+
+export async function deleteQsContact(id: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from("qs_contacts")
+      .delete()
+      .eq("id", id)
+      .select("id");
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      console.warn("[QS] deleteQsContact: banco recusou (RLS/0 linhas) o contato", id);
+      notifyError("Exclusão recusada pelo banco — o contato NÃO foi excluído.");
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("[QS] deleteQsContact failed:", err);
+    notifyError("Não foi possível excluir o contato.");
+    return false;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SETTINGS — Loss Reasons
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1120,6 +1457,51 @@ export async function createCustomField(
 // DASHBOARD / STATS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ── Cap de 1000 linhas do PostgREST ──────────────────────────────────────────
+// O Supabase devolve NO MÁXIMO 1000 linhas por request (max-rows do PostgREST).
+// Qualquer agregação client-side sem paginação passa a MENTIR em silêncio assim
+// que a tabela cruza esse teto (funil, heatmap, motivos de perda etc. paravam
+// de contar no lead nº 1001). Este helper varre TODAS as páginas e devolve o
+// total — e LANÇA se qualquer página falhar (erro nunca vira lista vazia).
+// A query construída pela factory DEVE ter um .order() estável (ex.: "id"),
+// senão o banco pode repetir/pular linhas entre páginas.
+export const POSTGREST_PAGE_SIZE = 1000;
+export async function fetchAllRows<T>(
+  buildQuery: (
+    from: number,
+    to: number
+  ) => PromiseLike<{ data: T[] | null; error: { message?: string } | null }>
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let page = 0; ; page++) {
+    const from = page * POSTGREST_PAGE_SIZE;
+    const { data, error } = await buildQuery(from, from + POSTGREST_PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < POSTGREST_PAGE_SIZE) break;
+  }
+  return all;
+}
+
+// ── Vigência de metas (decisão de produto, Sprint 4) ─────────────────────────
+// Meta mensal é RECORRENTE: `period_start` marca o mês em que ela PASSOU a
+// valer — sem uma meta mais nova, ela continua valendo nos meses seguintes
+// (meta de maio sem substituta ainda é a meta de julho). Meta ancorada num mês
+// FUTURO ainda não vigora. "Vigente" = a meta mais recente por (owner, tipo)
+// cujo mês do period_start já começou. O dashboard (SdrDashboard) e a página
+// Metas (GoalsPage) usam esta MESMA regra — se mudar aqui, mude lá o texto.
+export function isGoalEffective(periodStart: string | null | undefined): boolean {
+  if (!periodStart) return true;
+  const anchor = new Date(`${periodStart}T00:00:00`);
+  if (isNaN(anchor.getTime())) return true;
+  const now = new Date();
+  return (
+    anchor.getFullYear() < now.getFullYear() ||
+    (anchor.getFullYear() === now.getFullYear() && anchor.getMonth() <= now.getMonth())
+  );
+}
+
 // Coluna da DATA DE FECHAMENTO do lead. `closed_at` (migration 0012) só muda na
 // transição pra ganho/perdido — updated_at muda em QUALQUER edição e fazia ganhos
 // antigos "reaparecerem" no período atual. Fallback pra updated_at enquanto a
@@ -1197,8 +1579,11 @@ export async function fetchDashboardStats(
       taxaConversao: Math.round(taxaConversao * 100) / 100,
     };
   } catch (err) {
+    // PADRÃO DA CASA: erro NUNCA vira zero silencioso. Este catch devolvia tudo
+    // zerado e o dashboard exibia "0 ganhos" como se fosse dado real. Agora
+    // propaga — o chamador (SdrDashboard) mostra banner com "Tentar de novo".
     console.warn("[QS] fetchDashboardStats failed:", err);
-    return { ganhos: 0, leadsFinalizados: 0, atividadesRealizadas: 0, taxaConversao: 0 };
+    throw err;
   }
 }
 

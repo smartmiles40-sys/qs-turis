@@ -1,11 +1,15 @@
 // src/components/sdr/cadences/CadencesPage.tsx
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { deleteQsCadence, freezeCadence, unfreezeCadence } from "@/lib/qs/queries";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import { setDuplicateSource } from "./duplicateSource";
 import type {
   Cadence,
   CadenceDay,
   AcquisitionChannel,
   CadenceStatus,
+  LeadStatus,
   PriorityLevel,
   CadenceObjective,
   ChannelType,
@@ -16,6 +20,7 @@ import {
   PRIORITY_LABELS,
   OBJECTIVE_LABELS,
   CHANNEL_LABELS,
+  STATUS_LABELS,
   WEEKDAY_LABELS,
 } from "../types";
 
@@ -74,6 +79,33 @@ function IconEdit() {
   );
 }
 
+function IconCopy() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function IconTrash() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
+
+function IconX() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
 function ChannelIcon({ type, size = 14 }: { type: ChannelType; size?: number }) {
   const s = size;
   switch (type) {
@@ -115,6 +147,27 @@ function ChannelIcon({ type, size = 14 }: { type: ChannelType; size?: number }) 
           <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
         </svg>
       );
+    case "instagram":
+      return (
+        <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+          <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+          <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+        </svg>
+      );
+    case "tiktok":
+      return (
+        <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z" />
+        </svg>
+      );
+    case "youtube":
+      return (
+        <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-1.92 29 29 0 0 0 .46-5.33 29 29 0 0 0-.46-5.33z" />
+          <polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02" fill="currentColor" stroke="none" />
+        </svg>
+      );
   }
 }
 
@@ -151,6 +204,14 @@ const CHANNEL_COLORS: Record<ChannelType, string> = {
   youtube: "#FF0000",
 };
 
+// Status do LEAD (modal "Ver leads da cadência").
+const LEAD_STATUS_COLORS: Record<LeadStatus, { bg: string; text: string }> = {
+  nao_iniciado: { bg: "#F3F4F6", text: "#4B5563" },
+  em_prospeccao: { bg: "#EFF6FF", text: "#1E40AF" },
+  ganho: { bg: "#ECFDF5", text: "#065F46" },
+  perdido: { bg: "#FEF2F2", text: "#991B1B" },
+};
+
 // ── Component ───────────────────────────────────────────────────────────────
 
 export default function CadencesPage({ onCreateCadence, onEditCadence }: CadencesPageProps) {
@@ -164,6 +225,15 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
   const [cadences, setCadences] = useState<Cadence[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Card com ação em andamento (congelar/excluir/medir impacto) — trava os botões dele.
+  const [busyCardId, setBusyCardId] = useState<string | null>(null);
+  // Modal "Ver leads da cadência" (contadores clicáveis). leads: null = carregando.
+  const [leadsModal, setLeadsModal] = useState<{
+    cadence: Cadence;
+    onlyActive: boolean;
+    leads: { id: string; name: string; status: LeadStatus; owner_name: string | null }[] | null;
+    error: boolean;
+  } | null>(null);
 
   const loadCadences = useCallback(async () => {
     setLoading(true);
@@ -224,6 +294,123 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
     }
     setSelectedIds(new Set());
     await loadCadences();
+  }
+
+  // Congela/retoma UMA cadência (por card). SEMÂNTICA DO CONGELAR (Sprint 4,
+  // documentada no confirm e no tooltip): bloqueia vínculos NOVOS (sai dos
+  // seletores — fetchAvailableCadences) e pausa o fim automático
+  // (redirecionamento/perda do cadenceSweep); as atividades JÁ CRIADAS
+  // continuam na fila dos SDRs. Retomar reativa tudo — simétrico, sem mexer
+  // em tarefa nenhuma nas duas direções.
+  async function toggleFreeze(cadence: Cadence) {
+    const freezing = cadence.status === "disponivel";
+    const msg = freezing
+      ? `Congelar a cadência "${cadence.name}"?\n\n` +
+        "• Ela deixa de receber NOVOS leads (some dos seletores de vínculo).\n" +
+        "• O fim automático (redirecionamento / perda automática) fica pausado.\n" +
+        "• As atividades já criadas CONTINUAM na fila dos SDRs."
+      : `Retomar a cadência "${cadence.name}"?\n\n` +
+        "Ela volta a receber novos leads e o fim automático (redirecionamento / perda automática) é reativado.";
+    if (!window.confirm(msg)) return;
+    setActionError(null);
+    setBusyCardId(cadence.id);
+    const res = freezing ? await freezeCadence(cadence.id) : await unfreezeCadence(cadence.id);
+    setBusyCardId(null);
+    if (res) {
+      notifySuccess(freezing ? "Cadência congelada." : "Cadência retomada.");
+      await loadCadences();
+    }
+    // Falha: updateQsCadence já notificou o erro.
+  }
+
+  // Duplicar: abre o builder (modo criação) pré-preenchido com esta cadência.
+  function handleDuplicate(cadence: Cadence) {
+    setDuplicateSource(cadence.id);
+    onCreateCadence();
+  }
+
+  // Excluir: mede o impacto REAL na hora do clique (os contadores do card podem
+  // estar velhos), confirma mostrando as contagens e delega o efeito colateral
+  // ao deleteQsCadence (leads ficam sem cadência via ON DELETE SET NULL;
+  // tarefas abertas são encerradas como "ignorada" + skip_reason).
+  async function handleDelete(cadence: Cadence) {
+    setActionError(null);
+    setBusyCardId(cadence.id);
+    const [leadsRes, tasksRes] = await Promise.all([
+      supabase
+        .from("qs_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("cadence_id", cadence.id),
+      supabase
+        .from("qs_tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("cadence_id", cadence.id)
+        .eq("is_extra", false)
+        .in("status", ["pendente", "atrasada"]),
+    ]);
+    setBusyCardId(null);
+    if (leadsRes.error || tasksRes.error) {
+      setActionError("Não foi possível medir o impacto da exclusão — tente novamente.");
+      return;
+    }
+    const nLeads = leadsRes.count ?? 0;
+    const nTasks = tasksRes.count ?? 0;
+    const msg =
+      `Excluir a cadência "${cadence.name}"? Esta ação não pode ser desfeita.\n\n` +
+      `• ${nLeads} lead(s) vinculado(s) ficarão SEM cadência (permanecem no sistema, prontos pra receber outra).\n` +
+      `• ${nTasks} atividade(s) aberta(s) serão encerradas como "ignoradas".\n` +
+      "• A estrutura de dias/atividades da cadência será apagada.";
+    if (!window.confirm(msg)) return;
+    setBusyCardId(cadence.id);
+    const res = await deleteQsCadence(cadence.id, cadence.name);
+    setBusyCardId(null);
+    if (!res.ok) return; // deleteQsCadence já notificou o erro
+    if (res.tasksWarning) {
+      notifyError("Cadência excluída, mas algumas atividades abertas podem NÃO ter sido encerradas — confira a fila.");
+    } else {
+      notifySuccess("Cadência excluída.");
+    }
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(cadence.id);
+      return next;
+    });
+    await loadCadences();
+  }
+
+  // "Ver leads da cadência": contador clicável → modal com nome, status e dono.
+  async function openLeadsModal(cadence: Cadence, onlyActive: boolean) {
+    setLeadsModal({ cadence, onlyActive, leads: null, error: false });
+    let q = supabase
+      .from("qs_leads")
+      .select("id, full_name, first_name, last_name, status, owner:qs_users(name)")
+      .eq("cadence_id", cadence.id)
+      .order("full_name");
+    if (onlyActive) q = q.eq("status", "em_prospeccao");
+    const { data, error } = await q;
+    if (error) {
+      console.warn("Erro ao listar leads da cadência:", error);
+      setLeadsModal((m) => (m && m.cadence.id === cadence.id ? { ...m, leads: [], error: true } : m));
+      return;
+    }
+    type Row = {
+      id: string;
+      full_name: string | null;
+      first_name: string | null;
+      last_name: string | null;
+      status: LeadStatus;
+      owner: { name: string } | { name: string }[] | null;
+    };
+    const rows = ((data ?? []) as unknown as Row[]).map((r) => {
+      const owner = Array.isArray(r.owner) ? r.owner[0] : r.owner;
+      return {
+        id: r.id,
+        name: r.full_name || [r.first_name, r.last_name].filter(Boolean).join(" ") || "Sem nome",
+        status: r.status,
+        owner_name: owner?.name ?? null,
+      };
+    });
+    setLeadsModal((m) => (m && m.cadence.id === cadence.id ? { ...m, leads: rows } : m));
   }
 
   // Filter cadences
@@ -408,6 +595,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
             <div className="flex items-center gap-2">
               <button
                 onClick={() => bulkSetCadenceStatus("congelada")}
+                title="Congelar as selecionadas: bloqueia vínculos novos e pausa o fim automático; as atividades já criadas continuam na fila."
                 className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition"
               >
                 <IconSnowflake />
@@ -415,6 +603,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
               </button>
               <button
                 onClick={() => bulkSetCadenceStatus("disponivel")}
+                title="Retomar as selecionadas: voltam a receber novos leads e o fim automático é reativado."
                 className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 transition"
               >
                 <IconPlay />
@@ -500,12 +689,32 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
 
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Leads Vinculados</span>
-                        <span className="text-sm font-bold text-gray-900">{cadence._leads_count ?? 0}</span>
+                        {(cadence._leads_count ?? 0) > 0 ? (
+                          <button
+                            onClick={() => openLeadsModal(cadence, false)}
+                            className="text-sm font-bold text-gray-900 self-start underline decoration-dotted underline-offset-2 hover:text-[#0147FF] transition"
+                            title="Ver os leads vinculados a esta cadência"
+                          >
+                            {cadence._leads_count ?? 0}
+                          </button>
+                        ) : (
+                          <span className="text-sm font-bold text-gray-900">0</span>
+                        )}
                       </div>
 
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Ativos em Cadência</span>
-                        <span className="text-sm font-bold text-[#0147FF]">{cadence._active_leads_count ?? 0}</span>
+                        {(cadence._active_leads_count ?? 0) > 0 ? (
+                          <button
+                            onClick={() => openLeadsModal(cadence, true)}
+                            className="text-sm font-bold text-[#0147FF] self-start underline decoration-dotted underline-offset-2 hover:text-[#0139D6] transition"
+                            title="Ver os leads em prospecção nesta cadência"
+                          >
+                            {cadence._active_leads_count ?? 0}
+                          </button>
+                        ) : (
+                          <span className="text-sm font-bold text-[#0147FF]">0</span>
+                        )}
                       </div>
 
                       <div className="flex flex-col gap-1">
@@ -546,13 +755,52 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                     )}
                   </div>
 
-                  <button
-                    onClick={() => onEditCadence(cadence.id)}
-                    className="shrink-0 p-2 rounded-lg text-gray-400 hover:text-[#0147FF] hover:bg-[#0147FF]/5 transition"
-                    title="Editar cadência"
-                  >
-                    <IconEdit />
-                  </button>
+                  <div className="shrink-0 flex flex-col items-center gap-0.5">
+                    <button
+                      onClick={() => onEditCadence(cadence.id)}
+                      disabled={busyCardId === cadence.id}
+                      className="p-2 rounded-lg text-gray-400 hover:text-[#0147FF] hover:bg-[#0147FF]/5 transition disabled:opacity-40"
+                      title="Editar cadência"
+                    >
+                      <IconEdit />
+                    </button>
+                    {cadence.status === "disponivel" && (
+                      <button
+                        onClick={() => toggleFreeze(cadence)}
+                        disabled={busyCardId === cadence.id}
+                        className="p-2 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition disabled:opacity-40"
+                        title="Congelar: bloqueia vínculos novos e pausa o fim automático (redirecionamento/perda). As atividades já criadas continuam na fila."
+                      >
+                        <IconSnowflake />
+                      </button>
+                    )}
+                    {cadence.status === "congelada" && (
+                      <button
+                        onClick={() => toggleFreeze(cadence)}
+                        disabled={busyCardId === cadence.id}
+                        className="p-2 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition disabled:opacity-40"
+                        title="Retomar: volta a receber novos leads e reativa o fim automático."
+                      >
+                        <IconPlay />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDuplicate(cadence)}
+                      disabled={busyCardId === cadence.id}
+                      className="p-2 rounded-lg text-gray-400 hover:text-[#0147FF] hover:bg-[#0147FF]/5 transition disabled:opacity-40"
+                      title="Duplicar: abre o builder com uma cópia desta cadência (rascunho)"
+                    >
+                      <IconCopy />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(cadence)}
+                      disabled={busyCardId === cadence.id}
+                      className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition disabled:opacity-40"
+                      title="Excluir cadência"
+                    >
+                      <IconTrash />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -565,6 +813,82 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
           </div>
         )}
       </div>
+
+      {/* ── Modal: leads da cadência (contadores clicáveis, sem trocar de página) ── */}
+      {leadsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          onClick={() => setLeadsModal(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between px-5 py-4 border-b border-gray-100">
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-gray-900 truncate">
+                  {leadsModal.onlyActive ? "Leads ativos em cadência" : "Leads vinculados"}
+                </h3>
+                <p className="text-xs text-gray-500 truncate mt-0.5">{leadsModal.cadence.name}</p>
+              </div>
+              <button
+                onClick={() => setLeadsModal(null)}
+                className="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+                title="Fechar"
+              >
+                <IconX />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-3">
+              {leadsModal.leads === null && (
+                <p className="text-sm text-gray-500 text-center py-8">Carregando...</p>
+              )}
+              {leadsModal.leads !== null && leadsModal.error && (
+                <p className="text-sm text-red-600 text-center py-8">
+                  Não foi possível carregar os leads — feche e tente de novo.
+                </p>
+              )}
+              {leadsModal.leads !== null && !leadsModal.error && leadsModal.leads.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-8">
+                  Nenhum lead {leadsModal.onlyActive ? "em prospecção" : "vinculado"} nesta cadência.
+                  {/* Você pode só enxergar os SEUS leads (RLS) — o gestor vê todos. */}
+                </p>
+              )}
+              {leadsModal.leads !== null && !leadsModal.error && leadsModal.leads.length > 0 && (
+                <ul className="divide-y divide-gray-50">
+                  {leadsModal.leads.map((l) => {
+                    const sc = LEAD_STATUS_COLORS[l.status] ?? LEAD_STATUS_COLORS.nao_iniciado;
+                    return (
+                      <li key={l.id} className="py-2.5 flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{l.name}</p>
+                          <p className="text-[11px] text-gray-400 truncate">
+                            {l.owner_name ? `Dono: ${l.owner_name}` : "Sem dono"}
+                          </p>
+                        </div>
+                        <span
+                          className="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+                          style={{ background: sc.bg, color: sc.text }}
+                        >
+                          {STATUS_LABELS[l.status] ?? l.status}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+
+            {leadsModal.leads !== null && !leadsModal.error && (
+              <div className="px-5 py-3 border-t border-gray-100 text-[11px] text-gray-400">
+                {leadsModal.leads.length} lead{leadsModal.leads.length === 1 ? "" : "s"} · a lista respeita a sua
+                permissão (SDR vê os próprios leads; gestor vê todos)
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -13,6 +13,7 @@ import type {
 import { STATUS_LABELS, SOURCE_LABELS } from "../types";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { createCadenceTasks, closeOpenCadenceTasks, transferLead } from "@/lib/qs/queries";
+import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
 import { planCadenceDates } from "@/lib/workHours";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured } from "@/lib/webphone";
@@ -38,6 +39,31 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
+// Rótulos do filtro de temperatura (lead_score vem do Bitrix; normalizado em leadScore.ts).
+const TEMP_FILTER_LABELS: Record<LeadTemperature, string> = {
+  quente: "🔥 Quente",
+  morno: "🌤️ Morno",
+  frio: "❄️ Frio",
+};
+
+// Paginação COMPACTA: primeira / … / vizinhas da atual / … / última.
+// Antes era 1 botão por página (300 botões com 3k leads).
+function pageItems(current: number, total: number): (number | "...")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = [1, current - 1, current, current + 1, total]
+    .filter((p, i, arr) => p >= 1 && p <= total && arr.indexOf(p) === i)
+    .sort((a, b) => a - b);
+  const out: (number | "...")[] = [];
+  let prev = 0;
+  for (const p of pages) {
+    if (prev && p - prev === 2) out.push(prev + 1); // buraco de 1 = mostra o número
+    else if (prev && p - prev > 2) out.push("...");
+    out.push(p);
+    prev = p;
+  }
+  return out;
+}
+
 const ITEMS_PER_PAGE = 10;
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -50,6 +76,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const [filterCadence, setFilterCadence] = useState("");
   const [filterOwner, setFilterOwner] = useState("");
   const [filterLossReason, setFilterLossReason] = useState("");
+  // Temperatura (lead_score do Bitrix, agora editável no detalhe): Quente/Morno/Frio.
+  const [filterTemp, setFilterTemp] = useState<LeadTemperature | "">("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Vínculo em massa à cadência em andamento — desabilita o select durante o
   // loop (evita disparar um segundo vínculo por cima do primeiro).
@@ -62,6 +90,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const [csvImportedCount, setCsvImportedCount] = useState<number | null>(null);
   const [csvCadenceId, setCsvCadenceId] = useState("");
   const [csvProgress, setCsvProgress] = useState(0);
+  // Quantos leads o import de fato vai gravar (depois dos dedupes) — denominador
+  // da barra de progresso; e quantos foram pulados (duplicados no arquivo/banco).
+  const [csvPlanned, setCsvPlanned] = useState<number | null>(null);
+  const [csvSkipped, setCsvSkipped] = useState<{ file: number; db: number } | null>(null);
 
   // ── Handover state ──
   const [showHandover, setShowHandover] = useState(false);
@@ -85,6 +117,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const [cadences, setCadences] = useState<Cadence[]>([]);
   const [lossReasons, setLossReasons] = useState<LossReason[]>([]);
   const [loading, setLoading] = useState(true);
+  // Erro de rede/RLS ao carregar: sem isso a tela mentia "Nenhum lead encontrado".
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // ── Create Lead form state ──
   const [formFirstName, setFormFirstName] = useState("");
@@ -93,7 +127,14 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const [formPhone, setFormPhone] = useState("");
   const [formCompany, setFormCompany] = useState("");
   const [formSource, setFormSource] = useState<LeadSource>("manual");
+  // Responsável do lead manual: SDR/closer = sempre o próprio (fixo); gestor/admin
+  // pode escolher ("" = automático → round-robin do banco). Sem isso o trigger
+  // dava o lead a OUTRO SDR e ele sumia da tela de quem cadastrou.
+  const [formOwnerId, setFormOwnerId] = useState("");
+  // Duplicado encontrado na checagem pré-insert (telefone/e-mail já existem).
+  const [dupLead, setDupLead] = useState<{ id: string; name: string | null; ownerName: string | null } | null>(null);
   const [saving, setSaving] = useState(false);
+  const isManager = currentUser?.role === "admin" || currentUser?.role === "gestor";
 
   // ── Fetch data ──
   const fetchLeads = useCallback(async () => {
@@ -103,10 +144,20 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
       .order("created_at", { ascending: false });
     if (error) {
       console.warn("Erro ao buscar leads:", error);
+      // Erro de rede NÃO pode virar "Nenhum lead encontrado" — a tela mostra o
+      // erro com "Tentar novamente" (e mantém a lista antiga, se houver).
+      setLoadError("Não foi possível carregar os leads — verifique a conexão.");
       return;
     }
+    setLoadError(null);
     setLeads((data as Lead[]) ?? []);
   }, []);
+
+  async function retryFetchLeads() {
+    setLoading(true);
+    await fetchLeads();
+    setLoading(false);
+  }
 
   useEffect(() => {
     async function loadAll() {
@@ -115,7 +166,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
       const [usersRes, cadencesRes, lossRes] = await Promise.all([
         supabase.from("qs_users").select("*").eq("is_active", true),
-        supabase.from("qs_cadences").select("id, name"),
+        // "status" incluso: o modal CSV filtra cadências "disponivel" — sem a
+        // coluna no select, o filtro zerava as opções e ninguém conseguia
+        // importar COM cadência.
+        supabase.from("qs_cadences").select("id, name, status"),
         supabase.from("qs_loss_reasons").select("*").eq("is_archived", false),
       ]);
 
@@ -134,25 +188,95 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   }, [fetchLeads]);
 
   // ── Create Lead ──
-  async function handleCreateLead() {
-    if (!formFirstName.trim()) return;
-    setSaving(true);
-    const fullName = [formFirstName.trim(), formLastName.trim()].filter(Boolean).join(" ");
-    const { error } = await supabase.from("qs_leads").insert({
-      first_name: formFirstName.trim(),
-      last_name: formLastName.trim() || null,
-      full_name: fullName,
-      email: formEmail.trim() || null,
-      phone: formPhone.trim() || null,
-      company_name: formCompany.trim() || null,
-      source: formSource,
-      status: "nao_iniciado" as LeadStatus,
-    });
+  // Checagem de duplicado ANTES do insert (auditoria 2026-07-14): dois SDRs podem
+  // cadastrar o mesmo lead. Compara telefone (só dígitos, casando sufixo — cobre
+  // o "55" na frente) OU e-mail (minúsculo) contra o que o BANCO devolve na hora.
+  // Implementada INLINE (não em queries.ts) pra não colidir com a sprint paralela.
+  // Obs.: a busca enxerga o que a RLS deixa este usuário ler — gestor vê a base
+  // toda; SDR vê a própria carteira (checagem entre carteiras pede RPC/migration).
+  async function findDuplicateLead(
+    email: string,
+    phone: string
+  ): Promise<{ ok: boolean; dup: { id: string; name: string | null; ownerName: string | null } | null }> {
+    const emailNorm = email.trim().toLowerCase();
+    const phoneDigits = phone.replace(/\D/g, "");
+    if (!emailNorm && phoneDigits.length < 8) return { ok: true, dup: null }; // sem contato comparável
+    const { data, error } = await supabase
+      .from("qs_leads")
+      .select("id, full_name, email, phone, owner:qs_users(name)");
     if (error) {
+      console.warn("Erro na checagem de duplicado:", error);
+      return { ok: false, dup: null };
+    }
+    const rows = (data ?? []) as unknown as Array<{
+      id: string; full_name: string | null; email: string | null; phone: string | null;
+      owner: { name: string | null } | null;
+    }>;
+    const hit = rows.find((l) => {
+      const le = (l.email ?? "").trim().toLowerCase();
+      const lp = (l.phone ?? "").replace(/\D/g, "");
+      const emailHit = !!emailNorm && le === emailNorm;
+      const phoneHit =
+        phoneDigits.length >= 8 && lp.length >= 8 && (lp.endsWith(phoneDigits) || phoneDigits.endsWith(lp));
+      return emailHit || phoneHit;
+    });
+    return { ok: true, dup: hit ? { id: hit.id, name: hit.full_name, ownerName: hit.owner?.name ?? null } : null };
+  }
+
+  // `force` = "Cadastrar mesmo assim" (só gestor/admin) pulando a checagem.
+  async function handleCreateLead(force = false) {
+    if (!formFirstName.trim() || !currentUser) return;
+    setSaving(true);
+    if (!force) {
+      const check = await findDuplicateLead(formEmail, formPhone);
+      if (!check.ok) {
+        // Checagem falhou (rede/RLS): NÃO segue às cegas — padrão da casa é
+        // gravação medida, sem fail-open. O usuário tenta de novo.
+        notifyError("Não foi possível verificar se o lead já existe — tente novamente.");
+        setSaving(false);
+        return;
+      }
+      if (check.dup) {
+        setDupLead(check.dup); // o modal mostra o aviso com "Abrir lead" / "Cadastrar mesmo assim"
+        setSaving(false);
+        return;
+      }
+    }
+    const fullName = [formFirstName.trim(), formLastName.trim()].filter(Boolean).join(" ");
+    const { data: inserted, error } = await supabase
+      .from("qs_leads")
+      .insert({
+        first_name: formFirstName.trim(),
+        last_name: formLastName.trim() || null,
+        full_name: fullName,
+        email: formEmail.trim() || null,
+        phone: formPhone.trim() || null,
+        company_name: formCompany.trim() || null,
+        source: formSource,
+        status: "nao_iniciado" as LeadStatus,
+        // Dono explícito: o trigger round-robin só age quando owner_id vem null.
+        // SDR/closer: sempre o próprio (senão o lead sumia da tela do criador);
+        // gestor/admin: o selecionado, ou null = "automático" (rodízio do banco).
+        owner_id: isManager ? formOwnerId || null : currentUser.id,
+        // CSV e inbound já gravam arrived_at; o modal não gravava e o lead manual
+        // ficava sem horário de chegada (quebra métricas de fila/atraso).
+        arrived_at: new Date().toISOString(),
+      })
+      // Lê de volta o dono FINAL decidido pelo banco (se "automático", foi o
+      // round-robin) — qualquer criação futura de tarefas aqui deve usar
+      // inserted.owner_id, nunca o valor do form.
+      .select("id, owner_id")
+      .single();
+    if (error || !inserted) {
       console.warn("Erro ao cadastrar lead:", error);
       notifyError("Não foi possível cadastrar o lead — confira os dados e tente novamente.");
     } else {
-      notifySuccess(`Lead ${fullName} cadastrado.`);
+      const finalOwner = users.find((u) => u.id === inserted.owner_id)?.name;
+      notifySuccess(
+        finalOwner && inserted.owner_id !== currentUser.id
+          ? `Lead ${fullName} cadastrado — responsável: ${finalOwner}.`
+          : `Lead ${fullName} cadastrado.`
+      );
       await fetchLeads();
       setShowCreateModal(false);
       resetForm();
@@ -314,8 +438,22 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     if (filterCadence) result = result.filter((l) => l.cadence_id === filterCadence);
     if (filterOwner) result = result.filter((l) => l.owner_id === filterOwner);
     if (filterLossReason) result = result.filter((l) => l.loss_reason_id === filterLossReason);
+    // Temperatura: compara o rótulo NORMALIZADO (o Bitrix manda "Quente"/"hot"/etc.).
+    if (filterTemp) result = result.filter((l) => normalizeTemperature(l.lead_score) === filterTemp);
     return result;
-  }, [leads, search, filterSource, filterStatus, filterCadence, filterOwner, filterLossReason, currentUser]);
+  }, [leads, search, filterSource, filterStatus, filterCadence, filterOwner, filterLossReason, filterTemp, currentUser]);
+
+  // Seleção NÃO sobrevive a filtro/busca: mantém marcado só o que continua
+  // VISÍVEL na lista filtrada — antes dava pra selecionar, trocar o filtro e as
+  // ações em massa agiam sobre leads fora da tela (ninguém via o que ia junto).
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(filteredLeads.map((l) => l.id));
+      const next = new Set(Array.from(prev).filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filteredLeads]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / ITEMS_PER_PAGE));
   // Filtro/exclusão pode reduzir o total: sem o clamp a página atual fica vazia.
@@ -357,6 +495,19 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     setFormPhone("");
     setFormCompany("");
     setFormSource("manual");
+    setFormOwnerId("");
+    setDupLead(null);
+  }
+
+  // Fecha o modal de CSV — mas NUNCA no meio da importação: fechar deixava o
+  // import rodando escondido, sem barra de progresso nem resultado na tela.
+  function closeCsvModal() {
+    if (csvImporting) return;
+    setShowCsvModal(false);
+    setCsvRows([]);
+    setCsvImportedCount(null);
+    setCsvSkipped(null);
+    setCsvPlanned(null);
   }
 
   // ── Cadence name helper ──
@@ -366,7 +517,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   }
 
   // ── Active filter helpers ──
-  const hasActiveFilters = filterSource || filterStatus || filterCadence || filterOwner || filterLossReason;
+  const hasActiveFilters = filterSource || filterStatus || filterCadence || filterOwner || filterLossReason || filterTemp;
 
   function clearFilters() {
     setFilterSource("");
@@ -374,6 +525,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     setFilterCadence("");
     setFilterOwner("");
     setFilterLossReason("");
+    setFilterTemp("");
     setCurrentPage(1);
   }
 
@@ -502,6 +654,23 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
         <span className="w-px h-5 bg-gray-200" />
 
+        {/* Temperatura (lead_score do Bitrix, editável no detalhe do lead) */}
+        {(Object.keys(TEMP_FILTER_LABELS) as LeadTemperature[]).map((k) => (
+          <button
+            key={k}
+            onClick={() => { setFilterTemp(filterTemp === k ? "" : k); setCurrentPage(1); }}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              filterTemp === k
+                ? "bg-[#0147FF] text-white"
+                : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            {TEMP_FILTER_LABELS[k]}
+          </button>
+        ))}
+
+        <span className="w-px h-5 bg-gray-200" />
+
         {/* Cadence select */}
         <select
           value={filterCadence}
@@ -560,17 +729,34 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 const cadId = e.target.value;
                 if (!cadId || cadenceLinking) return;
                 e.target.value = "";
-                const ids = Array.from(selectedIds);
+                const allIds = Array.from(selectedIds);
+                // Leads FECHADOS (ganho/perdido) ficam FORA do vínculo em massa —
+                // antes o update virava todos pra em_prospeccao e RESSUSCITAVA
+                // lead fechado sem confirmação. Reativar é ato explícito no
+                // detalhe do lead, não efeito colateral de uma ação em lote.
+                const closedIds = allIds.filter((id) => {
+                  const st = leads.find((l) => l.id === id)?.status;
+                  return st === "ganho" || st === "perdido";
+                });
+                const ids = allIds.filter((id) => !closedIds.includes(id));
+                if (ids.length === 0) {
+                  notifyError("Todos os leads selecionados estão fechados (ganho/perdido) — reative-os no detalhe do lead antes de vincular uma cadência.");
+                  return;
+                }
                 const cadName = cadences.find((c) => c.id === cadId)?.name ?? "cadência";
-                if (!window.confirm(`Vincular ${ids.length} lead(s) à cadência "${cadName}" e criar as atividades a partir de hoje?`)) return;
+                const skipNote = closedIds.length > 0 ? `\n\n(${closedIds.length} lead(s) fechados serão pulados — reativação é feita no detalhe.)` : "";
+                if (!window.confirm(`Vincular ${ids.length} lead(s) à cadência "${cadName}" e criar as atividades a partir de hoje?${skipNote}`)) return;
                 setCadenceLinking(true);
                 try {
                   // Mede o que o banco REALMENTE vinculou: a RLS pode recusar em
                   // silêncio (sem erro, 0 linhas) e a tela fingia sucesso total.
+                  // O guarda de status também vale no BANCO (estado da tela pode
+                  // estar velho): fechado nunca entra no update.
                   const { data: linked, error } = await supabase
                     .from("qs_leads")
                     .update({ cadence_id: cadId, status: "em_prospeccao", cadence_started_at: new Date().toISOString() })
                     .in("id", ids)
+                    .not("status", "in", "(ganho,perdido)")
                     .select("id");
                   if (error) {
                     console.warn("Erro ao vincular cadência:", error);
@@ -580,7 +766,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   const linkedIds = new Set((linked ?? []).map((l) => l.id));
                   const refused = ids.length - linkedIds.size;
                   if (linkedIds.size === 0) {
-                    notifyError("Nenhum lead foi vinculado — o banco recusou por falta de permissão.");
+                    notifyError("Nenhum lead foi vinculado — o banco recusou (falta de permissão ou leads já fechados).");
                     return;
                   }
                   // Gera as TAREFAS da cadência SÓ pros leads que o banco aceitou —
@@ -600,11 +786,13 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     if (created === null) tasksFail++;
                   }
                   setLeads(prev => prev.map(l => linkedIds.has(l.id) ? { ...l, cadence_id: cadId, status: "em_prospeccao" as LeadStatus } : l));
-                  // Mantém selecionados só os recusados (pra dar pra tentar de novo).
-                  setSelectedIds(new Set(ids.filter((id) => !linkedIds.has(id))));
-                  if (refused > 0) notifyError(`${linkedIds.size} lead(s) vinculados à ${cadName}, mas ${refused} foram recusados por falta de permissão.`);
+                  // Mantém selecionados os recusados E os fechados pulados (pra
+                  // ficar visível o que NÃO foi processado).
+                  setSelectedIds(new Set(allIds.filter((id) => !linkedIds.has(id))));
+                  if (refused > 0) notifyError(`${linkedIds.size} lead(s) vinculados à ${cadName}, mas ${refused} foram recusados (sem permissão ou lead fechado).`);
                   else if (tasksFail === 0) notifySuccess(`${linkedIds.size} lead(s) vinculados à ${cadName} — atividades criadas.`);
                   if (tasksFail > 0) notifyError(`${tasksFail} lead(s) ficaram sem atividades — vincule a cadência deles de novo.`);
+                  if (closedIds.length > 0) notifyError(`${closedIds.length} lead(s) fechados (ganho/perdido) foram pulados — reativação é feita no detalhe do lead.`);
                 } finally {
                   setCadenceLinking(false);
                 }
@@ -660,6 +848,19 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
               Excluir selecionados
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── Erro de carga (com lista antiga na tela) ─────────────────────── */}
+      {loadError && leads.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100">
+          <span className="text-sm text-red-700">{loadError} A lista abaixo pode estar desatualizada.</span>
+          <button
+            onClick={retryFetchLeads}
+            className="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
+          >
+            Tentar novamente
+          </button>
         </div>
       )}
 
@@ -797,7 +998,20 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
               {paginatedLeads.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">
-                    Nenhum lead encontrado com os filtros atuais.
+                    {/* Erro de rede NÃO é "nenhum lead": mostra o erro + retry. */}
+                    {loadError ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <span className="text-red-600">{loadError}</span>
+                        <button
+                          onClick={retryFetchLeads}
+                          className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
+                        >
+                          Tentar novamente
+                        </button>
+                      </div>
+                    ) : (
+                      "Nenhum lead encontrado com os filtros atuais."
+                    )}
                   </td>
                 </tr>
               )}
@@ -821,19 +1035,27 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
             </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-              <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`w-8 h-8 rounded-lg text-xs font-medium transition-colors ${
-                  page === currentPage
-                    ? "bg-[#0147FF] text-white"
-                    : "text-gray-600 hover:bg-gray-100"
-                }`}
-              >
-                {page}
-              </button>
-            ))}
+            {/* Compacta: primeira / … / vizinhas / … / última (antes eram
+                totalPages botões — 300 botões com 3k leads). */}
+            {pageItems(currentPage, totalPages).map((page, idx) =>
+              page === "..." ? (
+                <span key={`gap-${idx}`} className="w-8 h-8 flex items-center justify-center text-xs text-gray-400 select-none">
+                  …
+                </span>
+              ) : (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`w-8 h-8 rounded-lg text-xs font-medium transition-colors tabular-nums ${
+                    page === currentPage
+                      ? "bg-[#0147FF] text-white"
+                      : "text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  {page}
+                </button>
+              )
+            )}
             <button
               disabled={currentPage >= totalPages}
               onClick={() => setCurrentPage((p) => p + 1)}
@@ -896,7 +1118,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 <input
                   type="email"
                   value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
+                  onChange={(e) => { setFormEmail(e.target.value); setDupLead(null); }}
                   placeholder="email@exemplo.com.br"
                   className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
@@ -907,7 +1129,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 <input
                   type="tel"
                   value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
+                  onChange={(e) => { setFormPhone(e.target.value); setDupLead(null); }}
                   placeholder="(00) 00000-0000"
                   className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
@@ -936,7 +1158,68 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   ))}
                 </select>
               </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Responsável</label>
+                {isManager ? (
+                  // Gestor/admin escolhe o dono — ou deixa o rodízio do banco decidir.
+                  <select
+                    value={formOwnerId}
+                    onChange={(e) => setFormOwnerId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+                  >
+                    <option value="">Automático (rodízio entre os SDRs)</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>{u.name} · {u.role}</option>
+                    ))}
+                  </select>
+                ) : (
+                  // SDR/closer: o lead fica com quem cadastrou (visível, não editável) —
+                  // sem isso o round-robin dava o lead a outro SDR e ele sumia da tela.
+                  <>
+                    <input
+                      type="text"
+                      value={currentUser?.name ?? ""}
+                      disabled
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-500 cursor-not-allowed"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">Leads cadastrados manualmente ficam com você.</p>
+                  </>
+                )}
+              </div>
             </div>
+
+            {/* Aviso de duplicado: telefone/e-mail já existem no banco. */}
+            {dupLead && (
+              <div className="mt-4 px-3 py-3 rounded-lg bg-amber-50 border border-amber-200">
+                <p className="text-sm text-amber-800 font-medium mb-2">
+                  Lead já existe{dupLead.name ? `: ${dupLead.name}` : ""} (dono: {dupLead.ownerName ?? "não atribuído"}).
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const id = dupLead.id;
+                      setShowCreateModal(false);
+                      resetForm();
+                      onOpenLead(id);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-xs font-medium text-white hover:bg-[#0139D6] transition-colors"
+                  >
+                    Abrir lead
+                  </button>
+                  {isManager && (
+                    // Só gestor/admin pode forçar o cadastro duplicado.
+                    <button
+                      onClick={() => handleCreateLead(true)}
+                      disabled={saving}
+                      className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+                    >
+                      Cadastrar mesmo assim
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
               <button
@@ -946,7 +1229,9 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 Cancelar
               </button>
               <button
-                onClick={handleCreateLead}
+                // Arrow de propósito: handleCreateLead(force?) — o evento do clique
+                // NÃO pode entrar como "force" (seria sempre truthy).
+                onClick={() => handleCreateLead()}
                 disabled={saving || !formFirstName.trim()}
                 className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
               >
@@ -962,14 +1247,16 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvImportedCount(null); }}
+            onClick={closeCsvModal}
           />
           <div className="relative bg-white rounded-xl border border-gray-100 shadow-none w-full max-w-2xl mx-4 p-4 md:p-6 max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-bold text-gray-900">Importar Leads via CSV</h2>
               <button
-                onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvImportedCount(null); }}
-                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                onClick={closeCsvModal}
+                disabled={csvImporting}
+                title={csvImporting ? "Aguarde a importação terminar" : undefined}
+                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -985,8 +1272,16 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   </svg>
                 </div>
                 <p className="text-lg font-semibold text-gray-900 mb-2">{csvImportedCount} leads importados</p>
+                {/* Transparência do dedupe: quantos ficaram de fora e por quê. */}
+                {csvSkipped && (csvSkipped.db > 0 || csvSkipped.file > 0) && (
+                  <p className="text-sm text-gray-500 mb-4">
+                    {csvSkipped.db > 0 && <>{csvSkipped.db} pulado{csvSkipped.db > 1 ? "s" : ""} (já existia{csvSkipped.db > 1 ? "m" : ""} no banco)</>}
+                    {csvSkipped.db > 0 && csvSkipped.file > 0 && " · "}
+                    {csvSkipped.file > 0 && <>{csvSkipped.file} duplicado{csvSkipped.file > 1 ? "s" : ""} no próprio arquivo</>}
+                  </p>
+                )}
                 <button
-                  onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvImportedCount(null); }}
+                  onClick={closeCsvModal}
                   className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
                 >
                   Fechar
@@ -1009,11 +1304,35 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                         reader.onload = (ev) => {
                           const text = ev.target?.result as string;
                           if (!text) return;
-                          const lines = text.split("\n").filter((l) => l.trim());
+                          // Divisor de linha com aspas padrão CSV (RFC 4180 simplificado):
+                          // "Empresa, Ltda" é UMA coluna, "" dentro de aspas vira aspa
+                          // literal. Campos com QUEBRA DE LINHA dentro de aspas não são
+                          // suportados (o parse segue linha a linha).
+                          const splitCsvLine = (line: string, sep: string): string[] => {
+                            const out: string[] = [];
+                            let cur = "";
+                            let inQuotes = false;
+                            for (let i = 0; i < line.length; i++) {
+                              const ch = line[i];
+                              if (inQuotes) {
+                                if (ch === '"') {
+                                  if (line[i + 1] === '"') { cur += '"'; i++; } // "" escapada
+                                  else inQuotes = false;
+                                } else cur += ch;
+                              } else if (ch === '"') inQuotes = true;
+                              else if (ch === sep) { out.push(cur); cur = ""; }
+                              else cur += ch;
+                            }
+                            out.push(cur);
+                            return out.map((c) => c.trim());
+                          };
+                          const lines = text.split(/\r?\n/).filter((l) => l.trim());
                           if (lines.length < 2) return;
+                          // Separador: o que aparecer mais no cabeçalho (Excel pt-BR usa ";").
+                          const sep = (lines[0].match(/;/g)?.length ?? 0) >= (lines[0].match(/,/g)?.length ?? 0) ? ";" : ",";
 
                           // Parse header
-                          const header = lines[0].split(/[,;]/).map((h) => h.trim().toLowerCase().replace(/['"]/g, ""));
+                          const header = splitCsvLine(lines[0], sep).map((h) => h.toLowerCase().replace(/['"]/g, ""));
                           const colNome = header.findIndex((h) => h === "nome" || h === "name");
                           const colEmpresa = header.findIndex((h) => h === "empresa" || h === "company" || h === "company_name");
                           const colTelefone = header.findIndex((h) => h === "telefone" || h === "phone" || h === "tel");
@@ -1021,7 +1340,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                           const colSegmento = header.findIndex((h) => h === "segmento" || h === "segment");
 
                           const rows = lines.slice(1).map((line) => {
-                            const cols = line.split(/[,;]/).map((c) => c.trim().replace(/^["']|["']$/g, ""));
+                            const cols = splitCsvLine(line, sep);
                             return {
                               nome: colNome >= 0 ? cols[colNome] || "" : "",
                               empresa: colEmpresa >= 0 ? cols[colEmpresa] || "" : "",
@@ -1084,15 +1403,17 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     {csvImporting && (
                       <div className="mb-3">
                         <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                          <div className="h-full rounded-full bg-[#0147FF] transition-all" style={{ width: `${Math.round((csvProgress / Math.max(csvRows.length, 1)) * 100)}%` }} />
+                          {/* Denominador = o que VAI ser gravado (depois dos dedupes). */}
+                          <div className="h-full rounded-full bg-[#0147FF] transition-all" style={{ width: `${Math.round((csvProgress / Math.max(csvPlanned ?? csvRows.length, 1)) * 100)}%` }} />
                         </div>
-                        <p className="text-xs text-gray-500 mt-1 tabular-nums">Importando {csvProgress}/{csvRows.length}…</p>
+                        <p className="text-xs text-gray-500 mt-1 tabular-nums">Importando {csvProgress}/{csvPlanned ?? csvRows.length}… Não feche esta janela.</p>
                       </div>
                     )}
                     <div className="flex items-center justify-end gap-3">
                       <button
                         onClick={() => setCsvRows([])}
-                        className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                        disabled={csvImporting}
+                        className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                       >
                         Cancelar
                       </button>
@@ -1100,6 +1421,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                         onClick={async () => {
                           setCsvImporting(true);
                           setCsvProgress(0);
+                          setCsvSkipped(null);
+                          setCsvPlanned(null);
 
                           // Dedupe dentro do arquivo (mesmo e-mail ou telefone = 1 lead só).
                           const seen = new Set<string>();
@@ -1109,8 +1432,57 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                             seen.add(key);
                             return true;
                           });
+                          const skippedFile = csvRows.length - rows.length;
+
+                          // Dedupe contra o BANCO (auditoria 2026-07-14): telefone (só
+                          // dígitos) ou e-mail (minúsculo) que já existem são PULADOS —
+                          // antes o dedupe era só intra-arquivo e reimportar a mesma
+                          // planilha duplicava a base inteira. Busca leve (email/phone)
+                          // feita na hora; a RLS limita ao que o usuário pode ler
+                          // (gestor/admin, que é quem importa, enxerga a base toda).
+                          const { data: existing, error: dedupeErr } = await supabase
+                            .from("qs_leads")
+                            .select("email, phone");
+                          if (dedupeErr) {
+                            // Sem a checagem não dá pra importar com segurança (criaria
+                            // duplicados em massa) — cancela e o usuário tenta de novo.
+                            console.warn("[CSV] checagem de duplicados no banco falhou:", dedupeErr);
+                            notifyError("Não foi possível checar duplicados no banco — importação cancelada, tente novamente.");
+                            setCsvImporting(false);
+                            return;
+                          }
+                          const dbEmails = new Set(
+                            (existing ?? []).map((l) => (l.email ?? "").trim().toLowerCase()).filter(Boolean)
+                          );
+                          const dbPhones = new Set(
+                            (existing ?? []).map((l) => (l.phone ?? "").replace(/\D/g, "")).filter((p) => p.length >= 8)
+                          );
+                          let skippedDb = 0;
+                          const newRows = rows.filter((r) => {
+                            const em = r.email.trim().toLowerCase();
+                            const ph = r.telefone.replace(/\D/g, "");
+                            const exists = (!!em && dbEmails.has(em)) || (ph.length >= 8 && dbPhones.has(ph));
+                            if (exists) skippedDb++;
+                            return !exists;
+                          });
+                          setCsvSkipped({ file: skippedFile, db: skippedDb });
+                          setCsvPlanned(newRows.length); // denominador honesto da barra
+                          if (newRows.length === 0) {
+                            notifyError("Nenhum lead novo para importar — todos já existiam no banco (ou eram duplicados no arquivo).");
+                            setCsvImportedCount(0);
+                            setCsvImporting(false);
+                            return;
+                          }
 
                           // Dias/atividades da cadência (1 busca só, reusada em todos os leads).
+                          //
+                          // CÓPIA-ESPELHO de createCadenceTasks (src/lib/qs/queries.ts) —
+                          // mantida INLINE de propósito: aqui é 1 busca de cadência pro LOTE
+                          // inteiro (vs 1 busca por lead na canônica). Qualquer mudança lá
+                          // precisa ser refletida aqui: datas via planCadenceDates, ordenação
+                          // por order_index, prioridade pelo período (manhã=alta, >=12:30=
+                          // média, sem horário=baixa), status "pendente", is_extra false e
+                          // owner_id = dono FINAL do lead inserido (inserted.owner_id).
                           let cadDays: { day_number: number; activities: { channel_type: string; scheduled_time: string | null; order_index: number }[] }[] = [];
                           // Datas reais de cada "Dia N" respeitando os dias de execução da
                           // cadência (mesmo helper do createCadenceTasks) — antes o "Dia 2"
@@ -1141,7 +1513,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                           // Insere UM POR VEZ: cada insert é uma transação própria, então o
                           // round-robin do banco rotaciona os SDRs (em lote cairia tudo no mesmo).
                           let ok = 0, fail = 0, tasksFail = 0;
-                          for (const row of rows) {
+                          for (const row of newRows) {
                             const nameParts = row.nome.trim().split(/\s+/);
                             const { data: inserted, error } = await supabase
                               .from("qs_leads")
