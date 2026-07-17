@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { notifyError } from "@/lib/qs/notify";
+import { fetchAllRows } from "@/lib/qs/queries";
 
 interface LeadStage {
   leadId: string;
@@ -45,26 +46,37 @@ export default function CadenceHealthPanel() {
       // Não-gestor: só o que é DELE. A RLS deixa passar lead/tarefa SEM dono
       // (owner_id is null), que senão apareceria na conta de todos os SDRs.
       const own = !isManager && currentUser ? currentUser.id : null;
-      let tasksQ = supabase.from("qs_tasks").select("lead_id, owner_id, scheduled_at").in("status", ["pendente", "atrasada"]);
-      let leadsQ = supabase.from("qs_leads").select("id, arrived_at, created_at, status, owner_id");
+      // Tudo paginado (cap 1000 do PostgREST): as concluídas são ALL-TIME e
+      // passam de 1000 rápido — sem paginação, lead já trabalhado "renascia"
+      // como Novo e a fila inteira mentia em silêncio.
+      const tasksP = fetchAllRows<any>((f, t) => {
+        let q = supabase.from("qs_tasks").select("lead_id, owner_id, scheduled_at").in("status", ["pendente", "atrasada"]).order("id");
+        if (own) q = q.eq("owner_id", own);
+        return q.range(f, t);
+      });
+      const leadsP = fetchAllRows<any>((f, t) => {
+        let q = supabase.from("qs_leads").select("id, arrived_at, created_at, status, owner_id").order("id");
+        if (own) q = q.eq("owner_id", own);
+        return q.range(f, t);
+      });
       // Concluídas SEM filtro de dono: o histórico segue o LEAD (migration 0015)
       // — um lead transferido com 4 tentativas não pode renascer como "Novo".
       // A classificação só olha leads do próprio SDR, então não vaza nada.
-      const concludedQ = supabase.from("qs_tasks").select("lead_id").eq("status", "concluida");
-      if (own) { tasksQ = tasksQ.eq("owner_id", own); leadsQ = leadsQ.eq("owner_id", own); }
-      const [tasksRes, leadsRes, concludedRes, usersRes] = await Promise.all([
-        tasksQ, leadsQ, concludedQ,
+      const concludedP = fetchAllRows<{ lead_id: string }>((f, t) =>
+        supabase.from("qs_tasks").select("lead_id").eq("status", "concluida").order("id").range(f, t)
+      );
+      const [tasks, leads, concluded, usersRes] = await Promise.all([
+        tasksP, leadsP, concludedP,
         supabase.from("qs_users").select("id, name").eq("is_active", true),
       ]);
-      if (tasksRes.error) throw tasksRes.error;
 
-      const leadsById = new Map((leadsRes.data ?? []).map((l: any) => [l.id, l]));
-      const contacted = new Set((concludedRes.data ?? []).map((r: any) => r.lead_id));
+      const leadsById = new Map(leads.map((l: any) => [l.id, l]));
+      const contacted = new Set(concluded.map((r) => r.lead_id));
       setUserNames(new Map((usersRes.data ?? []).map((u: any) => [u.id, u.name])));
 
       // Uma tarefa por lead: a ATUAL = a de menor scheduled_at (a que vence antes).
       const currentByLead = new Map<string, any>();
-      for (const t of (tasksRes.data ?? []) as any[]) {
+      for (const t of tasks as any[]) {
         const lead = leadsById.get(t.lead_id);
         if (!lead || lead.status === "ganho" || lead.status === "perdido") continue;
         const prev = currentByLead.get(t.lead_id);

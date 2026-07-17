@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { createCadenceTasks } from "@/lib/qs/queries";
+import { createCadenceTasks, fetchAllRows } from "@/lib/qs/queries";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -76,6 +76,31 @@ function nextBusinessDayAt9(): Date {
   return d;
 }
 
+// Janela do relatório de SLA: leads CHEGADOS nos últimos N dias.
+const SLA_WINDOW_DAYS = 7;
+
+// Tarefas concluídas de uma lista de leads, em LOTES — `.in()` com centenas de
+// ids estoura o limite de URL, e o resultado pode passar do cap de 1000 linhas
+// do PostgREST (por isso cada lote também é paginado via fetchAllRows).
+async function fetchCompletedTasksByLeadIds(leadIds: string[]): Promise<{ lead_id: string }[]> {
+  const out: { lead_id: string }[] = [];
+  const CHUNK = 150;
+  for (let i = 0; i < leadIds.length; i += CHUNK) {
+    const chunk = leadIds.slice(i, i + CHUNK);
+    const rows = await fetchAllRows<{ lead_id: string }>((f, t) =>
+      supabase
+        .from("qs_tasks")
+        .select("lead_id")
+        .in("lead_id", chunk)
+        .eq("status", "concluida")
+        .order("id")
+        .range(f, t)
+    );
+    out.push(...rows);
+  }
+  return out;
+}
+
 // ── Icons (inline SVG) ─────────────────────────────────────────────────────
 
 function IconClock() {
@@ -114,80 +139,97 @@ function IconShield() {
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export default function CoveragePanel() {
+interface SlaMetric {
+  label: string;
+  value: number | null; // null = ainda não há lead "julgável" na janela
+  unit: string;
+  greenThreshold: number;
+  yellowThreshold: number;
+}
+
+export default function CoveragePanel({ onOpenLead }: { onOpenLead?: (leadId: string) => void }) {
   const { currentUser } = useQsAuth();
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
   const [users, setUsers] = useState<QsUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [contactingId, setContactingId] = useState<string | null>(null);
-  const [slaMetrics, setSlaMetrics] = useState([
-    { label: "Contatados em < 5min", value: 0, unit: "%", greenThreshold: 80, yellowThreshold: 60 },
-    { label: "Contatados em < 15min", value: 0, unit: "%", greenThreshold: 85, yellowThreshold: 70 },
-    { label: "Contatados em < 30min", value: 0, unit: "%", greenThreshold: 90, yellowThreshold: 75 },
+  const [slaMetrics, setSlaMetrics] = useState<SlaMetric[]>([
+    { label: "Contatados em < 5min", value: null, unit: "%", greenThreshold: 80, yellowThreshold: 60 },
+    { label: "Contatados em < 15min", value: null, unit: "%", greenThreshold: 85, yellowThreshold: 70 },
+    { label: "Contatados em < 30min", value: null, unit: "%", greenThreshold: 90, yellowThreshold: 75 },
   ]);
   const [semContato, setSemContato] = useState({ label: "Sem contato (> 30min)", value: 0, unit: "leads" });
 
   // Fetch real leads from Supabase — roda no mount e a cada 60s (este painel
   // vigia SLA em MINUTOS; congelado até o F5 ele não serve pra nada).
   const fetchLeads = useCallback(async (initial = false) => {
-    {
-      if (initial) setLoading(true);
-
-      // Leads that arrived but have no cadence started (or no completed tasks)
-      // Strategy: leads with arrived_at but status = nao_iniciado or no completed task
+    if (initial) setLoading(true);
+    try {
       // Fetch users
-      const { data: usersData } = await supabase.from("qs_users").select("id, name").eq("is_active", true).order("name");
+      const { data: usersData, error: usersErr } = await supabase
+        .from("qs_users").select("id, name").eq("is_active", true).order("name");
+      if (usersErr) throw usersErr;
       if (usersData) setUsers(usersData as QsUser[]);
 
       // Isolamento por dono: o SDR só enxerga a cobertura dos PRÓPRIOS leads.
       // Gestor/admin veem o time todo (e podem filtrar por SDR no seletor acima).
       // Backstop de tela — a garantia real é a RLS 0007/0008 no banco.
-      let leadsQ = supabase
-        .from("qs_leads")
-        .select("id, full_name, company_name, source, arrived_at, owner_id, owner:qs_users(name)")
-        .not("arrived_at", "is", null)
-        .in("status", ["nao_iniciado", "em_prospeccao"])
-        .order("arrived_at", { ascending: true });
-      if (currentUser && !canSeeAllData(currentUser.role)) {
-        leadsQ = leadsQ.eq("owner_id", currentUser.id);
-      }
-      const { data: leadsData, error: leadsErr } = await leadsQ;
+      const scoped = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
 
-      if (leadsErr) {
-        console.warn("Erro ao buscar leads para cobertura:", leadsErr);
-        setLoading(false);
-        return;
-      }
+      // ── Fila "aguardando contato": leads ATIVOS com chegada — paginado
+      // (cap 1000 do PostgREST; a fila cheia não pode sumir lead em silêncio).
+      const leadsData = await fetchAllRows<any>((f, t) => {
+        let q = supabase
+          .from("qs_leads")
+          .select("id, full_name, company_name, source, arrived_at, owner_id, owner:qs_users(name)")
+          .not("arrived_at", "is", null)
+          .in("status", ["nao_iniciado", "em_prospeccao"])
+          .order("arrived_at", { ascending: true })
+          .order("id");
+        if (scoped) q = q.eq("owner_id", scoped);
+        return q.range(f, t);
+      });
 
-      if (!leadsData || leadsData.length === 0) {
-        setAllLeads([]);
-        setLoading(false);
-        return;
-      }
+      // ── Base do SLA: leads CHEGADOS na janela (últimos 7 dias), QUALQUER
+      // status. Antes a base era só nao_iniciado/em_prospeccao — lead que
+      // avançava pra ganho/perdido SAÍA do denominador e o "% < 5min" mudava
+      // retroativamente (o relatório reescrevia a própria história).
+      const windowStart = new Date();
+      windowStart.setDate(windowStart.getDate() - (SLA_WINDOW_DAYS - 1));
+      windowStart.setHours(0, 0, 0, 0);
 
-      // Check which leads have at least one completed task
-      const leadIds = leadsData.map((l: any) => l.id);
-      const { data: tasksData, error: tasksErr } = await supabase
-        .from("qs_tasks")
-        .select("lead_id, completed_at")
-        .in("lead_id", leadIds)
-        .eq("status", "concluida");
+      const [arrivedRows, contactRows, queueTasks] = await Promise.all([
+        fetchAllRows<{ id: string; arrived_at: string }>((f, t) => {
+          let q = supabase
+            .from("qs_leads")
+            .select("id, arrived_at")
+            .not("arrived_at", "is", null)
+            .gte("arrived_at", windowStart.toISOString())
+            .order("arrived_at")
+            .order("id");
+          if (scoped) q = q.eq("owner_id", scoped);
+          return q.range(f, t);
+        }),
+        // 1º contato dos leads da janela: o contato acontece DEPOIS da chegada,
+        // então completed_at >= início da janela cobre todos os casos.
+        fetchAllRows<{ lead_id: string; completed_at: string }>((f, t) =>
+          supabase
+            .from("qs_tasks")
+            .select("lead_id, completed_at")
+            .eq("status", "concluida")
+            .not("completed_at", "is", null)
+            .gte("completed_at", windowStart.toISOString())
+            .order("completed_at")
+            .order("id")
+            .range(f, t)
+        ),
+        // Quem da FILA já tem tarefa concluída (histórico segue o lead — 0015)
+        fetchCompletedTasksByLeadIds(leadsData.map((l: any) => l.id)),
+      ]);
 
-      const contactedSet = new Set<string>();
-      const firstContactMap = new Map<string, Date>();
-      if (!tasksErr && tasksData) {
-        (tasksData as any[]).forEach((t) => {
-          contactedSet.add(t.lead_id);
-          if (t.completed_at) {
-            const existing = firstContactMap.get(t.lead_id);
-            const completed = new Date(t.completed_at);
-            if (!existing || completed < existing) {
-              firstContactMap.set(t.lead_id, completed);
-            }
-          }
-        });
-      }
+      const contactedSet = new Set(queueTasks.map((t) => t.lead_id));
 
       // Build lead list — only leads WITHOUT completed tasks
       const sourceMap: Record<string, string> = {
@@ -202,9 +244,9 @@ export default function CoveragePanel() {
         whatsapp: "WhatsApp",
       };
 
-      const pendingLeads: Lead[] = (leadsData as any[])
-        .filter((l) => !contactedSet.has(l.id))
-        .map((l) => ({
+      const pendingLeads: Lead[] = leadsData
+        .filter((l: any) => !contactedSet.has(l.id))
+        .map((l: any) => ({
           id: l.id,
           name: l.full_name || "Sem nome",
           company: l.company_name || "",
@@ -212,45 +254,57 @@ export default function CoveragePanel() {
           arrivedAt: new Date(l.arrived_at),
           contacted: false,
           ownerId: l.owner_id,
-          ownerName: l.owner?.name || null,
+          ownerName: (Array.isArray(l.owner) ? l.owner[0] : l.owner)?.name || null,
         }));
 
       setAllLeads(pendingLeads);
 
-      // Calculate SLA metrics based on all arrived leads (contacted + pending)
-      const totalLeads = leadsData.length;
-      if (totalLeads > 0) {
-        let under5 = 0;
-        let under15 = 0;
-        let under30 = 0;
-        let over30 = 0;
+      // ── SLA sobre a coorte de chegada ──
+      // contactRows vem ordenado por completed_at asc → o 1º visto é o 1º contato.
+      const firstContactMap = new Map<string, Date>();
+      contactRows.forEach((t) => {
+        if (!firstContactMap.has(t.lead_id)) firstContactMap.set(t.lead_id, new Date(t.completed_at));
+      });
 
-        (leadsData as any[]).forEach((lead) => {
-          const arrivedAt = new Date(lead.arrived_at);
-          const firstContact = firstContactMap.get(lead.id);
-
-          if (firstContact) {
-            const diffMin = (firstContact.getTime() - arrivedAt.getTime()) / 60000;
-            if (diffMin <= 5) under5++;
-            if (diffMin <= 15) under15++;
-            if (diffMin <= 30) under30++;
-            else over30++;
-          } else {
-            // Not contacted = counts toward over30 if waiting > 30min
-            const waitMin = getWaitMinutes(arrivedAt);
-            if (waitMin > 30) over30++;
+      // Denominador JUSTO por limiar: entram os leads cujo desfecho para aquele
+      // limiar já é conhecido — contatados (a qualquer tempo) ou ainda sem
+      // contato mas JÁ além do limiar. Lead que chegou há 2min não é julgado
+      // pelo "< 5min" ainda (entra quando estourar ou for contatado). Uma vez
+      // na base, o lead NUNCA sai — a % não muda retroativamente.
+      const slaFor = (thresholdMin: number): number | null => {
+        let decided = 0;
+        let hit = 0;
+        arrivedRows.forEach((l) => {
+          const arrived = new Date(l.arrived_at);
+          const fc = firstContactMap.get(l.id);
+          if (fc) {
+            decided++;
+            if ((fc.getTime() - arrived.getTime()) / 60000 <= thresholdMin) hit++;
+          } else if (getWaitMinutes(arrived) > thresholdMin) {
+            decided++; // sem contato e além do limiar = falha definitiva
           }
         });
+        return decided > 0 ? Math.round((hit / decided) * 100) : null;
+      };
 
-        const contactedCount = contactedSet.size;
-        setSlaMetrics([
-          { label: "Contatados em < 5min", value: contactedCount > 0 ? Math.round((under5 / contactedCount) * 100) : 0, unit: "%", greenThreshold: 80, yellowThreshold: 60 },
-          { label: "Contatados em < 15min", value: contactedCount > 0 ? Math.round((under15 / contactedCount) * 100) : 0, unit: "%", greenThreshold: 85, yellowThreshold: 70 },
-          { label: "Contatados em < 30min", value: contactedCount > 0 ? Math.round((under30 / contactedCount) * 100) : 0, unit: "%", greenThreshold: 90, yellowThreshold: 75 },
-        ]);
-        setSemContato({ label: "Sem contato (> 30min)", value: over30, unit: "leads" });
-      }
+      setSlaMetrics([
+        { label: "Contatados em < 5min", value: slaFor(5), unit: "%", greenThreshold: 80, yellowThreshold: 60 },
+        { label: "Contatados em < 15min", value: slaFor(15), unit: "%", greenThreshold: 85, yellowThreshold: 70 },
+        { label: "Contatados em < 30min", value: slaFor(30), unit: "%", greenThreshold: 90, yellowThreshold: 75 },
+      ]);
+      setSemContato({
+        label: "Sem contato (> 30min)",
+        value: arrivedRows.filter((l) => !firstContactMap.has(l.id) && getWaitMinutes(new Date(l.arrived_at)) > 30).length,
+        unit: "leads",
+      });
 
+      setLoadError(null);
+    } catch (err) {
+      // Erro NÃO vira "fila vazia / SLA 100%": mantém o que está na tela e
+      // mostra o banner com retry (refresh de fundo não apaga dados bons).
+      console.warn("Erro ao buscar leads para cobertura:", err);
+      setLoadError("Não foi possível carregar a cobertura de leads.");
+    } finally {
       setLoading(false);
     }
   }, [currentUser]);
@@ -419,6 +473,11 @@ export default function CoveragePanel() {
     // Atualiza a lista local (remove da fila de aguardando)
     setAllLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, contacted: true } : l)));
     setContactingId(null);
+
+    // "Contatar agora" agora CONTATA de verdade: abre a página do lead
+    // (telefone, WhatsApp, histórico) — antes só registrava a tarefa e deixava
+    // o SDR na mesma tela, sem caminho pro contato em si.
+    onOpenLead?.(leadId);
   }
 
   if (loading) {
@@ -431,6 +490,19 @@ export default function CoveragePanel() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6">
+      {/* Erro de carga: banner com retry (a lista/SLA anteriores continuam na tela) */}
+      {loadError && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm text-red-700">{loadError}</p>
+          <button
+            onClick={() => fetchLeads(true)}
+            className="shrink-0 text-xs font-semibold text-red-700 border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-100 transition-colors"
+          >
+            Tentar de novo
+          </button>
+        </div>
+      )}
+
       {/* ── Panel: Leads Aguardando ─────────────────────────────────────── */}
       <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
         {/* Header */}
@@ -513,9 +585,19 @@ export default function CoveragePanel() {
                       style={{ background: statusColor }}
                     />
 
-                    {/* Name + company + responsável */}
+                    {/* Name + company + responsável (nome clicável → abre o lead) */}
                     <div className="min-w-0">
-                      <p className="text-[14px] font-medium text-gray-900 truncate">{lead.name}</p>
+                      {onOpenLead ? (
+                        <button
+                          onClick={() => onOpenLead(lead.id)}
+                          className="block max-w-full text-left text-[14px] font-medium text-gray-900 truncate hover:text-[#0147FF] hover:underline"
+                          title="Ver informações do lead"
+                        >
+                          {lead.name}
+                        </button>
+                      ) : (
+                        <p className="text-[14px] font-medium text-gray-900 truncate">{lead.name}</p>
+                      )}
                       <p className="text-[12px] text-gray-400 truncate">
                         {lead.company}
                         {lead.ownerName && <span> · SDR: <span className="font-medium text-gray-500">{lead.ownerName}</span></span>}
@@ -560,16 +642,23 @@ export default function CoveragePanel() {
 
       {/* ── SLA Report ────────────────────────────────────────────────────── */}
       <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-        <div className="flex items-center gap-2.5 px-4 md:px-6 py-4 border-b border-gray-100">
-          <span className="text-gray-500">
-            <IconShield />
-          </span>
-          <h2 className="text-[16px] font-semibold text-gray-900">Relatório de Cobertura SLA</h2>
+        <div className="px-4 md:px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-2.5">
+            <span className="text-gray-500">
+              <IconShield />
+            </span>
+            <h2 className="text-[16px] font-semibold text-gray-900">Relatório de Cobertura SLA</h2>
+          </div>
+          <p className="text-[12px] text-gray-400 mt-1">
+            Base: leads que CHEGARAM nos últimos {SLA_WINDOW_DAYS} dias (qualquer etapa) — lead que avança de coluna continua contando.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 md:p-6">
           {slaMetrics.map((metric) => {
-            const color = getSlaColor(metric.value, metric.greenThreshold, metric.yellowThreshold);
+            const color = metric.value === null
+              ? "#9CA3AF"
+              : getSlaColor(metric.value, metric.greenThreshold, metric.yellowThreshold);
             return (
               <div
                 key={metric.label}
@@ -577,8 +666,10 @@ export default function CoveragePanel() {
               >
                 <span className="text-[12px] text-gray-500 font-medium">{metric.label}</span>
                 <span className="text-[28px] font-bold" style={{ color }}>
-                  {metric.value}
-                  <span className="text-[16px] font-semibold ml-0.5">{metric.unit}</span>
+                  {metric.value !== null ? metric.value : "—"}
+                  {metric.value !== null && (
+                    <span className="text-[16px] font-semibold ml-0.5">{metric.unit}</span>
+                  )}
                 </span>
               </div>
             );

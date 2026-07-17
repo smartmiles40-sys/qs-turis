@@ -20,6 +20,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { notifyError } from "@/lib/qs/notify";
+import { fetchAllRows } from "@/lib/qs/queries";
 
 const BLUE = "#0147FF";
 const GREEN = "#0E7C6A";
@@ -85,8 +86,8 @@ export default function DailyFlowPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(false);
     try {
       // Início da janela: 00:00 local do 1º dos 21 dias.
@@ -94,24 +95,30 @@ export default function DailyFlowPanel() {
       start.setDate(start.getDate() - (DAYS - 1));
       const startISO = start.toISOString();
 
-      let leadsQ = supabase.from("qs_leads").select("arrived_at").gte("arrived_at", startISO);
-      let meetingsQ = supabase.from("qs_meetings").select("created_at").gte("created_at", startISO);
-      // Não-gestor: conta só o que é DELE. A RLS deixa passar lead/reunião SEM dono
-      // (owner_id is null), que senão seria contado no painel de TODOS os SDRs.
-      if (!isManager && currentUser) {
-        leadsQ = leadsQ.eq("owner_id", currentUser.id);
-        meetingsQ = meetingsQ.eq("owner_id", currentUser.id);
-      }
-      const [leadsRes, meetingsRes] = await Promise.all([leadsQ, meetingsQ]);
-      if (leadsRes.error) throw leadsRes.error;
-      if (meetingsRes.error) throw meetingsRes.error;
+      const own = !isManager && currentUser ? currentUser.id : null;
+      // Paginado (cap 1000 do PostgREST) — 21 dias de operação cheia passam
+      // disso e as barras dos últimos dias sumiam em silêncio.
+      // Não-gestor: conta só o que é DELE. A RLS deixa passar lead/reunião SEM
+      // dono (owner_id is null), que senão seria contado pra TODOS os SDRs.
+      const [leadRows, meetingRows] = await Promise.all([
+        fetchAllRows<any>((f, t) => {
+          let q = supabase.from("qs_leads").select("arrived_at").gte("arrived_at", startISO).order("id");
+          if (own) q = q.eq("owner_id", own);
+          return q.range(f, t);
+        }),
+        fetchAllRows<any>((f, t) => {
+          let q = supabase.from("qs_meetings").select("created_at").gte("created_at", startISO).order("id");
+          if (own) q = q.eq("owner_id", own);
+          return q.range(f, t);
+        }),
+      ]);
 
-      setLeadBuckets(bucketize(leadsRes.data ?? [], "arrived_at"));
-      setMeetingBuckets(bucketize(meetingsRes.data ?? [], "created_at"));
+      setLeadBuckets(bucketize(leadRows, "arrived_at"));
+      setMeetingBuckets(bucketize(meetingRows, "created_at"));
     } catch (e: any) {
       console.warn("[fluxo-diário] falha:", e?.message);
       setError(true);
-      notifyError("Não foi possível carregar a análise dia a dia.");
+      if (!silent) notifyError("Não foi possível carregar a análise dia a dia.");
     } finally {
       setLoading(false);
     }
@@ -119,11 +126,20 @@ export default function DailyFlowPanel() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Auto-refresh silencioso (TV do time) — mesmo guard de aba oculta do
+  // restante do dashboard.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!document.hidden) load(true);
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [load]);
+
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
         <h2 className="text-sm font-medium text-gray-700">Análise dia a dia (últimos 21 dias)</h2>
-        <button onClick={load} className="text-xs font-semibold" style={{ color: BLUE }}>Atualizar</button>
+        <button onClick={() => load()} className="text-xs font-semibold" style={{ color: BLUE }}>Atualizar</button>
       </div>
       <p className="text-xs text-gray-400 mb-3">
         Volume {scope} de leads que chegaram e de agendamentos feitos, por dia.

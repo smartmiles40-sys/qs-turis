@@ -611,7 +611,7 @@ export default function SdrLayout() {
         )}
         {activeNav === "cobertura" && (
           <PageErrorBoundary pageName="Cobertura de Leads">
-            <CoveragePanel />
+            <CoveragePanel onOpenLead={openLeadDetail} />
           </PageErrorBoundary>
         )}
         {activeNav === "reunioes" && (

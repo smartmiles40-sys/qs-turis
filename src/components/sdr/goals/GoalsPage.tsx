@@ -8,7 +8,15 @@ import type { Goal, GoalPeriod, GoalType, SdrUser } from "../types";
 
 // Janela de datas da meta:
 //  - diario  → hoje (00:00 até 23:59:59.999)
-//  - mensal  → mês corrente ancorado no mês do period_start
+//  - mensal  → mês CORRENTE. DECISÃO DE PRODUTO (Sprint 4): meta mensal é
+//    RECORRENTE — o period_start só marca DESDE QUANDO ela vigora (e é
+//    preservado na edição, fix da Sprint 3); sem uma meta mais nova, a mesma
+//    meta continua valendo nos meses seguintes. Por isso o realizado exibido é
+//    sempre o do mês corrente — a MESMA regra que o dashboard usa
+//    (isGoalEffective em queries.ts). Antes, na virada do mês, a página media o
+//    mês VELHO pra sempre e discordava do dashboard.
+//    Exceção: meta ancorada num mês FUTURO ainda não começou — mede o mês da
+//    âncora (fica zerada até lá).
 function getGoalRange(goal: Pick<Goal, "period" | "period_start">): { from: string; to: string } {
   const now = new Date();
   if (goal.period === "diario") {
@@ -16,10 +24,10 @@ function getGoalRange(goal: Pick<Goal, "period" | "period_start">): { from: stri
     const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     return { from: from.toISOString(), to: to.toISOString() };
   }
-  // mensal — usa o mês do period_start como referência (fallback: mês atual)
   const anchor = goal.period_start ? new Date(`${goal.period_start}T00:00:00`) : now;
-  const from = new Date(anchor.getFullYear(), anchor.getMonth(), 1, 0, 0, 0, 0);
-  const to = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0, 23, 59, 59, 999);
+  const ref = anchor.getTime() > now.getTime() ? anchor : now; // vigente → mês corrente; futura → mês da âncora
+  const from = new Date(ref.getFullYear(), ref.getMonth(), 1, 0, 0, 0, 0);
+  const to = new Date(ref.getFullYear(), ref.getMonth() + 1, 0, 23, 59, 59, 999);
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
@@ -146,6 +154,72 @@ function ProgressBar({ current, target, isPercent }: { current: number; target: 
   );
 }
 
+// ── Tabela de metas (reutilizada pelo bloco da Equipe e pelos blocos por usuário) ──
+
+function GoalsTable({
+  goals,
+  onEdit,
+  onDelete,
+  deletingId,
+  allowEdit,
+}: {
+  goals: { id: string; type: GoalType; target_value: number; current_value: number }[];
+  onEdit: (goalId: string) => void;
+  onDelete: (id: string) => void;
+  deletingId: string | null;
+  allowEdit: boolean;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[560px]">
+        <thead>
+          <tr className="border-b border-gray-100">
+            <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider w-44">Tipo</th>
+            <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Progresso</th>
+            <th className="text-right px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider w-16">Ação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {goals.map((goal) => (
+            <tr key={goal.id} className="border-b border-gray-100 last:border-0">
+              <td className="px-5 py-3 text-sm text-gray-700">{GOAL_TYPE_LABELS[goal.type]}</td>
+              <td className="px-5 py-3">
+                <ProgressBar current={goal.current_value} target={goal.target_value} isPercent={goal.type === "conversao"} />
+              </td>
+              <td className="px-5 py-3 text-right">
+                <div className="flex items-center justify-end gap-1">
+                  {allowEdit && (
+                    <button
+                      onClick={() => onEdit(goal.id)}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                      title="Editar meta"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onDelete(goal.id)}
+                    disabled={deletingId === goal.id}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                    title="Excluir meta"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                    </svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Modal ────────────────────────────────────────────────────────────────────
 
 interface ModalState {
@@ -165,6 +239,9 @@ const INITIAL_MODAL: ModalState = {
   period: "mensal",
   target_value: "",
 };
+
+// Sentinela do select "Responsável" pra meta de EQUIPE (owner_id null no banco).
+const TEAM_OWNER = "__team__";
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
@@ -199,37 +276,51 @@ export default function GoalsPage() {
   useEffect(() => {
     async function loadAll() {
       setLoading(true);
+      // Busca TODOS os usuários (ativos e desativados): meta de usuário
+      // desativado precisa APARECER aqui (com badge) pra poder ser excluída —
+      // antes ela sumia da página e continuava somada no dashboard pra sempre.
       const [_, usersRes] = await Promise.all([
         fetchGoals(),
-        supabase.from("qs_users").select("*").eq("is_active", true).order("name"),
+        supabase.from("qs_users").select("*").order("name"),
       ]);
       if (usersRes.error) console.warn("Erro ao buscar users:", usersRes.error);
       else {
         const u = (usersRes.data as SdrUser[]) ?? [];
         setUsers(u);
-        if (u.length > 0) setModal((prev) => ({ ...prev, owner_id: u[0].id }));
+        const firstActive = u.find((x) => x.is_active !== false);
+        if (firstActive) setModal((prev) => ({ ...prev, owner_id: firstActive.id }));
       }
       setLoading(false);
     }
     loadAll();
   }, [fetchGoals]);
 
+  // Só usuários ATIVOS podem receber meta nova (o modal não lista desativados).
+  const activeUsers = users.filter((u) => u.is_active !== false);
+
   const filteredGoals = goals.filter((g) => g.period === periodView);
 
-  const goalsByUser = users.map((user) => ({
-    user,
-    goals: filteredGoals.filter((g) => g.owner_id === user.id),
-  }));
+  // Metas de EQUIPE (owner_id null) ganham um bloco próprio no topo.
+  const teamGoals = filteredGoals.filter((g) => g.owner_id == null);
+
+  // Usuário ativo aparece sempre; desativado só se tiver meta (badge + excluir).
+  const goalsByUser = users
+    .map((user) => ({
+      user,
+      goals: filteredGoals.filter((g) => g.owner_id === user.id),
+    }))
+    .filter(({ user, goals: ug }) => user.is_active !== false || ug.length > 0)
+    .sort((a, b) => Number(b.user.is_active !== false) - Number(a.user.is_active !== false));
 
   function openAddModal() {
-    setModal({ ...INITIAL_MODAL, open: true, period: periodView, owner_id: users[0]?.id ?? "" });
+    setModal({ ...INITIAL_MODAL, open: true, period: periodView, owner_id: activeUsers[0]?.id ?? TEAM_OWNER });
   }
 
   function openEditModal(goal: GoalWithCurrent) {
     setModal({
       open: true,
       editingId: goal.id,
-      owner_id: goal.owner_id ?? users[0]?.id ?? "",
+      owner_id: goal.owner_id ?? TEAM_OWNER,
       type: goal.type,
       period: goal.period,
       target_value: String(goal.target_value),
@@ -242,6 +333,29 @@ export default function GoalsPage() {
 
   async function handleSaveGoal() {
     if (!modal.target_value || !modal.owner_id) return;
+
+    // Meta de EQUIPE usa a sentinela no select → vira owner_id null no banco.
+    const ownerIdOrNull = modal.owner_id === TEAM_OWNER ? null : modal.owner_id;
+
+    // Meta DUPLICADA (mesmo responsável + tipo + período) é bloqueada na
+    // criação: como a meta mensal é recorrente (vale até ser substituída),
+    // uma segunda linha igual só gera placar ambíguo — o caminho certo é
+    // EDITAR a existente. (Checagem de tela; não há unique no banco.)
+    if (!modal.editingId) {
+      const dup = goals.find(
+        (g) => (g.owner_id ?? null) === ownerIdOrNull && g.type === modal.type && g.period === modal.period
+      );
+      if (dup) {
+        const who = ownerIdOrNull === null
+          ? "a Equipe"
+          : users.find((u) => u.id === ownerIdOrNull)?.name ?? "este responsável";
+        notifyError(
+          `Já existe uma meta ${GOAL_PERIOD_LABELS[modal.period].toLowerCase()} de ${GOAL_TYPE_LABELS[modal.type]} para ${who} — edite a meta existente em vez de criar outra.`
+        );
+        return;
+      }
+    }
+
     setSaving(true);
 
     // period_start ancora o mês da meta mensal e só é definido na CRIAÇÃO.
@@ -253,7 +367,7 @@ export default function GoalsPage() {
     const periodChanged = editingGoal != null && editingGoal.period !== modal.period;
 
     const payload = {
-      owner_id: modal.owner_id,
+      owner_id: ownerIdOrNull,
       type: modal.type,
       period: modal.period,
       target_value: parseInt(modal.target_value) || 0,
@@ -284,7 +398,12 @@ export default function GoalsPage() {
     if (!window.confirm("Excluir esta meta? Esta ação não pode ser desfeita.")) return;
     setDeletingId(id);
     const { error } = await supabase.from("qs_goals").delete().eq("id", id);
-    if (error) console.warn("Erro ao excluir meta:", error);
+    if (error) {
+      // Falha de exclusão não pode ser silenciosa: a meta continua na lista e
+      // a pessoa precisa saber que NÃO foi excluída (FASE 2).
+      console.warn("Erro ao excluir meta:", error);
+      notifyError("Não foi possível excluir a meta — ela continua valendo. Tente novamente.");
+    }
     await fetchGoals();
     setDeletingId(null);
   }
@@ -338,78 +457,83 @@ export default function GoalsPage() {
         ))}
       </div>
 
-      {/* Goals per user */}
+      {/* Goals: Equipe + por usuário */}
       <div className="space-y-3">
-        {goalsByUser.map(({ user, goals: userGoals }) => (
-          <div
-            key={user.id}
-            className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden"
-          >
-            {/* User header */}
+        {/* Meta de EQUIPE (owner_id null): placar coletivo — no dashboard ela
+            prevalece sobre a soma das metas individuais na visão "Todos". */}
+        {teamGoals.length > 0 && (
+          <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-[#0147FF] flex items-center justify-center text-white text-xs font-semibold">
-                {user.name.split(" ").map((w) => w[0]).join("").slice(0, 2)}
+              <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-semibold">
+                EQ
               </div>
               <div>
-                <span className="text-sm font-medium text-gray-900">{user.name}</span>
-                <span className="block text-xs text-gray-400">{user.email}</span>
+                <span className="text-sm font-medium text-gray-900">Equipe (todos)</span>
+                <span className="block text-xs text-gray-400">Meta coletiva — soma o time inteiro; no dashboard vale como o placar da equipe</span>
               </div>
             </div>
-
-            {/* Goals table */}
-            {userGoals.length === 0 ? (
-              <div className="px-5 py-6 text-center text-sm text-gray-400">
-                Nenhuma meta definida para este período.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[560px]">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider w-44">Tipo</th>
-                    <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Progresso</th>
-                    <th className="text-right px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider w-16">Ação</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {userGoals.map((goal) => (
-                    <tr key={goal.id} className="border-b border-gray-100 last:border-0">
-                      <td className="px-5 py-3 text-sm text-gray-700">{GOAL_TYPE_LABELS[goal.type]}</td>
-                      <td className="px-5 py-3">
-                        <ProgressBar current={goal.current_value} target={goal.target_value} isPercent={goal.type === "conversao"} />
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => openEditModal(goal)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-                            title="Editar meta"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteGoal(goal.id)}
-                            disabled={deletingId === goal.id}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
-                            title="Excluir meta"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                            </svg>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              </div>
-            )}
+            <GoalsTable
+              goals={teamGoals}
+              onEdit={(goalId) => {
+                const g = goals.find((x) => x.id === goalId);
+                if (g) openEditModal(g);
+              }}
+              onDelete={handleDeleteGoal}
+              deletingId={deletingId}
+              allowEdit
+            />
           </div>
-        ))}
+        )}
+
+        {goalsByUser.map(({ user, goals: userGoals }) => {
+          const inactive = user.is_active === false;
+          return (
+            <div
+              key={user.id}
+              className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden"
+            >
+              {/* User header */}
+              <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold ${inactive ? "bg-gray-300" : "bg-[#0147FF]"}`}>
+                  {user.name.split(" ").map((w) => w[0]).join("").slice(0, 2)}
+                </div>
+                <div className="min-w-0">
+                  <span className={`text-sm font-medium ${inactive ? "text-gray-500" : "text-gray-900"}`}>
+                    {user.name}
+                    {inactive && (
+                      <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 border border-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-500 align-middle">
+                        usuário inativo
+                      </span>
+                    )}
+                  </span>
+                  <span className="block text-xs text-gray-400">
+                    {inactive
+                      ? "Estas metas NÃO contam mais no dashboard — exclua se não precisar do histórico."
+                      : user.email}
+                  </span>
+                </div>
+              </div>
+
+              {/* Goals table */}
+              {userGoals.length === 0 ? (
+                <div className="px-5 py-6 text-center text-sm text-gray-400">
+                  Nenhuma meta definida para este período.
+                </div>
+              ) : (
+                <GoalsTable
+                  goals={userGoals}
+                  onEdit={(goalId) => {
+                    const g = goals.find((x) => x.id === goalId);
+                    if (g) openEditModal(g);
+                  }}
+                  onDelete={handleDeleteGoal}
+                  deletingId={deletingId}
+                  allowEdit={!inactive}
+                />
+              )}
+            </div>
+          );
+        })}
 
         {users.length === 0 && (
           <div className="bg-white border border-gray-100 rounded-xl shadow-none p-6 md:p-12 text-center">
@@ -440,8 +564,15 @@ export default function GoalsPage() {
                 <label className="block text-xs font-medium text-gray-700 mb-1">Responsável</label>
                 <select value={modal.owner_id} onChange={(e) => setModal({ ...modal, owner_id: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]">
-                  {users.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
+                  {/* Meta de equipe (owner_id null) + usuários ATIVOS (desativado não recebe meta nova) */}
+                  <option value={TEAM_OWNER}>Equipe (todos)</option>
+                  {activeUsers.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
                 </select>
+                {modal.owner_id === TEAM_OWNER && (
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    Meta coletiva do time — no dashboard ela vale como o placar da equipe (não soma com as metas individuais).
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Tipo de Meta</label>

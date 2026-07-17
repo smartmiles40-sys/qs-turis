@@ -18,6 +18,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { notifyError } from "@/lib/qs/notify";
+import { fetchAllRows } from "@/lib/qs/queries";
 
 // Paleta padrão dos painéis (mesma do CadenceHealthPanel).
 const BLUE = "#0147FF";
@@ -109,35 +110,41 @@ export default function FupAnalyticsPanel() {
       const own = !isManager && currentUser ? currentUser.id : null;
 
       // Concluídas: o período é ancorado em completed_at (quando o trabalho
-      // de fato aconteceu), não em scheduled_at.
-      let doneQ = supabase
-        .from("qs_tasks")
-        .select("owner_id, contact_result, channel_type, tags, scheduled_at, completed_at")
-        .eq("status", "concluida")
-        .gte("completed_at", cut);
+      // de fato aconteceu), não em scheduled_at. Paginado (cap 1000 do
+      // PostgREST) — 30/90 dias de time cheio passam disso fácil e a matriz
+      // subestimava sem avisar.
+      const doneP = fetchAllRows<any>((f, t) => {
+        let q = supabase
+          .from("qs_tasks")
+          .select("owner_id, contact_result, channel_type, tags, scheduled_at, completed_at")
+          .eq("status", "concluida")
+          .gte("completed_at", cut)
+          .order("id");
+        if (own) q = q.eq("owner_id", own);
+        return q.range(f, t);
+      });
       // Puladas: não existe coluna "skipped_at", então a janela usa created_at.
       // É uma APROXIMAÇÃO (data de criação da tarefa, não do pulo) — como as
       // tarefas de cadência são criadas perto da execução, o desvio é pequeno.
-      let skipQ = supabase
-        .from("qs_tasks")
-        .select("owner_id, skip_reason, created_at")
-        .eq("status", "ignorada")
-        .gte("created_at", cut);
-      if (own) {
-        doneQ = doneQ.eq("owner_id", own);
-        skipQ = skipQ.eq("owner_id", own);
-      }
+      const skipP = fetchAllRows<any>((f, t) => {
+        let q = supabase
+          .from("qs_tasks")
+          .select("owner_id, skip_reason, created_at")
+          .eq("status", "ignorada")
+          .gte("created_at", cut)
+          .order("id");
+        if (own) q = q.eq("owner_id", own);
+        return q.range(f, t);
+      });
 
-      const [doneRes, skipRes, usersRes] = await Promise.all([
-        doneQ,
-        skipQ,
+      const [doneRows, skipRows, usersRes] = await Promise.all([
+        doneP,
+        skipP,
         supabase.from("qs_users").select("id, name").eq("is_active", true),
       ]);
-      if (doneRes.error) throw doneRes.error;
-      if (skipRes.error) throw skipRes.error;
 
       setDone(
-        ((doneRes.data ?? []) as any[]).map((t) => ({
+        (doneRows as any[]).map((t) => ({
           ownerId: t.owner_id ?? null,
           result: t.contact_result ?? null,
           channel: t.channel_type ?? null,
@@ -147,7 +154,7 @@ export default function FupAnalyticsPanel() {
         })),
       );
       setSkipped(
-        ((skipRes.data ?? []) as any[]).map((t) => ({
+        (skipRows as any[]).map((t) => ({
           ownerId: t.owner_id ?? null,
           reason: t.skip_reason ?? null,
         })),
