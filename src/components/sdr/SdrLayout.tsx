@@ -57,6 +57,7 @@ class PageErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
 import SdrDashboard from "./dashboard/SdrDashboard";
 import CadenceHealthPanel from "./dashboard/CadenceHealthPanel";
 import FupAnalyticsPanel from "./dashboard/FupAnalyticsPanel";
+import AdvancedAnalyticsPanel from "./dashboard/AdvancedAnalyticsPanel";
 import MyDayPanel from "./tasks/MyDayPanel";
 import LeadsPage from "./leads/LeadsPage";
 import LeadDetailPage from "./leads/LeadDetailPage";
@@ -90,6 +91,7 @@ export type SdrNav =
   | "dashboard"
   | "saude-cadencia"
   | "analises-fup"
+  | "analises-avancadas"
   | "reunioes"
   | "agenda"
   | "metas"
@@ -139,6 +141,7 @@ const MENU: (MenuGroup | MenuItem)[] = [
       { id: "dashboard", label: "Visão Geral", description: "Indicadores operacionais" },
       { id: "saude-cadencia", label: "Saúde da Cadência", description: "FUP por etapa, atrasadas e backlog" },
       { id: "analises-fup", label: "Análises de FUP", description: "Desfechos por SDR, conversão por tentativa e aderência" },
+      { id: "analises-avancadas", label: "Análises Avançadas", description: "Telefonia, show-rate, speed-to-lead, funil e R$ por fonte" },
       { id: "metas", label: "Metas", description: "Planejamento diário e mensal" },
     ],
   },
@@ -659,6 +662,11 @@ export default function SdrLayout() {
         {activeNav === "analises-fup" && (
           <PageErrorBoundary pageName="Análises de FUP">
             <FupAnalyticsPanel />
+          </PageErrorBoundary>
+        )}
+        {activeNav === "analises-avancadas" && (
+          <PageErrorBoundary pageName="Análises Avançadas">
+            <AdvancedAnalyticsPanel />
           </PageErrorBoundary>
         )}
         {activeNav === "cobertura" && (

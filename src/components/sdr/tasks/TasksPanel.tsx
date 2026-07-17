@@ -20,6 +20,7 @@ import WhatsAppModal from "../whatsapp/WhatsAppModal";
 import { dialViaWavoip, setOnCallEnded } from "@/lib/wavoip";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
+import { logCallEnded } from "@/lib/qs/callLog";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
 import type { SdrUser } from "../types";
@@ -1510,6 +1511,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // Mesmo desfecho automático pros DOIS webfones: Wavoip (WhatsApp) e WebRTC
     // (VoxFree). Ambos emitem o mesmo formato de CallEndedInfo.
     const handleCallEnded = (info: { leadId: string | null; phone: string | null; answered: boolean; durationSec: number }) => {
+      // Loga TODA chamada encerrada (atendida ou não, com ou sem lead) — telemetria
+      // fire-and-forget pras análises de telefonia. Vai ANTES do guard de leadId.
+      void logCallEnded(info);
       if (!info.leadId) return;
       const task = tasksRef.current.find((t) => t.lead_id === info.leadId && (t.status === "pendente" || t.status === "atrasada"));
       if (!task) return;

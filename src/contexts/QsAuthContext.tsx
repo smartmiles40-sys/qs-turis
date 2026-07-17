@@ -41,7 +41,7 @@ export function useQsAuth() {
 
 const MENU_ACCESS: Record<UserRole, string[]> = {
   admin: ["*"], // all
-  gestor: ["painel", "cobertura", "leads", "cadencias", "reunioes", "agenda", "dashboard", "metas", "lead-detail", "cadencia-criar", "cadencia-editar"],
+  gestor: ["painel", "cobertura", "leads", "cadencias", "reunioes", "agenda", "dashboard", "saude-cadencia", "analises-fup", "metas", "lead-detail", "cadencia-criar", "cadencia-editar", "analises-avancadas"],
   sdr: ["painel", "cobertura", "leads", "reunioes", "agenda", "lead-detail"],
   closer: ["leads", "reunioes", "agenda", "lead-detail"],
 };
