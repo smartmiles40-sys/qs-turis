@@ -15,9 +15,9 @@ import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getLeadScore } from "@/lib/leadScore";
-import { formatPhoneDisplay, fillTemplate } from "@/lib/whatsapp";
+import { formatPhoneDisplay, fillTemplate, startWhatsAppCall, isDialablePhone } from "@/lib/whatsapp";
 import WhatsAppModal from "../whatsapp/WhatsAppModal";
-import { dialViaWavoip, setOnCallEnded } from "@/lib/wavoip";
+import { dialViaWavoip, setOnCallEnded, getWavoipToken } from "@/lib/wavoip";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
 import { logCallEnded } from "@/lib/qs/callLog";
@@ -1784,6 +1784,27 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     }
   }
 
+  // Liga pelo WHATSAPP. Se houver token do webfone Wavoip, faz a chamada DENTRO do
+  // navegador (com desfecho automático ao encerrar). Sem token/config, abre a
+  // conversa do lead no WhatsApp — o botão de ligar do WhatsApp fica a 1 toque
+  // (fallback universal que sempre funciona, sem depender de setup).
+  async function callViaWhatsApp(phone?: string | null, opts?: { leadName?: string | null; leadId?: string | null }) {
+    const token = await getWavoipToken();
+    if (token) {
+      const r = await dialViaWavoip(phone, {
+        displayName: opts?.leadName ?? undefined,
+        leadName: opts?.leadName ?? undefined,
+        leadId: opts?.leadId ?? null,
+        ownerId: currentUser?.id ?? null,
+      });
+      if (r.ok) return;
+      console.warn("[QS] Wavoip indisponível, abrindo a conversa do WhatsApp:", r.error);
+    }
+    if (!isDialablePhone(phone)) { notifyError("Telefone do lead inválido para ligar pelo WhatsApp."); return; }
+    startWhatsAppCall(phone); // abre a conversa do lead — ligar em 1 toque
+    showToast("Abrindo o WhatsApp do lead — toque no ícone de ligar pra iniciar a chamada.");
+  }
+
   // Liga pelo canal "Ligação". Prefere o WEBFONE WebRTC (VoxFree): registra o
   // ramal e fala DENTRO do navegador, com desfecho automático ao encerrar. Se o
   // ramal do SDR ainda não estiver provisionado, cai no click-to-dial do
@@ -2023,6 +2044,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               title="Ligar pelo webfone (VoIP)"
             >
               <ChannelIcon type="ligacao" size={16} />Ligar
+            </button>
+            {/* Ligação via WhatsApp: opção ao lado da ligação manual. Usa o webfone
+                Wavoip se houver token; senão abre a conversa do lead pra ligar em 1 toque. */}
+            <button
+              onClick={() => { pinTaskForCall(task); callViaWhatsApp(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13.5px] font-bold text-white"
+              style={{ background: "#25D366", boxShadow: "0 6px 14px -8px rgba(37,211,102,.6)" }}
+              title="Ligar pelo WhatsApp (abre a conversa do lead pra iniciar a chamada)"
+            >
+              <IconWhatsAppCall size={16} />Ligação WhatsApp
             </button>
           </div>
         )}
