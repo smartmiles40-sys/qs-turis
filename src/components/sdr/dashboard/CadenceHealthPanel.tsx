@@ -16,6 +16,7 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { notifyError } from "@/lib/qs/notify";
 import { fetchAllRows } from "@/lib/qs/queries";
+import { loadWorkHours, workdaysBetween, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 
 interface LeadStage {
   leadId: string;
@@ -37,7 +38,12 @@ export default function CadenceHealthPanel() {
   const isManager = !!currentUser && canSeeAllData(currentUser.role);
   const [stages, setStages] = useState<LeadStage[]>([]);
   const [userNames, setUserNames] = useState<Map<string, string>>(new Map());
+  const [workHours, setWorkHours] = useState<WorkHours>(DEFAULT_WORK_HOURS);
   const [loading, setLoading] = useState(true);
+
+  // Horário de Trabalho: "atrasada" e backlog contam só dias ÚTEIS — o fim de
+  // semana não gera atraso (nada de "atrasada falsa" na segunda de manhã).
+  useEffect(() => { loadWorkHours().then(setWorkHours); }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,21 +83,22 @@ export default function CadenceHealthPanel() {
         }
       }
 
-      const today0 = startOfDay(new Date());
       const built: LeadStage[] = [];
       for (const [leadId, t] of currentByLead) {
         const lead = leadsById.get(leadId);
         const base = lead.arrived_at || lead.created_at;
         let fupDay = 1;
         if (base) fupDay = Math.max(1, Math.round((startOfDay(new Date(t.scheduled_at)) - startOfDay(new Date(base))) / 86400000) + 1);
-        const sched0 = startOfDay(new Date(t.scheduled_at));
-        const overdue = sched0 < today0;
+        // Atraso conta só DIAS ÚTEIS: tarefa de sexta vista na segunda = 1 dia
+        // útil de atraso, não 3; no fim de semana ela NÃO aparece como atrasada
+        // (o fim de semana não gera "atrasada falsa"). Verdade absoluta = work_hours.
+        const workLate = workdaysBetween(workHours, new Date(t.scheduled_at), new Date());
         built.push({
           leadId,
           ownerId: t.owner_id ?? lead.owner_id ?? null,
           fupDay,
-          overdue,
-          daysOverdue: overdue ? Math.round((today0 - sched0) / 86400000) : 0,
+          overdue: workLate > 0,
+          daysOverdue: workLate,
         });
       }
       setStages(built);
@@ -101,7 +108,7 @@ export default function CadenceHealthPanel() {
     } finally {
       setLoading(false);
     }
-  }, [currentUser, isManager]);
+  }, [currentUser, isManager, workHours]);
 
   useEffect(() => { load(); }, [load]);
 

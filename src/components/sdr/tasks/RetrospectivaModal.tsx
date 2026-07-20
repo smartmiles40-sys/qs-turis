@@ -16,6 +16,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
+import { loadWorkHours, workdaysInRange } from "@/lib/workHours";
 
 const BLUE = "#0147FF";
 const GREEN = "#0E7C6A";
@@ -90,6 +91,9 @@ async function loadRetro(uid: string): Promise<RetroData> {
   const todayStart = startOfToday();
   const todayEnd = endOfToday();
   const sevenStart = start7DaysAgo();
+  // Horário de Trabalho: a média/dia divide pelos DIAS ÚTEIS da janela (não pelos
+  // 7 corridos) — senão o fim de semana parado dilui a média e ela mente pra baixo.
+  const wh = await loadWorkHours();
 
   // Todas em paralelo; allSettled pra que uma falha não zere o resto.
   const [rY, rM, rOpen, rLeads, rDone7] = await Promise.allSettled([
@@ -145,7 +149,10 @@ async function loadRetro(uid: string): Promise<RetroData> {
 
   // ── Bloco C — média/dia e assertividade ─────────────────────────────────────
   const done7 = countOf(rDone7);
-  const mediaDia = done7 / 7; // média sobre os 7 dias da janela (dias parados contam como 0)
+  // Denominador = dias ÚTEIS na janela [today-7, ontem] (não os 7 corridos): o
+  // fim de semana/folga não entra na conta e a média reflete o ritmo real de trabalho.
+  const workdays7 = Math.max(1, workdaysInRange(wh, sevenStart, yStart));
+  const mediaDia = done7 / workdays7;
 
   // Dica de conversão conversa→reunião (regras defensivas — dados podem ser esparsos).
   let agendaDica: string;

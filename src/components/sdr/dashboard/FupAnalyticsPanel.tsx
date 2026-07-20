@@ -19,6 +19,7 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { notifyError } from "@/lib/qs/notify";
 import { fetchAllRows } from "@/lib/qs/queries";
+import { loadWorkHours, workdaysBetween, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 
 // Paleta padrão dos painéis (mesma do CadenceHealthPanel).
 const BLUE = "#0147FF";
@@ -121,7 +122,12 @@ export default function FupAnalyticsPanel() {
   const [done, setDone] = useState<DoneTask[]>([]);
   const [skipped, setSkipped] = useState<SkippedTask[]>([]);
   const [userNames, setUserNames] = useState<Map<string, string>>(new Map());
+  const [workHours, setWorkHours] = useState<WorkHours>(DEFAULT_WORK_HOURS);
   const [loading, setLoading] = useState(true);
+
+  // Horário de Trabalho: o "atraso em dias" conta só dias ÚTEIS (fim de semana
+  // não vira atraso — regra do Bruno).
+  useEffect(() => { loadWorkHours().then(setWorkHours); }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -282,9 +288,14 @@ export default function FupAnalyticsPanel() {
       // fora do recorte de pontualidade — por isso o denominador é comDatas.
       if (!t.completedAt || !t.scheduledAt) return;
       r.comDatas++;
-      const diff = localDayIndex(t.completedAt) - localDayIndex(t.scheduledAt);
-      if (diff === 0) r.noDia++; // adiantada (diff < 0) não é "no dia" nem atraso
-      else if (diff > 0) { r.atrasadas++; r.atrasoDias += diff; }
+      // Atraso conta só DIAS ÚTEIS: uma tarefa de sexta concluída na segunda está
+      // 1 dia útil atrasada, não 3, e concluída no fim de semana NÃO é atraso
+      // (o fim de semana não gera "atrasada falsa"). Adiantada (rawDiff<0) é ignorada.
+      const rawDiff = localDayIndex(t.completedAt) - localDayIndex(t.scheduledAt);
+      if (rawDiff < 0) return;
+      const workLate = rawDiff === 0 ? 0 : workdaysBetween(workHours, new Date(t.scheduledAt), new Date(t.completedAt));
+      if (workLate === 0) r.noDia++; // no dia útil (mesmo dia ou só atravessou folga)
+      else { r.atrasadas++; r.atrasoDias += workLate; }
     });
   }
   for (const s of skipped) bump(s.ownerId ?? "—", (r) => { r.puladas++; });

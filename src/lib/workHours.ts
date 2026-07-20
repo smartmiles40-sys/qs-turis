@@ -90,6 +90,130 @@ export function minutesLeftToday(wh: WorkHours, now = new Date()): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HORÁRIO DE TRABALHO COMO VERDADE ABSOLUTA (agendamento + contagem)
+// Regra do Bruno: o QS NUNCA traz um lead/atividade pra fora do expediente. Lead
+// que chega às 19:31 (depois do fim) ou no sábado só aparece pro SDR no próximo
+// dia útil, no horário de início — nada nasce "atrasado". Estas funções são a
+// fonte única disso; scheduling e métricas de dia útil consultam ELAS.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** É dia de trabalho (enabled no work_hours)? */
+export function isWorkday(wh: WorkHours, date: Date): boolean {
+  return !!wh[date.getDay()]?.enabled;
+}
+
+/** Dias da semana habilitados no expediente (0=Dom…6=Sáb). */
+export function enabledWeekdays(wh: WorkHours): number[] {
+  const out: number[] = [];
+  for (let d = 0; d < 7; d++) if (wh[d]?.enabled) out.push(d);
+  return out;
+}
+
+/**
+ * Dias em que uma cadência pode agendar = expediente (verdade absoluta) ∩ dias de
+ * execução da cadência. Se a cadência não define dias, usa só o expediente. Se a
+ * interseção ficar vazia (config esquisita), cai no expediente inteiro; e se nem
+ * o expediente tiver dia, no seg–sex (nunca devolve lista vazia → nada de loop
+ * infinito no calendário).
+ */
+export function scheduleWeekdays(wh: WorkHours, cadenceWeekdays?: number[] | null): number[] {
+  const enabled = enabledWeekdays(wh);
+  if (!enabled.length) return [1, 2, 3, 4, 5];
+  if (cadenceWeekdays && cadenceWeekdays.length) {
+    const inter = cadenceWeekdays.filter((d) => enabled.includes(d));
+    return inter.length ? inter : enabled;
+  }
+  return enabled;
+}
+
+/**
+ * Próximo MOMENTO de trabalho válido a partir de `date` (INCLUSIVE):
+ *  • dia útil, antes do início do expediente → o início daquele dia;
+ *  • dia útil, dentro da janela → a própria `date`;
+ *  • dia útil mas depois do fim, OU dia de folga → início do próximo dia útil.
+ * Avança no máx. 14 dias (mesma trava do resto). É o "trazer o lead dentro do
+ * horário de trabalho": usado pra 1ª atividade do lead e pros reagendamentos.
+ */
+export function nextWorkMoment(wh: WorkHours, date: Date): Date {
+  const d = new Date(date);
+  for (let i = 0; i < 15; i++) {
+    const day = wh[d.getDay()];
+    if (day?.enabled) {
+      const [sh, sm] = parseHM(day.start);
+      const [eh, em] = parseHM(day.end);
+      const start = new Date(d); start.setHours(sh, sm, 0, 0);
+      const end = new Date(d); end.setHours(eh, em, 0, 0);
+      if (d.getTime() < start.getTime()) return start;
+      if (d.getTime() <= end.getTime()) return new Date(d);
+      // depois do fim → cai pro próximo dia (abaixo)
+    }
+    d.setDate(d.getDate() + 1);
+    d.setHours(0, 0, 0, 0);
+  }
+  return d;
+}
+
+/**
+ * Mantém o DIA de `date` e encaixa só a HORA na janela do expediente daquele dia
+ * (antes do início → início; depois do fim → fim). Dia de folga → devolve `date`
+ * inalterada (o chamador escolhe o dia por fora, via scheduleWeekdays). Usado pras
+ * atividades FUTURAS da cadência: o dia já é útil, só ajusta o horário.
+ */
+export function clampToWorkWindow(wh: WorkHours, date: Date): Date {
+  const day = wh[date.getDay()];
+  if (!day?.enabled) return new Date(date);
+  const [sh, sm] = parseHM(day.start);
+  const [eh, em] = parseHM(day.end);
+  const start = new Date(date); start.setHours(sh, sm, 0, 0);
+  const end = new Date(date); end.setHours(eh, em, 0, 0);
+  if (date.getTime() < start.getTime()) return start;
+  if (date.getTime() > end.getTime()) return end;
+  return new Date(date);
+}
+
+/**
+ * Nº de dias ÚTEIS entre `from` e `to` (exclui o dia de `from`, inclui o de `to`).
+ * É o "atraso em dias" honesto: uma tarefa de sexta vista na segunda está 1 dia
+ * útil atrasada, não 3 — o fim de semana não infla o atraso (nem vira "atrasada
+ * falsa"). Compara por DIA local (zera as horas).
+ */
+export function workdaysBetween(wh: WorkHours, from: Date, to: Date): number {
+  const a = new Date(from); a.setHours(0, 0, 0, 0);
+  const b = new Date(to); b.setHours(0, 0, 0, 0);
+  if (b.getTime() <= a.getTime()) return 0;
+  let count = 0;
+  const d = new Date(a);
+  for (let i = 0; i < 3660 && d.getTime() < b.getTime(); i++) {
+    d.setDate(d.getDate() + 1);
+    if (wh[d.getDay()]?.enabled) count++;
+  }
+  return count;
+}
+
+/** Nº de dias úteis numa janela [from, to] INCLUSIVE — denominador de "média/dia". */
+export function workdaysInRange(wh: WorkHours, from: Date, to: Date): number {
+  const a = new Date(from); a.setHours(0, 0, 0, 0);
+  const b = new Date(to); b.setHours(0, 0, 0, 0);
+  let count = 0;
+  const d = new Date(a);
+  for (let i = 0; i < 3660 && d.getTime() <= b.getTime(); i++) {
+    if (wh[d.getDay()]?.enabled) count++;
+    d.setDate(d.getDate() + 1);
+  }
+  return count;
+}
+
+/** Último dia ÚTIL ESTRITAMENTE antes de `date` (p/ "ontem" da retrospectiva não cair num domingo vazio). */
+export function previousWorkday(wh: WorkHours, date: Date): Date {
+  const d = new Date(date); d.setHours(0, 0, 0, 0);
+  for (let i = 0; i < 15; i++) {
+    d.setDate(d.getDate() - 1);
+    if (wh[d.getDay()]?.enabled) return d;
+  }
+  return d;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // DIAS DE EXECUÇÃO DA CADÊNCIA (dia útil)
 // Mesmo ajuste de calendário que o follow-up já fazia (TasksPanel): tarefa não
 // cai em dia sem execução. Centralizado aqui pra geração INICIAL do plano usar

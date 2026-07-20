@@ -1,7 +1,7 @@
 // src/lib/qs/queries.ts — Data access layer for the QS (Qualificacao SDR) system
 import { supabase } from "@/lib/supabase";
 import { notifyError } from "@/lib/qs/notify";
-import { planCadenceDates } from "@/lib/workHours";
+import { planCadenceDates, loadWorkHours, scheduleWeekdays, nextWorkMoment, clampToWorkWindow } from "@/lib/workHours";
 import type {
   SdrUser,
   Lead,
@@ -698,17 +698,21 @@ export async function createCadenceTasks(
       .maybeSingle();
     const cadPlan = cadRow as { execution_weekdays: number[] | null; offday_policy: string | null } | null;
 
+    // HORÁRIO DE TRABALHO = verdade absoluta. Os dias em que a cadência pode
+    // agendar são o expediente (work_hours.enabled) ∩ execution_weekdays — assim
+    // uma cadência que inclua sábado NÃO agenda no sábado se a empresa não abre,
+    // e um dia desabilitado nas Configurações nunca recebe atividade.
+    const wh = await loadWorkHours();
+    const allowedWeekdays = scheduleWeekdays(wh, cadPlan?.execution_weekdays ?? null);
+
     const dayList = days as (CadenceDay & { activities: CadenceActivity[] })[];
     const dateByDay = planCadenceDates(
       dayList.map((d) => d.day_number ?? 1),
-      cadPlan?.execution_weekdays ?? null,
+      allowedWeekdays,
       cadPlan?.offday_policy ?? null
     );
 
-    // 1º dia da cadência (menor day_number, que cai HOJE na chegada do lead): o
-    // horário da atividade não pode jogar a tarefa no PASSADO. Ex.: lead chega à
-    // tarde e o "Dia 1" às 09:00 nasceria atrasado. O horário serve só de fonte
-    // de PRIORIDADE — então clampamos o agendamento pra "agora + 5 min".
+    // 1º dia da cadência (menor day_number, que cairia HOJE na chegada do lead).
     const firstDayNumber = Math.min(...dayList.map((d) => d.day_number ?? 1));
     const nowMs = Date.now();
 
@@ -719,12 +723,16 @@ export async function createCadenceTasks(
           const scheduled = new Date(dateByDay.get(day.day_number ?? 1) ?? new Date());
           const [h, m] = (act.scheduled_time || "09:00").split(":").map(Number);
           scheduled.setHours(h || 9, m || 0, 0, 0);
-          // Só o 1º dia precisa do clamp (os demais são futuros). A PRIORIDADE
-          // abaixo continua vindo do scheduled_time e NÃO muda com o clamp.
-          let scheduledMs = scheduled.getTime();
-          if ((day.day_number ?? 1) === firstDayNumber && scheduledMs < nowMs) {
-            scheduledMs = nowMs + 5 * 60 * 1000;
-          }
+          // NADA nasce fora do expediente. 1º dia: parte do horário planejado ou
+          // de AGORA (o que for maior — lead da tarde não ganha atividade no
+          // passado) e cai no próximo MOMENTO de trabalho — lead das 19:31 ou de
+          // sábado só aparece no próximo dia útil, no início, nunca "atrasado".
+          // Dias futuros: mantém o dia (já é útil) e encaixa a hora na janela.
+          const isFirst = (day.day_number ?? 1) === firstDayNumber;
+          const when = isFirst
+            ? nextWorkMoment(wh, new Date(Math.max(scheduled.getTime(), nowMs)))
+            : clampToWorkWindow(wh, scheduled);
+          const scheduledMs = when.getTime();
           return {
             lead_id: leadId,
             cadence_id: cadenceId,

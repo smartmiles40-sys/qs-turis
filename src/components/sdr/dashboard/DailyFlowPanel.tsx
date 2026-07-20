@@ -21,6 +21,7 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { notifyError } from "@/lib/qs/notify";
 import { fetchAllRows } from "@/lib/qs/queries";
+import { loadWorkHours, isWorkday, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 
 const BLUE = "#0147FF";
 const GREEN = "#0E7C6A";
@@ -83,8 +84,13 @@ export default function DailyFlowPanel() {
 
   const [leadBuckets, setLeadBuckets] = useState<DayBucket[]>([]);
   const [meetingBuckets, setMeetingBuckets] = useState<DayBucket[]>([]);
+  const [workHours, setWorkHours] = useState<WorkHours>(DEFAULT_WORK_HOURS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+
+  // Horário de Trabalho: a "média/dia" divide pelos DIAS ÚTEIS (não pelos 21
+  // corridos) — o fim de semana não dilui a média.
+  useEffect(() => { loadWorkHours().then(setWorkHours); }, []);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -160,12 +166,14 @@ export default function DailyFlowPanel() {
             hint="Contagem pela data de chegada do lead (arrived_at)."
             buckets={leadBuckets}
             color={GREEN}
+            workHours={workHours}
           />
           <DailyBars
             title="Agendamentos por dia"
             hint="Contagem pela data em que a reunião foi agendada (created_at)."
             buckets={meetingBuckets}
             color={BLUE}
+            workHours={workHours}
           />
         </div>
       )}
@@ -173,10 +181,13 @@ export default function DailyFlowPanel() {
   );
 }
 
-function DailyBars({ title, hint, buckets, color }: { title: string; hint: string; buckets: DayBucket[]; color: string }) {
+function DailyBars({ title, hint, buckets, color, workHours }: { title: string; hint: string; buckets: DayBucket[]; color: string; workHours: WorkHours }) {
   const total = buckets.reduce((s, b) => s + b.count, 0);
   const max = Math.max(1, ...buckets.map((b) => b.count));
-  const avg = (total / (buckets.length || 1)).toFixed(1).replace(".", ",");
+  // Média sobre os DIAS ÚTEIS da janela (fim de semana não dilui) — verdade
+  // absoluta = Horário de Trabalho.
+  const workdays = buckets.filter((b) => isWorkday(workHours, b.date)).length;
+  const avg = (total / Math.max(1, workdays)).toFixed(1).replace(".", ",");
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
@@ -190,7 +201,7 @@ function DailyBars({ title, hint, buckets, color }: { title: string; hint: strin
           <div className="text-2xl font-extrabold tabular-nums" style={{ color }}>{total}</div>
         </div>
         <div>
-          <div className="text-[11px] font-semibold uppercase text-gray-400">Média / dia</div>
+          <div className="text-[11px] font-semibold uppercase text-gray-400">Média / dia útil</div>
           <div className="text-2xl font-extrabold tabular-nums text-gray-900">{avg}</div>
         </div>
       </div>

@@ -6,6 +6,86 @@
 // -----------------------------------------------------------------------------
 import { rest, insert } from './_supabaseAdmin.js';
 
+// ─── HORÁRIO DE TRABALHO (verdade absoluta do agendamento) ───────────────────
+// Espelho do src/lib/workHours.ts — o mesmo runtime não deixa importar TS aqui.
+// O QS NUNCA traz um lead pra fora do expediente: lead das 19:31 ou de sábado só
+// nasce no próximo dia útil, no horário de início (nada "atrasado"). Todo o
+// cálculo abaixo é feito no RELÓGIO DE BRASÍLIA (UTC-3): representamos o "wall
+// clock" BRT num ms cujos campos UTC (getUTCDay/Hours/Minutes) já são os de BRT,
+// e só no fim somamos +3h pra gravar o instante real em UTC.
+const BRT_OFFSET_H = 3;
+const DEFAULT_WORK_HOURS = {
+  0: { enabled: false, start: '09:00', end: '18:00' },
+  1: { enabled: true, start: '09:30', end: '19:30' },
+  2: { enabled: true, start: '09:30', end: '19:30' },
+  3: { enabled: true, start: '09:30', end: '19:30' },
+  4: { enabled: true, start: '09:30', end: '19:30' },
+  5: { enabled: true, start: '10:00', end: '19:00' },
+  6: { enabled: false, start: '09:00', end: '13:00' },
+};
+
+async function loadWorkHours() {
+  try {
+    const rows = await rest('qs_settings?select=value&key=eq.work_hours&limit=1');
+    const v = rows && rows[0] && rows[0].value;
+    if (v && typeof v === 'object') return { ...DEFAULT_WORK_HOURS, ...v };
+  } catch (e) {
+    console.warn('[leads] work_hours indisponível, usando default:', e?.message);
+  }
+  return DEFAULT_WORK_HOURS;
+}
+
+function hmToMin(hm) {
+  const [h, m] = String(hm || '').split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+function brtMidnight(ms) {
+  const d = new Date(ms);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+// Dias habilitados no expediente ∩ dias de execução da cadência (nunca vazio).
+function scheduleWeekdays(wh, cadenceWeekdays) {
+  const enabled = [];
+  for (let d = 0; d < 7; d++) if (wh[d] && wh[d].enabled) enabled.push(d);
+  if (!enabled.length) return [1, 2, 3, 4, 5];
+  if (Array.isArray(cadenceWeekdays) && cadenceWeekdays.length) {
+    const inter = cadenceWeekdays.filter((d) => enabled.includes(d));
+    return inter.length ? inter : enabled;
+  }
+  return enabled;
+}
+// Próximo MOMENTO de trabalho ≥ brtWallMs (campos UTC = relógio BRT).
+function nextWorkMomentBrt(wh, brtWallMs) {
+  let ms = brtWallMs;
+  for (let i = 0; i < 15; i++) {
+    const dt = new Date(ms);
+    const cfg = wh[dt.getUTCDay()];
+    if (cfg && cfg.enabled) {
+      const cur = dt.getUTCHours() * 60 + dt.getUTCMinutes();
+      const startMin = hmToMin(cfg.start);
+      const endMin = hmToMin(cfg.end);
+      const mid = brtMidnight(ms);
+      if (cur < startMin) return mid + startMin * 60_000;
+      if (cur <= endMin) return ms;
+    }
+    ms = brtMidnight(ms) + 86_400_000; // próximo dia 00:00 BRT
+  }
+  return ms;
+}
+// Mantém o DIA e encaixa só a HORA na janela do expediente (dia já é útil).
+function clampWindowBrt(wh, brtWallMs) {
+  const dt = new Date(brtWallMs);
+  const cfg = wh[dt.getUTCDay()];
+  if (!cfg || !cfg.enabled) return brtWallMs;
+  const cur = dt.getUTCHours() * 60 + dt.getUTCMinutes();
+  const startMin = hmToMin(cfg.start);
+  const endMin = hmToMin(cfg.end);
+  const mid = brtMidnight(brtWallMs);
+  if (cur < startMin) return mid + startMin * 60_000;
+  if (cur > endMin) return mid + endMin * 60_000;
+  return brtWallMs;
+}
+
 /**
  * Escolhe o próximo SDR pela MENOR carga de leads em aberto (distribui
  * equilibrando quem tem menos leads ativos). Retorna o id do SDR ou null.
@@ -51,23 +131,27 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
   // DIAS DE EXECUÇÃO: o "Dia N" não pode cair em dia sem execução (lead que
   // entra na sexta ganhava o "Dia 2" no sábado). Espelha a regra do front
   // (planCadenceDates em src/lib/workHours.ts — mesmo runtime não dá pra
-  // importar TS aqui): cada dia pula pro próximo permitido; offday_policy
-  // "iniciar_imediato" mantém o Dia 1 na entrada; dias distintos não colapsam.
-  let allowedWeekdays = [1, 2, 3, 4, 5];
-  let offdayPolicy = 'aguardar_proximo_dia';
+  // importar TS aqui): cada dia pula pro próximo permitido; dias distintos não
+  // colapsam. offday_policy "iniciar_imediato" perde o efeito na PRÁTICA quando
+  // a chegada é fora do expediente — o Horário de Trabalho é a verdade absoluta.
+  let execWeekdays = null;
   try {
     const cad = await rest(
-      `qs_cadences?select=execution_weekdays,offday_policy&id=eq.${encodeURIComponent(cadenceId)}&limit=1`
+      `qs_cadences?select=execution_weekdays&id=eq.${encodeURIComponent(cadenceId)}&limit=1`
     );
     if (cad && cad[0]) {
       if (Array.isArray(cad[0].execution_weekdays) && cad[0].execution_weekdays.length > 0) {
-        allowedWeekdays = cad[0].execution_weekdays;
+        execWeekdays = cad[0].execution_weekdays;
       }
-      if (cad[0].offday_policy) offdayPolicy = cad[0].offday_policy;
     }
   } catch (e) {
     console.warn('[leads] execution_weekdays indisponível, usando seg–sex:', e?.message);
   }
+
+  // HORÁRIO DE TRABALHO = verdade absoluta: dias permitidos = expediente ∩ cadência.
+  const wh = await loadWorkHours();
+  const allowedWeekdays = scheduleWeekdays(wh, execWeekdays);
+
   const DAY_MS = 86_400_000;
   // Avança `d` (meia-noite UTC = dia no calendário BRT) até um dia permitido (máx. 14).
   const nextAllowed = (d) => {
@@ -77,13 +161,12 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
   };
 
   // FUSO: este código roda na Vercel (relógio UTC). Os horários da cadência
-  // ("09:00") são de BRASÍLIA (UTC-3, sem horário de verão desde 2019). Antes
-  // usávamos setHours() direto → a tarefa "09:00" nascia 09:00 UTC = 06:00 BRT
-  // e a fila da manhã amanhecia às 6h. Agora: dia-base calculado no relógio de
-  // Brasília e horário gravado como (h + 3) UTC.
-  const BRT_OFFSET_H = 3;
+  // ("09:00") são de BRASÍLIA (UTC-3, sem horário de verão desde 2019). Fazemos
+  // toda a conta no relógio BRT (campos UTC de um ms deslocado) e gravamos o
+  // instante real somando +3h no fim.
   const baseMs = baseDate ? new Date(baseDate).getTime() : Date.now();
   const brtBase = new Date(baseMs - BRT_OFFSET_H * 3600_000); // "agora" em Brasília, lido pelos campos UTC
+  const brtNowMs = Date.now() - BRT_OFFSET_H * 3600_000;      // "agora" BRT em wall-clock ms
   const rows = [];
   let prevDayUtc = null; // meia-noite UTC do último dia agendado (guarda anti-colapso)
   for (const day of days) {
@@ -94,7 +177,7 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
       brtBase.getUTCDate() + Math.max(0, (day.day_number ?? 1) - 1)
     ));
     const isFirst = prevDayUtc === null;
-    if (!(isFirst && offdayPolicy === 'iniciar_imediato')) dayUtc = nextAllowed(dayUtc);
+    dayUtc = nextAllowed(dayUtc);
     if (prevDayUtc && dayUtc.getTime() <= prevDayUtc.getTime()) {
       dayUtc = nextAllowed(new Date(prevDayUtc.getTime() + DAY_MS));
     }
@@ -107,13 +190,17 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
         const [hh, mm] = act.scheduled_time.split(':');
         h = Number(hh) || 9; m = Number(mm) || 0;
       }
-      let whenMs = dayUtc.getTime() + (h + BRT_OFFSET_H) * 3600_000 + m * 60_000;
-      // 1º dia (chegada = hoje): o horário define só a PRIORIDADE, não pode
-      // nascer no passado (lead da tarde não pode ganhar o "Dia 1" às 09h já
-      // atrasado). Se já passou, agenda "agora + 5 min". A priority abaixo NÃO
-      // muda — segue vindo do scheduled_time.
-      if (isFirst && whenMs < Date.now()) whenMs = Date.now() + 5 * 60_000;
-      const when = new Date(whenMs);
+      // Horário PLANEJADO em wall-clock BRT (campos UTC = BRT).
+      const plannedBrt = dayUtc.getTime() + h * 3600_000 + m * 60_000;
+      // NADA nasce fora do expediente. 1º dia: parte do maior entre o planejado e
+      // AGORA (lead da tarde não ganha atividade no passado) e cai no próximo
+      // MOMENTO de trabalho — lead das 19:31 ou de sábado só aparece no próximo
+      // dia útil, no início. Dias futuros: mantém o dia (já é útil) e encaixa a
+      // hora na janela. A PRIORIDADE abaixo NÃO muda — segue do scheduled_time.
+      const brtWhen = isFirst
+        ? nextWorkMomentBrt(wh, Math.max(plannedBrt, brtNowMs))
+        : clampWindowBrt(wh, plannedBrt);
+      const when = new Date(brtWhen + BRT_OFFSET_H * 3600_000); // volta pro instante real (UTC)
       rows.push({
         lead_id: leadId,
         cadence_id: cadenceId,

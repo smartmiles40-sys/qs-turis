@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { createCadenceTasks, fetchAllRows } from "@/lib/qs/queries";
+import { loadWorkHours, nextWorkMoment, type WorkHours } from "@/lib/workHours";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -65,15 +66,14 @@ function getSlaColor(value: number, thresholdGreen: number, thresholdYellow: num
   return "#EF4444";
 }
 
-// Próximo dia ÚTIL (seg–sex) às 09:00 local — o "amanhã" fixo cairia no fim de
-// semana e a tarefa amanheceria atrasada na segunda (mesma regra do TasksPanel).
-function nextBusinessDayAt9(): Date {
-  const d = new Date();
-  do {
-    d.setDate(d.getDate() + 1);
-  } while (d.getDay() === 0 || d.getDay() === 6);
-  d.setHours(9, 0, 0, 0);
-  return d;
+// Próximo MOMENTO de trabalho (Horário de Trabalho = verdade absoluta) a partir
+// de amanhã — o "amanhã 09:00" fixo cairia no fim de semana e a tarefa amanheceria
+// atrasada na segunda. Cai no início do expediente do próximo dia útil.
+function nextBusinessDayAt9(wh: WorkHours): Date {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(0, 0, 0, 0);
+  return nextWorkMoment(wh, tomorrow);
 }
 
 // Janela do relatório de SLA: leads CHEGADOS nos últimos N dias.
@@ -437,7 +437,7 @@ export default function CoveragePanel({ onOpenLead }: { onOpenLead?: (leadId: st
           .in("status", ["pendente", "atrasada"])
           .limit(1);
         if (!openTasks || openTasks.length === 0) {
-          const followUpAt = nextBusinessDayAt9();
+          const followUpAt = nextBusinessDayAt9(await loadWorkHours());
           const { error: fupErr } = await supabase.from("qs_tasks").insert({
             lead_id: leadId,
             owner_id: ownerId,
@@ -453,7 +453,7 @@ export default function CoveragePanel({ onOpenLead }: { onOpenLead?: (leadId: st
             console.warn("Erro ao criar follow-up de cobertura:", fupErr);
             followUpFailed = true;
           } else {
-            nextActivityMsg = `follow-up agendado para ${followUpAt.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" })} às 09:00`;
+            nextActivityMsg = `follow-up agendado para ${followUpAt.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" })} às ${followUpAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
           }
         }
       }

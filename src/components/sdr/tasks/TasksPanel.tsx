@@ -21,7 +21,7 @@ import { dialViaWavoip, setOnCallEnded } from "@/lib/wavoip";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
 import { logCallEnded } from "@/lib/qs/callLog";
-import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, type WorkHours } from "@/lib/workHours";
+import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, nextWorkMoment, clampToWorkWindow, scheduleWeekdays, isWithinHours, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
 import type { SdrUser } from "../types";
 
@@ -627,16 +627,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       .limit(1);
     if (nextOpen && nextOpen.length > 0) return null;
 
-    // Próximo dia ÚTIL da cadência (execution_weekdays; padrão seg–sex).
-    // O "amanhã 09:00" fixo caía em sábado/domingo e amanhecia atrasado na segunda.
+    // Próximo dia ÚTIL (Horário de Trabalho = verdade absoluta ∩ execution_weekdays),
+    // no horário de INÍCIO do expediente daquele dia — nunca fim de semana / fora
+    // do expediente (senão o follow-up amanhece atrasado). Antes era "amanhã 09:00" fixo.
     const cadDays = getCadenceForTask(task)?.execution_weekdays;
-    const allowed = cadDays && cadDays.length > 0 ? cadDays : [1, 2, 3, 4, 5];
-    const next = new Date();
-    for (let i = 0; i < 14; i++) {
-      next.setDate(next.getDate() + 1);
-      if (allowed.includes(next.getDay())) break;
-    }
-    next.setHours(9, 0, 0, 0);
+    const allowed = scheduleWeekdays(workHours, cadDays);
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    const next = nextWorkMoment(workHours, nextExecutionDay(tomorrow, allowed));
 
     const attempt = getAttemptCount(task) + 1;
 
@@ -1196,22 +1195,22 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // "Pediu retorno" abre o modal de atividade extra já preenchido pro lead.
   function openExtraFromRetorno(task: Task) {
     const lead = getLeadForTask(task);
-    // Próximo dia ÚTIL da cadência (padrão seg–sex) — o "amanhã" fixo caía no
-    // sábado/domingo e o retorno amanhecia atrasado na segunda (mesma regra do
-    // insertFollowUp). O SDR ainda pode trocar a data no modal.
-    const cadDays = getCadenceForTask(task)?.execution_weekdays;
-    const allowed = cadDays && cadDays.length > 0 ? cadDays : [1, 2, 3, 4, 5];
-    const d = new Date();
-    for (let i = 0; i < 14; i++) {
-      d.setDate(d.getDate() + 1);
-      if (allowed.includes(d.getDay())) break;
-    }
+    // Próximo dia ÚTIL (Horário de Trabalho = verdade absoluta ∩ execution_weekdays)
+    // no horário de início do expediente — o "amanhã 09:00" fixo caía no fim de
+    // semana e o retorno amanhecia atrasado (mesma regra do insertFollowUp). O SDR
+    // ainda pode trocar data/hora no modal (inclusive marcar fim de semana à mão).
+    const allowed = scheduleWeekdays(workHours, getCadenceForTask(task)?.execution_weekdays);
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    const d = nextWorkMoment(workHours, nextExecutionDay(tomorrow, allowed));
     const yyyy = d.getFullYear(), mm = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0"), mi = String(d.getMinutes()).padStart(2, "0");
     setExtraTask({
       lead_id: task.lead_id,
       channel_type: task.channel_type,
       date: `${yyyy}-${mm}-${dd}`,
-      time: "09:00",
+      time: `${hh}:${mi}`,
       notes: obsText.trim() || "Retorno solicitado pelo lead",
       _searchText: (lead?.full_name ?? "Lead") + (lead?.company_name ? ` · ${lead.company_name}` : ""),
     });
@@ -1232,9 +1231,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const target = new Date();
     target.setDate(target.getDate() + 1);
     target.setHours(base.getHours(), base.getMinutes(), 0, 0);
+    // Horário de Trabalho = verdade absoluta: nem "amanhã" nem "próximo dia útil"
+    // podem cair no fim de semana / fora do expediente. "amanhã" mantém o horário
+    // (clampado à janela); "dia útil" respeita o expediente ∩ execution_weekdays.
     const next = mode === "dia_util"
-      ? nextExecutionDay(target, getCadenceForTask(task)?.execution_weekdays)
-      : target;
+      ? clampToWorkWindow(workHours, nextExecutionDay(target, scheduleWeekdays(workHours, getCadenceForTask(task)?.execution_weekdays)))
+      : nextWorkMoment(workHours, target);
     const patch: Partial<Pick<Task, "scheduled_at" | "notes">> = { scheduled_at: next.toISOString() };
     if (reasonNote) patch.notes = task.notes ? `${task.notes} · ${reasonNote}` : reasonNote;
     const updated = await updateOpenTask(task.id, patch);
@@ -1615,6 +1617,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const minutesLeft = totalMinLeft % 60;
   const hoursWorked = Math.max(0.1, minutesWorkedToday(workHours, now) / 60);
   const rhythm = Math.round((DAILY_DONE / hoursWorked) * 10) / 10;
+  // Fora do expediente (folga/fim de semana ou depois do fim), o ritmo/h e o
+  // "restam Xh" não fazem sentido (o denominador zera e viraria número absurdo):
+  // mostramos um estado neutro em vez do lixo. O SDR ainda pode trabalhar.
+  const withinHours = isWithinHours(workHours, now);
 
   // Saudação (design Execução)
   const greetHour = now.getHours();
@@ -2766,7 +2772,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <span style={{ color: "var(--orange)", display: "flex" }}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
               </span>
-              Ritmo <b>{rhythm.toFixed(1)}/h</b><span className="sep" />faltam <b>{remainingGoal}</b><span className="sep" /><b>~{hoursLeft}h{String(minutesLeft).padStart(2, "0")}</b> restantes
+              {withinHours ? (
+                <>Ritmo <b>{rhythm.toFixed(1)}/h</b><span className="sep" />faltam <b>{remainingGoal}</b><span className="sep" /><b>~{hoursLeft}h{String(minutesLeft).padStart(2, "0")}</b> restantes</>
+              ) : (
+                <>Fora do expediente<span className="sep" />{remainingGoal > 0 ? <>faltam <b>{remainingGoal}</b> pra meta de hoje</> : <b style={{ color: "var(--green)" }}>meta de hoje batida!</b>}</>
+              )}
               {monthlyBeat && <><span className="sep" /><b style={{ color: "var(--green)" }}>Meta mensal batida!</b></>}
             </div>
           </div>

@@ -15,6 +15,7 @@ import {
   updateQsMeeting,
 } from "@/lib/qs/queries";
 import { getLeadScore } from "@/lib/leadScore";
+import { loadWorkHours, nextWorkMoment } from "@/lib/workHours";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import type {
@@ -813,6 +814,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     setSchedulingReContact(true);
     const scheduledAt = new Date();
     scheduledAt.setDate(scheduledAt.getDate() + days);
+    // Horário de Trabalho = verdade absoluta: o +N dias pode cair num fim de
+    // semana/folga (nasceria "atrasado"). Snap pro próximo momento de trabalho.
+    const scheduledWork = nextWorkMoment(await loadWorkHours(), scheduledAt);
 
     // A tag "re_contato" faz o Painel exibir esta tarefa mesmo com o lead perdido
     // (o filtro padrão esconde tarefas de leads ganhos/perdidos).
@@ -822,7 +826,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       channel_type: "ligacao",
       status: "pendente",
       priority: "media",
-      scheduled_at: scheduledAt.toISOString(),
+      scheduled_at: scheduledWork.toISOString(),
       is_extra: true,
       tags: ["re_contato"],
       notes: `Re-contato agendado (${days} dias) - Lead marcado como perdido`,

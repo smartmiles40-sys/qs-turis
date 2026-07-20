@@ -14,7 +14,7 @@ import { STATUS_LABELS, SOURCE_LABELS } from "../types";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { createCadenceTasks, closeOpenCadenceTasks, transferLead } from "@/lib/qs/queries";
 import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
-import { planCadenceDates } from "@/lib/workHours";
+import { planCadenceDates, loadWorkHours, scheduleWeekdays, nextWorkMoment, clampToWorkWindow, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured } from "@/lib/webphone";
 
@@ -1492,8 +1492,11 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                           // cadência (mesmo helper do createCadenceTasks) — antes o "Dia 2"
                           // de uma importação na sexta caía no sábado.
                           let csvDateByDay = new Map<number, Date>();
+                          // Horário de Trabalho = verdade absoluta (mesma regra do createCadenceTasks).
+                          let csvWorkHours: WorkHours = DEFAULT_WORK_HOURS;
+                          let csvFirstDay = 1;
                           if (csvCadenceId) {
-                            const [{ data }, { data: cadRow }] = await Promise.all([
+                            const [{ data }, { data: cadRow }, wh] = await Promise.all([
                               supabase
                                 .from("qs_cadence_days")
                                 .select("day_number, activities:qs_cadence_activities(channel_type, scheduled_time, order_index)")
@@ -1504,14 +1507,17 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                                 .select("execution_weekdays, offday_policy")
                                 .eq("id", csvCadenceId)
                                 .maybeSingle(),
+                              loadWorkHours(),
                             ]);
                             cadDays = (data ?? []) as typeof cadDays;
+                            csvWorkHours = wh;
                             const plan = cadRow as { execution_weekdays: number[] | null; offday_policy: string | null } | null;
                             csvDateByDay = planCadenceDates(
                               cadDays.map((d) => d.day_number ?? 1),
-                              plan?.execution_weekdays ?? null,
+                              scheduleWeekdays(wh, plan?.execution_weekdays ?? null),
                               plan?.offday_policy ?? null
                             );
+                            csvFirstDay = cadDays.length ? Math.min(...cadDays.map((d) => d.day_number ?? 1)) : 1;
                           }
 
                           // Insere UM POR VEZ: cada insert é uma transação própria, então o
@@ -1546,9 +1552,15 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                               const taskRows = cadDays.flatMap((d) =>
                                 [...d.activities].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)).map((a) => {
                                   // Data do dia já ajustada pros dias de execução (csvDateByDay).
-                                  const when = new Date(csvDateByDay.get(d.day_number ?? 1) ?? new Date());
+                                  const planned = new Date(csvDateByDay.get(d.day_number ?? 1) ?? new Date());
                                   const [h, m] = (a.scheduled_time || "09:00").split(":");
-                                  when.setHours(Number(h) || 9, Number(m) || 0, 0, 0);
+                                  planned.setHours(Number(h) || 9, Number(m) || 0, 0, 0);
+                                  // Horário de Trabalho = verdade absoluta: 1º dia cai no próximo
+                                  // momento de trabalho (nunca no passado/fim de semana); dias
+                                  // futuros encaixam a hora na janela do expediente.
+                                  const when = (d.day_number ?? 1) === csvFirstDay
+                                    ? nextWorkMoment(csvWorkHours, new Date(Math.max(planned.getTime(), Date.now())))
+                                    : clampToWorkWindow(csvWorkHours, planned);
                                   return {
                                     lead_id: inserted.id,
                                     cadence_id: csvCadenceId,
