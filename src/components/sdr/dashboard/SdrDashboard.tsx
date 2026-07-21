@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchDashboardStats, fetchQsUsers, getClosedAtColumn, fetchAllRows, isGoalEffective } from "@/lib/qs/queries";
+import { loadWorkHours, workdaysInRange } from "@/lib/workHours";
 import type { GoalType } from "../types";
 import type { SdrUser } from "../types";
 import { CHANNEL_LABELS } from "../types";
@@ -58,9 +59,23 @@ interface CadenceEfficiency {
 }
 
 interface SdrMeetings {
+  ownerId: string;
   name: string;
   count: number;
 }
+
+// Metas mensais PADRÃO (fallback quando não há meta cadastrada). Ficam no escopo
+// do módulo porque tanto os KPIs (loadKpis) quanto a meta de reuniões
+// (loadBusinessKpis) e a tabela "Reuniões por SDR" usam o MESMO valor —
+// antes o default de reuniões (40) morava dentro de loadKpis e os outros pontos
+// tinham que "adivinhar" o mesmo número.
+const META_DEFAULTS: Record<GoalType, number> = {
+  ganhos: 87,
+  leads_finalizados: 250,
+  atividades: 450,
+  conversao: 30,
+  reunioes: 40,
+};
 
 interface ChannelPerformanceRow {
   channel: string;
@@ -764,6 +779,13 @@ export default function SdrDashboard() {
   const [sdrMeetings, setSdrMeetings] = useState<SdrMeetings[]>([]);
   const [loadingOperational, setLoadingOperational] = useState(true);
 
+  // Dias úteis do mês corrente (respeita o Horário de Trabalho configurado) —
+  // denominador da "meta de reuniões POR DIA". Carregado 1x no mount.
+  const [workdaysMonth, setWorkdaysMonth] = useState<number>(0);
+  // Meta MENSAL de reuniões por SDR (owner_id → alvo mensal, já com vigência e
+  // dono ativo aplicados). A tabela "Reuniões por SDR" deriva a meta/dia daqui.
+  const [meetingGoalByOwner, setMeetingGoalByOwner] = useState<Record<string, number>>({});
+
   // KPIs de negócio (auditoria): reuniões do período, pipeline e conversão por fonte
   const [meetingKpis, setMeetingKpis] = useState<{ agendadas: number; realizadas: number; noShow: number; showRate: number | null; meta: number } | null>(null);
   const [pipelineOpen, setPipelineOpen] = useState<number | null>(null);
@@ -807,8 +829,47 @@ export default function SdrDashboard() {
     loadUsers();
   }, []);
 
+  // Dias úteis do mês corrente (Horário de Trabalho da empresa) — usado para
+  // transformar a meta MENSAL de reuniões em meta POR DIA.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const wh = await loadWorkHours();
+      const now = new Date();
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      if (active) setWorkdaysMonth(workdaysInRange(wh, first, last));
+    })();
+    return () => { active = false; };
+  }, []);
+
   const allUsers = [{ id: "all", name: "Todos os qualificadores" } as any, ...users];
   const userName = allUsers.find((u: any) => u.id === selectedUser)?.name || "Todos";
+
+  // Quantos SDRs ATIVOS existem — base da somatória do admin ("N SDRs × meta").
+  // Quem tem meta cadastrada entra com ela; o resto entra com o valor padrão.
+  const activeSdrUsers = users.filter((u) => u.role === "sdr" && u.is_active !== false);
+  const activeSdrCount = activeSdrUsers.length;
+  // Meta/dia de reuniões = meta mensal ÷ dias úteis do mês (arredonda p/ cima,
+  // mínimo 1 quando há meta). Reutilizada no hero do SDR e na tabela por SDR.
+  const meetingDaily = (monthly: number): number | null =>
+    monthly > 0 && workdaysMonth > 0 ? Math.max(1, Math.ceil(monthly / workdaysMonth)) : null;
+
+  // Reuniões por SDR (tabela do gestor): TODOS os SDRs ativos aparecem (mesmo
+  // com 0 reuniões no período), cada um com a meta/dia derivada da meta mensal.
+  const meetingRows = (() => {
+    const countByOwner: Record<string, number> = {};
+    sdrMeetings.forEach((r) => { countByOwner[r.ownerId] = r.count; });
+    const base = activeSdrUsers.length > 0
+      ? activeSdrUsers.map((u) => ({ id: u.id, name: u.name, count: countByOwner[u.id] ?? 0 }))
+      : sdrMeetings.map((r) => ({ id: r.ownerId, name: r.name, count: r.count }));
+    return base
+      .map((r) => {
+        const monthly = meetingGoalByOwner[r.id] ?? META_DEFAULTS.reunioes;
+        return { ...r, monthly, daily: meetingDaily(monthly) };
+      })
+      .sort((a, b) => b.count - a.count);
+  })();
 
   // Fetch KPIs and chart data
   const loadKpis = useCallback(async (silent = false) => {
@@ -817,21 +878,14 @@ export default function SdrDashboard() {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
-      // Metas mensais reais (qs_goals). Filtrado por usuário: as metas dele;
-      // "todos": meta de EQUIPE (owner_id null) prevalece como placar do time —
-      // senão soma as metas individuais dos donos ATIVOS. Fallback para os
-      // defaults se não houver meta cadastrada (não quebra o layout).
-      const META_DEFAULTS: Record<GoalType, number> = {
-        ganhos: 87,
-        leads_finalizados: 250,
-        atividades: 450,
-        conversao: 30,
-        reunioes: 40,
-      };
-
+      // Metas mensais reais (qs_goals). Um SDR selecionado → a meta DELE (ou o
+      // padrão). Admin em "todos" → SOMATÓRIA de todos os SDRs ativos: quem tem
+      // meta entra com ela, quem não tem entra com o valor padrão ("N SDRs ×
+      // meta"). A meta de EQUIPE (owner_id null) NÃO é mais usada como placar —
+      // decisão do Bruno (2026-07-20): o admin sempre vê a soma dos SDRs.
       let qGoals = supabase
         .from("qs_goals")
-        .select("owner_id, type, target_value, period_start, owner:qs_users(is_active)")
+        .select("owner_id, type, target_value, period_start, owner:qs_users(is_active, role)")
         .eq("period", "mensal")
         .order("period_start", { ascending: false });
       if (ownerId) qGoals = qGoals.eq("owner_id", ownerId);
@@ -861,9 +915,13 @@ export default function SdrDashboard() {
       ]);
       if (goalsRes.error) throw goalsRes.error;
 
+      // goalSum/goalCount: TODAS as metas individuais (usado quando um usuário
+      // específico está selecionado — a query já vem filtrada nele).
+      // sdrSum/sdrCount: só as de SDRs ativos — base da somatória do admin.
       const goalSum: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
       const goalCount: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
-      const teamGoal: Partial<Record<GoalType, number>> = {};
+      const sdrSum: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
+      const sdrCount: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
       const seenGoal = new Set<string>();
       ((goalsRes.data ?? []) as any[]).forEach((g) => {
         const type = g.type as GoalType;
@@ -871,32 +929,42 @@ export default function SdrDashboard() {
         // Meta ancorada num mês FUTURO ainda não vigora (regra compartilhada
         // com a página Metas — ver isGoalEffective em queries.ts).
         if (!isGoalEffective(g.period_start)) return;
-        // Meta de dono DESATIVADO não entra no placar (ela ficava somada "pra
-        // sempre" e ainda sumia da página Metas — agora é ignorada aqui e
-        // aparece lá com badge pra excluir).
+        // Meta de EQUIPE (owner_id null) não conta mais no placar do admin.
+        if (g.owner_id == null) return;
+        // Meta de dono DESATIVADO não entra (ficava somada "pra sempre").
         const ownerRow = Array.isArray(g.owner) ? g.owner[0] : g.owner;
-        if (g.owner_id && ownerRow && ownerRow.is_active === false) return;
-        // Meta de EQUIPE (owner_id null): guarda a mais recente por tipo.
-        if (g.owner_id == null) {
-          if (teamGoal[type] === undefined) teamGoal[type] = Number(g.target_value) || 0;
-          return;
-        }
+        if (ownerRow && ownerRow.is_active === false) return;
         // Dedupe por (owner, tipo) mantendo a meta vigente mais recente
         const key = `${g.owner_id}-${type}`;
         if (seenGoal.has(key)) return;
         seenGoal.add(key);
-        goalSum[type] += Number(g.target_value) || 0;
+        const val = Number(g.target_value) || 0;
+        goalSum[type] += val;
         goalCount[type] += 1;
+        if (ownerRow && ownerRow.role === "sdr") {
+          sdrSum[type] += val;
+          sdrCount[type] += 1;
+        }
       });
 
       const metaFor = (type: GoalType): { value: number; team: boolean } => {
-        // Visão "todos": a meta de equipe É o placar do time (não soma com as
-        // individuais — somar as duas contaria a mesma meta em dobro).
-        if (!ownerId && teamGoal[type] !== undefined) return { value: teamGoal[type]!, team: true };
-        if (goalCount[type] === 0) return { value: META_DEFAULTS[type], team: false };
-        // Conversão é percentual: usa a média das metas em vez de somar
-        if (type === "conversao") return { value: Math.round(goalSum[type] / goalCount[type]), team: false };
-        return { value: goalSum[type], team: false };
+        // Usuário específico selecionado: a meta dele (ou o padrão).
+        if (ownerId) {
+          return { value: goalCount[type] > 0 ? goalSum[type] : META_DEFAULTS[type], team: false };
+        }
+        // Admin / "todos": SOMATÓRIA de todos os SDRs ativos, preenchendo quem
+        // não tem meta com o padrão → "N SDRs × meta".
+        if (type === "conversao") {
+          // Percentual não soma: usa a MÉDIA das metas dos SDRs (ou o padrão).
+          const v = sdrCount[type] > 0 ? Math.round(sdrSum[type] / sdrCount[type]) : META_DEFAULTS[type];
+          return { value: v, team: true };
+        }
+        if (activeSdrCount > 0) {
+          const fill = Math.max(0, activeSdrCount - sdrCount[type]) * META_DEFAULTS[type];
+          return { value: sdrSum[type] + fill, team: true };
+        }
+        // Sem lista de SDRs ainda (boot): cai na soma do que houver / padrão.
+        return { value: goalCount[type] > 0 ? goalSum[type] : META_DEFAULTS[type], team: true };
       };
 
       const metaGanhos = metaFor("ganhos");
@@ -912,7 +980,13 @@ export default function SdrDashboard() {
       const pct = (value: number, meta: { value: number }): number =>
         meta.value > 0 ? Math.round((value / meta.value) * 100) : 0;
       const metaLabel = (meta: { value: number; team: boolean }, suffix = ""): string =>
-        `Meta mensal: ${meta.value}${suffix}${meta.team ? " (equipe)" : ""}`;
+        `Meta mensal: ${meta.value}${suffix}${
+          meta.team
+            ? activeSdrCount > 0
+              ? ` (soma de ${activeSdrCount} SDR${activeSdrCount !== 1 ? "s" : ""})`
+              : " (time)"
+            : ""
+        }`;
 
       const cards: KpiCard[] = [
         {
@@ -983,7 +1057,7 @@ export default function SdrDashboard() {
     } finally {
       setLoadingKpis(false);
     }
-  }, [selectedUser, selectedPeriod, customStart, customEnd]);
+  }, [selectedUser, selectedPeriod, customStart, customEnd, activeSdrCount]);
 
   useEffect(() => {
     loadKpis();
@@ -1332,15 +1406,18 @@ export default function SdrDashboard() {
       const overdue = (lateRes.count ?? 0) + (pendVencidaRes.count ?? 0);
       setTasksOverdueRate(openTotal > 0 ? (overdue / openTotal) * 100 : null);
 
-      // 5. Reuniões por SDR
-      const meetingsMap = new Map<string, number>();
+      // 5. Reuniões por SDR — agora por owner_id (a tabela cruza com a meta/dia).
+      const meetingsMap = new Map<string, { name: string; count: number }>();
       meetingsData.forEach((row) => {
         const owner = Array.isArray(row.owner) ? row.owner[0] : row.owner;
+        const id = row.owner_id || "sem-dono";
         const name = owner?.name || "Sem nome";
-        meetingsMap.set(name, (meetingsMap.get(name) || 0) + 1);
+        const e = meetingsMap.get(id) || { name, count: 0 };
+        e.count += 1;
+        meetingsMap.set(id, e);
       });
       const meetingsRows: SdrMeetings[] = Array.from(meetingsMap.entries())
-        .map(([name, count]) => ({ name, count }))
+        .map(([ownerId, { name, count }]) => ({ ownerId, name, count }))
         .sort((a, b) => b.count - a.count);
       setSdrMeetings(meetingsRows);
 
@@ -1442,9 +1519,10 @@ export default function SdrDashboard() {
       });
 
       // 1b. Meta de reuniões (qs_goals type=reunioes, mensal) — mesma regra de
-      // vigência/equipe/donos inativos dos KPIs (isGoalEffective).
+      // vigência/donos inativos dos KPIs (isGoalEffective). Admin em "todos" soma
+      // os SDRs (default-fill); SDR selecionado usa a meta dele (ou o padrão).
       let qMGoal = supabase.from("qs_goals")
-        .select("owner_id, target_value, period_start, owner:qs_users(is_active)")
+        .select("owner_id, target_value, period_start, owner:qs_users(is_active, role)")
         .eq("type", "reunioes").eq("period", "mensal").order("period_start", { ascending: false });
       if (ownerId) qMGoal = qMGoal.eq("owner_id", ownerId);
 
@@ -1484,23 +1562,36 @@ export default function SdrDashboard() {
       const realizadas = meetings.filter((m) => m.status === "realizada").length;
       const noShow = meetings.filter((m) => m.status === "no_show").length;
       const decididas = realizadas + noShow;
-      const seenOwner = new Set<string>();
-      let meta = 0;
-      let teamMeta: number | null = null;
+      // Meta MENSAL de reuniões por dono (vigente + dono ativo, mais recente).
+      const goalByOwner: Record<string, number> = {};
+      const sdrOwners = new Set<string>();
       ((mGoalRes.data ?? []) as any[]).forEach((g) => {
         if (!isGoalEffective(g.period_start)) return; // meta de mês futuro não vigora
+        if (g.owner_id == null) return; // meta de equipe não conta na soma dos SDRs
         const ownerRow = Array.isArray(g.owner) ? g.owner[0] : g.owner;
-        if (g.owner_id && ownerRow && ownerRow.is_active === false) return; // dono desativado
-        if (g.owner_id == null) {
-          if (teamMeta === null) teamMeta = Number(g.target_value) || 0;
-          return;
-        }
-        if (seenOwner.has(g.owner_id)) return; // mais recente por owner
-        seenOwner.add(g.owner_id);
-        meta += Number(g.target_value) || 0;
+        if (ownerRow && ownerRow.is_active === false) return; // dono desativado
+        if (g.owner_id in goalByOwner) return; // mais recente por owner (query ordena desc)
+        goalByOwner[g.owner_id] = Number(g.target_value) || 0;
+        if (ownerRow && ownerRow.role === "sdr") sdrOwners.add(g.owner_id);
       });
-      // Meta de EQUIPE prevalece na visão "todos" (não soma com individuais).
-      if (!ownerId && teamMeta !== null) meta = teamMeta;
+      setMeetingGoalByOwner(goalByOwner);
+
+      const DEF = META_DEFAULTS.reunioes;
+      let meta: number;
+      if (ownerId) {
+        // Um SDR/usuário específico: a meta dele (ou o padrão se não tiver).
+        meta = goalByOwner[ownerId] ?? DEF;
+      } else if (activeSdrCount > 0) {
+        // Admin / "todos": soma de TODOS os SDRs ativos; quem não tem meta
+        // cadastrada entra com o padrão ("N SDRs × meta").
+        const sumSdr = [...sdrOwners].reduce((acc, id) => acc + (goalByOwner[id] || 0), 0);
+        const fill = Math.max(0, activeSdrCount - sdrOwners.size) * DEF;
+        meta = sumSdr + fill;
+      } else {
+        // Boot (lista de SDRs ainda não chegou): soma o que houver, ou o padrão.
+        const sumAll = Object.values(goalByOwner).reduce((a, b) => a + b, 0);
+        meta = sumAll || DEF;
+      }
       setMeetingKpis({
         agendadas, realizadas, noShow,
         showRate: decididas > 0 ? (realizadas / decididas) * 100 : null,
@@ -1536,7 +1627,7 @@ export default function SdrDashboard() {
     } finally {
       setLoadingBusiness(false);
     }
-  }, [selectedUser, selectedPeriod, customStart, customEnd]);
+  }, [selectedUser, selectedPeriod, customStart, customEnd, activeSdrCount]);
 
   useEffect(() => {
     loadBusinessKpis();
@@ -1878,6 +1969,9 @@ export default function SdrDashboard() {
         const conversaoValue = conversaoCard ? conversaoCard.value.replace("%", "") : "—";
         const myOverdue = myStages.filter((s) => s.overdue).length;
         const metaPct = meetingKpis && meetingKpis.meta > 0 ? (meetingKpis.agendadas / meetingKpis.meta) * 100 : null;
+        // Meta de reuniões POR DIA (meta mensal ÷ dias úteis do mês).
+        const myMeetMeta = meetingKpis?.meta ?? 0;
+        const myDaily = meetingDaily(myMeetMeta);
         // Priorização: atrasados (mais dias parado no topo) + quentes sem 1º contato.
         const overdueItems = [...myStages]
           .filter((s) => s.overdue)
@@ -1902,7 +1996,7 @@ export default function SdrDashboard() {
             <div>
               <SectionHeading
                 title="Meu dia"
-                hint="Meta de agendamentos = reuniões que você agendou no período ÷ meta mensal de reuniões. Atividades realizadas = tarefas concluídas no período. Atrasadas = leads cuja atividade atual venceu ANTES de hoje 00:00 (nunca as de hoje). Reuniões = agendadas no período."
+                hint="Reuniões por dia = sua meta mensal de reuniões ÷ dias úteis do mês (o ritmo que você precisa manter). A barra mostra o quanto da meta mensal você já agendou. Atividades realizadas = tarefas concluídas no período. Atrasadas = leads cuja atividade atual venceu ANTES de hoje 00:00 (nunca as de hoje). Reuniões agendadas = no período."
               />
               {loadingKpis || loadingBusiness || loadingQueue ? (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1915,12 +2009,16 @@ export default function SdrDashboard() {
               ) : (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <HeroCard
-                    label="Meta de agendamentos"
+                    label="Reuniões por dia"
                     dotColor="#0147FF"
-                    value={<>{meetingKpis?.agendadas ?? 0}<span className="text-[15px] font-bold text-gray-400"> / {meetingKpis && meetingKpis.meta > 0 ? meetingKpis.meta : "—"}</span></>}
+                    value={myDaily != null ? <>{myDaily}<span className="text-[15px] font-bold text-gray-400">/dia</span></> : "—"}
                     barPct={metaPct}
                     barColor="#0147FF"
-                    sub={metaPct != null ? `${Math.round(metaPct)}% da meta · faltam ${Math.max(0, (meetingKpis?.meta ?? 0) - (meetingKpis?.agendadas ?? 0))}` : "sem meta de reuniões definida"}
+                    sub={
+                      myMeetMeta > 0
+                        ? `Agende ~${myDaily ?? "—"}/dia útil · meta mensal ${myMeetMeta}${metaPct != null ? ` (${Math.round(metaPct)}%)` : ""}`
+                        : "sem meta de reuniões definida"
+                    }
                   />
                   <HeroCard
                     label="Atividades realizadas"
@@ -2037,13 +2135,15 @@ export default function SdrDashboard() {
         const ganhosCard = kpiCards.find((c) => c.type === "ganhos");
         const crColor = connectRate == null ? "#8792A6" : connectRate > 40 ? "#059669" : connectRate > 20 ? "#C77700" : "#D92D20";
         const topZombie = zombies && zombies.bySdr.length > 0 ? `${zombies.bySdr[0].count} ${zombies.bySdr[0].count > 1 ? "são" : "é"} de ${zombies.bySdr[0].name}.` : "";
+        // Total de reuniões/dia do time (soma dos SDRs ÷ dias úteis do mês).
+        const teamMeetDaily = meetingDaily(meetingKpis?.meta ?? 0);
         return (
           <>
             {/* (1) Placar da equipe — hero */}
             <div>
               <SectionHeading
                 title="Placar da equipe"
-                hint="Meta do time = ganhos do período ÷ meta mensal (equipe, se cadastrada). Reuniões = agendadas por todos no período. R$ em jogo = valor estimado dos leads em aberto (foto de agora). Connect rate = conexões ÷ atividades (30 dias / período)."
+                hint="Meta do time = SOMATÓRIA das metas de todos os SDRs ativos (quem não tem meta cadastrada entra com o valor padrão). Reuniões = agendadas por todos no período, com o total de reuniões/dia esperado do time. R$ em jogo = valor estimado dos leads em aberto (foto de agora). Connect rate = conexões ÷ atividades (30 dias / período)."
               />
               {loadingKpis || loadingBusiness || loadingOperational ? (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -2066,7 +2166,11 @@ export default function SdrDashboard() {
                     label="Reuniões do time"
                     dotColor="#0147FF"
                     value={meetingKpis?.agendadas ?? 0}
-                    sub={meetingKpis && meetingKpis.meta > 0 ? `no período · meta ${meetingKpis.meta}` : "no período"}
+                    sub={
+                      meetingKpis && meetingKpis.meta > 0
+                        ? `no período · meta ${meetingKpis.meta}/mês${teamMeetDaily != null ? ` (~${teamMeetDaily}/dia, ${activeSdrCount} SDR${activeSdrCount !== 1 ? "s" : ""})` : ""}`
+                        : "no período"
+                    }
                   />
                   <HeroCard
                     label="R$ em jogo"
@@ -2412,10 +2516,13 @@ export default function SdrDashboard() {
               )}
             </div>
 
-            {/* 5. Reuniões Agendadas por SDR (table) */}
+            {/* 5. Reuniões por SDR + meta/dia (derivada da meta mensal ÷ dias úteis) */}
             <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
               <span className="text-xs text-gray-500 uppercase">Reuniões por SDR</span>
-              {sdrMeetings.length === 0 ? (
+              <span className="text-[11px] text-gray-400 -mt-1">
+                Reuniões = agendadas no período. Meta/dia = meta mensal de reuniões ÷ {workdaysMonth || "—"} dias úteis do mês.
+              </span>
+              {meetingRows.length === 0 ? (
                 <span className="text-sm text-gray-400">Sem dados</span>
               ) : (
                 <div className="overflow-x-auto mt-1">
@@ -2424,13 +2531,17 @@ export default function SdrDashboard() {
                       <tr className="border-b border-gray-100">
                         <th className="text-left py-1.5 text-[11px] font-semibold text-gray-500 uppercase">SDR</th>
                         <th className="text-center py-1.5 text-[11px] font-semibold text-gray-500 uppercase">Reuniões</th>
+                        <th className="text-center py-1.5 text-[11px] font-semibold text-gray-500 uppercase">Meta/dia</th>
+                        <th className="text-center py-1.5 text-[11px] font-semibold text-gray-500 uppercase">Meta/mês</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sdrMeetings.map((row) => (
-                        <tr key={row.name} className="border-b border-gray-50">
+                      {meetingRows.map((row) => (
+                        <tr key={row.id} className="border-b border-gray-50">
                           <td className="py-1.5 text-xs font-medium text-gray-900 truncate max-w-[140px]">{row.name}</td>
                           <td className="py-1.5 text-center text-xs font-bold text-gray-700">{row.count}</td>
+                          <td className="py-1.5 text-center text-xs font-bold" style={{ color: "#0147FF" }}>{row.daily ?? "—"}</td>
+                          <td className="py-1.5 text-center text-xs text-gray-400">{row.monthly}</td>
                         </tr>
                       ))}
                     </tbody>

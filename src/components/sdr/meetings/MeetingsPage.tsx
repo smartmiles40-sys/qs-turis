@@ -6,6 +6,7 @@ import { MEETING_STATUS_LABELS } from "../types";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import AgendaPage from "../agenda/AgendaPage";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -104,6 +105,10 @@ const labelClass = "block text-xs font-medium text-gray-700 mb-1";
 
 export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const { currentUser } = useQsAuth();
+
+  // "Reuniões" (gestão/CRUD daqui) vs "Agenda" (a Google Agenda dos closers, que
+  // antes era um item de menu próprio). Unificado numa aba só a pedido do Bruno.
+  const [view, setView] = useState<"reunioes" | "agenda">("reunioes");
 
   const [activeTab, setActiveTab] = useState<FilterTab>("todas");
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -436,16 +441,51 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     return new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime();
   });
 
+  // Alternador Reuniões ⇄ Agenda — reaproveitado nas 3 saídas (agenda, loading,
+  // conteúdo) pra ficar sempre visível, inclusive enquanto as reuniões carregam.
+  const viewToggle = (
+    <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+      {([
+        { id: "reunioes", label: "Reuniões" },
+        { id: "agenda", label: "Agenda" },
+      ] as const).map((v) => (
+        <button
+          key={v.id}
+          onClick={() => setView(v.id)}
+          className={`px-3.5 py-1.5 text-sm font-semibold rounded-md transition ${
+            view === v.id ? "bg-[#0147FF] text-white" : "text-gray-600 hover:bg-gray-50"
+          }`}
+        >
+          {v.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  // Aba "Agenda": só o embed da Google Agenda (AgendaPage traz o próprio título).
+  if (view === "agenda") {
+    return (
+      <div className="space-y-4" style={{ fontFamily: "inherit" }}>
+        {viewToggle}
+        <AgendaPage />
+      </div>
+    );
+  }
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12" style={{ fontFamily: "inherit" }}>
-        <p className="text-sm text-gray-500">Carregando...</p>
+      <div className="space-y-4" style={{ fontFamily: "inherit" }}>
+        {viewToggle}
+        <div className="flex items-center justify-center py-12">
+          <p className="text-sm text-gray-500">Carregando...</p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6" style={{ fontFamily: "inherit" }}>
+      {viewToggle}
       {/* Header */}
       <div className="flex flex-wrap gap-y-2 items-center justify-between">
         <div>

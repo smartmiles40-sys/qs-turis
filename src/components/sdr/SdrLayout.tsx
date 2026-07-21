@@ -55,9 +55,7 @@ class PageErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   }
 }
 import SdrDashboard from "./dashboard/SdrDashboard";
-import CadenceHealthPanel from "./dashboard/CadenceHealthPanel";
-import FupAnalyticsPanel from "./dashboard/FupAnalyticsPanel";
-import AdvancedAnalyticsPanel from "./dashboard/AdvancedAnalyticsPanel";
+import AnalisesPage from "./dashboard/AnalisesPage";
 import RetrospectivaModal from "./tasks/RetrospectivaModal";
 import LeadsPage from "./leads/LeadsPage";
 import LeadDetailPage from "./leads/LeadDetailPage";
@@ -65,8 +63,6 @@ import CadencesPage from "./cadences/CadencesPage";
 import CadenceCreatePage from "./cadences/CadenceCreatePage";
 import TasksPanel from "./tasks/TasksPanel";
 import MeetingsPage from "./meetings/MeetingsPage";
-import AgendaPage from "./agenda/AgendaPage";
-import GoalsPage from "./goals/GoalsPage";
 import SettingsPage from "./settings/SettingsPage";
 import CoveragePanel from "./dashboard/CoveragePanel";
 import NotificationsPanel from "./notifications/NotificationsPanel";
@@ -88,12 +84,8 @@ export type SdrNav =
   | "cadencia-criar"
   | "cadencia-editar"
   | "dashboard"
-  | "saude-cadencia"
-  | "analises-fup"
-  | "analises-avancadas"
+  | "analises"
   | "reunioes"
-  | "agenda"
-  | "metas"
   | "declaracao"
   | "historicos"
   | "cobertura"
@@ -128,19 +120,15 @@ const MENU: (MenuGroup | MenuItem)[] = [
     items: [
       { id: "leads", label: "Leads", description: "Cadastro e gestão de leads" },
       { id: "cadencias", label: "Cadências", description: "Fluxos de prospecção" },
-      { id: "reunioes", label: "Reuniões", description: "Agenda de reuniões" },
-      { id: "agenda", label: "Agenda", description: "Reuniões dos closers (Google)" },
+      { id: "reunioes", label: "Reuniões", description: "Gestão de reuniões + Agenda dos closers" },
     ],
   },
   {
     id: "desempenho",
     label: "Desempenho",
     items: [
-      { id: "dashboard", label: "Visão Geral", description: "Indicadores operacionais" },
-      { id: "saude-cadencia", label: "Saúde da Cadência", description: "FUP por etapa, atrasadas e backlog" },
-      { id: "analises-fup", label: "Análises de FUP", description: "Desfechos por SDR, conversão por tentativa e aderência" },
-      { id: "analises-avancadas", label: "Análises Avançadas", description: "Telefonia, show-rate, speed-to-lead, funil e R$ por fonte" },
-      { id: "metas", label: "Metas", description: "Planejamento diário e mensal" },
+      { id: "dashboard", label: "Visão Geral", description: "Indicadores, metas e reuniões por dia" },
+      { id: "analises", label: "Análises & Metas", description: "Saúde da cadência, FUP, análises avançadas e metas" },
     ],
   },
   { id: "configuracoes", label: "Configurações" },
@@ -650,19 +638,9 @@ export default function SdrLayout() {
             <SdrDashboard />
           </PageErrorBoundary>
         )}
-        {activeNav === "saude-cadencia" && (
-          <PageErrorBoundary pageName="Saúde da Cadência">
-            <CadenceHealthPanel />
-          </PageErrorBoundary>
-        )}
-        {activeNav === "analises-fup" && (
-          <PageErrorBoundary pageName="Análises de FUP">
-            <FupAnalyticsPanel />
-          </PageErrorBoundary>
-        )}
-        {activeNav === "analises-avancadas" && (
-          <PageErrorBoundary pageName="Análises Avançadas">
-            <AdvancedAnalyticsPanel />
+        {activeNav === "analises" && (
+          <PageErrorBoundary pageName="Análises & Metas">
+            <AnalisesPage />
           </PageErrorBoundary>
         )}
         {activeNav === "cobertura" && (
@@ -673,16 +651,6 @@ export default function SdrLayout() {
         {activeNav === "reunioes" && (
           <PageErrorBoundary pageName="Reuniões">
             <MeetingsPage onOpenLead={openLeadDetail} />
-          </PageErrorBoundary>
-        )}
-        {activeNav === "agenda" && (
-          <PageErrorBoundary pageName="Agenda">
-            <AgendaPage />
-          </PageErrorBoundary>
-        )}
-        {activeNav === "metas" && (
-          <PageErrorBoundary pageName="Metas">
-            <GoalsPage />
           </PageErrorBoundary>
         )}
         {activeNav === "configuracoes" && (
