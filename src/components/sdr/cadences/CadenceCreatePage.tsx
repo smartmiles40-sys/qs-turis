@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchQsUsers } from "@/lib/qs/queries";
+import { fetchEnabledChannels } from "@/lib/qs/channels";
 import { notifyError } from "@/lib/qs/notify";
 import { peekDuplicateSource, clearDuplicateSource } from "./duplicateSource";
 import type {
@@ -333,6 +334,11 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   // vínculos novos), mas um destino já gravado que congelou continua listado —
   // rotulado — pra o select não "sumir" com o valor salvo.
   const [otherCadences, setOtherCadences] = useState<{ id: string; name: string; status: CadenceStatus }[]>([]);
+  // Canais habilitados (Configurações → Canais de Contato). Só eles viram opção
+  // de canal nas atividades da cadência — canal desligado some da escolha (mas o
+  // já selecionado numa atividade continua visível, pra não sumir na edição).
+  const [enabledChannels, setEnabledChannels] = useState<Set<ChannelType> | null>(null);
+  useEffect(() => { fetchEnabledChannels().then(setEnabledChannels); }, []);
 
   // SDRs disponíveis para atribuir à cadência (só quem qualifica: sdr/closer).
   useEffect(() => {
@@ -759,9 +765,9 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                 )}
                 {day.activities.map((act) => (
                   <div key={act.id} className="space-y-2 p-3 rounded-lg bg-[#F8F9FA] border border-gray-100">
-                    {/* Canal */}
+                    {/* Canal — só os habilitados (Configurações), + o já escolhido */}
                     <div className="flex items-center gap-1 flex-wrap">
-                      {ALL_CHANNELS.map((ch) => {
+                      {ALL_CHANNELS.filter((ch) => !enabledChannels || enabledChannels.has(ch) || act.channel_type === ch).map((ch) => {
                         const selected = act.channel_type === ch;
                         return (
                           <button key={ch} onClick={() => updateActivity(day.id, act.id, { channel_type: ch })}

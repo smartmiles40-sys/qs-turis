@@ -459,6 +459,37 @@ export async function fetchQsTasksForToday(ownerId?: string): Promise<Task[]> {
   });
 }
 
+// ── Fila do Painel (pendente + atrasada) — SEM o teto de 1000 ────────────────
+// O Painel derivava "N em FUP", "N atrasadas" e a própria lista de um único
+// SELECT sem paginação: o PostgREST corta em 1000 linhas e a contagem TRAVAVA em
+// 1000 assim que o time cruzava esse volume (bug relatado). Aqui varremos TODAS
+// as páginas (fetchAllRows) com ordem estável (scheduled_at + id) e escopo por
+// dono: o SDR recebe só a fila DELE (bounded); admin/gestor recebe a de todos
+// (número real do time). Erro nunca vira lista vazia — fetchAllRows relança.
+export async function fetchQueueTasks(ownerId?: string | null): Promise<Task[]> {
+  return fetchAllRows<Task>((from, to) => {
+    let q = supabase
+      .from("qs_tasks")
+      .select("*")
+      .in("status", ["pendente", "atrasada"])
+      .order("scheduled_at", { ascending: true })
+      .order("id", { ascending: true });
+    if (ownerId) q = q.eq("owner_id", ownerId);
+    return q.range(from, to);
+  });
+}
+
+// Leads do Painel (para o mapa lead↔tarefa). Também paginado: com >1000 leads o
+// leadsMap ficava incompleto e as tarefas dos leads "extras" renderizavam sem
+// nome/telefone. RLS já restringe o SDR aos leads dele; o admin recebe todos.
+export async function fetchQueueLeads(ownerId?: string | null): Promise<Lead[]> {
+  return fetchAllRows<Lead>((from, to) => {
+    let q = supabase.from("qs_leads").select("*").order("id", { ascending: true });
+    if (ownerId) q = q.eq("owner_id", ownerId);
+    return q.range(from, to);
+  });
+}
+
 export async function completeTask(
   id: string,
   contactResult: string,

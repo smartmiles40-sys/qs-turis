@@ -11,12 +11,13 @@ import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
-import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, type CadenceScriptRow } from "@/lib/qs/queries";
+import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, type CadenceScriptRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getLeadScore } from "@/lib/leadScore";
 import { formatPhoneDisplay, fillTemplate, startWhatsAppCall, isDialablePhone } from "@/lib/whatsapp";
 import WhatsAppModal from "../whatsapp/WhatsAppModal";
+import { fetchEnabledChannels } from "@/lib/qs/channels";
 import { dialViaWavoip, setOnCallEnded, getWavoipToken } from "@/lib/wavoip";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
@@ -235,6 +236,12 @@ const MONTHLY_GOAL = 7350;
 // Canais que são LIGAÇÃO (recebem o bloco de classificação ao concluir).
 const CALL_CHANNELS: ChannelType[] = ["ligacao", "ligacao_whatsapp"];
 
+// Teto de pílulas RENDERIZADAS por período (Manhã/Tarde). Não afeta a CONTAGEM
+// ("N em FUP" vem de counterBase, sempre real) — só evita despejar milhares de
+// linhas no DOM na visão do admin (fila do time inteiro). Cada SDR fica muito
+// abaixo disso; só a visão agregada do gestor chega a cortar.
+const LIST_RENDER_CAP = 150;
+
 // Classificação da ligação (Growth Station): motivo/resultado da chamada, seleção
 // única. `positive` = o SDR falou com a persona e avançou; `reached` = falou com
 // alguém (conta como contato feito). O enum salvo vai em qs_tasks.contact_result.
@@ -358,10 +365,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [loadError, setLoadError] = useState(false);
   const loadData = useCallback(async () => {
     setLoading(true);
+    // Escopo da fila: SDR/closer vê só a dele; admin/gestor vê a do time inteiro.
+    const queueOwnerId = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
     try {
-      const [tasksRes, leadsRes, cadencesRes, usersData, productsRes, notesRes, contactedRes, scriptsData, availableData] = await Promise.all([
-        supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
-        supabase.from("qs_leads").select("*"),
+      const [queueTasks, queueLeads, cadencesRes, usersData, productsRes, notesRes, contactedRes, scriptsData, availableData] = await Promise.all([
+        fetchQueueTasks(queueOwnerId),   // paginado — nunca corta em 1000 (número real)
+        fetchQueueLeads(queueOwnerId),   // paginado — leadsMap completo
         supabase.from("qs_cadences").select("*"),
         fetchQsUsers(),
         supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
@@ -370,15 +379,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         fetchCadenceScripts(), // roteiros por atividade da cadência (item 6 — script_text)
         fetchAvailableCadences(), // só disponíveis — dropdown do Cadastrar Lead (item 12)
       ]);
-      // supabase-js não lança em erro de query — checa as duas leituras vitais.
-      if (tasksRes.error || leadsRes.error) {
-        console.warn("[TasksPanel] falha ao carregar dados:", tasksRes.error ?? leadsRes.error);
-        setLoadError(true);
-      } else {
-        setLoadError(false);
-      }
-      setTasks((tasksRes.data || []) as Task[]);
-      setLeads((leadsRes.data || []) as Lead[]);
+      // fetchQueue* já relança em erro (cai no catch abaixo); chegou aqui = ok.
+      setLoadError(false);
+      setTasks(queueTasks);
+      setLeads(queueLeads);
       setCadences((cadencesRes.data || []) as Cadence[]);
       setQsUsers(usersData);
       setProducts((productsRes.data || []) as { id: string; name: string }[]);
@@ -392,12 +396,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUser]);
   useEffect(() => { loadData(); }, [loadData]);
 
   // Horário de funcionamento (Configurações) — alimenta as métricas de tempo.
   const [workHours, setWorkHours] = useState<WorkHours>(DEFAULT_WORK_HOURS);
   useEffect(() => { loadWorkHours().then(setWorkHours); }, []);
+
+  // Canais habilitados (Configurações → Canais de Contato). Gate dos seletores de
+  // canal ao CRIAR/editar atividade extra — canal desligado deixa de ser opção
+  // (o já escolhido continua visível). null enquanto carrega = mostra todos.
+  const [enabledChannels, setEnabledChannels] = useState<Set<ChannelType> | null>(null);
+  useEffect(() => { fetchEnabledChannels().then(setEnabledChannels); }, []);
+  const channelOptions = (keep?: ChannelType) =>
+    (["pesquisa", "email", "ligacao", "ligacao_whatsapp", "whatsapp", "linkedin", "instagram", "tiktok", "youtube"] as ChannelType[])
+      .filter((ch) => !enabledChannels || enabledChannels.has(ch) || ch === keep);
 
   // Equipe da reunião (Configurações) — listas do modal de Ganho.
   const [meetingTeam, setMeetingTeam] = useState({ schedulers: DEFAULT_MEETING_SCHEDULERS, owners: DEFAULT_MEETING_OWNERS });
@@ -410,20 +423,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const pollBusyRef = useRef(false);
   const refreshQueue = useCallback(async () => {
     if (document.hidden || pollBusyRef.current) return;
+    const queueOwnerId = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
     try {
-      const [tasksRes, leadsRes, notesRes, contactedRes] = await Promise.all([
-        supabase.from("qs_tasks").select("*").in("status", ["pendente", "atrasada"]).order("scheduled_at"),
-        supabase.from("qs_leads").select("*"),
+      const [queueTasks, queueLeads, notesRes, contactedRes] = await Promise.all([
+        fetchQueueTasks(queueOwnerId),   // paginado (número real, sem teto de 1000)
+        fetchQueueLeads(queueOwnerId),   // paginado
         supabase.from("qs_notes").select("lead_id"),
         supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
       ]);
-      if (tasksRes.data) setTasks(tasksRes.data as Task[]);
-      if (leadsRes.data) setLeads(leadsRes.data as Lead[]);
+      setTasks(queueTasks);
+      setLeads(queueLeads);
       if (notesRes.data) setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[]));
       if (contactedRes.data) setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[]));
       refreshDoneTodayMine(); // placar "feitas hoje" acompanha o refresh de 60s
     } catch { /* silencioso — próxima rodada tenta de novo */ }
-  }, [refreshDoneTodayMine]);
+  }, [refreshDoneTodayMine, currentUser]);
 
   useEffect(() => {
     const id = setInterval(refreshQueue, 60_000); // fallback
@@ -1532,7 +1546,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         showToast(`Ligação encerrada (${Math.round(info.durationSec / 60)}min) — registre o desfecho`);
       }
       // traz o card pra vista
-      setTimeout(() => document.querySelector(".qsx-hero")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+      scrollHeroIntoView();
     };
     setOnCallEnded(handleCallEnded);
     setOnCallEndedWebphone(handleCallEnded);
@@ -1600,6 +1614,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // fila de hoje conta como "em FUP" (ninguém some da conta).
   const fupTasks = counterBase;
 
+  // Quantas atividades tem por CANAL na fila de hoje (WhatsApp: 200, Ligação: 200…).
+  // Vem de counterBase (número real, já escopado por papel), então bate com o
+  // "N em FUP". Ordem fixa; só entram canais com pelo menos 1 pendente.
+  const CHANNEL_ORDER: ChannelType[] = ["ligacao", "ligacao_whatsapp", "whatsapp", "email", "pesquisa", "linkedin", "instagram", "tiktok", "youtube"];
+  const channelCounts = useMemo(() => {
+    const m = new Map<ChannelType, number>();
+    for (const t of counterBase) m.set(t.channel_type, (m.get(t.channel_type) ?? 0) + 1);
+    return m;
+  }, [counterBase]);
+  const channelBreakdown = CHANNEL_ORDER
+    .map((ch) => ({ ch, n: channelCounts.get(ch) ?? 0 }))
+    .filter((x) => x.n > 0);
+
 
   // Placar real: concluídas hoje/mês vs metas (qs_goals, com fallback nos padrões)
   const DAILY_DONE = doneCounts.doneToday;
@@ -1643,6 +1670,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const periodOf = (task: Task): PeriodFilter =>
     new Date(task.scheduled_at).getHours() < 12 ? "manha" : "tarde";
 
+  // Rola o card ativo (hero) pro topo da vista. Espera o re-render trocar o hero
+  // (setTimeout) e respeita quem prefere menos movimento.
+  function scrollHeroIntoView() {
+    const smooth = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    setTimeout(() => {
+      document.querySelector(".qsx-hero")?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+    }, 90);
+  }
+
   // Item 7 — escolher qual lead atender (vira o card ativo); reseta os campos.
   // Também limpa a classificação de ligação (item 10 — antes ela ficava "presa"
   // ao trocar de card e pausava a fila), o menu (⋯) e a edição inline.
@@ -1658,6 +1694,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setTaskMenuOpen(false);
     setEditFor(null);
     setScriptOpen(true); // roteiro volta aberto no card novo
+    // Sobe pro card de ação (hero) sozinho: clicar numa atividade lá embaixo já
+    // traz a tela pro topo, sem o SDR ter que rolar de volta (pedido do Bruno —
+    // economiza tempo em toda atividade das últimas posições da fila).
+    scrollHeroIntoView();
   }
 
   // Card compacto da coluna de Atividades extras (retornos), destacado em azul.
@@ -2332,7 +2372,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   className="qsx-fchip"
                   style={{ height: 38, borderRadius: 10 }}
                 >
-                  {(["ligacao", "ligacao_whatsapp", "whatsapp", "email", "linkedin", "pesquisa"] as ChannelType[]).map((ch) => (
+                  {(["ligacao", "ligacao_whatsapp", "whatsapp", "email", "linkedin", "pesquisa"] as ChannelType[])
+                    .filter((ch) => channelOptions(editDraft.channel).includes(ch))
+                    .map((ch) => (
                     <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}</option>
                   ))}
                 </select>
@@ -2532,7 +2574,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-sub { font-size: 14px; color: var(--ink2); }
         .qsx-hl { color: var(--orange); font-weight: 800; }
 
-        .qsx-search { flex: 1; display: flex; align-items: center; gap: 11px; height: 48px; padding: 0 16px; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
+        .qsx-search { flex: 1; display: flex; align-items: center; gap: 11px; height: 48px; padding: 0 16px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
         .qsx-search input { border: 0; outline: 0; background: transparent; flex: 1; font-size: 14.5px; color: var(--ink); font-family: inherit; }
         .qsx-search input::placeholder { color: var(--ink3); }
         .qsx-btn { height: 48px; padding: 0 18px; border-radius: 14px; font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px; border: 0; color: #fff; cursor: pointer; white-space: nowrap; transition: filter .15s; }
@@ -2540,7 +2582,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-btn-green { background: var(--green); box-shadow: 0 8px 18px -8px rgba(18,161,138,.6); }
         .qsx-btn-blue { background: var(--blue); box-shadow: 0 8px 18px -8px rgba(37,99,235,.6); }
         .qsx-btn-orange { background: var(--orange); box-shadow: 0 8px 18px -8px rgba(245,130,31,.6); }
-        .qsx-btn-ghost { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+        .qsx-btn-ghost { background: var(--card); border: 1px solid var(--line); color: var(--ink); }
         .qsx-btn-ghost:hover { background: var(--line2); filter: none; }
 
         .qsx-metric { display: flex; flex-direction: column; gap: 7px; min-width: 168px; }
@@ -2551,24 +2593,24 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-mnums span { color: var(--ink3); font-weight: 700; }
         .qsx-bar { height: 7px; border-radius: 999px; background: var(--line2); overflow: hidden; }
         .qsx-bar i { display: block; height: 100%; border-radius: 999px; }
-        .qsx-pace { display: flex; align-items: center; gap: 9px; padding: 9px 15px; background: #fff; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; color: var(--ink2); font-weight: 600; white-space: nowrap; }
+        .qsx-pace { display: flex; align-items: center; gap: 9px; padding: 9px 15px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; font-size: 13px; color: var(--ink2); font-weight: 600; white-space: nowrap; }
         .qsx-pace b { color: var(--ink); font-weight: 800; }
         .qsx-pace .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--line); flex: none; }
 
         /* Hero — Próxima atividade */
-        .qsx-hero { display: flex; background: #fff; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 28px -22px rgba(16,24,40,.30); }
+        .qsx-hero { display: flex; background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 28px -22px rgba(16,24,40,.30); }
         .qsx-hero-accent { width: 4px; flex: none; opacity: .9; }
         .acc-alta { background: var(--red); } .acc-media { background: var(--amber); } .acc-baixa { background: var(--ink3); }
         .qsx-hero-main { flex: 1; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
         .qsx-eyebrow { font-size: 11.5px; font-weight: 700; letter-spacing: .2px; color: var(--ink3); }
         .qsx-hln { font-size: 18px; font-weight: 800; letter-spacing: -.3px; margin: 0; color: var(--ink); }
         .qsx-hco { font-size: 13px; color: var(--ink2); font-weight: 500; margin-top: 2px; }
-        .qsx-hbox { background: #FAFBFC; border: 1px solid var(--line2); border-radius: 13px; padding: 10px 13px; font-size: 13px; color: var(--ink2); line-height: 1.45; }
+        .qsx-hbox { background: var(--card2); border: 1px solid var(--line2); border-radius: 13px; padding: 10px 13px; font-size: 13px; color: var(--ink2); line-height: 1.45; }
         .qsx-hbox b { color: var(--ink); font-weight: 700; }
-        .qsx-hero-side { width: 260px; flex: none; border-left: 1px solid var(--line); padding: 16px; background: #FAFBFC; display: flex; flex-direction: column; gap: 4px; }
+        .qsx-hero-side { width: 260px; flex: none; border-left: 1px solid var(--line); padding: 16px; background: var(--card2); display: flex; flex-direction: column; gap: 4px; }
         .qsx-side-lab { font-size: 11.5px; font-weight: 700; letter-spacing: .2px; color: var(--ink3); margin-bottom: 8px; }
         .qsx-mini { display: flex; align-items: center; gap: 11px; padding: 10px; border-radius: 13px; cursor: pointer; }
-        .qsx-mini:hover { background: #fff; box-shadow: 0 2px 10px -4px rgba(23,32,46,.15); }
+        .qsx-mini:hover { background: var(--card); box-shadow: 0 2px 10px -4px rgba(23,32,46,.15); }
         .qsx-mini-time { font-size: 13px; font-weight: 800; color: var(--ink2); width: 42px; font-variant-numeric: tabular-nums; }
         .qsx-mini-n { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
         .qsx-mini-c { font-size: 12px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2581,6 +2623,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .ic-pesquisa { background: rgba(79,70,229,.11); color: #4F46E5; }
         .ic-linkedin { background: rgba(10,102,194,.12); color: #0A66C2; }
         .ic-social { background: rgba(219,39,119,.10); color: #DB2777; }
+
+        /* Resumo por canal (WhatsApp: 200, Ligação: 200…) — chips clicáveis */
+        .qsx-chan-row { display: flex; flex-wrap: wrap; gap: 8px; }
+        .qsx-chan-chip { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px 0 7px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); cursor: pointer; font-family: inherit; transition: border-color .15s, background .15s; }
+        .qsx-chan-chip:hover { border-color: var(--ink3); }
+        .qsx-chan-chip.on { border-color: var(--blue); background: rgba(37,99,235,.08); }
+        .qsx-chan-lab { font-size: 13px; font-weight: 700; color: var(--ink2); }
+        .qsx-chan-n { font-size: 12.5px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; background: var(--line2); border-radius: 999px; min-width: 22px; text-align: center; padding: 1px 7px; }
+        .qsx-chan-chip.on .qsx-chan-lab { color: var(--blue); }
+        .qsx-chan-chip.on .qsx-chan-n { color: var(--blue); background: rgba(37,99,235,.16); }
+        .qsx-chan-chip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
         /* Chips de prioridade */
         .qsx-chip { height: 26px; padding: 0 11px; border-radius: 999px; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -2595,14 +2648,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-glabel:before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .35; }
 
         /* Pílula da fila */
-        .qsx-pill { display: flex; align-items: center; gap: 15px; min-height: 76px; padding: 0 14px 0 20px; background: #fff; border: 1px solid var(--line); border-radius: 20px; cursor: pointer; transition: box-shadow .16s, border-color .16s, transform .16s; }
+        .qsx-pill { display: flex; align-items: center; gap: 15px; min-height: 76px; padding: 0 14px 0 20px; background: var(--card); border: 1px solid var(--line); border-radius: 20px; cursor: pointer; transition: box-shadow .16s, border-color .16s, transform .16s; }
         .qsx-pill:hover { border-color: #d3dae5; box-shadow: 0 14px 30px -20px rgba(23,32,46,.4); transform: translateY(-1px); }
         .qsx-pill.sel { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
         .qsx-time { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--ink); font-size: 15px; width: 48px; flex: none; }
         .qsx-lname { font-weight: 700; font-size: 15px; color: var(--ink); }
         .qsx-pco { font-size: 13px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
         .qsx-pco b { color: var(--ink2); font-weight: 700; }
-        .qsx-pa { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line); background: #fff; color: var(--ink2); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; transition: background .15s; }
+        .qsx-pa { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink2); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; transition: background .15s; }
         .qsx-pa:hover { background: var(--line2); }
         .qsx-pa-wa { background: rgba(18,161,138,.12); color: var(--green); border: 0; }
         .qsx-pa-wa:hover { background: rgba(18,161,138,.2); }
@@ -2610,7 +2663,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-pa-go:hover { background: var(--blue-ink); }
 
         /* Chip de filtro (select estilizado) */
-        .qsx-fchip { height: 36px; padding: 0 12px; border-radius: 999px; background: #fff; border: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink2); cursor: pointer; font-family: inherit; outline: 0; transition: border-color .15s; }
+        .qsx-fchip { height: 36px; padding: 0 12px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink2); cursor: pointer; font-family: inherit; outline: 0; transition: border-color .15s; }
         .qsx-fchip:hover { border-color: #d5dae2; }
         .qsx-fchip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
 
@@ -2620,19 +2673,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-name-btn:hover .qsx-hln { color: var(--blue); text-decoration: underline; }
 
         /* Botões de desfecho do contato (no card da próxima atividade) */
-        .qsx-out { height: 34px; padding: 0 12px; border-radius: 10px; font-size: 12.5px; font-weight: 700; border: 1.5px solid var(--line); background: #fff; color: var(--ink2); cursor: pointer; white-space: nowrap; font-family: inherit; transition: background .12s, border-color .12s; }
+        .qsx-out { height: 34px; padding: 0 12px; border-radius: 10px; font-size: 12.5px; font-weight: 700; border: 1.5px solid var(--line); background: var(--card); color: var(--ink2); cursor: pointer; white-space: nowrap; font-family: inherit; transition: background .12s, border-color .12s; }
         .qsx-out:hover { border-color: #d3dae5; background: var(--line2); }
         .qsx-out[data-tone="win"] { border-color: rgba(18,161,138,.4); color: #0E7C6A; background: rgba(18,161,138,.06); }
         .qsx-out[data-tone="lose"] { border-color: rgba(229,72,77,.35); color: var(--red); background: rgba(229,72,77,.05); }
         .qsx-out[data-on="1"] { background: var(--ink); color: #fff; border-color: var(--ink); }
 
         /* Botão pequeno de ícone (ex.: Transferir, ao lado do horário) */
-        .qsx-icon-sm { width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: #fff; color: var(--ink3); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; transition: background .12s, color .12s, border-color .12s; }
+        .qsx-icon-sm { width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink3); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; transition: background .12s, color .12s, border-color .12s; }
         .qsx-icon-sm:hover { background: var(--line2); color: var(--ink2); }
         .qsx-icon-sm.on { background: rgba(37,99,235,.10); color: var(--blue); border-color: rgba(37,99,235,.3); }
 
         /* Menu (⋯) do card — adiar/editar/excluir (Sprint 4) */
-        .qsx-menu-item { display: flex; width: 100%; align-items: center; gap: 8px; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--ink2); background: #fff; border: 0; cursor: pointer; text-align: left; font-family: inherit; white-space: nowrap; }
+        .qsx-menu-item { display: flex; width: 100%; align-items: center; gap: 8px; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--ink2); background: var(--card); border: 0; cursor: pointer; text-align: left; font-family: inherit; white-space: nowrap; }
         .qsx-menu-item:hover { background: var(--line2); }
         .qsx-menu-item.danger { color: var(--red); }
         .qsx-menu-item:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
@@ -2662,7 +2715,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         }
 
         /* Botão do topo em versão calma (só a ação principal fica cheia) */
-        .qsx-btn-soft { background: #fff; border: 1px solid var(--line); color: var(--ink); box-shadow: none; }
+        .qsx-btn-soft { background: var(--card); border: 1px solid var(--line); color: var(--ink); box-shadow: none; }
         .qsx-btn-soft:hover { background: var(--line2); filter: none; }
 
         /* Desfecho — hierarquia: caminho positivo salta, os raros recuam */
@@ -2671,7 +2724,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 4px; border-radius: 4px; border: 1px solid var(--line); background: var(--line2); color: var(--ink3); font-size: 10px; font-weight: 800; vertical-align: 1px; }
         .qsx-out-primary .qsx-kbd { background: rgba(255,255,255,.25); color: #fff; border-color: transparent; }
         .qsx-out-primary:hover { filter: brightness(1.05); }
-        .qsx-out-mini { height: 30px; padding: 0 11px; border-radius: 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); background: #fff; color: var(--ink3); cursor: pointer; white-space: nowrap; font-family: inherit; transition: background .12s, color .12s; }
+        .qsx-out-mini { height: 30px; padding: 0 11px; border-radius: 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); background: var(--card); color: var(--ink3); cursor: pointer; white-space: nowrap; font-family: inherit; transition: background .12s, color .12s; }
         .qsx-out-mini:hover { background: var(--line2); color: var(--ink2); }
         .qsx-out-mini[data-on="1"] { background: var(--ink); color: #fff; border-color: var(--ink); }
 
@@ -2680,6 +2733,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-fchip:focus-visible, .qsx-pill:focus-visible, .qsx-icon-sm:focus-visible, .qsx-name-btn:focus-visible,
         .qsx-extra-card:focus-visible, .qsx-mini:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
         .qsx-search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+
+        /* ── Modo Noturno: ajustes que a troca de variável não cobre ──
+           As superfícies já viram var(--card)/var(--card2). Aqui tratamos só o
+           que INVERTE no claro (ink + texto branco) — que no escuro viraria
+           branco-sobre-claro — e as bordas de hover que eram claras demais. */
+        html.dark .qsx-pill:hover { border-color: #3A4655; }
+        html.dark .qsx-fchip:hover, html.dark .qsx-out:hover { border-color: #3A4655; }
+        html.dark .qsx-fchip.on,
+        html.dark .qsx-out[data-on="1"],
+        html.dark .qsx-out-mini[data-on="1"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+        html.dark .qsx-out[data-tone="win"] { color: #38D8BA; }
 
         /* Respeita quem prefere menos movimento (uso o dia inteiro) */
         @media (prefers-reduced-motion: reduce) {
@@ -2743,7 +2807,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══════════════════════════════════════════════════════════════════════
           HEADER SECTION
           ══════════════════════════════════════════════════════════════════════ */}
-      <div className="shrink-0 px-4 md:px-6 pt-5 pb-4" style={{ background: "#fff", borderBottom: "1px solid var(--line)" }}>
+      <div className="shrink-0 px-4 md:px-6 pt-5 pb-4" style={{ background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
         <div className="qsx-page">
           {/* Saudação */}
           <div className="qsx-greet flex items-baseline gap-3 flex-wrap">
@@ -2824,11 +2888,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             {/* Controle FUP / Atrasada + feitas hoje sempre à vista (pedido do
                 Bruno). "Novo" foi extinto — todo lead sem 1º contato é FUP 1. */}
             <span className="text-[12px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>
-              <span style={{ color: "#B45309" }}>{fupTasks.length} em FUP</span>
+              <span style={{ color: "var(--amber)" }}>{fupTasks.length} em FUP</span>
               <span style={{ color: "var(--ink3)" }}> · </span>
-              <span style={{ color: "#DC2626" }}>{overdueTasks.length} atrasadas</span>
+              <span style={{ color: "var(--red)" }}>{overdueTasks.length} atrasadas</span>
               <span style={{ color: "var(--ink3)" }}> · </span>
-              <span style={{ color: "#0E7C6A" }} title="Atividades que você concluiu hoje">✅ {doneTodayMine} feitas hoje</span>
+              <span style={{ color: "var(--green)" }} title="Atividades que você concluiu hoje">✅ {doneTodayMine} feitas hoje</span>
             </span>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -2851,9 +2915,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               aria-label="Filtrar por canal"
             >
               <option value="">Canal</option>
-              {(["pesquisa", "email", "ligacao", "ligacao_whatsapp", "whatsapp", "linkedin", "instagram", "tiktok", "youtube"] as ChannelType[]).map((ch) => (
-                <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}</option>
-              ))}
+              {(["pesquisa", "email", "ligacao", "ligacao_whatsapp", "whatsapp", "linkedin", "instagram", "tiktok", "youtube"] as ChannelType[]).map((ch) => {
+                const n = channelCounts.get(ch) ?? 0;
+                return <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}{n > 0 ? ` (${n})` : ""}</option>;
+              })}
             </select>
 
             <select
@@ -2902,6 +2967,34 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             )}
           </div>
         </div>
+
+        {/* Quantas atividades por CANAL na fila (WhatsApp: 200, Ligação: 200…).
+            Clicar num canal filtra a fila por ele (toca de novo pra limpar). */}
+        {channelBreakdown.length > 0 && (
+          <div className="qsx-page mt-3">
+            <div className="qsx-chan-row">
+              {channelBreakdown.map(({ ch, n }) => {
+                const active = channelFilter === ch;
+                return (
+                  <button
+                    key={ch}
+                    type="button"
+                    onClick={() => setChannelFilter(active ? null : ch)}
+                    className={`qsx-chan-chip${active ? " on" : ""}`}
+                    title={`${n} ${n === 1 ? "atividade" : "atividades"} de ${CHANNEL_LABELS[ch]} na fila de hoje`}
+                    aria-pressed={active}
+                  >
+                    <span className={`qsx-chan-ic ${CHANNEL_IC_CLASS[ch]}`} style={{ width: 22, height: 22, borderRadius: 7 }}>
+                      <ChannelIcon type={ch} size={13} />
+                    </span>
+                    <span className="qsx-chan-lab">{CHANNEL_LABELS[ch]}</span>
+                    <span className="qsx-chan-n">{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
@@ -2972,13 +3065,23 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 {manha.length > 0 && (
                   <>
                     <div className="qsx-glabel">Manhã · {manha.length} {manha.length === 1 ? "atividade" : "atividades"}</div>
-                    <div className="flex flex-col gap-2.5">{manha.map(renderPill)}</div>
+                    <div className="flex flex-col gap-2.5">{manha.slice(0, LIST_RENDER_CAP).map(renderPill)}</div>
+                    {manha.length > LIST_RENDER_CAP && (
+                      <div className="text-center text-[12px] font-medium mt-2" style={{ color: "var(--ink3)" }}>
+                        + {manha.length - LIST_RENDER_CAP} atividades — use os filtros acima para focar
+                      </div>
+                    )}
                   </>
                 )}
                 {tarde.length > 0 && (
                   <>
                     <div className="qsx-glabel">Tarde · {tarde.length} {tarde.length === 1 ? "atividade" : "atividades"}</div>
-                    <div className="flex flex-col gap-2.5">{tarde.map(renderPill)}</div>
+                    <div className="flex flex-col gap-2.5">{tarde.slice(0, LIST_RENDER_CAP).map(renderPill)}</div>
+                    {tarde.length > LIST_RENDER_CAP && (
+                      <div className="text-center text-[12px] font-medium mt-2" style={{ color: "var(--ink3)" }}>
+                        + {tarde.length - LIST_RENDER_CAP} atividades — use os filtros acima para focar
+                      </div>
+                    )}
                   </>
                 )}
               </>
@@ -3176,12 +3279,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   onChange={(e) => setExtraTask(p => ({ ...p, channel_type: e.target.value as ChannelType }))}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400"
                 >
-                  <option value="ligacao">Fazer Ligação</option>
-                  <option value="ligacao_whatsapp">Ligar no WhatsApp</option>
-                  <option value="whatsapp">Enviar WhatsApp</option>
-                  <option value="email">Enviar E-mail</option>
-                  <option value="linkedin">Contato pelo LinkedIn</option>
-                  <option value="pesquisa">Atividade de Pesquisa</option>
+                  {(([
+                    ["ligacao", "Fazer Ligação"],
+                    ["ligacao_whatsapp", "Ligar no WhatsApp"],
+                    ["whatsapp", "Enviar WhatsApp"],
+                    ["email", "Enviar E-mail"],
+                    ["linkedin", "Contato pelo LinkedIn"],
+                    ["pesquisa", "Atividade de Pesquisa"],
+                  ] as [ChannelType, string][])
+                    .filter(([ch]) => channelOptions(extraTask.channel_type).includes(ch))
+                    .map(([ch, label]) => <option key={ch} value={ch}>{label}</option>))}
                 </select>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

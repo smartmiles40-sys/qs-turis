@@ -4,19 +4,32 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>QS Turis · by Inovvatur</title>
+    <title>QS · by STFV</title>
+
+    <!-- Modo Noturno: aplica o tema salvo ANTES do React montar (sem piscar branco) -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("qs_theme");
+          if (!t) t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          if (t === "dark") document.documentElement.classList.add("dark");
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {}
+      })();
+    </script>
 
     <!-- PWA / Adicionar à tela de início -->
-    <meta name="theme-color" content="#0147FF" />
-    <meta name="application-name" content="QS Turis" />
-    <meta name="description" content="QS Turis — Sistema de Qualificação de Leads (SDR) by Inovvatur" />
+    <meta name="theme-color" content="#0147FF" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0F141A" media="(prefers-color-scheme: dark)" />
+    <meta name="application-name" content="QS" />
+    <meta name="description" content="QS — Sistema de Qualificação de Leads (SDR) by STFV" />
     <link rel="manifest" href="/manifest.webmanifest" />
 
     <!-- iOS (iPhone/iPad): abre em tela cheia, sem barra do Safari -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="QS Turis" />
+    <meta name="apple-mobile-web-app-title" content="QS" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />

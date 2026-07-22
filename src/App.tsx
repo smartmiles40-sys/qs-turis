@@ -3,6 +3,7 @@ import SdrLayout from "@/components/sdr/SdrLayout";
 import LoginPage from "@/components/sdr/auth/LoginPage";
 import { QsAuthProvider, useQsAuth } from "@/contexts/QsAuthContext";
 import { ChatAppDockProvider } from "@/contexts/ChatAppDockContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -30,7 +31,7 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#F8F9FA" }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--bg)" }}>
         <div className="flex flex-col items-center gap-3">
           <div
             className="flex items-center justify-center w-10 h-10 rounded-xl text-white font-bold text-sm animate-pulse"
@@ -58,9 +59,11 @@ function AppContent() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <QsAuthProvider>
-        <AppContent />
-      </QsAuthProvider>
+      <ThemeProvider>
+        <QsAuthProvider>
+          <AppContent />
+        </QsAuthProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }

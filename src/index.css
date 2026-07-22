@@ -18,6 +18,40 @@
   --ink: #182231;
   --ink2: #586274;
   --ink3: #8B95A4;
+  --card2: #FAFBFC;      /* superfície secundária (caixas internas, hero-side) */
+  --accent: #0147FF;     /* azul da marca — usado como texto/realce */
+  --accent-soft: #EEF4FF;/* fundo suave do acento (chips/estados ativos) */
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MODO NOTURNO
+   O tema é uma classe no <html> (html.dark), aplicada pelo script anti-flash do
+   index.html e mantida pelo ThemeContext. Duas frentes cobrem o app inteiro:
+     1) as variáveis da paleta "Turis" abaixo trocam de valor → a tela de
+        Execução (TasksPanel, ~161 var(--…)) escurece sem tocar em componente;
+     2) a camada de override remapeia os utilitários Tailwind neutros mais usados
+        (bg-white, text-gray-*, border-gray-*, tints de acento) de uma só vez.
+   Acentos sólidos (bg-blue-600 + text-white em botões) NÃO são tocados.
+   ═══════════════════════════════════════════════════════════════════════════ */
+html.dark {
+  --blue: #4D82FF;
+  --blue-ink: #6E9BFF;
+  --orange: #FF9D42;
+  --green: #2BC0A6;
+  --yellow: #F5C542;
+  --red: #FF5C60;
+  --amber: #F0A227;
+  --bg: #0F141A;
+  --card: #171E27;
+  --card2: #1E2732;
+  --line: #2A3542;
+  --line2: #222C38;
+  --ink: #E7EBF1;
+  --ink2: #A6B0BE;
+  --ink3: #6E7889;
+  --accent: #5B8CFF;
+  --accent-soft: #1B2740;
+  color-scheme: dark;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -82,3 +116,78 @@ html.qs-webfone-open #webphone > * {
 @media (prefers-reduced-motion: reduce) {
   html.qs-webfone-open #webphone > * { animation: none !important; }
 }
+
+/* ── Camada de override do Modo Noturno (utilitários Tailwind) ────────────────
+   Seletores compostos (html.dark .classe) têm mais especificidade que o utilitário
+   puro e vêm depois no arquivo → vencem sem !important. Estilos inline com hex
+   (ex.: style={{background:'#fff'}}) NÃO são alcançáveis por CSS e são tratados
+   direto nos componentes de shell (SdrLayout, App). */
+html.dark body { background: var(--bg); color: var(--ink); }
+
+/* Superfícies */
+html.dark .bg-white { background-color: var(--card); }
+html.dark .bg-gray-50 { background-color: var(--card2); }
+html.dark .bg-gray-100 { background-color: #232E3A; }
+html.dark .bg-gray-200 { background-color: #2C3542; }
+html.dark .hover\:bg-white:hover { background-color: var(--card2); }
+html.dark .hover\:bg-gray-50:hover { background-color: var(--card2); }
+html.dark .hover\:bg-gray-100:hover { background-color: #232E3A; }
+
+/* Texto neutro */
+html.dark .text-gray-900 { color: var(--ink); }
+html.dark .text-gray-800 { color: var(--ink); }
+html.dark .text-gray-700 { color: #C6CEDA; }
+html.dark .text-gray-600 { color: #AFB8C5; }
+html.dark .text-gray-500 { color: var(--ink2); }
+html.dark .text-gray-400 { color: var(--ink3); }
+html.dark .text-gray-300 { color: #59616F; }
+html.dark .text-gray-200 { color: #4A515E; }
+html.dark .hover\:text-gray-900:hover { color: var(--ink); }
+html.dark .hover\:text-gray-700:hover { color: #C6CEDA; }
+html.dark .hover\:text-gray-600:hover { color: #AFB8C5; }
+
+/* Bordas / divisores */
+html.dark .border-gray-50 { border-color: var(--line2); }
+html.dark .border-gray-100 { border-color: var(--line2); }
+html.dark .border-gray-200 { border-color: var(--line); }
+html.dark .border-gray-300 { border-color: #35404E; }
+html.dark .hover\:border-gray-300:hover { border-color: #35404E; }
+html.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--line2); }
+html.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--line); }
+
+/* Tints de acento (fundo claro → translúcido no escuro) */
+html.dark .bg-blue-50 { background-color: rgba(91,140,255,.13); }
+html.dark .bg-blue-100 { background-color: rgba(91,140,255,.20); }
+html.dark .bg-green-50, html.dark .bg-emerald-50 { background-color: rgba(43,192,166,.13); }
+html.dark .bg-green-100, html.dark .bg-emerald-100 { background-color: rgba(43,192,166,.20); }
+html.dark .bg-red-50 { background-color: rgba(255,92,96,.13); }
+html.dark .bg-red-100 { background-color: rgba(255,92,96,.20); }
+html.dark .bg-amber-50, html.dark .bg-yellow-50, html.dark .bg-orange-50 { background-color: rgba(240,162,39,.13); }
+html.dark .bg-amber-100, html.dark .bg-orange-100 { background-color: rgba(240,162,39,.20); }
+html.dark .bg-purple-50 { background-color: rgba(160,120,255,.13); }
+html.dark .hover\:bg-red-50:hover { background-color: rgba(255,92,96,.15); }
+html.dark .hover\:bg-blue-50:hover { background-color: rgba(91,140,255,.15); }
+html.dark .hover\:bg-green-50:hover { background-color: rgba(43,192,166,.15); }
+
+/* Texto de acento — brilha um pouco pra manter contraste sobre o escuro */
+html.dark .text-blue-700, html.dark .text-blue-600 { color: #86A9FF; }
+html.dark .text-green-700, html.dark .text-green-600,
+html.dark .text-emerald-700, html.dark .text-emerald-600 { color: #38D8BA; }
+html.dark .text-red-700, html.dark .text-red-600 { color: #FF8184; }
+html.dark .text-amber-700, html.dark .text-amber-600,
+html.dark .text-orange-700, html.dark .text-orange-600,
+html.dark .text-yellow-700 { color: #F5B54F; }
+
+/* Inputs / placeholder */
+html.dark input, html.dark textarea, html.dark select { color: var(--ink); }
+html.dark ::placeholder { color: var(--ink3); opacity: 1; }
+html.dark .placeholder-gray-400::placeholder { color: var(--ink3); }
+
+/* Sombras claras somem no preto — uma sombra única, mais funda, no escuro */
+html.dark .shadow, html.dark .shadow-sm, html.dark .shadow-md,
+html.dark .shadow-lg, html.dark .shadow-xl, html.dark .shadow-2xl {
+  box-shadow: 0 14px 34px -14px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.03);
+}
+
+/* Trilho de rolagem discreto no escuro */
+html.dark * { scrollbar-color: #39434F var(--bg); }

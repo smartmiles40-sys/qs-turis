@@ -34,7 +34,7 @@ export default function LoginPage() {
   return (
     <div
       className="min-h-screen flex items-center justify-center px-4"
-      style={{ background: "#F8F9FA", fontFamily: "inherit" }}
+      style={{ background: "var(--bg)", fontFamily: "inherit" }}
     >
       <div className="w-full max-w-sm">
         {/* Logo */}
@@ -46,9 +46,9 @@ export default function LoginPage() {
             QS
           </div>
           <h1 className="text-lg font-bold text-gray-900">
-            QS Turis
+            QS
           </h1>
-          <p className="text-[10px] text-gray-400 font-medium mb-1">by Inovvatur</p>
+          <p className="text-[10px] text-gray-400 font-medium mb-1">by STFV</p>
           <p className="text-sm text-gray-500">
             Faça login para acessar o sistema
           </p>

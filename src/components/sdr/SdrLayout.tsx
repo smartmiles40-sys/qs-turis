@@ -1,6 +1,7 @@
 // src/components/sdr/SdrLayout.tsx — QS (Qualificação System)
 import { useState, useRef, useEffect, Component, type ReactNode } from "react";
 import { useQsAuth, canAccessNav } from "@/contexts/QsAuthContext";
+import { useTheme } from "@/contexts/ThemeContext";
 
 // ── Error Boundary ─────────────────────────────────────────────────────────
 
@@ -176,8 +177,8 @@ function NavDropdown({
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 px-3 py-2 text-[14px] font-medium transition-colors rounded-md"
         style={{
-          color: isActive ? "#0147FF" : "#374151",
-          borderBottom: isActive ? "2px solid #0147FF" : "2px solid transparent",
+          color: isActive ? "var(--accent)" : "var(--ink2)",
+          borderBottom: isActive ? "2px solid var(--accent)" : "2px solid transparent",
           borderRadius: 0,
         }}
       >
@@ -214,6 +215,7 @@ function NavDropdown({
 
 export default function SdrLayout() {
   const { currentUser, logout } = useQsAuth();
+  const { isDark, toggleTheme } = useTheme();
   const [activeNav, setActiveNav] = useState<SdrNav>("painel");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [editingCadenceId, setEditingCadenceId] = useState<string | null>(null);
@@ -307,15 +309,15 @@ export default function SdrLayout() {
     activeNav;
 
   return (
-    <div className="h-dvh flex overflow-hidden" style={{ background: "#F8F9FA" }}>
+    <div className="h-dvh flex overflow-hidden" style={{ background: "var(--bg)" }}>
       {/* ── COLUNA PRINCIPAL (topo + conteúdo) — divide a tela com o ChatApp ── */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {/* ── TOP BAR ────────────────────────────────────────────────────── */}
       <header
         className="shrink-0 z-50 flex items-center justify-between px-3 sm:px-4 h-[52px] select-none pl-safe pr-safe"
         style={{
-          background: "#FFFFFF",
-          borderBottom: "1px solid #E5E7EB",
+          background: "var(--card)",
+          borderBottom: "1px solid var(--line)",
         }}
       >
         {/* Left: Hambúrguer (mobile) + Logo + Nav */}
@@ -332,7 +334,7 @@ export default function SdrLayout() {
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </button>
-          {/* QS Turis Logo */}
+          {/* QS Logo */}
           <div className="flex items-center gap-2 md:mr-4 md:pr-4 md:border-r md:border-gray-200">
             <div
               className="flex items-center justify-center w-7 h-7 rounded-lg text-white font-bold text-[11px]"
@@ -340,10 +342,7 @@ export default function SdrLayout() {
             >
               QS
             </div>
-            <div className="flex flex-col">
-              <span className="text-[11px] font-bold text-gray-800 leading-none">Turis</span>
-              <span className="text-[8px] text-gray-400 font-medium leading-none mt-0.5">by Inovvatur</span>
-            </div>
+            <span className="text-[9px] text-gray-400 font-semibold leading-none tracking-wide">by STFV</span>
           </div>
 
           {/* Nav items (desktop) — no mobile vira o menu lateral */}
@@ -367,8 +366,8 @@ export default function SdrLayout() {
                   onClick={() => navigate(item.id)}
                   className="px-3 py-2 text-[14px] font-medium transition-colors"
                   style={{
-                    color: isActive ? "#0147FF" : "#374151",
-                    borderBottom: isActive ? "2px solid #0147FF" : "2px solid transparent",
+                    color: isActive ? "var(--accent)" : "var(--ink2)",
+                    borderBottom: isActive ? "2px solid var(--accent)" : "2px solid transparent",
                     borderRadius: 0,
                   }}
                 >
@@ -379,8 +378,28 @@ export default function SdrLayout() {
           </nav>
         </div>
 
-        {/* Right: Busca + Telefone + Notificações + Avatar */}
+        {/* Right: Tema + Busca + Telefone + Notificações + Avatar */}
         <div className="flex items-center gap-2">
+          {/* Modo Noturno — alterna claro/escuro (por dispositivo) */}
+          <button
+            onClick={toggleTheme}
+            title={isDark ? "Modo claro" : "Modo noturno"}
+            aria-label={isDark ? "Ativar modo claro" : "Ativar modo noturno"}
+            className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
+          >
+            {isDark ? (
+              // Sol (voltar ao claro)
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+              </svg>
+            ) : (
+              // Lua (ir pro escuro)
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            )}
+          </button>
           {/* Busca global (Ctrl+K) */}
           <button
             onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}
@@ -503,10 +522,7 @@ export default function SdrLayout() {
             <div className="shrink-0 flex items-center justify-between px-4 h-[52px] border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <div className="flex items-center justify-center w-7 h-7 rounded-lg text-white font-bold text-[11px]" style={{ background: "#0147FF" }}>QS</div>
-                <div className="flex flex-col">
-                  <span className="text-[12px] font-bold text-gray-800 leading-none">Turis</span>
-                  <span className="text-[8px] text-gray-400 font-medium leading-none mt-0.5">by Inovvatur</span>
-                </div>
+                <span className="text-[9px] text-gray-400 font-semibold leading-none tracking-wide">by STFV</span>
               </div>
               <button
                 onClick={() => setMobileNavOpen(false)}
@@ -531,9 +547,9 @@ export default function SdrLayout() {
                             key={item.id}
                             onClick={() => { navigate(item.id); setMobileNavOpen(false); }}
                             className="w-full text-left px-4 py-3 flex flex-col gap-0.5 active:bg-gray-50 transition-colors"
-                            style={{ background: active ? "#EEF4FF" : "transparent", borderLeft: active ? "3px solid #0147FF" : "3px solid transparent" }}
+                            style={{ background: active ? "var(--accent-soft)" : "transparent", borderLeft: active ? "3px solid var(--accent)" : "3px solid transparent" }}
                           >
-                            <span className="text-[14px] font-semibold" style={{ color: active ? "#0147FF" : "#182231" }}>{item.label}</span>
+                            <span className="text-[14px] font-semibold" style={{ color: active ? "var(--accent)" : "var(--ink)" }}>{item.label}</span>
                             {item.description && <span className="text-[11px] text-gray-400">{item.description}</span>}
                           </button>
                         );
@@ -547,9 +563,9 @@ export default function SdrLayout() {
                     key={entry.id}
                     onClick={() => { navigate(entry.id); setMobileNavOpen(false); }}
                     className="w-full text-left px-4 py-3 active:bg-gray-50 transition-colors"
-                    style={{ background: active ? "#EEF4FF" : "transparent", borderLeft: active ? "3px solid #0147FF" : "3px solid transparent" }}
+                    style={{ background: active ? "var(--accent-soft)" : "transparent", borderLeft: active ? "3px solid var(--accent)" : "3px solid transparent" }}
                   >
-                    <span className="text-[14px] font-semibold" style={{ color: active ? "#0147FF" : "#182231" }}>{entry.label}</span>
+                    <span className="text-[14px] font-semibold" style={{ color: active ? "var(--accent)" : "var(--ink)" }}>{entry.label}</span>
                   </button>
                 );
               })}
