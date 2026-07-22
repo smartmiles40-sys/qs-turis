@@ -409,7 +409,7 @@ export default function AdvancedAnalyticsPanel() {
         </p>
 
         {error ? (
-          <div className="rounded-2xl border p-6 text-center" style={{ background: "#FEF2F2", borderColor: "#FECACA" }}>
+          <div className="rounded-2xl border p-6 text-center" style={{ background: "rgba(229,72,77,0.10)", borderColor: "rgba(229,72,77,0.30)" }}>
             <p className="text-sm text-gray-700 mb-3">{error}</p>
             <button onClick={load} className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white" style={{ background: BLUE }}>
               Tentar de novo

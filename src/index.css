@@ -189,5 +189,16 @@ html.dark .shadow-lg, html.dark .shadow-xl, html.dark .shadow-2xl {
   box-shadow: 0 14px 34px -14px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.03);
 }
 
+/* Classes de valor arbitrário (bg-[#hex]) que o override por classe padrão não
+   pega. Só as CLARAS — os acentos (bg-[#0147FF] etc.) ficam. Escape: bg-\[\#..\].
+   O bg-[#F8F9FA] (25 usos) era a "folha branca" atrás dos paineis de Análises,
+   Cadências e Leads no escuro. */
+html.dark .bg-\[\#F8F9FA\] { background-color: var(--bg); }
+html.dark .bg-\[\#F9FAFB\], html.dark .bg-\[\#F5F6F8\], html.dark .bg-\[\#FAFBFC\] { background-color: var(--card2); }
+html.dark .bg-\[\#FFF7ED\] { background-color: rgba(240,162,39,.10); }
+html.dark .bg-\[\#E8EEFF\] { background-color: rgba(91,140,255,.12); }
+html.dark .bg-\[\#E1F5F0\] { background-color: rgba(43,192,166,.12); }
+html.dark .border-\[\#E5E7EB\], html.dark .border-\[\#E4E8EE\], html.dark .border-\[\#EEF1F5\] { border-color: var(--line); }
+
 /* Trilho de rolagem discreto no escuro */
 html.dark * { scrollbar-color: #39434F var(--bg); }

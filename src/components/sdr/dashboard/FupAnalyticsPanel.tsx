@@ -441,7 +441,7 @@ export default function FupAnalyticsPanel() {
                     ))}
                   </div>
                   {curveInsight && (
-                    <div className="rounded-xl border p-3 mt-4" style={{ background: "#FFF7ED", borderColor: "#FED7AA" }}>
+                    <div className="rounded-xl border p-3 mt-4" style={{ background: "rgba(240,162,39,0.10)", borderColor: "rgba(240,162,39,0.32)" }}>
                       <p className="text-[13px] text-gray-700"><b>Leitura:</b> {curveInsight}</p>
                     </div>
                   )}

@@ -178,10 +178,10 @@ export default function CadenceHealthPanel() {
           <>
             {/* Números-chave */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <StatTile label="Na fila" value={total} color="#111827" />
+              <StatTile label="Na fila" value={total} color="var(--ink)" />
               <StatTile label="Em FUP" value={emFup} color={AMBER} />
               <StatTile label="Atrasadas" value={atrasadas} color={RED} />
-              <StatTile label="Backlog (dias)" value={backlogDias} color={backlogDias >= 3 ? RED : "#111827"} hint="atividade parada há mais tempo" />
+              <StatTile label="Backlog (dias)" value={backlogDias} color={backlogDias >= 3 ? RED : "var(--ink)"} hint="atividade parada há mais tempo" />
             </div>
 
             {/* Distribuição por etapa */}
@@ -205,7 +205,7 @@ export default function CadenceHealthPanel() {
 
             {/* Leitura rápida */}
             {insights.length > 0 && (
-              <div className="rounded-2xl border p-4 mb-6" style={{ background: "#FFF7ED", borderColor: "#FED7AA" }}>
+              <div className="rounded-2xl border p-4 mb-6" style={{ background: "rgba(240,162,39,0.10)", borderColor: "rgba(240,162,39,0.32)" }}>
                 <h2 className="text-sm font-bold text-gray-900 mb-1.5">Leitura</h2>
                 <ul className="text-[13.5px] text-gray-700 space-y-1 list-disc pl-5">
                   {insights.map((t, i) => <li key={i}>{t}</li>)}
