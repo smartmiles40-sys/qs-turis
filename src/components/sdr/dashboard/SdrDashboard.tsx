@@ -90,120 +90,6 @@ interface HeatmapCell {
   count: number;
 }
 
-// ── SVG Area Chart ──────────────────────────────────────────────────────────
-
-const CHART_W = 720;
-const CHART_H = 220;
-const CHART_PAD_L = 40;
-const CHART_PAD_R = 16;
-const CHART_PAD_T = 16;
-const CHART_PAD_B = 28;
-
-function buildPath(data: number[], maxVal: number, totalDays: number): string {
-  const usableW = CHART_W - CHART_PAD_L - CHART_PAD_R;
-  const usableH = CHART_H - CHART_PAD_T - CHART_PAD_B;
-
-  return data
-    .map((v, i) => {
-      const x = CHART_PAD_L + (i / (totalDays - 1)) * usableW;
-      const y = CHART_PAD_T + usableH - (v / maxVal) * usableH;
-      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-}
-
-function buildAreaPath(
-  data: number[],
-  maxVal: number,
-  totalDays: number
-): string {
-  const usableW = CHART_W - CHART_PAD_L - CHART_PAD_R;
-  const usableH = CHART_H - CHART_PAD_T - CHART_PAD_B;
-  const baseline = CHART_PAD_T + usableH;
-
-  const linePath = data
-    .map((v, i) => {
-      const x = CHART_PAD_L + (i / (totalDays - 1)) * usableW;
-      const y = CHART_PAD_T + usableH - (v / maxVal) * usableH;
-      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-
-  const lastX =
-    CHART_PAD_L + ((data.length - 1) / (totalDays - 1)) * usableW;
-  const firstX = CHART_PAD_L;
-
-  return `${linePath} L${lastX.toFixed(1)},${baseline} L${firstX.toFixed(1)},${baseline} Z`;
-}
-
-function AreaChart({ realData, predictedData }: { realData: number[]; predictedData: number[] }) {
-  const maxVal = Math.max(...predictedData, ...realData) * 1.1 || 100;
-  const totalDays = 30;
-
-  const yTicks = [0, 25, 50, 75, 100];
-  const xTicks = [1, 5, 10, 15, 20, 25, 30];
-
-  const usableW = CHART_W - CHART_PAD_L - CHART_PAD_R;
-  const usableH = CHART_H - CHART_PAD_T - CHART_PAD_B;
-
-  return (
-    <svg
-      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-      className="w-full h-auto"
-      preserveAspectRatio="xMidYMid meet"
-    >
-      {/* Grid lines */}
-      {yTicks.map((tick) => {
-        const y = CHART_PAD_T + usableH - (tick / maxVal) * usableH;
-        return (
-          <g key={tick}>
-            <line x1={CHART_PAD_L} y1={y} x2={CHART_W - CHART_PAD_R} y2={y} stroke="#E5E7EB" strokeWidth="0.5" />
-            <text x={CHART_PAD_L - 6} y={y + 3} textAnchor="end" fill="#9CA3AF" fontSize="9">{tick}</text>
-          </g>
-        );
-      })}
-
-      {/* X-axis labels */}
-      {xTicks.map((day) => {
-        const x = CHART_PAD_L + ((day - 1) / (totalDays - 1)) * usableW;
-        return (
-          <text key={day} x={x} y={CHART_H - 4} textAnchor="middle" fill="#9CA3AF" fontSize="9">{day}</text>
-        );
-      })}
-
-      {/* Predicted line (dashed) */}
-      {predictedData.length > 1 && (
-        <path d={buildPath(predictedData, maxVal, totalDays)} fill="none" stroke="#9CA3AF" strokeWidth="1.5" strokeDasharray="5 3" />
-      )}
-
-      {/* Real area fill */}
-      {realData.length > 1 && (
-        <path d={buildAreaPath(realData, maxVal, totalDays)} fill="url(#orangeGradient)" opacity="0.15" />
-      )}
-
-      {/* Real line (solid) */}
-      {realData.length > 1 && (
-        <path d={buildPath(realData, maxVal, totalDays)} fill="none" stroke="#0147FF" strokeWidth="2" />
-      )}
-
-      {/* Current day dot */}
-      {realData.length > 0 && (() => {
-        const lastIdx = realData.length - 1;
-        const x = CHART_PAD_L + (lastIdx / (totalDays - 1)) * usableW;
-        const y = CHART_PAD_T + usableH - (realData[lastIdx] / maxVal) * usableH;
-        return <circle cx={x} cy={y} r="4" fill="#0147FF" />;
-      })()}
-
-      <defs>
-        <linearGradient id="orangeGradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#0147FF" />
-          <stop offset="100%" stopColor="#0147FF" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-    </svg>
-  );
-}
-
 // ── Horizontal Bar Chart ────────────────────────────────────────────────────
 
 function LossReasonsChart({
@@ -748,8 +634,6 @@ export default function SdrDashboard() {
   // Real data states
   const [users, setUsers] = useState<SdrUser[]>([]);
   const [kpiCards, setKpiCards] = useState<KpiCard[]>([]);
-  const [realData, setRealData] = useState<number[]>([]);
-  const [predictedData, setPredictedData] = useState<number[]>([]);
   const [channelPerformance, setChannelPerformance] = useState<ChannelPerformanceRow[]>([]);
   const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
   const [speedToLead, setSpeedToLead] = useState<number | null>(null);
@@ -890,28 +774,10 @@ export default function SdrDashboard() {
         .order("period_start", { ascending: false });
       if (ownerId) qGoals = qGoals.eq("owner_id", ownerId);
 
-      // Data de FECHAMENTO (closed_at, migration 0012) — updated_at re-contava
-      // ganhos antigos no mês atual a cada edição do lead.
-      const closedCol = await getClosedAtColumn();
-      const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const currentDay = now.getDate();
-
-      // As 3 buscas são independentes → paralelas (antes eram 3 idas em série).
-      const [stats, goalsRes, ganhosDays] = await Promise.all([
+      // As 2 buscas são independentes → paralelas.
+      const [stats, goalsRes] = await Promise.all([
         fetchDashboardStats(ownerId, from, to),
         qGoals,
-        // Paginado (cap 1000 do PostgREST): mês forte não pode "parar de contar".
-        fetchAllRows<Record<string, string>>((f, t) => {
-          let q = supabase
-            .from("qs_leads")
-            .select(closedCol)
-            .eq("status", "ganho")
-            .gte(closedCol, monthStart.toISOString())
-            .order("id");
-          if (ownerId) q = q.eq("owner_id", ownerId);
-          return q.range(f, t);
-        }),
       ]);
       if (goalsRes.error) throw goalsRes.error;
 
@@ -1024,32 +890,6 @@ export default function SdrDashboard() {
       ];
 
       setKpiCards(cards);
-
-      // Build cumulative array (ganhos accumulated by day, mês corrente)
-      const dayCounts = new Array(currentDay).fill(0);
-      ganhosDays.forEach((row: any) => {
-        const d = new Date(row[closedCol]).getDate();
-        if (d >= 1 && d <= currentDay) {
-          dayCounts[d - 1]++;
-        }
-      });
-
-      const cumulative: number[] = [];
-      let acc = 0;
-      for (let i = 0; i < dayCounts.length; i++) {
-        acc += dayCounts[i];
-        cumulative.push(acc);
-      }
-
-      setRealData(cumulative.length > 0 ? cumulative : [0]);
-
-      // Simple linear prediction
-      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-      const predicted: number[] = [];
-      for (let i = 0; i < daysInMonth; i++) {
-        predicted.push(Math.round((metaGanhos.value / daysInMonth) * (i + 1)));
-      }
-      setPredictedData(predicted);
       setErrKpis(null);
     } catch (err) {
       console.warn("Erro ao carregar KPIs do dashboard:", err);
@@ -2345,38 +2185,6 @@ export default function SdrDashboard() {
       <div className="pt-2">
         <h2 className="text-sm font-bold text-gray-800">Detalhamento</h2>
         <p className="text-xs text-gray-400 mt-0.5">Séries históricas, canais, horários, funil e motivos de perda — a camada analítica completa da operação.</p>
-      </div>
-
-      {/* Area Chart */}
-      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-        <div className="flex items-center justify-between flex-wrap gap-y-2 mb-4">
-          <h2 className="text-sm font-medium text-gray-700">
-            Ganhos ao longo do mês
-          </h2>
-          <div className="flex items-center gap-4 text-xs text-gray-500">
-            <span className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 bg-[#0147FF] rounded-full inline-block" />
-              Real
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span
-                className="w-4 h-0.5 rounded-full inline-block"
-                style={{
-                  backgroundImage: "repeating-linear-gradient(90deg, #9CA3AF 0 4px, transparent 4px 7px)",
-                  backgroundColor: "transparent",
-                }}
-              />
-              Previsto
-            </span>
-          </div>
-        </div>
-        {errKpis ? (
-          <SectionError message={errKpis} onRetry={() => loadKpis()} />
-        ) : loadingKpis ? (
-          <p className="text-sm text-gray-500 text-center py-8">Carregando...</p>
-        ) : (
-          <AreaChart realData={realData} predictedData={predictedData} />
-        )}
       </div>
 
       {/* KPI Cards + Speed-to-Lead */}

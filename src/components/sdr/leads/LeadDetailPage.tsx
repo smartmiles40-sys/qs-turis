@@ -1727,6 +1727,32 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               {lead.cadence_started_at && ` | Início: ${formatDate(lead.cadence_started_at)}`}
             </p>
 
+            {/* Informações do formulário — consolida o que veio na ENTRADA do lead
+                (origem/segmento/contato/valor…) pro SDR não precisar abrir o Bitrix
+                pra checar o básico. Mostra o que o QS já guarda hoje. */}
+            <div className="mb-6 rounded-lg border border-blue-100 bg-blue-50/40 p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                </svg>
+                <h4 className="text-xs font-semibold text-blue-800">Informações do formulário</h4>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+                <InfoRow label="Origem" value={SOURCE_LABELS[lead.source]} />
+                <InfoRow label="Segmento / Produto" value={lead.segment} />
+                <InfoRow label="Temperatura" value={lead.lead_score} />
+                <InfoRow label="Valor estimado" value={lead.estimated_value != null ? lead.estimated_value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : null} />
+                <InfoRow label="Empresa" value={lead.company_name} />
+                <InfoRow label="Cargo" value={lead.job_title} />
+                <InfoRow label="Cidade / UF" value={[lead.city, lead.state].filter(Boolean).join(" / ") || null} />
+                <InfoRow label="Telefone" value={lead.phone} />
+                <InfoRow label="E-mail" value={lead.email} />
+                {lead.website && <InfoRow label="Website" value={lead.website} />}
+                {lead.linkedin_url && <InfoRow label="LinkedIn" value={lead.linkedin_url} />}
+                <InfoRow label="Chegou em" value={lead.arrived_at ? formatDateTime(lead.arrived_at) : null} />
+              </div>
+            </div>
+
             {/* Próximas atividades (Sprint 4: pendentes/futuras, antes invisíveis) */}
             {(() => {
               const box = renderUpcomingTasksBox();

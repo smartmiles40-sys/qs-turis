@@ -376,35 +376,128 @@ export async function fetchActivityCounts(ownerId?: string | null): Promise<Acti
   }
 }
 
+// Padrão de meta de ATIVIDADES POR SDR (usado só pra preencher quem não tem
+// meta cadastrada, na somatória do admin). Mesmo valor do fallback do Painel
+// (DAILY_GOAL/MONTHLY_GOAL em TasksPanel) — que representa UMA unidade (1 SDR).
+const PER_SDR_ACTIVITY_DEFAULT: Record<"diario" | "mensal", number> = { diario: 350, mensal: 7350 };
+
 /**
  * Metas de ATIVIDADES vindas de qs_goals (period diario/mensal).
- * Com ownerId: prioriza a meta do próprio SDR; sem: soma as metas do time.
+ * - Com ownerId (SDR vendo o próprio, ou admin filtrado numa unidade): a meta
+ *   do dono, senão a global, senão null (o Painel usa o fallback).
+ * - Sem ownerId (admin SEM unidade selecionada): SOMA das metas dos SDRs ativos
+ *   — quem não tem meta entra com o padrão por SDR. Pedido do Bruno (2026-07-22):
+ *   o admin sempre vê a SOMA dos SDRs, alinhando a meta ao realizado (que já
+ *   soma o time). Isso INVERTE a regra antiga de "meta global de equipe".
  * Retorna null quando não há meta cadastrada (o Painel usa o fallback).
  */
 export async function fetchActivityGoals(ownerId?: string | null): Promise<{ daily: number | null; monthly: number | null }> {
   try {
-    const { data, error } = await supabase.from("qs_goals").select("*").eq("type", "atividades");
+    const { data, error } = await supabase.from("qs_goals").select("owner_id, period, target_value").eq("type", "atividades");
     if (error || !data) return { daily: null, monthly: null };
     const goals = data as { owner_id: string | null; period: string; target_value: number }[];
-    const pick = (period: string): number | null => {
-      const list = goals.filter((g) => g.period === period);
-      if (list.length === 0) return null;
-      if (ownerId) {
+
+    // Unidade específica: meta do dono → global → null.
+    if (ownerId) {
+      const pickOwn = (period: string): number | null => {
+        const list = goals.filter((g) => g.period === period);
+        if (list.length === 0) return null;
         const own = list.find((g) => g.owner_id === ownerId);
         if (own) return own.target_value;
         const global = list.find((g) => !g.owner_id);
         return global ? global.target_value : null;
+      };
+      return { daily: pickOwn("diario"), monthly: pickOwn("mensal") };
+    }
+
+    // Admin sem unidade: somatória das metas dos SDRs ativos (fill com o padrão).
+    const { data: sdrData } = await supabase
+      .from("qs_users").select("id").eq("role", "sdr").eq("is_active", true);
+    const sdrIds = (sdrData ?? []).map((u: { id: string }) => u.id);
+
+    const sumSdr = (period: "diario" | "mensal"): number | null => {
+      const list = goals.filter((g) => g.period === period && g.owner_id);
+      // Boot / sem lista de SDRs ainda: cai na soma bruta das metas individuais.
+      if (sdrIds.length === 0) {
+        if (list.length === 0) return null;
+        return list.reduce((s, g) => s + (Number(g.target_value) || 0), 0);
       }
-      // Visão do admin SEM unidade selecionada: usa a meta GLOBAL (sem dono).
-      // NUNCA soma as metas individuais do time — a meta exibida é sempre a da
-      // unidade (pedido do Bruno: "selecionada na unidade, não no time todo").
-      const global = list.find((g) => !g.owner_id);
-      return global ? global.target_value : null;
+      const byOwner = new Map<string, number>();
+      list.forEach((g) => { if (g.owner_id && !byOwner.has(g.owner_id)) byOwner.set(g.owner_id, Number(g.target_value) || 0); });
+      const def = PER_SDR_ACTIVITY_DEFAULT[period];
+      return sdrIds.reduce((s, id) => s + (byOwner.get(id) ?? def), 0);
     };
-    return { daily: pick("diario"), monthly: pick("mensal") };
+    return { daily: sumSdr("diario"), monthly: sumSdr("mensal") };
   } catch (err) {
     console.warn("[QS] fetchActivityGoals failed:", err);
     return { daily: null, monthly: null };
+  }
+}
+
+// ── Reuniões: contagem de hoje e do mês (visibilidade no Painel) ─────────────
+export interface MeetingCounts { today: number; month: number; }
+
+/**
+ * Conta reuniões AGENDADAS PARA hoje e para o mês corrente (por scheduled_at),
+ * excluindo canceladas. Sem ownerId conta o time inteiro (admin) → soma
+ * automática dos SDRs; com ownerId, só as do dono. Espelha fetchActivityCounts.
+ */
+export async function fetchMeetingCounts(ownerId?: string | null): Promise<MeetingCounts> {
+  const now = new Date();
+  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  try {
+    let qDay = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
+      .neq("status", "cancelada")
+      .gte("scheduled_at", dayStart.toISOString()).lt("scheduled_at", dayEnd.toISOString());
+    let qMonth = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
+      .neq("status", "cancelada")
+      .gte("scheduled_at", monthStart.toISOString()).lt("scheduled_at", monthEnd.toISOString());
+    if (ownerId) { qDay = qDay.eq("owner_id", ownerId); qMonth = qMonth.eq("owner_id", ownerId); }
+    const [d, m] = await Promise.all([qDay, qMonth]);
+    return { today: d.count ?? 0, month: m.count ?? 0 };
+  } catch (err) {
+    console.warn("[QS] fetchMeetingCounts failed:", err);
+    return { today: 0, month: 0 };
+  }
+}
+
+// ── Ligações e mensagens por usuário (hoje) — visibilidade no Painel ─────────
+export interface ContactBreakdownRow { ownerId: string | null; ligacoes: number; mensagens: number; }
+const CONTACT_CALL_CHANNELS = new Set(["ligacao", "ligacao_whatsapp"]);
+const CONTACT_MSG_CHANNELS = new Set(["whatsapp"]);
+
+/**
+ * Conta, POR usuário, quantas LIGAÇÕES e MENSAGENS foram concluídas HOJE. Fonte
+ * = qs_tasks concluídas por channel_type (o RLS já entrega SDR=próprio,
+ * admin=todos). Sem ownerId traz o time; com ownerId, só o dono. Agrega no
+ * cliente (supabase-js não faz GROUP BY) via fetchAllRows (cap de 1000 linhas).
+ */
+export async function fetchContactBreakdownToday(ownerId?: string | null): Promise<ContactBreakdownRow[]> {
+  const now = new Date();
+  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+  try {
+    const rows = await fetchAllRows<{ owner_id: string | null; channel_type: string | null }>((f, t) => {
+      let q = supabase.from("qs_tasks").select("owner_id, channel_type")
+        .eq("status", "concluida").gte("completed_at", dayStart.toISOString()).order("id");
+      if (ownerId) q = q.eq("owner_id", ownerId);
+      return q.range(f, t);
+    });
+    const map = new Map<string, ContactBreakdownRow>();
+    for (const r of rows) {
+      const key = r.owner_id ?? "—";
+      const e = map.get(key) ?? { ownerId: r.owner_id, ligacoes: 0, mensagens: 0 };
+      const ch = r.channel_type ?? "";
+      if (CONTACT_CALL_CHANNELS.has(ch)) e.ligacoes++;
+      else if (CONTACT_MSG_CHANNELS.has(ch)) e.mensagens++;
+      map.set(key, e);
+    }
+    return Array.from(map.values());
+  } catch (err) {
+    console.warn("[QS] fetchContactBreakdownToday failed:", err);
+    return [];
   }
 }
 

@@ -11,7 +11,7 @@ import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
-import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, type CadenceScriptRow } from "@/lib/qs/queries";
+import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, type CadenceScriptRow, type ContactBreakdownRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getLeadScore } from "@/lib/leadScore";
@@ -491,13 +491,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
   // Placar REAL: atividades concluídas (hoje/mês) + metas de qs_goals.
   // ESCOPO: SDR vê sempre o próprio placar; admin/gestor vê o da UNIDADE
-  // selecionada no filtro "Responsável". A meta é sempre POR UNIDADE (pedido do
-  // Bruno) — sem unidade selecionada cai na meta global, nunca na soma do time.
+  // selecionada no filtro "Responsável". SEM unidade selecionada, o admin vê a
+  // SOMA dos SDRs (meta e realizado) — decisão do Bruno 2026-07-22.
   const [doneCounts, setDoneCounts] = useState({ doneToday: 0, doneMonth: 0 });
   const [goalTargets, setGoalTargets] = useState<{ daily: number | null; monthly: number | null }>({ daily: null, monthly: null });
+  // Reuniões (hoje/mês) e ligações+mensagens por usuário — visibilidade no topo
+  // do Painel. Mesmo escopo do placar (SDR=próprio, admin=time ou unidade).
+  const [meetingCounts, setMeetingCounts] = useState<{ today: number; month: number }>({ today: 0, month: 0 });
+  const [contactBreakdown, setContactBreakdown] = useState<ContactBreakdownRow[]>([]);
   const countsScope = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : (ownerFilter || null);
   const refreshCounts = useCallback(() => {
     fetchActivityCounts(countsScope).then(setDoneCounts);
+    fetchMeetingCounts(countsScope).then(setMeetingCounts);
+    fetchContactBreakdownToday(countsScope).then(setContactBreakdown);
     refreshDoneTodayMine(); // placar pessoal "feitas hoje" acompanha os desfechos
   }, [countsScope, refreshDoneTodayMine]);
   useEffect(() => {
@@ -1649,6 +1655,29 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // mostramos um estado neutro em vez do lixo. O SDR ainda pode trabalhar.
   const withinHours = isWithinHours(workHours, now);
 
+  // Ligações e mensagens por usuário (hoje). Admin sem unidade selecionada vê a
+  // linha de cada SDR ativo (mesmo com 0); SDR (ou admin filtrado numa unidade)
+  // vê só a própria linha.
+  const isTeamView = !!currentUser && canSeeAllData(currentUser.role) && !ownerFilter;
+  const contactRows = (() => {
+    const byOwner = new Map(contactBreakdown.map((r) => [r.ownerId ?? "—", r]));
+    const nameOf = (id: string): string =>
+      qsUsers.find((u) => u.id === id)?.name ?? (id === currentUser?.id ? currentUser?.name : undefined) ?? "Qualificador";
+    if (isTeamView) {
+      const sdrs = qsUsers.filter((u) => u.role === "sdr" && u.is_active !== false);
+      const base = sdrs.length > 0
+        ? sdrs.map((u) => ({ id: u.id, name: u.name }))
+        : [...byOwner.keys()].filter((k) => k !== "—").map((id) => ({ id, name: nameOf(id) }));
+      return base.map(({ id, name }) => {
+        const r = byOwner.get(id);
+        return { id, name, ligacoes: r?.ligacoes ?? 0, mensagens: r?.mensagens ?? 0 };
+      });
+    }
+    const scopeId = countsScope ?? currentUser?.id ?? "—";
+    const r = byOwner.get(scopeId);
+    return [{ id: scopeId, name: nameOf(scopeId), ligacoes: r?.ligacoes ?? 0, mensagens: r?.mensagens ?? 0 }];
+  })();
+
   // Saudação (design Execução)
   const greetHour = now.getHours();
   const greetWord = greetHour < 12 ? "Bom dia" : greetHour < 18 ? "Boa tarde" : "Boa noite";
@@ -2596,6 +2625,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-pace { display: flex; align-items: center; gap: 9px; padding: 9px 15px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; font-size: 13px; color: var(--ink2); font-weight: 600; white-space: nowrap; }
         .qsx-pace b { color: var(--ink); font-weight: 800; }
         .qsx-pace .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--line); flex: none; }
+        /* Métrica "plain" (sem barra), p/ contagens simples como Reuniões */
+        .qsx-metric-plain { justify-content: center; min-width: 150px; }
+        /* Ligações e mensagens por usuário */
+        .qsx-cm { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); }
+        .qsx-cm-title { font-size: 10.5px; font-weight: 800; letter-spacing: .9px; text-transform: uppercase; color: var(--ink3); margin-bottom: 10px; }
+        .qsx-cm-list { display: flex; flex-wrap: wrap; gap: 8px 10px; }
+        .qsx-cm-item { display: flex; align-items: center; gap: 14px; padding: 8px 13px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+        .qsx-cm-name { font-size: 12.5px; font-weight: 800; color: var(--ink); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .qsx-cm-stat { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--ink2); font-variant-numeric: tabular-nums; }
+        .qsx-cm-stat b { color: var(--ink); font-weight: 800; }
+        .qsx-cm-stat svg { opacity: .65; }
 
         /* Hero — Próxima atividade */
         .qsx-hero { display: flex; background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 28px -22px rgba(16,24,40,.30); }
@@ -2862,6 +2902,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 </div>
                 <div className="qsx-bar"><i style={{ width: `${monthlyPct}%`, background: monthlyBeat ? "var(--green)" : "var(--blue)" }} /></div>
               </div>
+              {/* Reuniões hoje/mês — visibilidade (agendadas p/ o período, exceto canceladas) */}
+              <div className="qsx-metric qsx-metric-plain">
+                <div className="qsx-mtop">
+                  <span className="qsx-mdot" style={{ background: "var(--green)" }} />
+                  <span className="qsx-mlab">Reuniões de hoje</span>
+                  <span className="qsx-mnums">{meetingCounts.today}</span>
+                </div>
+              </div>
+              <div className="qsx-metric qsx-metric-plain">
+                <div className="qsx-mtop">
+                  <span className="qsx-mdot" style={{ background: "var(--blue)" }} />
+                  <span className="qsx-mlab">Reuniões do mês</span>
+                  <span className="qsx-mnums">{meetingCounts.month}</span>
+                </div>
+              </div>
             </div>
             <div className="qsx-pace">
               <span style={{ color: "var(--orange)", display: "flex" }}>
@@ -2873,6 +2928,28 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <>Fora do expediente<span className="sep" />{remainingGoal > 0 ? <>faltam <b>{remainingGoal}</b> pra meta de hoje</> : <b style={{ color: "var(--green)" }}>meta de hoje batida!</b>}</>
               )}
               {monthlyBeat && <><span className="sep" /><b style={{ color: "var(--green)" }}>Meta mensal batida!</b></>}
+            </div>
+          </div>
+
+          {/* Ligações e mensagens por usuário (hoje) — evita depender do Bitrix/telefonia
+              pra saber a produção do dia. Ligação = ligacao/ligacao_whatsapp; Mensagem =
+              WhatsApp. Admin vê os SDRs; SDR vê o próprio. */}
+          <div className="qsx-cm">
+            <div className="qsx-cm-title">
+              Ligações e mensagens · hoje{isTeamView ? " · por qualificador" : ""}
+            </div>
+            <div className="qsx-cm-list">
+              {contactRows.map((r) => (
+                <div key={r.id} className="qsx-cm-item">
+                  {isTeamView && <span className="qsx-cm-name">{r.name.split(" ")[0]}</span>}
+                  <span className="qsx-cm-stat" title="Ligações concluídas hoje">
+                    <IconPhoneCall size={14} /><b>{r.ligacoes}</b> lig.
+                  </span>
+                  <span className="qsx-cm-stat" title="Mensagens (WhatsApp) enviadas hoje">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg><b>{r.mensagens}</b> msg.
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
