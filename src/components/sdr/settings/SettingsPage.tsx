@@ -9,6 +9,7 @@ import { WAVOIP_TOKEN_KEY, ensureWavoipDevice } from "@/lib/wavoip";
 import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PREFIX_KEY, SIP_INSTALLER_URL_KEY, SIP_RAMAIS_KEY, DEFAULT_SIP_HOST } from "@/lib/sip";
 import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, deleteSipLine, ensureRegistered, type SipLineAdmin } from "@/lib/webphone";
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
+import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } from "@/lib/qs/chatProvider";
 import type {
   CustomField,
   CustomFieldScope,
@@ -51,7 +52,7 @@ const FIELD_TYPE_LABELS: Record<string, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "horario" | "equipe" | "agenda" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "horario" | "equipe" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -71,6 +72,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "webfone-webrtc", label: "Webfone WebRTC (VoxFree)", group: "EMPRESA" },
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
+  { key: "atendimento", label: "Atendimento (WhatsApp)", group: "INTEGRAÇÕES" },
   { key: "integracoes", label: "Integrações (status)", group: "INTEGRAÇÕES" },
 ];
 
@@ -1963,6 +1965,75 @@ function IntegracoesSection() {
   );
 }
 
+// ── Atendimento (cockpit de WhatsApp: ChatApp × Chatwoot) ────────────────────
+
+function AtendimentoSection() {
+  const [provider, setProvider] = useState<ChatProvider | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { getChatProvider().then(setProvider); }, []);
+
+  async function choose(p: ChatProvider) {
+    if (p === provider || saving) return;
+    setSaving(true);
+    const ok = await setChatProvider(p);
+    setSaving(false);
+    if (ok) { setProvider(p); notifySuccess(`Cockpit de atendimento: ${p === "chatwoot" ? "Chatwoot (embedado)" : "ChatApp (janela)"}.`); }
+    else notifyError("Não foi possível salvar (só admin pode trocar).");
+  }
+
+  const OPTIONS: { key: ChatProvider; title: string; desc: string }[] = [
+    { key: "chatapp", title: "ChatApp (legado)", desc: "Abre o ChatApp em janela externa. Comportamento atual." },
+    { key: "chatwoot", title: "Chatwoot (embedado)", desc: "Painel do Chatwoot self-hosted dentro do QS, com deep-link pro lead." },
+  ];
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Atendimento (WhatsApp)</h2>
+        <p className="text-sm text-gray-500 mt-1">Qual cockpit o SDR usa pra atender no WhatsApp. A troca é imediata (recarregar o QS pega o novo).</p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {OPTIONS.map((o) => {
+          const active = provider === o.key;
+          return (
+            <button
+              key={o.key}
+              onClick={() => choose(o.key)}
+              disabled={saving || provider === null}
+              className="text-left rounded-xl border p-4 transition-colors disabled:opacity-60"
+              style={active
+                ? { borderColor: "#0147FF", background: "#0147FF0d" }
+                : { borderColor: "var(--line, #E8EBF0)", background: "#fff" }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0" style={{ borderColor: active ? "#0147FF" : "#CBD5E1" }}>
+                  {active && <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#0147FF" }} />}
+                </span>
+                <span className="text-sm font-semibold text-gray-900">{o.title}</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1.5 leading-snug">{o.desc}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-gray-900">Chatwoot</h3>
+        <p className="text-xs text-gray-400 mt-0.5">
+          URL: <code className="text-gray-600">{getChatwootUrl()}</code>
+        </p>
+        <ul className="text-[11.5px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
+          <li>Só funciona acessando o QS por <b>qs.setuforeuvouviagens.com.br</b> (mesmo domínio do Chatwoot — senão o login não gruda no iframe).</li>
+          <li>O SDR faz login no Chatwoot <b>uma vez</b> dentro do painel; a sessão persiste.</li>
+          <li>Notificação/som de nova mensagem no navegador não funciona embedado (limite do browser) — use o app do Chatwoot no celular pra alertas.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -2027,6 +2098,7 @@ export default function SettingsPage() {
         {activeSection === "horario" && <HorarioSection />}
         {activeSection === "equipe" && <EquipeSection />}
         {activeSection === "agenda" && <AgendaSection />}
+        {activeSection === "atendimento" && <AtendimentoSection />}
         {activeSection === "webfone" && <WebfoneSection />}
         {activeSection === "webfone-webrtc" && <WebfoneWebrtcSection />}
         {activeSection === "telefone-sip" && <SipSection />}

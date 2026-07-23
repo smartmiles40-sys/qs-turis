@@ -67,7 +67,7 @@ import MeetingsPage from "./meetings/MeetingsPage";
 import SettingsPage from "./settings/SettingsPage";
 import CoveragePanel from "./dashboard/CoveragePanel";
 import NotificationsPanel from "./notifications/NotificationsPanel";
-import ChatAppDock from "./chatapp/ChatAppDock";
+import CommsDock from "./comms/CommsDock";
 import GlobalToasts from "./GlobalToasts";
 import CommandPalette from "./CommandPalette";
 import { toggleWebphone } from "@/lib/wavoip";
@@ -677,8 +677,9 @@ export default function SdrLayout() {
       </main>
       </div>
 
-      {/* Coluna do ChatApp — divide a tela; montada uma única vez e persistente */}
-      <ChatAppDock />
+      {/* Cockpit de atendimento (ChatApp ou Chatwoot, pela flag chat_provider) —
+          divide a tela; montado uma única vez e persistente */}
+      <CommsDock />
 
       {/* Toasts globais (erros de gravação, confirmações) */}
       <GlobalToasts />
