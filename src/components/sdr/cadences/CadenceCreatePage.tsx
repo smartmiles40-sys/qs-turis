@@ -440,6 +440,26 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       return;
     }
 
+    // Dia com CARTÃO mas sem atividade (2026-07-24): gap se faz NÃO criando o
+    // cartão do dia (ex.: 1-2-3-5 pula o 4). Cartão vazio confunde: o gestor
+    // acha que o dia existe no plano, mas a geração o ignora em silêncio —
+    // e se for o 1º dia, a cadência começa mais tarde do que a tela sugere.
+    const emptyDays = form.days.filter((d) => d.activities.length === 0).map((d) => d.day_number).sort((a, b) => a - b);
+    if (emptyDays.length > 0) {
+      notifyError(`O Dia ${emptyDays.join(", ")} está sem nenhuma atividade — adicione uma atividade ou exclua o cartão (pra espaçar dias, simplesmente não crie o cartão do dia de folga).`);
+      setActiveStep(2);
+      return;
+    }
+
+    // Dia inválido (0/negativo) — o input já sanitiza, mas cadências antigas
+    // carregadas podem trazer lixo; barra antes de gravar.
+    const badDays = form.days.filter((d) => !Number.isFinite(d.day_number) || d.day_number < 1).map((d) => d.day_number);
+    if (badDays.length > 0) {
+      notifyError("Há cartão de dia com número inválido (menor que 1) — corrija o número do dia antes de salvar.");
+      setActiveStep(2);
+      return;
+    }
+
     // Objetivo "Redirecionar" sem destino é promessa vazia: o motor de fim de
     // cadência (cadenceSweep) age pelo redirect_cadence_id, não pelo rótulo.
     if (form.objective === "redirecionar" && !form.redirect_cadence_id) {
@@ -480,8 +500,16 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       // JSON e regrava dias+atividades num BEGIN/COMMIT). Decidimos NÃO criar
       // migration nesta sprint (Sprint 4) — se falhar aqui, reabrir a cadência
       // e salvar de novo regrava o plano inteiro e conserta.
-      // Delete old days (cascade should handle activities)
-      await supabase.from("qs_cadence_days").delete().eq("cadence_id", cadenceId);
+      // Delete old days (cascade should handle activities) — MEDIDO (2026-07-24):
+      // se a RLS/rede recusar o delete e a gente seguir inserindo, o plano novo
+      // EMPILHA sobre o antigo (dias duplicados → tarefas duplicadas).
+      const { error: delErr } = await supabase.from("qs_cadence_days").delete().eq("cadence_id", cadenceId);
+      if (delErr) {
+        console.warn("Erro ao limpar o plano antigo:", delErr);
+        notifyError("Não foi possível regravar o plano (a limpeza do antigo falhou) — nada foi alterado nos dias. Tente salvar de novo.");
+        setSaving(false);
+        return;
+      }
     } else {
       // Insert new
       const { data, error } = await supabase.from("qs_cadences").insert(cadencePayload).select("id").single();
@@ -489,14 +517,16 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
       savedCadenceId = data.id;
     }
 
-    // Insert days and activities
+    // Insert days and activities. Falha parcial NÃO pode ser silenciosa
+    // (2026-07-24): sem aviso, o gestor achava que o plano inteiro gravou.
+    let planFailures = 0;
     for (const day of form.days) {
       const { data: dayData, error: dayErr } = await supabase
         .from("qs_cadence_days")
         .insert({ cadence_id: savedCadenceId, day_number: day.day_number })
         .select("id")
         .single();
-      if (dayErr || !dayData) { console.warn("Erro ao criar dia:", dayErr); continue; }
+      if (dayErr || !dayData) { console.warn("Erro ao criar dia:", dayErr); planFailures++; continue; }
 
       if (day.activities.length > 0) {
         const acts = day.activities.map((a, idx) => ({
@@ -507,8 +537,11 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
           script_text: a.script_text || null,
         }));
         const { error: actErr } = await supabase.from("qs_cadence_activities").insert(acts);
-        if (actErr) console.warn("Erro ao criar atividades:", actErr);
+        if (actErr) { console.warn("Erro ao criar atividades:", actErr); planFailures++; }
       }
+    }
+    if (planFailures > 0) {
+      notifyError(`Parte do plano (${planFailures} dia(s)/bloco(s)) NÃO foi gravada — reabra a cadência e salve de novo: salvar regrava o plano inteiro e conserta.`);
     }
 
     // Donos da cadência (quem recebe os leads no round-robin). Substitui o conjunto.
@@ -565,7 +598,10 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
   }
 
   function updateDayNumber(dayId: string, dayNumber: number) {
-    setForm((prev) => ({ ...prev, days: prev.days.map((d) => (d.id === dayId ? { ...d, day_number: dayNumber } : d)) }));
+    // Sanitiza na fonte (2026-07-24): dia 0/negativo/NaN vira 1 — o input tem
+    // min=1, mas digitar "-3" passava pelo parseInt e gerava plano estranho.
+    const clean = Number.isFinite(dayNumber) ? Math.max(1, Math.round(dayNumber)) : 1;
+    setForm((prev) => ({ ...prev, days: prev.days.map((d) => (d.id === dayId ? { ...d, day_number: clean } : d)) }));
   }
 
   function addActivity(dayId: string) {
@@ -912,7 +948,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                   </span>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {policy === "iniciar_imediato"
-                      ? "Inicia a cadência no dia da entrada, mesmo que não seja dia de execução."
+                      ? "Inicia a cadência no dia da entrada, mesmo fora dos dias de execução — mas SEMPRE dentro do Horário de Trabalho da empresa: se a empresa não abre no dia (ex.: sábado), a 1ª atividade cai no próximo momento de expediente."
                       : "Aguarda o próximo dia de execução configurado para iniciar a cadência."}
                   </p>
                 </div>

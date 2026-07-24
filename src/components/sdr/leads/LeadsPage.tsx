@@ -1573,6 +1573,9 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                                     scheduled_at: when.toISOString(),
                                     status: "pendente",
                                     is_extra: false,
+                                    // Carimbo do DIA DO PLANO — mesma regra do
+                                    // createCadenceTasks (rótulo FUP N real).
+                                    tags: [`dia:${d.day_number ?? 1}`],
                                   };
                                 })
                               );

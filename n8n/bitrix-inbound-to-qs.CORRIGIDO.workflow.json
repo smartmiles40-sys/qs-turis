@@ -16,7 +16,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ full_name: $json.full_name, phone: $json.phone, email: $json.email, bitrix_id: $json.ID, segment: $json.Fonte, source: $json.source }) }}",
+        "jsonBody": "={{ JSON.stringify({ full_name: $json.full_name, phone: $json.phone, email: $json.email, bitrix_id: $json.ID, segment: $json.Fonte, lead_score: $json.Morno || undefined, source: $json.source }) }}",
         "options": {}
       },
       "id": "26ce78ed-defc-4577-b7c0-0a8191d4432d",
@@ -78,7 +78,7 @@
               "id": "f5-city-0005",
               "name": "Morno",
               "type": "string",
-              "value": "={{ $json.query.LeadScoring || $json.query.Score }}"
+              "value": "={{ $json.query.Temperatura || $json.query.Pontuacao || $json.query.LeadScoring || $json.query.Score }}"
             },
             {
               "id": "f6-state-0006",

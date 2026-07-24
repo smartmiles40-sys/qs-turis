@@ -22,7 +22,7 @@ import { dialViaWavoip, setOnCallEnded, getWavoipToken } from "@/lib/wavoip";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
 import { logCallEnded } from "@/lib/qs/callLog";
-import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, nextWorkMoment, clampToWorkWindow, scheduleWeekdays, isWithinHours, type WorkHours } from "@/lib/workHours";
+import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, nextWorkMoment, clampToWorkWindow, scheduleWeekdays, isWithinHours, workdaysBetween, type WorkHours } from "@/lib/workHours";
 import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
 import type { SdrUser } from "../types";
 
@@ -524,20 +524,29 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
   // Classifica a tarefa pro controle FUP / Atrasada (pedido do Bruno). A categoria
   // "Novo" foi EXTINTA: todo lead sem 1º contato entra como FUP 1 (fupDay mínimo 1).
-  //  • fupDay = dia da cadência da tarefa (dia 1 = FUP 1, dia 2 = FUP 2…), derivado
-  //             da data agendada vs. a chegada do lead (o task não guarda o dia)
-  //  • overdue= venceu ANTES de hoje (a "atrasada" é sempre derivada da data)
+  //  • fupDay = o DIA DO PLANO da cadência (FUP 1 = Dia 1, FUP 2 = Dia 2…). Desde
+  //             2026-07-24 createCadenceTasks carimba "dia:N" nos tags — a antiga
+  //             derivação por dias corridos inflava o rótulo quando o plano
+  //             atravessava fim de semana (lead de sexta virava "FUP 4" no Dia 1).
+  //             Tasks antigas sem carimbo seguem no fallback por data.
+  //  • overdue= venceu em dia ÚTIL anterior (workdaysBetween) — a tarefa de sexta
+  //             NÃO amanhece "atrasada falsa" no sábado/domingo (mesma régua do
+  //             CadenceHealthPanel; "atrasada" continua derivada, nunca gravada).
   function classifyTask(task: Task): { fupDay: number; overdue: boolean } {
-    const lead = getLeadForTask(task);
-    const base = lead?.arrived_at || lead?.created_at || task.created_at;
-    let fupDay = 1;
-    if (base) {
-      const d0 = new Date(base); d0.setHours(0, 0, 0, 0);
-      const d1 = new Date(task.scheduled_at); d1.setHours(0, 0, 0, 0);
-      fupDay = Math.max(1, Math.round((d1.getTime() - d0.getTime()) / 86400000) + 1);
+    const tagged = task.tags?.find((t) => t.startsWith("dia:"));
+    const taggedDay = tagged ? parseInt(tagged.slice(4), 10) : NaN;
+    let fupDay = Number.isFinite(taggedDay) && taggedDay >= 1 ? taggedDay : 0;
+    if (!fupDay) {
+      const lead = getLeadForTask(task);
+      const base = lead?.arrived_at || lead?.created_at || task.created_at;
+      fupDay = 1;
+      if (base) {
+        const d0 = new Date(base); d0.setHours(0, 0, 0, 0);
+        const d1 = new Date(task.scheduled_at); d1.setHours(0, 0, 0, 0);
+        fupDay = Math.max(1, Math.round((d1.getTime() - d0.getTime()) / 86400000) + 1);
+      }
     }
-    const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
-    const overdue = new Date(task.scheduled_at).getTime() < startToday.getTime();
+    const overdue = workdaysBetween(workHours, new Date(task.scheduled_at), new Date()) >= 1;
     return { fupDay, overdue };
   }
 
@@ -1374,12 +1383,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const endMs = endOfToday.getTime();
     filtered = filtered.filter((t) => new Date(t.scheduled_at).getTime() <= endMs);
 
-    // "Atrasada" é DERIVADA da data (venceu antes de hoje) — o status 'atrasada'
-    // nunca é gravado pelo sistema, então filtrar por ele mostrava sempre 0
-    // enquanto o sino de notificações mostrava atrasadas de verdade.
-    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
-    const startMs = startOfToday.getTime();
-    const isOverdue = (t: Task) => new Date(t.scheduled_at).getTime() < startMs;
+    // "Atrasada" é DERIVADA da data (venceu em dia ÚTIL anterior) — o status
+    // 'atrasada' nunca é gravado pelo sistema. Régua por dia útil (2026-07-24):
+    // a tarefa de sexta não vira "atrasada falsa" no sábado/domingo.
+    const isOverdue = (t: Task) => workdaysBetween(workHours, new Date(t.scheduled_at), new Date()) >= 1;
     if (statusFilter === "extras") {
       filtered = filtered.filter((t) => t.is_extra);
     } else if (statusFilter === "para_hoje") {
@@ -1444,7 +1451,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
 
     return filtered;
-  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser]);
+  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser, workHours]);
 
   // Card "hero" atual (o que o SDR está atendendo) — usado no render E nos atalhos.
   const heroTaskMemo = useMemo(() => {
@@ -1600,7 +1607,6 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // (quando não é gestor/admin), de leads ainda ativos, até hoje. Antes contavam
   // a fila inteira do time + dias futuros e o número da saudação não batia.
   const endTodayMs = (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d.getTime(); })();
-  const startTodayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
   const counterBase = useMemo(() => {
     let base = tasks.filter((t) => {
       if (t.tags?.includes("re_contato")) return true;
@@ -1612,8 +1618,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     }
     return base.filter((t) => new Date(t.scheduled_at).getTime() <= endTodayMs);
   }, [tasks, leadsMap, currentUser, endTodayMs]);
-  const todayTasks = counterBase.filter((t) => new Date(t.scheduled_at).getTime() >= startTodayMs);
-  const overdueTasks = counterBase.filter((t) => new Date(t.scheduled_at).getTime() < startTodayMs);
+  // Partição por dia ÚTIL (2026-07-24): "atrasada" só quando venceu em dia útil
+  // anterior — no fim de semana a fila de sexta continua contando como "de hoje".
+  const overdueTasks = counterBase.filter((t) => workdaysBetween(workHours, new Date(t.scheduled_at), new Date()) >= 1);
+  const todayTasks = counterBase.filter((t) => workdaysBetween(workHours, new Date(t.scheduled_at), new Date()) < 1);
   const extraTasks = counterBase.filter((t) => t.is_extra);
   // Controle FUP / Atrasada (métrica que o Bruno pediu — sempre à vista). A
   // categoria "Novo" foi extinta: todo lead sem 1º contato é FUP 1, então TODA a
@@ -1998,7 +2006,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
                 </button>
                 {taskMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1 z-30 rounded-xl overflow-hidden" style={{ background: "#fff", border: "1px solid var(--line)", boxShadow: "0 12px 28px -14px rgba(16,24,40,.35)", minWidth: 230 }} role="menu">
+                  <div className="absolute right-0 top-full mt-1 z-30 rounded-xl overflow-hidden" style={{ background: "var(--card)", border: "1px solid var(--line)", boxShadow: "0 12px 28px -14px rgba(16,24,40,.35)", minWidth: 230 }} role="menu">
                     <button className="qsx-menu-item" role="menuitem" onClick={() => postponeTask(task, "amanha")}>
                       Adiar para amanhã
                     </button>
@@ -2205,7 +2213,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
           {/* Classificação da ligação (abre ao Concluir uma atividade de ligação) */}
           {classifyFor?.taskId === task.id && (
-            <div className="mt-1 rounded-2xl overflow-hidden" style={{ border: "1px solid var(--line)", background: "#fff" }}>
+            <div className="mt-1 rounded-2xl overflow-hidden" style={{ border: "1px solid var(--line)", background: "var(--card)" }}>
               <div className="px-4 pt-3.5 pb-3" style={{ borderBottom: "1px solid var(--line2)" }}>
                 <div className="flex items-center gap-2">
                   <span className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0" style={{ background: "rgba(18,161,138,.12)", color: "#0E7C6A" }}>
@@ -2416,7 +2424,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   onChange={(e) => setEditDraft((p) => ({ ...p, notes: e.target.value }))}
                   placeholder="Ex.: ligar depois das 14h"
                   className="w-full px-3 text-[13px] rounded-[10px]"
-                  style={{ height: 38, border: "1px solid var(--line)", background: "#fff", outline: "none", fontFamily: "inherit", color: "var(--ink)" }}
+                  style={{ height: 38, border: "1px solid var(--line)", background: "var(--card)", outline: "none", fontFamily: "inherit", color: "var(--ink)" }}
                 />
               </div>
               <button
@@ -2445,7 +2453,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               rows={2}
               placeholder="Anote o que rolou no contato… (vai como resumo para o Bitrix)"
               className="w-full px-3 py-2 text-sm rounded-xl resize-none"
-              style={{ border: "1px solid var(--line)", background: "#fff", outline: "none", fontFamily: "inherit", color: "var(--ink)" }}
+              style={{ border: "1px solid var(--line)", background: "var(--card)", outline: "none", fontFamily: "inherit", color: "var(--ink)" }}
             />
 
             <div className="qsx-side-lab" style={{ margin: "12px 0 9px" }}>
@@ -2562,7 +2570,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return (
       <div className="flex flex-col h-full overflow-hidden" style={{ background: "var(--bg)" }}>
         <style>{`@keyframes skPulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }`}</style>
-        <div className="px-4 md:px-6 pt-5 pb-4" style={{ background: "#fff", borderBottom: "1px solid var(--line)" }}>
+        <div className="px-4 md:px-6 pt-5 pb-4" style={{ background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
           <div className="flex flex-col gap-4" style={{ maxWidth: 1400, margin: "0 auto" }}>
             <div className="flex flex-wrap items-center gap-3">{sk(180, 24)}{sk(300, 16)}</div>
             <div className="flex flex-wrap items-center gap-3">{sk("40%", 48, 14)}{sk(150, 48, 14)}{sk(140, 48, 14)}{sk(140, 48, 14)}</div>

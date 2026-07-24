@@ -21,6 +21,7 @@ import {
   chatwootInboxUrl,
   chatwootConversationUrl,
   lookupChatwootConversation,
+  assignChatwootConversation,
   getChatwootUrl,
 } from "@/lib/qs/chatProvider";
 
@@ -88,13 +89,17 @@ export default function ChatwootDock() {
       setResolving(false);
       if (conversationId != null) {
         setIframeSrc(chatwootConversationUrl(conversationId));
+        // Auto-atribuição (2026-07-24): a conversa cai na fila do SDR dono do
+        // lead no QS (mapa em Configurações → Atendimento). Fire-and-forget —
+        // conversa já atribuída a alguém não é roubada.
+        assignChatwootConversation(conversationId, target?.ownerId ?? null);
       } else {
         // Sem conversa: fica no inbox e avisa (telefone já foi copiado no contexto).
         setNoConversation(true);
       }
     })();
     return () => { cancelled = true; };
-  }, [target?.leadId, target?.phone]);
+  }, [target?.leadId, target?.phone, target?.ownerId]);
 
   const openInWindow = useCallback(() => {
     const w = window.open(iframeSrc || getChatwootUrl(), "chatwoot_window");

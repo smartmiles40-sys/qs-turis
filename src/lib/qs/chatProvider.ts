@@ -75,6 +75,34 @@ export interface ChatwootLookupResult {
   contactId: number | null;
 }
 
+/**
+ * Atribui a conversa ao agente do Chatwoot mapeado pro SDR dono do lead
+ * (qs_settings.chatwoot_agent_map, editável em Configurações → Atendimento).
+ * Fire-and-forget e best-effort: o serverless não rouba conversa já atribuída
+ * e devolve assigned:false em qualquer configuração faltando — nunca quebra o dock.
+ */
+export async function assignChatwootConversation(
+  conversationId: number,
+  ownerId: string | null | undefined
+): Promise<void> {
+  if (!ownerId) return;
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    try {
+      const { supabase } = await import("@/lib/supabase");
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token) headers.Authorization = `Bearer ${data.session.access_token}`;
+    } catch { /* sem sessão — a rota nega */ }
+    await fetch("/api/chatwoot-assign", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ conversationId, ownerId }),
+    });
+  } catch (e) {
+    console.warn("[chatwoot] assign falhou (segue sem atribuir):", e);
+  }
+}
+
 export async function lookupChatwootConversation(phone: string | null | undefined): Promise<ChatwootLookupResult> {
   const empty: ChatwootLookupResult = { conversationId: null, conversationUrl: null, contactId: null };
   if (!phone) return empty;

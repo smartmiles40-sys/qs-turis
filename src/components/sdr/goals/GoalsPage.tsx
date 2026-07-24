@@ -459,8 +459,10 @@ export default function GoalsPage() {
 
       {/* Goals: Equipe + por usuário */}
       <div className="space-y-3">
-        {/* Meta de EQUIPE (owner_id null): placar coletivo — no dashboard ela
-            prevalece sobre a soma das metas individuais na visão "Todos". */}
+        {/* Meta de EQUIPE (owner_id null): referência coletiva. Texto alinhado à
+            realidade (2026-07-24): o placar do dashboard SOMA as metas
+            individuais dos SDRs ativos — a meta de equipe é acompanhamento à
+            parte, não substitui a soma. */}
         {teamGoals.length > 0 && (
           <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3">
@@ -469,7 +471,7 @@ export default function GoalsPage() {
               </div>
               <div>
                 <span className="text-sm font-medium text-gray-900">Equipe (todos)</span>
-                <span className="block text-xs text-gray-400">Meta coletiva — soma o time inteiro; no dashboard vale como o placar da equipe</span>
+                <span className="block text-xs text-gray-400">Meta coletiva de referência — o placar do dashboard usa a SOMA das metas individuais dos SDRs ativos</span>
               </div>
             </div>
             <GoalsTable
@@ -570,7 +572,7 @@ export default function GoalsPage() {
                 </select>
                 {modal.owner_id === TEAM_OWNER && (
                   <p className="mt-1 text-[11px] text-gray-400">
-                    Meta coletiva do time — no dashboard ela vale como o placar da equipe (não soma com as metas individuais).
+                    Meta coletiva de referência — o placar do dashboard usa a soma das metas individuais dos SDRs ativos; esta serve pro acompanhamento aqui na aba Metas.
                   </p>
                 )}
               </div>

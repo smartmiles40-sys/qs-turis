@@ -52,7 +52,7 @@ const FIELD_TYPE_LABELS: Record<string, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "horario" | "equipe" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "classificacao" | "horario" | "equipe" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -65,6 +65,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "canais", label: "Canais de Contato", group: "PLATAFORMA" },
   { key: "campos", label: "Campos Personalizados", group: "PLATAFORMA" },
   { key: "motivos", label: "Motivos de Perda", group: "PLATAFORMA" },
+  { key: "classificacao", label: "Classificação Automática", group: "PLATAFORMA" },
   { key: "horario", label: "Horário de Trabalho", group: "EMPRESA" },
   { key: "equipe", label: "Equipe da Reunião", group: "EMPRESA" },
   { key: "agenda", label: "Agenda (Google)", group: "EMPRESA" },
@@ -1971,7 +1972,39 @@ function AtendimentoSection() {
   const [provider, setProvider] = useState<ChatProvider | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Mapa "usuário QS → id do agente no Chatwoot" (auto-atribuição da conversa
+  // ao SDR dono do lead — sprint 2026-07-24). Key: chatwoot_agent_map.
+  const [agentUsers, setAgentUsers] = useState<{ id: string; name: string; role: string }[]>([]);
+  const [agentMap, setAgentMap] = useState<Record<string, string>>({});
+  const [savingMap, setSavingMap] = useState(false);
+
   useEffect(() => { getChatProvider().then(setProvider); }, []);
+
+  useEffect(() => {
+    (async () => {
+      const [{ data: users }, map] = await Promise.all([
+        supabase.from("qs_users").select("id, name, role").eq("is_active", true).in("role", ["sdr", "gestor", "admin"]).order("name"),
+        getSetting<Record<string, number | string>>("chatwoot_agent_map"),
+      ]);
+      setAgentUsers(((users ?? []) as { id: string; name: string; role: string }[]));
+      const m: Record<string, string> = {};
+      if (map && typeof map === "object") for (const [k, v] of Object.entries(map)) m[k] = String(v ?? "");
+      setAgentMap(m);
+    })();
+  }, []);
+
+  async function saveAgentMap() {
+    setSavingMap(true);
+    const clean: Record<string, number> = {};
+    for (const [k, v] of Object.entries(agentMap)) {
+      const n = Number(String(v).trim());
+      if (Number.isFinite(n) && n > 0) clean[k] = n;
+    }
+    const ok = await setSetting("chatwoot_agent_map", clean);
+    setSavingMap(false);
+    if (ok) notifySuccess("Mapa SDR → agente salvo. O dock passa a atribuir a conversa ao dono do lead.");
+    else notifyError("Não foi possível salvar o mapa (só admin/gestor grava configurações).");
+  }
 
   async function choose(p: ChatProvider) {
     if (p === provider || saving) return;
@@ -2030,6 +2063,151 @@ function AtendimentoSection() {
           <li>Notificação/som de nova mensagem no navegador não funciona embedado (limite do browser) — use o app do Chatwoot no celular pra alertas.</li>
         </ul>
       </div>
+
+      {/* Auto-atribuição: SDR do QS → agente do Chatwoot */}
+      <div className="bg-white border border-gray-100 rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-gray-900">Atribuição automática (SDR → agente do Chatwoot)</h3>
+        <p className="text-xs text-gray-500 mt-1 leading-snug">
+          Quando o dock abre a conversa de um lead, o QS atribui a conversa ao agente do Chatwoot mapeado pro
+          <b> dono do lead</b> (se ela ainda não tiver dono lá). O ID do agente aparece no Chatwoot em
+          <b> Agentes</b> (ou na URL do perfil do agente).
+        </p>
+        <div className="mt-3 space-y-2">
+          {agentUsers.length === 0 && <p className="text-sm text-gray-400">Carregando usuários…</p>}
+          {agentUsers.map((u) => (
+            <div key={u.id} className="flex items-center gap-3">
+              <span className="flex-1 text-sm text-gray-700 truncate">{u.name} <span className="text-[10.5px] text-gray-400 uppercase">({u.role})</span></span>
+              <input
+                value={agentMap[u.id] ?? ""}
+                onChange={(e) => setAgentMap({ ...agentMap, [u.id]: e.target.value })}
+                placeholder="ID do agente"
+                inputMode="numeric"
+                className="w-28 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 text-right focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+              />
+            </div>
+          ))}
+        </div>
+        {agentUsers.length > 0 && (
+          <div className="flex justify-end mt-3">
+            <button
+              onClick={saveAgentMap}
+              disabled={savingMap}
+              className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 transition-colors"
+            >
+              {savingMap ? "Salvando..." : "Salvar mapa"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Classificação Automática (auto_classify_rules) ──────────────────────────
+// Regras "Fonte → Temperatura" aplicadas NA ENTRADA do lead (serverless
+// /api/lead-inbound), só quando o Bitrix não manda temperatura — o rótulo do
+// Bitrix sempre vence. match = trecho/regex testado contra a Fonte (segment).
+
+interface AutoClassifyRule {
+  match: string;
+  temperatura: string;
+}
+
+function ClassificacaoSection() {
+  const [rules, setRules] = useState<AutoClassifyRule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getSetting<AutoClassifyRule[] | { rules: AutoClassifyRule[] }>("auto_classify_rules").then((v) => {
+      const list = Array.isArray(v) ? v : v && Array.isArray((v as { rules: AutoClassifyRule[] }).rules) ? (v as { rules: AutoClassifyRule[] }).rules : [];
+      setRules(list.filter((r) => r && typeof r.match === "string"));
+      setLoading(false);
+    });
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    const clean = rules
+      .map((r) => ({ match: r.match.trim(), temperatura: r.temperatura.trim() }))
+      .filter((r) => r.match && r.temperatura);
+    const ok = await setSetting("auto_classify_rules", clean);
+    setSaving(false);
+    if (ok) { setRules(clean); notifySuccess("Regras de classificação salvas — valem pros PRÓXIMOS leads que entrarem."); }
+    else notifyError("Não foi possível salvar as regras (só admin/gestor grava configurações).");
+  }
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Classificação Automática</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          Quando o lead entra pelo Bitrix <b>sem temperatura</b>, o QS aplica estas regras sobre a <b>Fonte</b> pra
+          sugerir Quente/Morno/Frio sozinho (o SDR pode ajustar no badge). Se o Bitrix mandar a temperatura, ela vence.
+        </p>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-gray-400">Carregando…</p>
+      ) : (
+        <div className="bg-white border border-gray-100 rounded-xl p-4 space-y-3">
+          {rules.length === 0 && (
+            <p className="text-sm text-gray-400">
+              Nenhuma regra — todo lead sem temperatura do Bitrix fica “sem classificação” até o SDR classificar.
+            </p>
+          )}
+          {rules.map((r, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-gray-400 shrink-0">Se a Fonte contém</span>
+              <input
+                value={r.match}
+                onChange={(e) => setRules(rules.map((x, j) => (j === i ? { ...x, match: e.target.value } : x)))}
+                placeholder="ex.: indicac|resgate"
+                className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+              />
+              <span className="text-xs text-gray-400 shrink-0">→</span>
+              <select
+                value={r.temperatura}
+                onChange={(e) => setRules(rules.map((x, j) => (j === i ? { ...x, temperatura: e.target.value } : x)))}
+                className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+              >
+                <option value="Quente">Quente</option>
+                <option value="Morno">Morno</option>
+                <option value="Frio">Frio</option>
+              </select>
+              <button
+                onClick={() => setRules(rules.filter((_, j) => j !== i))}
+                className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
+                title="Remover regra"
+                aria-label="Remover regra"
+              >
+                <TrashIcon />
+              </button>
+            </div>
+          ))}
+
+          <div className="flex items-center justify-between pt-1">
+            <button
+              onClick={() => setRules([...rules, { match: "", temperatura: "Morno" }])}
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-[#0147FF] hover:underline"
+            >
+              <PlusIcon /> Adicionar regra
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 transition-colors"
+            >
+              {saving ? "Salvando..." : "Salvar regras"}
+            </button>
+          </div>
+
+          <p className="text-[11.5px] text-gray-400 leading-snug">
+            O “contém” aceita alternativas com <code>|</code> (ex.: <code>whatsapp|orgânico|organico</code>) e ignora
+            maiúsculas/minúsculas. A regra roda uma vez, na chegada do lead — mudar aqui não reclassifica quem já entrou.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -2095,6 +2273,7 @@ export default function SettingsPage() {
         {activeSection === "canais" && <CanaisSection />}
         {activeSection === "campos" && <CamposSection />}
         {activeSection === "motivos" && <MotivosSection />}
+        {activeSection === "classificacao" && <ClassificacaoSection />}
         {activeSection === "horario" && <HorarioSection />}
         {activeSection === "equipe" && <EquipeSection />}
         {activeSection === "agenda" && <AgendaSection />}

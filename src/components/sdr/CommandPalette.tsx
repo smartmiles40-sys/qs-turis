@@ -109,9 +109,11 @@ export default function CommandPalette({ onOpenLead }: { onOpenLead: (leadId: st
   return (
     <div className="fixed inset-0 z-[80] flex items-start justify-center pt-[12vh] px-4" role="dialog" aria-modal="true" aria-label="Busca global">
       <div className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" onClick={() => setOpen(false)} />
-      <div className="relative w-full max-w-[560px] bg-white rounded-2xl shadow-2xl overflow-hidden" style={{ border: "1px solid #E4E8EE" }}>
+      {/* Cores por var(--*) (fix dark 2026-07-24): os hex inline ficavam
+          quase-pretos sobre o card escuro do Modo Noturno — busca ilegível. */}
+      <div className="relative w-full max-w-[560px] bg-white rounded-2xl shadow-2xl overflow-hidden" style={{ border: "1px solid var(--line, #E4E8EE)" }}>
         {/* Input */}
-        <div className="flex items-center gap-3 px-4 h-[54px] border-b" style={{ borderColor: "#F0F2F6" }}>
+        <div className="flex items-center gap-3 px-4 h-[54px] border-b" style={{ borderColor: "var(--line, #F0F2F6)" }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8B95A4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
           <input
             ref={inputRef}
@@ -124,10 +126,10 @@ export default function CommandPalette({ onOpenLead }: { onOpenLead: (leadId: st
             }}
             placeholder="Buscar cliente por nome, telefone, e-mail ou ID…"
             className="flex-1 outline-none text-[15px] bg-transparent"
-            style={{ color: "#17202E" }}
+            style={{ color: "var(--ink, #17202E)" }}
             aria-label="Buscar cliente"
           />
-          <kbd className="text-[10.5px] font-bold px-1.5 py-0.5 rounded border" style={{ color: "#8B95A4", borderColor: "#E4E8EE" }}>ESC</kbd>
+          <kbd className="text-[10.5px] font-bold px-1.5 py-0.5 rounded border" style={{ color: "var(--ink3, #8B95A4)", borderColor: "var(--line, #E4E8EE)" }}>ESC</kbd>
         </div>
 
         {/* Resultados */}
@@ -147,17 +149,17 @@ export default function CommandPalette({ onOpenLead }: { onOpenLead: (leadId: st
                 onClick={() => pick(h)}
                 onMouseEnter={() => setSel(i)}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
-                style={{ background: i === sel ? "#F0F4FF" : "transparent" }}
+                style={{ background: i === sel ? "var(--accent-soft, #F0F4FF)" : "transparent" }}
               >
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: STATUS_DOT[h.status] ?? "#8B95A4" }} title={STATUS_LABELS[h.status]} />
                 <span className="flex-1 min-w-0">
-                  <span className="block text-[14px] font-bold truncate" style={{ color: "#17202E" }}>{h.full_name || "Sem nome"}</span>
-                  <span className="block text-[12px] truncate" style={{ color: "#8B95A4" }}>
+                  <span className="block text-[14px] font-bold truncate" style={{ color: "var(--ink, #17202E)" }}>{h.full_name || "Sem nome"}</span>
+                  <span className="block text-[12px] truncate" style={{ color: "var(--ink3, #8B95A4)" }}>
                     {[h.company_name, h.phone ? formatPhoneDisplay(h.phone) : null, h.email].filter(Boolean).join(" · ") || "—"}
                   </span>
                 </span>
                 {h.bitrix_id && (
-                  <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 tabular-nums" style={{ background: "#F0F2F6", color: "#47536B" }}>
+                  <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 tabular-nums" style={{ background: "var(--card2, #F0F2F6)", color: "var(--ink2, #47536B)" }}>
                     ID {h.bitrix_id}
                   </span>
                 )}

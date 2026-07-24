@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchDashboardStats, fetchQsUsers, getClosedAtColumn, fetchAllRows, isGoalEffective } from "@/lib/qs/queries";
-import { loadWorkHours, workdaysInRange } from "@/lib/workHours";
+import { loadWorkHours, workdaysInRange, workdaysBetween, type WorkHours } from "@/lib/workHours";
 import type { GoalType } from "../types";
 import type { SdrUser } from "../types";
 import { CHANNEL_LABELS } from "../types";
@@ -254,36 +254,8 @@ function KpiCardComponent({ card }: { card: KpiCard }) {
 
 // ── Speed-to-Lead KPI Card (Change 20) ──────────────────────────────────────
 
-function SpeedToLeadCard({ avgMinutes, loading }: { avgMinutes: number | null; loading: boolean }) {
-  if (loading) {
-    return (
-      <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
-        <span className="text-xs text-gray-500">Tempo Médio de Contato</span>
-        <span className="text-sm text-gray-400">Carregando...</span>
-      </div>
-    );
-  }
-
-  const value = avgMinutes !== null ? avgMinutes : 0;
-  const color = value < 5 ? "#22C55E" : value < 15 ? "#EAB308" : "#EF4444";
-  const bgColor = value < 5 ? "bg-green-50" : value < 15 ? "bg-yellow-50" : "bg-red-50";
-  const label = value < 5 ? "Excelente" : value < 15 ? "Bom" : "Precisa melhorar";
-
-  return (
-    <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex flex-col gap-2">
-      <span className="text-xs text-gray-500">Tempo Médio de Contato</span>
-      <span className="text-2xl font-bold" style={{ color }}>
-        {avgMinutes !== null ? `${value.toFixed(1)} min` : "N/A"}
-      </span>
-      <div className="flex items-center gap-2 mt-1">
-        <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${bgColor}`} style={{ color }}>
-          {label}
-        </span>
-      </div>
-      <span className="text-xs text-gray-400">Meta: &lt; 5 minutos</span>
-    </div>
-  );
-}
+// (O antigo SpeedToLeadCard foi promovido pra um HeroCard no "Placar da equipe"
+//  — reorganização 2026-07-24.)
 
 // ── Channel Performance Table (Change 18) ───────────────────────────────────
 
@@ -640,7 +612,9 @@ export default function SdrDashboard() {
   const [loadingKpis, setLoadingKpis] = useState(true);
   const [loadingChannels, setLoadingChannels] = useState(true);
   const [loadingHeatmap, setLoadingHeatmap] = useState(true);
-  const [loadingSpeed, setLoadingSpeed] = useState(true);
+  // (loading do speed-to-lead virou só o "—" do HeroCard — o setter continua
+  //  usado pelo loadSpeedToLead; o valor não é mais lido em card próprio.)
+  const [, setLoadingSpeed] = useState(true);
 
   // Erro por seção (item FASE 2): query que falha NÃO vira zero silencioso —
   // a seção mostra banner com "Tentar de novo" no lugar de números mentirosos.
@@ -1183,12 +1157,15 @@ export default function SdrDashboard() {
         qPendVencida = qPendVencida.eq("owner_id", ownerId);
       }
 
-      // 5. Reuniões Agendadas por SDR — paginado
+      // 5. Reuniões Agendadas por SDR — paginado. Mesmo critério do hero
+      // (meetingKpis): tudo que não foi CANCELADO conta como agendada — o
+      // no_show é volume agendado que não compareceu (alinhamento 2026-07-24;
+      // antes esta tabela excluía no_show e divergia do placar na mesma tela).
       const meetingsPromise = fetchAllRows<any>((f, t) => {
         let q = supabase
           .from("qs_meetings")
           .select("owner_id, status, owner:qs_users(name)")
-          .in("status", ["agendada", "realizada"])
+          .neq("status", "cancelada")
           .order("id");
         if (ownerId) q = q.eq("owner_id", ownerId);
         if (from) q = q.gte("created_at", from);
@@ -1478,17 +1455,38 @@ export default function SdrDashboard() {
   // atividade ATUAL de cada lead (menor scheduled_at) define o FUP; venceu antes
   // de hoje 00:00 = atrasada. Também separa leads QUENTES sem 1º contato
   // (status "nao_iniciado" = nunca contatado) para a priorização.
+  // FUP + atraso com a MESMA régua do Painel (2026-07-24): FUP N = dia do PLANO
+  // (carimbo "dia:N" nos tags; fallback por data pra task antiga) e "atrasada"
+  // derivada por DIA ÚTIL (fim de semana não gera atrasada falsa).
+  function stageOf(
+    t: { scheduled_at: string; tags?: string[] | null },
+    lead: { arrived_at?: string | null; created_at?: string | null },
+    wh: WorkHours
+  ): { fupDay: number; overdue: boolean; daysOverdue: number } {
+    const tagged = t.tags?.find((x) => x.startsWith("dia:"));
+    const taggedDay = tagged ? parseInt(tagged.slice(4), 10) : NaN;
+    let fupDay = Number.isFinite(taggedDay) && taggedDay >= 1 ? taggedDay : 0;
+    if (!fupDay) {
+      const base = lead.arrived_at || lead.created_at;
+      fupDay = 1;
+      if (base) fupDay = Math.max(1, Math.round((dayStartMs(new Date(t.scheduled_at)) - dayStartMs(new Date(base))) / 86400000) + 1);
+    }
+    const late = workdaysBetween(wh, new Date(t.scheduled_at), new Date());
+    return { fupDay, overdue: late >= 1, daysOverdue: late };
+  }
+
   const loadMyQueue = useCallback(async (silent = false) => {
     if (!currentUser || isManager) return; // seção exclusiva do papel operacional
     if (!silent) setLoadingQueue(true);
     try {
       const own = currentUser.id;
+      const wh = await loadWorkHours();
       const [tasks, leads] = await Promise.all([
         // Paginado (cap 1000 do PostgREST): fila cheia não pode "parar de contar".
-        fetchAllRows<{ lead_id: string; owner_id: string | null; scheduled_at: string; channel_type: string | null }>((f, t) =>
+        fetchAllRows<{ lead_id: string; owner_id: string | null; scheduled_at: string; channel_type: string | null; tags: string[] | null }>((f, t) =>
           supabase
             .from("qs_tasks")
-            .select("lead_id, owner_id, scheduled_at, channel_type")
+            .select("lead_id, owner_id, scheduled_at, channel_type, tags")
             .in("status", ["pendente", "atrasada"])
             .eq("owner_id", own)
             .order("id")
@@ -1505,7 +1503,6 @@ export default function SdrDashboard() {
       ]);
 
       const leadsById = new Map(leads.map((l: any) => [l.id, l]));
-      const today0 = dayStartMs(new Date());
 
       // Uma tarefa por lead: a ATUAL = a de menor scheduled_at (vence antes).
       const currentByLead = new Map<string, any>();
@@ -1519,18 +1516,14 @@ export default function SdrDashboard() {
       const built: QueueStage[] = [];
       for (const [leadId, t] of currentByLead) {
         const lead = leadsById.get(leadId);
-        const base = lead.arrived_at || lead.created_at;
-        let fupDay = 1;
-        if (base) fupDay = Math.max(1, Math.round((dayStartMs(new Date(t.scheduled_at)) - dayStartMs(new Date(base))) / 86400000) + 1);
-        const sched0 = dayStartMs(new Date(t.scheduled_at));
-        const overdue = sched0 < today0;
+        const st = stageOf(t, lead, wh);
         built.push({
           leadId,
           ownerId: t.owner_id ?? lead.owner_id ?? null,
           leadName: leadDisplayName(lead),
-          fupDay,
-          overdue,
-          daysOverdue: overdue ? Math.round((today0 - sched0) / 86400000) : 0,
+          fupDay: st.fupDay,
+          overdue: st.overdue,
+          daysOverdue: st.daysOverdue,
           channel: t.channel_type ?? null,
         });
       }
@@ -1563,12 +1556,13 @@ export default function SdrDashboard() {
     if (!silent) setLoadingTeam(true);
     try {
       // Tudo paginado (cap 1000 do PostgREST) — base do time passa de 1000 fácil.
+      const wh = await loadWorkHours();
       const [leads, openTasks, doneTasks, meets, usersRes] = await Promise.all([
         fetchAllRows<any>((f, t) =>
           supabase.from("qs_leads").select("id, full_name, first_name, last_name, owner_id, status, arrived_at, created_at").order("id").range(f, t)
         ),
-        fetchAllRows<{ lead_id: string; owner_id: string | null; scheduled_at: string }>((f, t) =>
-          supabase.from("qs_tasks").select("lead_id, owner_id, scheduled_at").in("status", ["pendente", "atrasada"]).order("id").range(f, t)
+        fetchAllRows<{ lead_id: string; owner_id: string | null; scheduled_at: string; tags: string[] | null }>((f, t) =>
+          supabase.from("qs_tasks").select("lead_id, owner_id, scheduled_at, tags").in("status", ["pendente", "atrasada"]).order("id").range(f, t)
         ),
         fetchAllRows<{ lead_id: string; owner_id: string | null }>((f, t) =>
           supabase.from("qs_tasks").select("lead_id, owner_id").eq("status", "concluida").order("id").range(f, t)
@@ -1596,17 +1590,12 @@ export default function SdrDashboard() {
       const backlogByOwner = new Map<string, number>();
       for (const [leadId, t] of currentByLead) {
         const lead = leadsById.get(leadId);
-        const base = lead.arrived_at || lead.created_at;
-        let fupDay = 1;
-        if (base) fupDay = Math.max(1, Math.round((dayStartMs(new Date(t.scheduled_at)) - dayStartMs(new Date(base))) / 86400000) + 1);
-        const sched0 = dayStartMs(new Date(t.scheduled_at));
-        const overdue = sched0 < today0;
-        const dOver = overdue ? Math.round((today0 - sched0) / 86400000) : 0;
+        const st = stageOf(t, lead, wh);
         const owner = t.owner_id ?? lead.owner_id ?? null;
-        stages.push({ leadId, ownerId: owner, leadName: leadDisplayName(lead), fupDay, overdue, daysOverdue: dOver, channel: null });
-        if (owner && overdue) {
+        stages.push({ leadId, ownerId: owner, leadName: leadDisplayName(lead), fupDay: st.fupDay, overdue: st.overdue, daysOverdue: st.daysOverdue, channel: null });
+        if (owner && st.overdue) {
           lateByOwner.set(owner, (lateByOwner.get(owner) ?? 0) + 1);
-          backlogByOwner.set(owner, Math.max(backlogByOwner.get(owner) ?? 0, dOver));
+          backlogByOwner.set(owner, Math.max(backlogByOwner.get(owner) ?? 0, st.daysOverdue));
         }
       }
       setTeamStages(stages);
@@ -1979,22 +1968,25 @@ export default function SdrDashboard() {
         const teamMeetDaily = meetingDaily(meetingKpis?.meta ?? 0);
         return (
           <>
-            {/* (1) Placar da equipe — hero */}
+            {/* (1) Placar da equipe — hero com os KPIs ACIONÁVEIS no topo
+                (reorganização 2026-07-24, pedido do Bruno: métricas importantes
+                pra cima; show-rate, 1º contato e atrasadas saíram do fundo).
+                R$ em jogo continua no bloco "Fontes & Receita" logo abaixo. */}
             <div>
               <SectionHeading
                 title="Placar da equipe"
-                hint="Meta do time = SOMATÓRIA das metas de todos os SDRs ativos (quem não tem meta cadastrada entra com o valor padrão). Reuniões = agendadas por todos no período, com o total de reuniões/dia esperado do time. R$ em jogo = valor estimado dos leads em aberto (foto de agora). Connect rate = conexões ÷ atividades (30 dias / período)."
+                hint="Meta do time = SOMATÓRIA das metas dos SDRs ativos. Reuniões = agendadas no período (com realizadas/no-show). Show-rate = realizadas ÷ decididas. 1º contato = tempo médio até a primeira atividade concluída do lead. Connect rate = conexões ÷ atividades. Atrasadas = atividade atual venceu em dia útil anterior (time inteiro)."
               />
               {loadingKpis || loadingBusiness || loadingOperational ? (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  {[1, 2, 3, 4].map((i) => (
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                  {[1, 2, 3, 4, 5, 6].map((i) => (
                     <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 h-[104px] flex items-center justify-center">
                       <span className="text-sm text-gray-400">Carregando...</span>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                   <HeroCard
                     label="Meta do time (ganhos)"
                     dotColor="#0147FF"
@@ -2007,17 +1999,31 @@ export default function SdrDashboard() {
                     dotColor="#0147FF"
                     value={meetingKpis?.agendadas ?? 0}
                     sub={
-                      meetingKpis && meetingKpis.meta > 0
-                        ? `no período · meta ${meetingKpis.meta}/mês${teamMeetDaily != null ? ` (~${teamMeetDaily}/dia, ${activeSdrCount} SDR${activeSdrCount !== 1 ? "s" : ""})` : ""}`
-                        : "no período"
+                      `${meetingKpis?.realizadas ?? 0} realizadas · ${meetingKpis?.noShow ?? 0} no-show` +
+                      (meetingKpis && meetingKpis.meta > 0
+                        ? ` · meta ${meetingKpis.meta}/mês${teamMeetDaily != null ? ` (~${teamMeetDaily}/dia, ${activeSdrCount} SDR${activeSdrCount !== 1 ? "s" : ""})` : ""}`
+                        : "")
                     }
                   />
                   <HeroCard
-                    label="R$ em jogo"
+                    label="Show-rate"
                     dotColor="#059669"
-                    value={fmtBRL.format(pipelineOpen ?? 0)}
-                    valueColor="#059669"
-                    sub="pipeline em aberto"
+                    value={<>{meetingKpis?.showRate != null ? meetingKpis.showRate.toFixed(0) : "—"}<span className="text-[15px] font-bold text-gray-400">%</span></>}
+                    valueColor={meetingKpis?.showRate == null ? "#8792A6" : meetingKpis.showRate >= 70 ? "#059669" : meetingKpis.showRate >= 50 ? "#C77700" : "#D92D20"}
+                    sub="reuniões realizadas ÷ decididas"
+                  />
+                  <HeroCard
+                    label="1º contato (médio)"
+                    dotColor="#7C3AED"
+                    value={
+                      speedToLead == null
+                        ? "—"
+                        : speedToLead >= 60
+                          ? `${Math.floor(speedToLead / 60)}h ${Math.round(speedToLead % 60)}min`
+                          : `${speedToLead.toFixed(0)}min`
+                    }
+                    valueColor={speedToLead == null ? "#8792A6" : speedToLead < 5 ? "#059669" : speedToLead < 15 ? "#C77700" : "#D92D20"}
+                    sub={errSpeed ? "erro ao calcular — recarregue a página" : "meta: < 5 minutos"}
                   />
                   <HeroCard
                     label="Connect rate médio"
@@ -2025,6 +2031,13 @@ export default function SdrDashboard() {
                     value={<>{connectRate != null ? connectRate.toFixed(0) : "—"}<span className="text-[15px] font-bold text-gray-400">%</span></>}
                     valueColor={crColor}
                     sub="time · período selecionado"
+                  />
+                  <HeroCard
+                    label="Atrasadas (time)"
+                    dotColor="#D92D20"
+                    value={loadingTeam ? "—" : teamStages.filter((s) => s.overdue).length}
+                    valueColor={!loadingTeam && teamStages.some((s) => s.overdue) ? "#D92D20" : "#059669"}
+                    sub="atividade venceu em dia útil anterior"
                   />
                 </div>
               )}
@@ -2187,36 +2200,23 @@ export default function SdrDashboard() {
         <p className="text-xs text-gray-400 mt-0.5">Séries históricas, canais, horários, funil e motivos de perda — a camada analítica completa da operação.</p>
       </div>
 
-      {/* KPI Cards + Speed-to-Lead */}
+      {/* KPI Cards — sem o "Ganhos" (já vive no hero do placar) e sem o card de
+          Speed-to-Lead (promovido pro hero na reorganização 2026-07-24). */}
       {errKpis ? (
         <SectionError message="Não foi possível carregar os cards de indicadores." onRetry={() => loadKpis()} />
       ) : loadingKpis ? (
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          {[1, 2, 3, 4, 5].map((i) => (
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[1, 2, 3].map((i) => (
             <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-none p-5 flex items-center justify-center">
               <span className="text-sm text-gray-400">Carregando...</span>
             </div>
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          {kpiCards.map((card) => (
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {kpiCards.filter((card) => card.type !== "ganhos").map((card) => (
             <KpiCardComponent key={card.type} card={card} />
           ))}
-          {errSpeed ? (
-            <div className="bg-white border border-red-200 rounded-xl shadow-none p-5 flex flex-col gap-2">
-              <span className="text-xs text-gray-500">Tempo Médio de Contato</span>
-              <span className="text-sm text-red-600">{errSpeed}</span>
-              <button
-                onClick={() => loadSpeedToLead()}
-                className="self-start text-xs font-semibold text-red-700 border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-50 transition-colors"
-              >
-                Tentar de novo
-              </button>
-            </div>
-          ) : (
-            <SpeedToLeadCard avgMinutes={speedToLead} loading={loadingSpeed} />
-          )}
         </div>
       )}
 

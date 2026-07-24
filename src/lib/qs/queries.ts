@@ -869,6 +869,10 @@ export async function createCadenceTasks(
             scheduled_at: new Date(scheduledMs).toISOString(),
             status: "pendente" as TaskStatus,
             is_extra: false,
+            // Carimbo do DIA DO PLANO (2026-07-24): o rótulo "FUP N" do Painel e
+            // da Saúde da Cadência lê daqui — derivar por dias corridos inflava
+            // o FUP quando o plano atravessava fim de semana.
+            tags: [`dia:${day.day_number ?? 1}`],
           };
         })
     );
@@ -1014,6 +1018,9 @@ export async function createQsCadence(
             channel_type: act.channel_type,
             scheduled_time: act.scheduled_time,
             order_index: act.order_index,
+            // Fix 2026-07-24: o roteiro era descartado aqui — quem usasse esta
+            // função criava cadência com os scripts silenciosamente perdidos.
+            script_text: act.script_text ?? null,
           });
         });
       });

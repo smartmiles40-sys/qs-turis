@@ -137,6 +137,8 @@ export interface CadenceActivity {
   channel_type: ChannelType;
   scheduled_time: string | null;
   order_index: number;
+  /** Roteiro escrito pelo gestor (script do card / pré-preenche o WhatsApp). */
+  script_text?: string | null;
 }
 
 export interface Meeting {

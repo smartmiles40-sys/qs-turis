@@ -37,6 +37,9 @@ export default function CadenceHealthPanel() {
   const { currentUser } = useQsAuth();
   const isManager = !!currentUser && canSeeAllData(currentUser.role);
   const [stages, setStages] = useState<LeadStage[]>([]);
+  // Leads que CONCLUÍRAM o plano (sem tarefa aberta) e seguem sem desfecho —
+  // o fim de cadência agora é visível aqui, não um limbo (sprint 2026-07-24).
+  const [finishedCount, setFinishedCount] = useState(0);
   const [userNames, setUserNames] = useState<Map<string, string>>(new Map());
   const [workHours, setWorkHours] = useState<WorkHours>(DEFAULT_WORK_HOURS);
   const [loading, setLoading] = useState(true);
@@ -55,12 +58,12 @@ export default function CadenceHealthPanel() {
       // passam de 1000 rápido — sem paginação, a distribuição por FUP mentiria
       // em silêncio (leads a mais simplesmente sumiriam da conta).
       const tasksP = fetchAllRows<any>((f, t) => {
-        let q = supabase.from("qs_tasks").select("lead_id, owner_id, scheduled_at").in("status", ["pendente", "atrasada"]).order("id");
+        let q = supabase.from("qs_tasks").select("lead_id, owner_id, scheduled_at, tags").in("status", ["pendente", "atrasada"]).order("id");
         if (own) q = q.eq("owner_id", own);
         return q.range(f, t);
       });
       const leadsP = fetchAllRows<any>((f, t) => {
-        let q = supabase.from("qs_leads").select("id, arrived_at, created_at, status, owner_id").order("id");
+        let q = supabase.from("qs_leads").select("id, arrived_at, created_at, status, owner_id, cadence_id").order("id");
         if (own) q = q.eq("owner_id", own);
         return q.range(f, t);
       });
@@ -86,9 +89,17 @@ export default function CadenceHealthPanel() {
       const built: LeadStage[] = [];
       for (const [leadId, t] of currentByLead) {
         const lead = leadsById.get(leadId);
-        const base = lead.arrived_at || lead.created_at;
-        let fupDay = 1;
-        if (base) fupDay = Math.max(1, Math.round((startOfDay(new Date(t.scheduled_at)) - startOfDay(new Date(base))) / 86400000) + 1);
+        // FUP N = dia do PLANO. Preferimos o carimbo "dia:N" dos tags (gravado
+        // na criação desde 2026-07-24) — a derivação por dias corridos inflava
+        // o FUP quando o plano cruzava fim de semana. Sem carimbo: fallback.
+        const tagged = (t.tags as string[] | null)?.find((x) => x.startsWith("dia:"));
+        const taggedDay = tagged ? parseInt(tagged.slice(4), 10) : NaN;
+        let fupDay = Number.isFinite(taggedDay) && taggedDay >= 1 ? taggedDay : 0;
+        if (!fupDay) {
+          const base = lead.arrived_at || lead.created_at;
+          fupDay = 1;
+          if (base) fupDay = Math.max(1, Math.round((startOfDay(new Date(t.scheduled_at)) - startOfDay(new Date(base))) / 86400000) + 1);
+        }
         // Atraso conta só DIAS ÚTEIS: tarefa de sexta vista na segunda = 1 dia
         // útil de atraso, não 3; no fim de semana ela NÃO aparece como atrasada
         // (o fim de semana não gera "atrasada falsa"). Verdade absoluta = work_hours.
@@ -102,6 +113,17 @@ export default function CadenceHealthPanel() {
         });
       }
       setStages(built);
+
+      // "Fim de cadência aguardando decisão": lead aberto, COM cadência
+      // vinculada, e sem NENHUMA tarefa aberta — o plano acabou e ninguém
+      // decidiu ganho/perdido/nova cadência ainda.
+      let finished = 0;
+      for (const l of leads as any[]) {
+        if (l.status === "ganho" || l.status === "perdido") continue;
+        if (!l.cadence_id) continue;
+        if (!currentByLead.has(l.id)) finished++;
+      }
+      setFinishedCount(finished);
     } catch (e: any) {
       console.warn("[saúde-cadência] falha:", e?.message);
       notifyError("Não foi possível carregar a saúde da cadência.");
@@ -114,22 +136,23 @@ export default function CadenceHealthPanel() {
 
   // ── Agregações ──────────────────────────────────────────────────────────────
   const total = stages.length;
-  // "Novo" foi extinto: todo lead aberto é FUP N (sem 1º contato = FUP 1), então
-  // a fila inteira conta como "em FUP" — ninguém some da conta.
-  const emFup = total;
   const atrasadas = stages.filter((s) => s.overdue).length;
   const backlogDias = stages.reduce((m, s) => Math.max(m, s.daysOverdue), 0);
 
-  // Distribuição por etapa: o funil começa em FUP 1 (cada um com quantos atrasados).
-  const buckets: { key: string; label: string; count: number; overdue: number; color: string }[] = [
-    { key: "fup1", label: "FUP 1", count: 0, overdue: 0, color: GREEN },
-    { key: "fup2", label: "FUP 2", count: 0, overdue: 0, color: AMBER },
-    { key: "fup3", label: "FUP 3", count: 0, overdue: 0, color: AMBER },
-    { key: "fup4", label: "FUP 4", count: 0, overdue: 0, color: AMBER },
-    { key: "fup5", label: "FUP 5+", count: 0, overdue: 0, color: AMBER },
-  ];
+  // Distribuição por etapa: do FUP 1 até o ÚLTIMO FUP observado (pedido do
+  // Bruno, 2026-07-24 — antes saturava em "FUP 5+" e escondia o fim do funil).
+  // Trava de sanidade em 30 baldes; acima disso agrega no último.
+  const maxFup = Math.min(30, Math.max(1, ...stages.map((s) => s.fupDay)));
+  const hasBeyond = stages.some((s) => s.fupDay > maxFup);
+  const buckets = Array.from({ length: maxFup }, (_, i) => ({
+    key: `fup${i + 1}`,
+    label: `FUP ${i + 1}${i + 1 === maxFup && hasBeyond ? "+" : ""}`,
+    count: 0,
+    overdue: 0,
+    color: i === 0 ? GREEN : AMBER,
+  }));
   for (const s of stages) {
-    const idx = Math.min(5, s.fupDay) - 1; // FUP 1→0 … FUP 5+→4
+    const idx = Math.min(maxFup, s.fupDay) - 1;
     buckets[idx].count++;
     if (s.overdue) buckets[idx].overdue++;
   }
@@ -156,10 +179,12 @@ export default function CadenceHealthPanel() {
     const pctAtrasada = Math.round((atrasadas / total) * 100);
     if (pctAtrasada >= 25) insights.push(`⚠ ${pctAtrasada}% da fila está atrasada — sinal de sobrecarga: talvez a cadência tenha atividades demais pro tamanho do time.`);
     else if (pctAtrasada > 0) insights.push(`${pctAtrasada}% da fila está atrasada (sob controle abaixo de 25%).`);
-    if (buckets[1].count > 0 && buckets[0].count > 0 && buckets[1].count <= buckets[0].count * 0.4)
+    if (buckets.length > 1 && buckets[1].count > 0 && buckets[0].count > 0 && buckets[1].count <= buckets[0].count * 0.4)
       insights.push("Queda forte do FUP 1 → FUP 2: muita gente para na 1ª tentativa (revisar abordagem/roteiro do 1º toque).");
     if (backlogDias >= 3) insights.push(`A atividade atrasada mais antiga está parada há ${backlogDias} dias.`);
   }
+  if (finishedCount > 0)
+    insights.push(`🏁 ${finishedCount} lead(s) concluíram TODA a cadência sem desfecho — decida: ganho, perdido ou vincular a uma nova cadência (aba Leads).`);
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6">
@@ -178,8 +203,8 @@ export default function CadenceHealthPanel() {
           <>
             {/* Números-chave */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <StatTile label="Na fila" value={total} color="var(--ink)" />
-              <StatTile label="Em FUP" value={emFup} color={AMBER} />
+              <StatTile label="Na fila (em FUP)" value={total} color="var(--ink)" />
+              <StatTile label="Fim de cadência" value={finishedCount} color={finishedCount > 0 ? AMBER : "var(--ink)"} hint="plano concluído — aguardando decisão" />
               <StatTile label="Atrasadas" value={atrasadas} color={RED} />
               <StatTile label="Backlog (dias)" value={backlogDias} color={backlogDias >= 3 ? RED : "var(--ink)"} hint="atividade parada há mais tempo" />
             </div>

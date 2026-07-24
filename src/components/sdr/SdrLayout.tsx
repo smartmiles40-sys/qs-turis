@@ -255,9 +255,10 @@ export default function SdrLayout() {
   useEffect(() => {
     if (!currentUser || sweepRan.current) return;
     sweepRan.current = true;
-    sweepCadenceEndings().then(({ redirected, lost }) => {
+    sweepCadenceEndings().then(({ redirected, lost, finished }) => {
       if (redirected > 0) notifySuccess(`${redirected} lead(s) terminaram a cadência e foram redirecionados automaticamente.`);
       if (lost > 0) notifySuccess(`${lost} lead(s) marcados como perdidos automaticamente (fim de cadência) — perda espelhada no Bitrix.`);
+      if (finished > 0) notifySuccess(`${finished} lead(s) concluíram a cadência sem regra de fim — aguardando sua decisão (veja a Saúde da Cadência).`);
     });
   }, [currentUser]);
 

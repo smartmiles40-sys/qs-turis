@@ -73,7 +73,11 @@ function fmtMin(minutes: number): string {
 
 const BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
-// Rótulo da fonte do lead (LeadSource + null → "Sem fonte").
+// Rótulo da fonte do lead. A FONTE REAL do Bitrix vive em `segment` (texto da
+// campanha/canal); a coluna `source` é só o canal de entrada (todo lead do
+// Bitrix = "integracao"). Antes este painel agrupava por `source` e virava um
+// balde único "Integração" — agora prefere `segment`, igual ao "Conversão por
+// Fonte" do dashboard (padronização 2026-07-24). null → "Sem fonte".
 function sourceLabel(src: string | null): string {
   if (!src) return "Sem fonte";
   return SOURCE_LABELS[src as LeadSource] ?? src;
@@ -132,7 +136,7 @@ export default function AdvancedAnalyticsPanel() {
       const meetTermP = fetchAllRows<any>((f, t) =>
         supabase
           .from("qs_meetings")
-          .select("status, scheduled_at, created_at, lead:qs_leads(source)")
+          .select("status, scheduled_at, created_at, lead:qs_leads(source, segment)")
           .in("status", ["realizada", "no_show"])
           .gte("scheduled_at", cut)
           .order("id")
@@ -160,7 +164,7 @@ export default function AdvancedAnalyticsPanel() {
       const leadsP = fetchAllRows<any>((f, t) =>
         supabase
           .from("qs_leads")
-          .select("id, owner_id, source, status, arrived_at, created_at")
+          .select("id, owner_id, source, segment, status, arrived_at, created_at")
           .gte("created_at", cut)
           .order("id")
           .range(f, t),
@@ -185,7 +189,7 @@ export default function AdvancedAnalyticsPanel() {
       const wonP = fetchAllRows<any>((f, t) =>
         supabase
           .from("qs_leads")
-          .select("source, closed_value, estimated_value")
+          .select("source, segment, closed_value, estimated_value")
           .eq("status", "ganho")
           .gte(closedCol, cut)
           .order("id")
@@ -212,7 +216,10 @@ export default function AdvancedAnalyticsPanel() {
         status: (r.status as string) ?? "",
         scheduledAt: (r.scheduled_at as string) ?? null,
         createdAt: (r.created_at as string) ?? null,
-        source: one(r.lead as { source: string | null } | { source: string | null }[] | null)?.source ?? null,
+        source: (() => {
+          const l = one(r.lead as { source: string | null; segment: string | null } | { source: string | null; segment: string | null }[] | null);
+          return l?.segment || l?.source || null; // segment = Fonte real do Bitrix
+        })(),
       })));
 
       setMeetingLeadIds(new Set(meetLeadRows.map((r) => r.lead_id as string).filter(Boolean)));
@@ -220,7 +227,7 @@ export default function AdvancedAnalyticsPanel() {
       setLeads(leadRows.map((r) => ({
         id: (r.id as string),
         ownerId: (r.owner_id as string) ?? null,
-        source: (r.source as string) ?? null,
+        source: ((r.segment as string) || (r.source as string)) ?? null, // segment = Fonte real
         status: (r.status as string) ?? "",
         arrivedAt: (r.arrived_at as string) ?? null,
         createdAt: (r.created_at as string) ?? "",
@@ -238,7 +245,7 @@ export default function AdvancedAnalyticsPanel() {
       setFirstContact(fc);
 
       setWon(wonRows.map((r) => ({
-        source: (r.source as string) ?? null,
+        source: ((r.segment as string) || (r.source as string)) ?? null, // segment = Fonte real
         // Fallback pro valor estimado quando o fechado ficou vazio — mesmo critério
         // do "Reuniões e Receita" do dashboard (closed_value ?? estimated_value);
         // sem isso o ganho entra como R$0 e deflaciona o ticket médio.

@@ -9,9 +9,6 @@ import {
   deleteQsLead,
   updateQsNote,
   deleteQsNote,
-  createQsContact,
-  updateQsContact,
-  deleteQsContact,
   updateQsMeeting,
 } from "@/lib/qs/queries";
 import { getLeadScore } from "@/lib/leadScore";
@@ -26,13 +23,9 @@ import type {
   Cadence,
   CadenceDay,
   Note,
-  Contact,
   Meeting,
   MeetingStatus,
   Task,
-  CustomField,
-  CustomFieldScope,
-  LeadCustomValue,
 } from "../types";
 import {
   STATUS_LABELS,
@@ -50,16 +43,16 @@ interface LeadDetailPageProps {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+// Abas enxutas (sprint 2026-07-24, pedido do Bruno): Visão Geral absorveu as
+// Informações Pessoais; Empresa/Contatos/Campos Personalizados saíram — eram
+// estruturas mortas no fluxo real (o Bitrix só preenche nome/fone/email/fonte/
+// temperatura; o resto ficava eternamente vazio).
 type TabKey =
   | "historico"
   | "visao_geral"
-  | "informacoes_pessoais"
-  | "empresa"
   | "anotacoes"
-  | "contatos"
   | "reunioes"
-  | "prospeccao"
-  | "campos_personalizados";
+  | "prospeccao";
 
 interface TabItem {
   key: TabKey;
@@ -125,15 +118,6 @@ function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
-
-// ── Contatos (qs_contacts: type + value + is_primary) ───────────────────────
-
-const CONTACT_TYPE_LABELS: Record<string, string> = {
-  phone: "Telefone",
-  email: "E-mail",
-  whatsapp: "WhatsApp",
-  linkedin: "LinkedIn",
-};
 
 // ── Temperatura (lead_score editável pelo SDR) ──────────────────────────────
 // Gravamos o rótulo PT cru — o mesmo formato que vem do Bitrix; getLeadScore
@@ -233,26 +217,14 @@ const EMPTY_MEETING_FORM: MeetingForm = {
 
 // ── Custom fields ────────────────────────────────────────────────────────────
 
-const SCOPE_LABELS: Record<CustomFieldScope, string> = {
-  pessoal: "Pessoal",
-  empresa: "Empresa",
-  contato: "Contato",
-};
-
-const SCOPE_ORDER: CustomFieldScope[] = ["pessoal", "empresa", "contato"];
-
 // ── Tabs Definition ──────────────────────────────────────────────────────────
 
 const TABS: TabItem[] = [
   { key: "historico", label: "Histórico" },
   { key: "visao_geral", label: "Visão Geral" },
-  { key: "informacoes_pessoais", label: "Informações Pessoais" },
-  { key: "empresa", label: "Empresa" },
   { key: "anotacoes", label: "Anotações" },
-  { key: "contatos", label: "Contatos" },
   { key: "reunioes", label: "Reuniões" },
   { key: "prospeccao", label: "Prospecção" },
-  { key: "campos_personalizados", label: "Campos Personalizados" },
 ];
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -275,13 +247,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [meetingForm, setMeetingForm] = useState<MeetingForm>(EMPTY_MEETING_FORM);
   const [savingMeeting, setSavingMeeting] = useState(false);
   const [meetingError, setMeetingError] = useState<string | null>(null);
-
-  // ── Campos Personalizados (Task 2) ──
-  const [customFields, setCustomFields] = useState<CustomField[]>([]);
-  const [customValues, setCustomValues] = useState<Record<string, string>>({});
-  const [savingCustom, setSavingCustom] = useState(false);
-  const [customSaved, setCustomSaved] = useState(false);
-  const [customError, setCustomError] = useState<string | null>(null);
 
   // ── WhatsApp (Task 3) ──
   const [showWhatsApp, setShowWhatsApp] = useState(false);
@@ -309,16 +274,11 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteBody, setEditingNoteBody] = useState("");
   const [savingNoteEdit, setSavingNoteEdit] = useState(false);
-  const [showContactForm, setShowContactForm] = useState(false);
-  const [contactEditingId, setContactEditingId] = useState<string | null>(null);
-  const [contactForm, setContactForm] = useState({ type: "phone", value: "", is_primary: false });
-  const [savingContact, setSavingContact] = useState(false);
   const [updatingMeetingId, setUpdatingMeetingId] = useState<string | null>(null);
 
   // ── Data state ──
   const [lead, setLead] = useState<Lead | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [contacts, setContacts] = useState<Contact[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [cadence, setCadence] = useState<Cadence | null>(null);
@@ -376,36 +336,14 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     setMeetings((data as Meeting[]) ?? []);
   }, [leadId]);
 
-  // ── Reload custom fields + values (Task 2) ──
-  const reloadCustomFields = useCallback(async () => {
-    const [fieldsRes, valuesRes] = await Promise.all([
-      supabase.from("qs_custom_fields").select("*").eq("is_archived", false),
-      supabase.from("qs_lead_custom_values").select("*").eq("lead_id", leadId),
-    ]);
-
-    if (fieldsRes.error) console.warn("Erro ao buscar campos personalizados:", fieldsRes.error);
-    else setCustomFields((fieldsRes.data as CustomField[]) ?? []);
-
-    if (valuesRes.error) console.warn("Erro ao buscar valores personalizados:", valuesRes.error);
-    else {
-      const map: Record<string, string> = {};
-      for (const v of (valuesRes.data as LeadCustomValue[]) ?? []) {
-        map[v.custom_field_id] = v.value ?? "";
-      }
-      setCustomValues(map);
-    }
-  }, [leadId]);
-
   useEffect(() => {
     async function loadAll() {
       setLoading(true);
       setLoadError(null);
       const leadData = await fetchLead();
-      await reloadCustomFields();
 
-      const [notesRes, contactsRes, meetingsRes, tasksRes, closersRes] = await Promise.all([
+      const [notesRes, meetingsRes, tasksRes, closersRes] = await Promise.all([
         supabase.from("qs_notes").select("*").eq("lead_id", leadId).order("created_at", { ascending: false }),
-        supabase.from("qs_contacts").select("*").eq("lead_id", leadId),
         supabase.from("qs_meetings").select("*, lead:qs_leads(*)").eq("lead_id", leadId).order("scheduled_at", { ascending: false }),
         supabase.from("qs_tasks").select("*").eq("lead_id", leadId).order("scheduled_at", { ascending: true }),
         supabase.from("qs_users").select("*"),
@@ -413,9 +351,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
 
       if (notesRes.error) console.warn("Erro ao buscar notes:", notesRes.error);
       else setNotes((notesRes.data as Note[]) ?? []);
-
-      if (contactsRes.error) console.warn("Erro ao buscar contacts:", contactsRes.error);
-      else setContacts((contactsRes.data as Contact[]) ?? []);
 
       if (meetingsRes.error) console.warn("Erro ao buscar meetings:", meetingsRes.error);
       else setMeetings((meetingsRes.data as Meeting[]) ?? []);
@@ -461,7 +396,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       setLoading(false);
     }
     loadAll();
-  }, [leadId, fetchLead, reloadCustomFields, retryTick]);
+  }, [leadId, fetchLead, retryTick]);
 
   // ── Add note ──
   async function addNote() {
@@ -520,64 +455,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     if (editingNoteId === note.id) {
       setEditingNoteId(null);
       setEditingNoteBody("");
-    }
-  }
-
-  // ── Contacts CRUD (Sprint 4 — primeiro caminho de escrita de qs_contacts) ──
-  function openContactCreate() {
-    setContactEditingId(null);
-    setContactForm({ type: "phone", value: "", is_primary: false });
-    setShowContactForm(true);
-  }
-
-  function openContactEdit(contact: Contact) {
-    setContactEditingId(contact.id);
-    setContactForm({ type: contact.type, value: contact.value, is_primary: contact.is_primary });
-    setShowContactForm(true);
-  }
-
-  async function saveContact() {
-    if (!lead || savingContact) return;
-    if (!contactForm.value.trim()) {
-      notifyError("Informe o telefone/e-mail/perfil do contato.");
-      return;
-    }
-    setSavingContact(true);
-    try {
-      if (contactEditingId) {
-        const updated = await updateQsContact(contactEditingId, {
-          type: contactForm.type,
-          value: contactForm.value.trim(),
-          is_primary: contactForm.is_primary,
-        });
-        if (!updated) return; // camada já avisou
-        setContacts(contacts.map((c) => (c.id === updated.id ? updated : c)));
-      } else {
-        const created = await createQsContact({
-          lead_id: lead.id,
-          type: contactForm.type,
-          value: contactForm.value.trim(),
-          is_primary: contactForm.is_primary,
-        });
-        if (!created) return; // camada já avisou
-        setContacts([...contacts, created]);
-      }
-      setShowContactForm(false);
-      setContactEditingId(null);
-      setContactForm({ type: "phone", value: "", is_primary: false });
-    } finally {
-      setSavingContact(false);
-    }
-  }
-
-  async function handleDeleteContact(contact: Contact) {
-    if (!window.confirm(`Excluir o contato ${contact.value}?`)) return;
-    const ok = await deleteQsContact(contact.id);
-    if (!ok) return; // camada já avisou
-    setContacts(contacts.filter((c) => c.id !== contact.id));
-    if (contactEditingId === contact.id) {
-      setShowContactForm(false);
-      setContactEditingId(null);
     }
   }
 
@@ -988,35 +865,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     }
   }
 
-  // ── Save custom fields (Task 2) ──
-  async function saveCustomFields() {
-    if (!lead || customFields.length === 0) return;
-    setSavingCustom(true);
-    setCustomError(null);
-
-    const rows = customFields.map((field) => ({
-      lead_id: lead.id,
-      custom_field_id: field.id,
-      value: customValues[field.id]?.trim() ? customValues[field.id].trim() : null,
-    }));
-
-    const { error } = await supabase
-      .from("qs_lead_custom_values")
-      .upsert(rows, { onConflict: "lead_id,custom_field_id" });
-
-    setSavingCustom(false);
-
-    if (error) {
-      console.warn("Erro ao salvar campos personalizados:", error);
-      setCustomError("Não foi possível salvar os campos: " + error.message);
-      return;
-    }
-
-    await reloadCustomFields();
-    setCustomSaved(true);
-    setTimeout(() => setCustomSaved(false), 2000);
-  }
-
   // ── Loading / Not found ──
   if (loading) {
     return (
@@ -1270,85 +1118,31 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             {/* Próximas atividades (Sprint 4) */}
             {renderUpcomingTasksBox()}
 
-            {/* Contact / Function / Location / Source */}
+            {/* Dados do lead — fusão de "Informações Resumidas" + antiga aba
+                "Informações Pessoais" (sprint 2026-07-24): uma ficha única com o
+                que o fluxo real preenche. Campos raros (cargo/LinkedIn/valor) só
+                aparecem quando existem, pra ficha não virar lista de traços. */}
             <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Informações Resumidas</h3>
-              <InfoRow label="Contato Principal" value={lead.phone} />
-              <InfoRow label="E-mail" value={lead.email} />
-              <InfoRow label="Função" value={lead.job_title} />
-              <InfoRow label="Localização" value={lead.location} />
-              <InfoRow label="Origem" value={SOURCE_LABELS[lead.source]} />
-            </div>
-
-            {/* Prospection History Summary */}
-            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">Histórico de Prospecção</h3>
-              <div className="space-y-3">
-                {cadenceDays.length === 0 && (
-                  <p className="text-sm text-gray-400">Nenhuma cadência vinculada.</p>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Dados do Lead</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+                <InfoRow label="Nome completo" value={lead.full_name} />
+                <InfoRow label="Telefone" value={lead.phone} />
+                <InfoRow label="E-mail" value={lead.email} />
+                <InfoRow label="Fonte / Produto" value={lead.segment} />
+                <InfoRow label="Temperatura" value={lead.lead_score} />
+                <InfoRow label="Origem" value={SOURCE_LABELS[lead.source]} />
+                <InfoRow label="Chegou em" value={lead.arrived_at ? formatDateTime(lead.arrived_at) : null} />
+                {(lead.city || lead.state) && (
+                  <InfoRow label="Cidade / UF" value={[lead.city, lead.state].filter(Boolean).join(" / ")} />
                 )}
-                {cadenceDays.slice(0, 3).map((day) => (
-                  <div key={day.id} className="flex items-center gap-3 p-3 rounded-lg bg-[#F8F9FA]">
-                    <div className="w-8 h-8 rounded-full bg-[#0147FF]/10 flex items-center justify-center shrink-0">
-                      <span className="text-xs font-bold text-[#0147FF]">D{day.day_number}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {day.activities?.map((act) => (
-                        <span
-                          key={act.id}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white border border-gray-200 text-xs text-gray-600"
-                          title={CHANNEL_LABELS[act.channel_type]}
-                        >
-                          {CHANNEL_ICONS[act.channel_type]}
-                          {CHANNEL_LABELS[act.channel_type]}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {cadenceDays.length > 0 && (
-                  <button
-                    onClick={() => setActiveTab("prospeccao")}
-                    className="text-sm font-medium text-[#0147FF] hover:underline transition-colors"
-                  >
-                    Ver histórico completo
-                  </button>
+                {lead.job_title && <InfoRow label="Cargo" value={lead.job_title} />}
+                {lead.company_name && <InfoRow label="Empresa" value={lead.company_name} />}
+                {lead.linkedin_url && <InfoRow label="LinkedIn" value={lead.linkedin_url} />}
+                {lead.estimated_value != null && (
+                  <InfoRow label="Valor estimado" value={lead.estimated_value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
                 )}
               </div>
             </div>
-          </div>
-        );
-
-      // ── Informações Pessoais ──
-      case "informacoes_pessoais":
-        return (
-          <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-            <h3 className="text-sm font-semibold text-gray-900 mb-4">Informações Pessoais</h3>
-            <InfoRow label="Nome" value={lead.first_name} />
-            <InfoRow label="Sobrenome" value={lead.last_name} />
-            <InfoRow label="Nome completo" value={lead.full_name} />
-            <InfoRow label="Cargo" value={lead.job_title} />
-            <InfoRow label="Departamento" value={lead.department} />
-            <InfoRow label="LinkedIn" value={lead.linkedin_url} />
-            <InfoRow label="E-mail" value={lead.email} />
-            <InfoRow label="Telefone" value={lead.phone} />
-            <InfoRow label="Cidade" value={lead.city} />
-            <InfoRow label="Estado" value={lead.state} />
-          </div>
-        );
-
-      // ── Empresa ──
-      case "empresa":
-        return (
-          <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-            <h3 className="text-sm font-semibold text-gray-900 mb-4">Dados da Empresa</h3>
-            <InfoRow label="Nome da Empresa" value={lead.company_name} />
-            <InfoRow label="Segmento" value={lead.segment} />
-            <InfoRow label="Porte" value={lead.company_size} />
-            <InfoRow label="Website" value={lead.website} />
-            <InfoRow label="LinkedIn da Empresa" value={lead.company_linkedin} />
-            <InfoRow label="Cidade" value={lead.city} />
-            <InfoRow label="Estado" value={lead.state} />
           </div>
         );
 
@@ -1485,140 +1279,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           </div>
         );
 
-      // ── Contatos (Sprint 4: primeiro caminho de escrita de qs_contacts) ──
-      case "contatos":
-        return (
-          <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-gray-900">Contatos do Lead</h3>
-              {!showContactForm && (
-                <button
-                  onClick={openContactCreate}
-                  className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-xs font-medium text-white hover:bg-[#0139D6] transition-colors"
-                >
-                  + Adicionar contato
-                </button>
-              )}
-            </div>
-
-            {/* Form de criar/editar contato */}
-            {showContactForm && (
-              <div className="mb-4 p-4 rounded-lg border border-gray-200 bg-[#F8F9FA]">
-                <p className="text-xs font-semibold text-gray-700 mb-3">
-                  {contactEditingId ? "Editar contato" : "Novo contato"}
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Tipo</label>
-                    <select
-                      value={contactForm.type}
-                      onChange={(e) => setContactForm((prev) => ({ ...prev, type: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
-                    >
-                      {Object.entries(CONTACT_TYPE_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>{label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5">
-                      {contactForm.type === "email" ? "E-mail" : contactForm.type === "linkedin" ? "Perfil/URL" : "Número"}
-                    </label>
-                    <input
-                      type={contactForm.type === "email" ? "email" : "text"}
-                      value={contactForm.value}
-                      onChange={(e) => setContactForm((prev) => ({ ...prev, value: e.target.value }))}
-                      placeholder={contactForm.type === "email" ? "nome@empresa.com" : contactForm.type === "linkedin" ? "linkedin.com/in/..." : "(11) 99999-9999"}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
-                    />
-                  </div>
-                </div>
-                <label className="flex items-center gap-2 text-sm text-gray-700 mb-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={contactForm.is_primary}
-                    onChange={(e) => setContactForm((prev) => ({ ...prev, is_primary: e.target.checked }))}
-                    className="rounded border-gray-300"
-                  />
-                  Contato principal
-                </label>
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={() => {
-                      setShowContactForm(false);
-                      setContactEditingId(null);
-                    }}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    onClick={saveContact}
-                    disabled={!contactForm.value.trim() || savingContact}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-[#0147FF] hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {savingContact ? "Salvando..." : contactEditingId ? "Salvar" : "Adicionar"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {contacts.length === 0 && !showContactForm && (
-              <p className="text-sm text-gray-400 text-center py-6">
-                Nenhum contato cadastrado. Use "+ Adicionar contato" pra registrar telefones e e-mails extras deste lead.
-              </p>
-            )}
-            <div className="space-y-3">
-              {contacts.map((contact) => (
-                <div
-                  key={contact.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-[#F8F9FA]"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center shrink-0">
-                      {contact.type === "phone" && CHANNEL_ICONS.ligacao}
-                      {contact.type === "email" && CHANNEL_ICONS.email}
-                      {contact.type === "whatsapp" && CHANNEL_ICONS.whatsapp}
-                      {contact.type === "linkedin" && CHANNEL_ICONS.linkedin}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{contact.value}</p>
-                      <p className="text-xs text-gray-400">{CONTACT_TYPE_LABELS[contact.type] ?? contact.type}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {contact.is_primary && (
-                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-[#0147FF]/10 text-[#0147FF]">
-                        Principal
-                      </span>
-                    )}
-                    <button
-                      onClick={() => openContactEdit(contact)}
-                      className="p-1.5 rounded-md hover:bg-white text-gray-400 hover:text-gray-600 transition-colors"
-                      title="Editar contato"
-                      aria-label="Editar contato"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
-                    <button
-                      onClick={() => handleDeleteContact(contact)}
-                      className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
-                      title="Excluir contato"
-                      aria-label="Excluir contato"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-
       // ── Reuniões (Sprint 4: mostra o que foi coletado + ações de desfecho) ──
       case "reunioes":
         return (
@@ -1727,31 +1387,8 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               {lead.cadence_started_at && ` | Início: ${formatDate(lead.cadence_started_at)}`}
             </p>
 
-            {/* Informações do formulário — consolida o que veio na ENTRADA do lead
-                (origem/segmento/contato/valor…) pro SDR não precisar abrir o Bitrix
-                pra checar o básico. Mostra o que o QS já guarda hoje. */}
-            <div className="mb-6 rounded-lg border border-blue-100 bg-blue-50/40 p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                </svg>
-                <h4 className="text-xs font-semibold text-blue-800">Informações do formulário</h4>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
-                <InfoRow label="Origem" value={SOURCE_LABELS[lead.source]} />
-                <InfoRow label="Segmento / Produto" value={lead.segment} />
-                <InfoRow label="Temperatura" value={lead.lead_score} />
-                <InfoRow label="Valor estimado" value={lead.estimated_value != null ? lead.estimated_value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : null} />
-                <InfoRow label="Empresa" value={lead.company_name} />
-                <InfoRow label="Cargo" value={lead.job_title} />
-                <InfoRow label="Cidade / UF" value={[lead.city, lead.state].filter(Boolean).join(" / ") || null} />
-                <InfoRow label="Telefone" value={lead.phone} />
-                <InfoRow label="E-mail" value={lead.email} />
-                {lead.website && <InfoRow label="Website" value={lead.website} />}
-                {lead.linkedin_url && <InfoRow label="LinkedIn" value={lead.linkedin_url} />}
-                <InfoRow label="Chegou em" value={lead.arrived_at ? formatDateTime(lead.arrived_at) : null} />
-              </div>
-            </div>
+            {/* (As "Informações do formulário" moraram aqui até 2026-07-24 —
+                agora vivem consolidadas no card "Dados do Lead" da Visão Geral.) */}
 
             {/* Próximas atividades (Sprint 4: pendentes/futuras, antes invisíveis) */}
             {(() => {
@@ -1872,94 +1509,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           </div>
         );
 
-      // ── Campos Personalizados ──
-      case "campos_personalizados": {
-        if (customFields.length === 0) {
-          return (
-            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">Campos Personalizados</h3>
-              <div className="text-center py-6">
-                <p className="text-sm text-gray-400">Nenhum campo personalizado cadastrado.</p>
-              </div>
-            </div>
-          );
-        }
-
-        return (
-          <div className="space-y-6">
-            {SCOPE_ORDER.map((scope) => {
-              const fieldsInScope = customFields.filter((f) => f.scope === scope);
-              if (fieldsInScope.length === 0) return null;
-              return (
-                <div key={scope} className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">{SCOPE_LABELS[scope]}</h3>
-                  <div className="space-y-4">
-                    {fieldsInScope.map((field) => {
-                      const value = customValues[field.id] ?? "";
-                      const onChange = (v: string) =>
-                        setCustomValues((prev) => ({ ...prev, [field.id]: v }));
-                      const inputClass =
-                        "w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]";
-                      return (
-                        <div key={field.id}>
-                          <label className="block text-xs font-medium text-gray-500 mb-1.5">
-                            {field.label}
-                          </label>
-                          {field.field_type === "textarea" || field.field_type === "text_long" ? (
-                            <textarea
-                              value={value}
-                              onChange={(e) => onChange(e.target.value)}
-                              rows={3}
-                              className={`${inputClass} resize-none`}
-                            />
-                          ) : (
-                            <input
-                              type={
-                                field.field_type === "number"
-                                  ? "number"
-                                  : field.field_type === "date"
-                                  ? "date"
-                                  : field.field_type === "email"
-                                  ? "email"
-                                  : field.field_type === "url"
-                                  ? "url"
-                                  : "text"
-                              }
-                              value={value}
-                              onChange={(e) => onChange(e.target.value)}
-                              className={inputClass}
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-
-            {customError && (
-              <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                {customError}
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-3">
-              {customSaved && (
-                <span className="text-sm font-medium text-green-600">Campos salvos!</span>
-              )}
-              <button
-                onClick={saveCustomFields}
-                disabled={savingCustom}
-                className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {savingCustom ? "Salvando..." : "Salvar Campos"}
-              </button>
-            </div>
-          </div>
-        );
-      }
-
       default:
         return null;
     }
@@ -1985,7 +1534,15 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-[#0147FF]/10 flex items-center justify-center">
             <span className="text-base font-bold text-[#0147FF]">
-              {lead.first_name?.[0]}{lead.last_name?.[0]}
+              {/* Iniciais derivadas do full_name — first/last_name nunca chegam
+                  do Bitrix e deixavam o avatar em branco (fix 2026-07-24). */}
+              {(() => {
+                const parts = (lead.full_name ?? "").trim().split(/\s+/).filter(Boolean);
+                if (parts.length === 0) return "?";
+                const first = parts[0][0] ?? "";
+                const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
+                return (first + last).toUpperCase() || "?";
+              })()}
             </span>
           </div>
           <div>
@@ -2065,9 +1622,15 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                 </button>
               )}
             </div>
-            <p className="text-sm text-gray-500">
-              {lead.job_title} {lead.company_name ? `na ${lead.company_name}` : ""}
-            </p>
+            {/* Subtítulo: cargo/empresa quando existem; senão o telefone — pra
+                lead do Bitrix não sobrar um "na " solto (fix 2026-07-24). */}
+            {(lead.job_title || lead.company_name || lead.phone) && (
+              <p className="text-sm text-gray-500">
+                {lead.job_title || lead.company_name
+                  ? [lead.job_title, lead.company_name].filter(Boolean).join(" na ")
+                  : lead.phone}
+              </p>
+            )}
             {lead.segment && (
               <p className="text-[13px] font-semibold text-gray-600 mt-0.5">Fonte/Produto: <span className="text-gray-800">{lead.segment}</span></p>
             )}

@@ -213,6 +213,9 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
         scheduled_at: when.toISOString(),
         status: 'pendente',
         is_extra: false,
+        // Carimbo do DIA DO PLANO — mesma regra do createCadenceTasks (front):
+        // o rótulo "FUP N" do Painel lê daqui em vez de derivar por data.
+        tags: [`dia:${day.day_number ?? 1}`],
       });
     }
   }
@@ -286,6 +289,34 @@ function pickLeadScore(input) {
     return null;
   };
   return scan(input, 0) || null;
+}
+
+/**
+ * CLASSIFICAÇÃO AUTOMÁTICA POR FONTE (sprint 2026-07-24) — roda só quando o
+ * Bitrix NÃO mandou temperatura (o rótulo do Bitrix sempre vence). Regras
+ * configuráveis pelo gestor em qs_settings, key `auto_classify_rules`:
+ *   [ { "match": "indicac|resgate", "temperatura": "Quente" },
+ *     { "match": "whatsapp|organico|orgânico", "temperatura": "Morno" } ]
+ * `match` = regex case-insensitive aplicada à Fonte (coluna segment). Sem regra
+ * que case → null (nada de temperatura inventada — regra da casa).
+ */
+async function autoClassifyBySource(segment) {
+  const s = String(segment ?? '').trim();
+  if (!s) return null;
+  try {
+    const rows = await rest('qs_settings?select=value&key=eq.auto_classify_rules&limit=1');
+    const v = rows && rows[0] && rows[0].value;
+    const list = Array.isArray(v) ? v : v && Array.isArray(v.rules) ? v.rules : [];
+    for (const r of list) {
+      if (!r || !r.match || !r.temperatura) continue;
+      let re;
+      try { re = new RegExp(String(r.match), 'i'); } catch { continue; }
+      if (re.test(s)) return String(r.temperatura);
+    }
+  } catch (e) {
+    console.warn('[leads] auto_classify_rules indisponível (segue sem):', e?.message);
+  }
+  return null;
 }
 
 /**
@@ -373,6 +404,15 @@ export async function createInboundLead(payload) {
     if (c && c[0]) priority = c[0].priority || 'media';
   }
 
+  // Temperatura: rótulo do Bitrix vence; sem rótulo, tenta a classificação
+  // automática por Fonte (regras do gestor em qs_settings.auto_classify_rules).
+  let leadScore = pickLeadScore(payload);
+  let autoClassified = false;
+  if (!leadScore) {
+    leadScore = await autoClassifyBySource(payload.segment);
+    autoClassified = !!leadScore;
+  }
+
   const nowIso = new Date().toISOString();
   const leadRow = {
     first_name: payload.first_name || null,
@@ -397,7 +437,7 @@ export async function createInboundLead(payload) {
     owner_id: ownerId,
     cadence_id: cadenceId,
     estimated_value: payload.estimated_value ?? null,
-    lead_score: pickLeadScore(payload),
+    lead_score: leadScore,
     cadence_started_at: cadenceId ? nowIso : null,
     arrived_at: nowIso,
   };
@@ -435,6 +475,22 @@ export async function createInboundLead(payload) {
   let tasks = 0;
   if (cadenceId && lead) {
     tasks = await generateCadenceTasks({ leadId: lead.id, cadenceId, ownerId: finalOwner, priority, baseDate: nowIso });
+  }
+
+  // Rastro da classificação automática (best-effort): o SDR vê no histórico que
+  // a temperatura foi sugerida pela FONTE, não escolhida por alguém — e pode
+  // ajustar no badge do card quando discordar.
+  if (autoClassified && lead) {
+    try {
+      await insert('qs_notes', {
+        lead_id: lead.id,
+        author_id: null,
+        body: `🤖 Temperatura "${leadScore}" sugerida automaticamente pela fonte (${payload.segment}). Ajuste no badge do lead se discordar.`,
+        tags: ['cadencia', 'auto-classificacao'],
+      }, { returning: false });
+    } catch (e) {
+      console.warn('[leads] nota de auto-classificação falhou (segue):', e?.message);
+    }
   }
 
   return { lead, ownerId: finalOwner, cadenceId, tasks };
