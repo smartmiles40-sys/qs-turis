@@ -2011,13 +2011,16 @@ function AtendimentoSection() {
     setSaving(true);
     const ok = await setChatProvider(p);
     setSaving(false);
-    if (ok) { setProvider(p); notifySuccess(`Cockpit de atendimento: ${p === "chatwoot" ? "Chatwoot (embedado)" : "ChatApp (janela)"}.`); }
+    const nome = p === "qs" ? "Atendimento no QS (carteira separada)"
+      : p === "chatwoot" ? "Chatwoot (embedado)" : "ChatApp (janela)";
+    if (ok) { setProvider(p); notifySuccess(`Cockpit de atendimento: ${nome}.`); }
     else notifyError("Não foi possível salvar (só admin pode trocar).");
   }
 
   const OPTIONS: { key: ChatProvider; title: string; desc: string }[] = [
-    { key: "chatapp", title: "ChatApp (legado)", desc: "Abre o ChatApp em janela externa. Comportamento atual." },
-    { key: "chatwoot", title: "Chatwoot (embedado)", desc: "Painel do Chatwoot self-hosted dentro do QS, com deep-link pro lead." },
+    { key: "qs", title: "Atendimento no QS ✅", desc: "A conversa acontece dentro do QS e cada SDR só enxerga os leads da carteira dele (regra no banco, não na tela)." },
+    { key: "chatwoot", title: "Chatwoot (embedado)", desc: "Painel do Chatwoot dentro do QS, com deep-link pro lead. Atenção: todo agente enxerga a caixa inteira." },
+    { key: "chatapp", title: "ChatApp (legado)", desc: "Abre o ChatApp em janela externa. Comportamento antigo." },
   ];
 
   return (
@@ -2051,6 +2054,18 @@ function AtendimentoSection() {
           );
         })}
       </div>
+
+      {provider === "qs" && (
+        <div className="bg-white border border-gray-100 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-gray-900">Atendimento no QS</h3>
+          <ul className="text-[11.5px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
+            <li>O SDR <b>não precisa de conta no Chatwoot</b> — ele atende sem sair do QS.</li>
+            <li>Quem enxerga a conversa é decidido pelo <b>dono do lead</b>, no banco (migration 0024). Gestor e admin veem todas.</li>
+            <li>Precisa do webhook do Chatwoot apontando pro QS — senão as mensagens novas não entram (só o histórico, ao abrir o lead).</li>
+            <li>Mensagem enviada daqui sai pelo número da caixa configurada em <code>CHATWOOT_DEFAULT_INBOX_ID</code>.</li>
+          </ul>
+        </div>
+      )}
 
       <div className="bg-white border border-gray-100 rounded-xl p-4">
         <h3 className="text-sm font-semibold text-gray-900">Chatwoot</h3>

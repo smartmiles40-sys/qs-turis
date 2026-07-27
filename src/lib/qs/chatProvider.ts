@@ -13,14 +13,15 @@
 
 import { getSetting, setSetting } from "@/lib/qsSettings";
 
-export type ChatProvider = "chatapp" | "chatwoot";
+export type ChatProvider = "chatapp" | "chatwoot" | "qs";
 
 export const CHAT_PROVIDER_KEY = "chat_provider";
 
 /** Default por build (Vercel env). Sem env, cai no ChatApp (comportamento atual). */
 export function defaultChatProvider(): ChatProvider {
   const v = (import.meta.env.VITE_CHAT_PROVIDER as string | undefined)?.toLowerCase();
-  return v === "chatwoot" ? "chatwoot" : "chatapp";
+  if (v === "qs" || v === "chatwoot" || v === "chatapp") return v;
+  return "chatapp";
 }
 
 /**
@@ -30,7 +31,7 @@ export function defaultChatProvider(): ChatProvider {
  */
 export async function getChatProvider(): Promise<ChatProvider> {
   const flag = await getSetting<string>(CHAT_PROVIDER_KEY);
-  if (flag === "chatwoot" || flag === "chatapp") return flag;
+  if (flag === "qs" || flag === "chatwoot" || flag === "chatapp") return flag;
   return defaultChatProvider();
 }
 
