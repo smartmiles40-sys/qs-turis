@@ -33,6 +33,29 @@ function safeParse(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
 
+/**
+ * A Evolution decide "isso é áudio ou vídeo?" pela EXTENSÃO que aparece na URL do
+ * anexo — e na tabela mime que ela usa, `.webm` é **video/webm**; a extensão de
+ * áudio WebM é `.weba`. Ou seja: um áudio chamado `.webm` chegava no cliente como
+ * mensagem de VÍDEO, sem imagem, num contêiner que o iPhone não abre. Era o
+ * "áudio estranho".
+ *
+ * Com a extensão certa ela classifica como áudio, roda o ffmpeg embutido e manda
+ * OGG/Opus mono com ptt — a nota de voz de verdade, com bolinha e onda.
+ */
+const EXT_POR_MIME = {
+  'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a',
+  'audio/aac': 'm4a', 'audio/wav': 'wav', 'audio/webm': 'weba',
+};
+
+function nomeComExtensaoCerta(nome, mime) {
+  const ext = EXT_POR_MIME[mime];
+  if (!ext) return nome;
+  if (nome.toLowerCase().endsWith('.' + ext)) return nome;
+  const base = nome.replace(/\.[^.]+$/, '') || 'audio';
+  return `${base}.${ext}`;
+}
+
 /** Rótulo pra bolha não ficar vazia quando o Chatwoot ainda não devolveu a URL. */
 function rotuloDe(mime) {
   if (mime.startsWith('audio/')) return '🎤 áudio';
@@ -57,6 +80,7 @@ export default async function handler(req, res) {
   const mimeType = String(body.mimeType || '').toLowerCase().split(';')[0].trim();
   const caption = String(body.caption || '').trim().slice(0, 1000);
   const dataBase64 = String(body.dataBase64 || '');
+  const isVoiceMessage = body.isVoiceMessage === true || body.isVoiceMessage === 'true';
 
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
   if (!dataBase64) return res.status(400).json({ error: 'Arquivo vazio' });
@@ -116,31 +140,45 @@ export default async function handler(req, res) {
     form.append('message_type', 'outgoing');
     form.append('private', 'false');
     if (caption) form.append('content', caption);
-    form.append('attachments[]', new Blob([bytes], { type: mimeType }), fileName);
+    // Marca a bolha como nota de voz no Chatwoot (player com onda em vez de
+    // "arquivo"). Quem manda no WhatsApp é o formato — isto é só a UI de lá.
+    if (isVoiceMessage && mimeType.startsWith('audio/')) {
+      form.append('is_voice_message', 'true');
+    }
+    form.append(
+      'attachments[]',
+      new Blob([bytes], { type: mimeType }),
+      nomeComExtensaoCerta(fileName, mimeType)
+    );
 
     const sent = await cwForm(`/conversations/${conversationId}/messages`, form);
 
-    // Se o Chatwoot ainda não devolveu a URL do anexo, a bolha ficaria vazia —
-    // mostra um rótulo até o webhook chegar com o arquivo de verdade.
+    // ⚠️ DAQUI PRA BAIXO O ARQUIVO JÁ SAIU PRO CLIENTE.
+    // Nada aqui pode virar "não consegui enviar" — o SDR reenviaria e o cliente
+    // receberia o mesmo áudio duas vezes. Falha de gravação é problema nosso.
     const anexos = Array.isArray(sent?.attachments) ? sent.attachments : [];
     const temUrl = anexos.some((a) => a.data_url || a.thumb_url);
 
-    await ingestMessage({
-      leadId,
-      conversationId,
-      contactId,
-      inboxId,
-      message: {
-        id: sent?.id ?? null,
-        content: caption || (temUrl ? '' : rotuloDe(mimeType)),
-        message_type: 1,
-        created_at: sent?.created_at ?? null,
-        attachments: anexos,
-        sender: { name: auth.user?.name || null },
-      },
-    });
-
-    const tarefa = await completeWhatsAppTask(leadId);
+    let tarefa = null;
+    try {
+      await ingestMessage({
+        leadId,
+        conversationId,
+        contactId,
+        inboxId,
+        message: {
+          id: sent?.id ?? null,
+          content: caption || (temUrl ? '' : rotuloDe(mimeType)),
+          message_type: 1,
+          created_at: sent?.created_at ?? null,
+          attachments: anexos,
+          sender: { name: auth.user?.name || null },
+        },
+      });
+      tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);
+    } catch (e) {
+      console.error('[wa-send-media] enviado, mas falhou ao gravar no QS:', e?.message);
+    }
 
     return res.status(200).json({ ok: true, conversationId, messageId: sent?.id ?? null, tarefaConcluida: tarefa });
   } catch (e) {

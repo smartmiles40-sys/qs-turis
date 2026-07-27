@@ -192,10 +192,10 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     await recarregar();
   }, [text, sending, leadId, recarregar]);
 
-  const enviarMidia = useCallback(async (blob: Blob, nome: string, legenda = "") => {
+  const enviarMidia = useCallback(async (blob: Blob, nome: string, legenda = "", notaDeVoz = false) => {
     setSending(true);
     setErro(null);
-    const r = await sendWaMedia(leadId, blob, nome, legenda);
+    const r = await sendWaMedia(leadId, blob, nome, legenda, notaDeVoz);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar o arquivo."); return; }
     setSemConversa(false);
@@ -222,12 +222,23 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const iniciarGravacao = useCallback(async () => {
     setErro(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Mono não é capricho: nota de voz em estéreo é causa clássica de áudio
+      // que chega e não toca no WhatsApp.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
       streamRef.current = stream;
 
-      const preferidos = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+      // OGG primeiro: é o formato que o WhatsApp entende como nota de voz. Só o
+      // Firefox grava OGG nativo; Chrome/Edge/Safari caem no WebM, e aí quem
+      // converte é o ffmpeg da Evolution (por isso a extensão certa importa —
+      // ver nomeComExtensaoCerta em api/wa-send-media.js).
+      const preferidos = ["audio/ogg;codecs=opus", "audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
       const mime = preferidos.find((t) => MediaRecorder.isTypeSupported?.(t));
-      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const mr = new MediaRecorder(stream, {
+        ...(mime ? { mimeType: mime } : {}),
+        audioBitsPerSecond: 32000,   // voz mono: 3 min ≈ 720 KB, longe do teto de 3 MB
+      });
 
       chunksRef.current = [];
       cancelarRef.current = false;
@@ -241,11 +252,18 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         setSegundos(0);
         segundosRef.current = 0;
         if (cancelarRef.current) return;
-        const tipo = (mr.mimeType || "audio/webm").split(";")[0];
+        // Alguns navegadores reportam "video/webm" num stream que só tem áudio;
+        // normaliza pra não ser recusado como tipo inválido no servidor.
+        let tipo = (mr.mimeType || "audio/webm").split(";")[0].trim();
+        if (tipo === "video/webm") tipo = "audio/webm";
+
         const blob = new Blob(chunksRef.current, { type: tipo });
         if (blob.size < 1200 || dur < 1) { setErro("Áudio muito curto."); return; }
-        const ext = tipo.includes("ogg") ? "ogg" : tipo.includes("mp4") ? "m4a" : "webm";
-        await enviarMidia(blob, `audio-${Date.now()}.${ext}`);
+
+        // ".weba" (e não ".webm") é o que faz a Evolution tratar como ÁUDIO e
+        // converter pra nota de voz. O servidor reforça isso de qualquer jeito.
+        const ext = tipo.includes("ogg") ? "ogg" : tipo.includes("mp4") ? "m4a" : "weba";
+        await enviarMidia(blob, `audio-${Date.now()}.${ext}`, "", true);
       };
 
       recorderRef.current = mr;

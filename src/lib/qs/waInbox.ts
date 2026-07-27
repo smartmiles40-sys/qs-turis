@@ -303,7 +303,8 @@ export async function sendWaMedia(
   leadId: string,
   blob: Blob,
   fileName: string,
-  caption = ""
+  caption = "",
+  isVoiceMessage = false
 ): Promise<WaSendResult> {
   if (blob.size > MAX_MEDIA_BYTES) {
     return { ok: false, error: "Arquivo grande demais (máx. 3 MB)." };
@@ -313,7 +314,7 @@ export async function sendWaMedia(
     const res = await fetch("/api/wa-send-media", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ leadId, fileName, mimeType: blob.type, dataBase64, caption }),
+      body: JSON.stringify({ leadId, fileName, mimeType: blob.type, dataBase64, caption, isVoiceMessage }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };
