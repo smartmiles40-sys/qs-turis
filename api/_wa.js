@@ -214,13 +214,11 @@ export async function pickConversation(contactId, inboxId = null) {
 }
 
 /** Envio multipart (mídia). O cw() normal manda JSON e não serve aqui. */
-// 8,5s tem que ser MENOR que o maxDuration de 10s do vercel.json. Antes eram
-// 25s: o AbortController nunca disparava, a Vercel matava a função no meio e o
-// SDR via "não consegui enviar" com o arquivo já entregue — e reenviava.
-// Assim, se estourar, estoura como erro nosso, tratado e legível.
-// (Tentei subir o teto pra 60s em regra própria; o plano da Vercel recusou o
-// deploy. Se um dia liberar, sobe os dois juntos — nunca só um.)
-export async function cwForm(path, form, { timeoutMs = 8_500 } = {}) {
+// REGRA: este timeout tem que ser MENOR que o maxDuration da rota no
+// vercel.json (hoje 60s pra wa-send-media). Se for maior, o AbortController
+// nunca dispara, a Vercel mata a função no meio, e o SDR vê "não consegui
+// enviar" com o arquivo JÁ entregue — e reenvia. Mexeu num, mexa no outro.
+export async function cwForm(path, form, { timeoutMs = 45_000 } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
