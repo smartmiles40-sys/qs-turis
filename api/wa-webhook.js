@@ -62,13 +62,21 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Use POST' });
   }
 
-  const secret = process.env.WA_WEBHOOK_SECRET;
+  // .trim() dos dois lados de propósito: segredo colado no painel da Vercel vem
+  // com espaço/quebra de linha invisível com uma frequência alta demais, e o
+  // sintoma é péssimo de diagnosticar — 401 em toda mensagem, sem pista nenhuma.
+  const secret = String(process.env.WA_WEBHOOK_SECRET || '').trim();
   if (!secret) {
     console.error('[wa-webhook] WA_WEBHOOK_SECRET ausente — rota desligada');
     return res.status(503).json({ error: 'Webhook não configurado' });
   }
-  const sent = req.query?.secret || req.headers['x-qs-secret'];
-  if (sent !== secret) return res.status(401).json({ error: 'Não autorizado' });
+  const sent = String(req.query?.secret || req.headers['x-qs-secret'] || '').trim();
+  if (sent !== secret) {
+    // Não loga os valores (é segredo); loga só o suficiente pra saber se é
+    // "não mandaram" ou "mandaram diferente".
+    console.warn(`[wa-webhook] segredo não confere (recebido: ${sent ? 'presente' : 'ausente'})`);
+    return res.status(401).json({ error: 'Não autorizado' });
+  }
 
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const event = body?.event || '';
