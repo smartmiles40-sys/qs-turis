@@ -326,7 +326,7 @@ export default function SdrLayout() {
           {/* Botão do menu — só no mobile */}
           <button
             onClick={() => setMobileNavOpen(true)}
-            className="md:hidden flex items-center justify-center w-9 h-9 -ml-1 mr-1 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+            className="qs-navbtn md:hidden flex items-center justify-center w-9 h-9 -ml-1 mr-1 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
             aria-label="Abrir menu"
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -347,7 +347,7 @@ export default function SdrLayout() {
           </div>
 
           {/* Nav items (desktop) — no mobile vira o menu lateral */}
-          <nav className="hidden md:flex items-center gap-0.5">
+          <nav className="qs-topnav hidden md:flex items-center gap-0.5">
             {filteredMenu.map((item) => {
               if (isGroup(item)) {
                 return (

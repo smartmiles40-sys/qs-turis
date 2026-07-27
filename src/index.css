@@ -382,21 +382,26 @@ html.dark * { scrollbar-color: #39434F var(--bg); }
 /* Arrastando: sem transição, senão o painel persegue o mouse com atraso. */
 .qs-chatdock[data-arrastando="true"] { transition: none; }
 
-.qs-wa-scrim {
-  background: rgba(15,20,26,.28);
-  backdrop-filter: blur(1.5px);
-  animation: waFade .2s ease-out both;
-}
-html.dark .qs-wa-scrim { background: rgba(0,0,0,.5); }
-@keyframes waFade { from { opacity: 0 } to { opacity: 1 } }
+/* NÃO existe scrim/escurecimento aqui, e é decisão consciente: o painel serve
+   pra GANHAR tempo, e um SDR que não consegue clicar na fila enquanto conversa
+   perde mais do que ganha. O painel divide a tela, nunca cobre o QS. */
 
 .qs-chatdock-alca-linha { transition: background-color .15s, opacity .15s; }
 .qs-chatdock-alca:hover .qs-chatdock-alca-linha,
 .qs-chatdock-alca:focus-visible .qs-chatdock-alca-linha { background: var(--wa); opacity: 1; }
 
+/* ── App em coluna estreita ───────────────────────────────────────────────
+   Os breakpoints do Tailwind leem a VIEWPORT, não a coluna: com o painel
+   aberto ocupando metade da tela, o topo continua em modo desktop e CORTA os
+   botões em vez de reorganizar. Esta classe (posta no <html> pelo QsWaDock)
+   força o topo a virar o modo compacto que já existe pro celular — o menu
+   lateral —, então o QS continua 100% navegável ao lado da conversa. */
+html.qs-app-narrow .qs-topnav { display: none !important; }
+html.qs-app-narrow .qs-navbtn { display: flex !important; }
+
 /* Respeita quem pediu menos movimento (WCAG 2.3.3). */
 @media (prefers-reduced-motion: reduce) {
-  .qs-wa *, .qs-chatdock, .qs-chatdock::before, .qs-wa-scrim {
+  .qs-wa *, .qs-chatdock, .qs-chatdock::before {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;

@@ -8,12 +8,13 @@
 //
 // DESENHO — as duas decisões que mudam a experiência:
 //
-// 1. O painel PARA de espremer o app. Os pontos de quebra do QS leem a largura
-//    da JANELA, não da coluna: quando o dock espremia o conteúdo, o topo
-//    continuava em modo desktop e simplesmente CORTAVA os botões, em vez de
-//    reorganizar. Isso não tem conserto por CSS sem reescrever o app inteiro.
-//    Então: enquanto sobra app de verdade ele divide a tela; passando disso,
-//    descola e flutua por cima, com o fundo levemente escurecido.
+// 1. O painel DIVIDE a tela e nunca cobre o QS. O objetivo dele é ganho de
+//    tempo, e o SDR precisa seguir executando a cadência enquanto conversa —
+//    se o painel bloqueia o app, ele custa mais tempo do que economiza.
+//    O problema é que os pontos de quebra do QS leem a largura da JANELA, não
+//    da coluna: espremido, o topo continuava em modo desktop e CORTAVA os
+//    botões. Resolvido avisando o app (classe .qs-app-narrow no <html>), que
+//    então troca pro menu lateral compacto que já existe pro celular.
 //
 // 2. Acima de 560px vira LISTA + CONVERSA lado a lado. Antes, alargar só
 //    entregava bolhas mais largas — custo sem benefício. Agora alargar compra
@@ -28,30 +29,31 @@ import WaThreadList from "./WaThreadList";
 import WaConversation from "./WaConversation";
 import { countUnread, subscribeToThreads, type WaThread } from "@/lib/qs/waInbox";
 
-const PANEL_W = 440;        // padrão, e o que o duplo clique devolve
-const MIN_W = 340;          // abaixo disso a conversa fica ilegível
-const MAX_OVERLAY = 820;    // flutuando pode ser largo: não custa nada ao app
-const APP_CONFORTO = 1024;  // largura mínima pro QS continuar "desktop"
-const SPLIT_MIN_WIN = 1280; // num notebook 1366 não há tela pra dividir
-const DUAS_COLUNAS = 560;   // a partir daqui, lista e conversa convivem
+const PANEL_W = 440;       // padrão, e o que o duplo clique devolve
+const MIN_W = 340;         // abaixo disso a conversa fica ilegível
+const APP_MIN = 420;       // o QS ao lado nunca fica mais estreito que isto
+const APP_CONFORTO = 1080;  // abaixo disso o topo do QS entra em modo compacto
+const DUAS_COLUNAS = 560;  // a partir daqui, lista e conversa convivem
 const STORAGE_KEY = "qs_wa_dock_width";
 const AVISO_KEY = "qs_wa_avisos";
 
-type Modo = "split" | "overlay" | "fullscreen";
+// Só dois modos, de propósito. Não existe mais "flutuar por cima": o painel
+// serve pra GANHAR tempo, e cobrir o QS obriga o SDR a fechar a conversa toda
+// vez que precisa tocar na cadência — que é o trabalho principal dele.
+type Modo = "split" | "fullscreen";
 
+/** Teto: metade da tela é alvo legítimo, mas o QS sempre sobra utilizável. */
 function maxWidth(win?: number): number {
   const w = win ?? (typeof window === "undefined" ? 1440 : window.innerWidth);
-  return Math.max(MIN_W, Math.min(MAX_OVERLAY, w - 320));
+  return Math.max(MIN_W, w - APP_MIN);
 }
 
 function clampWidth(v: number, win?: number): number {
   return Math.min(Math.max(Math.round(v), MIN_W), maxWidth(win));
 }
 
-function modoDoDock(win: number, largura: number): Modo {
-  if (win < 768) return "fullscreen";
-  if (win < SPLIT_MIN_WIN) return "overlay";
-  return win - largura < APP_CONFORTO ? "overlay" : "split";
+function modoDoDock(win: number): Modo {
+  return win < 768 ? "fullscreen" : "split";
 }
 
 function useWinW() {
@@ -144,9 +146,17 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
 
   const win = useWinW();
   const { width, aplicar } = useDockWidth();
-  const modo = modoDoDock(win, width);
-  const flutuando = isOpen && modo === "overlay";
+  const modo = modoDoDock(win);
   const duasColunas = isOpen && modo !== "fullscreen" && width >= DUAS_COLUNAS;
+
+  // O QS ao lado só tem os breakpoints da JANELA, não da coluna: sem este aviso
+  // o topo continua em modo desktop e corta os botões em vez de reorganizar.
+  // Com a classe, ele troca pro menu lateral que já existe — e segue navegável.
+  useEffect(() => {
+    const apertado = isOpen && modo === "split" && win - width < APP_CONFORTO;
+    document.documentElement.classList.toggle("qs-app-narrow", apertado);
+    return () => document.documentElement.classList.remove("qs-app-narrow");
+  }, [isOpen, modo, win, width]);
 
   // ── Avisos de mensagem nova ───────────────────────────────────────────────
   useEffect(() => {
@@ -197,14 +207,6 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
     }
   }, [target?.leadId, target?.name, target?.phone, target?.draft]);
 
-  // Esc fecha quando está por cima: é camada sobreposta, o hábito manda.
-  useEffect(() => {
-    if (!flutuando) return;
-    const on = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
-    window.addEventListener("keydown", on);
-    return () => window.removeEventListener("keydown", on);
-  }, [flutuando, close]);
-
   // ── Redimensionar ─────────────────────────────────────────────────────────
   const [arrastando, setArrastando] = useState(false);
   const dragRef = useRef<{ x0: number; w0: number } | null>(null);
@@ -247,7 +249,7 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
     else if (e.key === "Home") { e.preventDefault(); aplicar(PANEL_W); }
   }, [aplicar, width]);
 
-  const largoAlvo = () => clampWidth(Math.round(win * 0.55));
+  const largoAlvo = () => clampWidth(Math.round(win * 0.5));   // metade da tela
   const estaLargo = width >= largoAlvo() - 8;
   const alternarLargura = () => aplicar(estaLargo ? PANEL_W : largoAlvo());
 
@@ -290,11 +292,6 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
             </span>
           )}
         </button>
-      )}
-
-      {/* Fundo escurecido quando o painel flutua — deixa claro que é camada */}
-      {flutuando && (
-        <div className="qs-wa-scrim fixed inset-0 z-[75]" onClick={close} aria-hidden="true" />
       )}
 
       <aside
