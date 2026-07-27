@@ -17,24 +17,44 @@ e vá na seção *Se der errado* no fim — não siga adiante.
   regra de privacidade; tudo respondendo certo.
 - ✅ **Webhook cadastrado** no Chatwoot apontando pro QS (`message_created`).
 - ✅ **Caixa "Comercial - Closers"** (id 2) criada e ligada ao número 11 95125-1935.
+- ✅ **Código no ar** (commits `3c4de4f` + `0314231`, deploy READY). As rotas
+  `/api/wa-*` respondem, e as proteções foram testadas: sem login dá 401, e o
+  webhook com segredo errado dá 401.
+
+## ⚠️ O bloqueio de agora: o segredo do webhook não confere
+
+Testado em produção: a variável `WA_WEBHOOK_SECRET` **existe** na Vercel (se
+faltasse, a resposta seria 503), mas o valor dela **não é** o mesmo que está na
+URL do webhook no Chatwoot. Resultado: toda mensagem que chega é recusada com 401
+e não entra no QS.
+
+**Conserto (Passo 1 abaixo).** Enquanto isso não for feito, nada do resto adianta.
 
 ## O que falta — 4 passos
 
 ---
 
-## Passo 1 — Subir o código (eu faço)
+## Passo 1 — Igualar o segredo do webhook
 
-**Onde:** aqui na conversa.
-**O que fazer:** me dar o ok pra commitar e pushar. O push na `main` dispara o
-deploy de produção na Vercel sozinho (~2 min).
+**Onde:** vercel.com → projeto **qs-turis** → Settings → Environment Variables →
+`WA_WEBHOOK_SECRET` → **Edit**.
 
-**Como saber que deu certo:** eu te confirmo que `/api/wa-webhook` parou de
-responder 404. Enquanto estiver 404, **nada** do resto funciona — o webhook que
-você cadastrou está batendo numa porta que ainda não existe.
+**O que fazer:** apagar o que está lá e colar **exatamente** o mesmo texto que
+aparece depois de `?secret=` na URL do webhook cadastrado no Chatwoot
+(Configurações → Integrações → Webhooks). Sem espaço antes nem depois.
+
+> Como a variável é "Sensitive", a Vercel não deixa você conferir o valor atual —
+> só sobrescrever. Então não tente comparar: apague e cole de novo.
+
+Depois: Deployments → três pontinhos do último → **Redeploy**.
+
+**Como saber que deu certo:** me avise. Eu chamo o webhook por fora e digo em 5
+segundos se voltou `200` (certo), `401` (ainda diferente) ou `503` (variável
+sumiu).
 
 ---
 
-## Passo 2 — Conferir as 4 variáveis na Vercel
+## Passo 2 — Conferir as outras 3 variáveis na Vercel
 
 **Onde:** vercel.com → projeto **qs-turis** → Settings → **Environment Variables**.
 
@@ -42,8 +62,7 @@ você cadastrou está batendo numa porta que ainda não existe.
 |---|---|---|
 | `CHATWOOT_AGENT_TOKEN` | já existe → deixar | — |
 | `CHATWOOT_WA_INBOX_IDS` | **editar** | `1,2` |
-| `CHATWOOT_DEFAULT_INBOX_ID` | criar | `2` |
-| `WA_WEBHOOK_SECRET` | criar | o mesmo segredo que está no fim da URL do webhook no Chatwoot |
+| `CHATWOOT_DEFAULT_INBOX_ID` | criar (se ainda não existir) | `2` |
 
 Três avisos que evitam dor de cabeça:
 
