@@ -233,3 +233,172 @@ html.dark .border-\[\#E5E7EB\], html.dark .border-\[\#E4E8EE\], html.dark .borde
 
 /* Trilho de rolagem discreto no escuro */
 html.dark * { scrollbar-color: #39434F var(--bg); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ATENDIMENTO DE WHATSAPP — camada de estilo do painel
+   ---------------------------------------------------------------------------
+   Por que existe um bloco de CSS em vez de style inline nos componentes:
+   estilo inline VENCE qualquer :hover, :focus-visible e :active. Enquanto a cor
+   das linhas era escrita inline, a lista inteira ficava morta ao mouse — não
+   por falta de capricho, mas porque era impossível reagir.
+
+   Decisão editorial: o painel NÃO veste a pele do WhatsApp. Verde de outro
+   produto colado dentro de um CRM azul é o que fazia ele parecer montado. Aqui
+   o verde vira só assinatura de ação (enviar, não lida); o resto é a superfície
+   do QS. O que dá ritmo à lista é o TRILHO de 3px na borda esquerda, que
+   carrega o estado e some quando não há estado.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.qs-wa { --wa-rail: transparent; }
+
+/* ── Linha da conversa ───────────────────────────────────────────────────── */
+.wa-row {
+  position: relative;
+  background: var(--card);
+  border-bottom: 1px solid var(--line2);
+  transition: background-color .16s cubic-bezier(.25,1,.5,1);
+}
+.wa-row::before {                      /* o trilho: a assinatura do painel */
+  content: "";
+  position: absolute; left: 0; top: 0; bottom: -1px; width: 3px;
+  background: var(--wa-rail);
+  transition: background-color .16s cubic-bezier(.25,1,.5,1);
+}
+.wa-row:hover { background: var(--card2); }
+.wa-row:focus-within { background: var(--card2); }
+.wa-row[data-esperando="true"] { --wa-rail: var(--red); }
+.wa-row[data-fixada="true"]    { --wa-rail: var(--amber); }
+.wa-row[data-ativa="true"]     { --wa-rail: var(--accent); background: var(--accent-soft); }
+.wa-row-btn:active { background: var(--line2); }
+
+/* Não lida pesa: peso é o sinal de varredura mais forte que existe, e não
+   depende de cor (WCAG 1.4.1 — cor nunca pode ser o único indicador). */
+.wa-row[data-nao-lida="true"] .wa-row-nome    { font-weight: 700; }
+.wa-row[data-nao-lida="true"] .wa-row-preview { color: var(--ink); font-weight: 500; }
+
+/* Alfinete: irmão do botão, não filho — ver comentário no WaThreadList. */
+.wa-pin {
+  color: var(--ink3); opacity: 0;
+  transition: opacity .15s cubic-bezier(.25,1,.5,1), color .15s, background-color .15s;
+}
+.wa-row:hover .wa-pin,
+.wa-row:focus-within .wa-pin,
+.wa-pin[aria-pressed="true"] { opacity: 1; }
+.wa-pin[aria-pressed="true"] { color: var(--amber); }
+.wa-pin:hover { background: var(--line2); color: var(--ink); }
+
+/* ── Abas ────────────────────────────────────────────────────────────────── */
+.wa-tab {
+  color: var(--ink3);
+  border-bottom: 2px solid transparent;
+  transition: color .15s cubic-bezier(.25,1,.5,1), border-color .15s, background-color .15s;
+}
+.wa-tab:hover { color: var(--ink2); background: var(--card2); }
+.wa-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--wa); }
+
+/* ── Botões ──────────────────────────────────────────────────────────────── */
+.wa-send {
+  background: var(--wa);
+  transition: background-color .15s cubic-bezier(.25,1,.5,1), transform .12s;
+}
+.wa-send:hover:not(:disabled) { background: var(--wa-hover); }
+.wa-send:active:not(:disabled) { transform: scale(.97); }
+.wa-send:disabled { opacity: .4; cursor: not-allowed; }
+
+.wa-icon-btn {
+  color: var(--ink3);
+  transition: color .15s cubic-bezier(.25,1,.5,1), background-color .15s, transform .12s;
+}
+.wa-icon-btn:hover:not(:disabled) { color: var(--ink); background: var(--line2); }
+.wa-icon-btn:active:not(:disabled) { transform: scale(.92); }
+.wa-icon-btn:disabled { opacity: .35; }
+
+.wa-chip {
+  transition: background-color .15s cubic-bezier(.25,1,.5,1), color .15s, border-color .15s;
+}
+.wa-chip:hover { border-color: var(--ink3); color: var(--ink); }
+
+/* Foco visível — faltava em TODOS os botões do painel. Quem trabalha rápido
+   navega por teclado, e o outline padrão some sobre superfície colorida. */
+.qs-wa :is(a,button,[role="button"],input,select,textarea):focus-visible {
+  outline: 2px solid var(--wa);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* ── Esqueleto de carregamento ───────────────────────────────────────────── */
+/* Carregar mostra a FORMA do conteúdo, não a palavra "carregando". */
+.wa-sk {
+  background: linear-gradient(90deg, var(--line2) 25%, var(--line) 37%, var(--line2) 63%);
+  background-size: 400% 100%;
+  animation: waSk 1.4s ease-in-out infinite;
+}
+@keyframes waSk { 0% { background-position: 100% 50% } 100% { background-position: 0 50% } }
+
+/* ── Áudio ───────────────────────────────────────────────────────────────── */
+.wa-audio-play {
+  background: var(--wa);
+  transition: background-color .15s cubic-bezier(.25,1,.5,1), transform .12s;
+}
+.wa-audio-play:hover { background: var(--wa-hover); }
+.wa-audio-play:active { transform: scale(.94); }
+.wa-audio-seek:focus-within { outline: 2px solid var(--wa); outline-offset: 3px; border-radius: 6px; }
+.wa-audio-vel { color: var(--ink3); transition: color .15s, background-color .15s; }
+.wa-audio-vel:hover { color: var(--ink); background: var(--line2); }
+
+/* ── Dock ────────────────────────────────────────────────────────────────── */
+/* Três modos. O painel só EMPURRA o app quando sobra app de verdade; passando
+   disso ele descola e flutua. Isso não é preferência: os breakpoints do QS leem
+   a VIEWPORT, não a coluna — espremer não faz o topo refluir, faz ele cortar. */
+.qs-chatdock { background: var(--card); }
+
+.qs-chatdock[data-modo="split"] {
+  width: var(--wa-dock-w);
+  border-left: 1px solid var(--line);
+  transition: width .28s cubic-bezier(.4,0,.2,1);
+}
+.qs-chatdock[data-modo="split"]:not(.qs-chatdock-open) { width: 0; border-left: none; }
+
+.qs-chatdock[data-modo="overlay"] {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 76;
+  width: var(--wa-dock-w);
+  border-left: 1px solid var(--line);
+  box-shadow: -28px 0 64px -28px rgba(16,24,40,.4);
+  transform: translateX(100%);
+  transition: transform .32s cubic-bezier(.16,1,.3,1);
+}
+.qs-chatdock[data-modo="overlay"].qs-chatdock-open { transform: none; }
+.qs-chatdock[data-modo="overlay"]:not(.qs-chatdock-open) { pointer-events: none; }
+
+.qs-chatdock[data-modo="fullscreen"] {
+  position: fixed; inset: 0; z-index: 80; width: 100vw; border-left: none;
+  transform: translateX(100%);
+  transition: transform .3s cubic-bezier(.16,1,.3,1);
+}
+.qs-chatdock[data-modo="fullscreen"].qs-chatdock-open { transform: none; }
+.qs-chatdock[data-modo="fullscreen"]:not(.qs-chatdock-open) { pointer-events: none; }
+.qs-chatdock[data-modo="fullscreen"] .qs-chatdock-alca { display: none; }
+
+/* Arrastando: sem transição, senão o painel persegue o mouse com atraso. */
+.qs-chatdock[data-arrastando="true"] { transition: none; }
+
+.qs-wa-scrim {
+  background: rgba(15,20,26,.28);
+  backdrop-filter: blur(1.5px);
+  animation: waFade .2s ease-out both;
+}
+html.dark .qs-wa-scrim { background: rgba(0,0,0,.5); }
+@keyframes waFade { from { opacity: 0 } to { opacity: 1 } }
+
+.qs-chatdock-alca-linha { transition: background-color .15s, opacity .15s; }
+.qs-chatdock-alca:hover .qs-chatdock-alca-linha,
+.qs-chatdock-alca:focus-visible .qs-chatdock-alca-linha { background: var(--wa); opacity: 1; }
+
+/* Respeita quem pediu menos movimento (WCAG 2.3.3). */
+@media (prefers-reduced-motion: reduce) {
+  .qs-wa *, .qs-chatdock, .qs-chatdock::before, .qs-wa-scrim {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

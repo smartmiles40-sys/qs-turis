@@ -19,14 +19,35 @@ import {
   toE164BR, findContact, pickConversation, ingestMessage,
 } from './_wa.js';
 
+async function gravarThread(leadId, patch) {
+  await rest('qs_wa_threads?on_conflict=lead_id', {
+    method: 'POST',
+    body: [{ lead_id: leadId, ...patch }],
+    prefer: 'resolution=merge-duplicates,return=minimal',
+  });
+}
+
+/**
+ * Grava o estado da conversa. Se a coluna `avatar_url` ainda não existir (a
+ * migration 0026 é opcional), o PostgREST recusa a linha INTEIRA — e aí se
+ * perderiam também a caixa, o id da conversa e o synced_at. Por isso, ao falhar
+ * com a foto, tenta de novo sem ela em vez de desistir de tudo.
+ */
 async function saveThreadMeta(leadId, patch) {
   try {
-    await rest('qs_wa_threads?on_conflict=lead_id', {
-      method: 'POST',
-      body: [{ lead_id: leadId, ...patch }],
-      prefer: 'resolution=merge-duplicates,return=minimal',
-    });
+    await gravarThread(leadId, patch);
   } catch (e) {
+    if ('avatar_url' in patch) {
+      const { avatar_url: _ignorado, ...semFoto } = patch;
+      try {
+        await gravarThread(leadId, semFoto);
+        console.warn('[wa-sync] avatar_url ignorado — aplique a migration 0026 pra ver as fotos');
+        return;
+      } catch (e2) {
+        console.warn('[wa-sync] saveThreadMeta:', e2?.message);
+        return;
+      }
+    }
     console.warn('[wa-sync] saveThreadMeta:', e?.message);
   }
 }
@@ -96,6 +117,10 @@ export default async function handler(req, res) {
       cw_conversation_id: conv.id,
       cw_contact_id: contact.id,
       cw_inbox_id: conv.inbox_id ?? null,
+      // Foto de perfil do WhatsApp (coluna da migration 0026). Se a coluna não
+      // existir, o PostgREST recusa a linha inteira — por isso saveThreadMeta
+      // engole o erro e o resto do sync segue normal.
+      avatar_url: contact.thumbnail || null,
       can_reply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
       synced_at: new Date().toISOString(),
     });

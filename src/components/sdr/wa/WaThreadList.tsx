@@ -6,6 +6,14 @@
 // devolve as conversas dos leads dele (mais as que ele passou pro closer, pra
 // poder acompanhar). As abas e filtros daqui são organização em cima disso, não
 // segurança: mesmo que alguém refaça a query no DevTools, continua vendo só o seu.
+//
+// DESENHO — três decisões que mudam a leitura da lista:
+//  1. Avatar à esquerda: dá a âncora de varredura que não existia (79% das
+//     pessoas varrem em F; sem coluna fixa à esquerda, varrer vira ler).
+//  2. Trilho de 3px na borda: carrega o estado (ativa/fixada/esperando) em vez
+//     de três selos coloridos brigando por espaço na mesma linha.
+//  3. Altura previsível: 2 linhas fixas + 1 de meta que NUNCA quebra. Antes a
+//     altura variava de 62 a 90px e o olho perdia o ritmo.
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,6 +25,7 @@ import {
 } from "@/lib/qs/waInbox";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { useQsAuth } from "@/contexts/QsAuthContext";
+import { WaAvatar, WaLinhaEsqueleto } from "./WaBits";
 
 type Aba = "meus" | "closers" | "todos";
 
@@ -28,7 +37,7 @@ interface Props {
 function IconPin({ size = 13, filled = false }: { size?: number; filled?: boolean }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"}
-         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+         stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6z" />
     </svg>
   );
@@ -63,8 +72,7 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
     getInboxLabels().then(setRotulos);
   }, []);
 
-  const alternarFixar = useCallback(async (e: React.MouseEvent, leadId: string) => {
-    e.stopPropagation();   // não abre a conversa ao clicar no alfinete
+  const alternarFixar = useCallback(async (leadId: string) => {
     const novo = await togglePin(leadId);
     if (novo == null) return;
     setFixadas((prev) => {
@@ -78,10 +86,9 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
     const q = busca.trim().toLowerCase();
     const soDigitos = q.replace(/\D/g, "");
 
-    let out = threads.filter((t) => {
+    const out = threads.filter((t) => {
       const dono = t.lead?.owner_id ?? null;
 
-      // Abas
       if (aba === "meus") {
         // Gestor não tem carteira própria: pra ele a primeira aba é "a equipe",
         // ou seja, tudo que NÃO está com um closer.
@@ -101,14 +108,13 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
       return true;
     });
 
-    // Fixadas sempre no topo; dentro de cada grupo, a mais recente primeiro.
-    out = [...out].sort((a, b) => {
+    // Fixadas no topo; dentro de cada grupo, a mais recente primeiro.
+    return [...out].sort((a, b) => {
       const fa = fixadas.has(a.lead_id) ? 1 : 0;
       const fb = fixadas.has(b.lead_id) ? 1 : 0;
       if (fa !== fb) return fb - fa;
       return new Date(b.last_at || 0).getTime() - new Date(a.last_at || 0).getTime();
     });
-    return out;
   }, [threads, aba, busca, soNaoRespondidas, donoFiltro, fixadas, users, ehGestor, currentUser?.id]);
 
   const contarAba = useCallback((a: Aba) => {
@@ -120,68 +126,76 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
     }).length;
   }, [threads, users, ehGestor, currentUser?.id]);
 
-  const naoRespondidas = useMemo(
-    () => threads.filter((t) => esperandoDesde(t)).length,
-    [threads]
-  );
+  const naoRespondidas = useMemo(() => threads.filter((t) => esperandoDesde(t)).length, [threads]);
+  const temFiltro = Boolean(busca) || soNaoRespondidas || donoFiltro !== "todos";
 
   const ABAS: { key: Aba; label: string }[] = [
-    { key: "meus", label: ehGestor ? "Da equipe" : "Meus Leads" },
-    { key: "closers", label: "Com Closers" },
-    { key: "todos", label: "Todos os contatos" },
+    { key: "meus", label: ehGestor ? "Da equipe" : "Meus leads" },
+    { key: "closers", label: "Com closers" },
+    { key: "todos", label: "Todos" },
   ];
 
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Abas */}
-      <div className="shrink-0 flex border-b" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
-        {ABAS.map((a) => {
-          const ativa = aba === a.key;
-          return (
-            <button
-              key={a.key}
-              onClick={() => setAba(a.key)}
-              className="flex-1 px-2 py-2 text-[11.5px] font-bold transition-colors"
-              style={{
-                color: ativa ? "var(--wa)" : "var(--ink3)",
-                borderBottom: ativa ? "2px solid var(--wa-bright)" : "2px solid transparent",
-              }}
-            >
-              {a.label}
-              <span className="ml-1 font-normal opacity-70">{contarAba(a.key)}</span>
-            </button>
-          );
-        })}
+      <div className="shrink-0 flex" style={{ background: "var(--card)", borderBottom: "1px solid var(--line)" }}
+           role="tablist" aria-label="Filtrar conversas">
+        {ABAS.map((a) => (
+          <button
+            key={a.key}
+            role="tab"
+            aria-selected={aba === a.key}
+            onClick={() => setAba(a.key)}
+            className="wa-tab flex-1 px-2 py-2.5 text-[12px] font-semibold"
+          >
+            {a.label}
+            <span className="ml-1.5 font-normal tabular-nums" style={{ color: "var(--ink3)" }}>
+              {contarAba(a.key)}
+            </span>
+          </button>
+        ))}
       </div>
 
       {/* Busca e filtros */}
-      <div className="shrink-0 p-2 border-b space-y-1.5" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
-        <input
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          placeholder="Buscar por nome ou telefone"
-          className="w-full rounded-full px-3 py-1.5 text-[12.5px] outline-none"
-          style={{ border: "1px solid var(--line)", background: "var(--card2)", color: "var(--ink)" }}
-        />
+      <div className="shrink-0 px-3 py-2.5 space-y-2"
+           style={{ background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
+        <div className="relative">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+               strokeLinecap="round" className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+               style={{ color: "var(--ink3)" }}>
+            <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+          </svg>
+          <input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar nome ou telefone"
+            aria-label="Buscar conversa"
+            className="w-full rounded-lg pl-9 pr-3 py-2 text-[13px] outline-none"
+            style={{ border: "1px solid var(--line)", background: "var(--card2)", color: "var(--ink)" }}
+          />
+        </div>
+
         <div className="flex items-center gap-2">
           <button
             onClick={() => setSoNaoRespondidas((v) => !v)}
-            className="px-2 py-1 rounded-full text-[10.5px] font-bold transition-colors"
-            style={soNaoRespondidas
-              ? { background: "var(--wa-err-bg)", color: "var(--wa-err-ink)" }
-              : { background: "var(--card2)", color: "var(--ink3)", border: "1px solid var(--line)" }}
+            aria-pressed={soNaoRespondidas}
             title="Só conversas em que o cliente falou por último"
+            className="wa-chip px-2.5 py-1 rounded-lg text-[11px] font-semibold"
+            style={soNaoRespondidas
+              ? { background: "var(--wa-err-bg)", color: "var(--wa-err-ink)", border: "1px solid transparent" }
+              : { background: "transparent", color: "var(--ink3)", border: "1px solid var(--line)" }}
           >
-            Esperando resposta {naoRespondidas > 0 && `(${naoRespondidas})`}
+            Esperando resposta
+            {naoRespondidas > 0 && <span className="ml-1 tabular-nums">{naoRespondidas}</span>}
           </button>
 
           {ehGestor && (
             <select
               value={donoFiltro}
               onChange={(e) => setDonoFiltro(e.target.value)}
-              className="ml-auto rounded-full px-2 py-1 text-[10.5px] outline-none"
-              style={{ border: "1px solid var(--line)", background: "var(--card2)", color: "var(--ink)" }}
-              title="Ver as conversas de um atendente específico"
+              aria-label="Filtrar por atendente"
+              className="ml-auto rounded-lg px-2 py-1 text-[11px] outline-none"
+              style={{ border: "1px solid var(--line)", background: "transparent", color: "var(--ink2)" }}
             >
               <option value="todos">Todos os atendentes</option>
               {users.filter((u) => u.is_active).map((u) => (
@@ -195,19 +209,28 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
       {/* Lista */}
       <div className="flex-1 min-h-0 overflow-y-auto" style={{ background: "var(--bg)" }}>
         {loading ? (
-          <p className="text-center text-[12px] py-6" style={{ color: "var(--ink3)" }}>carregando…</p>
+          Array.from({ length: 7 }).map((_, i) => <WaLinhaEsqueleto key={i} />)
         ) : lista.length === 0 ? (
-          <div className="text-center py-10 px-5">
-            <p className="text-[12.5px] font-bold" style={{ color: "var(--ink2)" }}>
-              {busca || soNaoRespondidas ? "Nada encontrado" : "Nenhuma conversa aqui"}
+          <div className="text-center py-12 px-6">
+            <p className="text-[14px] font-semibold" style={{ color: "var(--ink2)" }}>
+              {temFiltro ? "Nada com esse filtro" : "Nenhuma conversa ainda"}
             </p>
-            <p className="text-[11.5px] mt-1" style={{ color: "var(--ink3)" }}>
-              {busca || soNaoRespondidas
-                ? "Tente outro filtro."
+            <p className="text-[12px] mt-1.5 leading-relaxed" style={{ color: "var(--ink3)" }}>
+              {temFiltro
+                ? "Tente outro nome, número ou período."
                 : aba === "closers"
                   ? "Aqui aparecem os seus leads que já foram para um closer."
                   : "As conversas dos seus leads aparecem assim que alguém escrever."}
             </p>
+            {temFiltro && (
+              <button
+                onClick={() => { setBusca(""); setSoNaoRespondidas(false); setDonoFiltro("todos"); }}
+                className="wa-chip mt-3 px-3 py-1.5 rounded-lg text-[12px] font-semibold"
+                style={{ border: "1px solid var(--line)", color: "var(--ink2)" }}
+              >
+                Limpar filtros
+              </button>
+            )}
           </div>
         ) : (
           lista.map((t) => {
@@ -217,76 +240,84 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
             const espera = esperandoDesde(t);
             const dono = userName(users, t.lead?.owner_id);
             const tag = inboxTag(rotulos, t.cw_inbox_id);
+            const nome = threadTitle(t);
+            // O próprio nome repetido em 40 linhas é ruído: só mostra o dono
+            // quando ele NÃO é você.
+            const mostraDono = Boolean(dono) && t.lead?.owner_id !== currentUser?.id;
+
             return (
-              <button
-                key={t.lead_id}
-                onClick={() => onPick(t)}
-                className="w-full text-left px-3 py-2.5 border-b transition-colors"
-                style={{
-                  borderColor: "var(--line2)",
-                  background: ativa ? "var(--accent-soft)" : fixada ? "var(--card2)" : "var(--card)",
-                }}
-              >
-                <div className="flex items-baseline gap-2">
-                  <span className="flex-1 min-w-0 truncate text-[13px] font-bold" style={{ color: "var(--ink)" }}>
-                    {threadTitle(t)}
-                  </span>
-                  <span className="shrink-0 text-[10.5px]" style={{ color: "var(--ink3)" }}>
-                    {shortWhen(t.last_at)}
-                  </span>
-                  <span
-                    onClick={(e) => alternarFixar(e, t.lead_id)}
-                    role="button"
-                    tabIndex={-1}
-                    title={fixada ? "Desafixar" : "Fixar no topo"}
-                    className="shrink-0 p-0.5 rounded hover:opacity-100 transition-opacity"
-                    style={{ color: fixada ? "var(--amber)" : "var(--ink3)", opacity: fixada ? 1 : 0.45 }}
-                  >
-                    <IconPin size={13} filled={fixada} />
-                  </span>
-                </div>
+              <div key={t.lead_id} className="wa-row"
+                   data-ativa={ativa} data-fixada={fixada}
+                   data-esperando={Boolean(espera)} data-nao-lida={naoLidas > 0}>
+                <button
+                  onClick={() => onPick(t)}
+                  className="wa-row-btn w-full text-left flex items-start gap-3 pl-3 pr-10 py-2.5"
+                >
+                  <WaAvatar nome={nome} url={t.avatar_url} size={40} />
 
-                {/* Selos: dono · número · esperando resposta */}
-                <div className="flex items-center gap-1 flex-wrap mt-1">
-                  {dono && (
-                    <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold"
-                          style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
-                      {dono}
+                  <span className="flex-1 min-w-0">
+                    {/* linha 1 — nome + hora */}
+                    <span className="flex items-baseline gap-2">
+                      <span className="wa-row-nome flex-1 min-w-0 truncate text-[14px] font-medium"
+                            style={{ color: "var(--ink)" }}>
+                        {nome}
+                      </span>
+                      <span className="shrink-0 text-[11px] tabular-nums"
+                            style={{ color: espera ? "var(--red)" : "var(--ink3)" }}>
+                        {shortWhen(t.last_at)}
+                      </span>
                     </span>
-                  )}
-                  {tag && (
-                    <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold"
-                          style={tag.ehApi
-                            ? { background: "var(--wa-ok-bg)", color: "var(--wa)" }
-                            : { background: "var(--card2)", color: "var(--ink3)", border: "1px solid var(--line)" }}
-                          title={tag.ehApi ? "Número oficial (API)" : "WhatsApp normal"}>
-                      {tag.ehApi ? "API oficial" : "normal"} · {tag.nome}
-                    </span>
-                  )}
-                  {espera && (
-                    <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold"
-                          style={{ background: "var(--wa-err-bg)", color: "var(--wa-err-ink)" }}
-                          title="O cliente falou por último — ninguém respondeu ainda">
-                      esperando {humanizarEspera(espera)}
-                    </span>
-                  )}
-                </div>
 
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="flex-1 min-w-0 truncate text-[11.5px]" style={{ color: "var(--ink3)" }}>
-                    {t.last_direction === "out" && <span>você: </span>}
-                    {t.last_message || formatPhoneDisplay(t.lead?.phone) || "—"}
-                  </span>
-                  {naoLidas > 0 && (
-                    <span
-                      className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[10px] font-bold grid place-items-center"
-                      style={{ background: "var(--wa-bright)" }}
-                    >
-                      {naoLidas > 99 ? "99+" : naoLidas}
+                    {/* linha 2 — prévia + não lidas (altura sempre igual) */}
+                    <span className="flex items-center gap-2 mt-0.5">
+                      <span className="wa-row-preview flex-1 min-w-0 truncate text-[12px]"
+                            style={{ color: "var(--ink2)" }}>
+                        {t.last_direction === "out" && <span style={{ color: "var(--ink3)" }}>você: </span>}
+                        {t.last_message || formatPhoneDisplay(t.lead?.phone) || "—"}
+                      </span>
+                      {naoLidas > 0 && (
+                        <span className="shrink-0 min-w-[19px] h-[19px] px-1.5 rounded-full text-white text-[11px] font-semibold grid place-items-center tabular-nums"
+                              style={{ background: "var(--wa-bright)" }}>
+                          {naoLidas > 99 ? "99+" : naoLidas}
+                        </span>
+                      )}
                     </span>
-                  )}
-                </div>
-              </button>
+
+                    {/* linha 3 — meta. Uma linha só, com truncate: nunca quebra. */}
+                    {(espera || mostraDono || tag?.ehApi) && (
+                      <span className="flex items-center gap-2 mt-1 min-w-0 text-[11px]">
+                        {espera && (
+                          <span className="shrink-0 font-semibold" style={{ color: "var(--red)" }}>
+                            esperando {humanizarEspera(espera)}
+                          </span>
+                        )}
+                        {tag?.ehApi && (
+                          <span className="shrink-0 px-1.5 rounded font-semibold"
+                                style={{ background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }}
+                                title={`Número oficial · ${tag.nome}`}>
+                            API
+                          </span>
+                        )}
+                        {mostraDono && (
+                          <span className="min-w-0 truncate" style={{ color: "var(--ink3)" }}>{dono}</span>
+                        )}
+                      </span>
+                    )}
+                  </span>
+                </button>
+
+                {/* Alfinete FORA do botão: interativo dentro de interativo é HTML
+                    inválido e deixava fixar inalcançável por teclado. */}
+                <button
+                  onClick={() => alternarFixar(t.lead_id)}
+                  aria-pressed={fixada}
+                  aria-label={fixada ? `Desafixar ${nome}` : `Fixar ${nome} no topo`}
+                  title={fixada ? "Desafixar" : "Fixar no topo"}
+                  className="wa-pin absolute right-2 top-2.5 w-8 h-8 grid place-items-center rounded-lg"
+                >
+                  <IconPin size={13} filled={fixada} />
+                </button>
+              </div>
             );
           })
         )}

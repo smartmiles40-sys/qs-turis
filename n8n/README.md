@@ -1,6 +1,6 @@
 # Integrações n8n do QS Turis
 
-4 workflows prontos pra importar (menu **⋮ → Import from File** no n8n):
+Workflows prontos pra importar (menu **⋮ → Import from File** no n8n):
 
 | Arquivo | O que faz | Gatilho |
 |---|---|---|
@@ -8,6 +8,7 @@
 | `bitrix-to-qs.workflow.json` | Bitrix → QS via `crm.deal.get`/`crm.contact.get` (Etapa 1.1) | Webhook do Bitrix |
 | `bitrix-inbound-to-qs.workflow.json` | **⭐ Bitrix → QS pelos dados do próprio webhook** (querystring; NÃO chama o Bitrix de volta) → `/api/lead-inbound` | Webhook do Bitrix |
 | `qs-to-bitrix-webhook.workflow.json` | **⭐ QS → Bitrix por EVENTO**: cada botão (perdido/ganho/reunião/nota) dispara na hora | Webhook (por botão) |
+| `bitrix-atividade-concluida-move-stage.workflow.json` | **⭐ Dentro do Bitrix**: SDR conclui a 1ª atividade → o negócio anda sozinho de **Novo lead → Follow-up 1** | Evento do Bitrix (`ONCRMACTIVITYUPDATE`) |
 | `qs-to-bitrix-sync.workflow.json` | ⚠️ **APOSENTADO — NÃO RELIGAR** (reenviaria TODO o histórico; ver seção do legado). Substituído pelo de cima. | A cada 1 min |
 | `chatapp-token-refresh.workflow.json` | **Valida/renova o token do ChatApp** e grava no banco (Etapa 2.4) | A cada 6 h |
 
@@ -174,6 +175,80 @@ webhook ativo**.
   reunião, nota) e `TasksPanel` (desfecho da tarefa, "Ganho = agendar reunião",
   observação "Salvar no Bitrix"). Um botão **novo** no futuro não sincroniza
   sozinho — é preciso chamar `notifyBitrix(...)` nele (`src/lib/qs/bitrixSync.ts`).
+
+---
+
+## ⭐ `bitrix-atividade-concluida-move-stage` — a coluna anda sozinha no Bitrix
+
+**O problema (pedido do Bruno, 27/07):** o SDR conclui a atividade do lead e
+**depois** precisa abrir o kanban do Bitrix só pra arrastar o card de **Novo lead**
+pra **Follow-up 1**. Trabalho manual puro — e quando esquecem, o funil mente.
+
+**A ideia:** o Bitrix avisa o n8n toda vez que uma atividade muda; o n8n confere
+se ela foi **concluída**, se é de um **negócio**, e se esse negócio **ainda está
+em Novo lead** — só aí move. Ninguém abre o kanban.
+
+**Fluxo:** evento `ONCRMACTIVITYUPDATE` → `crm.activity.get` (o evento manda só o
+ID) → filtro (concluída + dona é negócio) → `crm.deal.get` → filtro (está em
+`STAGE_DE`?) → `crm.deal.update` (move) → comentário na timeline (nó opcional,
+vem desativado).
+
+### Por que "primeira atividade" sai de graça
+
+Não existe contador nem flag: a regra é **"só move quem ainda está em Novo lead"**.
+Depois do 1º move o negócio saiu dessa coluna, então concluir a 2ª, 3ª, 10ª
+atividade não faz nada. Isso também protege contra o robô **puxar pra trás** um
+negócio que já avançou pra Reunião Agendada.
+
+### Configurar (só o nó `Config` + 1 tela no Bitrix)
+
+1. **Nó `Config`** (é o único que você edita):
+   - `BITRIX_BASE` → a mesma base REST dos outros workflows
+     (`https://SEUPORTAL.bitrix24.com.br/rest/USERID/CODIGO`, **sem barra no fim**).
+   - `STAGE_DE` → coluna "Novo lead" (chute inicial: `C25:NEW`).
+   - `STAGE_PARA` → coluna "Follow-up 1" (**`PREENCHA_STAGE_FOLLOWUP_1`**).
+   - Descubra os dois colando no navegador (logado no Bitrix):
+     `BASE/crm.status.list.json?filter[ENTITY_ID]=DEAL_STAGE_25` — vem `STATUS_ID`
+     (o que vai no config) + `NAME` (o nome que você vê no kanban).
+   - `APP_TOKEN` → o "token do aplicativo" do webhook de saída (passo 2).
+   - `ENTIDADE` → `deal` (mude pra `lead` **só** se essas colunas estiverem na
+     seção **Leads** do Bitrix, não em Negócios — o workflow troca sozinho para
+     `crm.lead.*` e `STATUS_ID`).
+   - `SO_TIPOS` → vazio = qualquer atividade. Pra restringir, lista de tipos:
+     `1`=reunião, `2`=ligação, `3`=tarefa, `4`=e-mail (ex.: `2,3`).
+2. **Registrar o evento no Bitrix:** Aplicativos → Desenvolvedor →
+   **Webhook de saída**. Marque **`ONCRMACTIVITYUPDATE`** (e, se quiser pegar
+   ligação já lançada como concluída, também `ONCRMACTIVITYADD`), cole em
+   "endereço do manipulador" a URL de **produção** do webhook do n8n
+   (`https://SEU-N8N/webhook/bitrix-atividade-concluida`) e salve. Copie o
+   **token do aplicativo** que aparece e cole no `APP_TOKEN`.
+   *Alternativa por REST (mesma coisa, sem a tela):*
+   `BASE/event.bind.json?event=ONCRMACTIVITYUPDATE&handler=https://SEU-N8N/webhook/bitrix-atividade-concluida`
+3. **Ative o workflow** (antes de ativar, a URL de produção não existe e o Bitrix
+   leva 404).
+
+### Segurança
+
+O webhook **não** usa Header Auth como os `qs-*` — o Bitrix não deixa mandar
+header custom. Quem autentica é o `APP_TOKEN`: o Bitrix assina todo evento com
+ele e o nó "Ler evento do Bitrix" recusa o que não bater. **Preencha o
+`APP_TOKEN`** — deixando o placeholder, a validação fica desligada e qualquer um
+que descubra a URL move negócio no seu CRM.
+
+### Coisas que você precisa saber
+
+- **Não tem gatilho nativo genérico de "atividade concluída"** nas automações do
+  Bitrix (há gatilhos por *tipo* de comunicação: ligação, e-mail, formulário).
+  Se você encontrar um "Atividade concluída" na sua conta, dá pra fazer o mesmo
+  sem n8n — este workflow é o caminho que funciona em qualquer plano com REST.
+- **Isto é Bitrix→Bitrix.** Não mexe no QS: as abas Novo/FUP/Atrasada do QS
+  continuam saindo da cadência do Supabase. Se o SDR conclui a tarefa **no QS**
+  (e não no Bitrix), este evento nunca dispara — nesse caso o certo é um 5º
+  webhook no `qs-to-bitrix-webhook` disparado pelo app.
+- **Sem loop:** mover a coluna não cria atividade; e atividade nova entra como
+  não-concluída, que o filtro descarta.
+- **Execuções "vazias" são normais:** todo salvamento de atividade dispara o
+  evento; o que não passa nos filtros para no nó de Code com 0 itens.
 
 ---
 

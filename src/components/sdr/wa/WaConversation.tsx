@@ -17,8 +17,8 @@ import {
   type WaMessage, type CannedResponse, type WaNumero,
 } from "@/lib/qs/waInbox";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
+import { WaAudio, WaAvatar } from "./WaBits";
 
-const GREEN = "var(--wa-bright)";
 
 interface Props {
   leadId: string;
@@ -32,7 +32,7 @@ function DiaSeparador({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 my-3">
       <div className="flex-1 h-px" style={{ background: "var(--line)" }} />
-      <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full"
+      <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full"
             style={{ color: "var(--ink3)", background: "var(--card2)" }}>
         {label}
       </span>
@@ -61,24 +61,31 @@ function mmss(s: number): string {
   return `${m}:${String(s % 60).padStart(2, "0")}`;
 }
 
-function Anexo({ a }: { a: { type: string; url: string } }) {
+function Anexo({ a, meu }: { a: { type: string; url: string }; meu: boolean }) {
   if (a.type === "image") {
+    // minHeight reserva o espaço: sem isso a imagem empurra a conversa ao
+    // carregar, e o auto-scroll joga o SDR pra cima justo quando chega foto.
     return (
-      <a href={a.url} target="_blank" rel="noreferrer" className="block mb-1">
-        <img src={a.url} alt="imagem" className="rounded-lg max-h-56 w-auto" loading="lazy" />
+      <a href={a.url} target="_blank" rel="noreferrer"
+         className="block mb-1 rounded-xl overflow-hidden"
+         style={{ background: "var(--card2)", minHeight: 120, maxWidth: 240 }}>
+        <img src={a.url} alt="Imagem enviada na conversa" loading="lazy" decoding="async"
+             className="block w-full h-auto max-h-56 object-cover" />
       </a>
     );
   }
-  if (a.type === "audio") {
-    return <audio src={a.url} controls preload="none" className="mb-1 w-full max-w-[240px]" />;
-  }
+  if (a.type === "audio") return <WaAudio url={a.url} meu={meu} />;
   if (a.type === "video") {
-    return <video src={a.url} controls preload="none" className="mb-1 rounded-lg max-h-56" />;
+    return <video src={a.url} controls preload="none" className="mb-1 rounded-xl max-h-56" />;
   }
   return (
     <a href={a.url} target="_blank" rel="noreferrer"
-       className="block mb-1 text-[11.5px] font-bold underline" style={{ color: "var(--wa)" }}>
-      📎 abrir anexo
+       className="inline-flex items-center gap-1.5 mb-1 text-[12px] font-semibold underline"
+       style={{ color: meu ? "var(--wa-ink)" : "var(--wa)" }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+        <path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l9.2-9.2a3.67 3.67 0 1 1 5.18 5.18l-9.2 9.2a1.83 1.83 0 1 1-2.6-2.6l8.5-8.48" />
+      </svg>
+      Abrir anexo
     </a>
   );
 }
@@ -102,6 +109,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   // saber disso antes de escrever, porque é o número que o cliente vê chegando.
   const [numeros, setNumeros] = useState<WaNumero[]>([]);
   const [inboxAtual, setInboxAtual] = useState<number | null>(null);
+  const [avatarLead, setAvatarLead] = useState<string | null>(null);
 
   // Gravação de áudio
   const [gravando, setGravando] = useState(false);
@@ -115,6 +123,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const timerRef = useRef<number | null>(null);
   const cancelarRef = useRef(false);
 
+  const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -155,7 +164,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       if (!r.conversationId && local.length === 0) setSemConversa(true);
       markThreadRead(leadId);
       // Depois do sync, porque é ele que descobre/grava a caixa da conversa.
-      getThreadInbox(leadId).then((id) => { if (vivo) setInboxAtual(id); });
+      getThreadInbox(leadId).then((m) => {
+        if (!vivo) return;
+        setInboxAtual(m.inbox);
+        setAvatarLead(m.avatar);
+      });
     })();
 
     return () => { vivo = false; };
@@ -173,6 +186,15 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   useLayoutEffect(() => {
     if (stickToBottom.current) bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
+
+  // Cresce com o texto. Zera a altura antes de medir, senão o campo só aumenta
+  // e nunca volta ao encolher.
+  useLayoutEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = Math.min(el.scrollHeight, 128) + "px";
+  }, [text]);
 
   // Solta o microfone se o componente sumir no meio de uma gravação.
   useEffect(() => () => {
@@ -346,54 +368,83 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
            className="flex-1 min-h-0 overflow-y-auto px-3 py-3" style={{ background: "var(--bg)" }}>
         {/* Trazer tudo que já foi conversado com este cliente */}
         {!loading && (
-          <div className="text-center mb-2">
+          <div className="text-center mb-3">
             <button onClick={baixarTudo}
-                    className="text-[10.5px] font-bold px-2.5 py-1 rounded-full"
-                    style={{ background: "var(--card2)", color: "var(--ink3)", border: "1px solid var(--line)" }}>
+                    className="wa-chip text-[11px] font-semibold px-3 py-1.5 rounded-lg"
+                    style={{ background: "transparent", color: "var(--ink3)", border: "1px solid var(--line)" }}>
               Baixar histórico completo
             </button>
           </div>
         )}
 
         {loading ? (
-          <p className="text-center text-[12px] py-6" style={{ color: "var(--ink3)" }}>carregando conversa…</p>
+          // Esqueleto no formato das bolhas: carregar mostra a FORMA do
+          // conteúdo, não a palavra "carregando".
+          <div className="space-y-2 pt-2">
+            {[62, 44, 70, 38].map((w, i) => (
+              <div key={i} className={`flex ${i % 2 ? "justify-end" : "justify-start"}`}>
+                <span className="wa-sk rounded-2xl" style={{ width: `${w}%`, height: i % 2 ? 34 : 48 }} />
+              </div>
+            ))}
+          </div>
         ) : messages.length === 0 ? (
-          <div className="text-center py-8 px-4">
-            <p className="text-[12.5px] font-bold" style={{ color: "var(--ink2)" }}>
+          <div className="text-center py-10 px-6">
+            <p className="text-[14px] font-semibold" style={{ color: "var(--ink2)" }}>
               {semConversa ? "Nenhuma conversa ainda" : "Sem mensagens"}
             </p>
-            <p className="text-[11.5px] mt-1" style={{ color: "var(--ink3)" }}>
+            <p className="text-[12px] mt-1.5 leading-relaxed" style={{ color: "var(--ink3)" }}>
               {semConversa
                 ? "Mande a primeira mensagem aqui embaixo — ela abre a conversa no WhatsApp."
                 : "As mensagens aparecem aqui assim que chegarem."}
             </p>
           </div>
         ) : (
-          messages.map((m) => {
+          messages.map((m, i) => {
             const dia = diaLabel(m.sent_at);
             const mostraDia = dia !== ultimoDia;
             ultimoDia = dia;
             const meu = m.direction === "out";
+
+            // Agrupamento: mensagens seguidas do mesmo lado, dentro de 5 min,
+            // formam um bloco. É o que faz parecer conversa em vez de lista de
+            // itens — só a ÚLTIMA do bloco tem rabinho, hora e avatar.
+            const prox = messages[i + 1];
+            const fimDoBloco =
+              !prox ||
+              prox.direction !== m.direction ||
+              diaLabel(prox.sent_at) !== dia ||
+              Math.abs(+new Date(prox.sent_at) - +new Date(m.sent_at)) > 5 * 60_000;
+
             return (
               <div key={m.id}>
                 {mostraDia && <DiaSeparador label={dia} />}
-                <div className={`flex mb-1.5 ${meu ? "justify-end" : "justify-start"}`}>
-                  <div className="max-w-[82%] rounded-2xl px-3 py-2 shadow-sm"
+                <div className={`flex items-end gap-2 ${meu ? "justify-end" : "justify-start"} ${fimDoBloco ? "mb-3" : "mb-[3px]"}`}>
+                  {!meu && (
+                    fimDoBloco
+                      ? <WaAvatar nome={leadName || "Lead"} url={avatarLead} size={26} />
+                      : <span className="w-[26px] shrink-0" />   /* alinha o bloco */
+                  )}
+                  <div className="max-w-[78%] px-3 py-2"
                        style={{
                          background: meu ? "var(--wa-soft)" : "var(--card)",
+                         color: meu ? "var(--wa-ink)" : "var(--ink)",
                          border: meu ? "none" : "1px solid var(--line)",
-                         borderBottomRightRadius: meu ? 6 : undefined,
-                         borderBottomLeftRadius: meu ? undefined : 6,
+                         borderRadius: 16,
+                         borderBottomRightRadius: meu && fimDoBloco ? 5 : 16,
+                         borderBottomLeftRadius: !meu && fimDoBloco ? 5 : 16,
                        }}>
-                    {m.attachments?.map((a, i) => <Anexo key={i} a={a} />)}
+                    {m.attachments?.map((a, k) => <Anexo key={k} a={a} meu={meu} />)}
                     {m.content && (
-                      <p className="text-[13px] whitespace-pre-wrap break-words" style={{ color: "var(--wa-ink)" }}>
+                      <p className="text-[14px] leading-[1.45] whitespace-pre-wrap break-words">
                         {m.content}
                       </p>
                     )}
-                    <p className="text-[10px] mt-0.5 text-right" style={{ color: "var(--ink3)" }}>
-                      {hora(m.sent_at)}
-                    </p>
+                    {fimDoBloco && (
+                      <p className="text-[11px] mt-1 text-right tabular-nums"
+                         style={{ color: meu ? "var(--wa-ink)" : "var(--ink3)", opacity: meu ? .65 : 1 }}>
+                        {hora(m.sent_at)}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -401,7 +452,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
           })
         )}
         {syncing && (
-          <p className="text-center text-[10.5px] py-2" style={{ color: "var(--ink3)" }}>buscando histórico…</p>
+          <p className="text-center text-[11px] py-2" style={{ color: "var(--ink3)" }}>Buscando histórico…</p>
         )}
         <div ref={bottomRef} />
       </div>
@@ -412,7 +463,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         </div>
       )}
       {erro && (
-        <div className="px-3 py-1.5 text-[11.5px] font-bold" style={{ background: "var(--wa-err-bg)", color: "var(--wa-err-ink)" }}>
+        <div className="px-3 py-2 text-[12px] font-semibold" style={{ background: "var(--wa-err-bg)", color: "var(--wa-err-ink)" }}>
           {erro}
         </div>
       )}
@@ -423,10 +474,9 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
              style={{ borderColor: "var(--line)", background: "var(--card)" }}>
           {cannedFiltradas.map((c) => (
             <button key={c.atalho} onClick={() => aplicarCanned(c)}
-                    className="w-full text-left px-3 py-2 border-b hover:opacity-80 transition-opacity"
-                    style={{ borderColor: "var(--line2)" }}>
-              <span className="text-[11.5px] font-bold" style={{ color: "var(--wa)" }}>/{c.atalho}</span>
-              <span className="block text-[11px] truncate" style={{ color: "var(--ink3)" }}>{c.texto}</span>
+                    className="wa-row wa-row-btn w-full text-left px-3 py-2">
+              <span className="text-[12px] font-semibold" style={{ color: "var(--wa)" }}>/{c.atalho}</span>
+              <span className="block text-[12px] truncate mt-0.5" style={{ color: "var(--ink3)" }}>{c.texto}</span>
             </button>
           ))}
         </div>
@@ -458,20 +508,20 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       )}
 
       {/* Escrever */}
-      <div className="shrink-0 border-t p-2" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
+      <div className="shrink-0 border-t px-3 py-2.5" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
         {gravando ? (
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: "var(--red)" }} />
-            <span className="text-[13px] font-bold tabular-nums" style={{ color: "var(--ink)" }}>
-              gravando {mmss(segundos)}
+            <span className="text-[14px] font-semibold tabular-nums" style={{ color: "var(--ink)" }}>
+              Gravando {mmss(segundos)}
             </span>
             <button onClick={() => pararGravacao(true)}
-                    className="ml-auto px-3 h-9 rounded-full text-[12.5px] font-bold"
-                    style={{ background: "var(--card2)", color: "var(--ink2)", border: "1px solid var(--line)" }}>
+                    className="wa-chip ml-auto px-3 h-9 rounded-lg text-[13px] font-semibold"
+                    style={{ background: "transparent", color: "var(--ink2)", border: "1px solid var(--line)" }}>
               Cancelar
             </button>
             <button onClick={() => pararGravacao(false)}
-                    className="px-4 h-9 rounded-full text-white text-[12.5px] font-bold" style={{ background: GREEN }}>
+                    className="wa-send px-4 h-9 rounded-lg text-white text-[13px] font-semibold">
               Enviar
             </button>
           </div>
@@ -481,34 +531,36 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                    accept="image/*,audio/*,video/mp4,application/pdf" />
             <button onClick={() => fileRef.current?.click()} disabled={sending}
                     title="Enviar imagem, figurinha ou arquivo" aria-label="Anexar"
-                    className="shrink-0 w-9 h-9 grid place-items-center rounded-full disabled:opacity-40"
-                    style={{ color: "var(--ink3)" }}>
+                    className="wa-icon-btn shrink-0 w-9 h-9 grid place-items-center rounded-lg">
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
                 <path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l9.2-9.2a3.67 3.67 0 1 1 5.18 5.18l-9.2 9.2a1.83 1.83 0 1 1-2.6-2.6l8.5-8.48" />
               </svg>
             </button>
             <button onClick={iniciarGravacao} disabled={sending}
                     title="Gravar áudio" aria-label="Gravar áudio"
-                    className="shrink-0 w-9 h-9 grid place-items-center rounded-full disabled:opacity-40"
-                    style={{ color: "var(--ink3)" }}>
+                    className="wa-icon-btn shrink-0 w-9 h-9 grid place-items-center rounded-lg">
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
                 <rect x="9" y="2" width="6" height="12" rx="3" />
                 <path d="M5 11a7 7 0 0 0 14 0M12 18v4" />
               </svg>
             </button>
             <textarea
+              ref={taRef}
               value={text}
               onChange={(e) => aoDigitar(e.target.value)}
               onKeyDown={onKeyDown}
               rows={1}
               placeholder={`Mensagem para ${leadName || formatPhoneDisplay(phone) || "o lead"}…  (/ para atalhos)`}
-              className="flex-1 resize-none rounded-2xl px-3 py-2 text-[13px] outline-none max-h-28"
-              style={{ border: "1px solid var(--line)", background: "var(--card2)", color: "var(--ink)" }}
+              className="flex-1 resize-none rounded-xl px-3 py-2 text-[14px] leading-[1.45] outline-none"
+              style={{ border: "1px solid var(--line)", background: "var(--card2)", color: "var(--ink)", maxHeight: 128 }}
             />
             <button onClick={enviar} disabled={!text.trim() || sending} title="Enviar (Enter)"
-                    className="shrink-0 h-9 px-4 rounded-full text-white text-[12.5px] font-bold transition-opacity disabled:opacity-40"
-                    style={{ background: GREEN }}>
-              {sending ? "…" : "Enviar"}
+                    className="wa-send shrink-0 h-9 min-w-[84px] px-4 rounded-xl text-white text-[13px] font-semibold grid place-items-center">
+              {sending
+                ? <span className="w-4 h-4 rounded-full animate-spin"
+                        style={{ border: "2px solid rgba(255,255,255,.35)", borderTopColor: "#fff" }}
+                        aria-label="enviando" />
+                : "Enviar"}
             </button>
           </div>
         )}

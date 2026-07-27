@@ -1,0 +1,194 @@
+{
+  "name": "QS Turis - Bitrix: atividade concluida -> move Novo lead p/ Follow-up 1",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bitrix-atividade-concluida",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "wh-atv-0001-4a10-9b01-0d2e3f4a6c01",
+      "name": "Webhook Bitrix (atividade)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 320],
+      "webhookId": "bitrix-atv-b6f0-4d40-8e34-3051627c1001"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-base-0001",
+              "name": "BITRIX_BASE",
+              "type": "string",
+              "value": "PREENCHA_BITRIX_WEBHOOK_BASE"
+            },
+            {
+              "id": "cfg-token-0002",
+              "name": "APP_TOKEN",
+              "type": "string",
+              "value": "PREENCHA_APPLICATION_TOKEN"
+            },
+            {
+              "id": "cfg-entidade-0003",
+              "name": "ENTIDADE",
+              "type": "string",
+              "value": "deal"
+            },
+            {
+              "id": "cfg-de-0004",
+              "name": "STAGE_DE",
+              "type": "string",
+              "value": "C25:NEW"
+            },
+            {
+              "id": "cfg-para-0005",
+              "name": "STAGE_PARA",
+              "type": "string",
+              "value": "PREENCHA_STAGE_FOLLOWUP_1"
+            },
+            {
+              "id": "cfg-tipos-0006",
+              "name": "SO_TIPOS",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg-atv-0002-4a10-9b01-0d2e3f4a6c02",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [420, 320],
+      "notes": "EDITE SO ESTE NO. BITRIX_BASE = https://SEUPORTAL.bitrix24.com.br/rest/USERID/CODIGO (sem barra no fim). APP_TOKEN = token do webhook de saida. ENTIDADE = deal ou lead. STAGE_DE/STAGE_PARA = IDs das colunas. SO_TIPOS = vazio (qualquer atividade) ou lista tipo 1,2,3,4.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// O Bitrix manda POST form-urlencoded: event, data[FIELDS][ID], auth[application_token], ts.\n// Dependendo da versao o n8n entrega achatado (\"data[FIELDS][ID]\") ou aninhado — cobrimos os dois.\nconst cfg = $('Config').first().json;\nconst raiz = $input.first().json;\nconst b = raiz.body ?? raiz;\n\nconst activityId =\n  b['data[FIELDS][ID]'] ??\n  b?.data?.FIELDS?.ID ??\n  b?.FIELDS?.ID ??\n  b?.activity_id ??\n  b?.ID ??\n  null;\n\n// Seguranca: o Bitrix assina todo evento com o application_token do webhook de saida.\n// Sem isto, qualquer um que descobrisse a URL do n8n moveria negocio no seu CRM.\nconst token = b['auth[application_token]'] ?? b?.auth?.application_token ?? '';\nconst esperado = String(cfg.APP_TOKEN || '').trim();\nif (esperado && esperado !== 'PREENCHA_APPLICATION_TOKEN' && token !== esperado) {\n  throw new Error('application_token nao confere — evento recusado.');\n}\n\n// Evento sem ID (ping/handshake do Bitrix): para aqui, sem sujar o log de erro.\nif (!activityId) return [];\n\nreturn [{ json: { activity_id: String(activityId), evento: String(b.event ?? '') } }];"
+      },
+      "id": "ler-atv-0003-4a10-9b01-0d2e3f4a6c03",
+      "name": "Ler evento do Bitrix",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 320]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.BITRIX_BASE }}/crm.activity.get.json?id={{ $json.activity_id }}",
+        "options": {}
+      },
+      "id": "get-atv-0004-4a10-9b01-0d2e3f4a6c04",
+      "name": "Buscar atividade (crm.activity.get)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 320],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// O evento ONCRMACTIVITYUPDATE dispara em QUALQUER mexida na atividade (editar\n// texto, mudar data, adiar...). Aqui fica so o que interessa: atividade DE NEGOCIO\n// que acabou de ser marcada como concluida.\nconst cfg = $('Config').first().json;\nconst r = $input.first().json.result;\nif (!r) return [];\n\nconst tipoDono = String(cfg.ENTIDADE).toLowerCase() === 'lead' ? '1' : '2';\nif (String(r.OWNER_TYPE_ID) !== tipoDono) return [];   // atividade de contato/empresa: ignora\n\nconst concluida =\n  String(r.COMPLETED).toUpperCase() === 'Y' ||\n  r.COMPLETED === true ||\n  String(r.STATUS) === '2';\nif (!concluida) return [];\n\n// Filtro opcional por tipo (1=reuniao, 2=ligacao, 3=tarefa, 4=e-mail). Vazio = qualquer um.\nconst filtro = String(cfg.SO_TIPOS || '').replace(/\\s/g, '');\nif (filtro && !filtro.split(',').includes(String(r.TYPE_ID))) return [];\n\nreturn [{ json: {\n  activity_id: String(r.ID),\n  owner_id: String(r.OWNER_ID),\n  assunto: r.SUBJECT || '',\n  type_id: String(r.TYPE_ID || ''),\n  responsavel: String(r.RESPONSIBLE_ID || '')\n} }];"
+      },
+      "id": "flt-atv-0005-4a10-9b01-0d2e3f4a6c05",
+      "name": "So atividade concluida do funil",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 320]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.BITRIX_BASE }}/crm.{{ $('Config').first().json.ENTIDADE }}.get.json?id={{ $json.owner_id }}",
+        "options": {}
+      },
+      "id": "get-deal-0006-4a10-9b01-0d2e3f4a6c06",
+      "name": "Buscar negocio (crm.deal.get)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 320],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// AQUI mora o \"primeira atividade\": so move quem AINDA esta em Novo lead.\n// Concluir a 2a, 3a, 10a atividade nao faz nada, porque o negocio ja saiu de STAGE_DE.\n// De quebra, isso impede que o robo puxe pra tras um negocio que ja avancou.\nconst cfg = $('Config').first().json;\nconst r = $input.first().json.result;\nif (!r) return [];\n\nconst ehLead = String(cfg.ENTIDADE).toLowerCase() === 'lead';\nconst campo = ehLead ? 'STATUS_ID' : 'STAGE_ID';\nconst atual = String(r[campo] || '');\n\nif (atual !== String(cfg.STAGE_DE)) return [];\n\nconst fields = {};\nfields[campo] = String(cfg.STAGE_PARA);\n\nreturn [{ json: {\n  id: String(r.ID),\n  fields,\n  de: atual,\n  para: String(cfg.STAGE_PARA),\n  assunto: $('So atividade concluida do funil').first().json.assunto\n} }];"
+      },
+      "id": "flt-stage-0007-4a10-9b01-0d2e3f4a6c07",
+      "name": "So se ainda estiver em Novo lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.BITRIX_BASE }}/crm.{{ $('Config').first().json.ENTIDADE }}.update.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $json.id, fields: $json.fields, params: { REGISTER_SONET_EVENT: 'Y' } }) }}",
+        "options": {}
+      },
+      "id": "upd-stage-0008-4a10-9b01-0d2e3f4a6c08",
+      "name": "Mover pra Follow-up 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1740, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.BITRIX_BASE }}/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: $('So se ainda estiver em Novo lead').first().json.id, ENTITY_TYPE: $('Config').first().json.ENTIDADE, COMMENT: '🤖 Movido automaticamente de Novo lead para Follow-up 1 (atividade concluída: ' + ($('So se ainda estiver em Novo lead').first().json.assunto || '-') + ')' } }) }}",
+        "options": {}
+      },
+      "id": "cmt-stage-0009-4a10-9b01-0d2e3f4a6c09",
+      "name": "Comentario na timeline (opcional)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1960, 320],
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook Bitrix (atividade)": {
+      "main": [[{ "node": "Config", "type": "main", "index": 0 }]]
+    },
+    "Config": {
+      "main": [[{ "node": "Ler evento do Bitrix", "type": "main", "index": 0 }]]
+    },
+    "Ler evento do Bitrix": {
+      "main": [[{ "node": "Buscar atividade (crm.activity.get)", "type": "main", "index": 0 }]]
+    },
+    "Buscar atividade (crm.activity.get)": {
+      "main": [[{ "node": "So atividade concluida do funil", "type": "main", "index": 0 }]]
+    },
+    "So atividade concluida do funil": {
+      "main": [[{ "node": "Buscar negocio (crm.deal.get)", "type": "main", "index": 0 }]]
+    },
+    "Buscar negocio (crm.deal.get)": {
+      "main": [[{ "node": "So se ainda estiver em Novo lead", "type": "main", "index": 0 }]]
+    },
+    "So se ainda estiver em Novo lead": {
+      "main": [[{ "node": "Mover pra Follow-up 1", "type": "main", "index": 0 }]]
+    },
+    "Mover pra Follow-up 1": {
+      "main": [[{ "node": "Comentario na timeline (opcional)", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "instanceId": "qs-turis-bitrix-atividade-concluida" },
+  "tags": []
+}

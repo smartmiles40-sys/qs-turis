@@ -46,13 +46,14 @@ export interface WaThread {
   can_reply: boolean | null;
   synced_at: string | null;
   history_synced: boolean | null;
+  /** Foto de perfil do WhatsApp. Só existe depois da migration 0026 — por isso
+   *  a busca pede "*" em vez de listar colunas: sem ela, vem undefined e o
+   *  avatar cai nas iniciais, em vez de a lista inteira quebrar. */
+  avatar_url?: string | null;
   lead: WaThreadLead | null;
 }
 
-const THREAD_COLS =
-  "lead_id,cw_conversation_id,cw_inbox_id,last_message,last_direction,last_at," +
-  "last_in_at,last_out_at,unread,can_reply,synced_at,history_synced," +
-  "lead:qs_leads(id,full_name,first_name,phone,status,owner_id)";
+const THREAD_COLS = "*,lead:qs_leads(id,full_name,first_name,phone,status,owner_id)";
 
 // ── Quem é quem (pra mostrar o dono da conversa e filtrar por SDR) ──────────
 // Tabela pequena e quase estática: uma busca por sessão basta. Sem isto, a lista
@@ -247,14 +248,15 @@ export async function countUnread(): Promise<number> {
  * ANTES de escrever — cada conversa do Chatwoot pertence a um número só, e o
  * cliente vê a mensagem chegando daquele contato.
  */
-export async function getThreadInbox(leadId: string): Promise<number | null> {
+export async function getThreadInbox(leadId: string): Promise<{ inbox: number | null; avatar: string | null }> {
   const { data, error } = await supabase
     .from("qs_wa_threads")
-    .select("cw_inbox_id")
+    .select("*")
     .eq("lead_id", leadId)
     .maybeSingle();
-  if (error) return null;
-  return (data as { cw_inbox_id: number | null } | null)?.cw_inbox_id ?? null;
+  if (error || !data) return { inbox: null, avatar: null };
+  const d = data as { cw_inbox_id?: number | null; avatar_url?: string | null };
+  return { inbox: d.cw_inbox_id ?? null, avatar: d.avatar_url ?? null };
 }
 
 export async function listMessages(leadId: string, limit = 200): Promise<WaMessage[]> {
