@@ -17,7 +17,7 @@
 
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cw, ingestMessage,
-  ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask,
+  ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, inboxPermitida,
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 
@@ -39,6 +39,12 @@ export default async function handler(req, res) {
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
   if (!text) return res.status(400).json({ error: 'Mensagem vazia' });
   if (text.length > MAX_LEN) return res.status(400).json({ error: `Mensagem muito longa (máx. ${MAX_LEN})` });
+
+  // Por qual número o SDR escolheu falar (WhatsApp normal x API oficial).
+  const inboxPedida = inboxPermitida(body.inboxId);
+  if (inboxPedida == null && body.inboxId != null && body.inboxId !== '') {
+    return res.status(400).json({ error: 'Esse número não está liberado para envio.' });
+  }
 
   let auth;
   try {
@@ -70,14 +76,23 @@ export default async function handler(req, res) {
       inboxId = rows?.[0]?.cw_inbox_id ?? null;
     } catch { /* segue pro caminho completo */ }
 
+    // Pediu um número específico? Então o atalho acima só vale se a conversa que
+    // já conhecemos for DAQUELE número — no Chatwoot cada conversa pertence a uma
+    // caixa só, e mandar pela conversa errada sairia pelo número errado.
+    if (inboxPedida != null && Number(inboxId) !== Number(inboxPedida)) {
+      conversationId = null;
+      contactId = null;
+      inboxId = null;
+    }
+
     if (!conversationId) {
-      const r = await ensureConversation(auth.lead);
+      const r = await ensureConversation(auth.lead, inboxPedida);
       if (r.error) {
         return res.status(409).json({ error: motivoHumano(r.error), motivo: r.error });
       }
       conversationId = r.conversation.id;
       contactId = r.contact.id;
-      inboxId = r.conversation.inbox_id ?? defaultInboxId();
+      inboxId = r.conversation.inbox_id ?? inboxPedida ?? defaultInboxId();
     }
 
     const sent = await cw(`/conversations/${conversationId}/messages`, {

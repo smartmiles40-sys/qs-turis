@@ -127,6 +127,52 @@ export async function getInboxLabels(): Promise<InboxLabels> {
   }
 }
 
+/** Um número disponível pra enviar, já com o rótulo que o SDR entende. */
+export interface WaNumero {
+  id: number;
+  nome: string;
+  tipo: "normal" | "api";
+  canal: string;
+  /** É por este que sai quando o SDR não escolhe nada. */
+  padrao: boolean;
+}
+
+let numerosCache: WaNumero[] | null = null;
+
+/**
+ * Quais números estão REALMENTE disponíveis pra enviar. Vem do Chatwoot (só
+ * existe caixa se o número estiver conectado) e é enfeitado com os rótulos de
+ * Config → Atendimento. Por isso o número da API oficial aparece sozinho no
+ * seletor no dia em que você conectar — e some se for removido.
+ */
+export async function listWaNumeros(force = false): Promise<WaNumero[]> {
+  if (numerosCache && !force) return numerosCache;
+  try {
+    const [res, labels] = await Promise.all([
+      fetch("/api/wa-inboxes", { headers: await authHeaders() }),
+      getInboxLabels(),
+    ]);
+    if (!res.ok) return numerosCache ?? [];
+    const data = await res.json();
+    const brutos: { id: number; nome: string; canal: string }[] = Array.isArray(data?.inboxes) ? data.inboxes : [];
+    const padraoId = Number(data?.padrao);
+    const lista: WaNumero[] = brutos.map((i) => {
+      const l = labels[String(i.id)];
+      return {
+        id: i.id,
+        nome: l?.nome || i.nome,
+        tipo: l?.tipo === "api" ? "api" : "normal",
+        canal: i.canal,
+        padrao: i.id === padraoId,
+      };
+    });
+    numerosCache = lista;
+    return lista;
+  } catch {
+    return numerosCache ?? [];
+  }
+}
+
 export function inboxTag(labels: InboxLabels, inboxId: number | null | undefined) {
   if (inboxId == null) return null;
   const l = labels[String(inboxId)];
@@ -241,12 +287,16 @@ export interface WaSendResult {
   error?: string;
 }
 
-export async function sendWaMessage(leadId: string, text: string): Promise<WaSendResult> {
+export async function sendWaMessage(
+  leadId: string,
+  text: string,
+  inboxId?: number | null
+): Promise<WaSendResult> {
   try {
     const res = await fetch("/api/wa-send", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ leadId, text }),
+      body: JSON.stringify({ leadId, text, inboxId: inboxId ?? null }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };
@@ -304,7 +354,8 @@ export async function sendWaMedia(
   blob: Blob,
   fileName: string,
   caption = "",
-  isVoiceMessage = false
+  isVoiceMessage = false,
+  inboxId?: number | null
 ): Promise<WaSendResult> {
   if (blob.size > MAX_MEDIA_BYTES) {
     return { ok: false, error: "Arquivo grande demais (máx. 3 MB)." };
@@ -314,7 +365,10 @@ export async function sendWaMedia(
     const res = await fetch("/api/wa-send-media", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ leadId, fileName, mimeType: blob.type, dataBase64, caption, isVoiceMessage }),
+      body: JSON.stringify({
+        leadId, fileName, mimeType: blob.type, dataBase64, caption, isVoiceMessage,
+        inboxId: inboxId ?? null,
+      }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };

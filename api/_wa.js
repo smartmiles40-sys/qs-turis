@@ -194,11 +194,17 @@ export async function findContact(phoneE164) {
   return null;
 }
 
-export async function pickConversation(contactId) {
+/**
+ * Acha a conversa do contato. Com `inboxId`, procura a conversa DAQUELE número —
+ * é o que permite o SDR escolher por qual número falar: no Chatwoot cada conversa
+ * pertence a uma caixa só, então trocar de número é trocar de conversa.
+ */
+export async function pickConversation(contactId, inboxId = null) {
   try {
     const { payload = [] } = await cw(`/contacts/${contactId}/conversations`);
     let convs = Array.isArray(payload) ? payload : [];
-    if (WA_INBOX_IDS.length) convs = convs.filter((c) => WA_INBOX_IDS.includes(c.inbox_id));
+    if (inboxId != null) convs = convs.filter((c) => Number(c.inbox_id) === Number(inboxId));
+    else if (WA_INBOX_IDS.length) convs = convs.filter((c) => WA_INBOX_IDS.includes(c.inbox_id));
     convs.sort((a, b) => (b.last_activity_at || 0) - (a.last_activity_at || 0));
     return convs.find((c) => c.status && c.status !== 'resolved') || convs[0] || null;
   } catch (e) {
@@ -260,11 +266,11 @@ async function sourceIdFor(contactId, inboxId) {
  * Devolve a conversa do lead, CRIANDO contato/conversa se ainda não existir —
  * assim a primeira abordagem também sai pelo QS, e não por fora.
  */
-export async function ensureConversation(lead) {
+export async function ensureConversation(lead, inboxEscolhida = null) {
   const phone = toE164BR(lead.phone);
   if (!phone) return { error: 'lead-sem-telefone' };
 
-  const inboxId = defaultInboxId();
+  const inboxId = inboxEscolhida != null ? Number(inboxEscolhida) : defaultInboxId();
   if (!inboxId) return { error: 'inbox-nao-configurada' };
 
   let contact = await findContact(phone);
@@ -284,7 +290,7 @@ export async function ensureConversation(lead) {
   }
   if (!contact?.id) return { error: 'sem-contato' };
 
-  const existing = await pickConversation(contact.id);
+  const existing = await pickConversation(contact.id, inboxId);
   if (existing) return { conversation: existing, contact };
 
   const sourceId = await sourceIdFor(contact.id, inboxId);
@@ -300,6 +306,20 @@ export async function ensureConversation(lead) {
     console.error('[wa] criar conversa:', e?.message);
     return { error: 'falha-ao-criar-conversa' };
   }
+}
+
+/**
+ * Só deixa enviar por uma caixa que a configuração autoriza. Sem isto, um pedido
+ * adulterado mandaria mensagem por qualquer caixa da conta — inclusive a do
+ * widget do site, onde ela nunca chegaria no WhatsApp e ninguém veria o erro.
+ * Devolve o id validado, ou null se o pedido for inválido.
+ */
+export function inboxPermitida(id) {
+  if (id == null || id === '') return defaultInboxId();
+  const n = Number(id);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (WA_INBOX_IDS.length && !WA_INBOX_IDS.includes(n)) return null;
+  return n;
 }
 
 /** Mensagem humana pros erros de ensureConversation. */

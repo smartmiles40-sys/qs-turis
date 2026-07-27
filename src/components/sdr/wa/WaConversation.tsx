@@ -13,8 +13,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
-  listCanned, preencherCanned, comprimirImagem, downloadHistory,
-  type WaMessage, type CannedResponse,
+  listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros,
+  type WaMessage, type CannedResponse, type WaNumero,
 } from "@/lib/qs/waInbox";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 
@@ -97,6 +97,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const [canned, setCanned] = useState<CannedResponse[]>([]);
   const [mostrarCanned, setMostrarCanned] = useState(false);
 
+  // Por qual número enviar. Só aparece quando existe mais de um conectado — com
+  // um número só, escolher seria uma pergunta sem resposta possível.
+  const [numeros, setNumeros] = useState<WaNumero[]>([]);
+  const [numeroEscolhido, setNumeroEscolhido] = useState<number | null>(null);
+
   // Gravação de áudio
   const [gravando, setGravando] = useState(false);
   const [segundos, setSegundos] = useState(0);
@@ -123,6 +128,14 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   }, [leadId]);
 
   useEffect(() => { listCanned().then(setCanned); }, []);
+  useEffect(() => {
+    listWaNumeros().then((ns) => {
+      setNumeros(ns);
+      // Já marca o número por onde a mensagem sairia de verdade — senão a tela
+      // destacaria um e o servidor usaria outro.
+      setNumeroEscolhido((atual) => atual ?? (ns.find((n) => n.padrao)?.id ?? ns[0]?.id ?? null));
+    });
+  }, []);
 
   // Carga inicial + sincronização com o Chatwoot.
   useEffect(() => {
@@ -182,7 +195,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     if (!corpo || sending) return;
     setSending(true);
     setErro(null);
-    const r = await sendWaMessage(leadId, corpo);
+    const r = await sendWaMessage(leadId, corpo, numeroEscolhido);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar."); return; }
     setText("");
@@ -190,18 +203,18 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
-  }, [text, sending, leadId, recarregar]);
+  }, [text, sending, leadId, recarregar, numeroEscolhido]);
 
   const enviarMidia = useCallback(async (blob: Blob, nome: string, legenda = "", notaDeVoz = false) => {
     setSending(true);
     setErro(null);
-    const r = await sendWaMedia(leadId, blob, nome, legenda, notaDeVoz);
+    const r = await sendWaMedia(leadId, blob, nome, legenda, notaDeVoz, numeroEscolhido);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar o arquivo."); return; }
     setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
-  }, [leadId, recarregar]);
+  }, [leadId, recarregar, numeroEscolhido]);
 
   const escolherArquivo = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -410,6 +423,32 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               <span className="block text-[11px] truncate" style={{ color: "var(--ink3)" }}>{c.texto}</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Por qual número enviar — só com mais de um conectado */}
+      {numeros.length > 1 && !gravando && (
+        <div className="shrink-0 flex items-center gap-1.5 px-2 pt-2" style={{ background: "var(--card)" }}>
+          <span className="text-[11px] shrink-0" style={{ color: "var(--ink3)" }}>Enviar por:</span>
+          {numeros.map((n) => {
+            const ativo = numeroEscolhido === n.id;
+            return (
+              <button
+                key={n.id}
+                onClick={() => setNumeroEscolhido(n.id)}
+                title={n.tipo === "api" ? "Número oficial (API da Meta)" : "WhatsApp normal"}
+                className="px-2 py-1 rounded-full text-[11px] font-bold transition-colors"
+                style={ativo
+                  ? { background: "#0E7C6A", color: "#fff" }
+                  : { background: "var(--card2)", color: "var(--ink2)", border: "1px solid var(--line)" }}
+              >
+                {n.nome}
+                <span className="ml-1 font-normal opacity-80">
+                  {n.tipo === "api" ? "· API" : "· normal"}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
 

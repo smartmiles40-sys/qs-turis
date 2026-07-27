@@ -18,6 +18,7 @@
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cwForm,
   ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, ingestMessage,
+  inboxPermitida,
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 
@@ -84,6 +85,11 @@ export default async function handler(req, res) {
 
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
   if (!dataBase64) return res.status(400).json({ error: 'Arquivo vazio' });
+
+  const inboxPedida = inboxPermitida(body.inboxId);
+  if (inboxPedida == null && body.inboxId != null && body.inboxId !== '') {
+    return res.status(400).json({ error: 'Esse número não está liberado para envio.' });
+  }
   if (!TIPOS_OK.includes(mimeType)) {
     return res.status(415).json({ error: 'Tipo de arquivo não aceito.' });
   }
@@ -128,12 +134,20 @@ export default async function handler(req, res) {
       inboxId = rows?.[0]?.cw_inbox_id ?? null;
     } catch { /* segue pro caminho completo */ }
 
+    // Mesma regra do wa-send: pediu número específico, o atalho só vale se a
+    // conversa conhecida for daquele número.
+    if (inboxPedida != null && Number(inboxId) !== Number(inboxPedida)) {
+      conversationId = null;
+      contactId = null;
+      inboxId = null;
+    }
+
     if (!conversationId) {
-      const r = await ensureConversation(auth.lead);
+      const r = await ensureConversation(auth.lead, inboxPedida);
       if (r.error) return res.status(409).json({ error: motivoHumano(r.error), motivo: r.error });
       conversationId = r.conversation.id;
       contactId = r.contact.id;
-      inboxId = r.conversation.inbox_id ?? defaultInboxId();
+      inboxId = r.conversation.inbox_id ?? inboxPedida ?? defaultInboxId();
     }
 
     const form = new FormData();
