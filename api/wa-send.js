@@ -85,24 +85,29 @@ export default async function handler(req, res) {
       body: { content: text, message_type: 'outgoing', private: false },
     });
 
-    // Grava já, sem esperar o webhook: o SDR vê a própria mensagem na hora.
-    // Se o webhook chegar depois com a mesma mensagem, o id do Chatwoot dedupe.
-    await ingestMessage({
-      leadId,
-      conversationId,
-      contactId,
-      inboxId,
-      message: {
-        id: sent?.id ?? null,
-        content: text,
-        message_type: 1,
-        created_at: sent?.created_at ?? null,
-        sender: { name: auth.user?.name || null },
-      },
-    });
-
-    // Baixa a atividade de WhatsApp da cadência (best-effort, nunca derruba o envio).
-    const tarefa = await completeWhatsAppTask(leadId);
+    // ⚠️ DAQUI PRA BAIXO A MENSAGEM JÁ SAIU PRO CLIENTE.
+    // Nada aqui pode virar "não consegui enviar": o SDR reenviaria e o cliente
+    // receberia duas, três vezes. Falha de gravação é problema NOSSO, vai pro
+    // log, e o webhook do Chatwoot traz a mensagem de volta em seguida.
+    let tarefa = null;
+    try {
+      await ingestMessage({
+        leadId,
+        conversationId,
+        contactId,
+        inboxId,
+        message: {
+          id: sent?.id ?? null,
+          content: text,
+          message_type: 1,
+          created_at: sent?.created_at ?? null,
+          sender: { name: auth.user?.name || null },
+        },
+      });
+      tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);
+    } catch (e) {
+      console.error('[wa-send] enviado, mas falhou ao gravar no QS:', e?.message);
+    }
 
     return res.status(200).json({ ok: true, conversationId, messageId: sent?.id ?? null, tarefaConcluida: tarefa });
   } catch (e) {

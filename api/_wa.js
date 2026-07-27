@@ -119,15 +119,23 @@ export async function getSupabaseUserId(authHeader) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
+  // Timeout obrigatório: a função inteira tem 10s na Vercel. Sem isto, um
+  // /auth/v1/user lento consome sozinho todo o orçamento e o envio "falha"
+  // depois de já ter saído.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5_000);
   try {
     const r = await fetch(`${url.replace(/\/$/, '')}/auth/v1/user`, {
       headers: { apikey: key, Authorization: `Bearer ${jwt}` },
+      signal: ctrl.signal,
     });
     if (!r.ok) return null;
     const user = await r.json();
     return (user && user.id) || null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -144,8 +152,24 @@ export async function assertCanAccessLead(userId, leadId) {
   const user = (Array.isArray(users) && users[0]) || null;
   if (!user || user.is_active === false) return { ok: false, reason: 'usuario-invalido' };
   if (!lead) return { ok: false, reason: 'lead-inexistente' };
+
   const isManager = user.role === 'admin' || user.role === 'gestor';
   if (isManager || lead.owner_id === userId || lead.owner_id == null) return { ok: true, lead, user };
+
+  // Quem passou o lead adiante continua podendo falar com o cliente. Sem este
+  // ramo, o SDR VÊ a conversa (a RLS da 0025 permite) mas toma 403 ao responder
+  // — quebrando exatamente o fluxo "agendou, foi pro closer, mas continuo junto".
+  // Espelha `qs_owns_lead` da migration 0025: as duas regras têm que andar juntas.
+  try {
+    const passou = await rest(
+      `qs_handovers?select=lead_id&lead_id=eq.${encodeURIComponent(leadId)}` +
+      `&from_user_id=eq.${encodeURIComponent(userId)}&limit=1`
+    );
+    if (Array.isArray(passou) && passou.length) return { ok: true, lead, user };
+  } catch (e) {
+    console.warn('[wa] checagem de handover:', e?.message);
+  }
+
   return { ok: false, reason: 'lead-de-outro-sdr' };
 }
 
@@ -184,7 +208,11 @@ export async function pickConversation(contactId) {
 }
 
 /** Envio multipart (mídia). O cw() normal manda JSON e não serve aqui. */
-export async function cwForm(path, form, { timeoutMs = 25_000 } = {}) {
+// 45s cabe no maxDuration de 60s que a rota de mídia declara no vercel.json.
+// Antes eram 25s contra um teto de 10s: o AbortController nunca disparava, a
+// Vercel matava a função e o SDR via "não consegui enviar" com o arquivo já
+// entregue — e reenviava.
+export async function cwForm(path, form, { timeoutMs = 45_000 } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -296,20 +324,32 @@ export function motivoHumano(code) {
  * Best-effort de propósito: se falhar, o envio da mensagem NÃO pode falhar junto.
  * Desligável em qs_settings.wa_auto_complete_task = false.
  */
-export async function completeWhatsAppTask(leadId) {
+export async function completeWhatsAppTask(leadId, ownerId = null) {
   try {
     const cfg = await rest(`qs_settings?select=value&key=eq.wa_auto_complete_task&limit=1`);
     if (cfg?.[0]?.value === false) return null;
   } catch { /* sem config = ligado */ }
 
   try {
-    const amanha = new Date();
-    amanha.setDate(amanha.getDate() + 1);
-    const limite = amanha.toISOString();
+    // Tem que ser "até a próxima meia-noite de BRASÍLIA", não "daqui a 24h".
+    // Com janela deslizante, uma mensagem às 15h de hoje concluía o FUP das 9h
+    // de AMANHÃ — a atividade sumia da fila sem nunca ter sido feita.
+    const BRT_OFFSET_H = 3;
+    const agora = new Date();
+    const brt = new Date(agora.getTime() - BRT_OFFSET_H * 3600_000);
+    const meiaNoiteBrtSeguinte = new Date(Date.UTC(
+      brt.getUTCFullYear(), brt.getUTCMonth(), brt.getUTCDate() + 1, BRT_OFFSET_H, 0, 0
+    ));
+    const limite = meiaNoiteBrtSeguinte.toISOString();
+
+    // Só a tarefa DO DONO: depois de um handover, o closer respondendo não pode
+    // baixar a atividade do SDR (e vice-versa) — isso sujaria a aderência de cada um.
+    const filtroDono = ownerId ? `&owner_id=eq.${encodeURIComponent(ownerId)}` : '';
 
     const abertas = await rest(
       `qs_tasks?select=id,scheduled_at&lead_id=eq.${encodeURIComponent(leadId)}` +
       `&channel_type=eq.whatsapp&status=eq.pendente&scheduled_at=lt.${encodeURIComponent(limite)}` +
+      filtroDono +
       `&order=scheduled_at.asc&limit=1`
     );
     const alvo = abertas?.[0];
@@ -364,8 +404,22 @@ export function normalizeAttachments(message) {
  * lista. Toda a soma de "não lidas" acontece dentro da função do banco.
  */
 export async function ingestMessage({ leadId, conversationId, message, contactId = null, canReply = null, inboxId = null }) {
+  // Nota PRIVADA do Chatwoot é message_type=1 (outgoing) com private=true. Sem
+  // este corte ela entraria na tela do SDR como se tivesse ido pro cliente — e
+  // ainda mexeria no last_out_at, fazendo uma conversa parada sumir do
+  // "esperando resposta".
+  if (message?.private === true) return false;
+
   const direction = directionOf(message);
   if (!direction) return false;
+
+  // Sem o id do Chatwoot não há como deduplicar (o índice único é parcial e
+  // ignora NULL): a mesma mensagem entraria de novo pelo webhook e o SDR veria
+  // duplicado na tela. Melhor deixar o webhook gravar, que sempre traz o id.
+  if (message?.id == null) {
+    console.warn('[wa] mensagem sem id do Chatwoot — deixando pro webhook gravar');
+    return false;
+  }
 
   const attachments = normalizeAttachments(message);
   const content = message?.content || '';
