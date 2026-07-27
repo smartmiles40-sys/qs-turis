@@ -16,7 +16,7 @@ import ChatwootDock from "@/components/sdr/chatwoot/ChatwootDock";
 import QsWaDock from "@/components/sdr/wa/QsWaDock";
 import { getChatProvider, defaultChatProvider, type ChatProvider } from "@/lib/qs/chatProvider";
 
-export default function CommsDock() {
+export default function CommsDock({ onOpenLead }: { onOpenLead?: (leadId: string) => void }) {
   // Começa com o default de build (sync, sem flicker) e confirma com a flag do banco.
   const [provider, setProvider] = useState<ChatProvider>(() => defaultChatProvider());
 
@@ -26,7 +26,7 @@ export default function CommsDock() {
     return () => { active = false; };
   }, []);
 
-  if (provider === "qs") return <QsWaDock />;
+  if (provider === "qs") return <QsWaDock onOpenLead={onOpenLead} />;
   if (provider === "chatwoot") return <ChatwootDock />;
   return <ChatAppDock />;
 }

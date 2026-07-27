@@ -110,7 +110,7 @@ function IconNarrow({ size = 17 }: { size?: number }) {
   );
 }
 
-export default function QsWaDock() {
+export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string) => void }) {
   const { isOpen, target, open, close } = useChatAppDock();
   const [alvo, setAlvo] = useState<Alvo | null>(null);
   const [naoLidas, setNaoLidas] = useState(0);
@@ -290,6 +290,18 @@ export default function QsWaDock() {
               {alvo ? (formatPhoneDisplay(alvo.phone) || "WhatsApp") : "Só os leads da sua carteira"}
             </p>
           </div>
+          {/* Abrir o card do lead sem sair da conversa — o SDR precisa do
+              contexto (cadência, notas, histórico) na hora de responder. */}
+          {alvo && onOpenLead && (
+            <button
+              onClick={() => onOpenLead(alvo.leadId)}
+              title="Abrir o card deste cliente"
+              aria-label="Abrir o card deste cliente"
+              className="px-2 h-7 rounded-lg text-[11px] font-bold hover:bg-white/15 transition-colors border border-white/40"
+            >
+              Ver card
+            </button>
+          )}
           <button
             onClick={alternarLargura}
             title={estaLargo ? "Voltar ao tamanho normal" : "Alargar o painel"}

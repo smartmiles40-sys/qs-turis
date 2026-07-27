@@ -1,0 +1,121 @@
+// src/components/sdr/settings/WaInboxLabels.tsx
+// -----------------------------------------------------------------------------
+// Configura o SELO que o SDR vê em cada conversa: de qual número ela veio e se
+// aquele número é WhatsApp normal (QR/Baileys) ou API oficial da Meta.
+//
+// Por que é configuração e não detecção automática: hoje os dois números são
+// Baileys, então não há nada pra detectar. Quando um deles virar oficial, é aqui
+// que se marca — sem deploy.
+//
+// A chave de cada linha é o ID da CAIXA no Chatwoot (1, 2, ...), que é o que a
+// conversa carrega. Aparece em Chatwoot → Configurações → Caixas de entrada (na
+// URL da caixa).
+// -----------------------------------------------------------------------------
+
+import { useEffect, useState } from "react";
+import { getSetting, setSetting } from "@/lib/qsSettings";
+import { WA_INBOX_LABELS_KEY, type InboxLabels } from "@/lib/qs/waInbox";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
+
+interface Linha { id: string; nome: string; tipo: "normal" | "api" }
+
+export default function WaInboxLabels() {
+  const [linhas, setLinhas] = useState<Linha[]>([]);
+  const [salvando, setSalvando] = useState(false);
+  const [carregado, setCarregado] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const v = (await getSetting<InboxLabels>(WA_INBOX_LABELS_KEY)) || {};
+      const l = Object.entries(v).map(([id, d]) => ({
+        id,
+        nome: d?.nome ?? "",
+        tipo: d?.tipo === "api" ? "api" : "normal",
+      })) as Linha[];
+      setLinhas(l.length ? l : [{ id: "", nome: "", tipo: "normal" }]);
+      setCarregado(true);
+    })();
+  }, []);
+
+  function mudar(i: number, campo: keyof Linha, valor: string) {
+    setLinhas((prev) => prev.map((l, k) => (k === i ? { ...l, [campo]: valor } : l)));
+  }
+
+  async function salvar() {
+    setSalvando(true);
+    const mapa: InboxLabels = {};
+    for (const l of linhas) {
+      const id = l.id.trim();
+      if (!id || !Number.isFinite(Number(id))) continue;   // linha vazia/inválida é ignorada
+      mapa[id] = { nome: l.nome.trim() || `Caixa ${id}`, tipo: l.tipo === "api" ? "api" : "normal" };
+    }
+    const ok = await setSetting(WA_INBOX_LABELS_KEY, mapa);
+    setSalvando(false);
+    if (ok) notifySuccess("Selos dos números salvos. O SDR vê na próxima vez que abrir a lista.");
+    else notifyError("Não foi possível salvar (só admin/gestor grava configurações).");
+  }
+
+  if (!carregado) return null;
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl p-4">
+      <h3 className="text-sm font-semibold text-gray-900">Selo dos números (normal × API oficial)</h3>
+      <p className="text-xs text-gray-500 mt-1 leading-snug">
+        O SDR vê um selo em cada conversa dizendo de qual número ela veio. Use o <b>ID da caixa</b> do
+        Chatwoot (aparece na URL da caixa em Configurações → Caixas de entrada).
+      </p>
+
+      <div className="mt-3 space-y-2">
+        {linhas.map((l, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              value={l.id}
+              onChange={(e) => mudar(i, "id", e.target.value)}
+              placeholder="ID"
+              inputMode="numeric"
+              className="w-16 px-2 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 text-center focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
+            />
+            <input
+              value={l.nome}
+              onChange={(e) => mudar(i, "nome", e.target.value)}
+              placeholder="Nome que o SDR vê (ex.: Comercial)"
+              className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
+            />
+            <select
+              value={l.tipo}
+              onChange={(e) => mudar(i, "tipo", e.target.value)}
+              className="px-2 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none"
+            >
+              <option value="normal">normal</option>
+              <option value="api">API oficial</option>
+            </select>
+            <button
+              onClick={() => setLinhas((prev) => prev.filter((_, k) => k !== i))}
+              className="px-2 py-1.5 text-sm text-gray-400 hover:text-red-600 transition-colors"
+              title="Remover"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2 mt-3">
+        <button
+          onClick={() => setLinhas((prev) => [...prev, { id: "", nome: "", tipo: "normal" }])}
+          className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
+        >
+          + adicionar número
+        </button>
+        <button
+          onClick={salvar}
+          disabled={salvando}
+          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-60 transition-opacity"
+          style={{ background: "#0147FF" }}
+        >
+          {salvando ? "salvando…" : "Salvar selos"}
+        </button>
+      </div>
+    </div>
+  );
+}

@@ -219,7 +219,7 @@ export function normalizeAttachments(message) {
  * Grava uma mensagem no QS (idempotente por cw_message_id) e atualiza a linha da
  * lista. Toda a soma de "não lidas" acontece dentro da função do banco.
  */
-export async function ingestMessage({ leadId, conversationId, message, contactId = null, canReply = null }) {
+export async function ingestMessage({ leadId, conversationId, message, contactId = null, canReply = null, inboxId = null }) {
   const direction = directionOf(message);
   if (!direction) return false;
 
@@ -242,6 +242,7 @@ export async function ingestMessage({ leadId, conversationId, message, contactId
       p_sent_at: sentAt,
       p_contact: contactId,
       p_can_reply: canReply,
+      p_inbox: inboxId == null ? null : Number(inboxId),
     },
   });
   return out === true;

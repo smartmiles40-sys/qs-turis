@@ -111,6 +111,7 @@ export default async function handler(req, res) {
       message,
       contactId: conv?.meta?.sender?.id ?? null,
       canReply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
+      inboxId,
     });
 
     return res.status(200).json({ ok: true, leadId: lead.id, novo: saved });

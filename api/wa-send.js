@@ -121,12 +121,14 @@ export default async function handler(req, res) {
     // Caminho rápido: conversa que o QS já conhece. Só cai no Chatwoot se não souber.
     let conversationId = null;
     let contactId = null;
+    let inboxId = null;
     try {
       const rows = await rest(
-        `qs_wa_threads?select=cw_conversation_id,cw_contact_id&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
+        `qs_wa_threads?select=cw_conversation_id,cw_contact_id,cw_inbox_id&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
       );
       conversationId = rows?.[0]?.cw_conversation_id ?? null;
       contactId = rows?.[0]?.cw_contact_id ?? null;
+      inboxId = rows?.[0]?.cw_inbox_id ?? null;
     } catch { /* segue pro caminho completo */ }
 
     if (!conversationId) {
@@ -144,6 +146,7 @@ export default async function handler(req, res) {
       }
       conversationId = r.conversation.id;
       contactId = r.contact.id;
+      inboxId = r.conversation.inbox_id ?? defaultInboxId();
     }
 
     const sent = await cw(`/conversations/${conversationId}/messages`, {
@@ -157,6 +160,7 @@ export default async function handler(req, res) {
       leadId,
       conversationId,
       contactId,
+      inboxId,
       message: {
         id: sent?.id ?? null,
         content: text,

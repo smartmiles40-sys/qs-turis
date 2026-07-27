@@ -30,23 +30,126 @@ export interface WaThreadLead {
   first_name: string | null;
   phone: string | null;
   status: string | null;
+  owner_id: string | null;
 }
 
 export interface WaThread {
   lead_id: string;
   cw_conversation_id: number | null;
+  cw_inbox_id: number | null;
   last_message: string | null;
   last_direction: "in" | "out" | null;
   last_at: string | null;
+  last_in_at: string | null;
+  last_out_at: string | null;
   unread: number;
   can_reply: boolean | null;
   synced_at: string | null;
+  history_synced: boolean | null;
   lead: WaThreadLead | null;
 }
 
 const THREAD_COLS =
-  "lead_id,cw_conversation_id,last_message,last_direction,last_at,unread,can_reply,synced_at," +
-  "lead:qs_leads(id,full_name,first_name,phone,status)";
+  "lead_id,cw_conversation_id,cw_inbox_id,last_message,last_direction,last_at," +
+  "last_in_at,last_out_at,unread,can_reply,synced_at,history_synced," +
+  "lead:qs_leads(id,full_name,first_name,phone,status,owner_id)";
+
+// ── Quem é quem (pra mostrar o dono da conversa e filtrar por SDR) ──────────
+// Tabela pequena e quase estática: uma busca por sessão basta. Sem isto, a lista
+// teria que fazer um embed aninhado no PostgREST só pra pegar um nome.
+
+export interface UserLite { id: string; name: string; role: string; is_active: boolean }
+
+let usuariosCache: UserLite[] | null = null;
+
+export async function listUsersLite(force = false): Promise<UserLite[]> {
+  if (usuariosCache && !force) return usuariosCache;
+  const { data, error } = await supabase
+    .from("qs_users")
+    .select("id,name,role,is_active")
+    .order("name");
+  if (error) {
+    console.warn("[wa] listUsersLite:", error.message);
+    return usuariosCache ?? [];
+  }
+  usuariosCache = (data ?? []) as UserLite[];
+  return usuariosCache;
+}
+
+/** "Com Closers" = o lead está na mão de alguém com papel de closer. */
+export function isCloser(users: UserLite[], ownerId: string | null | undefined): boolean {
+  if (!ownerId) return false;
+  return users.some((u) => u.id === ownerId && u.role === "closer");
+}
+
+export function userName(users: UserLite[], id: string | null | undefined): string | null {
+  if (!id) return null;
+  return users.find((u) => u.id === id)?.name ?? null;
+}
+
+// ── Conversas fixadas ───────────────────────────────────────────────────────
+
+export async function listPinnedLeadIds(): Promise<Set<string>> {
+  const { data, error } = await supabase.from("qs_wa_pins").select("lead_id");
+  if (error) {
+    console.warn("[wa] listPinnedLeadIds:", error.message);
+    return new Set();
+  }
+  return new Set((data ?? []).map((r) => (r as { lead_id: string }).lead_id));
+}
+
+/** Devolve o novo estado (true = fixada). */
+export async function togglePin(leadId: string): Promise<boolean | null> {
+  const { data, error } = await supabase.rpc("qs_wa_toggle_pin", { p_lead: leadId });
+  if (error) {
+    console.warn("[wa] togglePin:", error.message);
+    return null;
+  }
+  return Boolean(data);
+}
+
+// ── Rótulo de cada número (normal x API oficial) ────────────────────────────
+// Vive em qs_settings pra o Bruno trocar sem deploy — e porque hoje os dois
+// números são Baileys; a distinção "API oficial" só existe quando ele migrar um.
+
+export interface InboxLabel { nome: string; tipo: "normal" | "api" }
+export type InboxLabels = Record<string, InboxLabel>;
+
+export const WA_INBOX_LABELS_KEY = "wa_inbox_labels";
+
+export async function getInboxLabels(): Promise<InboxLabels> {
+  try {
+    const { getSetting } = await import("@/lib/qsSettings");
+    const v = await getSetting<InboxLabels>(WA_INBOX_LABELS_KEY);
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+export function inboxTag(labels: InboxLabels, inboxId: number | null | undefined) {
+  if (inboxId == null) return null;
+  const l = labels[String(inboxId)];
+  if (!l) return null;
+  return { nome: l.nome, tipo: l.tipo, ehApi: l.tipo === "api" };
+}
+
+// ── "Esperando resposta" ────────────────────────────────────────────────────
+
+/** Há quanto tempo o cliente falou e ninguém respondeu (null = está em dia). */
+export function esperandoDesde(t: WaThread): string | null {
+  if (!t.last_in_at) return null;
+  if (t.last_out_at && new Date(t.last_out_at) >= new Date(t.last_in_at)) return null;
+  return t.last_in_at;
+}
+
+export function humanizarEspera(iso: string): string {
+  const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (min < 60) return `${min}min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.round(h / 24)}d`;
+}
 
 /** Conversas visíveis pra quem está logado (a RLS já corta as dos outros). */
 export async function listMyThreads(limit = 100): Promise<WaThread[]> {

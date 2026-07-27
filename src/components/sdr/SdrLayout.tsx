@@ -680,7 +680,7 @@ export default function SdrLayout() {
 
       {/* Cockpit de atendimento (ChatApp ou Chatwoot, pela flag chat_provider) —
           divide a tela; montado uma única vez e persistente */}
-      <CommsDock />
+      <CommsDock onOpenLead={openLeadDetail} />
 
       {/* Toasts globais (erros de gravação, confirmações) */}
       <GlobalToasts />

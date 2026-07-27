@@ -10,6 +10,7 @@ import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PREFIX_KEY, SIP_INSTAL
 import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, deleteSipLine, ensureRegistered, type SipLineAdmin } from "@/lib/webphone";
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
 import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } from "@/lib/qs/chatProvider";
+import WaInboxLabels from "./WaInboxLabels";
 import type {
   CustomField,
   CustomFieldScope,
@@ -2054,6 +2055,8 @@ function AtendimentoSection() {
           );
         })}
       </div>
+
+      {provider === "qs" && <WaInboxLabels />}
 
       {provider === "qs" && (
         <div className="bg-white border border-gray-100 rounded-xl p-4">

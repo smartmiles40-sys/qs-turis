@@ -87,6 +87,7 @@ export default async function handler(req, res) {
         message: m,
         contactId: contact.id,
         canReply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
+        inboxId: conv.inbox_id ?? null,
       });
       if (novo) importadas++;
     }
@@ -94,6 +95,7 @@ export default async function handler(req, res) {
     await saveThreadMeta(leadId, {
       cw_conversation_id: conv.id,
       cw_contact_id: contact.id,
+      cw_inbox_id: conv.inbox_id ?? null,
       can_reply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
       synced_at: new Date().toISOString(),
     });
