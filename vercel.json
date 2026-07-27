@@ -1,12 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
-    "api/wa-send-media.js": {
-      "maxDuration": 60
-    },
-    "api/wa-history.js": {
-      "maxDuration": 60
-    },
     "api/*.js": {
       "maxDuration": 10
     }
