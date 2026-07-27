@@ -137,7 +137,36 @@ export interface WaNumero {
   padrao: boolean;
 }
 
-let numerosCache: WaNumero[] | null = null;
+interface WaConfigBruta {
+  respostas: CannedResponse[];
+  inboxes: { id: number; nome: string; canal: string }[];
+  padrao: number | null;
+}
+
+// Uma promessa só, compartilhada: o painel pede atalhos e números ao mesmo
+// tempo, e sem isso seriam duas chamadas concorrentes pro mesmo endpoint.
+let configPromise: Promise<WaConfigBruta> | null = null;
+
+function buscarConfig(force = false): Promise<WaConfigBruta> {
+  if (configPromise && !force) return configPromise;
+  configPromise = (async () => {
+    const vazio: WaConfigBruta = { respostas: [], inboxes: [], padrao: null };
+    try {
+      const res = await fetch("/api/wa-config", { headers: await authHeaders() });
+      if (!res.ok) return vazio;
+      const d = await res.json();
+      return {
+        respostas: Array.isArray(d?.respostas) ? d.respostas : [],
+        inboxes: Array.isArray(d?.inboxes) ? d.inboxes : [],
+        padrao: d?.padrao ?? null,
+      };
+    } catch {
+      configPromise = null;   // deixa tentar de novo na próxima
+      return vazio;
+    }
+  })();
+  return configPromise;
+}
 
 /**
  * Quais números estão REALMENTE disponíveis pra enviar. Vem do Chatwoot (só
@@ -146,31 +175,18 @@ let numerosCache: WaNumero[] | null = null;
  * seletor no dia em que você conectar — e some se for removido.
  */
 export async function listWaNumeros(force = false): Promise<WaNumero[]> {
-  if (numerosCache && !force) return numerosCache;
-  try {
-    const [res, labels] = await Promise.all([
-      fetch("/api/wa-inboxes", { headers: await authHeaders() }),
-      getInboxLabels(),
-    ]);
-    if (!res.ok) return numerosCache ?? [];
-    const data = await res.json();
-    const brutos: { id: number; nome: string; canal: string }[] = Array.isArray(data?.inboxes) ? data.inboxes : [];
-    const padraoId = Number(data?.padrao);
-    const lista: WaNumero[] = brutos.map((i) => {
-      const l = labels[String(i.id)];
-      return {
-        id: i.id,
-        nome: l?.nome || i.nome,
-        tipo: l?.tipo === "api" ? "api" : "normal",
-        canal: i.canal,
-        padrao: i.id === padraoId,
-      };
-    });
-    numerosCache = lista;
-    return lista;
-  } catch {
-    return numerosCache ?? [];
-  }
+  const [cfg, labels] = await Promise.all([buscarConfig(force), getInboxLabels()]);
+  const padraoId = Number(cfg.padrao);
+  return cfg.inboxes.map((i) => {
+    const l = labels[String(i.id)];
+    return {
+      id: i.id,
+      nome: l?.nome || i.nome,
+      tipo: l?.tipo === "api" ? "api" : "normal",
+      canal: i.canal,
+      padrao: i.id === padraoId,
+    };
+  });
 }
 
 export function inboxTag(labels: InboxLabels, inboxId: number | null | undefined) {
@@ -382,20 +398,9 @@ export async function sendWaMedia(
 
 export interface CannedResponse { atalho: string; texto: string }
 
-let cannedCache: CannedResponse[] | null = null;
-
 export async function listCanned(): Promise<CannedResponse[]> {
-  if (cannedCache) return cannedCache;
-  try {
-    const res = await fetch("/api/wa-canned", { headers: await authHeaders() });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const lista: CannedResponse[] = Array.isArray(data?.respostas) ? data.respostas : [];
-    cannedCache = lista;
-    return lista;
-  } catch {
-    return [];
-  }
+  const cfg = await buscarConfig();
+  return cfg.respostas;
 }
 
 /** Troca as variáveis do Chatwoot pelo dado real do lead. */
