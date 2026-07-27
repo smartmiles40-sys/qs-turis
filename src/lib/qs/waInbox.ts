@@ -154,11 +154,22 @@ export async function sendWaMessage(leadId: string, text: string): Promise<WaSen
 }
 
 // ── Realtime ────────────────────────────────────────────────────────────────
+// ⚠️ Canal do Supabase é identificado pelo NOME. Dois componentes pedindo o
+// mesmo nome não viram dois ouvintes: o segundo tenta registrar num canal que já
+// foi assinado e o supabase-js estoura "cannot add postgres_changes callbacks
+// after subscribe()". Como o dock (badge) e a lista querem o mesmo evento, eles
+// DIVIDEM uma assinatura só, e o nome leva um número de série pra nunca colidir
+// com um canal antigo que ainda esteja sendo desmontado.
+
+let canalSeq = 0;
+
+const ouvintesThreads = new Set<() => void>();
+let canalThreads: ReturnType<typeof supabase.channel> | null = null;
 
 /** Mensagens novas de UM lead. Devolve a função de desinscrever. */
 export function subscribeToMessages(leadId: string, onInsert: (m: WaMessage) => void): () => void {
   const ch = supabase
-    .channel(`qs_wa_msgs_${leadId}`)
+    .channel(`qs_wa_msgs_${leadId}_${++canalSeq}`)
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "qs_wa_messages", filter: `lead_id=eq.${leadId}` },
@@ -168,13 +179,33 @@ export function subscribeToMessages(leadId: string, onInsert: (m: WaMessage) => 
   return () => { supabase.removeChannel(ch); };
 }
 
-/** Qualquer mexida na lista de conversas (mensagem nova, não lidas, etc.). */
+/**
+ * Qualquer mexida na lista de conversas (mensagem nova, não lidas, etc.).
+ * Vários componentes podem chamar à vontade — só existe um canal por baixo, e
+ * ele é derrubado quando o último ouvinte sai.
+ */
 export function subscribeToThreads(onChange: () => void): () => void {
-  const ch = supabase
-    .channel("qs_wa_threads_all")
-    .on("postgres_changes", { event: "*", schema: "public", table: "qs_wa_threads" }, onChange)
-    .subscribe();
-  return () => { supabase.removeChannel(ch); };
+  ouvintesThreads.add(onChange);
+
+  if (!canalThreads) {
+    canalThreads = supabase
+      .channel(`qs_wa_threads_${++canalSeq}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "qs_wa_threads" }, () => {
+        // Cópia antes de percorrer: um ouvinte pode se remover durante o aviso.
+        [...ouvintesThreads].forEach((f) => {
+          try { f(); } catch (e) { console.warn("[wa] ouvinte de threads falhou:", e); }
+        });
+      })
+      .subscribe();
+  }
+
+  return () => {
+    ouvintesThreads.delete(onChange);
+    if (ouvintesThreads.size === 0 && canalThreads) {
+      supabase.removeChannel(canalThreads);
+      canalThreads = null;
+    }
+  };
 }
 
 // ── Formatação ──────────────────────────────────────────────────────────────
