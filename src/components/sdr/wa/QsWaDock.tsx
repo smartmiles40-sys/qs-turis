@@ -71,6 +71,33 @@ interface Alvo {
   leadId: string;
   name: string | null;
   phone: string | null;
+  draft?: string | null;
+}
+
+const AVISO_KEY = "qs_wa_avisos";   // som + notificação, por navegador
+
+/**
+ * Bipe curto gerado na hora (WebAudio). Evita depender de um arquivo de áudio
+ * hospedado — um .mp3 a mais é uma requisição que pode falhar justo na hora do
+ * aviso, e o som some sem ninguém perceber.
+ */
+function tocarBipe() {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(660, ctx.currentTime + 0.09);
+    gain.gain.setValueAtTime(0.14, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+    osc.onended = () => ctx.close();
+  } catch { /* navegador bloqueou áudio sem gesto do usuário */ }
 }
 
 function IconChat({ size = 20 }: { size?: number }) {
@@ -115,22 +142,62 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
   const [alvo, setAlvo] = useState<Alvo | null>(null);
   const [naoLidas, setNaoLidas] = useState(0);
 
+  const [avisos, setAvisos] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem(AVISO_KEY) !== "off";
+  });
+  const naoLidasRef = useRef(0);
+
   // Badge do botão: sem isso, mensagem nova só é descoberta abrindo o painel.
   // Roda mesmo com o dock fechado — é uma query leve e é o ponto todo do aviso.
   useEffect(() => {
     let vivo = true;
-    const atualizar = () => { countUnread().then((n) => { if (vivo) setNaoLidas(n); }); };
+    const atualizar = () => {
+      countUnread().then((n) => {
+        if (!vivo) return;
+        // Só avisa quando o número SOBE. Zerar (o SDR leu) não pode tocar nada.
+        if (n > naoLidasRef.current && naoLidasRef.current >= 0 && avisos) {
+          tocarBipe();
+          try {
+            if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
+              new Notification("Nova mensagem no WhatsApp", {
+                body: `${n} conversa${n > 1 ? "s" : ""} esperando você`,
+                tag: "qs-wa",
+              });
+            }
+          } catch { /* navegador sem suporte */ }
+        }
+        naoLidasRef.current = n;
+        setNaoLidas(n);
+      });
+    };
     atualizar();
     const off = subscribeToThreads(atualizar);
     return () => { vivo = false; off(); };
-  }, []);
+  }, [avisos]);
+
+  const alternarAvisos = useCallback(async () => {
+    const novo = !avisos;
+    setAvisos(novo);
+    try { window.localStorage.setItem(AVISO_KEY, novo ? "on" : "off"); } catch { /* anônimo */ }
+    // Pedir permissão precisa acontecer dentro do clique — fora dele o
+    // navegador ignora silenciosamente.
+    if (novo && "Notification" in window && Notification.permission === "default") {
+      try { await Notification.requestPermission(); } catch { /* ignorado */ }
+    }
+  }, [avisos]);
 
   // Clicou no WhatsApp de um lead lá na fila → abre direto na conversa dele.
   useEffect(() => {
     if (target?.leadId) {
-      setAlvo({ leadId: target.leadId, name: target.name ?? null, phone: target.phone ?? null });
+      setAlvo({
+        leadId: target.leadId,
+        name: target.name ?? null,
+        phone: target.phone ?? null,
+        draft: target.draft ?? null,
+      });
     }
-  }, [target?.leadId, target?.name, target?.phone]);
+  }, [target?.leadId, target?.name, target?.phone, target?.draft]);
 
   // ── Redimensionar ─────────────────────────────────────────────────────────
   const { width, aplicar } = useDockWidth();
@@ -303,6 +370,18 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
             </button>
           )}
           <button
+            onClick={alternarAvisos}
+            title={avisos ? "Desligar som e notificação" : "Ligar som e notificação"}
+            aria-label={avisos ? "Desligar avisos" : "Ligar avisos"}
+            className="p-1.5 rounded-lg hover:bg-white/15 transition-colors"
+            style={{ opacity: avisos ? 1 : 0.55 }}
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" />
+              {!avisos && <path d="M3 3l18 18" />}
+            </svg>
+          </button>
+          <button
             onClick={alternarLargura}
             title={estaLargo ? "Voltar ao tamanho normal" : "Alargar o painel"}
             aria-label={estaLargo ? "Voltar ao tamanho normal" : "Alargar o painel"}
@@ -319,7 +398,7 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
         <div className="flex-1 min-h-0" style={{ minWidth: width }}>
           {isOpen && (
             alvo
-              ? <WaConversation leadId={alvo.leadId} leadName={alvo.name} phone={alvo.phone} />
+              ? <WaConversation leadId={alvo.leadId} leadName={alvo.name} phone={alvo.phone} initialText={alvo.draft} />
               : <WaThreadList selectedLeadId={null} onPick={escolher} />
           )}
         </div>

@@ -20,6 +20,12 @@ export interface ChatAppTarget {
   name?: string | null;
   phone?: string | null;
   ownerId?: string | null;
+  /**
+   * Texto pra já deixar escrito no campo de mensagem — é assim que o roteiro da
+   * atividade da cadência chega no atendimento nativo, em vez de o SDR ter que
+   * copiar e colar. Só o provider "qs" usa (o ChatApp/Chatwoot são iframes).
+   */
+  draft?: string | null;
 }
 
 interface ChatAppDockContextType {

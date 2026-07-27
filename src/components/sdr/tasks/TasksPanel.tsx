@@ -14,6 +14,7 @@ import { notifyError } from "@/lib/qs/notify";
 import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, type CadenceScriptRow, type ContactBreakdownRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
+import { getChatProvider, defaultChatProvider, type ChatProvider } from "@/lib/qs/chatProvider";
 import { getLeadScore } from "@/lib/leadScore";
 import { formatPhoneDisplay, fillTemplate, startWhatsAppCall, isDialablePhone } from "@/lib/whatsapp";
 import WhatsAppModal from "../whatsapp/WhatsAppModal";
@@ -318,16 +319,27 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const { currentUser } = useQsAuth();
   const chatDock = useChatAppDock();
 
-  // Abre o dock do ChatApp focando um lead (copia o telefone pra colar na busca).
-  const openWhatsApp = useCallback((lead: Lead | undefined | null) => {
+  // Abre o dock focando um lead (copia o telefone pra colar na busca).
+  const openWhatsApp = useCallback((lead: Lead | undefined | null, draft?: string | null) => {
     if (!lead) return;
     chatDock.openForLead({
       leadId: lead.id,
       name: lead.full_name ?? lead.first_name ?? null,
       phone: lead.phone ?? null,
       ownerId: lead.owner_id ?? null,
+      draft: draft ?? null,
     });
   }, [chatDock]);
+
+  // Qual cockpit está ativo. No atendimento nativo ("qs") a atividade de
+  // WhatsApp abre a conversa DENTRO do QS com o roteiro já escrito, em vez de
+  // jogar o SDR pro WhatsApp Web pra procurar o contato na mão.
+  const [chatProvider, setChatProvider] = useState<ChatProvider>(() => defaultChatProvider());
+  useEffect(() => {
+    let vivo = true;
+    getChatProvider().then((p) => { if (vivo) setChatProvider(p); });
+    return () => { vivo = false; };
+  }, []);
 
   // ── Supabase data ──────────────────────────────────────────────────
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -1352,8 +1364,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   function openWhatsAppForTask(task: Task, lead: Lead | undefined | null) {
     if (!lead) return;
     const script = task.channel_type === "whatsapp" ? getScriptForTask(task) : null;
-    if (script) {
-      setWaModal({ lead, text: fillTemplate(script, { name: lead.full_name }) });
+    const texto = script ? fillTemplate(script, { name: lead.full_name }) : null;
+
+    // Atendimento nativo: abre a conversa do lead aqui dentro, já com o roteiro
+    // no campo de mensagem. Zero tempo procurando o contato no WhatsApp.
+    if (chatProvider === "qs") {
+      openWhatsApp(lead, texto);
+      return;
+    }
+
+    if (texto) {
+      setWaModal({ lead, text: texto });
       return;
     }
     openWhatsApp(lead);

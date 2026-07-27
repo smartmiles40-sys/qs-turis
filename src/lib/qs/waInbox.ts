@@ -256,6 +256,120 @@ export async function sendWaMessage(leadId: string, text: string): Promise<WaSen
   }
 }
 
+// ── Mídia (áudio gravado, imagem, arquivo) ──────────────────────────────────
+
+/** Teto do servidor: 3 MB. Imagem grande é comprimida antes de chegar aqui. */
+export const MAX_MEDIA_BYTES = 3 * 1024 * 1024;
+
+function blobParaBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("Falha ao ler o arquivo"));
+    fr.onload = () => {
+      const s = String(fr.result || "");
+      resolve(s.slice(s.indexOf(",") + 1));   // tira o "data:...;base64,"
+    };
+    fr.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Reduz a imagem antes de mandar. Foto de celular tem 4–8 MB e estouraria o
+ * limite do servidor — e mandar 8 MB pra chegar num WhatsApp que recomprime
+ * tudo é desperdício puro.
+ */
+export async function comprimirImagem(file: File, maxLado = 1600, qualidade = 0.82): Promise<Blob> {
+  if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const escala = Math.min(1, maxLado / Math.max(bitmap.width, bitmap.height));
+    if (escala === 1 && file.size <= MAX_MEDIA_BYTES) return file;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * escala);
+    canvas.height = Math.round(bitmap.height * escala);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+    const out = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", qualidade));
+    return out && out.size < file.size ? out : file;
+  } catch {
+    return file;   // navegador sem createImageBitmap: manda como veio
+  }
+}
+
+export async function sendWaMedia(
+  leadId: string,
+  blob: Blob,
+  fileName: string,
+  caption = ""
+): Promise<WaSendResult> {
+  if (blob.size > MAX_MEDIA_BYTES) {
+    return { ok: false, error: "Arquivo grande demais (máx. 3 MB)." };
+  }
+  try {
+    const dataBase64 = await blobParaBase64(blob);
+    const res = await fetch("/api/wa-send-media", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ leadId, fileName, mimeType: blob.type, dataBase64, caption }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Sem conexão. Tente de novo." };
+  }
+}
+
+// ── Respostas prontas ───────────────────────────────────────────────────────
+
+export interface CannedResponse { atalho: string; texto: string }
+
+let cannedCache: CannedResponse[] | null = null;
+
+export async function listCanned(): Promise<CannedResponse[]> {
+  if (cannedCache) return cannedCache;
+  try {
+    const res = await fetch("/api/wa-canned", { headers: await authHeaders() });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const lista: CannedResponse[] = Array.isArray(data?.respostas) ? data.respostas : [];
+    cannedCache = lista;
+    return lista;
+  } catch {
+    return [];
+  }
+}
+
+/** Troca as variáveis do Chatwoot pelo dado real do lead. */
+export function preencherCanned(texto: string, lead: { nome?: string | null }): string {
+  const primeiro = (lead.nome || "").trim().split(/\s+/)[0] || "";
+  return texto
+    .replace(/\{\{\s*contact\.first_name\s*\}\}/gi, primeiro)
+    .replace(/\{\{\s*contact\.name\s*\}\}/gi, (lead.nome || "").trim());
+}
+
+// ── Histórico completo ──────────────────────────────────────────────────────
+
+export interface WaHistoryResult { importadas: number; lidas?: number; completo?: boolean; error?: string }
+
+export async function downloadHistory(leadId: string): Promise<WaHistoryResult> {
+  try {
+    const res = await fetch("/api/wa-history", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ leadId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { importadas: 0, error: data?.error || "Falha ao baixar." };
+    return data as WaHistoryResult;
+  } catch {
+    return { importadas: 0, error: "Sem conexão." };
+  }
+}
+
 // ── Realtime ────────────────────────────────────────────────────────────────
 // ⚠️ Canal do Supabase é identificado pelo NOME. Dois componentes pedindo o
 // mesmo nome não viram dois ouvintes: o segundo tenta registrar num canal que já

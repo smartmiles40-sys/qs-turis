@@ -16,73 +16,12 @@
 // -----------------------------------------------------------------------------
 
 import {
-  assertCanAccessLead, getSupabaseUserId, cwConfigured, cw,
-  toE164BR, findContact, pickConversation, ingestMessage, WA_INBOX_IDS,
+  assertCanAccessLead, getSupabaseUserId, cwConfigured, cw, ingestMessage,
+  ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask,
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 
 const MAX_LEN = 4000;
-
-/** Por qual caixa (= qual número nosso) a mensagem sai. */
-function defaultInboxId() {
-  const env = Number(process.env.CHATWOOT_DEFAULT_INBOX_ID);
-  if (Number.isFinite(env) && env > 0) return env;
-  return WA_INBOX_IDS[0] ?? null;
-}
-
-/** source_id = a "linha" que liga aquele contato àquela caixa; a conversa precisa dela. */
-async function sourceIdFor(contactId, inboxId) {
-  try {
-    const { payload = [] } = await cw(`/contacts/${contactId}/contactable_inboxes`);
-    const hit = payload.find((p) => (p.inbox?.id ?? p.inbox_id) === inboxId) || payload[0];
-    return hit?.source_id || null;
-  } catch (e) {
-    console.warn('[wa-send] contactable_inboxes:', e?.message);
-    return null;
-  }
-}
-
-async function ensureConversation(lead) {
-  const phone = toE164BR(lead.phone);
-  if (!phone) return { error: 'lead-sem-telefone' };
-
-  const inboxId = defaultInboxId();
-  if (!inboxId) return { error: 'inbox-nao-configurada' };
-
-  let contact = await findContact(phone);
-
-  if (!contact) {
-    const name = lead.full_name || [lead.first_name, lead.last_name].filter(Boolean).join(' ') || phone;
-    try {
-      const created = await cw('/contacts', {
-        method: 'POST',
-        body: { inbox_id: inboxId, name, phone_number: phone },
-      });
-      contact = created?.payload?.contact || created?.payload || null;
-    } catch (e) {
-      console.error('[wa-send] criar contato:', e?.message);
-      return { error: 'falha-ao-criar-contato' };
-    }
-  }
-  if (!contact?.id) return { error: 'sem-contato' };
-
-  const existing = await pickConversation(contact.id);
-  if (existing) return { conversation: existing, contact };
-
-  const sourceId = await sourceIdFor(contact.id, inboxId);
-  if (!sourceId) return { error: 'sem-source-id' };
-
-  try {
-    const conv = await cw('/conversations', {
-      method: 'POST',
-      body: { source_id: sourceId, inbox_id: inboxId, contact_id: contact.id },
-    });
-    return { conversation: conv, contact };
-  } catch (e) {
-    console.error('[wa-send] criar conversa:', e?.message);
-    return { error: 'falha-ao-criar-conversa' };
-  }
-}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -134,15 +73,7 @@ export default async function handler(req, res) {
     if (!conversationId) {
       const r = await ensureConversation(auth.lead);
       if (r.error) {
-        const humano = {
-          'lead-sem-telefone': 'Este lead não tem telefone cadastrado.',
-          'inbox-nao-configurada': 'Falta dizer por qual número enviar (CHATWOOT_DEFAULT_INBOX_ID).',
-          'falha-ao-criar-contato': 'Não consegui criar o contato no atendimento.',
-          'falha-ao-criar-conversa': 'Não consegui abrir a conversa no atendimento.',
-          'sem-source-id': 'A caixa de WhatsApp não aceitou este contato.',
-          'sem-contato': 'Não consegui identificar o contato no atendimento.',
-        }[r.error] || 'Não consegui abrir a conversa.';
-        return res.status(409).json({ error: humano, motivo: r.error });
+        return res.status(409).json({ error: motivoHumano(r.error), motivo: r.error });
       }
       conversationId = r.conversation.id;
       contactId = r.contact.id;
@@ -170,7 +101,10 @@ export default async function handler(req, res) {
       },
     });
 
-    return res.status(200).json({ ok: true, conversationId, messageId: sent?.id ?? null });
+    // Baixa a atividade de WhatsApp da cadência (best-effort, nunca derruba o envio).
+    const tarefa = await completeWhatsAppTask(leadId);
+
+    return res.status(200).json({ ok: true, conversationId, messageId: sent?.id ?? null, tarefaConcluida: tarefa });
   } catch (e) {
     console.error('[wa-send]', e?.message);
     // 401/403 do Chatwoot = token errado; o resto tratamos como falha de envio.

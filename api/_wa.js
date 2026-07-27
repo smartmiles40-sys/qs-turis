@@ -183,6 +183,150 @@ export async function pickConversation(contactId) {
   }
 }
 
+/** Envio multipart (mídia). O cw() normal manda JSON e não serve aqui. */
+export async function cwForm(path, form, { timeoutMs = 25_000 } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${CW_API}${path}`, {
+      method: 'POST',
+      // Sem Content-Type: o fetch monta o boundary do multipart sozinho.
+      headers: { api_access_token: process.env.CHATWOOT_AGENT_TOKEN || '' },
+      body: form,
+      signal: ctrl.signal,
+    });
+    const text = await r.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+    if (!r.ok) {
+      const err = new Error((json && json.message) || `Chatwoot HTTP ${r.status}`);
+      err.status = r.status;
+      throw err;
+    }
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Por qual caixa (= qual número nosso) a mensagem sai. */
+export function defaultInboxId() {
+  const env = Number(process.env.CHATWOOT_DEFAULT_INBOX_ID);
+  if (Number.isFinite(env) && env > 0) return env;
+  return WA_INBOX_IDS[0] ?? null;
+}
+
+/** source_id = a "linha" que liga aquele contato àquela caixa; a conversa precisa dela. */
+async function sourceIdFor(contactId, inboxId) {
+  try {
+    const { payload = [] } = await cw(`/contacts/${contactId}/contactable_inboxes`);
+    const hit = payload.find((p) => (p.inbox?.id ?? p.inbox_id) === inboxId) || payload[0];
+    return hit?.source_id || null;
+  } catch (e) {
+    console.warn('[wa] contactable_inboxes:', e?.message);
+    return null;
+  }
+}
+
+/**
+ * Devolve a conversa do lead, CRIANDO contato/conversa se ainda não existir —
+ * assim a primeira abordagem também sai pelo QS, e não por fora.
+ */
+export async function ensureConversation(lead) {
+  const phone = toE164BR(lead.phone);
+  if (!phone) return { error: 'lead-sem-telefone' };
+
+  const inboxId = defaultInboxId();
+  if (!inboxId) return { error: 'inbox-nao-configurada' };
+
+  let contact = await findContact(phone);
+
+  if (!contact) {
+    const name = lead.full_name || [lead.first_name, lead.last_name].filter(Boolean).join(' ') || phone;
+    try {
+      const created = await cw('/contacts', {
+        method: 'POST',
+        body: { inbox_id: inboxId, name, phone_number: phone },
+      });
+      contact = created?.payload?.contact || created?.payload || null;
+    } catch (e) {
+      console.error('[wa] criar contato:', e?.message);
+      return { error: 'falha-ao-criar-contato' };
+    }
+  }
+  if (!contact?.id) return { error: 'sem-contato' };
+
+  const existing = await pickConversation(contact.id);
+  if (existing) return { conversation: existing, contact };
+
+  const sourceId = await sourceIdFor(contact.id, inboxId);
+  if (!sourceId) return { error: 'sem-source-id' };
+
+  try {
+    const conv = await cw('/conversations', {
+      method: 'POST',
+      body: { source_id: sourceId, inbox_id: inboxId, contact_id: contact.id },
+    });
+    return { conversation: conv, contact };
+  } catch (e) {
+    console.error('[wa] criar conversa:', e?.message);
+    return { error: 'falha-ao-criar-conversa' };
+  }
+}
+
+/** Mensagem humana pros erros de ensureConversation. */
+export function motivoHumano(code) {
+  return {
+    'lead-sem-telefone': 'Este lead não tem telefone cadastrado.',
+    'inbox-nao-configurada': 'Falta dizer por qual número enviar (CHATWOOT_DEFAULT_INBOX_ID).',
+    'falha-ao-criar-contato': 'Não consegui criar o contato no atendimento.',
+    'falha-ao-criar-conversa': 'Não consegui abrir a conversa no atendimento.',
+    'sem-source-id': 'A caixa de WhatsApp não aceitou este contato.',
+    'sem-contato': 'Não consegui identificar o contato no atendimento.',
+  }[code] || 'Não consegui abrir a conversa.';
+}
+
+// ── Cadência: baixar a atividade de WhatsApp sozinha ────────────────────────
+
+/**
+ * Quando o SDR responde pelo QS, a tarefa de WhatsApp daquele lead que estava
+ * pendente pra hoje (ou atrasada) é dada como feita. Some o trabalho de marcar
+ * na mão — que é onde a aderência costuma se perder.
+ *
+ * Best-effort de propósito: se falhar, o envio da mensagem NÃO pode falhar junto.
+ * Desligável em qs_settings.wa_auto_complete_task = false.
+ */
+export async function completeWhatsAppTask(leadId) {
+  try {
+    const cfg = await rest(`qs_settings?select=value&key=eq.wa_auto_complete_task&limit=1`);
+    if (cfg?.[0]?.value === false) return null;
+  } catch { /* sem config = ligado */ }
+
+  try {
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+    const limite = amanha.toISOString();
+
+    const abertas = await rest(
+      `qs_tasks?select=id,scheduled_at&lead_id=eq.${encodeURIComponent(leadId)}` +
+      `&channel_type=eq.whatsapp&status=eq.pendente&scheduled_at=lt.${encodeURIComponent(limite)}` +
+      `&order=scheduled_at.asc&limit=1`
+    );
+    const alvo = abertas?.[0];
+    if (!alvo) return null;
+
+    await rest(`qs_tasks?id=eq.${encodeURIComponent(alvo.id)}`, {
+      method: 'PATCH',
+      body: { status: 'concluida', completed_at: new Date().toISOString() },
+      prefer: 'return=minimal',
+    });
+    return alvo.id;
+  } catch (e) {
+    console.warn('[wa] completeWhatsAppTask:', e?.message);
+    return null;
+  }
+}
+
 // ── Gravação no QS ──────────────────────────────────────────────────────────
 
 /** message_type do Chatwoot → direção nossa. 2=activity e afins ficam de fora. */
