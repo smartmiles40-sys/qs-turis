@@ -242,6 +242,21 @@ export async function countUnread(): Promise<number> {
   return (data ?? []).reduce((s, r) => s + ((r as { unread: number }).unread || 0), 0);
 }
 
+/**
+ * Por qual dos nossos números esta conversa acontece. O SDR precisa ver isso
+ * ANTES de escrever — cada conversa do Chatwoot pertence a um número só, e o
+ * cliente vê a mensagem chegando daquele contato.
+ */
+export async function getThreadInbox(leadId: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("qs_wa_threads")
+    .select("cw_inbox_id")
+    .eq("lead_id", leadId)
+    .maybeSingle();
+  if (error) return null;
+  return (data as { cw_inbox_id: number | null } | null)?.cw_inbox_id ?? null;
+}
+
 export async function listMessages(leadId: string, limit = 200): Promise<WaMessage[]> {
   const { data, error } = await supabase
     .from("qs_wa_messages")

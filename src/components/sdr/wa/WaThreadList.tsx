@@ -143,8 +143,8 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
               onClick={() => setAba(a.key)}
               className="flex-1 px-2 py-2 text-[11.5px] font-bold transition-colors"
               style={{
-                color: ativa ? "#0E7C6A" : "var(--ink3)",
-                borderBottom: ativa ? "2px solid #12A18A" : "2px solid transparent",
+                color: ativa ? "var(--wa)" : "var(--ink3)",
+                borderBottom: ativa ? "2px solid var(--wa-bright)" : "2px solid transparent",
               }}
             >
               {a.label}
@@ -168,7 +168,7 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
             onClick={() => setSoNaoRespondidas((v) => !v)}
             className="px-2 py-1 rounded-full text-[10.5px] font-bold transition-colors"
             style={soNaoRespondidas
-              ? { background: "#FDECEC", color: "#B4242A" }
+              ? { background: "var(--wa-err-bg)", color: "var(--wa-err-ink)" }
               : { background: "var(--card2)", color: "var(--ink3)", border: "1px solid var(--line)" }}
             title="Só conversas em que o cliente falou por último"
           >
@@ -240,7 +240,7 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
                     tabIndex={-1}
                     title={fixada ? "Desafixar" : "Fixar no topo"}
                     className="shrink-0 p-0.5 rounded hover:opacity-100 transition-opacity"
-                    style={{ color: fixada ? "#E8920B" : "var(--ink3)", opacity: fixada ? 1 : 0.45 }}
+                    style={{ color: fixada ? "var(--amber)" : "var(--ink3)", opacity: fixada ? 1 : 0.45 }}
                   >
                     <IconPin size={13} filled={fixada} />
                   </span>
@@ -250,14 +250,14 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
                 <div className="flex items-center gap-1 flex-wrap mt-1">
                   {dono && (
                     <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold"
-                          style={{ background: "var(--accent-soft)", color: "#0147FF" }}>
+                          style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
                       {dono}
                     </span>
                   )}
                   {tag && (
                     <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold"
                           style={tag.ehApi
-                            ? { background: "#E1F5F0", color: "#0E7C6A" }
+                            ? { background: "var(--wa-ok-bg)", color: "var(--wa)" }
                             : { background: "var(--card2)", color: "var(--ink3)", border: "1px solid var(--line)" }}
                           title={tag.ehApi ? "Número oficial (API)" : "WhatsApp normal"}>
                       {tag.ehApi ? "API oficial" : "normal"} · {tag.nome}
@@ -265,7 +265,7 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
                   )}
                   {espera && (
                     <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold"
-                          style={{ background: "#FDECEC", color: "#B4242A" }}
+                          style={{ background: "var(--wa-err-bg)", color: "var(--wa-err-ink)" }}
                           title="O cliente falou por último — ninguém respondeu ainda">
                       esperando {humanizarEspera(espera)}
                     </span>
@@ -280,7 +280,7 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
                   {naoLidas > 0 && (
                     <span
                       className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[10px] font-bold grid place-items-center"
-                      style={{ background: "#12A18A" }}
+                      style={{ background: "var(--wa-bright)" }}
                     >
                       {naoLidas > 99 ? "99+" : naoLidas}
                     </span>

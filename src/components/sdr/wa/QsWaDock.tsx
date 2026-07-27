@@ -18,7 +18,7 @@ import WaThreadList from "./WaThreadList";
 import WaConversation from "./WaConversation";
 import { countUnread, subscribeToThreads, type WaThread } from "@/lib/qs/waInbox";
 
-const WA_GREEN = "#12A18A";
+const WA_GREEN = "var(--wa-bright)";
 
 // Largura do painel (só no computador — no celular ele ocupa a tela inteira).
 const PANEL_W = 440;   // padrão, e o que o botão "restaurar" devolve
@@ -276,7 +276,7 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
           {naoLidas > 0 && (
             <span
               className="ml-0.5 min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold grid place-items-center"
-              style={{ background: "#fff", color: "#0E7C6A" }}
+              style={{ background: "#fff", color: "var(--wa)" }}
             >
               {naoLidas > 99 ? "99+" : naoLidas}
             </span>

@@ -21,6 +21,23 @@
   --card2: #FAFBFC;      /* superfície secundária (caixas internas, hero-side) */
   --accent: #0147FF;     /* azul da marca — usado como texto/realce */
   --accent-soft: #EEF4FF;/* fundo suave do acento (chips/estados ativos) */
+
+  /* ── Atendimento de WhatsApp ───────────────────────────────────────────────
+     Existem porque o painel tinha cores fixas em hex: no modo noturno o texto
+     da bolha (quase preto) caía sobre fundo escuro e sumia. Agora tudo aqui
+     troca de valor junto com o tema.
+     `--wa` é o verde de CHROME (fundo com texto branco por cima; 5,1:1, passa em
+     WCAG AA — o #12A18A dava só 3,2:1). `--wa-bright` é o de ACENTO, pra badge e
+     realce, onde não há texto em cima. */
+  --wa:          #0E7C6A;
+  --wa-hover:    #0B6B5C;
+  --wa-bright:   #12A18A;
+  --wa-soft:     #E4F4EF;  /* bolha enviada */
+  --wa-ink:      #0B4E43;  /* texto sobre a bolha enviada */
+  --wa-ok-bg:    #E1F5F0;
+  --wa-ok-ink:   #0E7C6A;
+  --wa-err-bg:   #FDECEC;
+  --wa-err-ink:  #B4242A;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -51,6 +68,20 @@ html.dark {
   --ink3: #6E7889;
   --accent: #5B8CFF;
   --accent-soft: #1B2740;
+
+  /* Atendimento de WhatsApp no escuro: bolha enviada vira um teal translúcido
+     (o verde-limão do WhatsApp num painel escuro parece erro de renderização) e
+     o texto passa a usar a tinta clara do tema. Os avisos ganham fundo
+     translúcido em vez de pastel claro, senão viram dois retângulos brancos. */
+  --wa:          #12A18A;
+  --wa-hover:    #16B79C;
+  --wa-bright:   #2BC0A6;
+  --wa-soft:     rgba(43, 192, 166, .18);
+  --wa-ink:      var(--ink);
+  --wa-ok-bg:    rgba(43, 192, 166, .16);
+  --wa-ok-ink:   #7FE0CB;
+  --wa-err-bg:   rgba(255, 92, 96, .16);
+  --wa-err-ink:  #FF9295;
   color-scheme: dark;
 }
 

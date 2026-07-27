@@ -13,12 +13,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
-  listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros,
+  listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros, getThreadInbox,
   type WaMessage, type CannedResponse, type WaNumero,
 } from "@/lib/qs/waInbox";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 
-const GREEN = "#12A18A";
+const GREEN = "var(--wa-bright)";
 
 interface Props {
   leadId: string;
@@ -77,7 +77,7 @@ function Anexo({ a }: { a: { type: string; url: string } }) {
   }
   return (
     <a href={a.url} target="_blank" rel="noreferrer"
-       className="block mb-1 text-[11.5px] font-bold underline" style={{ color: "#0E7C6A" }}>
+       className="block mb-1 text-[11.5px] font-bold underline" style={{ color: "var(--wa)" }}>
       📎 abrir anexo
     </a>
   );
@@ -97,10 +97,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const [canned, setCanned] = useState<CannedResponse[]>([]);
   const [mostrarCanned, setMostrarCanned] = useState(false);
 
-  // Por qual número enviar. Só aparece quando existe mais de um conectado — com
-  // um número só, escolher seria uma pergunta sem resposta possível.
+  // Por qual dos NOSSOS números esta conversa acontece. É informação, não
+  // escolha: quem decide é a conversa que já existe no Chatwoot. O SDR precisa
+  // saber disso antes de escrever, porque é o número que o cliente vê chegando.
   const [numeros, setNumeros] = useState<WaNumero[]>([]);
-  const [numeroEscolhido, setNumeroEscolhido] = useState<number | null>(null);
+  const [inboxAtual, setInboxAtual] = useState<number | null>(null);
 
   // Gravação de áudio
   const [gravando, setGravando] = useState(false);
@@ -128,14 +129,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   }, [leadId]);
 
   useEffect(() => { listCanned().then(setCanned); }, []);
-  useEffect(() => {
-    listWaNumeros().then((ns) => {
-      setNumeros(ns);
-      // Já marca o número por onde a mensagem sairia de verdade — senão a tela
-      // destacaria um e o servidor usaria outro.
-      setNumeroEscolhido((atual) => atual ?? (ns.find((n) => n.padrao)?.id ?? ns[0]?.id ?? null));
-    });
-  }, []);
+  useEffect(() => { listWaNumeros().then(setNumeros); }, []);
 
   // Carga inicial + sincronização com o Chatwoot.
   useEffect(() => {
@@ -160,6 +154,8 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       if (r.importadas > 0) await recarregar();
       if (!r.conversationId && local.length === 0) setSemConversa(true);
       markThreadRead(leadId);
+      // Depois do sync, porque é ele que descobre/grava a caixa da conversa.
+      getThreadInbox(leadId).then((id) => { if (vivo) setInboxAtual(id); });
     })();
 
     return () => { vivo = false; };
@@ -195,7 +191,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     if (!corpo || sending) return;
     setSending(true);
     setErro(null);
-    const r = await sendWaMessage(leadId, corpo, numeroEscolhido);
+    const r = await sendWaMessage(leadId, corpo);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar."); return; }
     setText("");
@@ -203,18 +199,18 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
-  }, [text, sending, leadId, recarregar, numeroEscolhido]);
+  }, [text, sending, leadId, recarregar]);
 
   const enviarMidia = useCallback(async (blob: Blob, nome: string, legenda = "", notaDeVoz = false) => {
     setSending(true);
     setErro(null);
-    const r = await sendWaMedia(leadId, blob, nome, legenda, notaDeVoz, numeroEscolhido);
+    const r = await sendWaMedia(leadId, blob, nome, legenda, notaDeVoz);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar o arquivo."); return; }
     setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
-  }, [leadId, recarregar, numeroEscolhido]);
+  }, [leadId, recarregar]);
 
   const escolherArquivo = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -301,6 +297,16 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     return canned.filter((c) => !q || c.atalho.toLowerCase().includes(q)).slice(0, 6);
   }, [canned, text, mostrarCanned]);
 
+  // Qual dos nossos números atende esta conversa. Sem conversa ainda, mostra por
+  // onde ela VAI sair (o padrão do servidor) — é a mesma pergunta do SDR.
+  const numeroDaConversa = useMemo(() => {
+    if (!numeros.length) return null;
+    if (inboxAtual != null) {
+      return numeros.find((n) => n.id === inboxAtual) ?? null;
+    }
+    return numeros.find((n) => n.padrao) ?? (numeros.length === 1 ? numeros[0] : null);
+  }, [numeros, inboxAtual]);
+
   const aplicarCanned = useCallback((c: CannedResponse) => {
     setText(preencherCanned(c.texto, { nome: leadName }));
     setMostrarCanned(false);
@@ -374,18 +380,18 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                 <div className={`flex mb-1.5 ${meu ? "justify-end" : "justify-start"}`}>
                   <div className="max-w-[82%] rounded-2xl px-3 py-2 shadow-sm"
                        style={{
-                         background: meu ? "#DCF8C6" : "var(--card)",
+                         background: meu ? "var(--wa-soft)" : "var(--card)",
                          border: meu ? "none" : "1px solid var(--line)",
                          borderBottomRightRadius: meu ? 6 : undefined,
                          borderBottomLeftRadius: meu ? undefined : 6,
                        }}>
                     {m.attachments?.map((a, i) => <Anexo key={i} a={a} />)}
                     {m.content && (
-                      <p className="text-[13px] whitespace-pre-wrap break-words" style={{ color: "#17202E" }}>
+                      <p className="text-[13px] whitespace-pre-wrap break-words" style={{ color: "var(--wa-ink)" }}>
                         {m.content}
                       </p>
                     )}
-                    <p className="text-[10px] mt-0.5 text-right" style={{ color: "#7A8593" }}>
+                    <p className="text-[10px] mt-0.5 text-right" style={{ color: "var(--ink3)" }}>
                       {hora(m.sent_at)}
                     </p>
                   </div>
@@ -401,12 +407,12 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       </div>
 
       {aviso && (
-        <div className="px-3 py-1.5 text-[11.5px] font-bold" style={{ background: "#E1F5F0", color: "#0E7C6A" }}>
+        <div className="px-3 py-1.5 text-[11.5px] font-bold" style={{ background: "var(--wa-ok-bg)", color: "var(--wa)" }}>
           {aviso}
         </div>
       )}
       {erro && (
-        <div className="px-3 py-1.5 text-[11.5px] font-bold" style={{ background: "#FDECEC", color: "#B4242A" }}>
+        <div className="px-3 py-1.5 text-[11.5px] font-bold" style={{ background: "var(--wa-err-bg)", color: "var(--wa-err-ink)" }}>
           {erro}
         </div>
       )}
@@ -419,36 +425,35 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             <button key={c.atalho} onClick={() => aplicarCanned(c)}
                     className="w-full text-left px-3 py-2 border-b hover:opacity-80 transition-opacity"
                     style={{ borderColor: "var(--line2)" }}>
-              <span className="text-[11.5px] font-bold" style={{ color: "#0E7C6A" }}>/{c.atalho}</span>
+              <span className="text-[11.5px] font-bold" style={{ color: "var(--wa)" }}>/{c.atalho}</span>
               <span className="block text-[11px] truncate" style={{ color: "var(--ink3)" }}>{c.texto}</span>
             </button>
           ))}
         </div>
       )}
 
-      {/* Por qual número enviar — só com mais de um conectado */}
-      {numeros.length > 1 && !gravando && (
-        <div className="shrink-0 flex items-center gap-1.5 px-2 pt-2" style={{ background: "var(--card)" }}>
-          <span className="text-[11px] shrink-0" style={{ color: "var(--ink3)" }}>Enviar por:</span>
-          {numeros.map((n) => {
-            const ativo = numeroEscolhido === n.id;
-            return (
-              <button
-                key={n.id}
-                onClick={() => setNumeroEscolhido(n.id)}
-                title={n.tipo === "api" ? "Número oficial (API da Meta)" : "WhatsApp normal"}
-                className="px-2 py-1 rounded-full text-[11px] font-bold transition-colors"
-                style={ativo
-                  ? { background: "#0E7C6A", color: "#fff" }
-                  : { background: "var(--card2)", color: "var(--ink2)", border: "1px solid var(--line)" }}
-              >
-                {n.nome}
-                <span className="ml-1 font-normal opacity-80">
-                  {n.tipo === "api" ? "· API" : "· normal"}
-                </span>
-              </button>
-            );
-          })}
+      {/* De qual WhatsApp esta conversa é — informação, não escolha.
+          O cliente vê a mensagem chegando DESTE número; o SDR precisa saber
+          disso antes de escrever, e não pode trocar sem querer. */}
+      {numeroDaConversa && !gravando && (
+        <div className="shrink-0 flex items-center gap-1.5 px-3 pt-2" style={{ background: "var(--card)" }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2" strokeLinecap="round" style={{ color: "var(--ink3)" }}>
+            <path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 21l2.1-5.7A8.4 8.4 0 1 1 21 11.5z" />
+          </svg>
+          <span className="text-[11px] min-w-0 truncate" style={{ color: "var(--ink3)" }}>
+            {inboxAtual == null ? "Vai sair pelo " : "Conversa pelo "}
+            <b style={{ color: "var(--ink2)" }}>{numeroDaConversa.nome}</b>
+          </span>
+          <span
+            className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold"
+            style={numeroDaConversa.tipo === "api"
+              ? { background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }
+              : { background: "var(--card2)", color: "var(--ink3)", border: "1px solid var(--line)" }}
+            title={numeroDaConversa.tipo === "api" ? "Número oficial (API da Meta)" : "WhatsApp normal"}
+          >
+            {numeroDaConversa.tipo === "api" ? "API oficial" : "normal"}
+          </span>
         </div>
       )}
 
@@ -456,7 +461,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       <div className="shrink-0 border-t p-2" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
         {gravando ? (
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: "#E5484D" }} />
+            <span className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: "var(--red)" }} />
             <span className="text-[13px] font-bold tabular-nums" style={{ color: "var(--ink)" }}>
               gravando {mmss(segundos)}
             </span>
