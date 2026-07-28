@@ -21,6 +21,8 @@ import {
   WA_TEMPLATES,
 } from "@/lib/whatsapp";
 import { dialViaWavoip } from "@/lib/wavoip";
+import { useQsAuth } from "@/contexts/QsAuthContext";
+import { assinarTexto, loadSignatureName } from "@/lib/qs/waSignature";
 
 export interface WhatsAppLead {
   id?: string | null;
@@ -43,10 +45,15 @@ const WA_GREEN = "#25D366";
 const CHATAPP_BLUE = "#0147FF";
 
 export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultText, onSent }: Props) {
+  const { currentUser } = useQsAuth();
   const [text, setText] = useState(defaultText ?? "");
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [calling, setCalling] = useState(false);
   const [sending, setSending] = useState(false);
+  // Nome que vai na primeira linha da mensagem. O envio pela API é assinado no
+  // servidor; aqui a assinatura serve pro texto COPIADO e pro link wa.me, que
+  // não passam por lá — e pra mostrar ao SDR como o cliente vai ver.
+  const [assinatura, setAssinatura] = useState("");
 
   const phone = useMemo(() => normalizePhoneBR(lead.phone), [lead.phone]);
   const dialable = isDialablePhone(lead.phone);
@@ -59,10 +66,19 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
     }
   }, [open, defaultText]);
 
+  useEffect(() => {
+    if (open) void loadSignatureName(currentUser).then(setAssinatura);
+  }, [open, currentUser]);
+
   if (!open) return null;
 
+  /** O texto como o cliente vai receber: com o nome do SDR na primeira linha. */
+  function textoAssinado(): string {
+    return assinarTexto(text.trim(), assinatura);
+  }
+
   async function copyText(): Promise<boolean> {
-    const t = text.trim();
+    const t = textoAssinado();
     if (!t) return false;
     try {
       await navigator.clipboard.writeText(t);
@@ -114,8 +130,9 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
 
   function handleOpenChat() {
     if (!dialable) return;
-    logWhatsApp({ leadId: lead.id ?? null, ownerId: ownerId ?? null, phone, body: text.trim() || null, status: "pending", kind: "message" });
-    window.open(waChatLink(lead.phone, text.trim() || undefined), "_blank", "noopener,noreferrer");
+    const t = textoAssinado();
+    logWhatsApp({ leadId: lead.id ?? null, ownerId: ownerId ?? null, phone, body: t || null, status: "pending", kind: "message" });
+    window.open(waChatLink(lead.phone, t || undefined), "_blank", "noopener,noreferrer");
   }
 
   async function handleWebfoneCall() {
@@ -196,6 +213,11 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               placeholder={`Escreva para ${firstName}...`}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-500 resize-none"
             />
+            {assinatura && (
+              <p className="mt-1 text-[11px] text-gray-400">
+                {firstName} vai receber assinado como <b className="text-gray-600">{assinatura}</b>, na primeira linha.
+              </p>
+            )}
           </div>
 
           {result && (

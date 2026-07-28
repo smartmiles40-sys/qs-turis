@@ -17,6 +17,8 @@ import {
   type WaMessage, type CannedResponse, type WaNumero,
 } from "@/lib/qs/waInbox";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
+import { loadSignatureName } from "@/lib/qs/waSignature";
+import { useQsAuth } from "@/contexts/QsAuthContext";
 import { WaAudio, WaAvatar } from "./WaBits";
 
 
@@ -91,6 +93,7 @@ function Anexo({ a, meu }: { a: { type: string; url: string }; meu: boolean }) {
 }
 
 export default function WaConversation({ leadId, leadName, phone, initialText }: Props) {
+  const { currentUser } = useQsAuth();
   const [messages, setMessages] = useState<WaMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -99,6 +102,9 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const [erro, setErro] = useState<string | null>(null);
   const [semConversa, setSemConversa] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
+  // Nome com que este SDR assina. Quem carimba é o /api/wa-send; isto aqui é só
+  // pra ele não descobrir depois, olhando a conversa do cliente.
+  const [assinatura, setAssinatura] = useState("");
 
   // Respostas prontas (/atalho)
   const [canned, setCanned] = useState<CannedResponse[]>([]);
@@ -139,6 +145,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
   useEffect(() => { listCanned().then(setCanned); }, []);
   useEffect(() => { listWaNumeros().then(setNumeros); }, []);
+  useEffect(() => { void loadSignatureName(currentUser).then(setAssinatura); }, [currentUser]);
 
   // Carga inicial + sincronização com o Chatwoot.
   useEffect(() => {
@@ -504,6 +511,13 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
           >
             {numeroDaConversa.tipo === "api" ? "API oficial" : "normal"}
           </span>
+          {/* Como o cliente vai ver quem está falando. O carimbo é feito no
+              servidor no momento do envio — aqui é só o SDR saber de antemão. */}
+          {assinatura && (
+            <span className="shrink-0 text-[11px] truncate" style={{ color: "var(--ink3)" }}>
+              · assina como <b style={{ color: "var(--ink2)" }}>{assinatura}</b>
+            </span>
+          )}
         </div>
       )}
 

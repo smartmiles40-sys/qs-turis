@@ -17,6 +17,7 @@
 
 import { sendMessageToLead, ChatAppError } from './_chatapp.js';
 import { rest, insert } from './_supabaseAdmin.js';
+import { assinarComoUsuario } from './_wa.js';
 
 // Guard-rails do envio (auditoria 2026-07-14):
 //  • MAX_TEXT_CHARS: mensagem gigante não passa (custo/abuso/erro de integração).
@@ -123,8 +124,21 @@ export default async function handler(req, res) {
   // Rastro no log da função (sem o conteúdo da mensagem — LGPD).
   console.log('[chatapp-send] envio:', userId || 'interno(n8n)', '→', phoneDigits || chatId, `(${textStr.length} chars)`);
 
+  // Assinatura do SDR, mesma regra do atendimento nativo. Só no caminho de
+  // usuário autenticado: o que vem pelo segredo interno é disparo do n8n
+  // (automação), que não é "alguém do time falando".
+  let textoFinal = textStr;
+  if (userId) {
+    try {
+      const users = await rest(`qs_users?select=id,name&id=eq.${encodeURIComponent(userId)}&limit=1`);
+      textoFinal = await assinarComoUsuario(textStr, users?.[0] ?? null);
+    } catch (e) {
+      console.warn('[chatapp-send] não consegui assinar a mensagem:', e?.message);
+    }
+  }
+
   try {
-    const data = await sendMessageToLead({ phone, chatId, text: textStr });
+    const data = await sendMessageToLead({ phone, chatId, text: textoFinal });
     return res.status(200).json({ success: true, data });
   } catch (err) {
     const status = err instanceof ChatAppError ? err.status || 500 : 500;

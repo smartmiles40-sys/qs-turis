@@ -18,6 +18,7 @@
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cw, ingestMessage,
   ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, inboxPermitida,
+  assinarComoUsuario,
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 
@@ -95,9 +96,13 @@ export default async function handler(req, res) {
       inboxId = r.conversation.inbox_id ?? inboxPedida ?? defaultInboxId();
     }
 
+    // O nome de quem está falando vai na primeira linha. Sai daqui, e não do
+    // navegador: quem assina é a sessão autenticada, não o que o cliente mandar.
+    const textoFinal = await assinarComoUsuario(text, auth.user);
+
     const sent = await cw(`/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: { content: text, message_type: 'outgoing', private: false },
+      body: { content: textoFinal, message_type: 'outgoing', private: false },
     });
 
     // ⚠️ DAQUI PRA BAIXO A MENSAGEM JÁ SAIU PRO CLIENTE.
@@ -113,7 +118,9 @@ export default async function handler(req, res) {
         inboxId,
         message: {
           id: sent?.id ?? null,
-          content: text,
+          // Grava o que o cliente REALMENTE recebeu (com a assinatura) — a bolha
+          // no QS tem que ser igual à do celular dele.
+          content: textoFinal,
           message_type: 1,
           created_at: sent?.created_at ?? null,
           sender: { name: auth.user?.name || null },

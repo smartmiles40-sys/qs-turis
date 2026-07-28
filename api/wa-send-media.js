@@ -18,7 +18,7 @@
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cwForm,
   ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, ingestMessage,
-  inboxPermitida,
+  inboxPermitida, assinarComoUsuario,
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 
@@ -150,10 +150,16 @@ export default async function handler(req, res) {
       inboxId = r.conversation.inbox_id ?? inboxPedida ?? defaultInboxId();
     }
 
+    // Legenda assinada, mesma regra do texto. Exceção: NOTA DE VOZ não leva
+    // legenda — o WhatsApp nem mostra, e o nome sozinho viraria uma bolha de
+    // texto solta antes do áudio.
+    const ehNotaDeVoz = isVoiceMessage && mimeType.startsWith('audio/');
+    const captionFinal = ehNotaDeVoz ? caption : await assinarComoUsuario(caption, auth.user);
+
     const form = new FormData();
     form.append('message_type', 'outgoing');
     form.append('private', 'false');
-    if (caption) form.append('content', caption);
+    if (captionFinal) form.append('content', captionFinal);
     // Marca a bolha como nota de voz no Chatwoot (player com onda em vez de
     // "arquivo"). Quem manda no WhatsApp é o formato — isto é só a UI de lá.
     if (isVoiceMessage && mimeType.startsWith('audio/')) {
@@ -182,7 +188,7 @@ export default async function handler(req, res) {
         inboxId,
         message: {
           id: sent?.id ?? null,
-          content: caption || (temUrl ? '' : rotuloDe(mimeType)),
+          content: captionFinal || (temUrl ? '' : rotuloDe(mimeType)),
           message_type: 1,
           created_at: sent?.created_at ?? null,
           attachments: anexos,

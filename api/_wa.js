@@ -26,6 +26,112 @@ export function cwHeaders() {
   return { api_access_token: process.env.CHATWOOT_AGENT_TOKEN || '', 'Content-Type': 'application/json' };
 }
 
+// ── Assinatura do SDR ───────────────────────────────────────────────────────
+// Todo mundo escreve pelo MESMO token de serviço do Chatwoot. Do lado do
+// cliente, isso significa que sem assinatura ninguém sabe com quem está falando
+// — e a assinatura automática do Chatwoot (`signMsg`) não resolve: ela carimba o
+// nome do dono do token, igual pra todos, o que é pior do que não ter nome.
+//
+// Então o nome vai daqui, e vai do SERVIDOR: o navegador manda só o texto, quem
+// diz quem está assinando é a sessão autenticada. Um SDR não consegue mandar
+// mensagem assinada com o nome de outro.
+//
+// O nome exibido é editável em Configurações → Atendimento (mapa
+// `wa_signature_names`), porque o cadastro costuma ter o nome completo
+// ("Victor Hugo Silva Santos") e no WhatsApp o time se apresenta pelo nome curto.
+// Sem nada mapeado, cai no automático: os dois primeiros nomes do cadastro.
+
+export const WA_SIGNATURE_MAP_KEY = 'wa_signature_names';
+export const WA_SIGNATURE_ENABLED_KEY = 'wa_signature_enabled';
+
+/** Nome curto padrão: "Victor Hugo Silva" → "Victor Hugo"; "Yanka" → "Yanka". */
+export function nomeCurto(nomeCompleto) {
+  const partes = String(nomeCompleto || '').trim().split(/\s+/).filter(Boolean);
+  if (!partes.length) return '';
+  // Nome composto ("Victor Hugo", "Ana Paula", "Maria Clara") só é preservado
+  // quando a 2ª palavra NÃO é conectivo de sobrenome (da, de, dos...).
+  const conectivos = new Set(['da', 'de', 'do', 'das', 'dos', 'e']);
+  if (partes.length > 1 && !conectivos.has(partes[1].toLowerCase())) {
+    return `${partes[0]} ${partes[1]}`;
+  }
+  return partes[0];
+}
+
+// Configuração de assinatura muda uma vez por mês; mensagem sai o dia inteiro.
+// Sem cache, cada envio pagaria duas idas ao banco antes de falar com o Chatwoot.
+// 60s é curto o bastante pra ninguém "esperar" a mudança e longo o bastante pra
+// sumir com o custo numa rajada de mensagens (a função serverless quente reusa
+// o processo; se ela reciclar, o cache simplesmente nasce vazio de novo).
+const CACHE_MS = 60_000;
+let cacheAssinatura = { em: 0, mapa: null, ligada: true };
+
+async function lerConfigAssinatura() {
+  if (Date.now() - cacheAssinatura.em < CACHE_MS) return cacheAssinatura;
+  try {
+    const rows = await rest(
+      `qs_settings?select=key,value&key=in.(${WA_SIGNATURE_MAP_KEY},${WA_SIGNATURE_ENABLED_KEY})`
+    );
+    const porChave = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value]));
+    const mapa = porChave[WA_SIGNATURE_MAP_KEY];
+    cacheAssinatura = {
+      em: Date.now(),
+      mapa: mapa && typeof mapa === 'object' ? mapa : null,
+      ligada: porChave[WA_SIGNATURE_ENABLED_KEY] !== false,
+    };
+  } catch (e) {
+    // Banco fora do ar não pode impedir o SDR de responder o cliente: segue com
+    // o padrão (ligada, nome do cadastro) e tenta de novo na próxima.
+    console.warn('[wa] config de assinatura indisponível:', e?.message);
+    cacheAssinatura = { em: Date.now(), mapa: null, ligada: true };
+  }
+  return cacheAssinatura;
+}
+
+/**
+ * Como este usuário assina. Lê o mapa das Configurações; volta pro nome curto do
+ * cadastro quando não houver nada mapeado. String vazia = não assina.
+ */
+export async function signatureName(user) {
+  if (!user?.id) return '';
+  const { mapa } = await lerConfigAssinatura();
+  const escolhido = mapa?.[user.id];
+  // Mapeado como "" de propósito = este usuário não assina.
+  if (typeof escolhido === 'string') return escolhido.trim();
+  return nomeCurto(user.name);
+}
+
+/** A assinatura está ligada? (padrão: sim) */
+export async function signatureEnabled() {
+  const { ligada } = await lerConfigAssinatura();
+  return ligada;
+}
+
+/**
+ * Carimba o nome como primeira linha, em negrito do WhatsApp:
+ *
+ *   *Victor Hugo*
+ *   Oi João, tudo bem?
+ *
+ * Idempotente: reenviar um texto que já está assinado com o mesmo nome não
+ * empilha duas assinaturas (acontece quando o SDR copia e cola a própria
+ * mensagem anterior).
+ */
+export function assinarTexto(text, nome) {
+  const corpo = String(text ?? '');
+  const assinatura = String(nome || '').trim();
+  if (!assinatura) return corpo;
+  const primeiraLinha = corpo.split('\n', 1)[0].trim();
+  if (primeiraLinha === `*${assinatura}*`) return corpo;
+  return corpo ? `*${assinatura}*\n${corpo}` : `*${assinatura}*`;
+}
+
+/** Atalho: resolve o nome e assina, respeitando o liga/desliga. */
+export async function assinarComoUsuario(text, user) {
+  const { ligada } = await lerConfigAssinatura();
+  if (!ligada) return String(text ?? '');
+  return assinarTexto(text, await signatureName(user));
+}
+
 export function cwConfigured() {
   return Boolean(process.env.CHATWOOT_AGENT_TOKEN);
 }

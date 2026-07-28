@@ -119,17 +119,59 @@ Se os 4 passarem, está no ar.
 
 ---
 
-## Passo 5 (recomendado, não urgente) — Desligar a assinatura automática
+## Passo 5 (agora É necessário) — Desligar a assinatura automática do Chatwoot
 
-Hoje a caixa assina cada mensagem com o nome do agente do Chatwoot. Como o QS
-envia por um usuário técnico único, **o cliente veria sempre o mesmo nome**, que
-não é o do SDR que escreveu. Pra desligar, rode no terminal do VPS (ou me peça):
+A caixa assina cada mensagem com o nome do agente do Chatwoot. Como o QS envia
+por um usuário técnico único, **o cliente veria sempre o mesmo nome**, que não é
+o do SDR que escreveu.
+
+Desde 2026-07-28 **quem assina é o QS**, com o nome certo de cada SDR (ver a
+seção abaixo). Se o `signMsg` continuar ligado, o cliente recebe **duas**
+assinaturas — a do bot e a do SDR. Pra desligar, rode no terminal do VPS
+(ou me peça):
 
 ```bash
 curl -X POST "https://evo.setuforeuvouviagens.com.br/chatwoot/set/<instancia>" \
   -H "apikey: $AUTHENTICATION_API_KEY" -H "Content-Type: application/json" \
   -d '{ ...o mesmo corpo de antes..., "signMsg": false }'
 ```
+
+---
+
+## Assinatura do SDR na mensagem (2026-07-28)
+
+O time inteiro escreve pelo mesmo número, então sem assinatura o cliente não
+sabe com quem está falando. Toda mensagem enviada pelo QS agora sai assim:
+
+```
+*Victor Hugo*
+Oi João, tudo bem? Vi que você se interessou pela expedição…
+```
+
+**Onde se configura:** Configurações → **Atendimento (WhatsApp)** → *Assinatura
+da mensagem*. Há um interruptor geral e um campo por pessoa (SDR, closer, gestor
+e admin). Deixar em branco usa o nome sugerido, tirado do cadastro: os dois
+primeiros nomes, ignorando conectivos — "Victor Hugo Silva Santos" vira
+"Victor Hugo", "Mariana de Souza" vira "Mariana". Preencha só quem precisa de um
+nome diferente do cadastrado.
+
+**Onde o carimbo acontece:** no servidor (`api/_wa.js`), no momento do envio. O
+navegador manda só o texto — um SDR **não consegue** enviar mensagem assinada com
+o nome de outro. A configuração fica em cache de 60s por instância da função, então
+uma mudança leva até um minuto pra valer em todos os envios.
+
+**Onde vale:**
+
+| Caminho | Assina? |
+|---|---|
+| Atendimento no QS — texto | sim |
+| Atendimento no QS — foto/arquivo (na legenda) | sim |
+| Atendimento no QS — **nota de voz** | não (o WhatsApp não mostra legenda de áudio) |
+| Modal de WhatsApp — envio pelo ChatApp | sim |
+| Modal de WhatsApp — texto copiado / link wa.me | sim |
+| Disparos do **n8n** (automação) | não — não é uma pessoa falando |
+
+Reenviar um texto que já está assinado não empilha duas assinaturas.
 
 ---
 
@@ -143,6 +185,9 @@ curl -X POST "https://evo.setuforeuvouviagens.com.br/chatwoot/set/<instancia>" \
 | "Não consegui abrir a conversa" ao enviar pra um lead novo | falta `CHATWOOT_DEFAULT_INBOX_ID` | Criar com valor `2` e redeploy |
 | Abriu o ChatApp velho em vez do novo | chave virada antes do deploy | Esperar o deploy e recarregar |
 | Mensagem enviada chega assinada com nome errado | `signMsg` ligado | Passo 5 |
+| Mensagem chega com **duas** assinaturas (nome do bot + nome do SDR) | `signMsg` ligado junto com a assinatura do QS | Passo 5 |
+| Mensagem chega **sem** o nome do SDR | interruptor desligado, ou nome mapeado em branco | Configurações → Atendimento → Assinatura da mensagem |
+| SDR trocou de nome e a mensagem saiu com o antigo | cache de 60s do servidor | Esperar um minuto |
 
 ## Como voltar atrás
 

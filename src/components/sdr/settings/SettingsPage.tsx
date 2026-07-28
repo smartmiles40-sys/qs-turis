@@ -12,6 +12,7 @@ import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/a
 import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } from "@/lib/qs/chatProvider";
 import WaInboxLabels from "./WaInboxLabels";
 import CloserAgendaSettings from "./CloserAgendaSettings";
+import { WA_SIGNATURE_MAP_KEY, WA_SIGNATURE_ENABLED_KEY, nomeCurto } from "@/lib/qs/waSignature";
 import type {
   CustomField,
   CustomFieldScope,
@@ -1982,7 +1983,52 @@ function AtendimentoSection() {
   const [agentMap, setAgentMap] = useState<Record<string, string>>({});
   const [savingMap, setSavingMap] = useState(false);
 
+  // Assinatura do SDR na mensagem (2026-07-28). Todo mundo escreve pelo mesmo
+  // token do Chatwoot, então sem isto o cliente não sabe com quem está falando.
+  // Key: wa_signature_names { "<qs_user_id>": "Victor Hugo" } + wa_signature_enabled.
+  const [signUsers, setSignUsers] = useState<{ id: string; name: string; role: string }[]>([]);
+  const [signMap, setSignMap] = useState<Record<string, string>>({});
+  const [signOn, setSignOn] = useState(true);
+  const [savingSign, setSavingSign] = useState(false);
+
   useEffect(() => { getChatProvider().then(setProvider); }, []);
+
+  useEffect(() => {
+    (async () => {
+      const [{ data: users }, mapa, ligada] = await Promise.all([
+        supabase.from("qs_users").select("id, name, role").eq("is_active", true)
+          .in("role", ["sdr", "closer", "gestor", "admin"]).order("name"),
+        getSetting<Record<string, string>>(WA_SIGNATURE_MAP_KEY),
+        getSetting<boolean>(WA_SIGNATURE_ENABLED_KEY),
+      ]);
+      setSignUsers((users ?? []) as { id: string; name: string; role: string }[]);
+      const m: Record<string, string> = {};
+      if (mapa && typeof mapa === "object") for (const [k, v] of Object.entries(mapa)) m[k] = String(v ?? "");
+      setSignMap(m);
+      setSignOn(ligada !== false);
+    })();
+  }, []);
+
+  async function saveSignatures() {
+    setSavingSign(true);
+    // Só grava o que foi realmente digitado. Quem não tem linha no mapa cai no
+    // automático (nome curto do cadastro) — não precisa preencher todo mundo.
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(signMap)) {
+      const nome = String(v ?? "").trim();
+      if (nome) clean[k] = nome;
+    }
+    const [okMapa, okFlag] = await Promise.all([
+      setSetting(WA_SIGNATURE_MAP_KEY, clean),
+      setSetting(WA_SIGNATURE_ENABLED_KEY, signOn),
+    ]);
+    setSavingSign(false);
+    if (okMapa && okFlag) {
+      notifySuccess(signOn ? "Assinatura salva — as próximas mensagens saem com o nome do SDR." : "Assinatura desligada.");
+    } else {
+      notifyError("Não foi possível salvar (só admin/gestor grava configurações).");
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -2083,6 +2129,68 @@ function AtendimentoSection() {
           <li>O SDR faz login no Chatwoot <b>uma vez</b> dentro do painel; a sessão persiste.</li>
           <li>Notificação/som de nova mensagem no navegador não funciona embedado (limite do browser) — use o app do Chatwoot no celular pra alertas.</li>
         </ul>
+      </div>
+
+      {/* Assinatura: o nome do SDR na primeira linha da mensagem */}
+      <div className="bg-white border border-gray-100 rounded-xl p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Assinatura da mensagem (nome do SDR)</h3>
+            <p className="text-xs text-gray-500 mt-1 leading-snug">
+              O time inteiro escreve pelo mesmo número. Com isto ligado, toda mensagem enviada pelo QS
+              sai com o nome de quem escreveu na <b>primeira linha</b>, em negrito:
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-600 shrink-0">
+            <input type="checkbox" checked={signOn} onChange={(e) => setSignOn(e.target.checked)} />
+            Ligada
+          </label>
+        </div>
+
+        <pre className="mt-2 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-[12px] text-gray-700 whitespace-pre-wrap font-sans">
+          <b>Victor Hugo</b>{"\n"}Oi João, tudo bem? Vi que você se interessou pela expedição…
+        </pre>
+
+        <div className="mt-3 space-y-2">
+          {signUsers.length === 0 && <p className="text-sm text-gray-400">Carregando usuários…</p>}
+          {signUsers.map((u) => (
+            <div key={u.id} className="flex items-center gap-3">
+              <span className="flex-1 text-sm text-gray-700 truncate">
+                {u.name} <span className="text-[10.5px] text-gray-400 uppercase">({u.role})</span>
+              </span>
+              <input
+                value={signMap[u.id] ?? ""}
+                onChange={(e) => setSignMap({ ...signMap, [u.id]: e.target.value })}
+                placeholder={nomeCurto(u.name) || "nome"}
+                maxLength={40}
+                className="w-44 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+              />
+            </div>
+          ))}
+        </div>
+
+        <p className="text-[11px] text-gray-400 mt-2 leading-snug">
+          Em branco = usa o nome sugerido (cinza), tirado do cadastro. Preencha só quem precisa de um
+          nome diferente do cadastrado.
+        </p>
+
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <p className="text-[11px] text-amber-800 leading-snug">
+            ⚠️ Se a instância da Evolution estiver com <code>signMsg: true</code>, o Chatwoot também
+            carimba um nome (o do dono do token — igual pra todos) e o cliente veria <b>duas</b>
+            assinaturas. Desligue lá: <code>POST /chatwoot/set/&lt;instancia&gt;</code> com
+            <code> "signMsg": false</code>.
+          </p>
+        </div>
+
+        <button
+          onClick={saveSignatures}
+          disabled={savingSign}
+          className="mt-3 px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+          style={{ background: "#2563EB" }}
+        >
+          {savingSign ? "Salvando..." : "Salvar assinatura"}
+        </button>
       </div>
 
       {/* Auto-atribuição: SDR do QS → agente do Chatwoot */}
