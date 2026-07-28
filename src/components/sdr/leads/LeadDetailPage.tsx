@@ -10,6 +10,7 @@ import {
   updateQsNote,
   deleteQsNote,
   updateQsMeeting,
+  LEAD_SELECT,
 } from "@/lib/qs/queries";
 import { getLeadScore } from "@/lib/leadScore";
 import { loadWorkHours, nextWorkMoment } from "@/lib/workHours";
@@ -269,7 +270,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const fetchLead = useCallback(async () => {
     const { data, error } = await supabase
       .from("qs_leads")
-      .select("*, owner:qs_users(*), loss_reason:qs_loss_reasons(*)")
+      .select(LEAD_SELECT)
       .eq("id", leadId)
       .single();
     if (error) {

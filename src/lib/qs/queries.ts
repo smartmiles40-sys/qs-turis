@@ -127,11 +127,20 @@ export interface LeadFilters {
   search?: string;
 }
 
+// ⚠️ O `!qs_leads_owner_id_fkey` NÃO é enfeite. A tabela qs_wa_pins (migration
+// 0025, sprint do WhatsApp) tem FK pra qs_leads E pra qs_users — com isso o
+// PostgREST passou a enxergar DOIS caminhos entre lead e usuário (o dono, e o
+// "quem fixou a conversa") e recusou o embed `owner:qs_users(*)` com HTTP 300 /
+// PGRST201 ("more than one relationship was found"). Resultado no ar: a tela de
+// leads virou "Não foi possível carregar os leads — verifique a conexão".
+// Regra: todo embed de qs_users PARTINDO de qs_leads aponta a FK explicitamente.
+export const LEAD_SELECT = "*, owner:qs_users!qs_leads_owner_id_fkey(*), loss_reason:qs_loss_reasons(*)";
+
 export async function fetchQsLeads(filters?: LeadFilters): Promise<Lead[]> {
   try {
     let q = supabase
       .from("qs_leads")
-      .select("*, owner:qs_users(*), loss_reason:qs_loss_reasons(*)")
+      .select(LEAD_SELECT)
       .order("created_at", { ascending: false });
 
     if (filters?.status) q = q.eq("status", filters.status);
@@ -157,7 +166,7 @@ export async function fetchQsLead(id: string): Promise<Lead | null> {
   try {
     const { data, error } = await supabase
       .from("qs_leads")
-      .select("*, owner:qs_users(*), loss_reason:qs_loss_reasons(*)")
+      .select(LEAD_SELECT)
       .eq("id", id)
       .single();
     if (error) throw error;
@@ -175,7 +184,7 @@ export async function createQsLead(
     const { data: row, error } = await supabase
       .from("qs_leads")
       .insert({ ...data, arrived_at: new Date().toISOString() })
-      .select("*, owner:qs_users(*), loss_reason:qs_loss_reasons(*)")
+      .select(LEAD_SELECT)
       .single();
     if (error) throw error;
     return row as Lead;
@@ -195,7 +204,7 @@ export async function updateQsLead(
       .from("qs_leads")
       .update({ ...data, updated_at: new Date().toISOString() })
       .eq("id", id)
-      .select("*, owner:qs_users(*), loss_reason:qs_loss_reasons(*)")
+      .select(LEAD_SELECT)
       .single();
     if (error) throw error;
     return row as Lead;

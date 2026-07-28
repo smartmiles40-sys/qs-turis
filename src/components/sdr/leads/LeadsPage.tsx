@@ -12,7 +12,7 @@ import type {
 } from "../types";
 import { STATUS_LABELS, SOURCE_LABELS } from "../types";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { createCadenceTasks, closeOpenCadenceTasks, transferLead } from "@/lib/qs/queries";
+import { createCadenceTasks, closeOpenCadenceTasks, transferLead, LEAD_SELECT } from "@/lib/qs/queries";
 import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
 import { planCadenceDates, loadWorkHours, scheduleWeekdays, nextWorkMoment, clampToWorkWindow, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 import { dialViaSip } from "@/lib/sip";
@@ -140,13 +140,21 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const fetchLeads = useCallback(async () => {
     const { data, error } = await supabase
       .from("qs_leads")
-      .select("*, owner:qs_users(*), loss_reason:qs_loss_reasons(*)")
+      .select(LEAD_SELECT)
       .order("created_at", { ascending: false });
     if (error) {
       console.warn("Erro ao buscar leads:", error);
       // Erro de rede NÃO pode virar "Nenhum lead encontrado" — a tela mostra o
       // erro com "Tentar novamente" (e mantém a lista antiga, se houver).
-      setLoadError("Não foi possível carregar os leads — verifique a conexão.");
+      // O código do erro vai junto: em 2026-07-28 a tela acusou "verifique a
+      // conexão" por DUAS SEMANAS enquanto o problema real era um PGRST201
+      // (embed ambíguo). Culpar a internet escondeu a causa — agora ela aparece.
+      const code = (error as { code?: string }).code;
+      setLoadError(
+        code && code !== "PGRST301"
+          ? `Não foi possível carregar os leads (erro ${code}).`
+          : "Não foi possível carregar os leads — verifique a conexão."
+      );
       return;
     }
     setLoadError(null);
@@ -203,7 +211,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     if (!emailNorm && phoneDigits.length < 8) return { ok: true, dup: null }; // sem contato comparável
     const { data, error } = await supabase
       .from("qs_leads")
-      .select("id, full_name, email, phone, owner:qs_users(name)");
+      // FK explícita: ver comentário do LEAD_SELECT (qs_wa_pins tornou o embed ambíguo).
+      .select("id, full_name, email, phone, owner:qs_users!qs_leads_owner_id_fkey(name)");
     if (error) {
       console.warn("Erro na checagem de duplicado:", error);
       return { ok: false, dup: null };

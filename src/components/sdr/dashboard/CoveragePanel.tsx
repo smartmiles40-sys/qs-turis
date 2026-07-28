@@ -183,7 +183,8 @@ export default function CoveragePanel({ onOpenLead }: { onOpenLead?: (leadId: st
       const leadsData = await fetchAllRows<any>((f, t) => {
         let q = supabase
           .from("qs_leads")
-          .select("id, full_name, company_name, source, arrived_at, owner_id, owner:qs_users(name)")
+          // FK explícita (qs_wa_pins deixou o embed lead→usuário ambíguo — ver LEAD_SELECT).
+          .select("id, full_name, company_name, source, arrived_at, owner_id, owner:qs_users!qs_leads_owner_id_fkey(name)")
           .not("arrived_at", "is", null)
           .in("status", ["nao_iniciado", "em_prospeccao"])
           .order("arrived_at", { ascending: true })

@@ -383,7 +383,8 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
     setLeadsModal({ cadence, onlyActive, leads: null, error: false });
     let q = supabase
       .from("qs_leads")
-      .select("id, full_name, first_name, last_name, status, owner:qs_users(name)")
+      // FK explícita (qs_wa_pins deixou o embed lead→usuário ambíguo — ver LEAD_SELECT).
+      .select("id, full_name, first_name, last_name, status, owner:qs_users!qs_leads_owner_id_fkey(name)")
       .eq("cadence_id", cadence.id)
       .order("full_name");
     if (onlyActive) q = q.eq("status", "em_prospeccao");

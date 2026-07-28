@@ -1,7 +1,8 @@
 // api/_leads.js
 // -----------------------------------------------------------------------------
-// Lógica server-side de leads: distribuição automática (round-robin por menor
-// carga) e geração das tarefas da cadência. Usada pelo webhook /api/lead-inbound.
+// Lógica server-side de leads: criação/dedupe e geração das tarefas da cadência.
+// Usada pelo webhook /api/lead-inbound. A DISTRIBUIÇÃO (quem fica com o lead) é
+// do gatilho do banco — rodízio circular, migration 0028.
 // Fala com o Supabase via PostgREST puro (ver _supabaseAdmin.js).
 // -----------------------------------------------------------------------------
 import { rest, insert } from './_supabaseAdmin.js';
@@ -86,30 +87,11 @@ function clampWindowBrt(wh, brtWallMs) {
   return brtWallMs;
 }
 
-/**
- * Escolhe o próximo SDR pela MENOR carga de leads em aberto (distribui
- * equilibrando quem tem menos leads ativos). Retorna o id do SDR ou null.
- */
-export async function pickNextSdr() {
-  const sdrs = await rest('qs_users?select=id&role=eq.sdr&is_active=eq.true');
-  if (!sdrs || sdrs.length === 0) return null;
-
-  const openLeads = await rest(
-    'qs_leads?select=owner_id&status=in.(nao_iniciado,em_prospeccao)&owner_id=not.is.null'
-  );
-
-  const load = new Map(sdrs.map((s) => [s.id, 0]));
-  for (const l of openLeads || []) {
-    if (load.has(l.owner_id)) load.set(l.owner_id, load.get(l.owner_id) + 1);
-  }
-  let best = sdrs[0].id;
-  let bestLoad = load.get(best) ?? 0;
-  for (const s of sdrs) {
-    const c = load.get(s.id) ?? 0;
-    if (c < bestLoad) { best = s.id; bestLoad = c; }
-  }
-  return best;
-}
+// A ESCOLHA DO SDR NÃO MORA MAIS AQUI. Existia um pickNextSdr() por "menor carga
+// em aberto" — código morto (ninguém chamava) e, pior, a regra ERRADA: ela dava
+// todos os leads pra quem acabava de marcar perdido/ganho. Hoje quem distribui é
+// o gatilho trg_qs_assign_owner no banco (migration 0028), em RODÍZIO CIRCULAR.
+// Um algoritmo só, no mesmo lugar, valendo pro n8n e pro app.
 
 /** Escolhe uma cadência disponível (a mais antiga) quando nenhuma é indicada. */
 export async function pickDefaultCadence() {
@@ -389,8 +371,8 @@ export async function createInboundLead(payload) {
   }
 
   // 1) Responsável: se o payload não trouxer, o GATILHO do banco decide
-  //    (round-robin POR CADÊNCIA — ver migration 0008). Não escolhemos aqui pra
-  //    ter UM algoritmo só e não divergir do que entra direto (n8n).
+  //    (rodízio circular — ver migration 0028). Não escolhemos aqui pra ter UM
+  //    algoritmo só e não divergir do que entra direto (n8n).
   const ownerId = payload.owner_id || null;
 
   // 2) Cadência: usa a informada ou uma disponível padrão.
