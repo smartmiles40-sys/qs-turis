@@ -149,7 +149,10 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const fetchMeetings = useCallback(async () => {
     const { data, error } = await supabase
       .from("qs_meetings")
-      .select("*, lead:qs_leads(*), owner:qs_users(*)")
+      // FK explícita: desde a 0027 a qs_meetings tem DOIS vínculos com qs_users
+      // (owner_id e closer_id) e o embed curto vira ambíguo — PostgREST devolve
+      // PGRST201 e a tela inteira fica vazia. Mesmo remédio do LEAD_SELECT.
+      .select("*, lead:qs_leads(*), owner:qs_users!qs_meetings_owner_id_fkey(*), closer:qs_users!qs_meetings_closer_id_fkey(id,name)")
       .order("scheduled_at", { ascending: false });
     if (error) {
       setPageError(`Erro ao buscar reuniões: ${error.message}`);

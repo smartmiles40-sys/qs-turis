@@ -1164,7 +1164,10 @@ export default function SdrDashboard() {
       const meetingsPromise = fetchAllRows<any>((f, t) => {
         let q = supabase
           .from("qs_meetings")
-          .select("owner_id, status, owner:qs_users(name)")
+          // FK explícita: a 0027 deu à qs_meetings um 2º vínculo com qs_users
+          // (closer_id) e o embed curto passou a devolver PGRST201, derrubando
+          // este bloco inteiro de métricas do gestor.
+          .select("owner_id, status, owner:qs_users!qs_meetings_owner_id_fkey(name)")
           .neq("status", "cancelada")
           .order("id");
         if (ownerId) q = q.eq("owner_id", ownerId);

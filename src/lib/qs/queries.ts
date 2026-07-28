@@ -1168,11 +1168,22 @@ export interface MeetingFilters {
   status?: MeetingStatus;
 }
 
+/**
+ * Reunião com os vínculos resolvidos. A FK vem EXPLÍCITA porque a migration 0027
+ * deu à qs_meetings um segundo vínculo com qs_users (`closer_id`, além de
+ * `owner_id`): com o embed curto `owner:qs_users(*)` o PostgREST não sabe qual
+ * usar, responde PGRST201 e a tela de Reuniões fica vazia. Mesmo problema que o
+ * LEAD_SELECT resolveu para os leads — por isso a forma canônica mora aqui, num
+ * lugar só.
+ */
+const MEETING_SELECT =
+  "*, lead:qs_leads(*), owner:qs_users!qs_meetings_owner_id_fkey(*), closer:qs_users!qs_meetings_closer_id_fkey(id,name)";
+
 export async function fetchQsMeetings(filters?: MeetingFilters): Promise<Meeting[]> {
   try {
     let q = supabase
       .from("qs_meetings")
-      .select("*, lead:qs_leads(*), owner:qs_users(*)")
+      .select(MEETING_SELECT)
       .order("scheduled_at", { ascending: true });
 
     if (filters?.status) q = q.eq("status", filters.status);
@@ -1193,7 +1204,7 @@ export async function createQsMeeting(
     const { data: row, error } = await supabase
       .from("qs_meetings")
       .insert(data)
-      .select("*, lead:qs_leads(*), owner:qs_users(*)")
+      .select(MEETING_SELECT)
       .single();
     if (error) throw error;
     return row as Meeting;
@@ -1213,7 +1224,7 @@ export async function updateQsMeeting(
       .from("qs_meetings")
       .update(data)
       .eq("id", id)
-      .select("*, lead:qs_leads(*), owner:qs_users(*)")
+      .select(MEETING_SELECT)
       .single();
     if (error) throw error;
     return row as Meeting;
