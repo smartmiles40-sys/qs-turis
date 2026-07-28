@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchDashboardStats, fetchQsUsers, getClosedAtColumn, fetchAllRows, isGoalEffective } from "@/lib/qs/queries";
-import { loadWorkHours, workdaysInRange, workdaysBetween, type WorkHours } from "@/lib/workHours";
+import { loadWorkHours, workdaysInRange, workdaysBetween, overdueCutoff, type WorkHours } from "@/lib/workHours";
 import type { GoalType } from "../types";
 import type { SdrUser } from "../types";
 import { CHANNEL_LABELS } from "../types";
@@ -1078,12 +1078,10 @@ export default function SdrDashboard() {
 
       // Data de FECHAMENTO real (closed_at, migration 0012; fallback updated_at).
       const closedCol = await getClosedAtColumn();
-      // "Atrasada" é POR DIA (mesma definição de classifyTask / notificações):
-      // conta só o que venceu ANTES de hoje 00:00 local. Antes o corte era "agora"
-      // (nowIso), então uma tarefa de HOJE 09h vista às 15h já entrava como
-      // atrasada e inflava a "Taxa de Tarefas Atrasadas".
-      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
-      const startOfTodayIso = startOfToday.toISOString();
+      // "Atrasada" sai de `overdueCutoff` (lib/workHours), a mesma régua do Painel
+      // e do sino: por DIA ÚTIL. O corte antigo era a meia-noite de hoje pelo
+      // calendário, e no sábado esta taxa mostrava a fila de sexta inteira em
+      // vermelho enquanto o hero "Atrasadas (time)", na mesma tela, mostrava 0.
 
       // 1. Ciclo Médio de Qualificação — paginado (cap 1000 do PostgREST)
       const cicloPromise = fetchAllRows<any>((f, t) => {
@@ -1137,23 +1135,38 @@ export default function SdrDashboard() {
         qConnHit = qConnHit.lte("completed_at", to);
       }
 
-      // 4. Taxa de Tarefas Atrasadas — idem, 3 contagens head
+      // 4. Taxa de Tarefas Atrasadas — duas contagens head.
+      //
+      // Duas correções aqui (revisão 28/07):
+      //
+      // (a) O DENOMINADOR contava a fila aberta INTEIRA, incluindo os dias
+      //     futuros da cadência — que nascem todos de uma vez no cadastro do
+      //     lead. Como o numerador só pode conter o que já venceu, quanto mais
+      //     longa a cadência, melhor o KPI ficava sozinho. Agora o denominador
+      //     para no fim de hoje: compara vencido com vencível.
+      //
+      // (b) Havia uma terceira contagem, `status = 'atrasada'`, que sempre volta
+      //     ZERO — esse status é derivado da data e nunca é gravado (regra do
+      //     dono). Era uma ida ao banco morta que ainda dava a impressão de
+      //     cobrir um segundo caso. Removida.
+      //
+      // E o corte agora é por DIA ÚTIL (`overdueCutoff`), igual ao Painel: no
+      // sábado esta taxa mostrava a fila inteira de sexta em vermelho enquanto o
+      // hero "Atrasadas (time)", na mesma tela, mostrava zero.
+      const endOfTodayIso = (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d.toISOString(); })();
+      const atrasadaCorteIso = overdueCutoff(await loadWorkHours()).toISOString();
       let qOpenTotal = supabase
         .from("qs_tasks")
         .select("id", { count: "exact", head: true })
-        .in("status", ["pendente", "atrasada"]);
-      let qLate = supabase
-        .from("qs_tasks")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "atrasada");
+        .in("status", ["pendente", "atrasada"])
+        .lte("scheduled_at", endOfTodayIso);
       let qPendVencida = supabase
         .from("qs_tasks")
         .select("id", { count: "exact", head: true })
-        .eq("status", "pendente")
-        .lt("scheduled_at", startOfTodayIso);
+        .in("status", ["pendente", "atrasada"])
+        .lt("scheduled_at", atrasadaCorteIso);
       if (ownerId) {
         qOpenTotal = qOpenTotal.eq("owner_id", ownerId);
-        qLate = qLate.eq("owner_id", ownerId);
         qPendVencida = qPendVencida.eq("owner_id", ownerId);
       }
 
@@ -1177,12 +1190,11 @@ export default function SdrDashboard() {
       });
 
       // Tudo independente → uma rodada só (antes eram 5 idas em SÉRIE).
-      const [cicloData, cadenceData, connTotalRes, connHitRes, openTotalRes, lateRes, pendVencidaRes, meetingsData] =
-        await Promise.all([cicloPromise, cadencePromise, qConnTotal, qConnHit, qOpenTotal, qLate, qPendVencida, meetingsPromise]);
+      const [cicloData, cadenceData, connTotalRes, connHitRes, openTotalRes, pendVencidaRes, meetingsData] =
+        await Promise.all([cicloPromise, cadencePromise, qConnTotal, qConnHit, qOpenTotal, qPendVencida, meetingsPromise]);
       if (connTotalRes.error) throw connTotalRes.error;
       if (connHitRes.error) throw connHitRes.error;
       if (openTotalRes.error) throw openTotalRes.error;
-      if (lateRes.error) throw lateRes.error;
       if (pendVencidaRes.error) throw pendVencidaRes.error;
 
       // 1. Ciclo médio
@@ -1223,7 +1235,7 @@ export default function SdrDashboard() {
 
       // 4. Tarefas atrasadas
       const openTotal = openTotalRes.count ?? 0;
-      const overdue = (lateRes.count ?? 0) + (pendVencidaRes.count ?? 0);
+      const overdue = pendVencidaRes.count ?? 0;
       setTasksOverdueRate(openTotal > 0 ? (overdue / openTotal) * 100 : null);
 
       // 5. Reuniões por SDR — agora por owner_id (a tabela cruza com a meta/dia).

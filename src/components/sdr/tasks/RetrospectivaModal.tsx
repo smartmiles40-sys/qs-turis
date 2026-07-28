@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
-import { loadWorkHours, workdaysInRange } from "@/lib/workHours";
+import { loadWorkHours, workdaysInRange, isOverdue } from "@/lib/workHours";
 
 const BLUE = "#0147FF";
 const GREEN = "#0E7C6A";
@@ -140,9 +140,11 @@ async function loadRetro(uid: string): Promise<RetroData> {
   // ── Bloco B — hoje (e pendências que sobraram) ──────────────────────────────
   const openTasks = rowsOf<{ id: string; lead_id: string; priority: string; scheduled_at: string }>(rOpen)
     .filter((t) => !closedLeadIds.has(t.lead_id));
-  const todayStartMs = todayStart.getTime();
   const hojeTotal = openTasks.length;
-  const hojeAtrasadas = openTasks.filter((t) => new Date(t.scheduled_at).getTime() < todayStartMs).length;
+  // Dia ÚTIL, a mesma régua do Painel (`isOverdue`). Antes contava por
+  // calendário: na segunda o modal abria dizendo "N atrasadas — limpe essas
+  // primeiro" para tarefas de sexta que o Painel, logo atrás, mostrava em dia.
+  const hojeAtrasadas = openTasks.filter((t) => isOverdue(wh, t.scheduled_at)).length;
   const altaHoje = openTasks.filter((t) => t.priority === "alta").length;
   // "Pendências que sobraram" de ontem = as atrasadas (venceram antes de hoje).
   const pendenciasSobraram = hojeAtrasadas;

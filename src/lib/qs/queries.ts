@@ -1656,6 +1656,38 @@ export async function fetchAllRows<T>(
   return all;
 }
 
+// ── Apoio do Painel: contagem de notas e "quem já foi contatado" ─────────────
+// As duas alimentam selos do card (📝 N obs. e o 🔴 SEM CONTATO) e vinham sem
+// paginação — `select("lead_id")` seco. Medido em 28/07: qs_tasks tem 11.287
+// linhas, 6.269 concluídas; o painel enxergava as 1.000 primeiras (16%), sem
+// `order`, ou seja num recorte arbitrário. Efeito visível: o selo vermelho de
+// "sem contato" voltava a piscar em lead já trabalhado.
+//
+// Filtra por dono quando é SDR (não precisa dos leads dos colegas) e pagina o
+// resto — em vez de baixar o histórico inteiro do time a cada 60 segundos.
+
+export async function fetchNoteCountsByLead(ownerId: string | null): Promise<Map<string, number>> {
+  const rows = await fetchAllRows<{ lead_id: string | null }>((from, to) => {
+    let q = supabase.from("qs_notes").select("lead_id, lead:qs_leads!inner(owner_id)").order("id");
+    if (ownerId) q = q.eq("lead.owner_id", ownerId);
+    return q.range(from, to) as unknown as PromiseLike<{ data: { lead_id: string | null }[] | null; error: { message?: string } | null }>;
+  });
+  const counts = new Map<string, number>();
+  for (const r of rows) if (r.lead_id) counts.set(r.lead_id, (counts.get(r.lead_id) ?? 0) + 1);
+  return counts;
+}
+
+export async function fetchContactedLeadIds(ownerId: string | null): Promise<Set<string>> {
+  const rows = await fetchAllRows<{ lead_id: string | null }>((from, to) => {
+    let q = supabase.from("qs_tasks").select("lead_id").eq("status", "concluida").order("id");
+    if (ownerId) q = q.eq("owner_id", ownerId);
+    return q.range(from, to);
+  });
+  const ids = new Set<string>();
+  for (const r of rows) if (r.lead_id) ids.add(r.lead_id);
+  return ids;
+}
+
 // ── Vigência de metas (decisão de produto, Sprint 4) ─────────────────────────
 // Meta mensal é RECORRENTE: `period_start` marca o mês em que ela PASSOU a
 // valer — sem uma meta mais nova, ela continua valendo nos meses seguintes

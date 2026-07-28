@@ -203,6 +203,44 @@ export function workdaysInRange(wh: WorkHours, from: Date, to: Date): number {
   return count;
 }
 
+/**
+ * A ATIVIDADE ESTÁ ATRASADA? — a definição única, para todo o sistema.
+ *
+ * Existia em três versões diferentes ao mesmo tempo: o Painel contava por dia
+ * ÚTIL (certo), enquanto o sino, a retrospectiva e o card de taxa do dashboard
+ * contavam por dia de CALENDÁRIO. Na segunda de manhã, a tarefa de sexta fazia o
+ * Painel dizer "0 atrasadas", o sino dizer "atrasada há 3d" e a retrospectiva
+ * mandar limpar a lista — três respostas para o mesmo fato, na primeira tela do
+ * dia. O SDR aprende a não confiar em nenhuma.
+ *
+ * Regra do dono: atrasada é DERIVADA da data (nunca gravada como status) e conta
+ * por DIA ÚTIL — fim de semana não atrasa ninguém.
+ */
+export function isOverdue(wh: WorkHours, scheduledAt: string | Date, now: Date = new Date()): boolean {
+  return overdueWorkdays(wh, scheduledAt, now) >= 1;
+}
+
+/** Há quantos dias ÚTEIS está atrasada (0 = em dia). Mesma régua do `isOverdue`. */
+export function overdueWorkdays(wh: WorkHours, scheduledAt: string | Date, now: Date = new Date()): number {
+  const quando = typeof scheduledAt === "string" ? new Date(scheduledAt) : scheduledAt;
+  if (!quando || isNaN(quando.getTime())) return 0;
+  return workdaysBetween(wh, quando, now);
+}
+
+/**
+ * A mesma régua de `isOverdue`, mas como uma DATA DE CORTE — para quem filtra no
+ * banco em vez de na memória (`scheduled_at < corte` = atrasada).
+ *
+ * Em dia útil o corte é a meia-noite de hoje. No sábado/domingo ele recua até a
+ * meia-noite do último dia útil: assim a tarefa de sexta não vira "atrasada" só
+ * porque alguém abriu o app no fim de semana.
+ */
+export function overdueCutoff(wh: WorkHours, now: Date = new Date()): Date {
+  const hoje = new Date(now);
+  hoje.setHours(0, 0, 0, 0);
+  return wh[hoje.getDay()]?.enabled ? hoje : previousWorkday(wh, hoje);
+}
+
 /** Último dia ÚTIL ESTRITAMENTE antes de `date` (p/ "ontem" da retrospectiva não cair num domingo vazio). */
 export function previousWorkday(wh: WorkHours, date: Date): Date {
   const d = new Date(date); d.setHours(0, 0, 0, 0);

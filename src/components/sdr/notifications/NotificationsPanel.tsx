@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { CHANNEL_LABELS, SOURCE_LABELS } from "@/components/sdr/types";
 import type { ChannelType, LeadSource } from "@/components/sdr/types";
+import { loadWorkHours, overdueCutoff } from "@/lib/workHours";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -330,25 +331,28 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
     const ownerId = currentUser.id;
 
     const now = new Date();
-    // Definição OFICIAL de "atrasada" (unificada entre as telas): tarefa aberta
-    // (pendente/atrasada) agendada ANTES DE HOJE 00:00 local — o que é de hoje
-    // ainda não está atrasado — ignorando tarefas de leads já ganho/perdido.
+    // "Atrasada" agora sai de um lugar só (`overdueCutoff`, em lib/workHours):
+    // conta por DIA ÚTIL, como o Painel. Antes esta tela cortava por dia de
+    // calendário e, na segunda de manhã, gritava "atrasada há 3d" para a tarefa
+    // de sexta enquanto o Painel dizia "0 atrasadas".
+    const wh = await loadWorkHours();
     const startOfDay = new Date(now);
     startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(now);
     endOfDay.setHours(23, 59, 59, 999);
     const startIso = startOfDay.toISOString();
     const endIso = endOfDay.toISOString();
+    const atrasadaIso = overdueCutoff(wh, now).toISOString();
     const h48Iso = new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString();
 
     const taskSelect = "id, lead_id, channel_type, scheduled_at, lead:qs_leads(full_name, company_name, status)";
 
-    // 1. Follow-ups atrasados: abertos agendados antes de hoje 00:00.
+    // 1. Follow-ups atrasados: abertos agendados antes do corte de DIA ÚTIL.
     let overdueQ = supabase
       .from("qs_tasks")
       .select(taskSelect)
       .in("status", ["pendente", "atrasada"])
-      .lt("scheduled_at", startIso)
+      .lt("scheduled_at", atrasadaIso)
       .order("scheduled_at", { ascending: true })
       .limit(30);
     if (!seeAll) overdueQ = overdueQ.eq("owner_id", ownerId);
