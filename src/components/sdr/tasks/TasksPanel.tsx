@@ -6,6 +6,7 @@ import type {
   Cadence,
   ChannelType,
   PriorityLevel,
+  LossReason,
 } from "../types";
 import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
@@ -13,7 +14,7 @@ import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { createMeeting } from "@/lib/qs/meetings";
 import { findUserIdByName } from "@/lib/qs/closerAgenda";
 import { notifyError } from "@/lib/qs/notify";
-import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, type CadenceScriptRow, type ContactBreakdownRow } from "@/lib/qs/queries";
+import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, fetchNoteCountsByLead, fetchContactedLeadIds, fetchLossReasons, type CadenceScriptRow, type ContactBreakdownRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getChatProvider, defaultChatProvider, type ChatProvider } from "@/lib/qs/chatProvider";
@@ -285,21 +286,11 @@ function getActivityLabel(channel: ChannelType, _cadenceName?: string): string {
   return channelNames[channel];
 }
 
-/** Conta observações (qs_notes) por lead_id — alimenta a mini-notificação. */
-function buildNoteCounts(rows: { lead_id: string | null }[] | null): Map<string, number> {
-  const m = new Map<string, number>();
-  for (const r of rows || []) {
-    if (r.lead_id) m.set(r.lead_id, (m.get(r.lead_id) || 0) + 1);
-  }
-  return m;
-}
-
-/** Set de lead_ids a partir de linhas {lead_id} (ex.: tarefas concluídas = já contatados). */
-function buildLeadIdSet(rows: { lead_id: string | null }[] | null): Set<string> {
-  const s = new Set<string>();
-  for (const r of rows || []) if (r.lead_id) s.add(r.lead_id);
-  return s;
-}
+// A contagem de observações e o conjunto de "já contatados" agora vêm prontos e
+// PAGINADOS de lib/qs/queries.ts (fetchNoteCountsByLead / fetchContactedLeadIds).
+// Os construtores locais foram removidos junto com as consultas sem paginação
+// que os alimentavam — elas viam 1.000 de 6.269 linhas e o selo "sem contato"
+// voltava a piscar em lead já trabalhado.
 
 // ── Tentativas de contato ────────────────────────────────────────────────────
 // A coluna qs_tasks NÃO tem `contact_attempts`. Cada tarefa de follow-up carrega a
@@ -388,8 +379,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         supabase.from("qs_cadences").select("*"),
         fetchQsUsers(),
         supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
-        supabase.from("qs_notes").select("lead_id"),
-        supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
+        // Paginadas e filtradas por dono (revisão 28/07): sem isso o painel via
+        // 1.000 de 6.269 concluídas e o selo "sem contato" reaparecia em lead já
+        // trabalhado. Ver fetchNoteCountsByLead/fetchContactedLeadIds.
+        fetchNoteCountsByLead(queueOwnerId),
+        fetchContactedLeadIds(queueOwnerId),
         fetchCadenceScripts(), // roteiros por atividade da cadência (item 6 — script_text)
         fetchAvailableCadences(), // só disponíveis — dropdown do Cadastrar Lead (item 12)
       ]);
@@ -400,8 +394,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       setCadences((cadencesRes.data || []) as Cadence[]);
       setQsUsers(usersData);
       setProducts((productsRes.data || []) as { id: string; name: string }[]);
-      setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[] | null));
-      setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[] | null));
+      setNoteCounts(notesRes);
+      setContactedLeadIds(contactedRes);
       setCadenceScripts(scriptsData);
       setAvailableCadences(availableData);
     } catch (err) {
@@ -442,13 +436,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       const [queueTasks, queueLeads, notesRes, contactedRes] = await Promise.all([
         fetchQueueTasks(queueOwnerId),   // paginado (número real, sem teto de 1000)
         fetchQueueLeads(queueOwnerId),   // paginado
-        supabase.from("qs_notes").select("lead_id"),
-        supabase.from("qs_tasks").select("lead_id").eq("status", "concluida"),
+        fetchNoteCountsByLead(queueOwnerId),
+        fetchContactedLeadIds(queueOwnerId),
       ]);
       setTasks(queueTasks);
       setLeads(queueLeads);
-      if (notesRes.data) setNoteCounts(buildNoteCounts(notesRes.data as { lead_id: string | null }[]));
-      if (contactedRes.data) setContactedLeadIds(buildLeadIdSet(contactedRes.data as { lead_id: string | null }[]));
+      setNoteCounts(notesRes);
+      setContactedLeadIds(contactedRes);
       refreshDoneTodayMine(); // placar "feitas hoje" acompanha o refresh de 60s
     } catch { /* silencioso — próxima rodada tenta de novo */ }
   }, [refreshDoneTodayMine, currentUser]);
@@ -574,6 +568,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
   // Confirmação do desfecho no card da "Próxima atividade"
   const [pendingResult, setPendingResult] = useState<{ taskId: string; result: string } | null>(null);
+  // Motivo da perda: obrigatório para fechar como "Perdido". Medido em 28/07:
+  // 156 dos 159 perdidos não tinham motivo, porque este caminho — o que o SDR
+  // realmente usa — nunca perguntou. O gráfico "Motivos de Perda" do gestor
+  // estava desenhado sobre 1,9% da amostra e não avisava.
+  const [lossReasons, setLossReasons] = useState<LossReason[]>([]);
+  const [pendingLossReason, setPendingLossReason] = useState("");
+  useEffect(() => { fetchLossReasons().then(setLossReasons); }, []);
   // Timer de auto-conclusão pós-ligação NÃO ATENDIDA (item sprint): 10s pra o SDR
   // agir; senão conclui como "Não atendeu" e libera o próximo card.
   const [autoFinish, setAutoFinish] = useState<{ taskId: string; secs: number } | null>(null);
@@ -593,7 +594,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [transferTo, setTransferTo] = useState("");
   // "Ganho" → formulário de agendamento da reunião
   const [meetingFor, setMeetingFor] = useState<{ taskId: string; leadId: string; leadName: string } | null>(null);
-  const [meeting, setMeeting] = useState({ agendadoPor: "", emailCliente: "", dataAgendamento: "", responsavel: "", dataHora: "" });
+  const [meeting, setMeeting] = useState({ agendadoPor: "", emailCliente: "", dataAgendamento: "", responsavel: "", dataHora: "", valorFechado: "" });
   const [savingMeeting, setSavingMeeting] = useState(false);
 
   // New Lead Modal
@@ -751,7 +752,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // independente de quem seta `finalizing` (o botão "Finalizar" seta antes de chamar).
   const outcomeBusyRef = useRef(false);
 
-  async function handleContactResult(taskId: string, result: string) {
+  async function handleContactResult(taskId: string, result: string, lossReasonId?: string) {
     if (outcomeBusyRef.current) return;
     const currentTask = tasks.find(t => t.id === taskId);
     if (!currentTask) return;
@@ -793,8 +794,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         setTasks(prev => prev.filter(t => t.lead_id !== currentTask.lead_id));
         showToast(`Ganho! ${leadName}`);
       } else if (result === "sem_interesse") {
-        const { error: updErr } = await supabase.from("qs_leads").update({ status: "perdido" }).eq("id", currentTask.lead_id);
-        if (updErr) {
+        // O motivo vai junto (é obrigatório na barra de confirmação) e o update é
+        // MEDIDO com .select(): sob RLS a recusa volta 0 linhas sem erro, e antes
+        // o código seguia avisando o Bitrix de uma perda que não foi gravada.
+        const { data: perdidoRows, error: updErr } = await supabase
+          .from("qs_leads")
+          .update({ status: "perdido", loss_reason_id: lossReasonId || null })
+          .eq("id", currentTask.lead_id)
+          .select("id");
+        if (updErr || !perdidoRows || perdidoRows.length === 0) {
           notifyError("A atividade foi concluída, mas o lead NÃO foi marcado como perdido — marque pelo perfil do lead.");
           setTasks(prev => prev.filter(t => t.id !== taskId));
           return;
@@ -1063,7 +1071,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const yyyy = hoje.getFullYear();
     const mm = String(hoje.getMonth() + 1).padStart(2, "0");
     const dd = String(hoje.getDate()).padStart(2, "0");
-    setMeeting({ agendadoPor: "", emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", dataHora: "" });
+    setMeeting({ agendadoPor: "", emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", dataHora: "", valorFechado: "" });
     setPendingResult(null);
     setMeetingFor({ taskId: task.id, leadId: task.lead_id, leadName: lead?.full_name ?? "Lead" });
   }
@@ -1137,13 +1145,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         notes: resumo,
         booking_date: meeting.dataAgendamento || null,
       });
+      // A REUNIÃO É O FATO CENTRAL DO GANHO — se ela não gravou, nada mais pode
+      // acontecer. Antes o erro só entrava numa lista de avisos e o fluxo seguia:
+      // concluía a tarefa, marcava o lead como ganho e encerrava as demais
+      // atividades. Sobrava um lead "ganho" sem reunião nenhuma, fora da fila de
+      // todo mundo — o cliente aparecia e não tinha ninguém do outro lado.
+      // Agora aborta e devolve o modal, com os dados preservados.
       if (!res.ok) {
         console.warn("[QS] insert da reunião do ganho falhou:", res.error);
-        failures.push(
+        setSavingMeeting(false);
+        notifyError(
           res.conflict
-            ? `o closer ${meeting.responsavel} já tem reunião nesse horário — a reunião NÃO foi registrada`
-            : "a reunião NÃO foi registrada em Reuniões"
+            ? `${meeting.responsavel} já tem reunião nesse horário. Escolha outro horário — nada foi alterado.`
+            : `A reunião não pôde ser registrada (${res.error}). Nada foi alterado — tente de novo.`
         );
+        return;
       }
       if (meeting.emailCliente) {
         const { error: mailErr } = await supabase.from("qs_leads").update({ email: meeting.emailCliente }).eq("id", leadId);
@@ -1156,8 +1172,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       // erro REAL de gravação ele mesmo notifica lá dentro.
       await completeTask(taskId, "ganho");
       // Ganho do lead MEDIDO (.select): sob RLS a recusa é silenciosa (0 linhas).
+      // O valor fechado vai junto — é o que alimenta receita, ticket médio e
+      // "R$ por fonte" no painel do gestor (que hoje mostram zero por falta dele).
+      const valorNum = Number(String(meeting.valorFechado).replace(",", "."));
+      const ganhoPatch: Record<string, unknown> = { status: "ganho" };
+      if (Number.isFinite(valorNum) && valorNum > 0) ganhoPatch.closed_value = valorNum;
       const { data: wonRows, error: wonErr } = await supabase
-        .from("qs_leads").update({ status: "ganho" }).eq("id", leadId).select("id");
+        .from("qs_leads").update(ganhoPatch).eq("id", leadId).select("id");
       if (wonErr || !wonRows || wonRows.length === 0) {
         console.warn("[QS] lead não marcado como ganho:", wonErr);
         failures.push("o lead NÃO foi marcado como ganho — marque pelo perfil do lead");
@@ -2567,21 +2588,39 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   {autoFinish?.taskId === task.id && <b style={{ color: "#C2410C" }}> · concluindo em {autoFinish.secs}s</b>}
                   {obsText.trim() && <span style={{ color: "var(--ink3)" }}> (a observação vai junto no resumo)</span>}
                 </span>
+                {/* Perder um lead sem dizer por quê custa o aprendizado inteiro:
+                    era assim que 156 dos 159 perdidos ficaram sem causa. */}
+                {pending === "sem_interesse" && (
+                  <select
+                    value={pendingLossReason}
+                    onChange={(e) => setPendingLossReason(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg text-[13px]"
+                    style={{ border: "1px solid var(--line)", background: "var(--card)", color: "var(--ink)" }}
+                    aria-label="Motivo da perda"
+                  >
+                    <option value="">Por que perdeu? *</option>
+                    {lossReasons.map((r) => (
+                      <option key={r.id} value={r.id}>{r.label}</option>
+                    ))}
+                  </select>
+                )}
                 <button
                   onClick={async () => {
                     if (finalizing) return; // anti duplo-clique
                     setAutoFinish(null);
                     setFinalizing(true);
                     try {
-                      await handleContactResult(task.id, pending);
+                      await handleContactResult(task.id, pending, pendingLossReason || undefined);
                       setPendingResult(null);
+                      setPendingLossReason("");
                     } finally {
                       setFinalizing(false);
                     }
                   }}
-                  disabled={finalizing}
+                  disabled={finalizing || (pending === "sem_interesse" && !pendingLossReason)}
+                  title={pending === "sem_interesse" && !pendingLossReason ? "Escolha o motivo da perda antes de finalizar" : undefined}
                   className="qsx-btn qsx-btn-orange"
-                  style={{ height: 38, marginLeft: "auto", opacity: finalizing ? 0.6 : 1 }}
+                  style={{ height: 38, marginLeft: "auto", opacity: finalizing || (pending === "sem_interesse" && !pendingLossReason) ? 0.6 : 1 }}
                 >
                   {finalizing ? "Finalizando…" : "Finalizar"}
                 </button>
@@ -2590,7 +2629,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                     Manter aberto
                   </button>
                 )}
-                <button onClick={() => { setAutoFinish(null); setPendingResult(null); }} disabled={finalizing} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }}>
+                <button onClick={() => { setAutoFinish(null); setPendingResult(null); setPendingLossReason(""); }} disabled={finalizing} className="qsx-btn qsx-btn-ghost" style={{ height: 38 }}>
                   Cancelar
                 </button>
               </div>
@@ -2888,12 +2927,23 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
       {/* ══════════════════════════════════════════════════════════════════════
           TOAST NOTIFICATION (Change 7)
+          ──────────────────────────────────────────────────────────────────────
+          Este toast (escuro, com "Desfazer") e o global de erro (vermelho,
+          GlobalToasts) dividiam o mesmo canto com 4px de diferença — e este
+          tinha z-index MAIOR. Resultado: nos casos que mais importam ("não foi
+          possível criar o follow-up", "as atividades não foram encerradas") o
+          aviso vermelho nascia ESCONDIDO atrás do verde de sucesso, que aparecia
+          logo depois. A tela mentia justamente na hora errada.
+
+          Conserto: este sobe (bottom-24, acima da faixa do global) e cede a
+          camada — o erro fica sempre visível e por cima.
           ══════════════════════════════════════════════════════════════════════ */}
       {toast && (
         <div
-          className="fixed bottom-4 right-4 z-[100] bg-gray-900 text-white px-4 py-3 rounded-lg shadow-xl text-sm font-medium flex items-center gap-3"
+          className="fixed bottom-24 right-4 z-[80] bg-gray-900 text-white px-4 py-3 rounded-lg shadow-xl text-sm font-medium flex items-center gap-3"
           style={{
             animation: toast.visible ? "toastIn 0.3s ease-out" : "toastOut 0.3s ease-out forwards",
+            marginBottom: "env(safe-area-inset-bottom)",
           }}
         >
           <span>{toast.message}</span>
@@ -3287,6 +3337,22 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Data e hora da reunião (Google Meet) *</label>
                 <input type="datetime-local" value={meeting.dataHora} onChange={(e) => setMeeting((m) => ({ ...m, dataHora: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400" />
+              </div>
+              {/* Sem este campo o sistema registra 61 ganhos e R$ 0 de receita —
+                  medido em 28/07. Os painéis "pipeline aberto", "receita ganha" e
+                  "ticket médio por fonte" já existem e mostravam zero. */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Valor fechado (R$)</label>
+                <input
+                  type="number" min={0} step={100} inputMode="decimal"
+                  value={meeting.valorFechado}
+                  onChange={(e) => setMeeting((m) => ({ ...m, valorFechado: e.target.value }))}
+                  placeholder="Ex.: 18500"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"
+                />
+                <p className="mt-1 text-[10.5px] text-gray-400">
+                  Em branco fecha assim mesmo — mas o faturamento por destino e o ticket médio ficam sem este ganho.
+                </p>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Observações da atividade</label>
