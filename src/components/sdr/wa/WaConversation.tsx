@@ -20,6 +20,7 @@ import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { loadSignatureName } from "@/lib/qs/waSignature";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { WaAudio, WaAvatar } from "./WaBits";
+import { WaTexto } from "./waFormat";
 
 
 interface Props {
@@ -443,7 +444,10 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                     {m.attachments?.map((a, k) => <Anexo key={k} a={a} meu={meu} />)}
                     {m.content && (
                       <p className="text-[14px] leading-[1.45] whitespace-pre-wrap break-words">
-                        {m.content}
+                        {/* Com a formatação do WhatsApp aplicada: o SDR vê a
+                            mensagem como ela chega no celular do cliente — a
+                            assinatura em negrito, e não `*Victor Hugo*` cru. */}
+                        <WaTexto texto={m.content} />
                       </p>
                     )}
                     {fimDoBloco && (

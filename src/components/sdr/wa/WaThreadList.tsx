@@ -26,6 +26,7 @@ import {
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { WaAvatar, WaLinhaEsqueleto } from "./WaBits";
+import { waPlain } from "./waFormat";
 
 type Aba = "meus" | "closers" | "todos";
 
@@ -273,7 +274,9 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
                       <span className="wa-row-preview flex-1 min-w-0 truncate text-[12px]"
                             style={{ color: "var(--ink2)" }}>
                         {t.last_direction === "out" && <span style={{ color: "var(--ink3)" }}>você: </span>}
-                        {t.last_message || formatPhoneDisplay(t.lead?.phone) || "—"}
+                        {/* Sem os sinais de formatação: numa linha só, truncada,
+                            negrito não ajuda — e `*Victor Hugo*` só rouba espaço. */}
+                        {waPlain(t.last_message) || formatPhoneDisplay(t.lead?.phone) || "—"}
                       </span>
                       {naoLidas > 0 && (
                         <span className="shrink-0 min-w-[19px] h-[19px] px-1.5 rounded-full text-white text-[11px] font-semibold grid place-items-center tabular-nums"
