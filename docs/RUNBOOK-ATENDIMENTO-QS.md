@@ -11,30 +11,28 @@ e vá na seção *Se der errado* no fim — não siga adiante.
 
 ---
 
-## Já está pronto (não precisa refazer)
+## ✅ Estado em 28/07/2026 — só falta o Passo 4
 
-- ✅ **Migration `0024`** aplicada no Supabase — testei as tabelas, as funções e a
-  regra de privacidade; tudo respondendo certo.
-- ✅ **Webhook cadastrado** no Chatwoot apontando pro QS (`message_created`).
-- ✅ **Caixa "Comercial - Closers"** (id 2) criada e ligada ao número 11 95125-1935.
-- ✅ **Código no ar** (commits `3c4de4f` + `0314231`, deploy READY). As rotas
-  `/api/wa-*` respondem, e as proteções foram testadas: sem login dá 401, e o
-  webhook com segredo errado dá 401.
+Conferido **por fora**, contra a produção, nesta data:
 
-## ⚠️ O bloqueio de agora: o segredo do webhook não confere
+| Passo | Estado | Como foi verificado |
+|---|---|---|
+| 1 — segredo do webhook | ✅ **feito** | `POST /api/wa-webhook` com o segredo que está na URL do Chatwoot → **200**. Se não batesse, seria 401. |
+| 2 — variáveis da Vercel | ✅ **feito** | Payload de teste com `inbox_id` 1 e 2 → aceito; com 7 → `inbox-fora-do-whatsapp`. Ou seja, `CHATWOOT_WA_INBOX_IDS` está `1,2`. |
+| 3 — chave virada no QS | ✅ **feito** | Configurações → Atendimento mostra **"Atendimento no QS ✅"** selecionado, e a tela do SDR traz "Minhas conversas". |
+| 4 — teste com dois celulares | ⬜ **falta** | Só você consegue fazer — precisa mandar mensagem de um número de fora. |
+| 5 — `signMsg` da Evolution | ✅ **feito** | Desligado nas **duas** instâncias via API; `chatwoot/find` confirma `signMsg=false`. |
 
-Testado em produção: a variável `WA_WEBHOOK_SECRET` **existe** na Vercel (se
-faltasse, a resposta seria 503), mas o valor dela **não é** o mesmo que está na
-URL do webhook no Chatwoot. Resultado: toda mensagem que chega é recusada com 401
-e não entra no QS.
+Também já estavam prontos: migration `0024` aplicada, webhook cadastrado
+(`message_created`), caixa "Comercial - Closers" (id 2) no número 11 95125-1935,
+e o código no ar.
 
-**Conserto (Passo 1 abaixo).** Enquanto isso não for feito, nada do resto adianta.
-
-## O que falta — 4 passos
+> Os testes de diagnóstico usaram um telefone inexistente (`+5500000000000`) e um
+> evento que a rota ignora — nenhuma conversa real foi tocada.
 
 ---
 
-## Passo 1 — Igualar o segredo do webhook
+## Passo 1 — Igualar o segredo do webhook ✅ (feito em 27/07)
 
 **Onde:** vercel.com → projeto **qs-turis** → Settings → Environment Variables →
 `WA_WEBHOOK_SECRET` → **Edit**.
@@ -50,11 +48,11 @@ Depois: Deployments → três pontinhos do último → **Redeploy**.
 
 **Como saber que deu certo:** me avise. Eu chamo o webhook por fora e digo em 5
 segundos se voltou `200` (certo), `401` (ainda diferente) ou `503` (variável
-sumiu).
+sumiu). — *Feito em 28/07: voltou `200`.*
 
 ---
 
-## Passo 2 — Conferir as outras 3 variáveis na Vercel
+## Passo 2 — Conferir as outras 3 variáveis na Vercel ✅ (feito em 27/07)
 
 **Onde:** vercel.com → projeto **qs-turis** → Settings → **Environment Variables**.
 
@@ -84,7 +82,7 @@ variável nem existir. Descubro qual dos três em 5 segundos.
 
 ---
 
-## Passo 3 — Virar a chave no QS
+## Passo 3 — Virar a chave no QS ✅ (feito)
 
 **Onde:** QS → **Configurações** → aba **Atendimento (WhatsApp)**.
 **O que fazer:** escolher **"Atendimento no QS ✅"**.
@@ -99,7 +97,7 @@ painel do Chatwoot dentro de um quadro.
 
 ---
 
-## Passo 4 — Testar de verdade (o teste que importa)
+## Passo 4 — Testar de verdade (o teste que importa) ⬜ **É O ÚNICO QUE FALTA**
 
 Faça nesta ordem, com dois celulares ou um celular e um colega:
 
@@ -119,22 +117,32 @@ Se os 4 passarem, está no ar.
 
 ---
 
-## Passo 5 (agora É necessário) — Desligar a assinatura automática do Chatwoot
+## Passo 5 — Desligar a assinatura automática do Chatwoot ✅ (feito em 28/07)
 
-A caixa assina cada mensagem com o nome do agente do Chatwoot. Como o QS envia
-por um usuário técnico único, **o cliente veria sempre o mesmo nome**, que não é
-o do SDR que escreveu.
+A caixa assinava cada mensagem com o nome do agente do Chatwoot. Como o QS envia
+por um usuário técnico único, **o cliente via sempre o mesmo nome**, que não era o
+do SDR que escreveu. E desde 28/07 **quem assina é o QS**, com o nome certo de
+cada um — com os dois ligados o cliente receberia **duas** assinaturas.
 
-Desde 2026-07-28 **quem assina é o QS**, com o nome certo de cada SDR (ver a
-seção abaixo). Se o `signMsg` continuar ligado, o cliente recebe **duas**
-assinaturas — a do bot e a do SDR. Pra desligar, rode no terminal do VPS
-(ou me peça):
+Desligado nas duas instâncias (`Comercial - Closers (1935)` e
+`Comercial - 1 (SDRs)`); `chatwoot/find` confirma `signMsg=false` nas duas.
+
+Se algum dia precisar refazer (instância recriada, por exemplo): a Evolution
+**sobrescreve a config inteira** neste POST, então leia a atual, mude só o campo
+e devolva o resto igual — mandar só `{"signMsg": false}` apaga o resto.
 
 ```bash
+# 1) ler:  GET  /chatwoot/find/<instancia>   (header apikey)
+# 2) POST /chatwoot/set/<instancia> com o MESMO corpo + "signMsg": false
 curl -X POST "https://evo.setuforeuvouviagens.com.br/chatwoot/set/<instancia>" \
   -H "apikey: $AUTHENTICATION_API_KEY" -H "Content-Type: application/json" \
   -d '{ ...o mesmo corpo de antes..., "signMsg": false }'
 ```
+
+> Pegadinha: `daysLimitImportMessages` volta do GET como `""` e o POST exige
+> **número** — mande `0`. Sem isso a API responde 400 e nada muda.
+>
+> O nome da instância tem espaço e parênteses: precisa vir URL-encoded na rota.
 
 ---
 
@@ -154,6 +162,19 @@ e admin). Deixar em branco usa o nome sugerido, tirado do cadastro: os dois
 primeiros nomes, ignorando conectivos — "Victor Hugo Silva Santos" vira
 "Victor Hugo", "Mariana de Souza" vira "Mariana". Preencha só quem precisa de um
 nome diferente do cadastrado.
+
+**Como ficou configurado em 28/07** (interruptor ligado):
+
+| Cadastro | Assina como | Origem |
+|---|---|---|
+| Victor Hugo | `Victor Hugo` | automático |
+| Mariana | `Mariana` | automático |
+| Yanca Manuella Ruivo | `Yanca` | preenchido à mão |
+| John Italo | `John Italo` | automático |
+| Master / Administrador (contas suas) | `Master` / `Administrador` | automático — **decida se quer trocar** |
+
+> As duas contas de admin assinariam com o nome da conta. Se você usa alguma
+> delas pra falar com cliente, preencha um nome de gente nesses dois campos.
 
 **Onde o carimbo acontece:** no servidor (`api/_wa.js`), no momento do envio. O
 navegador manda só o texto — um SDR **não consegue** enviar mensagem assinada com
