@@ -31,22 +31,48 @@ const EVENTS = new Set(['perdido', 'ganho', 'reuniao', 'nota', 'primeiro-contato
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function isValidSupabaseUser(authHeader) {
+/**
+ * Devolve o ID do usuário autenticado (ou null). Antes esta função devolvia um
+ * BOOLEANO e a identidade era jogada fora — então qualquer pessoa logada movia
+ * o negócio de QUALQUER lead no Bitrix, inclusive marcando como ganho/perdido o
+ * lead de outro SDR. Precisamos do id para checar a posse mais abaixo.
+ */
+async function getSupabaseUserId(authHeader) {
   const jwt = String(authHeader || '').replace(/^Bearer\s+/i, '').trim();
-  if (!jwt) return false;
+  if (!jwt) return null;
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return false;
+  if (!url || !key) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5_000);
   try {
     const r = await fetch(`${url.replace(/\/$/, '')}/auth/v1/user`, {
       headers: { apikey: key, Authorization: `Bearer ${jwt}` },
+      signal: ctrl.signal,
     });
-    if (!r.ok) return false;
+    if (!r.ok) return null;
     const user = await r.json();
-    return Boolean(user && user.id);
+    return (user && user.id) || null;
   } catch {
-    return false;
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+/** Este usuário pode mexer neste lead? Mesma regra da RLS (0007/0022). */
+async function podeMexerNoLead(userId, leadId) {
+  const [users, leads] = await Promise.all([
+    rest(`qs_users?select=role,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`),
+    rest(`qs_leads?select=owner_id&id=eq.${encodeURIComponent(leadId)}&limit=1`),
+  ]);
+  const user = (Array.isArray(users) && users[0]) || null;
+  const lead = (Array.isArray(leads) && leads[0]) || null;
+  if (!user || user.is_active === false) return { ok: false, reason: 'usuario-invalido' };
+  if (!lead) return { ok: false, reason: 'lead-inexistente' };
+  if (user.role === 'admin' || user.role === 'gestor') return { ok: true };
+  if (lead.owner_id === userId || lead.owner_id == null) return { ok: true };
+  return { ok: false, reason: 'lead-de-outro-sdr' };
 }
 
 export default async function handler(req, res) {
@@ -58,8 +84,8 @@ export default async function handler(req, res) {
   // Autorização SEMPRE exigida (fail-closed).
   const secret = process.env.INTERNAL_API_SECRET;
   const bySecret = Boolean(secret) && req.headers['x-internal-secret'] === secret;
-  const byUser = !bySecret && (await isValidSupabaseUser(req.headers['authorization']));
-  if (!bySecret && !byUser) {
+  const userId = bySecret ? null : await getSupabaseUserId(req.headers['authorization']);
+  if (!bySecret && !userId) {
     return res.status(401).json({ success: false, error: 'Não autorizado' });
   }
 
@@ -77,6 +103,27 @@ export default async function handler(req, res) {
   if (!UUID_RE.test(leadId)) {
     return res.status(400).json({ success: false, error: 'lead_id inválido (esperado UUID)' });
   }
+
+  // A correção de 14/07 fechou o bitrix_id (o servidor resolve), mas o lead_id
+  // continuava livre: um SDR podia marcar como ganho/perdido no Bitrix o negócio
+  // de um lead que não é dele — e forjar closed_value junto. Agora a posse é
+  // conferida no banco, com a mesma regra da RLS. O caminho do segredo interno
+  // (n8n) segue sem essa checagem, de propósito: lá não existe "usuário".
+  if (userId) {
+    let posse;
+    try {
+      posse = await podeMexerNoLead(userId, leadId);
+    } catch (err) {
+      console.error('[bitrix-sync] falha ao checar posse do lead', leadId, ':', err?.message);
+      return res.status(502).json({ success: false, error: 'Falha ao validar o lead' });
+    }
+    if (!posse.ok) {
+      console.warn('[bitrix-sync] recusado:', userId, '→', leadId, `(${posse.reason})`);
+      const status = posse.reason === 'lead-inexistente' ? 404 : 403;
+      return res.status(status).json({ success: false, error: 'Sem acesso a este lead', motivo: posse.reason });
+    }
+  }
+
   let serverBitrixId = null;
   try {
     const rows = await rest(`qs_leads?select=bitrix_id&id=eq.${encodeURIComponent(leadId)}&limit=1`);

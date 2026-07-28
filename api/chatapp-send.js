@@ -17,7 +17,7 @@
 
 import { sendMessageToLead, ChatAppError } from './_chatapp.js';
 import { rest, insert } from './_supabaseAdmin.js';
-import { assinarComoUsuario } from './_wa.js';
+import { assinarComoUsuario, findLeadByPhone, assertCanAccessLead } from './_wa.js';
 
 // Guard-rails do envio (auditoria 2026-07-14):
 //  • MAX_TEXT_CHARS: mensagem gigante não passa (custo/abuso/erro de integração).
@@ -93,6 +93,42 @@ export default async function handler(req, res) {
       error: `Mensagem longa demais (${textStr.length} caracteres; máx. ${MAX_TEXT_CHARS})`,
       code: 'TEXT_TOO_LONG',
     });
+  }
+
+  // ── Posse do destinatário ─────────────────────────────────────────────────
+  // O destino vinha CRU do navegador e nunca era resolvido para um lead: um SDR
+  // logado mandava mensagem pelo número da agência para o cliente de outro SDR —
+  // ou para qualquer telefone — e ela saía assinada com o nome dele. O /api/wa-send
+  // já resolve isso partindo do leadId; esta rota tinha ficado para trás.
+  //
+  // O caminho do segredo interno (n8n) segue livre: ali não existe usuário.
+  if (userId) {
+    const alvo = String(phone || chatId || '');
+    let dono;
+    try {
+      const lead = await findLeadByPhone(alvo);
+      if (!lead) {
+        console.warn('[chatapp-send] recusado: telefone sem lead correspondente');
+        return res.status(404).json({
+          success: false,
+          error: 'Esse número não está em nenhum lead seu. Cadastre o lead antes de enviar.',
+          code: 'LEAD_NAO_ENCONTRADO',
+        });
+      }
+      dono = await assertCanAccessLead(userId, lead.id);
+    } catch (err) {
+      console.error('[chatapp-send] falha ao validar o destinatário:', err?.message);
+      return res.status(502).json({ success: false, error: 'Falha ao validar o destinatário' });
+    }
+    if (!dono.ok) {
+      console.warn('[chatapp-send] recusado:', userId, `(${dono.reason})`);
+      return res.status(403).json({
+        success: false,
+        error: 'Sem acesso a este lead',
+        code: 'SEM_ACESSO',
+        motivo: dono.reason,
+      });
+    }
   }
 
   // Rate limit + log server-side (qs_message_log). O registro entra ANTES do

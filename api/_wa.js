@@ -265,13 +265,19 @@ export async function assertCanAccessLead(userId, leadId) {
   // Quem passou o lead adiante continua podendo falar com o cliente. Sem este
   // ramo, o SDR VÊ a conversa (a RLS da 0025 permite) mas toma 403 ao responder
   // — quebrando exatamente o fluxo "agendou, foi pro closer, mas continuo junto".
-  // Espelha `qs_owns_lead` da migration 0025: as duas regras têm que andar juntas.
+  // Espelha `qs_owns_lead` da migration 0029: as duas regras têm que andar juntas.
+  //
+  // Só o handover MAIS RECENTE conta. Antes bastava existir qualquer passagem
+  // histórica em nome do usuário, o que dava acesso vitalício: um lead que rodou
+  // por três donos ficava legível pelos três, para sempre.
   try {
-    const passou = await rest(
-      `qs_handovers?select=lead_id&lead_id=eq.${encodeURIComponent(leadId)}` +
-      `&from_user_id=eq.${encodeURIComponent(userId)}&limit=1`
+    const ultimo = await rest(
+      `qs_handovers?select=from_user_id&lead_id=eq.${encodeURIComponent(leadId)}` +
+      `&order=created_at.desc&limit=1`
     );
-    if (Array.isArray(passou) && passou.length) return { ok: true, lead, user };
+    if (Array.isArray(ultimo) && ultimo[0]?.from_user_id === userId) {
+      return { ok: true, lead, user };
+    }
   } catch (e) {
     console.warn('[wa] checagem de handover:', e?.message);
   }
