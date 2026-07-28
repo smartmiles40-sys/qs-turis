@@ -22,7 +22,12 @@
 import { supabase } from "@/lib/supabase";
 import { notifyError } from "@/lib/qs/notify";
 
-export type BitrixSyncEvent = "perdido" | "ganho" | "reuniao" | "nota";
+// "primeiro-contato" (2026-07-28): disparado quando o SDR conclui uma atividade
+// que NÃO encerra o lead. O n8n só move o negócio se ele AINDA estiver em "Novo
+// lead" — por isso podemos disparar em toda conclusão sem contador nem flag: da
+// 2ª em diante o evento chega, olha e não faz nada. Repetir é inofensivo, e se o
+// primeiro disparo se perder (rede/n8n fora) o próximo conserta sozinho.
+export type BitrixSyncEvent = "perdido" | "ganho" | "reuniao" | "nota" | "primeiro-contato";
 
 export interface BitrixSyncPayload {
   lead_id: string;

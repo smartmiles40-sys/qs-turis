@@ -7,7 +7,7 @@
 // bundle + webhooks sem auth) — qualquer visitante podia extrair a URL e mover
 // negócios no Bitrix. Agora a URL do n8n e o segredo ficam SÓ no servidor.
 //
-// Body (JSON): { "event": "perdido"|"ganho"|"reuniao"|"nota", "lead_id": uuid, ...payload }
+// Body (JSON): { "event": "perdido"|"ganho"|"reuniao"|"nota"|"primeiro-contato", "lead_id": uuid, ...payload }
 //   → encaminhado para `${N8N_SYNC_BASE}/qs-<event>` com o header
 //     x-qs-sync-secret = N8N_SYNC_SECRET (validar no nó Webhook do n8n).
 //   O `bitrix_id` é resolvido AQUI a partir do lead_id (qs_leads via service
@@ -24,7 +24,10 @@
 
 import { rest } from './_supabaseAdmin.js';
 
-const EVENTS = new Set(['perdido', 'ganho', 'reuniao', 'nota']);
+// 'primeiro-contato' (2026-07-28): o SDR conclui a 1ª atividade no QS e o negócio
+// anda sozinho de "Novo lead" para "Follow-up 1" no Bitrix. Quem decide se move é
+// o n8n (só move o que ainda está em Novo lead) — aqui é só o repasse.
+const EVENTS = new Set(['perdido', 'ganho', 'reuniao', 'nota', 'primeiro-contato']);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,7 +66,7 @@ export default async function handler(req, res) {
   const body = typeof req.body === 'string' ? safeJson(req.body) : req.body || {};
   const { event, ...payload } = body;
   if (!EVENTS.has(event)) {
-    return res.status(400).json({ success: false, error: 'event inválido (perdido|ganho|reuniao|nota)' });
+    return res.status(400).json({ success: false, error: 'event inválido (perdido|ganho|reuniao|nota|primeiro-contato)' });
   }
 
   // bitrix_id NUNCA vem do cliente (auditoria 2026-07-14): qualquer usuário

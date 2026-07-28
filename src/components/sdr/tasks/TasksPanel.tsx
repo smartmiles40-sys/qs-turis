@@ -10,6 +10,8 @@ import type {
 import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
+import { createMeeting } from "@/lib/qs/meetings";
+import { findUserIdByName } from "@/lib/qs/closerAgenda";
 import { notifyError } from "@/lib/qs/notify";
 import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, type CadenceScriptRow, type ContactBreakdownRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
@@ -806,6 +808,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       } else {
         // atendeu (pediu retorno), nao_atendeu, caixa_postal, desligou, numero_errado
         // → SEMPRE cria a próxima tarefa. Nenhum lead fica órfão.
+        //
+        // 1º CONTATO → o negócio anda de "Novo lead" para "Follow-up 1" no Bitrix.
+        // Só aqui: ganho/perdido acima JÁ movem a coluna (pra Reunião/Perdido), e
+        // disparar os dois ao mesmo tempo poderia puxar o negócio de volta.
+        notifyBitrix("primeiro-contato", {
+          lead_id: currentTask.lead_id,
+          bitrix_id: desfechoLead?.bitrix_id,
+          full_name: desfechoLead?.full_name,
+          canal: CHANNEL_LABELS[currentTask.channel_type],
+          desfecho: outcomeLabels[result] ?? result,
+          alcancou: result === "atendeu" || result === "desligou",
+          sdr: currentUser?.name ?? null,
+        });
         const followUp = await insertFollowUp(currentTask, result);
         setTasks(prev => {
           const rest = prev.filter(t => t.id !== taskId);
@@ -856,6 +871,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         await persistObservation(task.lead_id, `${CHANNEL_LABELS[task.channel_type]} — Concluída: ${obs}`, ["bitrix", "observacao"]);
       }
       markContacted(task.lead_id); // primeiro contato feito → não é mais "sem contato"
+      // …e o mesmo "contato feito" move o negócio de Novo lead pra Follow-up 1 no
+      // Bitrix (o n8n ignora quem já saiu dessa coluna — repetir não estraga nada).
+      const concludedLead = getLeadForTask(task);
+      notifyBitrix("primeiro-contato", {
+        lead_id: task.lead_id,
+        bitrix_id: concludedLead?.bitrix_id,
+        full_name: concludedLead?.full_name,
+        canal: CHANNEL_LABELS[task.channel_type],
+        desfecho: "Concluída",
+        alcancou: true,
+        sdr: currentUser?.name ?? null,
+      });
       setTasks((prev) => prev.filter((t) => t.id !== task.id));
       setActiveTaskId(null);
       setObsText("");
@@ -940,6 +967,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       }
 
       // 5) Demais casos → cria o próximo passo da cadência (lead segue trabalhado).
+      // A ligação classificada é o 1º contato: o negócio sai de "Novo lead" e vai
+      // pra "Follow-up 1" no Bitrix. O caminho "com avanço" saiu no passo 4 — lá o
+      // negócio vai pra Reunião Agendada, coluna à frente desta.
+      const classifiedLead = getLeadForTask(task);
+      notifyBitrix("primeiro-contato", {
+        lead_id: task.lead_id,
+        bitrix_id: classifiedLead?.bitrix_id,
+        full_name: classifiedLead?.full_name,
+        canal: CHANNEL_LABELS[task.channel_type],
+        desfecho: meta?.label ?? classifySel,
+        alcancou: meta?.reached === true,
+        sdr: currentUser?.name ?? null,
+      });
       const followUp = await insertFollowUp(task, classifySel);
       setTasks((prev) => {
         const rest = prev.filter((t) => t.id !== task.id);
@@ -1073,32 +1113,37 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // silêncio (as tarefas "ressuscitavam" no refresh de 60s sem explicação).
     const failures: string[] = [];
     try {
-      const meetingRow = {
+      // "Responsável pela reunião" é um NOME (lista das Configurações). A agenda
+      // trabalha com closer_id — traduzimos aqui pelo mesmo critério do backfill
+      // da 0027. Não casou o nome? A reunião nasce sem closer, como antes.
+      const closerId = await findUserIdByName(meeting.responsavel);
+      // A reunião do Ganho nasce pelo serviço central: é ele que cria a atividade
+      // de confirmação e avisa o Bitrix (o aviso separado que existia aqui saiu,
+      // senão o negócio receberia o evento "reuniao" duas vezes).
+      const res = await createMeeting({
         lead_id: leadId,
+        lead_name: leadName,
+        lead_bitrix_id: leads.find((l) => l.id === leadId)?.bitrix_id ?? null,
+        lead_email: meeting.emailCliente || null,
+        cadence_id: leads.find((l) => l.id === leadId)?.cadence_id ?? null,
         owner_id: currentUser?.id ?? null,
+        owner_name: meeting.agendadoPor || currentUser?.name || null,
+        closer_id: closerId,
+        closer_name: meeting.responsavel || null,
         title: `Reunião — ${leadName}`,
-        scheduled_at: new Date(meeting.dataHora).toISOString(),
+        scheduled_at: new Date(meeting.dataHora),
+        duration_min: 60,
         location: "Google Meet",
         notes: resumo,
-        status: "agendada",
-      };
-      // Campos estruturados (migration 0006) — o n8n usa pra preencher o Bitrix.
-      // Se a migration ainda não foi aplicada, o insert com eles falha e
-      // repetimos no formato antigo (só notes) pra nunca travar o Ganho.
-      const { error: insErr } = await supabase.from("qs_meetings").insert({
-        ...meetingRow,
-        scheduled_by: meeting.agendadoPor || null,
-        meeting_owner: meeting.responsavel || null,
-        client_email: meeting.emailCliente || null,
         booking_date: meeting.dataAgendamento || null,
       });
-      if (insErr) {
-        console.warn("[QS] insert com campos estruturados falhou (aplicar 0006?); usando formato antigo:", insErr.message);
-        const { error: ins2Err } = await supabase.from("qs_meetings").insert(meetingRow);
-        if (ins2Err) {
-          console.warn("[QS] insert da reunião falhou também no formato antigo:", ins2Err);
-          failures.push("a reunião NÃO foi registrada em Reuniões");
-        }
+      if (!res.ok) {
+        console.warn("[QS] insert da reunião do ganho falhou:", res.error);
+        failures.push(
+          res.conflict
+            ? `o closer ${meeting.responsavel} já tem reunião nesse horário — a reunião NÃO foi registrada`
+            : "a reunião NÃO foi registrada em Reuniões"
+        );
       }
       if (meeting.emailCliente) {
         const { error: mailErr } = await supabase.from("qs_leads").update({ email: meeting.emailCliente }).eq("id", leadId);
@@ -1122,20 +1167,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         if (!okClose) failures.push("as demais atividades do lead não foram encerradas (podem reaparecer na fila)");
       }
       await persistObservation(leadId, `Ganho — reunião agendada para ${meeting.dataHora}. ${resumo}`, ["bitrix", "ganho", "reuniao"]);
-      // Preenche os campos da reunião no Bitrix e move o negócio pra "Reunião agendada".
-      notifyBitrix("reuniao", {
-        lead_id: leadId,
-        bitrix_id: leads.find((l) => l.id === leadId)?.bitrix_id,
-        full_name: leadName,
-        title: meetingRow.title,
-        scheduled_at: meetingRow.scheduled_at,
-        location: meetingRow.location,
-        notes: resumo,
-        scheduled_by: meeting.agendadoPor || null,
-        meeting_owner: meeting.responsavel || null,
-        client_email: meeting.emailCliente || null,
-        booking_date: meeting.dataAgendamento || null,
-      });
+      // O evento "reuniao" pro Bitrix (que move o negócio pra "Reunião agendada")
+      // sai do createMeeting acima — não se repete aqui.
     } catch (e) {
       console.warn("[QS] falha ao registrar a reunião do ganho:", e);
       notifyError("Não foi possível registrar a reunião — confira em Reuniões antes de seguir.");
@@ -1217,6 +1250,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         notifyError("O retorno foi agendado, mas a atividade de origem não foi concluída agora (pode já ter sido finalizada) — confira a fila.");
       }
       await persistObservation(extraTask.lead_id, `Pediu retorno — atividade extra agendada para ${extraTask.date} ${extraTask.time}.${obsText.trim() ? " " + obsText.trim() : ""}`, ["bitrix", "retorno"]);
+      // "Pediu retorno" é contato feito: o negócio sai de Novo lead no Bitrix.
+      notifyBitrix("primeiro-contato", {
+        lead_id: extraTask.lead_id,
+        bitrix_id: lead?.bitrix_id,
+        full_name: lead?.full_name,
+        canal: CHANNEL_LABELS[extraTask.channel_type],
+        desfecho: "Pediu retorno",
+        alcancou: true,
+        sdr: currentUser?.name ?? null,
+      });
     }
 
     setSavingExtra(false);

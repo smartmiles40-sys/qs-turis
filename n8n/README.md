@@ -7,7 +7,7 @@ Workflows prontos pra importar (menu **⋮ → Import from File** no n8n):
 | `qs-inbound-leads.workflow.json` | Formulário/LP → QS (cria o card e as tarefas) | Webhook (form) |
 | `bitrix-to-qs.workflow.json` | Bitrix → QS via `crm.deal.get`/`crm.contact.get` (Etapa 1.1) | Webhook do Bitrix |
 | `bitrix-inbound-to-qs.workflow.json` | **⭐ Bitrix → QS pelos dados do próprio webhook** (querystring; NÃO chama o Bitrix de volta) → `/api/lead-inbound` | Webhook do Bitrix |
-| `qs-to-bitrix-webhook.workflow.json` | **⭐ QS → Bitrix por EVENTO**: cada botão (perdido/ganho/reunião/nota) dispara na hora | Webhook (por botão) |
+| `qs-to-bitrix-webhook.workflow.json` | **⭐ QS → Bitrix por EVENTO**: cada botão (perdido/ganho/reunião/nota/**1º contato**) dispara na hora | Webhook (por botão) |
 | `bitrix-atividade-concluida-move-stage.workflow.json` | **⭐ Dentro do Bitrix**: SDR conclui a 1ª atividade → o negócio anda sozinho de **Novo lead → Follow-up 1** | Evento do Bitrix (`ONCRMACTIVITYUPDATE`) |
 | `qs-to-bitrix-sync.workflow.json` | ⚠️ **APOSENTADO — NÃO RELIGAR** (reenviaria TODO o histórico; ver seção do legado). Substituído pelo de cima. | A cada 1 min |
 | `chatapp-token-refresh.workflow.json` | **Valida/renova o token do ChatApp** e grava no banco (Etapa 2.4) | A cada 6 h |
@@ -103,7 +103,7 @@ Depois selecione a credencial `x-lead-secret` no nó e **ative**.
 
 Em vez de varrer o banco a cada 1 min, **o próprio botão no QS dispara** um
 webhook na hora que o SDR age. Menos execução ociosa no n8n, e a coluna do
-Bitrix muda na hora certa. São **4 webhooks** (um "por botão"), cada um numa
+Bitrix muda na hora certa. São **5 webhooks** (um "por botão"), cada um numa
 linha do canvas:
 
 | Evento | Path do webhook | O que faz no Bitrix |
@@ -112,6 +112,7 @@ linha do canvas:
 | Ganho | `/webhook/qs-ganho` | acha o deal → move pra coluna de **Ganho** |
 | Reunião | `/webhook/qs-reuniao` | acha o deal → move pra **Reunião agendada** + comentário com todos os campos (+ nó de UF desativado) |
 | Nota | `/webhook/qs-nota` | comentário na timeline do negócio |
+| **1º contato** 🆕 | `/webhook/qs-primeiro-contato` | acha o deal → **só se ainda estiver em "Novo lead"** → move pra **Follow-up 1** + comentário |
 
 **Fluxo de cada branch:** Webhook (recebe `bitrix_id` + dados do body do app) →
 `crm.deal.get` (acha o deal) → `crm.deal.update` (move a coluna / preenche) →
@@ -129,12 +130,12 @@ o **Bitrix faz o resto** pelas automações dele. Nota é só `crm.timeline.comm
    - Conferidos via `crm.status.list?filter[ENTITY_ID]=DEAL_STAGE_25` em 2026-07.
      Se mudar o funil, reliste (CRM → Configurações → Funis e etapas; ou
      `crm.dealcategory.stage.list?id=25`).
-3. **Segurança (obrigatório desde 2026-07-13):** os 4 nós Webhook exigem
+3. **Segurança (obrigatório desde 2026-07-13):** os **5** nós Webhook exigem
    **Header Auth**. No n8n, crie uma credencial "Header Auth" chamada
    `QS Sync Secret (x-qs-sync-secret)` com:
    - **Name:** `x-qs-sync-secret`
    - **Value:** um segredo forte (ex.: saída de `openssl rand -hex 24`)
-   e selecione-a nos 4 nós Webhook depois de importar. Sem o header certo o n8n
+   e selecione-a nos 5 nós Webhook depois de importar. Sem o header certo o n8n
    responde 403 — ninguém "de fora" move negócio no Bitrix.
 4. **App (Vercel):** o navegador NÃO chama mais o n8n direto (a URL saiu do
    bundle). O front chama **`/api/bitrix-sync`** (autenticado pelo login do SDR)
@@ -144,6 +145,46 @@ o **Bitrix faz o resto** pelas automações dele. Nota é só `crm.timeline.comm
    - `N8N_SYNC_SECRET` = o MESMO valor da credencial Header Auth do passo 3
    - `VITE_N8N_SYNC_BASE` ficou **obsoleta** — remova se tiver setado.
    Depois **ative** o workflow (é aí que os paths passam a existir).
+
+### 🆕 5ª faixa: `qs-primeiro-contato` — a coluna anda quando o SDR trabalha NO QS
+
+**O par que faltava (28/07).** O workflow `bitrix-atividade-concluida-move-stage`
+move **Novo lead → Follow-up 1** quando a atividade é concluída **dentro do
+Bitrix**. Só que o SDR trabalha no QS: ali o evento do Bitrix nunca dispara e o
+card ficava parado em Novo lead. Esta faixa fecha o outro lado — **a mesma ação,
+registrada nos dois lugares, dá o mesmo resultado**.
+
+**Fluxo:** `/api/bitrix-sync` → webhook `qs-primeiro-contato` → `Config 1o contato`
+→ `crm.deal.get` → *"ainda está em Novo lead?"* → `crm.deal.update` (move) →
+comentário na timeline (canal, desfecho e SDR).
+
+**Por que "primeiro contato" sai de graça (de novo):** não há contador nem flag —
+a regra é **só move quem AINDA está em Novo lead**. Da 2ª atividade em diante o
+evento chega, olha e não faz nada. Isso torna o disparo **idempotente** (repetir
+não estraga), impede o robô de **puxar pra trás** um negócio que já avançou, e dá
+uma rede de segurança de graça: se um disparo se perder (rede caiu, n8n fora), a
+próxima atividade concluída conserta sozinha.
+
+**Configurar (só o nó `Config 1o contato`):**
+- `BITRIX_BASE` → mesma base REST (o mesmo `PREENCHA_BITRIX_WEBHOOK_BASE` do passo 1).
+- `STAGE_DE` → coluna "Novo lead" (chute inicial: `C25:NEW`).
+- `STAGE_PARA` → coluna "Follow-up 1" (**`PREENCHA_STAGE_FOLLOWUP_1`** — descubra
+  em `BASE/crm.status.list.json?filter[ENTITY_ID]=DEAL_STAGE_25`). **É o mesmo
+  valor que você vai preencher no workflow do lado do Bitrix.**
+- `SO_ALCANCOU` → `nao` (padrão: qualquer atividade concluída move, igual ao
+  workflow gêmeo) ou `sim` (move **só** quando o SDR falou mesmo com a pessoa).
+
+**Onde o QS dispara** (`TasksPanel`), e o que vai em `alcancou`:
+
+| Ação do SDR | Dispara? | `alcancou` |
+|---|---|---|
+| Desfecho da tarefa: atendeu / desligou | sim | `true` |
+| Desfecho: não atendeu / caixa postal / nº errado | sim | `false` |
+| Desfecho **Ganho** ou **Sem interesse** | **não** — ganho/perdido já movem a coluna | — |
+| Ligação classificada (sem avanço, gatekeeper, sem conexão…) | sim | `meta.reached` |
+| Ligação **"Com avanço"** | **não** — vai pra Reunião Agendada, coluna à frente | — |
+| "Concluir atividade" (WhatsApp, e-mail, pesquisa…) | sim | `true` |
+| "Pediu retorno" (atividade extra) | sim | `true` |
 
 **Opcional — preencher campos do negócio na reunião:** o nó
 **"Preencher campos da reunião (AJUSTAR UF_*)"** vem **DESATIVADO**. Quando você
@@ -173,8 +214,12 @@ webhook ativo**.
   `bitrix-to-qs` já nasce vinculado.
 - **Onde os botões disparam:** `LeadDetailPage` (marcar ganho/perdido, agendar
   reunião, nota) e `TasksPanel` (desfecho da tarefa, "Ganho = agendar reunião",
-  observação "Salvar no Bitrix"). Um botão **novo** no futuro não sincroniza
-  sozinho — é preciso chamar `notifyBitrix(...)` nele (`src/lib/qs/bitrixSync.ts`).
+  observação "Salvar no Bitrix", **conclusão de atividade → 1º contato**). Um botão
+  **novo** no futuro não sincroniza sozinho — é preciso chamar `notifyBitrix(...)`
+  nele (`src/lib/qs/bitrixSync.ts`).
+- **"Desfazer" não desfaz no Bitrix:** o toast de ~10 s devolve a atividade pra
+  pendente **no QS**, mas o negócio já foi pra Follow-up 1 lá. É de propósito —
+  o contato aconteceu de verdade; quem some é só a tarefa.
 
 ---
 
@@ -243,8 +288,11 @@ que descubra a URL move negócio no seu CRM.
   sem n8n — este workflow é o caminho que funciona em qualquer plano com REST.
 - **Isto é Bitrix→Bitrix.** Não mexe no QS: as abas Novo/FUP/Atrasada do QS
   continuam saindo da cadência do Supabase. Se o SDR conclui a tarefa **no QS**
-  (e não no Bitrix), este evento nunca dispara — nesse caso o certo é um 5º
-  webhook no `qs-to-bitrix-webhook` disparado pelo app.
+  (e não no Bitrix), este evento nunca dispara — esse outro lado agora existe:
+  **`qs-primeiro-contato`**, a 5ª faixa do `qs-to-bitrix-webhook` (feita em
+  28/07). Os dois usam a **mesma regra** ("só move quem ainda está em Novo lead")
+  e o **mesmo `STAGE_PARA`** — podem ficar ligados juntos sem se atrapalhar:
+  quem chegar primeiro move, o outro olha e não faz nada.
 - **Sem loop:** mover a coluna não cria atividade; e atividade nova entra como
   não-concluída, que o filtro descarta.
 - **Execuções "vazias" são normais:** todo salvamento de atividade dispara o

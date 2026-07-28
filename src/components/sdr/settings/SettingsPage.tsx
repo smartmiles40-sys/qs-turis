@@ -11,6 +11,7 @@ import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, del
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
 import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } from "@/lib/qs/chatProvider";
 import WaInboxLabels from "./WaInboxLabels";
+import CloserAgendaSettings from "./CloserAgendaSettings";
 import type {
   CustomField,
   CustomFieldScope,
@@ -53,7 +54,7 @@ const FIELD_TYPE_LABELS: Record<string, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "classificacao" | "horario" | "equipe" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "classificacao" | "horario" | "equipe" | "agenda-closers" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -69,7 +70,8 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "classificacao", label: "Classificação Automática", group: "PLATAFORMA" },
   { key: "horario", label: "Horário de Trabalho", group: "EMPRESA" },
   { key: "equipe", label: "Equipe da Reunião", group: "EMPRESA" },
-  { key: "agenda", label: "Agenda (Google)", group: "EMPRESA" },
+  { key: "agenda-closers", label: "Agenda dos Closers", group: "EMPRESA" },
+  { key: "agenda", label: "Agenda (Google) — legado", group: "EMPRESA" },
   { key: "webfone", label: "Webfone (Wavoip)", group: "EMPRESA" },
   { key: "webfone-webrtc", label: "Webfone WebRTC (VoxFree)", group: "EMPRESA" },
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
@@ -1813,10 +1815,11 @@ function AgendaSection() {
   return (
     <div className="max-w-3xl space-y-5">
       <div>
-        <h2 className="text-lg font-bold text-gray-900">Agenda (Google)</h2>
+        <h2 className="text-lg font-bold text-gray-900">Agenda (Google) — legado</h2>
         <p className="text-sm text-gray-500 mt-1">
-          A aba <b>Agenda</b> mostra a Google Agenda compartilhada dos closers embutida, pros SDRs verem
-          todas as reuniões num lugar só. Só visualização — a criação segue pelo Bitrix.
+          A aba <b>Agenda</b> deixou de usar este embed: o calendário dos closers agora é do próprio QS
+          (configurado em <b>Agenda dos Closers</b>). O ID abaixo fica guardado só como referência da
+          agenda antiga — nada no sistema lê mais daqui.
         </p>
       </div>
 
@@ -2294,6 +2297,7 @@ export default function SettingsPage() {
         {activeSection === "classificacao" && <ClassificacaoSection />}
         {activeSection === "horario" && <HorarioSection />}
         {activeSection === "equipe" && <EquipeSection />}
+        {activeSection === "agenda-closers" && <CloserAgendaSettings />}
         {activeSection === "agenda" && <AgendaSection />}
         {activeSection === "atendimento" && <AtendimentoSection />}
         {activeSection === "webfone" && <WebfoneSection />}

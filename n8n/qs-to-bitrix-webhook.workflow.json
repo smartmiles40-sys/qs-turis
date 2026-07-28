@@ -209,6 +209,122 @@
       "typeVersion": 4.2,
       "position": [460, 740],
       "onError": "continueRegularOutput"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-primeiro-contato",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": { "allowedOrigins": "*" }
+      },
+      "id": "wh-pc-0014-4a10-9b01-0d2e3f4a5c14",
+      "name": "Webhook 1o contato (qs-primeiro-contato)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 940],
+      "webhookId": "qs-primeiro-contato-b6f0-4d40-8e34-3051627c0005",
+      "credentials": { "httpHeaderAuth": { "name": "QS Sync Secret (x-qs-sync-secret)" } }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "pc-cfg-base-0001",
+              "name": "BITRIX_BASE",
+              "type": "string",
+              "value": "PREENCHA_BITRIX_WEBHOOK_BASE"
+            },
+            {
+              "id": "pc-cfg-de-0002",
+              "name": "STAGE_DE",
+              "type": "string",
+              "value": "C25:NEW"
+            },
+            {
+              "id": "pc-cfg-para-0003",
+              "name": "STAGE_PARA",
+              "type": "string",
+              "value": "PREENCHA_STAGE_FOLLOWUP_1"
+            },
+            {
+              "id": "pc-cfg-alc-0004",
+              "name": "SO_ALCANCOU",
+              "type": "string",
+              "value": "nao"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg-pc-0015-4a10-9b01-0d2e3f4a5c15",
+      "name": "Config 1o contato",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 940],
+      "notes": "EDITE SO ESTE NO desta faixa. STAGE_DE = coluna Novo lead. STAGE_PARA = coluna Follow-up 1. SO_ALCANCOU = nao (qualquer atividade concluida move) ou sim (so quando o SDR falou mesmo com a pessoa).",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config 1o contato').first().json.BITRIX_BASE }}/crm.deal.get.json?id={{ $('Webhook 1o contato (qs-primeiro-contato)').first().json.body.bitrix_id }}",
+        "options": {}
+      },
+      "id": "get-pc-0016-4a10-9b01-0d2e3f4a5c16",
+      "name": "Buscar negocio (1o contato)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 940],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// AQUI mora o \"primeiro contato\": nao existe contador nem flag — a regra e\n// \"so move quem AINDA esta em Novo lead\". Da 2a atividade em diante o negocio ja\n// saiu dessa coluna, entao o evento chega, olha e nao faz nada. De quebra, isso\n// impede o robo de puxar PRA TRAS um negocio que ja avancou (Reuniao Agendada,\n// Ganho, Perdido) e torna o disparo idempotente: repetir nao estraga nada.\nconst cfg = $('Config 1o contato').first().json;\nconst evt = $('Webhook 1o contato (qs-primeiro-contato)').first().json.body || {};\nconst r = $input.first().json.result;\nif (!r) return [];   // negocio nao encontrado no Bitrix (ou o GET falhou)\n\n// Opcional: mover so quando o SDR REALMENTE falou com a pessoa.\n// SO_ALCANCOU = \"sim\" liga o filtro; \"nao\" (padrao) move em qualquer atividade\n// concluida — mesmo criterio do workflow gemeo do lado do Bitrix, pra mesma acao\n// dar o mesmo resultado sendo registrada no QS ou no CRM.\nif (String(cfg.SO_ALCANCOU || '').toLowerCase() === 'sim' && evt.alcancou !== true) return [];\n\nif (String(r.STAGE_ID || '') !== String(cfg.STAGE_DE)) return [];\n\nreturn [{ json: {\n  id: String(r.ID),\n  de: String(r.STAGE_ID || ''),\n  para: String(cfg.STAGE_PARA),\n  canal: String(evt.canal || ''),\n  desfecho: String(evt.desfecho || ''),\n  sdr: String(evt.sdr || '')\n} }];"
+      },
+      "id": "flt-pc-0017-4a10-9b01-0d2e3f4a5c17",
+      "name": "So se ainda estiver em Novo lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 940]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config 1o contato').first().json.BITRIX_BASE }}/crm.deal.update.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $json.id, fields: { STAGE_ID: $json.para }, params: { REGISTER_SONET_EVENT: 'Y' } }) }}",
+        "options": {}
+      },
+      "id": "upd-pc-0018-4a10-9b01-0d2e3f4a5c18",
+      "name": "Mover pra Follow-up 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 940],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config 1o contato').first().json.BITRIX_BASE }}/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: $('So se ainda estiver em Novo lead').first().json.id, ENTITY_TYPE: 'deal', COMMENT: '🤖 1º CONTATO FEITO (QS Turis) — negócio movido de Novo lead para Follow-up 1.\\n' + 'Canal: ' + ($('So se ainda estiver em Novo lead').first().json.canal || '-') + '\\n' + 'Desfecho: ' + ($('So se ainda estiver em Novo lead').first().json.desfecho || '-') + '\\n' + 'SDR: ' + ($('So se ainda estiver em Novo lead').first().json.sdr || '-') } }) }}",
+        "options": {}
+      },
+      "id": "cmt-pc-0019-4a10-9b01-0d2e3f4a5c19",
+      "name": "Comentario do 1o contato",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1420, 940],
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -238,6 +354,21 @@
     },
     "Webhook Nota (qs-nota)": {
       "main": [[{ "node": "Comentario da nota", "type": "main", "index": 0 }]]
+    },
+    "Webhook 1o contato (qs-primeiro-contato)": {
+      "main": [[{ "node": "Config 1o contato", "type": "main", "index": 0 }]]
+    },
+    "Config 1o contato": {
+      "main": [[{ "node": "Buscar negocio (1o contato)", "type": "main", "index": 0 }]]
+    },
+    "Buscar negocio (1o contato)": {
+      "main": [[{ "node": "So se ainda estiver em Novo lead", "type": "main", "index": 0 }]]
+    },
+    "So se ainda estiver em Novo lead": {
+      "main": [[{ "node": "Mover pra Follow-up 1", "type": "main", "index": 0 }]]
+    },
+    "Mover pra Follow-up 1": {
+      "main": [[{ "node": "Comentario do 1o contato", "type": "main", "index": 0 }]]
     }
   },
   "active": false,

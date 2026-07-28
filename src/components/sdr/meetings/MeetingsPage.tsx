@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
-import type { Meeting, MeetingStatus, Lead } from "../types";
+import type { Meeting, MeetingStatus, Lead, SdrUser } from "../types";
 import { MEETING_STATUS_LABELS } from "../types";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import AgendaPage from "../agenda/AgendaPage";
+import { createMeeting } from "@/lib/qs/meetings";
+import { fetchClosers } from "@/lib/qs/closerAgenda";
+import AgendaCalendar from "../agenda/AgendaCalendar";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -106,13 +108,16 @@ const labelClass = "block text-xs font-medium text-gray-700 mb-1";
 export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const { currentUser } = useQsAuth();
 
-  // "Reuniões" (gestão/CRUD daqui) vs "Agenda" (a Google Agenda dos closers, que
-  // antes era um item de menu próprio). Unificado numa aba só a pedido do Bruno.
+  // "Reuniões" (a lista/CRUD daqui) vs "Agenda" (o calendário dos closers, hoje
+  // nativo). Unificado numa aba só a pedido do Bruno.
   const [view, setView] = useState<"reunioes" | "agenda">("reunioes");
 
   const [activeTab, setActiveTab] = useState<FilterTab>("todas");
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  // Closers ativos: sem eles a reunião nasce sem dono de horário e some do
+  // calendário da aba "Agenda" (que é organizado por closer).
+  const [closers, setClosers] = useState<SdrUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   // Ação (status/exclusão) gravando por reunião — trava os botões da linha p/ não
@@ -134,6 +139,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const [fLink, setFLink] = useState("");
   const [fNotes, setFNotes] = useState("");
   const [fStatus, setFStatus] = useState<MeetingStatus>("agendada");
+  const [fCloserId, setFCloserId] = useState("");
   // Combobox de lead (item 5): texto digitado; fLeadId só é preenchido ao escolher.
   const [fLeadSearch, setFLeadSearch] = useState("");
   // Lista aberta só com o campo em foco — fecha ao clicar fora / tabular (senão a
@@ -172,6 +178,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       setLoading(false);
     }
     load();
+    void fetchClosers().then(setClosers);
   }, [fetchMeetings, fetchLeads]);
 
   // ── Modal openers ──
@@ -187,6 +194,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     setFLink("");
     setFNotes("");
     setFStatus("agendada");
+    setFCloserId("");
     setShowModal(true);
   }
 
@@ -203,6 +211,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     setFLink(m.meeting_link ?? "");
     setFNotes(m.notes ?? "");
     setFStatus(m.status);
+    setFCloserId(m.closer_id ?? "");
     setShowModal(true);
   }
 
@@ -258,6 +267,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       notesToSave = notesToSave ? `${audit}\n${notesToSave}` : audit;
     }
 
+    const closerName = closers.find((c) => c.id === fCloserId)?.name ?? null;
+
     const base = {
       lead_id: fLeadId,
       title: fTitle.trim() || null,
@@ -267,27 +278,83 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       meeting_link: fLink.trim() || null,
       notes: notesToSave || null,
       status: fStatus,
+      closer_id: fCloserId || null,
+      meeting_owner: closerName,
     };
 
     const ownerId =
       currentUser && UUID_RE.test(currentUser.id) ? currentUser.id : null;
 
-    // Na edição não sobrescrevemos owner_id (preserva o responsável original).
+    // ── CRIAÇÃO: nasce pelo serviço central (lib/qs/meetings.ts) ──────────────
+    // É ele quem cria a atividade de confirmação e avisa o Bitrix — antes esta
+    // tela fazia a sua própria versão disso, e agendar por aqui não gerava a
+    // mesma coisa que agendar pela agenda ou pela página do lead.
+    if (!editingId) {
+      const novoLead = leads.find((l) => l.id === fLeadId);
+      const res = await createMeeting({
+        lead_id: fLeadId,
+        lead_name: novoLead?.full_name ?? null,
+        lead_bitrix_id: novoLead?.bitrix_id ?? null,
+        lead_email: novoLead?.email ?? null,
+        owner_id: ownerId,
+        owner_name: currentUser?.name ?? null,
+        closer_id: fCloserId || null,
+        closer_name: closerName,
+        title: fTitle.trim() || null,
+        scheduled_at: when,
+        duration_min: duration,
+        location: fLocation.trim() || null,
+        meeting_link: fLink.trim() || null,
+        notes: notesToSave || null,
+        status: fStatus,
+      });
+      setSaving(false);
+      if (!res.ok) {
+        setFormError(res.error);
+        return;
+      }
+      // Criada já com desfecho (raro): registra o status também na timeline.
+      if (fStatus !== "agendada") {
+        notifyMeetingStatusToBitrix(
+          { lead_id: fLeadId, scheduled_at: base.scheduled_at, title: base.title, lead: novoLead },
+          fStatus
+        );
+      }
+      closeModal();
+      await fetchMeetings();
+      return;
+    }
+
+    // ── EDIÇÃO ────────────────────────────────────────────────────────────────
+    // owner_id não é sobrescrito (preserva o responsável original).
     // .select() MEDE o que o banco aceitou sob RLS: sem ele um write barrado volta
     // "sucesso" com 0 linhas e a tela mentiria pro usuário.
-    const { data, error } = editingId
-      ? await supabase
-          .from("qs_meetings")
-          .update({ ...base, updated_at: new Date().toISOString() })
-          .eq("id", editingId)
-          .select()
-      : await supabase
-          .from("qs_meetings")
-          .insert({ ...base, owner_id: ownerId })
-          .select();
+    let { data, error } = await supabase
+      .from("qs_meetings")
+      .update({ ...base, updated_at: new Date().toISOString() })
+      .eq("id", editingId)
+      .select();
+
+    // 0027 ainda não aplicada (o deploy vem antes da migration): regrava sem a
+    // coluna nova em vez de deixar o usuário sem conseguir salvar.
+    if (error && (error.code === "42703" || error.code === "PGRST204")) {
+      const { closer_id: _closer, ...legacy } = base;
+      ({ data, error } = await supabase
+        .from("qs_meetings")
+        .update({ ...legacy, updated_at: new Date().toISOString() })
+        .eq("id", editingId)
+        .select());
+    }
 
     if (error) {
-      setFormError(`Não foi possível salvar: ${error.message}`);
+      // 23P01 = trava anti-choque da 0027: o closer já tem reunião nesse horário.
+      const choque =
+        error.code === "23P01" || /qs_meetings_closer_no_overlap/i.test(error.message ?? "");
+      setFormError(
+        choque
+          ? "O closer já tem outra reunião nesse horário. Escolha outro horário ou outro closer."
+          : `Não foi possível salvar: ${error.message}`
+      );
       setSaving(false);
       return;
     }
@@ -300,50 +367,23 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
 
     // ── Espelho no Bitrix (fire-and-forget, mesmo padrão da LeadDetailPage) ──
     const selLead = leads.find((l) => l.id === fLeadId);
-    if (editingId) {
-      // Edição: se o status mudou pelo modal (ex.: marcada como realizada),
-      // registra na timeline do Bitrix — mesmo efeito das ações rápidas.
-      if (prev && prev.status !== fStatus) {
-        notifyMeetingStatusToBitrix(
-          { lead_id: fLeadId, scheduled_at: base.scheduled_at, title: base.title, lead: selLead ?? prev.lead },
-          fStatus
-        );
-      }
-      // Remarcação: conta a mudança de horário na timeline do Bitrix (nota, sem
-      // mover coluna) e avisa o usuário que foi remarcada — não um "salvo" genérico.
-      if (rescheduled && prev) {
-        notifyBitrix("nota", {
-          lead_id: fLeadId,
-          bitrix_id: selLead?.bitrix_id ?? prev.lead?.bitrix_id,
-          body: `Reunião remarcada de ${formatDateTime(prev.scheduled_at)} para ${formatDateTime(base.scheduled_at)} no QS.`,
-        });
-        notifySuccess("Reunião remarcada — novo horário salvo.");
-      }
-    } else {
-      // Criação: preenche os campos da reunião no Bitrix e move o negócio pra
-      // "Reunião agendada" — mesmo evento/payload do agendamento na página do lead.
-      notifyBitrix("reuniao", {
+    // Se o status mudou pelo modal (ex.: marcada como realizada), registra na
+    // timeline do Bitrix — mesmo efeito das ações rápidas.
+    if (prev && prev.status !== fStatus) {
+      notifyMeetingStatusToBitrix(
+        { lead_id: fLeadId, scheduled_at: base.scheduled_at, title: base.title, lead: selLead ?? prev.lead },
+        fStatus
+      );
+    }
+    // Remarcação: conta a mudança de horário na timeline do Bitrix (nota, sem
+    // mover coluna) e avisa o usuário que foi remarcada — não um "salvo" genérico.
+    if (rescheduled && prev) {
+      notifyBitrix("nota", {
         lead_id: fLeadId,
-        bitrix_id: selLead?.bitrix_id,
-        full_name: selLead?.full_name ?? null,
-        title: base.title,
-        scheduled_at: base.scheduled_at,
-        duration_min: base.duration_min,
-        location: base.location,
-        meeting_link: base.meeting_link,
-        notes: base.notes,
-        scheduled_by: currentUser?.name ?? null,
-        meeting_owner: currentUser?.name ?? null,
-        client_email: selLead?.email ?? null,
-        booking_date: new Date().toISOString().slice(0, 10),
+        bitrix_id: selLead?.bitrix_id ?? prev.lead?.bitrix_id,
+        body: `Reunião remarcada de ${formatDateTime(prev.scheduled_at)} para ${formatDateTime(base.scheduled_at)} no QS.`,
       });
-      // Criada já com desfecho (raro): registra o status também na timeline.
-      if (fStatus !== "agendada") {
-        notifyMeetingStatusToBitrix(
-          { lead_id: fLeadId, scheduled_at: base.scheduled_at, title: base.title, lead: selLead },
-          fStatus
-        );
-      }
+      notifySuccess("Reunião remarcada — novo horário salvo.");
     }
 
     setSaving(false);
@@ -462,12 +502,13 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     </div>
   );
 
-  // Aba "Agenda": só o embed da Google Agenda (AgendaPage traz o próprio título).
+  // Aba "Agenda": o calendário NATIVO dos closers (0027). Substituiu o embed da
+  // Google Agenda — os dados são nossos e o agendamento acontece aqui dentro.
   if (view === "agenda") {
     return (
       <div className="space-y-4" style={{ fontFamily: "inherit" }}>
         {viewToggle}
-        <AgendaPage />
+        <AgendaCalendar onOpenLead={onOpenLead} />
       </div>
     );
   }
@@ -836,6 +877,24 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                     className={inputClass}
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className={labelClass}>Closer responsável</label>
+                <select
+                  value={fCloserId}
+                  onChange={(e) => setFCloserId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Sem closer definido</option>
+                  {closers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px] text-gray-400">
+                  Sem closer, a reunião não aparece na agenda dele nem reserva o horário.
+                  Para escolher entre os horários livres, use a aba <b>Agenda</b>.
+                </p>
               </div>
 
               <div>

@@ -147,14 +147,61 @@ export interface Meeting {
   lead?: Lead;
   owner_id: string | null;
   owner?: SdrUser;
+  /** Closer dono do horário (migration 0027). Antes era só `meeting_owner` em texto. */
+  closer_id?: string | null;
+  closer?: SdrUser;
   title: string | null;
   scheduled_at: string;
+  /** Fim da reunião — mantido pelo banco (trigger 0027) a partir de duration_min. */
+  ends_at?: string | null;
   duration_min: number | null;
   location: string | null;
   meeting_link: string | null;
   notes: string | null;
   status: MeetingStatus;
+  /** Nome do lead denormalizado: o join `lead:qs_leads(*)` volta nulo sob a RLS
+   *  quando a reunião é de um lead de outro SDR, e o calendário é do time todo. */
+  lead_name?: string | null;
+  scheduled_by?: string | null;
+  meeting_owner?: string | null;
+  client_email?: string | null;
   created_at: string;
+  updated_at?: string;
+}
+
+// ── Agenda dos closers (migration 0027) ──────────────────────────────────────
+
+/** Janela recorrente de atendimento. Almoço = duas janelas no mesmo dia. */
+export interface CloserAvailability {
+  id: string;
+  closer_id: string;
+  weekday: number;    // 0 = Domingo … 6 = Sábado
+  start_time: string; // "HH:MM:SS"
+  end_time: string;
+  created_at?: string;
+}
+
+/** Bloqueio pontual (férias, compromisso) — some da grade de slots livres. */
+export interface CloserBlock {
+  id: string;
+  closer_id: string;
+  starts_at: string;
+  ends_at: string;
+  reason: string | null;
+  created_by?: string | null;
+  created_at?: string;
+}
+
+/** Parâmetros de agendamento do closer. */
+export interface CloserConfig {
+  closer_id: string;
+  slot_minutes: number;
+  buffer_minutes: number;
+  min_notice_minutes: number;
+  max_per_day: number | null;
+  is_bookable: boolean;
+  color: string | null;
+  default_link: string | null;
   updated_at?: string;
 }
 

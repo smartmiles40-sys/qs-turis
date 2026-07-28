@@ -15,6 +15,7 @@ import { getLeadScore } from "@/lib/leadScore";
 import { loadWorkHours, nextWorkMoment } from "@/lib/workHours";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
+import ScheduleMeetingModal from "@/components/sdr/agenda/ScheduleMeetingModal";
 import type {
   Lead,
   LeadStatus,
@@ -195,26 +196,6 @@ function parseMoney(raw: string): number | null {
   return Number(normalized);
 }
 
-// ── Meeting form (Agendar Reunião) ───────────────────────────────────────────
-
-interface MeetingForm {
-  title: string;
-  scheduled_at: string; // datetime-local value
-  duration_min: string;
-  location: string;
-  meeting_link: string;
-  notes: string;
-}
-
-const EMPTY_MEETING_FORM: MeetingForm = {
-  title: "",
-  scheduled_at: "",
-  duration_min: "30",
-  location: "",
-  meeting_link: "",
-  notes: "",
-};
-
 // ── Custom fields ────────────────────────────────────────────────────────────
 
 // ── Tabs Definition ──────────────────────────────────────────────────────────
@@ -242,11 +223,8 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [lossReasons, setLossReasons] = useState<{ id: string; label: string }[]>([]);
   const [selectedLossReason, setSelectedLossReason] = useState("");
 
-  // ── Agendar Reunião (Task 1) ──
+  // ── Agendar Reunião: modal único do QS (agenda dos closers, 0027) ──
   const [showMeetingModal, setShowMeetingModal] = useState(false);
-  const [meetingForm, setMeetingForm] = useState<MeetingForm>(EMPTY_MEETING_FORM);
-  const [savingMeeting, setSavingMeeting] = useState(false);
-  const [meetingError, setMeetingError] = useState<string | null>(null);
 
   // ── WhatsApp (Task 3) ──
   const [showWhatsApp, setShowWhatsApp] = useState(false);
@@ -776,69 +754,12 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     }
   }
 
-  // ── Save meeting (Task 1) ──
-  async function saveMeeting() {
-    if (!lead || savingMeeting) return;
-    if (!meetingForm.scheduled_at) {
-      setMeetingError("Informe a data e o horário da reunião.");
-      return;
-    }
-    const when = new Date(meetingForm.scheduled_at);
-    if (isNaN(when.getTime())) {
-      setMeetingError("Data/hora inválida.");
-      return;
-    }
-    // Reunião no passado é quase sempre erro de digitação no datetime-local
-    // (ano/mês errado) — bloqueia com 1 min de tolerância pra "agora".
-    if (when.getTime() < Date.now() - 60_000) {
-      setMeetingError("A data da reunião está no passado — confira o dia e o horário.");
-      return;
-    }
-    setSavingMeeting(true);
-    setMeetingError(null);
-
-    const durationParsed = parseInt(meetingForm.duration_min, 10);
-
-    const { error } = await supabase.from("qs_meetings").insert({
-      lead_id: lead.id,
-      owner_id: currentUser?.id ?? lead.owner_id ?? null,
-      title: meetingForm.title.trim() || null,
-      scheduled_at: new Date(meetingForm.scheduled_at).toISOString(),
-      duration_min: Number.isFinite(durationParsed) && durationParsed > 0 ? durationParsed : 30,
-      location: meetingForm.location.trim() || null,
-      meeting_link: meetingForm.meeting_link.trim() || null,
-      notes: meetingForm.notes.trim() || null,
-      status: "agendada",
-    });
-
-    setSavingMeeting(false);
-
-    if (error) {
-      console.warn("Erro ao agendar reunião:", error);
-      setMeetingError("Não foi possível agendar a reunião: " + error.message);
-      return;
-    }
-
-    // Preenche os campos da reunião no Bitrix e move o negócio pra "Reunião agendada".
-    notifyBitrix("reuniao", {
-      lead_id: lead.id,
-      bitrix_id: lead.bitrix_id,
-      full_name: lead.full_name,
-      title: meetingForm.title.trim() || null,
-      scheduled_at: new Date(meetingForm.scheduled_at).toISOString(),
-      duration_min: Number.isFinite(durationParsed) && durationParsed > 0 ? durationParsed : 30,
-      location: meetingForm.location.trim() || null,
-      meeting_link: meetingForm.meeting_link.trim() || null,
-      notes: meetingForm.notes.trim() || null,
-      scheduled_by: currentUser?.name ?? null,
-      meeting_owner: currentUser?.name ?? null,
-      client_email: lead.email ?? null,
-      booking_date: new Date().toISOString().slice(0, 10),
-    });
-
+  // ── Reunião agendada pelo modal central ──
+  // O insert, a atividade de confirmação e o aviso ao Bitrix são do
+  // ScheduleMeetingModal / lib/qs/meetings.ts. Aqui só recarregamos a aba.
+  async function afterMeetingSaved() {
     await reloadMeetings();
     setShowMeetingModal(false);
-    setMeetingForm(EMPTY_MEETING_FORM);
     setActiveTab("reunioes");
   }
 
@@ -1992,121 +1913,13 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
         </div>
       )}
 
-      {/* Meeting Modal (Task 1) */}
-      {showMeetingModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto p-4 md:p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">Agendar Reunião</h2>
-              <button
-                onClick={() => {
-                  setShowMeetingModal(false);
-                  setMeetingError(null);
-                }}
-                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"
-                aria-label="Fechar"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">Título</label>
-                <input
-                  type="text"
-                  value={meetingForm.title}
-                  onChange={(e) => setMeetingForm((prev) => ({ ...prev, title: e.target.value }))}
-                  placeholder="Ex.: Reunião de apresentação"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Data e hora</label>
-                  <input
-                    type="datetime-local"
-                    value={meetingForm.scheduled_at}
-                    onChange={(e) => setMeetingForm((prev) => ({ ...prev, scheduled_at: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Duração (min)</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={meetingForm.duration_min}
-                    onChange={(e) => setMeetingForm((prev) => ({ ...prev, duration_min: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">Local</label>
-                <input
-                  type="text"
-                  value={meetingForm.location}
-                  onChange={(e) => setMeetingForm((prev) => ({ ...prev, location: e.target.value }))}
-                  placeholder="Ex.: Escritório, Google Meet, telefone..."
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">Link</label>
-                <input
-                  type="url"
-                  value={meetingForm.meeting_link}
-                  onChange={(e) => setMeetingForm((prev) => ({ ...prev, meeting_link: e.target.value }))}
-                  placeholder="https://..."
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">Anotações</label>
-                <textarea
-                  value={meetingForm.notes}
-                  onChange={(e) => setMeetingForm((prev) => ({ ...prev, notes: e.target.value }))}
-                  rows={3}
-                  placeholder="Pauta, contexto ou observações..."
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] resize-none"
-                />
-              </div>
-
-              {meetingError && (
-                <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                  {meetingError}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowMeetingModal(false);
-                  setMeetingError(null);
-                }}
-                className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={saveMeeting}
-                disabled={savingMeeting}
-                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-[#0147FF] hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {savingMeeting ? "Salvando..." : "Agendar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Agendar reunião — modal único do QS (closer + horários livres) */}
+      <ScheduleMeetingModal
+        open={showMeetingModal}
+        onClose={() => setShowMeetingModal(false)}
+        onSaved={() => { void afterMeetingSaved(); }}
+        lead={lead}
+      />
 
       {/* Editar Lead Modal (Sprint 4) */}
       {showEditModal && editForm && (
