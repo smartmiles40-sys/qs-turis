@@ -20,6 +20,13 @@ service_role do `.env` local).
 | 42 reuniões sem `closer_id`; as 19 com closer apontam para **admins**, não closers | `qs_meetings` + `qs_users` |
 | `qs_closer_config` / `_availability` / `_blocks`: **vazias** | consulta direta |
 | **Zero** sobreposições de agenda | comparação de `scheduled_at`/`ends_at` por closer |
+| **11.287 tarefas** (3.158 pendentes · 6.269 concluídas · 1.860 ignoradas) | contagem exata paginada |
+| 598 dos 599 leads abertos **têm** tarefa aberta — a fila está saudável | paginado |
+| **48 tarefas abertas presas em leads já ganhos/perdidos** | paginado |
+| 61 ganhos com **R$ 0** registrado · 819 leads com `estimated_value` vazio | `qs_leads` |
+| **156 dos 159 perdidos sem motivo** | `qs_leads.loss_reason_id` |
+| `job_title`, `company_name`, `city`: **zero** preenchidos em 819 leads | `qs_leads` |
+| **4 metas** cadastradas no sistema inteiro | `qs_goals` |
 
 > Correção de um erro meu: em algum momento reportei "91 sobreposições". Era bug
 > do meu script de medição (comparei horários sem ter buscado a coluna
@@ -111,12 +118,26 @@ atraso" e a Retrospectiva manda limpar. Conserto: extrair `isOverdue()` para
 `workHours.ts` e usar nos quatro. **Esforço: P.**
 
 ### 3.5 Consultas sem paginação — o teto de 1000 do PostgREST
-*(4 revisores)*
-A base está em 815 leads (82% do teto). Quando passar, **corta em silêncio**:
-a lista de leads perde registros e o dedupe do CSV passa a duplicar a base
-(`LeadsPage.tsx:141`, `:212`, `:1456`); os selos "sem contato" e "N obs." do
-painel voltam a piscar em lead já trabalhado (`TasksPanel.tsx:392`, `:445`).
-O helper certo (`fetchAllRows`) já existe e é usado só na fila. **Esforço: P–M.**
+*(4 revisores)* — **severidade elevada depois de medir: não é risco futuro, já está acontecendo**
+
+A tabela `qs_tasks` tem **11.287 linhas**, sendo **6.269 concluídas**. As duas
+consultas do painel que não paginam (`TasksPanel.tsx:392` para `qs_notes` e
+`:445-446` para as concluídas) pedem tudo sem `.range()` — o PostgREST devolve
+**1.000** e não avisa. Ou seja, o painel enxerga **16%** das tarefas concluídas
+hoje, e sem `order` o recorte é arbitrário. Consequência prática já visível: o
+selo pulsante "🔴 N min SEM CONTATO" (`getSlaAlert`, `:202-231`) volta a piscar
+em lead já trabalhado, e o chip "📝 N obs." fica errado.
+
+Os leads (819) ainda estão abaixo do teto — mas a lista de leads, o dedupe do
+cadastro manual e o dedupe do CSV (`LeadsPage.tsx:141`, `:212`, `:1456`) usam o
+mesmo padrão e passam a duplicar a base na próxima importação grande.
+
+> Nota de método: eu mesmo caí neste bug ao medir, e só percebi porque o número
+> contradizia a tela. Se ele engana quem está procurando por ele, engana o painel
+> em silêncio. O helper correto (`fetchAllRows`, `queries.ts:1630`) já existe no
+> repositório e é usado só na fila.
+
+**Esforço: P** (as duas do painel) · **M** (lista de leads com filtro no banco).
 
 ### 3.6 Abrir um lead destrói o contexto de quem estava trabalhando
 *(2 revisores, dores independentes)*
@@ -159,7 +180,11 @@ Conserto: `with check (from_user_id = auth.uid() and qs_owns_lead(lead_id))`.
 
 **Leads / Cadências**
 - Lead sem cadência não gera tarefa **e não é varrido pelo sweep** — entra e
-  morre. Os 188 "não iniciado" são candidatos.
+  morre. ⚠️ **Corrigido depois de medir:** o caminho existe no código, mas **não
+  está acontecendo** — há **0** leads abertos com `cadence_id` nulo e 598 dos 599
+  leads abertos têm tarefa aberta. É risco a fechar, não incêndio. O que **está**
+  acontecendo é o resíduo inverso: **48 tarefas abertas presas em leads já
+  ganhos/perdidos** (o `closeRemainingLeadTasks` falhando calado — ver 3.3).
 - Dedupe por telefone compara dígitos contra base gravada **formatada** — o lead
   do site duplica o cadastrado à mão.
 - Lead que chega fora do expediente ganha **Dia 1 e Dia 2 no mesmo minuto**.
@@ -203,6 +228,74 @@ o limite de 3 MB.
 
 ---
 
+## 5-B. Buracos de produto — o que falta para o time bater meta
+
+Estes não são bugs: o código faz o que foi escrito. O problema é o que nunca foi
+escrito. Todos medidos no banco.
+
+### O sistema não sabe quanto a operação vendeu
+**61 ganhos, zero com valor.** O desfecho "Ganho" no Painel faz
+`update({ status: "ganho" })` e mais nada (`TasksPanel.tsx:785`) — nenhum caminho
+pergunta o valor. E `estimated_value` está vazio nos 819 leads. Enquanto isso,
+três painéis de receita já construídos renderizam R$ 0: pipeline aberto e receita
+ganha (`SdrDashboard.tsx:1424-1425`) e "R$ por fonte + ticket médio"
+(`AdvancedAnalyticsPanel.tsx:633`). Num negócio de ticket alto, "61 ganhos" não
+responde nada — 61 de Amazônia e 61 de Japão são operações diferentes.
+**Um campo no modal que já existe destrava os três painéis. Esforço: P.**
+
+### 156 dos 159 perdidos não têm motivo — e o gráfico mostra os 3
+O "Perdido" do Painel grava sem motivo (`TasksPanel.tsx:796`); a perda automática
+do sweep também (`cadenceSweep.ts:206`). Só o select do detalhe grava, e é
+opcional. O gráfico "Motivos de Perda" filtra `.not("loss_reason_id","is",null)`
+(`SdrDashboard.tsx:137`) — está desenhado sobre **1,9% da amostra** e não avisa.
+"Por que caiu?" é irrespondível, e ~5 perdas novas por dia entram sem causa.
+**Esforço: P.**
+
+### A reunião não tem fechamento
+**45 reuniões com data no passado ainda "agendada".** Nada força o desfecho: sem
+cron, sem trigger, sem workflow. E não existe campo de resultado — `qs_meetings`
+tem 4 status e um `notes` livre, sem "compareceu", "vendeu", "valor". O show-rate
+do gestor divide sobre conjunto vazio. O SDR é cobrado por reunião *agendada*, que
+é o único passo medido — o incentivo aponta para agendar qualquer um.
+**Esforço: M.**
+
+### O CRM ainda veste roupa de B2B
+`job_title`, `company_name` e `city`: **zero preenchidos em 819 leads**. Mesmo
+assim o formulário pede "Cargo — Ex.: Diretor Comercial", "Porte da empresa" e
+"LinkedIn da empresa", o cabeçalho diz "Cargo **na** Empresa"
+(`LeadDetailPage.tsx:1549-1555`) e o Painel tem botão para buscar a pessoa no
+LinkedIn (`TasksPanel.tsx:2004`). O revelador: o cadastro rápido tem um select
+"Produto de interesse" que grava dentro de `company_name`
+(`TasksPanel.tsx:3537-3541`). Faltam os 4 campos que o closer precisa: destino,
+edição/data, nº de viajantes, faixa de orçamento. **Esforço: P** (remover) · **M**
+(campos novos).
+
+### Destino e fonte estão concatenados no mesmo texto livre
+`segment` tem 19 valores distintos: `[Tailândia] - Tráfego` (296),
+`WhatsApp - Agencia Se tu for, eu vou` (133), `[Japão] - Tráfego` (105),
+`[Itália] - Orgânico` (57) e **`UC_2TKBBXv` (44 — ID interno do Bitrix vazando
+para a tela do SDR)**. É o eixo de todos os painéis "por fonte". Resultado:
+"qual expedição converte melhor" não tem resposta, e os painéis produzem 19
+buckets misturando duas dimensões. Separar em `destino` + `fonte` é uma migration
+de backfill. **Esforço: M** — é o campo que transforma um CRM genérico num CRM de
+expedição.
+
+### Nada roda sem alguém abrir o navegador
+`vercel.json` não tem `crons`. O único motor de ciclo de vida (perda automática,
+redirecionamento, fim de cadência) roda no `useEffect` do layout
+(`SdrLayout.tsx:254-263`), **uma vez por sessão**, limitado pela RLS de quem
+logou. Numa segunda antes do primeiro login, nada aconteceu. E nenhum lembrete
+D-1 sai para o cliente — a intervenção mais barata que existe contra no-show.
+**Um endpoint com cron resolve isso e habilita o desfecho de reunião. Esforço: M.**
+
+### Metas: 4 cadastradas no sistema inteiro
+Três de atividades diárias (250, 250, 300) e uma de ganhos. Todo o resto vem de
+constantes no código, e o dashboard **completa quem não tem meta com o default**
+(`SdrDashboard.tsx:803`) — o gestor mede progresso contra números que ninguém
+definiu. **Esforço: P–M.**
+
+---
+
 ## 6. Ordem sugerida
 
 **Onda 1 — hoje/amanhã (P, alto impacto)**
@@ -212,6 +305,9 @@ o limite de 3 MB.
 4. Posse do lead em `/api/chatapp-send` e `/api/bitrix-sync`
 5. Régua única de "atrasada" (3.4)
 6. Toast de erro por cima do de sucesso
+7. Paginar as duas consultas do painel (3.5) — hoje enxergam 16% das concluídas
+8. **Valor no Ganho** e **motivo obrigatório no Perdido** (seção 5-B) — dois
+   campos que destravam os painéis de receita e de causa de perda já construídos
 
 **Onda 2 — esta semana (M)**
 7. Cadastrar os closers e trocar o textarea pela lista real (3.2)
