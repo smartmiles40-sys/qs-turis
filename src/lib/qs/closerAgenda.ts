@@ -193,17 +193,6 @@ export interface AgendaData {
   meetings: Meeting[];
 }
 
-export async function fetchAgendaData(from: Date, to: Date): Promise<AgendaData> {
-  const [closers, configs, availability, blocks, meetings] = await Promise.all([
-    fetchClosers(),
-    fetchCloserConfigs(),
-    fetchAvailability(),
-    fetchBlocks(from, to),
-    fetchMeetingsInRange(from, to),
-  ]);
-  return { closers, configs, availability, blocks, meetings };
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // CÁLCULO DOS SLOTS (puro)
 // ─────────────────────────────────────────────────────────────────────────────

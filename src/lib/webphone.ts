@@ -20,7 +20,7 @@
 // em qs_settings. Ver migration 0013_sip_lines.sql.
 // -----------------------------------------------------------------------------
 
-import { UA, WebSocketInterface } from "jssip";
+import type { UA } from "jssip";
 import { supabase } from "./supabase";
 import { getSetting, setSetting } from "./qsSettings";
 import { normalizePhoneBR, logWhatsApp } from "./whatsapp";
@@ -28,6 +28,15 @@ import { notifyBitrix } from "./qs/bitrixSync";
 
 // Tipo da sessão de chamada (o JsSIP não reexporta RTCSession pelo índice).
 type RTCSession = ReturnType<InstanceType<typeof UA>["call"]>;
+
+// O JsSIP (~250 kB) só entra na página quando alguém REALMENTE usa o webfone:
+// import() dinâmico aqui tira a lib do bundle inicial do app.
+type JsSipModule = typeof import("jssip");
+let jssipMod: JsSipModule | null = null;
+async function loadJsSip(): Promise<JsSipModule> {
+  if (!jssipMod) jssipMod = await import("jssip");
+  return jssipMod;
+}
 
 // ── Config compartilhada (qs_settings — NÃO secreta) ─────────────────────────
 export const SIP_WS_URL_KEY = "sip_ws_url"; // ex.: wss://box49.voxfree.com:5080
@@ -168,10 +177,6 @@ export function subscribeWebphone(cb: (s: WebphoneState) => void): () => void {
   return () => listeners.delete(cb);
 }
 
-export function getWebphoneState(): WebphoneState {
-  return state;
-}
-
 // ── Callback de fim de chamada (desfecho automático no Painel) ───────────────
 export interface CallEndedInfo {
   leadId: string | null;
@@ -240,9 +245,9 @@ function flushWaiters(r: RegResult): void {
 }
 
 /** Cria o UA JsSIP com listeners PERSISTENTES (sobrevivem a reconexões). */
-function buildUa(line: ResolvedSipLine): UA {
-  const socket = new WebSocketInterface(line.wsUrl);
-  const agent = new UA({
+function buildUa(jssip: JsSipModule, line: ResolvedSipLine): UA {
+  const socket = new jssip.WebSocketInterface(line.wsUrl);
+  const agent = new jssip.UA({
     sockets: [socket],
     uri: `sip:${line.authUser}@${line.domain}`,
     authorization_user: line.authUser,
@@ -279,6 +284,7 @@ export async function ensureRegistered(): Promise<RegResult> {
   if (!line) {
     return { ok: false, error: "Seu ramal ainda não foi configurado (Configurações → Webfone WebRTC)." };
   }
+  const jssip = await loadJsSip();
 
   const key = lineKey(line);
   // Linha mudou: derruba o UA antigo e zera o estado de registro.
@@ -311,7 +317,7 @@ export async function ensureRegistered(): Promise<RegResult> {
 
     setState({ status: "registering", error: null });
     try {
-      if (!ua) { uaLineKey = key; ua = buildUa(line); ua.start(); }
+      if (!ua) { uaLineKey = key; ua = buildUa(jssip, line); ua.start(); }
       else { try { ua.register(); } catch { /* re-register best-effort */ } }
     } catch (e) {
       done({ ok: false, error: e instanceof Error ? e.message : "Erro ao iniciar o webfone." });

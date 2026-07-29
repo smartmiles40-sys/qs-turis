@@ -1,5 +1,5 @@
 // src/components/sdr/SdrLayout.tsx — QS (Qualificação System)
-import { useState, useRef, useEffect, Component, type ReactNode } from "react";
+import { useState, useRef, useEffect, Component, lazy, Suspense, type ReactNode } from "react";
 import { useQsAuth, canAccessNav } from "@/contexts/QsAuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 
@@ -55,17 +55,19 @@ class PageErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
     return this.props.children;
   }
 }
-import SdrDashboard from "./dashboard/SdrDashboard";
-import AnalisesPage from "./dashboard/AnalisesPage";
 import RetrospectivaModal from "./tasks/RetrospectivaModal";
-import LeadsPage from "./leads/LeadsPage";
-import LeadDetailPage from "./leads/LeadDetailPage";
-import CadencesPage from "./cadences/CadencesPage";
-import CadenceCreatePage from "./cadences/CadenceCreatePage";
 import TasksPanel from "./tasks/TasksPanel";
-import MeetingsPage from "./meetings/MeetingsPage";
-import SettingsPage from "./settings/SettingsPage";
-import CoveragePanel from "./dashboard/CoveragePanel";
+// As demais telas carregam sob demanda (React.lazy): o SDR abre o app direto no
+// Painel, e o código de Leads/Dashboard/Config etc. só baixa quando navegar.
+const SdrDashboard = lazy(() => import("./dashboard/SdrDashboard"));
+const AnalisesPage = lazy(() => import("./dashboard/AnalisesPage"));
+const LeadsPage = lazy(() => import("./leads/LeadsPage"));
+const LeadDetailPage = lazy(() => import("./leads/LeadDetailPage"));
+const CadencesPage = lazy(() => import("./cadences/CadencesPage"));
+const CadenceCreatePage = lazy(() => import("./cadences/CadenceCreatePage"));
+const MeetingsPage = lazy(() => import("./meetings/MeetingsPage"));
+const SettingsPage = lazy(() => import("./settings/SettingsPage"));
+const CoveragePanel = lazy(() => import("./dashboard/CoveragePanel"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import CommsDock from "./comms/CommsDock";
 import GlobalToasts from "./GlobalToasts";
@@ -613,6 +615,13 @@ export default function SdrLayout() {
 
       {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
       <main className="flex-1 min-h-0 overflow-y-auto">
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-full py-24 text-sm text-gray-400">
+              Carregando…
+            </div>
+          }
+        >
         {activeNav === "painel" && (
           <PageErrorBoundary pageName="Painel de Atividades">
             <TasksPanel onOpenLead={openLeadDetail} />
@@ -675,6 +684,7 @@ export default function SdrLayout() {
             <SettingsPage />
           </PageErrorBoundary>
         )}
+        </Suspense>
       </main>
       </div>
 

@@ -19,7 +19,7 @@
 // -----------------------------------------------------------------------------
 
 import { supabase } from "@/lib/supabase";
-import { getSetting, setSetting } from "@/lib/qsSettings";
+import { getSetting } from "@/lib/qsSettings";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { loadWorkHours, nextWorkMoment, clampToWorkWindow, type WorkHours } from "@/lib/workHours";
 import type { ChannelType, Meeting, MeetingStatus } from "@/components/sdr/types";
@@ -44,10 +44,6 @@ export const DEFAULT_MEETING_CONFIRM: MeetingConfirmConfig = {
 export async function loadMeetingConfirmConfig(): Promise<MeetingConfirmConfig> {
   const saved = await getSetting<Partial<MeetingConfirmConfig>>(MEETING_CONFIRM_KEY);
   return { ...DEFAULT_MEETING_CONFIRM, ...(saved ?? {}) };
-}
-
-export async function saveMeetingConfirmConfig(cfg: MeetingConfirmConfig): Promise<boolean> {
-  return setSetting(MEETING_CONFIRM_KEY, cfg);
 }
 
 // Horário de trabalho é lido uma vez por sessão — a tarefa de confirmação nunca

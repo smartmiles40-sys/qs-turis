@@ -5,8 +5,6 @@ import { planCadenceDates, loadWorkHours, scheduleWeekdays, nextWorkMoment, clam
 import type {
   SdrUser,
   Lead,
-  LeadStatus,
-  LeadSource,
   Task,
   TaskStatus,
   ChannelType,
@@ -17,15 +15,8 @@ import type {
   CadenceActivity,
   AcquisitionChannel,
   Meeting,
-  MeetingStatus,
-  Goal,
-  GoalPeriod,
   Note,
-  Contact,
   LossReason,
-  ChannelConfig,
-  CustomField,
-  CustomFieldScope,
 } from "@/components/sdr/types";
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -47,85 +38,9 @@ export async function fetchQsUsers(): Promise<SdrUser[]> {
   }
 }
 
-export async function fetchQsUser(id: string): Promise<SdrUser | null> {
-  try {
-    const { data, error } = await supabase
-      .from("qs_users")
-      .select("*")
-      .eq("id", id)
-      .single();
-    if (error) throw error;
-    return data as SdrUser;
-  } catch (err) {
-    console.warn("[QS] fetchQsUser failed:", err);
-    return null;
-  }
-}
-
-export async function createQsUser(
-  data: Omit<SdrUser, "id" | "created_at">
-): Promise<SdrUser | null> {
-  try {
-    const { data: row, error } = await supabase
-      .from("qs_users")
-      .insert(data)
-      .select()
-      .single();
-    if (error) throw error;
-    return row as SdrUser;
-  } catch (err) {
-    console.warn("[QS] createQsUser failed:", err);
-    notifyError("Não foi possível criar o usuário — tente novamente.");
-    return null;
-  }
-}
-
-export async function updateQsUser(
-  id: string,
-  data: Partial<Omit<SdrUser, "id" | "created_at">>
-): Promise<SdrUser | null> {
-  try {
-    const { data: row, error } = await supabase
-      .from("qs_users")
-      .update(data)
-      .eq("id", id)
-      .select()
-      .single();
-    if (error) throw error;
-    return row as SdrUser;
-  } catch (err) {
-    console.warn("[QS] updateQsUser failed:", err);
-    notifyError("Não foi possível salvar o usuário — a alteração NÃO foi gravada.");
-    return null;
-  }
-}
-
-export async function deleteQsUser(id: string): Promise<boolean> {
-  try {
-    const { error } = await supabase
-      .from("qs_users")
-      .update({ is_active: false })
-      .eq("id", id);
-    if (error) throw error;
-    return true;
-  } catch (err) {
-    console.warn("[QS] deleteQsUser (soft) failed:", err);
-    notifyError("Não foi possível desativar o usuário.");
-    return false;
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // LEADS
 // ═══════════════════════════════════════════════════════════════════════════════
-
-export interface LeadFilters {
-  status?: LeadStatus;
-  source?: LeadSource;
-  cadence_id?: string;
-  owner_id?: string;
-  search?: string;
-}
 
 // ⚠️ O `!qs_leads_owner_id_fkey` NÃO é enfeite. A tabela qs_wa_pins (migration
 // 0025, sprint do WhatsApp) tem FK pra qs_leads E pra qs_users — com isso o
@@ -135,65 +50,6 @@ export interface LeadFilters {
 // leads virou "Não foi possível carregar os leads — verifique a conexão".
 // Regra: todo embed de qs_users PARTINDO de qs_leads aponta a FK explicitamente.
 export const LEAD_SELECT = "*, owner:qs_users!qs_leads_owner_id_fkey(*), loss_reason:qs_loss_reasons(*)";
-
-export async function fetchQsLeads(filters?: LeadFilters): Promise<Lead[]> {
-  try {
-    let q = supabase
-      .from("qs_leads")
-      .select(LEAD_SELECT)
-      .order("created_at", { ascending: false });
-
-    if (filters?.status) q = q.eq("status", filters.status);
-    if (filters?.source) q = q.eq("source", filters.source);
-    if (filters?.cadence_id) q = q.eq("cadence_id", filters.cadence_id);
-    if (filters?.owner_id) q = q.eq("owner_id", filters.owner_id);
-    if (filters?.search) {
-      q = q.or(
-        `full_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%,company_name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`
-      );
-    }
-
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []) as Lead[];
-  } catch (err) {
-    console.warn("[QS] fetchQsLeads failed:", err);
-    return [];
-  }
-}
-
-export async function fetchQsLead(id: string): Promise<Lead | null> {
-  try {
-    const { data, error } = await supabase
-      .from("qs_leads")
-      .select(LEAD_SELECT)
-      .eq("id", id)
-      .single();
-    if (error) throw error;
-    return data as Lead;
-  } catch (err) {
-    console.warn("[QS] fetchQsLead failed:", err);
-    return null;
-  }
-}
-
-export async function createQsLead(
-  data: Omit<Lead, "id" | "created_at" | "updated_at" | "arrived_at" | "owner" | "loss_reason">
-): Promise<Lead | null> {
-  try {
-    const { data: row, error } = await supabase
-      .from("qs_leads")
-      .insert({ ...data, arrived_at: new Date().toISOString() })
-      .select(LEAD_SELECT)
-      .single();
-    if (error) throw error;
-    return row as Lead;
-  } catch (err) {
-    console.warn("[QS] createQsLead failed:", err);
-    notifyError("Não foi possível criar o lead — tente novamente.");
-    return null;
-  }
-}
 
 export async function updateQsLead(
   id: string,
@@ -235,53 +91,6 @@ export async function deleteQsLead(id: string): Promise<boolean> {
   } catch (err) {
     console.warn("[QS] deleteQsLead failed:", err);
     notifyError("Não foi possível excluir o lead.");
-    return false;
-  }
-}
-
-export async function markLeadGanho(id: string): Promise<Lead | null> {
-  return updateQsLead(id, { status: "ganho" });
-}
-
-export async function markLeadPerdido(
-  id: string,
-  lossReasonId: string
-): Promise<Lead | null> {
-  return updateQsLead(id, { status: "perdido", loss_reason_id: lossReasonId });
-}
-
-export async function handoverLead(
-  leadId: string,
-  fromUserId: string,
-  toUserId: string,
-  briefing: string
-): Promise<boolean> {
-  try {
-    const { error: handoverError } = await supabase
-      .from("qs_handovers")
-      .insert({
-        lead_id: leadId,
-        from_user_id: fromUserId,
-        to_user_id: toUserId,
-        briefing,
-      });
-    if (handoverError) throw handoverError;
-
-    // Só troca o dono — "qualificado" não é um status válido do CHECK do banco
-    // (nao_iniciado | em_prospeccao | ganho | perdido); o status atual é mantido.
-    const { error: leadError } = await supabase
-      .from("qs_leads")
-      .update({
-        owner_id: toUserId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", leadId);
-    if (leadError) throw leadError;
-
-    return true;
-  } catch (err) {
-    console.warn("[QS] handoverLead failed:", err);
-    notifyError("Não foi possível fazer o handover — tente novamente.");
     return false;
   }
 }
@@ -514,53 +323,6 @@ export async function fetchContactBreakdownToday(ownerId?: string | null): Promi
 // TASKS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export interface TaskFilters {
-  owner_id?: string;
-  status?: TaskStatus;
-  channel_type?: ChannelType;
-  priority?: PriorityLevel;
-  date_from?: string;
-  date_to?: string;
-  is_extra?: boolean;
-}
-
-export async function fetchQsTasks(filters?: TaskFilters): Promise<Task[]> {
-  try {
-    let q = supabase
-      .from("qs_tasks")
-      .select("*, lead:qs_leads(*), owner:qs_users(*)")
-      .order("scheduled_at", { ascending: true });
-
-    if (filters?.owner_id) q = q.eq("owner_id", filters.owner_id);
-    if (filters?.status) q = q.eq("status", filters.status);
-    if (filters?.channel_type) q = q.eq("channel_type", filters.channel_type);
-    if (filters?.priority) q = q.eq("priority", filters.priority);
-    if (filters?.is_extra !== undefined) q = q.eq("is_extra", filters.is_extra);
-    if (filters?.date_from) q = q.gte("scheduled_at", filters.date_from);
-    if (filters?.date_to) q = q.lte("scheduled_at", filters.date_to);
-
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []) as Task[];
-  } catch (err) {
-    console.warn("[QS] fetchQsTasks failed:", err);
-    return [];
-  }
-}
-
-export async function fetchQsTasksForToday(ownerId?: string): Promise<Task[]> {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date();
-  todayEnd.setHours(23, 59, 59, 999);
-
-  return fetchQsTasks({
-    owner_id: ownerId,
-    date_from: todayStart.toISOString(),
-    date_to: todayEnd.toISOString(),
-  });
-}
-
 // ── Fila do Painel (pendente + atrasada) — SEM o teto de 1000 ────────────────
 // O Painel derivava "N em FUP", "N atrasadas" e a própria lista de um único
 // SELECT sem paginação: o PostgREST corta em 1000 linhas e a contagem TRAVAVA em
@@ -781,24 +543,6 @@ export async function skipTask(
   }
 }
 
-export async function createExtraTask(
-  data: Omit<Task, "id" | "created_at" | "completed_at" | "lead" | "owner"> & { is_extra: true }
-): Promise<Task | null> {
-  try {
-    const { data: row, error } = await supabase
-      .from("qs_tasks")
-      .insert({ ...data, is_extra: true })
-      .select("*, lead:qs_leads(*), owner:qs_users(*)")
-      .single();
-    if (error) throw error;
-    return row as Task;
-  } catch (err) {
-    console.warn("[QS] createExtraTask failed:", err);
-    notifyError("Não foi possível criar a atividade extra.");
-    return null;
-  }
-}
-
 // Gera as tarefas de um lead a partir dos dias/atividades da cadência.
 // Fonte ÚNICA usada por: cadastro de lead (TasksPanel), importação de CSV e
 // vínculo em massa (LeadsPage) e Reativar Lead (LeadDetailPage) — antes eram
@@ -981,90 +725,6 @@ export async function fetchQsCadence(id: string): Promise<Cadence | null> {
   }
 }
 
-export interface CreateCadencePayload {
-  cadence: Omit<Cadence, "id" | "created_at" | "days" | "owners" | "_leads_count" | "_active_leads_count">;
-  days: {
-    day_number: number;
-    activities: Omit<CadenceActivity, "id" | "cadence_day_id">[];
-  }[];
-  owner_ids: string[];
-}
-
-export async function createQsCadence(
-  payload: CreateCadencePayload
-): Promise<Cadence | null> {
-  try {
-    // 1. Create cadence
-    const { data: cadence, error: cadenceError } = await supabase
-      .from("qs_cadences")
-      .insert(payload.cadence)
-      .select()
-      .single();
-    if (cadenceError) throw cadenceError;
-
-    const cadenceId = (cadence as Cadence).id;
-
-    // 2. Create days
-    if (payload.days.length > 0) {
-      const daysToInsert = payload.days.map((d) => ({
-        cadence_id: cadenceId,
-        day_number: d.day_number,
-      }));
-
-      const { data: days, error: daysError } = await supabase
-        .from("qs_cadence_days")
-        .insert(daysToInsert)
-        .select();
-      if (daysError) throw daysError;
-
-      // 3. Create activities for each day
-      const activitiesToInsert: Omit<CadenceActivity, "id">[] = [];
-      (days as CadenceDay[]).forEach((day, idx) => {
-        const sourceDay = payload.days[idx];
-        sourceDay.activities.forEach((act) => {
-          activitiesToInsert.push({
-            cadence_day_id: day.id,
-            channel_type: act.channel_type,
-            scheduled_time: act.scheduled_time,
-            order_index: act.order_index,
-            // Fix 2026-07-24: o roteiro era descartado aqui — quem usasse esta
-            // função criava cadência com os scripts silenciosamente perdidos.
-            script_text: act.script_text ?? null,
-          });
-        });
-      });
-
-      if (activitiesToInsert.length > 0) {
-        const { error: actError } = await supabase
-          .from("qs_cadence_activities")
-          .insert(activitiesToInsert);
-        if (actError) throw actError;
-      }
-    }
-
-    // 4. Create owners
-    if (payload.owner_ids.length > 0) {
-      const ownersToInsert = payload.owner_ids.map((userId) => ({
-        cadence_id: cadenceId,
-        user_id: userId,
-        rr_pointer: false,
-      }));
-
-      const { error: ownersError } = await supabase
-        .from("qs_cadence_owners")
-        .insert(ownersToInsert);
-      if (ownersError) throw ownersError;
-    }
-
-    // Return the full cadence
-    return fetchQsCadence(cadenceId);
-  } catch (err) {
-    console.warn("[QS] createQsCadence failed:", err);
-    notifyError("Não foi possível criar a cadência — tente novamente.");
-    return null;
-  }
-}
-
 export async function updateQsCadence(
   id: string,
   data: Partial<Omit<Cadence, "id" | "created_at" | "days" | "owners" | "_leads_count" | "_active_leads_count">>
@@ -1164,10 +824,6 @@ export async function unfreezeCadence(id: string): Promise<Cadence | null> {
 // MEETINGS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export interface MeetingFilters {
-  status?: MeetingStatus;
-}
-
 /**
  * Reunião com os vínculos resolvidos. A FK vem EXPLÍCITA porque a migration 0027
  * deu à qs_meetings um segundo vínculo com qs_users (`closer_id`, além de
@@ -1178,42 +834,6 @@ export interface MeetingFilters {
  */
 const MEETING_SELECT =
   "*, lead:qs_leads(*), owner:qs_users!qs_meetings_owner_id_fkey(*), closer:qs_users!qs_meetings_closer_id_fkey(id,name)";
-
-export async function fetchQsMeetings(filters?: MeetingFilters): Promise<Meeting[]> {
-  try {
-    let q = supabase
-      .from("qs_meetings")
-      .select(MEETING_SELECT)
-      .order("scheduled_at", { ascending: true });
-
-    if (filters?.status) q = q.eq("status", filters.status);
-
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []) as Meeting[];
-  } catch (err) {
-    console.warn("[QS] fetchQsMeetings failed:", err);
-    return [];
-  }
-}
-
-export async function createQsMeeting(
-  data: Omit<Meeting, "id" | "created_at" | "lead" | "owner">
-): Promise<Meeting | null> {
-  try {
-    const { data: row, error } = await supabase
-      .from("qs_meetings")
-      .insert(data)
-      .select(MEETING_SELECT)
-      .single();
-    if (error) throw error;
-    return row as Meeting;
-  } catch (err) {
-    console.warn("[QS] createQsMeeting failed:", err);
-    notifyError("Não foi possível agendar a reunião — tente novamente.");
-    return null;
-  }
-}
 
 export async function updateQsMeeting(
   id: string,
@@ -1235,135 +855,13 @@ export async function updateQsMeeting(
   }
 }
 
-export async function cancelMeeting(id: string): Promise<Meeting | null> {
-  return updateQsMeeting(id, { status: "cancelada" });
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // GOALS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export async function fetchQsGoals(
-  ownerId?: string,
-  period?: GoalPeriod
-): Promise<Goal[]> {
-  try {
-    let q = supabase
-      .from("qs_goals")
-      .select("*")
-      .order("period_start", { ascending: false });
-
-    if (ownerId) q = q.eq("owner_id", ownerId);
-    if (period) q = q.eq("period", period);
-
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []) as Goal[];
-  } catch (err) {
-    console.warn("[QS] fetchQsGoals failed:", err);
-    return [];
-  }
-}
-
-export async function createQsGoal(
-  data: Omit<Goal, "id">
-): Promise<Goal | null> {
-  try {
-    const { data: row, error } = await supabase
-      .from("qs_goals")
-      .insert(data)
-      .select()
-      .single();
-    if (error) throw error;
-    return row as Goal;
-  } catch (err) {
-    console.warn("[QS] createQsGoal failed:", err);
-    notifyError("Não foi possível criar a meta.");
-    return null;
-  }
-}
-
-export async function updateQsGoal(
-  id: string,
-  data: Partial<Omit<Goal, "id">>
-): Promise<Goal | null> {
-  try {
-    const { data: row, error } = await supabase
-      .from("qs_goals")
-      .update(data)
-      .eq("id", id)
-      .select()
-      .single();
-    if (error) throw error;
-    return row as Goal;
-  } catch (err) {
-    console.warn("[QS] updateQsGoal failed:", err);
-    notifyError("Não foi possível salvar a meta.");
-    return null;
-  }
-}
-
-export async function deleteQsGoal(id: string): Promise<boolean> {
-  try {
-    const { error } = await supabase
-      .from("qs_goals")
-      .delete()
-      .eq("id", id);
-    if (error) throw error;
-    return true;
-  } catch (err) {
-    console.warn("[QS] deleteQsGoal failed:", err);
-    notifyError("Não foi possível excluir a meta.");
-    return false;
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // NOTES
 // ═══════════════════════════════════════════════════════════════════════════════
-
-export async function fetchQsNotes(leadId: string): Promise<Note[]> {
-  try {
-    const { data, error } = await supabase
-      .from("qs_notes")
-      .select("*")
-      .eq("lead_id", leadId)
-      .order("created_at", { ascending: false });
-    if (error) throw error;
-    return (data ?? []) as Note[];
-  } catch (err) {
-    console.warn("[QS] fetchQsNotes failed:", err);
-    return [];
-  }
-}
-
-export async function createQsNote(
-  leadId: string,
-  authorId: string,
-  body: string,
-  tags?: string[]
-): Promise<Note | null> {
-  try {
-    const insertData: Record<string, unknown> = {
-      lead_id: leadId,
-      author_id: authorId,
-      body,
-    };
-    if (tags !== undefined) insertData.tags = tags;
-
-    const { data, error } = await supabase
-      .from("qs_notes")
-      .insert(insertData)
-      .select()
-      .single();
-    if (error) throw error;
-    return data as Note;
-  } catch (err) {
-    console.warn("[QS] createQsNote failed:", err);
-    notifyError("Não foi possível salvar a observação — tente novamente.");
-    return null;
-  }
-}
 
 // Edita o TEXTO de uma anotação. RLS (0007: notes_update) permite autor ou
 // gestor — pra qualquer outro usuário o banco recusa em SILÊNCIO (0 linhas),
@@ -1418,84 +916,6 @@ export async function deleteQsNote(id: string): Promise<boolean> {
 // type + value + is_primary — não há colunas de nome/cargo.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export async function fetchQsContacts(leadId: string): Promise<Contact[]> {
-  try {
-    const { data, error } = await supabase
-      .from("qs_contacts")
-      .select("*")
-      .eq("lead_id", leadId)
-      .order("created_at", { ascending: true });
-    if (error) throw error;
-    return (data ?? []) as Contact[];
-  } catch (err) {
-    console.warn("[QS] fetchQsContacts failed:", err);
-    return [];
-  }
-}
-
-export async function createQsContact(
-  data: Omit<Contact, "id" | "created_at">
-): Promise<Contact | null> {
-  try {
-    const { data: row, error } = await supabase
-      .from("qs_contacts")
-      .insert(data)
-      .select()
-      .single();
-    if (error) throw error;
-    return row as Contact;
-  } catch (err) {
-    console.warn("[QS] createQsContact failed:", err);
-    notifyError("Não foi possível adicionar o contato — tente novamente.");
-    return null;
-  }
-}
-
-export async function updateQsContact(
-  id: string,
-  data: Partial<Omit<Contact, "id" | "lead_id" | "created_at">>
-): Promise<Contact | null> {
-  try {
-    const { data: rows, error } = await supabase
-      .from("qs_contacts")
-      .update(data)
-      .eq("id", id)
-      .select();
-    if (error) throw error;
-    if (!rows || rows.length === 0) {
-      console.warn("[QS] updateQsContact: banco recusou (RLS/0 linhas) o contato", id);
-      notifyError("Edição recusada pelo banco — a alteração NÃO foi gravada.");
-      return null;
-    }
-    return rows[0] as Contact;
-  } catch (err) {
-    console.warn("[QS] updateQsContact failed:", err);
-    notifyError("Não foi possível salvar o contato — a alteração NÃO foi gravada.");
-    return null;
-  }
-}
-
-export async function deleteQsContact(id: string): Promise<boolean> {
-  try {
-    const { data, error } = await supabase
-      .from("qs_contacts")
-      .delete()
-      .eq("id", id)
-      .select("id");
-    if (error) throw error;
-    if (!data || data.length === 0) {
-      console.warn("[QS] deleteQsContact: banco recusou (RLS/0 linhas) o contato", id);
-      notifyError("Exclusão recusada pelo banco — o contato NÃO foi excluído.");
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.warn("[QS] deleteQsContact failed:", err);
-    notifyError("Não foi possível excluir o contato.");
-    return false;
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // SETTINGS — Loss Reasons
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1515,54 +935,9 @@ export async function fetchLossReasons(): Promise<LossReason[]> {
   }
 }
 
-export async function createLossReason(label: string): Promise<LossReason | null> {
-  try {
-    const { data, error } = await supabase
-      .from("qs_loss_reasons")
-      .insert({ label, is_predefined: false, is_archived: false })
-      .select()
-      .single();
-    if (error) throw error;
-    return data as LossReason;
-  } catch (err) {
-    console.warn("[QS] createLossReason failed:", err);
-    notifyError("Não foi possível criar o motivo de perda.");
-    return null;
-  }
-}
-
-export async function archiveLossReason(id: string): Promise<boolean> {
-  try {
-    const { error } = await supabase
-      .from("qs_loss_reasons")
-      .update({ is_archived: true })
-      .eq("id", id);
-    if (error) throw error;
-    return true;
-  } catch (err) {
-    console.warn("[QS] archiveLossReason failed:", err);
-    notifyError("Não foi possível arquivar o motivo de perda.");
-    return false;
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // SETTINGS — Channel Config
 // ═══════════════════════════════════════════════════════════════════════════════
-
-export async function fetchChannelConfig(): Promise<ChannelConfig[]> {
-  try {
-    const { data, error } = await supabase
-      .from("qs_channel_config")
-      .select("*")
-      .order("type");
-    if (error) throw error;
-    return (data ?? []) as ChannelConfig[];
-  } catch (err) {
-    console.warn("[QS] fetchChannelConfig failed:", err);
-    return [];
-  }
-}
 
 export async function toggleChannel(
   channelType: ChannelType,
@@ -1585,45 +960,6 @@ export async function toggleChannel(
 // ═══════════════════════════════════════════════════════════════════════════════
 // SETTINGS — Custom Fields
 // ═══════════════════════════════════════════════════════════════════════════════
-
-export async function fetchCustomFields(
-  scope?: CustomFieldScope
-): Promise<CustomField[]> {
-  try {
-    let q = supabase
-      .from("qs_custom_fields")
-      .select("*")
-      .eq("is_archived", false)
-      .order("label");
-
-    if (scope) q = q.eq("scope", scope);
-
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []) as CustomField[];
-  } catch (err) {
-    console.warn("[QS] fetchCustomFields failed:", err);
-    return [];
-  }
-}
-
-export async function createCustomField(
-  data: Omit<CustomField, "id" | "is_system" | "is_archived">
-): Promise<CustomField | null> {
-  try {
-    const { data: row, error } = await supabase
-      .from("qs_custom_fields")
-      .insert({ ...data, is_system: false, is_archived: false })
-      .select()
-      .single();
-    if (error) throw error;
-    return row as CustomField;
-  } catch (err) {
-    console.warn("[QS] createCustomField failed:", err);
-    notifyError("Não foi possível criar o campo personalizado.");
-    return null;
-  }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DASHBOARD / STATS
@@ -1790,90 +1126,4 @@ export async function fetchDashboardStats(
     throw err;
   }
 }
-
-export interface LossReasonStat {
-  reason: string;
-  count: number;
-}
-
-export async function fetchLossReasonsStats(): Promise<LossReasonStat[]> {
-  try {
-    const { data, error } = await supabase
-      .from("qs_leads")
-      .select("loss_reason:qs_loss_reasons(label)")
-      .eq("status", "perdido")
-      .not("loss_reason_id", "is", null);
-    if (error) throw error;
-
-    // Aggregate counts by reason label.
-    // O embed do Supabase pode vir como objeto (FK to-one) ou array — normalizamos.
-    const counts = new Map<string, number>();
-    const rows = (data ?? []) as unknown as {
-      loss_reason: { label: string } | { label: string }[] | null;
-    }[];
-    rows.forEach((row) => {
-      const lr = Array.isArray(row.loss_reason) ? row.loss_reason[0] : row.loss_reason;
-      const label = lr?.label ?? "Sem motivo";
-      counts.set(label, (counts.get(label) ?? 0) + 1);
-    });
-
-    return Array.from(counts.entries())
-      .map(([reason, count]) => ({ reason, count }))
-      .sort((a, b) => b.count - a.count);
-  } catch (err) {
-    console.warn("[QS] fetchLossReasonsStats failed:", err);
-    return [];
-  }
-}
-
-export interface LeadsCoverage {
-  leadsWithoutContact: number;
-  totalLeads: number;
-  coveragePercent: number;
-}
-
-export async function fetchLeadsCoverage(): Promise<LeadsCoverage> {
-  try {
-    // Total active leads (not ganho/perdido)
-    const { count: totalLeads, error: totalError } = await supabase
-      .from("qs_leads")
-      .select("id", { count: "exact", head: true })
-      .in("status", ["nao_iniciado", "em_prospeccao"]);
-    if (totalError) throw totalError;
-
-    // Leads without any completed task (no contact)
-    const { data: leadsWithTasks, error: tasksError } = await supabase
-      .from("qs_tasks")
-      .select("lead_id")
-      .eq("status", "concluida");
-    if (tasksError) throw tasksError;
-
-    const contactedLeadIds = new Set(
-      (leadsWithTasks ?? []).map((t: { lead_id: string }) => t.lead_id)
-    );
-
-    const { data: activeLeads, error: activeError } = await supabase
-      .from("qs_leads")
-      .select("id")
-      .in("status", ["nao_iniciado", "em_prospeccao"]);
-    if (activeError) throw activeError;
-
-    const leadsWithoutContact = (activeLeads ?? []).filter(
-      (l: { id: string }) => !contactedLeadIds.has(l.id)
-    ).length;
-
-    const total = totalLeads ?? 0;
-    const coveragePercent = total > 0
-      ? Math.round(((total - leadsWithoutContact) / total) * 100 * 100) / 100
-      : 0;
-
-    return {
-      leadsWithoutContact,
-      totalLeads: total,
-      coveragePercent,
-    };
-  } catch (err) {
-    console.warn("[QS] fetchLeadsCoverage failed:", err);
-    return { leadsWithoutContact: 0, totalLeads: 0, coveragePercent: 0 };
-  }
-}
+

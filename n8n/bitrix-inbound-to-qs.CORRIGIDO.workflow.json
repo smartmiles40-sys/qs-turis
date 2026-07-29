@@ -10,7 +10,7 @@
           "parameters": [
             {
               "name": "x-lead-secret",
-              "value": "08398293d8622dd3f9f24c8578c38918a398b5ce7ec3f853"
+              "value": "PREENCHA_LEAD_INBOUND_SECRET (o valor antigo vazou no git — rotacione na Vercel e cole o NOVO aqui ou use credencial Header Auth)"
             }
           ]
         },

@@ -13,36 +13,17 @@
 // Guia de instalação: docs/SIP.md.
 // -----------------------------------------------------------------------------
 
-import { getSetting, setSetting } from "./qsSettings";
+import { getSetting } from "./qsSettings";
 import { normalizePhoneBR } from "./whatsapp";
 
 export const SIP_ENABLED_KEY = "sip_enabled";
 export const SIP_HOST_KEY = "sip_host";
 export const SIP_USER_KEY = "sip_user";
-export const SIP_PASSWORD_KEY = "sip_password";
 // Prefixo de rota que a operadora (BravoTech) pede na frente do número para
 // completar a ligação — ex.: "1*" ou "01*". Vazio = disca o número puro.
 export const SIP_PREFIX_KEY = "sip_prefix";
 
 export const DEFAULT_SIP_HOST = "sipv2.wavoip.com";
-
-/** true se o admin ligou a discagem por SIP (Configurações → Telefone SIP). */
-export async function isSipEnabled(): Promise<boolean> {
-  return (await getSetting<boolean>(SIP_ENABLED_KEY)) === true;
-}
-
-/** Host do tronco SIP (default sipv2.wavoip.com). */
-export async function getSipHost(): Promise<string> {
-  const h = (await getSetting<string>(SIP_HOST_KEY))?.trim();
-  return h || DEFAULT_SIP_HOST;
-}
-
-/** Monta o URI sip: para o softphone. Número em E.164 sem "+". Sem host = URI
- *  "pelada" (sip:NUMERO), que o softphone disca pela própria conta registrada. */
-export function buildSipUri(phone?: string | null, host?: string): string {
-  const to = normalizePhoneBR(phone);
-  return host ? `sip:${to}@${host}` : `sip:${to}`;
-}
 
 export type SipDialResult = { ok: true; uri: string } | { ok: false; error: string };
 
@@ -109,14 +90,4 @@ export async function getSipRamais(): Promise<SipRamaisMap> {
 export async function getSipRamalForUser(userId: string): Promise<SipRamalInfo | null> {
   const info = (await getSipRamais())[userId];
   return info && info.ramal ? info : null;
-}
-
-/** Salva o mapa usuário→ramal. */
-export async function setSipRamais(map: SipRamaisMap): Promise<boolean> {
-  return setSetting(SIP_RAMAIS_KEY, map);
-}
-
-/** Salva o link do instalador. */
-export async function setSipInstallerUrl(url: string): Promise<boolean> {
-  return setSetting(SIP_INSTALLER_URL_KEY, url.trim());
 }
