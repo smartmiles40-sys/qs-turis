@@ -231,6 +231,10 @@ type RegResult = { ok: boolean; error?: string };
 let ua: UA | null = null;
 let uaLineKey = "";       // identifica a linha registrada; se mudar, recria o UA
 let registered = false;    // reflete o "registered" do JsSIP (some numa reconexão)
+// O WebSocket chegou a abrir? Separa "sua internet/central fora do ar" de
+// "conectei na central e ELA não respondeu ao registro" — a segunda é o caso
+// da pane de 31/07/2026 e não adianta o SDR mexer em senha.
+let wsConnected = false;
 // Quem está esperando o próximo evento de registro (vários cliques concorrentes).
 let registrationWaiters: Array<(r: RegResult) => void> = [];
 
@@ -259,6 +263,7 @@ function buildUa(jssip: JsSipModule, line: ResolvedSipLine): UA {
     register: true,
     session_timers: false, // muitos PABX não usam; evita RE-INVITE desnecessário
   });
+  agent.on("connected", () => { wsConnected = true; });
   agent.on("registered", () => {
     registered = true;
     if (state.status === "registering") setState({ status: "idle", error: null });
@@ -268,9 +273,16 @@ function buildUa(jssip: JsSipModule, line: ResolvedSipLine): UA {
   agent.on("registrationFailed", (e: unknown) => {
     registered = false;
     const cause = (e as { cause?: string })?.cause || "";
-    flushWaiters({ ok: false, error: `Falha ao registrar o ramal${cause ? ` (${cause})` : ""} — confira ramal/senha no VoxFree.` });
+    // A central RESPONDEU e recusou: aí sim é credencial (ou ramal bloqueado).
+    const credencial = /auth|unauthorized|forbidden|not\s*found/i.test(cause);
+    flushWaiters({
+      ok: false,
+      error: credencial
+        ? `A central recusou a credencial do seu ramal${cause ? ` (${cause})` : ""} — confira ramal/senha em Configurações → Webfone WebRTC.`
+        : `A central não aceitou o registro do ramal${cause ? ` (${cause})` : ""} — se repetir, é problema na central (VoxFree), não no QS.`,
+    });
   });
-  agent.on("disconnected", () => { registered = false; });
+  agent.on("disconnected", () => { registered = false; wsConnected = false; });
   return agent;
 }
 
@@ -308,9 +320,16 @@ export async function ensureRegistered(): Promise<RegResult> {
       resolve(r);
     };
     const waiter = (r: RegResult) => done(r);
-    // Timeout de registro (rede/credencial ruim não pode travar o clique).
+    // Timeout de registro (rede/central fora do ar não pode travar o clique).
+    // A mensagem aponta o culpado certo: se o WebSocket abriu, o QS FALOU com a
+    // central e ela é que ficou muda — mexer em senha não resolve.
     const timer = setTimeout(
-      () => done({ ok: false, error: "O ramal não registrou a tempo — confira o WSS/senha (Configurações → Webfone WebRTC)." }),
+      () => done({
+        ok: false,
+        error: wsConnected
+          ? "A central telefônica (VoxFree) não respondeu ao registro do seu ramal. O QS conectou nela, mas ela ficou muda — normalmente é indisponibilidade da operadora. Tente de novo em alguns minutos e avise o suporte se persistir."
+          : "Não foi possível conectar à central telefônica (VoxFree). Confira sua internet; se estiver normal, é a central que está fora do ar.",
+      }),
       12000,
     );
     registrationWaiters.push(waiter);

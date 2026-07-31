@@ -23,10 +23,21 @@ export function onlyDigits(phone?: string | null): string {
 /**
  * Normaliza um telefone para o formato E.164 sem "+" (ex.: 5511999998888),
  * assumindo Brasil quando não vier DDI. Retorna "" se claramente inválido.
+ *
+ * O Bitrix manda o campo do contato com MAIS DE UM número no mesmo texto —
+ * separados por vírgula (" 5519993152056,  551993152056") ou simplesmente
+ * colados ("5547999689893554799689893"). Sem tratar isso, o webfone discava a
+ * sequência inteira e a central devolvia "Rejected". Aqui ficamos com o
+ * PRIMEIRO número da lista, que é o que o Bitrix considera o principal.
  */
 export function normalizePhoneBR(raw?: string | null): string {
-  let d = onlyDigits(raw);
+  // 1) separadores explícitos (vírgula, ponto e vírgula, barra, quebra de linha)
+  const partes = String(raw || "").split(/[,;/|\n]+/).map((p) => onlyDigits(p)).filter(Boolean);
+  let d = partes[0] || onlyDigits(raw);
   if (!d) return "";
+  // 2) números colados sem separador: um E.164 brasileiro tem no máximo 13
+  //    dígitos (55 + DDD + 9 + 8). Mais que isso com DDI 55 = lixo grudado.
+  if (d.startsWith("55") && d.length > 13) d = d.slice(0, d[4] === "9" ? 13 : 12);
   // já veio com DDI 55
   if (d.startsWith("55") && (d.length === 12 || d.length === 13)) return d;
   // número nacional (10 = fixo, 11 = celular com 9) -> prefixa 55
