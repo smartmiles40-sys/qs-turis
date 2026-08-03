@@ -16,7 +16,7 @@
 // -----------------------------------------------------------------------------
 
 import { sendMessageToLead, ChatAppError } from './_chatapp.js';
-import { rest, insert } from './_supabaseAdmin.js';
+import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { assinarComoUsuario, findLeadByPhone, assertCanAccessLead } from './_wa.js';
 
 // Guard-rails do envio (auditoria 2026-07-14):
@@ -68,7 +68,7 @@ export default async function handler(req, res) {
   // pulada e QUALQUER pessoa na internet podia mandar WhatsApp pelo número da
   // agência. Agora fail-CLOSED: sem secret, só o caminho de usuário autenticado.)
   const secret = process.env.INTERNAL_API_SECRET;
-  const bySecret = Boolean(secret) && req.headers['x-internal-secret'] === secret;
+  const bySecret = segredoConfere(req.headers['x-internal-secret'], secret);
   // userId = quem envia (pro rate limit e pro log). Segredo interno → null.
   const userId = bySecret ? null : await getSupabaseUserId(req.headers['authorization']);
   if (!bySecret && !userId) {

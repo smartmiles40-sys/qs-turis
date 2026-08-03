@@ -9,6 +9,8 @@
 // Usa a service_role key (ignora RLS) — só server-side, nunca no browser.
 // -----------------------------------------------------------------------------
 
+import { timingSafeEqual } from 'node:crypto';
+
 function cfg() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -81,4 +83,21 @@ export function insert(table, rows, { returning = true } = {}) {
     body: rows,
     prefer: returning ? 'return=representation' : 'return=minimal',
   });
+}
+
+/**
+ * Compara um segredo recebido com o esperado em tempo constante.
+ *
+ * `a === b` desiste no primeiro byte diferente: o tempo de resposta conta quantos
+ * caracteres do começo estão certos, e um atacante paciente descobre o segredo
+ * byte a byte. Nenhum dos nossos webhooks tem rate limit, então a única defesa é
+ * a comparação não vazar progresso.
+ */
+export function segredoConfere(recebido, esperado) {
+  const a = Buffer.from(String(recebido ?? ''), 'utf8');
+  const b = Buffer.from(String(esperado ?? ''), 'utf8');
+  // timingSafeEqual EXIGE mesmo tamanho (estoura se diferir). O tamanho em si não
+  // é o segredo; o conteúdo é.
+  if (a.length !== b.length || b.length === 0) return false;
+  return timingSafeEqual(a, b);
 }

@@ -228,6 +228,20 @@ function normPhone(v) {
   return d || null;
 }
 
+/**
+ * Valor pronto pra entrar num filtro do PostgREST.
+ *
+ * `encodeURIComponent` não basta: o PostgREST DECODIFICA a querystring antes de
+ * parsear o `or=(…)`, então um `%2C` volta a ser vírgula e vira separador de
+ * condição. Reproduzido contra o banco: `or=(email.eq.joao,silva@x.com)` responde
+ * 400 "failed to parse logic tree" — o dedupe cai no catch e o lead entra
+ * DUPLICADO, calado. Aspas duplas delimitam o valor; dentro delas só `"` e `\`
+ * precisam de escape.
+ */
+function pgValor(v) {
+  return encodeURIComponent(`"${String(v).replace(/["\\]/g, '\\$&')}"`);
+}
+
 // Vocabulário fechado de temperatura (PT + EN). Usado pra achar o score PELO
 // VALOR, sem depender do nome do campo que o Bitrix mandou.
 const TEMP_WORD = /^(quente|morno|frio|hot|warm|cold)$/i;
@@ -357,8 +371,8 @@ export async function createInboundLead(payload) {
     try {
       const since = new Date(Date.now() - 24 * 3600_000).toISOString();
       const ors = [];
-      if (email) ors.push(`email.eq.${encodeURIComponent(email)}`);
-      if (phone) ors.push(`phone.eq.${encodeURIComponent(phone)}`);
+      if (email) ors.push(`email.eq.${pgValor(email)}`);
+      if (phone) ors.push(`phone.eq.${pgValor(phone)}`);
       const dup = await rest(
         `qs_leads?select=*&or=(${ors.join(',')})&created_at=gte.${encodeURIComponent(since)}&limit=1`
       );

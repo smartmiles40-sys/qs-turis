@@ -17,6 +17,7 @@
 // Resposta: { success, lead_id, owner_id, cadence_id, tasks_created }
 // -----------------------------------------------------------------------------
 import { createInboundLead } from './_leads.js';
+import { segredoConfere } from './_supabaseAdmin.js';
 
 // UUID v4 (formato geral de UUID). cadence_id/owner_id inválidos antes iam
 // direto pra querystring do PostgREST e o caller recebia o erro cru do banco.
@@ -36,7 +37,7 @@ export default async function handler(req, res) {
   if (!secret) {
     return res.status(500).json({ success: false, error: 'LEAD_INBOUND_SECRET não configurado no servidor' });
   }
-  if (req.headers['x-lead-secret'] !== secret) {
+  if (!segredoConfere(req.headers['x-lead-secret'], secret)) {
     return res.status(401).json({ success: false, error: 'Não autorizado' });
   }
 

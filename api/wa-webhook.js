@@ -20,6 +20,7 @@
 // -----------------------------------------------------------------------------
 
 import { findLeadByPhone, ingestMessage, WA_INBOX_IDS } from './_wa.js';
+import { segredoConfere } from './_supabaseAdmin.js';
 
 /**
  * O payload do webhook não tem uma forma só: dependendo do evento, a mensagem
@@ -71,7 +72,7 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: 'Webhook não configurado' });
   }
   const sent = String(req.query?.secret || req.headers['x-qs-secret'] || '').trim();
-  if (sent !== secret) {
+  if (!segredoConfere(sent, secret)) {
     // Não loga os valores (é segredo); loga só o suficiente pra saber se é
     // "não mandaram" ou "mandaram diferente".
     console.warn(`[wa-webhook] segredo não confere (recebido: ${sent ? 'presente' : 'ausente'})`);

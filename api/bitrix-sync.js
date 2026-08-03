@@ -22,7 +22,7 @@
 // Sem N8N_SYNC_BASE → responde { code: "not_configured" } e o front ignora.
 // -----------------------------------------------------------------------------
 
-import { rest } from './_supabaseAdmin.js';
+import { rest, segredoConfere } from './_supabaseAdmin.js';
 
 // 'primeiro-contato' (2026-07-28): o SDR conclui a 1ª atividade no QS e o negócio
 // anda sozinho de "Novo lead" para "Follow-up 1" no Bitrix. Quem decide se move é
@@ -83,7 +83,7 @@ export default async function handler(req, res) {
 
   // Autorização SEMPRE exigida (fail-closed).
   const secret = process.env.INTERNAL_API_SECRET;
-  const bySecret = Boolean(secret) && req.headers['x-internal-secret'] === secret;
+  const bySecret = segredoConfere(req.headers['x-internal-secret'], secret);
   const userId = bySecret ? null : await getSupabaseUserId(req.headers['authorization']);
   if (!bySecret && !userId) {
     return res.status(401).json({ success: false, error: 'Não autorizado' });

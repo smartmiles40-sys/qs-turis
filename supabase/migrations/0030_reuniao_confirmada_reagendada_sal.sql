@@ -1,5 +1,5 @@
 -- =============================================================================
--- 0028 — Status de reunião "confirmada" e "reagendada" + o campo SAL
+-- 0030 — Status de reunião "confirmada" e "reagendada" + o campo SAL
 -- =============================================================================
 -- A agenda por especialista (tela Reuniões → Agenda) trabalha com o mesmo
 -- vocabulário do Bitrix, que tem dois estados a mais do que o QS tinha:
@@ -12,6 +12,8 @@
 -- sem ele "reunião realizada" não distingue lead bom de lead ruim.
 --
 -- Idempotente: pode rodar mais de uma vez.
+-- (Nasceu numerada 0028, colidindo com 0028_distribuicao_rodizio; renumerada para
+--  0030 depois de já aplicada. Renomear o arquivo não reaplica nada.)
 -- Depende da 0027 (closer_id / ends_at / trava anti-choque).
 -- =============================================================================
 
@@ -33,7 +35,7 @@ begin
        and pg_get_constraintdef(con.oid) ilike '%agendada%'
   loop
     execute format('alter table qs_meetings drop constraint %I', c.conname);
-    raise notice '[0028] CHECK de status removido: %', c.conname;
+    raise notice '[0030] CHECK de status removido: %', c.conname;
   end loop;
 end $$;
 
@@ -49,7 +51,7 @@ begin
   alter table qs_meetings
     add constraint qs_meetings_sal_check check (sal is null or sal in ('aceito','recusado'));
 exception
-  when duplicate_object then raise notice '[0028] CHECK de sal já existia — ok';
+  when duplicate_object then raise notice '[0030] CHECK de sal já existia — ok';
 end $$;
 
 comment on column qs_meetings.sal is
@@ -78,7 +80,7 @@ begin
     where (closer_id is not null and ends_at is not null and status in ('agendada','confirmada'));
 exception
   when others then
-    raise warning '[0028] trava anti-choque NÃO reaplicada (%). Provável sobreposição já existente entre reuniões agendadas/confirmadas do mesmo especialista — resolva e rode de novo.', sqlerrm;
+    raise warning '[0030] trava anti-choque NÃO reaplicada (%). Provável sobreposição já existente entre reuniões agendadas/confirmadas do mesmo especialista — resolva e rode de novo.', sqlerrm;
 end $$;
 
 -- ── Conferência ─────────────────────────────────────────────────────────────

@@ -413,7 +413,7 @@ export async function setMeetingStatus(
     if (isCheckViolation(error) && STATUS_0028.includes(status)) {
       return {
         ok: false,
-        error: `O banco ainda não aceita o status "${status}". Cole a migration 0028 no Supabase (supabase/migrations/0028_reuniao_confirmada_reagendada_sal.sql).`,
+        error: `O banco ainda não aceita o status "${status}". Cole a migration 0030 no Supabase (supabase/migrations/0030_reuniao_confirmada_reagendada_sal.sql).`,
       };
     }
     return { ok: false, error: `Não foi possível atualizar a reunião: ${error.message}` };
@@ -470,7 +470,7 @@ export async function setMeetingSal(
     if (isMissingSchema(error) || isCheckViolation(error) || /column .*sal/i.test(error.message ?? "")) {
       return {
         ok: false,
-        error: "O campo SAL ainda não existe no banco. Cole a migration 0028 no Supabase (supabase/migrations/0028_reuniao_confirmada_reagendada_sal.sql).",
+        error: "O campo SAL ainda não existe no banco. Cole a migration 0030 no Supabase (supabase/migrations/0030_reuniao_confirmada_reagendada_sal.sql).",
       };
     }
     return { ok: false, error: `Não foi possível salvar o SAL: ${error.message}` };

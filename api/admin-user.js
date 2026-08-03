@@ -10,6 +10,17 @@
 // -----------------------------------------------------------------------------
 import { rest } from './_supabaseAdmin.js';
 
+// Todo id que entra em filtro do PostgREST PRECISA passar por aqui. Sem isto,
+// `qs_users?id=eq.${user.id}` aceitava o ALVO escolhido pelo cliente: um id
+// valendo "0&role=eq.sdr" virava o filtro `id=eq.0&role=eq.sdr` e o PATCH
+// acertava TODOS os SDRs de uma vez (desativar/renomear o time inteiro numa
+// requisição). Exige sessão de admin, mas "só admin" não é contenção: token
+// roubado ou XSS na tela de usuários bastava. Formato de UUID é a fronteira.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function idValido(v) {
+  return typeof v === 'string' && UUID_RE.test(v.trim());
+}
+
 const AUTH_URL = () => `${(process.env.SUPABASE_URL || '').replace(/\/$/, '')}/auth/v1`;
 const SR = () => process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -60,7 +71,7 @@ export default async function handler(req, res) {
 
   // 1) Autenticação do chamador
   const callerId = await verifyCaller(access_token);
-  if (!callerId) return res.status(401).json({ success: false, error: 'Sessão inválida' });
+  if (!callerId || !idValido(callerId)) return res.status(401).json({ success: false, error: 'Sessão inválida' });
 
   // 2) Autorização: precisa ser admin
   try {
@@ -115,7 +126,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'update') {
-      if (!user?.id) return res.status(400).json({ success: false, error: 'Informe o id' });
+      if (!idValido(user?.id)) return res.status(400).json({ success: false, error: 'Informe um id válido' });
       // A6: o chamador (admin verificado acima) não pode se desativar nem
       // rebaixar o próprio papel — ficaria trancado pra fora do sistema.
       if (user.id === callerId) {
@@ -146,7 +157,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'delete') {
-      if (!user?.id) return res.status(400).json({ success: false, error: 'Informe o id' });
+      if (!idValido(user?.id)) return res.status(400).json({ success: false, error: 'Informe um id válido' });
       if (user.id === callerId) return res.status(400).json({ success: false, error: 'Você não pode excluir a si mesmo' });
       // ORDEM IMPORTA: a conta de AUTH sai PRIMEIRO. Na ordem antiga (perfil →
       // auth "best-effort"), se o delete do auth falhasse sobrava uma credencial
