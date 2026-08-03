@@ -1,0 +1,106 @@
+{
+  "name": "QS → Google Meet (agenda dos closers)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-agenda-meet",
+        "authentication": "headerAuth",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "meet-webhook-0001",
+      "name": "Webhook QS (qs-agenda-meet)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "webhookId": "qs-agenda-meet-0001",
+      "notesInFlow": true,
+      "notes": "Header Auth: nome x-qs-agenda-secret, valor = o mesmo da env N8N_AGENDA_SECRET na Vercel. Use a URL de PRODUÇÃO (/webhook/), não a de teste — e deixe o workflow ATIVO."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-cal-0001",
+              "name": "CALENDAR_ID",
+              "type": "string",
+              "value": "primary"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "meet-config-0002",
+      "name": "Config da agenda",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [660, 300],
+      "notesInFlow": true,
+      "notes": "CALENDAR_ID = 'primary' cria na agenda da conta Google conectada aqui no n8n (a agenda da OPERAÇÃO). Os closers entram como convidados e o evento cai na agenda deles ao aceitar. Se a agência tiver Google Workspace com delegação, dá pra trocar pelo e-mail do closer."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monta o corpo do evento do Google Calendar.\n//\n// conferenceData.createRequest é o que faz o Google GERAR o link do Meet. Sem\n// ele o evento nasce sem sala; sem o parâmetro conferenceDataVersion=1 na URL\n// (ver o nó seguinte) o Google IGNORA este bloco em silêncio — o evento é criado\n// certinho, só que sem Meet nenhum, e o sintoma é \"cadê o link?\".\n//\n// requestId precisa ser único por evento: reenviar o MESMO requestId devolve a\n// mesma sala em vez de criar outra.\nconst b = $('Webhook QS (qs-agenda-meet)').first().json.body || {};\nconst cfg = $('Config da agenda').first().json;\n\nif (!b.inicio || !b.fim) {\n  throw new Error('QS mandou reunião sem início/fim — evento não criado.');\n}\n\nconst convidados = Array.isArray(b.convidados) ? b.convidados.filter(Boolean) : [];\n\nreturn [{ json: {\n  calendarId: cfg.CALENDAR_ID || 'primary',\n  meeting_id: b.meeting_id,\n  evento: {\n    summary: b.titulo || 'Reunião',\n    description: b.descricao || '',\n    start: { dateTime: b.inicio, timeZone: b.timezone || 'America/Sao_Paulo' },\n    end:   { dateTime: b.fim,    timeZone: b.timezone || 'America/Sao_Paulo' },\n    attendees: convidados.map((email) => ({ email })),\n    conferenceData: {\n      createRequest: {\n        requestId: 'qs-' + String(b.meeting_id || Date.now()),\n        conferenceSolutionKey: { type: 'hangoutsMeet' }\n      }\n    },\n    reminders: { useDefault: false, overrides: [ { method: 'popup', minutes: 30 }, { method: 'email', minutes: 60 } ] }\n  }\n} }];"
+      },
+      "id": "meet-montar-0003",
+      "name": "Montar evento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($json.calendarId) }}/events?conferenceDataVersion=1&sendUpdates=all",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.evento) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "meet-criar-0004",
+      "name": "Criar evento no Google",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "conferenceDataVersion=1 é OBRIGATÓRIO — sem ele o Google ignora o pedido de Meet sem reclamar. sendUpdates=all faz o convite chegar por e-mail no closer e no cliente. Credencial: Google Calendar OAuth2, conta da operação."
+    },
+    {
+      "parameters": {
+        "jsCode": "// O nó acima segue em frente mesmo com erro (onError) pra este nó poder dar uma\n// mensagem que se entende. Sem isto, uma recusa do Google viraria execução verde\n// e o sintoma seria \"marquei ganho e não apareceu nada na agenda\".\nconst r = $input.first().json;\nconst montado = $('Montar evento').first().json;\n\nif (!r || r.error) {\n  const e = r && r.error;\n  const msg = (e && (e.message || e.status)) || 'resposta vazia';\n  throw new Error('Google recusou a criação do evento: ' + msg);\n}\nif (!r.id) {\n  throw new Error('Google respondeu sem id de evento.');\n}\n\n// hangoutLink é o link do Meet. Ele NÃO vem quando falta conferenceDataVersion=1\n// ou quando a conta não tem permissão de criar conferência — devolvemos assim\n// mesmo (o evento existe), e o QS mostra a reunião sem sala em vez de quebrar.\nconst meet = r.hangoutLink\n  || (r.conferenceData && r.conferenceData.entryPoints || []).filter((p) => p.entryPointType === 'video').map((p) => p.uri)[0]\n  || null;\n\nreturn [{ json: {\n  ok: true,\n  meeting_id: montado.meeting_id,\n  event_id: r.id,\n  meet_link: meet,\n  html_link: r.htmlLink || null\n} }];"
+      },
+      "id": "meet-conferir-0005",
+      "name": "Conferir resposta do Google",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 300]
+    }
+  ],
+  "connections": {
+    "Webhook QS (qs-agenda-meet)": {
+      "main": [[{ "node": "Config da agenda", "type": "main", "index": 0 }]]
+    },
+    "Config da agenda": {
+      "main": [[{ "node": "Montar evento", "type": "main", "index": 0 }]]
+    },
+    "Montar evento": {
+      "main": [[{ "node": "Criar evento no Google", "type": "main", "index": 0 }]]
+    },
+    "Criar evento no Google": {
+      "main": [[{ "node": "Conferir resposta do Google", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}

@@ -21,6 +21,7 @@ import {
   WA_TEMPLATES,
 } from "@/lib/whatsapp";
 import { dialViaWavoip } from "@/lib/wavoip";
+import { confirmar } from "@/lib/qs/confirmar";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { assinarTexto, loadSignatureName } from "@/lib/qs/waSignature";
 
@@ -137,6 +138,17 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
 
   async function handleWebfoneCall() {
     if (!dialable || calling) return;
+    // Mesma confirmação da fila: a chamada toca no telefone do cliente, então
+    // ela nunca sai de um clique só.
+    const ok = await confirmar({
+      titulo: "Você confirma querer ligar via WhatsApp?",
+      mensagem: `A chamada vai tocar agora${lead.name ? ` para ${lead.name}` : ""}${
+        lead.phone ? ` (${formatPhoneDisplay(lead.phone)})` : ""
+      }.`,
+      confirmarLabel: "Confirmar e ligar",
+      recusarLabel: "Recusar",
+    });
+    if (!ok) return;
     setCalling(true);
     // O log da ligação sai automaticamente no fim (call:ended) com desfecho+duração
     // — ver setupCallLogging em @/lib/wavoip; por isso não gravamos "pending" aqui.

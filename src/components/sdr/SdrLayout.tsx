@@ -75,6 +75,7 @@ const CoveragePanel = lazyPagina(() => import("./dashboard/CoveragePanel"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import CommsDock from "./comms/CommsDock";
 import GlobalToasts from "./GlobalToasts";
+import ConfirmDialog from "./ConfirmDialog";
 import CommandPalette from "./CommandPalette";
 import { toggleWebphone } from "@/lib/wavoip";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
@@ -698,6 +699,7 @@ export default function SdrLayout() {
 
       {/* Toasts globais (erros de gravação, confirmações) */}
       <GlobalToasts />
+      <ConfirmDialog />
 
       {/* Busca global Ctrl+K */}
       <CommandPalette onOpenLead={openLeadDetail} />

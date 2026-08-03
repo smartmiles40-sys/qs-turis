@@ -13,6 +13,8 @@ import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { createMeeting } from "@/lib/qs/meetings";
 import { findUserIdByName } from "@/lib/qs/closerAgenda";
+import { confirmar } from "@/lib/qs/confirmar";
+import { criarEventoNoGoogle } from "@/lib/qs/googleMeet";
 import { notifyError } from "@/lib/qs/notify";
 import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, fetchNoteCountsByLead, fetchContactedLeadIds, fetchLossReasons, type CadenceScriptRow, type ContactBreakdownRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
@@ -1169,6 +1171,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         );
         return;
       }
+      // ── Google Meet automático ────────────────────────────────────────────
+      // A reunião JÁ está gravada aqui; o evento no Google é o passo seguinte,
+      // não uma condição. Por isso nada abaixo pode abortar o Ganho: integração
+      // desligada não diz nada, e falha vira aviso — a reunião continua de pé e
+      // o SDR pode mandar o link na mão.
+      if (res.meeting?.id) {
+        const meet = await criarEventoNoGoogle(res.meeting.id);
+        if (meet.ok && meet.meetLink) {
+          showToast("Reunião criada com sala do Google Meet — convite enviado ao closer e ao cliente.");
+        } else if (!meet.ok && !meet.desligado) {
+          failures.push(`o convite do Google não foi criado (${meet.aviso}) — mande o link da reunião na mão`);
+        }
+      }
+
       if (meeting.emailCliente) {
         const { error: mailErr } = await supabase.from("qs_leads").update({ email: meeting.emailCliente }).eq("id", leadId);
         if (mailErr) {
@@ -1935,6 +1951,23 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     selectActive(task.id);
   }
 
+  /**
+   * Pergunta antes de discar. A ligação toca no telefone de um cliente de
+   * verdade: na fila os botões ficam a um toque de distância um do outro, e um
+   * clique errado (ou o dedo no celular) não pode virar uma chamada.
+   * Recusar simplesmente não faz nada.
+   */
+  async function confirmarLigacao(phone?: string | null, leadName?: string | null): Promise<boolean> {
+    return confirmar({
+      titulo: "Você confirma querer ligar via WhatsApp?",
+      mensagem: `A chamada vai tocar agora${leadName ? ` para ${leadName}` : ""}${
+        phone ? ` (${formatPhoneDisplay(phone)})` : ""
+      }.`,
+      confirmarLabel: "Confirmar e ligar",
+      recusarLabel: "Recusar",
+    });
+  }
+
   // Liga pelo WEBFONE (Wavoip) — TODA ligação do sistema sai por aqui.
   // Sem fallback pra WhatsApp externo: se o webfone não estiver configurado,
   // o SDR vê o erro na tela (e configura o token em Config → Webfone).
@@ -1942,6 +1975,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     phone?: string | null,
     opts?: { leadName?: string | null; leadId?: string | null },
   ) {
+    if (!(await confirmarLigacao(phone, opts?.leadName))) return;
     const r = await dialViaWavoip(phone, {
       displayName: opts?.leadName ?? undefined,
       leadName: opts?.leadName ?? undefined,
@@ -1959,6 +1993,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // conversa do lead no WhatsApp — o botão de ligar do WhatsApp fica a 1 toque
   // (fallback universal que sempre funciona, sem depender de setup).
   async function callViaWhatsApp(phone?: string | null, opts?: { leadName?: string | null; leadId?: string | null }) {
+    if (!(await confirmarLigacao(phone, opts?.leadName))) return;
     const token = await getWavoipToken();
     if (token) {
       const r = await dialViaWavoip(phone, {
@@ -1981,6 +2016,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // softphone (BravoTech/SIP) instalado no PC — a ligação acontece fora do
   // navegador e o SDR registra o desfecho na mão.
   async function callViaSip(phone?: string | null, opts?: { leadName?: string | null; leadId?: string | null }) {
+    // Mesma trava do WhatsApp: o canal muda, mas o telefone do cliente toca igual.
+    const ok = await confirmar({
+      titulo: "Você confirma querer ligar por telefone?",
+      mensagem: `A chamada vai tocar agora${opts?.leadName ? ` para ${opts.leadName}` : ""}${
+        phone ? ` (${formatPhoneDisplay(phone)})` : ""
+      }.`,
+      confirmarLabel: "Confirmar e ligar",
+      recusarLabel: "Recusar",
+    });
+    if (!ok) return;
     if (await isWebphoneConfigured()) {
       showToast("Ligando pelo webfone…");
       const r = await dialViaWebphone(phone, {
