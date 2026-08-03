@@ -13,9 +13,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { setMeetingStatus, deleteMeeting } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, deleteMeeting } from "@/lib/qs/meetings";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
-import { MEETING_STATUS_LABELS, type Meeting, type MeetingStatus } from "../types";
+import { MEETING_STATUS_LABELS, type Meeting, type MeetingSal, type MeetingStatus } from "../types";
 import { hhmm, WEEKDAY_LONG, MONTH_LONG } from "@/lib/qs/calendarLayout";
 
 function statusClasses(status: MeetingStatus): string {
@@ -92,6 +92,22 @@ export default function MeetingDetailModal({
     notifySuccess(`Reunião marcada como ${MEETING_STATUS_LABELS[status].toLowerCase()}.`);
     onChanged();
     onClose();
+  }
+
+  async function marcarSal(sal: MeetingSal) {
+    if (!meeting) return;
+    // Clicar de novo no que já está marcado desmarca — é o único jeito de
+    // desfazer um clique errado sem ter que reabrir a reunião de outro lugar.
+    const alvo = meeting.sal === sal ? null : sal;
+    setBusy(true);
+    const res = await setMeetingSal(meeting, alvo, currentUser?.id ?? null, meeting.lead?.bitrix_id);
+    setBusy(false);
+    if (!res.ok) {
+      notifyError(res.error);
+      return;
+    }
+    notifySuccess(alvo ? `Lead ${alvo} pelo especialista.` : "SAL desmarcado.");
+    onChanged();
   }
 
   async function excluir() {
@@ -217,7 +233,9 @@ export default function MeetingDetailModal({
 
         {podeMexer ? (
           <div className="px-5 py-4 border-t border-gray-100 space-y-2">
-            {meeting.status === "agendada" && (
+            {/* "Confirmada" também é reunião que ainda vai acontecer: o desfecho
+                tem que estar aqui, senão ela nunca fecha por esta tela. */}
+            {(meeting.status === "agendada" || meeting.status === "confirmada") && (
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => mudarStatus("realizada")}
@@ -233,6 +251,50 @@ export default function MeetingDetailModal({
                 >
                   No-show
                 </button>
+              </div>
+            )}
+
+            {meeting.status === "agendada" && (
+              <button
+                onClick={() => mudarStatus("confirmada")}
+                disabled={busy}
+                className="w-full py-2 rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-700 text-sm font-semibold hover:bg-cyan-100 disabled:opacity-50"
+              >
+                Cliente confirmou presença
+              </button>
+            )}
+
+            {/* SAL: o funil só fecha quando o especialista diz se o lead prestava.
+                Mesma pergunta da tela de Agendamento — quem clica na reunião pelo
+                mês não deveria ter que trocar de aba pra responder. */}
+            {meeting.status === "realizada" && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                  Lead aceito (SAL)
+                </p>
+                <div className="mt-2 flex gap-2">
+                  {([
+                    { valor: "aceito" as const, rotulo: "Aceito", cor: "#059669" },
+                    { valor: "recusado" as const, rotulo: "Recusado", cor: "#DC2626" },
+                  ]).map((op) => {
+                    const on = meeting.sal === op.valor;
+                    return (
+                      <button
+                        key={op.valor}
+                        onClick={() => marcarSal(op.valor)}
+                        disabled={busy}
+                        className="flex-1 rounded-lg border py-1.5 text-xs font-bold transition disabled:opacity-50"
+                        style={{
+                          borderColor: on ? op.cor : "#E5E7EB",
+                          background: on ? `${op.cor}18` : "transparent",
+                          color: on ? op.cor : "#6B7280",
+                        }}
+                      >
+                        {op.rotulo}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
             <div className="grid grid-cols-2 gap-2">

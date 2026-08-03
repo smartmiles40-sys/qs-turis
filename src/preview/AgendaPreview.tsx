@@ -3,17 +3,20 @@
 // Página de PREVIEW LOCAL da agenda por especialista, servida em
 // http://localhost:3000/agenda-preview.html no `npm run dev`.
 //
-// Renderiza o AgendaClosers REAL com dados de mentira (prop `demo`): sem login,
-// sem banco e sem gravar nada. Serve pra ver o layout — inclusive os casos
-// chatos: reunião sobreposta, reunião pendente de desfecho, coluna herdada do
-// texto livre e fora-do-expediente hachurado.
+// Renderiza as DUAS telas reais com dados de mentira (prop `demo`): sem login,
+// sem banco e sem gravar nada.
+//   • Agendamento — o dia por especialista, com os casos chatos: reunião
+//     sobreposta, pendente de desfecho, coluna herdada do texto livre e
+//     fora-do-expediente hachurado.
+//   • Agenda — o mês inteiro, com reuniões espalhadas pelas semanas.
 // Nada disso entra no build de produção (o build só empacota o index.html).
 // -----------------------------------------------------------------------------
 
-import { StrictMode } from "react";
+import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../index.css";
 import AgendaClosers, { type AgendaDemo } from "../components/sdr/agenda/AgendaClosers";
+import AgendaMes from "../components/sdr/agenda/AgendaMes";
 import type { Meeting, MeetingSal, MeetingStatus, SdrUser } from "../components/sdr/types";
 
 const hoje = new Date();
@@ -100,13 +103,89 @@ const DEMO: AgendaDemo = {
   ],
 };
 
+// ── Mês: as mesmas reuniões, espalhadas pelas semanas ───────────────────────
+// A visão de mês só mostra o que interessa nela (volume, quem, e o que passou
+// sem desfecho), então o demo precisa de dias diferentes — não só "hoje".
+
+function noDia(offsetDias: number, h: number, min = 0): string {
+  const d = new Date(hoje);
+  d.setDate(d.getDate() + offsetDias);
+  d.setHours(h, min, 0, 0);
+  return d.toISOString();
+}
+
+const DEMO_MES: AgendaDemo = {
+  ...DEMO,
+  meetings: [
+    ...DEMO.meetings,
+    // Passado sem desfecho: é o alerta âmbar que a tela precisa gritar.
+    { ...reuniao("c1", "Karine Ribeiro", 10, 0, 60, "agendada"), id: "x1", scheduled_at: noDia(-6, 10), ends_at: noDia(-6, 11) },
+    { ...reuniao("c2", "Elias Furtado", 15, 0, 60, "confirmada"), id: "x2", scheduled_at: noDia(-3, 15), ends_at: noDia(-3, 16) },
+    // Passado resolvido
+    { ...reuniao("c3", "Simone Vieira", 9, 0, 60, "realizada", { sal: "aceito" }), id: "x3", scheduled_at: noDia(-8, 9), ends_at: noDia(-8, 10) },
+    { ...reuniao("c1", "Otávio Prado", 16, 0, 60, "no_show"), id: "x4", scheduled_at: noDia(-2, 16), ends_at: noDia(-2, 17) },
+    // Futuro
+    { ...reuniao("c2", "Larissa Amaral", 11, 0, 60, "agendada", { link: true }), id: "x5", scheduled_at: noDia(2, 11), ends_at: noDia(2, 12) },
+    { ...reuniao("c3", "Rafael Nunes", 14, 0, 60, "agendada"), id: "x6", scheduled_at: noDia(2, 14), ends_at: noDia(2, 15) },
+    { ...reuniao("c1", "Priscila Tavares", 9, 30, 60, "confirmada"), id: "x7", scheduled_at: noDia(2, 9, 30), ends_at: noDia(2, 10, 30) },
+    // Dia lotado: dispara o "+N mais"
+    { ...reuniao("c1", "Cliente A", 8, 0, 30, "agendada"), id: "x8", scheduled_at: noDia(5, 8), ends_at: noDia(5, 8) },
+    { ...reuniao("c2", "Cliente B", 9, 0, 30, "agendada"), id: "x9", scheduled_at: noDia(5, 9), ends_at: noDia(5, 9) },
+    { ...reuniao("c3", "Cliente C", 10, 0, 30, "agendada"), id: "x10", scheduled_at: noDia(5, 10), ends_at: noDia(5, 10) },
+    { ...reuniao(null, "Cliente D", 11, 0, 30, "agendada", { owner: "Victor Maldonado" }), id: "x11", scheduled_at: noDia(5, 11), ends_at: noDia(5, 11) },
+    { ...reuniao("c1", "Cliente E", 12, 0, 30, "agendada"), id: "x12", scheduled_at: noDia(5, 12), ends_at: noDia(5, 12) },
+    // Semana seguinte
+    { ...reuniao("c2", "Heloísa Braga", 17, 0, 60, "agendada"), id: "x13", scheduled_at: noDia(9, 17), ends_at: noDia(9, 18) },
+    { ...reuniao("c3", "Wanderson Luz", 13, 0, 60, "cancelada"), id: "x14", scheduled_at: noDia(12, 13), ends_at: noDia(12, 14) },
+  ],
+};
+
+function Preview() {
+  const [tela, setTela] = useState<"agendamento" | "agenda">("agenda");
+  // Mesmo encanamento da MeetingsPage: o dia clicado no mês reposiciona o dia.
+  const [dia, setDia] = useState<Date | null>(null);
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+          {([
+            { id: "agendamento", label: "Agendamento (dia)" },
+            { id: "agenda", label: "Agenda (mês)" },
+          ] as const).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTela(t.id)}
+              className={`rounded-md px-3.5 py-1.5 text-sm font-semibold transition ${
+                tela === t.id ? "bg-[#0147FF] text-white" : "text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-sm text-gray-500">Preview local — dados de mentira, nada é gravado.</p>
+      </div>
+
+      {tela === "agendamento" ? (
+        <AgendaClosers
+          demo={DEMO}
+          dataInicial={dia}
+          onOpenLead={(id) => console.log("[preview] abrir lead", id)}
+        />
+      ) : (
+        <AgendaMes
+          demo={DEMO_MES}
+          onAbrirDia={(d) => { setDia(d); setTela("agendamento"); }}
+          onOpenLead={(id) => console.log("[preview] abrir lead", id)}
+        />
+      )}
+    </div>
+  );
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <div className="min-h-screen bg-gray-50 p-4">
-      <p className="mb-3 text-sm text-gray-500">
-        Preview local da <b>Agenda por especialista</b> — dados de mentira, nada é gravado.
-      </p>
-      <AgendaClosers demo={DEMO} onOpenLead={(id) => console.log("[preview] abrir lead", id)} />
-    </div>
+    <Preview />
   </StrictMode>
 );

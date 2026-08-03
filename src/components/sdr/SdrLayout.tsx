@@ -123,7 +123,7 @@ const MENU: (MenuGroup | MenuItem)[] = [
     items: [
       { id: "leads", label: "Leads", description: "Cadastro e gestão de leads" },
       { id: "cadencias", label: "Cadências", description: "Fluxos de prospecção" },
-      { id: "reunioes", label: "Reuniões", description: "Gestão de reuniões + Agenda dos closers" },
+      { id: "reunioes", label: "Reuniões", description: "Lista, Agendamento do dia e Agenda do mês" },
     ],
   },
   {

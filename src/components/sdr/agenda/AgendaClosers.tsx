@@ -104,13 +104,13 @@ function dataLonga(d: Date): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function fimDe(m: Meeting): Date {
+export function fimDe(m: Meeting): Date {
   if (m.ends_at) return new Date(m.ends_at);
   return new Date(new Date(m.scheduled_at).getTime() + (m.duration_min ?? 30) * 60_000);
 }
 
 /** Terminou e ninguém disse no que deu — o número que expõe o funil furado. */
-function pendente(m: Meeting, agora: Date): boolean {
+export function pendente(m: Meeting, agora: Date): boolean {
   return VIVAS.includes(m.status) && fimDe(m) < agora;
 }
 
@@ -182,8 +182,9 @@ interface Coluna {
   agendavel: boolean;
 }
 
-/** A que coluna esta reunião pertence. */
-function chaveDaColuna(m: Meeting): string {
+/** A que coluna esta reunião pertence. Também é a chave do especialista na
+ *  visão de mês — as duas telas precisam concordar sobre "de quem é isto". */
+export function chaveDaColuna(m: Meeting): string {
   if (m.closer_id) return m.closer_id;
   const nome = (m.closer?.name || m.meeting_owner || "").trim();
   return nome ? `nome:${nome.toLowerCase()}` : "sem";
@@ -202,14 +203,25 @@ export interface AgendaDemo {
 
 interface AgendaClosersProps {
   onOpenLead?: (leadId: string) => void;
+  /** Dia que a tela deve abrir — é assim que o clique num dia da Agenda (mês)
+   *  chega aqui. Trocar o valor REPOSICIONA a tela; navegar depois é livre. */
+  dataInicial?: Date | null;
   /** Em produção nunca é passado: liga o modo preview (sem banco, sem gravação). */
   demo?: AgendaDemo;
 }
 
-export default function AgendaClosers({ onOpenLead, demo }: AgendaClosersProps) {
+export default function AgendaClosers({ onOpenLead, dataInicial, demo }: AgendaClosersProps) {
   const { currentUser } = useQsAuth();
 
-  const [dia, setDia] = useState<Date>(() => startOfDay(new Date()));
+  const [dia, setDia] = useState<Date>(() => startOfDay(dataInicial ?? new Date()));
+
+  // Vem da Agenda do mês: cada clique num dia manda um Date novo. Comparo pelo
+  // TEMPO, e não pela referência, senão um re-render do pai jogaria o SDR de
+  // volta pro dia clicado enquanto ele navega com as setas.
+  const dataInicialMs = dataInicial ? startOfDay(dataInicial).getTime() : null;
+  useEffect(() => {
+    if (dataInicialMs !== null) setDia(new Date(dataInicialMs));
+  }, [dataInicialMs]);
   const [zoom, setZoom] = useState(1);
   const [filtro, setFiltro] = useState<"todas" | "pendentes" | MeetingStatus>("todas");
   const [agora, setAgora] = useState(new Date());
