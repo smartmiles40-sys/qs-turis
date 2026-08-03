@@ -781,8 +781,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       // 2. Desfecho: ganho/perdido encerram o lead; qualquer outro gera o próximo passo.
       const desfechoLead = getLeadForTask(currentTask);
       if (result === "ganho") {
-        const { error: updErr } = await supabase.from("qs_leads").update({ status: "ganho" }).eq("id", currentTask.lead_id);
-        if (updErr) {
+        // MEDIDO com .select(), igual ao "perdido" logo abaixo: sob RLS a recusa
+        // volta 0 linhas SEM erro (lead que trocou de dono com a aba aberta, lead
+        // órfão). Sem medir, o QS avisava o Bitrix "ganho", encerrava as
+        // atividades e cantava vitória com o lead ainda aberto no banco.
+        const { data: ganhoRows, error: updErr } = await supabase
+          .from("qs_leads")
+          .update({ status: "ganho" })
+          .eq("id", currentTask.lead_id)
+          .select("id");
+        if (updErr || !ganhoRows || ganhoRows.length === 0) {
           notifyError("A atividade foi concluída, mas o lead NÃO foi marcado como ganho — marque pelo perfil do lead.");
           setTasks(prev => prev.filter(t => t.id !== taskId));
           return;

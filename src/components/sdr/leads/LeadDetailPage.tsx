@@ -621,13 +621,12 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     const updateData: Record<string, unknown> = { status: "perdido" as LeadStatus };
     if (lossReasonId) updateData.loss_reason_id = lossReasonId;
 
-    const { error } = await supabase
-      .from("qs_leads")
-      .update(updateData)
-      .eq("id", lead.id);
-    if (error) {
-      console.warn("Erro ao marcar como perdido:", error);
-      notifyError("Não foi possível marcar como perdido — tente novamente.");
+    // Pelo updateQsLead, que MEDE o que o banco aceitou — igual ao "ganho" logo
+    // acima. Checar só `error` não bastava: sob RLS a recusa volta 0 linhas SEM
+    // erro, e o código seguia encerrando as atividades e avisando o Bitrix de
+    // uma perda que nunca foi gravada.
+    const perdido = await updateQsLead(lead.id, updateData as Partial<Lead>);
+    if (!perdido) {
       setSelectedLossReason("");
       return;
     }
@@ -712,21 +711,31 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     if (!lead || !selectedCloser || savingHandover) return;
     setSavingHandover(true);
     try {
-    const { error: hoError } = await supabase
+    const { data: hoRow, error: hoError } = await supabase
       .from("qs_handovers")
-      .insert({ lead_id: lead.id, from_user_id: lead.owner_id, to_user_id: selectedCloser });
-    if (hoError) {
+      .insert({ lead_id: lead.id, from_user_id: lead.owner_id, to_user_id: selectedCloser })
+      .select("id")
+      .maybeSingle();
+    if (hoError || !hoRow) {
       console.warn("Erro ao criar handover:", hoError);
       notifyError("Não foi possível fazer o handover — tente novamente.");
       return;
     }
-    const { error: upError } = await supabase
+    // MEDIDO: sob RLS a recusa volta 0 linhas SEM erro. Sem medir, a passagem era
+    // dada como feita — as atividades do SDR eram encerradas e o Bitrix avisado —
+    // com o lead ainda no nome do SDR antigo: sumia da fila dele e nunca chegava
+    // no closer.
+    const { data: donoRows, error: upError } = await supabase
       .from("qs_leads")
       .update({ owner_id: selectedCloser })
-      .eq("id", lead.id);
-    if (upError) {
+      .eq("id", lead.id)
+      .select("id");
+    if (upError || !donoRows || donoRows.length === 0) {
       console.warn("Erro ao atualizar lead após handover:", upError);
-      notifyError("O handover foi registrado, mas o dono do lead não mudou — tente novamente.");
+      // Desfaz o registro do handover: deixá-lo de pé descreveria uma passagem
+      // que não aconteceu (e o qs_owns_lead da 0029 lê essa tabela).
+      await supabase.from("qs_handovers").delete().eq("id", hoRow.id);
+      notifyError("O handover NÃO foi concluído — o lead continua com o dono atual. Tente de novo.");
       return;
     }
 

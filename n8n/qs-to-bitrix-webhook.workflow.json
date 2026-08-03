@@ -7,15 +7,24 @@
         "path": "qs-perdido",
         "authentication": "headerAuth",
         "responseMode": "onReceived",
-        "options": { "allowedOrigins": "*" }
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "wh-perdido-0001-4a10-9b01-0d2e3f4a5c01",
       "name": "Webhook Perdido (qs-perdido)",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [220, 120],
+      "position": [
+        220,
+        120
+      ],
       "webhookId": "qs-perdido-b6f0-4d40-8e34-3051627c0001",
-      "credentials": { "httpHeaderAuth": { "name": "QS Sync Secret (x-qs-sync-secret)" } }
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "QS Sync Secret (x-qs-sync-secret)"
+        }
+      }
     },
     {
       "parameters": {
@@ -27,7 +36,10 @@
       "name": "Buscar negocio (perdido)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 120],
+      "position": [
+        460,
+        120
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -44,25 +56,36 @@
       "name": "Mover pra Perdido",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [700, 120],
+      "position": [
+        700,
+        120
+      ],
       "onError": "continueRegularOutput"
     },
-
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "qs-ganho",
         "authentication": "headerAuth",
         "responseMode": "onReceived",
-        "options": { "allowedOrigins": "*" }
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "wh-ganho-0004-4a10-9b01-0d2e3f4a5c04",
       "name": "Webhook Ganho (qs-ganho)",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [220, 320],
+      "position": [
+        220,
+        320
+      ],
       "webhookId": "qs-ganho-b6f0-4d40-8e34-3051627c0002",
-      "credentials": { "httpHeaderAuth": { "name": "QS Sync Secret (x-qs-sync-secret)" } }
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "QS Sync Secret (x-qs-sync-secret)"
+        }
+      }
     },
     {
       "parameters": {
@@ -74,7 +97,10 @@
       "name": "Buscar negocio (ganho)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 320],
+      "position": [
+        460,
+        320
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -91,25 +117,36 @@
       "name": "Mover pra Ganho",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [700, 320],
+      "position": [
+        700,
+        320
+      ],
       "onError": "continueRegularOutput"
     },
-
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "qs-reuniao",
         "authentication": "headerAuth",
         "responseMode": "onReceived",
-        "options": { "allowedOrigins": "*" }
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "wh-reuniao-0007-4a10-9b01-0d2e3f4a5c07",
       "name": "Webhook Reuniao (qs-reuniao)",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [220, 520],
+      "position": [
+        220,
+        520
+      ],
       "webhookId": "qs-reuniao-b6f0-4d40-8e34-3051627c0003",
-      "credentials": { "httpHeaderAuth": { "name": "QS Sync Secret (x-qs-sync-secret)" } }
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "QS Sync Secret (x-qs-sync-secret)"
+        }
+      }
     },
     {
       "parameters": {
@@ -121,7 +158,10 @@
       "name": "Buscar negocio (reuniao)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 520],
+      "position": [
+        460,
+        520
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -138,7 +178,10 @@
       "name": "Mover pra Reuniao Agendada",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [700, 520],
+      "position": [
+        700,
+        520
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -155,7 +198,10 @@
       "name": "Comentario da reuniao",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [940, 520],
+      "position": [
+        940,
+        520
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -172,26 +218,37 @@
       "name": "Preencher campos da reuniao (AJUSTAR UF_*)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1180, 520],
+      "position": [
+        1180,
+        520
+      ],
       "disabled": true,
       "onError": "continueRegularOutput"
     },
-
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "qs-nota",
         "authentication": "headerAuth",
         "responseMode": "onReceived",
-        "options": { "allowedOrigins": "*" }
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "wh-nota-0012-4a10-9b01-0d2e3f4a5c12",
       "name": "Webhook Nota (qs-nota)",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [220, 740],
+      "position": [
+        220,
+        740
+      ],
       "webhookId": "qs-nota-b6f0-4d40-8e34-3051627c0004",
-      "credentials": { "httpHeaderAuth": { "name": "QS Sync Secret (x-qs-sync-secret)" } }
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "QS Sync Secret (x-qs-sync-secret)"
+        }
+      }
     },
     {
       "parameters": {
@@ -207,25 +264,36 @@
       "name": "Comentario da nota",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 740],
+      "position": [
+        460,
+        740
+      ],
       "onError": "continueRegularOutput"
     },
-
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "qs-primeiro-contato",
         "authentication": "headerAuth",
         "responseMode": "onReceived",
-        "options": { "allowedOrigins": "*" }
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "wh-pc-0014-4a10-9b01-0d2e3f4a5c14",
       "name": "Webhook 1o contato (qs-primeiro-contato)",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [220, 940],
+      "position": [
+        220,
+        940
+      ],
       "webhookId": "qs-primeiro-contato-b6f0-4d40-8e34-3051627c0005",
-      "credentials": { "httpHeaderAuth": { "name": "QS Sync Secret (x-qs-sync-secret)" } }
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "QS Sync Secret (x-qs-sync-secret)"
+        }
+      }
     },
     {
       "parameters": {
@@ -265,7 +333,10 @@
       "name": "Config 1o contato",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [460, 940],
+      "position": [
+        460,
+        940
+      ],
       "notes": "EDITE SO ESTE NO desta faixa. BITRIX_BASE = webhook de ENTRADA, sem barra no fim, e PRECISA ter o escopo CRM (confira em BASE/scope.json: [\"\"] = sem permissao, nada funciona). STAGE_DE = coluna Novo lead. STAGE_PARA = coluna Follow-up 1 — os DOIS iguais aos do workflow bitrix-atividade-concluida. SO_ALCANCOU = nao (qualquer atividade concluida move) ou sim (so quando o SDR falou mesmo com a pessoa).",
       "notesInFlow": true
     },
@@ -279,7 +350,10 @@
       "name": "Buscar negocio (1o contato)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [700, 940],
+      "position": [
+        700,
+        940
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -290,7 +364,10 @@
       "name": "So se ainda estiver em Novo lead",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [940, 940]
+      "position": [
+        940,
+        940
+      ]
     },
     {
       "parameters": {
@@ -306,7 +383,10 @@
       "name": "Mover pra Follow-up 1",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1180, 940],
+      "position": [
+        1180,
+        940
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -323,57 +403,248 @@
       "name": "Comentario do 1o contato",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1420, 940],
+      "position": [
+        1420,
+        940
+      ],
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// O crm.deal.update acima segue em frente mesmo com erro (onError:\n// continueRegularOutput) E o Bitrix responde HTTP 200 com {\"error\":...} quando\n// recusa — as duas coisas juntas faziam a execucao ficar VERDE com o card\n// parado. Sem este throw, o unico sintoma e \"marcar perdido no QS e o negocio nao\n// anda no Bitrix\", sem nenhuma pista de onde olhar.\nconst r = $input.first().json;\nif (!r || r.error) {\n  throw new Error(\"Bitrix recusou marcar perdido: \" + ((r && (r.error_description || r.error)) || \"resposta vazia\"));\n}\n// result === false tambem e recusa: o Bitrix devolve 200 sem mover nada.\nif (r.result === false) {\n  throw new Error(\"Bitrix nao moveu o negocio (marcar perdido): result=false\");\n}\nreturn $input.all();"
+      },
+      "id": "guard-mover-pra-perdido",
+      "name": "Conferir movimentacao (perdido)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// O crm.deal.update acima segue em frente mesmo com erro (onError:\n// continueRegularOutput) E o Bitrix responde HTTP 200 com {\"error\":...} quando\n// recusa — as duas coisas juntas faziam a execucao ficar VERDE com o card\n// parado. Sem este throw, o unico sintoma e \"marcar ganho no QS e o negocio nao\n// anda no Bitrix\", sem nenhuma pista de onde olhar.\nconst r = $input.first().json;\nif (!r || r.error) {\n  throw new Error(\"Bitrix recusou marcar ganho: \" + ((r && (r.error_description || r.error)) || \"resposta vazia\"));\n}\n// result === false tambem e recusa: o Bitrix devolve 200 sem mover nada.\nif (r.result === false) {\n  throw new Error(\"Bitrix nao moveu o negocio (marcar ganho): result=false\");\n}\nreturn $input.all();"
+      },
+      "id": "guard-mover-pra-ganho",
+      "name": "Conferir movimentacao (ganho)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// O crm.deal.update acima segue em frente mesmo com erro (onError:\n// continueRegularOutput) E o Bitrix responde HTTP 200 com {\"error\":...} quando\n// recusa — as duas coisas juntas faziam a execucao ficar VERDE com o card\n// parado. Sem este throw, o unico sintoma e \"agendar reuniao no QS e o negocio nao\n// anda no Bitrix\", sem nenhuma pista de onde olhar.\nconst r = $input.first().json;\nif (!r || r.error) {\n  throw new Error(\"Bitrix recusou agendar reuniao: \" + ((r && (r.error_description || r.error)) || \"resposta vazia\"));\n}\n// result === false tambem e recusa: o Bitrix devolve 200 sem mover nada.\nif (r.result === false) {\n  throw new Error(\"Bitrix nao moveu o negocio (agendar reuniao): result=false\");\n}\nreturn $input.all();"
+      },
+      "id": "guard-mover-pra-reuniao-agendada",
+      "name": "Conferir movimentacao (reuniao)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        430
+      ]
     }
   ],
   "connections": {
     "Webhook Perdido (qs-perdido)": {
-      "main": [[{ "node": "Buscar negocio (perdido)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Buscar negocio (perdido)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Buscar negocio (perdido)": {
-      "main": [[{ "node": "Mover pra Perdido", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Mover pra Perdido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Webhook Ganho (qs-ganho)": {
-      "main": [[{ "node": "Buscar negocio (ganho)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Buscar negocio (ganho)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Buscar negocio (ganho)": {
-      "main": [[{ "node": "Mover pra Ganho", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Mover pra Ganho",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Webhook Reuniao (qs-reuniao)": {
-      "main": [[{ "node": "Buscar negocio (reuniao)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Buscar negocio (reuniao)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Buscar negocio (reuniao)": {
-      "main": [[{ "node": "Mover pra Reuniao Agendada", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Mover pra Reuniao Agendada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Mover pra Reuniao Agendada": {
-      "main": [[{ "node": "Comentario da reuniao", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Conferir movimentacao (reuniao)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Comentario da reuniao": {
-      "main": [[{ "node": "Preencher campos da reuniao (AJUSTAR UF_*)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Preencher campos da reuniao (AJUSTAR UF_*)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Webhook Nota (qs-nota)": {
-      "main": [[{ "node": "Comentario da nota", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Comentario da nota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Webhook 1o contato (qs-primeiro-contato)": {
-      "main": [[{ "node": "Config 1o contato", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Config 1o contato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Config 1o contato": {
-      "main": [[{ "node": "Buscar negocio (1o contato)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Buscar negocio (1o contato)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Buscar negocio (1o contato)": {
-      "main": [[{ "node": "So se ainda estiver em Novo lead", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "So se ainda estiver em Novo lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "So se ainda estiver em Novo lead": {
-      "main": [[{ "node": "Mover pra Follow-up 1", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Mover pra Follow-up 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Mover pra Follow-up 1": {
-      "main": [[{ "node": "Comentario do 1o contato", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Comentario do 1o contato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mover pra Perdido": {
+      "main": [
+        [
+          {
+            "node": "Conferir movimentacao (perdido)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mover pra Ganho": {
+      "main": [
+        [
+          {
+            "node": "Conferir movimentacao (ganho)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir movimentacao (reuniao)": {
+      "main": [
+        [
+          {
+            "node": "Comentario da reuniao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1"
+  },
   "pinData": {},
-  "meta": { "instanceId": "qs-turis-qs-to-bitrix-webhook" },
+  "meta": {
+    "instanceId": "qs-turis-qs-to-bitrix-webhook"
+  },
   "tags": []
 }
