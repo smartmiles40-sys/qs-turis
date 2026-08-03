@@ -1,7 +1,8 @@
 // src/components/sdr/SdrLayout.tsx — QS (Qualificação System)
-import { useState, useRef, useEffect, Component, lazy, Suspense, type ReactNode } from "react";
+import { useState, useRef, useEffect, Component, Suspense, type ReactNode } from "react";
 import { useQsAuth, canAccessNav } from "@/contexts/QsAuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { lazyPagina } from "@/lib/qs/lazyPagina";
 
 // ── Error Boundary ─────────────────────────────────────────────────────────
 
@@ -57,17 +58,20 @@ class PageErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
 }
 import RetrospectivaModal from "./tasks/RetrospectivaModal";
 import TasksPanel from "./tasks/TasksPanel";
-// As demais telas carregam sob demanda (React.lazy): o SDR abre o app direto no
-// Painel, e o código de Leads/Dashboard/Config etc. só baixa quando navegar.
-const SdrDashboard = lazy(() => import("./dashboard/SdrDashboard"));
-const AnalisesPage = lazy(() => import("./dashboard/AnalisesPage"));
-const LeadsPage = lazy(() => import("./leads/LeadsPage"));
-const LeadDetailPage = lazy(() => import("./leads/LeadDetailPage"));
-const CadencesPage = lazy(() => import("./cadences/CadencesPage"));
-const CadenceCreatePage = lazy(() => import("./cadences/CadenceCreatePage"));
-const MeetingsPage = lazy(() => import("./meetings/MeetingsPage"));
-const SettingsPage = lazy(() => import("./settings/SettingsPage"));
-const CoveragePanel = lazy(() => import("./dashboard/CoveragePanel"));
+// As demais telas carregam sob demanda: o SDR abre o app direto no Painel, e o
+// código de Leads/Dashboard/Config etc. só baixa quando navegar.
+// `lazyPagina` e não o `lazy()` cru porque a aba fica aberta o dia inteiro:
+// quando sai um deploy, o chunk que ESTE index.html conhece some do servidor e o
+// clique na tela dava "Failed to fetch dynamically imported module".
+const SdrDashboard = lazyPagina(() => import("./dashboard/SdrDashboard"));
+const AnalisesPage = lazyPagina(() => import("./dashboard/AnalisesPage"));
+const LeadsPage = lazyPagina(() => import("./leads/LeadsPage"));
+const LeadDetailPage = lazyPagina(() => import("./leads/LeadDetailPage"));
+const CadencesPage = lazyPagina(() => import("./cadences/CadencesPage"));
+const CadenceCreatePage = lazyPagina(() => import("./cadences/CadenceCreatePage"));
+const MeetingsPage = lazyPagina(() => import("./meetings/MeetingsPage"));
+const SettingsPage = lazyPagina(() => import("./settings/SettingsPage"));
+const CoveragePanel = lazyPagina(() => import("./dashboard/CoveragePanel"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import CommsDock from "./comms/CommsDock";
 import GlobalToasts from "./GlobalToasts";
@@ -123,7 +127,7 @@ const MENU: (MenuGroup | MenuItem)[] = [
     items: [
       { id: "leads", label: "Leads", description: "Cadastro e gestão de leads" },
       { id: "cadencias", label: "Cadências", description: "Fluxos de prospecção" },
-      { id: "reunioes", label: "Reuniões", description: "Lista, Agendamento do dia e Agenda do mês" },
+      { id: "reunioes", label: "Reuniões", description: "Lista de reuniões e Agenda do mês" },
     ],
   },
   {

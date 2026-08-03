@@ -10,7 +10,8 @@
 // Nenhum dos dois confia no navegador: o servidor revalida a posse do lead.
 // -----------------------------------------------------------------------------
 
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazyPagina } from "@/lib/qs/lazyPagina";
 import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
   listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros, getThreadInbox,
@@ -24,7 +25,7 @@ import { WaTexto, tamanhoEmojiSolto } from "./waFormat";
 
 // O seletor carrega junto com a lista de emojis, e só quando a SDR abre pela
 // primeira vez — não é peso que todo mundo paga pra ver a conversa.
-const WaEmojiPicker = lazy(() => import("./WaEmojiPicker"));
+const WaEmojiPicker = lazyPagina(() => import("./WaEmojiPicker"));
 
 
 interface Props {
