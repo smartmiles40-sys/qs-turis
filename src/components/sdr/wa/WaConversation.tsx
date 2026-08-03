@@ -10,7 +10,7 @@
 // Nenhum dos dois confia no navegador: o servidor revalida a posse do lead.
 // -----------------------------------------------------------------------------
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
   listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros, getThreadInbox,
@@ -20,7 +20,11 @@ import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { loadSignatureName } from "@/lib/qs/waSignature";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { WaAudio, WaAvatar } from "./WaBits";
-import { WaTexto } from "./waFormat";
+import { WaTexto, tamanhoEmojiSolto } from "./waFormat";
+
+// O seletor carrega junto com a lista de emojis, e só quando a SDR abre pela
+// primeira vez — não é peso que todo mundo paga pra ver a conversa.
+const WaEmojiPicker = lazy(() => import("./WaEmojiPicker"));
 
 
 interface Props {
@@ -111,6 +115,13 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const [canned, setCanned] = useState<CannedResponse[]>([]);
   const [mostrarCanned, setMostrarCanned] = useState(false);
 
+  // Emojis
+  const [mostrarEmojis, setMostrarEmojis] = useState(false);
+  // Onde estava o cursor no campo de escrever. Precisa ser lembrado por fora
+  // porque escolher um emoji NÃO devolve o foco pro textarea — quem clicou em
+  // três emojis seguidos, ou buscou "aviao", perderia o lugar a cada clique.
+  const caretRef = useRef<number | null>(null);
+
   // Por qual dos NOSSOS números esta conversa acontece. É informação, não
   // escolha: quem decide é a conversa que já existe no Chatwoot. O SDR precisa
   // saber disso antes de escrever, porque é o número que o cliente vê chegando.
@@ -155,7 +166,9 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setErro(null);
     setAviso(null);
     setSemConversa(false);
+    setMostrarEmojis(false);
     stickToBottom.current = true;
+    caretRef.current = null;
     setText(initialText || "");
 
     (async () => {
@@ -226,6 +239,8 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     if (!r.ok) { setErro(r.error || "Não consegui enviar."); return; }
     setText("");
     setMostrarCanned(false);
+    setMostrarEmojis(false);
+    caretRef.current = null;
     setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
@@ -340,15 +355,44 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const aplicarCanned = useCallback((c: CannedResponse) => {
     setText(preencherCanned(c.texto, { nome: leadName }));
     setMostrarCanned(false);
+    caretRef.current = null;   // o texto trocou inteiro; o cursor velho não vale mais
   }, [leadName]);
+
+  // ── Emojis ────────────────────────────────────────────────────────────────
+  // Entra ONDE O CURSOR ESTÁ, não no fim: emoji quase sempre é no meio da frase
+  // ("bom dia 👋, tudo bem?"). Se o campo estiver focado, o cursor volta pra
+  // depois do emoji — senão o navegador o jogaria pro fim do texto.
+  const inserirEmoji = useCallback((emoji: string) => {
+    const el = taRef.current;
+    const focado = !!el && document.activeElement === el;
+    const ini = Math.min(focado ? el.selectionStart ?? text.length : caretRef.current ?? text.length, text.length);
+    const fim = Math.min(focado ? el.selectionEnd ?? ini : ini, text.length);
+    const depois = ini + emoji.length;
+    caretRef.current = depois;
+    setText(text.slice(0, ini) + emoji + text.slice(Math.max(ini, fim)));
+    if (focado) requestAnimationFrame(() => el.setSelectionRange(depois, depois));
+  }, [text]);
+
+  // Os dois painéis dividem o mesmo espaço acima do campo; abrir um fecha o outro.
+  const alternarEmojis = useCallback(() => {
+    setMostrarEmojis((v) => !v);
+    setMostrarCanned(false);
+  }, []);
+
+  const marcarCaret = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    caretRef.current = e.currentTarget.selectionStart;
+  };
 
   const aoDigitar = (v: string) => {
     setText(v);
-    setMostrarCanned(v.startsWith("/") && canned.length > 0);
+    const abreCanned = v.startsWith("/") && canned.length > 0;
+    setMostrarCanned(abreCanned);
+    if (abreCanned) setMostrarEmojis(false);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Escape" && mostrarCanned) { setMostrarCanned(false); return; }
+    if (e.key === "Escape" && mostrarEmojis) { setMostrarEmojis(false); return; }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (mostrarCanned && cannedFiltradas.length === 1) { aplicarCanned(cannedFiltradas[0]); return; }
@@ -416,6 +460,9 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             // Agrupamento: mensagens seguidas do mesmo lado, dentro de 5 min,
             // formam um bloco. É o que faz parecer conversa em vez de lista de
             // itens — só a ÚLTIMA do bloco tem rabinho, hora e avatar.
+            // Mensagem que é só emoji sai da bolha e cresce, como no celular.
+            const emojiPx = !m.attachments?.length && m.content ? tamanhoEmojiSolto(m.content) : null;
+
             const prox = messages[i + 1];
             const fimDoBloco =
               !prox ||
@@ -432,8 +479,8 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                       ? <WaAvatar nome={leadName || "Lead"} url={avatarLead} size={26} />
                       : <span className="w-[26px] shrink-0" />   /* alinha o bloco */
                   )}
-                  <div className="max-w-[78%] px-3 py-2"
-                       style={{
+                  <div className={emojiPx ? "max-w-[78%] px-1 py-0.5" : "max-w-[78%] px-3 py-2"}
+                       style={emojiPx ? { color: "var(--ink)" } : {
                          background: meu ? "var(--wa-soft)" : "var(--card)",
                          color: meu ? "var(--wa-ink)" : "var(--ink)",
                          border: meu ? "none" : "1px solid var(--line)",
@@ -443,7 +490,10 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                        }}>
                     {m.attachments?.map((a, k) => <Anexo key={k} a={a} meu={meu} />)}
                     {m.content && (
-                      <p className="text-[14px] leading-[1.45] whitespace-pre-wrap break-words">
+                      <p className="whitespace-pre-wrap break-words"
+                         style={emojiPx
+                           ? { fontSize: emojiPx, lineHeight: 1.15 }
+                           : { fontSize: 14, lineHeight: 1.45 }}>
                         {/* Com a formatação do WhatsApp aplicada: o SDR vê a
                             mensagem como ela chega no celular do cliente — a
                             assinatura em negrito, e não `*Victor Hugo*` cru. */}
@@ -452,7 +502,9 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                     )}
                     {fimDoBloco && (
                       <p className="text-[11px] mt-1 text-right tabular-nums"
-                         style={{ color: meu ? "var(--wa-ink)" : "var(--ink3)", opacity: meu ? .65 : 1 }}>
+                         style={emojiPx
+                           ? { color: "var(--ink3)" }
+                           : { color: meu ? "var(--wa-ink)" : "var(--ink3)", opacity: meu ? .65 : 1 }}>
                         {hora(m.sent_at)}
                       </p>
                     )}
@@ -493,6 +545,20 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         </div>
       )}
 
+      {/* Emojis. Fica gravando de fora: durante uma nota de voz o campo de
+          escrever nem existe, e o painel ficaria pendurado sem dono. */}
+      {mostrarEmojis && !gravando && (
+        <Suspense fallback={
+          <div className="shrink-0 border-t" style={{ borderColor: "var(--line)", background: "var(--card)", height: 248 }}>
+            <div className="grid gap-1.5 p-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(34px, 1fr))" }}>
+              {Array.from({ length: 24 }, (_, i) => <span key={i} className="wa-sk rounded-lg" style={{ height: 34 }} />)}
+            </div>
+          </div>
+        }>
+          <WaEmojiPicker onPick={inserirEmoji} onClose={() => setMostrarEmojis(false)} />
+        </Suspense>
+      )}
+
       {/* De qual WhatsApp esta conversa é — informação, não escolha.
           O cliente vê a mensagem chegando DESTE número; o SDR precisa saber
           disso antes de escrever, e não pode trocar sem querer. */}
@@ -526,7 +592,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       )}
 
       {/* Escrever */}
-      <div className="shrink-0 border-t px-3 py-2.5" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
+      <div className="wa-composer shrink-0 border-t px-3 py-2.5" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
         {gravando ? (
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: "var(--red)" }} />
@@ -547,6 +613,17 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
           <div className="flex items-end gap-1.5">
             <input ref={fileRef} type="file" className="hidden" onChange={escolherArquivo}
                    accept="image/*,audio/*,video/mp4,application/pdf" />
+            <button onClick={alternarEmojis} disabled={sending}
+                    data-wa-emoji-toggle
+                    aria-expanded={mostrarEmojis} aria-label="Emojis"
+                    title="Emojis" data-aberto={mostrarEmojis || undefined}
+                    className="wa-icon-btn wa-emoji-toggle shrink-0 w-9 h-9 grid place-items-center rounded-lg">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+                <circle cx="12" cy="12" r="9.25" />
+                <path d="M8.6 14.2a4.3 4.3 0 0 0 6.8 0" />
+                <path d="M9.2 9.4h.01M14.8 9.4h.01" strokeWidth="2.4" />
+              </svg>
+            </button>
             <button onClick={() => fileRef.current?.click()} disabled={sending}
                     title="Enviar imagem, figurinha ou arquivo" aria-label="Anexar"
                     className="wa-icon-btn shrink-0 w-9 h-9 grid place-items-center rounded-lg">
@@ -567,18 +644,29 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               value={text}
               onChange={(e) => aoDigitar(e.target.value)}
               onKeyDown={onKeyDown}
+              onSelect={marcarCaret}
               rows={1}
               placeholder={`Mensagem para ${leadName || formatPhoneDisplay(phone) || "o lead"}…  (/ para atalhos)`}
-              className="flex-1 resize-none rounded-xl px-3 py-2 text-[14px] leading-[1.45] outline-none"
+              className="flex-1 min-w-0 resize-none rounded-xl px-3 py-2 text-[14px] leading-[1.45] outline-none"
               style={{ border: "1px solid var(--line)", background: "var(--card2)", color: "var(--ink)", maxHeight: 128 }}
             />
-            <button onClick={enviar} disabled={!text.trim() || sending} title="Enviar (Enter)"
-                    className="wa-send shrink-0 h-9 min-w-[84px] px-4 rounded-xl text-white text-[13px] font-semibold grid place-items-center">
+            {/* Com o dock estreito a palavra "Enviar" some e sobra o ícone —
+                ver .wa-composer no index.css. */}
+            <button onClick={enviar} disabled={!text.trim() || sending} title="Enviar (Enter)" aria-label="Enviar"
+                    className="wa-send wa-send-btn shrink-0 h-9 rounded-xl text-white text-[13px] font-semibold grid place-items-center">
               {sending
                 ? <span className="w-4 h-4 rounded-full animate-spin"
                         style={{ border: "2px solid rgba(255,255,255,.35)", borderTopColor: "#fff" }}
                         aria-label="enviando" />
-                : "Enviar"}
+                : (
+                  <>
+                    <span className="wa-send-label">Enviar</span>
+                    <svg className="wa-send-icone" width="17" height="17" viewBox="0 0 24 24"
+                         fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21.5 12 3 4.5l3 7.5-3 7.5z" /><path d="M6 12h15.5" />
+                    </svg>
+                  </>
+                )}
             </button>
           </div>
         )}

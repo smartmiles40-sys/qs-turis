@@ -318,6 +318,48 @@ html.dark * { scrollbar-color: #39434F var(--bg); }
 }
 .wa-chip:hover { border-color: var(--ink3); color: var(--ink); }
 
+/* ── Campo de escrever ───────────────────────────────────────────────────── */
+/* Container query, e não breakpoint do Tailwind, porque quem aperta aqui é a
+   LARGURA DO DOCK (o SDR arrasta até 340px), não a viewport — media query não
+   enxerga isso. Com três ícones à esquerda + "Enviar" por extenso, no dock
+   estreito sobravam 98px de campo: cabe "Bom di". Abaixo de 380px a palavra vira
+   ícone e o campo recupera ~50px. */
+.wa-composer { container-type: inline-size; }
+
+.wa-send-btn   { min-width: 84px; padding-inline: 1rem; }
+.wa-send-icone { display: none; }
+
+@container (max-width: 380px) {
+  .wa-send-btn   { min-width: 36px; width: 36px; padding-inline: 0; }
+  .wa-send-label { display: none; }
+  .wa-send-icone { display: block; }
+}
+
+/* ── Emojis ──────────────────────────────────────────────────────────────── */
+/* O botão que abre o seletor fica ACESO enquanto o painel está aberto. Sem
+   isso, com o teclado ou num clique rápido, não dá pra saber qual dos três
+   ícones abriu a gaveta que apareceu embaixo. */
+.wa-emoji-toggle[data-aberto] { color: var(--wa); background: var(--wa-ok-bg); }
+
+/* A célula não tem borda nem fundo em repouso: 330 caixinhas desenhadas viram
+   ruído, e o que precisa saltar é o desenho do emoji, não a grade. */
+.wa-emoji-btn {
+  transition: background-color .12s cubic-bezier(.25,1,.5,1), transform .1s;
+}
+.wa-emoji-btn:hover  { background: var(--line2); }
+.wa-emoji-btn:active { transform: scale(.88); }
+
+.wa-emoji-cat {
+  filter: grayscale(1);
+  opacity: .55;
+  transition: opacity .15s cubic-bezier(.25,1,.5,1), filter .15s, background-color .15s;
+}
+.wa-emoji-cat:hover { opacity: .85; filter: grayscale(.4); background: var(--line2); }
+.wa-emoji-cat[aria-selected="true"] {
+  opacity: 1; filter: none;
+  background: var(--wa-ok-bg);
+}
+
 /* Foco visível — faltava em TODOS os botões do painel. Quem trabalha rápido
    navega por teclado, e o outline padrão some sobre superfície colorida. */
 .qs-wa :is(a,button,[role="button"],input,select,textarea):focus-visible {

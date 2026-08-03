@@ -101,6 +101,35 @@ export function waPlain(texto: string | null | undefined): string {
   return varrer(texto).map((t) => t.texto).join("");
 }
 
+// ── Emoji solto ─────────────────────────────────────────────────────────────
+// No WhatsApp, mensagem que é SÓ emoji (até 3) aparece grande, sem bolha em
+// volta. Aqui ela chegava como um 👍 de 14px perdido numa caixa — o SDR lia como
+// "o cliente mandou algo pequeno" quando na tela dele foi um gesto inteiro.
+// Renderizar do mesmo tamanho é o mesmo princípio do resto deste arquivo: as
+// duas telas têm que contar a mesma história.
+
+const SO_EMOJI =
+  /^(?:\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|[\u{1F3FB}-\u{1F3FF}])*|\p{Emoji_Presentation}|\s)+$/u;
+
+/** Conta em GRAFEMAS: "👨‍👩‍👧" é uma figura só, mas seis code points. */
+function contarFiguras(t: string): number {
+  const Seg = (Intl as unknown as { Segmenter?: typeof Intl.Segmenter }).Segmenter;
+  if (Seg) return [...new Seg("pt", { granularity: "grapheme" }).segment(t)].length;
+  return [...t].length;   // Safari antigo: aproximação, só erra o tamanho
+}
+
+/**
+ * Tamanho em px se a mensagem for só emoji (até 3). `null` = texto normal.
+ */
+export function tamanhoEmojiSolto(texto: string): number | null {
+  const t = texto.trim();
+  if (!t || t.length > 40) return null;          // corta cedo: 40 chars já não é "só emoji"
+  if (!SO_EMOJI.test(t)) return null;
+  const n = contarFiguras(t.replace(/\s+/g, ""));
+  if (n < 1 || n > 3) return null;
+  return n === 1 ? 40 : n === 2 ? 34 : 28;
+}
+
 /**
  * Renderiza o texto da mensagem com a formatação do WhatsApp aplicada.
  * Não usa dangerouslySetInnerHTML: o conteúdo vem do cliente, então vira
