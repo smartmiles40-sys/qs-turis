@@ -22,7 +22,7 @@ import { supabase } from "@/lib/supabase";
 import { getSetting } from "@/lib/qsSettings";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { loadWorkHours, nextWorkMoment, clampToWorkWindow, type WorkHours } from "@/lib/workHours";
-import type { ChannelType, Meeting, MeetingStatus } from "@/components/sdr/types";
+import type { ChannelType, Meeting, MeetingSal, MeetingStatus } from "@/components/sdr/types";
 
 // ── Configuração da atividade de confirmação ────────────────────────────────
 
@@ -382,10 +382,20 @@ export async function rescheduleMeeting(input: RescheduleInput): Promise<Meeting
 // ── Desfecho ────────────────────────────────────────────────────────────────
 
 const STATUS_PHRASE: Partial<Record<MeetingStatus, string>> = {
+  confirmada: "foi CONFIRMADA pelo cliente",
   realizada: "foi REALIZADA",
   no_show: "teve NO-SHOW (cliente não compareceu)",
+  reagendada: "foi REAGENDADA",
   cancelada: "foi CANCELADA",
 };
+
+/** Status que só existem depois da migration 0028 (o CHECK antigo os recusa). */
+const STATUS_0028: MeetingStatus[] = ["confirmada", "reagendada"];
+
+/** Erro 23514 = CHECK do banco recusou o valor (status/sal que a 0028 ainda não liberou). */
+function isCheckViolation(error: { code?: string; message?: string } | null): boolean {
+  return error?.code === "23514" || /violates check constraint/i.test(error?.message ?? "");
+}
 
 export async function setMeetingStatus(
   meeting: Meeting,
@@ -399,9 +409,19 @@ export async function setMeetingStatus(
     .select()
     .single();
 
-  if (error) return { ok: false, error: `Não foi possível atualizar a reunião: ${error.message}` };
+  if (error) {
+    if (isCheckViolation(error) && STATUS_0028.includes(status)) {
+      return {
+        ok: false,
+        error: `O banco ainda não aceita o status "${status}". Cole a migration 0028 no Supabase (supabase/migrations/0028_reuniao_confirmada_reagendada_sal.sql).`,
+      };
+    }
+    return { ok: false, error: `Não foi possível atualizar a reunião: ${error.message}` };
+  }
   if (!data) return { ok: false, error: "Você não tem permissão para alterar esta reunião." };
 
+  // "Confirmada" ainda vai acontecer: a atividade de confirmação já cumpriu o
+  // papel dela (o SDR confirmou), então também encerra.
   if (status !== "agendada") {
     await closeConfirmTask(meeting.id, `Reunião ${status === "no_show" ? "com no-show" : status}`);
   }
@@ -412,6 +432,56 @@ export async function setMeetingStatus(
       lead_id: meeting.lead_id,
       bitrix_id: leadBitrixId ?? meeting.lead?.bitrix_id,
       body: `Reunião de ${formatDateTime(meeting.scheduled_at)}${meeting.title ? ` (${meeting.title})` : ""} ${phrase} no QS.`,
+    });
+  }
+
+  return { ok: true, meeting: data as Meeting };
+}
+
+// ── SAL (Sales Accepted Lead) ───────────────────────────────────────────────
+
+/**
+ * O especialista aceitou ou recusou o lead na reunião. É o dado que fecha o
+ * funil: "realizada" sozinha não distingue lead bom de lead ruim.
+ *
+ * Passar `null` desmarca. Exige a migration 0028 (coluna `sal`) — sem ela a
+ * gravação falha com uma mensagem que diz exatamente isso, em vez de um erro
+ * de Postgres cru na cara do usuário.
+ */
+export async function setMeetingSal(
+  meeting: Meeting,
+  sal: MeetingSal | null,
+  by?: string | null,
+  leadBitrixId?: string | null
+): Promise<MeetingResult> {
+  const { data, error } = await supabase
+    .from("qs_meetings")
+    .update({
+      sal,
+      sal_at: sal ? new Date().toISOString() : null,
+      sal_by: sal ? (by ?? null) : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", meeting.id)
+    .select()
+    .single();
+
+  if (error) {
+    if (isMissingSchema(error) || isCheckViolation(error) || /column .*sal/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        error: "O campo SAL ainda não existe no banco. Cole a migration 0028 no Supabase (supabase/migrations/0028_reuniao_confirmada_reagendada_sal.sql).",
+      };
+    }
+    return { ok: false, error: `Não foi possível salvar o SAL: ${error.message}` };
+  }
+  if (!data) return { ok: false, error: "Você não tem permissão para alterar esta reunião." };
+
+  if (sal) {
+    notifyBitrix("nota", {
+      lead_id: meeting.lead_id,
+      bitrix_id: leadBitrixId ?? meeting.lead?.bitrix_id,
+      body: `Reunião de ${formatDateTime(meeting.scheduled_at)}: lead ${sal.toUpperCase()} pelo especialista (SAL).`,
     });
   }
 

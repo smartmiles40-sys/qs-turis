@@ -8,7 +8,7 @@ import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { createMeeting } from "@/lib/qs/meetings";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
-import AgendaCalendar from "../agenda/AgendaCalendar";
+import AgendaClosers from "../agenda/AgendaClosers";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -28,8 +28,10 @@ type FilterTab = "todas" | MeetingStatus;
 const TABS: { key: FilterTab; label: string }[] = [
   { key: "todas", label: "Todas" },
   { key: "agendada", label: "Agendadas" },
+  { key: "confirmada", label: "Confirmadas" },
   { key: "realizada", label: "Realizadas" },
   { key: "no_show", label: "No-show" },
+  { key: "reagendada", label: "Reagendadas" },
   { key: "cancelada", label: "Canceladas" },
 ];
 
@@ -40,8 +42,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function statusBadgeClasses(status: MeetingStatus): string {
   switch (status) {
     case "agendada": return "bg-blue-50 text-blue-700";
+    case "confirmada": return "bg-cyan-50 text-cyan-700";
     case "realizada": return "bg-green-50 text-green-700";
     case "no_show": return "bg-red-50 text-red-700";
+    case "reagendada": return "bg-amber-50 text-amber-700";
     case "cancelada": return "bg-gray-100 text-gray-500";
   }
 }
@@ -463,8 +467,10 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const counts: Record<FilterTab, number> = {
     todas: meetings.length,
     agendada: meetings.filter((m) => m.status === "agendada").length,
+    confirmada: meetings.filter((m) => m.status === "confirmada").length,
     realizada: meetings.filter((m) => m.status === "realizada").length,
     no_show: meetings.filter((m) => m.status === "no_show").length,
+    reagendada: meetings.filter((m) => m.status === "reagendada").length,
     cancelada: meetings.filter((m) => m.status === "cancelada").length,
   };
 
@@ -505,13 +511,14 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     </div>
   );
 
-  // Aba "Agenda": o calendário NATIVO dos closers (0027). Substituiu o embed da
-  // Google Agenda — os dados são nossos e o agendamento acontece aqui dentro.
+  // Aba "Agenda": o dia inteiro com UMA COLUNA POR ESPECIALISTA, no layout do
+  // Agendamento do Bitrix. Responde "quem está livre às 15h?" e, principalmente,
+  // "que reunião já passou sem ninguém dizer no que deu?".
   if (view === "agenda") {
     return (
       <div className="space-y-4" style={{ fontFamily: "inherit" }}>
         {viewToggle}
-        <AgendaCalendar onOpenLead={onOpenLead} />
+        <AgendaClosers onOpenLead={onOpenLead} />
       </div>
     );
   }

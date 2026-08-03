@@ -14,7 +14,12 @@ export type OffdayPolicy = "iniciar_imediato" | "aguardar_proximo_dia";
 export type TaskStatus = "pendente" | "concluida" | "ignorada" | "atrasada";
 export type GoalType = "ganhos" | "leads_finalizados" | "atividades" | "conversao" | "reunioes";
 export type GoalPeriod = "diario" | "mensal";
-export type MeetingStatus = "agendada" | "realizada" | "no_show" | "cancelada";
+// "confirmada" e "reagendada" chegam junto com a integração do Bitrix e só são
+// graváveis depois da migration 0028 (o CHECK antigo aceitava só os outros 4).
+export type MeetingStatus = "agendada" | "confirmada" | "realizada" | "no_show" | "reagendada" | "cancelada";
+
+/** Sales Accepted Lead: o especialista aceitou ou recusou o lead na reunião (0028). */
+export type MeetingSal = "aceito" | "recusado";
 export type CustomFieldScope = "pessoal" | "empresa" | "contato";
 
 export interface SdrUser {
@@ -159,6 +164,10 @@ export interface Meeting {
   meeting_link: string | null;
   notes: string | null;
   status: MeetingStatus;
+  /** Desfecho comercial da reunião (migration 0028). Nulo = ainda não avaliado. */
+  sal?: MeetingSal | null;
+  sal_at?: string | null;
+  sal_by?: string | null;
   /** Nome do lead denormalizado: o join `lead:qs_leads(*)` volta nulo sob a RLS
    *  quando a reunião é de um lead de outro SDR, e o calendário é do time todo. */
   lead_name?: string | null;
@@ -325,8 +334,10 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
 
 export const MEETING_STATUS_LABELS: Record<MeetingStatus, string> = {
   agendada: "Agendada",
+  confirmada: "Confirmada",
   realizada: "Realizada",
   no_show: "No-show",
+  reagendada: "Reagendada",
   cancelada: "Cancelada",
 };
 

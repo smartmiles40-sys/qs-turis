@@ -21,8 +21,10 @@ import { hhmm, WEEKDAY_LONG, MONTH_LONG } from "@/lib/qs/calendarLayout";
 function statusClasses(status: MeetingStatus): string {
   switch (status) {
     case "agendada": return "bg-blue-50 text-blue-700";
+    case "confirmada": return "bg-cyan-50 text-cyan-700";
     case "realizada": return "bg-green-50 text-green-700";
     case "no_show": return "bg-red-50 text-red-700";
+    case "reagendada": return "bg-amber-50 text-amber-700";
     case "cancelada": return "bg-gray-100 text-gray-500";
   }
 }
