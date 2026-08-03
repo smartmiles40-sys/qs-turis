@@ -243,13 +243,13 @@
               "id": "pc-cfg-de-0002",
               "name": "STAGE_DE",
               "type": "string",
-              "value": "C25:NEW"
+              "value": "C25:PREPAYMENT_INVOIC"
             },
             {
               "id": "pc-cfg-para-0003",
               "name": "STAGE_PARA",
               "type": "string",
-              "value": "PREENCHA_STAGE_FOLLOWUP_1"
+              "value": "C25:UC_271QUB"
             },
             {
               "id": "pc-cfg-alc-0004",
@@ -266,7 +266,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [460, 940],
-      "notes": "EDITE SO ESTE NO desta faixa. STAGE_DE = coluna Novo lead. STAGE_PARA = coluna Follow-up 1. SO_ALCANCOU = nao (qualquer atividade concluida move) ou sim (so quando o SDR falou mesmo com a pessoa).",
+      "notes": "EDITE SO ESTE NO desta faixa. BITRIX_BASE = webhook de ENTRADA, sem barra no fim, e PRECISA ter o escopo CRM (confira em BASE/scope.json: [\"\"] = sem permissao, nada funciona). STAGE_DE = coluna Novo lead. STAGE_PARA = coluna Follow-up 1 — os DOIS iguais aos do workflow bitrix-atividade-concluida. SO_ALCANCOU = nao (qualquer atividade concluida move) ou sim (so quando o SDR falou mesmo com a pessoa).",
       "notesInFlow": true
     },
     {
@@ -284,7 +284,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// AQUI mora o \"primeiro contato\": nao existe contador nem flag — a regra e\n// \"so move quem AINDA esta em Novo lead\". Da 2a atividade em diante o negocio ja\n// saiu dessa coluna, entao o evento chega, olha e nao faz nada. De quebra, isso\n// impede o robo de puxar PRA TRAS um negocio que ja avancou (Reuniao Agendada,\n// Ganho, Perdido) e torna o disparo idempotente: repetir nao estraga nada.\nconst cfg = $('Config 1o contato').first().json;\nconst evt = $('Webhook 1o contato (qs-primeiro-contato)').first().json.body || {};\nconst r = $input.first().json.result;\nif (!r) return [];   // negocio nao encontrado no Bitrix (ou o GET falhou)\n\n// Opcional: mover so quando o SDR REALMENTE falou com a pessoa.\n// SO_ALCANCOU = \"sim\" liga o filtro; \"nao\" (padrao) move em qualquer atividade\n// concluida — mesmo criterio do workflow gemeo do lado do Bitrix, pra mesma acao\n// dar o mesmo resultado sendo registrada no QS ou no CRM.\nif (String(cfg.SO_ALCANCOU || '').toLowerCase() === 'sim' && evt.alcancou !== true) return [];\n\nif (String(r.STAGE_ID || '') !== String(cfg.STAGE_DE)) return [];\n\nreturn [{ json: {\n  id: String(r.ID),\n  de: String(r.STAGE_ID || ''),\n  para: String(cfg.STAGE_PARA),\n  canal: String(evt.canal || ''),\n  desfecho: String(evt.desfecho || ''),\n  sdr: String(evt.sdr || '')\n} }];"
+        "jsCode": "// AQUI mora o \"primeiro contato\": nao existe contador nem flag — a regra e\n// \"so move quem AINDA esta em Novo lead\". Da 2a atividade em diante o negocio ja\n// saiu dessa coluna, entao o evento chega, olha e nao faz nada. De quebra, isso\n// impede o robo de puxar PRA TRAS um negocio que ja avancou (Reuniao Agendada,\n// Ganho, Perdido) e torna o disparo idempotente: repetir nao estraga nada.\nconst cfg = $('Config 1o contato').first().json;\nconst evt = $('Webhook 1o contato (qs-primeiro-contato)').first().json.body || {};\nconst resp = $input.first().json;\n\n// O crm.deal.get acima segue em frente mesmo com erro (onError). Se o Bitrix\n// RECUSOU, isso tem que ficar VERMELHO: sem este throw o unico sintoma e \"o\n// negocio nao anda\" e a execucao aparece verde. Erro classico:\n// insufficient_scope = o webhook de ENTRADA foi criado sem a permissao CRM.\nif (resp && resp.error) {\n  throw new Error('Bitrix recusou o crm.deal.get: ' + resp.error + ' — ' + (resp.error_description || ''));\n}\n\nconst r = resp.result;\nif (!r) return [];   // negocio nao encontrado no Bitrix\n\n// Opcional: mover so quando o SDR REALMENTE falou com a pessoa.\n// SO_ALCANCOU = \"sim\" liga o filtro; \"nao\" (padrao) move em qualquer atividade\n// concluida — mesmo criterio do workflow gemeo do lado do Bitrix, pra mesma acao\n// dar o mesmo resultado sendo registrada no QS ou no CRM.\nif (String(cfg.SO_ALCANCOU || '').toLowerCase() === 'sim' && evt.alcancou !== true) return [];\n\nif (String(r.STAGE_ID || '') !== String(cfg.STAGE_DE)) return [];\n\nreturn [{ json: {\n  id: String(r.ID),\n  de: String(r.STAGE_ID || ''),\n  para: String(cfg.STAGE_PARA),\n  canal: String(evt.canal || ''),\n  desfecho: String(evt.desfecho || ''),\n  sdr: String(evt.sdr || '')\n} }];"
       },
       "id": "flt-pc-0017-4a10-9b01-0d2e3f4a5c17",
       "name": "So se ainda estiver em Novo lead",
