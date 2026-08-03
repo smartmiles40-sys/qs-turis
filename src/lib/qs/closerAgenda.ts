@@ -509,3 +509,29 @@ export async function deleteBlock(id: string): Promise<{ ok: boolean; error?: st
   }
   return { ok: true };
 }
+
+// ── Identidade e desfecho da reunião ─────────────────────────────────────────
+// Moradia comum destes três: a Agenda precisa saber DE QUEM é a reunião e SE ela
+// ficou sem desfecho, e essa regra não pode divergir entre telas.
+
+/** Fim real da reunião: `ends_at` quando existe (0027), senão início + duração. */
+export function fimDaReuniao(m: Meeting): Date {
+  if (m.ends_at) return new Date(m.ends_at);
+  return new Date(new Date(m.scheduled_at).getTime() + (m.duration_min ?? 30) * 60_000);
+}
+
+/** Terminou e ninguém disse no que deu — o número que expõe o funil furado. */
+export function semDesfecho(m: Meeting, agora: Date): boolean {
+  return (m.status === "agendada" || m.status === "confirmada") && fimDaReuniao(m) < agora;
+}
+
+/**
+ * De quem é esta reunião. Closer de verdade quando existe; senão o nome do
+ * responsável em texto livre (`meeting_owner`), que é o que a operação usa
+ * enquanto ninguém tem o papel `closer` no QS.
+ */
+export function chaveDoEspecialista(m: Meeting): string {
+  if (m.closer_id) return m.closer_id;
+  const nome = (m.closer?.name || m.meeting_owner || "").trim();
+  return nome ? `nome:${nome.toLowerCase()}` : "sem";
+}

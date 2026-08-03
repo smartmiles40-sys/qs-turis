@@ -159,7 +159,7 @@ export default function ChatwootDock() {
 
         {/* Faixa de contexto do lead (telefone copiado / estado do deep-link) */}
         {target && (
-          <div className="shrink-0 flex items-center gap-2 px-3 py-2 text-[11.5px] border-b" style={{ borderColor: "var(--line, #E8EBF0)", background: "#F7FBFA", minWidth: PANEL_W }}>
+          <div className="shrink-0 flex items-center gap-2 px-3 py-2 text-[11.5px] border-b" style={{ borderColor: "var(--line, #E8EBF0)", background: "var(--card2)", minWidth: PANEL_W }}>
             <span className="font-bold truncate" style={{ color: "var(--ink, #17202E)" }}>{target.name || "Lead"}</span>
             {target.phone && (
               <button onClick={recopyPhone} className="flex items-center gap-1 font-bold hover:underline shrink-0" style={{ color: "#0E7C6A" }} title="Copiar o telefone">

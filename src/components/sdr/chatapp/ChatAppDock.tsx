@@ -140,7 +140,7 @@ export default function ChatAppDock() {
 
           {/* Lead em atendimento: telefone pra colar na busca */}
           {target && (
-            <div className="rounded-xl border p-3.5" style={{ borderColor: "var(--line, #E8EBF0)", background: "#F7FBFA" }}>
+            <div className="rounded-xl border p-3.5" style={{ borderColor: "var(--line, #E8EBF0)", background: "var(--card2)" }}>
               <p className="text-[10.5px] font-bold uppercase tracking-wider mb-1.5" style={{ color: "#0E7C6A" }}>
                 Lead em atendimento
               </p>
@@ -176,7 +176,7 @@ export default function ChatAppDock() {
                   style={
                     copiedTpl === t.label
                       ? { background: "#0E7C6A", borderColor: "#0E7C6A" }
-                      : { background: "#fff", borderColor: "var(--line, #E8EBF0)" }
+                      : { background: "var(--card)", borderColor: "var(--line, #E8EBF0)" }
                   }
                   title="Copiar a mensagem preenchida"
                 >

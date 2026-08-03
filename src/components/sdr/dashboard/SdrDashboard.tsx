@@ -2133,12 +2133,12 @@ export default function SdrDashboard() {
               ) : loadingTeam ? (
                 <p className="text-sm text-gray-500 text-center py-4">Carregando...</p>
               ) : !zombies || zombies.total === 0 ? (
-                <div className="rounded-xl border p-4 flex items-center gap-3" style={{ background: "#E1F5F0", borderColor: "#0E9F8640" }}>
+                <div className="rounded-xl border p-4 flex items-center gap-3" style={{ background: "var(--ok-bg)", borderColor: "#0E9F8640" }}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0E9F86" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
                   <p className="text-sm font-semibold text-gray-600">Nenhum lead parado sem contato há 3+ dias. Operação limpa.</p>
                 </div>
               ) : (
-                <div className="rounded-xl border p-4 flex gap-3 items-start" style={{ background: "#FBE3E1", borderColor: "#D92D2040" }}>
+                <div className="rounded-xl border p-4 flex gap-3 items-start" style={{ background: "var(--err-bg)", borderColor: "#D92D2040" }}>
                   <svg className="shrink-0" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D92D20" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
                   <div className="min-w-0">
                     <p className="text-[13px] font-semibold text-gray-700 leading-relaxed">

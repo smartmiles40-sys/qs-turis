@@ -1,22 +1,19 @@
 // src/preview/AgendaPreview.tsx
 // -----------------------------------------------------------------------------
-// Página de PREVIEW LOCAL da agenda por especialista, servida em
+// Página de PREVIEW LOCAL da Agenda (mês), servida em
 // http://localhost:3000/agenda-preview.html no `npm run dev`.
 //
-// Renderiza as DUAS telas reais com dados de mentira (prop `demo`): sem login,
-// sem banco e sem gravar nada.
-//   • Agendamento — o dia por especialista, com os casos chatos: reunião
-//     sobreposta, pendente de desfecho, coluna herdada do texto livre e
-//     fora-do-expediente hachurado.
-//   • Agenda — o mês inteiro, com reuniões espalhadas pelas semanas.
+// Renderiza a tela REAL com dados de mentira (prop `demo`): sem login, sem banco
+// e sem gravar nada. Cobre os casos chatos — dia lotado (+N mais), reunião que
+// passou sem desfecho, especialista herdado do texto livre, reunião sem dono —
+// e tem um botão de MODO NOTURNO pra conferir o tema escuro sem logar.
 // Nada disso entra no build de produção (o build só empacota o index.html).
 // -----------------------------------------------------------------------------
 
-import { StrictMode, useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../index.css";
-import AgendaClosers, { type AgendaDemo } from "../components/sdr/agenda/AgendaClosers";
-import AgendaMes from "../components/sdr/agenda/AgendaMes";
+import AgendaMes, { type AgendaDemo } from "../components/sdr/agenda/AgendaMes";
 import type { Meeting, MeetingSal, MeetingStatus, SdrUser } from "../components/sdr/types";
 
 const hoje = new Date();
@@ -67,21 +64,6 @@ function reuniao(
 const DEMO: AgendaDemo = {
   closers: CLOSERS,
   configs: [],
-  availability: [
-    // Talita atende 9–12 e 13–18 (o almoço vira hachura entre as duas janelas)
-    ...[1, 2, 3, 4, 5].flatMap((weekday) => [
-      { id: `a${weekday}a`, closer_id: "c1", weekday, start_time: "09:00:00", end_time: "12:00:00" },
-      { id: `a${weekday}b`, closer_id: "c1", weekday, start_time: "13:00:00", end_time: "18:00:00" },
-    ]),
-    // Bruno só à tarde
-    ...[0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
-      id: `b${weekday}`, closer_id: "c2", weekday, start_time: "13:00:00", end_time: "20:00:00",
-    })),
-    // Domingo/sábado da Talita: sem janela nenhuma → sem hachura (é o padrão)
-  ],
-  blocks: [
-    { id: "bl1", closer_id: "c2", starts_at: em(16, 0), ends_at: em(17, 0), reason: "Compromisso pessoal" },
-  ],
   meetings: [
     reuniao("c1", "Roselene Pereira", 10, 30, 60, "realizada", { link: true, sal: "aceito" }),
     reuniao("c1", "Jessica Melo", 14, 0, 60, "agendada", { link: true }),
@@ -141,45 +123,29 @@ const DEMO_MES: AgendaDemo = {
 };
 
 function Preview() {
-  const [tela, setTela] = useState<"agendamento" | "agenda">("agenda");
-  // Mesmo encanamento da MeetingsPage: o dia clicado no mês reposiciona o dia.
-  const [dia, setDia] = useState<Date | null>(null);
+  // O preview também serve pra conferir o MODO NOTURNO sem precisar logar: o
+  // tema é uma classe no <html>, então basta alterná-la aqui.
+  const [escuro, setEscuro] = useState(false);
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", escuro);
+    document.documentElement.style.colorScheme = escuro ? "dark" : "light";
+  }, [escuro]);
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
-          {([
-            { id: "agendamento", label: "Agendamento (dia)" },
-            { id: "agenda", label: "Agenda (mês)" },
-          ] as const).map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTela(t.id)}
-              className={`rounded-md px-3.5 py-1.5 text-sm font-semibold transition ${
-                tela === t.id ? "bg-[#0147FF] text-white" : "text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <p className="text-sm text-gray-500">Preview local — dados de mentira, nada é gravado.</p>
+        <button
+          onClick={() => setEscuro((v) => !v)}
+          className="rounded-lg border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+        >
+          {escuro ? "☀️ Modo claro" : "🌙 Modo noturno"}
+        </button>
+        <p className="text-sm text-gray-500">
+          Preview local da <b>Agenda</b> — dados de mentira, nada é gravado.
+        </p>
       </div>
 
-      {tela === "agendamento" ? (
-        <AgendaClosers
-          demo={DEMO}
-          dataInicial={dia}
-          onOpenLead={(id) => console.log("[preview] abrir lead", id)}
-        />
-      ) : (
-        <AgendaMes
-          demo={DEMO_MES}
-          onAbrirDia={(d) => { setDia(d); setTela("agendamento"); }}
-          onOpenLead={(id) => console.log("[preview] abrir lead", id)}
-        />
-      )}
+      <AgendaMes demo={DEMO_MES} onOpenLead={(id) => console.log("[preview] abrir lead", id)} />
     </div>
   );
 }

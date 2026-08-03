@@ -22,6 +22,19 @@
   --accent: #0147FF;     /* azul da marca — usado como texto/realce */
   --accent-soft: #EEF4FF;/* fundo suave do acento (chips/estados ativos) */
 
+  /* ── Caixas de aviso e de erro ────────────────────────────────────────────
+     Existem porque estes fundos pastel viviam em hex fixo dentro dos
+     componentes (#FFF7ED, #FEF2F2 …). Hex em `style={{}}` é inalcançável por
+     CSS, então no modo noturno viravam retângulos creme/rosa gritando no meio
+     da tela escura. Como variável, trocam de valor junto com o tema. */
+  --warn-bg:   #FFF7ED;
+  --warn-line: #FED7AA;
+  --warn-ink:  #9A3412;
+  --err-bg:    #FEF2F2;
+  --err-line:  #FECACA;
+  --err-ink:   #B4242A;
+  --ok-bg:     #E1F5F0;
+
   /* ── Atendimento de WhatsApp ───────────────────────────────────────────────
      Existem porque o painel tinha cores fixas em hex: no modo noturno o texto
      da bolha (quase preto) caía sobre fundo escuro e sumia. Agora tudo aqui
@@ -68,6 +81,16 @@ html.dark {
   --ink3: #6E7889;
   --accent: #5B8CFF;
   --accent-soft: #1B2740;
+
+  /* Avisos no escuro: fundo translúcido da própria cor em vez do pastel claro
+     (que vira um bloco creme cegando no meio da tela). */
+  --warn-bg:   rgba(240, 162, 39, .14);
+  --warn-line: rgba(240, 162, 39, .34);
+  --warn-ink:  #F5B54F;
+  --err-bg:    rgba(255, 92, 96, .14);
+  --err-line:  rgba(255, 92, 96, .34);
+  --err-ink:   #FF9295;
+  --ok-bg:     rgba(43, 192, 166, .14);
 
   /* Atendimento de WhatsApp no escuro: bolha enviada vira um teal translúcido
      (o verde-limão do WhatsApp num painel escuro parece erro de renderização) e
@@ -209,8 +232,27 @@ html.dark .text-amber-700, html.dark .text-amber-600,
 html.dark .text-orange-700, html.dark .text-orange-600,
 html.dark .text-yellow-700 { color: #F5B54F; }
 
-/* Inputs / placeholder */
-html.dark input, html.dark textarea, html.dark select { color: var(--ink); }
+/* Inputs / placeholder
+   Quase nenhum campo do app declara COR DE FUNDO (no claro, o branco do
+   user-agent já era o certo). No escuro, `color-scheme: dark` faz o Chrome
+   pintar o campo de rgb(59,59,59): um retângulo cinza chapado que não pertence
+   à paleta, sobre uma carta #171E27 — é o "fica tudo cinza e não dá pra ver".
+   Aqui eles voltam pra superfície do tema.
+   `:where()` de propósito: ele NÃO soma especificidade, então quem declarou
+   fundo próprio (html.dark .bg-white, .bg-gray-50 …) continua vencendo.
+   Checkbox/radio/range/color ficam de fora — pintar o fundo deles apaga o
+   desenho nativo do controle. */
+html.dark input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"])),
+html.dark textarea,
+html.dark select {
+  background-color: var(--card2);
+  border-color: var(--line);
+  color: var(--ink);
+}
+/* A lista aberta do <select> é desenhada pelo sistema: sem isto, no Windows ela
+   abre branca com texto claro (ilegível) mesmo com o campo escuro. */
+html.dark option { background-color: var(--card2); color: var(--ink); }
+
 html.dark ::placeholder { color: var(--ink3); opacity: 1; }
 html.dark .placeholder-gray-400::placeholder { color: var(--ink3); }
 
@@ -230,6 +272,17 @@ html.dark .bg-\[\#FFF7ED\] { background-color: rgba(240,162,39,.10); }
 html.dark .bg-\[\#E8EEFF\] { background-color: rgba(91,140,255,.12); }
 html.dark .bg-\[\#E1F5F0\] { background-color: rgba(43,192,166,.12); }
 html.dark .border-\[\#E5E7EB\], html.dark .border-\[\#E4E8EE\], html.dark .border-\[\#EEF1F5\] { border-color: var(--line); }
+
+/* Neutros COM OPACIDADE. `html.dark .bg-gray-50` não alcança `.bg-gray-50/40`:
+   são classes diferentes (bg-gray-50\/40). Sem isto, essas superfícies "de
+   respiro" continuam com o cinza CLARO do tema claro por baixo do escuro — que
+   é justamente o efeito de mancha que estraga a tela. */
+html.dark .bg-gray-50\/40 { background-color: rgba(30, 39, 50, .40); }
+html.dark .bg-gray-50\/50 { background-color: rgba(30, 39, 50, .50); }
+html.dark .bg-gray-50\/60 { background-color: rgba(30, 39, 50, .60); }
+html.dark .bg-white\/70  { background-color: rgba(23, 30, 39, .70); }
+/* bg-white/15 e text-white/xx ficam de fora: vivem sobre acento sólido
+   (botão azul, FAB verde), onde o branco translúcido é o certo nos dois temas. */
 
 /* Trilho de rolagem discreto no escuro */
 html.dark * { scrollbar-color: #39434F var(--bg); }

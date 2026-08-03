@@ -2582,7 +2582,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               ))}
             </div>
             {pending && (
-              <div className="mt-3 flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "#FFF7ED", border: "1px solid #FED7AA" }}>
+              <div className="mt-3 flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: "var(--warn-bg)", border: "1px solid var(--warn-line)" }}>
                 <span className="text-[13px]" style={{ color: "var(--ink2)" }}>
                   Confirmar: <b style={{ color: "var(--ink)" }}>{outcomes.find((o) => o.key === pending)?.label}</b>?
                   {autoFinish?.taskId === task.id && <b style={{ color: "#C2410C" }}> · concluindo em {autoFinish.secs}s</b>}
@@ -3652,7 +3652,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </div>
             </div>
             {newLeadError && (
-              <div className="mt-4 px-3 py-2 rounded-lg text-[13px] font-medium" style={{ background: "#FEF2F2", color: "#B91C1C", border: "1px solid #FECACA" }}>
+              <div className="mt-4 px-3 py-2 rounded-lg text-[13px] font-medium" style={{ background: "var(--err-bg)", color: "#B91C1C", border: "1px solid #FECACA" }}>
                 {newLeadError}
               </div>
             )}

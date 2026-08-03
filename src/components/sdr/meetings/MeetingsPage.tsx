@@ -8,7 +8,6 @@ import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { createMeeting } from "@/lib/qs/meetings";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
-import AgendaClosers from "../agenda/AgendaClosers";
 import AgendaMes from "../agenda/AgendaMes";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -113,21 +112,17 @@ const labelClass = "block text-xs font-medium text-gray-700 mb-1";
 export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const { currentUser } = useQsAuth();
 
-  // Três visões da mesma coisa, unificadas numa aba só a pedido do Bruno:
-  //   reunioes    — a lista/CRUD daqui (filtros, busca, formulário)
-  //   agendamento — o DIA, uma coluna por especialista (quem está livre às 15h?)
-  //   agenda      — o MÊS inteiro, na grade da Google Agenda (volume)
-  const [view, setView] = useState<"reunioes" | "agendamento" | "agenda">("reunioes");
-
-  // Dia que o Agendamento deve abrir. Nasce nulo (= hoje) e só é preenchido
-  // quando o usuário clica num dia na Agenda do mês.
-  const [diaAgendamento, setDiaAgendamento] = useState<Date | null>(null);
+  // Duas visões da mesma coisa, unificadas numa aba só a pedido do Bruno:
+  //   reunioes — a lista/CRUD daqui (filtros, busca, formulário)
+  //   agenda   — o MÊS inteiro, na grade da Google Agenda (o dia abre num painel
+  //              dentro dela mesma)
+  const [view, setView] = useState<"reunioes" | "agenda">("reunioes");
 
   const [activeTab, setActiveTab] = useState<FilterTab>("todas");
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   // Closers ativos: sem eles a reunião nasce sem dono de horário e some do
-  // calendário das abas "Agendamento"/"Agenda" (organizados por closer).
+  // calendário da aba "Agenda" (organizado por closer).
   const [closers, setClosers] = useState<SdrUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -497,14 +492,12 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     return new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime();
   });
 
-  // Alternador Reuniões ⇄ Agendamento ⇄ Agenda — reaproveitado nas saídas
-  // (agenda, loading, conteúdo) pra ficar sempre visível, inclusive enquanto as
-  // reuniões carregam.
+  // Alternador Reuniões ⇄ Agenda — reaproveitado nas saídas (agenda, loading,
+  // conteúdo) pra ficar sempre visível, inclusive enquanto as reuniões carregam.
   const viewToggle = (
     <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
       {([
         { id: "reunioes", label: "Reuniões" },
-        { id: "agendamento", label: "Agendamento" },
         { id: "agenda", label: "Agenda" },
       ] as const).map((v) => (
         <button
@@ -520,28 +513,13 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     </div>
   );
 
-  // Aba "Agendamento": o dia inteiro com UMA COLUNA POR ESPECIALISTA, no layout
-  // do Agendamento do Bitrix. Responde "quem está livre às 15h?" e,
-  // principalmente, "que reunião já passou sem ninguém dizer no que deu?".
-  if (view === "agendamento") {
-    return (
-      <div className="space-y-4" style={{ fontFamily: "inherit" }}>
-        {viewToggle}
-        <AgendaClosers onOpenLead={onOpenLead} dataInicial={diaAgendamento} />
-      </div>
-    );
-  }
-
-  // Aba "Agenda": o mês inteiro na grade da Google Agenda. Clicar num dia leva
-  // pro Agendamento já posicionado nele.
+  // Aba "Agenda": o mês inteiro na grade da Google Agenda. Clicar num dia abre o
+  // painel daquele dia dentro dela mesma.
   if (view === "agenda") {
     return (
       <div className="space-y-4" style={{ fontFamily: "inherit" }}>
         {viewToggle}
-        <AgendaMes
-          onOpenLead={onOpenLead}
-          onAbrirDia={(d) => { setDiaAgendamento(d); setView("agendamento"); }}
-        />
+        <AgendaMes onOpenLead={onOpenLead} />
       </div>
     );
   }
@@ -926,7 +904,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                 </select>
                 <p className="mt-1 text-[11px] text-gray-400">
                   Sem closer, a reunião não aparece na agenda dele nem reserva o horário.
-                  Para escolher entre os horários livres, use a aba <b>Agendamento</b>.
+                  Para escolher entre os horários livres, use a aba <b>Agenda</b>.
                 </p>
               </div>
 

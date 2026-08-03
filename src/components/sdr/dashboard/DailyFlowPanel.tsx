@@ -222,7 +222,7 @@ function DailyBars({ title, hint, buckets, color, workHours }: { title: string; 
               style={{
                 height: `${(b.count / max) * 100}%`,
                 minHeight: 2,
-                background: b.count > 0 ? color : "#E5E7EB",
+                background: b.count > 0 ? color : "var(--line)",
                 opacity: b.count > 0 ? 0.9 : 1,
                 transition: "height .3s",
               }}

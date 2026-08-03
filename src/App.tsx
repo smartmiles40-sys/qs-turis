@@ -13,7 +13,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
       return (
         <div style={{ padding: 40, fontFamily: "sans-serif" }}>
           <h2 style={{ color: "#DC2626" }}>Erro no QS</h2>
-          <pre style={{ background: "#FEF2F2", padding: 16, borderRadius: 8, fontSize: 13, whiteSpace: "pre-wrap" }}>
+          <pre style={{ background: "var(--err-bg)", padding: 16, borderRadius: 8, fontSize: 13, whiteSpace: "pre-wrap" }}>
             {this.state.error.message}{"\n\n"}{this.state.error.stack}
           </pre>
           <button onClick={() => this.setState({ error: null })} style={{ marginTop: 16, padding: "8px 20px", background: "#0147FF", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>

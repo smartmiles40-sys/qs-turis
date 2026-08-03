@@ -825,7 +825,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                             className="flex-1 px-2 py-1 rounded-lg text-xs font-semibold border transition leading-tight"
                             style={selected
                               ? { background: "#0147FF", color: "#fff", borderColor: "#0147FF" }
-                              : { background: "#fff", color: "#6B7280", borderColor: "#E5E7EB" }}>
+                              : { background: "var(--card)", color: "var(--ink2)", borderColor: "var(--line)" }}>
                             {p.label}
                             <span className="block text-[9px] font-medium opacity-70">{PRIORITY_LABEL[p.priority]}</span>
                           </button>
@@ -888,10 +888,10 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                     className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full border-2 text-sm font-medium transition-all"
                     style={on
                       ? { borderColor: "#0147FF", background: "#0147FF", color: "#fff" }
-                      : { borderColor: "#E5E7EB", background: "#fff", color: "#4B5563" }}
+                      : { borderColor: "var(--line)", background: "var(--card)", color: "var(--ink2)" }}
                   >
                     <span className="flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold"
-                      style={{ background: on ? "rgba(255,255,255,.25)" : "#F3F4F6", color: on ? "#fff" : "#6B7280" }}>
+                      style={{ background: on ? "rgba(255,255,255,.25)" : "var(--line2)", color: on ? "#fff" : "var(--ink2)" }}>
                       {u.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)}
                     </span>
                     {u.name}

@@ -2091,7 +2091,7 @@ function AtendimentoSection() {
               className="text-left rounded-xl border p-4 transition-colors disabled:opacity-60"
               style={active
                 ? { borderColor: "#0147FF", background: "#0147FF0d" }
-                : { borderColor: "var(--line, #E8EBF0)", background: "#fff" }}
+                : { borderColor: "var(--line, #E8EBF0)", background: "var(--card)" }}
             >
               <div className="flex items-center gap-2">
                 <span className="w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0" style={{ borderColor: active ? "#0147FF" : "#CBD5E1" }}>
