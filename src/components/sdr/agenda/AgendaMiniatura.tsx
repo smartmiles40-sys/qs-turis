@@ -94,7 +94,13 @@ export default function AgendaMiniatura({ responsavel, dia, onEscolher, selecion
   const diaBase = useMemo(() => new Date(diaMs), [diaMs]);
 
   const carregar = useCallback(async () => {
-    if (!closerId) return;
+    if (!closerId) {
+      // Nome que não casa com usuário do QS: não há o que carregar, e o estado
+      // PRECISA sair de "carregando" — senão a caixa fica presa no texto de
+      // carregamento em vez de explicar que o responsável não está cadastrado.
+      setCarregando(false);
+      return;
+    }
     const de = new Date(diaMs);
     const ate = addDays(de, 1);
     const [cfg, av, bl, mt] = await Promise.all([
