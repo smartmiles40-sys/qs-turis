@@ -20,7 +20,32 @@
 // -----------------------------------------------------------------------------
 
 import { findLeadByPhone, ingestMessage, WA_INBOX_IDS } from './_wa.js';
-import { segredoConfere } from './_supabaseAdmin.js';
+import { insert, segredoConfere } from './_supabaseAdmin.js';
+
+/**
+ * Registra a mensagem que NÃO deu pra vincular.
+ *
+ * O webhook responde 200 e segue a vida de propósito (erro aqui vira
+ * retentativa eterna do Chatwoot). O preço disso era a mensagem sumir sem
+ * rastro em lugar nenhum — foi assim que "não estão chegando mensagens" ficou
+ * invisível. Agora cada descarte deixa uma linha.
+ *
+ * Best-effort: se o próprio registro falhar, o webhook segue. Registrar o
+ * problema nunca pode virar um problema maior.
+ */
+async function registrarDescarte(motivo, dados = {}) {
+  try {
+    await insert('qs_wa_descartadas', {
+      motivo,
+      phone: dados.phone ? String(dados.phone).replace(/\D/g, '') : null,
+      inbox_id: dados.inboxId ?? null,
+      cw_message_id: dados.messageId ?? null,
+      detalhe: dados.detalhe ?? null,
+    }, { returning: false });
+  } catch (e) {
+    console.warn('[wa-webhook] não deu pra registrar o descarte:', e?.message);
+  }
+}
 
 /**
  * O payload do webhook não tem uma forma só: dependendo do evento, a mensagem
@@ -92,16 +117,27 @@ export default async function handler(req, res) {
   // Caixa de e-mail/site não interessa aqui — só WhatsApp.
   const inboxId = inboxIdOf(body, message);
   if (WA_INBOX_IDS.length && inboxId != null && !WA_INBOX_IDS.includes(Number(inboxId))) {
+    // Caixa nova no Chatwoot que ninguém adicionou em CHATWOOT_WA_INBOX_IDS
+    // aparece aqui — é uma das formas de "sumir mensagem" sem erro nenhum.
+    await registrarDescarte('inbox-fora-do-whatsapp', {
+      inboxId, messageId: message?.id, phone: extractPhone(body, message),
+    });
     return res.status(200).json({ ignored: 'inbox-fora-do-whatsapp', inboxId });
   }
 
   const phone = extractPhone(body, message);
-  if (!phone) return res.status(200).json({ ignored: 'sem-telefone' });
+  if (!phone) {
+    await registrarDescarte('sem-telefone', { inboxId, messageId: message?.id });
+    return res.status(200).json({ ignored: 'sem-telefone' });
+  }
 
   try {
     const lead = await findLeadByPhone(phone);
     if (!lead) {
-      // Normal: cliente que ainda não é lead no QS. Fica só no Chatwoot.
+      // Não é erro: é gente falando com a agência que ainda não virou lead.
+      // Registrado porque essa lista É oportunidade comercial — e porque, sem
+      // ela, "sumiu mensagem" não tem onde ser investigado.
+      await registrarDescarte('sem-lead-correspondente', { phone, inboxId, messageId: message?.id });
       return res.status(200).json({ ignored: 'sem-lead-correspondente' });
     }
 
@@ -119,6 +155,7 @@ export default async function handler(req, res) {
   } catch (e) {
     // Erro nosso: loga e responde 200 mesmo assim (ver cabeçalho do arquivo).
     console.error('[wa-webhook]', e?.message, e?.details || '');
+    await registrarDescarte('erro', { phone, inboxId, messageId: message?.id, detalhe: e?.message });
     return res.status(200).json({ ok: false, erro: e?.message || 'falha' });
   }
 }
