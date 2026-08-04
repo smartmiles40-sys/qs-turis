@@ -14,7 +14,7 @@ import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { createMeeting } from "@/lib/qs/meetings";
 import { findUserIdByName } from "@/lib/qs/closerAgenda";
 import { confirmar } from "@/lib/qs/confirmar";
-import { criarEventoNoGoogle } from "@/lib/qs/googleMeet";
+import { criarEvento } from "@/lib/qs/agendaMeet";
 import { notifyError } from "@/lib/qs/notify";
 import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, fetchNoteCountsByLead, fetchContactedLeadIds, fetchLossReasons, type CadenceScriptRow, type ContactBreakdownRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
@@ -1177,9 +1177,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       // desligada não diz nada, e falha vira aviso — a reunião continua de pé e
       // o SDR pode mandar o link na mão.
       if (res.meeting?.id) {
-        const meet = await criarEventoNoGoogle(res.meeting.id);
+        const meet = await criarEvento({ meetingId: res.meeting.id });
         if (meet.ok && meet.meetLink) {
           showToast("Reunião criada com sala do Google Meet — convite enviado ao closer e ao cliente.");
+          if (meet.convidadosDescartados?.length) {
+            // E-mail malformado faria o Google recusar o evento inteiro, então o
+            // n8n descarta e segue. Quem agendou precisa saber quem NÃO foi
+            // convidado — senão o cliente simplesmente não recebe e ninguém nota.
+            failures.push(`e-mail inválido não convidado: ${meet.convidadosDescartados.join(", ")}`);
+          }
+        } else if (meet.ok && meet.semMeet) {
+          // Evento criado, mas o Google não devolveu sala: a reunião vale, só não
+          // tem link. Avisar é melhor do que o SDR descobrir na hora da reunião.
+          failures.push("o evento foi criado no Google, mas SEM sala do Meet — mande o link na mão");
         } else if (!meet.ok && !meet.desligado) {
           failures.push(`o convite do Google não foi criado (${meet.aviso}) — mande o link da reunião na mão`);
         }

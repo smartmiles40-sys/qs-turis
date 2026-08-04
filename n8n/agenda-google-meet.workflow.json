@@ -1,5 +1,5 @@
 {
-  "name": "QS → Google Meet (agenda dos closers)",
+  "name": "QS · Agenda · Google Meet",
   "nodes": [
     {
       "parameters": {
@@ -9,98 +9,328 @@
         "responseMode": "lastNode",
         "options": {}
       },
-      "id": "meet-webhook-0001",
+      "id": "07f4aee8-5db2-40e3-94e9-702d6331ec2f",
       "name": "Webhook QS (qs-agenda-meet)",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [440, 300],
+      "position": [2320, 1280],
       "webhookId": "qs-agenda-meet-0001",
       "notesInFlow": true,
-      "notes": "Header Auth: nome x-qs-agenda-secret, valor = o mesmo da env N8N_AGENDA_SECRET na Vercel. Use a URL de PRODUÇÃO (/webhook/), não a de teste — e deixe o workflow ATIVO."
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nFYfkjovaZqHtWWT",
+          "name": "Header Auth account"
+        }
+      },
+      "notes": "Header Auth: nome x-qs-agenda-secret, valor = env N8N_AGENDA_SECRET na Vercel. Use a URL de PRODUCAO (/webhook/), nao a de teste, e deixe o workflow ATIVO. Um unico endpoint atende as 3 acoes; o QS manda o campo acao no body."
     },
     {
       "parameters": {
-        "assignments": {
-          "assignments": [
+        "jsCode": "// ---------------------------------------------------------------------------\n// Porta de entrada unica. Valida, normaliza e decide a acao.\n//\n// Tudo que chega do QS eh tratado como suspeito: campo faltando aqui vira\n// resposta clara em vez de erro do Google 3 nos adiante.\n// ---------------------------------------------------------------------------\n\n// Troque por a ID da agenda dedicada (ex.: c_xxx@group.calendar.google.com).\n// 'primary' joga tudo na agenda pessoal da conta da operacao.\nconst CALENDAR_PADRAO = 'primary';\n\nconst b = $input.first().json.body || {};\nconst acao = String(b.acao || 'criar').toLowerCase().trim();\nconst erros = [];\n\nif (!b.meeting_id) erros.push('meeting_id ausente');\nif (!['criar', 'reagendar', 'cancelar'].includes(acao)) erros.push('acao invalida: ' + acao);\n\nif (acao === 'criar' || acao === 'reagendar') {\n  if (!b.inicio) erros.push('inicio ausente');\n  if (!b.fim) erros.push('fim ausente');\n  if (b.inicio && b.fim && new Date(b.fim) <= new Date(b.inicio)) {\n    erros.push('fim menor ou igual ao inicio');\n  }\n}\nif (acao === 'reagendar' || acao === 'cancelar') {\n  if (!b.event_id) erros.push('event_id ausente');\n}\n\n// E-mail malformado faz o Google recusar o evento INTEIRO com 400. Melhor\n// descartar o convidado ruim e avisar o QS do que perder a reuniao.\nconst EMAIL = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nconst brutos = (Array.isArray(b.convidados) ? b.convidados : [])\n  .map((e) => String(e || '').trim())\n  .filter(Boolean);\nconst convidados = brutos.filter((e) => EMAIL.test(e));\nconst descartados = brutos.filter((e) => !EMAIL.test(e));\n\n// ID de evento deterministico: reenvio do mesmo meeting_id devolve 409 em vez\n// de criar uma segunda reuniao. O Google so aceita base32hex (a-v e 0-9).\nfunction idEvento(seed) {\n  const alfa = 'abcdefghijklmnopqrstuv0123456789';\n  const s = 'qs-' + String(seed);\n  let out = '';\n  for (let i = 0; i < s.length; i++) {\n    const c = s.charCodeAt(i);\n    out += alfa[c % 32] + alfa[(c >> 5) % 32];\n  }\n  return ('qs' + out).slice(0, 60);\n}\n\nreturn [{ json: {\n  acao: erros.length ? 'invalida' : acao,\n  erros,\n  meeting_id: b.meeting_id ?? null,\n  calendar_id: b.calendar_id || CALENDAR_PADRAO,\n  event_id: b.event_id || null,\n  event_id_previsto: b.meeting_id ? idEvento(b.meeting_id) : null,\n  inicio: b.inicio || null,\n  fim: b.fim || null,\n  timezone: b.timezone || 'America/Sao_Paulo',\n  titulo: b.titulo || 'Reuniao',\n  descricao: b.descricao || '',\n  convidados,\n  convidados_descartados: descartados\n} }];"
+      },
+      "id": "1a2b3c4d-0001-4000-8000-000000000001",
+      "name": "Validar entrada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2528, 1280],
+      "notesInFlow": true,
+      "notes": "Define aqui o CALENDAR_PADRAO. Campo invalido vira acao='invalida' e sai pela saida de erro do Switch."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
             {
-              "id": "cfg-cal-0001",
-              "name": "CALENDAR_ID",
-              "type": "string",
-              "value": "primary"
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "r-criar",
+                    "leftValue": "={{ $json.acao }}",
+                    "rightValue": "criar",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "criar"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "r-reagendar",
+                    "leftValue": "={{ $json.acao }}",
+                    "rightValue": "reagendar",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reagendar"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "r-cancelar",
+                    "leftValue": "={{ $json.acao }}",
+                    "rightValue": "cancelar",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cancelar"
             }
           ]
         },
-        "includeOtherFields": true,
-        "options": {}
+        "options": { "fallbackOutput": "extra", "renameFallbackOutput": "invalida" }
       },
-      "id": "meet-config-0002",
-      "name": "Config da agenda",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [660, 300],
-      "notesInFlow": true,
-      "notes": "CALENDAR_ID = 'primary' cria na agenda da conta Google conectada aqui no n8n (a agenda da OPERAÇÃO). Os closers entram como convidados e o evento cai na agenda deles ao aceitar. Se a agência tiver Google Workspace com delegação, dá pra trocar pelo e-mail do closer."
+      "id": "1a2b3c4d-0002-4000-8000-000000000002",
+      "name": "Rotear acao",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [2736, 1280]
     },
     {
       "parameters": {
-        "jsCode": "// Monta o corpo do evento do Google Calendar.\n//\n// conferenceData.createRequest é o que faz o Google GERAR o link do Meet. Sem\n// ele o evento nasce sem sala; sem o parâmetro conferenceDataVersion=1 na URL\n// (ver o nó seguinte) o Google IGNORA este bloco em silêncio — o evento é criado\n// certinho, só que sem Meet nenhum, e o sintoma é \"cadê o link?\".\n//\n// requestId precisa ser único por evento: reenviar o MESMO requestId devolve a\n// mesma sala em vez de criar outra.\nconst b = $('Webhook QS (qs-agenda-meet)').first().json.body || {};\nconst cfg = $('Config da agenda').first().json;\n\nif (!b.inicio || !b.fim) {\n  throw new Error('QS mandou reunião sem início/fim — evento não criado.');\n}\n\nconst convidados = Array.isArray(b.convidados) ? b.convidados.filter(Boolean) : [];\n\nreturn [{ json: {\n  calendarId: cfg.CALENDAR_ID || 'primary',\n  meeting_id: b.meeting_id,\n  evento: {\n    summary: b.titulo || 'Reunião',\n    description: b.descricao || '',\n    start: { dateTime: b.inicio, timeZone: b.timezone || 'America/Sao_Paulo' },\n    end:   { dateTime: b.fim,    timeZone: b.timezone || 'America/Sao_Paulo' },\n    attendees: convidados.map((email) => ({ email })),\n    conferenceData: {\n      createRequest: {\n        requestId: 'qs-' + String(b.meeting_id || Date.now()),\n        conferenceSolutionKey: { type: 'hangoutsMeet' }\n      }\n    },\n    reminders: { useDefault: false, overrides: [ { method: 'popup', minutes: 30 }, { method: 'email', minutes: 60 } ] }\n  }\n} }];"
+        "jsCode": "// Corpo do evento do Google Calendar.\n//\n// conferenceData.createRequest eh o que faz o Google GERAR a sala do Meet. Sem\n// o parametro conferenceDataVersion=1 na URL (no proximo no) o Google IGNORA\n// este bloco em silencio: o evento nasce certinho, so que sem Meet nenhum.\n//\n// id deterministico + requestId estavel = reenvio devolve 409 e a MESMA sala,\n// em vez de duplicar a reuniao.\nconst d = $json;\n\nreturn [{ json: { ...d, evento: {\n  id: d.event_id_previsto,\n  summary: d.titulo,\n  description: d.descricao,\n  start: { dateTime: d.inicio, timeZone: d.timezone },\n  end:   { dateTime: d.fim,   timeZone: d.timezone },\n  attendees: d.convidados.map((email) => ({ email })),\n  conferenceData: {\n    createRequest: {\n      requestId: 'qs-' + String(d.meeting_id),\n      conferenceSolutionKey: { type: 'hangoutsMeet' }\n    }\n  },\n  reminders: {\n    useDefault: false,\n    overrides: [ { method: 'popup', minutes: 30 }, { method: 'email', minutes: 60 } ]\n  }\n} } }];"
       },
-      "id": "meet-montar-0003",
+      "id": "1a2b3c4d-0003-4000-8000-000000000003",
       "name": "Montar evento",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [880, 300]
+      "position": [2976, 1040]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($json.calendarId) }}/events?conferenceDataVersion=1&sendUpdates=all",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($json.calendar_id) }}/events?conferenceDataVersion=1&sendUpdates=all",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleCalendarOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.evento) }}",
         "options": {
+          "response": { "response": { "fullResponse": true, "neverError": true } },
           "timeout": 15000
         }
       },
-      "id": "meet-criar-0004",
+      "id": "1a2b3c4d-0004-4000-8000-000000000004",
       "name": "Criar evento no Google",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1100, 300],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput",
+      "position": [3184, 1040],
       "notesInFlow": true,
-      "notes": "conferenceDataVersion=1 é OBRIGATÓRIO — sem ele o Google ignora o pedido de Meet sem reclamar. sendUpdates=all faz o convite chegar por e-mail no closer e no cliente. Credencial: Google Calendar OAuth2, conta da operação."
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "x4fWudD224Kqwufs",
+          "name": "Google Calendar account"
+        }
+      },
+      "notes": "conferenceDataVersion=1 eh OBRIGATORIO. neverError+fullResponse: em vez de estourar, devolve statusCode e body, e quem decide eh o no de resposta."
     },
     {
       "parameters": {
-        "jsCode": "// O nó acima segue em frente mesmo com erro (onError) pra este nó poder dar uma\n// mensagem que se entende. Sem isto, uma recusa do Google viraria execução verde\n// e o sintoma seria \"marquei ganho e não apareceu nada na agenda\".\nconst r = $input.first().json;\nconst montado = $('Montar evento').first().json;\n\nif (!r || r.error) {\n  const e = r && r.error;\n  const msg = (e && (e.message || e.status)) || 'resposta vazia';\n  throw new Error('Google recusou a criação do evento: ' + msg);\n}\nif (!r.id) {\n  throw new Error('Google respondeu sem id de evento.');\n}\n\n// hangoutLink é o link do Meet. Ele NÃO vem quando falta conferenceDataVersion=1\n// ou quando a conta não tem permissão de criar conferência — devolvemos assim\n// mesmo (o evento existe), e o QS mostra a reunião sem sala em vez de quebrar.\nconst meet = r.hangoutLink\n  || (r.conferenceData && r.conferenceData.entryPoints || []).filter((p) => p.entryPointType === 'video').map((p) => p.uri)[0]\n  || null;\n\nreturn [{ json: {\n  ok: true,\n  meeting_id: montado.meeting_id,\n  event_id: r.id,\n  meet_link: meet,\n  html_link: r.htmlLink || null\n} }];"
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c-409",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 409,
+              "operator": { "type": "number", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
-      "id": "meet-conferir-0005",
-      "name": "Conferir resposta do Google",
+      "id": "1a2b3c4d-0005-4000-8000-000000000005",
+      "name": "Ja existe (409)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3392, 1040],
+      "notesInFlow": true,
+      "notes": "409 = o QS reenviou o mesmo meeting_id. Nao eh erro: o evento ja existe, basta buscar e devolver o mesmo link."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($('Validar entrada').first().json.calendar_id) }}/events/{{ $('Validar entrada').first().json.event_id_previsto }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "response": { "response": { "fullResponse": true, "neverError": true } },
+          "timeout": 15000
+        }
+      },
+      "id": "1a2b3c4d-0006-4000-8000-000000000006",
+      "name": "Buscar evento existente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3600, 928],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "x4fWudD224Kqwufs",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resposta unica da acao criar. Serve tanto para insert novo quanto para o\n// caminho do 409 (evento ja existia), porque os dois devolvem um Event.\n//\n// Nunca damos throw: o webhook responde 200 com ok:false e uma mensagem que se\n// entende. Throw viraria 500 com stack trace e o QS perderia o motivo.\nconst r = $input.first().json;\nconst d = $('Validar entrada').first().json;\nconst status = r.statusCode;\nconst ev = r.body || {};\n\nfunction motivo(body, st) {\n  if (typeof body === 'string') return body.slice(0, 300);\n  const e = body && body.error;\n  if (typeof e === 'string') return e.slice(0, 300);\n  if (e && (e.message || e.status)) return e.message || e.status;\n  return 'HTTP ' + st;\n}\n\nif (status >= 400) {\n  return [{ json: {\n    ok: false,\n    acao: 'criar',\n    meeting_id: d.meeting_id,\n    codigo: status,\n    erro: motivo(ev, status)\n  } }];\n}\n\n// hangoutLink eh o link do Meet. Se vier vazio, quase sempre falta o\n// conferenceDataVersion=1 ou a conta nao tem permissao de criar conferencia.\n// Devolvemos assim mesmo: o evento existe, o QS mostra a reuniao sem sala em\n// vez de quebrar.\nconst pontos = (ev.conferenceData && ev.conferenceData.entryPoints) || [];\nconst meet = ev.hangoutLink\n  || pontos.filter((p) => p.entryPointType === 'video').map((p) => p.uri)[0]\n  || null;\n\nreturn [{ json: {\n  ok: true,\n  acao: 'criar',\n  meeting_id: d.meeting_id,\n  calendar_id: d.calendar_id,\n  event_id: ev.id || null,\n  meet_link: meet,\n  html_link: ev.htmlLink || null,\n  sem_meet: !meet,\n  duplicado: status === 409 || undefined,\n  convidados_descartados: d.convidados_descartados\n} }];"
+      },
+      "id": "1a2b3c4d-0007-4000-8000-000000000007",
+      "name": "Responder criacao",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1320, 300]
+      "position": [3808, 1040]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PATCH so com o que muda. Nao reenviamos conferenceData: a sala do Meet eh\n// preservada, entao o cliente que ja tem o link continua com o link certo.\nconst d = $json;\n\nreturn [{ json: { ...d, patch: {\n  summary: d.titulo,\n  start: { dateTime: d.inicio, timeZone: d.timezone },\n  end:   { dateTime: d.fim,   timeZone: d.timezone }\n} } }];"
+      },
+      "id": "1a2b3c4d-0008-4000-8000-000000000008",
+      "name": "Montar atualizacao",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2976, 1280]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($json.calendar_id) }}/events/{{ encodeURIComponent($json.event_id) }}?sendUpdates=all",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.patch) }}",
+        "options": {
+          "response": { "response": { "fullResponse": true, "neverError": true } },
+          "timeout": 15000
+        }
+      },
+      "id": "1a2b3c4d-0009-4000-8000-000000000009",
+      "name": "Atualizar evento no Google",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3184, 1280],
+      "notesInFlow": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "x4fWudD224Kqwufs",
+          "name": "Google Calendar account"
+        }
+      },
+      "notes": "sendUpdates=all faz o Google reenviar o convite atualizado sozinho. Sem isso o cliente continua com o lembrete no horario velho."
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst d = $('Validar entrada').first().json;\nconst status = r.statusCode;\nconst ev = r.body || {};\n\nfunction motivo(body, st) {\n  if (typeof body === 'string') return body.slice(0, 300);\n  const e = body && body.error;\n  if (typeof e === 'string') return e.slice(0, 300);\n  if (e && (e.message || e.status)) return e.message || e.status;\n  return 'HTTP ' + st;\n}\n\n// 404/410 = o evento sumiu do Google (apagado na mao, por exemplo). Devolvemos\n// codigo nao_encontrado para o QS reagir chamando acao=criar.\nif (status === 404 || status === 410) {\n  return [{ json: {\n    ok: false,\n    acao: 'reagendar',\n    meeting_id: d.meeting_id,\n    codigo: 'nao_encontrado',\n    erro: 'evento nao existe mais no Google; recrie com acao=criar'\n  } }];\n}\n\nif (status >= 400) {\n  return [{ json: {\n    ok: false,\n    acao: 'reagendar',\n    meeting_id: d.meeting_id,\n    codigo: status,\n    erro: motivo(ev, status)\n  } }];\n}\n\nconst pontos = (ev.conferenceData && ev.conferenceData.entryPoints) || [];\nconst meet = ev.hangoutLink\n  || pontos.filter((p) => p.entryPointType === 'video').map((p) => p.uri)[0]\n  || null;\n\nreturn [{ json: {\n  ok: true,\n  acao: 'reagendar',\n  meeting_id: d.meeting_id,\n  calendar_id: d.calendar_id,\n  event_id: ev.id || d.event_id,\n  meet_link: meet,\n  html_link: ev.htmlLink || null,\n  inicio: d.inicio,\n  fim: d.fim\n} }];"
+      },
+      "id": "1a2b3c4d-0010-4000-8000-000000000010",
+      "name": "Responder atualizacao",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3392, 1280]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($json.calendar_id) }}/events/{{ encodeURIComponent($json.event_id) }}?sendUpdates=all",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "response": { "response": { "fullResponse": true, "neverError": true } },
+          "timeout": 15000
+        }
+      },
+      "id": "1a2b3c4d-0011-4000-8000-000000000011",
+      "name": "Cancelar evento no Google",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2976, 1520],
+      "notesInFlow": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "x4fWudD224Kqwufs",
+          "name": "Google Calendar account"
+        }
+      },
+      "notes": "DELETE devolve 204 sem corpo. 404/410 tambem contam como sucesso: se o evento ja nao existe, o objetivo foi atingido."
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst d = $('Validar entrada').first().json;\nconst status = r.statusCode;\n\nfunction motivo(body, st) {\n  if (typeof body === 'string') return body.slice(0, 300);\n  const e = body && body.error;\n  if (typeof e === 'string') return e.slice(0, 300);\n  if (e && (e.message || e.status)) return e.message || e.status;\n  return 'HTTP ' + st;\n}\n\n// Cancelar eh idempotente: sucesso, ja apagado ou nunca existiu dao no mesmo.\nconst apagado = status === 204 || status === 200 || status === 404 || status === 410;\n\nif (!apagado) {\n  return [{ json: {\n    ok: false,\n    acao: 'cancelar',\n    meeting_id: d.meeting_id,\n    codigo: status,\n    erro: motivo(r.body, status)\n  } }];\n}\n\nreturn [{ json: {\n  ok: true,\n  acao: 'cancelar',\n  meeting_id: d.meeting_id,\n  event_id: d.event_id,\n  ja_estava_apagado: status === 404 || status === 410 || undefined\n} }];"
+      },
+      "id": "1a2b3c4d-0012-4000-8000-000000000012",
+      "name": "Responder cancelamento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3184, 1520]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Payload invalido nunca chega no Google. Responde 200 com ok:false e a lista\n// de erros, que eh o suficiente para o dev do QS achar o problema sem abrir log.\nconst d = $json;\n\nreturn [{ json: {\n  ok: false,\n  acao: 'invalida',\n  meeting_id: d.meeting_id,\n  codigo: 'payload_invalido',\n  erro: (d.erros || []).join('; ') || 'payload invalido'\n} }];"
+      },
+      "id": "1a2b3c4d-0013-4000-8000-000000000013",
+      "name": "Responder payload invalido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2976, 1760]
     }
   ],
   "connections": {
     "Webhook QS (qs-agenda-meet)": {
-      "main": [[{ "node": "Config da agenda", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Validar entrada", "type": "main", "index": 0 }]]
     },
-    "Config da agenda": {
-      "main": [[{ "node": "Montar evento", "type": "main", "index": 0 }]]
+    "Validar entrada": {
+      "main": [[{ "node": "Rotear acao", "type": "main", "index": 0 }]]
+    },
+    "Rotear acao": {
+      "main": [
+        [{ "node": "Montar evento", "type": "main", "index": 0 }],
+        [{ "node": "Montar atualizacao", "type": "main", "index": 0 }],
+        [{ "node": "Cancelar evento no Google", "type": "main", "index": 0 }],
+        [{ "node": "Responder payload invalido", "type": "main", "index": 0 }]
+      ]
     },
     "Montar evento": {
       "main": [[{ "node": "Criar evento no Google", "type": "main", "index": 0 }]]
     },
     "Criar evento no Google": {
-      "main": [[{ "node": "Conferir resposta do Google", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Ja existe (409)?", "type": "main", "index": 0 }]]
+    },
+    "Ja existe (409)?": {
+      "main": [
+        [{ "node": "Buscar evento existente", "type": "main", "index": 0 }],
+        [{ "node": "Responder criacao", "type": "main", "index": 0 }]
+      ]
+    },
+    "Buscar evento existente": {
+      "main": [[{ "node": "Responder criacao", "type": "main", "index": 0 }]]
+    },
+    "Montar atualizacao": {
+      "main": [[{ "node": "Atualizar evento no Google", "type": "main", "index": 0 }]]
+    },
+    "Atualizar evento no Google": {
+      "main": [[{ "node": "Responder atualizacao", "type": "main", "index": 0 }]]
+    },
+    "Cancelar evento no Google": {
+      "main": [[{ "node": "Responder cancelamento", "type": "main", "index": 0 }]]
     }
   },
-  "settings": {},
-  "pinData": {}
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "91aa63e4f74d7cbe350736303e89cc11603c939156428dd97f3f611c857dbb64"
+  }
 }
