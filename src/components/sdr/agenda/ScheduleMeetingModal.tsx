@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifySuccess } from "@/lib/qs/notify";
-import { createMeeting, rescheduleMeeting } from "@/lib/qs/meetings";
+import { createMeeting, reagendarReuniao } from "@/lib/qs/meetings";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
 import type { Lead, Meeting } from "../types";
 
@@ -103,21 +103,23 @@ export default function ScheduleMeetingModal({
     setError(null);
 
     if (remarcando && reschedule) {
-      const res = await rescheduleMeeting({
+      // Reagendar NÃO move mais a mesma linha: nasce uma reunião nova apontando
+      // pra antiga (reagendado_de). É o que separa reagendamento de no-show na
+      // métrica e o que permite contar quantas vezes o lead remarcou.
+      const res = await reagendarReuniao({
         meeting: reschedule,
-        scheduled_at: pick.start,
-        duration_min: pick.durationMin,
-        closer_id: pick.closerId,
-        closer_name: pick.closerName,
-        by: currentUser?.name ?? null,
-        lead_bitrix_id: reschedule.lead?.bitrix_id,
+        scheduledAt: pick.start,
+        durationMin: pick.durationMin,
+        closerId: pick.closerId,
+        closerNome: pick.closerName,
+        por: currentUser?.name ?? null,
       });
       setSaving(false);
       if (!res.ok) {
         setError(res.error);
         return;
       }
-      notifySuccess("Reunião remarcada — a atividade de confirmação foi movida junto.");
+      notifySuccess("Reunião reagendada — a antiga fica no histórico e o convite do Google mudou de horário.");
       onSaved(res.meeting);
       onClose();
       return;

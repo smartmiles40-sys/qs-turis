@@ -168,6 +168,18 @@ export interface Meeting {
   sal?: MeetingSal | null;
   sal_at?: string | null;
   sal_by?: string | null;
+  /** Por que o lead foi recusado (0032). O banco exige quando sal = recusado. */
+  sal_motivo?: string | null;
+  /** Quando a reunião de fato aconteceu (0032) — é o que ancora o SAL no mês
+   *  DA REUNIÃO, e não no mês em que alguém lembrou de preencher. */
+  realizada_em?: string | null;
+  /** Reunião que esta substitui, quando é remarcação (0032). Separa
+   *  reagendamento (avisou) de no-show (sumiu). */
+  reagendado_de?: string | null;
+  /** Vínculo com o evento no Google Calendar (0031). */
+  calendar_event_id?: string | null;
+  calendar_html_link?: string | null;
+  calendar_error?: string | null;
   /** Nome do lead denormalizado: o join `lead:qs_leads(*)` volta nulo sob a RLS
    *  quando a reunião é de um lead de outro SDR, e o calendário é do time todo. */
   lead_name?: string | null;

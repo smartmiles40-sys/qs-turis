@@ -37,6 +37,7 @@ import {
   chaveDoEspecialista,
 } from "@/lib/qs/closerAgenda";
 import { setMeetingStatus, setMeetingSal } from "@/lib/qs/meetings";
+import { getSetting } from "@/lib/qsSettings";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
 import type {
   CloserAvailability,
@@ -67,6 +68,16 @@ const STATUS: Record<MeetingStatus, StatusToken> = {
   reagendada: { label: "Reagendada", cor: "#D97706", fundo: "rgba(217,119,6,0.12)",   texto: "#B45309" },
   cancelada:  { label: "Cancelada",  cor: "#64748B", fundo: "rgba(100,116,139,0.10)", texto: "#475569" },
 };
+
+/** Usada até o banco responder e no preview. A de verdade vem de qs_settings. */
+const MOTIVOS_SAL_PADRAO = [
+  'Fora do perfil',
+  'Sem orçamento',
+  'Sem urgência (>6 meses)',
+  'Já comprou com concorrente',
+  'Dado incorreto / não era o decisor',
+  'Curioso — sem intenção real',
+];
 
 const LARGURA_EIXO = 56;         // px da coluna de horas
 const LARGURA_MIN_COLUNA = 210;  // px mínimos por especialista
@@ -220,6 +231,18 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
 
   const [agendarPara, setAgendarPara] = useState<{ closerId: string | null; date: Date } | null>(null);
   const [remarcando, setRemarcando] = useState<Meeting | null>(null);
+
+  // Recusa exige motivo: o painel abre a lista em vez de gravar direto.
+  const [pedindoMotivo, setPedindoMotivo] = useState<string | null>(null);
+  // Lista fechada, definida pelo comercial em qs_settings (0032) — trocar os
+  // motivos não exige deploy nem migration.
+  const [motivosSal, setMotivosSal] = useState<string[]>(MOTIVOS_SAL_PADRAO);
+  useEffect(() => {
+    if (demo) return;
+    void getSetting<string[]>('sal_motivos').then((lista) => {
+      if (Array.isArray(lista) && lista.length) setMotivosSal(lista);
+    });
+  }, [demo]);
 
   const gradeRef = useRef<HTMLDivElement>(null);
   const cabecalhoRef = useRef<HTMLDivElement>(null);
@@ -463,16 +486,24 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
     void load();
   };
 
-  const marcarSal = async (m: Meeting, sal: MeetingSal) => {
+  const marcarSal = async (m: Meeting, sal: MeetingSal, motivo?: string | null) => {
     const alvo = m.sal === sal ? null : sal;
-    if (demo) {
-      const novo = { ...m, sal: alvo };
-      setMeetings((ms) => ms.map((x) => (x.id === m.id ? novo : x)));
-      setSelecionada(novo);
+    // Recusar SEM motivo não é permitido — nem aqui nem no banco (CHECK da
+    // 0032). "Recusado" sem porquê vira um número que ninguém sabe atacar.
+    if (alvo === "recusado" && !motivo) {
+      setPedindoMotivo(m.id);
       return;
     }
-    const r = await setMeetingSal(m, alvo, currentUser?.id ?? null);
+    if (demo) {
+      const novo = { ...m, sal: alvo, sal_motivo: alvo === "recusado" ? motivo ?? null : null };
+      setMeetings((ms) => ms.map((x) => (x.id === m.id ? novo : x)));
+      setSelecionada(novo);
+      setPedindoMotivo(null);
+      return;
+    }
+    const r = await setMeetingSal(m, alvo, currentUser?.id ?? null, m.lead?.bitrix_id, motivo ?? null);
     if (!r.ok) return notifyError(r.error);
+    setPedindoMotivo(null);
     setSelecionada(r.meeting);
     if (alvo) notifySuccess(`Lead ${alvo} registrado.`);
     void load();
@@ -766,7 +797,10 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
           agora={agora}
           onFechar={() => setSelecionada(null)}
           onStatus={(s) => void mudarStatus(selecionada, s)}
-          onSal={(s) => void marcarSal(selecionada, s)}
+          onSal={(s, motivo) => void marcarSal(selecionada, s, motivo)}
+          motivos={motivosSal}
+          pedindoMotivo={pedindoMotivo === selecionada.id ? selecionada.id : null}
+          onCancelarMotivo={() => setPedindoMotivo(null)}
           onRemarcar={() => {
             setRemarcando(selecionada);
             setSelecionada(null);
@@ -806,12 +840,17 @@ interface PainelProps {
   agora: Date;
   onFechar: () => void;
   onStatus: (s: MeetingStatus) => void;
-  onSal: (s: MeetingSal) => void;
+  onSal: (s: MeetingSal, motivo?: string) => void;
+  /** Lista fechada de motivos (qs_settings.sal_motivos). */
+  motivos: string[];
+  /** Reunião cujo motivo está sendo pedido — null = nenhum. */
+  pedindoMotivo: string | null;
+  onCancelarMotivo: () => void;
   onRemarcar: () => void;
   onAbrirLead?: () => void;
 }
 
-function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRemarcar, onAbrirLead }: PainelProps) {
+function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRemarcar, onAbrirLead, motivos, pedindoMotivo, onCancelarMotivo }: PainelProps) {
   const [copiado, setCopiado] = useState(false);
   const st = STATUS[reuniao.status] ?? STATUS.agendada;
   const ini = new Date(reuniao.scheduled_at);
@@ -928,9 +967,42 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
               );
             })}
           </div>
+          {/* Motivo da recusa — lista fechada. Recusar sem dizer por quê produz
+              um número que ninguém consegue atacar; e o banco recusa (0032). */}
+          {pedindoMotivo && (
+            <div className="mt-2.5 rounded-xl border p-2.5" style={{ borderColor: "#DC262633", background: "#DC26260A" }}>
+              <p className="text-xs font-bold" style={{ color: "#B91C1C" }}>Por que o lead foi recusado?</p>
+              <div className="mt-2 grid gap-1">
+                {motivos.map((mot) => (
+                  <button
+                    key={mot}
+                    onClick={() => onSal("recusado", mot)}
+                    className="w-full rounded-lg border px-2.5 py-1.5 text-left text-xs font-semibold transition hover:brightness-95"
+                    style={{ borderColor: "var(--line)", background: "var(--card)", color: "var(--ink2)" }}
+                  >
+                    {mot}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={onCancelarMotivo}
+                className="mt-2 w-full py-1 text-[11px] font-bold text-gray-400 hover:underline"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+
+          {reuniao.sal === "recusado" && reuniao.sal_motivo && !pedindoMotivo && (
+            <p className="mt-2 text-xs" style={{ color: "var(--ink2)" }}>
+              Motivo: <b>{reuniao.sal_motivo}</b>
+            </p>
+          )}
+
           <p className="mt-2 text-xs leading-relaxed text-gray-400">
             Marque o desfecho assim que a reunião terminar. Aceito ou recusado, o
             registro conta como reunião realizada — o que muda é a qualidade do lead.
+            Recusar um lead ruim MELHORA o seu número de conversão.
           </p>
         </div>
 

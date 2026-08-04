@@ -21,6 +21,8 @@
 import { supabase } from "@/lib/supabase";
 import { getSetting } from "@/lib/qsSettings";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
+import { notifyError } from "@/lib/qs/notify";
+import { cancelarEvento, reagendarEvento } from "@/lib/qs/agendaMeet";
 import { loadWorkHours, nextWorkMoment, clampToWorkWindow, type WorkHours } from "@/lib/workHours";
 import type { ChannelType, Meeting, MeetingSal, MeetingStatus } from "@/components/sdr/types";
 
@@ -435,7 +437,105 @@ export async function setMeetingStatus(
     });
   }
 
+  // Reunião que não vai mais acontecer não pode continuar ocupando a agenda do
+  // Google: o closer veria um compromisso fantasma e o cliente receberia o
+  // lembrete de uma reunião cancelada. Fire-and-forget de propósito — o desfecho
+  // no QS já está gravado, e o job de auditoria recolhe o que falhar aqui.
+  if ((status === "cancelada" || status === "no_show") && meeting.calendar_event_id) {
+    void cancelarEvento({ meetingId: meeting.id, eventId: meeting.calendar_event_id });
+  }
+
   return { ok: true, meeting: data as Meeting };
+}
+
+// ── Reagendar ───────────────────────────────────────────────────────────────
+
+/**
+ * Reagenda pelo modelo do briefing: a reunião antiga vira `reagendada` e nasce
+ * uma NOVA com `reagendado_de` apontando pra ela. É isso que separa
+ * reagendamento (avisou antes) de no-show (sumiu) — e que permite contar quantas
+ * vezes o mesmo lead remarcou.
+ *
+ * Os dois passos rodam numa transação só, dentro da função `qs_reagendar_reuniao`
+ * (migration 0033): a linha antiga ocupa o próprio horário, então liberar e
+ * inserir precisa valer junto — senão um conflito no meio deixaria a reunião sem
+ * substituta.
+ *
+ * O evento do Google é MOVIDO, não recriado: o cliente que já tem o link
+ * continua com o link certo e o Google reenvia o convite sozinho.
+ */
+export async function reagendarReuniao(input: {
+  meeting: Meeting;
+  scheduledAt: Date;
+  durationMin?: number | null;
+  closerId?: string | null;
+  closerNome?: string | null;
+  por?: string | null;
+}): Promise<MeetingResult> {
+  const { meeting } = input;
+  const { data, error } = await supabase.rpc("qs_reagendar_reuniao", {
+    p_meeting_id: meeting.id,
+    p_scheduled_at: input.scheduledAt.toISOString(),
+    p_duration_min: input.durationMin ?? meeting.duration_min ?? 60,
+    p_closer_id: input.closerId ?? meeting.closer_id ?? null,
+    p_closer_nome: input.closerNome ?? meeting.meeting_owner ?? null,
+    p_por: input.por ?? null,
+  });
+
+  if (error) {
+    if (isConflict(error)) {
+      return { ok: false, conflict: true, error: "O especialista já tem reunião nesse horário — nada foi alterado." };
+    }
+    if (isMissingSchema(error) || /qs_reagendar_reuniao/i.test(error.message ?? "")) {
+      // A 0033 ainda não foi colada. Em vez de deixar o SDR sem remarcar, cai no
+      // jeito ANTIGO (move a própria linha) — que é exatamente o comportamento
+      // de hoje, então nada regride — e avisa o que se perde: sem a migration a
+      // remarcação não vira histórico e o número de reagendamentos não existe.
+      notifyError("Reagendamento gravado do jeito antigo: cole a migration 0033 pra separar reagendamento de no-show na métrica.");
+      return rescheduleMeeting({
+        meeting,
+        scheduled_at: input.scheduledAt,
+        duration_min: input.durationMin ?? undefined,
+        closer_id: input.closerId ?? undefined,
+        closer_name: input.closerNome ?? undefined,
+        by: input.por ?? null,
+        lead_bitrix_id: meeting.lead?.bitrix_id,
+      });
+    }
+    return { ok: false, error: `Não foi possível reagendar: ${error.message}` };
+  }
+  // A função devolve UMA linha; o PostgREST entrega objeto ou array de um.
+  const nova = (Array.isArray(data) ? data[0] : data) as Meeting | null;
+  if (!nova) return { ok: false, error: "Você não tem permissão para reagendar esta reunião." };
+
+  // Move o evento no Google pro horário novo, agora em nome da linha NOVA.
+  if (meeting.calendar_event_id) {
+    const r = await reagendarEvento({
+      meetingId: nova.id,
+      eventId: meeting.calendar_event_id,
+      inicio: nova.scheduled_at,
+      fim: nova.ends_at ?? undefined,
+    });
+    if (!r.ok && !r.desligado) {
+      notifyError(`Reunião remarcada, mas o convite do Google não mudou de horário (${r.aviso}) — avise o cliente.`);
+    }
+  }
+
+  await ensureConfirmTask({
+    meetingId: nova.id,
+    leadId: nova.lead_id,
+    ownerId: nova.owner_id,
+    scheduledAt: nova.scheduled_at,
+    leadName: nova.lead_name ?? meeting.lead_name,
+  });
+
+  notifyBitrix("nota", {
+    lead_id: nova.lead_id,
+    bitrix_id: meeting.lead?.bitrix_id,
+    body: `Reunião REAGENDADA de ${formatDateTime(meeting.scheduled_at)} para ${formatDateTime(nova.scheduled_at)} no QS.`,
+  });
+
+  return { ok: true, meeting: nova };
 }
 
 // ── SAL (Sales Accepted Lead) ───────────────────────────────────────────────
@@ -452,12 +552,21 @@ export async function setMeetingSal(
   meeting: Meeting,
   sal: MeetingSal | null,
   by?: string | null,
-  leadBitrixId?: string | null
+  leadBitrixId?: string | null,
+  /** Obrigatório quando `sal` é "recusado" — o banco recusa sem ele (0032). */
+  motivo?: string | null
 ): Promise<MeetingResult> {
+  // Barra antes de ir ao banco: a mensagem daqui explica o que fazer, a do
+  // Postgres seria "violates check constraint qs_meetings_sal_motivo_check".
+  if (sal === "recusado" && !String(motivo ?? "").trim()) {
+    return { ok: false, error: "Escolha o motivo da recusa — sem motivo, o número de leads recusados não serve pra nada." };
+  }
+
   const { data, error } = await supabase
     .from("qs_meetings")
     .update({
       sal,
+      sal_motivo: sal === "recusado" ? String(motivo).trim() : null,
       sal_at: sal ? new Date().toISOString() : null,
       sal_by: sal ? (by ?? null) : null,
       updated_at: new Date().toISOString(),
@@ -470,7 +579,7 @@ export async function setMeetingSal(
     if (isMissingSchema(error) || isCheckViolation(error) || /column .*sal/i.test(error.message ?? "")) {
       return {
         ok: false,
-        error: "O campo SAL ainda não existe no banco. Cole a migration 0030 no Supabase (supabase/migrations/0030_reuniao_confirmada_reagendada_sal.sql).",
+        error: "O campo SAL ainda não existe no banco. Cole as migrations 0030 e 0032 no Supabase.",
       };
     }
     return { ok: false, error: `Não foi possível salvar o SAL: ${error.message}` };
@@ -481,7 +590,9 @@ export async function setMeetingSal(
     notifyBitrix("nota", {
       lead_id: meeting.lead_id,
       bitrix_id: leadBitrixId ?? meeting.lead?.bitrix_id,
-      body: `Reunião de ${formatDateTime(meeting.scheduled_at)}: lead ${sal.toUpperCase()} pelo especialista (SAL).`,
+      body: `Reunião de ${formatDateTime(meeting.scheduled_at)}: lead ${sal.toUpperCase()} pelo especialista (SAL)${
+        sal === "recusado" && motivo ? ` — motivo: ${motivo}` : ""
+      }.`,
     });
   }
 
