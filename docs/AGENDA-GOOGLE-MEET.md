@@ -73,8 +73,10 @@ comentada no fim do arquivo lista os pares para resolver.
 
 ## Ligar (4 passos)
 
-1. **Migrations.** Cole `0031_agenda_google_meet.sql` e `0032_agenda_desfecho.sql`
-   no SQL Editor do Supabase. As duas são idempotentes.
+1. **Banco.** Cole `supabase/APLICAR-AGENDA.sql` no SQL Editor — ele junta as
+   migrations 0031 a 0035 na ordem, numa transação só (se um passo falhar, nada
+   é aplicado). Confira os NOTICE no fim: vinculadas ~68, janelas 10, retiradas
+   do funil 88, ativas 9.
 2. **Credencial Google no n8n** — Google Calendar OAuth2, na conta que será dona
    da agenda da operação.
 3. **Workflow.** Importe `n8n/agenda-google-meet.workflow.json`, ligue a
