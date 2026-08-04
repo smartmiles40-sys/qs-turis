@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { createMeeting } from "@/lib/qs/meetings";
 import { findUserIdByName } from "@/lib/qs/closerAgenda";
+import AgendaMiniatura from "@/components/sdr/agenda/AgendaMiniatura";
 import { confirmar } from "@/lib/qs/confirmar";
 import { criarEvento } from "@/lib/qs/agendaMeet";
 import { notifyError } from "@/lib/qs/notify";
@@ -309,6 +310,13 @@ function getAttemptCount(task: Task): number {
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
+
+/** Date → valor de <input type="datetime-local">, no fuso LOCAL.
+ *  toISOString() aqui jogaria o horário 3h pra trás (ele converte pra UTC). */
+function paraInputLocal(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const { currentUser } = useQsAuth();
@@ -3397,6 +3405,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   {meetingTeam.owners.map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
+              {/* A agenda do especialista, aqui dentro: o SDR não sai mais do
+                  modal pra descobrir que horário oferecer — e clicar num horário
+                  livre preenche o campo abaixo. */}
+              <AgendaMiniatura
+                responsavel={meeting.responsavel}
+                dia={meeting.dataHora ? new Date(meeting.dataHora) : new Date()}
+                selecionado={meeting.dataHora ? new Date(meeting.dataHora) : null}
+                onEscolher={(inicio) => setMeeting((m) => ({ ...m, dataHora: paraInputLocal(inicio) }))}
+              />
+
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Data e hora da reunião (Google Meet) *</label>
                 <input type="datetime-local" value={meeting.dataHora} onChange={(e) => setMeeting((m) => ({ ...m, dataHora: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400" />
