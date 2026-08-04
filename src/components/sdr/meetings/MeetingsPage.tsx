@@ -3,52 +3,18 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import type { Meeting, MeetingStatus, Lead, SdrUser } from "../types";
 import { MEETING_STATUS_LABELS } from "../types";
-import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
-import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import { notifySuccess } from "@/lib/qs/notify";
 import { createMeeting } from "@/lib/qs/meetings";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
 import AgendaMes from "../agenda/AgendaMes";
+import AgendaDia from "../agenda/AgendaDia";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Converte a reunião no evento de agenda (Google/.ics). */
-function meetingToEvent(m: Meeting): CalendarEvent {
-  return {
-    title: m.title || `Reunião — ${m.lead?.full_name ?? "cliente"}`,
-    startsAt: m.scheduled_at,
-    durationMin: m.duration_min,
-    description: [m.lead?.full_name ? `Cliente: ${m.lead.full_name}` : null, m.notes].filter(Boolean).join("\n"),
-    location: m.meeting_link || m.location || null,
-  };
-}
-
-type FilterTab = "todas" | MeetingStatus;
-
-const TABS: { key: FilterTab; label: string }[] = [
-  { key: "todas", label: "Todas" },
-  { key: "agendada", label: "Agendadas" },
-  { key: "confirmada", label: "Confirmadas" },
-  { key: "realizada", label: "Realizadas" },
-  { key: "no_show", label: "No-show" },
-  { key: "reagendada", label: "Reagendadas" },
-  { key: "cancelada", label: "Canceladas" },
-];
 
 // UUIDs válidos são exigidos por owner_id (uuid). O usuário "demo-skip" do
 // bypass de login NÃO é um uuid, então nesse caso gravamos owner_id = null.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function statusBadgeClasses(status: MeetingStatus): string {
-  switch (status) {
-    case "agendada": return "bg-blue-50 text-blue-700";
-    case "confirmada": return "bg-cyan-50 text-cyan-700";
-    case "realizada": return "bg-green-50 text-green-700";
-    case "no_show": return "bg-red-50 text-red-700";
-    case "reagendada": return "bg-amber-50 text-amber-700";
-    case "cancelada": return "bg-gray-100 text-gray-500";
-  }
-}
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -57,14 +23,6 @@ function formatDateTime(iso: string): string {
   const hours = String(d.getHours()).padStart(2, "0");
   const mins = String(d.getMinutes()).padStart(2, "0");
   return `${day}/${month} ${hours}:${mins}`;
-}
-
-// Converte um ISO (timestamptz) para o formato aceito por <input datetime-local>
-// ("YYYY-MM-DDTHH:mm") no fuso local do navegador.
-function isoToLocalInput(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function leadLabel(l: Lead): string {
@@ -118,7 +76,10 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   //              dentro dela mesma)
   const [view, setView] = useState<"reunioes" | "agenda">("reunioes");
 
-  const [activeTab, setActiveTab] = useState<FilterTab>("todas");
+  // Dia que a aba Reuniões mostra. Nasce nulo (= hoje) e só muda quando o
+  // usuário clica num dia na Agenda do mês.
+  const [diaReunioes, setDiaReunioes] = useState<Date | null>(null);
+
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   // Closers ativos: sem eles a reunião nasce sem dono de horário e some do
@@ -126,9 +87,6 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const [closers, setClosers] = useState<SdrUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
-  // Ação (status/exclusão) gravando por reunião — trava os botões da linha p/ não
-  // gravar duas vezes num duplo-clique.
-  const [busyId, setBusyId] = useState<string | null>(null);
 
   // ── Modal (criar/editar) ──
   const [showModal, setShowModal] = useState(false);
@@ -204,23 +162,6 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     setFNotes("");
     setFStatus("agendada");
     setFCloserId("");
-    setShowModal(true);
-  }
-
-  function openEdit(m: Meeting) {
-    setEditingId(m.id);
-    setFormError(null);
-    setFLeadId(m.lead_id);
-    // Preenche o combobox com o rótulo do lead atual (join m.lead) pra não abrir vazio.
-    setFLeadSearch(m.lead ? leadLabel(m.lead) : "");
-    setFTitle(m.title ?? "");
-    setFWhen(m.scheduled_at ? isoToLocalInput(m.scheduled_at) : "");
-    setFDuration(m.duration_min != null ? String(m.duration_min) : "30");
-    setFLocation(m.location ?? "");
-    setFLink(m.meeting_link ?? "");
-    setFNotes(m.notes ?? "");
-    setFStatus(m.status);
-    setFCloserId(m.closer_id ?? "");
     setShowModal(true);
   }
 
@@ -401,97 +342,10 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   }
 
   // ── Status quick actions / cancel ──
-  async function updateStatus(id: string, status: MeetingStatus) {
-    const m = meetings.find((x) => x.id === id);
-    // Cancelar é um clique num ícone — misclick não pode cancelar reunião de cliente.
-    if (status === "cancelada") {
-      const who = m?.lead?.full_name ? ` com ${m.lead.full_name}` : "";
-      if (!window.confirm(`Cancelar a reunião${who}?`)) return;
-    }
-    setBusyId(id); // trava os botões da linha enquanto grava
-    // .select() MEDE o que o banco aceitou sob RLS: update barrado volta data vazio,
-    // então não recarregamos "como se tivesse dado certo".
-    const { data, error } = await supabase
-      .from("qs_meetings")
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .select();
-    setBusyId(null);
-    if (error) {
-      console.warn("Erro ao atualizar status da reunião:", error);
-      notifyError("Não foi possível atualizar a reunião — tente novamente.");
-      return;
-    }
-    if (!data || data.length === 0) {
-      notifyError("Você não tem permissão para alterar esta reunião.");
-      return;
-    }
-    setPageError(null);
-    // Espelha o desfecho na timeline do negócio no Bitrix (fire-and-forget).
-    if (m) notifyMeetingStatusToBitrix(m, status);
-    await fetchMeetings();
-  }
-
   // ── Excluir reunião (REMOVE a linha) ──
   // Distinto de "Cancelar" (que mantém o registro com status cancelada). Serve pra
   // reuniões criadas por engano/duplicadas. Reuniões "realizada" têm valor histórico
   // (aconteceram de fato), então a exclusão só é oferecida em não-realizada.
-  async function deleteMeeting(id: string) {
-    const m = meetings.find((x) => x.id === id);
-    const who = m?.lead?.full_name ? ` com ${m.lead.full_name}` : "";
-    // window.confirm: misclick não pode apagar reunião de cliente.
-    if (!window.confirm(`Excluir permanentemente a reunião${who}? Esta ação não pode ser desfeita.`)) return;
-    setBusyId(id);
-    // .select() MEDE o que o banco aceitou sob RLS (delete barrado volta data vazio).
-    const { data, error } = await supabase
-      .from("qs_meetings")
-      .delete()
-      .eq("id", id)
-      .select();
-    setBusyId(null);
-    if (error) {
-      notifyError(`Não foi possível excluir a reunião: ${error.message}`);
-      return;
-    }
-    if (!data || data.length === 0) {
-      notifyError("Você não tem permissão para excluir esta reunião.");
-      return;
-    }
-    notifySuccess("Reunião excluída.");
-    await fetchMeetings();
-  }
-
-  const filtered =
-    activeTab === "todas"
-      ? meetings
-      : meetings.filter((m) => m.status === activeTab);
-
-  const counts: Record<FilterTab, number> = {
-    todas: meetings.length,
-    agendada: meetings.filter((m) => m.status === "agendada").length,
-    confirmada: meetings.filter((m) => m.status === "confirmada").length,
-    realizada: meetings.filter((m) => m.status === "realizada").length,
-    no_show: meetings.filter((m) => m.status === "no_show").length,
-    reagendada: meetings.filter((m) => m.status === "reagendada").length,
-    cancelada: meetings.filter((m) => m.status === "cancelada").length,
-  };
-
-  // Ordenação de EXIBIÇÃO (item 4): reuniões FUTURAS agendadas primeiro, em ordem
-  // crescente (a PRÓXIMA no topo); depois todo o resto em ordem decrescente (mais
-  // recente primeiro). Feito só aqui, na camada de exibição — as contagens das abas
-  // continuam saindo de `meetings`, sem serem afetadas.
-  const nowMs = Date.now();
-  const isUpcoming = (m: Meeting) =>
-    m.status === "agendada" && new Date(m.scheduled_at).getTime() >= nowMs;
-  const sorted = [...filtered].sort((a, b) => {
-    const au = isUpcoming(a);
-    const bu = isUpcoming(b);
-    if (au && bu) return new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime();
-    if (au) return -1;
-    if (bu) return 1;
-    return new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime();
-  });
-
   // Alternador Reuniões ⇄ Agenda — reaproveitado nas saídas (agenda, loading,
   // conteúdo) pra ficar sempre visível, inclusive enquanto as reuniões carregam.
   const viewToggle = (
@@ -519,7 +373,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     return (
       <div className="space-y-4" style={{ fontFamily: "inherit" }}>
         {viewToggle}
-        <AgendaMes onOpenLead={onOpenLead} />
+        <AgendaMes onOpenLead={onOpenLead} onAbrirDia={(d) => { setDiaReunioes(d); setView("reunioes"); }} />
       </div>
     );
   }
@@ -580,215 +434,13 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
         </div>
       )}
 
-      {/* Filter Tabs */}
-      <div className="flex flex-wrap gap-1 gap-y-2">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              activeTab === tab.key
-                ? "bg-[#0147FF] text-white"
-                : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            {tab.label}
-            <span className={`ml-1.5 ${activeTab === tab.key ? "text-white/70" : "text-gray-400"}`}>
-              {counts[tab.key]}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {/* Table or Empty State */}
-      {filtered.length === 0 ? (
-        <div className="bg-white border border-gray-100 rounded-xl shadow-none p-6 md:p-12 flex flex-col items-center justify-center text-center">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
-            <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-          </svg>
-          <p className="mt-4 text-sm text-gray-500">
-            Nenhuma reunião encontrada para este filtro.
-          </p>
-        </div>
-      ) : (
-        <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[640px]">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Data/Hora</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Lead</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Responsável</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((meeting) => (
-                <tr
-                  key={meeting.id}
-                  className="border-b border-gray-100 last:border-0 hover:bg-gray-50/40 transition-colors"
-                >
-                  <td className="px-4 py-3 text-sm text-gray-700">
-                    {formatDateTime(meeting.scheduled_at)}
-                    {meeting.title && (
-                      <span className="block text-xs text-gray-400">{meeting.title}</span>
-                    )}
-                    {meeting.location && (
-                      <span className="inline-flex items-center gap-1 mt-0.5 text-[11px] font-semibold text-emerald-600">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
-                        {meeting.location}
-                      </span>
-                    )}
-                    {/* Link da reunião clicável direto na lista (item 2) — atalho pra entrar. */}
-                    {meeting.meeting_link && (
-                      <span className="block mt-0.5">
-                        <a
-                          href={meeting.meeting_link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0147FF] hover:underline"
-                          title="Entrar na reunião"
-                        >
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
-                          Entrar
-                        </a>
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => onOpenLead(meeting.lead_id)}
-                      className="text-[#0147FF] hover:underline text-sm font-medium"
-                    >
-                      {meeting.lead?.full_name ?? "—"}
-                    </button>
-                    {meeting.lead?.company_name && (
-                      <span className="block text-xs text-gray-400">
-                        {meeting.lead.company_name}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">
-                    {(meeting as any).owner?.name ?? "—"}
-                    {meeting.notes && (
-                      <span className="block text-xs text-gray-400 truncate max-w-[260px]" title={meeting.notes}>
-                        {meeting.notes}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${statusBadgeClasses(meeting.status)}`}
-                    >
-                      {MEETING_STATUS_LABELS[meeting.status]}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="inline-flex items-center gap-1">
-                      {meeting.status === "agendada" && (
-                        <>
-                          <button
-                            onClick={() => updateStatus(meeting.id, "realizada")}
-                            disabled={busyId === meeting.id}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            title="Marcar como realizada"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => updateStatus(meeting.id, "no_show")}
-                            disabled={busyId === meeting.id}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            title="Marcar como no-show"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                              <circle cx="9" cy="7" r="4" />
-                              <line x1="17" y1="8" x2="23" y2="14" />
-                              <line x1="23" y1="8" x2="17" y2="14" />
-                            </svg>
-                          </button>
-                        </>
-                      )}
-                      {meeting.status === "agendada" && (
-                        <>
-                          <a
-                            href={googleCalendarUrl(meetingToEvent(meeting))}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                            title="Adicionar ao Google Agenda"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                              <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
-                              <line x1="12" y1="14" x2="12" y2="18" /><line x1="10" y1="16" x2="14" y2="16" />
-                            </svg>
-                          </a>
-                          <button
-                            onClick={() => downloadIcs(meetingToEvent(meeting))}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                            title="Baixar convite (.ics) — Outlook/Apple"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                              <polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-                            </svg>
-                          </button>
-                        </>
-                      )}
-                      <button
-                        onClick={() => openEdit(meeting)}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-                        title="Editar"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                        </svg>
-                      </button>
-                      {meeting.status !== "cancelada" && (
-                        <button
-                          onClick={() => updateStatus(meeting.id, "cancelada")}
-                          disabled={busyId === meeting.id}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                          title="Cancelar (mantém o registro)"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="18" y1="6" x2="6" y2="18" />
-                            <line x1="6" y1="6" x2="18" y2="18" />
-                          </svg>
-                        </button>
-                      )}
-                      {/* Excluir (lixeira) — remove o registro; escondido em realizada (histórico). */}
-                      {meeting.status !== "realizada" && (
-                        <button
-                          onClick={() => deleteMeeting(meeting.id)}
-                          disabled={busyId === meeting.id}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                          title="Excluir reunião (remove o registro)"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                            <line x1="10" y1="11" x2="10" y2="17" />
-                            <line x1="14" y1="11" x2="14" y2="17" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        </div>
-      )}
+      {/* A aba Reuniões é O DIA, uma coluna por especialista — o que cada um
+          tem HOJE, em vez de uma tabela com o histórico inteiro. A lista com
+          filtro por status saiu a pedido do Bruno; quem quer o mês vai na aba
+          Agenda. O botão "Agendar Reunião" acima CONTINUA aqui de propósito: o
+          agendamento por slot depende de closer cadastrado, e hoje não há
+          nenhum no banco — sem este formulário não haveria como criar reunião. */}
+      <AgendaDia onOpenLead={onOpenLead} dataInicial={diaReunioes} />
 
       {/* ── Create / Edit Modal ─────────────────────────────────────────── */}
       {showModal && (

@@ -84,11 +84,17 @@ export interface AgendaDemo {
 
 interface AgendaMesProps {
   onOpenLead?: (leadId: string) => void;
+  /**
+   * Clique no número do dia / "+N mais". Quando a página trata (levando pra aba
+   * Reuniões, que é o dia por especialista), é ela quem manda. Sem isso — no
+   * preview, por exemplo — o mês abre o dia num painel aqui mesmo.
+   */
+  onAbrirDia?: (dia: Date) => void;
   /** Em produção nunca é passado: liga o modo preview (sem banco, sem gravação). */
   demo?: AgendaDemo;
 }
 
-export default function AgendaMes({ onOpenLead, demo }: AgendaMesProps) {
+export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesProps) {
   const [mes, setMes] = useState<Date>(() => startOfDay(new Date()));
   const [agora, setAgora] = useState(new Date());
 
@@ -396,8 +402,8 @@ export default function AgendaMes({ onOpenLead, demo }: AgendaMesProps) {
                 >
                   <div className="flex items-center justify-between">
                     <button
-                      onClick={() => setDiaAberto(d)}
-                      title="Ver o dia inteiro"
+                      onClick={() => (onAbrirDia ? onAbrirDia(d) : setDiaAberto(d))}
+                      title={onAbrirDia ? "Abrir este dia em Reuniões" : "Ver o dia inteiro"}
                       className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold transition-colors ${
                         hoje
                           ? "bg-[#0147FF] text-white"
@@ -453,7 +459,7 @@ export default function AgendaMes({ onOpenLead, demo }: AgendaMesProps) {
                     })}
                     {sobrando > 0 && (
                       <button
-                        onClick={() => setDiaAberto(d)}
+                        onClick={() => (onAbrirDia ? onAbrirDia(d) : setDiaAberto(d))}
                         className={`w-full px-1 text-left text-[10px] font-semibold hover:underline ${LINK}`}
                       >
                         +{sobrando} mais
@@ -467,7 +473,7 @@ export default function AgendaMes({ onOpenLead, demo }: AgendaMesProps) {
         )}
 
         <p className="px-3 py-2 text-[11px] text-gray-400">
-          Clique no número do dia para ver o dia inteiro. Passe o mouse sobre um dia para agendar nele.
+          Clique no número do dia para ver o dia inteiro por especialista. Passe o mouse sobre um dia para agendar nele.
         </p>
       </div>
 
