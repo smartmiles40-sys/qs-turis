@@ -1,6 +1,6 @@
 // src/components/sdr/types.ts
 
-export type UserRole = "admin" | "gestor" | "sdr" | "closer";
+export type UserRole = "admin" | "gestor" | "sdr" | "closer" | "marketing";
 export type LeadStatus = "nao_iniciado" | "em_prospeccao" | "ganho" | "perdido";
 export type LeadSource = "manual" | "api" | "integracao" | "importacao";
 export type ChannelType = "pesquisa" | "email" | "ligacao" | "ligacao_whatsapp" | "whatsapp" | "linkedin" | "instagram" | "tiktok" | "youtube";

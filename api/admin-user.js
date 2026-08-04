@@ -16,6 +16,12 @@ import { rest } from './_supabaseAdmin.js';
 // acertava TODOS os SDRs de uma vez (desativar/renomear o time inteiro numa
 // requisição). Exige sessão de admin, mas "só admin" não é contenção: token
 // roubado ou XSS na tela de usuários bastava. Formato de UUID é a fronteira.
+
+// Vocabulário fechado de papéis. Sem isto, o endpoint aceita qualquer string
+// e grava um papel que o app não conhece — o usuário loga e não vê tela nenhuma
+// (o CHECK do banco barra, mas com erro cru; aqui a recusa é clara).
+const PAPEIS = new Set(['admin', 'gestor', 'sdr', 'closer', 'marketing']);
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function idValido(v) {
   return typeof v === 'string' && UUID_RE.test(v.trim());
@@ -85,6 +91,9 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'create') {
+      if (user.role && !PAPEIS.has(user.role)) {
+        return res.status(400).json({ success: false, error: 'Papel inválido' });
+      }
       if (!user?.email || !user?.password) {
         return res.status(400).json({ success: false, error: 'Informe email e senha' });
       }
@@ -138,6 +147,9 @@ export default async function handler(req, res) {
         }
       }
       // atualiza o perfil
+      if (user.role !== undefined && !PAPEIS.has(user.role)) {
+        return res.status(400).json({ success: false, error: 'Papel inválido' });
+      }
       const fields = {};
       for (const k of ['name', 'role', 'whatsapp_number', 'is_active']) {
         if (user[k] !== undefined) fields[k] = user[k];

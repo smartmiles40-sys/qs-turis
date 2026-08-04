@@ -44,6 +44,10 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   gestor: ["painel", "cobertura", "leads", "cadencias", "reunioes", "dashboard", "analises", "lead-detail", "cadencia-criar", "cadencia-editar"],
   sdr: ["painel", "cobertura", "leads", "reunioes", "dashboard", "lead-detail"],
   closer: ["leads", "reunioes", "dashboard", "lead-detail"],
+  // Espectador: enxerga o funil inteiro pra medir campanha. Fica de fora o
+  // Painel (tela de EXECUÇÃO, não faria sentido pra quem não executa) e as
+  // Configurações (que só existem pra mudar coisa).
+  marketing: ["leads", "lead-detail", "cobertura", "cadencias", "reunioes", "dashboard", "analises"],
 };
 
 export function canAccessNav(role: UserRole, navId: string): boolean {
@@ -54,7 +58,19 @@ export function canAccessNav(role: UserRole, navId: string): boolean {
 }
 
 export function canSeeAllData(role: UserRole): boolean {
-  return role === "admin" || role === "gestor";
+  return role === "admin" || role === "gestor" || role === "marketing";
+}
+
+/**
+ * Pode MUDAR alguma coisa? Marketing é espectador: vê tudo, não executa nada.
+ *
+ * Isto some com o botão — quem recusa de verdade é o banco (gatilho da migration
+ * 0036). Esconder no front é educação com o usuário, não segurança: todo login
+ * fala com o PostgREST com o próprio token, e botão escondido não impede um
+ * PATCH pelo DevTools.
+ */
+export function podeExecutar(role: UserRole | undefined | null): boolean {
+  return !!role && role !== "marketing";
 }
 
 // ── Provider ───────────────────────────────────────────────────────────────

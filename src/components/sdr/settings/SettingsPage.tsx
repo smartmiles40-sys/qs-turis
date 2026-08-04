@@ -28,6 +28,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   gestor: "Gestor",
   sdr: "Qualificador",
   closer: "Closer",
+  marketing: "Marketing (espectador)",
 };
 
 const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
@@ -35,6 +36,7 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
   gestor: "bg-blue-50 text-blue-700",
   sdr: "bg-green-50 text-green-700",
   closer: "bg-amber-50 text-amber-700",
+  marketing: "bg-gray-100 text-gray-600",
 };
 
 const SCOPE_LABELS: Record<CustomFieldScope, string> = {
@@ -783,6 +785,9 @@ function UsuariosSection() {
                   <option value="sdr">Qualificador</option>
                   <option value="closer">Closer</option>
                   <option value="gestor">Gestor</option>
+                  {/* Espectador: vê tudo, não executa nada. A trava real está no
+                      banco (gatilho da 0036), não neste select. */}
+                  <option value="marketing">Marketing (só visualiza)</option>
                   <option value="admin">Admin</option>
                 </select>
                 {editUser && editUser.id === currentUser?.id && (

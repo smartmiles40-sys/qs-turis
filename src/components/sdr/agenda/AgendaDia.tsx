@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, podeExecutar } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import {
   fetchClosers,
@@ -207,6 +207,9 @@ interface AgendaDiaProps {
 
 export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaProps) {
   const { currentUser } = useQsAuth();
+  // Espectador (marketing): a agenda é só de leitura. A recusa real é do banco
+  // (gatilho da 0036) — aqui evitamos oferecer o que vai falhar.
+  const executa = podeExecutar(currentUser?.role);
 
   const [dia, setDia] = useState<Date>(() => startOfDay(dataInicial ?? new Date()));
 
@@ -574,13 +577,15 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
           <button onClick={() => setZoom((z) => Math.min(2, +(z + 0.2).toFixed(1)))} aria-label="Aumentar zoom" className={btnIcone}>
             <IcZoomIn />
           </button>
-          <button
-            onClick={() => setAgendarPara({ closerId: null, date: startOfDay(dia) })}
-            className="ml-1 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/30"
-            style={{ background: "#0147FF" }}
-          >
-            <IcPlus /> Agendar reunião
-          </button>
+          {executa && (
+            <button
+              onClick={() => setAgendarPara({ closerId: null, date: startOfDay(dia) })}
+              className="ml-1 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/30"
+              style={{ background: "#0147FF" }}
+            >
+              <IcPlus /> Agendar reunião
+            </button>
+          )}
         </div>
       </div>
 
@@ -801,6 +806,7 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
           motivos={motivosSal}
           pedindoMotivo={pedindoMotivo === selecionada.id ? selecionada.id : null}
           onCancelarMotivo={() => setPedindoMotivo(null)}
+          somenteLeitura={!executa}
           onRemarcar={() => {
             setRemarcando(selecionada);
             setSelecionada(null);
@@ -846,11 +852,13 @@ interface PainelProps {
   /** Reunião cujo motivo está sendo pedido — null = nenhum. */
   pedindoMotivo: string | null;
   onCancelarMotivo: () => void;
+  /** Espectador (marketing): mostra os dados, esconde tudo que muda algo. */
+  somenteLeitura?: boolean;
   onRemarcar: () => void;
   onAbrirLead?: () => void;
 }
 
-function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRemarcar, onAbrirLead, motivos, pedindoMotivo, onCancelarMotivo }: PainelProps) {
+function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRemarcar, onAbrirLead, motivos, pedindoMotivo, onCancelarMotivo, somenteLeitura }: PainelProps) {
   const [copiado, setCopiado] = useState(false);
   const st = STATUS[reuniao.status] ?? STATUS.agendada;
   const ini = new Date(reuniao.scheduled_at);
@@ -924,8 +932,9 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
           </div>
         )}
 
-        {/* Desfecho: é aqui que o dado do funil nasce */}
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+        {/* Desfecho: é aqui que o dado do funil nasce. Espectador não vê — não
+            é dele a decisão, e botão que sempre falha só irrita. */}
+        {!somenteLeitura && <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
           <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Desfecho</p>
 
           <div className="mt-2.5 grid grid-cols-3 gap-1.5">
@@ -1004,7 +1013,19 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
             registro conta como reunião realizada — o que muda é a qualidade do lead.
             Recusar um lead ruim MELHORA o seu número de conversão.
           </p>
-        </div>
+        </div>}
+
+        {/* Espectador vê o desfecho JÁ REGISTRADO, só não pode mudá-lo — o dado
+            é o que ele veio buscar. */}
+        {somenteLeitura && reuniao.sal && (
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Lead aceito (SAL)</p>
+            <p className="mt-1 text-sm font-bold" style={{ color: reuniao.sal === "aceito" ? "#059669" : "#DC2626" }}>
+              {reuniao.sal === "aceito" ? "Aceito" : "Recusado"}
+              {reuniao.sal_motivo ? <span className="font-normal" style={{ color: "var(--ink2)" }}> — {reuniao.sal_motivo}</span> : null}
+            </p>
+          </div>
+        )}
 
         {reuniao.notes && (
           <div>

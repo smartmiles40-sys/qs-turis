@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useQsAuth, podeExecutar } from "@/contexts/QsAuthContext";
 import {
   fetchClosers,
   fetchCloserConfigs,
@@ -95,6 +96,10 @@ interface AgendaMesProps {
 }
 
 export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesProps) {
+  const { currentUser } = useQsAuth();
+  // Espectador (marketing): calendário só de leitura.
+  const executa = podeExecutar(currentUser?.role);
+
   const [mes, setMes] = useState<Date>(() => startOfDay(new Date()));
   const [agora, setAgora] = useState(new Date());
 
@@ -329,13 +334,13 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesPro
               {pendentesNaTela} sem desfecho
             </span>
           )}
-          <button
+          {executa && <button
             onClick={() => agendarEm(new Date())}
             className="inline-flex items-center gap-1.5 rounded-lg bg-[#0147FF] px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0139D6]"
           >
             <IcPlus />
             Agendar
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -414,14 +419,14 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesPro
                     >
                       {d.getDate()}
                     </button>
-                    <button
+                    {executa && <button
                       onClick={() => agendarEm(d)}
                       title="Agendar neste dia"
                       className="rounded p-0.5 text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-[#0147FF] focus:opacity-100 group-hover:opacity-100 dark:hover:text-[#86A9FF]"
                       aria-label={`Agendar em ${d.getDate()}`}
                     >
                       <IcPlus s={13} />
-                    </button>
+                    </button>}
                   </div>
 
                   <div className="mt-1 space-y-0.5">

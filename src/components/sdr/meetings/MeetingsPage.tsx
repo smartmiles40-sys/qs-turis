@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, podeExecutar } from "@/contexts/QsAuthContext";
 import type { Meeting, MeetingStatus, Lead, SdrUser } from "../types";
 import { MEETING_STATUS_LABELS } from "../types";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
@@ -69,6 +69,9 @@ const labelClass = "block text-xs font-medium text-gray-700 mb-1";
 
 export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const { currentUser } = useQsAuth();
+  // Espectador (marketing) vê tudo e não muda nada. O banco recusa de verdade
+  // (gatilho da 0036); aqui só evitamos oferecer botão que vai falhar.
+  const executa = podeExecutar(currentUser?.role);
 
   // Duas visões da mesma coisa, unificadas numa aba só a pedido do Bruno:
   //   reunioes — a lista/CRUD daqui (filtros, busca, formulário)
@@ -405,7 +408,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
             Gestão de Reuniões
           </h1>
         </div>
-        <button
+        {executa && <button
           onClick={openCreate}
           className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors"
         >
@@ -414,7 +417,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
           Agendar Reunião
-        </button>
+        </button>}
       </div>
 
       {/* Page error banner */}
