@@ -12,6 +12,7 @@
 
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { lazyPagina } from "@/lib/qs/lazyPagina";
+import ErroDeParte from "../ErroDeParte";
 import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
   listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros, getThreadInbox,
@@ -549,15 +550,21 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       {/* Emojis. Fica gravando de fora: durante uma nota de voz o campo de
           escrever nem existe, e o painel ficaria pendurado sem dono. */}
       {mostrarEmojis && !gravando && (
-        <Suspense fallback={
-          <div className="shrink-0 border-t" style={{ borderColor: "var(--line)", background: "var(--card)", height: 248 }}>
-            <div className="grid gap-1.5 p-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(34px, 1fr))" }}>
-              {Array.from({ length: 24 }, (_, i) => <span key={i} className="wa-sk rounded-lg" style={{ height: 34 }} />)}
+        // Cerca PRÓPRIA, por dentro da conversa: o seletor carrega sob demanda e,
+        // numa aba anterior ao último deploy, o arquivo dele não existe mais.
+        // Suspense cobre a espera, não a falha — sem esta cerca o erro subia e
+        // levava a tela inteira junto. Aqui o pior caso é ficar sem emoji.
+        <ErroDeParte parte="o seletor de emoji" modo="discreto">
+          <Suspense fallback={
+            <div className="shrink-0 border-t" style={{ borderColor: "var(--line)", background: "var(--card)", height: 248 }}>
+              <div className="grid gap-1.5 p-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(34px, 1fr))" }}>
+                {Array.from({ length: 24 }, (_, i) => <span key={i} className="wa-sk rounded-lg" style={{ height: 34 }} />)}
+              </div>
             </div>
-          </div>
-        }>
-          <WaEmojiPicker onPick={inserirEmoji} onClose={() => setMostrarEmojis(false)} />
-        </Suspense>
+          }>
+            <WaEmojiPicker onPick={inserirEmoji} onClose={() => setMostrarEmojis(false)} />
+          </Suspense>
+        </ErroDeParte>
       )}
 
       {/* De qual WhatsApp esta conversa é — informação, não escolha.

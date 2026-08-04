@@ -74,6 +74,8 @@ const SettingsPage = lazyPagina(() => import("./settings/SettingsPage"));
 const CoveragePanel = lazyPagina(() => import("./dashboard/CoveragePanel"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import CommsDock from "./comms/CommsDock";
+import ErroDeParte from "./ErroDeParte";
+import AvisoDeVersao from "./AvisoDeVersao";
 import GlobalToasts from "./GlobalToasts";
 import ConfirmDialog from "./ConfirmDialog";
 import CommandPalette from "./CommandPalette";
@@ -695,11 +697,17 @@ export default function SdrLayout() {
 
       {/* Cockpit de atendimento (ChatApp ou Chatwoot, pela flag chat_provider) —
           divide a tela; montado uma única vez e persistente */}
-      <CommsDock onOpenLead={openLeadDetail} />
+      {/* Cerca: uma falha no painel de atendimento (ex.: pedaço do app que sumiu
+          num deploy) NÃO pode derrubar o Painel junto — foi exatamente o que
+          aconteceu e virou "as SDRs não conseguem concluir a atividade". */}
+      <ErroDeParte parte="o WhatsApp" modo="discreto">
+        <CommsDock onOpenLead={openLeadDetail} />
+      </ErroDeParte>
 
       {/* Toasts globais (erros de gravação, confirmações) */}
       <GlobalToasts />
       <ConfirmDialog />
+      <AvisoDeVersao />
 
       {/* Busca global Ctrl+K */}
       <CommandPalette onOpenLead={openLeadDetail} />
