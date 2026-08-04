@@ -1948,9 +1948,47 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
     setMassaRodando({ feitas: 0, total: ids.length });
     let sucesso = 0;
+    const leadsTocados = new Set<string>();
     for (const id of ids) {
+      const tarefa = tasks.find((t) => t.id === id);
       const r = await completeTask(id, resultado);
-      if (r) sucesso += 1;
+      if (r) {
+        sucesso += 1;
+
+        // O MESMO efeito colateral do caminho de um-a-um. Sem isto o lote seria
+        // uma porta lateral que fura três regras da casa:
+        //
+        // 1. INVARIANTE ANTI-LEAD-ÓRFÃO — desfecho sem contato ("não atendeu",
+        //    "caixa postal") PRECISA deixar uma próxima atividade. Sem ela o
+        //    lead some de todas as filas e ninguém nunca mais fala com ele.
+        //    insertFollowUp já protege contra duplicar quando a cadência ainda
+        //    tem dia aberto.
+        // 2. O lead deixa de ser "sem contato" na tela de Cobertura.
+        // 3. O Bitrix move o card de Novo lead para Follow-up 1 no primeiro
+        //    contato (o n8n ignora quem já saiu de lá — repetir não estraga).
+        if (tarefa) {
+          leadsTocados.add(tarefa.lead_id);
+          if (resultado !== "concluida") {
+            // `null` aqui NÃO é sempre problema: quando o lead já tem outra
+            // atividade aberta (a cadência cria os dias todos de uma vez), o
+            // helper devolve null de propósito pra não duplicar a fila. Só conta
+            // como órfão quem ficou REALMENTE sem nada pendente — e essa
+            // pergunta quem responde é o banco, depois do recarregamento.
+            await insertFollowUp(tarefa, resultado);
+          }
+          markContacted(tarefa.lead_id);
+          const leadDaTarefa = getLeadForTask(tarefa);
+          notifyBitrix("primeiro-contato", {
+            lead_id: tarefa.lead_id,
+            bitrix_id: leadDaTarefa?.bitrix_id,
+            full_name: leadDaTarefa?.full_name,
+            canal: CHANNEL_LABELS[tarefa.channel_type],
+            desfecho: rotulo,
+            alcancou: false,
+            sdr: currentUser?.name ?? null,
+          });
+        }
+      }
       setMassaRodando((m) => (m ? { ...m, feitas: m.feitas + 1 } : m));
     }
     setMassaRodando(null);
@@ -1964,6 +2002,31 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
     if (sucesso === ids.length) showToast(`${sucesso} atividade${sucesso > 1 ? "s" : ""} concluída${sucesso > 1 ? "s" : ""}.`);
     else notifyError(`${sucesso} de ${ids.length} concluídas — as demais continuam na fila (o banco recusou).`);
+
+    // ── A conferência que fecha a invariante ──────────────────────────────────
+    // Lead sem NENHUMA atividade pendente some de todas as filas — ninguém nunca
+    // mais fala com ele. Em vez de deduzir isso pelo retorno do helper (que
+    // devolve null também no caso legítimo de "já tem tarefa aberta"), pergunta
+    // ao banco: destes leads, quais ficaram sem nada em aberto?
+    if (leadsTocados.size > 0) {
+      try {
+        const { data: aindaAbertas } = await supabase
+          .from("qs_tasks")
+          .select("lead_id")
+          .in("lead_id", [...leadsTocados])
+          .in("status", ["pendente", "atrasada"]);
+        const comTarefa = new Set((aindaAbertas ?? []).map((t) => t.lead_id));
+        const orfaos = [...leadsTocados].filter((id) => !comTarefa.has(id));
+        if (orfaos.length > 0) {
+          notifyError(
+            `${orfaos.length} lead(s) ficaram SEM próxima atividade e sumiriam da fila — ` +
+            `abra o perfil de cada um e agende o retorno.`
+          );
+        }
+      } catch {
+        /* a conferência é bônus; não pode derrubar o lote que já foi gravado */
+      }
+    }
   }
 
   function renderPill(task: Task) {
