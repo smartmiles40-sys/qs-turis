@@ -61,7 +61,8 @@ export default function AgendaMiniatura({ responsavel, dia, onEscolher, selecion
   const [availability, setAvailability] = useState<CloserAvailability[]>([]);
   const [blocks, setBlocks] = useState<CloserBlock[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [carregando, setCarregando] = useState(false);
+  // Só a PRIMEIRA carga mostra texto de carregamento (ver o efeito abaixo).
+  const [carregando, setCarregando] = useState(true);
 
   // O select do Ganho guarda o NOME (a "Equipe da Reunião" é texto), então o
   // primeiro passo é descobrir de qual usuário se trata. Nome que não casa com
@@ -78,12 +79,23 @@ export default function AgendaMiniatura({ responsavel, dia, onEscolher, selecion
     return () => { vivo = false; };
   }, [responsavel]);
 
-  const diaBase = useMemo(() => startOfDay(dia), [dia]);
+  // ── Por que NÚMERO e não Date ──────────────────────────────────────────────
+  // O pai monta `dia={new Date(...)}` no JSX, ou seja: OBJETO NOVO a cada render
+  // dele — e ele re-renderiza a cada tecla digitada no formulário do Ganho. Com
+  // o Date na lista de dependências, cada tecla invalidava o useMemo, que
+  // invalidava o useCallback, que disparava o efeito: uma recarga completa (4
+  // consultas) POR TECLA. Medido: 50 requisições em 6 segundos.
+  //
+  // O sintoma pro SDR era a tela piscando e o horário fugindo do clique, porque
+  // a lista era substituída por "Carregando…" a cada letra.
+  //
+  // O timestamp é um número: só muda quando o DIA muda de verdade.
+  const diaMs = startOfDay(dia).getTime();
+  const diaBase = useMemo(() => new Date(diaMs), [diaMs]);
 
   const carregar = useCallback(async () => {
     if (!closerId) return;
-    setCarregando(true);
-    const de = diaBase;
+    const de = new Date(diaMs);
     const ate = addDays(de, 1);
     const [cfg, av, bl, mt] = await Promise.all([
       fetchCloserConfigs(),
@@ -96,9 +108,15 @@ export default function AgendaMiniatura({ responsavel, dia, onEscolher, selecion
     setBlocks(bl);
     setMeetings(mt);
     setCarregando(false);
-  }, [closerId, diaBase]);
+  }, [closerId, diaMs]);
 
-  useEffect(() => { void carregar(); }, [carregar]);
+  useEffect(() => {
+    // "Carregando" só na PRIMEIRA vez. Numa recarga (trocou o dia ou o
+    // especialista), a lista antiga fica na tela até a nova chegar — trocar por
+    // um texto de carregamento faz a tela saltar e o alvo do clique sumir
+    // debaixo do dedo.
+    void carregar();
+  }, [carregar]);
 
   const slots: Slot[] = useMemo(() => {
     if (!closerId) return [];
@@ -113,7 +131,7 @@ export default function AgendaMiniatura({ responsavel, dia, onEscolher, selecion
   const moldura = "mt-2 rounded-xl border p-2.5";
   const estiloMoldura = { borderColor: "var(--line)", background: "var(--card2)" };
 
-  if (resolvendo || carregando) {
+  if ((resolvendo || carregando) && slots.length === 0) {
     return (
       <div className={moldura} style={estiloMoldura}>
         <p className="text-xs text-gray-400">Carregando a agenda de {responsavel}…</p>

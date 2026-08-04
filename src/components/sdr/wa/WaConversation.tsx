@@ -206,6 +206,40 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     return off;
   }, [leadId]);
 
+  // ── Rede de segurança do tempo real ────────────────────────────────────────
+  // O realtime funciona (testado de ponta a ponta), mas ele é um WEBSOCKET numa
+  // aba que fica aberta o dia inteiro: notebook que dorme, wi-fi que troca,
+  // proxy que derruba conexão ociosa. Quando isso acontece, o socket volta mas
+  // as mensagens do intervalo NÃO chegam — elas não são reenviadas.
+  //
+  // Por isso: recarrega quando a aba volta ao foco e a cada 45s enquanto a
+  // conversa está aberta e visível. É barato (uma consulta, filtrada por lead) e
+  // transforma "sumiu uma mensagem" em "apareceu 45 segundos depois".
+  useEffect(() => {
+    let parado = false;
+
+    const sincronizar = async () => {
+      if (parado || document.hidden) return;
+      const list = await listMessages(leadId);
+      if (parado) return;
+      // Só mexe no estado se algo mudou — senão a lista re-renderiza à toa e o
+      // scroll pode saltar debaixo de quem está lendo.
+      setMessages((prev) => (prev.length === list.length && prev[prev.length - 1]?.id === list[list.length - 1]?.id ? prev : list));
+    };
+
+    const aoVoltar = () => { if (!document.hidden) void sincronizar(); };
+    document.addEventListener("visibilitychange", aoVoltar);
+    window.addEventListener("focus", aoVoltar);
+    const t = setInterval(() => void sincronizar(), 45_000);
+
+    return () => {
+      parado = true;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", aoVoltar);
+      window.removeEventListener("focus", aoVoltar);
+    };
+  }, [leadId]);
+
   useLayoutEffect(() => {
     if (stickToBottom.current) bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);

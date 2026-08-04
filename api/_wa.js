@@ -180,8 +180,8 @@ export function toE164BR(raw) {
  * (com/sem +55, com/sem o 9) entre o CRM, o Chatwoot e o WhatsApp — comparar
  * string crua faria o lead certo não casar com a conversa dele.
  */
-export function waKey(raw) {
-  let d = onlyDigits(raw);
+/** A chave de UM número já isolado. DDD + 8 dígitos, sem 55 e sem o 9º. */
+function chaveDeUmNumero(d) {
   if (!d) return null;
   if (d.length >= 12 && d.startsWith('55')) d = d.slice(2);
   if (d.length < 10) return null;
@@ -190,6 +190,59 @@ export function waKey(raw) {
   if (rest.length === 9 && rest.startsWith('9')) rest = rest.slice(1);
   if (rest.length !== 8) return null;
   return ddd + rest;
+}
+
+/**
+ * Candidatos de telefone dentro de um campo que pode ter MAIS DE UM.
+ *
+ * O Bitrix manda o telefone como lista, e o campo chega assim:
+ *
+ *     " 5519993152056,  551993152056"    ← o mesmo número com e sem o 9º dígito
+ *     "5547999689893554799689893"        ← dois números COLADOS, sem separador
+ *
+ * O segundo caso é obra nossa: o normalizador antigo fazia
+ * `replace(/\D/g,'')` na string inteira e grudava os dois. Medido em produção:
+ * 57 leads assim — e mensagem de WhatsApp desses leads NUNCA vinculava, porque a
+ * chave dava null e o webhook descartava em silêncio.
+ */
+function candidatosDeTelefone(raw) {
+  const bruto = String(raw ?? '');
+  const fora = [];
+
+  // 1) separadores explícitos (vírgula, ponto e vírgula, barra, quebra de linha)
+  for (const p of bruto.split(/[,;/|\n\r]+/)) {
+    const d = onlyDigits(p);
+    if (d) fora.push(d);
+  }
+
+  // 2) grudados: uma sequência longa demais pra ser um número só. Tenta os
+  //    tamanhos plausíveis do começo — 13 (55+DDD+9), 12, 11 (DDD+9), 10.
+  for (const d of [...fora]) {
+    if (d.length > 13) {
+      for (const n of [13, 12, 11, 10]) fora.push(d.slice(0, n));
+    }
+  }
+
+  return fora;
+}
+
+/**
+ * Chave canônica do telefone (DDD + 8 dígitos). Tolera campo com vários números:
+ * devolve a chave do PRIMEIRO que for válido.
+ */
+export function waKey(raw) {
+  const cands = candidatosDeTelefone(raw);
+  for (const cand of cands) {
+    const k = chaveDeUmNumero(cand);
+    if (k) return k;
+  }
+
+  // Número de fora do Brasil (Portugal, Alemanha, Paraguai — clientes reais de
+  // uma agência de viagens). A regra brasileira não serve, mas a comparação
+  // continua valendo: os dois lados passam por aqui, então basta uma chave
+  // ESTÁVEL. Prefixo "i:" pra nunca colidir com uma chave de DDD+8.
+  const internacional = cands.filter((d) => d.length >= 10 && d.length <= 15).sort((a, b) => b.length - a.length)[0];
+  return internacional ? `i:${internacional}` : null;
 }
 
 // ── Leads ───────────────────────────────────────────────────────────────────

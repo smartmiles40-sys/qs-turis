@@ -68,6 +68,23 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
 
   useEffect(() => { carregar(); }, [carregar]);
   useEffect(() => subscribeToThreads(carregar), [carregar]);
+
+  // Rede de segurança do tempo real: o websocket cai (notebook dorme, wi-fi
+  // troca, proxy derruba conexão ociosa) e volta SEM reenviar o que perdeu — uma
+  // conversa nova ficaria fora da lista até um F5. Recarrega ao voltar o foco e
+  // a cada 60s com a aba visível. Barato, e é o que faz "sumiu uma conversa"
+  // virar "apareceu um minuto depois".
+  useEffect(() => {
+    const aoVoltar = () => { if (!document.hidden) carregar(); };
+    document.addEventListener("visibilitychange", aoVoltar);
+    window.addEventListener("focus", aoVoltar);
+    const t = setInterval(aoVoltar, 60_000);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", aoVoltar);
+      window.removeEventListener("focus", aoVoltar);
+    };
+  }, [carregar]);
   useEffect(() => {
     listUsersLite().then(setUsers);
     getInboxLabels().then(setRotulos);

@@ -223,9 +223,38 @@ function normEmail(v) {
   const s = String(v ?? '').trim().toLowerCase();
   return s || null;
 }
+/**
+ * Telefone normalizado — e aqui mora um bug que custou caro.
+ *
+ * O Bitrix manda telefone como LISTA, e o campo chega assim:
+ *   " 5519993152056,  551993152056"   (o mesmo número com e sem o 9º dígito)
+ *
+ * O `replace(/\D/g,'')` direto GRUDAVA os dois num número de 25 dígitos. O lead
+ * era gravado com esse monstro, e a partir daí toda mensagem de WhatsApp dele
+ * era descartada em silêncio: a chave do telefone dava null e o webhook não
+ * achava o lead. Medido em produção: 57 leads nessa situação.
+ *
+ * Agora pega o PRIMEIRO número plausível. Separador explícito quando existe;
+ * quando os números vêm colados, corta nos tamanhos que fazem sentido no Brasil
+ * (55+DDD+9, 55+DDD+8, DDD+9, DDD+8).
+ */
 function normPhone(v) {
-  const d = String(v ?? '').replace(/\D/g, '');
-  return d || null;
+  const bruto = String(v ?? '');
+  if (!bruto.trim()) return null;
+
+  const pedacos = bruto.split(/[,;/|\n\r]+/).map((p) => p.replace(/\D/g, '')).filter(Boolean);
+  for (const d of pedacos) {
+    if (d.length >= 10 && d.length <= 15) return d;   // já é um número sozinho
+    if (d.length > 15) {
+      for (const n of [13, 12, 11, 10]) {
+        const corte = d.slice(0, n);
+        if (corte.length === n) return corte;
+      }
+    }
+  }
+  // Nada plausível: devolve os dígitos como vieram, pra não perder o dado.
+  const cru = bruto.replace(/\D/g, '');
+  return cru || null;
 }
 
 /**

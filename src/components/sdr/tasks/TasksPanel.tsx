@@ -623,6 +623,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Classificação da ligação: ao concluir uma atividade de LIGAÇÃO, o SDR escolhe
   // o motivo do resultado da chamada (radio único). Guarda o contexto pro título.
   const [classifyFor, setClassifyFor] = useState<{ taskId: string; leadName: string; phone: string | null; atLabel: string } | null>(null);
+
+  // ── Seleção múltipla (ações em massa) ─────────────────────────────────────
+  // O SDR dispara 20 WhatsApps num intervalo e depois precisa fechar 20
+  // atividades. Uma por uma são 20 cliques no card + 20 confirmações. Aqui ele
+  // marca as que já tratou e resolve todas de uma vez.
+  const [modoSelecao, setModoSelecao] = useState(false);
+  const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+  const [massaRodando, setMassaRodando] = useState<{ feitas: number; total: number } | null>(null);
   const [classifySel, setClassifySel] = useState<string | null>(null);
 
   // Menu (⋯) do card: adiar/reagendar/editar/excluir extra (Sprint 4 — item 1/3).
@@ -1890,6 +1898,74 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     );
   }
 
+  // ── Ações em massa ─────────────────────────────────────────────────────────
+
+  /** Só os desfechos que fazem sentido em lote. "Ganho" e "Perdido" ficam de
+   *  fora de propósito: os dois exigem decisão caso a caso (reunião, motivo). */
+  const ROTULO_MASSA: Record<string, string> = {
+    concluida: "concluída",
+    nao_atendeu: "não atendeu",
+    caixa_postal: "caixa postal",
+  };
+
+  function alternarSelecao(taskId: string) {
+    setSelecionadas((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }
+
+  function sairDaSelecao() {
+    setModoSelecao(false);
+    setSelecionadas(new Set());
+  }
+
+  /**
+   * Fecha várias atividades de uma vez.
+   *
+   * Uma por vez, de propósito — não em paralelo. Cada conclusão dispara nota,
+   * aviso ao Bitrix e possível follow-up; vinte disparos simultâneos viram
+   * corrida no banco e estouro de rate limit, e o SDR não teria como saber o que
+   * falhou. Sequencial é mais lento em milissegundos e honesto no resultado: o
+   * contador mostra o progresso e o fim diz quantas foram.
+   */
+  async function concluirEmMassa(resultado: string) {
+    const ids = [...selecionadas];
+    if (!ids.length) return;
+
+    const rotulo = ROTULO_MASSA[resultado] ?? resultado;
+    const ok = await confirmar({
+      titulo: `Marcar ${ids.length} atividade${ids.length > 1 ? "s" : ""} como "${rotulo}"?`,
+      mensagem:
+        "Cada uma vira histórico do lead e vai pro Bitrix. Isso não pode ser desfeito de uma vez — " +
+        "só uma a uma, pelo histórico.",
+      confirmarLabel: `Sim, marcar ${ids.length}`,
+      recusarLabel: "Cancelar",
+    });
+    if (!ok) return;
+
+    setMassaRodando({ feitas: 0, total: ids.length });
+    let sucesso = 0;
+    for (const id of ids) {
+      const r = await completeTask(id, resultado);
+      if (r) sucesso += 1;
+      setMassaRodando((m) => (m ? { ...m, feitas: m.feitas + 1 } : m));
+    }
+    setMassaRodando(null);
+
+    // Quem manda no que fica na fila é o BANCO, não a tela: recarrega em vez de
+    // adivinhar. Assim, atividade que o banco recusou continua visível — some da
+    // fila só o que realmente foi concluído.
+    await refreshQueue();
+    refreshCounts();
+    sairDaSelecao();
+
+    if (sucesso === ids.length) showToast(`${sucesso} atividade${sucesso > 1 ? "s" : ""} concluída${sucesso > 1 ? "s" : ""}.`);
+    else notifyError(`${sucesso} de ${ids.length} concluídas — as demais continuam na fila (o banco recusou).`);
+  }
+
   function renderPill(task: Task) {
     const lead = getLeadForTask(task);
     const cadence = getCadenceForTask(task);
@@ -1901,7 +1977,22 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // atrasada era indistinguível da de hoje (o horário sozinho engana).
     const overdue = classifyTask(task).overdue;
     return (
-      <div key={task.id} onClick={() => selectActive(task.id)} className={`qsx-pill${isActive ? " sel" : ""}`} title="Clique para atender este lead">
+      <div
+        key={task.id}
+        onClick={() => (modoSelecao ? alternarSelecao(task.id) : selectActive(task.id))}
+        className={`qsx-pill${isActive && !modoSelecao ? " sel" : ""}${modoSelecao && selecionadas.has(task.id) ? " marcada" : ""}`}
+        title={modoSelecao ? "Clique para marcar/desmarcar" : "Clique para atender este lead"}
+      >
+        {modoSelecao && (
+          <input
+            type="checkbox"
+            checked={selecionadas.has(task.id)}
+            onChange={() => alternarSelecao(task.id)}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`Selecionar a atividade de ${lead?.full_name ?? "lead"}`}
+            style={{ width: 18, height: 18, accentColor: "var(--blue)", cursor: "pointer", flexShrink: 0 }}
+          />
+        )}
         <div className="qsx-time">{formatTime(task.scheduled_at)}</div>
         <span className={`qsx-chan-ic ${CHANNEL_IC_CLASS[task.channel_type]}`} style={{ width: 44, height: 44, borderRadius: 13 }}>
           <ChannelIcon type={task.channel_type} size={19} />
@@ -2873,6 +2964,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-pill { display: flex; align-items: center; gap: 15px; min-height: 76px; padding: 0 14px 0 20px; background: var(--card); border: 1px solid var(--line); border-radius: 20px; cursor: pointer; transition: box-shadow .16s, border-color .16s, transform .16s; }
         .qsx-pill:hover { border-color: #d3dae5; box-shadow: 0 14px 30px -20px rgba(23,32,46,.4); transform: translateY(-1px); }
         .qsx-pill.sel { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+        .qsx-pill.marcada { border-color: var(--green); background: rgba(18,161,138,.06); }
         .qsx-time { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--ink); font-size: 15px; width: 48px; flex: none; }
         .qsx-lname { font-weight: 700; font-size: 15px; color: var(--ink); }
         .qsx-pco { font-size: 13px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
@@ -3009,6 +3101,67 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           Conserto: este sobe (bottom-24, acima da faixa do global) e cede a
           camada — o erro fica sempre visível e por cima.
           ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══════════════════════════════════════════════════════════════════════
+          BARRA DE AÇÃO EM MASSA
+          Fica FIXA no rodapé, e não no topo da fila, porque o SDR marca as
+          pílulas rolando pra baixo — uma barra no topo sumiria justamente quando
+          ele terminasse de escolher.
+          ══════════════════════════════════════════════════════════════════════ */}
+      {modoSelecao && (
+        <div
+          className="fixed bottom-4 left-1/2 z-[79] -translate-x-1/2 flex flex-wrap items-center gap-2 rounded-2xl px-3 py-2.5 shadow-xl"
+          style={{ background: "var(--card)", border: "1px solid var(--line)", maxWidth: "calc(100vw - 2rem)" }}
+        >
+          <span className="px-1 text-[13px] font-bold" style={{ color: "var(--ink)" }}>
+            {selecionadas.size === 0
+              ? "Marque as atividades que você já tratou"
+              : `${selecionadas.size} selecionada${selecionadas.size > 1 ? "s" : ""}`}
+          </span>
+
+          {selecionadas.size > 0 && !massaRodando && (
+            <>
+              <button onClick={() => void concluirEmMassa("concluida")} className="qsx-btn qsx-btn-green" style={{ height: 34 }}>
+                Concluir
+              </button>
+              <button onClick={() => void concluirEmMassa("nao_atendeu")} className="qsx-btn qsx-btn-ghost" style={{ height: 34 }}>
+                Não atendeu
+              </button>
+              <button onClick={() => void concluirEmMassa("caixa_postal")} className="qsx-btn qsx-btn-ghost" style={{ height: 34 }}>
+                Caixa postal
+              </button>
+            </>
+          )}
+
+          {massaRodando && (
+            <span className="px-1 text-[13px] font-bold" style={{ color: "var(--blue)" }}>
+              Gravando {massaRodando.feitas}/{massaRodando.total}…
+            </span>
+          )}
+
+          {/* Marcar tudo respeita o FILTRO da tela: se o SDR filtrou por
+              WhatsApp, "todas" são as de WhatsApp — não a fila inteira. */}
+          {!massaRodando && (
+            <button
+              onClick={() =>
+                setSelecionadas((prev) =>
+                  prev.size === filteredTasks.length ? new Set() : new Set(filteredTasks.map((t) => t.id))
+                )
+              }
+              className="qsx-btn qsx-btn-ghost"
+              style={{ height: 34 }}
+            >
+              {selecionadas.size === filteredTasks.length && filteredTasks.length > 0 ? "Desmarcar todas" : `Marcar todas (${filteredTasks.length})`}
+            </button>
+          )}
+
+          {!massaRodando && (
+            <button onClick={sairDaSelecao} className="qsx-btn qsx-btn-ghost" style={{ height: 34 }}>
+              Sair
+            </button>
+          )}
+        </div>
+      )}
+
       {toast && (
         <div
           className="fixed bottom-24 right-4 z-[80] bg-gray-900 text-white px-4 py-3 rounded-lg shadow-xl text-sm font-medium flex items-center gap-3"
@@ -3166,6 +3319,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </span>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Ações em massa: o SDR dispara 20 WhatsApps e depois precisa fechar
+                20 atividades. Uma a uma são 40 cliques. */}
+            <button
+              onClick={() => (modoSelecao ? sairDaSelecao() : setModoSelecao(true))}
+              className={`qsx-fchip${modoSelecao ? " on" : ""}`}
+              title="Marcar várias atividades e concluir de uma vez"
+            >
+              {modoSelecao ? "Sair da seleção" : "Selecionar várias"}
+            </button>
             <select
               value={statusFilter || ""}
               onChange={(e) => setStatusFilter(e.target.value as any || null)}
