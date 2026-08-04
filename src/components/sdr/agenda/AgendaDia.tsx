@@ -36,7 +36,7 @@ import {
   semDesfecho,
   chaveDoEspecialista,
 } from "@/lib/qs/closerAgenda";
-import { setMeetingStatus, setMeetingSal } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks } from "@/lib/qs/meetings";
 import { getSetting } from "@/lib/qsSettings";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
 import type {
@@ -291,6 +291,14 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
     setLoading(true);
     void load();
   }, [load]);
+
+  // Passivo: reuniões que venceram ANTES desta cobrança existir não têm
+  // atividade de desfecho. A varredura cria as que faltam — uma vez por abertura
+  // da tela, idempotente, e quase sempre sem escrever nada.
+  useEffect(() => {
+    if (demo || !executa) return;
+    void sweepOutcomeTasks();
+  }, [demo, executa]);
 
   // Realtime: outro SDR agendou ou deu desfecho → a grade se atualiza sozinha.
   useEffect(() => {

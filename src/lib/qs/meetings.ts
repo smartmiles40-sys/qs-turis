@@ -169,6 +169,116 @@ export async function ensureConfirmTask(input: ConfirmTaskInput): Promise<void> 
   }
 }
 
+// ── A atividade de DESFECHO ─────────────────────────────────────────────────
+// A de confirmação cobra ANTES ("o cliente vem?"). Faltava a de DEPOIS: "no que
+// deu?". É a lacuna que produz o número mais feio do sistema — reunião que
+// acontece e nunca vira dado. Hoje a tela mostra o contador, mas só pra quem
+// abre a tela; ninguém é cobrado.
+//
+// Ela nasce JUNTO com a reunião, agendada pro fim dela + 5 minutos. Sem cron:
+// quando o horário chega, ela simplesmente aparece na fila. E não precisa ser
+// concluída na mão — registrar o desfecho na Agenda já a encerra, porque o
+// closeConfirmTask varre TODA tarefa com a tag desta reunião.
+//
+// Dono: o CLOSER, não o SDR. Quem sabe no que deu é quem esteve na reunião.
+// Sem closer definido, cai pro SDR que agendou — melhor cobrar alguém do que
+// ninguém.
+
+interface OutcomeTaskInput {
+  meetingId: string;
+  leadId: string;
+  closerId?: string | null;
+  ownerId: string | null;
+  scheduledAt: string;
+  endsAt?: string | null;
+  durationMin?: number | null;
+  leadName?: string | null;
+}
+
+export async function ensureOutcomeTask(input: OutcomeTaskInput): Promise<void> {
+  try {
+    const fim = input.endsAt
+      ? new Date(input.endsAt)
+      : new Date(new Date(input.scheduledAt).getTime() + (input.durationMin ?? 60) * 60_000);
+    const when = new Date(fim.getTime() + 5 * 60_000);
+
+    const tag = meetingTag(input.meetingId);
+    const dono = input.closerId ?? input.ownerId;
+    if (!dono) return; // sem ninguém pra cobrar, não adianta criar
+
+    const notes =
+      `Registre o desfecho da reunião com ${input.leadName ?? "o lead"} ` +
+      `(${formatDateTime(input.scheduledAt)}): realizada, no-show ou reagendada — e o SAL. ` +
+      `Abra Reuniões → o card da reunião.`;
+
+    // Já existe uma de desfecho aberta pra esta reunião? Move em vez de duplicar.
+    const { data: existing } = await supabase
+      .from("qs_tasks")
+      .select("id")
+      .contains("tags", [tag, "desfecho"])
+      .in("status", ["pendente", "atrasada"])
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      await supabase
+        .from("qs_tasks")
+        .update({ scheduled_at: when.toISOString(), status: "pendente", notes, owner_id: dono })
+        .eq("id", existing[0].id);
+      return;
+    }
+
+    const { error } = await supabase.from("qs_tasks").insert({
+      lead_id: input.leadId,
+      owner_id: dono,
+      channel_type: "pesquisa",   // não é contato com o cliente: é registro interno
+      priority: "alta",
+      scheduled_at: when.toISOString(),
+      status: "pendente",
+      is_extra: true,
+      notes,
+      tags: ["reuniao", "desfecho", tag],
+    });
+    if (error) console.warn("[meetings] atividade de desfecho não criada:", error.message);
+  } catch (e) {
+    // Nunca derruba o agendamento: a reunião é o que importa.
+    console.warn("[meetings] falha ao preparar a atividade de desfecho:", e);
+  }
+}
+
+/**
+ * Cria as atividades de desfecho que faltam para reuniões que JÁ venceram sem
+ * resposta. Serve pro passivo que existe hoje (as que aconteceram antes desta
+ * função existir) — sem isto, a cobrança só valeria daqui pra frente.
+ *
+ * Chamada quando a Agenda carrega. É idempotente e barata: uma consulta e, na
+ * imensa maioria das vezes, nenhuma escrita.
+ */
+export async function sweepOutcomeTasks(): Promise<void> {
+  try {
+    const { data: vencidas } = await supabase
+      .from("qs_meetings")
+      .select("id, lead_id, closer_id, owner_id, scheduled_at, ends_at, duration_min, lead_name")
+      .in("status", ["agendada", "confirmada"])
+      .lt("ends_at", new Date().toISOString())
+      .limit(50);
+
+    for (const m of vencidas ?? []) {
+      await ensureOutcomeTask({
+        meetingId: m.id,
+        leadId: m.lead_id,
+        closerId: m.closer_id,
+        ownerId: m.owner_id,
+        scheduledAt: m.scheduled_at,
+        endsAt: m.ends_at,
+        durationMin: m.duration_min,
+        leadName: m.lead_name,
+      });
+    }
+  } catch (e) {
+    console.warn("[meetings] varredura de desfechos pendentes falhou:", e);
+  }
+}
+
 /** Encerra a tarefa de confirmação (reunião cancelada, realizada, no-show ou excluída). */
 export async function closeConfirmTask(meetingId: string, motivo: string): Promise<void> {
   try {
@@ -288,6 +398,18 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
       scheduledAt: meeting.scheduled_at,
       leadName: input.lead_name,
       closerName: input.closer_name,
+    });
+    // E a cobrança do DEPOIS, que nasce junto: quando a reunião terminar, o
+    // closer tem uma atividade esperando por ele pedindo o desfecho.
+    await ensureOutcomeTask({
+      meetingId: meeting.id,
+      leadId: input.lead_id,
+      closerId: meeting.closer_id ?? input.closer_id ?? null,
+      ownerId: input.owner_id,
+      scheduledAt: meeting.scheduled_at,
+      endsAt: meeting.ends_at,
+      durationMin: meeting.duration_min,
+      leadName: input.lead_name,
     });
   }
 
@@ -526,6 +648,16 @@ export async function reagendarReuniao(input: {
     leadId: nova.lead_id,
     ownerId: nova.owner_id,
     scheduledAt: nova.scheduled_at,
+    leadName: nova.lead_name ?? meeting.lead_name,
+  });
+  await ensureOutcomeTask({
+    meetingId: nova.id,
+    leadId: nova.lead_id,
+    closerId: nova.closer_id,
+    ownerId: nova.owner_id,
+    scheduledAt: nova.scheduled_at,
+    endsAt: nova.ends_at,
+    durationMin: nova.duration_min,
     leadName: nova.lead_name ?? meeting.lead_name,
   });
 

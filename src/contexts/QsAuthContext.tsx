@@ -43,7 +43,9 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   admin: ["*"], // all
   gestor: ["painel", "cobertura", "leads", "cadencias", "reunioes", "dashboard", "analises", "lead-detail", "cadencia-criar", "cadencia-editar"],
   sdr: ["painel", "cobertura", "leads", "reunioes", "dashboard", "lead-detail"],
-  closer: ["leads", "reunioes", "dashboard", "lead-detail"],
+  // O Painel entrou pro closer junto com a atividade de DESFECHO: sem ele, a
+  // cobrança nasceria numa fila que o closer não enxerga.
+  closer: ["painel", "leads", "reunioes", "dashboard", "lead-detail"],
   // Espectador: enxerga o funil inteiro pra medir campanha. Fica de fora o
   // Painel (tela de EXECUÇÃO, não faria sentido pra quem não executa) e as
   // Configurações (que só existem pra mudar coisa).
