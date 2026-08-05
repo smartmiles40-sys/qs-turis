@@ -111,6 +111,31 @@ export async function transferLead(
 ): Promise<boolean> {
   const notify = opts?.notify !== false;
   try {
+    // ── Caminho novo: uma operação só, no banco (migration 0040) ─────────────
+    // Transferir não é "um UPDATE que por acaso muda o dono": é uma operação
+    // com autorização própria, e como três escritas soltas ela podia falhar no
+    // meio e deixar o lead com as tarefas de um dono e a posse de outro.
+    // A função faz tudo numa transação e carrega a própria regra.
+    const { data: rpcData, error: rpcErr } = await supabase.rpc("qs_transferir_lead", {
+      p_lead: leadId,
+      p_para: toUserId,
+      p_motivo: note?.trim() || null,
+    });
+    if (!rpcErr) {
+      const r = rpcData as { ok?: boolean } | null;
+      if (r?.ok) return true;
+      if (notify) notifyError("A transferência não foi concluída — tente de novo.");
+      return false;
+    }
+    // 42883 = a função não existe: a 0040 ainda não foi aplicada. Cai no
+    // caminho antigo em vez de travar o SDR — e o antigo avisa se for barrado.
+    if (rpcErr.code !== "42883") {
+      console.warn("[QS] transferLead via RPC:", rpcErr);
+      if (notify) notifyError(rpcErr.message || "Não foi possível transferir o lead.");
+      return false;
+    }
+    console.warn("[QS] qs_transferir_lead ausente (migration 0040) — usando o caminho antigo");
+
     // 1. Troca o dono e MEDE o efeito: o `.select('id')` devolve as linhas que
     //    o banco realmente alterou. Sem isso, a RLS recusa em SILÊNCIO (sem
     //    erro, 0 linhas) e a função dizia "transferido" mesmo sem transferir.
