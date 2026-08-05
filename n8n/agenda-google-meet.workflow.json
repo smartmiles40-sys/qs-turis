@@ -13,7 +13,10 @@
       "name": "Webhook QS (qs-agenda-meet)",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [2320, 1280],
+      "position": [
+        2320,
+        1280
+      ],
       "webhookId": "qs-agenda-meet-0001",
       "notesInFlow": true,
       "credentials": {
@@ -32,7 +35,10 @@
       "name": "Validar entrada",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2528, 1280],
+      "position": [
+        2528,
+        1280
+      ],
       "notesInFlow": true,
       "notes": "Define aqui o CALENDAR_PADRAO. Campo invalido vira acao='invalida' e sai pela saida de erro do Switch."
     },
@@ -42,13 +48,21 @@
           "values": [
             {
               "conditions": {
-                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
                 "conditions": [
                   {
                     "id": "r-criar",
                     "leftValue": "={{ $json.acao }}",
                     "rightValue": "criar",
-                    "operator": { "type": "string", "operation": "equals" }
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
                   }
                 ],
                 "combinator": "and"
@@ -58,13 +72,21 @@
             },
             {
               "conditions": {
-                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
                 "conditions": [
                   {
                     "id": "r-reagendar",
                     "leftValue": "={{ $json.acao }}",
                     "rightValue": "reagendar",
-                    "operator": { "type": "string", "operation": "equals" }
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
                   }
                 ],
                 "combinator": "and"
@@ -74,13 +96,21 @@
             },
             {
               "conditions": {
-                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
                 "conditions": [
                   {
                     "id": "r-cancelar",
                     "leftValue": "={{ $json.acao }}",
                     "rightValue": "cancelar",
-                    "operator": { "type": "string", "operation": "equals" }
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
                   }
                 ],
                 "combinator": "and"
@@ -90,13 +120,19 @@
             }
           ]
         },
-        "options": { "fallbackOutput": "extra", "renameFallbackOutput": "invalida" }
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "invalida"
+        }
       },
       "id": "1a2b3c4d-0002-4000-8000-000000000002",
       "name": "Rotear acao",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
-      "position": [2736, 1280]
+      "position": [
+        2736,
+        1280
+      ]
     },
     {
       "parameters": {
@@ -106,7 +142,10 @@
       "name": "Montar evento",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2976, 1040]
+      "position": [
+        2976,
+        1040
+      ]
     },
     {
       "parameters": {
@@ -118,7 +157,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.evento) }}",
         "options": {
-          "response": { "response": { "fullResponse": true, "neverError": true } },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
           "timeout": 15000
         }
       },
@@ -126,7 +170,10 @@
       "name": "Criar evento no Google",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3184, 1040],
+      "position": [
+        3184,
+        1040
+      ],
       "notesInFlow": true,
       "credentials": {
         "googleCalendarOAuth2Api": {
@@ -139,13 +186,21 @@
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
           "conditions": [
             {
               "id": "c-409",
               "leftValue": "={{ $json.statusCode }}",
               "rightValue": 409,
-              "operator": { "type": "number", "operation": "equals" }
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
             }
           ],
           "combinator": "and"
@@ -156,18 +211,26 @@
       "name": "Ja existe (409)?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [3392, 1040],
+      "position": [
+        3392,
+        1040
+      ],
       "notesInFlow": true,
       "notes": "409 = o QS reenviou o mesmo meeting_id. Nao eh erro: o evento ja existe, basta buscar e devolver o mesmo link."
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($('Validar entrada').first().json.calendar_id) }}/events/{{ $('Validar entrada').first().json.event_id_previsto }}",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($('Validar entrada').first().json.calendar_id) }}/events/{{ encodeURIComponent($('Validar entrada').first().json.event_id_previsto) }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleCalendarOAuth2Api",
         "options": {
-          "response": { "response": { "fullResponse": true, "neverError": true } },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
           "timeout": 15000
         }
       },
@@ -175,7 +238,10 @@
       "name": "Buscar evento existente",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3600, 928],
+      "position": [
+        3600,
+        928
+      ],
       "credentials": {
         "googleCalendarOAuth2Api": {
           "id": "x4fWudD224Kqwufs",
@@ -185,13 +251,16 @@
     },
     {
       "parameters": {
-        "jsCode": "// Resposta unica da acao criar. Serve tanto para insert novo quanto para o\n// caminho do 409 (evento ja existia), porque os dois devolvem um Event.\n//\n// Nunca damos throw: o webhook responde 200 com ok:false e uma mensagem que se\n// entende. Throw viraria 500 com stack trace e o QS perderia o motivo.\nconst r = $input.first().json;\nconst d = $('Validar entrada').first().json;\nconst status = r.statusCode;\nconst ev = r.body || {};\n\nfunction motivo(body, st) {\n  if (typeof body === 'string') return body.slice(0, 300);\n  const e = body && body.error;\n  if (typeof e === 'string') return e.slice(0, 300);\n  if (e && (e.message || e.status)) return e.message || e.status;\n  return 'HTTP ' + st;\n}\n\nif (status >= 400) {\n  return [{ json: {\n    ok: false,\n    acao: 'criar',\n    meeting_id: d.meeting_id,\n    codigo: status,\n    erro: motivo(ev, status)\n  } }];\n}\n\n// hangoutLink eh o link do Meet. Se vier vazio, quase sempre falta o\n// conferenceDataVersion=1 ou a conta nao tem permissao de criar conferencia.\n// Devolvemos assim mesmo: o evento existe, o QS mostra a reuniao sem sala em\n// vez de quebrar.\nconst pontos = (ev.conferenceData && ev.conferenceData.entryPoints) || [];\nconst meet = ev.hangoutLink\n  || pontos.filter((p) => p.entryPointType === 'video').map((p) => p.uri)[0]\n  || null;\n\nreturn [{ json: {\n  ok: true,\n  acao: 'criar',\n  meeting_id: d.meeting_id,\n  calendar_id: d.calendar_id,\n  event_id: ev.id || null,\n  meet_link: meet,\n  html_link: ev.htmlLink || null,\n  sem_meet: !meet,\n  duplicado: status === 409 || undefined,\n  convidados_descartados: d.convidados_descartados\n} }];"
+        "jsCode": "// Resposta unica da acao criar. Serve tanto para insert novo quanto para o\n// caminho do 409 (evento ja existia), porque os dois devolvem um Event.\n//\n// Nunca damos throw: o webhook responde 200 com ok:false e uma mensagem que se\n// entende. Throw viraria 500 com stack trace e o QS perderia o motivo.\nconst r = $input.first().json;\nconst d = $('Validar entrada').first().json;\nconst status = r.statusCode;\nconst ev = r.body || {};\n\n// O 409 veio do POST, nao deste no: quando passamos pelo \"Buscar evento\n// existente\", o status que chega aqui eh o do GET (200). Sem olhar o no do IF,\n// o campo \"duplicado\" NUNCA era preenchido — o QS nao tinha como saber que\n// aquele link ja existia (medido em producao, 05/08).\nlet veioDo409 = false;\ntry { veioDo409 = $('Ja existe (409)?').first().json.statusCode === 409; } catch (e) { veioDo409 = false; }\n\nfunction motivo(body, st) {\n  if (typeof body === 'string') return body.slice(0, 300);\n  const e = body && body.error;\n  if (typeof e === 'string') return e.slice(0, 300);\n  if (e && (e.message || e.status)) return e.message || e.status;\n  return 'HTTP ' + st;\n}\n\nif (status >= 400) {\n  return [{ json: {\n    ok: false,\n    acao: 'criar',\n    meeting_id: d.meeting_id,\n    codigo: status,\n    erro: motivo(ev, status)\n  } }];\n}\n\n// EVENTO QUE EXISTE MAS ESTA CANCELADO.\n// O Google guarda o id de um evento apagado. Entao: alguem apaga o evento na\n// mao, o QS tenta criar de novo com o mesmo meeting_id, o POST toma 409 e o GET\n// devolve 200 com status \"cancelled\" — e o hangoutLink da sala MORTA.\n// Sem esta checagem devolviamos ok:true e o QS gravava um link de reuniao que\n// nao existe mais, que o SDR mandava pro cliente. Confirmado em producao 05/08.\nif (ev.status === 'cancelled') {\n  return [{ json: {\n    ok: false,\n    acao: 'criar',\n    meeting_id: d.meeting_id,\n    codigo: 'evento_cancelado',\n    erro: 'o evento deste agendamento foi apagado no Google; refaca o agendamento no QS'\n  } }];\n}\n\n// hangoutLink eh o link do Meet. Se vier vazio, quase sempre falta o\n// conferenceDataVersion=1 ou a conta nao tem permissao de criar conferencia.\n// Devolvemos assim mesmo: o evento existe, o QS mostra a reuniao sem sala em\n// vez de quebrar.\nconst pontos = (ev.conferenceData && ev.conferenceData.entryPoints) || [];\nconst meet = ev.hangoutLink\n  || pontos.filter((p) => p.entryPointType === 'video').map((p) => p.uri)[0]\n  || null;\n\nreturn [{ json: {\n  ok: true,\n  acao: 'criar',\n  meeting_id: d.meeting_id,\n  calendar_id: d.calendar_id,\n  event_id: ev.id || null,\n  meet_link: meet,\n  html_link: ev.htmlLink || null,\n  sem_meet: !meet,\n  duplicado: veioDo409 || undefined,\n  convidados_descartados: d.convidados_descartados\n} }];"
       },
       "id": "1a2b3c4d-0007-4000-8000-000000000007",
       "name": "Responder criacao",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3808, 1040]
+      "position": [
+        3808,
+        1040
+      ]
     },
     {
       "parameters": {
@@ -201,7 +270,10 @@
       "name": "Montar atualizacao",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2976, 1280]
+      "position": [
+        2976,
+        1280
+      ]
     },
     {
       "parameters": {
@@ -213,7 +285,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.patch) }}",
         "options": {
-          "response": { "response": { "fullResponse": true, "neverError": true } },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
           "timeout": 15000
         }
       },
@@ -221,7 +298,10 @@
       "name": "Atualizar evento no Google",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3184, 1280],
+      "position": [
+        3184,
+        1280
+      ],
       "notesInFlow": true,
       "credentials": {
         "googleCalendarOAuth2Api": {
@@ -239,7 +319,10 @@
       "name": "Responder atualizacao",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3392, 1280]
+      "position": [
+        3392,
+        1280
+      ]
     },
     {
       "parameters": {
@@ -248,7 +331,12 @@
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleCalendarOAuth2Api",
         "options": {
-          "response": { "response": { "fullResponse": true, "neverError": true } },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
           "timeout": 15000
         }
       },
@@ -256,7 +344,10 @@
       "name": "Cancelar evento no Google",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2976, 1520],
+      "position": [
+        2976,
+        1520
+      ],
       "notesInFlow": true,
       "credentials": {
         "googleCalendarOAuth2Api": {
@@ -274,7 +365,10 @@
       "name": "Responder cancelamento",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3184, 1520]
+      "position": [
+        3184,
+        1520
+      ]
     },
     {
       "parameters": {
@@ -284,53 +378,159 @@
       "name": "Responder payload invalido",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2976, 1760]
+      "position": [
+        2976,
+        1760
+      ]
     }
   ],
   "connections": {
     "Webhook QS (qs-agenda-meet)": {
-      "main": [[{ "node": "Validar entrada", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Validar entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Validar entrada": {
-      "main": [[{ "node": "Rotear acao", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Rotear acao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Rotear acao": {
       "main": [
-        [{ "node": "Montar evento", "type": "main", "index": 0 }],
-        [{ "node": "Montar atualizacao", "type": "main", "index": 0 }],
-        [{ "node": "Cancelar evento no Google", "type": "main", "index": 0 }],
-        [{ "node": "Responder payload invalido", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Montar evento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Montar atualizacao",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cancelar evento no Google",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder payload invalido",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Montar evento": {
-      "main": [[{ "node": "Criar evento no Google", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Criar evento no Google",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Criar evento no Google": {
-      "main": [[{ "node": "Ja existe (409)?", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Ja existe (409)?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Ja existe (409)?": {
       "main": [
-        [{ "node": "Buscar evento existente", "type": "main", "index": 0 }],
-        [{ "node": "Responder criacao", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Buscar evento existente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder criacao",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Buscar evento existente": {
-      "main": [[{ "node": "Responder criacao", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Responder criacao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Montar atualizacao": {
-      "main": [[{ "node": "Atualizar evento no Google", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Atualizar evento no Google",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Atualizar evento no Google": {
-      "main": [[{ "node": "Responder atualizacao", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Responder atualizacao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Cancelar evento no Google": {
-      "main": [[{ "node": "Responder cancelamento", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Responder cancelamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1"
+  },
   "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "91aa63e4f74d7cbe350736303e89cc11603c939156428dd97f3f611c857dbb64"
-  }
+  },
+  "active": true
 }
