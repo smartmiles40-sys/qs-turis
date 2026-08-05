@@ -721,16 +721,22 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       notifyError("Não foi possível fazer o handover — tente novamente.");
       return;
     }
+    // A troca de dono vai pela função da 0040, não por UPDATE direto: o UPDATE
+    // direto é recusado com "new row violates row-level security policy" sempre
+    // que o novo dono não é quem está editando — que é exatamente o caso aqui.
+    // Foi o mesmo tropeço da transferência entre SDRs.
+    //
     // MEDIDO: sob RLS a recusa volta 0 linhas SEM erro. Sem medir, a passagem era
     // dada como feita — as atividades do SDR eram encerradas e o Bitrix avisado —
     // com o lead ainda no nome do SDR antigo: sumia da fila dele e nunca chegava
     // no closer.
-    const { data: donoRows, error: upError } = await supabase
-      .from("qs_leads")
-      .update({ owner_id: selectedCloser })
-      .eq("id", lead.id)
-      .select("id");
-    if (upError || !donoRows || donoRows.length === 0) {
+    const { data: rpcOk, error: upError } = await supabase.rpc("qs_transferir_lead", {
+      p_lead: lead.id,
+      p_para: selectedCloser,
+      p_motivo: "Handover para closer",
+    });
+    const donoRows = (rpcOk as { ok?: boolean } | null)?.ok ? [1] : null;
+    if (upError || !donoRows) {
       console.warn("Erro ao atualizar lead após handover:", upError);
       // Desfaz o registro do handover: deixá-lo de pé descreveria uma passagem
       // que não aconteceu (e o qs_owns_lead da 0029 lê essa tabela).
