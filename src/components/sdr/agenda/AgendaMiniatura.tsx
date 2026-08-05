@@ -7,12 +7,18 @@
 // pra saber que horário oferecer. Na prática ninguém conferia: chutava um
 // horário, e o choque aparecia depois (ou nunca, porque não havia trava).
 //
-// Aqui o dia do especialista aparece na hora, e o horário livre é CLICÁVEL: um
-// clique preenche a data/hora do formulário. O SDR para de digitar horário e
-// para de errar agenda.
+// ── Por que SEMANA e não um dia ──────────────────────────────────────────────
+// A primeira versão mostrava um dia só: o dia que estivesse no campo de data do
+// formulário. Isso responde "o dia X está livre?" — mas na ligação a pergunta é
+// outra: "quais horários eu tenho pra OFERECER?". Pra ver quinta, o SDR tinha
+// que digitar a data no teclado com o cliente na linha, um dia por vez.
 //
-// Reaproveita o `computeDaySlots` (regra pura já usada pelo SlotPicker): janela
-// de atendimento − reuniões − bloqueios − antecedência mínima. Uma regra só pro
+// Agora a semana inteira fica à vista com a contagem de livres por dia; clicar
+// num dia troca a lista de horários, e clicar num horário preenche o formulário.
+// O SDR lê duas ou três opções em voz alta e marca na hora.
+//
+// Reaproveita `computeDaySlots` (regra pura já usada pelo SlotPicker): janela de
+// atendimento − reuniões − bloqueios − antecedência mínima. Uma regra só pro
 // sistema inteiro; se mudar lá, muda aqui.
 //
 // Degrada com elegância, e isso importa: sem especialista escolhido, sem
@@ -55,9 +61,26 @@ interface Props {
 const hhmm = (d: Date) =>
   `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 
+const DIAS_CURTOS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
 function diaLongo(d: Date): string {
   const s = d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Segunda-feira da semana de `d` (a operação pensa a semana começando na segunda). */
+function inicioDaSemana(d: Date): Date {
+  const base = startOfDay(d);
+  const diff = (base.getDay() + 6) % 7; // domingo (0) vira 6
+  return addDays(base, -diff);
+}
+
+function rotuloDaSemana(inicio: Date, fim: Date): string {
+  const dia = (x: Date) => String(x.getDate()).padStart(2, "0");
+  const mes = (x: Date) => x.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "");
+  return inicio.getMonth() === fim.getMonth()
+    ? `${dia(inicio)} a ${dia(fim)} de ${mes(inicio)}`
+    : `${dia(inicio)} ${mes(inicio)} a ${dia(fim)} ${mes(fim)}`;
 }
 
 export default function AgendaMiniatura({ responsavel, closerId: closerIdProp, dia, onEscolher, selecionado }: Props) {
@@ -95,18 +118,24 @@ export default function AgendaMiniatura({ responsavel, closerId: closerIdProp, d
   // invalidava o useCallback, que disparava o efeito: uma recarga completa (4
   // consultas) POR TECLA. Medido: 50 requisições em 6 segundos.
   //
-  // O sintoma pro SDR era a tela piscando e o horário fugindo do clique, porque
-  // a lista era substituída por "Carregando…" a cada letra.
-  //
   // O timestamp é um número: só muda quando o DIA muda de verdade.
   const diaMs = startOfDay(dia).getTime();
-  const diaBase = useMemo(() => new Date(diaMs), [diaMs]);
+
+  // Dia aberto na lista de horários. Começa no dia do formulário e passa a ser
+  // do usuário assim que ele navega — trocar de dia aqui NÃO mexe no formulário
+  // (só o clique num horário mexe), senão navegar já marcaria reunião sem querer.
+  const [diaSelMs, setDiaSelMs] = useState(diaMs);
+  useEffect(() => { if (!Number.isNaN(diaMs)) setDiaSelMs(diaMs); }, [diaMs]);
+
+  const diaSel = useMemo(() => new Date(diaSelMs), [diaSelMs]);
+  const semanaIni = useMemo(() => inicioDaSemana(new Date(diaSelMs)), [diaSelMs]);
+  const semanaIniMs = semanaIni.getTime();
 
   const carregar = useCallback(async () => {
     // Data pela metade ("2026-08-0") enquanto o SDR digita vira Invalid Date, e
     // `toISOString()` mais abaixo ESTOURA — a promessa era rejeitada em silêncio e
     // a caixa ficava presa no estado anterior. Sai fora e espera a data ficar boa.
-    if (Number.isNaN(diaMs)) { setCarregando(false); return; }
+    if (Number.isNaN(semanaIniMs)) { setCarregando(false); return; }
     if (!closerId) {
       // Nome que não casa com usuário do QS: não há o que carregar, e o estado
       // PRECISA sair de "carregando" — senão a caixa fica presa no texto de
@@ -114,36 +143,59 @@ export default function AgendaMiniatura({ responsavel, closerId: closerIdProp, d
       setCarregando(false);
       return;
     }
-    const de = new Date(diaMs);
-    const ate = addDays(de, 1);
+    // A SEMANA inteira numa ida só: a contagem de livres por dia precisa dos
+    // compromissos dos 7 dias, e buscar por dia seria 7× mais consultas.
+    const de = new Date(semanaIniMs);
+    const ate = addDays(de, 7);
     const [cfg, av, bl, mt] = await Promise.all([
       fetchCloserConfigs(),
-      fetchAvailability(),
-      fetchBlocks(de, ate),
-      fetchMeetingsInRange(de, ate),
+      fetchAvailability([closerId]),
+      fetchBlocks(de, ate, [closerId]),
+      fetchMeetingsInRange(de, ate, [closerId]),
     ]);
     setConfigs(cfg);
     setAvailability(av);
     setBlocks(bl);
     setMeetings(mt);
     setCarregando(false);
-  }, [closerId, diaMs]);
+  }, [closerId, semanaIniMs]);
 
   useEffect(() => {
-    // "Carregando" só na PRIMEIRA vez. Numa recarga (trocou o dia ou o
+    // "Carregando" só na PRIMEIRA vez. Numa recarga (trocou a semana ou o
     // especialista), a lista antiga fica na tela até a nova chegar — trocar por
     // um texto de carregamento faz a tela saltar e o alvo do clique sumir
     // debaixo do dedo.
     void carregar();
   }, [carregar]);
 
+  const entrada = useMemo(
+    () => (closerId ? { closerId, config: configFor(closerId, configs), availability, blocks, meetings } : null),
+    [closerId, configs, availability, blocks, meetings]
+  );
+
+  // Os 7 dias da semana com a contagem de livres. Dias em que o closer não
+  // atende continuam à vista, marcados com "—": some da grade daria a impressão
+  // de que a semana é mais curta do que é.
+  const semana = useMemo(() => {
+    if (!entrada || Number.isNaN(semanaIniMs)) return [];
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = addDays(new Date(semanaIniMs), i);
+      const slots = computeDaySlots(entrada, d);
+      return { dia: d, livres: slots.filter((s) => s.available).length, atende: slots.length > 0 };
+    });
+  }, [entrada, semanaIniMs]);
+
+  // Fim de semana sem NENHUM atendimento configurado é ruído: se o closer não
+  // trabalha sábado nem domingo, esses dois quadradinhos só ocupam espaço.
+  const diasVisiveis = useMemo(() => {
+    const fds = semana.filter((d) => d.dia.getDay() === 0 || d.dia.getDay() === 6);
+    return fds.some((d) => d.atende) ? semana : semana.filter((d) => d.dia.getDay() !== 0 && d.dia.getDay() !== 6);
+  }, [semana]);
+
   const slots: Slot[] = useMemo(() => {
-    if (!closerId || Number.isNaN(diaMs)) return [];
-    return computeDaySlots(
-      { closerId, config: configFor(closerId, configs), availability, blocks, meetings },
-      diaBase
-    );
-  }, [closerId, configs, availability, blocks, meetings, diaBase, diaMs]);
+    if (!entrada || Number.isNaN(diaSelMs)) return [];
+    return computeDaySlots(entrada, diaSel);
+  }, [entrada, diaSel, diaSelMs]);
 
   if (!responsavel.trim()) return null;
 
@@ -169,81 +221,143 @@ export default function AgendaMiniatura({ responsavel, closerId: closerIdProp, d
     );
   }
 
-  if (slots.length === 0) {
-    return (
-      <div className={moldura} style={estiloMoldura}>
-        <p className="text-xs text-gray-400">
-          <b>{responsavel}</b> não tem horário de atendimento configurado para {diaLongo(diaBase)}.
-          Configure em <b>Configurações → Agenda dos Closers</b>, ou preencha a data e hora na mão.
-        </p>
-      </div>
-    );
-  }
-
+  const hojeMs = startOfDay(new Date()).getTime();
+  const semanaFim = addDays(semanaIni, 6);
   const selMs = selecionado ? selecionado.getTime() : null;
+  const livresNoDia = slots.filter((s) => s.available).length;
 
   return (
     <div className={moldura} style={estiloMoldura}>
+      {/* ── Navegação da semana ─────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setDiaSelMs(addDays(new Date(diaSelMs), -7).getTime())}
+          className="grid h-6 w-6 place-items-center rounded-md text-gray-500 hover:bg-black/5"
+          aria-label="Semana anterior"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6" /></svg>
+        </button>
         <p className="text-xs font-bold" style={{ color: "var(--ink2)" }}>
-          Agenda de {responsavel.split(" ")[0]} · {diaLongo(diaBase)}
+          {rotuloDaSemana(semanaIni, semanaFim)}
         </p>
-        <span className="text-[11px] text-gray-400">
-          {slots.filter((s) => s.available).length} horário(s) livre(s)
-        </span>
+        <button
+          type="button"
+          onClick={() => setDiaSelMs(addDays(new Date(diaSelMs), 7).getTime())}
+          className="grid h-6 w-6 place-items-center rounded-md text-gray-500 hover:bg-black/5"
+          aria-label="Próxima semana"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6" /></svg>
+        </button>
       </div>
 
-      {/* Rolagem: um dia cheio tem 10+ faixas e o modal não pode virar uma página. */}
-      <div className="mt-2 max-h-[168px] space-y-1 overflow-y-auto pr-0.5">
-        {slots.map((s) => {
-          const ocupado = !s.available;
-          const escolhido = selMs !== null && s.start.getTime() === selMs;
-          const rotulo = ocupado
-            ? s.reason === "ocupado"
-              ? s.meeting?.lead_name ?? s.meeting?.lead?.full_name ?? "Reunião"
-              : s.reason === "bloqueio"
-                ? s.block?.reason ?? "Bloqueado"
-                : s.reason === "antecedencia"
-                  ? "cedo demais"
-                  : s.reason === "passado"
-                    ? "já passou"
-                    : "indisponível"
-            : "livre";
-
+      {/* ── Os dias, com quantos horários livres cada um tem ─────────────── */}
+      <div className="mt-2 flex gap-1">
+        {diasVisiveis.map(({ dia: d, livres, atende }) => {
+          const ms = startOfDay(d).getTime();
+          const escolhido = ms === startOfDay(diaSel).getTime();
+          const hoje = ms === hojeMs;
+          const vazio = livres === 0;
           return (
             <button
-              key={s.start.toISOString()}
+              key={ms}
               type="button"
-              disabled={ocupado}
-              onClick={() => onEscolher(s.start)}
-              className={`flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-xs transition ${
-                ocupado ? "cursor-default" : "hover:brightness-95"
-              }`}
+              disabled={!atende}
+              onClick={() => setDiaSelMs(ms)}
+              className={`flex-1 rounded-lg border px-0.5 py-1 text-center transition ${atende ? "hover:brightness-95" : "cursor-default"}`}
               style={{
-                borderColor: escolhido ? "var(--green)" : ocupado ? "transparent" : "var(--line)",
-                background: escolhido
-                  ? "rgba(18,161,138,.14)"
-                  : ocupado
-                    ? "var(--line2)"
-                    : "var(--card)",
-                color: ocupado ? "var(--ink3)" : "var(--ink)",
+                borderColor: escolhido ? "var(--green)" : "var(--line)",
+                background: escolhido ? "rgba(18,161,138,.14)" : atende ? "var(--card)" : "transparent",
+                opacity: atende ? 1 : 0.45,
               }}
             >
-              <span className="w-11 shrink-0 font-bold tabular-nums">{hhmm(s.start)}</span>
-              <span className={`truncate ${ocupado ? "" : "font-semibold"}`}>{rotulo}</span>
-              {escolhido && (
-                <span className="ml-auto shrink-0 text-[10px] font-bold" style={{ color: "var(--green)" }}>
-                  escolhido
-                </span>
-              )}
+              <span className="block text-[10px] leading-tight text-gray-500">{DIAS_CURTOS[d.getDay()]}</span>
+              <span
+                className="block text-[13px] font-bold leading-tight tabular-nums"
+                style={{ color: hoje ? "var(--blue)" : "var(--ink)" }}
+              >
+                {String(d.getDate()).padStart(2, "0")}
+              </span>
+              <span
+                className="block text-[10px] font-semibold leading-tight tabular-nums"
+                style={{ color: vazio ? "var(--ink3)" : "var(--green)" }}
+              >
+                {atende ? (vazio ? "0" : livres) : "—"}
+              </span>
             </button>
           );
         })}
       </div>
+      <p className="mt-1 text-center text-[10px] text-gray-400">horários livres por dia</p>
 
-      <p className="mt-1.5 text-[11px] text-gray-400">
-        Clique num horário livre para preencher a data e a hora.
-      </p>
+      {/* ── Horários do dia aberto ───────────────────────────────────────── */}
+      <div className="mt-2 flex items-center justify-between">
+        <p className="text-xs font-bold" style={{ color: "var(--ink2)" }}>
+          {diaLongo(diaSel)}
+        </p>
+        <span className="text-[11px] text-gray-400">{livresNoDia} horário(s) livre(s)</span>
+      </div>
+
+      {slots.length === 0 ? (
+        <p className="mt-1.5 text-xs text-gray-400">
+          <b>{responsavel.split(" ")[0]}</b> não atende em {diaLongo(diaSel)}. Escolha outro dia acima
+          — ou preencha a data e a hora na mão.
+        </p>
+      ) : (
+        <>
+          {/* Rolagem: um dia cheio tem 10+ faixas e o modal não pode virar uma página. */}
+          <div className="mt-2 max-h-[168px] space-y-1 overflow-y-auto pr-0.5">
+            {slots.map((s) => {
+              const ocupado = !s.available;
+              const escolhido = selMs !== null && s.start.getTime() === selMs;
+              const rotulo = ocupado
+                ? s.reason === "ocupado"
+                  ? s.meeting?.lead_name ?? s.meeting?.lead?.full_name ?? "Reunião"
+                  : s.reason === "bloqueio"
+                    ? s.block?.reason ?? "Bloqueado"
+                    : s.reason === "antecedencia"
+                      ? "cedo demais"
+                      : s.reason === "passado"
+                        ? "já passou"
+                        : "indisponível"
+                : "livre";
+
+              return (
+                <button
+                  key={s.start.toISOString()}
+                  type="button"
+                  disabled={ocupado}
+                  onClick={() => onEscolher(s.start)}
+                  className={`flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-xs transition ${
+                    ocupado ? "cursor-default" : "hover:brightness-95"
+                  }`}
+                  style={{
+                    borderColor: escolhido ? "var(--green)" : ocupado ? "transparent" : "var(--line)",
+                    background: escolhido
+                      ? "rgba(18,161,138,.14)"
+                      : ocupado
+                        ? "var(--line2)"
+                        : "var(--card)",
+                    color: ocupado ? "var(--ink3)" : "var(--ink)",
+                  }}
+                >
+                  <span className="w-11 shrink-0 font-bold tabular-nums">{hhmm(s.start)}</span>
+                  <span className={`truncate ${ocupado ? "" : "font-semibold"}`}>{rotulo}</span>
+                  {escolhido && (
+                    <span className="ml-auto shrink-0 text-[10px] font-bold" style={{ color: "var(--green)" }}>
+                      escolhido
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="mt-1.5 text-[11px] text-gray-400">
+            Clique num horário livre para preencher a data e a hora.
+          </p>
+        </>
+      )}
     </div>
   );
 }

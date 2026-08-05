@@ -312,6 +312,18 @@ function getAttemptCount(task: Task): number {
 
 /** Date → valor de <input type="datetime-local">, no fuso LOCAL.
  *  toISOString() aqui jogaria o horário 3h pra trás (ele converte pra UTC). */
+/** O que a tela de sucesso do agendamento precisa saber. */
+interface MeetingDone {
+  leadId: string;
+  leadName: string;
+  quando: Date;
+  closerNome: string;
+  emailCliente: string;
+  /** null quando o Google não devolveu sala (integração desligada ou falha). */
+  meetLink: string | null;
+  aviso: string | null;
+}
+
 // Mesma regra do n8n (`Validar entrada`): e-mail torto faz o Google recusar o
 // evento INTEIRO, então é melhor barrar aqui do que perder a reunião lá.
 function emailValido(v: string): boolean {
@@ -619,6 +631,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [transferTo, setTransferTo] = useState("");
   // "Ganho" → formulário de agendamento da reunião
   const [meetingFor, setMeetingFor] = useState<{ taskId: string; leadId: string; leadName: string } | null>(null);
+  // O que a tela de sucesso mostra depois que a reunião foi criada.
+  const [meetingDone, setMeetingDone] = useState<MeetingDone | null>(null);
+  const [linkCopiado, setLinkCopiado] = useState(false);
+
   // `agendadoPor` saiu do formulário: quem agendou é SEMPRE quem está logado.
   // Perguntar era pedir pro SDR digitar o que o sistema já sabe — e a lista fixa
   // nem tinha todo mundo (a Yanca não estava lá, e sem escolher não dava pra
@@ -1181,6 +1197,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // Item 7 (Sprint 4): cada passo secundário é MEDIDO — falha não some mais em
     // silêncio (as tarefas "ressuscitavam" no refresh de 60s sem explicação).
     const failures: string[] = [];
+    let linkDoMeet: string | null = null;
+    let avisoAgenda: string | null = null;
     try {
       // O closer_id vem direto do select (a lista é montada a partir dos closers
       // reais), então não há mais tradução por nome — nem homônimo, nem "não
@@ -1229,8 +1247,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       // o SDR pode mandar o link na mão.
       if (res.meeting?.id) {
         const meet = await criarEvento({ meetingId: res.meeting.id });
+        // Guardado pra tela de sucesso: é este link que o SDR manda no WhatsApp.
+        // Antes ele existia por meio segundo (só pra escrever o texto do toast) e
+        // era jogado fora — o SDR tinha que ir em Reuniões buscar de novo.
+        linkDoMeet = meet.meetLink ?? null;
+        if (meet.desligado) avisoAgenda = "A agenda do Google está desligada — esta reunião ficou sem sala.";
         if (meet.ok && meet.meetLink) {
-          showToast("Reunião criada com sala do Google Meet — convite enviado ao closer e ao cliente.");
           if (meet.convidadosDescartados?.length) {
             // E-mail malformado faria o Google recusar o evento inteiro, então o
             // n8n descarta e segue. Quem agendou precisa saber quem NÃO foi
@@ -1288,7 +1310,51 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     setSavingMeeting(false);
     setMeetingFor(null);
     refreshCounts();
-    showToast(`Ganho! Reunião agendada — ${leadName}`);
+    // A tela de sucesso substitui o toast: o link do Meet fica À VISTA, com
+    // "Copiar" e "Abrir conversa". Fechar com um toast obrigava o SDR a ir em
+    // Reuniões buscar o link — 5 passos, com o cliente já desligado.
+    setMeetingDone({
+      leadId,
+      leadName,
+      quando: new Date(meeting.dataHora),
+      closerNome: meeting.responsavel,
+      emailCliente: meeting.emailCliente,
+      meetLink: linkDoMeet,
+      aviso: avisoAgenda,
+    });
+  }
+
+  /** Mensagem pronta pro WhatsApp — o SDR ajusta se quiser antes de mandar. */
+  function textoDoConvite(d: MeetingDone): string {
+    const primeiro = (d.leadName || "").trim().split(/\s+/)[0] || "tudo bem";
+    const data = d.quando.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" });
+    const hora = `${String(d.quando.getHours()).padStart(2, "0")}:${String(d.quando.getMinutes()).padStart(2, "0")}`;
+    return [
+      `Oi ${primeiro}! Confirmando nossa conversa: sua reunião ficou para ${data}, às ${hora}.`,
+      d.meetLink ? `\nÉ por aqui: ${d.meetLink}` : "",
+      `\nQualquer coisa é só me chamar por aqui. Até lá!`,
+    ].join("");
+  }
+
+  async function copiarLink(d: MeetingDone) {
+    if (!d.meetLink) return;
+    try {
+      await navigator.clipboard.writeText(d.meetLink);
+      setLinkCopiado(true);
+      setTimeout(() => setLinkCopiado(false), 2200);
+    } catch {
+      notifyError("Não consegui copiar — selecione o link e copie na mão.");
+    }
+  }
+
+  /** Fecha o sucesso e abre a conversa do lead com a mensagem já escrita. */
+  async function abrirConversaComConvite(d: MeetingDone) {
+    const texto = textoDoConvite(d);
+    // Copia junto: se o dock não conseguir pré-preencher (provider antigo por
+    // iframe), o SDR só dá Ctrl+V em vez de digitar tudo de novo.
+    try { await navigator.clipboard.writeText(texto); } catch { /* sem clipboard: segue */ }
+    openWhatsApp(leads.find((l) => l.id === d.leadId), texto);
+    setMeetingDone(null);
   }
 
   // Cria a atividade extra e aplica a REGRA: encerra todas as outras tarefas
@@ -3732,6 +3798,88 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <button onClick={() => cancelMeetingModal()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
               <button onClick={handleConfirmMeeting} disabled={savingMeeting || !meeting.responsavelId || !meeting.dataHora || !emailValido(meeting.emailCliente)} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
                 {savingMeeting ? "Salvando..." : "Confirmar ganho"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ REUNIÃO AGENDADA — o link fica À VISTA ═══════════════════════════ */}
+      {/* Substitui o toast que fechava tudo. O SDR sai daqui com o link copiado
+          ou já na conversa do lead, sem passar por Reuniões. */}
+      {meetingDone && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setMeetingDone(null)} />
+          <div className="relative flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+            <div className="flex shrink-0 items-center gap-3 px-5 py-4" style={{ background: "var(--green)" }}>
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/20 text-white">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+              </span>
+              <div className="text-white">
+                <p className="text-sm font-bold leading-tight">Reunião agendada</p>
+                <p className="text-[11px] opacity-90 leading-tight">{meetingDone.leadName}</p>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-3 overflow-y-auto p-5">
+              <div className="rounded-xl border p-3" style={{ borderColor: "var(--line)", background: "var(--card2)" }}>
+                <p className="text-sm font-bold" style={{ color: "var(--ink)" }}>
+                  {meetingDone.quando.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" })}
+                  {" · "}
+                  {`${String(meetingDone.quando.getHours()).padStart(2, "0")}:${String(meetingDone.quando.getMinutes()).padStart(2, "0")}`}
+                </p>
+                <p className="mt-0.5 text-xs text-gray-500">Com {meetingDone.closerNome}</p>
+                <p className="mt-1.5 text-[11px] text-gray-500">
+                  ✓ Convite enviado para <b>{meetingDone.emailCliente}</b>
+                </p>
+              </div>
+
+              {meetingDone.meetLink ? (
+                <div>
+                  <p className="mb-1 text-xs font-medium text-gray-500">Link do Meet</p>
+                  <div className="rounded-lg border px-3 py-2" style={{ borderColor: "var(--line)", background: "var(--card2)" }}>
+                    <p className="break-all text-xs font-semibold" style={{ color: "var(--blue)" }}>
+                      {meetingDone.meetLink}
+                    </p>
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={() => copiarLink(meetingDone)}
+                      className="flex-1 rounded-lg border py-2 text-xs font-semibold transition hover:bg-gray-50"
+                      style={{ borderColor: "var(--line)", color: linkCopiado ? "var(--green)" : "var(--ink2)" }}
+                    >
+                      {linkCopiado ? "Copiado ✓" : "Copiar link"}
+                    </button>
+                    <button
+                      onClick={() => void abrirConversaComConvite(meetingDone)}
+                      className="flex-1 rounded-lg py-2 text-xs font-semibold text-white transition hover:brightness-95"
+                      style={{ background: "#25D366" }}
+                    >
+                      Abrir conversa
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[10.5px] text-gray-400">
+                    "Abrir conversa" leva o SDR pro WhatsApp do lead com a mensagem já escrita.
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-lg border px-3 py-2.5" style={{ borderColor: "#FDE68A", background: "#FFFBEB" }}>
+                  <p className="text-xs font-semibold" style={{ color: "#92400E" }}>Sem link do Meet</p>
+                  <p className="mt-0.5 text-[11px]" style={{ color: "#92400E" }}>
+                    {meetingDone.aviso ?? "O evento no Google não foi criado."} A reunião está
+                    registrada — combine o link com o closer e mande pro cliente.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="shrink-0 border-t px-5 py-4" style={{ borderColor: "var(--line)" }}>
+              <button
+                onClick={() => setMeetingDone(null)}
+                className="w-full rounded-lg py-2.5 text-sm font-semibold text-white"
+                style={{ background: "var(--ink2)" }}
+              >
+                Concluir
               </button>
             </div>
           </div>
