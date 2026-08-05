@@ -119,7 +119,24 @@ export async function transferLead(
       .update({ owner_id: toUserId, updated_at: new Date().toISOString() })
       .eq("id", leadId)
       .select("id");
-    if (leadError) throw leadError;
+    if (leadError) {
+      // 42501 + "new row violates" = a policy de UPDATE tem WITH CHECK exigindo
+      // que a linha continue sendo de quem edita — e transferir é justamente
+      // deixar de ser dono. Jogar o texto cru do Postgres na tela do SDR não
+      // ajuda ninguém: ele não tem como saber que isso é migration faltando.
+      const violaCheck = leadError.code === "42501" || /row-level security/i.test(leadError.message ?? "");
+      if (violaCheck) {
+        console.warn("[QS] transferLead: WITH CHECK barrou a troca de dono — falta a migration 0039", leadError);
+        if (notify) {
+          notifyError(
+            "O banco ainda não permite transferir leads entre SDRs. " +
+            "Peça pro gestor aplicar a migration 0039 — nada foi alterado."
+          );
+        }
+        return false;
+      }
+      throw leadError;
+    }
     if (!updated || updated.length === 0) {
       console.warn("[QS] transferLead: banco recusou (RLS/0 linhas) o lead", leadId);
       if (notify) notifyError("Transferência recusada pelo banco — você não tem permissão sobre este lead.");
