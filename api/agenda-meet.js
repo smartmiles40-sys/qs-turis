@@ -37,7 +37,18 @@ export default async function handler(req, res) {
   const meetingId = String(body.meeting_id || '');
 
   if (!ACOES.has(acao)) return res.status(400).json({ ok: false, codigo: 'acao_invalida', erro: `ação inválida: ${acao}` });
-  if (!UUID_RE.test(meetingId)) return res.status(400).json({ ok: false, codigo: 'meeting_id_invalido', erro: 'meeting_id inválido' });
+  if (!UUID_RE.test(meetingId)) {
+    // Dizer QUAIS campos chegaram custa nada e teria economizado meio dia: o
+    // front mandava `meetingId` (camelCase) e esta rota lê `meeting_id`, então
+    // a resposta era sempre "meeting_id inválido" sem dizer que o campo nem
+    // veio. Com a lista de chaves, o desencontro salta aos olhos.
+    const recebidos = Object.keys(body).filter((k) => k !== 'access_token').join(', ') || '(corpo vazio)';
+    return res.status(400).json({
+      ok: false,
+      codigo: 'meeting_id_invalido',
+      erro: `meeting_id inválido ou ausente — campos recebidos: ${recebidos}`,
+    });
+  }
 
   const base = process.env.N8N_AGENDA_URL;
   const secret = process.env.N8N_AGENDA_SECRET;

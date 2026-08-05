@@ -59,10 +59,31 @@ async function chamar(acao: Acao, dados: Entrada): Promise<RespostaAgenda> {
       return { ok: false, aviso: erroSessao ? `sessão ilegível (${erroSessao.message})` : "sem sessão ativa no navegador" };
     }
 
+    // ── A TRADUÇÃO QUE FALTAVA ────────────────────────────────────────────────
+    // Este arquivo fala camelCase (`meetingId`, `eventId`); a rota lê snake_case
+    // (`meeting_id`, `event_id`). O `...dados` espalhava os nomes do TypeScript
+    // direto no corpo, então `body.meeting_id` chegava SEMPRE undefined e a rota
+    // respondia 400 "meeting_id inválido" — em toda reunião, desde sempre.
+    //
+    // Como o 400 acontece antes de a rota conhecer a reunião, não havia onde
+    // gravar o erro: o SDR via "sem link do Meet" e o banco não dizia nada. Foi
+    // por isso que NENHUMA das 20 reuniões criadas pelo app teve evento no
+    // Google, enquanto a mesma chamada feita na mão funcionava.
+    //
+    // Montado campo a campo de propósito: `...dados` de novo faria o próximo
+    // campo novo repetir o mesmo erro em silêncio.
+    const corpo: Record<string, unknown> = { access_token: token, acao, meeting_id: dados.meetingId };
+    if (dados.eventId != null) corpo.event_id = dados.eventId;
+    if (dados.titulo != null) corpo.titulo = dados.titulo;
+    if (dados.descricao != null) corpo.descricao = dados.descricao;
+    if (dados.inicio != null) corpo.inicio = dados.inicio;
+    if (dados.fim != null) corpo.fim = dados.fim;
+    if (dados.convidados != null) corpo.convidados = dados.convidados;
+
     const r = await fetch("/api/agenda-meet", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ access_token: token, acao, ...dados }),
+      body: JSON.stringify(corpo),
     });
 
     // 501 = N8N_AGENDA_URL não configurada. Já foi silêncio TOTAL, e custou
