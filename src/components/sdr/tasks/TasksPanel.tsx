@@ -1268,7 +1268,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           // Evento criado, mas o Google não devolveu sala: a reunião vale, só não
           // tem link. Avisar é melhor do que o SDR descobrir na hora da reunião.
           failures.push("o evento foi criado no Google, mas SEM sala do Meet — mande o link na mão");
-        } else if (!meet.ok && !meet.desligado) {
+        } else if (!meet.ok) {
+          // `desligado` (501) também entra aqui agora. Antes era o único caso
+          // silencioso — e foi exatamente por onde três reuniões reais passaram
+          // sem sala, sem aviso na tela e sem erro gravado no banco.
           failures.push(`o convite do Google não foi criado (${meet.aviso}) — mande o link da reunião na mão`);
         }
       }

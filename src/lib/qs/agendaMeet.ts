@@ -60,9 +60,11 @@ async function chamar(acao: Acao, dados: Entrada): Promise<RespostaAgenda> {
       body: JSON.stringify({ access_token: token, acao, ...dados }),
     });
 
-    // 501 = N8N_AGENDA_URL não configurada. Silêncio: quem não ligou a
-    // integração não precisa ver erro toda vez que agenda.
-    if (r.status === 501) return { ok: false, desligado: true };
+    // 501 = N8N_AGENDA_URL não configurada. Já foi silêncio TOTAL, e custou
+    // caro: em 05/08 três reuniões reais nasceram sem sala e sem ninguém saber,
+    // porque o front engolia este caso e a rota não gravava nada. Continua sem
+    // estragar o agendamento (a reunião vale), mas agora avisa.
+    if (r.status === 501) return { ok: false, desligado: true, aviso: "a agenda do Google está desligada" };
 
     const json = await r.json().catch(() => null);
     if (!json) return { ok: false, aviso: `resposta ilegível (HTTP ${r.status})` };

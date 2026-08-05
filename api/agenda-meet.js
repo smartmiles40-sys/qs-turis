@@ -32,14 +32,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, erro: 'Use POST' });
   }
 
-  const base = process.env.N8N_AGENDA_URL;
-  const secret = process.env.N8N_AGENDA_SECRET;
-  if (!base) {
-    // Não é erro do usuário: a integração não foi ligada. O front trata 501 como
-    // "segue sem o Google" e não estraga o agendamento.
-    return res.status(501).json({ ok: false, codigo: 'nao_configurado', erro: 'Agenda Google não configurada' });
-  }
-
   const body = typeof req.body === 'string' ? safeJson(req.body) : req.body || {};
   const acao = String(body.acao || 'criar').toLowerCase().trim();
   const meetingId = String(body.meeting_id || '');
@@ -47,8 +39,23 @@ export default async function handler(req, res) {
   if (!ACOES.has(acao)) return res.status(400).json({ ok: false, codigo: 'acao_invalida', erro: `ação inválida: ${acao}` });
   if (!UUID_RE.test(meetingId)) return res.status(400).json({ ok: false, codigo: 'meeting_id_invalido', erro: 'meeting_id inválido' });
 
+  const base = process.env.N8N_AGENDA_URL;
+  const secret = process.env.N8N_AGENDA_SECRET;
+  if (!base) {
+    // Integração não ligada. NÃO é silêncio: em 05/08, três reuniões reais
+    // nasceram sem evento no Google porque este caminho não deixava rastro — nem
+    // na reunião, nem na tela. Agora fica gravado na própria reunião, e é por
+    // isso que a checagem de envs desceu pra DEPOIS da validação do meeting_id:
+    // sem um id válido não há onde escrever.
+    await marcarErro(meetingId, 'agenda do Google não configurada (N8N_AGENDA_URL ausente)');
+    return res.status(501).json({ ok: false, codigo: 'nao_configurado', erro: 'Agenda Google não configurada' });
+  }
+
   const userId = await getSupabaseUserId(body.access_token ? `Bearer ${body.access_token}` : req.headers.authorization);
-  if (!userId) return res.status(401).json({ ok: false, codigo: 'sessao', erro: 'Sessão inválida' });
+  if (!userId) {
+    await marcarErro(meetingId, 'sessão inválida ao criar o evento');
+    return res.status(401).json({ ok: false, codigo: 'sessao', erro: 'Sessão inválida' });
+  }
 
   let meeting;
   try {
@@ -59,13 +66,19 @@ export default async function handler(req, res) {
     meeting = Array.isArray(rows) && rows[0];
   } catch (e) {
     console.error('[agenda-meet] leitura da reunião:', e?.message);
+    await marcarErro(meetingId, `falha ao ler a reunião: ${e?.message ?? ''}`);
     return res.status(500).json({ ok: false, codigo: 'leitura', erro: 'Falha ao ler a reunião' });
   }
+  // Sem linha no banco não há onde gravar o erro — é o único caminho que segue
+  // sem rastro, e por definição não há reunião pra ficar sem sala.
   if (!meeting) return res.status(404).json({ ok: false, codigo: 'inexistente', erro: 'Reunião não encontrada' });
 
   // Mesma trava do resto do app: quem não pode mexer no lead não mexe na agenda dele.
   const permissao = await assertCanAccessLead(userId, meeting.lead_id);
-  if (!permissao.ok) return res.status(403).json({ ok: false, codigo: 'permissao', erro: 'Esta reunião é de outro SDR' });
+  if (!permissao.ok) {
+    await marcarErro(meeting.id, 'sem permissão sobre o lead desta reunião');
+    return res.status(403).json({ ok: false, codigo: 'permissao', erro: 'Esta reunião é de outro SDR' });
+  }
 
   // ── Monta o payload de cada ação ──────────────────────────────────────────
   const payload = { acao, meeting_id: meeting.id };
