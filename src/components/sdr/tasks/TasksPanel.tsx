@@ -316,6 +316,10 @@ function getAttemptCount(task: Task): number {
 interface MeetingDone {
   leadId: string;
   leadName: string;
+  /** Copiados no momento do ganho: a fila muda depois, e depender dela pra achar
+   *  o lead deixaria o botão "Abrir conversa" sem fazer nada, em silêncio. */
+  leadPhone: string | null;
+  leadOwnerId: string | null;
   quando: Date;
   closerNome: string;
   emailCliente: string;
@@ -1313,9 +1317,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // A tela de sucesso substitui o toast: o link do Meet fica À VISTA, com
     // "Copiar" e "Abrir conversa". Fechar com um toast obrigava o SDR a ir em
     // Reuniões buscar o link — 5 passos, com o cliente já desligado.
+    const leadDoGanho = leads.find((l) => l.id === leadId);
     setMeetingDone({
       leadId,
       leadName,
+      leadPhone: leadDoGanho?.phone ?? null,
+      leadOwnerId: leadDoGanho?.owner_id ?? null,
       quando: new Date(meeting.dataHora),
       closerNome: meeting.responsavel,
       emailCliente: meeting.emailCliente,
@@ -1353,7 +1360,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // Copia junto: se o dock não conseguir pré-preencher (provider antigo por
     // iframe), o SDR só dá Ctrl+V em vez de digitar tudo de novo.
     try { await navigator.clipboard.writeText(texto); } catch { /* sem clipboard: segue */ }
-    openWhatsApp(leads.find((l) => l.id === d.leadId), texto);
+    chatDock.openForLead({
+      leadId: d.leadId,
+      name: d.leadName,
+      phone: d.leadPhone,
+      ownerId: d.leadOwnerId,
+      draft: texto,
+    });
     setMeetingDone(null);
   }
 
