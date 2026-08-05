@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { createQsAuthUser, updateQsAuthUser, deleteQsAuthUser } from "@/lib/adminUsers";
 import { loadWorkHours, saveWorkHours, DEFAULT_WORK_HOURS, WEEKDAY_NAMES, type WorkHours } from "@/lib/workHours";
-import { loadMeetingTeam, saveMeetingTeam, getSetting, setSetting } from "@/lib/qsSettings";
+import { getSetting, setSetting } from "@/lib/qsSettings";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { WAVOIP_TOKEN_KEY, ensureWavoipDevice } from "@/lib/wavoip";
 import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PREFIX_KEY, SIP_INSTALLER_URL_KEY, SIP_RAMAIS_KEY, DEFAULT_SIP_HOST } from "@/lib/sip";
@@ -1134,84 +1134,40 @@ function HorarioSection() {
 // Listas usadas no modal de agendamento do "Ganho": quem agenda e quem faz a
 // reunião. Um nome por linha; salvas em qs_settings.
 
+// Esta tela EDITAVA duas listas de nomes em texto que alimentavam o modal de
+// Ganho. As duas saíram de circulação em 05/08, porque nome solto não tem como
+// ser conferido contra o cadastro: a lista oferecia "Victor Maldonado" (que não
+// existe no QS) e "John Italo" (admin, sem agenda) — e a reunião nascia sem
+// closer, sem trava de conflito e sem convidar ninguém no Google.
+//
+// Mantida como explicação, e SEM CONTROLE NENHUM de propósito: um editor que não
+// altera mais nada é pior do que tela nenhuma.
 function EquipeSection() {
-  const [schedulersText, setSchedulersText] = useState("");
-  const [ownersText, setOwnersText] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    loadMeetingTeam().then(({ schedulers, owners }) => {
-      setSchedulersText(schedulers.join("\n"));
-      setOwnersText(owners.join("\n"));
-      setLoading(false);
-    });
-  }, []);
-
-  const parse = (text: string) => text.split("\n").map((l) => l.trim()).filter(Boolean);
-
-  async function handleSave() {
-    const schedulers = parse(schedulersText);
-    const owners = parse(ownersText);
-    if (schedulers.length === 0 || owners.length === 0) {
-      notifyError("Preencha pelo menos um nome em cada lista.");
-      return;
-    }
-    setSaving(true);
-    const ok = await saveMeetingTeam(schedulers, owners);
-    setSaving(false);
-    setSaved(ok);
-    if (ok) { notifySuccess("Equipe da reunião salva."); setTimeout(() => setSaved(false), 2500); }
-    else notifyError("Não foi possível salvar a equipe — tente novamente.");
-  }
-
-  if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
-
   return (
     <div className="space-y-5">
       <div>
         <h2 className="text-lg font-bold text-gray-900">Equipe da Reunião</h2>
         <p className="text-sm text-gray-500 mt-0.5">
-          Nomes que aparecem no agendamento quando um lead é marcado como <b>Ganho</b>. Um nome por linha.
+          Não se configura mais por aqui — o agendamento passou a usar o cadastro real.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white border border-gray-100 rounded-xl p-4">
-          <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-2">Quem faz o agendamento</label>
-          <textarea
-            value={schedulersText}
-            onChange={(e) => { setSchedulersText(e.target.value); setSaved(false); }}
-            rows={5}
-            placeholder={"Mariana Rodrigues - SDR\nVictor Hugo - SDR"}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 resize-none"
-          />
-          <p className="text-[11px] text-gray-400 mt-1">{parse(schedulersText).length} nome(s)</p>
+      <div className="bg-white border border-gray-100 rounded-xl p-4 space-y-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Quem faz o agendamento</p>
+          <p className="text-sm text-gray-600 mt-1">
+            Preenchido sozinho com <b>quem está logado</b>. Não há mais o que escolher — e ninguém
+            fica de fora da lista.
+          </p>
         </div>
-        <div className="bg-white border border-gray-100 rounded-xl p-4">
-          <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-2">Responsáveis pela reunião</label>
-          <textarea
-            value={ownersText}
-            onChange={(e) => { setOwnersText(e.target.value); setSaved(false); }}
-            rows={5}
-            placeholder={"Talita Carvalho\nVictor Maldonado\nBruno Matheus\nJohn Italo"}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 resize-none"
-          />
-          <p className="text-[11px] text-gray-400 mt-1">{parse(ownersText).length} nome(s)</p>
+        <div className="border-t border-gray-100 pt-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Responsáveis pela reunião</p>
+          <p className="text-sm text-gray-600 mt-1">
+            Vem de quem tem o papel <b>closer</b>, está ativo e aceita agendamento. Para incluir
+            alguém: crie o usuário em <b>Configurações → Usuários</b> com o papel closer e configure
+            a grade dele em <b>Configurações → Agenda dos Closers</b>.
+          </p>
         </div>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <button
-          onClick={handleSave}
-          disabled={saving || parse(schedulersText).length === 0 || parse(ownersText).length === 0}
-          className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-          style={{ background: "#2563EB" }}
-        >
-          {saving ? "Salvando..." : "Salvar equipe"}
-        </button>
-        {saved && <span className="text-sm font-medium text-green-600">Salvo ✓</span>}
       </div>
     </div>
   );

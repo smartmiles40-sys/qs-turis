@@ -1,3 +1,12 @@
+> **STATUS 05/08/2026 — A AGENDA ESTÁ LIGADA E VALIDADA DE PONTA A PONTA.**
+> Passos 1, 2, 5, 6 e 7 concluídos e provados: evento criado no Google, sala do
+> Meet gerada e convite entregue no e-mail do convidado.
+> **Passo 3 dispensado por decisão do Bruno**: fica em `primary` mesmo — a conta
+> `especialista@agenciasetuforeuvou.com` é fixa da empresa, e é exatamente a
+> agenda que o QS já embute (`qs_settings.google_calendar_embed`), então as
+> reuniões aparecem na aba Agenda sem configuração nenhuma.
+> **Único passo em aberto: o 4** (acesso rápido do Meet).
+
 # Ligar a agenda com Google Meet — passo a passo
 
 Checklist pra fazer de uma sentada. São ~25 minutos. Cada passo tem **como
@@ -125,10 +134,17 @@ Vercel → projeto **qs-turis** → **Settings → Environment Variables**
 > **Sem o redeploy nada muda.** A função serverless só enxerga a variável no
 > build seguinte. É o erro mais comum desta lista.
 
-**Conferir:** abra `https://qs.setuforeuvouviagens.com.br/api/agenda-meet` no
-navegador.
-- Antes: `{"ok":false,"codigo":"nao_configurado"}`
-- Depois: `{"ok":false,"erro":"Use POST"}` (HTTP 405) ← **é isto que você quer ver**
+**Conferir** — e **não** abrindo a URL no navegador: um GET devolve `405` sempre,
+ligado ou desligado (o método é checado antes da variável). O teste que
+distingue de verdade é um POST:
+
+```powershell
+Invoke-WebRequest -Uri https://qs.setuforeuvouviagens.com.br/api/agenda-meet `
+  -Method POST -Body '{"acao":"criar","meeting_id":"x"}' -ContentType 'application/json'
+```
+
+- `501` → ainda desligado (variável não salva, ou faltou o redeploy)
+- `400` → **ligou** ← é isto que você quer ver
 
 ---
 

@@ -38,6 +38,12 @@ import type { CloserAvailability, CloserBlock, CloserConfig, Meeting } from "../
 interface Props {
   /** Nome escolhido no select "Responsável pela reunião". */
   responsavel: string;
+  /**
+   * ID do closer, quando quem chama já sabe (o select do Ganho agora é montado a
+   * partir dos closers de verdade). Evita a ida ao banco pra traduzir o nome —
+   * e o erro de casar com um homônimo que não é closer.
+   */
+  closerId?: string | null;
   /** Dia mostrado (vem do campo de data/hora do formulário). */
   dia: Date;
   /** Clique num horário livre — devolve o início escolhido. */
@@ -54,8 +60,9 @@ function diaLongo(d: Date): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-export default function AgendaMiniatura({ responsavel, dia, onEscolher, selecionado }: Props) {
-  const [closerId, setCloserId] = useState<string | null>(null);
+export default function AgendaMiniatura({ responsavel, closerId: closerIdProp, dia, onEscolher, selecionado }: Props) {
+  const [closerIdResolvido, setCloserIdResolvido] = useState<string | null>(null);
+  const closerId = closerIdProp !== undefined ? closerIdProp : closerIdResolvido;
   const [resolvendo, setResolvendo] = useState(false);
   const [configs, setConfigs] = useState<CloserConfig[]>([]);
   const [availability, setAvailability] = useState<CloserAvailability[]>([]);
@@ -68,16 +75,18 @@ export default function AgendaMiniatura({ responsavel, dia, onEscolher, selecion
   // primeiro passo é descobrir de qual usuário se trata. Nome que não casa com
   // ninguém cadastrado = sem agenda pra mostrar, e tudo bem.
   useEffect(() => {
+    // Quem já sabe o closer passa `closerId` e nada disto roda.
+    if (closerIdProp !== undefined) { setResolvendo(false); return; }
     let vivo = true;
-    if (!responsavel.trim()) { setCloserId(null); return; }
+    if (!responsavel.trim()) { setCloserIdResolvido(null); return; }
     setResolvendo(true);
     void findUserIdByName(responsavel).then((id) => {
       if (!vivo) return;
-      setCloserId(id);
+      setCloserIdResolvido(id);
       setResolvendo(false);
     });
     return () => { vivo = false; };
-  }, [responsavel]);
+  }, [responsavel, closerIdProp]);
 
   // ── Por que NÚMERO e não Date ──────────────────────────────────────────────
   // O pai monta `dia={new Date(...)}` no JSX, ou seja: OBJETO NOVO a cada render
@@ -94,6 +103,10 @@ export default function AgendaMiniatura({ responsavel, dia, onEscolher, selecion
   const diaBase = useMemo(() => new Date(diaMs), [diaMs]);
 
   const carregar = useCallback(async () => {
+    // Data pela metade ("2026-08-0") enquanto o SDR digita vira Invalid Date, e
+    // `toISOString()` mais abaixo ESTOURA — a promessa era rejeitada em silêncio e
+    // a caixa ficava presa no estado anterior. Sai fora e espera a data ficar boa.
+    if (Number.isNaN(diaMs)) { setCarregando(false); return; }
     if (!closerId) {
       // Nome que não casa com usuário do QS: não há o que carregar, e o estado
       // PRECISA sair de "carregando" — senão a caixa fica presa no texto de
@@ -125,12 +138,12 @@ export default function AgendaMiniatura({ responsavel, dia, onEscolher, selecion
   }, [carregar]);
 
   const slots: Slot[] = useMemo(() => {
-    if (!closerId) return [];
+    if (!closerId || Number.isNaN(diaMs)) return [];
     return computeDaySlots(
       { closerId, config: configFor(closerId, configs), availability, blocks, meetings },
       diaBase
     );
-  }, [closerId, configs, availability, blocks, meetings, diaBase]);
+  }, [closerId, configs, availability, blocks, meetings, diaBase, diaMs]);
 
   if (!responsavel.trim()) return null;
 

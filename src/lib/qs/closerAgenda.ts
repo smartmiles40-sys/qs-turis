@@ -440,6 +440,41 @@ export function isSlotBookable(
   return { ok: true };
 }
 
+/**
+ * A conferência do horário ANTES de gravar, buscando o que precisa no banco.
+ *
+ * Existia `isSlotBookable` (pura, testável) desde a 0031 — e ninguém a chamava.
+ * O campo de data/hora do Ganho é um `datetime-local` solto: aceitava horário no
+ * passado e fora da janela do closer sem piscar. O banco só barra CHOQUE de
+ * agenda (constraint EXCLUDE); o resto passava. Medido na base real em 05/08:
+ * uma reunião marcada para 23h50 e outra às 20h40, fora da janela da closer.
+ *
+ * Devolve `null` quando está tudo certo, ou a mensagem pro usuário.
+ */
+export async function validarHorario(
+  closerId: string,
+  inicio: Date,
+  duracaoMin: number,
+  opts: { ignoreMeetingId?: string } = {}
+): Promise<string | null> {
+  if (Number.isNaN(inicio.getTime())) return "Data e hora inválidas.";
+  const de = startOfDay(inicio);
+  const ate = addDays(de, 1);
+  const [configs, availability, blocks, meetings] = await Promise.all([
+    fetchCloserConfigs(),
+    fetchAvailability([closerId]),
+    fetchBlocks(de, ate, [closerId]),
+    fetchMeetingsInRange(de, ate, [closerId]),
+  ]);
+  const r = isSlotBookable(
+    { closerId, config: configFor(closerId, configs), availability, blocks, meetings },
+    inicio,
+    duracaoMin,
+    opts
+  );
+  return r.ok ? null : r.message;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ESCRITA DA DISPONIBILIDADE (Configurações → Agenda dos Closers)
 // ─────────────────────────────────────────────────────────────────────────────

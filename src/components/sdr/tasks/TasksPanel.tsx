@@ -12,7 +12,7 @@ import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { createMeeting } from "@/lib/qs/meetings";
-import { findUserIdByName } from "@/lib/qs/closerAgenda";
+import { fetchClosers, fetchCloserConfigs, configFor, validarHorario } from "@/lib/qs/closerAgenda";
 import AgendaMiniatura from "@/components/sdr/agenda/AgendaMiniatura";
 import { confirmar } from "@/lib/qs/confirmar";
 import { criarEvento } from "@/lib/qs/agendaMeet";
@@ -30,7 +30,6 @@ import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
 import { logCallEnded } from "@/lib/qs/callLog";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, nextWorkMoment, clampToWorkWindow, scheduleWeekdays, isWithinHours, workdaysBetween, type WorkHours } from "@/lib/workHours";
-import { loadMeetingTeam, DEFAULT_MEETING_SCHEDULERS, DEFAULT_MEETING_OWNERS } from "@/lib/qsSettings";
 import type { SdrUser } from "../types";
 
 // ── Props ────────────────────────────────────────────────────────────────────
@@ -313,6 +312,12 @@ function getAttemptCount(task: Task): number {
 
 /** Date → valor de <input type="datetime-local">, no fuso LOCAL.
  *  toISOString() aqui jogaria o horário 3h pra trás (ele converte pra UTC). */
+// Mesma regra do n8n (`Validar entrada`): e-mail torto faz o Google recusar o
+// evento INTEIRO, então é melhor barrar aqui do que perder a reunião lá.
+function emailValido(v: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || "").trim());
+}
+
 function paraInputLocal(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -430,9 +435,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     (["pesquisa", "email", "ligacao", "ligacao_whatsapp", "whatsapp", "linkedin", "instagram", "tiktok", "youtube"] as ChannelType[])
       .filter((ch) => !enabledChannels || enabledChannels.has(ch) || ch === keep);
 
-  // Equipe da reunião (Configurações) — listas do modal de Ganho.
-  const [meetingTeam, setMeetingTeam] = useState({ schedulers: DEFAULT_MEETING_SCHEDULERS, owners: DEFAULT_MEETING_OWNERS });
-  useEffect(() => { loadMeetingTeam().then(setMeetingTeam); }, []);
+  // ── Responsáveis pela reunião ────────────────────────────────────────────────
+  // Antes esta lista era TEXTO ("Equipe da Reunião", nas Configurações), e o
+  // desencontro com o cadastro real era invisível: em 05/08 ela oferecia "Victor
+  // Maldonado" (que não existe no QS → a reunião nascia sem closer, sem trava de
+  // conflito e sem convidar ninguém no Google) e "John Italo" (admin sem janela
+  // de atendimento → a agenda abria vazia e não havia horário pra clicar).
+  // Agora vem de quem é closer de verdade: ativo, com agenda e aceitando reunião.
+  const [closers, setClosers] = useState<SdrUser[]>([]);
+  useEffect(() => {
+    void Promise.all([fetchClosers(), fetchCloserConfigs()]).then(([lista, configs]) => {
+      setClosers(lista.filter((c) => configFor(c.id, configs).is_bookable));
+    });
+  }, []);
 
   // ── Fila em TEMPO REAL + fallback de polling ───────────────────────
   // Realtime: mudança em qs_tasks/qs_leads → refetch (debounced 1,2s). O poll de
@@ -604,7 +619,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [transferTo, setTransferTo] = useState("");
   // "Ganho" → formulário de agendamento da reunião
   const [meetingFor, setMeetingFor] = useState<{ taskId: string; leadId: string; leadName: string } | null>(null);
-  const [meeting, setMeeting] = useState({ agendadoPor: "", emailCliente: "", dataAgendamento: "", responsavel: "", dataHora: "", valorFechado: "" });
+  // `agendadoPor` saiu do formulário: quem agendou é SEMPRE quem está logado.
+  // Perguntar era pedir pro SDR digitar o que o sistema já sabe — e a lista fixa
+  // nem tinha todo mundo (a Yanca não estava lá, e sem escolher não dava pra
+  // confirmar o ganho).
+  const [meeting, setMeeting] = useState({ emailCliente: "", dataAgendamento: "", responsavel: "", responsavelId: "", dataHora: "" });
   const [savingMeeting, setSavingMeeting] = useState(false);
 
   // New Lead Modal
@@ -1097,7 +1116,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const yyyy = hoje.getFullYear();
     const mm = String(hoje.getMonth() + 1).padStart(2, "0");
     const dd = String(hoje.getDate()).padStart(2, "0");
-    setMeeting({ agendadoPor: "", emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", dataHora: "", valorFechado: "" });
+    setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "" });
     setPendingResult(null);
     setMeetingFor({ taskId: task.id, leadId: task.lead_id, leadName: lead?.full_name ?? "Lead" });
   }
@@ -1131,13 +1150,29 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Confirma o "Ganho": cria a reunião (qs_meetings), marca o lead ganho e encerra as tarefas.
   async function handleConfirmMeeting() {
     if (!meetingFor) return;
-    if (!meeting.agendadoPor || !meeting.responsavel || !meeting.dataHora) return;
+    if (!meeting.responsavelId || !meeting.dataHora) return;
+    // O e-mail passou a ser obrigatório: sem ele o convite do Google não chega no
+    // cliente, e o link do Meet fica só com o closer. Em 05/08 eram 6 das 17
+    // reuniões da base sem e-mail nenhum.
+    if (!emailValido(meeting.emailCliente)) {
+      notifyError("Informe o e-mail do cliente — é por ele que o convite do Google Meet é enviado.");
+      return;
+    }
+    // O horário é conferido contra a agenda do closer ANTES de gravar (janela de
+    // atendimento, bloqueio, antecedência, choque). O banco só barra o choque.
+    const inicio = new Date(meeting.dataHora);
+    const impedimento = await validarHorario(meeting.responsavelId, inicio, 60);
+    if (impedimento) {
+      notifyError(`${impedimento} Escolha um horário livre na agenda acima.`);
+      return;
+    }
     setSavingMeeting(true);
     const { taskId, leadId, leadName } = meetingFor;
     const currentTask = tasks.find((t) => t.id === taskId);
     const obs = obsText.trim();
+    const agendadoPor = currentUser?.name ?? null;
     const resumo = [
-      meeting.agendadoPor && `Agendado por: ${meeting.agendadoPor}`,
+      agendadoPor && `Agendado por: ${agendadoPor}`,
       meeting.responsavel && `Responsável: ${meeting.responsavel}`,
       meeting.emailCliente && `E-mail: ${meeting.emailCliente}`,
       meeting.dataAgendamento && `Data do agendamento: ${meeting.dataAgendamento}`,
@@ -1147,10 +1182,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // silêncio (as tarefas "ressuscitavam" no refresh de 60s sem explicação).
     const failures: string[] = [];
     try {
-      // "Responsável pela reunião" é um NOME (lista das Configurações). A agenda
-      // trabalha com closer_id — traduzimos aqui pelo mesmo critério do backfill
-      // da 0027. Não casou o nome? A reunião nasce sem closer, como antes.
-      const closerId = await findUserIdByName(meeting.responsavel);
+      // O closer_id vem direto do select (a lista é montada a partir dos closers
+      // reais), então não há mais tradução por nome — nem homônimo, nem "não
+      // casou o nome e a reunião nasceu sem closer".
+      const closerId = meeting.responsavelId;
       // A reunião do Ganho nasce pelo serviço central: é ele que cria a atividade
       // de confirmação e avisa o Bitrix (o aviso separado que existia aqui saiu,
       // senão o negócio receberia o evento "reuniao" duas vezes).
@@ -1161,7 +1196,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         lead_email: meeting.emailCliente || null,
         cadence_id: leads.find((l) => l.id === leadId)?.cadence_id ?? null,
         owner_id: currentUser?.id ?? null,
-        owner_name: meeting.agendadoPor || currentUser?.name || null,
+        owner_name: agendadoPor,
         closer_id: closerId,
         closer_name: meeting.responsavel || null,
         title: `Reunião — ${leadName}`,
@@ -1222,13 +1257,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       // erro REAL de gravação ele mesmo notifica lá dentro.
       await completeTask(taskId, "ganho");
       // Ganho do lead MEDIDO (.select): sob RLS a recusa é silenciosa (0 linhas).
-      // O valor fechado vai junto — é o que alimenta receita, ticket médio e
-      // "R$ por fonte" no painel do gestor (que hoje mostram zero por falta dele).
-      const valorNum = Number(String(meeting.valorFechado).replace(",", "."));
-      const ganhoPatch: Record<string, unknown> = { status: "ganho" };
-      if (Number.isFinite(valorNum) && valorNum > 0) ganhoPatch.closed_value = valorNum;
+      // `closed_value` NÃO é preenchido aqui: neste ponto o SDR está agendando uma
+      // reunião, não fechando venda — o valor ainda não existe. A coluna continua
+      // no banco e deve ser preenchida no desfecho da reunião, pelo closer.
       const { data: wonRows, error: wonErr } = await supabase
-        .from("qs_leads").update(ganhoPatch).eq("id", leadId).select("id");
+        .from("qs_leads").update({ status: "ganho" }).eq("id", leadId).select("id");
       if (wonErr || !wonRows || wonRows.length === 0) {
         console.warn("[QS] lead não marcado como ganho:", wonErr);
         failures.push("o lead NÃO foi marcado como ganho — marque pelo perfil do lead");
@@ -3597,8 +3630,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {meetingFor && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !savingMeeting && cancelMeetingModal()} />
-          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4" style={{ background: "var(--green)" }}>
+          {/* max-h + coluna: o corpo rola e o rodapé fica SEMPRE visível.
+              Antes era só `overflow-hidden` sem altura máxima — quando a agenda do
+              responsável aparecia (~200px), o modal passava da altura da tela e o
+              rodapé era cortado sem rolagem nenhuma: o SDR escolhia o responsável
+              e ficava sem conseguir preencher o resto nem confirmar o ganho. */}
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex shrink-0 items-center justify-between px-5 py-4" style={{ background: "var(--green)" }}>
               <div className="text-white">
                 <p className="text-sm font-bold leading-tight">Agendar reunião — Ganho</p>
                 <p className="text-[11px] opacity-90 leading-tight">{meetingFor.leadName}</p>
@@ -3607,17 +3645,26 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
               </button>
             </div>
-            <div className="p-5 space-y-3">
-              <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Quem fez o agendamento *</label>
-                <select value={meeting.agendadoPor} onChange={(e) => setMeeting((m) => ({ ...m, agendadoPor: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400">
-                  <option value="">Selecione...</option>
-                  {meetingTeam.schedulers.map((n) => <option key={n} value={n}>{n}</option>)}
-                </select>
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              {/* Quem agendou é quem está logado — o sistema já sabe, não pergunta. */}
+              <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: "var(--card2)" }}>
+                <span className="text-xs text-gray-500">Agendado por</span>
+                <span className="text-xs font-semibold" style={{ color: "var(--ink)" }}>
+                  {currentUser?.name ?? "—"}
+                </span>
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">E-mail do cliente</label>
-                <input type="email" value={meeting.emailCliente} onChange={(e) => setMeeting((m) => ({ ...m, emailCliente: e.target.value }))} placeholder="email@cliente.com" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400" />
+                <label className="text-xs font-medium text-gray-500 block mb-1">E-mail do cliente *</label>
+                <input
+                  type="email" required value={meeting.emailCliente}
+                  onChange={(e) => setMeeting((m) => ({ ...m, emailCliente: e.target.value }))}
+                  placeholder="email@cliente.com"
+                  className="w-full px-3 py-2 text-sm border rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"
+                  style={{ borderColor: meeting.emailCliente && !emailValido(meeting.emailCliente) ? "#DC2626" : "#e5e7eb" }}
+                />
+                <p className="mt-1 text-[10.5px] text-gray-400">
+                  É por ele que o convite do Google Meet chega no cliente.
+                </p>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Data do agendamento</label>
@@ -3625,16 +3672,37 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Responsável pela reunião *</label>
-                <select value={meeting.responsavel} onChange={(e) => setMeeting((m) => ({ ...m, responsavel: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400">
+                <select
+                  value={meeting.responsavelId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    // Trocar de responsável invalida o horário escolhido: ele era
+                    // livre na agenda do outro. Limpar evita gravar em cima de uma
+                    // reunião que já existe na agenda do novo.
+                    setMeeting((m) => ({
+                      ...m,
+                      responsavelId: id,
+                      responsavel: closers.find((c) => c.id === id)?.name ?? "",
+                      dataHora: id === m.responsavelId ? m.dataHora : "",
+                    }));
+                  }}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"
+                >
                   <option value="">Selecione...</option>
-                  {meetingTeam.owners.map((n) => <option key={n} value={n}>{n}</option>)}
+                  {closers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
+                {closers.length === 0 && (
+                  <p className="mt-1 text-[10.5px]" style={{ color: "#B45309" }}>
+                    Nenhum closer disponível para agendamento. Cadastre em <b>Configurações → Agenda dos Closers</b>.
+                  </p>
+                )}
               </div>
               {/* A agenda do especialista, aqui dentro: o SDR não sai mais do
                   modal pra descobrir que horário oferecer — e clicar num horário
                   livre preenche o campo abaixo. */}
               <AgendaMiniatura
                 responsavel={meeting.responsavel}
+                closerId={meeting.responsavelId || null}
                 dia={meeting.dataHora ? new Date(meeting.dataHora) : new Date()}
                 selecionado={meeting.dataHora ? new Date(meeting.dataHora) : null}
                 onEscolher={(inicio) => setMeeting((m) => ({ ...m, dataHora: paraInputLocal(inicio) }))}
@@ -3642,22 +3710,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Data e hora da reunião (Google Meet) *</label>
-                <input type="datetime-local" value={meeting.dataHora} onChange={(e) => setMeeting((m) => ({ ...m, dataHora: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400" />
-              </div>
-              {/* Sem este campo o sistema registra 61 ganhos e R$ 0 de receita —
-                  medido em 28/07. Os painéis "pipeline aberto", "receita ganha" e
-                  "ticket médio por fonte" já existem e mostravam zero. */}
-              <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Valor fechado (R$)</label>
                 <input
-                  type="number" min={0} step={100} inputMode="decimal"
-                  value={meeting.valorFechado}
-                  onChange={(e) => setMeeting((m) => ({ ...m, valorFechado: e.target.value }))}
-                  placeholder="Ex.: 18500"
+                  type="datetime-local"
+                  // `min` = agora. Não substitui a conferência do confirmar (o
+                  // navegador só sugere), mas evita o erro bobo de marcar no passado.
+                  min={paraInputLocal(new Date())}
+                  value={meeting.dataHora}
+                  onChange={(e) => setMeeting((m) => ({ ...m, dataHora: e.target.value }))}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"
                 />
                 <p className="mt-1 text-[10.5px] text-gray-400">
-                  Em branco fecha assim mesmo — mas o faturamento por destino e o ticket médio ficam sem este ganho.
+                  O horário é conferido contra a agenda do responsável antes de gravar.
                 </p>
               </div>
               <div>
@@ -3665,9 +3728,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <textarea value={obsText} onChange={(e) => setObsText(e.target.value)} rows={2} placeholder="Anotações do contato — vão junto para o Bitrix" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400 resize-none" />
               </div>
             </div>
-            <div className="flex gap-2 px-5 pb-5">
+            <div className="flex shrink-0 gap-2 border-t px-5 py-4" style={{ borderColor: "var(--line)" }}>
               <button onClick={() => cancelMeetingModal()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
-              <button onClick={handleConfirmMeeting} disabled={savingMeeting || !meeting.agendadoPor || !meeting.responsavel || !meeting.dataHora} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
+              <button onClick={handleConfirmMeeting} disabled={savingMeeting || !meeting.responsavelId || !meeting.dataHora || !emailValido(meeting.emailCliente)} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
                 {savingMeeting ? "Salvando..." : "Confirmar ganho"}
               </button>
             </div>
