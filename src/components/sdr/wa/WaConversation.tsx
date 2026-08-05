@@ -297,9 +297,28 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     const f = e.target.files?.[0];
     e.target.value = "";              // permite escolher o mesmo arquivo de novo
     if (!f) return;
+    // Figurinha (.webp) vai SEM legenda: sticker não carrega texto no WhatsApp —
+    // uma legenda forçaria o envio como imagem comum. O que o SDR digitou fica
+    // no campo, intacto, pra sair como mensagem separada se ele quiser.
+    const ehFigurinha = f.type === "image/webp";
     const blob = await comprimirImagem(f);
     const nome = blob === f ? f.name : f.name.replace(/\.[^.]+$/, "") + ".jpg";
-    await enviarMidia(blob, nome, text.trim());
+    await enviarMidia(blob, nome, ehFigurinha ? "" : text.trim());
+    if (!ehFigurinha) setText("");
+  }, [enviarMidia, text]);
+
+  // Ctrl+V de imagem direto no campo — print de tela, foto copiada de outro
+  // app. Era o jeito nº 1 de mandar imagem no WhatsApp Web e aqui não existia:
+  // o SDR tinha que salvar o print em arquivo só pra anexar.
+  const aoColar = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const item = Array.from(e.clipboardData?.items ?? []).find((i) => i.type.startsWith("image/"));
+    if (!item) return;                 // texto colado segue o fluxo normal
+    const f = item.getAsFile();
+    if (!f) return;
+    e.preventDefault();
+    const blob = await comprimirImagem(f);
+    const nome = f.name && f.name !== "image.png" ? f.name : `colada-${Date.now()}.${blob.type.includes("png") ? "png" : "jpg"}`;
+    await enviarMidia(blob, blob === f ? nome : nome.replace(/\.[^.]+$/, "") + ".jpg", text.trim());
     setText("");
   }, [enviarMidia, text]);
 
@@ -686,6 +705,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               value={text}
               onChange={(e) => aoDigitar(e.target.value)}
               onKeyDown={onKeyDown}
+              onPaste={(e) => void aoColar(e)}
               onSelect={marcarCaret}
               rows={1}
               placeholder={`Mensagem para ${leadName || formatPhoneDisplay(phone) || "o lead"}…  (/ para atalhos)`}

@@ -32,7 +32,6 @@ import {
   fetchAvailability,
   fetchBlocks,
   fetchMeetingsInRange,
-  findUserIdByName,
   computeDaySlots,
   configFor,
   startOfDay,
@@ -42,16 +41,15 @@ import {
 import type { CloserAvailability, CloserBlock, CloserConfig, Meeting } from "../types";
 
 interface Props {
-  /** Nome escolhido no select "Responsável pela reunião". */
+  /** Nome escolhido no select "Responsável pela reunião" (só exibição). */
   responsavel: string;
-  /**
-   * ID do closer, quando quem chama já sabe (o select do Ganho agora é montado a
-   * partir dos closers de verdade). Evita a ida ao banco pra traduzir o nome —
-   * e o erro de casar com um homônimo que não é closer.
-   */
-  closerId?: string | null;
-  /** Dia mostrado (vem do campo de data/hora do formulário). */
-  dia: Date;
+  /** ID do closer — vem direto do select do Ganho, que é montado a partir dos
+   *  closers reais. (A tradução por nome que existia aqui morreu junto com a
+   *  lista de nomes em texto.) */
+  closerId: string | null;
+  /** Dia do formulário. `null` = campo vazio ou pela metade — a agenda NÃO
+   *  salta pra lugar nenhum; fica onde o SDR estava navegando. */
+  dia: Date | null;
   /** Clique num horário livre — devolve o início escolhido. */
   onEscolher: (inicio: Date) => void;
   /** Horário já escolhido no formulário, pra destacar. */
@@ -83,33 +81,13 @@ function rotuloDaSemana(inicio: Date, fim: Date): string {
     : `${dia(inicio)} ${mes(inicio)} a ${dia(fim)} ${mes(fim)}`;
 }
 
-export default function AgendaMiniatura({ responsavel, closerId: closerIdProp, dia, onEscolher, selecionado }: Props) {
-  const [closerIdResolvido, setCloserIdResolvido] = useState<string | null>(null);
-  const closerId = closerIdProp !== undefined ? closerIdProp : closerIdResolvido;
-  const [resolvendo, setResolvendo] = useState(false);
+export default function AgendaMiniatura({ responsavel, closerId, dia, onEscolher, selecionado }: Props) {
   const [configs, setConfigs] = useState<CloserConfig[]>([]);
   const [availability, setAvailability] = useState<CloserAvailability[]>([]);
   const [blocks, setBlocks] = useState<CloserBlock[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   // Só a PRIMEIRA carga mostra texto de carregamento (ver o efeito abaixo).
   const [carregando, setCarregando] = useState(true);
-
-  // O select do Ganho guarda o NOME (a "Equipe da Reunião" é texto), então o
-  // primeiro passo é descobrir de qual usuário se trata. Nome que não casa com
-  // ninguém cadastrado = sem agenda pra mostrar, e tudo bem.
-  useEffect(() => {
-    // Quem já sabe o closer passa `closerId` e nada disto roda.
-    if (closerIdProp !== undefined) { setResolvendo(false); return; }
-    let vivo = true;
-    if (!responsavel.trim()) { setCloserIdResolvido(null); return; }
-    setResolvendo(true);
-    void findUserIdByName(responsavel).then((id) => {
-      if (!vivo) return;
-      setCloserIdResolvido(id);
-      setResolvendo(false);
-    });
-    return () => { vivo = false; };
-  }, [responsavel, closerIdProp]);
 
   // ── Por que NÚMERO e não Date ──────────────────────────────────────────────
   // O pai monta `dia={new Date(...)}` no JSX, ou seja: OBJETO NOVO a cada render
@@ -118,13 +96,15 @@ export default function AgendaMiniatura({ responsavel, closerId: closerIdProp, d
   // invalidava o useCallback, que disparava o efeito: uma recarga completa (4
   // consultas) POR TECLA. Medido: 50 requisições em 6 segundos.
   //
-  // O timestamp é um número: só muda quando o DIA muda de verdade.
-  const diaMs = startOfDay(dia).getTime();
+  // O timestamp é um número: só muda quando o DIA muda de verdade. E quando o
+  // campo está vazio/pela metade, `dia` vem null → NaN → a agenda fica parada
+  // onde o SDR a deixou, em vez de saltar pra semana de hoje no meio da digitação.
+  const diaMs = dia ? startOfDay(dia).getTime() : Number.NaN;
 
   // Dia aberto na lista de horários. Começa no dia do formulário e passa a ser
   // do usuário assim que ele navega — trocar de dia aqui NÃO mexe no formulário
   // (só o clique num horário mexe), senão navegar já marcaria reunião sem querer.
-  const [diaSelMs, setDiaSelMs] = useState(diaMs);
+  const [diaSelMs, setDiaSelMs] = useState(() => (Number.isNaN(diaMs) ? startOfDay(new Date()).getTime() : diaMs));
   useEffect(() => { if (!Number.isNaN(diaMs)) setDiaSelMs(diaMs); }, [diaMs]);
 
   const diaSel = useMemo(() => new Date(diaSelMs), [diaSelMs]);
@@ -197,26 +177,17 @@ export default function AgendaMiniatura({ responsavel, closerId: closerIdProp, d
     return computeDaySlots(entrada, diaSel);
   }, [entrada, diaSel, diaSelMs]);
 
-  if (!responsavel.trim()) return null;
+  // Sem responsável escolhido não há agenda pra mostrar — e o select do Ganho
+  // sempre entrega os dois juntos (nome + id), então basta uma das checagens.
+  if (!responsavel.trim() || !closerId) return null;
 
   const moldura = "mt-2 rounded-xl border p-2.5";
   const estiloMoldura = { borderColor: "var(--line)", background: "var(--card2)" };
 
-  if ((resolvendo || carregando) && slots.length === 0) {
+  if (carregando && slots.length === 0) {
     return (
       <div className={moldura} style={estiloMoldura}>
         <p className="text-xs text-gray-400">Carregando a agenda de {responsavel}…</p>
-      </div>
-    );
-  }
-
-  if (!closerId) {
-    return (
-      <div className={moldura} style={estiloMoldura}>
-        <p className="text-xs text-gray-400">
-          <b>{responsavel}</b> não está cadastrado como usuário do QS, então não dá pra mostrar a
-          agenda dele. Preencha a data e hora na mão.
-        </p>
       </div>
     );
   }

@@ -363,6 +363,9 @@ function blobParaBase64(blob: Blob): Promise<string> {
  */
 export async function comprimirImagem(file: File, maxLado = 1600, qualidade = 0.82): Promise<Blob> {
   if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+  // WebP passa intacto: figurinha de WhatsApp É um .webp, e reencodar pra JPEG
+  // mataria a transparência e a chance de a Evolution tratá-la como figurinha.
+  if (file.type === "image/webp") return file;
   try {
     const bitmap = await createImageBitmap(file);
     const escala = Math.min(1, maxLado / Math.max(bitmap.width, bitmap.height));

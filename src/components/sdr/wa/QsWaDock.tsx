@@ -24,10 +24,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
+import { useQsAuth } from "@/contexts/QsAuthContext";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
+import { transferLead } from "@/lib/qs/queries";
+import { notifySuccess } from "@/lib/qs/notify";
 import WaThreadList from "./WaThreadList";
 import WaConversation from "./WaConversation";
-import { countUnread, subscribeToThreads, type WaThread } from "@/lib/qs/waInbox";
+import { countUnread, subscribeToThreads, listUsersLite, type WaThread, type UserLite } from "@/lib/qs/waInbox";
 
 const PANEL_W = 440;       // padrão, e o que o duplo clique devolve
 const MIN_W = 340;         // abaixo disso a conversa fica ilegível
@@ -113,7 +116,14 @@ function tocarBipe() {
   } catch { /* navegador bloqueou áudio sem gesto */ }
 }
 
-interface Alvo { leadId: string; name: string | null; phone: string | null; draft?: string | null }
+interface Alvo {
+  leadId: string;
+  name: string | null;
+  phone: string | null;
+  /** Dono atual do lead — necessário pra transferência registrar o handover. */
+  ownerId?: string | null;
+  draft?: string | null;
+}
 
 function Icon({ d, size = 18 }: { d: string; size?: number }) {
   return (
@@ -135,9 +145,42 @@ const P = {
 
 export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string) => void }) {
   const { isOpen, target, open, close } = useChatAppDock();
+  const { currentUser } = useQsAuth();
   const [alvo, setAlvo] = useState<Alvo | null>(null);
   const [naoLidas, setNaoLidas] = useState(0);
   const naoLidasRef = useRef(0);
+
+  // ── Transferir o lead direto da conversa ──────────────────────────────────
+  // O caso real: chega mensagem de um lead que na verdade é do colega (número
+  // que ligou pro SDR errado, dupla que divide carteira). Antes o SDR tinha que
+  // sair do atendimento, achar o lead no Painel e transferir por lá — aqui é
+  // onde ele ESTÁ quando percebe o problema.
+  const [transferindo, setTransferindo] = useState(false);   // popover aberto?
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [sdrs, setSdrs] = useState<UserLite[]>([]);
+  useEffect(() => {
+    if (!transferindo) return;
+    void listUsersLite().then((us) => setSdrs(us.filter((u) => u.is_active && u.role === "sdr")));
+  }, [transferindo]);
+
+  const transferirPara = useCallback(async (destino: UserLite) => {
+    if (!alvo || transferBusy) return;
+    setTransferBusy(true);
+    const ok = await transferLead(
+      alvo.leadId,
+      alvo.ownerId ?? currentUser?.id ?? null,
+      destino.id,
+      `Transferido pelo atendimento (WhatsApp) por ${currentUser?.name ?? "?"}`
+    );
+    setTransferBusy(false);
+    setTransferindo(false);
+    // Transferiu = a conversa deixa de ser deste SDR (a RLS corta na hora).
+    // Fechar aqui evita a tela morta de "conversa que não carrega mais".
+    if (ok) {
+      notifySuccess(`${alvo.name ?? "Lead"} transferido para ${destino.name} — a conversa foi junto.`);
+      setAlvo(null);
+    }
+  }, [alvo, transferBusy, currentUser]);
 
   const [avisos, setAvisos] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
@@ -198,14 +241,16 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
   // Clicou no WhatsApp de um lead lá na fila → abre direto na conversa dele.
   useEffect(() => {
     if (target?.leadId) {
+      setTransferindo(false);   // popover aberto não pode "vazar" pra outra conversa
       setAlvo({
         leadId: target.leadId,
         name: target.name ?? null,
         phone: target.phone ?? null,
+        ownerId: target.ownerId ?? null,
         draft: target.draft ?? null,
       });
     }
-  }, [target?.leadId, target?.name, target?.phone, target?.draft]);
+  }, [target?.leadId, target?.name, target?.phone, target?.ownerId, target?.draft]);
 
   // ── Redimensionar ─────────────────────────────────────────────────────────
   const [arrastando, setArrastando] = useState(false);
@@ -254,10 +299,12 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
   const alternarLargura = () => aplicar(estaLargo ? PANEL_W : largoAlvo());
 
   const escolher = (t: WaThread) => {
+    setTransferindo(false);
     setAlvo({
       leadId: t.lead_id,
       name: t.lead?.full_name || t.lead?.first_name || null,
       phone: t.lead?.phone ?? null,
+      ownerId: t.lead?.owner_id ?? null,
     });
   };
 
@@ -361,6 +408,45 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
                     style={{ border: "1px solid var(--line)", color: "var(--ink2)" }}>
               Ver card
             </button>
+          )}
+          {alvo && (
+            <div className="relative shrink-0">
+              <button onClick={() => setTransferindo((v) => !v)}
+                      title="Transferir este lead para outro SDR"
+                      aria-expanded={transferindo}
+                      className="wa-chip px-2.5 h-8 rounded-lg text-[12px] font-semibold"
+                      style={{ border: "1px solid var(--line)", color: "var(--ink2)" }}>
+                Transferir
+              </button>
+              {transferindo && (
+                <div className="absolute right-0 top-10 z-30 w-56 rounded-xl border shadow-lg overflow-hidden"
+                     style={{ borderColor: "var(--line)", background: "var(--card)" }}>
+                  <p className="px-3 pt-2.5 pb-1.5 text-[11px] font-bold uppercase tracking-wide"
+                     style={{ color: "var(--ink3)" }}>
+                    Transferir para
+                  </p>
+                  {sdrs.filter((u) => u.id !== (alvo.ownerId ?? currentUser?.id)).length === 0 ? (
+                    <p className="px-3 pb-3 text-[12px]" style={{ color: "var(--ink3)" }}>
+                      Nenhum outro SDR ativo.
+                    </p>
+                  ) : (
+                    sdrs.filter((u) => u.id !== (alvo.ownerId ?? currentUser?.id)).map((u) => (
+                      <button key={u.id}
+                              onClick={() => void transferirPara(u)}
+                              disabled={transferBusy}
+                              className="wa-row-btn w-full text-left px-3 py-2 text-[13px] font-medium disabled:opacity-50"
+                              style={{ color: "var(--ink)" }}>
+                        {u.name}
+                      </button>
+                    ))
+                  )}
+                  <p className="px-3 py-2 text-[10.5px] leading-snug border-t"
+                     style={{ color: "var(--ink3)", borderColor: "var(--line)" }}>
+                    A conversa, as atividades e o histórico vão junto. Esta conversa sai da sua lista.
+                  </p>
+                </div>
+              )}
+            </div>
           )}
           <button onClick={alternarAvisos}
                   title={avisos ? "Desligar som e notificação" : "Ligar som e notificação"}

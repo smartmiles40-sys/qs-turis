@@ -150,11 +150,17 @@ export default async function handler(req, res) {
       inboxId = r.conversation.inbox_id ?? inboxPedida ?? defaultInboxId();
     }
 
-    // Legenda assinada, mesma regra do texto. Exceção: NOTA DE VOZ não leva
-    // legenda — o WhatsApp nem mostra, e o nome sozinho viraria uma bolha de
-    // texto solta antes do áudio.
+    // Legenda assinada, mesma regra do texto. Duas exceções:
+    // - NOTA DE VOZ: o WhatsApp nem mostra legenda, e o nome sozinho viraria
+    //   uma bolha de texto solta antes do áudio.
+    // - FIGURINHA (webp sem legenda): sticker não carrega texto — a assinatura
+    //   entraria como legenda (assinarTexto('') devolve `*Nome*`) e forçaria o
+    //   envio como imagem comum em vez de figurinha.
     const ehNotaDeVoz = isVoiceMessage && mimeType.startsWith('audio/');
-    const captionFinal = ehNotaDeVoz ? caption : await assinarComoUsuario(caption, auth.user);
+    const ehFigurinha = mimeType === 'image/webp' && !caption;
+    const captionFinal = (ehNotaDeVoz || ehFigurinha)
+      ? caption
+      : await assinarComoUsuario(caption, auth.user);
 
     const form = new FormData();
     form.append('message_type', 'outgoing');

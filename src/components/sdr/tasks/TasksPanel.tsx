@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { createMeeting } from "@/lib/qs/meetings";
 import { fetchClosers, fetchCloserConfigs, configFor, validarHorario } from "@/lib/qs/closerAgenda";
+import { getSetting } from "@/lib/qsSettings";
 import AgendaMiniatura from "@/components/sdr/agenda/AgendaMiniatura";
 import { confirmar } from "@/lib/qs/confirmar";
 import { criarEvento } from "@/lib/qs/agendaMeet";
@@ -1331,11 +1332,28 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
   }
 
-  /** Mensagem pronta pro WhatsApp — o SDR ajusta se quiser antes de mandar. */
-  function textoDoConvite(d: MeetingDone): string {
+  /**
+   * Mensagem pronta pro WhatsApp — o SDR ajusta se quiser antes de mandar.
+   *
+   * O texto pode ser trocado SEM deploy: chave `wa_convite_template` em
+   * qs_settings (mesmo padrão de sal_motivos), com {nome}, {data}, {hora} e
+   * {link}. Sem a chave, vale o texto padrão daqui.
+   */
+  async function textoDoConvite(d: MeetingDone): Promise<string> {
     const primeiro = (d.leadName || "").trim().split(/\s+/)[0] || "tudo bem";
     const data = d.quando.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" });
     const hora = `${String(d.quando.getHours()).padStart(2, "0")}:${String(d.quando.getMinutes()).padStart(2, "0")}`;
+    let tpl: string | null = null;
+    try {
+      tpl = await getSetting<string>("wa_convite_template");
+    } catch { /* sem setting: usa o padrão */ }
+    if (tpl && tpl.trim()) {
+      return tpl
+        .replace(/\{nome\}/gi, primeiro)
+        .replace(/\{data\}/gi, data)
+        .replace(/\{hora\}/gi, hora)
+        .replace(/\{link\}/gi, d.meetLink ?? "");
+    }
     return [
       `Oi ${primeiro}! Confirmando nossa conversa: sua reunião ficou para ${data}, às ${hora}.`,
       d.meetLink ? `\nÉ por aqui: ${d.meetLink}` : "",
@@ -1356,7 +1374,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
   /** Fecha o sucesso e abre a conversa do lead com a mensagem já escrita. */
   async function abrirConversaComConvite(d: MeetingDone) {
-    const texto = textoDoConvite(d);
+    const texto = await textoDoConvite(d);
     // Copia junto: se o dock não conseguir pré-preencher (provider antigo por
     // iframe), o SDR só dá Ctrl+V em vez de digitar tudo de novo.
     try { await navigator.clipboard.writeText(texto); } catch { /* sem clipboard: segue */ }
@@ -3782,7 +3800,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <AgendaMiniatura
                 responsavel={meeting.responsavel}
                 closerId={meeting.responsavelId || null}
-                dia={meeting.dataHora ? new Date(meeting.dataHora) : new Date()}
+                dia={meeting.dataHora ? new Date(meeting.dataHora) : null}
                 selecionado={meeting.dataHora ? new Date(meeting.dataHora) : null}
                 onEscolher={(inicio) => setMeeting((m) => ({ ...m, dataHora: paraInputLocal(inicio) }))}
               />
