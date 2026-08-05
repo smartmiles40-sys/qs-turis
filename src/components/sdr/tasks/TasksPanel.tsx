@@ -1256,7 +1256,22 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         // Antes ele existia por meio segundo (só pra escrever o texto do toast) e
         // era jogado fora — o SDR tinha que ir em Reuniões buscar de novo.
         linkDoMeet = meet.meetLink ?? null;
-        if (meet.desligado) avisoAgenda = "A agenda do Google está desligada — esta reunião ficou sem sala.";
+        // O MOTIVO, sempre — não só quando a integração está desligada. Antes a
+        // tela mostrava "o evento não foi criado" sem dizer por quê, e o banco
+        // ficava vazio quando a falha acontecia AQUI no navegador (sessão, rede),
+        // porque nesse caso a rota nem chega a ser chamada pra gravar o erro.
+        if (!meet.ok) {
+          avisoAgenda = meet.desligado
+            ? "A agenda do Google está desligada — esta reunião ficou sem sala."
+            : `O Google recusou: ${meet.aviso ?? "motivo desconhecido"}.`;
+          // Rede de segurança: grava o motivo na reunião mesmo quando a falha foi
+          // no navegador. É o que transforma "não funcionou" em "não funcionou
+          // por isto" sem depender de alguém estar com o DevTools aberto.
+          void supabase
+            .from("qs_meetings")
+            .update({ calendar_error: `[app] ${meet.aviso ?? "falha ao chamar /api/agenda-meet"}`.slice(0, 300) })
+            .eq("id", res.meeting.id);
+        }
         if (meet.ok && meet.meetLink) {
           if (meet.convidadosDescartados?.length) {
             // E-mail malformado faria o Google recusar o evento inteiro, então o

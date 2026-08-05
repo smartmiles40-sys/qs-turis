@@ -50,9 +50,14 @@ interface Entrada {
 
 async function chamar(acao: Acao, dados: Entrada): Promise<RespostaAgenda> {
   try {
-    const { data: sessao } = await supabase.auth.getSession();
+    const { data: sessao, error: erroSessao } = await supabase.auth.getSession();
     const token = sessao?.session?.access_token;
-    if (!token) return { ok: false, aviso: "sessão expirada" };
+    if (!token) {
+      // Distingue os dois casos: "não há sessão" e "não consegui LER a sessão".
+      // Dizer só "sessão expirada" mandava o SDR relogar à toa quando o problema
+      // era outro — e escondia a causa de quem fosse investigar depois.
+      return { ok: false, aviso: erroSessao ? `sessão ilegível (${erroSessao.message})` : "sem sessão ativa no navegador" };
+    }
 
     const r = await fetch("/api/agenda-meet", {
       method: "POST",
@@ -66,8 +71,22 @@ async function chamar(acao: Acao, dados: Entrada): Promise<RespostaAgenda> {
     // estragar o agendamento (a reunião vale), mas agora avisa.
     if (r.status === 501) return { ok: false, desligado: true, aviso: "a agenda do Google está desligada" };
 
-    const json = await r.json().catch(() => null);
-    if (!json) return { ok: false, aviso: `resposta ilegível (HTTP ${r.status})` };
+    const bruto = await r.text();
+    // Formato do corpo do /api/agenda-meet (que repassa o do n8n quase como veio).
+    interface CorpoAgenda {
+      ok?: boolean; erro?: string; error?: string; codigo?: string | number;
+      event_id?: string | null; meet_link?: string | null; html_link?: string | null;
+      duplicado?: boolean; sem_meet?: boolean; convidados_descartados?: string[];
+    }
+    let json: CorpoAgenda | null = null;
+    try { json = bruto ? (JSON.parse(bruto) as CorpoAgenda) : null; } catch { json = null; }
+    if (!json) {
+      // Corpo não-JSON quase sempre significa que a chamada nem chegou na função:
+      // a Vercel devolveu o HTML do app (rota errada) ou uma página de erro. Os
+      // primeiros caracteres identificam qual dos dois em dois segundos.
+      const amostra = bruto.trim().slice(0, 60).replace(/\s+/g, " ");
+      return { ok: false, aviso: `resposta ilegível (HTTP ${r.status}${amostra ? `: ${amostra}` : ""})` };
+    }
 
     if (!json.ok) {
       return {
