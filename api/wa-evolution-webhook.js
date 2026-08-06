@@ -9,7 +9,9 @@
 //
 // Configurar na Evolution (Manager → instância → Webhook, EM CADA instância):
 //   URL:     https://qs.setuforeuvouviagens.com.br/api/wa-evolution-webhook?secret=<segredo>
-//   Eventos: MESSAGES_UPSERT   (só este — o resto continua indo pelo Chatwoot)
+//   Eventos: MESSAGES_UPSERT     (reação do cliente)
+//            CONNECTION_UPDATE   (o número caiu/voltou → avisa no WhatsApp)
+//   O resto continua indo pelo Chatwoot.
 //
 // Envs: EVOLUTION_WEBHOOK_SECRET + SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
 //
@@ -19,6 +21,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
+import { verificar } from './_waAlerta.js';
 
 function safeParse(s) {
   try { return JSON.parse(s); } catch { return {}; }
@@ -51,6 +54,20 @@ export default async function handler(req, res) {
 
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const event = String(body?.event || '').toLowerCase().replace(/_/g, '.');
+
+  // Número caiu/voltou. Em vez de decidir aqui, dispara a MESMA verificação do
+  // /api/wa-monitor: o estado e a regra anti-spam ficam num lugar só, e o
+  // aviso sai na hora em vez de esperar a próxima varredura do agendador.
+  if (event === 'connection.update') {
+    try {
+      const resumo = await verificar();
+      return res.status(200).json({ ok: true, gatilho: 'connection.update', ...resumo });
+    } catch (e) {
+      console.error('[wa-evo] monitor falhou no connection.update:', e?.message);
+      return res.status(200).json({ ok: false, erro: e?.message });
+    }
+  }
+
   if (event && event !== 'messages.upsert') {
     return res.status(200).json({ ignored: 'evento-nao-tratado', event });
   }

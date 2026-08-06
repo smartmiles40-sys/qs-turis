@@ -69,6 +69,73 @@ export async function evo(path, body, { timeoutMs = 10_000 } = {}) {
   }
 }
 
+/** GET na Evolution, mesmo timeout e mesmo tratamento de erro do `evo`. */
+export async function evoGet(path, { timeoutMs = 10_000 } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${EVO_BASE}${path}`, {
+      headers: { apikey: process.env.EVOLUTION_APIKEY || '' },
+      signal: ctrl.signal,
+    });
+    const text = await r.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+    if (!r.ok) {
+      const err = new Error(
+        (json && (json.message || json.error)) || `Evolution HTTP ${r.status}`
+      );
+      err.status = r.status;
+      err.body = json;
+      throw err;
+    }
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Estado de todas as instâncias, já normalizado.
+ *
+ * A Evolution mudou o formato entre versões: a v2 devolve os campos na raiz
+ * (`name`/`connectionStatus`), a v1 embrulhava em `{ instance: {...} }`. Ler os
+ * dois evita que uma atualização do servidor cegue o monitor em silêncio.
+ */
+export async function listarInstancias() {
+  const out = await evoGet('/instance/fetchInstances');
+  const linhas = Array.isArray(out) ? out : [out];
+  return linhas.filter(Boolean).map((linha) => {
+    const i = linha.instance && typeof linha.instance === 'object' ? linha.instance : linha;
+    const jid = String(i.ownerJid || i.owner || '');
+    return {
+      nome: String(i.name || i.instanceName || ''),
+      status: String(i.connectionStatus || i.status || 'unknown'),
+      numero: jid.split('@')[0] || null,
+    };
+  }).filter((i) => i.nome);
+}
+
+/** Só `open` é "no ar". `close` = deslogada, `connecting` = esperando o QR. */
+export function noAr(status) {
+  return String(status).toLowerCase() === 'open';
+}
+
+/** Manda texto simples. Formato v2 (`{number,text}`) com fallback pro da v1. */
+export async function sendText(instance, numero, texto) {
+  const number = String(numero).replace(/\D/g, '');
+  try {
+    return await evo(`/message/sendText/${encodeURIComponent(instance)}`, {
+      number, text: texto,
+    });
+  } catch (e) {
+    if (e?.status !== 400 && e?.status !== 422) throw e;
+    return await evo(`/message/sendText/${encodeURIComponent(instance)}`, {
+      number, textMessage: { text: texto },
+    });
+  }
+}
+
 /** O JID "chutado" a partir do telefone: 55DDD…@s.whatsapp.net. */
 export function jidFromPhone(phone) {
   const e164 = toE164BR(phone);
