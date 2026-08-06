@@ -11,7 +11,7 @@ import type {
 import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
-import { createMeeting } from "@/lib/qs/meetings";
+import { createMeeting, avisarBitrixDaSala } from "@/lib/qs/meetings";
 import { fetchClosers, fetchCloserConfigs, configFor, validarHorario } from "@/lib/qs/closerAgenda";
 import { getSetting } from "@/lib/qsSettings";
 import AgendaMiniatura from "@/components/sdr/agenda/AgendaMiniatura";
@@ -1279,6 +1279,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             .eq("id", res.meeting.id);
         }
         if (meet.ok && meet.meetLink) {
+          // O aviso de reunião ao Bitrix saiu dentro do createMeeting, antes de
+          // a sala existir. Este segundo disparo completa o card com o link.
+          avisarBitrixDaSala(res.meeting, {
+            bitrix_id: leads.find((l) => l.id === leadId)?.bitrix_id,
+            lead_name: leadName,
+            link: meet.meetLink,
+          });
           if (meet.convidadosDescartados?.length) {
             // E-mail malformado faria o Google recusar o evento inteiro, então o
             // n8n descarta e segue. Quem agendou precisa saber quem NÃO foi

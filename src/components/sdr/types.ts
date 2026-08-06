@@ -176,6 +176,9 @@ export interface Meeting {
   /** Reunião que esta substitui, quando é remarcação (0032). Separa
    *  reagendamento (avisou) de no-show (sumiu). */
   reagendado_de?: string | null;
+  /** Dia em que o agendamento foi FEITO (0006) — com o scheduled_at, dá a
+   *  antecedência, que é o que mais explica no-show. Vai pro Bitrix. */
+  booking_date?: string | null;
   /** Vínculo com o evento no Google Calendar (0031). */
   calendar_event_id?: string | null;
   calendar_html_link?: string | null;

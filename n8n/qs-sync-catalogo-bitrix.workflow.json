@@ -1,0 +1,253 @@
+{
+  "name": "QS · Sync catálogo de campos do Bitrix",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Cron diário 6h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-460, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-sync-catalogo",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Webhook sync manual",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-460, 200],
+      "webhookId": "a1000000-0000-4000-8000-0000000000ff",
+      "notes": "Para rodar na hora depois de criar um campo ou um closer novo no Bitrix.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA",
+          "name": "QS Sync (x-qs-sync-secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "BITRIX_BASE",
+              "value": "https://SEUPORTAL.bitrix24.com.br/rest/23/SEU_TOKEN_DE_ENTRADA",
+              "type": "string"
+            },
+            {
+              "id": "c2",
+              "name": "SUPABASE_URL",
+              "value": "https://eabfjomrnucymduqnbci.supabase.co",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-240, 100],
+      "notes": "O BITRIX_BASE contém o token do webhook de entrada. Preencha SÓ aqui no n8n — nunca no arquivo, que fica num repositório público."
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.BITRIX_BASE }}/crm.deal.userfield.list.json",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Bitrix userfield.list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-20, 100],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "Sem filtro: crm.deal.userfield.list já devolve só os campos de negócio. O filter[ENTITY_ID] pertence a outro método e alguns portais recusam."
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\n\nif (res.error) {\n  throw new Error('Bitrix recusou: ' + res.error + ' | ' + (res.error_description || '') +\n    ' — quase sempre é escopo do webhook (precisa de crm) ou token errado.');\n}\n\nconst runTs = new Date().toISOString();\nconst lista = res.result || [];\nconst campos = [];\nconst opcoes = [];\n\nfor (const f of lista) {\n  // O rótulo vem como string ou como objeto por idioma, depende do portal.\n  let label = f.EDIT_FORM_LABEL || f.LIST_COLUMN_LABEL || f.FIELD_NAME;\n  if (label && typeof label === 'object') {\n    label = label.br || label.pt || label.en || Object.values(label)[0] || f.FIELD_NAME;\n  }\n\n  campos.push({\n    field_name: f.FIELD_NAME,\n    user_type_id: f.USER_TYPE_ID,\n    label: String(label || f.FIELD_NAME),\n    mandatory: f.MANDATORY === 'Y',\n    synced_at: runTs\n  });\n\n  for (const item of (f.LIST || [])) {\n    opcoes.push({\n      field_name: f.FIELD_NAME,\n      option_id: Number(item.ID),\n      value: item.VALUE,\n      sort: Number(item.SORT) || 500,\n      active: true,\n      synced_at: runTs\n    });\n  }\n}\n\nif (!campos.length) {\n  throw new Error('O Bitrix respondeu sem nenhum campo personalizado. Confira o escopo crm do webhook.');\n}\n\n// O Bitrix pagina de 50 em 50. Se vier 'next', existe mais coisa que não foi\n// lida — melhor avisar alto do que sincronizar metade em silêncio.\nconst truncado = res.next !== undefined && res.next !== null;\n\nreturn [{\n  json: {\n    run_ts: runTs,\n    campos,\n    opcoes,\n    total_campos: campos.length,\n    total_opcoes: opcoes.length,\n    truncado,\n    aviso: truncado ? 'ATENÇÃO: o portal tem mais de 50 campos de negócio e esta leitura trouxe só os primeiros. Me avise para eu paginar.' : null\n  }\n}];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Montar payloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [200, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/bitrix_fields?on_conflict=field_name",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.campos) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Upsert campos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 100],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "merge-duplicates preserva a coluna alias, que é preenchida à mão e nunca vem do Bitrix.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA",
+          "name": "Supabase QS (service_role)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/bitrix_field_options?on_conflict=field_name,option_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($('Montar payloads').first().json.opcoes) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Upsert opções",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 100],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA",
+          "name": "Supabase QS (service_role)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/bitrix_field_options?synced_at=lt.{{ encodeURIComponent($('Montar payloads').first().json.run_ts) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ active: false }) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "Desativar opções sumidas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 100],
+      "onError": "continueRegularOutput",
+      "notes": "Opção que não veio nesta leitura fica inativa — some dos selects sem apagar histórico.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA",
+          "name": "Supabase QS (service_role)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, campos: $('Montar payloads').first().json.total_campos, opcoes: $('Montar payloads').first().json.total_opcoes, aviso: $('Montar payloads').first().json.aviso }) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "Responder",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 100]
+    }
+  ],
+  "connections": {
+    "Cron diário 6h": {
+      "main": [[{ "node": "Config", "type": "main", "index": 0 }]]
+    },
+    "Webhook sync manual": {
+      "main": [[{ "node": "Config", "type": "main", "index": 0 }]]
+    },
+    "Config": {
+      "main": [[{ "node": "Bitrix userfield.list", "type": "main", "index": 0 }]]
+    },
+    "Bitrix userfield.list": {
+      "main": [[{ "node": "Montar payloads", "type": "main", "index": 0 }]]
+    },
+    "Montar payloads": {
+      "main": [[{ "node": "Upsert campos", "type": "main", "index": 0 }]]
+    },
+    "Upsert campos": {
+      "main": [[{ "node": "Upsert opções", "type": "main", "index": 0 }]]
+    },
+    "Upsert opções": {
+      "main": [[{ "node": "Desativar opções sumidas", "type": "main", "index": 0 }]]
+    },
+    "Desativar opções sumidas": {
+      "main": [[{ "node": "Responder", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}

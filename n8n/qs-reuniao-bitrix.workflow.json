@@ -1,0 +1,288 @@
+{
+  "name": "QS · Reunião → Bitrix",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-reuniao",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000001",
+      "name": "Webhook QS",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-640, 0],
+      "webhookId": "d1000000-0000-4000-8000-0000000000ff",
+      "notes": "Recebe o evento 'reuniao' que o QS já dispara em /api/bitrix-sync. O caminho TEM que ser exatamente qs-reuniao e o header, x-qs-sync-secret.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA",
+          "name": "QS Sync (x-qs-sync-secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "BITRIX_BASE",
+              "value": "https://SEUPORTAL.bitrix24.com.br/rest/23/SEU_TOKEN_DE_ENTRADA",
+              "type": "string"
+            },
+            {
+              "id": "c2",
+              "name": "SUPABASE_URL",
+              "value": "https://eabfjomrnucymduqnbci.supabase.co",
+              "type": "string"
+            },
+            {
+              "id": "c3",
+              "name": "STAGE_REUNIAO",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-420, 0],
+      "notes": "STAGE_REUNIAO vazio = NÃO mexe na etapa do funil. Preencha com o ID da coluna (ex.: C25:UC_XXXXX) só quando decidir para onde o card deve ir."
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.SUPABASE_URL }}/rest/v1/bitrix_fields?select=alias,field_name,user_type_id&alias=not.is.null",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000003",
+      "name": "Buscar de-para",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-200, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA",
+          "name": "Supabase QS (service_role)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/v_opcoes_por_alias?select=alias,option_id,value",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000004",
+      "name": "Buscar opções",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [20, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "O QS manda o NOME do SDR e do especialista. O Bitrix só aceita o option_id. É aqui que a tradução acontece.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA",
+          "name": "Supabase QS (service_role)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $('Webhook QS').first().json.body || {};\nconst cfg = $('Config').first().json;\n\n// ── de-para alias → campo do Bitrix ─────────────────────────────────────\nconst mapa = {};\nfor (const it of $('Buscar de-para').all()) {\n  const r = it.json;\n  if (r && r.alias && r.field_name) mapa[r.alias] = r.field_name;\n}\n\n// ── opções das listas, por alias ────────────────────────────────────────\nconst opcoes = {};\nfor (const it of $('Buscar opções').all()) {\n  const r = it.json;\n  if (!r || !r.alias) continue;\n  (opcoes[r.alias] = opcoes[r.alias] || []).push({ id: Number(r.option_id), value: String(r.value == null ? '' : r.value) });\n}\n\nconst normalizar = (s) => String(s == null ? '' : s)\n  .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n  .toLowerCase().replace(/\\s+/g, ' ').trim();\n\n// Casa o nome que veio do QS com o rótulo da opção no Bitrix. Tenta o nome\n// inteiro e, se não bater, o primeiro nome — o Bitrix costuma cadastrar só\n// \"Talita\" enquanto o QS tem \"Talita Carvalho\".\nfunction acharOpcao(alias, nome) {\n  const lista = opcoes[alias] || [];\n  const alvo = normalizar(nome);\n  if (!alvo || !lista.length) return null;\n  let hit = lista.find((o) => normalizar(o.value) === alvo);\n  if (hit) return hit.id;\n  const primeiro = alvo.split(' ')[0];\n  hit = lista.find((o) => normalizar(o.value).split(' ')[0] === primeiro);\n  return hit ? hit.id : null;\n}\n\n// ── datas ───────────────────────────────────────────────────────────────\n// O QS grava em UTC. Mandar assim faz o Bitrix mostrar a reunião 3h adiantada,\n// então converte pra horário de Brasília COM offset explícito. O Brasil não\n// tem mais horário de verão desde 2019, então -03:00 é fixo.\nfunction brt(iso) {\n  const d = new Date(iso);\n  if (isNaN(d.getTime())) return null;\n  const b = new Date(d.getTime() - 3 * 3600 * 1000);\n  const p = (n) => String(n).padStart(2, '0');\n  return b.getUTCFullYear() + '-' + p(b.getUTCMonth() + 1) + '-' + p(b.getUTCDate()) +\n         'T' + p(b.getUTCHours()) + ':' + p(b.getUTCMinutes()) + ':' + p(b.getUTCSeconds()) + '-03:00';\n}\nfunction soData(v) {\n  if (!v) return null;\n  const s = String(v);\n  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return s;\n  const b = brt(s);\n  return b ? b.slice(0, 10) : null;\n}\n\n// ── monta os campos ─────────────────────────────────────────────────────\nconst fields = {};\nconst pulados = [];\n\n// opcional = campo que talvez nem exista no Bitrix ainda; não vira alerta.\nfunction set(alias, valor, opcional) {\n  const campo = mapa[alias];\n  if (!campo) { if (!opcional) pulados.push(alias + ' (alias não cadastrado em bitrix_fields)'); return; }\n  if (valor === null || valor === undefined || valor === '') { if (!opcional) pulados.push(alias + ' (o QS não tem esse dado)'); return; }\n  fields[campo] = valor;\n}\n\nset('email_cliente', body.client_email);\nset('data_agendamento', soData(body.booking_date));\nset('datahora_meet', brt(body.scheduled_at));\nset('produto_reuniao', body.produto || null, true);\nset('link_meet', body.meeting_link || null, true);\nset('duracao_reuniao', body.duration_min || null, true);\n\nfor (const [alias, nome] of [['sdr_agendou', body.scheduled_by], ['resp_reuniao', body.meeting_owner]]) {\n  if (!mapa[alias]) { pulados.push(alias + ' (alias não cadastrado em bitrix_fields)'); continue; }\n  const id = acharOpcao(alias, nome);\n  if (id) fields[mapa[alias]] = id;\n  else pulados.push(alias + ' (nome \"' + (nome || '—') + '\" não bate com nenhuma opção do Bitrix)');\n}\n\n// Etapa do funil: só mexe se alguém disser qual. Vazio = não move — é de\n// propósito, mover pra coluna errada é pior do que não mover.\nif (cfg.STAGE_REUNIAO) fields.STAGE_ID = cfg.STAGE_REUNIAO;\n\nif (!body.bitrix_id) throw new Error('payload sem bitrix_id (o /api/bitrix-sync deveria ter resolvido)');\nif (!Object.keys(fields).length) throw new Error('nada para gravar — nenhum alias preenchido em bitrix_fields');\n\n// Sem meeting_id não há linha pra marcar. Um uuid que não casa com nada deixa\n// o PATCH seguinte rodar em zero linhas, sem precisar de um IF só pra isso.\nconst meetingId = body.meeting_id || '00000000-0000-0000-0000-000000000000';\n\nconst quando = brt(body.scheduled_at);\nconst legivel = quando ? quando.slice(8, 10) + '/' + quando.slice(5, 7) + ' às ' + quando.slice(11, 16) : 'data não informada';\n\nreturn [{\n  json: {\n    deal_id: Number(body.bitrix_id),\n    meeting_id: meetingId,\n    meet_link: body.meeting_link || '',\n    pulados,\n    comentario: 'Reunião agendada pelo QS para ' + legivel +\n      (body.meeting_owner ? ' com ' + body.meeting_owner : '') + '.' +\n      (body.meeting_link ? ' Meet: ' + body.meeting_link : ' (sem link do Meet ainda)') +\n      (body.scheduled_by ? ' Agendada por ' + body.scheduled_by + '.' : '') +\n      (pulados.length ? ' | Campos não preenchidos: ' + pulados.join('; ') : ''),\n    payload: { id: Number(body.bitrix_id), fields }\n  }\n}];"
+      },
+      "id": "d1000000-0000-4000-8000-000000000005",
+      "name": "Montar deal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.BITRIX_BASE }}/crm.deal.update.json",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000006",
+      "name": "Bitrix deal.update",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.BITRIX_BASE }}/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ fields: { ENTITY_ID: $('Montar deal').first().json.deal_id, ENTITY_TYPE: 'deal', COMMENT: $('Montar deal').first().json.comentario } }) }}",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000007",
+      "name": "Comentário na timeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, -120],
+      "onError": "continueRegularOutput",
+      "notes": "Se o comentário falhar, o fluxo segue: os campos já foram gravados, que é o que importa."
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/qs_meetings?id=eq.{{ $('Montar deal').first().json.meeting_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ bitrix_synced: true, bitrix_synced_at: new Date().toISOString(), bitrix_error: ($('Montar deal').first().json.pulados.length ? 'gravado, mas sem: ' + $('Montar deal').first().json.pulados.join('; ') : null) }) }}",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000008",
+      "name": "Marcar sincronizada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, -120],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput",
+      "notes": "Grava o resultado na PRÓPRIA reunião do QS (colunas bitrix_synced / bitrix_error, que já existem). É onde se vê o que falhou, sem tabela nova.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA",
+          "name": "Supabase QS (service_role)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, deal_id: $('Montar deal').first().json.deal_id, nao_preenchidos: $('Montar deal').first().json.pulados }) }}",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000009",
+      "name": "Responder sucesso",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, -120]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/qs_meetings?id=eq.{{ $('Montar deal').first().json.meeting_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ bitrix_synced: false, bitrix_error: String(JSON.stringify($json)).slice(0, 900) }) }}",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000010",
+      "name": "Marcar erro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 140],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA",
+          "name": "Supabase QS (service_role)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 502,
+        "responseBody": "={{ JSON.stringify({ ok: false, deal_id: $('Montar deal').first().json.deal_id, mensagem: 'O Bitrix recusou a gravação. A reunião está salva no QS e o motivo ficou em qs_meetings.bitrix_error.' }) }}",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000011",
+      "name": "Responder erro",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [900, 140]
+    }
+  ],
+  "connections": {
+    "Webhook QS": {
+      "main": [[{ "node": "Config", "type": "main", "index": 0 }]]
+    },
+    "Config": {
+      "main": [[{ "node": "Buscar de-para", "type": "main", "index": 0 }]]
+    },
+    "Buscar de-para": {
+      "main": [[{ "node": "Buscar opções", "type": "main", "index": 0 }]]
+    },
+    "Buscar opções": {
+      "main": [[{ "node": "Montar deal", "type": "main", "index": 0 }]]
+    },
+    "Montar deal": {
+      "main": [[{ "node": "Bitrix deal.update", "type": "main", "index": 0 }]]
+    },
+    "Bitrix deal.update": {
+      "main": [
+        [{ "node": "Comentário na timeline", "type": "main", "index": 0 }],
+        [{ "node": "Marcar erro", "type": "main", "index": 0 }]
+      ]
+    },
+    "Comentário na timeline": {
+      "main": [[{ "node": "Marcar sincronizada", "type": "main", "index": 0 }]]
+    },
+    "Marcar sincronizada": {
+      "main": [[{ "node": "Responder sucesso", "type": "main", "index": 0 }]]
+    },
+    "Marcar erro": {
+      "main": [[{ "node": "Responder erro", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "pinData": {}
+}

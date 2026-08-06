@@ -415,6 +415,9 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
 
   notifyBitrix("reuniao", {
     lead_id: input.lead_id,
+    // O n8n grava o resultado de volta NESTA reunião (bitrix_synced / bitrix_error).
+    // Sem o id ele teria que adivinhar a linha por lead + horário.
+    meeting_id: meeting.id,
     bitrix_id: input.lead_bitrix_id,
     full_name: input.lead_name ?? null,
     title: row.title,
@@ -430,6 +433,39 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
   });
 
   return { ok: true, meeting };
+}
+
+/**
+ * Avisa o Bitrix DE NOVO, agora com o link da sala.
+ *
+ * Por que existe: a reunião é gravada antes de a sala do Meet ser criada — é
+ * essa ordem que garante que o horário fica reservado mesmo se o Google falhar.
+ * O efeito colateral é que o primeiro aviso ao Bitrix sai com o link vazio.
+ *
+ * O workflow do lado de lá é um `crm.deal.update` com os mesmos campos, então
+ * repetir é inofensivo: o segundo disparo apenas preenche o que faltava.
+ */
+export function avisarBitrixDaSala(
+  meeting: Meeting,
+  extras: { bitrix_id?: string | null; lead_name?: string | null; link: string }
+): void {
+  if (!extras.bitrix_id || !extras.link) return;
+  notifyBitrix("reuniao", {
+    lead_id: meeting.lead_id,
+    meeting_id: meeting.id,
+    bitrix_id: extras.bitrix_id,
+    full_name: extras.lead_name ?? meeting.lead_name ?? null,
+    title: meeting.title,
+    scheduled_at: meeting.scheduled_at,
+    duration_min: meeting.duration_min,
+    location: "Google Meet",
+    meeting_link: extras.link,
+    notes: meeting.notes,
+    scheduled_by: meeting.scheduled_by,
+    meeting_owner: meeting.meeting_owner,
+    client_email: meeting.client_email,
+    booking_date: meeting.booking_date,
+  });
 }
 
 // ── A sala do Google Meet ───────────────────────────────────────────────────

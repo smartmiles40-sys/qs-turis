@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
-import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead } from "@/lib/qs/meetings";
+import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala } from "@/lib/qs/meetings";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
 import type { Lead, Meeting } from "../types";
 
@@ -192,6 +192,16 @@ export default function ScheduleMeetingModal({
 
     const sala = await gerarSalaMeet(res.meeting, { linkManual: gerarMeet ? null : link });
     setSaving(false);
+
+    // O primeiro aviso ao Bitrix saiu antes de a sala existir; este completa o
+    // card com o link.
+    if (sala.link) {
+      avisarBitrixDaSala(res.meeting, {
+        bitrix_id: selectedLead?.bitrix_id,
+        lead_name: selectedLead?.full_name,
+        link: sala.link,
+      });
+    }
 
     if (sala.aviso) notifyError(sala.aviso);
     notifySuccess(

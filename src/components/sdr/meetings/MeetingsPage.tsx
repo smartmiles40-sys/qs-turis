@@ -5,7 +5,7 @@ import type { Meeting, MeetingStatus, Lead, SdrUser } from "../types";
 import { MEETING_STATUS_LABELS } from "../types";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
-import { createMeeting, gerarSalaMeet, salvarEmailDoLead } from "@/lib/qs/meetings";
+import { createMeeting, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala } from "@/lib/qs/meetings";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
 import AgendaMes from "../agenda/AgendaMes";
 import AgendaDia from "../agenda/AgendaDia";
@@ -294,6 +294,17 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
 
       const sala = await gerarSalaMeet(res.meeting, { linkManual: querMeet ? null : fLink });
       setSaving(false);
+
+      // O primeiro aviso ao Bitrix saiu antes de a sala existir; este completa
+      // o card com o link.
+      if (sala.link) {
+        avisarBitrixDaSala(res.meeting, {
+          bitrix_id: novoLead?.bitrix_id,
+          lead_name: novoLead?.full_name,
+          link: sala.link,
+        });
+      }
+
       if (sala.aviso) notifyError(sala.aviso);
       else if (sala.link) {
         notifySuccess(`Reunião agendada e sala do Meet criada${emailLimpo ? " — convite enviado ao cliente" : ""}.`);
