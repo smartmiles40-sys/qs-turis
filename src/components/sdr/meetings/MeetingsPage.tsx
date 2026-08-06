@@ -4,8 +4,8 @@ import { useQsAuth, podeExecutar } from "@/contexts/QsAuthContext";
 import type { Meeting, MeetingStatus, Lead, SdrUser } from "../types";
 import { MEETING_STATUS_LABELS } from "../types";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
-import { notifySuccess } from "@/lib/qs/notify";
-import { createMeeting } from "@/lib/qs/meetings";
+import { notifySuccess, notifyError } from "@/lib/qs/notify";
+import { createMeeting, gerarSalaMeet, salvarEmailDoLead } from "@/lib/qs/meetings";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
 import AgendaMes from "../agenda/AgendaMes";
 import AgendaDia from "../agenda/AgendaDia";
@@ -31,6 +31,11 @@ function leadLabel(l: Lead): string {
     [l.first_name, l.last_name].filter(Boolean).join(" ") ||
     "Sem nome";
   return l.company_name ? `${name} — ${l.company_name}` : name;
+}
+
+/** Barra grosseiramente o que nem chega a parecer e-mail (o Google recusa o resto). */
+function emailValido(v: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
 }
 
 // Espelha a mudança de status da reunião (realizada / no-show / cancelada) na
@@ -104,6 +109,10 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const [fDuration, setFDuration] = useState("30");
   const [fLocation, setFLocation] = useState("");
   const [fLink, setFLink] = useState("");
+  // E-mail pra onde vai o convite do Google (e que volta pro cadastro do lead).
+  const [fEmail, setFEmail] = useState("");
+  // Sala do Meet criada automaticamente ao agendar. Desligar libera o link manual.
+  const [fGerarMeet, setFGerarMeet] = useState(true);
   const [fNotes, setFNotes] = useState("");
   const [fStatus, setFStatus] = useState<MeetingStatus>("agendada");
   const [fCloserId, setFCloserId] = useState("");
@@ -162,6 +171,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     setFDuration("30");
     setFLocation("");
     setFLink("");
+    setFEmail("");
+    setFGerarMeet(true);
     setFNotes("");
     setFStatus("agendada");
     setFCloserId("");
@@ -187,6 +198,11 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     const when = new Date(fWhen);
     if (isNaN(when.getTime())) {
       setFormError("Data/hora inválida.");
+      return;
+    }
+    const emailLimpo = fEmail.trim();
+    if (emailLimpo && !emailValido(emailLimpo)) {
+      setFormError("O e-mail do lead não parece válido — o Google recusaria o convite.");
       return;
     }
 
@@ -244,11 +260,14 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     // mesma coisa que agendar pela agenda ou pela página do lead.
     if (!editingId) {
       const novoLead = leads.find((l) => l.id === fLeadId);
+      // Sala automática só faz sentido pra reunião que ainda vai acontecer:
+      // lançamento retroativo (já realizada / no-show) não ganha evento.
+      const querMeet = fGerarMeet && fStatus === "agendada";
       const res = await createMeeting({
         lead_id: fLeadId,
         lead_name: novoLead?.full_name ?? null,
         lead_bitrix_id: novoLead?.bitrix_id ?? null,
-        lead_email: novoLead?.email ?? null,
+        lead_email: emailLimpo || novoLead?.email || null,
         owner_id: ownerId,
         owner_name: currentUser?.name ?? null,
         closer_id: fCloserId || null,
@@ -256,16 +275,30 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
         title: fTitle.trim() || null,
         scheduled_at: when,
         duration_min: duration,
-        location: fLocation.trim() || null,
-        meeting_link: fLink.trim() || null,
+        location: querMeet ? "Google Meet" : fLocation.trim() || null,
+        meeting_link: querMeet ? null : fLink.trim() || null,
         notes: notesToSave || null,
         status: fStatus,
       });
-      setSaving(false);
       if (!res.ok) {
+        setSaving(false);
         setFormError(res.error);
         return;
       }
+
+      // Daqui pra baixo a reunião JÁ está gravada: nada pode virar "não salvou".
+      // O e-mail volta pro cadastro do lead pra vir pronto no próximo agendamento.
+      if (emailLimpo && emailLimpo !== novoLead?.email) {
+        void salvarEmailDoLead(fLeadId, emailLimpo);
+      }
+
+      const sala = await gerarSalaMeet(res.meeting, { linkManual: querMeet ? null : fLink });
+      setSaving(false);
+      if (sala.aviso) notifyError(sala.aviso);
+      else if (sala.link) {
+        notifySuccess(`Reunião agendada e sala do Meet criada${emailLimpo ? " — convite enviado ao cliente" : ""}.`);
+      }
+
       // Criada já com desfecho (raro): registra o status também na timeline.
       if (fStatus !== "agendada") {
         notifyMeetingStatusToBitrix(
@@ -494,7 +527,13 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                         <button
                           type="button"
                           key={l.id}
-                          onClick={() => { setFLeadId(l.id); setFLeadSearch(leadLabel(l)); }}
+                          onClick={() => {
+                            setFLeadId(l.id);
+                            setFLeadSearch(leadLabel(l));
+                            // E-mail do cadastro entra sozinho; só preenche campo
+                            // vazio pra não apagar o que o SDR já digitou.
+                            if (l.email && !fEmail.trim()) setFEmail(l.email);
+                          }}
                           className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-50 last:border-0"
                         >
                           <span className="font-medium text-gray-900">{l.full_name || "Sem nome"}</span>
@@ -508,6 +547,54 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                     </div>
                   );
                 })()}
+
+                {/* Confirmação de que o lead veio mesmo da base — e o que ela já
+                    sabe sobre ele. Sem isto, digitar um nome parecido e não
+                    escolher da lista parecia ter funcionado. */}
+                {(() => {
+                  const sel = leads.find((l) => l.id === fLeadId);
+                  if (!sel) return null;
+                  return (
+                    <div className="mt-1.5 flex items-start gap-2 rounded-lg bg-green-50 border border-green-100 px-2.5 py-2">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"
+                           strokeLinecap="round" strokeLinejoin="round" className="text-green-600 mt-0.5 shrink-0">
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                      <p className="text-[11px] text-green-800 leading-relaxed min-w-0">
+                        Lead do QS
+                        {sel.phone && <> · {sel.phone}</>}
+                        {sel.email
+                          ? <> · e-mail no cadastro</>
+                          : <> · <span className="font-semibold">sem e-mail cadastrado</span>, preencha abaixo</>}
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* E-mail do cliente: é pra ELE que o Google manda o convite com o
+                  link da sala. Sem e-mail a reunião acontece igual, mas o link
+                  só chega se o SDR mandar no WhatsApp. */}
+              <div>
+                <label className={labelClass}>
+                  E-mail do lead{" "}
+                  {leads.find((l) => l.id === fLeadId)?.email && (
+                    <span className="text-green-600 font-normal">· veio do cadastro</span>
+                  )}
+                </label>
+                <input
+                  type="email"
+                  value={fEmail}
+                  onChange={(e) => setFEmail(e.target.value)}
+                  placeholder="cliente@email.com"
+                  className={inputClass}
+                  autoComplete="off"
+                />
+                <p className="mt-1 text-[11px] text-gray-400">
+                  {fEmail.trim()
+                    ? "O convite do Google com o link vai pra este e-mail (e fica salvo no lead)."
+                    : "Sem e-mail o convite não é enviado — a sala é criada e o link fica na reunião pra você mandar."}
+                </p>
               </div>
 
               <div>
@@ -519,6 +606,9 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                   placeholder="Ex.: Apresentação da proposta"
                   className={inputClass}
                 />
+                <p className="mt-1 text-[11px] text-gray-400">
+                  É o nome que aparece no convite do Google e na agenda do especialista.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -563,27 +653,52 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                 </p>
               </div>
 
-              <div>
-                <label className={labelClass}>Local</label>
-                <input
-                  type="text"
-                  value={fLocation}
-                  onChange={(e) => setFLocation(e.target.value)}
-                  placeholder="Ex.: Escritório, Google Meet, telefone..."
-                  className={inputClass}
-                />
-              </div>
+              {/* Sala do Meet — só pra reunião que ainda vai acontecer.
+                  Lançamento retroativo (já realizada) não cria evento. */}
+              {fStatus === "agendada" && (
+                <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={fGerarMeet}
+                      onChange={(e) => setFGerarMeet(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 accent-[#0147FF]"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-gray-800">Criar sala do Google Meet</span>
+                      <span className="block text-[11px] text-gray-500 mt-0.5">
+                        O link é gerado ao salvar e o convite vai pro especialista e pro cliente.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              )}
 
-              <div>
-                <label className={labelClass}>Link da reunião</label>
-                <input
-                  type="text"
-                  value={fLink}
-                  onChange={(e) => setFLink(e.target.value)}
-                  placeholder="https://..."
-                  className={inputClass}
-                />
-              </div>
+              {!(fGerarMeet && fStatus === "agendada") && (
+                <>
+                  <div>
+                    <label className={labelClass}>Local</label>
+                    <input
+                      type="text"
+                      value={fLocation}
+                      onChange={(e) => setFLocation(e.target.value)}
+                      placeholder="Ex.: Escritório, Google Meet, telefone..."
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelClass}>Link da reunião</label>
+                    <input
+                      type="text"
+                      value={fLink}
+                      onChange={(e) => setFLink(e.target.value)}
+                      placeholder="https://..."
+                      className={inputClass}
+                    />
+                  </div>
+                </>
+              )}
 
               <div>
                 <label className={labelClass}>Status</label>

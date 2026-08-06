@@ -22,7 +22,7 @@ import { supabase } from "@/lib/supabase";
 import { getSetting } from "@/lib/qsSettings";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
-import { cancelarEvento, reagendarEvento } from "@/lib/qs/agendaMeet";
+import { cancelarEvento, criarEvento, reagendarEvento } from "@/lib/qs/agendaMeet";
 import { loadWorkHours, nextWorkMoment, clampToWorkWindow, type WorkHours } from "@/lib/workHours";
 import type { ChannelType, Meeting, MeetingSal, MeetingStatus } from "@/components/sdr/types";
 
@@ -430,6 +430,92 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
   });
 
   return { ok: true, meeting };
+}
+
+// ── A sala do Google Meet ───────────────────────────────────────────────────
+// Antes disto, SÓ o fluxo de Ganho criava o evento no Google. Quem agendava por
+// Reuniões ou pela Agenda gravava a reunião e ficava sem sala — e descobria na
+// hora da reunião. Agora os três caminhos passam por aqui.
+//
+// Nada nesta função pode derrubar quem chamou: a reunião JÁ está gravada quando
+// ela roda. Google fora do ar vira aviso, nunca exceção.
+
+export interface SalaMeetResult {
+  /** Link da sala, quando o Google devolveu um. */
+  link: string | null;
+  /** Frase pronta pra mostrar ao usuário quando algo não saiu como esperado. */
+  aviso: string | null;
+}
+
+export async function gerarSalaMeet(
+  meeting: Meeting,
+  opts?: { linkManual?: string | null }
+): Promise<SalaMeetResult> {
+  // Link colado à mão manda: a reunião pode ser por Zoom, Teams ou pela sala
+  // fixa do especialista. Criar um Meet por cima trocaria o link que o SDR
+  // escolheu — e o cliente receberia o endereço errado.
+  const manual = String(opts?.linkManual ?? "").trim();
+  if (manual) return { link: manual, aviso: null };
+
+  // Reunião registrada já com desfecho (lançamento retroativo) não precisa de
+  // sala: ela já aconteceu.
+  if (meeting.status !== "agendada") {
+    return { link: meeting.meeting_link ?? null, aviso: null };
+  }
+
+  const r = await criarEvento({ meetingId: meeting.id });
+
+  if (!r.ok) {
+    const motivo = r.desligado ? "a agenda do Google está desligada" : (r.aviso ?? "motivo desconhecido");
+    // Rede de segurança: quando a falha acontece no NAVEGADOR (sessão, rede), a
+    // rota nem chega a ser chamada, e sem isto a reunião ficaria sem explicação
+    // nenhuma no banco — "não funcionou" em vez de "não funcionou por isto".
+    void supabase
+      .from("qs_meetings")
+      .update({ calendar_error: `[app] ${motivo}`.slice(0, 300) })
+      .eq("id", meeting.id);
+    return {
+      link: null,
+      aviso: `A reunião foi agendada, mas ficou SEM link do Meet (${motivo}) — mande o link na mão.`,
+    };
+  }
+
+  if (r.semMeet) {
+    return {
+      link: r.meetLink ?? null,
+      aviso: "O evento foi criado no Google, mas sem sala do Meet — mande o link na mão.",
+    };
+  }
+
+  if (r.convidadosDescartados?.length) {
+    // E-mail malformado faria o Google recusar o evento inteiro, então o n8n
+    // descarta e segue. Quem agendou precisa saber quem NÃO foi convidado —
+    // senão o cliente simplesmente não recebe e ninguém percebe.
+    return {
+      link: r.meetLink ?? null,
+      aviso: `Sala criada, mas este e-mail é inválido e não foi convidado: ${r.convidadosDescartados.join(", ")}.`,
+    };
+  }
+
+  return { link: r.meetLink ?? null, aviso: null };
+}
+
+/**
+ * Guarda no lead o e-mail digitado no agendamento.
+ *
+ * É o que faz o campo vir preenchido sozinho da próxima vez: o e-mail do
+ * cliente quase nunca está no cadastro (o Bitrix manda telefone, raramente
+ * e-mail), e sem ele o Google não tem pra quem mandar o convite.
+ */
+export async function salvarEmailDoLead(leadId: string, email: string | null | undefined): Promise<boolean> {
+  const limpo = String(email ?? "").trim();
+  if (!limpo) return false;
+  const { error } = await supabase.from("qs_leads").update({ email: limpo }).eq("id", leadId);
+  if (error) {
+    console.warn("[meetings] e-mail do lead não atualizado:", error.message);
+    return false;
+  }
+  return true;
 }
 
 // ── Remarcar ────────────────────────────────────────────────────────────────

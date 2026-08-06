@@ -8,10 +8,15 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
-import { notifySuccess } from "@/lib/qs/notify";
-import { createMeeting, reagendarReuniao } from "@/lib/qs/meetings";
+import { notifySuccess, notifyError } from "@/lib/qs/notify";
+import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead } from "@/lib/qs/meetings";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
 import type { Lead, Meeting } from "../types";
+
+/** Barra grosseiramente o que nem chega a parecer e-mail (o Google recusa o resto). */
+function emailValido(v: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
+}
 
 const inputClass =
   "w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] transition-colors";
@@ -57,6 +62,12 @@ export default function ScheduleMeetingModal({
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [link, setLink] = useState("");
+  // E-mail pra onde vai o convite do Google. Vem do cadastro quando existe; o
+  // SDR completa quando não — e o que ele digitar volta pro cadastro do lead.
+  const [email, setEmail] = useState("");
+  // Sala do Meet criada automaticamente. Desligar libera o campo de link manual
+  // (reunião por Zoom/Teams, ou a sala fixa do especialista).
+  const [gerarMeet, setGerarMeet] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,6 +80,8 @@ export default function ScheduleMeetingModal({
     setTitle(reschedule?.title ?? "");
     setNotes("");
     setLink(reschedule?.meeting_link ?? "");
+    setEmail(lead?.email ?? "");
+    setGerarMeet(true);
     setError(null);
   }, [open, lead, reschedule]);
 
@@ -84,15 +97,23 @@ export default function ScheduleMeetingModal({
     })();
   }, [open, lead, remarcando]);
 
-  // O link da sala do closer entra sozinho quando o SDR não digitou nada.
+  // O link da sala do closer entra sozinho quando o SDR não digitou nada — mas
+  // só no modo manual: com a sala automática ligada, quem manda é o Meet novo.
   useEffect(() => {
-    if (pick?.link && !link.trim()) setLink(pick.link);
+    if (!gerarMeet && pick?.link && !link.trim()) setLink(pick.link);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pick]);
-
-  if (!open) return null;
+  }, [pick, gerarMeet]);
 
   const selectedLead = lead ?? leads.find((l) => l.id === leadId) ?? null;
+
+  // Escolheu o lead na lista: o e-mail do cadastro entra sozinho. Só preenche
+  // campo vazio — não apaga o que o SDR já tiver digitado.
+  useEffect(() => {
+    if (selectedLead?.email && !email.trim()) setEmail(selectedLead.email);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLead?.id]);
+
+  if (!open) return null;
 
   async function handleSave() {
     if (!pick) {
@@ -131,11 +152,18 @@ export default function ScheduleMeetingModal({
       return;
     }
 
+    const emailLimpo = email.trim();
+    if (emailLimpo && !emailValido(emailLimpo)) {
+      setError("O e-mail do lead não parece válido — o Google recusaria o convite.");
+      setSaving(false);
+      return;
+    }
+
     const res = await createMeeting({
       lead_id: leadId,
       lead_name: selectedLead?.full_name ?? null,
       lead_bitrix_id: selectedLead?.bitrix_id ?? null,
-      lead_email: selectedLead?.email ?? null,
+      lead_email: emailLimpo || selectedLead?.email || null,
       cadence_id: selectedLead?.cadence_id ?? null,
       owner_id: currentUser?.id ?? null,
       owner_name: currentUser?.name ?? null,
@@ -144,19 +172,34 @@ export default function ScheduleMeetingModal({
       title: title || `Reunião — ${selectedLead?.full_name ?? "cliente"}`,
       scheduled_at: pick.start,
       duration_min: pick.durationMin,
-      location: link.trim() ? "Online" : null,
-      meeting_link: link,
+      location: gerarMeet ? "Google Meet" : link.trim() ? "Online" : null,
+      meeting_link: gerarMeet ? null : link,
       notes,
     });
 
-    setSaving(false);
     if (!res.ok) {
+      setSaving(false);
       setError(res.error);
       if (res.conflict) setPick(null); // força escolher outro horário
       return;
     }
-    notifySuccess(`Reunião agendada com ${pick.closerName}. A atividade de confirmação já está na sua fila.`);
-    onSaved(res.meeting);
+
+    // Daqui pra baixo a reunião JÁ está gravada: nada pode virar "não agendou".
+    // O e-mail volta pro cadastro do lead pra vir pronto no próximo agendamento.
+    if (emailLimpo && emailLimpo !== selectedLead?.email) {
+      void salvarEmailDoLead(leadId, emailLimpo);
+    }
+
+    const sala = await gerarSalaMeet(res.meeting, { linkManual: gerarMeet ? null : link });
+    setSaving(false);
+
+    if (sala.aviso) notifyError(sala.aviso);
+    notifySuccess(
+      sala.link
+        ? `Reunião agendada com ${pick.closerName} e sala do Meet criada${emailLimpo ? " — convite enviado ao cliente" : ""}.`
+        : `Reunião agendada com ${pick.closerName}. A atividade de confirmação já está na sua fila.`
+    );
+    onSaved(sala.link ? { ...res.meeting, meeting_link: sala.link } : res.meeting);
     onClose();
   }
 
@@ -237,6 +280,25 @@ export default function ScheduleMeetingModal({
                   </div>
                 );
               })()}
+
+              {/* Confirmação de que o lead veio mesmo da base — e o que ela já
+                  sabe sobre ele. Sem isto, digitar um nome parecido e não
+                  selecionar da lista parecia ter funcionado. */}
+              {selectedLead && (
+                <div className="mt-1.5 flex items-start gap-2 rounded-lg bg-green-50 border border-green-100 px-2.5 py-2">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"
+                       strokeLinecap="round" strokeLinejoin="round" className="text-green-600 mt-0.5 shrink-0">
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                  <p className="text-[11px] text-green-800 leading-relaxed min-w-0">
+                    Lead do QS
+                    {selectedLead.phone && <> · {selectedLead.phone}</>}
+                    {selectedLead.email
+                      ? <> · e-mail no cadastro</>
+                      : <> · <span className="font-semibold">sem e-mail cadastrado</span>, preencha abaixo</>}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -252,6 +314,28 @@ export default function ScheduleMeetingModal({
 
           {!remarcando && (
             <>
+              {/* E-mail do cliente: é pra ELE que o Google manda o convite com o
+                  link. Sem e-mail a reunião acontece igual, mas o cliente só
+                  recebe o link se o SDR mandar no WhatsApp. */}
+              <div>
+                <label className={labelClass}>
+                  E-mail do lead {selectedLead?.email && <span className="text-green-600 font-normal">· veio do cadastro</span>}
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="cliente@email.com"
+                  className={inputClass}
+                  autoComplete="off"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  {email.trim()
+                    ? "O convite do Google com o link vai pra este e-mail (e fica salvo no lead)."
+                    : "Sem e-mail o convite não é enviado — a sala é criada e o link fica aqui pra você mandar no WhatsApp."}
+                </p>
+              </div>
+
               <div>
                 <label className={labelClass}>Título</label>
                 <input
@@ -261,17 +345,41 @@ export default function ScheduleMeetingModal({
                   placeholder={`Reunião — ${selectedLead?.full_name ?? "cliente"}`}
                   className={inputClass}
                 />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  É o nome que aparece no convite do Google e na agenda do especialista.
+                </p>
               </div>
-              <div>
-                <label className={labelClass}>Link da reunião</label>
-                <input
-                  type="text"
-                  value={link}
-                  onChange={(e) => setLink(e.target.value)}
-                  placeholder="https://meet.google.com/..."
-                  className={inputClass}
-                />
+
+              {/* Sala do Meet */}
+              <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={gerarMeet}
+                    onChange={(e) => setGerarMeet(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-[#0147FF]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-800">Criar sala do Google Meet</span>
+                    <span className="block text-[11px] text-gray-500 mt-0.5">
+                      O link é gerado ao agendar e o convite vai pro especialista e pro cliente.
+                    </span>
+                  </span>
+                </label>
               </div>
+
+              {!gerarMeet && (
+                <div>
+                  <label className={labelClass}>Link da reunião</label>
+                  <input
+                    type="text"
+                    value={link}
+                    onChange={(e) => setLink(e.target.value)}
+                    placeholder="https://meet.google.com/..."
+                    className={inputClass}
+                  />
+                </div>
+              )}
               <div>
                 <label className={labelClass}>Anotações</label>
                 <textarea
