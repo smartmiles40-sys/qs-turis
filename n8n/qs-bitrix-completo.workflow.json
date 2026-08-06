@@ -1,0 +1,2284 @@
+{
+  "name": "QS ⇄ Bitrix (completo)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 1. Bitrix → QS\nLead novo no Bitrix cai no QS (cria card + tarefas da cadência) e registra a nota de origem — **uma vez só**.\n\nCORRIGIDO: antes a nota era gravada em TODO reenvio. Medido em produção: 135 leads com nota repetida, um deles com 30 cópias. O `/api/lead-inbound` já devolvia `deduped: true` justamente pra isso e ninguém olhava.",
+        "height": 292,
+        "width": 1240
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        368,
+        576
+      ],
+      "id": "19693e87-d51b-40a7-a256-6cecccc469ce",
+      "name": "Nota -120"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-lead-inbound",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "2150559b-98f3-49a9-b5ca-fab1bbc64fd7",
+      "name": "Webhook Bitrix -> QS (qs-lead-inbound)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        448,
+        704
+      ],
+      "webhookId": "d4c3f6b5-4444-4d40-6e34-3051627c8e93"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "full_name",
+              "type": "string",
+              "value": "={{ $json.query.Nome }}"
+            },
+            {
+              "id": "f2",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $json.query['E-mail'] }}"
+            },
+            {
+              "id": "f3",
+              "name": "phone",
+              "type": "string",
+              "value": "={{ $json.query.Telefone || $json.query.telefone }}"
+            },
+            {
+              "id": "f4",
+              "name": "Fonte",
+              "type": "string",
+              "value": "={{ $json.query.Fonte }}"
+            },
+            {
+              "id": "f5",
+              "name": "Morno",
+              "type": "string",
+              "value": "={{ $json.query.Temperatura || $json.query.Pontuacao || $json.query.LeadScoring || $json.query.Score }}"
+            },
+            {
+              "id": "f6",
+              "name": "ID",
+              "type": "string",
+              "value": "={{ $json.query.ID }}"
+            },
+            {
+              "id": "f8",
+              "name": "source",
+              "type": "string",
+              "value": "integracao"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "04191905-2ac7-4834-a2aa-76619cba9289",
+      "name": "Normalizar",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        688,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qs.setuforeuvouviagens.com.br/api/lead-inbound",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lead-secret",
+              "value": "TROQUE_PELO_SEGREDO_NOVO"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ full_name: $json.full_name, phone: $json.phone, email: $json.email, bitrix_id: $json.ID, segment: $json.Fonte, lead_score: $json.Morno || undefined, source: $json.source }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "b5f79831-b544-4ede-886f-00d37b0c020e",
+      "name": "Enviar ao QS (/api/lead-inbound)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        928,
+        704
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "x-lead-secret: o valor antigo vazou (ficou no histórico do repositório público e num chat). Gere um novo, troque na env LEAD_INBOUND_SECRET da Vercel e cole aqui. Domínio trocado para qs.setuforeuvouviagens.com.br, que é o oficial."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dedup-1",
+              "leftValue": "={{ $json.deduped }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "aa000000-0000-4000-8000-000000000001",
+      "name": "Lead é novo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1168,
+        704
+      ],
+      "notesInFlow": true,
+      "notes": "deduped=true significa que o lead JÁ existia. Sem esta porta, cada reenvio do Bitrix empilhava mais uma nota de origem no mesmo lead."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://eabfjomrnucymduqnbci.supabase.co/rest/v1/qs_notes",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.lead_id, body: '📥 Origem Bitrix\\nFonte: ' + ($('Normalizar').first().json.Fonte || '-') + '\\nTemperatura: ' + ($('Normalizar').first().json.Morno || '-'), tags: ['bitrix','origem'] }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "b18bad22-863b-42a2-b8fe-8cb1727b7f05",
+      "name": "Nota: origem Bitrix (Fonte/Score)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1408,
+        704
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "eskrddYHVWzOtA9g",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## 2. QS → Bitrix (5 gatilhos)\nCada ação do QS espelha no Bitrix na hora.\n\n⚠️ **Header:** estes 5 webhooks recebem `x-qs-sync-secret` (env `N8N_SYNC_SECRET` da Vercel). A agenda, lá na direita, recebe `x-qs-agenda-secret` — **são dois segredos e duas credenciais diferentes**. Uma credencial só não atende os dois: o nome do header faz parte da checagem.\n\nGanho e Reunião **não existiam** — por isso a SDR via o aviso vermelho “o Bitrix não recebeu esta atualização” toda vez que confirmava um deles.",
+        "height": 1180,
+        "width": 1740
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        368,
+        912
+      ],
+      "id": "9818055e-49d6-4a3d-9fa4-8040823a1976",
+      "name": "Nota 200"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-perdido",
+        "authentication": "headerAuth",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "59ac8769-ff70-4fd6-a4d5-3167900e2118",
+      "name": "Webhook Perdido (qs-perdido)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        448,
+        1072
+      ],
+      "webhookId": "qs-perdido-b6f0-4d40-8e34-3051627c0001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA",
+          "name": "QS Sync (x-qs-sync-secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config Perdido').first().json.BITRIX_BASE }}/crm.deal.update.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: Number($('Webhook Perdido (qs-perdido)').first().json.body.bitrix_id), fields: { STAGE_ID: 'C25:LOSE' }, params: { REGISTER_SONET_EVENT: 'Y' } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "ff75d4dd-9336-4e30-a921-27de688099ad",
+      "name": "Mover pra Perdido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        736,
+        1072
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config Perdido').first().json.BITRIX_BASE }}/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: Number($('Webhook Perdido (qs-perdido)').first().json.body.bitrix_id), ENTITY_TYPE: 'deal', COMMENT: '❌ Lead marcado como PERDIDO no QS.' + ($('Webhook Perdido (qs-perdido)').first().json.body.loss_reason ? '\\nMotivo: ' + $('Webhook Perdido (qs-perdido)').first().json.body.loss_reason : '\\nMotivo: não informado') } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000002",
+      "name": "Comentário do perdido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        976,
+        1072
+      ],
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "O motivo da perda existia no QS e morria aqui: o card só mudava de coluna, sem dizer por quê."
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-nota",
+        "authentication": "headerAuth",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "5dce8fbe-05de-482b-8ca0-6000f07720de",
+      "name": "Webhook Nota (qs-nota)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        448,
+        1248
+      ],
+      "webhookId": "qs-nota-b6f0-4d40-8e34-3051627c0004",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA",
+          "name": "QS Sync (x-qs-sync-secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config Nota').first().json.BITRIX_BASE }}/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: Number($json.body.bitrix_id), ENTITY_TYPE: 'deal', COMMENT: '📝 QS Turis: ' + ($json.body.body || '') } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "96c19fdc-b807-4336-af1d-495864bb438c",
+      "name": "Comentario da nota",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        736,
+        1248
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-ganho",
+        "authentication": "headerAuth",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000010",
+      "name": "Webhook Ganho (qs-ganho)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        448,
+        1424
+      ],
+      "webhookId": "qs-ganho-b6f0-4d40-8e34-3051627c0002",
+      "notesInFlow": true,
+      "notes": "NÃO EXISTIA. Toda vez que a SDR confirmava um Ganho, o QS tomava 404 e mostrava o aviso vermelho.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA",
+          "name": "QS Sync (x-qs-sync-secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ganho: move a coluna só se STAGE_GANHO estiver preenchido no Config Ganho.\n// Vazio = só comenta na timeline. É de propósito: mover pra coluna errada é\n// pior do que não mover, e ninguém decidiu ainda qual é a coluna de ganho.\nconst cfg = $('Config Ganho').first().json;\nconst b = $('Webhook Ganho (qs-ganho)').first().json.body || {};\n\nif (!b.bitrix_id) return [];\n\nconst valor = b.closed_value;\nconst temValor = valor !== null && valor !== undefined && valor !== '' && Number(valor) > 0;\n\nconst fields = {};\nif (cfg.STAGE_GANHO) fields.STAGE_ID = String(cfg.STAGE_GANHO);\n// OPPORTUNITY é o campo nativo de valor do negócio no Bitrix.\nif (temValor) fields.OPPORTUNITY = Number(valor);\n\nreturn [{ json: {\n  id: Number(b.bitrix_id),\n  mexe_no_card: Object.keys(fields).length > 0,\n  fields,\n  comentario: '🏆 Lead marcado como GANHO no QS.' +\n    (temValor ? '\\nValor fechado: R$ ' + Number(valor).toLocaleString('pt-BR') : '\\nValor fechado: não informado') +\n    (b.full_name ? '\\nLead: ' + b.full_name : '')\n} }];"
+      },
+      "id": "aa000000-0000-4000-8000-000000000011",
+      "name": "Montar ganho",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "g-1",
+              "leftValue": "={{ $json.mexe_no_card }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "aa000000-0000-4000-8000-000000000012",
+      "name": "Tem o que gravar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        976,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config Ganho').first().json.BITRIX_BASE }}/crm.deal.update.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $json.id, fields: $json.fields, params: { REGISTER_SONET_EVENT: 'Y' } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000013",
+      "name": "Gravar ganho no card",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1216,
+        1344
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config Ganho').first().json.BITRIX_BASE }}/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: $('Montar ganho').first().json.id, ENTITY_TYPE: 'deal', COMMENT: $('Montar ganho').first().json.comentario } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000014",
+      "name": "Comentário do ganho",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1456,
+        1424
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-primeiro-contato",
+        "authentication": "headerAuth",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "49e5236e-4e5a-41c0-8363-f00147356de5",
+      "name": "Webhook 1o contato (qs-primeiro-contato)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        448,
+        1616
+      ],
+      "webhookId": "qs-primeiro-contato-b6f0-4d40-8e34-3051627c0005",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA",
+          "name": "QS Sync (x-qs-sync-secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config 1o contato').first().json.BITRIX_BASE }}/crm.deal.get.json?id={{ $('Webhook 1o contato (qs-primeiro-contato)').first().json.body.bitrix_id }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "9836040a-0022-4bdc-91fa-105daa249f55",
+      "name": "Buscar negocio (1o contato)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        736,
+        1616
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// AQUI mora o \"primeiro contato\": não existe contador nem flag — a regra é\n// \"só move quem AINDA está em Novo lead\". Da 2ª atividade em diante o negócio já\n// saiu dessa coluna, então o evento chega, olha e não faz nada. De quebra, isso\n// impede o robô de puxar PRA TRÁS um negócio que já avançou (Reunião, Ganho,\n// Perdido) e torna o disparo idempotente: repetir não estraga nada.\nconst cfg = $('Config 1o contato').first().json;\nconst evt = $('Webhook 1o contato (qs-primeiro-contato)').first().json.body || {};\nconst resp = $input.first().json;\n\n// O crm.deal.get acima segue em frente mesmo com erro (onError). Se o Bitrix\n// RECUSOU, isso tem que ficar VERMELHO: sem este throw o único sintoma é \"o\n// negócio não anda\" e a execução aparece verde. Erro clássico:\n// insufficient_scope = o webhook de ENTRADA foi criado sem a permissão CRM.\nif (resp && resp.error) {\n  throw new Error('Bitrix recusou o crm.deal.get: ' + resp.error + ' — ' + (resp.error_description || ''));\n}\n\nconst r = resp.result;\nif (!r) return [];   // negócio não encontrado no Bitrix\n\n// Opcional: mover só quando o SDR REALMENTE falou com a pessoa.\nif (String(cfg.SO_ALCANCOU || '').toLowerCase() === 'sim' && evt.alcancou !== true) return [];\n\nif (String(r.STAGE_ID || '') !== String(cfg.STAGE_DE)) return [];\n\nreturn [{ json: {\n  id: String(r.ID),\n  de: String(r.STAGE_ID || ''),\n  para: String(cfg.STAGE_PARA),\n  canal: String(evt.canal || ''),\n  desfecho: String(evt.desfecho || ''),\n  sdr: String(evt.sdr || '')\n} }];"
+      },
+      "id": "5e22b9ea-ea58-4a09-8622-cb2c0ff8cce9",
+      "name": "So se ainda estiver em Novo lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        976,
+        1616
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config 1o contato').first().json.BITRIX_BASE }}/crm.deal.update.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: Number($json.id), fields: { STAGE_ID: $json.para }, params: { REGISTER_SONET_EVENT: 'Y' } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "7340b51b-121c-4cda-89bf-06ae2accfab4",
+      "name": "Mover pra Follow-up 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1216,
+        1616
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config 1o contato').first().json.BITRIX_BASE }}/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: Number($('So se ainda estiver em Novo lead').first().json.id), ENTITY_TYPE: 'deal', COMMENT: '🤖 1º CONTATO FEITO (QS Turis) — negócio movido de Novo lead para Follow-up 1.\\n' + 'Canal: ' + ($('So se ainda estiver em Novo lead').first().json.canal || '-') + '\\n' + 'Desfecho: ' + ($('So se ainda estiver em Novo lead').first().json.desfecho || '-') + '\\n' + 'SDR: ' + ($('So se ainda estiver em Novo lead').first().json.sdr || '-') } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "e0d9da3d-4d6f-4cd6-a50e-50f46457179f",
+      "name": "Comentario do 1o contato",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1456,
+        1616
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-reuniao",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000020",
+      "name": "Webhook Reunião (qs-reuniao)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        448,
+        1808
+      ],
+      "webhookId": "qs-reuniao-b6f0-4d40-8e34-3051627c0003",
+      "notesInFlow": true,
+      "notes": "NÃO EXISTIA. Depende do catálogo de campos (migration 0042 + workflow qs-sync-catalogo-bitrix).",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA",
+          "name": "QS Sync (x-qs-sync-secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config Reuniao').first().json.SUPABASE_URL }}/rest/v1/bitrix_fields?select=alias,field_name,user_type_id&alias=not.is.null",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000021",
+      "name": "Buscar de-para",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        736,
+        1808
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "supabaseApi": {
+          "id": "eskrddYHVWzOtA9g",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config Reuniao').first().json.SUPABASE_URL }}/rest/v1/v_opcoes_por_alias?select=alias,option_id,value",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000022",
+      "name": "Buscar opções",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        976,
+        1808
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notesInFlow": true,
+      "notes": "O QS manda o NOME do SDR e do especialista. O Bitrix só aceita o option_id. A tradução acontece aqui.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "eskrddYHVWzOtA9g",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $('Webhook Reunião (qs-reuniao)').first().json.body || {};\nconst cfg = $('Config Reuniao').first().json;\n\nconst mapa = {};\nfor (const it of $('Buscar de-para').all()) {\n  const r = it.json;\n  if (r && r.alias && r.field_name) mapa[r.alias] = r.field_name;\n}\n\nconst opcoes = {};\nfor (const it of $('Buscar opções').all()) {\n  const r = it.json;\n  if (!r || !r.alias) continue;\n  (opcoes[r.alias] = opcoes[r.alias] || []).push({ id: Number(r.option_id), value: String(r.value == null ? '' : r.value) });\n}\n\nconst normalizar = (s) => String(s == null ? '' : s)\n  .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n  .toLowerCase().replace(/\\s+/g, ' ').trim();\n\n// Casa o nome do QS com o rótulo da opção no Bitrix. Tenta o nome inteiro e,\n// se não bater, o primeiro nome — o Bitrix costuma ter só \"Talita\" enquanto o\n// QS tem \"Talita Carvalho\".\nfunction acharOpcao(alias, nome) {\n  const lista = opcoes[alias] || [];\n  const alvo = normalizar(nome);\n  if (!alvo || !lista.length) return null;\n  let hit = lista.find((o) => normalizar(o.value) === alvo);\n  if (hit) return hit.id;\n  const primeiro = alvo.split(' ')[0];\n  hit = lista.find((o) => normalizar(o.value).split(' ')[0] === primeiro);\n  return hit ? hit.id : null;\n}\n\n// O QS grava em UTC. Mandar assim faz a reunião aparecer 3h adiantada no card.\n// O Brasil não tem mais horário de verão desde 2019, então -03:00 é fixo.\nfunction brt(iso) {\n  const d = new Date(iso);\n  if (isNaN(d.getTime())) return null;\n  const b = new Date(d.getTime() - 3 * 3600 * 1000);\n  const p = (n) => String(n).padStart(2, '0');\n  return b.getUTCFullYear() + '-' + p(b.getUTCMonth() + 1) + '-' + p(b.getUTCDate()) +\n         'T' + p(b.getUTCHours()) + ':' + p(b.getUTCMinutes()) + ':' + p(b.getUTCSeconds()) + '-03:00';\n}\nfunction soData(v) {\n  if (!v) return null;\n  const s = String(v);\n  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return s;\n  const b = brt(s);\n  return b ? b.slice(0, 10) : null;\n}\n\nconst fields = {};\nconst pulados = [];\n\n// opcional = campo que talvez nem exista no Bitrix ainda; não vira alerta.\nfunction set(alias, valor, opcional) {\n  const campo = mapa[alias];\n  if (!campo) { if (!opcional) pulados.push(alias + ' (alias não cadastrado)'); return; }\n  if (valor === null || valor === undefined || valor === '') { if (!opcional) pulados.push(alias + ' (o QS não tem esse dado)'); return; }\n  fields[campo] = valor;\n}\n\nset('email_cliente', body.client_email);\nset('data_agendamento', soData(body.booking_date));\nset('datahora_meet', brt(body.scheduled_at));\nset('produto_reuniao', body.produto || null, true);\nset('link_meet', body.meeting_link || null, true);\nset('duracao_reuniao', body.duration_min || null, true);\n\nfor (const par of [['sdr_agendou', body.scheduled_by], ['resp_reuniao', body.meeting_owner]]) {\n  const alias = par[0], nome = par[1];\n  if (!mapa[alias]) { pulados.push(alias + ' (alias não cadastrado)'); continue; }\n  const id = acharOpcao(alias, nome);\n  if (id) fields[mapa[alias]] = id;\n  else pulados.push(alias + ' (nome \"' + (nome || '—') + '\" não bate com nenhuma opção)');\n}\n\nif (cfg.STAGE_REUNIAO) fields.STAGE_ID = String(cfg.STAGE_REUNIAO);\n\nif (!body.bitrix_id) throw new Error('payload sem bitrix_id');\nif (!Object.keys(fields).length) throw new Error('nada para gravar — nenhum alias preenchido em bitrix_fields');\n\n// Sem meeting_id não há linha pra marcar. Um uuid que não casa com nada deixa\n// o PATCH seguinte rodar em zero linhas, sem precisar de um IF só pra isso.\nconst meetingId = body.meeting_id || '00000000-0000-0000-0000-000000000000';\n\nconst quando = brt(body.scheduled_at);\nconst legivel = quando ? quando.slice(8, 10) + '/' + quando.slice(5, 7) + ' às ' + quando.slice(11, 16) : 'data não informada';\n\nreturn [{ json: {\n  deal_id: Number(body.bitrix_id),\n  meeting_id: meetingId,\n  pulados,\n  comentario: '📅 Reunião agendada pelo QS para ' + legivel +\n    (body.meeting_owner ? ' com ' + body.meeting_owner : '') + '.' +\n    (body.meeting_link ? '\\nMeet: ' + body.meeting_link : '\\n(sem link do Meet ainda)') +\n    (body.scheduled_by ? '\\nAgendada por: ' + body.scheduled_by : '') +\n    (pulados.length ? '\\n⚠️ Não preenchidos: ' + pulados.join('; ') : ''),\n  payload: { id: Number(body.bitrix_id), fields }\n} }];"
+      },
+      "id": "aa000000-0000-4000-8000-000000000023",
+      "name": "Montar reunião",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        1808
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config Reuniao').first().json.BITRIX_BASE }}/crm.deal.update.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000024",
+      "name": "Gravar reunião no card",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1456,
+        1808
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config Reuniao').first().json.BITRIX_BASE }}/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: $('Montar reunião').first().json.deal_id, ENTITY_TYPE: 'deal', COMMENT: $('Montar reunião').first().json.comentario } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000025",
+      "name": "Comentário da reunião",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1696,
+        1712
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config Reuniao').first().json.SUPABASE_URL }}/rest/v1/qs_meetings?id=eq.{{ $('Montar reunião').first().json.meeting_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ bitrix_synced: true, bitrix_synced_at: new Date().toISOString(), bitrix_error: ($('Montar reunião').first().json.pulados.length ? 'gravado, mas sem: ' + $('Montar reunião').first().json.pulados.join('; ') : null) }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000026",
+      "name": "Marcar reunião sincronizada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1936,
+        1712
+      ],
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "Grava o resultado na PRÓPRIA reunião do QS (bitrix_synced / bitrix_error, colunas que já existiam sem uso). É onde se vê o que falhou, sem tabela nova.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "eskrddYHVWzOtA9g",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, deal_id: $('Montar reunião').first().json.deal_id, nao_preenchidos: $('Montar reunião').first().json.pulados }) }}",
+        "options": {}
+      },
+      "id": "aa000000-0000-4000-8000-000000000027",
+      "name": "Responder reunião ok",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2176,
+        1712
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config Reuniao').first().json.SUPABASE_URL }}/rest/v1/qs_meetings?id=eq.{{ $('Montar reunião').first().json.meeting_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ bitrix_synced: false, bitrix_error: String(JSON.stringify($json)).slice(0, 900) }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "aa000000-0000-4000-8000-000000000028",
+      "name": "Marcar reunião com erro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1696,
+        1936
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "supabaseApi": {
+          "id": "eskrddYHVWzOtA9g",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 502,
+        "responseBody": "={{ JSON.stringify({ ok: false, mensagem: 'O Bitrix recusou a gravação. A reunião está salva no QS e o motivo ficou em qs_meetings.bitrix_error.' }) }}",
+        "options": {}
+      },
+      "id": "aa000000-0000-4000-8000-000000000029",
+      "name": "Responder reunião erro",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1936,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Bitrix → Bitrix\nRede de segurança: se a atividade for concluída DENTRO do Bitrix, o card anda igual.\nMesma regra e mesmo STAGE_PARA da faixa 2 — os dois podem ficar ligados juntos.",
+        "height": 292,
+        "width": 1984
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        368,
+        2144
+      ],
+      "id": "971252cf-f67a-4ba3-913a-b636132b5fb8",
+      "name": "Nota 1300"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bitrix-atividade-concluida",
+        "options": {}
+      },
+      "id": "3fc2e7ca-1c12-44e7-b1e1-001c1e500f27",
+      "name": "Webhook Bitrix (atividade)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        416,
+        2288
+      ],
+      "webhookId": "bitrix-atv-b6f0-4d40-8e34-3051627c1001",
+      "notesInFlow": true,
+      "notes": "Sem Header Auth de propósito: o Bitrix não manda header customizado. A autenticação é o application_token, conferido no próximo nó."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-base-0001",
+              "name": "BITRIX_BASE",
+              "type": "string",
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+            },
+            {
+              "id": "cfg-token-0002",
+              "name": "APP_TOKEN",
+              "type": "string",
+              "value": "TROQUE_PELO_APP_TOKEN_NOVO"
+            },
+            {
+              "id": "cfg-entidade-0003",
+              "name": "ENTIDADE",
+              "type": "string",
+              "value": "deal"
+            },
+            {
+              "id": "cfg-tipos-0006",
+              "name": "SO_TIPOS",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "cfg-prov-0007",
+              "name": "PROVIDERS_IGNORADOS",
+              "type": "string",
+              "value": "IMOPENLINES_SESSION,CRM_WEBFORM,CRM_EMAIL,CRM_NOTIFICATION"
+            },
+            {
+              "id": "cfg-resp-0008",
+              "name": "SO_RESPONSAVEIS",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "cfg-de-0004",
+              "name": "STAGE_DE",
+              "type": "string",
+              "value": "C25:PREPAYMENT_INVOIC"
+            },
+            {
+              "id": "cfg-para-0005",
+              "name": "STAGE_PARA",
+              "type": "string",
+              "value": "C25:UC_271QUB"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "dc469d15-1ac1-41b7-9ad5-788e1f05e112",
+      "name": "Config (atividade Bitrix)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        640,
+        2288
+      ],
+      "notesInFlow": true,
+      "notes": "EDITE SO ESTE NO desta faixa. BITRIX_BASE = webhook de ENTRADA (precisa do escopo CRM). APP_TOKEN = token do webhook de SAIDA. STAGE_DE/STAGE_PARA precisam ser IGUAIS aos do Config 1o contato. Se trocar o token do Bitrix, troque em TODOS os nos de Config desta tela (a busca do n8n acha por \"TROQUE_PELO\")."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bitrix manda POST form-urlencoded: event, data[FIELDS][ID], auth[application_token], ts.\n// Dependendo da versão o n8n entrega achatado (\"data[FIELDS][ID]\") ou aninhado — cobrimos os dois.\nconst cfg = $('Config (atividade Bitrix)').first().json;\nconst raiz = $input.first().json;\nconst b = raiz.body ?? raiz;\n\nconst activityId =\n  b['data[FIELDS][ID]'] ??\n  b?.data?.FIELDS?.ID ??\n  b?.FIELDS?.ID ??\n  b?.activity_id ??\n  b?.ID ??\n  null;\n\n// Segurança: o Bitrix assina todo evento com o application_token do webhook de\n// saída. Sem isto, qualquer um que descobrisse a URL do n8n moveria negócio no CRM.\nconst token = b['auth[application_token]'] ?? b?.auth?.application_token ?? '';\nconst esperado = String(cfg.APP_TOKEN || '').trim();\nif (!esperado || esperado.startsWith('TROQUE')) {\n  throw new Error('APP_TOKEN não configurado — o fluxo está aberto. Preencha no Config (atividade Bitrix).');\n}\nif (token !== esperado) {\n  throw new Error('application_token não confere — evento recusado.');\n}\n\n// Evento sem ID (ping/handshake do Bitrix): para aqui, sem sujar o log de erro.\nif (!activityId) return [];\n\nreturn [{ json: { activity_id: String(activityId), evento: String(b.event ?? '') } }];"
+      },
+      "id": "eb87a021-2898-4d4b-86a8-3af2173278cb",
+      "name": "Ler evento do Bitrix",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        2288
+      ],
+      "notesInFlow": true,
+      "notes": "MUDOU: antes, APP_TOKEN vazio deixava passar QUALQUER requisição. Agora token ausente derruba o fluxo em vez de abrir a porta."
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config (atividade Bitrix)').first().json.BITRIX_BASE }}/crm.activity.get.json?id={{ $json.activity_id }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "6c2a2c59-9973-4660-a0eb-38a2a049fbc0",
+      "name": "Buscar atividade (crm.activity.get)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1088,
+        2288
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ONCRMACTIVITYUPDATE dispara em QUALQUER mexida na atividade (editar texto, adiar...).\n// ONCRMACTIVITYADD dispara quando o SDR registra uma ligação JÁ como concluída.\n// Aqui fica só o que interessa: atividade DE NEGÓCIO, concluída, feita por gente.\nconst cfg = $('Config (atividade Bitrix)').first().json;\nconst resp = $input.first().json;\n\nif (resp && resp.error) {\n  throw new Error('Bitrix recusou o crm.activity.get: ' + resp.error + ' — ' + (resp.error_description || ''));\n}\n\nconst r = resp.result;\nif (!r) return [];\n\nconst tipoDono = String(cfg.ENTIDADE).toLowerCase() === 'lead' ? '1' : '2';\nif (String(r.OWNER_TYPE_ID) !== tipoDono) return [];   // atividade de contato/empresa: ignora\n\nconst concluida =\n  String(r.COMPLETED).toUpperCase() === 'Y' ||\n  r.COMPLETED === true ||\n  String(r.STATUS) === '2';\nif (!concluida) return [];\n\n// Filtro opcional por tipo (1=reunião, 2=ligação, 3=tarefa, 4=e-mail). Vazio = qualquer um.\nconst tipos = String(cfg.SO_TIPOS || '').replace(/\\s/g, '');\nif (tipos && !tipos.split(',').includes(String(r.TYPE_ID))) return [];\n\n// IMPORTANTE: bloqueia atividade criada por robô (canal aberto/WhatsApp, formulário,\n// e-mail de marketing). Sem isto uma mensagem automática move o negócio sozinha.\nconst bloq = String(cfg.PROVIDERS_IGNORADOS || '').replace(/\\s/g, '').split(',').filter(Boolean);\nif (bloq.includes(String(r.PROVIDER_ID || ''))) return [];\n\n// Opcional: só conta se o responsável pela atividade for um dos SDRs listados.\nconst sdrs = String(cfg.SO_RESPONSAVEIS || '').replace(/\\s/g, '').split(',').filter(Boolean);\nif (sdrs.length && !sdrs.includes(String(r.RESPONSIBLE_ID || ''))) return [];\n\nreturn [{ json: {\n  activity_id: String(r.ID),\n  owner_id: String(r.OWNER_ID),\n  assunto: r.SUBJECT || '',\n  type_id: String(r.TYPE_ID || ''),\n  provider_id: String(r.PROVIDER_ID || ''),\n  responsavel: String(r.RESPONSIBLE_ID || '')\n} }];"
+      },
+      "id": "a5d642d7-d1c9-4b6c-9469-03df92fc83c4",
+      "name": "So atividade concluida do funil",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        2288
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config (atividade Bitrix)').first().json.BITRIX_BASE }}/crm.{{ $('Config (atividade Bitrix)').first().json.ENTIDADE }}.get.json?id={{ $json.owner_id }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "247b9374-d9c3-4b7e-9e38-39de943e77d2",
+      "name": "Buscar negocio no CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1536,
+        2288
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// AQUI mora o \"primeira atividade\": só move quem AINDA está em STAGE_DE.\n// Concluir a 2ª, 3ª, 10ª atividade não faz nada, porque o negócio já saiu de lá.\nconst cfgAtv = $('Config (atividade Bitrix)').first().json;\nconst cfg = $('Config (atividade Bitrix)').first().json;\nconst resp = $input.first().json;\n\nif (resp && resp.error) {\n  throw new Error('Bitrix recusou o crm.' + cfgAtv.ENTIDADE + '.get: ' + resp.error + ' — ' + (resp.error_description || ''));\n}\n\nconst r = resp.result;\nif (!r) return [];\n\nconst ehLead = String(cfgAtv.ENTIDADE).toLowerCase() === 'lead';\nconst campo = ehLead ? 'STATUS_ID' : 'STAGE_ID';\nconst atual = String(r[campo] || '');\n\nif (atual !== String(cfg.STAGE_DE)) return [];\n\nconst fields = {};\nfields[campo] = String(cfg.STAGE_PARA);\n\nconst atv = $('So atividade concluida do funil').first().json;\n\nreturn [{ json: {\n  id: String(r.ID),\n  fields,\n  de: atual,\n  para: String(cfg.STAGE_PARA),\n  assunto: atv.assunto,\n  activity_id: atv.activity_id,\n  responsavel: atv.responsavel\n} }];"
+      },
+      "id": "18cb78ac-ba78-408b-bab4-1c8d123e9b55",
+      "name": "So se ainda estiver em Novo lead (Bitrix)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        2288
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config (atividade Bitrix)').first().json.BITRIX_BASE }}/crm.{{ $('Config (atividade Bitrix)').first().json.ENTIDADE }}.update.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: Number($json.id), fields: $json.fields, params: { REGISTER_SONET_EVENT: 'Y' } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "01876c43-330e-4266-b92a-b8aee06050f3",
+      "name": "Mover pra Follow-up 1 (Bitrix)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1984,
+        2288
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config (atividade Bitrix)').first().json.BITRIX_BASE }}/crm.timeline.comment.add.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: Number($('So se ainda estiver em Novo lead (Bitrix)').first().json.id), ENTITY_TYPE: $('Config (atividade Bitrix)').first().json.ENTIDADE, COMMENT: '[robô] Movido de Novo lead para Follow-up 1 — primeira atividade concluída: ' + ($('So se ainda estiver em Novo lead (Bitrix)').first().json.assunto || '-') } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "4d181fbd-b752-40fd-a492-3d8a3217ed28",
+      "name": "Comentario na timeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2208,
+        2288
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## 4. Token do ChatApp\nRenova o token a cada 3 h e grava em `qs_settings`.\n\nO atendimento migrou para o inbox nativo (`chat_provider = qs`), mas o `WhatsAppModal` ainda chama `/api/chatapp-send` — então isto **continua vivo**. Desligue só depois de tirar esse último uso.",
+        "height": 316,
+        "width": 736
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        368,
+        2480
+      ],
+      "id": "c7324ade-f0da-469b-b826-f2bec6344245",
+      "name": "Nota 1700"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "cd18873a-6c96-4252-adb8-76dcd7e6e37d",
+      "name": "A cada 3 horas",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        416,
+        2608
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4AMsQK0G8ClzF4Jw",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/4AMsQK0G8ClzF4Jw",
+          "cachedResultName": "Validação de Token (chatApp)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "8a29ef90-8f11-4a14-b19e-d76be8a5f33e",
+      "name": "Validar/renovar token (sub-workflow)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        656,
+        2608
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://eabfjomrnucymduqnbci.supabase.co/rest/v1/qs_settings?on_conflict=key",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ key: 'chatapp_token', value: ($json.access_token || $json.token || $json.chatapp_token), updated_at: new Date().toISOString() }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "d192cd8f-0997-4c9c-8c21-cc2a1ec2c1c8",
+      "name": "Gravar token em qs_settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        2608
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "eskrddYHVWzOtA9g",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "# 5. Agenda: criar / reagendar / cancelar reunião no Google\nEste é o único lugar que fala com o Google Calendar. **Não duplicar em outro workflow** — dois criadores geram dois eventos e dois convites pro mesmo cliente.\n\nHeader próprio: `x-qs-agenda-secret` (env `N8N_AGENDA_SECRET`), diferente do `x-qs-sync-secret` da faixa 2.",
+        "height": 1024,
+        "width": 1632,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        640
+      ],
+      "id": "55f85958-ccca-4a3d-bc07-981cee7226cd",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-agenda-meet",
+        "authentication": "headerAuth",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "3a02d58c-e361-4fd2-93d1-58f9af434130",
+      "name": "Webhook QS (qs-agenda-meet)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        1024
+      ],
+      "webhookId": "qs-agenda-meet-0001",
+      "notesInFlow": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nFYfkjovaZqHtWWT",
+          "name": "Header Auth account"
+        }
+      },
+      "notes": "Header Auth: nome x-qs-agenda-secret, valor = env N8N_AGENDA_SECRET na Vercel. Esta credencial NÃO serve para a faixa 2 (lá o header é x-qs-sync-secret)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ---------------------------------------------------------------------------\n// Porta de entrada única. Valida, normaliza e decide a ação.\n// Tudo que chega do QS é tratado como suspeito: campo faltando aqui vira\n// resposta clara em vez de erro do Google 3 nós adiante.\n// ---------------------------------------------------------------------------\n\n// Troque pelo ID da agenda dedicada (ex.: c_xxx@group.calendar.google.com).\n// 'primary' joga tudo na agenda pessoal da conta da operação.\nconst CALENDAR_PADRAO = 'primary';\n\nconst b = $input.first().json.body || {};\nconst acao = String(b.acao || 'criar').toLowerCase().trim();\nconst erros = [];\n\nif (!b.meeting_id) erros.push('meeting_id ausente');\nif (!['criar', 'reagendar', 'cancelar'].includes(acao)) erros.push('acao invalida: ' + acao);\n\nif (acao === 'criar' || acao === 'reagendar') {\n  if (!b.inicio) erros.push('inicio ausente');\n  if (!b.fim) erros.push('fim ausente');\n  if (b.inicio && b.fim && new Date(b.fim) <= new Date(b.inicio)) {\n    erros.push('fim menor ou igual ao inicio');\n  }\n}\nif (acao === 'reagendar' || acao === 'cancelar') {\n  if (!b.event_id) erros.push('event_id ausente');\n}\n\n// E-mail malformado faz o Google recusar o evento INTEIRO com 400. Melhor\n// descartar o convidado ruim e avisar o QS do que perder a reunião.\nconst EMAIL = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nconst brutos = (Array.isArray(b.convidados) ? b.convidados : [])\n  .map((e) => String(e || '').trim())\n  .filter(Boolean);\nconst convidados = brutos.filter((e) => EMAIL.test(e));\nconst descartados = brutos.filter((e) => !EMAIL.test(e));\n\n// ID de evento determinístico: reenvio do mesmo meeting_id devolve 409 em vez\n// de criar uma segunda reunião. O Google só aceita base32hex (a-v e 0-9).\nfunction idEvento(seed) {\n  const alfa = 'abcdefghijklmnopqrstuv0123456789';\n  const s = 'qs-' + String(seed);\n  let out = '';\n  for (let i = 0; i < s.length; i++) {\n    const c = s.charCodeAt(i);\n    out += alfa[c % 32] + alfa[(c >> 5) % 32];\n  }\n  return ('qs' + out).slice(0, 60);\n}\n\nreturn [{ json: {\n  acao: erros.length ? 'invalida' : acao,\n  erros,\n  meeting_id: b.meeting_id ?? null,\n  calendar_id: b.calendar_id || CALENDAR_PADRAO,\n  event_id: b.event_id || null,\n  event_id_previsto: b.meeting_id ? idEvento(b.meeting_id) : null,\n  inicio: b.inicio || null,\n  fim: b.fim || null,\n  timezone: b.timezone || 'America/Sao_Paulo',\n  titulo: b.titulo || 'Reuniao',\n  descricao: b.descricao || '',\n  convidados,\n  convidados_descartados: descartados\n} }];"
+      },
+      "id": "3d332b22-2cfb-4c10-a8b0-519551f9c4c8",
+      "name": "Validar entrada1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2656,
+        1024
+      ],
+      "notesInFlow": true,
+      "notes": "Define aqui o CALENDAR_PADRAO. Campo inválido vira acao='invalida' e sai pela saída de erro do Switch."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "r-criar",
+                    "leftValue": "={{ $json.acao }}",
+                    "rightValue": "criar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "criar"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "r-reagendar",
+                    "leftValue": "={{ $json.acao }}",
+                    "rightValue": "reagendar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reagendar"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "r-cancelar",
+                    "leftValue": "={{ $json.acao }}",
+                    "rightValue": "cancelar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cancelar"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "invalida"
+        }
+      },
+      "id": "a4721900-b7e9-49a7-bdc3-9717882f8394",
+      "name": "Rotear acao1",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2864,
+        1024
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Corpo do evento do Google Calendar.\n//\n// conferenceData.createRequest é o que faz o Google GERAR a sala do Meet. Sem\n// o parâmetro conferenceDataVersion=1 na URL (no próximo nó) o Google IGNORA\n// este bloco em silêncio: o evento nasce certinho, só que sem Meet nenhum.\n//\n// id determinístico + requestId estável = reenvio devolve 409 e a MESMA sala,\n// em vez de duplicar a reunião.\nconst d = $json;\n\nreturn [{ json: { ...d, evento: {\n  id: d.event_id_previsto,\n  summary: d.titulo,\n  description: d.descricao,\n  start: { dateTime: d.inicio, timeZone: d.timezone },\n  end:   { dateTime: d.fim,   timeZone: d.timezone },\n  attendees: d.convidados.map((email) => ({ email })),\n  conferenceData: {\n    createRequest: {\n      requestId: 'qs-' + String(d.meeting_id),\n      conferenceSolutionKey: { type: 'hangoutsMeet' }\n    }\n  },\n  reminders: {\n    useDefault: false,\n    overrides: [ { method: 'popup', minutes: 30 }, { method: 'email', minutes: 60 } ]\n  }\n} } }];"
+      },
+      "id": "e772b935-36da-449f-ab45-3ef62cbb30f3",
+      "name": "Montar evento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3104,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($json.calendar_id) }}/events?conferenceDataVersion=1&sendUpdates=all",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.evento) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "bfc59c38-d6f1-42c4-9f5a-b53077a74648",
+      "name": "Criar evento no Google",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3280,
+        832
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "x4fWudD224Kqwufs",
+          "name": "Google Calendar account"
+        }
+      },
+      "notes": "conferenceDataVersion=1 é OBRIGATÓRIO. neverError+fullResponse: em vez de estourar, devolve statusCode e body, e quem decide é o nó de resposta."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-409",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 409,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "083e61d5-c410-4aa8-ba26-2ecf3da72be8",
+      "name": "Ja existe (409)?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3456,
+        832
+      ],
+      "notesInFlow": true,
+      "notes": "409 = o QS reenviou o mesmo meeting_id. Não é erro: o evento já existe, basta buscar e devolver o mesmo link."
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($('Validar entrada1').first().json.calendar_id) }}/events/{{ encodeURIComponent($('Validar entrada1').first().json.event_id_previsto) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "1bc2d18a-d949-40db-bfbf-70669628a104",
+      "name": "Buscar evento existente1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3632,
+        720
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "x4fWudD224Kqwufs",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resposta única da ação criar. Serve tanto para insert novo quanto para o\n// caminho do 409 (evento já existia), porque os dois devolvem um Event.\n//\n// Nunca damos throw: o webhook responde 200 com ok:false e uma mensagem que se\n// entende. Throw viraria 500 com stack trace e o QS perderia o motivo.\nconst r = $input.first().json;\nconst d = $('Validar entrada1').first().json;\nconst status = r.statusCode;\nconst ev = r.body || {};\n\n// O 409 veio do POST, não deste nó: quando passamos pelo \"Buscar evento\n// existente\", o status que chega aqui é o do GET (200).\nlet veioDo409 = false;\ntry { veioDo409 = $('Ja existe (409)?1').first().json.statusCode === 409; } catch (e) { veioDo409 = false; }\n\nfunction motivo(body, st) {\n  if (typeof body === 'string') return body.slice(0, 300);\n  const e = body && body.error;\n  if (typeof e === 'string') return e.slice(0, 300);\n  if (e && (e.message || e.status)) return e.message || e.status;\n  return 'HTTP ' + st;\n}\n\nif (status >= 400) {\n  return [{ json: { ok: false, acao: 'criar', meeting_id: d.meeting_id, codigo: status, erro: motivo(ev, status) } }];\n}\n\n// EVENTO QUE EXISTE MAS ESTÁ CANCELADO.\n// O Google guarda o id de um evento apagado. Então: alguém apaga o evento na\n// mão, o QS tenta criar de novo com o mesmo meeting_id, o POST toma 409 e o GET\n// devolve 200 com status \"cancelled\" — e o hangoutLink da sala MORTA.\nif (ev.status === 'cancelled') {\n  return [{ json: {\n    ok: false,\n    acao: 'criar',\n    meeting_id: d.meeting_id,\n    codigo: 'evento_cancelado',\n    erro: 'o evento deste agendamento foi apagado no Google; refaça o agendamento no QS'\n  } }];\n}\n\n// hangoutLink é o link do Meet. Se vier vazio, quase sempre falta o\n// conferenceDataVersion=1 ou a conta não tem permissão de criar conferência.\nconst pontos = (ev.conferenceData && ev.conferenceData.entryPoints) || [];\nconst meet = ev.hangoutLink\n  || pontos.filter((p) => p.entryPointType === 'video').map((p) => p.uri)[0]\n  || null;\n\nreturn [{ json: {\n  ok: true,\n  acao: 'criar',\n  meeting_id: d.meeting_id,\n  calendar_id: d.calendar_id,\n  event_id: ev.id || null,\n  meet_link: meet,\n  html_link: ev.htmlLink || null,\n  sem_meet: !meet,\n  duplicado: veioDo409 || undefined,\n  convidados_descartados: d.convidados_descartados\n} }];"
+      },
+      "id": "7c1b7318-9729-4c0a-8229-620a7afb03e3",
+      "name": "Responder criacao1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PATCH só com o que muda. Não reenviamos conferenceData: a sala do Meet é\n// preservada, então o cliente que já tem o link continua com o link certo.\nconst d = $json;\n\nreturn [{ json: { ...d, patch: {\n  summary: d.titulo,\n  start: { dateTime: d.inicio, timeZone: d.timezone },\n  end:   { dateTime: d.fim,   timeZone: d.timezone }\n} } }];"
+      },
+      "id": "7120fa7c-4fa0-414e-99c0-5e63170a9858",
+      "name": "Montar atualizacao1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3104,
+        1024
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($json.calendar_id) }}/events/{{ encodeURIComponent($json.event_id) }}?sendUpdates=all",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.patch) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "6d4d8222-d649-455a-a614-0ed62ac76604",
+      "name": "Atualizar evento no Google1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3280,
+        1024
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "x4fWudD224Kqwufs",
+          "name": "Google Calendar account"
+        }
+      },
+      "notes": "sendUpdates=all faz o Google reenviar o convite atualizado sozinho. Sem isso o cliente continua com o lembrete no horário velho."
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst d = $('Validar entrada1').first().json;\nconst status = r.statusCode;\nconst ev = r.body || {};\n\nfunction motivo(body, st) {\n  if (typeof body === 'string') return body.slice(0, 300);\n  const e = body && body.error;\n  if (typeof e === 'string') return e.slice(0, 300);\n  if (e && (e.message || e.status)) return e.message || e.status;\n  return 'HTTP ' + st;\n}\n\n// 404/410 = o evento sumiu do Google (apagado na mão, por exemplo). Devolvemos\n// código nao_encontrado para o QS reagir chamando acao=criar.\nif (status === 404 || status === 410) {\n  return [{ json: {\n    ok: false,\n    acao: 'reagendar',\n    meeting_id: d.meeting_id,\n    codigo: 'nao_encontrado',\n    erro: 'evento não existe mais no Google; recrie com acao=criar'\n  } }];\n}\n\nif (status >= 400) {\n  return [{ json: { ok: false, acao: 'reagendar', meeting_id: d.meeting_id, codigo: status, erro: motivo(ev, status) } }];\n}\n\nconst pontos = (ev.conferenceData && ev.conferenceData.entryPoints) || [];\nconst meet = ev.hangoutLink\n  || pontos.filter((p) => p.entryPointType === 'video').map((p) => p.uri)[0]\n  || null;\n\nreturn [{ json: {\n  ok: true,\n  acao: 'reagendar',\n  meeting_id: d.meeting_id,\n  calendar_id: d.calendar_id,\n  event_id: ev.id || d.event_id,\n  meet_link: meet,\n  html_link: ev.htmlLink || null,\n  inicio: d.inicio,\n  fim: d.fim\n} }];"
+      },
+      "id": "a1662aa4-c843-4f9f-9204-d1f061adf3a9",
+      "name": "Responder atualizacao1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3456,
+        1024
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/{{ encodeURIComponent($json.calendar_id) }}/events/{{ encodeURIComponent($json.event_id) }}?sendUpdates=all",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "2ef770bd-c0fb-4a8d-b6cc-ba665f60baaf",
+      "name": "Cancelar evento no Google1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3104,
+        1264
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "x4fWudD224Kqwufs",
+          "name": "Google Calendar account"
+        }
+      },
+      "notes": "DELETE devolve 204 sem corpo. 404/410 também contam como sucesso: se o evento já não existe, o objetivo foi atingido."
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst d = $('Validar entrada1').first().json;\nconst status = r.statusCode;\n\nfunction motivo(body, st) {\n  if (typeof body === 'string') return body.slice(0, 300);\n  const e = body && body.error;\n  if (typeof e === 'string') return e.slice(0, 300);\n  if (e && (e.message || e.status)) return e.message || e.status;\n  return 'HTTP ' + st;\n}\n\n// Cancelar é idempotente: sucesso, já apagado ou nunca existiu dão no mesmo.\nconst apagado = status === 204 || status === 200 || status === 404 || status === 410;\n\nif (!apagado) {\n  return [{ json: { ok: false, acao: 'cancelar', meeting_id: d.meeting_id, codigo: status, erro: motivo(r.body, status) } }];\n}\n\nreturn [{ json: {\n  ok: true,\n  acao: 'cancelar',\n  meeting_id: d.meeting_id,\n  event_id: d.event_id,\n  ja_estava_apagado: status === 404 || status === 410 || undefined\n} }];"
+      },
+      "id": "47e8b995-7401-4c71-8d1b-d978786285ec",
+      "name": "Responder cancelamento1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3280,
+        1264
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Payload inválido nunca chega no Google. Responde 200 com ok:false e a lista\n// de erros, que é o suficiente para achar o problema sem abrir log.\nconst d = $json;\n\nreturn [{ json: {\n  ok: false,\n  acao: 'invalida',\n  meeting_id: d.meeting_id,\n  codigo: 'payload_invalido',\n  erro: (d.erros || []).join('; ') || 'payload invalido'\n} }];"
+      },
+      "id": "392ec660-fcf0-4b41-ad48-5f46af43c88c",
+      "name": "Responder payload invalido1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3104,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c0",
+              "name": "BITRIX_BASE",
+              "type": "string",
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg-perd",
+      "name": "Config Perdido",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        688,
+        1072
+      ],
+      "notesInFlow": true,
+      "notes": "Se trocar o token do Bitrix, troque em TODOS os nos de Config desta tela (a busca do n8n acha por \"TROQUE_PELO\")."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c0",
+              "name": "BITRIX_BASE",
+              "type": "string",
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg-nota",
+      "name": "Config Nota",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        688,
+        1248
+      ],
+      "notesInFlow": true,
+      "notes": "Se trocar o token do Bitrix, troque em TODOS os nos de Config desta tela (a busca do n8n acha por \"TROQUE_PELO\")."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c0",
+              "name": "BITRIX_BASE",
+              "type": "string",
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+            },
+            {
+              "id": "c1",
+              "name": "STAGE_GANHO",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg-ganho",
+      "name": "Config Ganho",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        688,
+        1424
+      ],
+      "notesInFlow": true,
+      "notes": "STAGE_GANHO vazio = so comenta na timeline, nao mexe na coluna. Se trocar o token do Bitrix, troque em TODOS os nos de Config desta tela (a busca do n8n acha por \"TROQUE_PELO\")."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c0",
+              "name": "BITRIX_BASE",
+              "type": "string",
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+            },
+            {
+              "id": "c1",
+              "name": "STAGE_DE",
+              "type": "string",
+              "value": "C25:PREPAYMENT_INVOIC"
+            },
+            {
+              "id": "c2",
+              "name": "STAGE_PARA",
+              "type": "string",
+              "value": "C25:UC_271QUB"
+            },
+            {
+              "id": "c3",
+              "name": "SO_ALCANCOU",
+              "type": "string",
+              "value": "nao"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg-pc",
+      "name": "Config 1o contato",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        688,
+        1616
+      ],
+      "notesInFlow": true,
+      "notes": "Se trocar o token do Bitrix, troque em TODOS os nos de Config desta tela (a busca do n8n acha por \"TROQUE_PELO\")."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c0",
+              "name": "BITRIX_BASE",
+              "type": "string",
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+            },
+            {
+              "id": "c1",
+              "name": "SUPABASE_URL",
+              "type": "string",
+              "value": "https://eabfjomrnucymduqnbci.supabase.co"
+            },
+            {
+              "id": "c2",
+              "name": "STAGE_REUNIAO",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfg-reu",
+      "name": "Config Reuniao",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        688,
+        1808
+      ],
+      "notesInFlow": true,
+      "notes": "STAGE_REUNIAO vazio = preenche os campos e NAO mexe na coluna. Se trocar o token do Bitrix, troque em TODOS os nos de Config desta tela (a busca do n8n acha por \"TROQUE_PELO\")."
+    }
+  ],
+  "connections": {
+    "Webhook Bitrix -> QS (qs-lead-inbound)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar": {
+      "main": [
+        [
+          {
+            "node": "Enviar ao QS (/api/lead-inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar ao QS (/api/lead-inbound)": {
+      "main": [
+        [
+          {
+            "node": "Lead é novo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead é novo?": {
+      "main": [
+        [
+          {
+            "node": "Nota: origem Bitrix (Fonte/Score)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Webhook Perdido (qs-perdido)": {
+      "main": [
+        [
+          {
+            "node": "Config Perdido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Nota (qs-nota)": {
+      "main": [
+        [
+          {
+            "node": "Config Nota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Ganho (qs-ganho)": {
+      "main": [
+        [
+          {
+            "node": "Config Ganho",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook 1o contato (qs-primeiro-contato)": {
+      "main": [
+        [
+          {
+            "node": "Config 1o contato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Reunião (qs-reuniao)": {
+      "main": [
+        [
+          {
+            "node": "Config Reuniao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Bitrix (atividade)": {
+      "main": [
+        [
+          {
+            "node": "Config (atividade Bitrix)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mover pra Perdido": {
+      "main": [
+        [
+          {
+            "node": "Comentário do perdido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar ganho": {
+      "main": [
+        [
+          {
+            "node": "Tem o que gravar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem o que gravar?": {
+      "main": [
+        [
+          {
+            "node": "Gravar ganho no card",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Comentário do ganho",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar ganho no card": {
+      "main": [
+        [
+          {
+            "node": "Comentário do ganho",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar negocio (1o contato)": {
+      "main": [
+        [
+          {
+            "node": "So se ainda estiver em Novo lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "So se ainda estiver em Novo lead": {
+      "main": [
+        [
+          {
+            "node": "Mover pra Follow-up 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mover pra Follow-up 1": {
+      "main": [
+        [
+          {
+            "node": "Comentario do 1o contato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar de-para": {
+      "main": [
+        [
+          {
+            "node": "Buscar opções",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar opções": {
+      "main": [
+        [
+          {
+            "node": "Montar reunião",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar reunião": {
+      "main": [
+        [
+          {
+            "node": "Gravar reunião no card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar reunião no card": {
+      "main": [
+        [
+          {
+            "node": "Comentário da reunião",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar reunião com erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comentário da reunião": {
+      "main": [
+        [
+          {
+            "node": "Marcar reunião sincronizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar reunião sincronizada": {
+      "main": [
+        [
+          {
+            "node": "Responder reunião ok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar reunião com erro": {
+      "main": [
+        [
+          {
+            "node": "Responder reunião erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config (atividade Bitrix)": {
+      "main": [
+        [
+          {
+            "node": "Ler evento do Bitrix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler evento do Bitrix": {
+      "main": [
+        [
+          {
+            "node": "Buscar atividade (crm.activity.get)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar atividade (crm.activity.get)": {
+      "main": [
+        [
+          {
+            "node": "So atividade concluida do funil",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "So atividade concluida do funil": {
+      "main": [
+        [
+          {
+            "node": "Buscar negocio no CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar negocio no CRM": {
+      "main": [
+        [
+          {
+            "node": "So se ainda estiver em Novo lead (Bitrix)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "So se ainda estiver em Novo lead (Bitrix)": {
+      "main": [
+        [
+          {
+            "node": "Mover pra Follow-up 1 (Bitrix)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mover pra Follow-up 1 (Bitrix)": {
+      "main": [
+        [
+          {
+            "node": "Comentario na timeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A cada 3 horas": {
+      "main": [
+        [
+          {
+            "node": "Validar/renovar token (sub-workflow)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar/renovar token (sub-workflow)": {
+      "main": [
+        [
+          {
+            "node": "Gravar token em qs_settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook QS (qs-agenda-meet)": {
+      "main": [
+        [
+          {
+            "node": "Validar entrada1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar entrada1": {
+      "main": [
+        [
+          {
+            "node": "Rotear acao1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rotear acao1": {
+      "main": [
+        [
+          {
+            "node": "Montar evento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Montar atualizacao1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cancelar evento no Google1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder payload invalido1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar evento": {
+      "main": [
+        [
+          {
+            "node": "Criar evento no Google",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar evento no Google": {
+      "main": [
+        [
+          {
+            "node": "Ja existe (409)?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ja existe (409)?1": {
+      "main": [
+        [
+          {
+            "node": "Buscar evento existente1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder criacao1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar evento existente1": {
+      "main": [
+        [
+          {
+            "node": "Responder criacao1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar atualizacao1": {
+      "main": [
+        [
+          {
+            "node": "Atualizar evento no Google1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar evento no Google1": {
+      "main": [
+        [
+          {
+            "node": "Responder atualizacao1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancelar evento no Google1": {
+      "main": [
+        [
+          {
+            "node": "Responder cancelamento1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config Perdido": {
+      "main": [
+        [
+          {
+            "node": "Mover pra Perdido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config Nota": {
+      "main": [
+        [
+          {
+            "node": "Comentario da nota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config Ganho": {
+      "main": [
+        [
+          {
+            "node": "Montar ganho",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config 1o contato": {
+      "main": [
+        [
+          {
+            "node": "Buscar negocio (1o contato)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config Reuniao": {
+      "main": [
+        [
+          {
+            "node": "Buscar de-para",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveDataErrorExecution": "all"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "91aa63e4f74d7cbe350736303e89cc11603c939156428dd97f3f611c857dbb64"
+  }
+}
