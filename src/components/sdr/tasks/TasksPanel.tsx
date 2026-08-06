@@ -644,7 +644,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Perguntar era pedir pro SDR digitar o que o sistema já sabe — e a lista fixa
   // nem tinha todo mundo (a Yanca não estava lá, e sem escolher não dava pra
   // confirmar o ganho).
-  const [meeting, setMeeting] = useState({ emailCliente: "", dataAgendamento: "", responsavel: "", responsavelId: "", dataHora: "" });
+  const [meeting, setMeeting] = useState({ emailCliente: "", dataAgendamento: "", responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 });
   const [savingMeeting, setSavingMeeting] = useState(false);
 
   // New Lead Modal
@@ -1137,7 +1137,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const yyyy = hoje.getFullYear();
     const mm = String(hoje.getMonth() + 1).padStart(2, "0");
     const dd = String(hoje.getDate()).padStart(2, "0");
-    setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "" });
+    setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 });
     setPendingResult(null);
     setMeetingFor({ taskId: task.id, leadId: task.lead_id, leadName: lead?.full_name ?? "Lead" });
   }
@@ -1182,9 +1182,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // O horário é conferido contra a agenda do closer ANTES de gravar (janela de
     // atendimento, bloqueio, antecedência, choque). O banco só barra o choque.
     const inicio = new Date(meeting.dataHora);
-    const impedimento = await validarHorario(meeting.responsavelId, inicio, 60);
+    // Confere a duração ESCOLHIDA: com 60 fixo, uma reunião de 1h30 passava na
+    // validação e só batia no choque do banco (ou pior, entrava por cima da
+    // reunião seguinte quando o intervalo entre elas era maior que uma hora).
+    const impedimento = await validarHorario(meeting.responsavelId, inicio, meeting.duracaoMin);
     if (impedimento) {
-      notifyError(`${impedimento} Escolha um horário livre na agenda acima.`);
+      // Diz a duração: a miniatura marca os horários livres pelo tamanho do slot
+      // do closer, então um horário que PARECE livre pode não comportar uma
+      // reunião mais longa — sem essa frase o SDR não entende por que foi barrado.
+      notifyError(`${impedimento} Escolha um horário livre na agenda acima (a reunião ocupa ${meeting.duracaoMin} min).`);
       return;
     }
     setSavingMeeting(true);
@@ -1224,7 +1230,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         closer_name: meeting.responsavel || null,
         title: `Reunião — ${leadName}`,
         scheduled_at: new Date(meeting.dataHora),
-        duration_min: 60,
+        duration_min: meeting.duracaoMin,
         location: "Google Meet",
         notes: resumo,
         booking_date: meeting.dataAgendamento || null,
@@ -3837,6 +3843,32 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <p className="mt-1 text-[10.5px] text-gray-400">
                   O horário é conferido contra a agenda do responsável antes de gravar.
                 </p>
+              </div>
+
+              {/* Duração: era 60 min fixo no código. A reunião reserva esse tempo
+                  na agenda do especialista e é a duração do evento no Google. */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Duração da reunião</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[30, 45, 60, 90].map((min) => {
+                    const ativo = meeting.duracaoMin === min;
+                    return (
+                      <button
+                        key={min}
+                        type="button"
+                        onClick={() => setMeeting((m) => ({ ...m, duracaoMin: min }))}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                          ativo
+                            ? "border-transparent text-white"
+                            : "border-gray-200 bg-white text-gray-700 hover:border-green-400 hover:text-green-700"
+                        }`}
+                        style={ativo ? { background: "var(--green)" } : undefined}
+                      >
+                        {min >= 60 && min % 60 === 0 ? `${min / 60}h` : min === 90 ? "1h30" : `${min} min`}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Observações da atividade</label>

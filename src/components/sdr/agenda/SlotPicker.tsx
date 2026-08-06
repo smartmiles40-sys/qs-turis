@@ -74,6 +74,9 @@ export default function SlotPicker({
   const [stripStart, setStripStart] = useState<Date>(startOfDay(initialDate ?? new Date()));
   const [manual, setManual] = useState(false);
   const [manualTime, setManualTime] = useState("");
+  // Quantos blocos da grade do closer a reunião ocupa. 1 = o padrão de antes,
+  // então nada muda pra quem não mexer aqui.
+  const [blocos, setBlocos] = useState(1);
 
   useEffect(() => {
     let alive = true;
@@ -125,6 +128,51 @@ export default function SlotPicker({
     [stripStart]
   );
 
+  // ── Duração ───────────────────────────────────────────────────────────────
+  // A grade do closer é feita de blocos de `slot_minutes`. Uma reunião mais
+  // longa ocupa blocos SEGUIDOS — então o horário só serve se os seguintes
+  // também estiverem livres e colados. Sem esta conta, o SDR escolheria 1h num
+  // horário com 30 min livres e o banco recusaria na hora de salvar.
+  const slotMinutes = config?.slot_minutes ?? 30;
+  const duracaoMin = blocos * slotMinutes;
+  const opcoesDuracao = useMemo(
+    () => [1, 2, 3].map((b) => ({ blocos: b, min: b * slotMinutes })),
+    [slotMinutes]
+  );
+
+  /** Inícios que NÃO comportam a duração escolhida. */
+  const naoCabe = useMemo(() => {
+    const fora = new Set<number>();
+    if (blocos <= 1) return fora;
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      if (!s.available) continue;
+      for (let k = 1; k < blocos; k++) {
+        const anterior = slots[i + k - 1];
+        const proximo = slots[i + k];
+        // Colados: o próximo tem que começar exatamente onde o anterior termina
+        // (buffer entre reuniões cria buraco, e aí não dá pra emendar).
+        if (!proximo || !proximo.available || proximo.start.getTime() !== anterior.end.getTime()) {
+          fora.add(s.start.getTime());
+          break;
+        }
+      }
+    }
+    return fora;
+  }, [slots, blocos]);
+
+  // Trocar a duração pode invalidar o horário já escolhido. Mantém a escolha
+  // quando ela ainda cabe (só atualiza os minutos) e descarta quando não cabe.
+  useEffect(() => {
+    if (!value || value.closerId !== closerId) return;
+    if (naoCabe.has(value.start.getTime())) {
+      onChange(null);
+      return;
+    }
+    if (value.durationMin !== duracaoMin) onChange({ ...value, durationMin: duracaoMin });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duracaoMin, naoCabe]);
+
   /** Livres por dia da régua — é o que faz o SDR ver "quarta tá cheia" sem clicar. */
   const freeByDay = useMemo(() => {
     if (!slotInput) return new Map<number, number>();
@@ -137,12 +185,11 @@ export default function SlotPicker({
 
   function pick(slot: Slot) {
     if (!selectedCloser || !config) return;
-    const durationMin = Math.round((slot.end.getTime() - slot.start.getTime()) / 60_000);
     onChange({
       closerId: selectedCloser.id,
       closerName: selectedCloser.name,
       start: slot.start,
-      durationMin,
+      durationMin: duracaoMin,
       link: config.default_link,
     });
   }
@@ -157,14 +204,15 @@ export default function SlotPicker({
       closerId: selectedCloser.id,
       closerName: selectedCloser.name,
       start,
-      durationMin: config.slot_minutes,
+      durationMin: duracaoMin,
       link: config.default_link,
     });
   }
 
   function selectCloser(id: string) {
     setCloserId(id);
-    onChange(null); // trocar de closer invalida o horário escolhido
+    setBlocos(1);    // a grade do próximo closer pode ter outro tamanho de bloco
+    onChange(null);  // trocar de closer invalida o horário escolhido
   }
 
   function selectDay(d: Date) {
@@ -188,7 +236,9 @@ export default function SlotPicker({
   }
 
   const bookableClosers = closers.filter((c) => configFor(c.id, configs).is_bookable);
-  const freeSlots = slots.filter((s) => s.available);
+  // "Livre" aqui é livre PRA ESTA DURAÇÃO — contar slots que não comportam a
+  // reunião escolhida diria "3 livres" numa grade sem nenhum início utilizável.
+  const freeSlots = slots.filter((s) => s.available && !naoCabe.has(s.start.getTime()));
 
   return (
     <div className="space-y-3">
@@ -290,6 +340,36 @@ export default function SlotPicker({
             </div>
           </div>
 
+          {/* ── Duração ── */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">Duração</label>
+            <div className="flex flex-wrap gap-1.5">
+              {opcoesDuracao.map((o) => {
+                const ativo = o.blocos === blocos;
+                return (
+                  <button
+                    key={o.blocos}
+                    type="button"
+                    onClick={() => setBlocos(o.blocos)}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      ativo
+                        ? "border-[#0147FF] bg-[#0147FF] text-white"
+                        : "border-gray-200 bg-white text-gray-700 hover:border-[#0147FF] hover:text-[#0147FF]"
+                    }`}
+                  >
+                    {o.min >= 60 && o.min % 60 === 0 ? `${o.min / 60}h` : `${o.min} min`}
+                  </button>
+                );
+              })}
+            </div>
+            {blocos > 1 && (
+              <p className="mt-1.5 text-[11px] text-gray-400">
+                Reunião de {duracaoMin} min ocupa {blocos} horários seguidos — só aparecem
+                os inícios com todos eles livres.
+              </p>
+            )}
+          </div>
+
           {/* ── Horários ── */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
@@ -335,7 +415,12 @@ export default function SlotPicker({
                   const active =
                     value?.start != null && value.start.getTime() === s.start.getTime() && value.closerId === closerId;
                   const label = hhmm(s.start);
-                  const title = s.available
+                  // Livre no slot, mas curto demais pra duração escolhida.
+                  const curto = s.available && naoCabe.has(s.start.getTime());
+                  const disponivel = s.available && !curto;
+                  const title = curto
+                    ? `Não cabe ${duracaoMin} min a partir das ${label}`
+                    : s.available
                     ? `Agendar às ${label}`
                     : s.reason === "ocupado"
                       ? `Ocupado — ${s.meeting?.lead_name ?? s.meeting?.title ?? "reunião"}`
@@ -350,15 +435,19 @@ export default function SlotPicker({
                     <button
                       key={s.start.getTime()}
                       type="button"
-                      onClick={() => s.available && pick(s)}
-                      disabled={!s.available}
+                      onClick={() => disponivel && pick(s)}
+                      disabled={!disponivel}
                       title={title}
                       className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
                         active
                           ? "border-[#0147FF] bg-[#0147FF] text-white"
-                          : s.available
+                          : disponivel
                             ? "border-gray-200 bg-white text-gray-700 hover:border-[#0147FF] hover:text-[#0147FF]"
-                            : "border-transparent bg-gray-100 text-gray-400 cursor-not-allowed line-through"
+                            : curto
+                              // Curto ≠ ocupado: sem risco de o SDR achar que o
+                              // closer está cheio quando é só a duração que não cabe.
+                              ? "border-dashed border-gray-200 bg-white text-gray-300 cursor-not-allowed"
+                              : "border-transparent bg-gray-100 text-gray-400 cursor-not-allowed line-through"
                       }`}
                     >
                       {label}
