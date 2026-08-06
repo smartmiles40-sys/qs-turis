@@ -13,6 +13,13 @@
 
 import { supabase } from "@/lib/supabase";
 
+/** Uma reação numa mensagem. `autor` é 'lead' ou o uuid do usuário que reagiu. */
+export interface WaReacao {
+  emoji: string;
+  autor: string;
+  nome: string | null;
+}
+
 export interface WaMessage {
   id: string;
   lead_id: string;
@@ -22,6 +29,8 @@ export interface WaMessage {
   attachments: { type: string; url: string }[];
   sender_name: string | null;
   sent_at: string;
+  /** Só existe depois da migration 0041 — por isso o select pede "*". */
+  reactions?: WaReacao[] | null;
 }
 
 export interface WaThreadLead {
@@ -260,9 +269,12 @@ export async function getThreadInbox(leadId: string): Promise<{ inbox: number | 
 }
 
 export async function listMessages(leadId: string, limit = 200): Promise<WaMessage[]> {
+  // "*" de propósito (mesma lição do avatar_url): a coluna `reactions` só existe
+  // depois da 0041 — listar colunas quebraria a conversa inteira num banco que
+  // ainda não recebeu a migration.
   const { data, error } = await supabase
     .from("qs_wa_messages")
-    .select("id,lead_id,cw_message_id,direction,content,attachments,sender_name,sent_at")
+    .select("*")
     .eq("lead_id", leadId)
     .order("sent_at", { ascending: true })
     .limit(limit);
@@ -414,6 +426,143 @@ export async function sendWaMedia(
   }
 }
 
+// ── Reações ─────────────────────────────────────────────────────────────────
+
+export interface WaReactResult {
+  ok: boolean;
+  /** A lista nova de reações da mensagem (já com a troca aplicada). */
+  reactions?: WaReacao[];
+  /** true = a reação chegou no WhatsApp do cliente; false = ficou só no QS. */
+  entregue?: boolean;
+  motivo?: string | null;
+  error?: string;
+}
+
+/** Reage a uma mensagem (emoji "" remove). Uma reação por pessoa, como no WhatsApp. */
+export async function reagirMensagem(
+  leadId: string,
+  messageId: string,
+  emoji: string
+): Promise<WaReactResult> {
+  try {
+    const res = await fetch("/api/wa-react", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ leadId, messageId, emoji }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data?.error || "Não consegui reagir." };
+    return { ok: true, reactions: data?.reactions ?? [], entregue: data?.entregue === true, motivo: data?.motivo ?? null };
+  } catch {
+    return { ok: false, error: "Sem conexão. Tente de novo." };
+  }
+}
+
+// ── Figurinhas (a galeria pessoal do SDR) ───────────────────────────────────
+// `dado` é um data-url (figurinha que o SDR subiu, convertida no navegador) ou
+// a URL do Chatwoot (figurinha salva de uma conversa). A tabela tem RLS por
+// dono — cada um enxerga só a própria galeria.
+
+export interface Figurinha { id: string; dado: string }
+
+export async function listFigurinhas(): Promise<Figurinha[]> {
+  const { data, error } = await supabase
+    .from("qs_wa_figurinhas")
+    .select("id,dado")
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.warn("[wa] listFigurinhas:", error.message);
+    return [];
+  }
+  return (data ?? []) as Figurinha[];
+}
+
+/** Guarda na galeria. Salvar a mesma figurinha duas vezes não duplica. */
+export async function salvarFigurinha(dado: string): Promise<{ ok: boolean; error?: string }> {
+  const { data: sess } = await supabase.auth.getSession();
+  const uid = sess.session?.user.id;
+  if (!uid) return { ok: false, error: "Sessão expirada." };
+  const { error } = await supabase.from("qs_wa_figurinhas").insert({ user_id: uid, dado });
+  if (error) {
+    if (error.code === "23505") return { ok: true };   // já estava salva
+    if (/qs_wa_figurinhas/.test(error.message) && /not exist|não existe/i.test(error.message)) {
+      return { ok: false, error: "Galeria ainda não ativada no banco (falta a migration 0041)." };
+    }
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}
+
+export async function removerFigurinha(id: string): Promise<boolean> {
+  const { error } = await supabase.from("qs_wa_figurinhas").delete().eq("id", id);
+  if (error) console.warn("[wa] removerFigurinha:", error.message);
+  return !error;
+}
+
+/** Manda uma figurinha da galeria pra conversa. */
+export async function enviarFigurinha(leadId: string, fig: Figurinha): Promise<WaSendResult> {
+  // Subida pelo SDR: o arquivo está no próprio dado (data-url) — vira Blob e
+  // segue o caminho normal de mídia.
+  if (fig.dado.startsWith("data:")) {
+    const blob = await (await fetch(fig.dado)).blob();
+    return sendWaMedia(leadId, blob, "figurinha.webp", "", false);
+  }
+  // Salva de uma conversa: só temos a URL do Chatwoot, e o CORS impede o
+  // navegador de baixá-la — quem busca o arquivo é o servidor.
+  try {
+    const res = await fetch("/api/wa-send-media", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ leadId, stickerUrl: fig.dado, fileName: "figurinha.webp" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Sem conexão. Tente de novo." };
+  }
+}
+
+/**
+ * Converte uma imagem qualquer (png/jpg/webp) em figurinha: quadrado de 512px
+ * com fundo transparente, webp — o formato que o WhatsApp trata como sticker.
+ * Devolve o data-url pronto pra galeria.
+ */
+export async function converterParaFigurinha(file: File): Promise<{ dado?: string; error?: string }> {
+  if (!file.type.startsWith("image/")) return { error: "Escolha uma imagem." };
+  try {
+    const bitmap = await createImageBitmap(file);
+    const LADO = 512;
+    const canvas = document.createElement("canvas");
+    canvas.width = LADO;
+    canvas.height = LADO;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return { error: "Navegador sem suporte." };
+    // "contain": a imagem inteira aparece, centrada, sobra transparente.
+    const escala = Math.min(LADO / bitmap.width, LADO / bitmap.height);
+    const w = Math.round(bitmap.width * escala);
+    const h = Math.round(bitmap.height * escala);
+    ctx.drawImage(bitmap, (LADO - w) / 2, (LADO - h) / 2, w, h);
+
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/webp", 0.9));
+    if (!blob || blob.type !== "image/webp") {
+      // Safari não exporta webp; sem webp não existe figurinha de verdade.
+      return { error: "Este navegador não gera figurinha (use o Chrome ou Edge)." };
+    }
+    if (blob.size > 300 * 1024) return { error: "Imagem complexa demais pra virar figurinha." };
+
+    const dado = await new Promise<string>((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onerror = () => reject(new Error("falha ao ler"));
+      fr.onload = () => resolve(String(fr.result || ""));
+      fr.readAsDataURL(blob);
+    });
+    return { dado };
+  } catch {
+    return { error: "Não consegui converter a imagem." };
+  }
+}
+
 // ── Respostas prontas ───────────────────────────────────────────────────────
 
 export interface CannedResponse { atalho: string; texto: string }
@@ -463,16 +612,31 @@ let canalSeq = 0;
 const ouvintesThreads = new Set<() => void>();
 let canalThreads: ReturnType<typeof supabase.channel> | null = null;
 
-/** Mensagens novas de UM lead. Devolve a função de desinscrever. */
-export function subscribeToMessages(leadId: string, onInsert: (m: WaMessage) => void): () => void {
-  const ch = supabase
+/**
+ * Mensagens novas de UM lead — e, com `onUpdate`, também as MUDANÇAS nas que já
+ * estão na tela (hoje isso significa: chegou/saiu uma reação). Devolve a função
+ * de desinscrever.
+ */
+export function subscribeToMessages(
+  leadId: string,
+  onInsert: (m: WaMessage) => void,
+  onUpdate?: (m: WaMessage) => void
+): () => void {
+  let ch = supabase
     .channel(`qs_wa_msgs_${leadId}_${++canalSeq}`)
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "qs_wa_messages", filter: `lead_id=eq.${leadId}` },
       (payload) => onInsert(payload.new as WaMessage)
-    )
-    .subscribe();
+    );
+  if (onUpdate) {
+    ch = ch.on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "qs_wa_messages", filter: `lead_id=eq.${leadId}` },
+      (payload) => onUpdate(payload.new as WaMessage)
+    );
+  }
+  ch.subscribe();
   return () => { supabase.removeChannel(ch); };
 }
 

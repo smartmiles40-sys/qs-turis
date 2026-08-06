@@ -18,7 +18,7 @@
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cwForm,
   ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, ingestMessage,
-  inboxPermitida, assinarComoUsuario,
+  inboxPermitida, assinarComoUsuario, CW_BASE,
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 
@@ -83,23 +83,50 @@ export default async function handler(req, res) {
   const dataBase64 = String(body.dataBase64 || '');
   const isVoiceMessage = body.isVoiceMessage === true || body.isVoiceMessage === 'true';
 
+  // Figurinha salva da galeria: o navegador manda só a URL (o arquivo mora no
+  // Chatwoot e o CORS impede o front de baixá-lo). O servidor busca — e SÓ do
+  // nosso Chatwoot: URL de fora é recusada, senão isto vira um proxy aberto.
+  const stickerUrl = String(body.stickerUrl || '').trim();
+
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
-  if (!dataBase64) return res.status(400).json({ error: 'Arquivo vazio' });
+  if (!dataBase64 && !stickerUrl) return res.status(400).json({ error: 'Arquivo vazio' });
 
   const inboxPedida = inboxPermitida(body.inboxId);
   if (inboxPedida == null && body.inboxId != null && body.inboxId !== '') {
     return res.status(400).json({ error: 'Esse número não está liberado para envio.' });
   }
-  if (!TIPOS_OK.includes(mimeType)) {
-    return res.status(415).json({ error: 'Tipo de arquivo não aceito.' });
+  let bytes;
+  let mimeFinal = mimeType;
+
+  if (stickerUrl) {
+    if (!stickerUrl.startsWith(`${CW_BASE}/`)) {
+      return res.status(400).json({ error: 'Figurinha inválida.' });
+    }
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15_000);
+    try {
+      const r = await fetch(stickerUrl, { signal: ctrl.signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      bytes = Buffer.from(await r.arrayBuffer());
+      const tipo = String(r.headers.get('content-type') || '').split(';')[0].trim();
+      mimeFinal = TIPOS_OK.includes(tipo) ? tipo : 'image/webp';
+    } catch (e) {
+      console.error('[wa-send-media] baixar figurinha:', e?.message);
+      return res.status(502).json({ error: 'Não consegui baixar a figurinha salva.' });
+    } finally {
+      clearTimeout(timer);
+    }
+  } else {
+    if (!TIPOS_OK.includes(mimeType)) {
+      return res.status(415).json({ error: 'Tipo de arquivo não aceito.' });
+    }
+    try {
+      bytes = Buffer.from(dataBase64, 'base64');
+    } catch {
+      return res.status(400).json({ error: 'Arquivo inválido' });
+    }
   }
 
-  let bytes;
-  try {
-    bytes = Buffer.from(dataBase64, 'base64');
-  } catch {
-    return res.status(400).json({ error: 'Arquivo inválido' });
-  }
   if (!bytes.length) return res.status(400).json({ error: 'Arquivo vazio' });
   if (bytes.length > MAX_BYTES) {
     return res.status(413).json({ error: 'Arquivo grande demais (máx. 3 MB).' });
@@ -156,8 +183,8 @@ export default async function handler(req, res) {
     // - FIGURINHA (webp sem legenda): sticker não carrega texto — a assinatura
     //   entraria como legenda (assinarTexto('') devolve `*Nome*`) e forçaria o
     //   envio como imagem comum em vez de figurinha.
-    const ehNotaDeVoz = isVoiceMessage && mimeType.startsWith('audio/');
-    const ehFigurinha = mimeType === 'image/webp' && !caption;
+    const ehNotaDeVoz = isVoiceMessage && mimeFinal.startsWith('audio/');
+    const ehFigurinha = mimeFinal === 'image/webp' && !caption;
     const captionFinal = (ehNotaDeVoz || ehFigurinha)
       ? caption
       : await assinarComoUsuario(caption, auth.user);
@@ -168,13 +195,13 @@ export default async function handler(req, res) {
     if (captionFinal) form.append('content', captionFinal);
     // Marca a bolha como nota de voz no Chatwoot (player com onda em vez de
     // "arquivo"). Quem manda no WhatsApp é o formato — isto é só a UI de lá.
-    if (isVoiceMessage && mimeType.startsWith('audio/')) {
+    if (isVoiceMessage && mimeFinal.startsWith('audio/')) {
       form.append('is_voice_message', 'true');
     }
     form.append(
       'attachments[]',
-      new Blob([bytes], { type: mimeType }),
-      nomeComExtensaoCerta(fileName, mimeType)
+      new Blob([bytes], { type: mimeFinal }),
+      nomeComExtensaoCerta(fileName, mimeFinal)
     );
 
     const sent = await cwForm(`/conversations/${conversationId}/messages`, form);
@@ -194,11 +221,14 @@ export default async function handler(req, res) {
         inboxId,
         message: {
           id: sent?.id ?? null,
-          content: captionFinal || (temUrl ? '' : rotuloDe(mimeType)),
+          content: captionFinal || (temUrl ? '' : rotuloDe(mimeFinal)),
           message_type: 1,
           created_at: sent?.created_at ?? null,
           attachments: anexos,
           sender: { name: auth.user?.name || null },
+          // O id no WhatsApp costuma chegar só no message_updated do webhook,
+          // mas quando o Chatwoot já devolve, aproveita.
+          source_id: sent?.source_id ?? null,
         },
       });
       tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);

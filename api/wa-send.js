@@ -124,6 +124,9 @@ export default async function handler(req, res) {
           message_type: 1,
           created_at: sent?.created_at ?? null,
           sender: { name: auth.user?.name || null },
+          // Id no WhatsApp (quando o Chatwoot já devolve) — liga a mensagem às
+          // reações da 0041; o message_updated do webhook completa os demais.
+          source_id: sent?.source_id ?? null,
         },
       });
       tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);

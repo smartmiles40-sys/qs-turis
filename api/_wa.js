@@ -612,21 +612,33 @@ export async function ingestMessage({ leadId, conversationId, message, contactId
 
   const sentAt = parseCwDate(message?.created_at);
 
-  const out = await rest('rpc/qs_wa_ingest', {
-    method: 'POST',
-    body: {
-      p_lead: leadId,
-      p_conv: conversationId ?? null,
-      p_msg: message?.id ?? null,
-      p_direction: direction,
-      p_content: content,
-      p_attachments: attachments,
-      p_sender: message?.sender?.name || null,
-      p_sent_at: sentAt,
-      p_contact: contactId,
-      p_can_reply: canReply,
-      p_inbox: inboxId == null ? null : Number(inboxId),
-    },
-  });
-  return out === true;
+  const corpo = {
+    p_lead: leadId,
+    p_conv: conversationId ?? null,
+    p_msg: message?.id ?? null,
+    p_direction: direction,
+    p_content: content,
+    p_attachments: attachments,
+    p_sender: message?.sender?.name || null,
+    p_sent_at: sentAt,
+    p_contact: contactId,
+    p_can_reply: canReply,
+    p_inbox: inboxId == null ? null : Number(inboxId),
+    // O id da mensagem NO WHATSAPP (o Chatwoot repassa como source_id). É o que
+    // permite casar uma REAÇÃO do cliente com a mensagem certa (0041).
+    p_source: message?.source_id ? String(message.source_id) : null,
+  };
+
+  try {
+    const out = await rest('rpc/qs_wa_ingest', { method: 'POST', body: corpo });
+    return out === true;
+  } catch (e) {
+    // Banco ainda na assinatura antiga (migration 0041 não aplicada): o RPC não
+    // conhece p_source e o PostgREST recusa a chamada inteira. Mensagem não pode
+    // parar de entrar por causa disso — repete sem o parâmetro novo.
+    if (!/p_source|qs_wa_ingest/i.test(String(e?.message))) throw e;
+    const { p_source: _ignorado, ...legado } = corpo;
+    const out = await rest('rpc/qs_wa_ingest', { method: 'POST', body: legado });
+    return out === true;
+  }
 }

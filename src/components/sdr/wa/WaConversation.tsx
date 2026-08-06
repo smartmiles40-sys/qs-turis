@@ -16,7 +16,8 @@ import ErroDeParte from "../ErroDeParte";
 import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
   listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros, getThreadInbox,
-  type WaMessage, type CannedResponse, type WaNumero,
+  reagirMensagem, salvarFigurinha, enviarFigurinha,
+  type WaMessage, type CannedResponse, type WaNumero, type Figurinha, type WaReacao,
 } from "@/lib/qs/waInbox";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { loadSignatureName } from "@/lib/qs/waSignature";
@@ -27,6 +28,31 @@ import { WaTexto, tamanhoEmojiSolto } from "./waFormat";
 // O seletor carrega junto com a lista de emojis, e só quando a SDR abre pela
 // primeira vez — não é peso que todo mundo paga pra ver a conversa.
 const WaEmojiPicker = lazyPagina(() => import("./WaEmojiPicker"));
+// Mesma regra pra galeria de figurinhas.
+const WaFigurinhas = lazyPagina(() => import("./WaFigurinhas"));
+
+// As seis do WhatsApp — reagir de novo com a mesma troca por remoção.
+const REACOES_RAPIDAS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+/** É uma figurinha? (um anexo de imagem .webp, sem texto junto) */
+function urlDeFigurinha(m: WaMessage): string | null {
+  if (m.content || m.attachments?.length !== 1) return null;
+  const a = m.attachments[0];
+  if (a.type !== "image" || !/\.webp($|\?)/i.test(a.url)) return null;
+  return a.url;
+}
+
+/** Agrupa por emoji pra "pill": 👍 2 (com os nomes no title). */
+function agruparReacoes(rs: WaReacao[]) {
+  const mapa = new Map<string, { emoji: string; n: number; nomes: string[] }>();
+  for (const r of rs) {
+    const g = mapa.get(r.emoji) ?? { emoji: r.emoji, n: 0, nomes: [] };
+    g.n += 1;
+    g.nomes.push(r.nome || (r.autor === "lead" ? "Cliente" : "SDR"));
+    mapa.set(r.emoji, g);
+  }
+  return [...mapa.values()];
+}
 
 
 interface Props {
@@ -119,6 +145,10 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
   // Emojis
   const [mostrarEmojis, setMostrarEmojis] = useState(false);
+  // Figurinhas (galeria) e reações
+  const [mostrarFigurinhas, setMostrarFigurinhas] = useState(false);
+  // Qual mensagem está com a paleta de reação aberta (id) — uma por vez.
+  const [reagindoA, setReagindoA] = useState<string | null>(null);
   // Onde estava o cursor no campo de escrever. Precisa ser lembrado por fora
   // porque escolher um emoji NÃO devolve o foco pro textarea — quem clicou em
   // três emojis seguidos, ou buscou "aviao", perderia o lugar a cada clique.
@@ -169,6 +199,8 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setAviso(null);
     setSemConversa(false);
     setMostrarEmojis(false);
+    setMostrarFigurinhas(false);
+    setReagindoA(null);
     stickToBottom.current = true;
     caretRef.current = null;
     setText(initialText || "");
@@ -197,14 +229,34 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     return () => { vivo = false; };
   }, [leadId, recarregar, initialText]);
 
-  // Realtime: mensagem nova (dos dois lados) entra sem recarregar.
+  // Realtime: mensagem nova (dos dois lados) entra sem recarregar — e mudança
+  // numa mensagem que já está na tela (reação que chegou/saiu) atualiza a bolha.
   useEffect(() => {
-    const off = subscribeToMessages(leadId, (nova) => {
-      setMessages((prev) => (prev.some((m) => m.id === nova.id) ? prev : [...prev, nova]));
-      markThreadRead(leadId);
-    });
+    const off = subscribeToMessages(
+      leadId,
+      (nova) => {
+        setMessages((prev) => (prev.some((m) => m.id === nova.id) ? prev : [...prev, nova]));
+        markThreadRead(leadId);
+      },
+      (mudou) => {
+        setMessages((prev) => prev.map((m) => (m.id === mudou.id ? { ...m, ...mudou } : m)));
+      }
+    );
     return off;
   }, [leadId]);
+
+  // Paleta de reação fecha ao clicar em qualquer outro lugar (ou com Esc, no
+  // handler do teclado). Tudo que pertence à paleta carrega data-wa-react.
+  useEffect(() => {
+    if (!reagindoA) return;
+    const fechar = (ev: PointerEvent) => {
+      const el = ev.target as HTMLElement | null;
+      if (el?.closest?.("[data-wa-react]")) return;
+      setReagindoA(null);
+    };
+    document.addEventListener("pointerdown", fechar);
+    return () => document.removeEventListener("pointerdown", fechar);
+  }, [reagindoA]);
 
   // ── Rede de segurança do tempo real ────────────────────────────────────────
   // O realtime funciona (testado de ponta a ponta), mas ele é um WEBSOCKET numa
@@ -322,6 +374,46 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setText("");
   }, [enviarMidia, text]);
 
+  // ── Reações ────────────────────────────────────────────────────────────────
+  // Uma por pessoa, como no WhatsApp: reagir de novo troca; o mesmo emoji
+  // remove. A resposta do servidor traz a lista pronta — nada de adivinhar.
+  const reagir = useCallback(async (m: WaMessage, emoji: string) => {
+    setReagindoA(null);
+    const minha = (m.reactions ?? []).find((r) => r.autor === currentUser?.id);
+    const alvo = minha?.emoji === emoji ? "" : emoji;
+    const r = await reagirMensagem(leadId, m.id, alvo);
+    if (!r.ok) { setErro(r.error || "Não consegui reagir."); return; }
+    setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, reactions: r.reactions ?? [] } : x)));
+    // Honestidade: reação que ficou só no QS não pode passar por entregue.
+    if (alvo && r.entregue === false) {
+      setAviso(r.motivo === "evolution-nao-configurada"
+        ? "Reação registrada no QS. Pra ela chegar no WhatsApp do cliente, falta ligar a Evolution (Config)."
+        : "Reação registrada no QS, mas não chegou no WhatsApp do cliente.");
+      window.setTimeout(() => setAviso(null), 6000);
+    }
+  }, [leadId, currentUser?.id]);
+
+  // ── Figurinhas ─────────────────────────────────────────────────────────────
+  const salvarFig = useCallback(async (url: string) => {
+    const r = await salvarFigurinha(url);
+    if (!r.ok) { setErro(r.error || "Não consegui salvar a figurinha."); return; }
+    setErro(null);
+    setAviso("Figurinha salva na sua galeria.");
+    window.setTimeout(() => setAviso(null), 3000);
+  }, []);
+
+  const mandarFigurinha = useCallback(async (fig: Figurinha) => {
+    setMostrarFigurinhas(false);
+    setSending(true);
+    setErro(null);
+    const r = await enviarFigurinha(leadId, fig);
+    setSending(false);
+    if (!r.ok) { setErro(r.error || "Não consegui enviar a figurinha."); return; }
+    setSemConversa(false);
+    stickToBottom.current = true;
+    await recarregar();
+  }, [leadId, recarregar]);
+
   // ── Áudio ──────────────────────────────────────────────────────────────────
   const pararGravacao = useCallback((cancelar: boolean) => {
     cancelarRef.current = cancelar;
@@ -428,9 +520,16 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     if (focado) requestAnimationFrame(() => el.setSelectionRange(depois, depois));
   }, [text]);
 
-  // Os dois painéis dividem o mesmo espaço acima do campo; abrir um fecha o outro.
+  // Os painéis dividem o mesmo espaço acima do campo; abrir um fecha os outros.
   const alternarEmojis = useCallback(() => {
     setMostrarEmojis((v) => !v);
+    setMostrarCanned(false);
+    setMostrarFigurinhas(false);
+  }, []);
+
+  const alternarFigurinhas = useCallback(() => {
+    setMostrarFigurinhas((v) => !v);
+    setMostrarEmojis(false);
     setMostrarCanned(false);
   }, []);
 
@@ -442,12 +541,14 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setText(v);
     const abreCanned = v.startsWith("/") && canned.length > 0;
     setMostrarCanned(abreCanned);
-    if (abreCanned) setMostrarEmojis(false);
+    if (abreCanned) { setMostrarEmojis(false); setMostrarFigurinhas(false); }
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Escape" && mostrarCanned) { setMostrarCanned(false); return; }
     if (e.key === "Escape" && mostrarEmojis) { setMostrarEmojis(false); return; }
+    if (e.key === "Escape" && mostrarFigurinhas) { setMostrarFigurinhas(false); return; }
+    if (e.key === "Escape" && reagindoA) { setReagindoA(null); return; }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (mostrarCanned && cannedFiltradas.length === 1) { aplicarCanned(cannedFiltradas[0]); return; }
@@ -517,6 +618,12 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             // itens — só a ÚLTIMA do bloco tem rabinho, hora e avatar.
             // Mensagem que é só emoji sai da bolha e cresce, como no celular.
             const emojiPx = !m.attachments?.length && m.content ? tamanhoEmojiSolto(m.content) : null;
+            // Figurinha também sai da bolha: imagem solta, como no celular.
+            const figurinha = urlDeFigurinha(m);
+            const semBolha = Boolean(emojiPx) || Boolean(figurinha);
+
+            const reacoes = Array.isArray(m.reactions) ? m.reactions : [];
+            const grupos = reacoes.length ? agruparReacoes(reacoes) : [];
 
             const prox = messages[i + 1];
             const fimDoBloco =
@@ -525,17 +632,37 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               diaLabel(prox.sent_at) !== dia ||
               Math.abs(+new Date(prox.sent_at) - +new Date(m.sent_at)) > 5 * 60_000;
 
+            // A "pill" de reação invade o rodapé da bolha — a linha precisa de
+            // um respiro a mais embaixo pra não cobrir a mensagem seguinte.
+            const respiro = grupos.length ? "mb-5" : fimDoBloco ? "mb-3" : "mb-[3px]";
+
+            const botaoReagir = (
+              <button
+                data-wa-react
+                onClick={() => setReagindoA((v) => (v === m.id ? null : m.id))}
+                aria-label="Reagir a esta mensagem" title="Reagir"
+                className="wa-icon-btn shrink-0 w-7 h-7 grid place-items-center rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity self-center">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+                  <circle cx="10.5" cy="11.5" r="7.75" />
+                  <path d="M7.6 13.4a3.7 3.7 0 0 0 5.8 0" />
+                  <path d="M8.4 9.6h.01M12.6 9.6h.01" strokeWidth="2.3" />
+                  <path d="M18.5 4.5v5M16 7h5" />
+                </svg>
+              </button>
+            );
+
             return (
               <div key={m.id}>
                 {mostraDia && <DiaSeparador label={dia} />}
-                <div className={`flex items-end gap-2 ${meu ? "justify-end" : "justify-start"} ${fimDoBloco ? "mb-3" : "mb-[3px]"}`}>
+                <div className={`group flex items-end gap-2 ${meu ? "justify-end" : "justify-start"} ${respiro}`}>
                   {!meu && (
                     fimDoBloco
                       ? <WaAvatar nome={leadName || "Lead"} url={avatarLead} size={26} />
                       : <span className="w-[26px] shrink-0" />   /* alinha o bloco */
                   )}
-                  <div className={emojiPx ? "max-w-[78%] px-1 py-0.5" : "max-w-[78%] px-3 py-2"}
-                       style={emojiPx ? { color: "var(--ink)" } : {
+                  {meu && botaoReagir}
+                  <div className={`relative ${semBolha ? "max-w-[78%] px-1 py-0.5" : "max-w-[78%] px-3 py-2"}`}
+                       style={semBolha ? { color: "var(--ink)" } : {
                          background: meu ? "var(--wa-soft)" : "var(--card)",
                          color: meu ? "var(--wa-ink)" : "var(--ink)",
                          border: meu ? "none" : "1px solid var(--line)",
@@ -543,7 +670,42 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                          borderBottomRightRadius: meu && fimDoBloco ? 5 : 16,
                          borderBottomLeftRadius: !meu && fimDoBloco ? 5 : 16,
                        }}>
-                    {m.attachments?.map((a, k) => <Anexo key={k} a={a} meu={meu} />)}
+                    {/* Paleta de reação — em cima da bolha, no lado certo. */}
+                    {reagindoA === m.id && (
+                      <div data-wa-react
+                           className={`absolute -top-11 ${meu ? "right-0" : "left-0"} z-20 flex gap-0.5 px-1.5 py-1 rounded-full`}
+                           style={{ background: "var(--card)", border: "1px solid var(--line)", boxShadow: "0 6px 18px rgba(0,0,0,.16)" }}>
+                        {REACOES_RAPIDAS.map((e) => {
+                          const minha = reacoes.some((r) => r.autor === currentUser?.id && r.emoji === e);
+                          return (
+                            <button key={e} onClick={() => void reagir(m, e)}
+                                    aria-label={minha ? `Remover reação ${e}` : `Reagir com ${e}`}
+                                    className="w-8 h-8 grid place-items-center rounded-full text-[19px] leading-none transition-transform hover:scale-125"
+                                    style={minha ? { background: "var(--wa-soft)" } : undefined}>
+                              {e}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {figurinha ? (
+                      // Figurinha: imagem solta (sem bolha), com o "salvar" no hover.
+                      <span className="relative block">
+                        <img src={figurinha} alt="Figurinha" loading="lazy" decoding="async"
+                             className="block h-auto" style={{ width: 150 }} />
+                        <button onClick={() => void salvarFig(figurinha)}
+                                aria-label="Salvar figurinha na galeria" title="Salvar figurinha"
+                                className="absolute top-1 right-1 w-7 h-7 grid place-items-center rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                                style={{ background: "var(--card)", border: "1px solid var(--line)", color: "var(--ink2)", boxShadow: "0 1px 4px rgba(0,0,0,.15)" }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17.5 21 12 17.2 6.5 21V5.3A2.3 2.3 0 0 1 8.8 3h6.4a2.3 2.3 0 0 1 2.3 2.3z" />
+                          </svg>
+                        </button>
+                      </span>
+                    ) : (
+                      m.attachments?.map((a, k) => <Anexo key={k} a={a} meu={meu} />)
+                    )}
                     {m.content && (
                       <p className="whitespace-pre-wrap break-words"
                          style={emojiPx
@@ -557,13 +719,33 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                     )}
                     {fimDoBloco && (
                       <p className="text-[11px] mt-1 text-right tabular-nums"
-                         style={emojiPx
+                         style={semBolha
                            ? { color: "var(--ink3)" }
                            : { color: meu ? "var(--wa-ink)" : "var(--ink3)", opacity: meu ? .65 : 1 }}>
                         {hora(m.sent_at)}
                       </p>
                     )}
+
+                    {/* Reações penduradas na bolha, como no WhatsApp. Clicar na
+                        própria remove; numa que ainda não é sua, adere. */}
+                    {grupos.length > 0 && (
+                      <div className={`absolute -bottom-3.5 ${meu ? "right-1" : "left-1"} z-10 flex gap-1`}>
+                        {grupos.map((g) => (
+                          <button key={g.emoji} onClick={() => void reagir(m, g.emoji)}
+                                  title={g.nomes.join(", ")}
+                                  aria-label={`Reação ${g.emoji} de ${g.nomes.join(", ")}`}
+                                  className="flex items-center gap-0.5 px-1.5 py-[1px] rounded-full text-[13px] leading-[18px]"
+                                  style={{ background: "var(--card)", border: "1px solid var(--line)", boxShadow: "0 1px 3px rgba(0,0,0,.10)" }}>
+                            <span>{g.emoji}</span>
+                            {g.n > 1 && (
+                              <span className="text-[10px] font-bold tabular-nums" style={{ color: "var(--ink3)" }}>{g.n}</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
+                  {!meu && botaoReagir}
                 </div>
               </div>
             );
@@ -616,6 +798,21 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             </div>
           }>
             <WaEmojiPicker onPick={inserirEmoji} onClose={() => setMostrarEmojis(false)} />
+          </Suspense>
+        </ErroDeParte>
+      )}
+
+      {/* Figurinhas — mesmo espaço e mesma cerca do seletor de emoji. */}
+      {mostrarFigurinhas && !gravando && (
+        <ErroDeParte parte="a galeria de figurinhas" modo="discreto">
+          <Suspense fallback={
+            <div className="shrink-0 border-t" style={{ borderColor: "var(--line)", background: "var(--card)", height: 248 }}>
+              <div className="grid gap-2 p-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))" }}>
+                {Array.from({ length: 8 }, (_, i) => <span key={i} className="wa-sk rounded-xl" style={{ height: 72 }} />)}
+              </div>
+            </div>
+          }>
+            <WaFigurinhas onEnviar={(f) => void mandarFigurinha(f)} onClose={() => setMostrarFigurinhas(false)} />
           </Suspense>
         </ErroDeParte>
       )}
@@ -683,6 +880,15 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                 <circle cx="12" cy="12" r="9.25" />
                 <path d="M8.6 14.2a4.3 4.3 0 0 0 6.8 0" />
                 <path d="M9.2 9.4h.01M14.8 9.4h.01" strokeWidth="2.4" />
+              </svg>
+            </button>
+            <button onClick={alternarFigurinhas} disabled={sending}
+                    aria-expanded={mostrarFigurinhas} aria-label="Figurinhas"
+                    title="Figurinhas" data-aberto={mostrarFigurinhas || undefined}
+                    className="wa-icon-btn wa-emoji-toggle shrink-0 w-9 h-9 grid place-items-center rounded-lg">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19.5 13V8.2A3.7 3.7 0 0 0 15.8 4.5H8.2A3.7 3.7 0 0 0 4.5 8.2v7.6a3.7 3.7 0 0 0 3.7 3.7H13" />
+                <path d="M19.5 13a6.5 6.5 0 0 1-6.5 6.5V15a2 2 0 0 1 2-2z" />
               </svg>
             </button>
             <button onClick={() => fileRef.current?.click()} disabled={sending}
