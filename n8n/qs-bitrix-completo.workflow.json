@@ -101,7 +101,7 @@
           "parameters": [
             {
               "name": "x-lead-secret",
-              "value": "TROQUE_PELO_SEGREDO_NOVO"
+              "value": "PREENCHA_LEAD_INBOUND_SECRET_ANTES_DE_ATIVAR"
             }
           ]
         },
@@ -123,9 +123,8 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput",
       "notesInFlow": true,
-      "notes": "x-lead-secret: o valor antigo vazou (ficou no histórico do repositório público e num chat). Gere um novo, troque na env LEAD_INBOUND_SECRET da Vercel e cole aqui. Domínio trocado para qs.setuforeuvouviagens.com.br, que é o oficial."
+      "notes": "Se este no falhar, a execucao TEM que ficar vermelha: lead que nao entra no QS e emergencia, nao detalhe. Por isso nao tem onError.\n\nx-lead-secret = env LEAD_INBOUND_SECRET da Vercel. PREENCHA antes de ativar — com o placeholder a rota devolve 401 e NENHUM lead entra."
     },
     {
       "parameters": {
@@ -853,13 +852,13 @@
               "id": "cfg-base-0001",
               "name": "BITRIX_BASE",
               "type": "string",
-              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/PREENCHA_O_TOKEN_DO_WEBHOOK_DE_ENTRADA"
             },
             {
               "id": "cfg-token-0002",
               "name": "APP_TOKEN",
               "type": "string",
-              "value": "TROQUE_PELO_APP_TOKEN_NOVO"
+              "value": "PREENCHA_O_APPLICATION_TOKEN_DO_WEBHOOK_DE_SAIDA"
             },
             {
               "id": "cfg-entidade-0003",
@@ -1544,7 +1543,7 @@
               "id": "c0",
               "name": "BITRIX_BASE",
               "type": "string",
-              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/PREENCHA_O_TOKEN_DO_WEBHOOK_DE_ENTRADA"
             }
           ]
         },
@@ -1569,7 +1568,7 @@
               "id": "c0",
               "name": "BITRIX_BASE",
               "type": "string",
-              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/PREENCHA_O_TOKEN_DO_WEBHOOK_DE_ENTRADA"
             }
           ]
         },
@@ -1594,7 +1593,7 @@
               "id": "c0",
               "name": "BITRIX_BASE",
               "type": "string",
-              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/PREENCHA_O_TOKEN_DO_WEBHOOK_DE_ENTRADA"
             },
             {
               "id": "c1",
@@ -1625,7 +1624,7 @@
               "id": "c0",
               "name": "BITRIX_BASE",
               "type": "string",
-              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/PREENCHA_O_TOKEN_DO_WEBHOOK_DE_ENTRADA"
             },
             {
               "id": "c1",
@@ -1668,7 +1667,7 @@
               "id": "c0",
               "name": "BITRIX_BASE",
               "type": "string",
-              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/TROQUE_PELO_TOKEN_NOVO"
+              "value": "https://agenciasetuforeuvou.bitrix24.com.br/rest/23/PREENCHA_O_TOKEN_DO_WEBHOOK_DE_ENTRADA"
             },
             {
               "id": "c1",
