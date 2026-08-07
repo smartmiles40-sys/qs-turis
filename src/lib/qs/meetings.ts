@@ -135,12 +135,19 @@ export async function ensureConfirmTask(input: ConfirmTaskInput): Promise<void> 
     const tag = meetingTag(input.meetingId);
     const notes = confirmTaskNotes({ scheduled_at: input.scheduledAt, lead_name: input.leadName }, input.closerName);
 
-    const { data: existing } = await supabase
+    // Mesma regra do desfecho (ver ensureOutcomeTask): erro na checagem NÃO pode
+    // virar um INSERT às cegas.
+    const { data: existing, error: erroExistente } = await supabase
       .from("qs_tasks")
       .select("id")
       .contains("tags", [tag])
       .in("status", ["pendente", "atrasada"])
       .limit(1);
+
+    if (erroExistente) {
+      console.warn("[meetings] não deu pra checar a atividade de confirmação; não vou duplicar:", erroExistente.message);
+      return;
+    }
 
     if (existing && existing.length > 0) {
       await supabase
@@ -212,12 +219,27 @@ export async function ensureOutcomeTask(input: OutcomeTaskInput): Promise<void> 
       `Abra Reuniões → o card da reunião.`;
 
     // Já existe uma de desfecho aberta pra esta reunião? Move em vez de duplicar.
-    const { data: existing } = await supabase
+    //
+    // O ERRO NÃO PODE SER IGNORADO. Ele era, e custou caro: em 07/08 havia 458
+    // tarefas de desfecho abertas para 40 reuniões, uma delas com 27 cópias.
+    // Esta checagem roda no navegador, sob RLS — leitura vazia por recusa da RLS
+    // ou falha de rede era indistinguível de "não existe", e virava INSERT. Como
+    // o `sweepOutcomeTasks` roda a cada abertura da Agenda, cada visita à tela
+    // empilhava mais uma.
+    //
+    // Na dúvida agora NÃO cria: cobrança faltando é um problema menor do que a
+    // fila do closer entupida. A garantia de verdade é o índice único da 0044.
+    const { data: existing, error: erroExistente } = await supabase
       .from("qs_tasks")
       .select("id")
       .contains("tags", [tag, "desfecho"])
       .in("status", ["pendente", "atrasada"])
       .limit(1);
+
+    if (erroExistente) {
+      console.warn("[meetings] não deu pra checar se a cobrança já existe; não vou duplicar:", erroExistente.message);
+      return;
+    }
 
     if (existing && existing.length > 0) {
       await supabase
