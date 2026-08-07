@@ -670,9 +670,18 @@ export async function setMeetingStatus(
   status: MeetingStatus,
   leadBitrixId?: string | null
 ): Promise<MeetingResult> {
+  // `realizada_em` carimba QUANDO a reunião de fato aconteceu. Existe desde a
+  // 0032 e nunca era preenchido por ninguém — é ele que ancora o SAL no mês da
+  // REUNIÃO, e não no mês em que alguém lembrou de registrar. Sem isso, um
+  // desfecho lançado com duas semanas de atraso contaminava o mês errado.
+  const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
+  if (status === "realizada" && !meeting.realizada_em) {
+    patch.realizada_em = meeting.scheduled_at;
+  }
+
   const { data, error } = await supabase
     .from("qs_meetings")
-    .update({ status, updated_at: new Date().toISOString() })
+    .update(patch)
     .eq("id", meeting.id)
     .select()
     .single();

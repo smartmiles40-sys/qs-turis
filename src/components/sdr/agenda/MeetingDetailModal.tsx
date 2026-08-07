@@ -15,8 +15,20 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { setMeetingStatus, setMeetingSal, deleteMeeting } from "@/lib/qs/meetings";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
+import { getSetting } from "@/lib/qsSettings";
 import { MEETING_STATUS_LABELS, type Meeting, type MeetingSal, type MeetingStatus } from "../types";
 import { hhmm, WEEKDAY_LONG, MONTH_LONG } from "@/lib/qs/calendarLayout";
+
+// Lista fechada, definida pelo comercial em qs_settings (0032) — a MESMA que a
+// AgendaDia usa. Trocar os motivos não exige deploy.
+const MOTIVOS_SAL_PADRAO = [
+  "Fora do perfil",
+  "Sem orçamento",
+  "Sem urgência (>6 meses)",
+  "Já comprou com concorrente",
+  "Dado incorreto / não era o decisor",
+  "Curioso — sem intenção real",
+];
 
 function statusClasses(status: MeetingStatus): string {
   switch (status) {
@@ -57,6 +69,17 @@ export default function MeetingDetailModal({
   const { currentUser } = useQsAuth();
   const [busy, setBusy] = useState(false);
   const [leadVisible, setLeadVisible] = useState(false);
+  // "Recusado" EXIGE motivo — o banco recusa sem ele (0032). Este modal chamava
+  // setMeetingSal sem passar nada, então clicar em Recusado dava erro TODA vez.
+  // Agora ele abre a lista antes de gravar, igual à AgendaDia.
+  const [motivos, setMotivos] = useState<string[]>(MOTIVOS_SAL_PADRAO);
+  const [pedindoMotivo, setPedindoMotivo] = useState(false);
+
+  useEffect(() => {
+    void getSetting<string[]>("sal_motivos").then((lista) => {
+      if (Array.isArray(lista) && lista.length) setMotivos(lista);
+    });
+  }, []);
 
   useEffect(() => {
     if (!meeting) return;
@@ -94,14 +117,22 @@ export default function MeetingDetailModal({
     onClose();
   }
 
-  async function marcarSal(sal: MeetingSal) {
+  async function marcarSal(sal: MeetingSal, motivo?: string) {
     if (!meeting) return;
     // Clicar de novo no que já está marcado desmarca — é o único jeito de
     // desfazer um clique errado sem ter que reabrir a reunião de outro lugar.
     const alvo = meeting.sal === sal ? null : sal;
+
+    // Recusar sem motivo não passa no banco: pergunta antes de tentar.
+    if (alvo === "recusado" && !motivo) {
+      setPedindoMotivo(true);
+      return;
+    }
+
     setBusy(true);
-    const res = await setMeetingSal(meeting, alvo, currentUser?.id ?? null, meeting.lead?.bitrix_id);
+    const res = await setMeetingSal(meeting, alvo, currentUser?.id ?? null, meeting.lead?.bitrix_id, motivo ?? null);
     setBusy(false);
+    setPedindoMotivo(false);
     if (!res.ok) {
       notifyError(res.error);
       return;
@@ -295,6 +326,42 @@ export default function MeetingDetailModal({
                     );
                   })}
                 </div>
+
+                {/* Por que recusou. Lista fechada de propósito: motivo em texto
+                    livre não vira relatório, e é o relatório que diz ao marketing
+                    que tipo de lead parar de trazer. */}
+                {pedindoMotivo && (
+                  <div className="mt-3 border-t border-gray-200 pt-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                      Por que o lead foi recusado?
+                    </p>
+                    <div className="mt-2 flex flex-col gap-1">
+                      {motivos.map((mot) => (
+                        <button
+                          key={mot}
+                          onClick={() => marcarSal("recusado", mot)}
+                          disabled={busy}
+                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-left text-xs font-medium text-gray-700 hover:border-red-300 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          {mot}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setPedindoMotivo(false)}
+                      className="mt-2 text-[11px] font-semibold text-gray-400 hover:text-gray-600"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                )}
+
+                {/* Já respondido: mostra o motivo em vez de esconder a decisão. */}
+                {!pedindoMotivo && meeting.sal === "recusado" && meeting.sal_motivo && (
+                  <p className="mt-2 text-[11.5px] text-gray-500">
+                    Motivo: <b className="text-gray-700">{meeting.sal_motivo}</b>
+                  </p>
+                )}
               </div>
             )}
             <div className="grid grid-cols-2 gap-2">
