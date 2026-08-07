@@ -23,7 +23,10 @@ import {
   closerColor,
   startOfDay,
   addDays,
+  loadJanelaAgendamento,
+  JANELA_AGENDAMENTO_PADRAO,
   type Slot,
+  type JanelaAgendamento,
 } from "@/lib/qs/closerAgenda";
 import type { CloserAvailability, CloserBlock, CloserConfig, Meeting, SdrUser } from "../types";
 import { WEEKDAY_SHORT, hhmm } from "@/lib/qs/calendarLayout";
@@ -74,6 +77,8 @@ export default function SlotPicker({
   const [stripStart, setStripStart] = useState<Date>(startOfDay(initialDate ?? new Date()));
   const [manual, setManual] = useState(false);
   const [manualTime, setManualTime] = useState("");
+  // Horário comercial da grade (09:00–19:30 por padrão, ajustável em qs_settings).
+  const [janela, setJanela] = useState<JanelaAgendamento>(JANELA_AGENDAMENTO_PADRAO);
   // Quantos blocos da grade do closer a reunião ocupa. 1 = o padrão de antes,
   // então nada muda pra quem não mexer aqui.
   const [blocos, setBlocos] = useState(1);
@@ -84,12 +89,13 @@ export default function SlotPicker({
       setLoading(true);
       const from = startOfDay(new Date());
       const to = addDays(from, HORIZON_DAYS);
-      const [c, cfg, av, bl, mt] = await Promise.all([
+      const [c, cfg, av, bl, mt, jan] = await Promise.all([
         fetchClosers(),
         fetchCloserConfigs(),
         fetchAvailability(),
         fetchBlocks(from, to),
         fetchMeetingsInRange(from, to),
+        loadJanelaAgendamento(),
       ]);
       if (!alive) return;
       setClosers(c);
@@ -97,6 +103,7 @@ export default function SlotPicker({
       setAvailability(av);
       setBlocks(bl);
       setMeetings(mt);
+      setJanela(jan);
       setLoading(false);
       // Um closer só? Já entra escolhido — um clique a menos, todo dia.
       if (!closerId && c.length === 1) setCloserId(c[0].id);
@@ -120,8 +127,8 @@ export default function SlotPicker({
 
   const slots: Slot[] = useMemo(() => {
     if (!slotInput) return [];
-    return computeDaySlots(slotInput, day, { ignoreMeetingId });
-  }, [slotInput, day, ignoreMeetingId]);
+    return computeDaySlots(slotInput, day, { ignoreMeetingId, janela });
+  }, [slotInput, day, ignoreMeetingId, janela]);
 
   const stripDays = useMemo(
     () => Array.from({ length: STRIP_DAYS }, (_, i) => addDays(stripStart, i)),
@@ -178,10 +185,10 @@ export default function SlotPicker({
     if (!slotInput) return new Map<number, number>();
     const map = new Map<number, number>();
     for (const d of stripDays) {
-      map.set(d.getTime(), countFreeSlots(slotInput, d, { ignoreMeetingId }));
+      map.set(d.getTime(), countFreeSlots(slotInput, d, { ignoreMeetingId, janela }));
     }
     return map;
-  }, [slotInput, stripDays, ignoreMeetingId]);
+  }, [slotInput, stripDays, ignoreMeetingId, janela]);
 
   function pick(slot: Slot) {
     if (!selectedCloser || !config) return;
@@ -390,7 +397,9 @@ export default function SlotPicker({
             {manual ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                 <p className="text-[11px] text-amber-800 mb-2">
-                  Encaixe manual: ignora a grade de slots, mas a trava de choque de agenda do banco continua valendo.
+                  Encaixe manual: ignora a grade e o horário comercial — dá pra marcar
+                  antes das {janela.inicio} ou depois das {janela.fim}. A trava de choque
+                  de agenda do banco continua valendo.
                 </p>
                 <input
                   type="time"

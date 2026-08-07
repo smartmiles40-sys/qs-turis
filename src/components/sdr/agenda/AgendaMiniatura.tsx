@@ -36,7 +36,10 @@ import {
   configFor,
   startOfDay,
   addDays,
+  loadJanelaAgendamento,
+  JANELA_AGENDAMENTO_PADRAO,
   type Slot,
+  type JanelaAgendamento,
 } from "@/lib/qs/closerAgenda";
 import type { CloserAvailability, CloserBlock, CloserConfig, Meeting } from "../types";
 
@@ -88,6 +91,9 @@ export default function AgendaMiniatura({ responsavel, closerId, dia, onEscolher
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   // Só a PRIMEIRA carga mostra texto de carregamento (ver o efeito abaixo).
   const [carregando, setCarregando] = useState(true);
+  // Horário comercial da grade — o mesmo que o SlotPicker usa, para as duas
+  // telas de agendamento nunca mostrarem horários diferentes.
+  const [janela, setJanela] = useState<JanelaAgendamento>(JANELA_AGENDAMENTO_PADRAO);
 
   // ── Por que NÚMERO e não Date ──────────────────────────────────────────────
   // O pai monta `dia={new Date(...)}` no JSX, ou seja: OBJETO NOVO a cada render
@@ -127,16 +133,18 @@ export default function AgendaMiniatura({ responsavel, closerId, dia, onEscolher
     // compromissos dos 7 dias, e buscar por dia seria 7× mais consultas.
     const de = new Date(semanaIniMs);
     const ate = addDays(de, 7);
-    const [cfg, av, bl, mt] = await Promise.all([
+    const [cfg, av, bl, mt, jan] = await Promise.all([
       fetchCloserConfigs(),
       fetchAvailability([closerId]),
       fetchBlocks(de, ate, [closerId]),
       fetchMeetingsInRange(de, ate, [closerId]),
+      loadJanelaAgendamento(),
     ]);
     setConfigs(cfg);
     setAvailability(av);
     setBlocks(bl);
     setMeetings(mt);
+    setJanela(jan);
     setCarregando(false);
   }, [closerId, semanaIniMs]);
 
@@ -160,10 +168,10 @@ export default function AgendaMiniatura({ responsavel, closerId, dia, onEscolher
     if (!entrada || Number.isNaN(semanaIniMs)) return [];
     return Array.from({ length: 7 }, (_, i) => {
       const d = addDays(new Date(semanaIniMs), i);
-      const slots = computeDaySlots(entrada, d);
+      const slots = computeDaySlots(entrada, d, { janela });
       return { dia: d, livres: slots.filter((s) => s.available).length, atende: slots.length > 0 };
     });
-  }, [entrada, semanaIniMs]);
+  }, [entrada, semanaIniMs, janela]);
 
   // Fim de semana sem NENHUM atendimento configurado é ruído: se o closer não
   // trabalha sábado nem domingo, esses dois quadradinhos só ocupam espaço.
@@ -174,8 +182,8 @@ export default function AgendaMiniatura({ responsavel, closerId, dia, onEscolher
 
   const slots: Slot[] = useMemo(() => {
     if (!entrada || Number.isNaN(diaSelMs)) return [];
-    return computeDaySlots(entrada, diaSel);
-  }, [entrada, diaSel, diaSelMs]);
+    return computeDaySlots(entrada, diaSel, { janela });
+  }, [entrada, diaSel, diaSelMs, janela]);
 
   // Sem responsável escolhido não há agenda pra mostrar — e o select do Ganho
   // sempre entrega os dois juntos (nome + id), então basta uma das checagens.

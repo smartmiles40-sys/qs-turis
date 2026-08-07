@@ -57,6 +57,55 @@ export function configFor(closerId: string, all: CloserConfig[]): CloserConfig {
   return found ?? { closer_id: closerId, ...DEFAULT_CLOSER_CONFIG };
 }
 
+// ── Janela COMERCIAL de agendamento ─────────────────────────────────────────
+// Decisão do Bruno (07/08): a janela de atendimento de cada closer continua
+// LARGA no cadastro — é ela que permite encaixar um horário fora do comum
+// quando o cliente só pode àquela hora. Mas a grade que o SDR clica no dia a
+// dia mostra só o horário comercial.
+//
+// Ou seja: a exceção continua possível (encaixe manual, ou o campo de data e
+// hora do Ganho), o que muda é o que aparece por padrão.
+//
+// Vive em qs_settings pra mudar sem deploy — trocar o horário de trabalho não
+// deveria exigir um build.
+
+export interface JanelaAgendamento { inicio: string; fim: string }
+
+export const JANELA_AGENDAMENTO_KEY = "agenda_janela_agendamento";
+export const JANELA_AGENDAMENTO_PADRAO: JanelaAgendamento = { inicio: "09:00", fim: "19:30" };
+
+const HORA_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** "HH:MM" → minutos desde a meia-noite. null quando o texto não presta. */
+function minutosDoDia(hhmm: string): number | null {
+  const m = HORA_RE.exec(String(hhmm || "").trim());
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+let janelaCache: JanelaAgendamento | null = null;
+
+/**
+ * A janela configurada. Uma busca por sessão — isto muda uma vez por ano, e a
+ * grade é recalculada a cada clique de dia.
+ *
+ * Valor inválido ou banco fora do ar caem no padrão: melhor a grade comercial
+ * do que a grade crua das 6h às 23h.
+ */
+export async function loadJanelaAgendamento(force = false): Promise<JanelaAgendamento> {
+  if (janelaCache && !force) return janelaCache;
+  try {
+    const { getSetting } = await import("@/lib/qsSettings");
+    const v = await getSetting<Partial<JanelaAgendamento>>(JANELA_AGENDAMENTO_KEY);
+    const inicio = minutosDoDia(v?.inicio ?? "") != null ? String(v?.inicio) : JANELA_AGENDAMENTO_PADRAO.inicio;
+    const fim = minutosDoDia(v?.fim ?? "") != null ? String(v?.fim) : JANELA_AGENDAMENTO_PADRAO.fim;
+    janelaCache = minutosDoDia(inicio)! < minutosDoDia(fim)! ? { inicio, fim } : JANELA_AGENDAMENTO_PADRAO;
+  } catch {
+    janelaCache = JANELA_AGENDAMENTO_PADRAO;
+  }
+  return janelaCache;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // LEITURA
 // ─────────────────────────────────────────────────────────────────────────────
@@ -225,6 +274,12 @@ export interface SlotOptions {
   now?: Date;
   /** Devolve só os livres (o padrão devolve todos, marcados). */
   onlyFree?: boolean;
+  /**
+   * Recorte comercial da grade. Omitido = usa o padrão (09:00–19:30), que é o
+   * que o SDR deve ver. Passe `null` para ver a janela CRUA do closer — é o que
+   * o encaixe manual do gestor precisa.
+   */
+  janela?: JanelaAgendamento | null;
 }
 
 function parseTime(hms: string): [number, number] {
@@ -306,6 +361,13 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
   const noticeLimit = now.getTime() + config.min_notice_minutes * 60_000;
   const buffer = config.buffer_minutes * 60_000;
 
+  // Recorte comercial: a janela do closer pode ir das 6h às 23h para permitir
+  // encaixe excepcional, mas a grade oferecida vai só das 09:00 às 19:30.
+  // `janela: null` desliga o corte (encaixe manual do gestor).
+  const janela = opts.janela === null ? null : (opts.janela ?? JANELA_AGENDAMENTO_PADRAO);
+  const janIni = janela ? minutosDoDia(janela.inicio) : null;
+  const janFim = janela ? minutosDoDia(janela.fim) : null;
+
   const slots: Slot[] = [];
   for (const w of windows) {
     const wStart = atTime(dayStart, w.start_time);
@@ -318,6 +380,13 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
 
       const start = new Date(sStart);
       const end = new Date(sEnd);
+
+      // Fora do horário comercial nem entra na lista — não vira slot riscado,
+      // some. O SDR não deve nem cogitar 07:30 no fluxo normal.
+      if (janIni != null && janFim != null) {
+        const minutoDoSlot = start.getHours() * 60 + start.getMinutes();
+        if (minutoDoSlot < janIni || minutoDoSlot > janFim) continue;
+      }
 
       // A ordem importa: o motivo mais informativo ganha. "Ocupado com Fulano"
       // diz mais do que "passado" num slot que é as duas coisas.
