@@ -145,20 +145,24 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: false, code: 'not_configured' });
   }
 
-  // UM header só para as duas faixas (sincronismo e agenda).
+  // Manda os DOIS nomes de header, com o mesmo segredo.
   //
-  // Por que não são dois: o n8n valida NOME + valor do header, então dois nomes
-  // exigiam duas credenciais lá dentro — e essa configuração se mostrou fácil de
-  // fazer pela metade. Em 07/08 isso derrubou a integração três vezes seguidas:
-  // arrumar o sincronismo quebrava a agenda e vice-versa, porque os sete webhooks
-  // dividem uma credencial só. Como as duas rotas falam com o MESMO n8n, um
-  // segredo resolve, e a credencial que já existe passa a servir as duas.
+  // Por quê: o n8n valida NOME + valor. Como os sete webhooks dividem uma única
+  // credencial de Header Auth, o nome dela vira uma variável global — e em 07/08
+  // isso derrubou a integração quatro vezes seguidas, porque arrumar o
+  // sincronismo quebrava a agenda e vice-versa, dependendo de qual nome estava
+  // salvo naquele momento.
   //
-  // Para voltar a separar depois, é criar a segunda credencial no n8n, apontar os
-  // webhooks de sincronismo pra ela e trocar o nome do header aqui.
+  // Mandando os dois, o nome deixa de importar: qualquer que seja o configurado,
+  // a requisição carrega. Sobra uma única coisa para acertar — o VALOR. Header a
+  // mais é ignorado por quem não o espera, então não há custo.
   const headers = { 'Content-Type': 'application/json' };
-  const segredo = (process.env.N8N_SYNC_SECRET || process.env.N8N_AGENDA_SECRET || '').trim();
-  if (segredo) headers['x-qs-agenda-secret'] = segredo;
+  const sync = (process.env.N8N_SYNC_SECRET || '').trim();
+  const agenda = (process.env.N8N_AGENDA_SECRET || '').trim();
+  if (sync || agenda) {
+    headers['x-qs-sync-secret'] = sync || agenda;
+    headers['x-qs-agenda-secret'] = agenda || sync;
+  }
 
   // Timeout: n8n lento não pode segurar a função até o limite da Vercel.
   const ctrl = new AbortController();

@@ -151,9 +151,19 @@ export default async function handler(req, res) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
+      // Os DOIS nomes de header, mesmo motivo do /api/bitrix-sync: os webhooks do
+      // n8n dividem uma credencial só, e o nome dela muda conforme quem mexeu por
+      // último. Mandando os dois, sobra só o valor para acertar.
+      const alt = (process.env.N8N_SYNC_SECRET || '').trim();
       const r = await fetch(base, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(secret ? { 'x-qs-agenda-secret': secret } : {}) },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(secret || alt ? {
+            'x-qs-agenda-secret': secret || alt,
+            'x-qs-sync-secret': alt || secret,
+          } : {}),
+        },
         body: JSON.stringify(payload),
         signal: ctrl.signal,
       });
