@@ -41,11 +41,11 @@ export function useQsAuth() {
 
 const MENU_ACCESS: Record<UserRole, string[]> = {
   admin: ["*"], // all
-  gestor: ["painel", "cobertura", "leads", "cadencias", "reunioes", "dashboard", "analises", "lead-detail", "cadencia-criar", "cadencia-editar"],
+  gestor: ["minha-agenda", "painel", "cobertura", "leads", "cadencias", "reunioes", "dashboard", "analises", "lead-detail", "cadencia-criar", "cadencia-editar"],
   sdr: ["painel", "cobertura", "leads", "reunioes", "dashboard", "lead-detail"],
   // O Painel entrou pro closer junto com a atividade de DESFECHO: sem ele, a
   // cobrança nasceria numa fila que o closer não enxerga.
-  closer: ["painel", "leads", "reunioes", "dashboard", "lead-detail"],
+  closer: ["minha-agenda", "painel", "leads", "reunioes", "dashboard", "lead-detail"],
   // Espectador: enxerga o funil inteiro pra medir campanha. Fica de fora o
   // Painel (tela de EXECUÇÃO, não faria sentido pra quem não executa) e as
   // Configurações (que só existem pra mudar coisa).
@@ -57,6 +57,17 @@ export function canAccessNav(role: UserRole, navId: string): boolean {
   if (!access) return false;
   if (access.includes("*")) return true;
   return access.includes(navId);
+}
+
+/**
+ * Onde cada papel CAI ao entrar. O closer trabalha por reunião, não por fila de
+ * atividade — até 07/08 ele aterrissava no Painel do SDR e precisava caçar a
+ * própria agenda, e o resultado era 0 de 40 reuniões com desfecho registrado.
+ */
+export function telaInicial(role: UserRole | undefined | null): string {
+  if (role === "closer") return "minha-agenda";
+  if (role === "marketing") return "dashboard";
+  return "painel";
 }
 
 export function canSeeAllData(role: UserRole): boolean {

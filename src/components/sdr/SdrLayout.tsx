@@ -1,6 +1,6 @@
 // src/components/sdr/SdrLayout.tsx — QS (Qualificação System)
 import { useState, useRef, useEffect, Component, Suspense, type ReactNode } from "react";
-import { useQsAuth, canAccessNav } from "@/contexts/QsAuthContext";
+import { useQsAuth, canAccessNav, telaInicial } from "@/contexts/QsAuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { lazyPagina } from "@/lib/qs/lazyPagina";
 
@@ -72,6 +72,7 @@ const CadenceCreatePage = lazyPagina(() => import("./cadences/CadenceCreatePage"
 const MeetingsPage = lazyPagina(() => import("./meetings/MeetingsPage"));
 const SettingsPage = lazyPagina(() => import("./settings/SettingsPage"));
 const CoveragePanel = lazyPagina(() => import("./dashboard/CoveragePanel"));
+const MinhaAgendaPage = lazyPagina(() => import("./agenda/MinhaAgendaPage"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import CommsDock from "./comms/CommsDock";
 import ErroDeParte from "./ErroDeParte";
@@ -87,6 +88,7 @@ import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
 import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 
 export type SdrNav =
+  | "minha-agenda"
   | "painel"
   | "leads"
   | "lead-detail"
@@ -120,6 +122,9 @@ const MENU: (MenuGroup | MenuItem)[] = [
     id: "execucao",
     label: "Execução",
     items: [
+      // Primeiro da lista de propósito: é a casa do closer. Para SDR/gestor é
+      // só mais uma tela; para o closer é O trabalho.
+      { id: "minha-agenda", label: "Minha Agenda", description: "Suas reuniões de hoje e o que falta registrar" },
       { id: "painel", label: "Painel de Atividades", description: "Fila de tarefas do dia" },
       { id: "cobertura", label: "Cobertura de Leads", description: "Leads aguardando contato" },
     ],
@@ -225,7 +230,17 @@ function NavDropdown({
 export default function SdrLayout() {
   const { currentUser, logout } = useQsAuth();
   const { isDark, toggleTheme } = useTheme();
+  // A tela de entrada depende do papel: o closer cai na agenda dele, não na
+  // fila do SDR. Só vale na PRIMEIRA renderização — depois quem manda é a
+  // navegação do usuário.
   const [activeNav, setActiveNav] = useState<SdrNav>("painel");
+  const landingAplicada = useRef(false);
+  useEffect(() => {
+    if (landingAplicada.current || !currentUser) return;
+    landingAplicada.current = true;
+    const inicial = telaInicial(currentUser.role) as SdrNav;
+    if (inicial !== "painel") setActiveNav(inicial);
+  }, [currentUser]);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [editingCadenceId, setEditingCadenceId] = useState<string | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -679,6 +694,11 @@ export default function SdrLayout() {
         {activeNav === "cobertura" && (
           <PageErrorBoundary pageName="Cobertura de Leads">
             <CoveragePanel onOpenLead={openLeadDetail} />
+          </PageErrorBoundary>
+        )}
+        {activeNav === "minha-agenda" && (
+          <PageErrorBoundary pageName="Minha Agenda">
+            <MinhaAgendaPage onOpenLead={openLeadDetail} />
           </PageErrorBoundary>
         )}
         {activeNav === "reunioes" && (
