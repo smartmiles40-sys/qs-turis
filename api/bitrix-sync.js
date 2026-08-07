@@ -145,9 +145,20 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: false, code: 'not_configured' });
   }
 
+  // UM header só para as duas faixas (sincronismo e agenda).
+  //
+  // Por que não são dois: o n8n valida NOME + valor do header, então dois nomes
+  // exigiam duas credenciais lá dentro — e essa configuração se mostrou fácil de
+  // fazer pela metade. Em 07/08 isso derrubou a integração três vezes seguidas:
+  // arrumar o sincronismo quebrava a agenda e vice-versa, porque os sete webhooks
+  // dividem uma credencial só. Como as duas rotas falam com o MESMO n8n, um
+  // segredo resolve, e a credencial que já existe passa a servir as duas.
+  //
+  // Para voltar a separar depois, é criar a segunda credencial no n8n, apontar os
+  // webhooks de sincronismo pra ela e trocar o nome do header aqui.
   const headers = { 'Content-Type': 'application/json' };
-  const syncSecret = (process.env.N8N_SYNC_SECRET || '').trim();
-  if (syncSecret) headers['x-qs-sync-secret'] = syncSecret;
+  const segredo = (process.env.N8N_SYNC_SECRET || process.env.N8N_AGENDA_SECRET || '').trim();
+  if (segredo) headers['x-qs-agenda-secret'] = segredo;
 
   // Timeout: n8n lento não pode segurar a função até o limite da Vercel.
   const ctrl = new AbortController();
