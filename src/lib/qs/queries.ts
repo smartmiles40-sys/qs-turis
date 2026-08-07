@@ -1044,24 +1044,78 @@ export async function fetchAllRows<T>(
 // Filtra por dono quando é SDR (não precisa dos leads dos colegas) e pagina o
 // resto — em vez de baixar o histórico inteiro do time a cada 60 segundos.
 
+/**
+ * A visão não existe? (migration 0043 ainda não colada)
+ *
+ * O deploy do front e a migration não acontecem no mesmo segundo. Neste
+ * intervalo o Painel tem que continuar abrindo — devagar, como antes, mas
+ * abrindo. Mesma rede de segurança que a 0027 já usava.
+ */
+function semVisao(error: { code?: string; message?: string } | null): boolean {
+  const c = error?.code ?? "";
+  if (c === "42P01" || c === "PGRST205" || c === "PGRST200") return true;
+  return /relation .* does not exist|could not find the table/i.test(error?.message ?? "");
+}
+
+/**
+ * Quantas observações cada lead tem — para o selo "📝 N obs." do card.
+ *
+ * MEDIDO em 07/08 (admin, base real): o caminho antigo baixava 10.151 linhas em
+ * 11 idas ao banco e levava 30 segundos, só para contar. A visão da 0043 agrega
+ * no banco e devolve ~800 linhas numa ida. O resultado é o mesmo.
+ */
 export async function fetchNoteCountsByLead(ownerId: string | null): Promise<Map<string, number>> {
-  const rows = await fetchAllRows<{ lead_id: string | null }>((from, to) => {
-    let q = supabase.from("qs_notes").select("lead_id, lead:qs_leads!inner(owner_id)").order("id");
-    if (ownerId) q = q.eq("lead.owner_id", ownerId);
-    return q.range(from, to) as unknown as PromiseLike<{ data: { lead_id: string | null }[] | null; error: { message?: string } | null }>;
-  });
   const counts = new Map<string, number>();
+
+  let q = supabase.from("qs_lead_note_counts").select("lead_id,total");
+  if (ownerId) q = q.eq("owner_id", ownerId);
+  const { data, error } = await q;
+
+  if (!error) {
+    for (const r of (data ?? []) as { lead_id: string | null; total: number }[]) {
+      if (r.lead_id) counts.set(r.lead_id, (counts.get(r.lead_id) ?? 0) + (r.total ?? 0));
+    }
+    return counts;
+  }
+  if (!semVisao(error)) throw error;
+
+  // ── Caminho antigo (lento), só enquanto a 0043 não for aplicada ───────────
+  const rows = await fetchAllRows<{ lead_id: string | null }>((from, to) => {
+    let f = supabase.from("qs_notes").select("lead_id, lead:qs_leads!inner(owner_id)").order("id");
+    if (ownerId) f = f.eq("lead.owner_id", ownerId);
+    return f.range(from, to) as unknown as PromiseLike<{ data: { lead_id: string | null }[] | null; error: { message?: string } | null }>;
+  });
   for (const r of rows) if (r.lead_id) counts.set(r.lead_id, (counts.get(r.lead_id) ?? 0) + 1);
   return counts;
 }
 
+/**
+ * Leads que já tiveram alguma atividade concluída — para o selo "🔴 SEM CONTATO".
+ *
+ * Era a consulta mais cara do sistema: 11.238 linhas em 12 idas, 61 segundos
+ * (medido em 07/08). Pior que o volume era o OFFSET: cada página obrigava o
+ * Postgres a percorrer tudo de novo desde o começo, então a última custava mais
+ * que a primeira. A visão da 0043 faz o DISTINCT no banco.
+ */
 export async function fetchContactedLeadIds(ownerId: string | null): Promise<Set<string>> {
-  const rows = await fetchAllRows<{ lead_id: string | null }>((from, to) => {
-    let q = supabase.from("qs_tasks").select("lead_id").eq("status", "concluida").order("id");
-    if (ownerId) q = q.eq("owner_id", ownerId);
-    return q.range(from, to);
-  });
   const ids = new Set<string>();
+
+  let q = supabase.from("qs_leads_contatados").select("lead_id");
+  if (ownerId) q = q.eq("owner_id", ownerId);
+  const { data, error } = await q;
+
+  if (!error) {
+    for (const r of (data ?? []) as { lead_id: string | null }[]) if (r.lead_id) ids.add(r.lead_id);
+    return ids;
+  }
+  if (!semVisao(error)) throw error;
+
+  // ── Caminho antigo (lento), só enquanto a 0043 não for aplicada ───────────
+  const rows = await fetchAllRows<{ lead_id: string | null }>((from, to) => {
+    let f = supabase.from("qs_tasks").select("lead_id").eq("status", "concluida").order("id");
+    if (ownerId) f = f.eq("owner_id", ownerId);
+    return f.range(from, to);
+  });
   for (const r of rows) if (r.lead_id) ids.add(r.lead_id);
   return ids;
 }
