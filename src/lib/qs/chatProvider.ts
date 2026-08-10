@@ -1,37 +1,39 @@
 // src/lib/qs/chatProvider.ts
 // -----------------------------------------------------------------------------
-// Qual "cockpit" de atendimento o QS usa: o ChatApp (legado, janela externa) ou
-// o Chatwoot self-hosted embedado (novo). Controlado por uma FEATURE FLAG em
+// Qual "cockpit" de atendimento o QS usa: o atendimento NATIVO (`qs`, padrão) ou
+// o Chatwoot self-hosted embedado. Controlado por uma FEATURE FLAG em
 // qs_settings (`chat_provider`), pra virar a chave sem deploy e com rollback
 // instantâneo. Um override por build (VITE_CHAT_PROVIDER) serve de default.
+// O ChatApp (BSP legado) foi REMOVIDO em 2026-08 — flag antiga "chatapp" no
+// banco cai no nativo.
 //
-// Por que o Chatwoot pode ser embedado (e o ChatApp não): ele é self-hosted, e
-// nós liberamos o frame (middleware Traefik `cw-embed` = CSP frame-ancestors) e
-// servimos o QS no MESMO domínio-pai (qs.* e chat.* → same-site), então o cookie
-// de sessão gruda dentro do iframe. Ver docs/PLANO-INTEGRACAO-QS.md.
+// Por que o Chatwoot pode ser embedado: ele é self-hosted, e nós liberamos o
+// frame (middleware Traefik `cw-embed` = CSP frame-ancestors) e servimos o QS no
+// MESMO domínio-pai (qs.* e chat.* → same-site), então o cookie de sessão gruda
+// dentro do iframe. Ver docs/PLANO-INTEGRACAO-QS.md.
 // -----------------------------------------------------------------------------
 
 import { getSetting, setSetting } from "@/lib/qsSettings";
 
-export type ChatProvider = "chatapp" | "chatwoot" | "qs";
+export type ChatProvider = "chatwoot" | "qs";
 
 export const CHAT_PROVIDER_KEY = "chat_provider";
 
-/** Default por build (Vercel env). Sem env, cai no ChatApp (comportamento atual). */
+/** Default por build (Vercel env). Sem env, cai no atendimento nativo. */
 export function defaultChatProvider(): ChatProvider {
   const v = (import.meta.env.VITE_CHAT_PROVIDER as string | undefined)?.toLowerCase();
-  if (v === "qs" || v === "chatwoot" || v === "chatapp") return v;
-  return "chatapp";
+  if (v === "qs" || v === "chatwoot") return v;
+  return "qs";
 }
 
 /**
  * Provider EFETIVO: a flag de qs_settings manda; se não houver linha (ou erro de
- * leitura), cai no default de build. Fail-safe pro ChatApp — nunca deixa o SDR
- * sem cockpit por causa de config.
+ * leitura, ou a flag legada "chatapp"), cai no default de build. Fail-safe —
+ * nunca deixa o SDR sem cockpit por causa de config.
  */
 export async function getChatProvider(): Promise<ChatProvider> {
   const flag = await getSetting<string>(CHAT_PROVIDER_KEY);
-  if (flag === "qs" || flag === "chatwoot" || flag === "chatapp") return flag;
+  if (flag === "qs" || flag === "chatwoot") return flag;
   return defaultChatProvider();
 }
 

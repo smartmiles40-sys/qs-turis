@@ -1820,38 +1820,21 @@ function AgendaSection() {
 }
 
 // ── Integrações (status, read-only) ──────────────────────────────────────────
-// Mostra SE o ChatApp e o Bitrix estão configurados — sem expor nenhum segredo.
-//   • ChatApp: o token vive em qs_settings['chatapp_token'] (renovado pelo n8n).
-//     A RLS 0011 só libera essa chave pra gestor/admin — e só o admin abre as
-//     Configurações; lemos apenas pra dizer "configurado/expirado", nunca o valor.
+// Mostra SE o Bitrix está configurado — sem expor nenhum segredo.
 //   • Bitrix: o webhook (N8N_SYNC_BASE) vive numa env do SERVIDOR (Vercel) e NÃO
 //     é legível pelo navegador. O sinal honesto que dá pra medir aqui é quantos
 //     leads já estão VINCULADOS ao Bitrix (qs_leads.bitrix_id) — se há vínculos,
 //     a integração está trazendo dados.
-
-type ChatAppStatus = { configured: boolean; expired: boolean; hasLicense: boolean };
+// (O card do ChatApp saiu em 2026-08 junto com o BSP — o WhatsApp agora é 100%
+//  pelo canal nativo, cujo status aparece na seção Atendimento.)
 
 function IntegracoesSection() {
   const [loading, setLoading] = useState(true);
-  const [chatapp, setChatapp] = useState<ChatAppStatus | null>(null);
   const [bitrixLinked, setBitrixLinked] = useState<number | null>(null);
 
   useEffect(() => {
     async function load() {
-      const [tok, cnt] = await Promise.all([
-        getSetting<{ accessToken?: string; expiresAt?: number; licenseId?: string }>("chatapp_token"),
-        supabase.from("qs_leads").select("id", { count: "exact", head: true }).not("bitrix_id", "is", null),
-      ]);
-      const nowSec = Math.floor(Date.now() / 1000);
-      if (tok && tok.accessToken) {
-        setChatapp({
-          configured: true,
-          expired: typeof tok.expiresAt === "number" && tok.expiresAt < nowSec,
-          hasLicense: !!tok.licenseId,
-        });
-      } else {
-        setChatapp({ configured: false, expired: false, hasLicense: false });
-      }
+      const cnt = await supabase.from("qs_leads").select("id", { count: "exact", head: true }).not("bitrix_id", "is", null);
       setBitrixLinked(cnt.error ? null : (cnt.count ?? 0));
       setLoading(false);
     }
@@ -1867,37 +1850,6 @@ function IntegracoesSection() {
         <p className="text-sm text-gray-500 mt-0.5">
           Só leitura — mostra se cada integração está ativa, sem exibir tokens ou segredos.
         </p>
-      </div>
-
-      {/* ChatApp */}
-      <div className="bg-white border border-gray-100 rounded-xl p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900">ChatApp (WhatsApp)</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Envio de mensagens ao lead. Token mantido pelo n8n em qs_settings.</p>
-          </div>
-          {chatapp?.configured ? (
-            <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${chatapp.expired ? "text-amber-600" : "text-green-600"}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${chatapp.expired ? "bg-amber-500" : "bg-green-500"}`} />
-              {chatapp.expired ? "Token expirado" : "Token configurado ✓"}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-gray-300" /> Não configurado
-            </span>
-          )}
-        </div>
-        {chatapp?.configured ? (
-          <p className="text-[11px] text-gray-400 mt-2">
-            {chatapp.expired
-              ? "O token expirou — o workflow \"ChatApp token\" do n8n renova a cada 6h. Se persistir, verifique o n8n."
-              : "Licença: " + (chatapp.hasLicense ? "configurada ✓" : "faltando (preencha o licenseId no workflow do n8n).")}
-          </p>
-        ) : (
-          <p className="text-[11px] text-amber-600 mt-2">
-            Ative o workflow "ChatApp token" no n8n (grava o token em qs_settings) — sem ele o envio direto não funciona (o iframe segue normal).
-          </p>
-        )}
       </div>
 
       {/* Bitrix */}
@@ -1932,7 +1884,7 @@ function IntegracoesSection() {
   );
 }
 
-// ── Atendimento (cockpit de WhatsApp: ChatApp × Chatwoot) ────────────────────
+// ── Atendimento (cockpit de WhatsApp: nativo × Chatwoot) ─────────────────────
 
 function AtendimentoSection() {
   const [provider, setProvider] = useState<ChatProvider | null>(null);
@@ -2022,8 +1974,7 @@ function AtendimentoSection() {
     setSaving(true);
     const ok = await setChatProvider(p);
     setSaving(false);
-    const nome = p === "qs" ? "Atendimento no QS (carteira separada)"
-      : p === "chatwoot" ? "Chatwoot (embedado)" : "ChatApp (janela)";
+    const nome = p === "qs" ? "Atendimento no QS (carteira separada)" : "Chatwoot (embedado)";
     if (ok) { setProvider(p); notifySuccess(`Cockpit de atendimento: ${nome}.`); }
     else notifyError("Não foi possível salvar (só admin pode trocar).");
   }
@@ -2031,7 +1982,6 @@ function AtendimentoSection() {
   const OPTIONS: { key: ChatProvider; title: string; desc: string }[] = [
     { key: "qs", title: "Atendimento no QS ✅", desc: "A conversa acontece dentro do QS e cada SDR só enxerga os leads da carteira dele (regra no banco, não na tela)." },
     { key: "chatwoot", title: "Chatwoot (embedado)", desc: "Painel do Chatwoot dentro do QS, com deep-link pro lead. Atenção: todo agente enxerga a caixa inteira." },
-    { key: "chatapp", title: "ChatApp (legado)", desc: "Abre o ChatApp em janela externa. Comportamento antigo." },
   ];
 
   return (

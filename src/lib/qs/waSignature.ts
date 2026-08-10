@@ -7,7 +7,7 @@
 // está assinando é a sessão autenticada. Este arquivo existe para os caminhos
 // que NÃO passam pelo servidor:
 //
-//   • o texto que o modal copia pra área de transferência (colar no ChatApp)
+//   • o texto que o modal copia pra área de transferência
 //   • o link wa.me com mensagem pré-preenchida
 //
 // A regra é a mesma dos dois lados — se mudar aqui, mude em `api/_wa.js`

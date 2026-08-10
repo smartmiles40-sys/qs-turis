@@ -1,16 +1,14 @@
 // src/components/sdr/whatsapp/WhatsAppModal.tsx
 // -----------------------------------------------------------------------------
-// Modal de WhatsApp para um lead. O envio de mensagem é feito pelo ChatApp:
-// ao clicar, abre o cabinet do ChatApp em nova aba (o token da API do ChatApp
-// expira, então não dá pra enviar direto pelo servidor). A mensagem escrita é
-// copiada para a área de transferência, para colar no ChatApp.
-// Também oferece abrir a conversa no WhatsApp (wa.me) e ligar.
+// Modal de WhatsApp para um lead. O envio sai pelo canal NATIVO do QS
+// (/api/wa-send: Chatwoot → Evolution → WhatsApp) — a mesma conversa do inbox,
+// assinada com o nome do SDR no servidor. Fallback: abrir no wa.me.
+// Também oferece ligar pelo webfone (Wavoip).
 // Cada interação é registrada em qs_whatsapp_messages.
 // -----------------------------------------------------------------------------
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  openChatApp,
   waChatLink,
   normalizePhoneBR,
   formatPhoneDisplay,
@@ -38,12 +36,12 @@ interface Props {
   ownerId?: string | null;
   /** Texto inicial opcional (ex.: script da cadência). */
   defaultText?: string;
-  /** Callback após abrir o ChatApp (ex.: registrar atividade/concluir tarefa). */
+  /** Callback após enviar/abrir a conversa (ex.: registrar atividade/concluir tarefa). */
   onSent?: () => void;
 }
 
 const WA_GREEN = "#25D366";
-const CHATAPP_BLUE = "#0147FF";
+const QS_BLUE = "#0147FF";
 
 export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultText, onSent }: Props) {
   const { currentUser } = useQsAuth();
@@ -89,39 +87,31 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
     }
   }
 
-  async function handleOpenChatApp() {
+  async function handleSend() {
     const t = text.trim();
-
-    // 1º: tenta ENVIAR DIRETO pela API do ChatApp (token mantido pelo n8n em
-    //     qs_settings). Se funcionar, nem precisa abrir o cabinet.
-    if (t && dialable && !sending) {
-      setSending(true);
-      const r = await sendWhatsAppMessage({
-        leadId: lead.id ?? null,
-        ownerId: ownerId ?? null,
-        phone: lead.phone,
-        text: t,
-      });
-      setSending(false);
-      if (r.ok) {
-        setResult({ ok: true, msg: "✓ Mensagem enviada ao lead pelo ChatApp!" });
-        onSent?.();
-        return;
-      }
-      console.warn("[chatapp] envio direto falhou, caindo pro cabinet:", r.error);
+    if (!t) {
+      setResult({ ok: false, msg: "Escreva a mensagem antes de enviar." });
+      return;
     }
+    if (sending) return;
 
-    // 2º (fallback): copia a mensagem e abre o cabinet pra enviar manualmente.
-    const copied = await copyText();
-    logWhatsApp({ leadId: lead.id ?? null, ownerId: ownerId ?? null, phone, body: t || null, status: "pending", kind: "message" });
-    openChatApp();
-    setResult({
-      ok: true,
-      msg: copied
-        ? "ChatApp aberto em nova aba — a mensagem foi copiada, é só colar na conversa do lead."
-        : "ChatApp aberto em nova aba. Abra a conversa do lead para enviar.",
+    // Envia pelo canal nativo (/api/wa-send). O servidor valida a posse do lead,
+    // assina com o nome do SDR e grava a bolha na MESMA conversa do inbox.
+    setSending(true);
+    const r = await sendWhatsAppMessage({
+      leadId: lead.id ?? null,
+      ownerId: ownerId ?? null,
+      phone: lead.phone,
+      text: t,
     });
-    onSent?.();
+    setSending(false);
+
+    if (r.ok) {
+      setResult({ ok: true, msg: "✓ Mensagem enviada — ela aparece na conversa do lead no inbox." });
+      onSent?.();
+      return;
+    }
+    setResult({ ok: false, msg: `${r.error} Se preferir, use o botão WhatsApp (abre no seu aparelho).` });
   }
 
   async function handleCopy() {
@@ -210,7 +200,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
           {/* Mensagem */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-medium text-gray-500">Mensagem (copie e cole no ChatApp)</label>
+              <label className="text-xs font-medium text-gray-500">Mensagem</label>
               <button type="button" onClick={handleCopy} className="text-[11px] font-medium text-gray-500 hover:text-gray-700 inline-flex items-center gap-1">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
@@ -243,15 +233,16 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Mensagem</p>
             <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr] gap-2">
               <button
-                onClick={handleOpenChatApp}
-                disabled={sending}
+                onClick={handleSend}
+                disabled={sending || !lead.id}
+                title={lead.id ? "Enviar pela conversa do inbox do QS" : "Lead sem cadastro no QS — use o botão WhatsApp"}
                 className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
-                style={{ background: CHATAPP_BLUE }}
+                style={{ background: QS_BLUE }}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7z" />
                 </svg>
-                {sending ? "Enviando…" : "Enviar pelo ChatApp"}
+                {sending ? "Enviando…" : "Enviar pelo QS"}
               </button>
               <button
                 onClick={handleOpenChat}

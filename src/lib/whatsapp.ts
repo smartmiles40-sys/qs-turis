@@ -2,7 +2,8 @@
 // -----------------------------------------------------------------------------
 // Camada de WhatsApp do front. Junta:
 //   - normalização de telefone (BR)
-//   - envio de mensagem via rota serverless /api/chatapp-send (ChatApp)
+//   - envio de mensagem via rota serverless /api/wa-send (canal nativo:
+//     Chatwoot → Evolution → WhatsApp — o mesmo do inbox do QS)
 //   - REGISTRO (log) de cada envio na tabela qs_whatsapp_messages
 //   - links de "clique-para-conversar" e "clique-para-ligar" (wa.me), que abrem
 //     o app/WhatsApp Web do próprio atendente (fallback que sempre funciona).
@@ -13,7 +14,6 @@
 // -----------------------------------------------------------------------------
 
 import { supabase } from "./supabase";
-import { sendLeadMessage } from "./chatapp";
 
 /** Só dígitos. "(11) 99999-8888" -> "11999998888". */
 export function onlyDigits(phone?: string | null): string {
@@ -83,53 +83,62 @@ export function startWhatsAppCall(phone?: string | null): string {
   return url;
 }
 
-/** URL do cabinet do ChatApp (configurável por VITE_CHATAPP_URL). */
-export function getChatAppUrl(): string {
-  return (
-    (import.meta.env.VITE_CHATAPP_URL as string) ||
-    "https://cabinet.chatapp.online/businesses/v2/products/dialogs#/?api[company_id]=56587&businessId=108329&lang=en&hostAppName=billingCabinet"
-  );
-}
-
-/** Abre o ChatApp em nova aba (o atendente conversa por lá). Retorna a URL aberta. */
-export function openChatApp(): string {
-  const url = getChatAppUrl();
-  if (typeof window !== "undefined") window.open(url, "_blank", "noopener,noreferrer");
-  return url;
-}
-
 export type WaSendResult =
-  | { ok: true; chatId: string }
-  | { ok: false; error: string; code?: string };
+  | { ok: true; conversationId: number | null }
+  | { ok: false; error: string };
 
 /**
- * Envia mensagem ao lead via ChatApp (rota serverless) e registra o resultado
- * em qs_whatsapp_messages. O log é best-effort: se a tabela ainda não existir,
- * o envio não é bloqueado.
+ * Envia mensagem ao lead pelo canal NATIVO (/api/wa-send: Chatwoot → Evolution),
+ * o mesmo do inbox do QS. O servidor valida a posse do lead (SDR só escreve pra
+ * lead da carteira dele), assina com o nome do usuário e grava a bolha na
+ * conversa — por isso aqui só precisa de leadId + texto.
+ * O log em qs_whatsapp_messages é best-effort e não bloqueia o envio.
  */
 export async function sendWhatsAppMessage(input: {
   leadId?: string | null;
   ownerId?: string | null;
   phone?: string | null;
-  chatId?: string;
   text: string;
 }): Promise<WaSendResult> {
   const phone = normalizePhoneBR(input.phone);
-  const r = await sendLeadMessage({ phone: phone || undefined, chatId: input.chatId, text: input.text });
+  if (!input.leadId) {
+    return { ok: false, error: "Lead sem cadastro no QS — use o botão WhatsApp (wa.me)." };
+  }
 
-  const ok = r.success === true;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) headers.Authorization = `Bearer ${data.session.access_token}`;
+  } catch { /* sem sessão — a rota nega */ }
+
+  let ok = false;
+  let error = "Falha ao enviar";
+  let conversationId: number | null = null;
+  try {
+    const res = await fetch("/api/wa-send", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ leadId: input.leadId, text: input.text }),
+    });
+    const json = (await res.json()) as { ok?: boolean; conversationId?: number; error?: string };
+    ok = res.ok && json.ok === true;
+    conversationId = json.conversationId ?? null;
+    if (!ok) error = json.error || `Falha ao enviar (HTTP ${res.status})`;
+  } catch {
+    error = "Falha de rede ao chamar /api/wa-send";
+  }
+
   await logWhatsApp({
-    leadId: input.leadId ?? null,
+    leadId: input.leadId,
     ownerId: input.ownerId ?? null,
     phone,
-    chatId: ok ? (r as { data: { chatId: string } }).data.chatId : input.chatId ?? null,
     body: input.text,
     status: ok ? "sent" : "failed",
-    error: ok ? null : (r as { error?: string }).error ?? "Falha ao enviar",
+    error: ok ? null : error,
   });
 
-  if (ok) return { ok: true, chatId: (r as { data: { chatId: string } }).data.chatId };
-  return { ok: false, error: (r as { error?: string; code?: string }).error ?? "Falha ao enviar", code: (r as { code?: string }).code };
+  if (ok) return { ok: true, conversationId };
+  return { ok: false, error };
 }
 
 /** Grava uma linha em qs_whatsapp_messages. Silencioso se a tabela não existir. */

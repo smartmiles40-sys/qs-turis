@@ -1635,7 +1635,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   }
 
   // WhatsApp da tarefa: com roteiro → abre o modal com a mensagem PRONTA
-  // (defaultText); sem roteiro → segue no dock do ChatApp como antes.
+  // (defaultText); sem roteiro → segue no dock de atendimento como antes.
   function openWhatsAppForTask(task: Task, lead: Lead | undefined | null) {
     if (!lead) return;
     const script = task.channel_type === "whatsapp" ? getScriptForTask(task) : null;
@@ -2257,7 +2257,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {task.channel_type === "whatsapp" && lead?.phone && (
-            <button onClick={(e) => { e.stopPropagation(); openWhatsAppForTask(task, lead); }} className="qsx-pa qsx-pa-wa" title={getScriptForTask(task) ? "Abrir WhatsApp com o roteiro da atividade preenchido" : "Abrir no ChatApp e copiar o número"}>
+            <button onClick={(e) => { e.stopPropagation(); openWhatsAppForTask(task, lead); }} className="qsx-pa qsx-pa-wa" title={getScriptForTask(task) ? "Abrir WhatsApp com o roteiro da atividade preenchido" : "Abrir o atendimento e copiar o número"}>
               <IconWhatsApp size={18} />
             </button>
           )}

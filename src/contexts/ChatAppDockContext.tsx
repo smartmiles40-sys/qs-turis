@@ -1,14 +1,13 @@
 // src/contexts/ChatAppDockContext.tsx
 // -----------------------------------------------------------------------------
-// Estado global do "dock" do ChatApp — o painel lateral fixo que mantém o ChatApp
-// SEMPRE carregado (o <iframe> é montado uma única vez em <ChatAppDock/> e nunca
-// desmonta, então a sessão do ChatApp sobrevive à sessão inteira do QS).
+// Estado global do "dock" de ATENDIMENTO — o painel lateral fixo (inbox nativo
+// ou Chatwoot, conforme a flag chat_provider). O nome "ChatApp" no arquivo é
+// herança do cockpit legado (removido em 2026-08); o contexto em si é genérico.
 //
 // Qualquer botão de WhatsApp chama `openForLead(lead)`:
 //   1. abre o painel (se estiver fechado)
-//   2. copia o telefone do lead pra área de transferência (é só colar na busca
-//      do ChatApp com Ctrl+V — não dá pra "digitar" dentro do iframe porque é
-//      outro domínio)
+//   2. copia o telefone do lead pra área de transferência (útil pra busca do
+//      Chatwoot, que é iframe de outro contexto — não dá pra "digitar" nele)
 //   3. registra a interação em qs_whatsapp_messages (best-effort)
 // -----------------------------------------------------------------------------
 
@@ -23,7 +22,7 @@ export interface ChatAppTarget {
   /**
    * Texto pra já deixar escrito no campo de mensagem — é assim que o roteiro da
    * atividade da cadência chega no atendimento nativo, em vez de o SDR ter que
-   * copiar e colar. Só o provider "qs" usa (o ChatApp/Chatwoot são iframes).
+   * copiar e colar. Só o provider "qs" usa (o Chatwoot é iframe).
    */
   draft?: string | null;
 }
@@ -94,7 +93,7 @@ export function ChatAppDockProvider({ children }: { children: ReactNode }) {
       phone,
       status: "pending",
       kind: "message",
-      body: "Aberto no ChatApp (dock)",
+      body: "Aberto no atendimento (dock)",
     });
   }, []);
 
