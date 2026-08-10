@@ -32,7 +32,7 @@ import { notifySuccess } from "@/lib/qs/notify";
 import { useWaAvisos } from "@/lib/qs/waAvisos";
 import WaThreadList from "./WaThreadList";
 import WaConversation from "./WaConversation";
-import { WaAvatar } from "./WaBits";
+import { WaAvatar, WaSeloNumero } from "./WaBits";
 import {
   getInboxLabels, inboxTag, listUsersLite, threadTitle, userName,
   esperandoDesde, humanizarEspera,
@@ -208,9 +208,14 @@ export default function WaPage({ onOpenLead }: Props) {
                   <p className="text-[14.5px] font-semibold leading-tight truncate" style={{ color: "var(--ink)" }}>
                     {sel.nome}
                   </p>
-                  <p className="text-[11.5px] leading-tight truncate tabular-nums" style={{ color: "var(--ink3)" }}>
-                    {formatPhoneDisplay(sel.phone) || "WhatsApp"}
-                  </p>
+                  <span className="flex items-center gap-1.5 leading-tight">
+                    <span className="text-[11.5px] truncate tabular-nums" style={{ color: "var(--ink3)" }}>
+                      {formatPhoneDisplay(sel.phone) || "WhatsApp"}
+                    </span>
+                    {/* Por qual dos NOSSOS números essa conversa corre. Aqui
+                        aparece sempre: e uma linha so, nao 566. */}
+                    {tag && <WaSeloNumero tipo={tag.tipo} nome={tag.nome} compacto />}
+                  </span>
                 </div>
                 {/* Abaixo de xl o painel de contexto não existe: estas duas
                     informações são as que mudam a decisão de escrever agora. */}
@@ -314,14 +319,9 @@ export default function WaPage({ onOpenLead }: Props) {
                   <dt className="text-[10.5px] font-bold uppercase tracking-wider" style={{ color: "var(--ink3)" }}>
                     Número
                   </dt>
-                  <dd className="mt-0.5 flex items-center gap-1.5" style={{ color: "var(--ink)" }}>
-                    {tag.nome}
-                    {tag.ehApi && (
-                      <span className="px-1.5 rounded text-[10.5px] font-semibold"
-                            style={{ background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }}>
-                        API oficial
-                      </span>
-                    )}
+                  <dd className="mt-1 flex items-center gap-1.5" style={{ color: "var(--ink)" }}>
+                    <span className="min-w-0 truncate">{tag.nome}</span>
+                    <WaSeloNumero tipo={tag.tipo} />
                   </dd>
                 </div>
               )}

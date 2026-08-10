@@ -119,22 +119,59 @@ export async function togglePin(leadId: string): Promise<boolean | null> {
 }
 
 // ── Rótulo de cada número (normal x API oficial) ────────────────────────────
-// Vive em qs_settings pra o Bruno trocar sem deploy — e porque hoje os dois
-// números são Baileys; a distinção "API oficial" só existe quando ele migrar um.
+//
+// O tipo é DERIVADO do canal que o Chatwoot informa, não digitado à mão. Antes
+// dependia só de qs_settings.wa_inbox_labels — e como esse registro nunca foi
+// preenchido, `inboxTag` devolvia null para TODAS as conversas e o selo nunca
+// apareceu pra ninguém, em nenhuma das 566 conversas da base.
+//
+// O canal é um sinal confiável e automático:
+//   Channel::Whatsapp → API oficial da Meta (Cloud API / 360dialog)
+//   Channel::Api      → número comum, via Evolution (Baileys/QR)
+//
+// A configuração manual continua existindo e VENCE quando preenchida: serve pra
+// dar um nome humano ("Comercial", "Pós-venda") a cada número. O que ela deixa
+// de fazer é ser condição pro selo existir.
 
 export interface InboxLabel { nome: string; tipo: "normal" | "api" }
 export type InboxLabels = Record<string, InboxLabel>;
 
 export const WA_INBOX_LABELS_KEY = "wa_inbox_labels";
 
+/** Canal do Chatwoot → é número oficial da Meta? */
+export function canalEhApiOficial(canal: string | null | undefined): boolean {
+  return String(canal || "").toLowerCase().includes("whatsapp");
+}
+
 export async function getInboxLabels(): Promise<InboxLabels> {
+  // Base automática: uma entrada por caixa que existe de verdade no Chatwoot.
+  const auto: InboxLabels = {};
+  try {
+    const cfg = await buscarConfig();
+    for (const i of cfg.inboxes) {
+      auto[String(i.id)] = {
+        nome: i.nome,
+        tipo: canalEhApiOficial(i.canal) ? "api" : "normal",
+      };
+    }
+  } catch { /* sem config, segue só com o que estiver salvo à mão */ }
+
+  // Ajuste manual por cima (só o que foi realmente preenchido).
   try {
     const { getSetting } = await import("@/lib/qsSettings");
     const v = await getSetting<InboxLabels>(WA_INBOX_LABELS_KEY);
-    return v && typeof v === "object" ? v : {};
-  } catch {
-    return {};
-  }
+    if (v && typeof v === "object") {
+      for (const [id, l] of Object.entries(v)) {
+        if (!l) continue;
+        auto[id] = {
+          nome: l.nome || auto[id]?.nome || `Caixa ${id}`,
+          tipo: l.tipo === "api" || l.tipo === "normal" ? l.tipo : (auto[id]?.tipo ?? "normal"),
+        };
+      }
+    }
+  } catch { /* segue com a base automática */ }
+
+  return auto;
 }
 
 /** Um número disponível pra enviar, já com o rótulo que o SDR entende. */
@@ -192,7 +229,9 @@ export async function listWaNumeros(force = false): Promise<WaNumero[]> {
     return {
       id: i.id,
       nome: l?.nome || i.nome,
-      tipo: l?.tipo === "api" ? "api" : "normal",
+      // Sem ajuste manual, o tipo vem do canal do Chatwoot — não do padrão
+      // "normal", que marcaria o número oficial como comum.
+      tipo: l?.tipo ?? (canalEhApiOficial(i.canal) ? "api" : "normal"),
       canal: i.canal,
       padrao: i.id === padraoId,
     };

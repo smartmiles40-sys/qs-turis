@@ -20,12 +20,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   listMyThreads, listPinnedLeadIds, listUsersLite, togglePin, getInboxLabels,
   shortWhen, subscribeToThreads, threadTitle, isCloser, userName,
-  esperandoDesde, humanizarEspera, inboxTag,
-  type WaThread, type UserLite, type InboxLabels,
+  esperandoDesde, humanizarEspera, inboxTag, listWaNumeros,
+  type WaThread, type UserLite, type InboxLabels, type WaNumero,
 } from "@/lib/qs/waInbox";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { useQsAuth } from "@/contexts/QsAuthContext";
-import { WaAvatar, WaLinhaEsqueleto } from "./WaBits";
+import { WaAvatar, WaLinhaEsqueleto, WaSeloNumero } from "./WaBits";
 import { waPlain } from "./waFormat";
 
 type Aba = "meus" | "closers" | "todos";
@@ -52,12 +52,18 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
   const [users, setUsers] = useState<UserLite[]>([]);
   const [fixadas, setFixadas] = useState<Set<string>>(new Set());
   const [rotulos, setRotulos] = useState<InboxLabels>({});
+  // Os números de WhatsApp da conta. Com um número só, tanto o selo de origem
+  // quanto o filtro seriam ruído — a resposta seria sempre a mesma. Os dois
+  // aparecem sozinhos no dia em que o segundo número conectar.
+  const [numeros, setNumeros] = useState<WaNumero[]>([]);
+  const varios = numeros.length > 1;
   const [loading, setLoading] = useState(true);
 
   const [aba, setAba] = useState<Aba>("meus");
   const [busca, setBusca] = useState("");
   const [soNaoRespondidas, setSoNaoRespondidas] = useState(false);
   const [donoFiltro, setDonoFiltro] = useState<string>("todos");   // só gestor
+  const [numeroFiltro, setNumeroFiltro] = useState<string>("todos");
 
   const carregar = useCallback(async () => {
     const [ts, ps] = await Promise.all([listMyThreads(), listPinnedLeadIds()]);
@@ -88,6 +94,7 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
   useEffect(() => {
     listUsersLite().then(setUsers);
     getInboxLabels().then(setRotulos);
+    listWaNumeros().then(setNumeros);
   }, []);
 
   const alternarFixar = useCallback(async (leadId: string) => {
@@ -118,6 +125,12 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
       if (ehGestor && donoFiltro !== "todos" && dono !== donoFiltro) return false;
       if (soNaoRespondidas && !esperandoDesde(t)) return false;
 
+      // Por qual dos NOSSOS números a conversa corre. Conversa sem número
+      // identificado (as antigas, anteriores ao registro da caixa) fica de fora
+      // de propósito quando se filtra por um número específico: ninguém sabe se
+      // ela é daquele número, e chutar seria pior que omitir.
+      if (numeroFiltro !== "todos" && String(t.cw_inbox_id ?? "") !== numeroFiltro) return false;
+
       if (q) {
         const nome = threadTitle(t).toLowerCase();
         const fone = (t.lead?.phone || "").replace(/\D/g, "");
@@ -133,7 +146,7 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
       if (fa !== fb) return fb - fa;
       return new Date(b.last_at || 0).getTime() - new Date(a.last_at || 0).getTime();
     });
-  }, [threads, aba, busca, soNaoRespondidas, donoFiltro, fixadas, users, ehGestor, currentUser?.id]);
+  }, [threads, aba, busca, soNaoRespondidas, donoFiltro, numeroFiltro, fixadas, users, ehGestor, currentUser?.id]);
 
   const contarAba = useCallback((a: Aba) => {
     return threads.filter((t) => {
@@ -145,7 +158,17 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
   }, [threads, users, ehGestor, currentUser?.id]);
 
   const naoRespondidas = useMemo(() => threads.filter((t) => esperandoDesde(t)).length, [threads]);
-  const temFiltro = Boolean(busca) || soNaoRespondidas || donoFiltro !== "todos";
+  const temFiltro = Boolean(busca) || soNaoRespondidas || donoFiltro !== "todos" || numeroFiltro !== "todos";
+
+  /** Quantas conversas correm por cada número — o filtro precisa dizer isso antes do clique. */
+  const porNumero = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of threads) {
+      const k = String(t.cw_inbox_id ?? "");
+      if (k) m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  }, [threads]);
 
   const ABAS: { key: Aba; label: string }[] = [
     { key: "meus", label: ehGestor ? "Da equipe" : "Meus leads" },
@@ -193,7 +216,7 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
           />
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setSoNaoRespondidas((v) => !v)}
             aria-pressed={soNaoRespondidas}
@@ -206,6 +229,28 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
             Esperando resposta
             {naoRespondidas > 0 && <span className="ml-1 tabular-nums">{naoRespondidas}</span>}
           </button>
+
+          {/* Filtrar por número só existe quando há mais de um: com um número
+              só, "todos" e "aquele" devolveriam a mesma lista. */}
+          {varios && (
+            <select
+              value={numeroFiltro}
+              onChange={(e) => setNumeroFiltro(e.target.value)}
+              aria-label="Filtrar por número de WhatsApp"
+              title="De qual dos nossos números é a conversa"
+              className="rounded-lg px-2 py-1 text-[11px] outline-none"
+              style={numeroFiltro !== "todos"
+                ? { border: "1px solid var(--wa)", background: "transparent", color: "var(--wa)", fontWeight: 600 }
+                : { border: "1px solid var(--line)", background: "transparent", color: "var(--ink2)" }}
+            >
+              <option value="todos">Todos os números</option>
+              {numeros.map((n) => (
+                <option key={n.id} value={String(n.id)}>
+                  {n.nome}{n.tipo === "api" ? " (oficial)" : ""} · {porNumero.get(String(n.id)) ?? 0}
+                </option>
+              ))}
+            </select>
+          )}
 
           {ehGestor && (
             <select
@@ -304,19 +349,15 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
                     </span>
 
                     {/* linha 3 — meta. Uma linha só, com truncate: nunca quebra. */}
-                    {(espera || mostraDono || tag?.ehApi) && (
+                    {(espera || mostraDono || (varios && tag)) && (
                       <span className="flex items-center gap-2 mt-1 min-w-0 text-[11px]">
                         {espera && (
                           <span className="shrink-0 font-semibold" style={{ color: "var(--red)" }}>
                             esperando {humanizarEspera(espera)}
                           </span>
                         )}
-                        {tag?.ehApi && (
-                          <span className="shrink-0 px-1.5 rounded font-semibold"
-                                style={{ background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }}
-                                title={`Número oficial · ${tag.nome}`}>
-                            API
-                          </span>
+                        {varios && tag && (
+                          <WaSeloNumero tipo={tag.tipo} nome={tag.nome} compacto />
                         )}
                         {mostraDono && (
                           <span className="min-w-0 truncate" style={{ color: "var(--ink3)" }}>{dono}</span>

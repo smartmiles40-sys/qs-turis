@@ -196,6 +196,64 @@ export function WaAudio({ url, meu }: { url: string; meu: boolean }) {
   );
 }
 
+// ── Selo do número (comum × API oficial) ────────────────────────────────────
+//
+// A diferença é operacional, não decorativa, e é por isso que ela merece um
+// desenho próprio:
+//
+//   • API oficial (Meta) — fora da janela de 24h só sai template aprovado, e
+//     cada mensagem tem custo. Escudo com visto: "verificado, com regra".
+//   • Comum (Evolution/QR) — texto livre a qualquer hora, mas o número pode ser
+//     banido em disparo. Celular: "é um aparelho, como o do cliente".
+//
+// Cor não carrega o significado sozinha (daltonismo, tema escuro, impressão):
+// as duas formas já são distintas, e todo selo tem `title` pra quem passar o
+// mouse. Em `compacto` fica só o ícone — cabe na linha da lista sem empurrar o
+// nome do cliente.
+
+export function WaSeloNumero({
+  tipo, nome, compacto = false,
+}: { tipo: "normal" | "api"; nome?: string | null; compacto?: boolean }) {
+  const ehApi = tipo === "api";
+  const titulo = ehApi
+    ? `${nome ? nome + " · " : ""}API oficial da Meta — fora da janela de 24h só sai template aprovado`
+    : `${nome ? nome + " · " : ""}WhatsApp comum (via aparelho) — texto livre a qualquer hora`;
+
+  const cor = ehApi
+    ? { background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }
+    : { background: "var(--card2)", color: "var(--ink3)" };
+
+  const icone = ehApi ? (
+    // Escudo com visto
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  ) : (
+    // Celular
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="7" y="2" width="10" height="20" rx="2.5" />
+      <path d="M11 18h2" />
+    </svg>
+  );
+
+  return (
+    <span
+      title={titulo}
+      aria-label={titulo}
+      className={`shrink-0 inline-flex items-center rounded font-semibold ${
+        compacto ? "gap-0 w-[18px] h-[15px] justify-center" : "gap-1 px-1.5 h-[18px] text-[10.5px]"
+      }`}
+      style={cor}
+    >
+      {icone}
+      {!compacto && <span>{ehApi ? "Oficial" : "Comum"}</span>}
+    </span>
+  );
+}
+
 // ── Esqueleto da lista ──────────────────────────────────────────────────────
 
 export function WaLinhaEsqueleto() {

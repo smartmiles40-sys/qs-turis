@@ -1,11 +1,16 @@
 // src/components/sdr/settings/WaInboxLabels.tsx
 // -----------------------------------------------------------------------------
-// Configura o SELO que o SDR vê em cada conversa: de qual número ela veio e se
-// aquele número é WhatsApp normal (QR/Baileys) ou API oficial da Meta.
+// Ajuste FINO do selo que o atendente vê em cada conversa: de qual número ela
+// veio e se aquele número é WhatsApp comum (QR/Baileys) ou API oficial da Meta.
 //
-// Por que é configuração e não detecção automática: hoje os dois números são
-// Baileys, então não há nada pra detectar. Quando um deles virar oficial, é aqui
-// que se marca — sem deploy.
+// MUDOU: o tipo agora é DERIVADO do canal que o Chatwoot informa
+// (Channel::Whatsapp = oficial, Channel::Api = comum), então o selo funciona
+// sem ninguém preencher nada aqui. Antes dependia só desta tela — e como ela
+// nunca foi preenchida, o selo não aparecia em NENHUMA das conversas da base.
+//
+// Esta tela continua valendo pra duas coisas: dar um nome humano ao número
+// ("Comercial", "Pós-venda") e corrigir o tipo no caso raro em que o canal do
+// Chatwoot não represente a realidade. O que estiver aqui vence o automático.
 //
 // A chave de cada linha é o ID da CAIXA no Chatwoot (1, 2, ...), que é o que a
 // conversa carrega. Aparece em Chatwoot → Configurações → Caixas de entrada (na
@@ -59,10 +64,12 @@ export default function WaInboxLabels() {
 
   return (
     <div className="bg-white border border-gray-100 rounded-xl p-4">
-      <h3 className="text-sm font-semibold text-gray-900">Selo dos números (normal × API oficial)</h3>
+      <h3 className="text-sm font-semibold text-gray-900">Nome dos números (comum × API oficial)</h3>
       <p className="text-xs text-gray-500 mt-1 leading-snug">
-        O SDR vê um selo em cada conversa dizendo de qual número ela veio. Use o <b>ID da caixa</b> do
-        Chatwoot (aparece na URL da caixa em Configurações → Caixas de entrada).
+        O selo de cada conversa já funciona sozinho: o tipo vem do canal que o Chatwoot informa.
+        Preencha aqui só para dar um <b>nome humano</b> ao número ("Comercial", "Pós-venda") ou para
+        corrigir o tipo num caso fora do padrão. Use o <b>ID da caixa</b> do Chatwoot (aparece na URL
+        da caixa em Configurações → Caixas de entrada).
       </p>
 
       <div className="mt-3 space-y-2">
