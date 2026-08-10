@@ -25,10 +25,11 @@ import { insert, rest, segredoConfere } from './_supabaseAdmin.js';
 /**
  * O cliente apagou a mensagem no celular dele.
  *
- * O Chatwoot avisa por message_updated com content_attributes.deleted = true e
- * o conteúdo já esvaziado. Sem tratar isso, a mensagem apagada continuava na
- * tela do QS — a pessoa apaga e a gente segue lendo, que é justamente o que ela
- * quis evitar.
+ * O Chatwoot avisa por message_updated com content_attributes.deleted = true.
+ * Nós apenas CARIMBAMOS a mensagem (qs_wa_apagar, migration 0046): o texto fica
+ * no QS, que é o arquivo da conversa — saber o que o cliente apagou é
+ * justamente o que interessa a um time comercial. A tela mostra a marca "o
+ * cliente apagou · só você vê".
  *
  * Best-effort: falhou, o webhook segue e a mensagem apenas não é marcada.
  */
@@ -145,7 +146,7 @@ export default async function handler(req, res) {
 
   // Apagada no celular do cliente: chega como message_updated com o conteúdo já
   // vazio. Tem que ser tratado ANTES da ingestão — que descartaria o evento por
-  // "nada pra mostrar" e deixaria a bolha antiga intacta na tela.
+  // "nada pra mostrar" e a mensagem nunca ganharia a marca de apagada.
   if (message?.content_attributes?.deleted === true && message?.id != null) {
     const ok = await marcarApagada(message.id);
     return res.status(200).json({ ok, apagada: true, messageId: message.id });

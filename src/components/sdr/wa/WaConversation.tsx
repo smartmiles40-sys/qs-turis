@@ -244,20 +244,20 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
   const apagar = useCallback(async (m: WaMessage) => {
     const ok = await confirmar({
-      titulo: "Apagar esta mensagem para todos?",
-      mensagem: "Ela some do seu QS e do WhatsApp do cliente. Não dá pra desfazer.",
-      confirmarLabel: "Apagar para todos",
+      titulo: "Apagar esta mensagem no WhatsApp do cliente?",
+      mensagem: "Ela some do aparelho dele e não dá pra desfazer. Aqui no QS a mensagem CONTINUA no histórico, marcada como apagada.",
+      confirmarLabel: "Apagar no WhatsApp",
       recusarLabel: "Manter",
     });
     if (!ok) return;
     const r = await apagarMensagem(leadId, m.id);
     if (!r.ok) { notifyError(r.error || "Não consegui apagar."); return; }
-    // Otimista: o realtime traz a versão do banco logo em seguida.
+    // Otimista: só a marca. O conteúdo fica — o QS é o arquivo da conversa.
     setMessages((prev) => prev.map((x) =>
-      x.id === m.id ? { ...x, content: null, attachments: [], reactions: [], deleted_at: new Date().toISOString() } : x
+      x.id === m.id ? { ...x, deleted_at: new Date().toISOString() } : x
     ));
-    if (respondendo?.id === m.id) setRespondendo(null);
-  }, [leadId, respondendo?.id]);
+    notifySuccess("Apagada no WhatsApp do cliente. Continua aqui no histórico.");
+  }, [leadId]);
 
   const copiar = useCallback(async (m: WaMessage) => {
     const t = waPlain(m.content) || "";
@@ -284,6 +284,8 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         id: "reagir",
         label: "Reagir",
         icone: <IconeMenu d={PATHS.reagir} />,
+        // Reagir e responder dependem da mensagem existir no aparelho do
+        // cliente — apagada lá fora, o WhatsApp não teria em que pendurar.
         escondido: apagada,
         // Abre a MESMA paleta do hover: quem usa mouse continua no atalho
         // rápido, e quem está no celular chega nela pelo menu.
@@ -293,12 +295,14 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         id: "copiar",
         label: "Copiar texto",
         icone: <IconeMenu d={PATHS.copiar} />,
-        escondido: apagada || !m.content,
+        // Copiar continua valendo em mensagem apagada: o texto segue aqui, e
+        // copiar é operação local — não toca no WhatsApp de ninguém.
+        escondido: !m.content,
         onClick: () => void copiar(m),
       },
       {
         id: "apagar",
-        label: "Apagar para todos",
+        label: "Apagar no WhatsApp",
         icone: <IconeMenu d={PATHS.apagar} />,
         perigo: true,
         // O WhatsApp só deixa apagar o que é NOSSO. Esconder é mais honesto do
@@ -826,7 +830,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                         WhatsApp. Vem do reply_preview gravado junto — a citada
                         pode ser anterior ao que o QS importou, e aí não haveria
                         de onde ler o texto. */}
-                    {m.reply_preview && !m.deleted_at && (
+                    {m.reply_preview && (
                       <p className="mb-1.5 pl-2 py-1 rounded text-[12px] leading-snug line-clamp-3 break-words"
                          style={{
                            borderLeft: "3px solid var(--wa-bright)",
@@ -838,19 +842,23 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                       </p>
                     )}
 
-                    {m.deleted_at ? (
-                      // Apagada: some o conteúdo e fica o rastro, igual ao
-                      // celular. Um buraco silencioso no histórico seria pior —
-                      // ninguém entenderia que ali existiu uma mensagem.
-                      <p className="flex items-center gap-1.5 italic"
-                         style={{ fontSize: 13.5, opacity: .7, color: meu ? "var(--wa-ink)" : "var(--ink3)" }}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                             strokeWidth="1.9" strokeLinecap="round" aria-hidden>
+                    {/* Apagada = SUMIU DO CELULAR DO CLIENTE, não daqui. O QS é
+                        o arquivo da conversa: é dele que sai a auditoria do que
+                        foi combinado, e ela não pode ter buraco. Fica a marca —
+                        o atendente precisa saber que o outro lado não vê mais
+                        essa mensagem (não dá pra cobrar algo invisível). */}
+                    {m.deleted_at && (
+                      <p className="flex items-center gap-1 mb-1 text-[11px] font-semibold"
+                         style={{ opacity: .75, color: meu ? "var(--wa-ink)" : "var(--ink3)" }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             strokeWidth="2" strokeLinecap="round" aria-hidden>
                           <path d="M4.9 4.9 19 19M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />
                         </svg>
-                        {meu ? "Você apagou esta mensagem" : "Esta mensagem foi apagada"}
+                        {meu ? "apagada para o cliente" : "o cliente apagou"} · só você vê
                       </p>
-                    ) : figurinha ? (
+                    )}
+
+                    {figurinha ? (
                       // Figurinha: imagem solta (sem bolha), com o "salvar" no hover.
                       <span className="relative block">
                         <img src={figurinha} alt="Figurinha" loading="lazy" decoding="async"
@@ -867,7 +875,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                     ) : (
                       m.attachments?.map((a, k) => <Anexo key={k} a={a} meu={meu} />)
                     )}
-                    {m.content && !m.deleted_at && (
+                    {m.content && (
                       <p className="whitespace-pre-wrap break-words"
                          style={emojiPx
                            ? { fontSize: emojiPx, lineHeight: 1.15 }

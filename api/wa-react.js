@@ -16,10 +16,12 @@
 //      WhatsApp do cliente. Sem Evolution, a reação fica visível só no QS e a
 //      resposta avisa (`entregue: false`) — nada de fingir que chegou.
 //
-// APAGAR: primeiro no WhatsApp, depois no QS. Nessa ordem porque o WhatsApp é
-// quem pode RECUSAR (só dá pra apagar mensagem nossa, e dentro do prazo dele) —
-// apagar só do nosso lado deixaria o atendente achando que sumiu do celular do
-// cliente, que é o oposto do que ele quis.
+// APAGAR: some do WhatsApp do cliente e CONTINUA aqui. O QS é o arquivo da
+// conversa — dele sai a auditoria do que foi combinado, e ela não pode ter
+// buraco (migration 0046). No banco isso é só um carimbo em `deleted_at`.
+// A ordem é WhatsApp primeiro porque é ele quem pode RECUSAR (só dá pra apagar
+// mensagem nossa, e dentro do prazo dele): carimbar antes deixaria a mensagem
+// marcada como apagada aqui e viva no celular do cliente.
 //
 // Mesma trava das outras rotas: o servidor confirma que o lead é deste usuário
 // antes de escrever qualquer coisa.

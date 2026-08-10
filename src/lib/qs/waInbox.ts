@@ -37,6 +37,7 @@ export interface WaMessage {
   //    conversa segue funcionando exatamente como antes) ────────────────────
   /** Recibo do WhatsApp: sent | delivered | read | failed. Só em mensagem nossa. */
   status?: "sent" | "delivered" | "read" | "failed" | null;
+  /** Carimbo de "não está mais no WhatsApp do cliente". O conteúdo FICA aqui. */
   deleted_at?: string | null;
   /** A mensagem que esta aqui está respondendo (id dela no WhatsApp). */
   reply_to_source_id?: string | null;
@@ -525,7 +526,10 @@ export async function reagirMensagem(
 }
 
 /**
- * Apaga a mensagem para todos — primeiro no WhatsApp do cliente, depois no QS.
+ * Apaga a mensagem no WhatsApp do CLIENTE. Aqui ela continua: o QS é o arquivo
+ * da conversa, e some dele seria perder a auditoria do que foi combinado — a
+ * mensagem só ganha a marca `deleted_at` (migration 0046).
+ *
  * O servidor recusa mensagem do cliente e mensagem velha demais, e devolve o
  * motivo em português pra tela repassar como está.
  */
