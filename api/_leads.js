@@ -432,6 +432,7 @@ export async function createInboundLead(payload) {
   // Temperatura: rótulo do Bitrix vence; sem rótulo, tenta a classificação
   // automática por Fonte (regras do gestor em qs_settings.auto_classify_rules).
   let leadScore = pickLeadScore(payload);
+  const bitrixScore = leadScore; // rótulo cru que veio do Bitrix (usado na nota de origem)
   let autoClassified = false;
   if (!leadScore) {
     leadScore = await autoClassifyBySource(payload.segment);
@@ -500,6 +501,23 @@ export async function createInboundLead(payload) {
   let tasks = 0;
   if (cadenceId && lead) {
     tasks = await generateCadenceTasks({ leadId: lead.id, cadenceId, ownerId: finalOwner, priority, baseDate: nowIso });
+  }
+
+  // Nota de origem Bitrix (best-effort). Antes quem criava era o n8n, DEPOIS da
+  // resposta — e todo reenvio do Bitrix empilhava mais uma cópia (135 leads com
+  // nota repetida em produção). Aqui ela só roda quando o lead acabou de NASCER:
+  // reenvio cai no dedupe lá em cima e nunca chega neste ponto.
+  if (bitrixId && lead) {
+    try {
+      await insert('qs_notes', {
+        lead_id: lead.id,
+        author_id: null,
+        body: `📥 Origem Bitrix\nFonte: ${payload.segment || '-'}\nTemperatura: ${bitrixScore || '-'}`,
+        tags: ['bitrix', 'origem'],
+      }, { returning: false });
+    } catch (e) {
+      console.warn('[leads] nota de origem falhou (segue):', e?.message);
+    }
   }
 
   // Rastro da classificação automática (best-effort): o SDR vê no histórico que
