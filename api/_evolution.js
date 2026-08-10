@@ -165,6 +165,36 @@ export async function resolveJid(instance, phone) {
 }
 
 /**
+ * A URL da foto de perfil do contato no WhatsApp.
+ *
+ * Devolve null em silêncio quando não há foto — e isso é comum, não é erro:
+ * quem configura "foto de perfil: só meus contatos" fica invisível pro nosso
+ * número, e a resposta certa nesse caso são as iniciais coloridas.
+ *
+ * ⚠️ A URL que volta é ASSINADA e EXPIRA em poucos dias. Guardar ela crua no
+ * banco dá foto quebrada depois — quem chama precisa baixar e rehospedar.
+ */
+export async function fetchProfilePicture(instance, phone) {
+  const numero = onlyDigitsEvo(phone);
+  if (!numero) return null;
+  try {
+    const r = await evo(`/chat/fetchProfilePictureUrl/${encodeURIComponent(instance)}`, { number: numero });
+    const url = r?.profilePictureUrl || r?.profilePicUrl || null;
+    return url && /^https?:\/\//i.test(String(url)) ? String(url) : null;
+  } catch (e) {
+    // 404 = contato sem foto (ou sem permissão de ver). Não polui o log.
+    if (e?.status !== 404 && e?.status !== 400) {
+      console.warn('[evo] fetchProfilePicture:', e?.message);
+    }
+    return null;
+  }
+}
+
+function onlyDigitsEvo(v) {
+  return String(v || '').replace(/\D/g, '');
+}
+
+/**
  * Apaga a mensagem PARA TODOS no WhatsApp — o "Apagar para todos" do celular.
  *
  * A Evolution expõe isso como DELETE em /chat/deleteMessageForEveryone, e o

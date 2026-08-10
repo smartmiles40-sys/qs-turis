@@ -19,8 +19,59 @@
 
 import { useEffect, useState } from "react";
 import { getSetting, setSetting } from "@/lib/qsSettings";
-import { WA_INBOX_LABELS_KEY, type InboxLabels } from "@/lib/qs/waInbox";
+import { WA_INBOX_LABELS_KEY, preencherFotos, type InboxLabels } from "@/lib/qs/waInbox";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
+
+/**
+ * Preencher as fotos de perfil que faltam.
+ *
+ * Existe porque a foto só chega quando alguém ABRE a conversa, e esperar 566
+ * conversas serem abertas uma a uma não é um plano. Vai de 25 em 25: do outro
+ * lado é um WhatsApp de verdade, e rajada de consulta é o padrão que derruba
+ * número por abuso — clicar de novo continua de onde parou.
+ */
+function BotaoFotos() {
+  const [rodando, setRodando] = useState(false);
+  const [ultimo, setUltimo] = useState<string | null>(null);
+
+  async function rodar() {
+    setRodando(true);
+    const r = await preencherFotos(25);
+    setRodando(false);
+    if (!r.ok) { notifyError(r.error || "Não consegui buscar as fotos."); setUltimo(null); return; }
+    setUltimo(
+      r.tentadas === 0
+        ? "Nenhuma conversa sem foto — está tudo preenchido."
+        : `${r.preenchidas} de ${r.tentadas} conversas ganharam foto.`
+    );
+    if (r.preenchidas > 0) notifySuccess(`${r.preenchidas} foto(s) trazidas do WhatsApp.`);
+  }
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl p-4">
+      <h3 className="text-sm font-semibold text-gray-900">Fotos de perfil dos clientes</h3>
+      <p className="text-xs text-gray-500 mt-1 leading-snug">
+        A foto entra sozinha quando alguém abre a conversa. Use o botão para preencher as antigas de
+        uma vez — ele processa <b>25 por clique</b>, para não bater demais no WhatsApp de uma vez.
+      </p>
+      <div className="flex items-center gap-3 mt-3">
+        <button
+          onClick={rodar}
+          disabled={rodando}
+          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-60 transition-opacity"
+          style={{ background: "#0147FF" }}
+        >
+          {rodando ? "buscando…" : "Buscar fotos que faltam"}
+        </button>
+        {ultimo && <span className="text-[11.5px] text-gray-500">{ultimo}</span>}
+      </div>
+      <p className="text-[11px] text-gray-400 mt-2 leading-snug">
+        Cliente que configurou "foto de perfil: só meus contatos" continua sem foto — o WhatsApp não
+        mostra para quem não está na agenda dele, e aí as iniciais coloridas são a resposta certa.
+      </p>
+    </div>
+  );
+}
 
 interface Linha { id: string; nome: string; tipo: "normal" | "api" }
 
@@ -63,6 +114,7 @@ export default function WaInboxLabels() {
   if (!carregado) return null;
 
   return (
+    <>
     <div className="bg-white border border-gray-100 rounded-xl p-4">
       <h3 className="text-sm font-semibold text-gray-900">Nome dos números (comum × API oficial)</h3>
       <p className="text-xs text-gray-500 mt-1 leading-snug">
@@ -120,9 +172,11 @@ export default function WaInboxLabels() {
           className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-60 transition-opacity"
           style={{ background: "#0147FF" }}
         >
-          {salvando ? "salvando…" : "Salvar selos"}
+          {salvando ? "salvando…" : "Salvar nomes"}
         </button>
       </div>
     </div>
+    <BotaoFotos />
+    </>
   );
 }

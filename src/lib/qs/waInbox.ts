@@ -551,6 +551,31 @@ export async function apagarMensagem(
   }
 }
 
+/**
+ * Preenche as fotos de perfil que faltam, em lote (só gestor/admin).
+ * Roda de N em N de propósito: do outro lado é um WhatsApp de verdade, e
+ * rajada de consulta é o padrão que derruba número por abuso.
+ */
+export async function preencherFotos(
+  quantidade = 25
+): Promise<{ ok: boolean; preenchidas: number; tentadas: number; error?: string }> {
+  try {
+    const res = await fetch(`/api/wa-sync?fotos=${quantidade}`, { headers: await authHeaders() });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        ok: false, preenchidas: 0, tentadas: 0,
+        error: d?.error || (d?.motivo === "evolution-nao-configurada"
+          ? "A Evolution não está configurada na Vercel (faltam EVOLUTION_URL e EVOLUTION_APIKEY)."
+          : "Não consegui buscar as fotos."),
+      };
+    }
+    return { ok: true, preenchidas: d?.preenchidas ?? 0, tentadas: d?.tentadas ?? 0 };
+  } catch {
+    return { ok: false, preenchidas: 0, tentadas: 0, error: "Sem conexão. Tente de novo." };
+  }
+}
+
 // ── Figurinhas (a galeria pessoal do SDR) ───────────────────────────────────
 // `dado` é um data-url (figurinha que o SDR subiu, convertida no navegador) ou
 // a URL do Chatwoot (figurinha salva de uma conversa). A tabela tem RLS por

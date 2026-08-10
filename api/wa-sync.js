@@ -18,6 +18,7 @@ import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cw,
   toE164BR, findContact, pickConversation, ingestMessage,
 } from './_wa.js';
+import { resolverFoto, preencherFotosEmLote } from './_waFoto.js';
 
 async function gravarThread(leadId, patch) {
   await rest('qs_wa_threads?on_conflict=lead_id', {
@@ -60,6 +61,20 @@ export default async function handler(req, res) {
 
   const userId = await getSupabaseUserId(req.headers['authorization']);
   if (!userId) return res.status(401).json({ error: 'Não autorizado' });
+
+  // ── Modo LOTE: preencher as fotos que faltam ──────────────────────────────
+  // Vive aqui, e não numa rota nova, porque o projeto já roda no limite prático
+  // de funções da Vercel. Só gestor/admin: é uma rodada de consultas ao
+  // WhatsApp, não algo pra qualquer um disparar a qualquer hora.
+  if (req.query?.fotos) {
+    const users = await rest(`qs_users?select=role,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
+    const u = Array.isArray(users) && users[0];
+    if (!u || u.is_active === false || (u.role !== 'admin' && u.role !== 'gestor')) {
+      return res.status(403).json({ error: 'Só gestor ou admin pode preencher as fotos.' });
+    }
+    const r = await preencherFotosEmLote(Number(req.query.fotos));
+    return res.status(r.ok ? 200 : 503).json(r);
+  }
 
   const leadId = String(req.query?.leadId || '').trim();
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
@@ -113,14 +128,30 @@ export default async function handler(req, res) {
       if (novo) importadas++;
     }
 
+    // Foto: o thumbnail do Chatwoot quando existe (já hospedado e estável) e,
+    // quando não existe — o caso de ~92% dos contatos —, a Evolution, com a
+    // imagem rehospedada no nosso Storage. Best-effort: sem foto, o avatar cai
+    // nas iniciais coloridas e o sync das mensagens segue igual.
+    let foto = contact.thumbnail || null;
+    try {
+      const nova = await resolverFoto({
+        leadId,
+        phone: auth.lead.phone,
+        inboxId: conv.inbox_id ?? null,
+        thumbnailChatwoot: contact.thumbnail || null,
+      });
+      if (nova) foto = nova;
+    } catch (e) {
+      console.warn('[wa-sync] foto de perfil:', e?.message);
+    }
+
     await saveThreadMeta(leadId, {
       cw_conversation_id: conv.id,
       cw_contact_id: contact.id,
       cw_inbox_id: conv.inbox_id ?? null,
-      // Foto de perfil do WhatsApp (coluna da migration 0026). Se a coluna não
-      // existir, o PostgREST recusa a linha inteira — por isso saveThreadMeta
-      // engole o erro e o resto do sync segue normal.
-      avatar_url: contact.thumbnail || null,
+      // Coluna da migration 0026. Se ela não existir, o PostgREST recusa a
+      // linha inteira — por isso saveThreadMeta engole o erro e o resto segue.
+      avatar_url: foto,
       can_reply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
       synced_at: new Date().toISOString(),
     });
