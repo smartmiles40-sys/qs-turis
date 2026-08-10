@@ -36,6 +36,9 @@ export default async function handler(req, res) {
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const leadId = String(body.leadId || '').trim();
   const text = String(body.text || '').trim();
+  // Responder citando: o front manda o id da mensagem NO QS; aqui viramos o id
+  // dela no Chatwoot, que é o que a API dele entende em content_attributes.
+  const respondendoA = String(body.respondendoA || '').trim();
 
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
   if (!text) return res.status(400).json({ error: 'Mensagem vazia' });
@@ -100,9 +103,35 @@ export default async function handler(req, res) {
     // navegador: quem assina é a sessão autenticada, não o que o cliente mandar.
     const textoFinal = await assinarComoUsuario(text, auth.user);
 
+    // A citação é OPCIONAL de verdade: se a mensagem citada não for deste lead,
+    // ou o QS não souber o id dela no Chatwoot, mandamos sem citar. Perder a
+    // citação é aceitável; perder a mensagem, não.
+    let citando = null;
+    let citadoTexto = null;
+    if (respondendoA) {
+      try {
+        const alvo = await rest(
+          `qs_wa_messages?select=cw_message_id,content&id=eq.${encodeURIComponent(respondendoA)}` +
+          `&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
+        );
+        citando = alvo?.[0]?.cw_message_id ?? null;
+        // Guardamos o trecho AGORA, daqui: o webhook devolve a nossa mensagem
+        // sem o texto da citada, e sem isso a citação apareceria como uma faixa
+        // vazia na própria tela de quem acabou de responder.
+        citadoTexto = alvo?.[0]?.content ? String(alvo[0].content).slice(0, 160) : null;
+      } catch (e) {
+        console.warn('[wa-send] citação ignorada:', e?.message);
+      }
+    }
+
     const sent = await cw(`/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: { content: textoFinal, message_type: 'outgoing', private: false },
+      body: {
+        content: textoFinal,
+        message_type: 'outgoing',
+        private: false,
+        ...(citando ? { content_attributes: { in_reply_to: citando } } : {}),
+      },
     });
 
     // ⚠️ DAQUI PRA BAIXO A MENSAGEM JÁ SAIU PRO CLIENTE.
@@ -127,6 +156,13 @@ export default async function handler(req, res) {
           // Id no WhatsApp (quando o Chatwoot já devolve) — liga a mensagem às
           // reações da 0041; o message_updated do webhook completa os demais.
           source_id: sent?.source_id ?? null,
+          // Nasce como "enviada" (✓). O webhook do Chatwoot promove pra
+          // entregue/lida depois; sem este valor inicial a bolha ficaria sem
+          // recibo nenhum até o cliente abrir a conversa.
+          status: sent?.status || 'sent',
+          ...(citando ? {
+            content_attributes: { in_reply_to: citando, in_reply_to_content: citadoTexto },
+          } : {}),
         },
       });
       tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);

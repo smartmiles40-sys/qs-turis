@@ -165,6 +165,39 @@ export async function resolveJid(instance, phone) {
 }
 
 /**
+ * Apaga a mensagem PARA TODOS no WhatsApp — o "Apagar para todos" do celular.
+ *
+ * A Evolution expõe isso como DELETE em /chat/deleteMessageForEveryone, e o
+ * corpo é a mesma `key` da reação (remoteJid + id + fromMe). O WhatsApp só
+ * deixa apagar mensagem NOSSA e dentro da janela dele — passou do prazo, ele
+ * recusa, e quem chama precisa saber disso pra não mentir na tela.
+ */
+export async function deleteForEveryone(instance, key) {
+  const url = `${EVO_BASE}/chat/deleteMessageForEveryone/${encodeURIComponent(instance)}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  try {
+    const r = await fetch(url, {
+      method: 'DELETE',
+      headers: { apikey: process.env.EVOLUTION_APIKEY || '', 'Content-Type': 'application/json' },
+      body: JSON.stringify(key),
+      signal: ctrl.signal,
+    });
+    const text = await r.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+    if (!r.ok) {
+      const err = new Error((json && (json.message || json.error)) || `Evolution HTTP ${r.status}`);
+      err.status = r.status;
+      throw err;
+    }
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Manda a reação pro WhatsApp do cliente. `emoji` vazio REMOVE a reação —
  * mesma semântica do celular. Tenta o formato da Evolution v2 e, se a instância
  * for v1, repete no formato antigo.

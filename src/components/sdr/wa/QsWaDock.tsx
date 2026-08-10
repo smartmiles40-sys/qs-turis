@@ -410,7 +410,7 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
             <>
               <div className="w-[292px] shrink-0 overflow-hidden"
                    style={{ borderRight: "1px solid var(--line)" }}>
-                <WaThreadList selectedLeadId={alvo?.leadId ?? null} onPick={escolher} />
+                <WaThreadList selectedLeadId={alvo?.leadId ?? null} onPick={escolher} onOpenLead={onOpenLead} />
               </div>
               <div className="flex-1 min-w-0">
                 {alvo
@@ -437,7 +437,7 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
             <div className="flex-1 min-w-0">
               {alvo
                 ? <WaConversation leadId={alvo.leadId} leadName={alvo.name} phone={alvo.phone} initialText={alvo.draft} />
-                : <WaThreadList selectedLeadId={null} onPick={escolher} />}
+                : <WaThreadList selectedLeadId={null} onPick={escolher} onOpenLead={onOpenLead} />}
             </div>
           ))}
         </div>

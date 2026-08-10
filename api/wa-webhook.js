@@ -20,7 +20,36 @@
 // -----------------------------------------------------------------------------
 
 import { findLeadByPhone, ingestMessage, WA_INBOX_IDS } from './_wa.js';
-import { insert, segredoConfere } from './_supabaseAdmin.js';
+import { insert, rest, segredoConfere } from './_supabaseAdmin.js';
+
+/**
+ * O cliente apagou a mensagem no celular dele.
+ *
+ * O Chatwoot avisa por message_updated com content_attributes.deleted = true e
+ * o conteúdo já esvaziado. Sem tratar isso, a mensagem apagada continuava na
+ * tela do QS — a pessoa apaga e a gente segue lendo, que é justamente o que ela
+ * quis evitar.
+ *
+ * Best-effort: falhou, o webhook segue e a mensagem apenas não é marcada.
+ */
+async function marcarApagada(cwMessageId) {
+  try {
+    const rows = await rest(
+      `qs_wa_messages?select=id&cw_message_id=eq.${encodeURIComponent(cwMessageId)}&limit=1`
+    );
+    const id = Array.isArray(rows) && rows[0]?.id;
+    if (!id) return false;
+    // p_user null: quem apagou foi o cliente, não alguém do time.
+    await rest('rpc/qs_wa_apagar', { method: 'POST', body: { p_msg: id, p_user: null } });
+    return true;
+  } catch (e) {
+    // Função ausente = a 0045 ainda não foi colada. Não é motivo de alarme.
+    if (!/qs_wa_apagar|schema cache|function/i.test(String(e?.message))) {
+      console.warn('[wa-webhook] marcarApagada:', e?.message);
+    }
+    return false;
+  }
+}
 
 /**
  * Registra a mensagem que NÃO deu pra vincular.
@@ -113,6 +142,14 @@ export default async function handler(req, res) {
 
   const message = extractMessage(body);
   if (!message) return res.status(200).json({ ignored: 'sem-mensagem' });
+
+  // Apagada no celular do cliente: chega como message_updated com o conteúdo já
+  // vazio. Tem que ser tratado ANTES da ingestão — que descartaria o evento por
+  // "nada pra mostrar" e deixaria a bolha antiga intacta na tela.
+  if (message?.content_attributes?.deleted === true && message?.id != null) {
+    const ok = await marcarApagada(message.id);
+    return res.status(200).json({ ok, apagada: true, messageId: message.id });
+  }
 
   // Caixa de e-mail/site não interessa aqui — só WhatsApp.
   const inboxId = inboxIdOf(body, message);

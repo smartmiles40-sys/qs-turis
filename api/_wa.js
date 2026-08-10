@@ -588,6 +588,38 @@ export function normalizeAttachments(message) {
  * Grava uma mensagem no QS (idempotente por cw_message_id) e atualiza a linha da
  * lista. Toda a soma de "não lidas" acontece dentro da função do banco.
  */
+/**
+ * O que a mensagem CITA, quando é uma resposta.
+ *
+ * O Chatwoot guarda isso em content_attributes, e o nome do campo varia com o
+ * canal: `in_reply_to_external_id` é o id no WhatsApp (o que serve pra casar com
+ * o nosso source_id) e `in_reply_to` é o id interno do Chatwoot. Preferimos o
+ * externo; o interno fica de reserva.
+ */
+export function extractReply(message) {
+  const ca = message?.content_attributes || {};
+  const externo = ca.in_reply_to_external_id ?? null;
+  const interno = ca.in_reply_to ?? null;
+  const id = externo ?? interno;
+  if (id == null || id === '') return { id: null, preview: null };
+  return {
+    id: String(id).replace(/^WAID:/i, ''),
+    // Trecho da citada, quando o Chatwoot manda o objeto junto. Guardamos porque
+    // a mensagem citada pode ser anterior ao que o QS importou — sem o trecho, a
+    // citação apareceria como uma caixa vazia.
+    preview: typeof ca.in_reply_to_content === 'string'
+      ? ca.in_reply_to_content.slice(0, 160)
+      : null,
+  };
+}
+
+/** Status do Chatwoot, limitado ao vocabulário que a gente entende. */
+const STATUS_CONHECIDOS = new Set(['sent', 'delivered', 'read', 'failed']);
+export function extractStatus(message) {
+  const s = String(message?.status || '').toLowerCase();
+  return STATUS_CONHECIDOS.has(s) ? s : null;
+}
+
 export async function ingestMessage({ leadId, conversationId, message, contactId = null, canReply = null, inboxId = null }) {
   // Nota PRIVADA do Chatwoot é message_type=1 (outgoing) com private=true. Sem
   // este corte ela entraria na tela do SDR como se tivesse ido pro cliente — e
@@ -611,6 +643,7 @@ export async function ingestMessage({ leadId, conversationId, message, contactId
   if (!content && !attachments.length) return false; // nada pra mostrar
 
   const sentAt = parseCwDate(message?.created_at);
+  const citada = extractReply(message);
 
   const corpo = {
     p_lead: leadId,
@@ -627,18 +660,35 @@ export async function ingestMessage({ leadId, conversationId, message, contactId
     // O id da mensagem NO WHATSAPP (o Chatwoot repassa como source_id). É o que
     // permite casar uma REAÇÃO do cliente com a mensagem certa (0041).
     p_source: message?.source_id ? String(message.source_id) : null,
+    // Recibo de entrega (✓✓) e citação — colunas da 0045.
+    p_status: extractStatus(message),
+    p_reply_to: citada.id,
+    p_reply_prev: citada.preview,
   };
 
-  try {
-    const out = await rest('rpc/qs_wa_ingest', { method: 'POST', body: corpo });
-    return out === true;
-  } catch (e) {
-    // Banco ainda na assinatura antiga (migration 0041 não aplicada): o RPC não
-    // conhece p_source e o PostgREST recusa a chamada inteira. Mensagem não pode
-    // parar de entrar por causa disso — repete sem o parâmetro novo.
-    if (!/p_source|qs_wa_ingest/i.test(String(e?.message))) throw e;
-    const { p_source: _ignorado, ...legado } = corpo;
-    const out = await rest('rpc/qs_wa_ingest', { method: 'POST', body: legado });
-    return out === true;
+  // O banco pode estar em qualquer uma das três gerações do RPC. Vamos da mais
+  // nova pra mais velha: mensagem não pode parar de entrar porque uma migration
+  // ainda não foi colada. Cada degrau perde só o recurso daquela migration.
+  const degraus = [
+    corpo,
+    // sem 0045 (status/citação)
+    (({ p_status: _s, p_reply_to: _r, p_reply_prev: _p, ...resto }) => resto)(corpo),
+    // sem 0045 nem 0041 (source_id das reações)
+    (({ p_status: _s, p_reply_to: _r, p_reply_prev: _p, p_source: _src, ...resto }) => resto)(corpo),
+  ];
+
+  let ultimoErro = null;
+  for (const body of degraus) {
+    try {
+      const out = await rest('rpc/qs_wa_ingest', { method: 'POST', body });
+      return out === true;
+    } catch (e) {
+      // Só vale tentar o degrau seguinte quando a recusa é de ASSINATURA (o
+      // PostgREST não achou função com esses parâmetros). Qualquer outro erro é
+      // real e tem que subir — repetir três vezes só atrasaria o diagnóstico.
+      if (!/p_status|p_reply|p_source|qs_wa_ingest|schema cache|function/i.test(String(e?.message))) throw e;
+      ultimoErro = e;
+    }
   }
+  throw ultimoErro;
 }

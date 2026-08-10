@@ -31,6 +31,17 @@ export interface WaMessage {
   sent_at: string;
   /** Só existe depois da migration 0041 — por isso o select pede "*". */
   reactions?: WaReacao[] | null;
+  /** Id da mensagem no WhatsApp. Serve pra casar reação e citação. */
+  source_id?: string | null;
+  // ── Campos da migration 0045 (todos opcionais: sem ela, viram undefined e a
+  //    conversa segue funcionando exatamente como antes) ────────────────────
+  /** Recibo do WhatsApp: sent | delivered | read | failed. Só em mensagem nossa. */
+  status?: "sent" | "delivered" | "read" | "failed" | null;
+  deleted_at?: string | null;
+  /** A mensagem que esta aqui está respondendo (id dela no WhatsApp). */
+  reply_to_source_id?: string | null;
+  /** Trecho da citada, guardado junto porque ela pode nem estar importada. */
+  reply_preview?: string | null;
 }
 
 export interface WaThreadLead {
@@ -330,6 +341,20 @@ export async function markThreadRead(leadId: string): Promise<void> {
   if (error) console.warn("[wa] markThreadRead:", error.message);
 }
 
+/**
+ * Marca a conversa como NÃO LIDA — o "deixo pra depois e não quero esquecer".
+ * Devolve false quando o banco ainda não tem a função (migration 0045), pra
+ * tela avisar em vez de fingir que marcou.
+ */
+export async function markThreadUnread(leadId: string): Promise<boolean> {
+  const { error } = await supabase.rpc("qs_wa_mark_unread", { p_lead: leadId });
+  if (error) {
+    console.warn("[wa] markThreadUnread:", error.message);
+    return false;
+  }
+  return true;
+}
+
 // ── Chamadas ao servidor ────────────────────────────────────────────────────
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -374,13 +399,15 @@ export interface WaSendResult {
 export async function sendWaMessage(
   leadId: string,
   text: string,
-  inboxId?: number | null
+  inboxId?: number | null,
+  /** Id (no QS) da mensagem que esta está respondendo — a citação do WhatsApp. */
+  respondendoA?: string | null
 ): Promise<WaSendResult> {
   try {
     const res = await fetch("/api/wa-send", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ leadId, text, inboxId: inboxId ?? null }),
+      body: JSON.stringify({ leadId, text, inboxId: inboxId ?? null, respondendoA: respondendoA ?? null }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };
@@ -492,6 +519,29 @@ export async function reagirMensagem(
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data?.error || "Não consegui reagir." };
     return { ok: true, reactions: data?.reactions ?? [], entregue: data?.entregue === true, motivo: data?.motivo ?? null };
+  } catch {
+    return { ok: false, error: "Sem conexão. Tente de novo." };
+  }
+}
+
+/**
+ * Apaga a mensagem para todos — primeiro no WhatsApp do cliente, depois no QS.
+ * O servidor recusa mensagem do cliente e mensagem velha demais, e devolve o
+ * motivo em português pra tela repassar como está.
+ */
+export async function apagarMensagem(
+  leadId: string,
+  messageId: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-react", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ leadId, messageId, acao: "apagar" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data?.error || "Não consegui apagar." };
+    return { ok: true };
   } catch {
     return { ok: false, error: "Sem conexão. Tente de novo." };
   }

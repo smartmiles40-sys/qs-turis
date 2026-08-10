@@ -16,14 +16,17 @@ import ErroDeParte from "../ErroDeParte";
 import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
   listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros, getThreadInbox,
-  reagirMensagem, salvarFigurinha, enviarFigurinha,
+  reagirMensagem, salvarFigurinha, enviarFigurinha, apagarMensagem,
   type WaMessage, type CannedResponse, type WaNumero, type Figurinha, type WaReacao,
 } from "@/lib/qs/waInbox";
+import WaMenuContexto, { IconeMenu, PATHS, useToqueLongo, type ItemMenu, type PosMenu } from "./WaMenuContexto";
+import { confirmar } from "@/lib/qs/confirmar";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { loadSignatureName } from "@/lib/qs/waSignature";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { WaAudio, WaAvatar } from "./WaBits";
-import { WaTexto, tamanhoEmojiSolto } from "./waFormat";
+import { WaTexto, tamanhoEmojiSolto, waPlain } from "./waFormat";
 
 // O seletor carrega junto com a lista de emojis, e só quando a SDR abre pela
 // primeira vez — não é peso que todo mundo paga pra ver a conversa.
@@ -61,6 +64,50 @@ interface Props {
   phone?: string | null;
   /** Roteiro da atividade da cadência, quando o SDR veio de uma tarefa. */
   initialText?: string | null;
+}
+
+/**
+ * O recibo do WhatsApp (✓ enviada, ✓✓ entregue, ✓✓ azul lida, ⚠ falhou).
+ *
+ * Só em mensagem NOSSA — no WhatsApp o recibo da mensagem do outro não existe.
+ * `null` quando o banco ainda não tem a coluna (migration 0045) ou quando o
+ * Chatwoot não informou: melhor nada do que inventar um estado.
+ *
+ * O "falhou" é o que mais importa e o que menos aparece: hoje uma mensagem
+ * recusada (fora da janela de 24h no número oficial, por exemplo) fica na tela
+ * exatamente igual a uma entregue.
+ */
+function Recibo({ status }: { status?: string | null }) {
+  if (!status) return null;
+
+  if (status === "failed") {
+    return (
+      <span className="inline-flex items-center gap-0.5 font-semibold" style={{ color: "var(--red)" }}
+            title="Não foi entregue. Fora da janela de 24h no número oficial é a causa mais comum.">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+          <path d="M12 8v5M12 17h.01M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />
+        </svg>
+        falhou
+      </span>
+    );
+  }
+
+  const lida = status === "read";
+  const duplo = lida || status === "delivered";
+  const titulo = lida ? "Lida" : status === "delivered" ? "Entregue no aparelho" : "Enviada";
+
+  return (
+    <span title={titulo} aria-label={titulo} className="inline-flex shrink-0"
+          style={{ color: lida ? "var(--wa-bright)" : "currentColor", opacity: lida ? 1 : 0.75 }}>
+      <svg width={duplo ? 16 : 12} height="12" viewBox={duplo ? "0 0 20 14" : "0 0 14 14"}
+           fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round"
+           strokeLinejoin="round" aria-hidden>
+        <path d="M1 7.5 4.5 11 11 3" />
+        {duplo && <path d="M8 7.5 11.5 11 18 3" />}
+      </svg>
+    </span>
+  );
 }
 
 function DiaSeparador({ label }: { label: string }) {
@@ -186,6 +233,81 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setMessages(list);
     return list;
   }, [leadId]);
+
+  // ── Menu do botão direito + responder citando ─────────────────────────────
+  const [menu, setMenu] = useState<{ pos: PosMenu; m: WaMessage } | null>(null);
+  const [respondendo, setRespondendo] = useState<WaMessage | null>(null);
+  const alvoToque = useRef<WaMessage | null>(null);
+  const toque = useToqueLongo(useCallback((pos: PosMenu) => {
+    if (alvoToque.current) setMenu({ pos, m: alvoToque.current });
+  }, []));
+
+  const apagar = useCallback(async (m: WaMessage) => {
+    const ok = await confirmar({
+      titulo: "Apagar esta mensagem para todos?",
+      mensagem: "Ela some do seu QS e do WhatsApp do cliente. Não dá pra desfazer.",
+      confirmarLabel: "Apagar para todos",
+      recusarLabel: "Manter",
+    });
+    if (!ok) return;
+    const r = await apagarMensagem(leadId, m.id);
+    if (!r.ok) { notifyError(r.error || "Não consegui apagar."); return; }
+    // Otimista: o realtime traz a versão do banco logo em seguida.
+    setMessages((prev) => prev.map((x) =>
+      x.id === m.id ? { ...x, content: null, attachments: [], reactions: [], deleted_at: new Date().toISOString() } : x
+    ));
+    if (respondendo?.id === m.id) setRespondendo(null);
+  }, [leadId, respondendo?.id]);
+
+  const copiar = useCallback(async (m: WaMessage) => {
+    const t = waPlain(m.content) || "";
+    if (!t) { notifyError("Esta mensagem não tem texto para copiar."); return; }
+    try {
+      await navigator.clipboard.writeText(t);
+      notifySuccess("Mensagem copiada.");
+    } catch {
+      notifyError("O navegador bloqueou a cópia.");
+    }
+  }, []);
+
+  const itensMenu = useCallback((m: WaMessage): ItemMenu[] => {
+    const apagada = Boolean(m.deleted_at);
+    return [
+      {
+        id: "responder",
+        label: "Responder",
+        icone: <IconeMenu d={PATHS.responder} />,
+        escondido: apagada,
+        onClick: () => { setRespondendo(m); taRef.current?.focus(); },
+      },
+      {
+        id: "reagir",
+        label: "Reagir",
+        icone: <IconeMenu d={PATHS.reagir} />,
+        escondido: apagada,
+        // Abre a MESMA paleta do hover: quem usa mouse continua no atalho
+        // rápido, e quem está no celular chega nela pelo menu.
+        onClick: () => setReagindoA(m.id),
+      },
+      {
+        id: "copiar",
+        label: "Copiar texto",
+        icone: <IconeMenu d={PATHS.copiar} />,
+        escondido: apagada || !m.content,
+        onClick: () => void copiar(m),
+      },
+      {
+        id: "apagar",
+        label: "Apagar para todos",
+        icone: <IconeMenu d={PATHS.apagar} />,
+        perigo: true,
+        // O WhatsApp só deixa apagar o que é NOSSO. Esconder é mais honesto do
+        // que oferecer e devolver erro depois do clique.
+        escondido: apagada || m.direction !== "out",
+        onClick: () => void apagar(m),
+      },
+    ];
+  }, [apagar, copiar]);
 
   useEffect(() => { listCanned().then(setCanned); }, []);
   useEffect(() => { listWaNumeros().then(setNumeros); }, []);
@@ -322,17 +444,18 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     if (!corpo || sending) return;
     setSending(true);
     setErro(null);
-    const r = await sendWaMessage(leadId, corpo);
+    const r = await sendWaMessage(leadId, corpo, undefined, respondendo?.id ?? null);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar."); return; }
     setText("");
+    setRespondendo(null);
     setMostrarCanned(false);
     setMostrarEmojis(false);
     caretRef.current = null;
     setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
-  }, [text, sending, leadId, recarregar]);
+  }, [text, sending, leadId, recarregar, respondendo?.id]);
 
   const enviarMidia = useCallback(async (blob: Blob, nome: string, legenda = "", notaDeVoz = false) => {
     setSending(true);
@@ -667,6 +790,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                       pra ler. No dock o min() continua escolhendo os 78%, então
                       lá nada muda. */}
                   <div className={`relative ${semBolha ? "max-w-[min(78%,34rem)] px-1 py-0.5" : "max-w-[min(78%,34rem)] px-3 py-2"}`}
+                       onContextMenu={(e) => { e.preventDefault(); setMenu({ pos: { x: e.clientX, y: e.clientY }, m }); }}
+                       onTouchStart={(e) => { alvoToque.current = m; toque.onTouchStart(e); }}
+                       onTouchMove={toque.onTouchMove}
+                       onTouchEnd={toque.onTouchEnd}
+                       onTouchCancel={toque.onTouchCancel}
                        style={semBolha ? { color: "var(--ink)" } : {
                          background: meu ? "var(--wa-soft)" : "var(--card)",
                          color: meu ? "var(--wa-ink)" : "var(--ink)",
@@ -694,7 +822,35 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                       </div>
                     )}
 
-                    {figurinha ? (
+                    {/* Citação: o trechinho da mensagem respondida, como no
+                        WhatsApp. Vem do reply_preview gravado junto — a citada
+                        pode ser anterior ao que o QS importou, e aí não haveria
+                        de onde ler o texto. */}
+                    {m.reply_preview && !m.deleted_at && (
+                      <p className="mb-1.5 pl-2 py-1 rounded text-[12px] leading-snug line-clamp-3 break-words"
+                         style={{
+                           borderLeft: "3px solid var(--wa-bright)",
+                           background: meu ? "rgba(0,0,0,.06)" : "var(--card2)",
+                           color: meu ? "var(--wa-ink)" : "var(--ink2)",
+                           opacity: .9,
+                         }}>
+                        {waPlain(m.reply_preview)}
+                      </p>
+                    )}
+
+                    {m.deleted_at ? (
+                      // Apagada: some o conteúdo e fica o rastro, igual ao
+                      // celular. Um buraco silencioso no histórico seria pior —
+                      // ninguém entenderia que ali existiu uma mensagem.
+                      <p className="flex items-center gap-1.5 italic"
+                         style={{ fontSize: 13.5, opacity: .7, color: meu ? "var(--wa-ink)" : "var(--ink3)" }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             strokeWidth="1.9" strokeLinecap="round" aria-hidden>
+                          <path d="M4.9 4.9 19 19M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />
+                        </svg>
+                        {meu ? "Você apagou esta mensagem" : "Esta mensagem foi apagada"}
+                      </p>
+                    ) : figurinha ? (
                       // Figurinha: imagem solta (sem bolha), com o "salvar" no hover.
                       <span className="relative block">
                         <img src={figurinha} alt="Figurinha" loading="lazy" decoding="async"
@@ -711,7 +867,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                     ) : (
                       m.attachments?.map((a, k) => <Anexo key={k} a={a} meu={meu} />)
                     )}
-                    {m.content && (
+                    {m.content && !m.deleted_at && (
                       <p className="whitespace-pre-wrap break-words"
                          style={emojiPx
                            ? { fontSize: emojiPx, lineHeight: 1.15 }
@@ -723,11 +879,14 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                       </p>
                     )}
                     {fimDoBloco && (
-                      <p className="text-[11px] mt-1 text-right tabular-nums"
+                      <p className="text-[11px] mt-1 flex items-center justify-end gap-1 tabular-nums"
                          style={semBolha
                            ? { color: "var(--ink3)" }
                            : { color: meu ? "var(--wa-ink)" : "var(--ink3)", opacity: meu ? .65 : 1 }}>
                         {hora(m.sent_at)}
+                        {/* Só na nossa: no WhatsApp o recibo da mensagem do
+                            outro não existe. Apagada também não tem recibo. */}
+                        {meu && !m.deleted_at && <Recibo status={m.status} />}
                       </p>
                     )}
 
@@ -856,6 +1015,27 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
       {/* Escrever */}
       <div className="wa-composer shrink-0 border-t px-3 py-2.5" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
+        {/* Respondendo a alguém: o trecho citado fica ACIMA do campo, com um X
+            pra desistir — mesmo lugar e mesmo gesto do WhatsApp. Sem esta faixa
+            o atendente não teria como saber que a próxima mensagem vai citar. */}
+        {respondendo && (
+          <div className="flex items-start gap-2 mb-2 pl-2 pr-1 py-1.5 rounded-lg"
+               style={{ background: "var(--card2)", borderLeft: "3px solid var(--wa-bright)" }}>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-bold" style={{ color: "var(--wa)" }}>
+                {respondendo.direction === "out" ? "Você" : (leadName || "Cliente")}
+              </p>
+              <p className="text-[12px] truncate" style={{ color: "var(--ink2)" }}>
+                {waPlain(respondendo.content) || (respondendo.attachments?.length ? "Anexo" : "Mensagem")}
+              </p>
+            </div>
+            <button onClick={() => setRespondendo(null)} aria-label="Cancelar resposta"
+                    className="wa-icon-btn shrink-0 w-7 h-7 grid place-items-center rounded-lg">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </button>
+          </div>
+        )}
         {gravando ? (
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: "var(--red)" }} />
@@ -944,6 +1124,12 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
           </div>
         )}
       </div>
+
+      <WaMenuContexto
+        pos={menu?.pos ?? null}
+        itens={menu ? itensMenu(menu.m) : []}
+        onFechar={() => setMenu(null)}
+      />
     </div>
   );
 }

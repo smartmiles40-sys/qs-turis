@@ -182,7 +182,7 @@ export default function WaPage({ onOpenLead }: Props) {
             conversa). A partir de lg as duas convivem. */}
         <div className={`${sel ? "hidden lg:block" : "block"} w-full lg:w-[340px] shrink-0 min-h-0`}
              style={{ borderRight: "1px solid var(--line)" }}>
-          <WaThreadList selectedLeadId={sel?.leadId ?? null} onPick={escolher} />
+          <WaThreadList selectedLeadId={sel?.leadId ?? null} onPick={escolher} onOpenLead={onOpenLead} />
         </div>
 
         {/* ── Conversa ──────────────────────────────────────────────────── */}

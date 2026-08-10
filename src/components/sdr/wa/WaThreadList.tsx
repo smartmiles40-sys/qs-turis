@@ -16,23 +16,28 @@
 //     altura variava de 62 a 90px e o olho perdia o ritmo.
 // -----------------------------------------------------------------------------
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   listMyThreads, listPinnedLeadIds, listUsersLite, togglePin, getInboxLabels,
   shortWhen, subscribeToThreads, threadTitle, isCloser, userName,
   esperandoDesde, humanizarEspera, inboxTag, listWaNumeros,
+  markThreadRead, markThreadUnread,
   type WaThread, type UserLite, type InboxLabels, type WaNumero,
 } from "@/lib/qs/waInbox";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { WaAvatar, WaLinhaEsqueleto, WaSeloNumero } from "./WaBits";
 import { waPlain } from "./waFormat";
+import WaMenuContexto, { IconeMenu, PATHS, useToqueLongo, type ItemMenu, type PosMenu } from "./WaMenuContexto";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
 
 type Aba = "meus" | "closers" | "todos";
 
 interface Props {
   selectedLeadId?: string | null;
   onPick: (t: WaThread) => void;
+  /** Abrir o card do cliente — vira um item do menu do botão direito. */
+  onOpenLead?: (leadId: string) => void;
 }
 
 function IconPin({ size = 13, filled = false }: { size?: number; filled?: boolean }) {
@@ -44,7 +49,7 @@ function IconPin({ size = 13, filled = false }: { size?: number; filled?: boolea
   );
 }
 
-export default function WaThreadList({ selectedLeadId, onPick }: Props) {
+export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Props) {
   const { currentUser } = useQsAuth();
   const ehGestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
 
@@ -106,6 +111,60 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
       return s;
     });
   }, []);
+
+  // ── Menu do botão direito na conversa ─────────────────────────────────────
+  const [menu, setMenu] = useState<{ pos: PosMenu; t: WaThread } | null>(null);
+
+  const alternarLida = useCallback(async (t: WaThread) => {
+    const temNaoLida = (t.unread || 0) > 0;
+    if (temNaoLida) {
+      await markThreadRead(t.lead_id);
+    } else if (!(await markThreadUnread(t.lead_id))) {
+      // Sem a 0045 no banco a marcação não existe — dizer isso é melhor do que
+      // um clique que não faz nada e deixa a pessoa clicando de novo.
+      notifyError("Marcar como não lida ainda não está ativo no banco (falta a migration 0045).");
+      return;
+    }
+    // Otimista: a lista recarrega sozinha pelo realtime, mas o retorno visual
+    // imediato é o que faz o clique parecer que funcionou.
+    setThreads((prev) => prev.map((x) =>
+      x.lead_id === t.lead_id ? { ...x, unread: temNaoLida ? 0 : Math.max(1, x.unread || 0) } : x
+    ));
+    notifySuccess(temNaoLida ? "Conversa marcada como lida." : "Conversa marcada como não lida.");
+  }, []);
+
+  const itensMenu = useCallback((t: WaThread): ItemMenu[] => {
+    const naoLida = (t.unread || 0) > 0;
+    const fixada = fixadas.has(t.lead_id);
+    return [
+      {
+        id: "lida",
+        label: naoLida ? "Marcar como lida" : "Marcar como não lida",
+        icone: <IconeMenu d={naoLida ? PATHS.lida : PATHS.naoLida} />,
+        onClick: () => void alternarLida(t),
+      },
+      {
+        id: "fixar",
+        label: fixada ? "Desafixar" : "Fixar no topo",
+        icone: <IconeMenu d={PATHS.fixar} />,
+        onClick: () => void alternarFixar(t.lead_id),
+      },
+      {
+        id: "card",
+        label: "Abrir o card do cliente",
+        icone: <IconeMenu d={PATHS.card} />,
+        escondido: !onOpenLead,
+        onClick: () => onOpenLead?.(t.lead_id),
+      },
+    ];
+  }, [fixadas, alternarLida, alternarFixar, onOpenLead]);
+
+  // No celular não existe botão direito: segurar o dedo abre o mesmo menu. O ref
+  // guarda QUAL linha está sob o dedo — hook não pode ser chamado dentro do map.
+  const alvoToque = useRef<WaThread | null>(null);
+  const toque = useToqueLongo(useCallback((pos: PosMenu) => {
+    if (alvoToque.current) setMenu({ pos, t: alvoToque.current });
+  }, []));
 
   const lista = useMemo(() => {
     const q = busca.trim().toLowerCase();
@@ -311,7 +370,12 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
             return (
               <div key={t.lead_id} className="wa-row"
                    data-ativa={ativa} data-fixada={fixada}
-                   data-esperando={Boolean(espera)} data-nao-lida={naoLidas > 0}>
+                   data-esperando={Boolean(espera)} data-nao-lida={naoLidas > 0}
+                   onContextMenu={(e) => { e.preventDefault(); setMenu({ pos: { x: e.clientX, y: e.clientY }, t }); }}
+                   onTouchStart={(e) => { alvoToque.current = t; toque.onTouchStart(e); }}
+                   onTouchMove={toque.onTouchMove}
+                   onTouchEnd={toque.onTouchEnd}
+                   onTouchCancel={toque.onTouchCancel}>
                 <button
                   onClick={() => onPick(t)}
                   className="wa-row-btn w-full text-left flex items-start gap-3 pl-3 pr-10 py-2.5"
@@ -383,6 +447,13 @@ export default function WaThreadList({ selectedLeadId, onPick }: Props) {
           })
         )}
       </div>
+
+      <WaMenuContexto
+        pos={menu?.pos ?? null}
+        titulo={menu ? threadTitle(menu.t) : null}
+        itens={menu ? itensMenu(menu.t) : []}
+        onFechar={() => setMenu(null)}
+      />
     </div>
   );
 }
