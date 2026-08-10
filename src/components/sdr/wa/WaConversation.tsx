@@ -661,7 +661,12 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                       : <span className="w-[26px] shrink-0" />   /* alinha o bloco */
                   )}
                   {meu && botaoReagir}
-                  <div className={`relative ${semBolha ? "max-w-[78%] px-1 py-0.5" : "max-w-[78%] px-3 py-2"}`}
+                  {/* 78% da coluna, com TETO de 34rem. A porcentagem sozinha
+                      bastava no dock (78% de 440px = 343px), mas na aba em tela
+                      cheia esticava a bolha pra ~780px — linha comprida demais
+                      pra ler. No dock o min() continua escolhendo os 78%, então
+                      lá nada muda. */}
+                  <div className={`relative ${semBolha ? "max-w-[min(78%,34rem)] px-1 py-0.5" : "max-w-[min(78%,34rem)] px-3 py-2"}`}
                        style={semBolha ? { color: "var(--ink)" } : {
                          background: meu ? "var(--wa-soft)" : "var(--card)",
                          color: meu ? "var(--wa-ink)" : "var(--ink)",

@@ -30,7 +30,8 @@ import { transferLead } from "@/lib/qs/queries";
 import { notifySuccess } from "@/lib/qs/notify";
 import WaThreadList from "./WaThreadList";
 import WaConversation from "./WaConversation";
-import { countUnread, subscribeToThreads, listUsersLite, type WaThread, type UserLite } from "@/lib/qs/waInbox";
+import { useWaAvisos } from "@/lib/qs/waAvisos";
+import { listUsersLite, type WaThread, type UserLite } from "@/lib/qs/waInbox";
 
 const PANEL_W = 440;       // padrão, e o que o duplo clique devolve
 const MIN_W = 340;         // abaixo disso a conversa fica ilegível
@@ -38,7 +39,6 @@ const APP_MIN = 420;       // o QS ao lado nunca fica mais estreito que isto
 const APP_CONFORTO = 1080;  // abaixo disso o topo do QS entra em modo compacto
 const DUAS_COLUNAS = 560;  // a partir daqui, lista e conversa convivem
 const STORAGE_KEY = "qs_wa_dock_width";
-const AVISO_KEY = "qs_wa_avisos";
 
 // Só dois modos, de propósito. Não existe mais "flutuar por cima": o painel
 // serve pra GANHAR tempo, e cobrir o QS obriga o SDR a fechar a conversa toda
@@ -95,27 +95,6 @@ function useDockWidth() {
   return { width, aplicar };
 }
 
-/** Bipe gerado na hora — um .mp3 hospedado é uma requisição que pode falhar
- *  justo na hora do aviso, e o som some sem ninguém perceber. */
-function tocarBipe() {
-  try {
-    const Ctx = window.AudioContext
-      || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
-    osc.frequency.setValueAtTime(660, ctx.currentTime + 0.09);
-    gain.gain.setValueAtTime(0.14, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.start(); osc.stop(ctx.currentTime + 0.3);
-    osc.onended = () => ctx.close();
-  } catch { /* navegador bloqueou áudio sem gesto */ }
-}
-
 interface Alvo {
   leadId: string;
   name: string | null;
@@ -147,8 +126,8 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
   const { isOpen, target, open, close } = useChatAppDock();
   const { currentUser } = useQsAuth();
   const [alvo, setAlvo] = useState<Alvo | null>(null);
-  const [naoLidas, setNaoLidas] = useState(0);
-  const naoLidasRef = useRef(0);
+  // Compartilhado com a aba de WhatsApp — só um dos dois fica montado por vez.
+  const { naoLidas, avisos, alternarAvisos } = useWaAvisos();
 
   // ── Transferir o lead direto da conversa ──────────────────────────────────
   // O caso real: chega mensagem de um lead que na verdade é do colega (número
@@ -182,11 +161,6 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
     }
   }, [alvo, transferBusy, currentUser]);
 
-  const [avisos, setAvisos] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    return window.localStorage.getItem(AVISO_KEY) !== "off";
-  });
-
   const win = useWinW();
   const { width, aplicar } = useDockWidth();
   const modo = modoDoDock(win);
@@ -200,43 +174,6 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
     document.documentElement.classList.toggle("qs-app-narrow", apertado);
     return () => document.documentElement.classList.remove("qs-app-narrow");
   }, [isOpen, modo, win, width]);
-
-  // ── Avisos de mensagem nova ───────────────────────────────────────────────
-  useEffect(() => {
-    let vivo = true;
-    const atualizar = () => {
-      countUnread().then((n) => {
-        if (!vivo) return;
-        // Só avisa quando o número SOBE. Zerar (o SDR leu) não pode tocar nada.
-        if (n > naoLidasRef.current && avisos) {
-          tocarBipe();
-          try {
-            if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
-              new Notification("Nova mensagem no WhatsApp", {
-                body: `${n} conversa${n > 1 ? "s" : ""} esperando você`,
-                tag: "qs-wa",
-              });
-            }
-          } catch { /* sem suporte */ }
-        }
-        naoLidasRef.current = n;
-        setNaoLidas(n);
-      });
-    };
-    atualizar();
-    const off = subscribeToThreads(atualizar);
-    return () => { vivo = false; off(); };
-  }, [avisos]);
-
-  const alternarAvisos = useCallback(async () => {
-    const novo = !avisos;
-    setAvisos(novo);
-    try { window.localStorage.setItem(AVISO_KEY, novo ? "on" : "off"); } catch { /* anônimo */ }
-    // Pedir permissão só funciona dentro do clique.
-    if (novo && "Notification" in window && Notification.permission === "default") {
-      try { await Notification.requestPermission(); } catch { /* ignorado */ }
-    }
-  }, [avisos]);
 
   // Clicou no WhatsApp de um lead lá na fila → abre direto na conversa dele.
   useEffect(() => {

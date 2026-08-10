@@ -41,13 +41,13 @@ export function useQsAuth() {
 
 const MENU_ACCESS: Record<UserRole, string[]> = {
   admin: ["*"], // all
-  gestor: ["minha-agenda", "painel", "cobertura", "leads", "cadencias", "reunioes", "dashboard", "analises", "lead-detail", "cadencia-criar", "cadencia-editar"],
-  sdr: ["painel", "cobertura", "leads", "reunioes", "dashboard", "lead-detail"],
+  gestor: ["minha-agenda", "painel", "whatsapp", "cobertura", "leads", "cadencias", "reunioes", "dashboard", "analises", "lead-detail", "cadencia-criar", "cadencia-editar"],
+  sdr: ["painel", "whatsapp", "cobertura", "leads", "reunioes", "dashboard", "lead-detail"],
   // O Painel entrou pro closer junto com a atividade de DESFECHO: sem ele, a
   // cobrança nasceria numa fila que o closer não enxerga.
-  closer: ["minha-agenda", "painel", "leads", "reunioes", "dashboard", "lead-detail"],
+  closer: ["minha-agenda", "painel", "whatsapp", "leads", "reunioes", "dashboard", "lead-detail"],
   // Espectador: enxerga o funil inteiro pra medir campanha. Fica de fora o
-  // Painel (tela de EXECUÇÃO, não faria sentido pra quem não executa) e as
+  // Painel e o WhatsApp (telas de EXECUÇÃO — quem não executa não atende) e as
   // Configurações (que só existem pra mudar coisa).
   marketing: ["leads", "lead-detail", "cobertura", "cadencias", "reunioes", "dashboard", "analises"],
 };

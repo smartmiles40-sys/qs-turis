@@ -73,6 +73,7 @@ const MeetingsPage = lazyPagina(() => import("./meetings/MeetingsPage"));
 const SettingsPage = lazyPagina(() => import("./settings/SettingsPage"));
 const CoveragePanel = lazyPagina(() => import("./dashboard/CoveragePanel"));
 const MinhaAgendaPage = lazyPagina(() => import("./agenda/MinhaAgendaPage"));
+const WaPage = lazyPagina(() => import("./wa/WaPage"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import CommsDock from "./comms/CommsDock";
 import ErroDeParte from "./ErroDeParte";
@@ -90,6 +91,7 @@ import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 export type SdrNav =
   | "minha-agenda"
   | "painel"
+  | "whatsapp"
   | "leads"
   | "lead-detail"
   | "cadencias"
@@ -126,6 +128,9 @@ const MENU: (MenuGroup | MenuItem)[] = [
       // só mais uma tela; para o closer é O trabalho.
       { id: "minha-agenda", label: "Minha Agenda", description: "Suas reuniões de hoje e o que falta registrar" },
       { id: "painel", label: "Painel de Atividades", description: "Fila de tarefas do dia" },
+      // Tela cheia pra quem atende o dia inteiro. Quem só conversa entre uma
+      // atividade e outra continua com o dock lateral, sem sair da fila.
+      { id: "whatsapp", label: "WhatsApp", description: "Atendimento em tela cheia" },
       { id: "cobertura", label: "Cobertura de Leads", description: "Leads aguardando contato" },
     ],
   },
@@ -335,7 +340,7 @@ export default function SdrLayout() {
 
   return (
     <div className="h-dvh flex overflow-hidden" style={{ background: "var(--bg)" }}>
-      {/* ── COLUNA PRINCIPAL (topo + conteúdo) — divide a tela com o ChatApp ── */}
+      {/* ── COLUNA PRINCIPAL (topo + conteúdo) — divide a tela com o atendimento ── */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {/* ── TOP BAR ────────────────────────────────────────────────────── */}
       <header
@@ -636,7 +641,10 @@ export default function SdrLayout() {
       )}
 
       {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
-      <main className="flex-1 min-h-0 overflow-y-auto">
+      {/* A aba de WhatsApp gerencia a própria rolagem (lista e conversa rolam
+          separadas). Deixar o overflow do <main> ligado criaria uma segunda
+          barra e faria a conversa "escapar" da tela ao chegar mensagem. */}
+      <main className={`flex-1 min-h-0 ${activeNav === "whatsapp" ? "overflow-hidden" : "overflow-y-auto"}`}>
         <Suspense
           fallback={
             <div className="flex items-center justify-center h-full py-24 text-sm text-gray-400">
@@ -701,6 +709,11 @@ export default function SdrLayout() {
             <MinhaAgendaPage onOpenLead={openLeadDetail} />
           </PageErrorBoundary>
         )}
+        {activeNav === "whatsapp" && (
+          <PageErrorBoundary pageName="WhatsApp">
+            <WaPage onOpenLead={openLeadDetail} />
+          </PageErrorBoundary>
+        )}
         {activeNav === "reunioes" && (
           <PageErrorBoundary pageName="Reuniões">
             <MeetingsPage onOpenLead={openLeadDetail} />
@@ -715,14 +728,19 @@ export default function SdrLayout() {
       </main>
       </div>
 
-      {/* Cockpit de atendimento (ChatApp ou Chatwoot, pela flag chat_provider) —
+      {/* Cockpit de atendimento (nativo ou Chatwoot, pela flag chat_provider) —
           divide a tela; montado uma única vez e persistente */}
       {/* Cerca: uma falha no painel de atendimento (ex.: pedaço do app que sumiu
           num deploy) NÃO pode derrubar o Painel junto — foi exatamente o que
           aconteceu e virou "as SDRs não conseguem concluir a atividade". */}
-      <ErroDeParte parte="o WhatsApp" modo="discreto">
-        <CommsDock onOpenLead={openLeadDetail} />
-      </ErroDeParte>
+      {/* Na ABA de WhatsApp o dock não é montado: dois atendimentos na mesma
+          tela confundem, assinam o realtime duas vezes e fariam a mensagem nova
+          apitar em dobro. Sair da aba remonta o dock com o estado de sempre. */}
+      {activeNav !== "whatsapp" && (
+        <ErroDeParte parte="o WhatsApp" modo="discreto">
+          <CommsDock onOpenLead={openLeadDetail} />
+        </ErroDeParte>
+      )}
 
       {/* Toasts globais (erros de gravação, confirmações) */}
       <GlobalToasts />
