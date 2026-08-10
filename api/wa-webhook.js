@@ -12,14 +12,15 @@
 //   evento: "Mensagem criada" (message_created).
 //
 // Envs: WA_WEBHOOK_SECRET + SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
-//       (CHATWOOT_WA_INBOX_IDS opcional — restringe às caixas de WhatsApp)
+//       (CHATWOOT_WA_INBOX_IDS opcional — atalho que evita uma consulta ao
+//        Chatwoot; quais caixas são de WhatsApp o próprio Chatwoot informa)
 //
 // Responde 200 quase sempre, de propósito: webhook que recebe erro fica em
 // retentativa eterna e entope a fila do Chatwoot. O que não deu pra tratar vira
 // log na Vercel com o motivo.
 // -----------------------------------------------------------------------------
 
-import { findLeadByPhone, ingestMessage, WA_INBOX_IDS } from './_wa.js';
+import { findLeadByPhone, ingestMessage, inboxAceita } from './_wa.js';
 import { insert, rest, segredoConfere } from './_supabaseAdmin.js';
 
 /**
@@ -152,15 +153,17 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok, apagada: true, messageId: message.id });
   }
 
-  // Caixa de e-mail/site não interessa aqui — só WhatsApp.
+  // Caixa de e-mail/site não interessa aqui — só WhatsApp. Quem decide é o
+  // channel_type que o Chatwoot informa; a env CHATWOOT_WA_INBOX_IDS virou
+  // atalho, não requisito (ver inboxAceita em _wa.js). Antes, caixa nova que
+  // ninguém somou na env tinha TODA mensagem descartada em silêncio.
   const inboxId = inboxIdOf(body, message);
-  if (WA_INBOX_IDS.length && inboxId != null && !WA_INBOX_IDS.includes(Number(inboxId))) {
-    // Caixa nova no Chatwoot que ninguém adicionou em CHATWOOT_WA_INBOX_IDS
-    // aparece aqui — é uma das formas de "sumir mensagem" sem erro nenhum.
-    await registrarDescarte('inbox-fora-do-whatsapp', {
+  const porta = await inboxAceita(inboxId);
+  if (!porta.aceita) {
+    await registrarDescarte(porta.motivo || 'inbox-fora-do-whatsapp', {
       inboxId, messageId: message?.id, phone: extractPhone(body, message),
     });
-    return res.status(200).json({ ignored: 'inbox-fora-do-whatsapp', inboxId });
+    return res.status(200).json({ ignored: porta.motivo || 'inbox-fora-do-whatsapp', inboxId });
   }
 
   const phone = extractPhone(body, message);

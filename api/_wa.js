@@ -136,6 +136,91 @@ export function cwConfigured() {
   return Boolean(process.env.CHATWOOT_AGENT_TOKEN);
 }
 
+// ── Quais caixas são de WhatsApp (sem depender de alguém editar env) ────────
+//
+// A lista CHATWOOT_WA_INBOX_IDS existe pra não ingerir caixa de e-mail nem do
+// widget do site. O preço dela era alto e silencioso: número novo no Chatwoot
+// nasce com um id que ninguém somou na variável, e TODA mensagem dele é
+// descartada sem erro nenhum. Medido em 10/08: 30 mensagens perdidas em 24h na
+// caixa 3, recém-criada — leads escrevendo e ninguém vendo.
+//
+// Agora o próprio Chatwoot responde a pergunta: ele diz o `channel_type` de
+// cada caixa. Canal de WhatsApp entra; e-mail, widget e afins continuam fora.
+// A variável vira ATALHO (id listado entra na hora, sem consultar), não a única
+// fonte da verdade.
+//
+// Cache de 5 min: caixa nova aparece sozinha em minutos, e uma rajada de
+// mensagens não vira uma rajada de consultas ao Chatwoot.
+const INBOX_TTL = 5 * 60_000;
+let cacheInboxes = { em: 0, mapa: null };
+
+async function mapaDeInboxes() {
+  if (cacheInboxes.mapa && Date.now() - cacheInboxes.em < INBOX_TTL) return cacheInboxes.mapa;
+  try {
+    const data = await cw('/inboxes');
+    const list = Array.isArray(data?.payload) ? data.payload : [];
+    const mapa = new Map();
+    for (const i of list) mapa.set(Number(i.id), String(i.channel_type || ''));
+    cacheInboxes = { em: Date.now(), mapa };
+    return mapa;
+  } catch (e) {
+    console.warn('[wa] não consegui listar as caixas do Chatwoot:', e?.message);
+    return null;
+  }
+}
+
+/** O canal do Chatwoot é de WhatsApp? (Channel::Api = Evolution, Channel::Whatsapp = Meta) */
+export function canalEhWhatsApp(canal) {
+  const c = String(canal || '').toLowerCase();
+  return c.includes('whatsapp') || c.includes('api');
+}
+
+/**
+ * Todos os ids de caixa que valem como WhatsApp: os da env MAIS os que o
+ * Chatwoot classifica como canal de WhatsApp. Devolve null quando não deu pra
+ * consultar e a env também está vazia — aí quem chama decide não filtrar.
+ */
+export async function idsDeWhatsApp() {
+  const out = new Set(WA_INBOX_IDS);
+  const mapa = await mapaDeInboxes();
+  if (mapa) {
+    for (const [id, canal] of mapa) if (canalEhWhatsApp(canal)) out.add(id);
+  }
+  return out.size ? out : null;
+}
+
+/**
+ * Esta mensagem deve entrar no QS?
+ *
+ * Devolve { aceita, motivo } — o motivo alimenta o registro de descarte, que é
+ * o que transforma "sumiu mensagem" em algo investigável.
+ */
+export async function inboxAceita(inboxId) {
+  if (inboxId == null) return { aceita: true, motivo: null };   // sem caixa: trata como antes
+  const id = Number(inboxId);
+
+  // Atalho: id explicitamente liberado na env entra sem consultar ninguém.
+  if (WA_INBOX_IDS.includes(id)) return { aceita: true, motivo: null };
+
+  const mapa = await mapaDeInboxes();
+  if (!mapa) {
+    // Chatwoot fora do ar: sem a env pra confirmar, o comportamento seguro é o
+    // antigo (descartar) — ingerir caixa desconhecida sujaria a base do time.
+    return { aceita: WA_INBOX_IDS.length === 0, motivo: 'chatwoot-indisponivel' };
+  }
+
+  const canal = mapa.get(id);
+  if (canal === undefined) return { aceita: false, motivo: 'caixa-desconhecida' };
+  if (!canalEhWhatsApp(canal)) return { aceita: false, motivo: 'inbox-fora-do-whatsapp' };
+
+  // É WhatsApp e não estava na env: entra, e o log pede o ajuste — a env deixa
+  // de ser obrigatória, mas mantê-la em dia poupa uma consulta por caixa.
+  if (WA_INBOX_IDS.length) {
+    console.warn(`[wa] caixa ${id} (${canal}) é de WhatsApp mas não está em CHATWOOT_WA_INBOX_IDS — aceitando assim mesmo. Some o id na env pra evitar a consulta.`);
+  }
+  return { aceita: true, motivo: null };
+}
+
 /** fetch no Chatwoot com timeout — nunca deixa a função serverless pendurada. */
 export async function cw(path, { method = 'GET', body, timeoutMs = 10_000 } = {}) {
   const ctrl = new AbortController();
@@ -368,8 +453,17 @@ export async function pickConversation(contactId, inboxId = null) {
   try {
     const { payload = [] } = await cw(`/contacts/${contactId}/conversations`);
     let convs = Array.isArray(payload) ? payload : [];
-    if (inboxId != null) convs = convs.filter((c) => Number(c.inbox_id) === Number(inboxId));
-    else if (WA_INBOX_IDS.length) convs = convs.filter((c) => WA_INBOX_IDS.includes(c.inbox_id));
+    if (inboxId != null) {
+      convs = convs.filter((c) => Number(c.inbox_id) === Number(inboxId));
+    } else {
+      // Mesma regra da porta de entrada: caixa de WhatsApp entra, venha ela da
+      // env ou do channel_type. Filtrar só pela env escondia a conversa de um
+      // número novo — o histórico dele simplesmente não era encontrado.
+      const permitidas = await idsDeWhatsApp();
+      if (permitidas && permitidas.size) {
+        convs = convs.filter((c) => permitidas.has(Number(c.inbox_id)));
+      }
+    }
     convs.sort((a, b) => (b.last_activity_at || 0) - (a.last_activity_at || 0));
     return convs.find((c) => c.status && c.status !== 'resolved') || convs[0] || null;
   } catch (e) {
