@@ -11,13 +11,13 @@ import type {
 import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
-import { createMeeting, avisarBitrixDaSala } from "@/lib/qs/meetings";
+import { createMeeting, avisarBitrixDaSala, transferirLeadProCloser } from "@/lib/qs/meetings";
 import { fetchClosers, fetchCloserConfigs, configFor, validarHorario } from "@/lib/qs/closerAgenda";
 import { getSetting } from "@/lib/qsSettings";
 import AgendaMiniatura from "@/components/sdr/agenda/AgendaMiniatura";
 import { confirmar } from "@/lib/qs/confirmar";
 import { criarEvento } from "@/lib/qs/agendaMeet";
-import { notifyError } from "@/lib/qs/notify";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, fetchNoteCountsByLead, fetchContactedLeadIds, fetchLossReasons, type CadenceScriptRow, type ContactBreakdownRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
@@ -1169,6 +1169,62 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   }
 
   // Confirma o "Ganho": cria a reunião (qs_meetings), marca o lead ganho e encerra as tarefas.
+  /**
+   * Ganho SEM agendar nova reunião (pedido dos SDRs, 14/08): cliente que já
+   * foi agendado antes voltava pro funil e não tinha como fechar — o botão
+   * "Ganho / Agendou" OBRIGAVA a marcar outra reunião. Este caminho faz tudo
+   * que o ganho normal faz, menos criar reunião: conclui a tarefa, marca o
+   * lead, encerra as demais atividades, registra a nota e move o card no
+   * Bitrix (evento "ganho" → coluna Reunião Agendada).
+   */
+  async function handleGanhoSemReuniao() {
+    if (!meetingFor || savingMeeting) return;
+    const { taskId, leadId, leadName } = meetingFor;
+    const ok = await confirmar({
+      titulo: `Finalizar ${leadName} como ganho?`,
+      mensagem: "Sem agendar nova reunião — use só quando o cliente já tem reunião marcada.",
+      confirmarLabel: "Finalizar como ganho",
+    });
+    if (!ok) return;
+    setSavingMeeting(true);
+    const obs = obsText.trim();
+    const failures: string[] = [];
+    try {
+      await completeTask(taskId, "ganho");
+      const { data: wonRows, error: wonErr } = await supabase
+        .from("qs_leads").update({ status: "ganho" }).eq("id", leadId).select("id");
+      if (wonErr || !wonRows || wonRows.length === 0) {
+        console.warn("[QS] lead não marcado como ganho:", wonErr);
+        failures.push("o lead NÃO foi marcado como ganho — marque pelo perfil do lead");
+      }
+      const okClose = await closeRemainingLeadTasks(leadId, taskId, "Lead ganho — finalizado sem nova reunião");
+      if (!okClose) failures.push("as demais atividades do lead não foram encerradas");
+      await persistObservation(
+        leadId,
+        `Ganho — finalizado SEM nova reunião (cliente já agendado)${obs ? `. Observações: ${obs}` : ""}`,
+        ["bitrix", "ganho"]
+      );
+      // Move o card no Bitrix (C25:WON). No fluxo normal isto sai do
+      // createMeeting; aqui não há reunião, então o evento vai direto.
+      const bx = leads.find((l) => l.id === leadId)?.bitrix_id;
+      notifyBitrix("ganho", { lead_id: leadId, bitrix_id: bx });
+    } catch (e) {
+      console.warn("[QS] ganho sem reunião falhou:", e);
+      notifyError("Não foi possível finalizar o ganho — tente de novo.");
+      setSavingMeeting(false);
+      return;
+    }
+    if (failures.length > 0) notifyError(`Ganho registrado com pendências: ${failures.join("; ")}.`);
+    else notifySuccess(`${leadName} finalizado como ganho.`);
+    setLeads((prev) => prev.map((l): Lead => (l.id === leadId ? { ...l, status: "ganho" } : l)));
+    setTasks((prev) => prev.filter((t) => t.lead_id !== leadId));
+    setActiveTaskId(null);
+    setObsText("");
+    setSavingMeeting(false);
+    setMeetingFor(null);
+    refreshCounts();
+  }
+
   async function handleConfirmMeeting() {
     if (!meetingFor) return;
     if (!meeting.responsavelId || !meeting.dataHora) return;
@@ -1339,6 +1395,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     if (failures.length > 0) {
       notifyError(`Ganho registrado com pendências: ${failures.join("; ")}.`);
     }
+    // O lead (e a conversa de WhatsApp) passa pro especialista — POR ÚLTIMO,
+    // depois de TODAS as gravações do SDR: transferido, a RLS recusaria o
+    // update de status/notas dele (ele deixa de ser o dono).
+    await transferirLeadProCloser(leadId, meeting.responsavelId, meeting.responsavel);
+
     setLeads((prev) => prev.map((l): Lead => l.id === leadId ? { ...l, status: "ganho" } : l));
     setTasks((prev) => prev.filter((t) => t.lead_id !== leadId));
     setActiveTaskId(null);
@@ -3899,10 +3960,22 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <textarea value={obsText} onChange={(e) => setObsText(e.target.value)} rows={2} placeholder="Anotações do contato — vão junto para o Bitrix" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400 resize-none" />
               </div>
             </div>
-            <div className="flex shrink-0 gap-2 border-t px-5 py-4" style={{ borderColor: "var(--line)" }}>
-              <button onClick={() => cancelMeetingModal()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
-              <button onClick={handleConfirmMeeting} disabled={savingMeeting || !meeting.responsavelId || !meeting.dataHora || !emailValido(meeting.emailCliente)} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
-                {savingMeeting ? "Salvando..." : "Confirmar ganho"}
+            <div className="shrink-0 border-t px-5 py-4" style={{ borderColor: "var(--line)" }}>
+              <div className="flex gap-2">
+                <button onClick={() => cancelMeetingModal()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
+                <button onClick={handleConfirmMeeting} disabled={savingMeeting || !meeting.responsavelId || !meeting.dataHora || !emailValido(meeting.emailCliente)} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
+                  {savingMeeting ? "Salvando..." : "Confirmar ganho"}
+                </button>
+              </div>
+              {/* Cliente que JÁ tem reunião marcada não precisa de outra: este
+                  caminho fecha o ganho sem agendar nada (pedido dos SDRs, 14/08). */}
+              <button
+                onClick={() => void handleGanhoSemReuniao()}
+                disabled={savingMeeting}
+                className="mt-2 w-full py-2 rounded-lg text-[13px] font-semibold border disabled:opacity-50"
+                style={{ borderColor: "var(--green)", color: "var(--green)", background: "transparent" }}
+              >
+                Finalizar como ganho (já tem reunião marcada)
               </button>
             </div>
           </div>

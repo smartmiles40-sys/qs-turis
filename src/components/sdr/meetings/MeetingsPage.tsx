@@ -6,7 +6,7 @@ import { MEETING_STATUS_LABELS } from "../types";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { fetchAllRows } from "@/lib/qs/queries";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
-import { createMeeting, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala } from "@/lib/qs/meetings";
+import { createMeeting, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser } from "@/lib/qs/meetings";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
 import AgendaMes from "../agenda/AgendaMes";
 import AgendaDia from "../agenda/AgendaDia";
@@ -324,6 +324,12 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
           { lead_id: fLeadId, scheduled_at: base.scheduled_at, title: base.title, lead: novoLead },
           fStatus
         );
+      }
+      // Agendou de verdade → o lead (e a conversa) passa pro especialista.
+      // Lançamento retroativo (já realizada/no-show) não transfere: a reunião
+      // é história, não atendimento em curso.
+      if (fStatus === "agendada" && fCloserId) {
+        await transferirLeadProCloser(fLeadId, fCloserId, closerName);
       }
       closeModal();
       await fetchMeetings();

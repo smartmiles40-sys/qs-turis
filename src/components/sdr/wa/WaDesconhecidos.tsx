@@ -148,7 +148,10 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
         phone: d.phone,
         owner_id: null,
         cadence_id: cadenciaId || null,
-        source: "whatsapp",
+        // "manual", não "whatsapp": o CHECK de qs_leads.source só aceita
+        // manual|api|integracao|importacao — "whatsapp" estourava 23514 e o
+        // botão falhava com erro genérico. A origem real fica na nota abaixo.
+        source: "manual",
         status: temCadencia ? "em_prospeccao" : "nao_iniciado",
         arrived_at: d.primeira,          // chegou quando ESCREVEU, não agora
         cadence_started_at: temCadencia ? agora : null,

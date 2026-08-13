@@ -57,17 +57,13 @@ export function configFor(closerId: string, all: CloserConfig[]): CloserConfig {
   return found ?? { closer_id: closerId, ...DEFAULT_CLOSER_CONFIG };
 }
 
-// ── Janela COMERCIAL de agendamento ─────────────────────────────────────────
-// Decisão do Bruno (07/08): a janela de atendimento de cada closer continua
-// LARGA no cadastro — é ela que permite encaixar um horário fora do comum
-// quando o cliente só pode àquela hora. Mas a grade que o SDR clica no dia a
-// dia mostra só o horário comercial.
-//
-// Ou seja: a exceção continua possível (encaixe manual, ou o campo de data e
-// hora do Ganho), o que muda é o que aparece por padrão.
-//
-// Vive em qs_settings pra mudar sem deploy — trocar o horário de trabalho não
-// deveria exigir um build.
+// ── Janela COMERCIAL de agendamento — DESATIVADA (14/08) ────────────────────
+// Existiu de 07/08 a 14/08: a grade só oferecia 09:00–19:30. O Bruno reverteu
+// ("abrir para marcarem em qualquer horário, sem limitação — ficávamos
+// pendentes de fazer agendamento"). O corte saiu do computeDaySlots; estas
+// exports ficam só pra não quebrar código antigo e podem ser removidas na
+// próxima limpeza. O que segue protegendo a agenda é o que é real: choque de
+// horário (trava do banco), bloqueios e antecedência mínima.
 
 export interface JanelaAgendamento { inicio: string; fim: string }
 
@@ -328,10 +324,16 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
 
   if (!config.is_bookable) return [];
 
-  const windows = input.availability
+  let windows = input.availability
     .filter((a) => a.closer_id === closerId && a.weekday === day.getDay())
     .sort((a, b) => a.start_time.localeCompare(b.start_time));
-  if (!windows.length) return [];
+  // Sem janela cadastrada pro dia, a grade abre INTEIRA (07–22h) em vez de
+  // sumir. Decisão do Bruno (14/08): closer sem cadastro de agenda travava o
+  // agendamento — "ficamos pendentes de fazer o agendamento". O que continua
+  // protegendo é o que é REAL: choque de horário, bloqueio e antecedência.
+  if (!windows.length) {
+    windows = [{ closer_id: closerId, weekday: day.getDay(), start_time: "07:00", end_time: "22:00" } as CloserAvailability];
+  }
 
   // Reuniões do closer que TOCAM o dia (uma de 23:30 invade o dia seguinte).
   const dayMeetings = input.meetings.filter((m) => {
@@ -361,12 +363,10 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
   const noticeLimit = now.getTime() + config.min_notice_minutes * 60_000;
   const buffer = config.buffer_minutes * 60_000;
 
-  // Recorte comercial: a janela do closer pode ir das 6h às 23h para permitir
-  // encaixe excepcional, mas a grade oferecida vai só das 09:00 às 19:30.
-  // `janela: null` desliga o corte (encaixe manual do gestor).
-  const janela = opts.janela === null ? null : (opts.janela ?? JANELA_AGENDAMENTO_PADRAO);
-  const janIni = janela ? minutosDoDia(janela.inicio) : null;
-  const janFim = janela ? minutosDoDia(janela.fim) : null;
+  // O recorte comercial (09:00–19:30) FOI REMOVIDO a pedido do Bruno (14/08):
+  // a grade oferece qualquer horário da janela do closer, sem corte — os SDRs
+  // ficavam sem conseguir agendar fora do comercial. `opts.janela` é ignorado
+  // de propósito (mantido na assinatura pra não quebrar caller antigo).
 
   const slots: Slot[] = [];
   for (const w of windows) {
@@ -380,13 +380,6 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
 
       const start = new Date(sStart);
       const end = new Date(sEnd);
-
-      // Fora do horário comercial nem entra na lista — não vira slot riscado,
-      // some. O SDR não deve nem cogitar 07:30 no fluxo normal.
-      if (janIni != null && janFim != null) {
-        const minutoDoSlot = start.getHours() * 60 + start.getMinutes();
-        if (minutoDoSlot < janIni || minutoDoSlot > janFim) continue;
-      }
 
       // A ordem importa: o motivo mais informativo ganha. "Ocupado com Fulano"
       // diz mais do que "passado" num slot que é as duas coisas.

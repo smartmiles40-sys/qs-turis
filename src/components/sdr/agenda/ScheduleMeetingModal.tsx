@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
-import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala } from "@/lib/qs/meetings";
+import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser } from "@/lib/qs/meetings";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
 import type { Lead, Meeting } from "../types";
 
@@ -204,6 +204,12 @@ export default function ScheduleMeetingModal({
     }
 
     if (sala.aviso) notifyError(sala.aviso);
+
+    // Agendou → o lead (e a conversa de WhatsApp dele) passa pro especialista.
+    // POR ÚLTIMO de propósito: depois da transferência o SDR perde a posse e a
+    // RLS recusaria qualquer gravação dele neste lead.
+    await transferirLeadProCloser(leadId, pick.closerId, pick.closerName);
+
     notifySuccess(
       sala.link
         ? `Reunião agendada com ${pick.closerName} e sala do Meet criada${emailLimpo ? " — convite enviado ao cliente" : ""}.`

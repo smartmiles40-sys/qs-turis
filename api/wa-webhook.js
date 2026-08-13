@@ -20,7 +20,8 @@
 // log na Vercel com o motivo.
 // -----------------------------------------------------------------------------
 
-import { findLeadByPhone, ingestMessage, inboxAceita } from './_wa.js';
+import { findLeadByPhone, ingestMessage, inboxAceita, canalDaInbox, canalEhApiOficial } from './_wa.js';
+import { createInboundLead } from './_leads.js';
 import { insert, rest, segredoConfere } from './_supabaseAdmin.js';
 
 /**
@@ -219,6 +220,37 @@ export default async function handler(req, res) {
     }
 
     if (!lead) lead = await findLeadByPhone(phone);
+    if (!lead) {
+      // ── NÚMERO DA API OFICIAL: cria o card na hora (Bruno, 14/08) ─────────
+      // Quem escreve pro número oficial é cliente falando com a AGÊNCIA — lead
+      // antigo do Bitrix, cliente de campanha, indicação. Descartar pra
+      // triagem aqui era perder atendimento: "se for um lead antigo mandando
+      // mensagem na API, não vai se criar card e isso é um problema". O card
+      // nasce pelo caminho normal (createInboundLead): rodízio dá o dono,
+      // cadência gera a fila, e o resgate embutido puxa o histórico.
+      // Os números da Evolution seguem indo pra TRIAGEM — neles escreve também
+      // colega de time e pós-venda, e card automático sujaria a base.
+      const nome = extractNome(body, message);
+      try {
+        const canal = await canalDaInbox(inboxId);
+        if (canalEhApiOficial(canal)) {
+          const r = await createInboundLead({
+            full_name: nome || `WhatsApp ${String(phone).replace(/\D/g, '').slice(-8)}`,
+            phone,
+            source: 'api',
+            segment: 'WhatsApp (API oficial)',
+          });
+          if (r?.lead) {
+            lead = r.lead;
+            console.log(`[wa-webhook] card criado pela API oficial: lead ${lead.id} (${nome || phone})`);
+          }
+        }
+      } catch (e) {
+        // Criação falhou: cai no registro de descarte logo abaixo — a mensagem
+        // não pode sumir sem rastro em NENHUM caminho.
+        console.error('[wa-webhook] auto-criação pela API oficial falhou:', e?.message);
+      }
+    }
     if (!lead) {
       // Não é erro: é gente falando com a agência que ainda não virou lead.
       // Registrado porque essa lista É oportunidade comercial — e porque, sem

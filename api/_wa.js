@@ -175,6 +175,19 @@ export function canalEhWhatsApp(canal) {
   return c.includes('whatsapp') || c.includes('api');
 }
 
+/** O channel_type de uma caixa (ou null se o Chatwoot não respondeu). */
+export async function canalDaInbox(inboxId) {
+  if (inboxId == null) return null;
+  const mapa = await mapaDeInboxes();
+  return mapa ? (mapa.get(Number(inboxId)) ?? null) : null;
+}
+
+/** Caixa da API OFICIAL da Meta? (Channel::Whatsapp — a Evolution é Channel::Api) */
+export function canalEhApiOficial(canal) {
+  const c = String(canal || '').toLowerCase();
+  return c.includes('whatsapp') && !c.includes('api');
+}
+
 /**
  * Todos os ids de caixa que valem como WhatsApp: os da env MAIS os que o
  * Chatwoot classifica como canal de WhatsApp. Devolve null quando não deu pra

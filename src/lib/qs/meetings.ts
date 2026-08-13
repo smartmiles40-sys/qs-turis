@@ -319,6 +319,45 @@ export async function closeConfirmTask(meetingId: string, motivo: string): Promi
   }
 }
 
+// ── O lead vai junto com a reunião ──────────────────────────────────────────
+
+/**
+ * Agendou com um especialista → o LEAD passa a ser dele (decisão do Bruno,
+ * 14/08: "o número vai pros closers, não fica mais com os SDRs"). A conversa
+ * de WhatsApp segue o dono pela RLS, então transferir o lead é o que põe o
+ * cliente na tela do closer.
+ *
+ * Usa a RPC qs_transferir_lead (0040): atômica, move as tarefas abertas junto
+ * e deixa rastro em qs_handovers. Best-effort — a reunião já está gravada;
+ * se a transferência falhar (RLS, rede), avisa e alguém transfere na mão.
+ *
+ * ⚠️ ORDEM IMPORTA no fluxo de Ganho: chamar isto ANTES de marcar o lead como
+ * ganho faria a RLS recusar o update do SDR (ele já não seria o dono). Por
+ * isso quem chama é o FIM de cada fluxo, nunca o meio.
+ */
+export async function transferirLeadProCloser(
+  leadId: string,
+  closerId: string | null | undefined,
+  closerNome?: string | null
+): Promise<void> {
+  if (!leadId || !closerId) return;
+  try {
+    const { data: rows } = await supabase.from("qs_leads").select("owner_id").eq("id", leadId).limit(1);
+    if (rows?.[0]?.owner_id === closerId) return; // já é dele
+    const { error } = await supabase.rpc("qs_transferir_lead", {
+      p_lead: leadId,
+      p_para: closerId,
+      p_motivo: `Reunião agendada — atendimento passa pro especialista${closerNome ? ` ${closerNome}` : ""}`,
+    });
+    if (error) {
+      console.warn("[meetings] transferência pro closer falhou:", error);
+      notifyError(`A reunião foi gravada, mas o lead NÃO passou pro especialista (${error.message}). Transfira pelo card do lead.`);
+    }
+  } catch (e) {
+    console.warn("[meetings] transferência pro closer falhou:", e);
+  }
+}
+
 // ── Agendar ─────────────────────────────────────────────────────────────────
 
 export interface CreateMeetingInput {
@@ -857,6 +896,12 @@ export async function reagendarReuniao(input: {
     nova_data: String(nova.scheduled_at).slice(0, 10),
     nova_data_hora: new Date(nova.scheduled_at).toISOString(),
   });
+
+  // Mudou de especialista (arrasto entre colunas / remarcação com troca)?
+  // O lead segue a reunião — a conversa vai junto pela RLS.
+  if (input.closerId && input.closerId !== meeting.closer_id) {
+    await transferirLeadProCloser(nova.lead_id, input.closerId, input.closerNome);
+  }
 
   return { ok: true, meeting: nova };
 }
