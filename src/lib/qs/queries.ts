@@ -1067,17 +1067,22 @@ function semVisao(error: { code?: string; message?: string } | null): boolean {
 export async function fetchNoteCountsByLead(ownerId: string | null): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
 
-  let q = supabase.from("qs_lead_note_counts").select("lead_id,total");
-  if (ownerId) q = q.eq("owner_id", ownerId);
-  const { data, error } = await q;
-
-  if (!error) {
-    for (const r of (data ?? []) as { lead_id: string | null; total: number }[]) {
+  // Paginado desde 13/08: a base cruzou 1.000 leads (1.398 medidos) e a visão
+  // passou do teto do PostgREST — sem o range, o selo voltava a mentir pro
+  // gestor, exatamente o bug que a 0043 tinha ido resolver.
+  try {
+    const rows = await fetchAllRows<{ lead_id: string | null; total: number }>((from, to) => {
+      let q = supabase.from("qs_lead_note_counts").select("lead_id,total").order("lead_id");
+      if (ownerId) q = q.eq("owner_id", ownerId);
+      return q.range(from, to);
+    });
+    for (const r of rows) {
       if (r.lead_id) counts.set(r.lead_id, (counts.get(r.lead_id) ?? 0) + (r.total ?? 0));
     }
     return counts;
+  } catch (error) {
+    if (!semVisao(error as { code?: string; message?: string })) throw error;
   }
-  if (!semVisao(error)) throw error;
 
   // ── Caminho antigo (lento), só enquanto a 0043 não for aplicada ───────────
   const rows = await fetchAllRows<{ lead_id: string | null }>((from, to) => {
@@ -1100,15 +1105,18 @@ export async function fetchNoteCountsByLead(ownerId: string | null): Promise<Map
 export async function fetchContactedLeadIds(ownerId: string | null): Promise<Set<string>> {
   const ids = new Set<string>();
 
-  let q = supabase.from("qs_leads_contatados").select("lead_id");
-  if (ownerId) q = q.eq("owner_id", ownerId);
-  const { data, error } = await q;
-
-  if (!error) {
-    for (const r of (data ?? []) as { lead_id: string | null }[]) if (r.lead_id) ids.add(r.lead_id);
+  // Paginado desde 13/08 — mesma razão da fetchNoteCountsByLead acima.
+  try {
+    const rows = await fetchAllRows<{ lead_id: string | null }>((from, to) => {
+      let q = supabase.from("qs_leads_contatados").select("lead_id").order("lead_id");
+      if (ownerId) q = q.eq("owner_id", ownerId);
+      return q.range(from, to);
+    });
+    for (const r of rows) if (r.lead_id) ids.add(r.lead_id);
     return ids;
+  } catch (error) {
+    if (!semVisao(error as { code?: string; message?: string })) throw error;
   }
-  if (!semVisao(error)) throw error;
 
   // ── Caminho antigo (lento), só enquanto a 0043 não for aplicada ───────────
   const rows = await fetchAllRows<{ lead_id: string | null }>((from, to) => {

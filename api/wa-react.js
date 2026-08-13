@@ -28,7 +28,7 @@
 // -----------------------------------------------------------------------------
 
 import {
-  assertCanAccessLead, getSupabaseUserId, signatureName, nomeCurto,
+  assertCanAccessLead, getSupabaseUserId, signatureName, nomeCurto, cw, cwConfigured,
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 import {
@@ -47,8 +47,56 @@ function safeParse(s) {
  * diferente pro atendente, e "não deu" sem dizer por quê é o que fazia essas
  * falhas serem impossíveis de investigar.
  */
+/**
+ * Busca o WAID que faltou, direto no Chatwoot, na hora em que ele faz falta.
+ *
+ * MEDIDO em 13/08: ~40% das mensagens ENVIADAS ficam sem source_id (476 de
+ * 1.194 em 7 dias) — a resposta do POST do Chatwoot ainda não traz o WAID e o
+ * eco do webhook nem sempre volta com ele. Sem o id, reagir e apagar recusavam
+ * com "mensagem antiga demais" MENTINDO: a mensagem era de minutos atrás.
+ * O Chatwoot, esse, já sabe o id — só ninguém tinha ido perguntar.
+ *
+ * Pagina pra trás (?before=) no máximo 5 páginas; se a página já passou do
+ * cw_message_id procurado e ele não apareceu, o Chatwoot não o tem — desiste.
+ * Ao achar, grava no banco: a próxima ação nem precisa vir aqui.
+ */
+async function backfillSourceId(msg) {
+  if (!cwConfigured() || msg.cw_conversation_id == null || msg.cw_message_id == null) return null;
+  let before = null;
+  for (let i = 0; i < 5; i++) {
+    const data = await cw(`/conversations/${msg.cw_conversation_id}/messages${before ? `?before=${before}` : ''}`);
+    const lista = Array.isArray(data?.payload) ? data.payload : [];
+    if (!lista.length) return null;
+
+    const alvo = lista.find((m) => Number(m.id) === Number(msg.cw_message_id));
+    if (alvo) {
+      const sid = alvo.source_id ? String(alvo.source_id) : null;
+      if (sid) {
+        await rest(`qs_wa_messages?id=eq.${encodeURIComponent(msg.id)}&source_id=is.null`, {
+          method: 'PATCH', body: { source_id: sid }, prefer: 'return=minimal',
+        });
+      }
+      return sid;
+    }
+
+    const ids = lista.map((m) => Number(m.id)).filter(Number.isFinite);
+    const menor = Math.min(...ids);
+    if (!Number.isFinite(menor) || menor <= Number(msg.cw_message_id)) return null; // já passou dele
+    before = menor;
+  }
+  return null;
+}
+
 async function montarKeyDoWhatsApp(leadId, lead, msg) {
   if (!evoConfigured()) return { motivo: 'evolution-nao-configurada' };
+  if (!msg.source_id) {
+    // Antes de desistir, pergunta ao Chatwoot — ver backfillSourceId acima.
+    const sid = await backfillSourceId(msg).catch((e) => {
+      console.warn('[wa-react] backfill de source_id falhou:', e?.message);
+      return null;
+    });
+    if (sid) msg.source_id = sid;
+  }
   // Mensagem gravada antes da 0041 (ou que o Chatwoot não identificou): não há
   // como apontar pra ela lá fora.
   if (!msg.source_id) return { motivo: 'mensagem-sem-id-do-whatsapp' };
@@ -120,7 +168,7 @@ export default async function handler(req, res) {
     // A mensagem tem que ser DESTE lead — sem isso, um messageId chutado
     // reagiria na conversa de outro cliente.
     const rows = await rest(
-      `qs_wa_messages?select=id,direction,source_id&id=eq.${encodeURIComponent(messageId)}` +
+      `qs_wa_messages?select=id,direction,source_id,cw_message_id,cw_conversation_id&id=eq.${encodeURIComponent(messageId)}` +
       `&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
     );
     const msg = Array.isArray(rows) && rows[0];

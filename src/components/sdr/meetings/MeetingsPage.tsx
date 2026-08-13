@@ -4,6 +4,7 @@ import { useQsAuth, podeExecutar } from "@/contexts/QsAuthContext";
 import type { Meeting, MeetingStatus, Lead, SdrUser } from "../types";
 import { MEETING_STATUS_LABELS } from "../types";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
+import { fetchAllRows } from "@/lib/qs/queries";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
 import { createMeeting, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala } from "@/lib/qs/meetings";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
@@ -139,14 +140,21 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   }, []);
 
   const fetchLeads = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("qs_leads")
-      .select("id, full_name, first_name, last_name, company_name, phone, email, owner_id, bitrix_id")
-      .order("full_name", { ascending: true });
-    if (error) {
-      setPageError(`Erro ao buscar leads: ${error.message}`);
-    } else {
-      setLeads((data as Lead[]) ?? []);
+    // Paginado (13/08): a base passou de 1.000 (teto do PostgREST) — sem o
+    // range, o combobox de agendar reunião não achava lead cujo nome ordena
+    // depois do corte.
+    try {
+      const rows = await fetchAllRows<Lead>((from, to) =>
+        supabase
+          .from("qs_leads")
+          .select("id, full_name, first_name, last_name, company_name, phone, email, owner_id, bitrix_id")
+          .order("full_name", { ascending: true })
+          .order("id")
+          .range(from, to) as unknown as PromiseLike<{ data: Lead[] | null; error: { message?: string } | null }>
+      );
+      setLeads(rows);
+    } catch (error) {
+      setPageError(`Erro ao buscar leads: ${(error as { message?: string }).message ?? "desconhecido"}`);
     }
   }, []);
 

@@ -12,7 +12,7 @@ import type {
 } from "../types";
 import { STATUS_LABELS, SOURCE_LABELS } from "../types";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { createCadenceTasks, closeOpenCadenceTasks, transferLead, LEAD_SELECT } from "@/lib/qs/queries";
+import { createCadenceTasks, closeOpenCadenceTasks, transferLead, fetchAllRows, LEAD_SELECT } from "@/lib/qs/queries";
 import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
 import { planCadenceDates, loadWorkHours, scheduleWeekdays, nextWorkMoment, clampToWorkWindow, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 import { dialViaSip } from "@/lib/sip";
@@ -141,18 +141,29 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
   // ── Fetch data ──
   const fetchLeads = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("qs_leads")
-      .select(LEAD_SELECT)
-      .order("created_at", { ascending: false });
-    if (error) {
+    // Paginado desde 13/08: a base cruzou o teto de 1.000 do PostgREST (1.398
+    // leads medidos) e o select seco passou a ESCONDER ~400 leads do gestor —
+    // sem erro nenhum, a tela só mostrava menos. O `id` no order desempata
+    // created_at igual (lote de importação) pra nenhuma página repetir linha.
+    let rows: Lead[];
+    try {
+      rows = await fetchAllRows<Lead>((from, to) =>
+        supabase
+          .from("qs_leads")
+          .select(LEAD_SELECT)
+          .order("created_at", { ascending: false })
+          .order("id")
+          .range(from, to) as unknown as PromiseLike<{ data: Lead[] | null; error: { message?: string } | null }>
+      );
+    } catch (e) {
+      const error = e as { code?: string; message?: string };
       console.warn("Erro ao buscar leads:", error);
       // Erro de rede NÃO pode virar "Nenhum lead encontrado" — a tela mostra o
       // erro com "Tentar novamente" (e mantém a lista antiga, se houver).
       // O código do erro vai junto: em 2026-07-28 a tela acusou "verifique a
       // conexão" por DUAS SEMANAS enquanto o problema real era um PGRST201
       // (embed ambíguo). Culpar a internet escondeu a causa — agora ela aparece.
-      const code = (error as { code?: string }).code;
+      const code = error.code;
       setLoadError(
         code && code !== "PGRST301"
           ? `Não foi possível carregar os leads (erro ${code}).`
@@ -161,7 +172,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
       return;
     }
     setLoadError(null);
-    setLeads((data as Lead[]) ?? []);
+    setLeads(rows);
   }, []);
 
   async function retryFetchLeads() {
@@ -212,14 +223,28 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     const emailNorm = email.trim().toLowerCase();
     const phoneDigits = phone.replace(/\D/g, "");
     if (!emailNorm && phoneDigits.length < 8) return { ok: true, dup: null }; // sem contato comparável
-    const { data, error } = await supabase
-      .from("qs_leads")
-      // FK explícita: ver comentário do LEAD_SELECT (qs_wa_pins tornou o embed ambíguo).
-      .select("id, full_name, email, phone, owner:qs_users!qs_leads_owner_id_fkey(name)");
+
+    // Busca DIRIGIDA em vez de baixar a base: o select seco cortava em 1.000
+    // (teto do PostgREST) e a base tem 1.398 — a checagem deixava duplicado
+    // passar justamente nos leads que a tela também não mostrava. Peneira
+    // grossa no banco (e-mail exato / últimos 8 dígitos), decisão fina no JS
+    // logo abaixo, que segue idêntica.
+    // FK explícita: ver comentário do LEAD_SELECT (qs_wa_pins tornou o embed ambíguo).
+    const COLS = "id, full_name, email, phone, owner:qs_users!qs_leads_owner_id_fkey(name)";
+    const [porEmail, porFone] = await Promise.all([
+      emailNorm
+        ? supabase.from("qs_leads").select(COLS).ilike("email", emailNorm).limit(20)
+        : Promise.resolve({ data: [], error: null }),
+      phoneDigits.length >= 8
+        ? supabase.from("qs_leads").select(COLS).ilike("phone", `%${phoneDigits.slice(-8)}%`).limit(20)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    const error = porEmail.error ?? porFone.error;
     if (error) {
       console.warn("Erro na checagem de duplicado:", error);
       return { ok: false, dup: null };
     }
+    const data = [...(porEmail.data ?? []), ...(porFone.data ?? [])];
     const rows = (data ?? []) as unknown as Array<{
       id: string; full_name: string | null; email: string | null; phone: string | null;
       owner: { name: string | null } | null;
@@ -1462,10 +1487,15 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                           // planilha duplicava a base inteira. Busca leve (email/phone)
                           // feita na hora; a RLS limita ao que o usuário pode ler
                           // (gestor/admin, que é quem importa, enxerga a base toda).
-                          const { data: existing, error: dedupeErr } = await supabase
-                            .from("qs_leads")
-                            .select("email, phone");
-                          if (dedupeErr) {
+                          // Paginado (13/08): o select seco cortava em 1.000 e a base
+                          // tem 1.398 — reimportar planilha antiga duplicaria os leads
+                          // que ficaram fora do recorte.
+                          let existing: { email: string | null; phone: string | null }[];
+                          try {
+                            existing = await fetchAllRows<{ email: string | null; phone: string | null }>((from, to) =>
+                              supabase.from("qs_leads").select("email, phone").order("id").range(from, to)
+                            );
+                          } catch (dedupeErr) {
                             // Sem a checagem não dá pra importar com segurança (criaria
                             // duplicados em massa) — cancela e o usuário tenta de novo.
                             console.warn("[CSV] checagem de duplicados no banco falhou:", dedupeErr);

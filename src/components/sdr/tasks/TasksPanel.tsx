@@ -1660,10 +1660,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     let filtered = [...tasks];
 
     // Guard: tarefas de leads já encerrados (ganho/perdido) não aparecem na fila.
-    // Exceção: re-contato agendado (tag "re_contato") — o lead está perdido de
-    // propósito e a tarefa PRECISA aparecer quando a data chegar.
+    // Exceções — tarefas que nascem JUSTAMENTE depois do encerramento:
+    //   re_contato  → lead perdido de propósito, a tarefa aparece quando a data chega;
+    //   confirmar / desfecho → cobranças de reunião (ganho no QS = reunião agendada,
+    //     então TODA cobrança de confirmação/desfecho vive num lead "ganho").
+    //     Medido em 13/08: 48 'desfecho' + 31 'confirmar' abertas e invisíveis —
+    //     a causa-código das reuniões vencidas sem desfecho.
     filtered = filtered.filter((t) => {
-      if (t.tags?.includes("re_contato")) return true;
+      if (t.tags?.some((tag) => tag === "re_contato" || tag === "confirmar" || tag === "desfecho")) return true;
       const st = getLeadForTask(t)?.status;
       return st !== "ganho" && st !== "perdido";
     });
@@ -1765,13 +1769,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // 8): o efeito só re-rodava quando filteredTasks mudava, então os handlers
   // capturados viam obsText/tasks VELHOS — a tecla "C" concluía com a observação
   // vazia. Com as refs, o listener sempre chama a versão mais recente.
-  const shortcutCtx = useRef<{ hero?: Task; pending: typeof pendingResult; busy: boolean }>({ hero: undefined, pending: null, busy: false });
+  const shortcutCtx = useRef<{ hero?: Task; pending: typeof pendingResult; busy: boolean; lossReason: string }>({ hero: undefined, pending: null, busy: false, lossReason: "" });
   shortcutCtx.current = {
     hero: heroTaskMemo,
     pending: pendingResult,
     // classifyFor/editFor/menu/waModal também PAUSAM os atalhos (item 10): com a
     // classificação de ligação aberta, "C"/números agiam por baixo do bloco.
-    busy: !!(meetingFor || transferOpen || skipMenuOpen || showExtraTaskModal || showDialer || showNewLeadModal || finalizing || classifyFor || editFor || taskMenuOpen || waModal),
+    // meetingDone idem: com o modal de sucesso aberto o hero já é o PRÓXIMO
+    // lead — um "c" perdido concluía a atividade dele por baixo do modal.
+    busy: !!(meetingFor || transferOpen || skipMenuOpen || showExtraTaskModal || showDialer || showNewLeadModal || finalizing || classifyFor || editFor || taskMenuOpen || waModal || meetingDone),
+    // O Enter precisa do motivo de perda FRESCO (não o do render em que o
+    // listener nasceu) pra poder espelhar a regra do botão Finalizar.
+    lossReason: pendingLossReason,
   };
   const shortcutFnsRef = useRef({
     conclude: handleConcludeActivity,
@@ -1791,7 +1800,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   };
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const { hero, pending, busy } = shortcutCtx.current;
+      const { hero, pending, busy, lossReason } = shortcutCtx.current;
       const fns = shortcutFnsRef.current;
       if (!hero || busy || e.ctrlKey || e.metaKey || e.altKey) return;
       const el = document.activeElement as HTMLElement | null;
@@ -1806,8 +1815,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       else if (k === "c") { e.preventDefault(); fns.conclude(hero); }
       else if (k === "enter" && pending && pending.taskId === hero.id) {
         e.preventDefault();
+        // Perdido exige MOTIVO — mesma regra do botão Finalizar. Sem esta
+        // trava, "3 + Enter" gravava loss_reason_id NULL por baixo do select
+        // (medido: 153/465 perdidos sem causa; parte veio deste atalho) e o
+        // relatório de motivos de perda ficava cego.
+        if (pending.result === "sem_interesse" && !lossReason) {
+          notifyError("Escolha o motivo da perda antes de finalizar (Enter).");
+          return;
+        }
         shortcutCtx.current.busy = true; // anti repetição até o próximo render
-        fns.contact(hero.id, pending.result).finally(() => setPendingResult(null));
+        fns.contact(hero.id, pending.result, lossReason || undefined).finally(() => setPendingResult(null));
       }
       else if (k === "n" || k === "arrowright") {
         e.preventDefault();
@@ -4314,8 +4331,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   setShowNewLeadModal(false);
                   setNewLead({ full_name: "", phone: "", email: "", company_name: "", owner_id: currentUser?.id ?? "", cadence_id: "", notes: "" });
                   showToast(`Lead cadastrado — ${inserted.full_name ?? ""}`);
-                  const { data } = await supabase.from("qs_leads").select("*");
-                  if (data) setLeads(data as Lead[]);
+                  // refreshQueue: paginado e escopado por papel. O select('*')
+                  // seco que ficava aqui cortava em 1.000 (base tem 1.398) e
+                  // REGREDIA o leadsMap carregado pelo fetchQueueLeads — pílula
+                  // virava "Lead desconhecido" e desfecho disparava notifyBitrix
+                  // sem bitrix_id até o próximo refresh de 60s.
+                  await refreshQueue();
                 }}
                 disabled={savingLead || !newLead.full_name || !newLead.phone}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"

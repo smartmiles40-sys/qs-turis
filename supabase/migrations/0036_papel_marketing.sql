@@ -58,6 +58,13 @@ grant execute on function qs_is_espectador() to authenticated;
 
 -- ── (3) LER: uma policy de SELECT a mais em cada tabela qs_* ────────────────
 -- Permissivas se somam. Não mexo em nada do que existe.
+--
+-- ⚠️ LIÇÃO (13/08, corrigida na 0049): "somar com OR" também ATROPELA
+-- restrição fina. Este loop deu ao espectador leitura de qs_sip_lines (senha
+-- SIP em texto puro, que a 0013 restringia ao dono) e de qs_settings SEM a
+-- denylist de segredos da 0011. Se este loop for reaplicado/estendido um dia,
+-- toda tabela com restrição por LINHA (dono) ou por VALOR (denylist de chave)
+-- precisa entrar numa lista de exceções — ver 0049_espectador_contido.sql.
 do $$
 declare
   t text;

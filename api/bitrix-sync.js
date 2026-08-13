@@ -165,8 +165,12 @@ export default async function handler(req, res) {
   }
 
   // Timeout: n8n lento não pode segurar a função até o limite da Vercel.
+  // 7s, não 10s: o maxDuration da rota É 10s e a autenticação que roda antes
+  // gasta até 5s — timeout igual ao teto significa que a Vercel mata a função
+  // ANTES do abort disparar (a regra de _wa.js: o timeout do fetch tem que ser
+  // MENOR que o maxDuration, senão ele nunca age).
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  const timer = setTimeout(() => ctrl.abort(), 7_000);
   try {
     const r = await fetch(`${base}/qs-${event}`, {
       method: 'POST',
@@ -180,7 +184,7 @@ export default async function handler(req, res) {
     }
     return res.status(200).json({ success: true });
   } catch (err) {
-    console.error('[bitrix-sync]', event, err?.name === 'AbortError' ? 'timeout 10s' : err?.message);
+    console.error('[bitrix-sync]', event, err?.name === 'AbortError' ? 'timeout 7s' : err?.message);
     return res.status(502).json({ success: false, error: 'Falha ao falar com o n8n' });
   } finally {
     clearTimeout(timer);

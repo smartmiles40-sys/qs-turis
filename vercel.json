@@ -7,6 +7,15 @@
     "api/wa-history.js": {
       "maxDuration": 60
     },
+    "api/agenda-meet.js": {
+      "maxDuration": 30
+    },
+    "api/wa-sync.js": {
+      "maxDuration": 60
+    },
+    "api/wa-send.js": {
+      "maxDuration": 30
+    },
     "api/*.js": {
       "maxDuration": 10
     }

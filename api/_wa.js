@@ -813,7 +813,7 @@ async function descartesPendentesDe(key) {
 
   let linhas;
   try {
-    linhas = await rest(`qs_wa_descartadas?select=id,phone&situacao=eq.pendente&${alvo}`);
+    linhas = await rest(`qs_wa_descartadas?select=id,phone,inbox_id,cw_message_id&situacao=eq.pendente&${alvo}`);
   } catch (e) {
     // Coluna `situacao` ausente = 0047 ainda não colada. Sem ela não dá pra
     // saber o que já foi tratado, então o resgate se limita a NÃO reprocessar
@@ -846,24 +846,34 @@ export async function resgatarConversaPerdida(lead) {
 
   const contact = await findContact(toE164BR(lead.phone));
   if (!contact) return { resgatadas: 0, motivo: 'sem-contato-no-chatwoot' };
-  const conv = await pickConversation(contact.id);
-  if (!conv) return { resgatadas: 0, motivo: 'sem-conversa' };
 
-  const data = await cw(`/conversations/${conv.id}/messages`);
-  const lista = Array.isArray(data?.payload) ? data.payload : [];
-
+  // Uma conversa POR CAIXA do descarte, não "a mais recente do contato": com 3
+  // números de WhatsApp ativos, o mesmo contato pode ter conversa em mais de
+  // uma caixa — e a mensagem descartada mora na caixa que a registrou. Caixa
+  // desconhecida (linha antiga sem inbox_id) cai no comportamento padrão.
+  const caixas = [...new Set(linhas.map((l) => l.inbox_id ?? null))];
   let resgatadas = 0;
-  for (const m of lista) {
-    const novo = await ingestMessage({
-      leadId: lead.id,
-      conversationId: conv.id,
-      message: m,
-      contactId: contact.id,
-      canReply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
-      inboxId: conv.inbox_id ?? null,
-    });
-    if (novo) resgatadas++;
+  let convPrincipal = null;
+  for (const caixa of caixas) {
+    const conv = await pickConversation(contact.id, caixa);
+    if (!conv) continue;
+    convPrincipal = convPrincipal || conv;
+
+    const data = await cw(`/conversations/${conv.id}/messages`);
+    const lista = Array.isArray(data?.payload) ? data.payload : [];
+    for (const m of lista) {
+      const novo = await ingestMessage({
+        leadId: lead.id,
+        conversationId: conv.id,
+        message: m,
+        contactId: contact.id,
+        canReply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
+        inboxId: conv.inbox_id ?? null,
+      });
+      if (novo) resgatadas++;
+    }
   }
+  if (!convPrincipal) return { resgatadas: 0, motivo: 'sem-conversa' };
 
   // A thread é o que faz a conversa APARECER na lista de atendimento. Sem ela a
   // mensagem estaria no banco e continuaria invisível — que é o problema que
@@ -873,10 +883,10 @@ export async function resgatarConversaPerdida(lead) {
       method: 'POST',
       body: [{
         lead_id: lead.id,
-        cw_conversation_id: conv.id,
+        cw_conversation_id: convPrincipal.id,
         cw_contact_id: contact.id,
-        cw_inbox_id: conv.inbox_id ?? null,
-        can_reply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
+        cw_inbox_id: convPrincipal.inbox_id ?? null,
+        can_reply: typeof convPrincipal.can_reply === 'boolean' ? convPrincipal.can_reply : null,
         synced_at: new Date().toISOString(),
       }],
       prefer: 'resolution=merge-duplicates,return=minimal',
@@ -887,12 +897,36 @@ export async function resgatarConversaPerdida(lead) {
 
   if (temSituacao) {
     try {
-      const ids = linhas.map((l) => l.id).join(',');
-      await rest(`qs_wa_descartadas?id=in.(${ids})`, {
-        method: 'PATCH',
-        body: { situacao: 'resgatada', lead_id: lead.id, tratado_em: new Date().toISOString() },
-        prefer: 'return=minimal',
-      });
+      // Carimba 'resgatada' SÓ a linha cuja mensagem comprovadamente ENTROU —
+      // "resgatei" sem a mensagem no banco é a mesma perda silenciosa de antes
+      // com um selo por cima (o backfill da 0047 fez isso em 30 de 39 linhas).
+      // A régua é o cw_message_id da própria linha existir em qs_wa_messages.
+      const comMsgId = linhas.filter((l) => l.cw_message_id != null);
+      const entregues = new Set();
+      if (comMsgId.length) {
+        const ids = comMsgId.map((l) => encodeURIComponent(l.cw_message_id)).join(',');
+        const achadas = await rest(`qs_wa_messages?select=cw_message_id&lead_id=eq.${lead.id}&cw_message_id=in.(${ids})`);
+        for (const a of (Array.isArray(achadas) ? achadas : [])) entregues.add(String(a.cw_message_id));
+      }
+      const confirmadas = linhas.filter((l) => entregues.has(String(l.cw_message_id)));
+      const restantes = linhas.filter((l) => !entregues.has(String(l.cw_message_id)));
+
+      if (confirmadas.length) {
+        await rest(`qs_wa_descartadas?id=in.(${confirmadas.map((l) => l.id).join(',')})`, {
+          method: 'PATCH',
+          body: { situacao: 'resgatada', lead_id: lead.id, tratado_em: new Date().toISOString() },
+          prefer: 'return=minimal',
+        });
+      }
+      // As não confirmadas ficam PENDENTES mas ganham o lead: a triagem as
+      // mostra como "já é lead — trazer conversa", nunca como "criar lead".
+      if (restantes.length) {
+        await rest(`qs_wa_descartadas?id=in.(${restantes.map((l) => l.id).join(',')})&situacao=eq.pendente`, {
+          method: 'PATCH',
+          body: { lead_id: lead.id },
+          prefer: 'return=minimal',
+        });
+      }
     } catch (e) {
       // Carimbo perdido: o pior que acontece é a linha aparecer na triagem
       // depois de já resolvida. Não vale derrubar um resgate bem-sucedido.
@@ -900,5 +934,5 @@ export async function resgatarConversaPerdida(lead) {
     }
   }
 
-  return { resgatadas, conversationId: conv.id, descartes: linhas.length };
+  return { resgatadas, conversationId: convPrincipal.id, descartes: linhas.length };
 }

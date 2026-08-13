@@ -104,7 +104,10 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
     setOcupado(true);
     const sync = await syncThread(d.leadId);
     if (sync.importadas > 0 || sync.conversationId) {
-      await marcarResgatado(d.ids, d.leadId);
+      // O retorno importa: se a RLS recusar o carimbo, o item voltaria no
+      // próximo carregamento — remover da tela agora seria fingir sucesso.
+      const ok = await marcarResgatado(d.ids, d.leadId);
+      if (!ok) { setOcupado(false); return; } // o erro já foi notificado
       remover(d.phone);
       notifySuccess(
         sync.importadas > 0
@@ -176,10 +179,18 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
     // Puxa a conversa do Chatwoot pro lead novo. É o que faz a mensagem que
     // motivou tudo isto finalmente aparecer na tela de atendimento.
     const sync = await syncThread(criado.id);
-    await vincularDesconhecido(d.ids, criado.id);
+    const carimbou = await vincularDesconhecido(d.ids, criado.id);
 
     setOcupado(false);
     setCriando(null);
+    if (!carimbou) {
+      // O lead JÁ EXISTE — o que falhou foi o carimbo (RLS/rede). Remover o
+      // item fingiria sucesso; mantê-lo como estava convidaria um SEGUNDO
+      // clique em "Criar lead" = a mesma pessoa duas vezes na base. O item
+      // fica, mas apontando pro lead criado: o botão vira "Trazer conversa".
+      setItens((prev) => prev.map((x) => (x.phone === d.phone ? { ...x, leadId: criado.id } : x)));
+      return;
+    }
     remover(d.phone);
     notifySuccess(
       sync.importadas > 0

@@ -1,7 +1,7 @@
 // src/components/sdr/cadences/CadencesPage.tsx
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { deleteQsCadence, freezeCadence, unfreezeCadence } from "@/lib/qs/queries";
+import { deleteQsCadence, freezeCadence, unfreezeCadence, fetchAllRows } from "@/lib/qs/queries";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { setDuplicateSource } from "./duplicateSource";
 import type {
@@ -249,11 +249,21 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
 
     // Contagem real de leads por cadência: uma única query, agregada no cliente
     // (evita N queries head:true e não estoura performance com muitas cadências).
-    const { data: leadRows, error: leadErr } = await supabase
-      .from("qs_leads")
-      .select("cadence_id, status")
-      .not("cadence_id", "is", null);
-    if (leadErr) console.warn("Erro ao contar leads das cadências:", leadErr);
+    // Paginado (13/08): 1.398 leads com cadence_id — o select seco cortava em
+    // 1.000 e os cards subcontavam sem dar erro nenhum.
+    let leadRows: { cadence_id: string | null; status: string | null }[] = [];
+    try {
+      leadRows = await fetchAllRows<{ cadence_id: string | null; status: string | null }>((from, to) =>
+        supabase
+          .from("qs_leads")
+          .select("cadence_id, status")
+          .not("cadence_id", "is", null)
+          .order("id")
+          .range(from, to)
+      );
+    } catch (leadErr) {
+      console.warn("Erro ao contar leads das cadências:", leadErr);
+    }
 
     const totalMap = new Map<string, number>();
     const activeMap = new Map<string, number>();
@@ -381,15 +391,22 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
   // "Ver leads da cadência": contador clicável → modal com nome, status e dono.
   async function openLeadsModal(cadence: Cadence, onlyActive: boolean) {
     setLeadsModal({ cadence, onlyActive, leads: null, error: false });
-    let q = supabase
-      .from("qs_leads")
-      // FK explícita (qs_wa_pins deixou o embed lead→usuário ambíguo — ver LEAD_SELECT).
-      .select("id, full_name, first_name, last_name, status, owner:qs_users!qs_leads_owner_id_fkey(name)")
-      .eq("cadence_id", cadence.id)
-      .order("full_name");
-    if (onlyActive) q = q.eq("status", "em_prospeccao");
-    const { data, error } = await q;
-    if (error) {
+    // Paginado (13/08): uma cadência sozinha pode ter >1.000 leads e o modal
+    // cortava a lista sem avisar.
+    let data: unknown[];
+    try {
+      data = await fetchAllRows<unknown>((from, to) => {
+        let q = supabase
+          .from("qs_leads")
+          // FK explícita (qs_wa_pins deixou o embed lead→usuário ambíguo — ver LEAD_SELECT).
+          .select("id, full_name, first_name, last_name, status, owner:qs_users!qs_leads_owner_id_fkey(name)")
+          .eq("cadence_id", cadence.id)
+          .order("full_name")
+          .order("id");
+        if (onlyActive) q = q.eq("status", "em_prospeccao");
+        return q.range(from, to) as unknown as PromiseLike<{ data: unknown[] | null; error: { message?: string } | null }>;
+      });
+    } catch (error) {
       console.warn("Erro ao listar leads da cadência:", error);
       setLeadsModal((m) => (m && m.cadence.id === cadence.id ? { ...m, leads: [], error: true } : m));
       return;

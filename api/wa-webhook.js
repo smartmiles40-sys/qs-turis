@@ -195,7 +195,30 @@ export default async function handler(req, res) {
   }
 
   try {
-    const lead = await findLeadByPhone(phone);
+    // A conversa já tem dono? O vínculo conversa→lead da thread VENCE o match
+    // por telefone. Motivo (medido em 13/08): com os leads duplicados por
+    // telefone, o findLeadByPhone ordena por updated_at e o "vencedor" muda ao
+    // longo do tempo — 26 conversas ficaram com o histórico DIVIDIDO entre dois
+    // cards (ex.: 6 mensagens num, 1 no outro). A thread torna o roteamento
+    // determinístico: quem recebeu a conversa uma vez fica com ela.
+    const convId = (body?.conversation || message?.conversation || {})?.id;
+    let lead = null;
+    if (convId != null) {
+      try {
+        const th = await rest(
+          `qs_wa_threads?select=lead_id&cw_conversation_id=eq.${encodeURIComponent(convId)}&order=synced_at.desc.nullslast&limit=1`
+        );
+        const leadId = Array.isArray(th) && th[0]?.lead_id;
+        if (leadId) {
+          const rows = await rest(`qs_leads?select=id,owner_id,full_name,first_name,last_name,phone,status&id=eq.${encodeURIComponent(leadId)}&limit=1`);
+          lead = (Array.isArray(rows) && rows[0]) || null;
+        }
+      } catch (e) {
+        console.warn('[wa-webhook] lookup por conversa falhou (cai pro telefone):', e?.message);
+      }
+    }
+
+    if (!lead) lead = await findLeadByPhone(phone);
     if (!lead) {
       // Não é erro: é gente falando com a agência que ainda não virou lead.
       // Registrado porque essa lista É oportunidade comercial — e porque, sem
