@@ -36,7 +36,7 @@ import {
   semDesfecho,
   chaveDoEspecialista,
 } from "@/lib/qs/closerAgenda";
-import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, reagendarReuniao } from "@/lib/qs/meetings";
 import { getSetting } from "@/lib/qsSettings";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
 import type {
@@ -234,6 +234,17 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
 
   const [agendarPara, setAgendarPara] = useState<{ closerId: string | null; date: Date } | null>(null);
   const [remarcando, setRemarcando] = useState<Meeting | null>(null);
+
+  // ── Arrastar e soltar (estilo Google Agenda) ───────────────────────────────
+  // A reunião vira um card arrastável: soltar em outro horário remarca, soltar
+  // em outra coluna troca o especialista — pelo MESMO caminho do botão
+  // "Remarcar" (qs_reagendar_reuniao, 0033), então a trava anti-choque do banco
+  // e o histórico de reagendamentos continuam valendo. Se o banco recusar
+  // (horário ocupado / sem permissão), o card volta pro lugar e o erro aparece.
+  // `overMin` é minuto-do-dia já ENCAIXADO (15 em 15): só re-renderiza quando o
+  // fantasma muda de vaga, não a cada pixel do mouse.
+  const [drag, setDrag] = useState<{ m: Meeting; overCol: string | null; overMin: number | null } | null>(null);
+  const [soltando, setSoltando] = useState(false);
 
   // Recusa exige motivo: o painel abre a lista em vez de gravar direto.
   const [pedindoMotivo, setPedindoMotivo] = useState<string | null>(null);
@@ -483,6 +494,58 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
     setAgendarPara({ closerId: col.closerId, date: quando });
   };
 
+  /** Minuto do dia (encaixado de 15 em 15) a partir da posição do mouse na coluna. */
+  const minutoDoEvento = (e: React.DragEvent<HTMLDivElement>) => {
+    const caixa = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - caixa.top;
+    const brutos = (y / alturaHora) * 60 + horaInicio * 60;
+    return Math.max(0, Math.round(brutos / 15) * 15);
+  };
+
+  /** A coluna aceita receber esta reunião? Coluna de texto livre não tem closer
+   *  pra atribuir — só aceita a PRÓPRIA reunião (mover de horário sem trocar). */
+  const colunaAceita = (col: Coluna, m: Meeting) =>
+    col.closerId != null || col.key === chaveDoEspecialista(m);
+
+  const soltarReuniao = async (col: Coluna, e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const atual = drag;
+    setDrag(null);
+    if (!atual || soltando || !colunaAceita(col, atual.m)) return;
+
+    const min = minutoDoEvento(e);
+    const quando = startOfDay(dia);
+    quando.setHours(0, min, 0, 0);
+
+    const antes = new Date(atual.m.scheduled_at);
+    const mesmaColuna = col.key === chaveDoEspecialista(atual.m);
+    if (mesmaColuna && quando.getTime() === antes.getTime()) return; // soltou onde estava
+
+    if (demo) {
+      const novo = { ...atual.m, scheduled_at: quando.toISOString(), closer_id: col.closerId ?? atual.m.closer_id };
+      setMeetings((ms) => ms.map((x) => (x.id === atual.m.id ? novo : x)));
+      return;
+    }
+
+    setSoltando(true);
+    const r = await reagendarReuniao({
+      meeting: atual.m,
+      scheduledAt: quando,
+      closerId: col.closerId ?? atual.m.closer_id ?? null,
+      closerNome: col.closerId ? col.nome : atual.m.meeting_owner ?? col.nome,
+      por: currentUser?.name ?? null,
+    });
+    setSoltando(false);
+    if (!r.ok) return notifyError(r.error);
+    notifySuccess(
+      mesmaColuna
+        ? `${atual.m.lead_name || "Reunião"} movida para ${hhmm(quando)}.`
+        : `${atual.m.lead_name || "Reunião"} agora é de ${col.nome}, às ${hhmm(quando)}.`
+    );
+    void load();
+  };
+
   const mudarStatus = async (m: Meeting, status: MeetingStatus) => {
     if (demo) {
       const novo = { ...m, status };
@@ -685,8 +748,33 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
                 style={{ minWidth: LARGURA_MIN_COLUNA }}
                 className={`relative flex-1 border-l border-gray-200 ${col.agendavel ? "cursor-copy" : ""}`}
                 onClick={(e) => clicarVazio(col, e)}
+                onDragOver={(e) => {
+                  if (!drag || !colunaAceita(col, drag.m)) return;
+                  e.preventDefault(); // sem isto o navegador proíbe o drop
+                  e.dataTransfer.dropEffect = "move";
+                  const min = minutoDoEvento(e);
+                  // Só re-renderiza quando o fantasma muda de vaga.
+                  setDrag((d) => (d && (d.overCol !== col.key || d.overMin !== min) ? { ...d, overCol: col.key, overMin: min } : d));
+                }}
+                onDrop={(e) => void soltarReuniao(col, e)}
                 title={col.agendavel ? "Clique num horário livre para agendar" : undefined}
               >
+                {/* fantasma do arrasto: onde a reunião vai cair se soltar aqui */}
+                {drag && drag.overCol === col.key && drag.overMin != null && (
+                  <div
+                    className="pointer-events-none absolute inset-x-1 z-20 rounded-md border-2 border-dashed"
+                    style={{
+                      top: ((drag.overMin - horaInicio * 60) / 60) * alturaHora,
+                      height: Math.max(22, (((fimDaReuniao(drag.m).getTime() - new Date(drag.m.scheduled_at).getTime()) / 3_600_000) || 0.5) * alturaHora - 2),
+                      borderColor: "#0147FF",
+                      background: "rgba(1,71,255,0.08)",
+                    }}
+                  >
+                    <span className="ml-1 rounded bg-[#0147FF] px-1 text-[11px] font-bold tabular-nums text-white">
+                      {`${dd(Math.floor(drag.overMin / 60))}:${dd(drag.overMin % 60)}`}
+                    </span>
+                  </div>
+                )}
                 {/* linhas de hora e meia hora */}
                 {Array.from({ length: totalHoras }, (_, i) => (
                   <div key={i} style={{ height: alturaHora }} className="border-b border-gray-100">
@@ -729,6 +817,9 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
                   const largura = 100 / totalFaixas;
                   const atrasada = semDesfecho(m, agora);
                   const morta = m.status === "cancelada";
+                  // Só o que ainda VAI acontecer se move: desfecho dado é
+                  // história, e história não se arrasta.
+                  const arrastavel = executa && !demo && (m.status === "agendada" || m.status === "confirmada");
 
                   return (
                     <button
@@ -737,6 +828,15 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
                         e.stopPropagation();
                         setSelecionada(m);
                       }}
+                      draggable={arrastavel}
+                      onDragStart={(e) => {
+                        e.stopPropagation();
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", m.id); // exigido pelo Firefox
+                        setDrag({ m, overCol: null, overMin: null });
+                      }}
+                      onDragEnd={() => setDrag(null)}
+                      title={arrastavel ? "Arraste para mudar o horário ou o especialista" : undefined}
                       className="absolute overflow-hidden rounded-md px-2 py-1 text-left transition hover:z-10 hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/40"
                       style={{
                         top: topo,
@@ -746,7 +846,8 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
                         background: st.fundo,
                         borderLeft: `3px solid ${st.cor}`,
                         boxShadow: atrasada ? "0 0 0 1.5px rgba(220,38,38,.55)" : "none",
-                        opacity: morta ? 0.55 : 1,
+                        opacity: morta ? 0.55 : drag?.m.id === m.id ? 0.35 : 1,
+                        cursor: arrastavel ? "grab" : undefined,
                       }}
                     >
                       <div className="flex items-center gap-1">

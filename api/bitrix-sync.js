@@ -27,7 +27,74 @@ import { rest, segredoConfere } from './_supabaseAdmin.js';
 // 'primeiro-contato' (2026-07-28): o SDR conclui a 1ª atividade no QS e o negócio
 // anda sozinho de "Novo lead" para "Follow-up 1" no Bitrix. Quem decide se move é
 // o n8n (só move o que ainda está em Novo lead) — aqui é só o repasse.
-const EVENTS = new Set(['perdido', 'ganho', 'reuniao', 'nota', 'primeiro-contato']);
+// 'reuniao-campos' (2026-08-14): desfecho da reunião preenche os CAMPOS do
+// negócio direto no Bitrix (datas, flags, SAL) — sem passar pelo n8n.
+const EVENTS = new Set(['perdido', 'ganho', 'reuniao', 'nota', 'primeiro-contato', 'reuniao-campos']);
+
+// ─── Desfecho da reunião → campos do negócio ─────────────────────────────────
+// Mapeamento confirmado com o Bruno em 14/08, campo a campo, lido do portal via
+// crm.deal.fields (o rótulo mora no formLabel — o userfield.list vem sem rótulo).
+// Se um campo for RECRIADO no Bitrix, o UF_CRM_* muda: atualizar AQUI.
+//
+// Vai DIRETO ao Bitrix (env BITRIX_WEBHOOK_BASE, ex.:
+// https://xxx.bitrix24.com.br/rest/23/token) em vez de pelo n8n: atualizar
+// campo é um crm.deal.update de uma chamada — sem workflow pra importar, sem
+// header de credencial pra divergir (a lição das 4 quebras de 07/08).
+const CAMPO = {
+  realizada_data:  'UF_CRM_1767825384035', // date  "Data da reunião realizada/Proposta enviada"
+  realizada_flag:  'UF_CRM_1762283634897', // enum  "Reunião realizada?"
+  no_show_data:    'UF_CRM_1767828211464', // date  "Data de No Show"
+  no_show_texto:   'UF_CRM_1761758153832', // string "No Show?"
+  reagendamento:   'UF_CRM_1785277621436', // date  "Reagendamento"
+  meet_datahora:   'UF_CRM_1773943863374', // datetime "Data e hora do agendamento (Google Meet)"
+  sal:             'UF_CRM_1785533874395', // enum  "SAL"
+};
+const OPCAO = {
+  realizada_sim: 761,   // "Reunião realizada?" → Sim
+  realizada_nao: 763,   // "Reunião realizada?" → Não
+  sal_aceito:    1427,  // "SAL" → Aceito
+  sal_recusado:  1429,  // "SAL" → Recusado
+};
+
+/** Os campos que cada desfecho escreve. `d` = dados que o front mandou. */
+const CAMPOS_POR_DESFECHO = {
+  realizada:    (d) => ({ [CAMPO.realizada_data]: d.data, [CAMPO.realizada_flag]: OPCAO.realizada_sim }),
+  no_show:      (d) => ({ [CAMPO.no_show_data]: d.data, [CAMPO.no_show_texto]: 'Sim', [CAMPO.realizada_flag]: OPCAO.realizada_nao }),
+  remarcada:    (d) => ({ [CAMPO.reagendamento]: d.nova_data, [CAMPO.meet_datahora]: d.nova_data_hora }),
+  sal_aceito:   () => ({ [CAMPO.sal]: OPCAO.sal_aceito }),
+  sal_recusado: () => ({ [CAMPO.sal]: OPCAO.sal_recusado }),
+};
+
+/**
+ * crm.deal.update direto no Bitrix. Timeout de 7s pela mesma regra do n8n
+ * (fetch < maxDuration, senão a Vercel mata a função antes do abort).
+ */
+async function atualizarCamposBitrix(bitrixId, fields) {
+  const base = (process.env.BITRIX_WEBHOOK_BASE || '').trim().replace(/\/+$/, '');
+  if (!base) return { ok: false, code: 'not_configured' };
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 7_000);
+  try {
+    const r = await fetch(`${base}/crm.deal.update.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: bitrixId, fields }),
+      signal: ctrl.signal,
+    });
+    const json = await r.json().catch(() => null);
+    if (!r.ok || json?.error) {
+      console.error('[bitrix-sync] crm.deal.update recusou:', r.status, json?.error_description || json?.error || '');
+      return { ok: false, code: 'bitrix-recusou' };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error('[bitrix-sync] crm.deal.update:', err?.name === 'AbortError' ? 'timeout 7s' : err?.message);
+    return { ok: false, code: 'bitrix-inacessivel' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -138,6 +205,27 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true, code: 'skipped_no_bitrix_id' });
   }
   payload.bitrix_id = serverBitrixId; // sobrescreve qualquer valor do cliente
+
+  // ── Desfecho de reunião → campos do negócio (caminho direto, sem n8n) ──────
+  if (event === 'reuniao-campos') {
+    const monta = CAMPOS_POR_DESFECHO[String(payload.desfecho || '')];
+    if (!monta) {
+      return res.status(400).json({ success: false, error: 'desfecho inválido (realizada|no_show|remarcada|sal_aceito|sal_recusado)' });
+    }
+    // Só entra no update o que veio preenchido — mandar undefined pro Bitrix
+    // apagaria o valor que está lá.
+    const fields = Object.fromEntries(
+      Object.entries(monta(payload)).filter(([, v]) => v !== undefined && v !== null && v !== '')
+    );
+    if (!Object.keys(fields).length) {
+      return res.status(400).json({ success: false, error: 'nenhum campo a atualizar' });
+    }
+    const r = await atualizarCamposBitrix(serverBitrixId, fields);
+    if (!r.ok && r.code === 'not_configured') {
+      return res.status(200).json({ success: false, code: 'not_configured' });
+    }
+    return res.status(r.ok ? 200 : 502).json(r.ok ? { success: true } : { success: false, error: r.code });
+  }
 
   const base = (process.env.N8N_SYNC_BASE || '').trim().replace(/\/+$/, '');
   if (!base) {

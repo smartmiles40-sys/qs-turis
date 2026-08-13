@@ -27,7 +27,10 @@ import { notifyError } from "@/lib/qs/notify";
 // lead" — por isso podemos disparar em toda conclusão sem contador nem flag: da
 // 2ª em diante o evento chega, olha e não faz nada. Repetir é inofensivo, e se o
 // primeiro disparo se perder (rede/n8n fora) o próximo conserta sozinho.
-export type BitrixSyncEvent = "perdido" | "ganho" | "reuniao" | "nota" | "primeiro-contato";
+// "reuniao-campos" (2026-08-14): desfecho da reunião preenche os CAMPOS do
+// negócio (Data da reunião realizada, Data de No Show, Reagendamento, SAL) —
+// o mapeamento desfecho→UF_CRM_* vive no servidor, nunca no navegador.
+export type BitrixSyncEvent = "perdido" | "ganho" | "reuniao" | "nota" | "primeiro-contato" | "reuniao-campos";
 
 export interface BitrixSyncPayload {
   lead_id: string;

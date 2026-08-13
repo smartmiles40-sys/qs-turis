@@ -295,6 +295,11 @@ export async function sweepOutcomeTasks(): Promise<void> {
         durationMin: m.duration_min,
         leadName: m.lead_name,
       });
+      // Reunião que JÁ PASSOU não tem mais o que confirmar — a cobrança de
+      // confirmação vencida só empilhava na fila (medido em 14/08: 11 abertas
+      // de reuniões passadas). O que importa agora é o DESFECHO, garantido
+      // logo acima. Idempotente: já encerrada, o update não acha linha.
+      await closeConfirmTask(m.id, "Reunião já passou — confirmação perdeu o objeto");
     }
   } catch (e) {
     console.warn("[meetings] varredura de desfechos pendentes falhou:", e);
@@ -644,6 +649,15 @@ export async function rescheduleMeeting(input: RescheduleInput): Promise<Meeting
     body: `Reunião remarcada de ${formatDateTime(antes)} para ${formatDateTime(updated.scheduled_at)} no QS.`,
   });
 
+  // Mesmos campos do reagendamento novo — este é o caminho antigo (sem a 0033).
+  notifyBitrix("reuniao-campos", {
+    lead_id: updated.lead_id,
+    bitrix_id: input.lead_bitrix_id ?? meeting.lead?.bitrix_id,
+    desfecho: "remarcada",
+    nova_data: String(updated.scheduled_at).slice(0, 10),
+    nova_data_hora: new Date(updated.scheduled_at).toISOString(),
+  });
+
   return { ok: true, meeting: updated };
 }
 
@@ -709,6 +723,21 @@ export async function setMeetingStatus(
       lead_id: meeting.lead_id,
       bitrix_id: leadBitrixId ?? meeting.lead?.bitrix_id,
       body: `Reunião de ${formatDateTime(meeting.scheduled_at)}${meeting.title ? ` (${meeting.title})` : ""} ${phrase} no QS.`,
+    });
+  }
+
+  // Campos do negócio no Bitrix (mapeamento confirmado com o Bruno em 14/08):
+  // realizada → "Data da reunião realizada" + "Reunião realizada? = Sim";
+  // no-show → "Data de No Show" + "No Show? = Sim" + "Reunião realizada? = Não".
+  // A data é a DA REUNIÃO (realizada_em/scheduled_at), não a de quando alguém
+  // lembrou de registrar — mesma âncora do SAL (0032).
+  if (status === "realizada" || status === "no_show") {
+    const quando = String((data as Meeting).realizada_em ?? meeting.scheduled_at).slice(0, 10);
+    notifyBitrix("reuniao-campos", {
+      lead_id: meeting.lead_id,
+      bitrix_id: leadBitrixId ?? meeting.lead?.bitrix_id,
+      desfecho: status,
+      data: quando,
     });
   }
 
@@ -820,6 +849,15 @@ export async function reagendarReuniao(input: {
     body: `Reunião REAGENDADA de ${formatDateTime(meeting.scheduled_at)} para ${formatDateTime(nova.scheduled_at)} no QS.`,
   });
 
+  // Campos: "Reagendamento" (date) + "Data e hora do agendamento (Google Meet)".
+  notifyBitrix("reuniao-campos", {
+    lead_id: nova.lead_id,
+    bitrix_id: meeting.lead?.bitrix_id,
+    desfecho: "remarcada",
+    nova_data: String(nova.scheduled_at).slice(0, 10),
+    nova_data_hora: new Date(nova.scheduled_at).toISOString(),
+  });
+
   return { ok: true, meeting: nova };
 }
 
@@ -878,6 +916,12 @@ export async function setMeetingSal(
       body: `Reunião de ${formatDateTime(meeting.scheduled_at)}: lead ${sal.toUpperCase()} pelo especialista (SAL)${
         sal === "recusado" && motivo ? ` — motivo: ${motivo}` : ""
       }.`,
+    });
+    // Campo enum "SAL" do negócio (Aceito/Recusado).
+    notifyBitrix("reuniao-campos", {
+      lead_id: meeting.lead_id,
+      bitrix_id: leadBitrixId ?? meeting.lead?.bitrix_id,
+      desfecho: sal === "aceito" ? "sal_aceito" : "sal_recusado",
     });
   }
 
