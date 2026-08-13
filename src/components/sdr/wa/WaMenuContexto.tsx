@@ -198,4 +198,5 @@ export const PATHS = {
   lida: "M22 6l-10 7L2 6M2 6h20v12H2zM17 3l2 2 4-4",
   fixar: "M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6z",
   card: "M3 5h18v14H3zM3 10h18M8 15h5",
+  baixar: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
 };

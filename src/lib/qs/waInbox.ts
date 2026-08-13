@@ -12,6 +12,7 @@
 // -----------------------------------------------------------------------------
 
 import { supabase } from "@/lib/supabase";
+import { notifyError } from "@/lib/qs/notify";
 
 /** Uma reação numa mensagem. `autor` é 'lead' ou o uuid do usuário que reagiu. */
 export interface WaReacao {
@@ -337,6 +338,80 @@ export async function listMessages(leadId: string, limit = 200): Promise<WaMessa
 }
 
 /** Zera o contador de não lidas (única escrita do navegador — e via função). */
+// ── Exportar a conversa (.txt) ───────────────────────────────────────────────
+
+/**
+ * Baixa a conversa INTEIRA como .txt, no formato do "Exportar conversa" do
+ * próprio WhatsApp (pedido do time, 14/08) — serve pra anexar em proposta,
+ * encaminhar por e-mail ou guardar fora do QS.
+ *
+ * Paginado de propósito: o listMessages da tela corta em 200 (é uma TELA);
+ * exportar é outro trabalho — precisa de TUDO, e conversa longa já passa de
+ * mil mensagens. A RLS decide o que o usuário pode ler, como sempre.
+ */
+export async function exportarConversaTxt(leadId: string, titulo: string, phone?: string | null): Promise<boolean> {
+  try {
+    const todas: WaMessage[] = [];
+    for (let page = 0; ; page++) {
+      const de = page * 1000;
+      const { data, error } = await supabase
+        .from("qs_wa_messages")
+        .select("*")
+        .eq("lead_id", leadId)
+        .order("sent_at", { ascending: true })
+        .order("id")
+        .range(de, de + 999);
+      if (error) throw error;
+      const rows = (data ?? []) as WaMessage[];
+      todas.push(...rows);
+      if (rows.length < 1000) break;
+    }
+    if (!todas.length) {
+      notifyError("Esta conversa ainda não tem mensagens para exportar.");
+      return false;
+    }
+
+    const dt = (iso: string) => {
+      const d = new Date(iso);
+      const dd = (n: number) => String(n).padStart(2, "0");
+      return `${dd(d.getDate())}/${dd(d.getMonth() + 1)}/${d.getFullYear()} ${dd(d.getHours())}:${dd(d.getMinutes())}`;
+    };
+
+    const linhas: string[] = [
+      `Conversa de WhatsApp — ${titulo}${phone ? ` (${phone})` : ""}`,
+      `Exportada do QS em ${dt(new Date().toISOString())} — ${todas.length} mensagens`,
+      "",
+    ];
+    for (const m of todas) {
+      const autor = m.direction === "in" ? titulo : (m.sender_name || "Equipe");
+      const partes: string[] = [];
+      if (m.content) partes.push(m.content);
+      for (const a of m.attachments ?? []) partes.push(`[${a.type || "anexo"}] ${a.url}`);
+      if (!partes.length) partes.push("[mensagem sem texto]");
+      const marca = m.deleted_at ? " [apagada no WhatsApp — texto preservado no QS]" : "";
+      // Mensagem com quebra de linha vira linhas indentadas, como no export do WhatsApp.
+      const texto = partes.join("\n").split("\n").join("\n    ");
+      linhas.push(`${dt(m.sent_at)} - ${autor}: ${texto}${marca}`);
+    }
+
+    const blob = new Blob(["﻿" + linhas.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `WhatsApp - ${titulo.replace(/[\\/:*?"<>|]+/g, "_").trim() || "conversa"}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revogar já quebraria o download no Safari; um minuto depois é seguro.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return true;
+  } catch (e) {
+    console.warn("[wa] exportar conversa:", e);
+    notifyError("Não foi possível exportar a conversa — tente de novo.");
+    return false;
+  }
+}
+
 export async function markThreadRead(leadId: string): Promise<void> {
   const { error } = await supabase.rpc("qs_wa_mark_read", { p_lead: leadId });
   if (error) console.warn("[wa] markThreadRead:", error.message);

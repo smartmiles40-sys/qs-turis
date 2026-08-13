@@ -37,7 +37,7 @@ import { countDesconhecidos } from "@/lib/qs/waDesconhecidos";
 import { WaAvatar, WaSeloNumero } from "./WaBits";
 import {
   getInboxLabels, inboxTag, listUsersLite, threadTitle, userName,
-  esperandoDesde, humanizarEspera,
+  esperandoDesde, humanizarEspera, exportarConversaTxt,
   type WaThread, type UserLite, type InboxLabels,
 } from "@/lib/qs/waInbox";
 
@@ -264,6 +264,12 @@ export default function WaPage({ onOpenLead }: Props) {
                     Ver card
                   </button>
                 )}
+                <button onClick={() => void exportarConversaTxt(sel.leadId, sel.nome, sel.phone)}
+                        title="Baixar a conversa inteira (.txt)"
+                        aria-label="Baixar conversa"
+                        className="wa-icon-btn shrink-0 w-9 h-9 grid place-items-center rounded-lg">
+                  <Icon d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={16} />
+                </button>
               </div>
               <div className="flex-1 min-h-0">
                 <WaConversation

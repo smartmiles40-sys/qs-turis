@@ -21,7 +21,7 @@ import {
   listMyThreads, listPinnedLeadIds, listUsersLite, togglePin, getInboxLabels,
   shortWhen, subscribeToThreads, threadTitle, isCloser, userName,
   esperandoDesde, humanizarEspera, inboxTag, listWaNumeros,
-  markThreadRead, markThreadUnread,
+  markThreadRead, markThreadUnread, exportarConversaTxt,
   type WaThread, type UserLite, type InboxLabels, type WaNumero,
 } from "@/lib/qs/waInbox";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
@@ -155,6 +155,12 @@ export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Pro
         icone: <IconeMenu d={PATHS.card} />,
         escondido: !onOpenLead,
         onClick: () => onOpenLead?.(t.lead_id),
+      },
+      {
+        id: "baixar",
+        label: "Baixar conversa (.txt)",
+        icone: <IconeMenu d={PATHS.baixar} />,
+        onClick: () => void exportarConversaTxt(t.lead_id, threadTitle(t), t.lead?.phone ?? null),
       },
     ];
   }, [fixadas, alternarLida, alternarFixar, onOpenLead]);
