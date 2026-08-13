@@ -65,17 +65,39 @@ async function marcarApagada(cwMessageId) {
  * problema nunca pode virar um problema maior.
  */
 async function registrarDescarte(motivo, dados = {}) {
+  const linha = {
+    motivo,
+    phone: dados.phone ? String(dados.phone).replace(/\D/g, '') : null,
+    inbox_id: dados.inboxId ?? null,
+    cw_message_id: dados.messageId ?? null,
+    detalhe: dados.detalhe ?? null,
+  };
   try {
-    await insert('qs_wa_descartadas', {
-      motivo,
-      phone: dados.phone ? String(dados.phone).replace(/\D/g, '') : null,
-      inbox_id: dados.inboxId ?? null,
-      cw_message_id: dados.messageId ?? null,
-      detalhe: dados.detalhe ?? null,
-    }, { returning: false });
+    // O nome como o WhatsApp mostra (coluna da 0047). É o que transforma a
+    // triagem de uma lista de telefones numa lista de PESSOAS — reconhecer
+    // "é a Tainara, do time" leva um segundo; deduzir isso de +5585… não.
+    await insert('qs_wa_descartadas', { ...linha, contato_nome: dados.nome || null }, { returning: false });
   } catch (e) {
+    // Coluna ausente = 0047 ainda não colada. Registrar o descarte importa mais
+    // que o nome: sem a linha, "sumiu mensagem" volta a não ter onde ser
+    // investigado — que é exatamente o buraco que a 0038 fechou.
+    if (/contato_nome|42703|PGRST204/i.test(String(e?.message))) {
+      try {
+        await insert('qs_wa_descartadas', linha, { returning: false });
+        return;
+      } catch (e2) {
+        console.warn('[wa-webhook] não deu pra registrar o descarte:', e2?.message);
+        return;
+      }
+    }
     console.warn('[wa-webhook] não deu pra registrar o descarte:', e?.message);
   }
+}
+
+/** O nome que o Chatwoot mostra pro contato da conversa (pode não existir). */
+function extractNome(body, message) {
+  const conv = body?.conversation || message?.conversation || {};
+  return conv?.meta?.sender?.name || body?.contact?.name || null;
 }
 
 /**
@@ -178,7 +200,9 @@ export default async function handler(req, res) {
       // Não é erro: é gente falando com a agência que ainda não virou lead.
       // Registrado porque essa lista É oportunidade comercial — e porque, sem
       // ela, "sumiu mensagem" não tem onde ser investigado.
-      await registrarDescarte('sem-lead-correspondente', { phone, inboxId, messageId: message?.id });
+      await registrarDescarte('sem-lead-correspondente', {
+        phone, inboxId, messageId: message?.id, nome: extractNome(body, message),
+      });
       return res.status(200).json({ ignored: 'sem-lead-correspondente' });
     }
 

@@ -32,6 +32,8 @@ import { notifySuccess } from "@/lib/qs/notify";
 import { useWaAvisos } from "@/lib/qs/waAvisos";
 import WaThreadList from "./WaThreadList";
 import WaConversation from "./WaConversation";
+import WaDesconhecidos from "./WaDesconhecidos";
+import { countDesconhecidos } from "@/lib/qs/waDesconhecidos";
 import { WaAvatar, WaSeloNumero } from "./WaBits";
 import {
   getInboxLabels, inboxTag, listUsersLite, threadTitle, userName,
@@ -84,9 +86,16 @@ export default function WaPage({ onOpenLead }: Props) {
   const [transferindo, setTransferindo] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
 
+  // Triagem de quem escreveu sem ser lead. Só a gestão enxerga — a RLS da
+  // qs_wa_descartadas devolve zero pro SDR, então o botão simplesmente não
+  // aparece pra ele em vez de aparecer e recusar o clique.
+  const [triagem, setTriagem] = useState(false);
+  const [desconhecidos, setDesconhecidos] = useState(0);
+
   useEffect(() => {
     void listUsersLite().then(setUsers);
     void getInboxLabels().then(setRotulos);
+    void countDesconhecidos().then(setDesconhecidos);
   }, []);
 
   // Clicou no WhatsApp de um lead em outra tela com a aba já aberta: abre a
@@ -159,6 +168,19 @@ export default function WaPage({ onOpenLead }: Props) {
           </p>
         </div>
 
+        {desconhecidos > 0 && !triagem && (
+          <button onClick={() => setTriagem(true)}
+                  title="Números que escreveram e não são lead"
+                  className="shrink-0 flex items-center gap-2 px-3 h-9 rounded-lg text-[13px] font-semibold"
+                  style={{ background: "rgba(245,130,31,.12)", color: "var(--orange)", border: "1px solid rgba(245,130,31,.35)" }}>
+            <span className="grid place-items-center w-5 h-5 rounded-full text-[11px] text-white"
+                  style={{ background: "var(--orange)" }}>
+              {desconhecidos}
+            </span>
+            <span className="hidden sm:inline">sem lead</span>
+          </button>
+        )}
+
         <button onClick={alternarAvisos}
                 title={avisos ? "Desligar som e notificação" : "Ligar som e notificação"}
                 aria-label={avisos ? "Desligar avisos" : "Ligar avisos"}
@@ -176,7 +198,16 @@ export default function WaPage({ onOpenLead }: Props) {
         )}
       </header>
 
-      <div className="flex-1 min-h-0 flex">
+      {/* A triagem toma a tela inteira de propósito: decidir quem vira lead é
+          um trabalho em si, não algo pra fazer de canto de olho enquanto uma
+          conversa espera resposta do outro lado. */}
+      {triagem && (
+        <div className="flex-1 min-h-0">
+          <WaDesconhecidos onFechar={() => setTriagem(false)} onMudou={setDesconhecidos} />
+        </div>
+      )}
+
+      <div className={`flex-1 min-h-0 ${triagem ? "hidden" : "flex"}`}>
         {/* ── Lista ─────────────────────────────────────────────────────────
             No celular, lista e conversa se revezam (a lista some ao abrir uma
             conversa). A partir de lg as duas convivem. */}

@@ -786,3 +786,119 @@ export async function ingestMessage({ leadId, conversationId, message, contactId
   }
   throw ultimoErro;
 }
+
+// ── Resgate da mensagem que chegou antes do lead ────────────────────────────
+//
+// A CORRIDA (medida em 13/08, em 32 números): o cliente responde no MESMO
+// minuto em que o Bitrix cria o negócio. A mensagem bate no webhook segundos
+// ANTES de o lead existir no QS, não acha dono e é descartada. Segundos depois
+// o lead nasce — e o descarte já é passado, ninguém volta nele.
+//
+// Até aqui a conversa só reaparecia se alguém abrisse o lead (o wa-sync puxa o
+// histórico do Chatwoot). Nos 32 ela acabou entrando — mas por acaso, não por
+// desenho: ninguém foi avisado em nenhum caso, e em 2 deles ela entrou num card
+// DUPLICADO da mesma pessoa, enquanto o SDR trabalhava o outro, mudo.
+//
+// Agora o próprio nascimento do lead fecha a corrida.
+//
+// BEST-EFFORT DE PROPÓSITO: isto roda pendurado na criação do lead. Se o
+// Chatwoot estiver fora, se a 0047 não tiver sido colada, se o contato não
+// existir — o lead entra igual. Resgate que derruba a entrada de leads seria um
+// remédio pior que a doença.
+
+/** As linhas de descarte que são deste telefone e ainda esperam tratamento. */
+async function descartesPendentesDe(key) {
+  const last8 = key.replace(/^i:/, '').slice(-8);
+  const alvo = `phone=ilike.*${encodeURIComponent(last8)}*&motivo=eq.sem-lead-correspondente&limit=100`;
+
+  let linhas;
+  try {
+    linhas = await rest(`qs_wa_descartadas?select=id,phone&situacao=eq.pendente&${alvo}`);
+  } catch (e) {
+    // Coluna `situacao` ausente = 0047 ainda não colada. Sem ela não dá pra
+    // saber o que já foi tratado, então o resgate se limita a NÃO reprocessar
+    // nada: melhor não resgatar do que reingerir a mesma conversa a cada lead.
+    if (/situacao|42703|PGRST204/i.test(String(e?.message))) {
+      console.warn('[wa] resgate limitado — aplique a migration 0047');
+      return { linhas: [], temSituacao: false };
+    }
+    throw e;
+  }
+
+  const lista = Array.isArray(linhas) ? linhas : [];
+  // O ilike é uma peneira grossa (últimos 8 dígitos); quem decide é a chave.
+  return { linhas: lista.filter((l) => waKey(l.phone) === key), temSituacao: true };
+}
+
+/**
+ * Puxa do Chatwoot a conversa de um lead recém-criado, mas SÓ quando existe
+ * mensagem descartada esperando por ele. Devolve quantas mensagens entraram.
+ *
+ * @param {{id: string, phone: string|null}} lead
+ */
+export async function resgatarConversaPerdida(lead) {
+  const key = lead?.phone ? waKey(lead.phone) : null;
+  if (!lead?.id || !key) return { resgatadas: 0, motivo: 'sem-telefone' };
+  if (!cwConfigured()) return { resgatadas: 0, motivo: 'chatwoot-nao-configurado' };
+
+  const { linhas, temSituacao } = await descartesPendentesDe(key);
+  if (!linhas.length) return { resgatadas: 0, motivo: 'nada-pendente' };
+
+  const contact = await findContact(toE164BR(lead.phone));
+  if (!contact) return { resgatadas: 0, motivo: 'sem-contato-no-chatwoot' };
+  const conv = await pickConversation(contact.id);
+  if (!conv) return { resgatadas: 0, motivo: 'sem-conversa' };
+
+  const data = await cw(`/conversations/${conv.id}/messages`);
+  const lista = Array.isArray(data?.payload) ? data.payload : [];
+
+  let resgatadas = 0;
+  for (const m of lista) {
+    const novo = await ingestMessage({
+      leadId: lead.id,
+      conversationId: conv.id,
+      message: m,
+      contactId: contact.id,
+      canReply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
+      inboxId: conv.inbox_id ?? null,
+    });
+    if (novo) resgatadas++;
+  }
+
+  // A thread é o que faz a conversa APARECER na lista de atendimento. Sem ela a
+  // mensagem estaria no banco e continuaria invisível — que é o problema que
+  // este resgate existe pra resolver.
+  try {
+    await rest('qs_wa_threads?on_conflict=lead_id', {
+      method: 'POST',
+      body: [{
+        lead_id: lead.id,
+        cw_conversation_id: conv.id,
+        cw_contact_id: contact.id,
+        cw_inbox_id: conv.inbox_id ?? null,
+        can_reply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
+        synced_at: new Date().toISOString(),
+      }],
+      prefer: 'resolution=merge-duplicates,return=minimal',
+    });
+  } catch (e) {
+    console.warn('[wa] resgate: thread não gravada:', e?.message);
+  }
+
+  if (temSituacao) {
+    try {
+      const ids = linhas.map((l) => l.id).join(',');
+      await rest(`qs_wa_descartadas?id=in.(${ids})`, {
+        method: 'PATCH',
+        body: { situacao: 'resgatada', lead_id: lead.id, tratado_em: new Date().toISOString() },
+        prefer: 'return=minimal',
+      });
+    } catch (e) {
+      // Carimbo perdido: o pior que acontece é a linha aparecer na triagem
+      // depois de já resolvida. Não vale derrubar um resgate bem-sucedido.
+      console.warn('[wa] resgate: carimbo não gravado:', e?.message);
+    }
+  }
+
+  return { resgatadas, conversationId: conv.id, descartes: linhas.length };
+}

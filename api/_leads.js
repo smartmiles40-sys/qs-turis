@@ -6,6 +6,7 @@
 // Fala com o Supabase via PostgREST puro (ver _supabaseAdmin.js).
 // -----------------------------------------------------------------------------
 import { rest, insert } from './_supabaseAdmin.js';
+import { resgatarConversaPerdida } from './_wa.js';
 
 // ─── HORÁRIO DE TRABALHO (verdade absoluta do agendamento) ───────────────────
 // Espelho do src/lib/workHours.ts — o mesmo runtime não deixa importar TS aqui.
@@ -533,6 +534,24 @@ export async function createInboundLead(payload) {
       }, { returning: false });
     } catch (e) {
       console.warn('[leads] nota de auto-classificação falhou (segue):', e?.message);
+    }
+  }
+
+  // A mensagem que chegou ANTES deste lead existir (best-effort).
+  //
+  // Medido em 13/08: em 32 números o cliente respondeu no MESMO minuto em que o
+  // Bitrix criou o negócio — a mensagem bateu no webhook segundos antes do lead
+  // e foi descartada por não ter dono. Aqui o lead acabou de nascer, então a
+  // corrida terminou: se havia algo esperando por este telefone, a conversa
+  // entra agora, sem depender de alguém abrir o card.
+  if (lead) {
+    try {
+      const r = await resgatarConversaPerdida(lead);
+      if (r.resgatadas > 0) {
+        console.log(`[leads] conversa resgatada: ${r.resgatadas} mensagem(ns) que chegaram antes do lead ${lead.id}`);
+      }
+    } catch (e) {
+      console.warn('[leads] resgate da conversa falhou (segue):', e?.message);
     }
   }
 
