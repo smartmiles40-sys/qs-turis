@@ -27,6 +27,23 @@ function safeParse(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
 
+// Cursor de CONTINUAÇÃO: a mensagem mais antiga que o QS já importou deste
+// lead. Tudo abaixo dela ainda não veio — é de onde uma nova chamada deve
+// seguir. Sem isso, cada clique em "baixar histórico" recomeçava do mais
+// recente e estourava o teto nos MESMOS 400 — conversa longa nunca completava.
+async function oldestImportedCwId(leadId) {
+  try {
+    const rows = await rest(
+      `qs_wa_messages?select=cw_message_id&lead_id=eq.${encodeURIComponent(leadId)}&cw_message_id=not.is.null&order=cw_message_id.asc&limit=1`
+    );
+    const id = Array.isArray(rows) && rows[0] ? rows[0].cw_message_id : null;
+    return id == null ? null : Number(id);
+  } catch (e) {
+    console.warn('[wa-history] cursor de continuação indisponível:', e?.message);
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
@@ -69,6 +86,14 @@ export default async function handler(req, res) {
     let before = null;
     let completo = false;
 
+    // Duas fases: "recente" desce do topo cobrindo buracos novos (webhook fora
+    // do ar etc.); quando encontra 2 blocos seguidos já importados, pula direto
+    // pro fim do que o QS conhece ("antigo") e segue dali pra trás — é isso que
+    // faz cliques sucessivos AVANÇAREM numa conversa maior que o teto.
+    const cursorAntigo = await oldestImportedCwId(leadId);
+    let fase = 'recente';
+    let blocosSemNovas = 0;
+
     for (let bloco = 0; bloco < MAX_BLOCOS; bloco++) {
       const qs = before ? `?before=${encodeURIComponent(before)}` : '';
       const data = await cw(`/conversations/${conv.id}/messages${qs}`);
@@ -76,6 +101,7 @@ export default async function handler(req, res) {
       if (!list.length) { completo = true; break; }
 
       lidas += list.length;
+      let novasNoBloco = 0;
       for (const m of list) {
         const novo = await ingestMessage({
           leadId,
@@ -85,12 +111,24 @@ export default async function handler(req, res) {
           inboxId: conv.inbox_id ?? null,
           canReply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
         });
-        if (novo) importadas++;
+        if (novo) { importadas++; novasNoBloco++; }
       }
 
       // O bloco vem do mais antigo pro mais novo: o cursor é o primeiro id.
       const maisAntiga = list[0]?.id;
       if (!maisAntiga || maisAntiga === before) { completo = true; break; }
+
+      if (fase === 'recente' && cursorAntigo != null) {
+        blocosSemNovas = novasNoBloco === 0 ? blocosSemNovas + 1 : 0;
+        // 2 blocos seguidos sem nada novo = entramos no trecho já importado.
+        // (2, e não 1, porque um bloco pode vir "vazio de novas" só por notas
+        // privadas/mensagens sem conteúdo, que o ingest descarta.)
+        if (blocosSemNovas >= 2 && cursorAntigo < Number(maisAntiga)) {
+          fase = 'antigo';
+          before = cursorAntigo;
+          continue;
+        }
+      }
       before = maisAntiga;
     }
 

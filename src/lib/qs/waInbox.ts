@@ -324,17 +324,23 @@ export async function listMessages(leadId: string, limit = 200): Promise<WaMessa
   // "*" de propósito (mesma lição do avatar_url): a coluna `reactions` só existe
   // depois da 0041 — listar colunas quebraria a conversa inteira num banco que
   // ainda não recebeu a migration.
+  //
+  // DESCENDENTE + reverse: o corte de 200 tem que ficar com as mais RECENTES.
+  // Ascendente com limit devolvia as 200 mais antigas — conversa longa abria
+  // sem as últimas mensagens (elas só apareciam quando chegava algo novo pelo
+  // realtime).
   const { data, error } = await supabase
     .from("qs_wa_messages")
     .select("*")
     .eq("lead_id", leadId)
-    .order("sent_at", { ascending: true })
+    .order("sent_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(limit);
   if (error) {
     console.warn("[wa] listMessages:", error.message);
     return [];
   }
-  return (data ?? []) as WaMessage[];
+  return ((data ?? []) as WaMessage[]).reverse();
 }
 
 /** Zera o contador de não lidas (única escrita do navegador — e via função). */

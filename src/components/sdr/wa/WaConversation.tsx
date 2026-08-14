@@ -688,10 +688,15 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     const r = await downloadHistory(leadId);
     if (r.error) { setAviso(null); setErro(r.error); return; }
     await recarregar();
+    // `completo === false` = a função bateu no teto de segurança do servidor
+    // (~400 msgs por chamada) — o clique seguinte CONTINUA de onde parou.
+    const aindaTem = r.completo === false;
     setAviso(r.importadas > 0
-      ? `${r.importadas} mensagem${r.importadas > 1 ? "ns" : ""} trazida${r.importadas > 1 ? "s" : ""} do histórico.`
-      : "Nada novo no histórico.");
-    window.setTimeout(() => setAviso(null), 4000);
+      ? `${r.importadas} ${r.importadas > 1 ? "mensagens trazidas" : "mensagem trazida"} do histórico.${aindaTem ? " Ainda tem mais — clique de novo pra continuar." : ""}`
+      : aindaTem
+        ? "Histórico parcial — clique de novo pra continuar."
+        : "Nada novo no histórico.");
+    window.setTimeout(() => setAviso(null), aindaTem ? 7000 : 4000);
   }, [leadId, recarregar]);
 
   let ultimoDia = "";
