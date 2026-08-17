@@ -14,8 +14,9 @@
 // limite de 100 tokens/dia por e-mail+appId — por isso pegamos UM e reusamos.
 //
 // COMO USAR
-//   1) preencha .env.chatapp.local (CHATAPP_EMAIL, CHATAPP_PASSWORD,
-//      CHATAPP_APP_ID, CHATAPP_LICENSE_ID, CHATAPP_MESSENGER)
+//   1) preencha .env.chatapp.local com TRÊS coisas: CHATAPP_EMAIL e
+//      CHATAPP_PASSWORD (o login do painel) e CHATAPP_APP_ID (o suporte do
+//      ChatApp fornece). O licenseId o script descobre sozinho.
 //   2) node scripts/chatapp-historico.mjs --explorar
 //        conecta, lista as conversas e MOSTRA o formato real de uma mensagem.
 //        Nada é gravado. É o passo que responde "dá pra migrar?" em 1 minuto.
@@ -50,8 +51,16 @@ const MESSENGER = ca.CHATAPP_MESSENGER || 'whatsapp';
 function exigir(campos) {
   const faltando = campos.filter((c) => !ca[c]);
   if (faltando.length) {
-    console.error(`\nFaltam credenciais em .env.chatapp.local: ${faltando.join(', ')}`);
-    console.error('Pegue no painel do ChatApp (cabinet.chatapp.online) e preencha o arquivo.\n');
+    console.error(`\nFaltam credenciais em .env.chatapp.local: ${faltando.join(', ')}\n`);
+    console.error('Onde pegar cada uma:');
+    console.error('  CHATAPP_EMAIL / CHATAPP_PASSWORD');
+    console.error('     o MESMO login que você usa em cabinet.chatapp.online.');
+    console.error('  CHATAPP_APP_ID');
+    console.error('     não fica visível no painel — peça ao suporte do ChatApp:');
+    console.error('     "preciso do appId da nossa conta para usar a API REST"');
+    console.error('     (nossa conta: company_id 56587 / businessId 108329).');
+    console.error('  CHATAPP_LICENSE_ID');
+    console.error('     NÃO precisa preencher — este script descobre sozinho depois de entrar.\n');
     process.exit(1);
   }
 }
@@ -87,11 +96,32 @@ async function autenticar() {
   return TOKEN;
 }
 
+/**
+ * Descobre a licença sozinho. O licenseId é o que aparece no meio das URLs da
+ * API, e ninguém precisa caçar isso no painel: depois de autenticar, a própria
+ * API lista o que a conta tem. Só usa o valor do .env se ele existir.
+ */
+async function descobrirLicenca() {
+  if (ca.CHATAPP_LICENSE_ID) return ca.CHATAPP_LICENSE_ID;
+  const d = await chatapp('/v1/licenses');
+  const lista = Array.isArray(d) ? d : (d?.items || d?.data || d?.licenses || []);
+  if (!lista.length) throw new Error('a conta não tem nenhuma licença visível para este usuário');
+  const escolhida = lista[0];
+  const id = escolhida.licenseId ?? escolhida.id;
+  console.log(`  licença descoberta automaticamente: ${id}${escolhida.name ? ` (${escolhida.name})` : ''}`);
+  if (lista.length > 1) {
+    console.log(`  (há ${lista.length} licenças; usando a primeira — para escolher outra, preencha CHATAPP_LICENSE_ID)`);
+    for (const l of lista) console.log(`     • ${l.licenseId ?? l.id} ${l.name ?? ''} ${l.messengers ? `[${(l.messengers||[]).map(m=>m.type??m).join(', ')}]` : ''}`);
+  }
+  ca.CHATAPP_LICENSE_ID = String(id);
+  return ca.CHATAPP_LICENSE_ID;
+}
+
 const raiz = () => `/v1/licenses/${ca.CHATAPP_LICENSE_ID}/messengers/${MESSENGER}`;
 
 /** Lista as conversas, paginando por `lastTime` (a doc deles). */
 async function listarChats({ maxPaginas = 50, limit = 100 } = {}) {
-  exigir(['CHATAPP_LICENSE_ID']);
+  await descobrirLicenca();
   const todos = [];
   let lastTime = null;
   for (let i = 0; i < maxPaginas; i++) {
