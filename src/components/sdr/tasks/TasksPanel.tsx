@@ -644,7 +644,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Perguntar era pedir pro SDR digitar o que o sistema já sabe — e a lista fixa
   // nem tinha todo mundo (a Yanca não estava lá, e sem escolher não dava pra
   // confirmar o ganho).
-  const [meeting, setMeeting] = useState({ emailCliente: "", dataAgendamento: "", responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 });
+  const [meeting, setMeeting] = useState({ emailCliente: "", dataAgendamento: "", responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60, produto: "" });
   const [savingMeeting, setSavingMeeting] = useState(false);
 
   // New Lead Modal
@@ -1137,7 +1137,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const yyyy = hoje.getFullYear();
     const mm = String(hoje.getMonth() + 1).padStart(2, "0");
     const dd = String(hoje.getDate()).padStart(2, "0");
-    setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 });
+    setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 , produto: "" });
     setPendingResult(null);
     setMeetingFor({ taskId: task.id, leadId: task.lead_id, leadName: lead?.full_name ?? "Lead" });
   }
@@ -1284,7 +1284,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         owner_name: agendadoPor,
         closer_id: closerId,
         closer_name: meeting.responsavel || null,
-        title: `Reunião — ${leadName}`,
+        // O produto vira o titulo: e ele que vai pro card do Bitrix e pro
+        // convite do Google. Sem produto, cai no nome generico de antes.
+        title: meeting.produto.trim() || `Reunião — ${leadName}`,
         scheduled_at: new Date(meeting.dataHora),
         duration_min: meeting.duracaoMin,
         location: "Google Meet",
@@ -3871,6 +3873,27 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <p className="mt-1 text-[10.5px] text-gray-400">
                   É por ele que o convite do Google Meet chega no cliente.
                 </p>
+              </div>
+              {/* O QUE É A REUNIÃO. Vai pro card do Bitrix ("Produto (Descritivo
+                  da Reunião)") e pro convite do Google — é o que o especialista
+                  lê pra saber do que se trata antes de entrar. */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Produto — o que é a reunião</label>
+                <input
+                  type="text"
+                  value={meeting.produto}
+                  onChange={(e) => setMeeting((m) => ({ ...m, produto: e.target.value }))}
+                  placeholder="Expedição Itália, Pacote Japão/China/Coreia…"
+                  list="qs-produtos-frequentes"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"
+                />
+                <datalist id="qs-produtos-frequentes">
+                  <option value="Expedição " />
+                  <option value="Pacote " />
+                  <option value="Personalizado " />
+                  <option value="Passagem aérea " />
+                  <option value="Concierge " />
+                </datalist>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Data do agendamento</label>

@@ -479,6 +479,23 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
     });
   }
 
+  // O PRODUTO da reunião vai direto pro campo do card ("Produto (Descritivo da
+  // Reunião)"), sem passar pelo n8n: é o que o especialista lê pra saber do que
+  // se trata antes de entrar. Só quando o SDR escreveu algo — título automático
+  // ("Reunião — Fulano") não descreve produto nenhum e sujaria o campo.
+  const produto = input.title?.trim();
+  // "Reunião — Fulano" é o título que o sistema monta sozinho quando ninguém
+  // escreveu nada: não descreve produto nenhum e só sujaria o campo do Bitrix.
+  const ehTituloAutomatico = !produto || /^reuni[ãa]o\s*[—–-]/i.test(produto);
+  if (produto && !ehTituloAutomatico && input.lead_bitrix_id) {
+    notifyBitrix("reuniao-campos", {
+      lead_id: input.lead_id,
+      bitrix_id: input.lead_bitrix_id,
+      desfecho: "produto",
+      produto,
+    });
+  }
+
   notifyBitrix("reuniao", {
     lead_id: input.lead_id,
     // O n8n grava o resultado de volta NESTA reunião (bitrix_synced / bitrix_error).

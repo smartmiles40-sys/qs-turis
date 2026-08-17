@@ -50,6 +50,7 @@ const CAMPO = {
   sal:             'UF_CRM_1785533874395', // enum  "SAL"
   tipo_venda:      'UF_CRM_1743296167520', // enum  "Tipo de venda" (2119 negócios usam)
   valor:           'OPPORTUNITY',          // double — o "Total" do card, campo nativo
+  produto:         'UF_CRM_1773954690276', // string "Produto (Descritivo da Reunião)" (443 usam)
 };
 
 // ⚠️ ENUM DO BITRIX É STRING (medido 17/08 nos 671 negócios que já têm o campo:
@@ -107,6 +108,10 @@ const CAMPOS_POR_DESFECHO = {
   }),
   sal_aceito:   () => ({ [CAMPO.sal]: OPCAO.sal_aceito }),
   sal_recusado: () => ({ [CAMPO.sal]: OPCAO.sal_recusado }),
+  // O QUE É A REUNIÃO ("Expedição Itália", "Pacote Japão/China/Coreia"). Sai no
+  // AGENDAMENTO, não no desfecho: é a informação que o especialista precisa
+  // ANTES de entrar na reunião. Não muda etapa nenhuma — só descreve o negócio.
+  produto:      (d) => ({ [CAMPO.produto]: d.produto }),
 };
 
 /**

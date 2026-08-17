@@ -353,16 +353,28 @@ export default function ScheduleMeetingModal({
               </div>
 
               <div>
-                <label className={labelClass}>Título</label>
+                <label className={labelClass}>Produto — o que é a reunião</label>
                 <input
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder={`Reunião — ${selectedLead?.full_name ?? "cliente"}`}
+                  placeholder="Expedição Itália, Pacote Japão/China/Coreia…"
+                  list="produtos-frequentes"
                   className={inputClass}
                 />
+                {/* Sugestões que espelham o que o comercial já escreve no campo
+                    "Produto (Descritivo da Reunião)" do Bitrix. É datalist, não
+                    select: o destino é texto livre e destino novo tem que caber. */}
+                <datalist id="produtos-frequentes">
+                  <option value="Expedição " />
+                  <option value="Pacote " />
+                  <option value="Personalizado " />
+                  <option value="Passagem aérea " />
+                  <option value="Concierge " />
+                </datalist>
                 <p className="text-[11px] text-gray-400 mt-1">
-                  É o nome que aparece no convite do Google e na agenda do especialista.
+                  Vai pro card do Bitrix e pro convite do Google — é o que o especialista
+                  lê pra saber do que se trata antes de entrar na reunião.
                 </p>
               </div>
 

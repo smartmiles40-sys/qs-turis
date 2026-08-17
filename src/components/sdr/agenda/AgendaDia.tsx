@@ -1002,6 +1002,11 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
           <h2 className="mt-2 truncate text-lg font-bold text-gray-900">
             {reuniao.lead_name || reuniao.lead?.full_name || reuniao.title || "Reunião"}
           </h2>
+          {/* O produto ao lado do nome: é a primeira coisa que o especialista
+              precisa saber ao abrir a reunião — sobre o que ela é. */}
+          {reuniao.title && reuniao.title !== reuniao.lead_name && (
+            <p className="truncate text-sm font-semibold" style={{ color: "#0147FF" }}>{reuniao.title}</p>
+          )}
           {reuniao.lead?.bitrix_id && <p className="text-xs text-gray-400">Negócio #{reuniao.lead.bitrix_id}</p>}
         </div>
         <button onClick={onFechar} aria-label="Fechar" className={btnIcone}>
