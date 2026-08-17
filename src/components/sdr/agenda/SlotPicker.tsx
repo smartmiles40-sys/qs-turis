@@ -25,6 +25,7 @@ import {
   addDays,
   loadJanelaAgendamento,
   JANELA_AGENDAMENTO_PADRAO,
+  DURACAO_PADRAO_MIN,
   type Slot,
   type JanelaAgendamento,
 } from "@/lib/qs/closerAgenda";
@@ -81,7 +82,8 @@ export default function SlotPicker({
   const [janela, setJanela] = useState<JanelaAgendamento>(JANELA_AGENDAMENTO_PADRAO);
   // Quantos blocos da grade do closer a reunião ocupa. 1 = o padrão de antes,
   // então nada muda pra quem não mexer aqui.
-  const [blocos, setBlocos] = useState(1);
+  // Toda reunião ocupa UM bloco de 1h — não há mais escolha de duração.
+  const blocos = 1;
 
   useEffect(() => {
     let alive = true;
@@ -140,12 +142,7 @@ export default function SlotPicker({
   // longa ocupa blocos SEGUIDOS — então o horário só serve se os seguintes
   // também estiverem livres e colados. Sem esta conta, o SDR escolheria 1h num
   // horário com 30 min livres e o banco recusaria na hora de salvar.
-  const slotMinutes = config?.slot_minutes ?? 30;
-  const duracaoMin = blocos * slotMinutes;
-  const opcoesDuracao = useMemo(
-    () => [1, 2, 3].map((b) => ({ blocos: b, min: b * slotMinutes })),
-    [slotMinutes]
-  );
+  const duracaoMin = DURACAO_PADRAO_MIN;
 
   /** Inícios que NÃO comportam a duração escolhida. */
   const naoCabe = useMemo(() => {
@@ -218,7 +215,6 @@ export default function SlotPicker({
 
   function selectCloser(id: string) {
     setCloserId(id);
-    setBlocos(1);    // a grade do próximo closer pode ter outro tamanho de bloco
     onChange(null);  // trocar de closer invalida o horário escolhido
   }
 
@@ -347,35 +343,9 @@ export default function SlotPicker({
             </div>
           </div>
 
-          {/* ── Duração ── */}
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">Duração</label>
-            <div className="flex flex-wrap gap-1.5">
-              {opcoesDuracao.map((o) => {
-                const ativo = o.blocos === blocos;
-                return (
-                  <button
-                    key={o.blocos}
-                    type="button"
-                    onClick={() => setBlocos(o.blocos)}
-                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                      ativo
-                        ? "border-[#0147FF] bg-[#0147FF] text-white"
-                        : "border-gray-200 bg-white text-gray-700 hover:border-[#0147FF] hover:text-[#0147FF]"
-                    }`}
-                  >
-                    {o.min >= 60 && o.min % 60 === 0 ? `${o.min / 60}h` : `${o.min} min`}
-                  </button>
-                );
-              })}
-            </div>
-            {blocos > 1 && (
-              <p className="mt-1.5 text-[11px] text-gray-400">
-                Reunião de {duracaoMin} min ocupa {blocos} horários seguidos — só aparecem
-                os inícios com todos eles livres.
-              </p>
-            )}
-          </div>
+          {/* Duração: FIXA em 1h (Bruno, 17/08). O seletor saiu — escolher
+              tempo no meio do agendamento era mais uma decisão pra errar, e
+              reunião de 30/90 min desalinhava a grade de todo mundo. */}
 
           {/* ── Horários ── */}
           <div>

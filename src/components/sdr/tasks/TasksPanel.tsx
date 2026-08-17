@@ -3953,31 +3953,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 </p>
               </div>
 
-              {/* Duração: era 60 min fixo no código. A reunião reserva esse tempo
-                  na agenda do especialista e é a duração do evento no Google. */}
-              <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Duração da reunião</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {[30, 45, 60, 90].map((min) => {
-                    const ativo = meeting.duracaoMin === min;
-                    return (
-                      <button
-                        key={min}
-                        type="button"
-                        onClick={() => setMeeting((m) => ({ ...m, duracaoMin: min }))}
-                        className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                          ativo
-                            ? "border-transparent text-white"
-                            : "border-gray-200 bg-white text-gray-700 hover:border-green-400 hover:text-green-700"
-                        }`}
-                        style={ativo ? { background: "var(--green)" } : undefined}
-                      >
-                        {min >= 60 && min % 60 === 0 ? `${min / 60}h` : min === 90 ? "1h30" : `${min} min`}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              {/* Duração fixa de 1h (Bruno, 17/08): escolher o tempo era mais uma
+                  decisão no meio do agendamento, e reunião de 30 ou 90 min
+                  bagunçava a grade de todo mundo. Some da tela, vale sempre. */}
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Observações da atividade</label>
                 <textarea value={obsText} onChange={(e) => setObsText(e.target.value)} rows={2} placeholder="Anotações do contato — vão junto para o Bitrix" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400 resize-none" />

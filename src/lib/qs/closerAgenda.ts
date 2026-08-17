@@ -41,20 +41,40 @@ export function closerColor(_closerId: string, index: number, config?: CloserCon
   return config?.color || CLOSER_COLORS[index % CLOSER_COLORS.length];
 }
 
+/** Toda reunião dura 1 hora (Bruno, 17/08). Não é mais escolha de ninguém. */
+export const DURACAO_PADRAO_MIN = 60;
+
 export const DEFAULT_CLOSER_CONFIG: Omit<CloserConfig, "closer_id"> = {
-  slot_minutes: 60,
+  slot_minutes: DURACAO_PADRAO_MIN,
   buffer_minutes: 0,
-  min_notice_minutes: 120,
+  min_notice_minutes: 0,
   max_per_day: null,
   is_bookable: true,
   color: null,
   default_link: null,
 };
 
-/** Config do closer com os defaults preenchidos (a linha pode não existir ainda). */
+/**
+ * Config do closer — com a AGENDA ABERTA (decisão do Bruno, 17/08).
+ *
+ * O que era configurável por closer (duração do slot, intervalo entre reuniões,
+ * antecedência mínima, teto diário, "aceita agendamento") virou fonte de
+ * confusão: o SDR via horário sumindo da grade sem entender por quê e o
+ * agendamento simplesmente não acontecia. Agora a linha do banco só é lida pro
+ * que é cosmético/prático — cor e link padrão. As travas vêm zeradas SEMPRE,
+ * inclusive pra quem já tem configuração salva.
+ *
+ * O que continua protegendo é só o que é FÍSICO: dois clientes na mesma hora
+ * com o mesmo especialista (trava do banco, 0032) e horário no passado.
+ */
 export function configFor(closerId: string, all: CloserConfig[]): CloserConfig {
   const found = all.find((c) => c.closer_id === closerId);
-  return found ?? { closer_id: closerId, ...DEFAULT_CLOSER_CONFIG };
+  return {
+    closer_id: closerId,
+    ...DEFAULT_CLOSER_CONFIG,
+    color: found?.color ?? null,
+    default_link: found?.default_link ?? null,
+  };
 }
 
 // ── Janela COMERCIAL de agendamento — DESATIVADA (14/08) ────────────────────
@@ -317,23 +337,18 @@ export function sameDay(a: Date, b: Date): boolean {
  * o horário simplesmente sumir da grade.
  */
 export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions = {}): Slot[] {
-  const { closerId, config } = input;
+  const { closerId } = input;
   const now = opts.now ?? new Date();
   const dayStart = startOfDay(day);
   const dayEnd = addDays(dayStart, 1);
 
-  if (!config.is_bookable) return [];
-
-  let windows = input.availability
-    .filter((a) => a.closer_id === closerId && a.weekday === day.getDay())
-    .sort((a, b) => a.start_time.localeCompare(b.start_time));
-  // Sem janela cadastrada pro dia, a grade abre INTEIRA (07–22h) em vez de
-  // sumir. Decisão do Bruno (14/08): closer sem cadastro de agenda travava o
-  // agendamento — "ficamos pendentes de fazer o agendamento". O que continua
-  // protegendo é o que é REAL: choque de horário, bloqueio e antecedência.
-  if (!windows.length) {
-    windows = [{ closer_id: closerId, weekday: day.getDay(), start_time: "07:00", end_time: "22:00" } as CloserAvailability];
-  }
+  // AGENDA ABERTA (Bruno, 17/08): a grade do dia é sempre a mesma pra todo
+  // especialista — 07:00 às 22:00, de hora em hora. A janela cadastrada por
+  // closer deixou de recortar a grade: era ela que fazia horário sumir da tela
+  // sem explicação e travava o SDR ("muito problema com o agendamento").
+  const windows: CloserAvailability[] = [
+    { closer_id: closerId, weekday: day.getDay(), start_time: "07:00", end_time: "22:00" } as CloserAvailability,
+  ];
 
   // Reuniões do closer que TOCAM o dia (uma de 23:30 invade o dia seguinte).
   const dayMeetings = input.meetings.filter((m) => {
@@ -355,13 +370,11 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
     );
   });
 
-  // Teto diário: conta as reuniões que COMEÇAM no dia.
-  const bookedToday = dayMeetings.filter((m) => sameDay(new Date(m.scheduled_at), dayStart)).length;
-  const dayFull = config.max_per_day != null && bookedToday >= config.max_per_day;
-
-  const step = Math.max(5, config.slot_minutes + config.buffer_minutes);
-  const noticeLimit = now.getTime() + config.min_notice_minutes * 60_000;
-  const buffer = config.buffer_minutes * 60_000;
+  // Teto diário e antecedência mínima SAÍRAM (Bruno, 17/08): eram limite de
+  // configuração, não da realidade — o especialista podia ter a hora livre e o
+  // SDR não conseguia marcar. Sem buffer entre reuniões pelo mesmo motivo.
+  const step = DURACAO_PADRAO_MIN;
+  const buffer = 0;
 
   // O recorte comercial (09:00–19:30) FOI REMOVIDO a pedido do Bruno (14/08):
   // a grade oferece qualquer horário da janela do closer, sem corte — os SDRs
@@ -375,7 +388,7 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
     // Trava de segurança: janela absurda não pode virar loop infinito.
     for (let i = 0, t = wStart.getTime(); i < 300; i++, t += step * 60_000) {
       const sStart = t;
-      const sEnd = t + config.slot_minutes * 60_000;
+      const sEnd = t + DURACAO_PADRAO_MIN * 60_000;
       if (sEnd > wEnd.getTime()) break;
 
       const start = new Date(sStart);
@@ -392,12 +405,12 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
         overlaps(sStart, sEnd, new Date(b.starts_at).getTime(), new Date(b.ends_at).getTime())
       );
 
+      // Só sobra o que é REAL: já tem alguém nessa hora, o especialista marcou
+      // bloqueio (férias/almoço) ou o horário já passou.
       let reason: SlotReason = "livre";
       if (meeting) reason = "ocupado";
       else if (block) reason = "bloqueio";
       else if (sStart < now.getTime()) reason = "passado";
-      else if (sStart < noticeLimit) reason = "antecedencia";
-      else if (dayFull) reason = "limite_diario";
 
       const slot: Slot = { start, end, available: reason === "livre", reason, meeting, block };
       if (!opts.onlyFree || slot.available) slots.push(slot);
@@ -441,9 +454,9 @@ export function isSlotBookable(
   const sEnd = sStart + durationMin * 60_000;
   const buffer = input.config.buffer_minutes * 60_000;
 
-  if (!input.config.is_bookable) {
-    return { ok: false, reason: "bloqueio", message: "Este closer não está aceitando agendamentos." };
-  }
+  // AGENDA ABERTA (17/08): "não aceita agendamento", antecedência mínima e
+  // janela de atendimento saíram daqui. Sobraram as três checagens que
+  // correspondem a algo real no mundo — passado, choque e bloqueio.
   if (sStart < now.getTime()) {
     return { ok: false, reason: "passado", message: "Esse horário já passou." };
   }
@@ -469,33 +482,6 @@ export function isSlotBookable(
       ok: false,
       reason: "bloqueio",
       message: `O closer está indisponível nesse horário${bloqueio.reason ? ` (${bloqueio.reason})` : ""}.`,
-    };
-  }
-
-  if (sStart < now.getTime() + input.config.min_notice_minutes * 60_000) {
-    const h = Math.round(input.config.min_notice_minutes / 60);
-    return {
-      ok: false,
-      reason: "antecedencia",
-      message: `Este closer pede ${h >= 1 ? `${h}h` : `${input.config.min_notice_minutes} min`} de antecedência.`,
-    };
-  }
-
-  // Fora da janela de atendimento? (não é impeditivo no encaixe do gestor, mas
-  // precisa ser dito — a UI decide se bloqueia ou só avisa)
-  const windows = input.availability.filter(
-    (a) => a.closer_id === input.closerId && a.weekday === start.getDay()
-  );
-  const dentro = windows.some((w) => {
-    const ws = atTime(start, w.start_time).getTime();
-    const we = atTime(start, w.end_time).getTime();
-    return sStart >= ws && sEnd <= we;
-  });
-  if (!dentro) {
-    return {
-      ok: false,
-      reason: "bloqueio",
-      message: "Esse horário está fora da janela de atendimento do closer.",
     };
   }
 

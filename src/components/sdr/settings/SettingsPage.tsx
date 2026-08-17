@@ -11,11 +11,8 @@ import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, del
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
 import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } from "@/lib/qs/chatProvider";
 import WaInboxLabels from "./WaInboxLabels";
-import CloserAgendaSettings from "./CloserAgendaSettings";
 import { WA_SIGNATURE_MAP_KEY, WA_SIGNATURE_ENABLED_KEY, nomeCurto } from "@/lib/qs/waSignature";
 import type {
-  CustomField,
-  CustomFieldScope,
   LossReason,
   SdrUser,
   UserRole,
@@ -39,25 +36,11 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
   marketing: "bg-gray-100 text-gray-600",
 };
 
-const SCOPE_LABELS: Record<CustomFieldScope, string> = {
-  pessoal: "Pessoal",
-  empresa: "Empresa",
-  contato: "Contato",
-};
 
-const FIELD_TYPE_LABELS: Record<string, string> = {
-  text: "Texto",
-  number: "Número",
-  date: "Data",
-  select: "Seleção",
-  email: "E-mail",
-  phone: "Telefone",
-  url: "URL",
-};
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "campos" | "motivos" | "classificacao" | "horario" | "equipe" | "agenda-closers" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "motivos" | "classificacao" | "horario" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -68,12 +51,9 @@ interface SidebarItem {
 const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "produtos", label: "Produtos", group: "PLATAFORMA" },
   { key: "canais", label: "Canais de Contato", group: "PLATAFORMA" },
-  { key: "campos", label: "Campos Personalizados", group: "PLATAFORMA" },
   { key: "motivos", label: "Motivos de Perda", group: "PLATAFORMA" },
   { key: "classificacao", label: "Classificação Automática", group: "PLATAFORMA" },
   { key: "horario", label: "Horário de Trabalho", group: "EMPRESA" },
-  { key: "equipe", label: "Equipe da Reunião", group: "EMPRESA" },
-  { key: "agenda-closers", label: "Agenda dos Closers", group: "EMPRESA" },
   { key: "agenda", label: "Agenda (Google) — legado", group: "EMPRESA" },
   { key: "webfone", label: "Webfone (Wavoip)", group: "EMPRESA" },
   { key: "webfone-webrtc", label: "Webfone WebRTC (VoxFree)", group: "EMPRESA" },
@@ -160,206 +140,7 @@ function ChannelSvgIcon({ type }: { type: string }) {
 
 // ── Campos Personalizados ────────────────────────────────────────────────────
 
-const FIELD_TYPE_OPTIONS: { value: string; label: string }[] = [
-  { value: "text", label: "Texto" },
-  { value: "number", label: "Número" },
-  { value: "date", label: "Data" },
-  { value: "select", label: "Seleção" },
-];
 
-function CamposSection() {
-  const [activeScope, setActiveScope] = useState<CustomFieldScope>("pessoal");
-  const [allFields, setAllFields] = useState<CustomField[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editField, setEditField] = useState<CustomField | null>(null);
-  const [form, setForm] = useState({ label: "", scope: "pessoal" as CustomFieldScope, field_type: "text" });
-  const [saving, setSaving] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  async function loadFields() {
-    setLoading(true);
-    const { data, error } = await supabase.from("qs_custom_fields").select("*").order("label");
-    if (error) console.warn("Erro ao buscar campos:", error);
-    else setAllFields((data as CustomField[]) ?? []);
-    setLoading(false);
-  }
-
-  useEffect(() => { loadFields(); }, []);
-
-  const fields = allFields.filter((f) => f.scope === activeScope);
-
-  function openAdd() {
-    setEditField(null);
-    setForm({ label: "", scope: activeScope, field_type: "text" });
-    setErrorMsg(null);
-    setShowModal(true);
-  }
-
-  function openEdit(field: CustomField) {
-    setEditField(field);
-    setForm({ label: field.label, scope: field.scope, field_type: field.field_type });
-    setErrorMsg(null);
-    setShowModal(true);
-  }
-
-  async function handleSave() {
-    if (!form.label.trim()) return;
-    setSaving(true);
-    setErrorMsg(null);
-    if (editField) {
-      const { error } = await supabase
-        .from("qs_custom_fields")
-        .update({ label: form.label.trim(), scope: form.scope, field_type: form.field_type })
-        .eq("id", editField.id);
-      if (error) {
-        console.warn("Erro ao atualizar campo:", error);
-        setErrorMsg("Não foi possível salvar o campo. Tente novamente.");
-        setSaving(false);
-        return;
-      }
-    } else {
-      const { error } = await supabase
-        .from("qs_custom_fields")
-        .insert({ label: form.label.trim(), scope: form.scope, field_type: form.field_type, is_system: false, is_archived: false });
-      if (error) {
-        console.warn("Erro ao criar campo:", error);
-        setErrorMsg("Não foi possível criar o campo. Tente novamente.");
-        setSaving(false);
-        return;
-      }
-    }
-    setSaving(false);
-    setShowModal(false);
-    await loadFields();
-  }
-
-  if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
-
-  return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-gray-900">Campos Personalizados</h2>
-        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors">
-          <PlusIcon /> Novo Campo
-        </button>
-      </div>
-
-      <div className="flex gap-1">
-        {(["pessoal", "empresa", "contato"] as CustomFieldScope[]).map((scope) => (
-          <button
-            key={scope}
-            onClick={() => setActiveScope(scope)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              activeScope === scope
-                ? "bg-[#0147FF] text-white"
-                : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            {SCOPE_LABELS[scope]}
-            <span className={`ml-1.5 ${activeScope === scope ? "text-white/70" : "text-gray-400"}`}>
-              {allFields.filter((f) => f.scope === scope).length}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-x-auto">
-        {fields.length === 0 ? (
-          <div className="px-4 py-6 text-center text-sm text-gray-400">Nenhum campo neste escopo.</div>
-        ) : (
-          <table className="w-full text-sm min-w-[560px]">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Campo</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tipo</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Origem</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fields.map((field) => (
-                <tr key={field.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50/40 transition-colors">
-                  <td className="px-4 py-3 text-sm text-gray-700 font-medium">{field.label}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{FIELD_TYPE_LABELS[field.field_type] ?? field.field_type}</td>
-                  <td className="px-4 py-3">
-                    {field.is_system ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-gray-400"><LockIcon /> Sistema</span>
-                    ) : (
-                      <span className="text-xs text-[#0147FF] font-medium">Personalizado</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {field.is_system ? (
-                      <span className="text-xs text-gray-300">--</span>
-                    ) : (
-                      <div className="inline-flex items-center gap-1">
-                        <button onClick={() => openEdit(field)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" title="Editar"><PencilIcon /></button>
-                        <button
-                          onClick={async () => {
-                            // Excluir um campo apaga também os valores preenchidos nos leads.
-                            if (!window.confirm(`Excluir o campo "${field.label}"? Os valores já preenchidos nos leads serão apagados.`)) return;
-                            const { error } = await supabase.from("qs_custom_fields").delete().eq("id", field.id);
-                            if (error) {
-                              console.warn("Erro ao excluir campo:", error);
-                              notifyError("Não foi possível excluir o campo — tente novamente.");
-                            }
-                            else setAllFields((prev) => prev.filter((f) => f.id !== field.id));
-                          }}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors" title="Excluir"
-                        >
-                          <TrashIcon />
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Modal Criar/Editar Campo */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 md:p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-base font-bold text-gray-900 mb-4">{editField ? "Editar Campo" : "Novo Campo"}</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Nome do campo *</label>
-                <input type="text" value={form.label} onChange={(e) => setForm(p => ({ ...p, label: e.target.value }))} placeholder="Ex.: Orçamento estimado" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400" autoFocus />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Escopo</label>
-                <select value={form.scope} onChange={(e) => setForm(p => ({ ...p, scope: e.target.value as CustomFieldScope }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400">
-                  <option value="pessoal">Pessoal</option>
-                  <option value="empresa">Empresa</option>
-                  <option value="contato">Contato</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Tipo</label>
-                <select value={form.field_type} onChange={(e) => setForm(p => ({ ...p, field_type: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400">
-                  {FIELD_TYPE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-              {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
-            </div>
-            <div className="flex items-center gap-3 mt-5">
-              <button onClick={handleSave} disabled={saving || !form.label.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#0147FF" }}>
-                {saving ? "Salvando..." : editField ? "Salvar" : "Criar"}
-              </button>
-              <button onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Motivos de Perda ─────────────────────────────────────────────────────────
 
@@ -1142,36 +923,6 @@ function HorarioSection() {
 //
 // Mantida como explicação, e SEM CONTROLE NENHUM de propósito: um editor que não
 // altera mais nada é pior do que tela nenhuma.
-function EquipeSection() {
-  return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-bold text-gray-900">Equipe da Reunião</h2>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Não se configura mais por aqui — o agendamento passou a usar o cadastro real.
-        </p>
-      </div>
-
-      <div className="bg-white border border-gray-100 rounded-xl p-4 space-y-3">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Quem faz o agendamento</p>
-          <p className="text-sm text-gray-600 mt-1">
-            Preenchido sozinho com <b>quem está logado</b>. Não há mais o que escolher — e ninguém
-            fica de fora da lista.
-          </p>
-        </div>
-        <div className="border-t border-gray-100 pt-3">
-          <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Responsáveis pela reunião</p>
-          <p className="text-sm text-gray-600 mt-1">
-            Vem de quem tem o papel <b>closer</b>, está ativo e aceita agendamento. Para incluir
-            alguém: crie o usuário em <b>Configurações → Usuários</b> com o papel closer e configure
-            a grade dele em <b>Configurações → Agenda dos Closers</b>.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Webfone (Wavoip) ─────────────────────────────────────────────────────────
 // Token do dispositivo Wavoip (instância do WhatsApp) usado pelo webfone para
@@ -2311,12 +2062,9 @@ export default function SettingsPage() {
       <main className="flex-1 min-w-0">
         {activeSection === "produtos" && <ProdutosSection />}
         {activeSection === "canais" && <CanaisSection />}
-        {activeSection === "campos" && <CamposSection />}
         {activeSection === "motivos" && <MotivosSection />}
         {activeSection === "classificacao" && <ClassificacaoSection />}
         {activeSection === "horario" && <HorarioSection />}
-        {activeSection === "equipe" && <EquipeSection />}
-        {activeSection === "agenda-closers" && <CloserAgendaSettings />}
         {activeSection === "agenda" && <AgendaSection />}
         {activeSection === "atendimento" && <AtendimentoSection />}
         {activeSection === "webfone" && <WebfoneSection />}
