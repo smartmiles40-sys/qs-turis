@@ -16,7 +16,7 @@
 import { rest } from './_supabaseAdmin.js';
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cw,
-  toE164BR, findContact, pickConversation, ingestMessage,
+  toE164BR, findContact, escolherConversaDoLead, ingestMessage,
 } from './_wa.js';
 
 // Teto de segurança: 20 blocos ≈ 400 mensagens. Evita função pendurada num
@@ -78,7 +78,9 @@ export default async function handler(req, res) {
     const contact = await findContact(phone);
     if (!contact) return res.status(200).json({ importadas: 0, motivo: 'sem-contato-no-chatwoot' });
 
-    const conv = await pickConversation(contact.id);
+    // A conversa do CLIENTE — o histórico e o ponteiro têm que ser da conversa
+    // por onde ele fala, não da "mais ativa" no Chatwoot (ver wa-sync).
+    const conv = await escolherConversaDoLead(leadId, contact.id);
     if (!conv) return res.status(200).json({ importadas: 0, motivo: 'sem-conversa' });
 
     let importadas = 0;

@@ -728,6 +728,46 @@ export function extractStatus(message) {
 }
 
 /**
+ * ONDE O CLIENTE FALA: a conversa da última mensagem RECEBIDA dele — cada
+ * mensagem guarda o próprio cw_conversation_id, então isso vem do nosso banco,
+ * não de adivinhação. É a fonte da verdade pra decidir por onde responder.
+ * null = ele nunca escreveu (ou nada importado ainda).
+ */
+export async function conversaOndeOClienteFala(leadId) {
+  try {
+    const rows = await rest(
+      `qs_wa_messages?select=cw_conversation_id&lead_id=eq.${encodeURIComponent(leadId)}` +
+      `&direction=eq.in&cw_conversation_id=not.is.null&order=sent_at.desc&limit=1`
+    );
+    return rows?.[0]?.cw_conversation_id ?? null;
+  } catch (e) {
+    console.warn('[wa] conversaOndeOClienteFala:', e?.message);
+    return null;
+  }
+}
+
+/**
+ * Resolve a conversa de um lead PREFERINDO a que o cliente usou por último
+ * (lição do teste de 17/08: pickConversation escolhia a conversa "mais ativa"
+ * no Chatwoot — e a conversa do número CAÍDO fica eternamente ativa, porque o
+ * bot da Evolution posta "🚨 não foi possível enviar" nela a cada tentativa).
+ * Fallback: a escolha antiga do Chatwoot, pra lead sem mensagem importada.
+ */
+export async function escolherConversaDoLead(leadId, contactId, inboxPreferida = null) {
+  const doCliente = await conversaOndeOClienteFala(leadId);
+  if (doCliente != null) {
+    try {
+      const d = await cw(`/conversations/${doCliente}`);
+      const conv = d?.id != null ? d : (d?.payload?.id != null ? d.payload : null);
+      if (conv) return conv;
+    } catch (e) {
+      console.warn('[wa] conversa do cliente sumiu no Chatwoot, caindo no fallback:', e?.message);
+    }
+  }
+  return pickConversation(contactId, inboxPreferida);
+}
+
+/**
  * A CONVERSA SEGUE O CLIENTE (bug real de 17/08): a thread do QS gruda na
  * PRIMEIRA conversa do lead no Chatwoot (coalesce da 0024). Quando o cliente
  * migra de número — escrevia no 1935 e agora chama no oficial — a mensagem dele

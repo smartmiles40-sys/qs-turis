@@ -16,7 +16,7 @@
 import { rest } from './_supabaseAdmin.js';
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cw,
-  toE164BR, findContact, pickConversation, ingestMessage,
+  toE164BR, findContact, escolherConversaDoLead, ingestMessage,
 } from './_wa.js';
 import { resolverFoto, preencherFotosEmLote } from './_waFoto.js';
 
@@ -106,7 +106,11 @@ export default async function handler(req, res) {
       return res.status(200).json({ conversationId: null, importadas: 0, motivo: 'sem-contato-no-chatwoot' });
     }
 
-    const conv = await pickConversation(contact.id);
+    // A conversa que vale é a do cliente — não a "mais ativa" do Chatwoot.
+    // Era AQUI que o ponteiro da thread voltava pro número morto (17/08): o
+    // upsert lá embaixo grava conv/caixa por cima, então escolher errado aqui
+    // desfazia o roteamento certo segundos depois.
+    const conv = await escolherConversaDoLead(leadId, contact.id);
     if (!conv) {
       await saveThreadMeta(leadId, { cw_contact_id: contact.id, synced_at: new Date().toISOString() });
       return res.status(200).json({ conversationId: null, contactId: contact.id, importadas: 0, motivo: 'sem-conversa' });

@@ -26,7 +26,7 @@
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cw, ingestMessage,
   ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, inboxPermitida,
-  assinarComoUsuario, canalDaInbox, canalEhApiOficial,
+  assinarComoUsuario, canalDaInbox, canalEhApiOficial, conversaOndeOClienteFala,
 } from './_wa.js';
 import { evoConfigured, evoInstanceForInbox, listarInstancias, noAr } from './_evolution.js';
 import { rest } from './_supabaseAdmin.js';
@@ -201,6 +201,32 @@ export default async function handler(req, res) {
       conversationId = null;
       contactId = null;
       inboxId = null;
+    }
+
+    // BLINDAGEM (o teste de 17/08 provou que o ponteiro da thread PODE estar
+    // errado): sem escolha explícita do SDR, a resposta sai pela conversa onde
+    // o cliente FALOU POR ÚLTIMO — que vem das próprias mensagens, não do
+    // ponteiro. Divergiu, corrige a rota E conserta o ponteiro pra próxima.
+    if (inboxPedida == null && !modelo) {
+      const doCliente = await conversaOndeOClienteFala(leadId);
+      if (doCliente != null && conversationId != null && Number(doCliente) !== Number(conversationId)) {
+        try {
+          const d = await cw(`/conversations/${doCliente}`);
+          const convCerta = d?.id != null ? d : (d?.payload?.id != null ? d.payload : null);
+          if (convCerta) {
+            conversationId = convCerta.id;
+            inboxId = convCerta.inbox_id ?? inboxId;
+            rest(`qs_wa_threads?lead_id=eq.${encodeURIComponent(leadId)}`, {
+              method: 'PATCH',
+              body: { cw_conversation_id: conversationId, ...(convCerta.inbox_id != null ? { cw_inbox_id: convCerta.inbox_id } : {}) },
+              prefer: 'return=minimal',
+            }).catch((e) => console.warn('[wa-send] conserto do ponteiro falhou:', e?.message));
+            console.log(`[wa-send] rota corrigida: respondendo na conv ${conversationId} (onde o cliente falou por último)`);
+          }
+        } catch (e) {
+          console.warn('[wa-send] checagem da conversa do cliente falhou (segue pela thread):', e?.message);
+        }
+      }
     }
 
     if (!conversationId) {
