@@ -11,6 +11,7 @@ Workflows prontos pra importar (menu **⋮ → Import from File** no n8n):
 | `bitrix-atividade-concluida-move-stage.workflow.json` | **⭐ Dentro do Bitrix**: SDR conclui a 1ª atividade → o negócio anda sozinho de **Novo lead → Follow-up 1** | Evento do Bitrix (`ONCRMACTIVITYUPDATE`) |
 | `qs-to-bitrix-sync.workflow.json` | ⚠️ **APOSENTADO — NÃO RELIGAR** (reenviaria TODO o histórico; ver seção do legado). Substituído pelo de cima. | A cada 1 min |
 | `chatapp-token-refresh.workflow.json` | **Valida/renova o token do ChatApp** e grava no banco (Etapa 2.4) | A cada 6 h |
+| `qs-wa-to-bitrix.workflow.json` | **🆕 WhatsApp API oficial → Bitrix**: card criado pelo `wa-webhook` sem `bitrix_id` vira contato + negócio no Bitrix e recebe o vínculo de volta | A cada 5 min |
 
 Antes de ativar qualquer um: aplique o `supabase/APLICAR-PENDENTES.sql` no SQL
 Editor do Supabase (cria `bitrix_id`, flags de sync, `qs_settings` etc.).
@@ -364,6 +365,86 @@ ver histórico deste README no git.
 > Com o `bitrix-to-qs` ativo, a bifurcação fica **opcional** — o caminho
 > LP → Bitrix → (webhook) → QS já cobre, e com `bitrix_id` vinculado (melhor).
 > Use a bifurcação só se quiser o lead no QS mesmo quando o Bitrix estiver fora.
+
+---
+
+## 🆕 `qs-wa-to-bitrix` — WhatsApp API oficial → Bitrix (nenhum lead fica só no QS)
+
+**O problema (Bruno, 14–17/08):** quem escreve pro número oficial da Meta (caixa 3
+do Chatwoot) e não casa com lead existente ganha um card automático no QS via
+`createInboundLead` (`api/wa-webhook.js`) — com `source='api'`,
+`segment='WhatsApp (API oficial)'` e **`bitrix_id` NULO**. Ou seja: o lead existe
+no QS mas **não existe no Bitrix**, e "nada pode se perder".
+
+**A solução:** a cada 5 min o n8n varre o Supabase atrás desses cards órfãos e,
+pra cada um, garante contato + negócio no Bitrix e **grava o `bitrix_id` de
+volta** no `qs_leads`. Com o vínculo criado, todo o resto do ecossistema passa a
+funcionar pra esse lead (QS→Bitrix por evento, comentários, mover coluna).
+
+**Fluxo:** Schedule (5 min) → `Config` → GET
+`qs_leads?bitrix_id=is.null&segment=eq.WhatsApp (API oficial)&limit=20`
+→ `Preparar leads` (pula lead **sem telefone**, com log) →
+`crm.duplicate.findbycomm` (telefone já é contato? usa o ID existente —
+**anti-duplicação**) → senão `crm.contact.add` → `crm.deal.add`
+(TITLE `WhatsApp API — <nome>`, `CONTACT_ID`) → **PATCH
+`qs_leads?id=eq.<id>` com `{"bitrix_id": <ID do deal>}`** → guard.
+
+**Idempotência mora no PATCH:** com `bitrix_id` preenchido o lead sai do filtro
+do GET e nunca é reprocessado. Por isso o último nó (guard) **derruba a execução
+em vermelho** se algum PATCH falhar — PATCH perdido = lead reprocessado no
+próximo ciclo = **negócio duplicado** no Bitrix. Se vir esse erro, conserte (ou
+desative o workflow) antes do próximo ciclo.
+
+### Configurar (3 coisas)
+
+1. **Credencial `Supabase QS (service_role)` — tipo *Supabase API*** (a mesma do
+   `qs-sync-catalogo-bitrix`; se já existe, só selecione nos 2 nós que pedem):
+   - **Host:** `https://eabfjomrnucymduqnbci.supabase.co`
+   - **Service Role Secret:** valor de `SUPABASE_SERVICE_ROLE_KEY` (no `.env` /
+     `CREDENCIAIS.local.md` — ⚠️ ignora RLS, só dentro do n8n)
+   - Esse tipo de credencial manda **os dois headers** (`apikey` +
+     `Authorization: Bearer`) sozinho. Alternativa: 2 credenciais Header Auth
+     (uma por header), mas o nó só aceita uma — prefira a Supabase API.
+2. **Nó `Config`** (o único que você edita):
+   - `BITRIX_BASE` → troque `PREENCHA_BITRIX_WEBHOOK_BASE` pela mesma base REST
+     dos outros workflows (`https://SEUPORTAL.bitrix24.com.br/rest/USERID/CODIGO`,
+     sem barra no fim, com escopo **CRM**).
+   - `CATEGORY_ID` → vem `25` (funil comercial — **inferido** dos estágios
+     `C25:*` que todos os workflows deste repo usam; confirme em
+     CRM → Negócios → qual funil os SDRs usam). Vazio = funil padrão do Bitrix.
+   - `STAGE_ID` → vem `C25:PREPAYMENT_INVOIC` (**"Novo lead"**, o mesmo
+     `STAGE_DE` do `qs-to-bitrix-webhook`). ⚠️ **NÃO use `C25:NEW`: nesse funil
+     ele é "Ajuste", não "Novo lead"** — e deixar vazio faz o Bitrix jogar o deal
+     justamente no 1º estágio (`C25:NEW`/Ajuste). Confirme em
+     `BASE/crm.status.list.json?filter[ENTITY_ID]=DEAL_STAGE_25`.
+   - `SOURCE_ID` → opcional (`PREENCHA_SOURCE_ID` se quiser marcar a origem;
+     liste em `BASE/crm.status.list.json?filter[ENTITY_ID]=SOURCE`). Vazio =
+     não envia. Não há referência de SOURCE_ID nos workflows atuais, por isso
+     não veio preenchido.
+3. **Ative** o workflow. Teste em 1 min: ache um card "WhatsApp (API oficial)"
+   no QS sem vínculo, rode **Execute workflow** manualmente e confira (a) o
+   negócio novo no funil do Bitrix e (b) o `bitrix_id` preenchido no card.
+
+### Coisas que você precisa saber
+
+- **Lead sem telefone é pulado** (com log no nó `Preparar leads`) — sem telefone
+  não dá pra procurar nem criar contato. Ele reaparece em todo ciclo até ganhar
+  telefone; se acumular, resolva na mão.
+- **1 lead com erro não trava o lote:** os nós Bitrix seguem em frente
+  (`onError`) e os nós de Code pulam só o lead problemático, com log. Lead
+  pulado fica com `bitrix_id` nulo e **volta sozinho no próximo ciclo**.
+- **Anti-duplicação é por telefone de CONTATO** (`crm.duplicate.findbycomm`).
+  Não há busca de deal duplicado — a proteção contra deal duplicado é o PATCH +
+  guard acima. Se o `findbycomm` falhar, o workflow cria contato novo (pode
+  duplicar contato, nunca perder lead — escolha deliberada).
+- **Convive com o `bitrix-to-qs`:** aquele cria card a partir de deal novo no
+  Bitrix; este cria deal a partir de card do WhatsApp. Sem loop: o deal criado
+  aqui dispara o `ONCRMDEALADD`, mas o `/api/lead-inbound` **deduplica por
+  `bitrix_id`** — o mesmo negócio nunca vira segundo card.
+- **Volume:** `limit=20` por ciclo (20 × 12 ciclos/h = folga enorme pro volume
+  real). Backlog grande de primeira ativação escoa em poucos ciclos.
+- **Segredos:** nada de chave no JSON — Supabase via credencial; o token do
+  Bitrix entra só no nó `Config` da SUA instância (aqui fica `PREENCHA_*`).
 
 ---
 

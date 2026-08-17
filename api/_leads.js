@@ -6,7 +6,7 @@
 // Fala com o Supabase via PostgREST puro (ver _supabaseAdmin.js).
 // -----------------------------------------------------------------------------
 import { rest, insert } from './_supabaseAdmin.js';
-import { resgatarConversaPerdida } from './_wa.js';
+import { resgatarConversaPerdida, findLeadByPhone } from './_wa.js';
 
 // ─── HORÁRIO DE TRABALHO (verdade absoluta do agendamento) ───────────────────
 // Espelho do src/lib/workHours.ts — o mesmo runtime não deixa importar TS aqui.
@@ -391,6 +391,40 @@ export async function createInboundLead(payload) {
       }
     } catch (e) {
       console.warn('[leads] dedupe por bitrix_id indisponível (coluna existe?):', e?.message);
+    }
+
+    // 0a) Bitrix mandou um id NOVO, mas o telefone pode já ser um card do QS —
+    //     o caso típico é o card que a API oficial criou quando o cliente
+    //     escreveu ANTES de o negócio existir no Bitrix (wa-webhook). Sem isto,
+    //     o mesmo cliente vira DOIS cards: o do WhatsApp (sem bitrix_id) e o do
+    //     Bitrix. Aqui a gente ADOTA o card existente: gruda o bitrix_id nele e
+    //     atualiza o contato. Só adota card que ainda não pertence a NENHUM
+    //     negócio do Bitrix — card já vinculado a outro id é outro negócio.
+    //     O casamento de telefone é o mesmo do webhook (waKey: ignora +55 e o
+    //     9º dígito), não igualdade de string — senão o formato diferente entre
+    //     Chatwoot e Bitrix recriaria o duplicado que estamos evitando.
+    if (phone) {
+      try {
+        const achado = await findLeadByPhone(phone);
+        // findLeadByPhone devolve poucas colunas — rebusca a linha inteira,
+        // porque a decisão de adotar depende do bitrix_id atual do card.
+        const cheio = achado
+          ? await rest(`qs_leads?select=*&id=eq.${encodeURIComponent(achado.id)}&limit=1`)
+          : null;
+        const mesmo = cheio?.[0] ?? null;
+        if (mesmo && !mesmo.bitrix_id) {
+          const patch = { bitrix_id: bitrixId };
+          if (email) patch.email = email;
+          if (buildFullName(payload)) patch.full_name = buildFullName(payload);
+          if (payload.segment) patch.segment = payload.segment;
+          { const ls = pickLeadScore(payload); if (ls) patch.lead_score = ls; }
+          await rest(`qs_leads?id=eq.${mesmo.id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' });
+          console.log(`[leads] bitrix ${bitrixId} adotou o card existente ${mesmo.id} (mesmo telefone)`);
+          return { lead: { ...mesmo, ...patch }, ownerId: mesmo.owner_id, cadenceId: mesmo.cadence_id, tasks: 0, deduped: true };
+        }
+      } catch (e) {
+        console.warn('[leads] adoção por telefone falhou (segue criando):', e?.message);
+      }
     }
   }
 

@@ -1,0 +1,453 @@
+{
+  "name": "QS Turis - WA (API oficial) -> Bitrix (card sem bitrix_id vira contato+negocio)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "wa2bx-0001-4000-8000-000000000001",
+      "name": "A cada 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-base",
+              "name": "BITRIX_BASE",
+              "value": "PREENCHA_BITRIX_WEBHOOK_BASE",
+              "type": "string"
+            },
+            {
+              "id": "cfg-supabase",
+              "name": "SUPABASE_URL",
+              "value": "https://eabfjomrnucymduqnbci.supabase.co",
+              "type": "string"
+            },
+            {
+              "id": "cfg-category",
+              "name": "CATEGORY_ID",
+              "value": "25",
+              "type": "string"
+            },
+            {
+              "id": "cfg-stage",
+              "name": "STAGE_ID",
+              "value": "C25:PREPAYMENT_INVOIC",
+              "type": "string"
+            },
+            {
+              "id": "cfg-source",
+              "name": "SOURCE_ID",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wa2bx-0002-4000-8000-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -460,
+        300
+      ],
+      "notes": "EDITE SO ESTE NO. BITRIX_BASE = webhook de ENTRADA do Bitrix (https://SEUPORTAL.bitrix24.com.br/rest/USERID/CODIGO, sem barra no fim, com escopo CRM) — preencha SO aqui no n8n, nunca no arquivo do repo. CATEGORY_ID = 25 (funil comercial; inferido dos estagios C25:* dos outros workflows — confirme). STAGE_ID = C25:PREPAYMENT_INVOIC e a coluna 'Novo lead' conforme o qs-to-bitrix-webhook. ⚠️ NAO use C25:NEW: nesse funil ele e 'Ajuste', nao 'Novo lead'. Vazio = o Bitrix joga no 1o estagio do funil (que e justamente C25:NEW/Ajuste). Confira em BASE/crm.status.list.json?filter[ENTITY_ID]=DEAL_STAGE_25. SOURCE_ID = opcional (PREENCHA_SOURCE_ID se quiser; liste em BASE/crm.status.list.json?filter[ENTITY_ID]=SOURCE); vazio = nao envia.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.SUPABASE_URL }}/rest/v1/qs_leads?select=id,full_name,phone,email,segment,created_at&bitrix_id=is.null&segment=eq.{{ encodeURIComponent('WhatsApp (API oficial)') }}&order=created_at.asc&limit=20",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {}
+      },
+      "id": "wa2bx-0003-4000-8000-000000000003",
+      "name": "Buscar leads WA sem Bitrix",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "So os cards criados pelo wa-webhook (segment='WhatsApp (API oficial)') que AINDA nao tem bitrix_id. O encodeURIComponent cuida dos espacos/parenteses do segment. limit=20 por ciclo: o que sobrar entra no proximo (5 min depois).",
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA",
+          "name": "Supabase QS (service_role)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Entrada: resposta do GET no Supabase (o n8n ja quebrou o array em itens).\n// Saida: 1 item por lead PROCESSAVEL.\n// Lead SEM TELEFONE e pulado com log — sem telefone nao da pra procurar nem\n// criar contato no Bitrix, e quebrar aqui travaria os outros leads do lote.\n// (Ele vai continuar aparecendo em todo ciclo ate ganhar telefone ou\n// bitrix_id na mao — o log existe pra esse caso nao ficar invisivel.)\nconst out = [];\nfor (const item of $input.all()) {\n  const l = item.json || {};\n  if (!l.id) continue; // resposta vazia do Supabase: nenhum lead pendente\n  const digits = String(l.phone || '').replace(/\\D/g, '');\n  if (!digits) {\n    console.log('[qs-wa-to-bitrix] lead ' + l.id + ' PULADO: sem telefone (' + (l.full_name || 'sem nome') + ')');\n    continue;\n  }\n  out.push({ json: {\n    qs_id: String(l.id),\n    full_name: String(l.full_name || ('WhatsApp ' + digits.slice(-8))),\n    phone: String(l.phone),\n    phone_digits: digits,\n    email: String(l.email || '')\n  } });\n}\nif (!out.length) console.log('[qs-wa-to-bitrix] nenhum lead pendente neste ciclo.');\nreturn out;"
+      },
+      "id": "wa2bx-0004-4000-8000-000000000004",
+      "name": "Preparar leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -20,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.BITRIX_BASE }}/crm.duplicate.findbycomm.json?entity_type=CONTACT&type=PHONE&values[]={{ $json.phone_digits }}",
+        "options": {}
+      },
+      "id": "wa2bx-0005-4000-8000-000000000005",
+      "name": "Bitrix: procurar contato pelo telefone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Anti-duplicacao: crm.duplicate.findbycomm devolve em result.CONTACT os IDs de contato que ja tem esse telefone. Se achar, o proximo no usa o ID existente em vez de criar outro contato.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Junta a resposta do findbycomm com o lead correspondente (itemMatching).\n// Achou contato com esse telefone -> contact_id = o primeiro ID achado.\n// Nao achou (ou o findbycomm falhou so pra este item) -> contact_id = null\n// e o fluxo cria um contato novo. Um lead com erro NAO derruba os demais.\nconst out = [];\nconst items = $input.all();\nfor (let i = 0; i < items.length; i++) {\n  const r = items[i].json || {};\n  let lead = {};\n  try { lead = $('Preparar leads').itemMatching(i).json; } catch (e) { /* pareamento perdido */ }\n  if (!lead.qs_id) {\n    console.log('[qs-wa-to-bitrix] item ' + i + ' sem par no Preparar leads — pulado');\n    continue;\n  }\n  if (r.error) {\n    console.log('[qs-wa-to-bitrix] findbycomm falhou pro lead ' + lead.qs_id + ' (' + (r.error_description || JSON.stringify(r.error)) + ') — segue e cria contato novo');\n  }\n  let contactId = null;\n  const achados = r.result && r.result.CONTACT;\n  if (Array.isArray(achados) && achados.length) contactId = String(achados[0]);\n  out.push({ json: Object.assign({}, lead, { contact_id: contactId }) });\n}\nreturn out;"
+      },
+      "id": "wa2bx-0006-4000-8000-000000000006",
+      "name": "Decidir contato",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-contato-existe",
+              "leftValue": "={{ $json.contact_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wa2bx-0007-4000-8000-000000000007",
+      "name": "Contato ja existe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        300
+      ],
+      "notes": "true = reaproveita o contato achado pelo findbycomm (vai direto pro deal.add). false = cria o contato antes.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.BITRIX_BASE }}/crm.contact.add.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: Object.assign({ NAME: $json.full_name, PHONE: [{ VALUE: $json.phone, VALUE_TYPE: 'WORK' }], SOURCE_DESCRIPTION: 'WhatsApp API oficial — criado pelo n8n qs-wa-to-bitrix' }, $json.email ? { EMAIL: [{ VALUE: $json.email, VALUE_TYPE: 'WORK' }] } : {}) }) }}",
+        "options": {}
+      },
+      "id": "wa2bx-0008-4000-8000-000000000008",
+      "name": "Bitrix: criar contato",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        860,
+        460
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "EMAIL so entra quando o lead tem e-mail (os cards do wa-webhook nascem sem)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Le o resultado do crm.contact.add. O Bitrix responde HTTP 200 com\n// {\"error\":...} quando recusa, e o onError do no anterior deixa o item de\n// erro passar — entao a checagem tem que ser AQUI. Falhou pra um lead?\n// Esse lead e pulado (fica com bitrix_id null e volta no proximo ciclo);\n// os demais seguem.\nconst out = [];\nconst items = $input.all();\nfor (let i = 0; i < items.length; i++) {\n  const r = items[i].json || {};\n  let lead = {};\n  try { lead = $('Decidir contato').itemMatching(i).json; } catch (e) { /* pareamento perdido */ }\n  if (!lead.qs_id) continue;\n  if (r.error || !r.result) {\n    console.log('[qs-wa-to-bitrix] contact.add FALHOU pro lead ' + lead.qs_id + ': ' + (r.error_description || JSON.stringify(r.error) || 'resposta vazia') + ' — fica pro proximo ciclo');\n    continue;\n  }\n  out.push({ json: Object.assign({}, lead, { contact_id: String(r.result) }) });\n}\nreturn out;"
+      },
+      "id": "wa2bx-0009-4000-8000-000000000009",
+      "name": "Extrair CONTACT_ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.BITRIX_BASE }}/crm.deal.add.json",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ (function () { const cfg = $('Config').first().json; const fields = { TITLE: 'WhatsApp API — ' + $json.full_name, CONTACT_ID: $json.contact_id, SOURCE_DESCRIPTION: 'Criado pelo n8n qs-wa-to-bitrix a partir do lead QS ' + $json.qs_id }; if (cfg.CATEGORY_ID) fields.CATEGORY_ID = cfg.CATEGORY_ID; if (cfg.STAGE_ID) fields.STAGE_ID = cfg.STAGE_ID; if (cfg.SOURCE_ID) fields.SOURCE_ID = cfg.SOURCE_ID; return JSON.stringify({ fields: fields, params: { REGISTER_SONET_EVENT: 'Y' } }); })() }}",
+        "options": {}
+      },
+      "id": "wa2bx-0010-4000-8000-000000000010",
+      "name": "Bitrix: criar negocio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "CATEGORY_ID/STAGE_ID/SOURCE_ID vem do no Config e so entram no payload quando preenchidos. O deal nasce ja vinculado ao contato (CONTACT_ID).",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Le o resultado do crm.deal.add e monta o PATCH de volta pro Supabase.\n// r.result = ID do negocio criado -> vira o bitrix_id do lead no QS.\n// Falhou pra um lead? Loga e pula (volta no proximo ciclo); os demais seguem.\nconst out = [];\nconst items = $input.all();\nfor (let i = 0; i < items.length; i++) {\n  const r = items[i].json || {};\n  let lead = {};\n  try { lead = $('Decidir contato').itemMatching(i).json; } catch (e) { /* pareamento perdido */ }\n  if (!lead.qs_id) {\n    console.log('[qs-wa-to-bitrix] deal criado mas SEM par pro item ' + i + ' — bitrix_id nao sera gravado; confira a execucao');\n    continue;\n  }\n  if (r.error || !r.result) {\n    console.log('[qs-wa-to-bitrix] deal.add FALHOU pro lead ' + lead.qs_id + ': ' + (r.error_description || JSON.stringify(r.error) || 'resposta vazia') + ' — fica pro proximo ciclo');\n    continue;\n  }\n  out.push({ json: { qs_id: lead.qs_id, bitrix_id: String(r.result) } });\n}\nif (!out.length) console.log('[qs-wa-to-bitrix] nenhum negocio criado neste ciclo.');\nreturn out;"
+      },
+      "id": "wa2bx-0011-4000-8000-000000000011",
+      "name": "Conferir deal e montar PATCH",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/qs_leads?id=eq.{{ encodeURIComponent($json.qs_id) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ bitrix_id: $json.bitrix_id }) }}",
+        "options": {}
+      },
+      "id": "wa2bx-0012-4000-8000-000000000012",
+      "name": "Gravar bitrix_id no QS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1740,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notes": "E ESTE PATCH que da a idempotencia: com bitrix_id preenchido o lead sai do filtro do GET e nao e reprocessado. Se falhar, o guard seguinte deixa a execucao VERMELHA — porque no proximo ciclo o lead seria reprocessado e DUPLICARIA o negocio no Bitrix.",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA",
+          "name": "Supabase QS (service_role)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// O PATCH acima segue em frente mesmo com erro (pra nao perder os PATCHes\n// dos outros leads do lote). Mas PATCH perdido = lead reprocessado no\n// proximo ciclo = NEGOCIO DUPLICADO no Bitrix. Entao qualquer falha aqui\n// tem que ficar VERMELHA na lista de execucoes.\nconst falhas = $input.all().filter(function (i) { return i.json && i.json.error; });\nif (falhas.length) {\n  throw new Error(falhas.length + ' PATCH(es) de bitrix_id FALHARAM no Supabase — esses leads serao reprocessados e vao DUPLICAR negocio no Bitrix no proximo ciclo. Conserte ja (ou desative o workflow enquanto investiga).');\n}\nreturn [{ json: { ok: true, gravados: $input.all().length } }];"
+      },
+      "id": "wa2bx-0013-4000-8000-000000000013",
+      "name": "Conferir gravacao (guard)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "A cada 5 min": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Buscar leads WA sem Bitrix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar leads WA sem Bitrix": {
+      "main": [
+        [
+          {
+            "node": "Preparar leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar leads": {
+      "main": [
+        [
+          {
+            "node": "Bitrix: procurar contato pelo telefone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bitrix: procurar contato pelo telefone": {
+      "main": [
+        [
+          {
+            "node": "Decidir contato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir contato": {
+      "main": [
+        [
+          {
+            "node": "Contato ja existe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contato ja existe?": {
+      "main": [
+        [
+          {
+            "node": "Bitrix: criar negocio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Bitrix: criar contato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bitrix: criar contato": {
+      "main": [
+        [
+          {
+            "node": "Extrair CONTACT_ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair CONTACT_ID": {
+      "main": [
+        [
+          {
+            "node": "Bitrix: criar negocio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bitrix: criar negocio": {
+      "main": [
+        [
+          {
+            "node": "Conferir deal e montar PATCH",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir deal e montar PATCH": {
+      "main": [
+        [
+          {
+            "node": "Gravar bitrix_id no QS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar bitrix_id no QS": {
+      "main": [
+        [
+          {
+            "node": "Conferir gravacao (guard)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "qs-turis-qs-wa-to-bitrix"
+  },
+  "tags": []
+}

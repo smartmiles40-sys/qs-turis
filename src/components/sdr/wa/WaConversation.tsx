@@ -17,7 +17,8 @@ import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
   listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros, getThreadInbox,
   reagirMensagem, salvarFigurinha, enviarFigurinha, apagarMensagem,
-  type WaMessage, type CannedResponse, type WaNumero, type Figurinha, type WaReacao,
+  listWaModelos, sendWaTemplate, janelaFechaEm, humanizarJanela,
+  type WaMessage, type CannedResponse, type WaNumero, type Figurinha, type WaReacao, type WaModelo,
 } from "@/lib/qs/waInbox";
 import WaMenuContexto, { IconeMenu, PATHS, useToqueLongo, type ItemMenu, type PosMenu } from "./WaMenuContexto";
 import { confirmar } from "@/lib/qs/confirmar";
@@ -33,6 +34,8 @@ import { WaTexto, tamanhoEmojiSolto, waPlain } from "./waFormat";
 const WaEmojiPicker = lazyPagina(() => import("./WaEmojiPicker"));
 // Mesma regra pra galeria de figurinhas.
 const WaFigurinhas = lazyPagina(() => import("./WaFigurinhas"));
+// E pro painel de modelos da Meta (só quem atende pelo número oficial abre).
+const WaModelos = lazyPagina(() => import("./WaModelos"));
 
 // As seis do WhatsApp — reagir de novo com a mesma troca por remoção.
 const REACOES_RAPIDAS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -208,6 +211,13 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const [inboxAtual, setInboxAtual] = useState<number | null>(null);
   const [avatarLead, setAvatarLead] = useState<string | null>(null);
 
+  // Modelos da Meta + o relógio da janela de 24h (só valem no número oficial).
+  const [modelos, setModelos] = useState<WaModelo[]>([]);
+  const [mostrarModelos, setMostrarModelos] = useState(false);
+  const [agora, setAgora] = useState(() => Date.now());
+  // O `enviar` nasce antes do cálculo da janela — o ref carrega o valor até lá.
+  const soModeloRef = useRef(false);
+
   // Gravação de áudio
   const [gravando, setGravando] = useState(false);
   const [segundos, setSegundos] = useState(0);
@@ -315,6 +325,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
   useEffect(() => { listCanned().then(setCanned); }, []);
   useEffect(() => { listWaNumeros().then(setNumeros); }, []);
+  useEffect(() => { listWaModelos().then(setModelos); }, []);
   useEffect(() => { void loadSignatureName(currentUser).then(setAssinatura); }, [currentUser]);
 
   // Carga inicial + sincronização com o Chatwoot.
@@ -326,6 +337,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setSemConversa(false);
     setMostrarEmojis(false);
     setMostrarFigurinhas(false);
+    setMostrarModelos(false);
     setReagindoA(null);
     stickToBottom.current = true;
     caretRef.current = null;
@@ -446,6 +458,14 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const enviar = useCallback(async () => {
     const corpo = text.trim();
     if (!corpo || sending) return;
+    // Janela de 24h fechada no número oficial: a Meta vai recusar texto livre.
+    // Barrar AQUI, com o caminho certo aberto, é melhor que "enviar" e a
+    // mensagem morrer no meio sem o SDR saber.
+    if (soModeloRef.current) {
+      setErro("A janela de 24h fechou — pela API oficial, agora só sai modelo aprovado. Escolha um abaixo.");
+      setMostrarModelos(true);
+      return;
+    }
     setSending(true);
     setErro(null);
     const r = await sendWaMessage(leadId, corpo, undefined, respondendo?.id ?? null);
@@ -626,6 +646,51 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     return numeros.find((n) => n.padrao) ?? (numeros.length === 1 ? numeros[0] : null);
   }, [numeros, inboxAtual]);
 
+  // ── Janela de 24h (só no número oficial da Meta) ──────────────────────────
+  // A âncora é a ÚLTIMA mensagem que o CLIENTE mandou: é dela que a Meta conta
+  // as 24h de texto livre. Sem mensagem dele, a janela nunca abriu — primeira
+  // abordagem é por modelo, sempre.
+  const ehOficial = numeroDaConversa?.tipo === "api";
+
+  const ultimaDoCliente = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].direction === "in") return messages[i].sent_at;
+    }
+    return null;
+  }, [messages]);
+
+  const janela = useMemo(() => {
+    if (!ehOficial) return null;
+    const fecha = janelaFechaEm(ultimaDoCliente);
+    if (!fecha) return { estado: "nunca-abriu" as const, restante: 0 };
+    const restante = fecha.getTime() - agora;
+    if (restante <= 0) return { estado: "fechada" as const, restante: 0 };
+    return { estado: (restante < 3 * 3600_000 ? "fechando" : "aberta") as "fechando" | "aberta", restante };
+  }, [ehOficial, ultimaDoCliente, agora]);
+
+  const soModelo = janela != null && janela.estado !== "aberta" && janela.estado !== "fechando";
+  soModeloRef.current = soModelo;
+
+  // O cronômetro só precisa de precisão de minuto — e só gira na conversa oficial.
+  useEffect(() => {
+    if (!ehOficial) return;
+    const t = setInterval(() => setAgora(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, [ehOficial]);
+
+  const enviarModelo = useCallback(async (m: WaModelo, valores: Record<string, string>) => {
+    if (sending) return;
+    setSending(true);
+    setErro(null);
+    const r = await sendWaTemplate(leadId, m, valores);
+    setSending(false);
+    if (!r.ok) { setErro(r.error || "Não consegui enviar o modelo."); return; }
+    setMostrarModelos(false);
+    setSemConversa(false);
+    stickToBottom.current = true;
+    await recarregar();
+  }, [sending, leadId, recarregar]);
+
   const aplicarCanned = useCallback((c: CannedResponse) => {
     setText(preencherCanned(c.texto, { nome: leadName }));
     setMostrarCanned(false);
@@ -652,12 +717,14 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setMostrarEmojis((v) => !v);
     setMostrarCanned(false);
     setMostrarFigurinhas(false);
+    setMostrarModelos(false);
   }, []);
 
   const alternarFigurinhas = useCallback(() => {
     setMostrarFigurinhas((v) => !v);
     setMostrarEmojis(false);
     setMostrarCanned(false);
+    setMostrarModelos(false);
   }, []);
 
   const marcarCaret = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
@@ -994,6 +1061,28 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         </ErroDeParte>
       )}
 
+      {/* Modelos da Meta — mesmo espaço dos outros painéis. Abre pelo botão do
+          composer ou sozinho quando o SDR tenta texto livre com a janela fechada. */}
+      {mostrarModelos && !gravando && (
+        <ErroDeParte parte="os modelos da Meta" modo="discreto">
+          <Suspense fallback={
+            <div className="shrink-0 border-t" style={{ borderColor: "var(--line)", background: "var(--card)", height: 160 }}>
+              <div className="grid gap-2 p-3">
+                {Array.from({ length: 2 }, (_, i) => <span key={i} className="wa-sk rounded-xl" style={{ height: 56 }} />)}
+              </div>
+            </div>
+          }>
+            <WaModelos
+              modelos={modelos}
+              leadName={leadName}
+              enviando={sending}
+              onEnviar={(m, valores) => void enviarModelo(m, valores)}
+              onClose={() => setMostrarModelos(false)}
+            />
+          </Suspense>
+        </ErroDeParte>
+      )}
+
       {/* De qual WhatsApp esta conversa é — informação, não escolha.
           O cliente vê a mensagem chegando DESTE número; o SDR precisa saber
           disso antes de escrever, e não pode trocar sem querer. */}
@@ -1016,6 +1105,37 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
           >
             {numeroDaConversa.tipo === "api" ? "API oficial" : "normal"}
           </span>
+          {/* O cronômetro da janela de 24h. Verde = tranquilo; âmbar piscando =
+              menos de 3h; vermelho = fechou (ou o cliente nunca respondeu) e
+              texto livre a Meta recusa — daqui em diante é modelo. */}
+          {janela && (
+            <span
+              className={"shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums" +
+                (janela.estado === "fechando" ? " animate-pulse" : "")}
+              style={
+                janela.estado === "aberta"
+                  ? { background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }
+                  : janela.estado === "fechando"
+                    ? { background: "#FFF7ED", color: "#9A3412" }
+                    : { background: "#FEF2F2", color: "#B91C1C" }
+              }
+              title={
+                janela.estado === "nunca-abriu"
+                  ? "O cliente ainda não respondeu — a primeira mensagem pela API oficial sai por modelo aprovado."
+                  : janela.estado === "fechada"
+                    ? "Passaram 24h desde a última mensagem do cliente — agora só sai modelo aprovado."
+                    : "Tempo restante pra responder com texto livre (24h desde a última mensagem do cliente)."
+              }
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2.4" strokeLinecap="round">
+                <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+              </svg>
+              {janela.estado === "nunca-abriu" ? "só modelo"
+                : janela.estado === "fechada" ? "janela fechada"
+                : `fecha em ${humanizarJanela(janela.restante)}`}
+            </span>
+          )}
           {/* Como o cliente vai ver quem está falando. O carimbo é feito no
               servidor no momento do envio — aqui é só o SDR saber de antemão. */}
           {assinatura && (
@@ -1096,6 +1216,21 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                 <path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l9.2-9.2a3.67 3.67 0 1 1 5.18 5.18l-9.2 9.2a1.83 1.83 0 1 1-2.6-2.6l8.5-8.48" />
               </svg>
             </button>
+            {/* Modelos da Meta — só faz sentido na conversa do número oficial.
+                Ganha destaque quando é o ÚNICO caminho (janela fechada). */}
+            {ehOficial && (
+              <button onClick={() => setMostrarModelos((v) => !v)} disabled={sending}
+                      aria-expanded={mostrarModelos} aria-label="Modelos aprovados"
+                      title={soModelo ? "Janela de 24h fechada — enviar modelo aprovado" : "Modelos aprovados da Meta"}
+                      data-aberto={mostrarModelos || undefined}
+                      className="wa-icon-btn wa-emoji-toggle shrink-0 w-9 h-9 grid place-items-center rounded-lg"
+                      style={soModelo ? { color: "#B91C1C" } : undefined}>
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 3.5h8a2.5 2.5 0 0 1 2.5 2.5v12a2.5 2.5 0 0 1-2.5 2.5H8A2.5 2.5 0 0 1 5.5 18V6A2.5 2.5 0 0 1 8 3.5z" />
+                  <path d="M9 8.5h6M9 12h6M9 15.5h3.5" />
+                </svg>
+              </button>
+            )}
             <button onClick={iniciarGravacao} disabled={sending}
                     title="Gravar áudio" aria-label="Gravar áudio"
                     className="wa-icon-btn shrink-0 w-9 h-9 grid place-items-center rounded-lg">

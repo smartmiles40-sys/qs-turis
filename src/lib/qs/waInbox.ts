@@ -197,9 +197,23 @@ export interface WaNumero {
   padrao: boolean;
 }
 
+/** Template aprovado na Meta (número oficial) — vem pronto do /api/wa-config. */
+export interface WaModelo {
+  inboxId: number;
+  nome: string;
+  idioma: string;
+  categoria: string;
+  cabecalho: string | null;
+  corpo: string;
+  rodape: string | null;
+  /** Chaves dos {{buracos}} do corpo, na ordem em que aparecem. */
+  variaveis: string[];
+}
+
 interface WaConfigBruta {
   respostas: CannedResponse[];
   inboxes: { id: number; nome: string; canal: string }[];
+  modelos: WaModelo[];
   padrao: number | null;
 }
 
@@ -210,7 +224,7 @@ let configPromise: Promise<WaConfigBruta> | null = null;
 function buscarConfig(force = false): Promise<WaConfigBruta> {
   if (configPromise && !force) return configPromise;
   configPromise = (async () => {
-    const vazio: WaConfigBruta = { respostas: [], inboxes: [], padrao: null };
+    const vazio: WaConfigBruta = { respostas: [], inboxes: [], modelos: [], padrao: null };
     try {
       const res = await fetch("/api/wa-config", { headers: await authHeaders() });
       if (!res.ok) return vazio;
@@ -218,6 +232,7 @@ function buscarConfig(force = false): Promise<WaConfigBruta> {
       return {
         respostas: Array.isArray(d?.respostas) ? d.respostas : [],
         inboxes: Array.isArray(d?.inboxes) ? d.inboxes : [],
+        modelos: Array.isArray(d?.modelos) ? d.modelos : [],
         padrao: d?.padrao ?? null,
       };
     } catch {
@@ -249,6 +264,40 @@ export async function listWaNumeros(force = false): Promise<WaNumero[]> {
       padrao: i.id === padraoId,
     };
   });
+}
+
+/** Templates aprovados da Meta (vazio se o número oficial não está ligado). */
+export async function listWaModelos(): Promise<WaModelo[]> {
+  const cfg = await buscarConfig();
+  return cfg.modelos;
+}
+
+/** O corpo do modelo com as variáveis preenchidas (pré-visualização do envio). */
+export function previewModelo(m: WaModelo, valores: Record<string, string>): string {
+  return m.corpo.replace(/{{\s*([^}]+?)\s*}}/g, (todo, chave) => {
+    const v = valores[chave]?.trim();
+    return v ? v : todo;
+  });
+}
+
+// ── Janela de 24h da API oficial ────────────────────────────────────────────
+// A Meta só aceita texto livre até 24h depois da ÚLTIMA mensagem do cliente.
+// Depois disso (ou numa conversa que ele nunca respondeu), só template.
+
+export const JANELA_24H_MS = 24 * 3600_000;
+
+/** Quando a janela fecha (null = o cliente nunca escreveu → já precisa de modelo). */
+export function janelaFechaEm(lastInAt: string | null | undefined): Date | null {
+  if (!lastInAt) return null;
+  const t = new Date(lastInAt).getTime();
+  return Number.isFinite(t) ? new Date(t + JANELA_24H_MS) : null;
+}
+
+/** "21h 32min" / "47min" — o que falta pra janela fechar. */
+export function humanizarJanela(msRestante: number): string {
+  const min = Math.max(0, Math.floor(msRestante / 60_000));
+  if (min < 60) return `${min}min`;
+  return `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}min`;
 }
 
 export function inboxTag(labels: InboxLabels, inboxId: number | null | undefined) {
@@ -493,6 +542,33 @@ export async function sendWaMessage(
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Sem conexão. Tente de novo." };
+  }
+}
+
+/**
+ * Envia um TEMPLATE aprovado da Meta (o único jeito de falar fora da janela de
+ * 24h ou de abrir conversa pelo número oficial). O corpo real é resolvido no
+ * servidor a partir do template do Chatwoot — daqui vão só o nome e os valores.
+ */
+export async function sendWaTemplate(
+  leadId: string,
+  modelo: WaModelo,
+  valores: Record<string, string>
+): Promise<WaSendResult> {
+  try {
+    const res = await fetch("/api/wa-send", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({
+        leadId,
+        modelo: { nome: modelo.nome, idioma: modelo.idioma, params: valores },
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar o modelo." };
     return { ok: true };
   } catch {
     return { ok: false, error: "Sem conexão. Tente de novo." };
