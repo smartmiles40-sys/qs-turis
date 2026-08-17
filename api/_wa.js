@@ -727,6 +727,45 @@ export function extractStatus(message) {
   return STATUS_CONHECIDOS.has(s) ? s : null;
 }
 
+/**
+ * A CONVERSA SEGUE O CLIENTE (bug real de 17/08): a thread do QS gruda na
+ * PRIMEIRA conversa do lead no Chatwoot (coalesce da 0024). Quando o cliente
+ * migra de número — escrevia no 1935 e agora chama no oficial — a mensagem dele
+ * ENTRA (o webhook acha o lead pelo telefone), mas a RESPOSTA sai pela conversa
+ * velha, num número que pode estar desconectado: o Chatwoot aceita, a Evolution
+ * engole, e o SDR vê "enviada" numa mensagem que nunca existiu.
+ *
+ * Regra: a mensagem MAIS RECENTE do cliente decide por onde a conversa continua.
+ * Histórico importado (wa-sync/wa-history traz coisa antiga) NÃO move o ponteiro
+ * — só mensagem que é o novo last_in_at da thread.
+ */
+async function conversaSegueOCliente(leadId, conversationId, inboxId, sentAt) {
+  if (conversationId == null) return;
+  try {
+    const rows = await rest(
+      `qs_wa_threads?select=cw_conversation_id,cw_inbox_id,last_in_at&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
+    );
+    const t = rows?.[0];
+    if (!t || Number(t.cw_conversation_id) === Number(conversationId)) return;
+    // O RPC acabou de atualizar last_in_at: se esta mensagem é mais antiga que
+    // ele, é backfill — o cliente não "voltou" pra conversa velha.
+    if (sentAt && t.last_in_at && new Date(sentAt).getTime() < new Date(t.last_in_at).getTime()) return;
+    await rest(`qs_wa_threads?lead_id=eq.${encodeURIComponent(leadId)}`, {
+      method: 'PATCH',
+      body: {
+        cw_conversation_id: Number(conversationId),
+        ...(inboxId != null ? { cw_inbox_id: Number(inboxId) } : {}),
+      },
+      prefer: 'return=minimal',
+    });
+    console.log(`[wa] conversa do lead ${leadId} agora segue a conv ${conversationId} (caixa ${inboxId ?? '?'})`);
+  } catch (e) {
+    // Best-effort: mover o ponteiro é melhoria de rota, não pode derrubar a
+    // ingestão da mensagem.
+    console.warn('[wa] conversaSegueOCliente:', e?.message);
+  }
+}
+
 export async function ingestMessage({ leadId, conversationId, message, contactId = null, canReply = null, inboxId = null }) {
   // Nota PRIVADA do Chatwoot é message_type=1 (outgoing) com private=true. Sem
   // este corte ela entraria na tela do SDR como se tivesse ido pro cliente — e
@@ -788,6 +827,10 @@ export async function ingestMessage({ leadId, conversationId, message, contactId
   for (const body of degraus) {
     try {
       const out = await rest('rpc/qs_wa_ingest', { method: 'POST', body });
+      // Mensagem NOVA do cliente pode mudar o número por onde a conversa segue.
+      if (out === true && direction === 'in') {
+        await conversaSegueOCliente(leadId, corpo.p_conv, corpo.p_inbox, sentAt);
+      }
       return out === true;
     } catch (e) {
       // Só vale tentar o degrau seguinte quando a recusa é de ASSINATURA (o

@@ -26,8 +26,9 @@
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cw, ingestMessage,
   ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, inboxPermitida,
-  assinarComoUsuario,
+  assinarComoUsuario, canalDaInbox, canalEhApiOficial,
 } from './_wa.js';
+import { evoConfigured, evoInstanceForInbox, listarInstancias, noAr } from './_evolution.js';
 import { rest } from './_supabaseAdmin.js';
 
 const MAX_LEN = 4000;
@@ -81,6 +82,34 @@ async function resolverModelo(modelo) {
     };
   }
   return { error: 'modelo-nao-encontrado' };
+}
+
+/**
+ * B0 — o 1935 cai toda semana e o Chatwoot aceita mensagem pra número caído:
+ * ela morre entre o Chatwoot e a Evolution com cara de "enviada" (foi EXATAMENTE
+ * o que aconteceu no teste do Bruno em 17/08). Antes de enviar por uma caixa da
+ * Evolution, confere se a instância está `open`; caída, barra com aviso claro.
+ * Best-effort: checagem quebrada NUNCA bloqueia o envio — só a certeza bloqueia.
+ * Devolve a mensagem de erro, ou null pra seguir.
+ */
+async function numeroCaido(inboxId) {
+  try {
+    if (!evoConfigured() || inboxId == null) return null;
+    const canal = await canalDaInbox(inboxId);
+    // Caixa da Meta não passa pela Evolution; sem canal conhecido, não barra.
+    if (!canal || canalEhApiOficial(canal) || !String(canal).toLowerCase().includes('api')) return null;
+    const instancia = evoInstanceForInbox(inboxId);
+    const lista = await listarInstancias();
+    const alvo = instancia
+      ? lista.find((i) => i.nome === instancia)
+      : (lista.length === 1 ? lista[0] : null);
+    if (!alvo || noAr(alvo.status)) return null;
+    return `Este WhatsApp está DESCONECTADO agora (${alvo.nome}) — a mensagem não chegaria. ` +
+      'Reconecte o número pelo QR, ou fale com o cliente pelo número oficial.';
+  } catch (e) {
+    console.warn('[wa-send] checagem de número caído falhou (envio segue):', e?.message);
+    return null;
+  }
 }
 
 export default async function handler(req, res) {
@@ -182,6 +211,13 @@ export default async function handler(req, res) {
       conversationId = r.conversation.id;
       contactId = r.contact.id;
       inboxId = r.conversation.inbox_id ?? inboxPedida ?? defaultInboxId();
+    }
+
+    // Número da Evolution caído? Barra AQUI, antes de o Chatwoot aceitar e a
+    // mensagem morrer calada. (Template sai pela Meta — não passa por isso.)
+    if (!templateParams) {
+      const caido = await numeroCaido(inboxId);
+      if (caido) return res.status(409).json({ error: caido, motivo: 'numero-desconectado' });
     }
 
     // O nome de quem está falando vai na primeira linha. Sai daqui, e não do
