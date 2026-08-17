@@ -26,6 +26,18 @@
 // -----------------------------------------------------------------------------
 
 import { getSupabaseUserId, cwConfigured, cw, WA_INBOX_IDS, defaultInboxId } from './_wa.js';
+import { listarModelos, criarModelo, excluirModelo } from './_meta.js';
+import { rest } from './_supabaseAdmin.js';
+
+/** Só admin/gestor mexe nos modelos: eles vão pra análise da Meta em nome da
+ *  empresa, e modelo reprovado sujando a conta afeta o número inteiro. */
+async function ehAdmin(userId) {
+  try {
+    const u = await rest(`qs_users?select=role,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
+    const r = Array.isArray(u) && u[0];
+    return !!r && r.is_active !== false && (r.role === 'admin' || r.role === 'gestor');
+  } catch { return false; }
+}
 
 async function buscarRespostas() {
   try {
@@ -98,13 +110,46 @@ function extrairModelos(inboxList) {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Use GET' });
   }
 
   const userId = await getSupabaseUserId(req.headers['authorization']);
   if (!userId) return res.status(401).json({ error: 'Não autorizado' });
+
+  // ── PORTAL DE MODELOS (só admin/gestor) ───────────────────────────────────
+  // Vive nesta rota, e não numa nova, pela mesma razão do resto do arquivo: o
+  // projeto está no teto prático de funções da Vercel.
+  const querModelos = req.method === 'POST' || req.query?.modelos === 'todos';
+  if (querModelos) {
+    if (!(await ehAdmin(userId))) {
+      return res.status(403).json({ error: 'Só administrador ou gestor gerencia os modelos.' });
+    }
+    if (!cwConfigured()) return res.status(503).json({ error: 'Atendimento não configurado.' });
+
+    if (req.method === 'GET') {
+      const r = await listarModelos();
+      if (r.erro) return res.status(503).json({ error: 'Não achei o número oficial no atendimento.', motivo: r.erro });
+      return res.status(200).json({ modelos: r.modelos });
+    }
+
+    const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
+    if (body.acao === 'excluir') {
+      const r = await excluirModelo(String(body.nome || ''));
+      if (r.erro) return res.status(r.erro === 'sem-caixa-oficial' ? 503 : 400).json({ error: r.mensagem || 'Não consegui excluir.' });
+      return res.status(200).json({ ok: true });
+    }
+    if (body.acao === 'criar') {
+      const r = await criarModelo({
+        nome: body.nome, categoria: body.categoria, idioma: body.idioma,
+        corpo: body.corpo, cabecalho: body.cabecalho, rodape: body.rodape,
+      });
+      if (r.erro) return res.status(r.erro === 'sem-caixa-oficial' ? 503 : 400).json({ error: r.mensagem || 'Não consegui criar o modelo.' });
+      return res.status(200).json({ ok: true, id: r.id, status: r.status });
+    }
+    return res.status(400).json({ error: 'Ação inválida.' });
+  }
 
   if (!cwConfigured()) {
     return res.status(200).json({ respostas: [], inboxes: [], modelos: [], padrao: null });
@@ -120,4 +165,8 @@ export default async function handler(req, res) {
     modelos: caixas.modelos,
     padrao: defaultInboxId(),
   });
+}
+
+function safeParse(s) {
+  try { return JSON.parse(s); } catch { return {}; }
 }

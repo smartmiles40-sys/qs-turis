@@ -11,6 +11,7 @@ import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, del
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
 import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } from "@/lib/qs/chatProvider";
 import WaInboxLabels from "./WaInboxLabels";
+import ModelosMeta from "./ModelosMeta";
 import { WA_SIGNATURE_MAP_KEY, WA_SIGNATURE_ENABLED_KEY, nomeCurto } from "@/lib/qs/waSignature";
 import type {
   LossReason,
@@ -40,7 +41,7 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "motivos" | "classificacao" | "horario" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "modelos-meta" | "motivos" | "classificacao" | "horario" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -60,6 +61,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
   { key: "atendimento", label: "Atendimento (WhatsApp)", group: "INTEGRAÇÕES" },
+  { key: "modelos-meta", label: "Modelos de Mensagem", group: "INTEGRAÇÕES" },
   { key: "integracoes", label: "Integrações (status)", group: "INTEGRAÇÕES" },
 ];
 
@@ -2066,6 +2068,7 @@ export default function SettingsPage() {
         {activeSection === "classificacao" && <ClassificacaoSection />}
         {activeSection === "horario" && <HorarioSection />}
         {activeSection === "agenda" && <AgendaSection />}
+        {activeSection === "modelos-meta" && <ModelosMeta />}
         {activeSection === "atendimento" && <AtendimentoSection />}
         {activeSection === "webfone" && <WebfoneSection />}
         {activeSection === "webfone-webrtc" && <WebfoneWebrtcSection />}

@@ -293,6 +293,70 @@ export async function listWaModelos(): Promise<WaModelo[]> {
   return cfg.modelos;
 }
 
+// ── Portal de modelos (admin) ───────────────────────────────────────────────
+// Aqui é a visão de QUEM ADMINISTRA: todos os modelos, inclusive em análise e
+// reprovados — ao contrário de listWaModelos, que só entrega o que dá pra enviar.
+
+export interface WaModeloAdmin extends WaModelo {
+  id: string;
+  /** APPROVED | PENDING | REJECTED | PAUSED — como a Meta chama. */
+  status: string;
+  /** Por que a Meta recusou, quando recusou. */
+  motivo: string | null;
+  /** Modelo com cabeçalho de mídia (IMAGE/VIDEO) — não dá pra enviar pelo QS. */
+  cabecalhoMidia?: string | null;
+}
+
+export async function listarModelosAdmin(): Promise<{ modelos: WaModeloAdmin[]; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config?modelos=todos", { headers: await authHeaders() });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { modelos: [], error: d?.error || "Não consegui carregar os modelos." };
+    return { modelos: Array.isArray(d?.modelos) ? d.modelos : [] };
+  } catch {
+    return { modelos: [], error: "Sem conexão." };
+  }
+}
+
+export interface NovoModelo {
+  nome: string;
+  categoria: "MARKETING" | "UTILITY";
+  idioma: string;
+  corpo: string;
+  cabecalho?: string;
+  rodape?: string;
+}
+
+export async function criarModeloNaMeta(m: NovoModelo): Promise<{ ok: boolean; status?: string; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ acao: "criar", ...m }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: d?.error || "Não consegui enviar o modelo." };
+    return { ok: true, status: d?.status };
+  } catch {
+    return { ok: false, error: "Sem conexão." };
+  }
+}
+
+export async function excluirModeloNaMeta(nome: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ acao: "excluir", nome }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: d?.error || "Não consegui excluir." };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Sem conexão." };
+  }
+}
+
 /** O corpo do modelo com as variáveis preenchidas (pré-visualização do envio). */
 export function previewModelo(m: WaModelo, valores: Record<string, string>): string {
   return m.corpo.replace(/{{\s*([^}]+?)\s*}}/g, (todo, chave) => {
