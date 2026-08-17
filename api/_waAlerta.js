@@ -18,6 +18,7 @@
 
 import { rest } from './_supabaseAdmin.js';
 import { listarInstancias, noAr, sendText, evoConfigured, EVO_BASE } from './_evolution.js';
+import { conferirRecebimento, textoDoAlerta } from './_waConferencia.js';
 
 const CHAVE = 'wa_monitor_estado';
 const REPETIR_MS = 6 * 60 * 60 * 1000;
@@ -190,6 +191,25 @@ export async function verificar() {
   const instancias = await listarInstancias();
   const anterior = await lerEstado();
   const { avisos, novoEstado } = decidir(anterior, instancias, quando);
+
+  // MENSAGEM QUE NÃO CHEGOU NO QS — a outra metade do "está tudo funcionando?".
+  // Número no ar não garante nada: em 10/08 o WhatsApp estava perfeito e 25
+  // mensagens ficaram só no Chatwoot. Best-effort: a conferência nunca pode
+  // derrubar o monitor dos números, que é o trabalho principal dele.
+  let conferencia = null;
+  try {
+    conferencia = await conferirRecebimento();
+    if (conferencia.faltando.length) {
+      avisos.push({
+        tipo: 'mensagem-nao-recebida',
+        instancia: 'QS',
+        texto: textoDoAlerta(conferencia.faltando),
+      });
+    }
+  } catch (e) {
+    console.warn('[wa-monitor] conferência de recebimento falhou:', e?.message);
+  }
+
   const envio = await entregar(avisos, instancias);
 
   // Grava mesmo se o envio falhou: o estado é o retrato do servidor, não do
@@ -207,6 +227,11 @@ export async function verificar() {
   return {
     instancias: instancias.map((i) => ({ nome: i.nome, status: i.status, numero: i.numero })),
     avisos: avisos.map((a) => ({ tipo: a.tipo, instancia: a.instancia })),
+    // O placar da conferência sai no corpo da resposta: é como o Bruno confere
+    // "chegou tudo?" abrindo a URL do monitor, sem depender de receber alerta.
+    recebimento: conferencia
+      ? { conferidas: conferencia.conferidas, faltando: conferencia.faltando.length, detalhe: conferencia.faltando.slice(0, 5) }
+      : { erro: 'nao-conferido' },
     ...envio,
   };
 }

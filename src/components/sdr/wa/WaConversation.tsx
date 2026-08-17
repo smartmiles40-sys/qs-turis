@@ -209,6 +209,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   // saber disso antes de escrever, porque é o número que o cliente vê chegando.
   const [numeros, setNumeros] = useState<WaNumero[]>([]);
   const [inboxAtual, setInboxAtual] = useState<number | null>(null);
+  // Por qual número o SDR ESCOLHEU falar nesta conversa (null = o da conversa,
+  // ou o padrão quando ela ainda não existe). O servidor já aceitava a escolha
+  // desde sempre — o que faltava era a tela deixar escolher.
+  const [inboxEscolhida, setInboxEscolhida] = useState<number | null>(null);
+  const [trocandoNumero, setTrocandoNumero] = useState(false);
   const [avatarLead, setAvatarLead] = useState<string | null>(null);
 
   // Modelos da Meta + o relógio da janela de 24h (só valem no número oficial).
@@ -339,6 +344,9 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setMostrarFigurinhas(false);
     setMostrarModelos(false);
     setReagindoA(null);
+    // A escolha de número é por CONVERSA: trocar de lead volta pro número dela.
+    setInboxEscolhida(null);
+    setTrocandoNumero(false);
     stickToBottom.current = true;
     caretRef.current = null;
     setText(initialText || "");
@@ -468,7 +476,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     }
     setSending(true);
     setErro(null);
-    const r = await sendWaMessage(leadId, corpo, undefined, respondendo?.id ?? null);
+    const r = await sendWaMessage(leadId, corpo, inboxEscolhida ?? undefined, respondendo?.id ?? null);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar."); return; }
     setText("");
@@ -479,7 +487,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
-  }, [text, sending, leadId, recarregar, respondendo?.id]);
+  }, [text, sending, leadId, recarregar, respondendo?.id, inboxEscolhida]);
 
   const enviarMidia = useCallback(async (blob: Blob, nome: string, legenda = "", notaDeVoz = false) => {
     setSending(true);
@@ -640,11 +648,20 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   // onde ela VAI sair (o padrão do servidor) — é a mesma pergunta do SDR.
   const numeroDaConversa = useMemo(() => {
     if (!numeros.length) return null;
+    // A escolha do SDR vence; depois o número da conversa; por último o padrão.
+    if (inboxEscolhida != null) {
+      return numeros.find((n) => n.id === inboxEscolhida) ?? null;
+    }
     if (inboxAtual != null) {
       return numeros.find((n) => n.id === inboxAtual) ?? null;
     }
     return numeros.find((n) => n.padrao) ?? (numeros.length === 1 ? numeros[0] : null);
-  }, [numeros, inboxAtual]);
+  }, [numeros, inboxAtual, inboxEscolhida]);
+
+  /** Trocar de número só faz sentido com mais de um disponível. */
+  const podeTrocarNumero = numeros.length > 1;
+  /** A escolha diverge da conversa que já existe? Isso ABRE conversa nova lá. */
+  const numeroTrocado = inboxEscolhida != null && inboxAtual != null && inboxEscolhida !== inboxAtual;
 
   // ── Janela de 24h (só no número oficial da Meta) ──────────────────────────
   // A âncora é a ÚLTIMA mensagem que o CLIENTE mandou: é dela que a Meta conta
@@ -1093,7 +1110,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             <path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 21l2.1-5.7A8.4 8.4 0 1 1 21 11.5z" />
           </svg>
           <span className="text-[11px] min-w-0 truncate" style={{ color: "var(--ink3)" }}>
-            {inboxAtual == null ? "Vai sair pelo " : "Conversa pelo "}
+            {inboxAtual == null || inboxEscolhida != null ? "Vai sair pelo " : "Conversa pelo "}
             <b style={{ color: "var(--ink2)" }}>{numeroDaConversa.nome}</b>
           </span>
           {/* A bolinha verde: nuvem = número oficial (mora na Meta), aparelho =
@@ -1134,6 +1151,20 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                 : `fecha em ${humanizarJanela(janela.restante)}`}
             </span>
           )}
+          {/* TROCAR DE NÚMERO. O servidor já aceitava a escolha; faltava a tela
+              deixar escolher — e é o que o SDR pede pra abordar cliente novo
+              pelo número certo. Só aparece com mais de um número disponível. */}
+          {podeTrocarNumero && (
+            <button
+              onClick={() => setTrocandoNumero((v) => !v)}
+              className="shrink-0 text-[11px] font-semibold underline underline-offset-2"
+              style={{ color: "var(--wa)" }}
+              aria-expanded={trocandoNumero}
+              title="Escolher por qual número esta mensagem sai"
+            >
+              trocar
+            </button>
+          )}
           {/* Como o cliente vai ver quem está falando. O carimbo é feito no
               servidor no momento do envio — aqui é só o SDR saber de antemão. */}
           {assinatura && (
@@ -1141,6 +1172,42 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               · assina como <b style={{ color: "var(--ink2)" }}>{assinatura}</b>
             </span>
           )}
+        </div>
+      )}
+
+      {/* A lista de números, quando o SDR clicou em "trocar". */}
+      {trocandoNumero && podeTrocarNumero && !gravando && (
+        <div className="shrink-0 px-3 pt-2" style={{ background: "var(--card)" }}>
+          <div className="rounded-xl p-2 grid gap-1" style={{ background: "var(--card2)", border: "1px solid var(--line)" }}>
+            {numeros.map((n) => {
+              const ativo = numeroDaConversa?.id === n.id;
+              return (
+                <button
+                  key={n.id}
+                  onClick={() => { setInboxEscolhida(n.id); setTrocandoNumero(false); }}
+                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left"
+                  style={ativo ? { background: "var(--wa-ok-bg)" } : undefined}
+                >
+                  <WaSeloNumero tipo={n.tipo} nome={n.nome} numero={n.numero} compacto />
+                  <span className="flex-1 min-w-0 truncate text-[12px]" style={{ color: "var(--ink)" }}>
+                    {n.numero || n.nome}
+                    {n.tipo === "api" && <span style={{ color: "var(--ink3)" }}> · oficial</span>}
+                  </span>
+                  {ativo && <span className="text-[10px] font-bold" style={{ color: "var(--wa-ok-ink)" }}>usando</span>}
+                </button>
+              );
+            })}
+            {/* Trocar de número numa conversa que já existe NÃO move a conversa:
+                abre outra, naquele número. Dizer isso antes evita a surpresa de
+                "sumiu o histórico" — ele continua aqui, na conversa de origem. */}
+            {numeroTrocado && (
+              <p className="px-2 pb-0.5 text-[11px]" style={{ color: "#9A3412" }}>
+                A conversa deste lead começou em outro número. Enviando por aqui, o cliente
+                recebe de um número novo — o histórico antigo continua nesta tela.
+                <button onClick={() => setInboxEscolhida(null)} className="ml-1 underline font-semibold">desfazer</button>
+              </p>
+            )}
+          </div>
         </div>
       )}
 
