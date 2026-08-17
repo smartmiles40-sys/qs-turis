@@ -48,19 +48,63 @@ const CAMPO = {
   reagendamento:   'UF_CRM_1785277621436', // date  "Reagendamento"
   meet_datahora:   'UF_CRM_1773943863374', // datetime "Data e hora do agendamento (Google Meet)"
   sal:             'UF_CRM_1785533874395', // enum  "SAL"
-};
-const OPCAO = {
-  realizada_sim: 761,   // "Reunião realizada?" → Sim
-  realizada_nao: 763,   // "Reunião realizada?" → Não
-  sal_aceito:    1427,  // "SAL" → Aceito
-  sal_recusado:  1429,  // "SAL" → Recusado
+  tipo_venda:      'UF_CRM_1743296167520', // enum  "Tipo de venda" (2119 negócios usam)
+  valor:           'OPPORTUNITY',          // double — o "Total" do card, campo nativo
 };
 
-/** Os campos que cada desfecho escreve. `d` = dados que o front mandou. */
+// ⚠️ ENUM DO BITRIX É STRING (medido 17/08 nos 671 negócios que já têm o campo:
+// vêm como "761"/"763"/"803"). Mandando número, o crm.deal.update aceita a
+// chamada e IGNORA o campo em silêncio — era por isso que a data gravava e
+// "Reunião realizada?" ficava vazio em todo desfecho lançado pelo QS.
+const OPCAO = {
+  realizada_sim: '761',   // "Reunião realizada?" → Sim
+  realizada_nao: '763',   // "Reunião realizada?" → Não
+  sal_aceito:    '1427',  // "SAL" → Aceito
+  sal_recusado:  '1429',  // "SAL" → Recusado
+};
+
+// Etapas do funil do CLOSER (categoria 0 — "Negociação #NNNNN"), lidas do portal
+// em 17/08. O lead do QS aponta pra ESTE negócio (bitrix_id), não pro do funil 25
+// de pré-vendas. Se uma etapa for recriada no Bitrix, o código muda: atualizar aqui.
+const ETAPA = {
+  negociacao:    'UC_YGG9JY',  // "Em Negociação"  — para onde vai quem fez a reunião
+  no_show:       'UC_3Y96XD',  // "No-Show"
+  reagendamento: 'UC_ANBZSL',  // "Reagendamento"  — separado do no-show a pedido do Bruno
+};
+
+/**
+ * Os campos que cada desfecho escreve. `d` = dados que o front mandou.
+ *
+ * Fluxo confirmado com o Bruno em 17/08, campo a campo contra o portal:
+ *   realizada → data da reunião + valor + tipo da venda → etapa "Em Negociação"
+ *   no_show   → data de no-show + valor + tipo da venda → etapa "No-Show"
+ *   remarcada → data de reagendamento                    → etapa "Reagendamento"
+ *   cancelada → NADA no Bitrix (só Google Agenda e QS)
+ *
+ * Valor e tipo só entram quando o closer preencheu — o filtro de vazios lá
+ * embaixo tira o resto, pra nunca APAGAR um valor que já esteja no card.
+ */
 const CAMPOS_POR_DESFECHO = {
-  realizada:    (d) => ({ [CAMPO.realizada_data]: d.data, [CAMPO.realizada_flag]: OPCAO.realizada_sim }),
-  no_show:      (d) => ({ [CAMPO.no_show_data]: d.data, [CAMPO.no_show_texto]: 'Sim', [CAMPO.realizada_flag]: OPCAO.realizada_nao }),
-  remarcada:    (d) => ({ [CAMPO.reagendamento]: d.nova_data, [CAMPO.meet_datahora]: d.nova_data_hora }),
+  realizada: (d) => ({
+    [CAMPO.realizada_data]: d.data,
+    [CAMPO.realizada_flag]: OPCAO.realizada_sim,
+    [CAMPO.valor]: d.valor,
+    [CAMPO.tipo_venda]: d.tipo_venda,
+    STAGE_ID: ETAPA.negociacao,
+  }),
+  no_show: (d) => ({
+    [CAMPO.no_show_data]: d.data,
+    [CAMPO.no_show_texto]: 'Sim',
+    [CAMPO.realizada_flag]: OPCAO.realizada_nao,
+    [CAMPO.valor]: d.valor,
+    [CAMPO.tipo_venda]: d.tipo_venda,
+    STAGE_ID: ETAPA.no_show,
+  }),
+  remarcada: (d) => ({
+    [CAMPO.reagendamento]: d.nova_data,
+    [CAMPO.meet_datahora]: d.nova_data_hora,
+    STAGE_ID: ETAPA.reagendamento,
+  }),
   sal_aceito:   () => ({ [CAMPO.sal]: OPCAO.sal_aceito }),
   sal_recusado: () => ({ [CAMPO.sal]: OPCAO.sal_recusado }),
 };

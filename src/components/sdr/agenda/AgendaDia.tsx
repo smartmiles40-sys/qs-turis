@@ -36,7 +36,8 @@ import {
   semDesfecho,
   chaveDoEspecialista,
 } from "@/lib/qs/closerAgenda";
-import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, reagendarReuniao } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, reagendarReuniao, type DadosDaVenda } from "@/lib/qs/meetings";
+import DesfechoVenda from "./DesfechoVenda";
 import { getSetting } from "@/lib/qsSettings";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
 import type {
@@ -546,14 +547,14 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
     void load();
   };
 
-  const mudarStatus = async (m: Meeting, status: MeetingStatus) => {
+  const mudarStatus = async (m: Meeting, status: MeetingStatus, venda?: DadosDaVenda) => {
     if (demo) {
       const novo = { ...m, status };
       setMeetings((ms) => ms.map((x) => (x.id === m.id ? novo : x)));
       setSelecionada(novo);
       return;
     }
-    const r = await setMeetingStatus(m, status);
+    const r = await setMeetingStatus(m, status, m.lead?.bitrix_id, venda);
     if (!r.ok) return notifyError(r.error);
     notifySuccess(`Reunião marcada como ${STATUS[status].label.toLowerCase()}.`);
     setSelecionada(r.meeting);
@@ -910,7 +911,7 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
           coluna={colunas.find((c) => c.key === chaveDoEspecialista(selecionada))}
           agora={agora}
           onFechar={() => setSelecionada(null)}
-          onStatus={(s) => void mudarStatus(selecionada, s)}
+          onStatus={(s, venda) => void mudarStatus(selecionada, s, venda)}
           onSal={(s, motivo) => void marcarSal(selecionada, s, motivo)}
           motivos={motivosSal}
           pedindoMotivo={pedindoMotivo === selecionada.id ? selecionada.id : null}
@@ -954,7 +955,7 @@ interface PainelProps {
   coluna?: Coluna;
   agora: Date;
   onFechar: () => void;
-  onStatus: (s: MeetingStatus) => void;
+  onStatus: (s: MeetingStatus, venda?: DadosDaVenda) => void;
   onSal: (s: MeetingSal, motivo?: string) => void;
   /** Lista fechada de motivos (qs_settings.sal_motivos). */
   motivos: string[];
@@ -969,6 +970,8 @@ interface PainelProps {
 
 function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRemarcar, onAbrirLead, motivos, pedindoMotivo, onCancelarMotivo, somenteLeitura }: PainelProps) {
   const [copiado, setCopiado] = useState(false);
+  // Mesmo passo do modal de detalhe: antes de fechar, pergunta valor e tipo.
+  const [fechando, setFechando] = useState<"realizada" | "no_show" | null>(null);
   const st = STATUS[reuniao.status] ?? STATUS.agendada;
   const ini = new Date(reuniao.scheduled_at);
   const fim = fimDaReuniao(reuniao);
@@ -1046,11 +1049,23 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
         {!somenteLeitura && <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
           <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Desfecho</p>
 
-          <div className="mt-2.5 grid grid-cols-3 gap-1.5">
-            <BotaoDesfecho cor="#059669" icone={<IcCheck />} rotulo="Realizada" onClick={() => onStatus("realizada")} />
-            <BotaoDesfecho cor="#D97706" icone={<IcRedo />} rotulo="Reagendar" onClick={onRemarcar} />
-            <BotaoDesfecho cor="#DC2626" icone={<IcUserX />} rotulo="No-show" onClick={() => onStatus("no_show")} />
-          </div>
+          {!fechando && (
+            <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+              <BotaoDesfecho cor="#059669" icone={<IcCheck />} rotulo="Realizada" onClick={() => setFechando("realizada")} />
+              <BotaoDesfecho cor="#D97706" icone={<IcRedo />} rotulo="Reagendar" onClick={onRemarcar} />
+              <BotaoDesfecho cor="#DC2626" icone={<IcUserX />} rotulo="No-show" onClick={() => setFechando("no_show")} />
+            </div>
+          )}
+
+          {fechando && (
+            <div className="mt-2.5">
+              <DesfechoVenda
+                tipo={fechando}
+                onVoltar={() => setFechando(null)}
+                onConfirmar={(venda) => { setFechando(null); onStatus(fechando, venda); }}
+              />
+            </div>
+          )}
 
           {reuniao.status === "agendada" && (
             <button

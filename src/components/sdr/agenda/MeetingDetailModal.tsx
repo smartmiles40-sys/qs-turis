@@ -13,7 +13,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { setMeetingStatus, setMeetingSal, deleteMeeting } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, deleteMeeting, type DadosDaVenda } from "@/lib/qs/meetings";
+import DesfechoVenda from "./DesfechoVenda";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
 import { getSetting } from "@/lib/qsSettings";
 import { MEETING_STATUS_LABELS, type Meeting, type MeetingSal, type MeetingStatus } from "../types";
@@ -74,6 +75,10 @@ export default function MeetingDetailModal({
   // Agora ele abre a lista antes de gravar, igual à AgendaDia.
   const [motivos, setMotivos] = useState<string[]>(MOTIVOS_SAL_PADRAO);
   const [pedindoMotivo, setPedindoMotivo] = useState(false);
+  // Realizada e no-show levam VALOR e TIPO DA VENDA pro card do Bitrix (Bruno,
+  // 17/08). Perguntamos aqui, na hora do desfecho, porque é o único momento em
+  // que o closer tem os dois na cabeça — depois vira campo em branco pra sempre.
+  const [fechando, setFechando] = useState<"realizada" | "no_show" | null>(null);
 
   useEffect(() => {
     void getSetting<string[]>("sal_motivos").then((lista) => {
@@ -99,14 +104,14 @@ export default function MeetingDetailModal({
   const start = new Date(meeting.scheduled_at);
   const end = new Date(start.getTime() + (meeting.duration_min ?? 30) * 60_000);
 
-  async function mudarStatus(status: MeetingStatus) {
+  async function mudarStatus(status: MeetingStatus, venda?: DadosDaVenda) {
     if (!meeting) return;
     if (status === "cancelada") {
       const quem = meeting.lead_name ? ` com ${meeting.lead_name}` : "";
       if (!window.confirm(`Cancelar a reunião${quem}? A atividade de confirmação também será encerrada.`)) return;
     }
     setBusy(true);
-    const res = await setMeetingStatus(meeting, status, meeting.lead?.bitrix_id);
+    const res = await setMeetingStatus(meeting, status, meeting.lead?.bitrix_id, venda);
     setBusy(false);
     if (!res.ok) {
       notifyError(res.error);
@@ -266,23 +271,35 @@ export default function MeetingDetailModal({
           <div className="px-5 py-4 border-t border-gray-100 space-y-2">
             {/* "Confirmada" também é reunião que ainda vai acontecer: o desfecho
                 tem que estar aqui, senão ela nunca fecha por esta tela. */}
-            {(meeting.status === "agendada" || meeting.status === "confirmada") && (
+            {(meeting.status === "agendada" || meeting.status === "confirmada") && !fechando && (
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => mudarStatus("realizada")}
+                  onClick={() => setFechando("realizada")}
                   disabled={busy}
                   className="py-2 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
                 >
                   Realizada
                 </button>
                 <button
-                  onClick={() => mudarStatus("no_show")}
+                  onClick={() => setFechando("no_show")}
                   disabled={busy}
                   className="py-2 rounded-lg border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 disabled:opacity-50"
                 >
                   No-show
                 </button>
               </div>
+            )}
+
+            {/* Valor e tipo da venda antes de fechar — mesmo formulário da
+                agenda do dia (DesfechoVenda). Os dois vão pro card do Bitrix
+                junto com a data e a mudança de etapa. */}
+            {fechando && (
+              <DesfechoVenda
+                tipo={fechando}
+                busy={busy}
+                onVoltar={() => setFechando(null)}
+                onConfirmar={(venda) => void mudarStatus(fechando, venda)}
+              />
             )}
 
             {meeting.status === "agendada" && (

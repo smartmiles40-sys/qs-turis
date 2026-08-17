@@ -718,10 +718,19 @@ function isCheckViolation(error: { code?: string; message?: string } | null): bo
   return error?.code === "23514" || /violates check constraint/i.test(error?.message ?? "");
 }
 
+/** O que o closer informa ao fechar a reunião (vai pro card do Bitrix). */
+export interface DadosDaVenda {
+  /** Valor do negócio — vira o "Total" do card. */
+  valor?: number | null;
+  /** Id da opção de "Tipo de venda" no Bitrix (ex.: "69" = Expedições). */
+  tipoVenda?: string | null;
+}
+
 export async function setMeetingStatus(
   meeting: Meeting,
   status: MeetingStatus,
-  leadBitrixId?: string | null
+  leadBitrixId?: string | null,
+  venda?: DadosDaVenda
 ): Promise<MeetingResult> {
   // `realizada_em` carimba QUANDO a reunião de fato aconteceu. Existe desde a
   // 0032 e nunca era preenchido por ninguém — é ele que ancora o SAL no mês da
@@ -777,6 +786,10 @@ export async function setMeetingStatus(
       bitrix_id: leadBitrixId ?? meeting.lead?.bitrix_id,
       desfecho: status,
       data: quando,
+      // Só vão se o closer preencheu: campo vazio é descartado no servidor pra
+      // não APAGAR um valor que já esteja no card do Bitrix.
+      valor: venda?.valor ?? undefined,
+      tipo_venda: venda?.tipoVenda || undefined,
     });
   }
 
