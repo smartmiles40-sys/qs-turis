@@ -3103,7 +3103,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           </div>
         </div>
 
-        {upNext.length > 0 && !chatDock.isOpen && (
+        {/* "A seguir" SEMPRE aparece. Antes ele sumia quando o WhatsApp abria —
+            e o SDR ficava sem enxergar a própria fila justamente enquanto
+            atendia. Agora, com o QS estreito, ele desce pra baixo do card
+            (regra .qs-app-narrow no CSS) em vez de desaparecer. */}
+        {upNext.length > 0 && (
           <div className="qsx-hero-side">
             <div className="qsx-side-lab">A seguir · clique para atender</div>
             {upNext.map((t) => {
@@ -3319,6 +3323,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-fila-extras { width: 260px; flex: none; }
         .qsx-fila-main { flex: 1 1 auto; min-width: 0; }
         @media (max-width: 1100px) { .qsx-fila-extras { width: 230px; } }
+
+        /* ── QS ESTREITO: o painel de WhatsApp está aberto ao lado ──────────
+           As media queries acima olham a JANELA, que continua larga quando o
+           dock abre — só a COLUNA do QS encolhe. Resultado antigo: nada
+           reorganizava, tudo só espremia, e informação sumia da tela ("acaba
+           bagunçando muito"). A classe qs-app-narrow é posta no elemento raiz
+           pelo QsWaDock quando sobra pouco espaço; daí aplicamos aqui o MESMO
+           empilhamento do celular, que é a resposta certa pra coluna estreita. */
+        html.qs-app-narrow .qsx-hero { flex-direction: column; }
+        html.qs-app-narrow .qsx-hero-accent { width: 100%; height: 4px; }
+        html.qs-app-narrow .qsx-hero-main { padding: 18px 16px; gap: 12px; }
+        html.qs-app-narrow .qsx-hero-side { width: 100%; border-left: 0; border-top: 1px solid var(--line); }
+        html.qs-app-narrow .qsx-fila-row { flex-direction: column; align-items: stretch; gap: 14px; }
+        html.qs-app-narrow .qsx-fila-extras { width: 100%; }
+        html.qs-app-narrow .qsx-fila-main { width: 100%; }
 
         /* ── Celular (≤767px): empilha as colunas do hero e da fila ── */
         @media (max-width: 767px) {
