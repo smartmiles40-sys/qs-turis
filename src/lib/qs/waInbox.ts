@@ -146,8 +146,19 @@ export async function togglePin(leadId: string): Promise<boolean | null> {
 // dar um nome humano ("Comercial", "Pós-venda") a cada número. O que ela deixa
 // de fazer é ser condição pro selo existir.
 
-export interface InboxLabel { nome: string; tipo: "normal" | "api" }
+export interface InboxLabel { nome: string; tipo: "normal" | "api"; telefone?: string | null }
 export type InboxLabels = Record<string, InboxLabel>;
+
+/** "+551148636051" → "11 4863-6051" (o que o SDR reconhece de bater o olho). */
+export function numeroCurto(tel: string | null | undefined): string | null {
+  const d = String(tel || "").replace(/\D/g, "");
+  if (d.length < 10) return null;
+  const sem55 = d.startsWith("55") ? d.slice(2) : d;
+  const ddd = sem55.slice(0, 2);
+  const resto = sem55.slice(2);
+  if (resto.length < 8) return null;
+  return `${ddd} ${resto.slice(0, resto.length - 4)}-${resto.slice(-4)}`;
+}
 
 export const WA_INBOX_LABELS_KEY = "wa_inbox_labels";
 
@@ -165,6 +176,7 @@ export async function getInboxLabels(): Promise<InboxLabels> {
       auto[String(i.id)] = {
         nome: i.nome,
         tipo: canalEhApiOficial(i.canal) ? "api" : "normal",
+        telefone: i.telefone ?? null,
       };
     }
   } catch { /* sem config, segue só com o que estiver salvo à mão */ }
@@ -179,6 +191,9 @@ export async function getInboxLabels(): Promise<InboxLabels> {
         auto[id] = {
           nome: l.nome || auto[id]?.nome || `Caixa ${id}`,
           tipo: l.tipo === "api" || l.tipo === "normal" ? l.tipo : (auto[id]?.tipo ?? "normal"),
+          // O telefone vem do Chatwoot, não do ajuste manual — o ajuste é só
+          // pra dar nome humano à caixa.
+          telefone: auto[id]?.telefone ?? null,
         };
       }
     }
@@ -193,6 +208,10 @@ export interface WaNumero {
   nome: string;
   tipo: "normal" | "api";
   canal: string;
+  /** O telefone da caixa, quando o Chatwoot informa. */
+  telefone: string | null;
+  /** O mesmo telefone já legível: "11 4863-6051". */
+  numero: string | null;
   /** É por este que sai quando o SDR não escolhe nada. */
   padrao: boolean;
 }
@@ -212,7 +231,7 @@ export interface WaModelo {
 
 interface WaConfigBruta {
   respostas: CannedResponse[];
-  inboxes: { id: number; nome: string; canal: string }[];
+  inboxes: { id: number; nome: string; canal: string; telefone?: string | null }[];
   modelos: WaModelo[];
   padrao: number | null;
 }
@@ -261,6 +280,8 @@ export async function listWaNumeros(force = false): Promise<WaNumero[]> {
       // "normal", que marcaria o número oficial como comum.
       tipo: l?.tipo ?? (canalEhApiOficial(i.canal) ? "api" : "normal"),
       canal: i.canal,
+      telefone: i.telefone ?? null,
+      numero: numeroCurto(i.telefone),
       padrao: i.id === padraoId,
     };
   });
@@ -304,7 +325,13 @@ export function inboxTag(labels: InboxLabels, inboxId: number | null | undefined
   if (inboxId == null) return null;
   const l = labels[String(inboxId)];
   if (!l) return null;
-  return { nome: l.nome, tipo: l.tipo, ehApi: l.tipo === "api" };
+  return {
+    nome: l.nome,
+    tipo: l.tipo,
+    ehApi: l.tipo === "api",
+    telefone: l.telefone ?? null,
+    numero: numeroCurto(l.telefone),
+  };
 }
 
 // ── "Esperando resposta" ────────────────────────────────────────────────────

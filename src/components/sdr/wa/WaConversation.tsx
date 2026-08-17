@@ -26,7 +26,7 @@ import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { loadSignatureName } from "@/lib/qs/waSignature";
 import { useQsAuth } from "@/contexts/QsAuthContext";
-import { WaAudio, WaAvatar } from "./WaBits";
+import { WaAudio, WaAvatar, WaSeloNumero } from "./WaBits";
 import { WaTexto, tamanhoEmojiSolto, waPlain } from "./waFormat";
 
 // O seletor carrega junto com a lista de emojis, e só quando a SDR abre pela
@@ -1096,15 +1096,13 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             {inboxAtual == null ? "Vai sair pelo " : "Conversa pelo "}
             <b style={{ color: "var(--ink2)" }}>{numeroDaConversa.nome}</b>
           </span>
-          <span
-            className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold"
-            style={numeroDaConversa.tipo === "api"
-              ? { background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }
-              : { background: "var(--card2)", color: "var(--ink3)", border: "1px solid var(--line)" }}
-            title={numeroDaConversa.tipo === "api" ? "Número oficial (API da Meta)" : "WhatsApp normal"}
-          >
-            {numeroDaConversa.tipo === "api" ? "API oficial" : "normal"}
-          </span>
+          {/* A bolinha verde: nuvem = número oficial (mora na Meta), aparelho =
+              WhatsApp comum. Mostra o telefone quando o Chatwoot informa. */}
+          <WaSeloNumero
+            tipo={numeroDaConversa.tipo}
+            nome={numeroDaConversa.nome}
+            numero={numeroDaConversa.numero}
+          />
           {/* O cronômetro da janela de 24h. Verde = tranquilo; âmbar piscando =
               menos de 3h; vermelho = fechou (ou o cliente nunca respondeu) e
               texto livre a Meta recusa — daqui em diante é modelo. */}

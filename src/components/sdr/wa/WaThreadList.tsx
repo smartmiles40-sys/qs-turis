@@ -311,7 +311,7 @@ export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Pro
               <option value="todos">Todos os números</option>
               {numeros.map((n) => (
                 <option key={n.id} value={String(n.id)}>
-                  {n.nome}{n.tipo === "api" ? " (oficial)" : ""} · {porNumero.get(String(n.id)) ?? 0}
+                  {n.nome}{n.numero ? ` · ${n.numero}` : ""}{n.tipo === "api" ? " (oficial)" : ""} · {porNumero.get(String(n.id)) ?? 0}
                 </option>
               ))}
             </select>
@@ -427,7 +427,7 @@ export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Pro
                           </span>
                         )}
                         {varios && tag && (
-                          <WaSeloNumero tipo={tag.tipo} nome={tag.nome} compacto />
+                          <WaSeloNumero tipo={tag.tipo} nome={tag.nome} numero={tag.numero} compacto />
                         )}
                         {mostraDono && (
                           <span className="min-w-0 truncate" style={{ color: "var(--ink3)" }}>{dono}</span>

@@ -212,44 +212,64 @@ export function WaAudio({ url, meu }: { url: string; meu: boolean }) {
 // nome do cliente.
 
 export function WaSeloNumero({
-  tipo, nome, compacto = false,
-}: { tipo: "normal" | "api"; nome?: string | null; compacto?: boolean }) {
+  tipo, nome, numero, compacto = false,
+}: {
+  tipo: "normal" | "api";
+  nome?: string | null;
+  /** Telefone já legível ("11 4863-6051"), quando o Chatwoot informa. */
+  numero?: string | null;
+  compacto?: boolean;
+}) {
   const ehApi = tipo === "api";
+  // O que o SDR lê ao lado da bolinha: o NÚMERO quando existe (é o que ele
+  // reconhece), o nome da caixa quando não — caixa da Evolution não expõe o
+  // telefone pelo Chatwoot.
+  const rotulo = numero || nome || (ehApi ? "API oficial" : "WhatsApp");
   const titulo = ehApi
-    ? `${nome ? nome + " · " : ""}API oficial da Meta — fora da janela de 24h só sai template aprovado`
-    : `${nome ? nome + " · " : ""}WhatsApp comum (via aparelho) — texto livre a qualquer hora`;
-
-  const cor = ehApi
-    ? { background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }
-    : { background: "var(--card2)", color: "var(--ink3)" };
+    ? `${rotulo} · API oficial da Meta (nuvem) — fora da janela de 24h só sai modelo aprovado`
+    : `${rotulo} · WhatsApp comum, por aparelho — texto livre a qualquer hora`;
 
   const icone = ehApi ? (
-    // Escudo com visto
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-         strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      <path d="m9 12 2 2 4-4" />
+    // Nuvem: é a Cloud API — o número mora na Meta, não num aparelho.
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M6.5 18.5h11a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.2 10.6a3.96 3.96 0 0 0 .3 7.9z" />
     </svg>
   ) : (
-    // Celular
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-         strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <rect x="7" y="2" width="10" height="20" rx="2.5" />
-      <path d="M11 18h2" />
+    // Aparelho: o WhatsApp comum vive num celular, como o do cliente.
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+      <path d="M10.8 18.4h2.4" />
     </svg>
   );
+
+  // A bolinha é sempre VERDE (é WhatsApp nos dois casos) — quem separa é a
+  // FORMA de dentro: nuvem × aparelho. Cor sozinha não distingue nada pra quem
+  // não enxerga cor, e aqui os dois seriam verdes de qualquer jeito.
+  const bolinha = (
+    <span
+      className="shrink-0 inline-grid place-items-center rounded-full"
+      style={{ width: 16, height: 16, background: "var(--wa-bright, #25D366)", color: "#fff" }}
+      aria-hidden
+    >
+      {icone}
+    </span>
+  );
+
+  if (compacto) {
+    return <span title={titulo} aria-label={titulo} className="shrink-0 inline-flex">{bolinha}</span>;
+  }
 
   return (
     <span
       title={titulo}
       aria-label={titulo}
-      className={`shrink-0 inline-flex items-center rounded font-semibold ${
-        compacto ? "gap-0 w-[18px] h-[15px] justify-center" : "gap-1 px-1.5 h-[18px] text-[10.5px]"
-      }`}
-      style={cor}
+      className="shrink-0 inline-flex items-center gap-1 pl-0.5 pr-1.5 h-[19px] rounded-full font-semibold text-[10.5px]"
+      style={{ background: "var(--card2)", color: "var(--ink2)", border: "1px solid var(--line)" }}
     >
-      {icone}
-      {!compacto && <span>{ehApi ? "Oficial" : "Comum"}</span>}
+      {bolinha}
+      <span className="tabular-nums">{rotulo}</span>
     </span>
   );
 }

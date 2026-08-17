@@ -35,8 +35,10 @@ export default function WaModelos({ modelos, leadName, enviando, onEnviar, onClo
   const [escolhido, setEscolhido] = useState<WaModelo | null>(null);
   const [valores, setValores] = useState<Record<string, string>>({});
 
+  // Escolher NUNCA envia direto — mostra o texto e espera a confirmação. Os
+  // modelos aprovados hoje são de texto fixo (sem variáveis), então sem esta
+  // parada um clique errado na lista já sairia pro cliente, sem volta.
   const escolher = (m: WaModelo) => {
-    if (!m.variaveis.length) { onEnviar(m, {}); return; }
     const iniciais: Record<string, string> = {};
     m.variaveis.forEach((v, i) => { iniciais[v] = valorInicial(v, i, leadName); });
     setValores(iniciais);
@@ -59,8 +61,10 @@ export default function WaModelos({ modelos, leadName, enviando, onEnviar, onClo
                  strokeWidth="2" strokeLinecap="round"><path d="M15 18 9 12l6-6" /></svg>
           </button>
         )}
-        <p className="text-[12px] font-bold flex-1" style={{ color: "var(--ink2)" }}>
-          {escolhido ? `Preencher "${escolhido.nome}"` : "Modelos aprovados na Meta"}
+        <p className="text-[12px] font-bold flex-1 min-w-0 truncate" style={{ color: "var(--ink2)" }}>
+          {escolhido
+            ? (escolhido.variaveis.length ? `Preencher "${escolhido.nome}"` : `Confira antes de enviar`)
+            : "Modelos aprovados na Meta"}
         </p>
         <button onClick={onClose} aria-label="Fechar modelos"
                 className="wa-icon-btn w-7 h-7 grid place-items-center rounded-lg">

@@ -245,7 +245,7 @@ export default function WaPage({ onOpenLead }: Props) {
                     </span>
                     {/* Por qual dos NOSSOS números essa conversa corre. Aqui
                         aparece sempre: e uma linha so, nao 566. */}
-                    {tag && <WaSeloNumero tipo={tag.tipo} nome={tag.nome} compacto />}
+                    {tag && <WaSeloNumero tipo={tag.tipo} nome={tag.nome} numero={tag.numero} compacto />}
                   </span>
                 </div>
                 {/* Abaixo de xl o painel de contexto não existe: estas duas
@@ -356,9 +356,9 @@ export default function WaPage({ onOpenLead }: Props) {
                   <dt className="text-[10.5px] font-bold uppercase tracking-wider" style={{ color: "var(--ink3)" }}>
                     Número
                   </dt>
-                  <dd className="mt-1 flex items-center gap-1.5" style={{ color: "var(--ink)" }}>
+                  <dd className="mt-1 flex flex-wrap items-center gap-1.5" style={{ color: "var(--ink)" }}>
                     <span className="min-w-0 truncate">{tag.nome}</span>
-                    <WaSeloNumero tipo={tag.tipo} />
+                    <WaSeloNumero tipo={tag.tipo} nome={tag.nome} numero={tag.numero} />
                   </dd>
                 </div>
               )}

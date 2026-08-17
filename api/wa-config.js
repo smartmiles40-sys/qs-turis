@@ -52,6 +52,10 @@ async function buscarInboxes() {
         id: Number(i.id),
         nome: String(i.name || `Caixa ${i.id}`),
         canal: String(i.channel_type || ''),
+        // O número em si, quando o Chatwoot sabe (as caixas da API oficial
+        // trazem; as da Evolution vêm sem, e aí vale o nome da caixa). É o que
+        // deixa o SDR ver "11 4863-6051" em vez de decorar nome de caixa.
+        telefone: i.phone_number ? String(i.phone_number) : null,
       }));
     return { inboxes, modelos: extrairModelos(list) };
   } catch (e) {

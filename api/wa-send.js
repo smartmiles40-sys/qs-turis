@@ -74,7 +74,12 @@ async function resolverModelo(modelo) {
         name: t.name,
         category: t.category,
         language: t.language,
-        namespace: t.namespace ?? null,
+        // ⚠️ MEDIDO EM 17/08: o Chatwoot valida `namespace` como STRING. Template
+        // da Cloud API não tem namespace (é conceito da API antiga), então mandar
+        // `null` fazia TODO envio de modelo morrer com 422 "must be of type
+        // string". Só entra quando existe de verdade.
+        ...(typeof t.namespace === 'string' && t.namespace ? { namespace: t.namespace } : {}),
+        // Tem que ser objeto/hash — array também é recusado.
         processed_params: Object.fromEntries(
           Object.entries(params).map(([k, v]) => [k, String(v).trim()])
         ),
