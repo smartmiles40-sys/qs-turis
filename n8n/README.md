@@ -56,6 +56,25 @@ Depois de salvar e **ativar**, o n8n te dá a URL de produção (algo como
 Também aceita `full_name` / `phone` / `email`, e ainda `cidade`, `estado`, `empresa`,
 `fonte`, `bitrix_id`.
 
+## Se o lead vem do Bitrix
+
+O Bitrix manda os dados do negócio na **URL** (`?Nome=...&Telefone=...`) e usa o corpo da
+requisição só para os metadados dele (`document_id`, `auth`). O nó **"Padronizar o lead"**
+já lê os dois lugares, então funciona sem ajuste — e também entende os nomes de campo que
+o Bitrix usa:
+
+| Campo no Bitrix | Vira no QS |
+|---|---|
+| `Nome` + `Sobrenome` | nome do lead |
+| `Telefone` | telefone (normalizado) |
+| `E-mail` | e-mail |
+| `Fonte` | Fonte no card (ex.: "[Islândia] - Tráfego") |
+| `LeadScoring` | temperatura (Quente / Morno / Frio) |
+| `ID` | id do negócio — é o que impede o mesmo card virar dois leads |
+
+Se um dia não chegar nada, o nó para com uma mensagem dizendo **quais campos vieram** na
+chamada, em vez de mandar um lead vazio para o QS.
+
 ## Três coisas que valem saber
 
 **Quem já está no QS não muda de cadência.** O QS deduplica por telefone, e-mail e
