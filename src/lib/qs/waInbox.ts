@@ -809,9 +809,13 @@ export async function reagirMensagem(
  * abrir a conversa depois já ler sem processar de novo.
  */
 export async function salvarTranscricao(messageId: string, texto: string): Promise<void> {
-  const { error } = await supabase.from("qs_wa_messages").update({ transcricao: texto }).eq("id", messageId);
-  // Sem a migration 0051 a coluna não existe: o texto continua na tela desta
-  // sessão, só não fica salvo. Não vale incomodar o SDR com isso.
+  // Via RPC, não update direto: qs_wa_messages não tem policy de UPDATE (a 0024
+  // fechou de propósito), então o update saía com 0 linhas e SEM erro — falha
+  // silenciosa que fazia o Whisper reprocessar o mesmo áudio a cada abertura.
+  // A função da 0052 só encosta nesta coluna e só de quem pode ver a conversa.
+  const { error } = await supabase.rpc("qs_wa_salvar_transcricao", { p_msg: messageId, p_texto: texto });
+  // Enquanto a 0052 não estiver aplicada, o texto continua na tela desta sessão
+  // — só não fica salvo. Não vale incomodar quem está atendendo com isso.
   if (error) console.warn("[wa] transcrição não pôde ser salva:", error.message);
 }
 

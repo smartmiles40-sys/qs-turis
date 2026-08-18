@@ -157,6 +157,53 @@ $$;
 
 grant execute on function qs_transferir_lead(uuid, uuid, text) to authenticated;
 
+
+-- ---------------------------------------------------------------------------
+-- TRANSCRIÇÃO DE ÁUDIO — hoje ela nunca salva.
+--
+-- A 0024 diz, de propósito, "sem policy de INSERT/UPDATE/DELETE: o navegador
+-- não escreve aqui", e a 0051 acrescentou a coluna sem abrir exceção. O front
+-- faz update direto em qs_wa_messages e leva 0 linhas, sem erro — falha
+-- silenciosa. Efeito prático: toda vez que alguém reabre a conversa, o Whisper
+-- roda o áudio de novo, no navegador, do zero.
+--
+-- Em vez de abrir a tabela para UPDATE (o que deixaria o navegador reescrever
+-- o texto de qualquer mensagem), uma função que só encosta na coluna
+-- transcricao e só de quem pode ver aquela conversa.
+-- ---------------------------------------------------------------------------
+create or replace function qs_wa_salvar_transcricao(p_msg uuid, p_texto text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_lead uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'Sessão inválida — entre de novo no QS.' using errcode = '42501';
+  end if;
+
+  select lead_id into v_lead from qs_wa_messages where id = p_msg;
+  if not found then
+    raise exception 'Mensagem não encontrada.' using errcode = 'P0002';
+  end if;
+
+  -- Mesma porta da leitura da conversa (0050 já inclui o closer aqui).
+  if not qs_owns_lead(v_lead) then
+    raise exception 'Sem acesso a esta conversa.' using errcode = '42501';
+  end if;
+
+  update qs_wa_messages
+     set transcricao = nullif(btrim(p_texto), '')
+   where id = p_msg;
+
+  return true;
+end;
+$$;
+
+grant execute on function qs_wa_salvar_transcricao(uuid, text) to authenticated;
+
 -- ── VERIFICAÇÃO ──────────────────────────────────────────────────────────────
 -- Aqui, logo depois do Run (conferindo que o SDR NÃO ganhou o lead órfão):
 select policyname, cmd, qual::text from pg_policies
