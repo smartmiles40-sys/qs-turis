@@ -1,0 +1,123 @@
+{
+  "name": "QS · Resgate — carga da lista (rodar 1 vez)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "start",
+      "name": "Clique em Test workflow",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════════════════\n//  COLE A SUA LISTA AQUI DENTRO DOS COLCHETES.\n//\n//  Aceita os nomes de campo mais comuns (nome/telefone/email, ou\n//  full_name/phone/email). O que importa é ter TELEFONE — é por ele que o QS\n//  descobre se a pessoa já está na base.\n//\n//  Dica: se a sua lista está no Excel/Sheets, peça a alguém (ou a mim) pra\n//  transformar em JSON, ou troque este nó por um nó de Google Sheets ligado\n//  direto no \"Enviar para o QS\".\n// ═══════════════════════════════════════════════════════════════════════════\nconst LISTA = [\n  { nome: \"Maria Exemplo\", telefone: \"62 99999-0001\", email: \"maria@exemplo.com\", fonte: \"Lista resgate agosto\" },\n  { nome: \"João Exemplo\",  telefone: \"5562999990002\",                              fonte: \"Lista resgate agosto\" },\n];\n// ═══════════════════════════════════════════════════════════════════════════\n\nfunction telefone(v) {\n  let d = String(v ?? '').replace(/\\D/g, '');\n  if (!d) return null;\n  d = d.replace(/^0+/, '');\n  if (!d.startsWith('55')) d = '55' + d;\n  return (d.length === 12 || d.length === 13) ? d : null;\n}\n\nconst pega = (o, ...chaves) => {\n  for (const k of chaves) {\n    const v = o[k];\n    if (v != null && String(v).trim() !== '') return String(v).trim();\n  }\n  return null;\n};\n\n// Mandamos TODOS, inclusive os que parecem incompletos: o QS recusa com um\n// motivo claro e o resumo no fim conta quantos e por quê. Descartar aqui, em\n// silêncio, esconderia linha ruim na planilha — e você acharia que subiu tudo.\nreturn LISTA.map((linha) => ({ json: {\n  full_name:    pega(linha, 'full_name', 'nome', 'name', 'Nome', 'cliente'),\n  phone:        telefone(pega(linha, 'phone', 'telefone', 'whatsapp', 'celular', 'Telefone', 'WhatsApp')),\n  email:        pega(linha, 'email', 'e-mail', 'Email', 'E-mail'),\n  segment:      pega(linha, 'segment', 'fonte', 'origem', 'Fonte') ?? 'Resgate',\n  source:       pega(linha, 'source') ?? 'resgate',\n  city:         pega(linha, 'city', 'cidade'),\n  state:        pega(linha, 'state', 'estado', 'uf'),\n  company_name: pega(linha, 'company_name', 'empresa'),\n  bitrix_id:    pega(linha, 'bitrix_id', 'id_bitrix'),\n} }));"
+      },
+      "id": "lista",
+      "name": "A sua lista de leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qs.setuforeuvouviagens.com.br/api/lead-inbound?lista=resgate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lead-secret",
+              "value": "SEU_LEAD_INBOUND_SECRET_AQUI"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 1000
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "envio",
+      "name": "Enviar para o QS (lista resgate)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fecha a conta da carga. Roda uma vez, sobre TODOS os itens.\nconst itens = $input.all();\nlet criados = 0, jaExistiam = 0, falharam = 0;\nconst erros = [];\n\nfor (const it of itens) {\n  const r = it.json;\n  const status = r.statusCode ?? 0;\n  const corpo = r.body ?? {};\n  if (status === 200 && corpo.success) {\n    if (corpo.deduped) jaExistiam++; else criados++;\n  } else {\n    falharam++;\n    if (erros.length < 15) erros.push({ status, erro: corpo.error || 'sem detalhe' });\n  }\n}\n\nreturn [{ json: {\n  total_enviado: itens.length,\n  criados_no_resgate: criados,\n  ja_existiam_no_qs: jaExistiam,   // esses NÃO foram movidos — seguem onde estavam\n  falharam,\n  primeiros_erros: erros,\n  aviso: jaExistiam > 0\n    ? `${jaExistiam} já estavam no QS: o webhook não muda a cadência de quem já existe. Se precisar trazer esses para o resgate, é outro caminho.`\n    : null,\n} }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "resumo",
+      "name": "Resumo da carga",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Clique em Test workflow": {
+      "main": [
+        [
+          {
+            "node": "A sua lista de leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A sua lista de leads": {
+      "main": [
+        [
+          {
+            "node": "Enviar para o QS (lista resgate)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar para o QS (lista resgate)": {
+      "main": [
+        [
+          {
+            "node": "Resumo da carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

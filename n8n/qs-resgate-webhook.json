@@ -1,0 +1,148 @@
+{
+  "name": "QS · Resgate — entrada por webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qs-resgate",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-resgate",
+      "name": "Chega um lead de resgate",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -220,
+        0
+      ],
+      "webhookId": "qs-resgate"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aceita o lead do jeito que a origem mandar e devolve no formato do QS.\n// Só o telefone é tratado a sério: o QS deduplica por ele, então \"62 99999-0001\"\n// e \"5562999990001\" precisam virar a MESMA coisa, senão o mesmo cliente entra\n// duas vezes.\nconst entrada = $input.first().json;\nconst b = entrada.body ?? entrada;   // o Webhook do n8n embrulha o corpo em .body\n\nconst txt = (...chaves) => {\n  for (const k of chaves) {\n    const v = b[k];\n    if (v != null && String(v).trim() !== '') return String(v).trim();\n  }\n  return null;\n};\n\nfunction telefone(v) {\n  let d = String(v ?? '').replace(/\\D/g, '');\n  if (!d) return null;\n  d = d.replace(/^0+/, '');           // tira 0 de operadora\n  if (!d.startsWith('55')) d = '55' + d;\n  // 55 + DDD(2) + número(8 ou 9)\n  return (d.length === 12 || d.length === 13) ? d : null;\n}\n\nreturn [{ json: {\n  full_name:    txt('full_name', 'nome', 'name', 'Nome', 'NOME', 'cliente'),\n  phone:        telefone(txt('phone', 'telefone', 'whatsapp', 'celular', 'Telefone', 'WhatsApp', 'Celular')),\n  email:        txt('email', 'e-mail', 'Email', 'E-mail', 'EMAIL'),\n  // Fonte aparece no card do lead. Deixe reconhecível pra saber de onde veio.\n  segment:      txt('segment', 'fonte', 'origem', 'Fonte', 'Origem') ?? 'Resgate',\n  source:       txt('source') ?? 'resgate',\n  city:         txt('city', 'cidade', 'Cidade'),\n  state:        txt('state', 'estado', 'uf', 'UF'),\n  company_name: txt('company_name', 'empresa', 'Empresa'),\n  bitrix_id:    txt('bitrix_id', 'id_bitrix', 'ID'),\n} }];"
+      },
+      "id": "padronizar-o-lead",
+      "name": "Padronizar o lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qs.setuforeuvouviagens.com.br/api/lead-inbound?lista=resgate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lead-secret",
+              "value": "SEU_LEAD_INBOUND_SECRET_AQUI"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "enviar-para-o-qs-(lista-resgate)",
+      "name": "Enviar para o QS (lista resgate)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Traduz a resposta do QS pra algo legível no histórico do n8n.\nconst r = $input.first().json;\nconst status = r.statusCode ?? 0;\nconst corpo = r.body ?? {};\n\nlet resultado, detalhe;\nif (status === 200 && corpo.success) {\n  resultado = corpo.deduped ? 'ja_existia' : 'criado';\n  detalhe = corpo.deduped\n    ? 'Esse lead JÁ estava no QS. Nada foi alterado — ele continua na cadência em que estava.'\n    : `Lead criado com ${corpo.tasks_created} atividades na cadência de resgate.`;\n} else if (status === 401) {\n  resultado = 'erro';\n  detalhe = 'Segredo recusado. Confira o header x-lead-secret no nó \"Enviar para o QS\".';\n} else if (status === 400) {\n  resultado = 'erro';\n  detalhe = corpo.error || 'Faltou telefone, e-mail ou nome.';\n} else {\n  resultado = 'erro';\n  detalhe = corpo.error || `Falha inesperada (HTTP ${status}).`;\n}\n\nreturn [{ json: {\n  resultado,\n  detalhe,\n  lead_id: corpo.lead_id ?? null,\n  lista: corpo.lista ?? null,\n  cadence_id: corpo.cadence_id ?? null,\n} }];"
+      },
+      "id": "ler-a-resposta",
+      "name": "Ler a resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "responder",
+      "name": "Responder a quem chamou",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        660,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Chega um lead de resgate": {
+      "main": [
+        [
+          {
+            "node": "Padronizar o lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Padronizar o lead": {
+      "main": [
+        [
+          {
+            "node": "Enviar para o QS (lista resgate)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar para o QS (lista resgate)": {
+      "main": [
+        [
+          {
+            "node": "Ler a resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler a resposta": {
+      "main": [
+        [
+          {
+            "node": "Responder a quem chamou",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
