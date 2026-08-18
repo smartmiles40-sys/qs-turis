@@ -31,6 +31,13 @@ import { readFileSync } from 'node:fs';
 
 const ARGS = new Set(process.argv.slice(2));
 const APLICAR = ARGS.has('--apply');
+/** --limite=N processa só as N primeiras conversas casadas. Serve pra provar o
+ *  mapeamento com dados reais antes de soltar o lote inteiro. */
+const LIMITE = (() => {
+  const a = [...ARGS].find((x) => x.startsWith('--limite='));
+  const n = a ? Number(a.split('=')[1]) : 0;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+})();
 
 function lerEnv(caminho) {
   try {
@@ -323,6 +330,7 @@ async function importar() {
     const telefone = c.phone ?? c.chatId ?? c.contactPhone ?? '';
     const lead = acharLead(telefone);
     if (!lead) { semLead++; continue; }
+    if (LIMITE && comLead >= LIMITE) break;
     comLead++;
     let msgs = [];
     try { msgs = await listarMensagens(chatId); }
