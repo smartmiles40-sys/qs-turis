@@ -7,6 +7,7 @@
 // -----------------------------------------------------------------------------
 import { rest, insert } from './_supabaseAdmin.js';
 import { resgatarConversaPerdida, findLeadByPhone } from './_wa.js';
+import { vincularLeadAoBitrix } from './_bitrixLead.js';
 
 // ─── HORÁRIO DE TRABALHO (verdade absoluta do agendamento) ───────────────────
 // Espelho do src/lib/workHours.ts — o mesmo runtime não deixa importar TS aqui.
@@ -536,6 +537,21 @@ export async function createInboundLead(payload) {
   let tasks = 0;
   if (cadenceId && lead) {
     tasks = await generateCadenceTasks({ leadId: lead.id, cadenceId, ownerId: finalOwner, priority, baseDate: nowIso });
+  }
+
+  // ── O LEAD TAMBÉM NASCE NO BITRIX (Bruno, 18/08) ──────────────────────────
+  // Quem chega pelo WhatsApp não traz bitrix_id — e desde que a caixa oficial
+  // passou a criar card sozinha, 20 leads (a "Paula" entre eles) existiam só no
+  // QS: com dono e cadência aqui, invisíveis pro comercial lá. Agora o negócio
+  // é criado no mesmo instante, no funil de Pré-Vendas, com o dono do QS como
+  // responsável. Best-effort: Bitrix fora não impede o lead de entrar.
+  if (lead && !bitrixId) {
+    try {
+      const novoId = await vincularLeadAoBitrix({ ...lead, owner_id: finalOwner });
+      if (novoId) lead.bitrix_id = novoId;
+    } catch (e) {
+      console.warn('[leads] criação no Bitrix falhou (o lead entrou mesmo assim):', e?.message);
+    }
   }
 
   // Nota de origem Bitrix (best-effort). Antes quem criava era o n8n, DEPOIS da
