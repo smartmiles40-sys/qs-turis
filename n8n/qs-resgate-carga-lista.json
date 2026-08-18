@@ -28,7 +28,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://qs.setuforeuvouviagens.com.br/api/lead-inbound?lista=resgate",
+        "url": "https://qs.setuforeuvouviagens.com.br/api/lead-inbound?lista=resgate&mover=1",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -55,7 +55,8 @@
             }
           },
           "timeout": 20000
-        }
+        },
+        "contentType": "json"
       },
       "id": "envio",
       "name": "Enviar para o QS (lista resgate)",
@@ -68,7 +69,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Fecha a conta da carga. Roda uma vez, sobre TODOS os itens.\nconst itens = $input.all();\nlet criados = 0, jaExistiam = 0, falharam = 0;\nconst erros = [];\n\nfor (const it of itens) {\n  const r = it.json;\n  const status = r.statusCode ?? 0;\n  const corpo = r.body ?? {};\n  if (status === 200 && corpo.success) {\n    if (corpo.deduped) jaExistiam++; else criados++;\n  } else {\n    falharam++;\n    if (erros.length < 15) erros.push({ status, erro: corpo.error || 'sem detalhe' });\n  }\n}\n\nreturn [{ json: {\n  total_enviado: itens.length,\n  criados_no_resgate: criados,\n  ja_existiam_no_qs: jaExistiam,   // esses NÃO foram movidos — seguem onde estavam\n  falharam,\n  primeiros_erros: erros,\n  aviso: jaExistiam > 0\n    ? `${jaExistiam} já estavam no QS: o webhook não muda a cadência de quem já existe. Se precisar trazer esses para o resgate, é outro caminho.`\n    : null,\n} }];",
+        "jsCode": "// Fecha a conta da carga. Roda uma vez, sobre TODOS os itens.\nconst itens = $input.all();\nlet criados = 0, movidos = 0, naoMovidos = 0, falharam = 0;\nconst bloqueios = {};\nconst erros = [];\n\nfor (const it of itens) {\n  const r = it.json;\n  const status = r.statusCode ?? 0;\n  const corpo = r.body ?? {};\n  if (status === 200 && corpo.success) {\n    const m = corpo.movido;\n    if (m?.movido) movidos++;\n    else if (m) { naoMovidos++; bloqueios[m.motivo] = (bloqueios[m.motivo] ?? 0) + 1; }\n    else if (corpo.deduped) { naoMovidos++; bloqueios['ja-existia-sem-mover'] = (bloqueios['ja-existia-sem-mover'] ?? 0) + 1; }\n    else criados++;\n  } else {\n    falharam++;\n    if (erros.length < 15) erros.push({ status, erro: corpo.error || 'sem detalhe' });\n  }\n}\n\nreturn [{ json: {\n  total_enviado: itens.length,\n  criados_novos: criados,            // não existiam no QS\n  movidos_para_resgate: movidos,     // já existiam e foram trazidos\n  nao_movidos: naoMovidos,\n  motivos_de_bloqueio: bloqueios,    // \"esta-sendo-trabalhado\" é proteção, não erro\n  falharam,\n  primeiros_erros: erros,\n}}];",
         "mode": "runOnceForAllItems"
       },
       "id": "resumo",

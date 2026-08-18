@@ -77,10 +77,20 @@ chamada, em vez de mandar um lead vazio para o QS.
 
 ## Três coisas que valem saber
 
-**Quem já está no QS não muda de cadência.** O QS deduplica por telefone, e-mail e
-bitrix_id. Se a pessoa já existe, a resposta volta `ja_existia` e ela **continua na
-cadência em que estava** — nada é sobrescrito. É de propósito: assim uma carga de resgate
-nunca atropela quem está sendo trabalhado. O resumo avisa quantos caíram nesse caso.
+**Quem já está no QS É TRAZIDO para o resgate — com trava.** É o `&mover=1` no fim da
+URL. Sem ele, o webhook só cria quem não existe (e a maior parte da sua lista já está no
+QS há meses, então quase nada entraria). Com ele, o lead existente muda para a cadência de
+resgate e ganha o plano novo — **mas nunca** se estiver num destes casos:
+
+| Situação | O que acontece |
+|---|---|
+| Tem atividade em aberto | **Não move.** Alguém está trabalhando esse lead agora. |
+| Tem reunião marcada | **Não move.** Tem especialista esperando. |
+| É cliente (lead ganho) | **Não move.** |
+| Não deu para conferir | **Não move.** Na dúvida, não mexe. |
+
+O motivo do bloqueio aparece no histórico do n8n e no resumo da carga. Bloqueio **não é
+erro** — é a proteção fazendo o trabalho dela.
 
 **Nada some em silêncio.** Linhas incompletas são enviadas do mesmo jeito e o QS recusa
 com o motivo; elas aparecem em `falharam` / `primeiros_erros`. Se fossem descartadas antes,
