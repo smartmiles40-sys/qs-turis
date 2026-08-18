@@ -47,22 +47,49 @@ async function prepararAudio(leadId: string, messageId: string): Promise<Float32
   );
   if (!resposta.ok) throw new Error('não consegui baixar o áudio');
   const bruto = await resposta.arrayBuffer();
+  if (!bruto.byteLength) throw new Error('o áudio veio vazio');
 
-  // O AudioContext decodifica ogg/opus, mp3, m4a e wav sem ajuda externa.
+  // ── Decodificar ──────────────────────────────────────────────────────────
+  // ⚠️ NÃO pedir uma taxa de amostragem aqui. A primeira versão criava o
+  // AudioContext já com 16 kHz (a taxa que o Whisper quer) e o navegador
+  // recusava o Opus com EncodingError — que virava "não consegui abrir este
+  // formato". Decodificar na taxa NATIVA sempre funciona; a conversão para
+  // 16 kHz vem depois, no OfflineAudioContext, que é feito exatamente pra isso.
   const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  const ctx = new Ctx({ sampleRate: TAXA_WHISPER });
+  const ctx = new Ctx();
+  let decodificado: AudioBuffer;
   try {
-    const buffer = await ctx.decodeAudioData(bruto);
-    if (buffer.numberOfChannels === 1) return buffer.getChannelData(0).slice();
-    // Estéreo vira mono pela média — o Whisper só aceita um canal.
-    const a = buffer.getChannelData(0);
-    const b = buffer.getChannelData(1);
-    const mono = new Float32Array(a.length);
-    for (let i = 0; i < a.length; i++) mono[i] = (a[i] + b[i]) / 2;
-    return mono;
+    decodificado = await ctx.decodeAudioData(bruto.slice(0));
   } finally {
     void ctx.close();
   }
+
+  // ── Mono ────────────────────────────────────────────────────────────────
+  const canais = decodificado.numberOfChannels;
+  let mono: Float32Array;
+  if (canais === 1) {
+    mono = decodificado.getChannelData(0);
+  } else {
+    const a = decodificado.getChannelData(0);
+    const b = decodificado.getChannelData(1);
+    mono = new Float32Array(a.length);
+    for (let i = 0; i < a.length; i++) mono[i] = (a[i] + b[i]) / 2;
+  }
+
+  // ── 16 kHz, que é o que o Whisper espera ────────────────────────────────
+  if (decodificado.sampleRate === TAXA_WHISPER) return mono.slice();
+
+  const amostras = Math.max(1, Math.round((mono.length * TAXA_WHISPER) / decodificado.sampleRate));
+  const off = new OfflineAudioContext(1, amostras, TAXA_WHISPER);
+  const origem = off.createBufferSource();
+  const buf = off.createBuffer(1, mono.length, decodificado.sampleRate);
+  // copyToChannel exige um Float32Array com ArrayBuffer próprio (não compartilhado).
+  buf.copyToChannel(new Float32Array(mono), 0);
+  origem.buffer = buf;
+  origem.connect(off.destination);
+  origem.start();
+  const pronto = await off.startRendering();
+  return pronto.getChannelData(0).slice();
 }
 
 /**
