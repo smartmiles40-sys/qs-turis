@@ -77,20 +77,19 @@ chamada, em vez de mandar um lead vazio para o QS.
 
 ## Três coisas que valem saber
 
-**Quem já está no QS É TRAZIDO para o resgate — com trava.** É o `&mover=1` no fim da
-URL. Sem ele, o webhook só cria quem não existe (e a maior parte da sua lista já está no
-QS há meses, então quase nada entraria). Com ele, o lead existente muda para a cadência de
-resgate e ganha o plano novo — **mas nunca** se estiver num destes casos:
+**O resgate cria um card próprio, e não mexe em ninguém.** É o `&duplicar=1` no fim da
+URL. Quem já está no QS ganha um **segundo card**, na cadência de resgate — e o card antigo
+continua exatamente como estava: mesma cadência, mesmo status, histórico inteiro. Os dois
+convivem.
 
-| Situação | O que acontece |
-|---|---|
-| Tem atividade em aberto | **Não move.** Alguém está trabalhando esse lead agora. |
-| Tem reunião marcada | **Não move.** Tem especialista esperando. |
-| É cliente (lead ganho) | **Não move.** |
-| Não deu para conferir | **Não move.** Na dúvida, não mexe. |
+Foi escolhido assim de propósito: como nada é sobrescrito, não existe risco de atropelar
+quem está sendo trabalhado. Em troca, o mesmo telefone passa a aparecer em dois cards
+enquanto o resgate durar.
 
-O motivo do bloqueio aparece no histórico do n8n e no resumo da carga. Bloqueio **não é
-erro** — é a proteção fazendo o trabalho dela.
+**O card de resgate não abre negócio no Bitrix.** Essas pessoas já têm (ou já tiveram) card
+lá; criar de novo encheria o funil de Pré-Vendas de duplicatas e estragaria a contagem do
+comercial. O card de resgate nasce sem vínculo — o vínculo com o negócio continua no card
+original.
 
 **Nada some em silêncio.** Linhas incompletas são enviadas do mesmo jeito e o QS recusa
 com o motivo; elas aparecem em `falharam` / `primeiros_erros`. Se fossem descartadas antes,
