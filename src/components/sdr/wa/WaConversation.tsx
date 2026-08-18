@@ -28,6 +28,7 @@ import { loadSignatureName } from "@/lib/qs/waSignature";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { WaAudio, WaAvatar, WaSeloNumero } from "./WaBits";
 import { WaTexto, tamanhoEmojiSolto, waPlain } from "./waFormat";
+import { webmParaOgg } from "@/lib/qs/opusRemux";
 
 // O seletor carrega junto com a lista de emojis, e só quando a SDR abre pela
 // primeira vez — não é peso que todo mundo paga pra ver a conversa.
@@ -613,8 +614,18 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         let tipo = (mr.mimeType || "audio/webm").split(";")[0].trim();
         if (tipo === "video/webm") tipo = "audio/webm";
 
-        const blob = new Blob(chunksRef.current, { type: tipo });
+        let blob = new Blob(chunksRef.current, { type: tipo });
         if (blob.size < 1200 || dur < 1) { setErro("Áudio muito curto."); return; }
+
+        // A META NÃO ACEITA WEBM (medido 18/08: "131053: Media upload error" em
+        // todo áudio pelo número oficial). A lista dela é aac/amr/mp3/m4a/ogg —
+        // e o Chrome só grava webm. Como os dois contêineres carregam o MESMO
+        // Opus, trocamos a embalagem sem recodificar. Falhou a troca? Segue com
+        // o original: pelo número comum a Evolution converte e funciona igual.
+        if (tipo.includes("webm")) {
+          const ogg = await webmParaOgg(blob);
+          if (ogg) { blob = ogg; tipo = "audio/ogg"; }
+        }
 
         // ".weba" (e não ".webm") é o que faz a Evolution tratar como ÁUDIO e
         // converter pra nota de voz. O servidor reforça isso de qualquer jeito.
