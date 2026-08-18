@@ -21,9 +21,13 @@
 //   Os apelidos ficam em qs_settings.webhook_listas. Apelido desconhecido
 //   responde 400 — nunca cai na padrão em silêncio.
 //
+//   &mover=1 (opcional) → quando o lead JÁ EXISTE, traz ele para a cadência
+//   desta lista em vez de só devolver "deduped". NÃO move lead ganho, com
+//   reunião marcada ou com atividade em aberto — nesses casos volta o motivo.
+//
 // Resposta: { success, lead_id, owner_id, cadence_id, tasks_created }
 // -----------------------------------------------------------------------------
-import { createInboundLead } from './_leads.js';
+import { createInboundLead, moverLeadParaCadencia } from './_leads.js';
 import { segredoConfere, rest } from './_supabaseAdmin.js';
 
 // UUID v4 (formato geral de UUID). cadence_id/owner_id inválidos antes iam
@@ -104,6 +108,10 @@ export default async function handler(req, res) {
   // exatamente o problema que as listas vieram resolver. A URL vence o corpo —
   // quem configurou o endereço sabe para onde aquela origem manda.
   const lista = typeof req.query?.lista === 'string' ? req.query.lista.trim().toLowerCase() : '';
+  // &mover=1 autoriza trazer um lead que JÁ existe para a cadência desta lista.
+  // Fica desligado por padrão: mexer na cadência de um lead alheio é o tipo de
+  // coisa que tem que ser pedida, nunca acontecer por acidente.
+  const mover = /^(1|true|sim)$/i.test(String(req.query?.mover ?? ''));
   if (lista) {
     let destino;
     try {
@@ -123,6 +131,23 @@ export default async function handler(req, res) {
 
   try {
     const { lead, ownerId, cadenceId, tasks, deduped } = await createInboundLead(body);
+
+    // O lead JÁ existia e a URL pediu &mover=1: traz ele pra cadência da lista.
+    // Sem isto, a lista de resgate não funciona na prática — a maioria dessas
+    // pessoas está no QS há meses, então o dedupe respondia "já existia" e o
+    // lead nunca saía do lugar. As travas ficam em moverLeadParaCadencia: lead
+    // ganho, com reunião marcada ou com atividade em aberto NÃO é movido, e o
+    // motivo volta na resposta pra aparecer no histórico do n8n.
+    let movido = null;
+    if (deduped && mover && lista && lead) {
+      try {
+        movido = await moverLeadParaCadencia(lead, body.cadence_id);
+      } catch (e) {
+        console.error('[lead-inbound] mover falhou:', e?.message || e);
+        movido = { movido: false, motivo: 'erro-ao-mover' };
+      }
+    }
+
     return res.status(200).json({
       success: true,
       lead_id: lead.id,
@@ -134,6 +159,10 @@ export default async function handler(req, res) {
       // Ecoa a lista usada: dá pra conferir no histórico do n8n que aquela
       // origem entregou na cadência certa, sem abrir o QS.
       lista: lista || null,
+      // Só aparece quando &mover=1 foi pedido num lead que já existia.
+      // { movido: true, tarefas: N } ou { movido: false, motivo: "..." }.
+      movido: movido || undefined,
+      cadence_id_final: movido?.movido ? body.cadence_id : cadenceId,
     });
   } catch (err) {
     // Detalhe completo SÓ no log do servidor (Vercel). Pro caller vai mensagem

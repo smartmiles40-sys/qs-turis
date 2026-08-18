@@ -607,3 +607,90 @@ export async function createInboundLead(payload) {
 
   return { lead, ownerId: finalOwner, cadenceId, tasks };
 }
+
+/**
+ * Move um lead que JÁ EXISTE para outra cadência (usado pelo `&mover=1` das
+ * listas do webhook).
+ *
+ * POR QUE PRECISOU EXISTIR: a lista de resgate do Bruno vem do Bitrix, e a
+ * maioria dessas pessoas já está no QS há meses — perdidas, sem atividade
+ * nenhuma em aberto. O webhook, que deduplica por telefone/e-mail/bitrix_id,
+ * respondia "já existia" e não fazia nada: o lead continuava parado na cadência
+ * de trabalho e nunca aparecia na fila de resgate.
+ *
+ * AS TRAVAS SÃO O CORAÇÃO DISTO. O pedido original foi "que não dê nenhum
+ * problema com os leads que realmente estão sendo trabalhados", então mover é a
+ * exceção, não a regra: qualquer sinal de vida no lead cancela a mudança e
+ * devolve o motivo. Nada é sobrescrito em silêncio.
+ */
+export async function moverLeadParaCadencia(lead, cadenceId) {
+  if (!lead?.id || !cadenceId) return { movido: false, motivo: 'dados insuficientes' };
+  if (lead.cadence_id === cadenceId) return { movido: false, motivo: 'ja-estava-nesta-cadencia' };
+
+  // 1) Cliente fechado não volta pra fila de prospecção.
+  if (lead.status === 'ganho') return { movido: false, motivo: 'lead-ganho' };
+
+  // 2) Tem reunião marcada pra frente? Então está VIVO, com especialista
+  //    esperando. Mover reiniciaria a cadência por baixo de uma reunião real.
+  try {
+    const agora = new Date().toISOString();
+    const reunioes = await rest(
+      `qs_meetings?lead_id=eq.${encodeURIComponent(lead.id)}&status=in.(agendada,confirmada)` +
+      `&scheduled_at=gte.${encodeURIComponent(agora)}&select=id&limit=1`
+    );
+    if (Array.isArray(reunioes) && reunioes.length) {
+      return { movido: false, motivo: 'tem-reuniao-marcada' };
+    }
+  } catch (e) {
+    // Na dúvida, NÃO mexe: falha de leitura não pode virar autorização.
+    console.warn('[leads] mover: não consegui conferir reuniões:', e?.message);
+    return { movido: false, motivo: 'nao-consegui-conferir-reuniao' };
+  }
+
+  // 3) Tem atividade em aberto = alguém está trabalhando este lead AGORA.
+  //    Esta é a trava que o Bruno pediu com todas as letras.
+  let abertas = [];
+  try {
+    abertas = await rest(
+      `qs_tasks?lead_id=eq.${encodeURIComponent(lead.id)}&status=in.(pendente,atrasada)&select=id,is_extra`
+    );
+  } catch (e) {
+    console.warn('[leads] mover: não consegui conferir atividades:', e?.message);
+    return { movido: false, motivo: 'nao-consegui-conferir-atividades' };
+  }
+  const daCadencia = (Array.isArray(abertas) ? abertas : []).filter((t) => !t.is_extra);
+  if (daCadencia.length > 0) {
+    return { movido: false, motivo: 'esta-sendo-trabalhado', atividades_abertas: daCadencia.length };
+  }
+
+  // 4) Liberado. A ORDEM importa: primeiro encerra o que sobrou (avulsos que o
+  //    SDR criou à mão), depois troca a cadência, depois gera o plano novo. Se
+  //    a geração falhar, o lead fica sem atividade — por isso ela vem por
+  //    último e o resultado é devolvido pra quem chamou.
+  const avulsas = (Array.isArray(abertas) ? abertas : []).filter((t) => t.is_extra);
+  for (const t of avulsas) {
+    try {
+      await rest(`qs_tasks?id=eq.${encodeURIComponent(t.id)}`, {
+        method: 'PATCH',
+        body: { status: 'ignorada', skip_reason: 'Lead movido para outra cadência (resgate)' },
+        prefer: 'return=minimal',
+      });
+    } catch { /* atividade avulsa que não fechou não impede o resgate */ }
+  }
+
+  const agoraIso = new Date().toISOString();
+  await rest(`qs_leads?id=eq.${encodeURIComponent(lead.id)}`, {
+    method: 'PATCH',
+    body: { cadence_id: cadenceId, cadence_started_at: agoraIso, status: 'em_prospeccao', updated_at: agoraIso },
+    prefer: 'return=minimal',
+  });
+
+  let tarefas = 0;
+  try {
+    tarefas = await generateCadenceTasks({ leadId: lead.id, cadenceId, ownerId: lead.owner_id ?? null });
+  } catch (e) {
+    console.error('[leads] mover: cadência trocada mas as atividades falharam:', e?.message);
+  }
+
+  return { movido: true, tarefas };
+}
