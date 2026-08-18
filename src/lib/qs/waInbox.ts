@@ -444,12 +444,24 @@ export async function listMyThreads(limit = 2000): Promise<WaThread[]> {
   });
 }
 
-/** Total de não lidas do usuário logado (badge do botão flutuante). */
+/**
+ * Total de não lidas do usuário logado (badge do botão flutuante).
+ *
+ * Escopado nos leads DELE de propósito. Desde a 0050 o closer enxerga as
+ * conversas da empresa toda: sem este recorte o badge diria "437 esperando
+ * você" e o app apitaria a cada mensagem que qualquer SDR recebesse, o dia
+ * inteiro — o aviso viraria ruído e ele desligaria os avisos. A LISTA continua
+ * ampla; o que se estreita é só a cobrança de atenção.
+ */
 export async function countUnread(): Promise<number> {
-  const { data, error } = await supabase
+  const { data: sessao } = await supabase.auth.getUser();
+  const eu = sessao?.user?.id ?? null;
+  let q = supabase
     .from("qs_wa_threads")
-    .select("unread")
+    .select("unread, lead:qs_leads!inner(owner_id)")
     .gt("unread", 0);
+  if (eu) q = q.eq("lead.owner_id", eu);
+  const { data, error } = await q;
   if (error) return 0;
   return (data ?? []).reduce((s, r) => s + ((r as { unread: number }).unread || 0), 0);
 }

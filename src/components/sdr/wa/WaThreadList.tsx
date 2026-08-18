@@ -52,6 +52,11 @@ function IconPin({ size = 13, filled = false }: { size?: number; filled?: boolea
 export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Props) {
   const { currentUser } = useQsAuth();
   const ehGestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  // O closer atende a empresa inteira (0050): pra ele "Meus" nunca teve
+  // sentido — ele não tem carteira. As abas passam a funcionar como as do
+  // gestor, e ele abre já numa lista com gente de verdade dentro.
+  const ehCloser = currentUser?.role === "closer";
+  const visaoDeEquipe = ehGestor || ehCloser;
 
   const [threads, setThreads] = useState<WaThread[]>([]);
   const [users, setUsers] = useState<UserLite[]>([]);
@@ -64,7 +69,10 @@ export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Pro
   const varios = numeros.length > 1;
   const [loading, setLoading] = useState(true);
 
-  const [aba, setAba] = useState<Aba>("meus");
+  const [aba, setAba] = useState<Aba>(
+    // O closer não tem leads próprios: abrir em "Meus" era abrir vazio.
+    currentUser?.role === "closer" ? "todos" : "meus"
+  );
   const [busca, setBusca] = useState("");
   const [soNaoRespondidas, setSoNaoRespondidas] = useState(false);
   const [donoFiltro, setDonoFiltro] = useState<string>("todos");   // só gestor
@@ -182,12 +190,12 @@ export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Pro
       if (aba === "meus") {
         // Gestor não tem carteira própria: pra ele a primeira aba é "a equipe",
         // ou seja, tudo que NÃO está com um closer.
-        if (ehGestor ? isCloser(users, dono) : dono !== currentUser?.id) return false;
+        if (visaoDeEquipe ? isCloser(users, dono) : dono !== currentUser?.id) return false;
       } else if (aba === "closers") {
         if (!isCloser(users, dono)) return false;
       }
 
-      if (ehGestor && donoFiltro !== "todos" && dono !== donoFiltro) return false;
+      if (visaoDeEquipe && donoFiltro !== "todos" && dono !== donoFiltro) return false;
       if (soNaoRespondidas && !esperandoDesde(t)) return false;
 
       // Por qual dos NOSSOS números a conversa corre. Conversa sem número
@@ -211,16 +219,16 @@ export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Pro
       if (fa !== fb) return fb - fa;
       return new Date(b.last_at || 0).getTime() - new Date(a.last_at || 0).getTime();
     });
-  }, [threads, aba, busca, soNaoRespondidas, donoFiltro, numeroFiltro, fixadas, users, ehGestor, currentUser?.id]);
+  }, [threads, aba, busca, soNaoRespondidas, donoFiltro, numeroFiltro, fixadas, users, visaoDeEquipe, currentUser?.id]);
 
   const contarAba = useCallback((a: Aba) => {
     return threads.filter((t) => {
       const dono = t.lead?.owner_id ?? null;
-      if (a === "meus") return ehGestor ? !isCloser(users, dono) : dono === currentUser?.id;
+      if (a === "meus") return visaoDeEquipe ? !isCloser(users, dono) : dono === currentUser?.id;
       if (a === "closers") return isCloser(users, dono);
       return true;
     }).length;
-  }, [threads, users, ehGestor, currentUser?.id]);
+  }, [threads, users, visaoDeEquipe, currentUser?.id]);
 
   const naoRespondidas = useMemo(() => threads.filter((t) => esperandoDesde(t)).length, [threads]);
   const temFiltro = Boolean(busca) || soNaoRespondidas || donoFiltro !== "todos" || numeroFiltro !== "todos";
@@ -236,7 +244,7 @@ export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Pro
   }, [threads]);
 
   const ABAS: { key: Aba; label: string }[] = [
-    { key: "meus", label: ehGestor ? "Da equipe" : "Meus leads" },
+    { key: "meus", label: visaoDeEquipe ? "Da equipe" : "Meus leads" },
     { key: "closers", label: "Com closers" },
     { key: "todos", label: "Todos" },
   ];
@@ -326,7 +334,7 @@ export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Pro
             </select>
           )}
 
-          {ehGestor && (
+          {visaoDeEquipe && (
             <select
               value={donoFiltro}
               onChange={(e) => setDonoFiltro(e.target.value)}
