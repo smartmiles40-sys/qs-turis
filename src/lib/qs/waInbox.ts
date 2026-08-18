@@ -415,8 +415,16 @@ export function humanizarEspera(iso: string): string {
   return `${Math.round(h / 24)}d`;
 }
 
-/** Conversas visíveis pra quem está logado (a RLS já corta as dos outros). */
-export async function listMyThreads(limit = 100): Promise<WaThread[]> {
+/**
+ * Conversas visíveis pra quem está logado (a RLS já corta as dos outros).
+ *
+ * O teto era 100 e cortava calado: com mais de mil conversas, "Equipe" e
+ * "Todos" mostravam só as cem mais recentes e o resto simplesmente não existia
+ * na tela (Bruno, 18/08: "tire o limitador de 100"). Agora vem tudo, e quem
+ * enxuga a lista é o filtro de quem está esperando resposta — que a tela liga
+ * sozinha nessas duas abas.
+ */
+export async function listMyThreads(limit = 2000): Promise<WaThread[]> {
   const { data, error } = await supabase
     .from("qs_wa_threads")
     .select(THREAD_COLS)

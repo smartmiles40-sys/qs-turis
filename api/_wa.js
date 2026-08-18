@@ -410,8 +410,12 @@ export async function assertCanAccessLead(userId, leadId) {
   if (!user || user.is_active === false) return { ok: false, reason: 'usuario-invalido' };
   if (!lead) return { ok: false, reason: 'lead-inexistente' };
 
-  const isManager = user.role === 'admin' || user.role === 'gestor';
-  if (isManager || lead.owner_id === userId || lead.owner_id == null) return { ok: true, lead, user };
+  // O CLOSER ATENDE QUALQUER CONVERSA (Bruno, 18/08: "abre por papel mesmo").
+  // Espelha a migration 0050, que abriu o mesmo caminho na leitura — as duas
+  // pontas precisam andar juntas, senão ele VÊ a conversa e toma 403 ao
+  // responder, que é pior do que não ver.
+  const podeTudo = user.role === 'admin' || user.role === 'gestor' || user.role === 'closer';
+  if (podeTudo || lead.owner_id === userId || lead.owner_id == null) return { ok: true, lead, user };
 
   // Quem passou o lead adiante continua podendo falar com o cliente. Sem este
   // ramo, o SDR VÊ a conversa (a RLS da 0025 permite) mas toma 403 ao responder

@@ -251,7 +251,14 @@ export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Pro
             key={a.key}
             role="tab"
             aria-selected={aba === a.key}
-            onClick={() => setAba(a.key)}
+            onClick={() => {
+              setAba(a.key);
+              // "Equipe" e "Todos" agora vêm sem teto de 100 — são mais de mil
+              // conversas. Abrir com o filtro de quem espera resposta ligado é o
+              // que torna isso útil em vez de uma parede de nomes; o botão ao
+              // lado desliga quando alguém quiser ver a lista inteira.
+              if (a.key !== "meus") setSoNaoRespondidas(true);
+            }}
             className="wa-tab flex-1 px-2 py-2.5 text-[12px] font-semibold"
           >
             {a.label}
