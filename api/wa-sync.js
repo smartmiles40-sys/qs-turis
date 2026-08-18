@@ -119,7 +119,12 @@ export default async function handler(req, res) {
       res.setHeader('Content-Length', String(bytes.length));
       // O arquivo não muda: vale guardar no navegador.
       res.setHeader('Cache-Control', 'private, max-age=86400');
-      return res.status(200).send(bytes);
+      // `res.end`, e NÃO `res.send`: o helper da Vercel serializa objeto como
+      // JSON, e um Buffer é objeto — o navegador receberia texto no lugar do
+      // áudio e a decodificação falharia com "formato inválido". `end` escreve
+      // os bytes crus, que é o que queremos.
+      res.status(200);
+      return res.end(bytes);
     } catch (e) {
       console.warn('[wa-sync] áudio:', e?.message);
       return res.status(502).json({ error: 'Não consegui baixar o áudio' });

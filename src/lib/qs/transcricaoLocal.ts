@@ -49,6 +49,20 @@ async function prepararAudio(leadId: string, messageId: string): Promise<Float32
   const bruto = await resposta.arrayBuffer();
   if (!bruto.byteLength) throw new Error('o áudio veio vazio');
 
+  // Confere que veio ÁUDIO mesmo. Se o servidor devolver texto/JSON por engano,
+  // o decodificador falharia com um erro genérico de formato e a gente ficaria
+  // procurando problema no lugar errado — melhor dizer o que realmente chegou.
+  const primeiros = new Uint8Array(bruto.slice(0, 4));
+  const assinatura = String.fromCharCode(...primeiros);
+  const ehOgg = assinatura === 'OggS';
+  const ehWebm = primeiros[0] === 0x1a && primeiros[1] === 0x45;
+  const ehMp3 = assinatura.startsWith('ID3') || (primeiros[0] === 0xff && (primeiros[1] & 0xe0) === 0xe0);
+  const ehMp4 = String.fromCharCode(...new Uint8Array(bruto.slice(4, 8))) === 'ftyp';
+  if (!ehOgg && !ehWebm && !ehMp3 && !ehMp4) {
+    const amostra = new TextDecoder().decode(bruto.slice(0, 60)).replace(/\s+/g, ' ');
+    throw new Error(`o servidor não devolveu áudio (${bruto.byteLength} bytes, começa com "${amostra}")`);
+  }
+
   // ── Decodificar ──────────────────────────────────────────────────────────
   // ⚠️ NÃO pedir uma taxa de amostragem aqui. A primeira versão criava o
   // AudioContext já com 16 kHz (a taxa que o Whisper quer) e o navegador
@@ -118,6 +132,7 @@ export async function transcreverLocalmente(
     const m = String((e as Error)?.message || e);
     console.warn('[transcrição local]', m);
     if (m.includes('baixar')) return { error: 'Não consegui baixar o áudio.' };
+    if (m.includes('não devolveu áudio')) return { error: m };
     if (/decode|Unable to decode|EncodingError/i.test(m)) return { error: 'Não consegui abrir este formato de áudio.' };
     if (/fetch|network|Failed to fetch/i.test(m)) return { error: 'Falha de rede ao preparar a transcrição.' };
     return { error: `Não consegui transcrever: ${m.slice(0, 80)}` };
