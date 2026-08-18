@@ -130,7 +130,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { lead, ownerId, cadenceId, tasks, deduped } = await createInboundLead(body);
+    // Com &mover=1 a busca por duplicado ignora a janela de 24h: numa carga de
+    // resgate as pessoas estão no QS há meses, e sem isso todas duplicariam.
+    const { lead, ownerId, cadenceId, tasks, deduped } = await createInboundLead(body, { buscarEmQualquerEpoca: mover });
 
     // O lead JÁ existia e a URL pediu &mover=1: traz ele pra cadência da lista.
     // Sem isto, a lista de resgate não funciona na prática — a maioria dessas

@@ -367,7 +367,7 @@ function normSource(v) {
   return ALLOWED_SOURCE.has(s) ? s : 'integracao';
 }
 
-export async function createInboundLead(payload) {
+export async function createInboundLead(payload, opts = {}) {
   // Contato normalizado UMA vez — usado no dedupe, no patch e na gravação.
   const email = normEmail(payload.email);
   const phone = normPhone(payload.phone);
@@ -426,6 +426,34 @@ export async function createInboundLead(payload) {
       } catch (e) {
         console.warn('[leads] adoção por telefone falhou (segue criando):', e?.message);
       }
+    }
+  }
+
+  // 0c) CARGA DE LISTA (&mover=1): procura o mesmo telefone em QUALQUER ÉPOCA.
+  //
+  //     O dedupe 0b abaixo só olha as últimas 24h — janela feita pra retry do
+  //     n8n, não pra reprocessar a base. Numa carga de resgate isso é fatal: as
+  //     pessoas estão no QS há MESES, então todas passariam batido e virariam
+  //     card duplicado. Pior: cada duplicado dispara vincularLeadAoBitrix e
+  //     abre um negócio novo no Bitrix. Descoberto na marra em 18/08, com um
+  //     lead de 05/08 que duplicou num teste e criou o negócio 41747.
+  //
+  //     Vale também quando o Bitrix manda um ID de negócio NOVO pra alguém que
+  //     já está na base: o 0a só adota card sem bitrix_id, e aqui a intenção
+  //     declarada é justamente reencontrar quem já existe.
+  if (opts.buscarEmQualquerEpoca && phone) {
+    try {
+      const achado = await findLeadByPhone(phone);
+      if (achado?.id) {
+        const cheio = await rest(`qs_leads?select=*&id=eq.${encodeURIComponent(achado.id)}&limit=1`);
+        if (cheio?.[0]) {
+          return { lead: cheio[0], ownerId: cheio[0].owner_id, cadenceId: cheio[0].cadence_id, tasks: 0, deduped: true };
+        }
+      }
+    } catch (e) {
+      // Falha de leitura NÃO pode virar "então cria": criar seria duplicar.
+      console.warn('[leads] busca ampla por telefone falhou:', e?.message);
+      throw new Error('Não consegui conferir se este lead já existe — nada foi criado.');
     }
   }
 
