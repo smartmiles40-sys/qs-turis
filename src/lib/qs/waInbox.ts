@@ -456,12 +456,36 @@ export async function listMyThreads(limit = 2000): Promise<WaThread[]> {
 export async function countUnread(): Promise<number> {
   const { data: sessao } = await supabase.auth.getUser();
   const eu = sessao?.user?.id ?? null;
-  let q = supabase
-    .from("qs_wa_threads")
-    .select("unread, lead:qs_leads!inner(owner_id)")
-    .gt("unread", 0);
-  if (eu) q = q.eq("lead.owner_id", eu);
-  const { data, error } = await q;
+  if (!eu) return 0;
+
+  const { data: perfil } = await supabase.from("qs_users").select("role").eq("id", eu).maybeSingle();
+  const papel = (perfil as { role?: string } | null)?.role ?? "sdr";
+
+  // Gestão continua vendo o total da operação — é o número que ela usa pra
+  // saber se o time está dando conta. Só quem executa é que precisa de um
+  // badge sobre O SEU trabalho.
+  if (papel === "admin" || papel === "gestor") {
+    const { data, error } = await supabase.from("qs_wa_threads").select("unread").gt("unread", 0);
+    if (error) return 0;
+    return (data ?? []).reduce((s, r) => s + ((r as { unread: number }).unread || 0), 0);
+  }
+
+  // O closer não tem carteira: o que é "dele" são as conversas dos clientes
+  // com quem ele TEM REUNIÃO, mais as que lhe foram transferidas.
+  let meusLeads: string[] = [];
+  if (papel === "closer") {
+    const { data: reunioes } = await supabase
+      .from("qs_meetings")
+      .select("lead_id")
+      .eq("closer_id", eu)
+      .in("status", ["agendada", "confirmada"]);
+    meusLeads = [...new Set((reunioes ?? []).map((r) => (r as { lead_id: string }).lead_id))];
+  }
+
+  const q = supabase.from("qs_wa_threads").select("unread, lead:qs_leads!inner(owner_id)").gt("unread", 0);
+  const { data, error } = meusLeads.length
+    ? await q.or(`lead_id.in.(${meusLeads.join(",")}),lead.owner_id.eq.${eu}`)
+    : await q.eq("lead.owner_id", eu);
   if (error) return 0;
   return (data ?? []).reduce((s, r) => s + ((r as { unread: number }).unread || 0), 0);
 }
