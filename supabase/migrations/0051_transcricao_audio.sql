@@ -10,8 +10,9 @@
 -- entidade própria. Fica junto, some junto, e a RLS que já protege a mensagem
 -- protege o texto sem nenhuma regra nova.
 --
--- Guardar evita pagar duas vezes pelo mesmo áudio: transcreveu uma vez, todo
--- mundo que abrir a conversa depois lê na hora, de graça.
+-- A transcrição roda NA MÁQUINA do SDR (Whisper em WebAssembly, sem API e sem
+-- custo — decisão do Bruno em 18/08). Guardar o resultado evita reprocessar: um
+-- transcreveu, todo mundo que abrir a conversa depois lê na hora.
 --
 -- ADITIVA e opcional: sem esta migration o botão continua funcionando, só que o
 -- texto não fica salvo e cada clique refaz a transcrição.

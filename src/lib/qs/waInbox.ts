@@ -792,22 +792,15 @@ export async function reagirMensagem(
  * motivo em português pra tela repassar como está.
  */
 /**
- * Transcreve o áudio de uma mensagem. O texto fica guardado na própria mensagem,
- * então o segundo clique (de qualquer pessoa) volta instantâneo.
+ * Guarda o texto do áudio na mensagem. A transcrição em si acontece na máquina
+ * do SDR (ver transcricaoLocal.ts) — aqui só persistimos o resultado, pra quem
+ * abrir a conversa depois já ler sem processar de novo.
  */
-export async function transcreverAudio(leadId: string, messageId: string): Promise<{ texto?: string; error?: string }> {
-  try {
-    const res = await fetch("/api/wa-react", {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify({ leadId, messageId, acao: "transcrever" }),
-    });
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) return { error: d?.error || "Não consegui transcrever." };
-    return { texto: String(d?.texto || "") };
-  } catch {
-    return { error: "Sem conexão." };
-  }
+export async function salvarTranscricao(messageId: string, texto: string): Promise<void> {
+  const { error } = await supabase.from("qs_wa_messages").update({ transcricao: texto }).eq("id", messageId);
+  // Sem a migration 0051 a coluna não existe: o texto continua na tela desta
+  // sessão, só não fica salvo. Não vale incomodar o SDR com isso.
+  if (error) console.warn("[wa] transcrição não pôde ser salva:", error.message);
 }
 
 export async function apagarMensagem(

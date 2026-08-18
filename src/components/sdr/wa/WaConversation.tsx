@@ -17,7 +17,7 @@ import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
   listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros, getThreadInbox,
   reagirMensagem, salvarFigurinha, enviarFigurinha, apagarMensagem,
-  listWaModelos, sendWaTemplate, janelaFechaEm, humanizarJanela, transcreverAudio,
+  listWaModelos, sendWaTemplate, janelaFechaEm, humanizarJanela, salvarTranscricao,
   type WaMessage, type CannedResponse, type WaNumero, type Figurinha, type WaReacao, type WaModelo,
 } from "@/lib/qs/waInbox";
 import WaMenuContexto, { IconeMenu, PATHS, useToqueLongo, type ItemMenu, type PosMenu } from "./WaMenuContexto";
@@ -29,6 +29,7 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { WaAudio, WaAvatar, WaSeloNumero } from "./WaBits";
 import { WaTexto, tamanhoEmojiSolto, waPlain } from "./waFormat";
 import { webmParaOgg } from "@/lib/qs/opusRemux";
+import { transcreverLocalmente } from "@/lib/qs/transcricaoLocal";
 
 // O seletor carrega junto com a lista de emojis, e só quando a SDR abre pela
 // primeira vez — não é peso que todo mundo paga pra ver a conversa.
@@ -207,6 +208,8 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const [reagindoA, setReagindoA] = useState<string | null>(null);
   // Qual áudio está sendo transcrito agora (id da mensagem).
   const [transcrevendo, setTranscrevendo] = useState<string | null>(null);
+  // Só na primeira vez: o modelo precisa ser baixado antes de transcrever.
+  const [baixandoModelo, setBaixandoModelo] = useState<number | null>(null);
   // Onde estava o cursor no campo de escrever. Precisa ser lembrado por fora
   // porque escolher um emoji NÃO devolve o foco pro textarea — quem clicou em
   // três emojis seguidos, ou buscou "aviao", perderia o lugar a cada clique.
@@ -284,12 +287,20 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
   const transcrever = useCallback(async (m: WaMessage) => {
     if (m.transcricao) return;                 // já tem texto na tela
+    const audio = (m.attachments || []).find((a) => String(a.type || "").includes("audio"));
+    if (!audio?.url) return;
     setTranscrevendo(m.id);
-    const r = await transcreverAudio(leadId, m.id);
+    setBaixandoModelo(null);
+    // Roda NA MÁQUINA do SDR (Whisper em WebAssembly): nenhuma API, nenhum
+    // custo, e o áudio do cliente não sai do computador dele.
+    const r = await transcreverLocalmente(audio.url, (pct) => setBaixandoModelo(pct));
     setTranscrevendo(null);
-    if (r.error) { notifyError(r.error); return; }
+    setBaixandoModelo(null);
+    if (r.error || !r.texto) { notifyError(r.error || "Não identifiquei fala neste áudio."); return; }
     setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, transcricao: r.texto ?? null } : x)));
-  }, [leadId]);
+    // Guarda pra ninguém precisar transcrever de novo (migration 0051).
+    void salvarTranscricao(m.id, r.texto);
+  }, []);
 
   const copiar = useCallback(async (m: WaMessage) => {
     const t = waPlain(m.content) || "";
@@ -1008,7 +1019,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                       <p className="mt-1 mb-1 px-2 py-1.5 rounded-lg text-[12.5px] leading-[1.45] whitespace-pre-wrap break-words"
                          style={{ background: meu ? "rgba(0,0,0,.07)" : "var(--card2)", color: meu ? "var(--wa-ink)" : "var(--ink2)" }}>
                         {transcrevendo === m.id
-                          ? <span style={{ opacity: .7 }}>transcrevendo o áudio…</span>
+                          ? <span style={{ opacity: .7 }}>
+                              {baixandoModelo != null && baixandoModelo < 100
+                                ? `preparando a transcrição pela primeira vez… ${baixandoModelo}%`
+                                : "transcrevendo o áudio…"}
+                            </span>
                           : m.transcricao}
                       </p>
                     )}
