@@ -31,6 +31,7 @@ import {
   assertCanAccessLead, getSupabaseUserId, signatureName, nomeCurto, cw, cwConfigured,
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
+import { transcreverDeUrl, transcricaoLigada, motivoDaFalha } from './_transcrever.js';
 import {
   evoConfigured, evoInstanceForInbox, resolveJid, sendReaction, deleteForEveryone,
 } from './_evolution.js';
@@ -147,10 +148,11 @@ export default async function handler(req, res) {
   const messageId = String(body.messageId || '').trim();
   const emoji = String(body.emoji ?? '').trim();
   const apagar = String(body.acao || '').toLowerCase() === 'apagar';
+  const transcrever = String(body.acao || '').toLowerCase() === 'transcrever';
 
   if (!leadId || !messageId) return res.status(400).json({ error: 'leadId e messageId obrigatórios' });
   // 16 unidades cobre qualquer emoji composto (👨‍👩‍👧); corta abuso de texto.
-  if (!apagar && emoji.length > 16) return res.status(400).json({ error: 'Reação inválida' });
+  if (!apagar && !transcrever && emoji.length > 16) return res.status(400).json({ error: 'Reação inválida' });
 
   let auth;
   try {
@@ -173,6 +175,40 @@ export default async function handler(req, res) {
     );
     const msg = Array.isArray(rows) && rows[0];
     if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
+
+    // ── TRANSCREVER (Bruno, 18/08) ─────────────────────────────────────────
+    // Vive nesta rota, e não numa nova, pelo mesmo motivo do resto: o projeto
+    // está no teto de funções da Vercel. É uma AÇÃO SOBRE UMA MENSAGEM, que é
+    // exatamente o que este arquivo já faz (reagir, apagar).
+    if (transcrever) {
+      if (!transcricaoLigada()) {
+        return res.status(503).json({ error: motivoDaFalha('nao-configurado'), motivo: 'nao-configurado' });
+      }
+      const comAnexo = await rest(
+        `qs_wa_messages?select=attachments,transcricao&id=eq.${encodeURIComponent(messageId)}&limit=1`
+      ).catch(() => null);
+      const linha = Array.isArray(comAnexo) && comAnexo[0];
+      // Já transcrito? Devolve o que está gravado — não paga duas vezes pelo
+      // mesmo áudio, e a resposta é instantânea.
+      if (linha?.transcricao) return res.status(200).json({ ok: true, texto: linha.transcricao, cache: true });
+
+      const audio = (linha?.attachments || []).find((a) => String(a.type || '').includes('audio'));
+      if (!audio?.url) return res.status(400).json({ error: motivoDaFalha('sem-audio'), motivo: 'sem-audio' });
+
+      const r = await transcreverDeUrl(audio.url);
+      if (r.erro) return res.status(r.erro === 'nao-configurado' ? 503 : 422).json({ error: motivoDaFalha(r.erro), motivo: r.erro });
+
+      // Guarda pra não transcrever de novo. Coluna opcional (migration 0051):
+      // sem ela o texto ainda volta pra tela, só não fica salvo.
+      try {
+        await rest(`qs_wa_messages?id=eq.${encodeURIComponent(messageId)}`, {
+          method: 'PATCH', body: { transcricao: r.texto }, prefer: 'return=minimal',
+        });
+      } catch (e) {
+        console.warn('[wa-react] transcrição não pôde ser salva (falta a 0051?):', e?.message);
+      }
+      return res.status(200).json({ ok: true, texto: r.texto });
+    }
 
     // ── APAGAR PARA TODOS ─────────────────────────────────────────────────
     if (apagar) {

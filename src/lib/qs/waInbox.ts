@@ -44,6 +44,8 @@ export interface WaMessage {
   reply_to_source_id?: string | null;
   /** Trecho da citada, guardado junto porque ela pode nem estar importada. */
   reply_preview?: string | null;
+  /** Texto do áudio (migration 0051). Só existe depois que alguém transcreve. */
+  transcricao?: string | null;
 }
 
 export interface WaThreadLead {
@@ -789,6 +791,25 @@ export async function reagirMensagem(
  * O servidor recusa mensagem do cliente e mensagem velha demais, e devolve o
  * motivo em português pra tela repassar como está.
  */
+/**
+ * Transcreve o áudio de uma mensagem. O texto fica guardado na própria mensagem,
+ * então o segundo clique (de qualquer pessoa) volta instantâneo.
+ */
+export async function transcreverAudio(leadId: string, messageId: string): Promise<{ texto?: string; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-react", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ leadId, messageId, acao: "transcrever" }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: d?.error || "Não consegui transcrever." };
+    return { texto: String(d?.texto || "") };
+  } catch {
+    return { error: "Sem conexão." };
+  }
+}
+
 export async function apagarMensagem(
   leadId: string,
   messageId: string

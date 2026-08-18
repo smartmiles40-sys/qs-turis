@@ -17,7 +17,7 @@ import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
   listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros, getThreadInbox,
   reagirMensagem, salvarFigurinha, enviarFigurinha, apagarMensagem,
-  listWaModelos, sendWaTemplate, janelaFechaEm, humanizarJanela,
+  listWaModelos, sendWaTemplate, janelaFechaEm, humanizarJanela, transcreverAudio,
   type WaMessage, type CannedResponse, type WaNumero, type Figurinha, type WaReacao, type WaModelo,
 } from "@/lib/qs/waInbox";
 import WaMenuContexto, { IconeMenu, PATHS, useToqueLongo, type ItemMenu, type PosMenu } from "./WaMenuContexto";
@@ -40,6 +40,11 @@ const WaModelos = lazyPagina(() => import("./WaModelos"));
 
 // As seis do WhatsApp — reagir de novo com a mesma troca por remoção.
 const REACOES_RAPIDAS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+/** A mensagem tem áudio? (é o que habilita transcrever) */
+function temAudio(m: WaMessage): boolean {
+  return (m.attachments || []).some((a) => String(a.type || "").includes("audio"));
+}
 
 /** É uma figurinha? (um anexo de imagem .webp, sem texto junto) */
 function urlDeFigurinha(m: WaMessage): string | null {
@@ -200,6 +205,8 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const [mostrarFigurinhas, setMostrarFigurinhas] = useState(false);
   // Qual mensagem está com a paleta de reação aberta (id) — uma por vez.
   const [reagindoA, setReagindoA] = useState<string | null>(null);
+  // Qual áudio está sendo transcrito agora (id da mensagem).
+  const [transcrevendo, setTranscrevendo] = useState<string | null>(null);
   // Onde estava o cursor no campo de escrever. Precisa ser lembrado por fora
   // porque escolher um emoji NÃO devolve o foco pro textarea — quem clicou em
   // três emojis seguidos, ou buscou "aviao", perderia o lugar a cada clique.
@@ -275,6 +282,15 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     notifySuccess("Apagada no WhatsApp do cliente. Continua aqui no histórico.");
   }, [leadId]);
 
+  const transcrever = useCallback(async (m: WaMessage) => {
+    if (m.transcricao) return;                 // já tem texto na tela
+    setTranscrevendo(m.id);
+    const r = await transcreverAudio(leadId, m.id);
+    setTranscrevendo(null);
+    if (r.error) { notifyError(r.error); return; }
+    setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, transcricao: r.texto ?? null } : x)));
+  }, [leadId]);
+
   const copiar = useCallback(async (m: WaMessage) => {
     const t = waPlain(m.content) || "";
     if (!t) { notifyError("Esta mensagem não tem texto para copiar."); return; }
@@ -308,6 +324,15 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         onClick: () => setReagindoA(m.id),
       },
       {
+        id: "transcrever",
+        label: m.transcricao ? "Já transcrito" : "Transcrever áudio",
+        icone: <IconeMenu d={PATHS.copiar} />,
+        // Só faz sentido em mensagem que tem áudio — nos dois sentidos: o que o
+        // cliente mandou (pra ler em vez de ouvir) e o que a gente gravou.
+        escondido: !temAudio(m),
+        onClick: () => void transcrever(m),
+      },
+      {
         id: "copiar",
         label: "Copiar texto",
         icone: <IconeMenu d={PATHS.copiar} />,
@@ -327,7 +352,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         onClick: () => void apagar(m),
       },
     ];
-  }, [apagar, copiar]);
+  }, [apagar, copiar, transcrever]);
 
   useEffect(() => { listCanned().then(setCanned); }, []);
   useEffect(() => { listWaNumeros().then(setNumeros); }, []);
@@ -974,6 +999,18 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                       </span>
                     ) : (
                       m.attachments?.map((a, k) => <Anexo key={k} a={a} meu={meu} />)
+                    )}
+                    {/* TRANSCRIÇÃO DO ÁUDIO — o texto do que foi falado, embaixo
+                        do player. Vale nos dois sentidos: ler o que o cliente
+                        mandou sem precisar ouvir, e conferir/copiar o que a
+                        gente gravou. Só aparece depois que alguém pede. */}
+                    {temAudio(m) && (m.transcricao || transcrevendo === m.id) && (
+                      <p className="mt-1 mb-1 px-2 py-1.5 rounded-lg text-[12.5px] leading-[1.45] whitespace-pre-wrap break-words"
+                         style={{ background: meu ? "rgba(0,0,0,.07)" : "var(--card2)", color: meu ? "var(--wa-ink)" : "var(--ink2)" }}>
+                        {transcrevendo === m.id
+                          ? <span style={{ opacity: .7 }}>transcrevendo o áudio…</span>
+                          : m.transcricao}
+                      </p>
                     )}
                     {m.content && (
                       <p className="whitespace-pre-wrap break-words"
