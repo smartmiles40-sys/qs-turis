@@ -326,9 +326,17 @@ export default async function handler(req, res) {
           } : {}),
         },
       });
-      tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);
     } catch (e) {
       console.error('[wa-send] enviado, mas falhou ao gravar no QS:', e?.message);
+    }
+
+    // FORA do try acima de propósito: a atividade não pode depender da gravação
+    // da bolha. Quando as duas ficavam juntas, um tropeço ao gravar a mensagem
+    // levava junto a baixa da tarefa — o cliente atendido e a fila cobrando.
+    try {
+      tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);
+    } catch (e) {
+      console.warn('[wa-send] não consegui concluir a atividade:', e?.message);
     }
 
     return res.status(200).json({ ok: true, conversationId, messageId: sent?.id ?? null, tarefaConcluida: tarefa });

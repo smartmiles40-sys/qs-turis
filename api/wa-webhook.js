@@ -20,7 +20,7 @@
 // log na Vercel com o motivo.
 // -----------------------------------------------------------------------------
 
-import { findLeadByPhone, ingestMessage, inboxAceita } from './_wa.js';
+import { findLeadByPhone, ingestMessage, inboxAceita, completeWhatsAppTask, directionOf } from './_wa.js';
 import { insert, rest, segredoConfere } from './_supabaseAdmin.js';
 
 /**
@@ -250,7 +250,29 @@ export default async function handler(req, res) {
       inboxId,
     });
 
-    return res.status(200).json({ ok: true, leadId: lead.id, novo: saved });
+    // ── A ATIVIDADE FECHA VENHA A RESPOSTA DE ONDE VIER ────────────────────
+    // Antes, só o botão de enviar do QS baixava a tarefa de WhatsApp. Quem
+    // respondia por fora — pela caixa do Chatwoot, pelo aparelho, ou por
+    // qualquer automação que fale pela API oficial — deixava a atividade em
+    // aberto: o cliente já tinha sido atendido e a fila continuava cobrando.
+    //
+    // Aqui a origem não importa: se saiu uma mensagem NOSSA pra esse lead, o
+    // toque de WhatsApp do dia está feito. Chamar duas vezes não atrapalha —
+    // a função só encosta em tarefa que ainda está `pendente`.
+    //
+    // Só em `message_created`: `message_updated` traz mudança de STATUS, e uma
+    // mensagem que virou "failed" não pode passar por atendimento feito.
+    let tarefa = null;
+    const ehNossa = directionOf(message) === 'out' && message?.private !== true;
+    if (ehNossa && (!event || event === 'message_created')) {
+      try {
+        tarefa = await completeWhatsAppTask(lead.id, lead.owner_id ?? null);
+      } catch (e) {
+        console.warn('[wa-webhook] não consegui concluir a atividade:', e?.message);
+      }
+    }
+
+    return res.status(200).json({ ok: true, leadId: lead.id, novo: saved, tarefaConcluida: tarefa });
   } catch (e) {
     // Erro nosso: loga e responde 200 mesmo assim (ver cabeçalho do arquivo).
     console.error('[wa-webhook]', e?.message, e?.details || '');
