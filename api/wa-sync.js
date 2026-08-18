@@ -79,6 +79,53 @@ export default async function handler(req, res) {
   const leadId = String(req.query?.leadId || '').trim();
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
 
+  // ── Modo ÁUDIO: entrega o arquivo pro navegador ───────────────────────────
+  // Por que existe: o áudio mora no Chatwoot, que NÃO manda cabeçalho de CORS.
+  // A tag <audio> toca (mídia não precisa de CORS), mas ler os BYTES por script
+  // é bloqueado pelo navegador — e a transcrição, que roda na máquina do SDR,
+  // precisa exatamente dos bytes. Buscar aqui no servidor resolve: servidor com
+  // servidor não tem CORS, e devolvemos o arquivo já liberado.
+  //
+  // Vive nesta rota (e não numa nova) pela mesma razão do modo `?fotos=`: o
+  // projeto está no teto prático de funções da Vercel.
+  if (req.query?.audio) {
+    let permissao;
+    try {
+      permissao = await assertCanAccessLead(userId, leadId);
+    } catch {
+      return res.status(500).json({ error: 'Falha ao validar o lead' });
+    }
+    if (!permissao.ok) return res.status(permissao.reason === 'lead-de-outro-sdr' ? 403 : 404).json({ error: 'Sem acesso' });
+
+    const msgId = String(req.query.audio);
+    let linha;
+    try {
+      const rows = await rest(
+        `qs_wa_messages?select=attachments&id=eq.${encodeURIComponent(msgId)}` +
+        `&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
+      );
+      linha = Array.isArray(rows) && rows[0];
+    } catch (e) {
+      console.warn('[wa-sync] áudio: consulta falhou:', e?.message);
+    }
+    const anexo = (linha?.attachments || []).find((a) => String(a.type || '').includes('audio'));
+    if (!anexo?.url) return res.status(404).json({ error: 'Esta mensagem não tem áudio' });
+
+    try {
+      const r = await fetch(anexo.url, { redirect: 'follow' });
+      if (!r.ok) return res.status(502).json({ error: 'Não consegui baixar o áudio' });
+      const bytes = Buffer.from(await r.arrayBuffer());
+      res.setHeader('Content-Type', r.headers.get('content-type') || 'audio/ogg');
+      res.setHeader('Content-Length', String(bytes.length));
+      // O arquivo não muda: vale guardar no navegador.
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+      return res.status(200).send(bytes);
+    } catch (e) {
+      console.warn('[wa-sync] áudio:', e?.message);
+      return res.status(502).json({ error: 'Não consegui baixar o áudio' });
+    }
+  }
+
   let auth;
   try {
     auth = await assertCanAccessLead(userId, leadId);

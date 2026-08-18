@@ -589,7 +589,7 @@ export async function markThreadUnread(leadId: string): Promise<boolean> {
 
 // ── Chamadas ao servidor ────────────────────────────────────────────────────
 
-async function authHeaders(): Promise<Record<string, string>> {
+export async function authHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   try {
     const { data } = await supabase.auth.getSession();

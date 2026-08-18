@@ -30,9 +30,21 @@ function obterWorker(): Worker {
   return worker;
 }
 
-/** Baixa o arquivo e devolve o sinal no formato que o Whisper espera. */
-async function prepararAudio(url: string): Promise<Float32Array> {
-  const resposta = await fetch(url);
+/**
+ * Baixa o arquivo e devolve o sinal no formato que o Whisper espera.
+ *
+ * O áudio NÃO é buscado direto no Chatwoot: ele não manda cabeçalho de CORS, e
+ * o navegador bloqueia a leitura dos bytes por script (a tag <audio> toca
+ * normalmente, porque mídia não passa por essa regra — foi o que fez a primeira
+ * versão falhar com "não consegui transcrever"). Quem busca é o nosso servidor,
+ * em /api/wa-sync?audio=, que entrega o arquivo já liberado.
+ */
+async function prepararAudio(leadId: string, messageId: string): Promise<Float32Array> {
+  const { authHeaders } = await import('@/lib/qs/waInbox');
+  const resposta = await fetch(
+    `/api/wa-sync?leadId=${encodeURIComponent(leadId)}&audio=${encodeURIComponent(messageId)}`,
+    { headers: await authHeaders() }
+  );
   if (!resposta.ok) throw new Error('não consegui baixar o áudio');
   const bruto = await resposta.arrayBuffer();
 
@@ -58,12 +70,14 @@ async function prepararAudio(url: string): Promise<Float32Array> {
  * modelo na PRIMEIRA vez (depois disso ele vem do cache e nem é chamado).
  */
 export async function transcreverLocalmente(
-  url: string,
+  leadId: string,
+  messageId: string,
   onProgresso?: (pct: number) => void
 ): Promise<{ texto?: string; error?: string }> {
   try {
     aoBaixar = onProgresso ?? null;
-    const audio = await prepararAudio(url);
+    const audio = await prepararAudio(leadId, messageId);
+    if (!audio.length) return { error: 'Este áudio está vazio.' };
     const id = String(proximoId++);
     const w = obterWorker();
     const texto = await new Promise<string>((resolve, reject) => {
@@ -72,9 +86,14 @@ export async function transcreverLocalmente(
     });
     return { texto: texto.trim() };
   } catch (e) {
+    // A mensagem real vai pro console: sem ela, todo problema virava o mesmo
+    // "não consegui transcrever" e não dava pra saber o que arrumar.
     const m = String((e as Error)?.message || e);
     console.warn('[transcrição local]', m);
-    return { error: m.includes('baixar') ? 'Não consegui baixar o áudio.' : 'Não consegui transcrever este áudio.' };
+    if (m.includes('baixar')) return { error: 'Não consegui baixar o áudio.' };
+    if (/decode|Unable to decode|EncodingError/i.test(m)) return { error: 'Não consegui abrir este formato de áudio.' };
+    if (/fetch|network|Failed to fetch/i.test(m)) return { error: 'Falha de rede ao preparar a transcrição.' };
+    return { error: `Não consegui transcrever: ${m.slice(0, 80)}` };
   } finally {
     aoBaixar = null;
   }

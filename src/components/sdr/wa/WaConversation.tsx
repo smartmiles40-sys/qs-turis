@@ -287,20 +287,19 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
   const transcrever = useCallback(async (m: WaMessage) => {
     if (m.transcricao) return;                 // já tem texto na tela
-    const audio = (m.attachments || []).find((a) => String(a.type || "").includes("audio"));
-    if (!audio?.url) return;
+    if (!temAudio(m)) return;
     setTranscrevendo(m.id);
     setBaixandoModelo(null);
     // Roda NA MÁQUINA do SDR (Whisper em WebAssembly): nenhuma API, nenhum
     // custo, e o áudio do cliente não sai do computador dele.
-    const r = await transcreverLocalmente(audio.url, (pct) => setBaixandoModelo(pct));
+    const r = await transcreverLocalmente(leadId, m.id, (pct) => setBaixandoModelo(pct));
     setTranscrevendo(null);
     setBaixandoModelo(null);
     if (r.error || !r.texto) { notifyError(r.error || "Não identifiquei fala neste áudio."); return; }
     setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, transcricao: r.texto ?? null } : x)));
     // Guarda pra ninguém precisar transcrever de novo (migration 0051).
     void salvarTranscricao(m.id, r.texto);
-  }, []);
+  }, [leadId]);
 
   const copiar = useCallback(async (m: WaMessage) => {
     const t = waPlain(m.content) || "";
