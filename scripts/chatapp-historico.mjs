@@ -104,7 +104,7 @@ async function autenticar() {
 async function descobrirLicenca() {
   if (ca.CHATAPP_LICENSE_ID) return ca.CHATAPP_LICENSE_ID;
   const d = await chatapp('/v1/licenses');
-  const lista = Array.isArray(d) ? d : (d?.items || d?.data || d?.licenses || []);
+  const lista = extrairLista(d);
   if (!lista.length) throw new Error('a conta não tem nenhuma licença visível para este usuário');
   const escolhida = lista[0];
   const id = escolhida.licenseId ?? escolhida.id;
@@ -128,7 +128,7 @@ async function listarChats({ maxPaginas = 50, limit = 100 } = {}) {
     const q = new URLSearchParams({ limit: String(limit) });
     if (lastTime) q.set('lastTime', String(lastTime));
     const d = await chatapp(`${raiz()}/chats?${q}`);
-    const lote = Array.isArray(d) ? d : (d?.items || d?.data || d?.chats || []);
+    const lote = extrairLista(d);
     if (!lote.length) break;
     todos.push(...lote);
     const ultimo = lote[lote.length - 1];
@@ -141,9 +141,32 @@ async function listarChats({ maxPaginas = 50, limit = 100 } = {}) {
   return todos;
 }
 
-async function listarMensagens(chatId, { limit = 200 } = {}) {
-  const d = await chatapp(`${raiz()}/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}`);
-  return Array.isArray(d) ? d : (d?.items || d?.data || d?.messages || []);
+async function listarMensagens(chatId, { maxPaginas = 20 } = {}) {
+  // Teto da API: 100 por página (mandar 200 devolve 422). Pagina por `lastTime`,
+  // igual à lista de conversas, até esgotar ou bater o teto de segurança.
+  const todas = [];
+  let lastTime = null;
+  for (let i = 0; i < maxPaginas; i++) {
+    const q = new URLSearchParams({ limit: '100' });
+    if (lastTime) q.set('lastTime', String(lastTime));
+    const d = await chatapp(`${raiz()}/chats/${encodeURIComponent(chatId)}/messages?${q}`);
+    const lote = extrairLista(d);
+    if (!lote.length) break;
+    todas.push(...lote);
+    const t = lote[lote.length - 1]?.time;
+    if (!t || t === lastTime) break;
+    lastTime = t;
+  }
+  return todas;
+}
+
+/** A API responde {success, data:{items:[...]}} — mas nem todo endpoint segue. */
+function extrairLista(d) {
+  if (Array.isArray(d)) return d;
+  if (Array.isArray(d?.data?.items)) return d.data.items;
+  if (Array.isArray(d?.items)) return d.items;
+  if (Array.isArray(d?.data)) return d.data;
+  return [];
 }
 
 // ── QS ──────────────────────────────────────────────────────────────────────
@@ -158,12 +181,48 @@ async function qsGet(path) {
   return Array.isArray(j) ? j : [];
 }
 
-/** Mesma regra do servidor: casa pelos 8 últimos dígitos, o mais recente vence. */
-async function acharLead(telefone) {
+// ── Índices carregados UMA vez ──────────────────────────────────────────────
+// São 3000 conversas. Consultar o banco por mensagem seriam dezenas de milhares
+// de idas — horas de execução. Duas leituras grandes no começo resolvem tudo em
+// memória: quem já está no QS (por wamid) e o telefone de cada lead.
+
+const jaNoQs = new Set();      // wamids que o QS já tem
+const leadPorFone = new Map(); // 8 últimos dígitos -> { id, full_name }
+
+async function carregarIndices() {
+  process.stdout.write('  carregando o que o QS já tem… ');
+  let de = 0;
+  for (;;) {
+    const r = await fetch(`${SB}/rest/v1/qs_wa_messages?select=source_id&source_id=not.is.null`, {
+      headers: { ...H, Range: `${de}-${de + 999}` },
+    });
+    const lote = await r.json().catch(() => []);
+    if (!Array.isArray(lote) || !lote.length) break;
+    for (const m of lote) if (m.source_id) jaNoQs.add(m.source_id);
+    if (lote.length < 1000) break;
+    de += 1000;
+  }
+  let d2 = 0;
+  for (;;) {
+    const r = await fetch(`${SB}/rest/v1/qs_leads?select=id,full_name,phone&phone=not.is.null&order=updated_at.desc`, {
+      headers: { ...H, Range: `${d2}-${d2 + 999}` },
+    });
+    const lote = await r.json().catch(() => []);
+    if (!Array.isArray(lote) || !lote.length) break;
+    for (const l of lote) {
+      const d8 = String(l.phone || '').replace(/\D/g, '').slice(-8);
+      // O primeiro vence: a busca vem ordenada por atualização, igual ao servidor.
+      if (d8.length === 8 && !leadPorFone.has(d8)) leadPorFone.set(d8, { id: l.id, full_name: l.full_name });
+    }
+    if (lote.length < 1000) break;
+    d2 += 1000;
+  }
+  console.log(`${jaNoQs.size} mensagens já no QS · ${leadPorFone.size} leads com telefone`);
+}
+
+function acharLead(telefone) {
   const d8 = String(telefone || '').replace(/\D/g, '').slice(-8);
-  if (d8.length < 8) return null;
-  const r = await qsGet(`qs_leads?select=id,full_name&phone=ilike.*${d8}*&order=updated_at.desc&limit=1`);
-  return r[0] || null;
+  return d8.length === 8 ? (leadPorFone.get(d8) || null) : null;
 }
 
 /**
@@ -182,25 +241,44 @@ function idNoQs(idOriginal) {
   return FAIXA_CHATAPP + h;
 }
 
+/** O wamid: o MESMO id que o Chatwoot guarda em source_id. É ele que evita
+ *  reimportar uma mensagem que já entrou no QS pelo caminho normal. */
+function wamid(msg) {
+  const id = String(msg?.id ?? msg?.internalId ?? '');
+  return id.startsWith('wamid.') ? id : null;
+}
+
+function jaExiste(msg) {
+  const w = wamid(msg);
+  return !!w && jaNoQs.has(w);
+}
+
 async function gravar({ leadId, chatId, msg }) {
+  // O texto mora em message.text (ou na legenda do anexo) — `message` é objeto.
+  const texto = String(msg?.message?.text || msg?.message?.caption || '').slice(0, 8000);
+  if (!texto.trim()) return { pulou: 'sem-texto' };
+
+  // `time` vem em SEGUNDOS.
+  const quando = new Date(Number(msg?.time || 0) * 1000).toISOString();
+
   const corpo = {
     p_lead: leadId,
     p_conv: null,
-    p_msg: idNoQs(msg.id ?? msg.messageId ?? msg.uuid),
-    p_direction: msg.fromMe || msg.outgoing || msg.direction === 'out' ? 'out' : 'in',
-    p_content: String(msg.text ?? msg.body ?? msg.message ?? msg.content ?? '').slice(0, 8000),
+    p_msg: idNoQs(msg.id ?? msg.internalId),
+    // side é "in"/"out"; fromMe confirma. Mensagem nossa = out.
+    p_direction: (msg?.side === 'out' || msg?.fromMe === true) ? 'out' : 'in',
+    p_content: texto,
     p_attachments: [],
-    p_sender: msg.senderName ?? msg.author ?? null,
-    p_sent_at: new Date(Number(msg.time ?? msg.timestamp ?? msg.createdAt ?? Date.now()) * (String(msg.time ?? '').length > 11 ? 1 : 1000)).toISOString(),
+    p_sender: msg?.fromUser?.name ?? null,
+    p_sent_at: quando,
     p_contact: null,
     p_can_reply: null,
     p_inbox: null,
-    p_source: `chatapp:${chatId}`,
+    p_source: wamid(msg),      // permite casar com o que já veio do Chatwoot
     p_status: null,
     p_reply_to: null,
     p_reply_prev: null,
   };
-  if (!corpo.p_content.trim()) return { pulou: 'sem-texto' };
   if (!APLICAR) return { simulado: true };
   const r = await fetch(`${SB}/rest/v1/rpc/qs_wa_ingest`, { method: 'POST', headers: H, body: JSON.stringify(corpo) });
   const t = await r.text();
@@ -235,23 +313,25 @@ async function explorar() {
 async function importar() {
   if (!SB || !SRK) { console.error('faltam SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY no .env'); process.exit(1); }
   await autenticar();
+  await carregarIndices();
   const chats = await listarChats();
   console.log(`${chats.length} conversas no ChatApp\n`);
 
-  let comLead = 0, semLead = 0, gravadas = 0, novas = 0, erros = 0;
+  let comLead = 0, semLead = 0, gravadas = 0, novas = 0, erros = 0, repetidas = 0;
   for (const c of chats) {
     const chatId = c.chatId ?? c.id;
     const telefone = c.phone ?? c.chatId ?? c.contactPhone ?? '';
-    const lead = await acharLead(telefone);
+    const lead = acharLead(telefone);
     if (!lead) { semLead++; continue; }
     comLead++;
     let msgs = [];
     try { msgs = await listarMensagens(chatId); }
     catch (e) { erros++; console.warn(`  erro ao ler ${chatId}: ${e.message}`); continue; }
     for (const m of msgs) {
+      if (jaExiste(m)) { repetidas++; continue; }
       const r = await gravar({ leadId: lead.id, chatId, msg: m });
       if (r.erro) { erros++; console.warn(`  ${r.erro}`); }
-      else if (r.novo) { novas++; gravadas++; }
+      else if (r.novo) { novas++; gravadas++; const w = wamid(m); if (w) jaNoQs.add(w); }
       else if (!r.pulou) gravadas++;
     }
     process.stdout.write(`\r  ${comLead} conversas casadas · ${gravadas} mensagens · ${novas} novas`);
@@ -260,6 +340,7 @@ async function importar() {
   console.log(`  conversas com lead no QS: ${comLead}`);
   console.log(`  conversas sem lead:       ${semLead}`);
   console.log(`  mensagens processadas:    ${gravadas} (${novas} novas)`);
+  console.log(`  ja estavam no QS:         ${repetidas}`);
   console.log(`  erros:                    ${erros}`);
 }
 
