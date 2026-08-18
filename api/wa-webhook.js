@@ -20,8 +20,7 @@
 // log na Vercel com o motivo.
 // -----------------------------------------------------------------------------
 
-import { findLeadByPhone, ingestMessage, inboxAceita, canalDaInbox, canalEhApiOficial } from './_wa.js';
-import { createInboundLead } from './_leads.js';
+import { findLeadByPhone, ingestMessage, inboxAceita } from './_wa.js';
 import { insert, rest, segredoConfere } from './_supabaseAdmin.js';
 
 /**
@@ -220,37 +219,17 @@ export default async function handler(req, res) {
     }
 
     if (!lead) lead = await findLeadByPhone(phone);
-    if (!lead) {
-      // ── NÚMERO DA API OFICIAL: cria o card na hora (Bruno, 14/08) ─────────
-      // Quem escreve pro número oficial é cliente falando com a AGÊNCIA — lead
-      // antigo do Bitrix, cliente de campanha, indicação. Descartar pra
-      // triagem aqui era perder atendimento: "se for um lead antigo mandando
-      // mensagem na API, não vai se criar card e isso é um problema". O card
-      // nasce pelo caminho normal (createInboundLead): rodízio dá o dono,
-      // cadência gera a fila, e o resgate embutido puxa o histórico.
-      // Os números da Evolution seguem indo pra TRIAGEM — neles escreve também
-      // colega de time e pós-venda, e card automático sujaria a base.
-      const nome = extractNome(body, message);
-      try {
-        const canal = await canalDaInbox(inboxId);
-        if (canalEhApiOficial(canal)) {
-          const r = await createInboundLead({
-            full_name: nome || `WhatsApp ${String(phone).replace(/\D/g, '').slice(-8)}`,
-            phone,
-            source: 'api',
-            segment: 'WhatsApp (API oficial)',
-          });
-          if (r?.lead) {
-            lead = r.lead;
-            console.log(`[wa-webhook] card criado pela API oficial: lead ${lead.id} (${nome || phone})`);
-          }
-        }
-      } catch (e) {
-        // Criação falhou: cai no registro de descarte logo abaixo — a mensagem
-        // não pode sumir sem rastro em NENHUM caminho.
-        console.error('[wa-webhook] auto-criação pela API oficial falhou:', e?.message);
-      }
-    }
+    // ── NÃO SE CRIA CARD AUTOMÁTICO (Bruno, 18/08 — urgente) ───────────────
+    // De 13/08 a 18/08 a caixa oficial criava lead sozinha pra QUALQUER número
+    // que escrevesse. A intenção era não perder cliente antigo; o efeito real
+    // foram ~18 cards de gente que não é lead novo — cliente já cadastrado com
+    // telefone em outro formato, pós-venda, colega de time, curioso. Base suja
+    // é pior que fila de triagem: polui métrica, cadência e rodízio, e alguém
+    // tem que limpar depois.
+    //
+    // A mensagem NÃO SE PERDE: cai no registro logo abaixo e aparece na triagem
+    // ("N sem lead", na aba de WhatsApp), onde uma pessoa decide se vira lead.
+    // Criar o card continua sendo um clique — só deixou de ser automático.
     if (!lead) {
       // Não é erro: é gente falando com a agência que ainda não virou lead.
       // Registrado porque essa lista É oportunidade comercial — e porque, sem
