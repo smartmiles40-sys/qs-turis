@@ -204,6 +204,57 @@ $$;
 
 grant execute on function qs_wa_salvar_transcricao(uuid, text) to authenticated;
 
+
+-- ---------------------------------------------------------------------------
+-- ENCERRAR A COBRANÇA DE CONFIRMAÇÃO — hoje ela sobra na fila do SDR.
+--
+-- Quando o closer registra o desfecho, o app tenta encerrar a atividade
+-- "confirmar presença na reunião". Essa tarefa é do SDR que agendou, e
+-- tasks_update exige owner_id = auth.uid(): o update do closer atinge ZERO
+-- linhas e não levanta erro. Resultado: a reunião já foi registrada como
+-- realizada e o SDR continua com "confirmar reunião" pendente na fila dele.
+--
+-- Só encerra tarefa amarrada àquela reunião (tag meeting:<id>), e só se quem
+-- chamou pode mexer na reunião — não é um poder geral sobre a fila alheia.
+-- ---------------------------------------------------------------------------
+create or replace function qs_encerrar_confirmacao(p_meeting uuid, p_motivo text)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_n     integer := 0;
+  v_dono  uuid;
+  v_closer uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'Sessão inválida — entre de novo no QS.' using errcode = '42501';
+  end if;
+
+  select owner_id, closer_id into v_dono, v_closer from qs_meetings where id = p_meeting;
+  if not found then
+    raise exception 'Reunião não encontrada.' using errcode = 'P0002';
+  end if;
+
+  -- Mesma regra de quem pode lançar o desfecho (0027): gestão, quem agendou
+  -- ou o especialista da reunião.
+  if not (qs_is_manager() or v_dono = auth.uid() or v_closer = auth.uid()) then
+    raise exception 'Esta reunião não é sua.' using errcode = '42501';
+  end if;
+
+  update qs_tasks
+     set status = 'ignorada', skip_reason = p_motivo
+   where tags @> array['meeting:' || p_meeting::text]
+     and status in ('pendente', 'atrasada');
+  get diagnostics v_n = row_count;
+
+  return v_n;
+end;
+$$;
+
+grant execute on function qs_encerrar_confirmacao(uuid, text) to authenticated;
+
 -- ── VERIFICAÇÃO ──────────────────────────────────────────────────────────────
 -- Aqui, logo depois do Run (conferindo que o SDR NÃO ganhou o lead órfão):
 select policyname, cmd, qual::text from pg_policies

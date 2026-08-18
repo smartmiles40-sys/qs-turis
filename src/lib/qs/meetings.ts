@@ -309,11 +309,25 @@ export async function sweepOutcomeTasks(): Promise<void> {
 /** Encerra a tarefa de confirmação (reunião cancelada, realizada, no-show ou excluída). */
 export async function closeConfirmTask(meetingId: string, motivo: string): Promise<void> {
   try {
-    await supabase
-      .from("qs_tasks")
-      .update({ status: "ignorada", skip_reason: motivo })
-      .contains("tags", [meetingTag(meetingId)])
-      .in("status", ["pendente", "atrasada"]);
+    // Via RPC: a tarefa de confirmação é do SDR que agendou, e tasks_update
+    // exige owner_id = auth.uid(). Quando quem registra o desfecho é o CLOSER,
+    // o update direto atingia zero linhas sem erro — a reunião ficava
+    // registrada como realizada e o SDR seguia com "confirmar reunião"
+    // pendente na fila. A função da 0052 confere quem pode mexer NAQUELA
+    // reunião e só encosta nas tarefas com a tag dela.
+    const { error } = await supabase.rpc("qs_encerrar_confirmacao", {
+      p_meeting: meetingId,
+      p_motivo: motivo,
+    });
+    if (error) {
+      // Enquanto a 0052 não estiver aplicada, mantém o caminho antigo — que
+      // funciona pro SDR dono e é inofensivo pros demais.
+      await supabase
+        .from("qs_tasks")
+        .update({ status: "ignorada", skip_reason: motivo })
+        .contains("tags", [meetingTag(meetingId)])
+        .in("status", ["pendente", "atrasada"]);
+    }
   } catch (e) {
     console.warn("[meetings] falha ao encerrar a atividade de confirmação:", e);
   }
