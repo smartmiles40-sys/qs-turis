@@ -186,7 +186,7 @@ async function podeMexerNoLead(userId, leadId) {
   const lead = (Array.isArray(leads) && leads[0]) || null;
   if (!user || user.is_active === false) return { ok: false, reason: 'usuario-invalido' };
   if (!lead) return { ok: false, reason: 'lead-inexistente' };
-  if (user.role === 'admin' || user.role === 'gestor') return { ok: true };
+  if (user.role === 'admin' || user.role === 'gestor' || user.role === 'closer') return { ok: true };
   if (lead.owner_id === userId || lead.owner_id == null) return { ok: true };
   return { ok: false, reason: 'lead-de-outro-sdr' };
 }

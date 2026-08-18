@@ -44,8 +44,13 @@ let warnedNotConfigured = false;
  * Dispara o evento pro n8n via /api/bitrix-sync (autenticado com o JWT da sessão).
  */
 export function notifyBitrix(event: BitrixSyncEvent, payload: BitrixSyncPayload): void {
-  if (!payload.bitrix_id) {
-    console.info(`[bitrixSync] "${event}" pulado: lead sem bitrix_id (não veio do Bitrix)`);
+  // O SERVIDOR resolve o bitrix_id a partir do lead_id (e ignora o do cliente).
+  // Abortar aqui quando o campo não veio era o que matava o desfecho lançado
+  // pela Agenda do Dia — que carrega reuniões SEM o embed do lead — enquanto a
+  // mesma ação funcionava na página de Reuniões. Só desistimos quando não há
+  // nem lead_id, porque aí não há o que resolver.
+  if (!payload.bitrix_id && !payload.lead_id) {
+    console.info(`[bitrixSync] "${event}" pulado: sem lead_id nem bitrix_id`);
     return;
   }
 

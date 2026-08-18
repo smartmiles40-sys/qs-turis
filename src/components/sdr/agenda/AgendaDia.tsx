@@ -38,6 +38,7 @@ import {
 } from "@/lib/qs/closerAgenda";
 import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, reagendarReuniao, type DadosDaVenda } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
+import BriefingDoLead from "./BriefingDoLead";
 import { getSetting } from "@/lib/qsSettings";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
 import type {
@@ -1015,6 +1016,10 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
       </div>
 
       <div className="flex-1 space-y-4 overflow-auto px-5 py-4 text-sm">
+        {/* O contexto que faltava: o closer lançava o desfecho aqui SEM ver
+            nada do que o SDR conversou. O resumo vem pelo servidor, então
+            funciona mesmo antes da migration de leitura (0052). */}
+        <BriefingDoLead leadId={reuniao.lead_id} />
         {atrasada && (
           <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
             <span className="mt-0.5 shrink-0"><IcAlert /></span>

@@ -139,7 +139,7 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
   const [sdrs, setSdrs] = useState<UserLite[]>([]);
   useEffect(() => {
     if (!transferindo) return;
-    void listUsersLite().then((us) => setSdrs(us.filter((u) => u.is_active && u.role === "sdr")));
+    void listUsersLite().then((us) => setSdrs(us.filter((u) => u.is_active && (u.role === "sdr" || u.role === "closer"))));
   }, [transferindo]);
 
   const transferirPara = useCallback(async (destino: UserLite) => {

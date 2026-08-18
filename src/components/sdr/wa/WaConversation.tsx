@@ -287,6 +287,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
   const transcrever = useCallback(async (m: WaMessage) => {
     if (m.transcricao) return;                 // já tem texto na tela
+    if (transcrevendo) { notifyError("Espere a transcrição atual terminar."); return; }
     if (!temAudio(m)) return;
     setTranscrevendo(m.id);
     setBaixandoModelo(null);
@@ -299,7 +300,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, transcricao: r.texto ?? null } : x)));
     // Guarda pra ninguém precisar transcrever de novo (migration 0051).
     void salvarTranscricao(m.id, r.texto);
-  }, [leadId]);
+  }, [leadId, transcrevendo]);
 
   const copiar = useCallback(async (m: WaMessage) => {
     const t = waPlain(m.content) || "";
@@ -526,15 +527,22 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   }, [text, sending, leadId, recarregar, respondendo?.id, inboxEscolhida]);
 
   const enviarMidia = useCallback(async (blob: Blob, nome: string, legenda = "", notaDeVoz = false) => {
+    // A janela de 24h vale pra TUDO na caixa oficial, não só texto. Sem esta
+    // barreira o áudio/foto "saía" e a Meta recusava calada.
+    if (soModeloRef.current) {
+      setErro("A janela de 24h fechou — pela API oficial, mídia também não sai. Envie um modelo primeiro.");
+      setMostrarModelos(true);
+      return;
+    }
     setSending(true);
     setErro(null);
-    const r = await sendWaMedia(leadId, blob, nome, legenda, notaDeVoz);
+    const r = await sendWaMedia(leadId, blob, nome, legenda, notaDeVoz, inboxEscolhida ?? undefined);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar o arquivo."); return; }
     setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
-  }, [leadId, recarregar]);
+  }, [leadId, recarregar, inboxEscolhida]);
 
   const escolherArquivo = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -597,7 +605,13 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setMostrarFigurinhas(false);
     setSending(true);
     setErro(null);
-    const r = await enviarFigurinha(leadId, fig);
+    if (soModeloRef.current) {
+      setErro("A janela de 24h fechou — figurinha também não sai pela API oficial. Envie um modelo primeiro.");
+      setMostrarModelos(true);
+      setSending(false);
+      return;
+    }
+    const r = await enviarFigurinha(leadId, fig, inboxEscolhida ?? undefined);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar a figurinha."); return; }
     setSemConversa(false);
@@ -724,12 +738,19 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
   const janela = useMemo(() => {
     if (!ehOficial) return null;
+    // TROCOU pro oficial numa conversa que corre em OUTRO número? A janela de
+    // lá não vale aqui: na caixa oficial esse cliente nunca abriu janela — a
+    // primeira mensagem é por modelo, sempre. Sem este corte, a última mensagem
+    // do número comum deixava o cronômetro verde e a Meta recusava o texto.
+    if (inboxEscolhida != null && inboxAtual != null && inboxEscolhida !== inboxAtual) {
+      return { estado: "nunca-abriu" as const, restante: 0 };
+    }
     const fecha = janelaFechaEm(ultimaDoCliente);
     if (!fecha) return { estado: "nunca-abriu" as const, restante: 0 };
     const restante = fecha.getTime() - agora;
     if (restante <= 0) return { estado: "fechada" as const, restante: 0 };
     return { estado: (restante < 3 * 3600_000 ? "fechando" : "aberta") as "fechando" | "aberta", restante };
-  }, [ehOficial, ultimaDoCliente, agora]);
+  }, [ehOficial, ultimaDoCliente, agora, inboxEscolhida, inboxAtual]);
 
   const soModelo = janela != null && janela.estado !== "aberta" && janela.estado !== "fechando";
   soModeloRef.current = soModelo;

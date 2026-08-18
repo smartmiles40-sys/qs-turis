@@ -15,6 +15,7 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { setMeetingStatus, setMeetingSal, deleteMeeting, type DadosDaVenda } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
+import BriefingDoLead from "./BriefingDoLead";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
 import { getSetting } from "@/lib/qsSettings";
 import { MEETING_STATUS_LABELS, type Meeting, type MeetingSal, type MeetingStatus } from "../types";
@@ -265,6 +266,10 @@ export default function MeetingDetailModal({
               </>
             )}
           </div>
+        </div>
+
+        <div className="px-5 pb-3">
+          <BriefingDoLead leadId={meeting.lead_id} />
         </div>
 
         {podeMexer ? (

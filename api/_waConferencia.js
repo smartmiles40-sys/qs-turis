@@ -29,7 +29,9 @@ export async function conferirRecebimento({ janelaMin = JANELA_MIN } = {}) {
   if (!cwConfigured()) return { conferidas: 0, faltando: [], erro: 'chatwoot-nao-configurado' };
 
   const caixas = await idsDeWhatsApp();
-  if (!caixas || !caixas.length) return { conferidas: 0, faltando: [], erro: 'sem-caixas' };
+  // `idsDeWhatsApp` devolve um Set — e Set não tem .length (o guard antigo
+  // desligava o vigia inteiro em silêncio, toda rodada).
+  if (!caixas || caixas.size === 0) return { conferidas: 0, faltando: [], erro: 'sem-caixas' };
 
   const limite = Date.now() - janelaMin * 60_000;
   const faltando = [];

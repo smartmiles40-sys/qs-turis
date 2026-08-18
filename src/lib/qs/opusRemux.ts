@@ -179,14 +179,26 @@ export async function webmParaOgg(blob: Blob): Promise<Blob | null> {
     paginas.push(montarPagina([extraido.cabecalho ?? opusHeadPadrao()], 2, 0, serial, seq++));
     paginas.push(montarPagina([opusTags()], 0, 0, serial, seq++));
 
-    // Os pacotes vão em páginas de até 50 — o suficiente pra não estourar a
-    // tabela de segmentos (255) e manter o arquivo bem formado.
+    // A página fecha pelo TAMANHO DA TABELA de segmentos (máx. 255 entradas),
+    // não por contagem de pacotes: um pacote de N bytes ocupa ceil((N+1)/255)
+    // entradas, então 50 pacotes grandes estourariam o byte de contagem e o
+    // arquivo sairia corrompido.
     let granulo = 0;
-    for (let i = 0; i < extraido.pacotes.length; i += 50) {
-      const lote = extraido.pacotes.slice(i, i + 50);
-      for (const p of lote) granulo += amostrasDoPacote(p);
-      const ultimo = i + 50 >= extraido.pacotes.length;
+    let lote: Uint8Array[] = [];
+    let entradas = 0;
+    const fechar = (ultimo: boolean) => {
+      if (!lote.length) return;
       paginas.push(montarPagina(lote, ultimo ? 4 : 0, granulo, serial, seq++));
+      lote = []; entradas = 0;
+    };
+    for (let i = 0; i < extraido.pacotes.length; i++) {
+      const p = extraido.pacotes[i];
+      const precisa = Math.floor(p.length / 255) + 1;
+      if (entradas + precisa > 255) fechar(false);
+      lote.push(p);
+      entradas += precisa;
+      granulo += amostrasDoPacote(p);
+      if (i === extraido.pacotes.length - 1) fechar(true);
     }
     return new Blob(paginas as BlobPart[], { type: 'audio/ogg' });
   } catch (e) {

@@ -257,7 +257,9 @@ export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Pro
               // conversas. Abrir com o filtro de quem espera resposta ligado é o
               // que torna isso útil em vez de uma parede de nomes; o botão ao
               // lado desliga quando alguém quiser ver a lista inteira.
-              if (a.key !== "meus") setSoNaoRespondidas(true);
+              // Liga nas abas de equipe (lista sem teto) e DESLIGA ao voltar —
+              // senão "Meus" ficava escondendo conversa respondida sem aviso.
+              setSoNaoRespondidas(a.key !== "meus");
             }}
             className="wa-tab flex-1 px-2 py-2.5 text-[12px] font-semibold"
           >

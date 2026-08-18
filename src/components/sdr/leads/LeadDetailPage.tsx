@@ -845,7 +845,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // Backstop de tela: a garantia REAL é a RLS 0007/0008 no banco.
   const canView =
     !!currentUser &&
-    (canSeeAllData(currentUser.role) || lead.owner_id === currentUser.id);
+    // O closer atende qualquer conversa (0050) — o card do cliente acompanha,
+    // senão o "Abrir card" da lista de WhatsApp termina num beco sem saída.
+    (canSeeAllData(currentUser.role) || currentUser.role === "closer" || lead.owner_id === currentUser.id);
   if (!canView) {
     return (
       <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "inherit" }}>

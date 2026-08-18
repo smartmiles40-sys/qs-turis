@@ -35,7 +35,13 @@ export const TIPOS_DE_VENDA = [
 export function valorNumerico(texto: string): number | null {
   const limpo = texto.trim();
   if (!limpo) return null;
-  const n = Number(limpo.replace(/\./g, "").replace(",", "."));
+  // "34.000,00" (ponto de milhar) e "34000.50" (ponto decimal) são AMBOS
+  // formas que o time digita. Regra: se o ponto é seguido de 1-2 dígitos no
+  // fim e não há vírgula, ele é DECIMAL — tratá-lo como milhar multiplicava o
+  // valor por 100 no card do Bitrix.
+  const n = /^\d+\.\d{1,2}$/.test(limpo)
+    ? Number(limpo)
+    : Number(limpo.replace(/\./g, "").replace(",", "."));
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 

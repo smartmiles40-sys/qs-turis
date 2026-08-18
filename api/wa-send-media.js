@@ -91,9 +91,13 @@ export default async function handler(req, res) {
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
   if (!dataBase64 && !stickerUrl) return res.status(400).json({ error: 'Arquivo vazio' });
 
-  const inboxPedida = inboxPermitida(body.inboxId);
-  if (inboxPedida == null && body.inboxId != null && body.inboxId !== '') {
-    return res.status(400).json({ error: 'Esse número não está liberado para envio.' });
+  let inboxPedida = null;
+  if (body.inboxId != null && body.inboxId !== '') {
+    // Mesmo conserto do wa-send: pedido só quando o SDR escolheu de verdade.
+    inboxPedida = inboxPermitida(body.inboxId);
+    if (inboxPedida == null) {
+      return res.status(400).json({ error: 'Esse número não está liberado para envio.' });
+    }
   }
   let bytes;
   let mimeFinal = mimeType;

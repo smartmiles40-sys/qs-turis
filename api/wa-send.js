@@ -143,9 +143,14 @@ export default async function handler(req, res) {
   // descoberta no Chatwoot) — e essa caixa vem do servidor, não do navegador,
   // então não passa pelo filtro da env.
   let inboxPedida = null;
-  if (!modelo) {
+  if (!modelo && body.inboxId != null && body.inboxId !== '') {
+    // Só existe "pedido" quando o SDR ESCOLHEU um número na tela. O bug antigo:
+    // inboxPermitida(null) devolvia a caixa PADRÃO, então todo envio sem escolha
+    // era tratado como pedido pela padrão — conversa em outra caixa era jogada
+    // fora e recriada na padrão, e a blindagem "responde onde o cliente falou"
+    // nunca rodava (o if dela exigia inboxPedida == null, que nunca acontecia).
     inboxPedida = inboxPermitida(body.inboxId);
-    if (inboxPedida == null && body.inboxId != null && body.inboxId !== '') {
+    if (inboxPedida == null) {
       return res.status(400).json({ error: 'Esse número não está liberado para envio.' });
     }
   }

@@ -25,7 +25,7 @@
 // seletor o SDR ainda conversa normalmente.
 // -----------------------------------------------------------------------------
 
-import { getSupabaseUserId, cwConfigured, cw, WA_INBOX_IDS, defaultInboxId } from './_wa.js';
+import { getSupabaseUserId, cwConfigured, cw, defaultInboxId } from './_wa.js';
 import { listarModelos, criarModelo, excluirModelo } from './_meta.js';
 import { rest } from './_supabaseAdmin.js';
 
@@ -59,7 +59,11 @@ async function buscarInboxes() {
     const inboxes = list
       // Com a lista de caixas de WhatsApp configurada, ela manda. Sem ela,
       // devolvemos todas — melhor oferecer demais que travar o envio.
-      .filter((i) => (WA_INBOX_IDS.length ? WA_INBOX_IDS.includes(Number(i.id)) : true))
+      // Só canais de WHATSAPP entram no seletor — a env virou atalho, não
+      // requisito (mesma regra do inboxAceita): caixa de e-mail/site nunca deve
+      // aparecer como "número pra falar", e a oficial nunca deve sumir por
+      // alguém ter esquecido de somar o id na env.
+      .filter((i) => /whatsapp|::api$/i.test(String(i.channel_type || '')))
       .map((i) => ({
         id: Number(i.id),
         nome: String(i.name || `Caixa ${i.id}`),

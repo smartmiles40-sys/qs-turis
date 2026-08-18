@@ -888,12 +888,12 @@ export async function removerFigurinha(id: string): Promise<boolean> {
 }
 
 /** Manda uma figurinha da galeria pra conversa. */
-export async function enviarFigurinha(leadId: string, fig: Figurinha): Promise<WaSendResult> {
+export async function enviarFigurinha(leadId: string, fig: Figurinha, inboxId?: number | null): Promise<WaSendResult> {
   // Subida pelo SDR: o arquivo está no próprio dado (data-url) — vira Blob e
   // segue o caminho normal de mídia.
   if (fig.dado.startsWith("data:")) {
     const blob = await (await fetch(fig.dado)).blob();
-    return sendWaMedia(leadId, blob, "figurinha.webp", "", false);
+    return sendWaMedia(leadId, blob, "figurinha.webp", "", false, inboxId);
   }
   // Salva de uma conversa: só temos a URL do Chatwoot, e o CORS impede o
   // navegador de baixá-la — quem busca o arquivo é o servidor.
@@ -901,7 +901,7 @@ export async function enviarFigurinha(leadId: string, fig: Figurinha): Promise<W
     const res = await fetch("/api/wa-send-media", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ leadId, stickerUrl: fig.dado, fileName: "figurinha.webp" }),
+      body: JSON.stringify({ leadId, stickerUrl: fig.dado, fileName: "figurinha.webp" , inboxId: inboxId ?? null }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };
@@ -1034,7 +1034,16 @@ export function subscribeToMessages(
  * ele é derrubado quando o último ouvinte sai.
  */
 export function subscribeToThreads(onChange: () => void): () => void {
-  ouvintesThreads.add(onChange);
+  // DEBOUNCE de 1,5s: cada mensagem de QUALQUER conversa mexe em qs_wa_threads,
+  // e desde a 0050 o closer enxerga a empresa inteira — sem agrupar, cada
+  // mensagem do time disparava um recarregamento de 2.000 linhas com embed.
+  let timer: number | null = null;
+  const agrupado = () => {
+    if (timer != null) window.clearTimeout(timer);
+    timer = window.setTimeout(() => { timer = null; onChange(); }, 1_500);
+  };
+
+  ouvintesThreads.add(agrupado);
 
   if (!canalThreads) {
     canalThreads = supabase
@@ -1049,7 +1058,7 @@ export function subscribeToThreads(onChange: () => void): () => void {
   }
 
   return () => {
-    ouvintesThreads.delete(onChange);
+    ouvintesThreads.delete(agrupado);
     if (ouvintesThreads.size === 0 && canalThreads) {
       supabase.removeChannel(canalThreads);
       canalThreads = null;

@@ -399,7 +399,9 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
       .lte("scheduled_at", endIso)
       .order("scheduled_at", { ascending: true })
       .limit(30);
-    if (!seeAll) meetingsQ = meetingsQ.eq("owner_id", ownerId);
+    if (!seeAll) // O closer está em closer_id, não em owner_id (que é o SDR que agendou) —
+      // sem o OR, o sino do closer nunca avisava a PRÓPRIA reunião.
+      meetingsQ = meetingsQ.or(`owner_id.eq.${ownerId},closer_id.eq.${ownerId}`);
 
     const [overdueRes, todayRes, leadsRes, receivedRes, meetingsRes] = await Promise.all([overdueQ, todayQ, leadsQ, receivedQ, meetingsQ]);
 

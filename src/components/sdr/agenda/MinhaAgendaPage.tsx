@@ -21,6 +21,7 @@
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { sweepOutcomeTasks } from "@/lib/qs/meetings";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { fetchAllRows } from "@/lib/qs/queries";
@@ -115,8 +116,8 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
         .limit(100);
 
       if (!gestor) {
-        qPend = qPend.eq("closer_id", currentUser.id);
-        qProx = qProx.eq("closer_id", currentUser.id);
+        qPend = qPend.or(`closer_id.eq.${currentUser.id},meeting_owner.eq.${(currentUser.name ?? "").replace(/,/g, "")}`);
+        qProx = qProx.or(`closer_id.eq.${currentUser.id},meeting_owner.eq.${(currentUser.name ?? "").replace(/,/g, "")}`);
       }
 
       const [rPend, rProx, rUsers] = await Promise.all([
@@ -163,6 +164,9 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
   }, [currentUser, gestor]);
 
   useEffect(() => { void carregar(); }, [carregar]);
+  // As cobranças de desfecho nasciam só quando alguém abria a aba Reuniões — o
+  // closer que vive NESTA tela nunca era cobrado. A varredura é idempotente.
+  useEffect(() => { void sweepOutcomeTasks(); }, []);
 
   const hoje = useMemo(() => {
     const agora = new Date();

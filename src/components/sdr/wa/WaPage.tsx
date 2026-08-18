@@ -35,6 +35,7 @@ import WaConversation from "./WaConversation";
 import WaDesconhecidos from "./WaDesconhecidos";
 import { countDesconhecidos } from "@/lib/qs/waDesconhecidos";
 import { WaAvatar, WaSeloNumero } from "./WaBits";
+import BriefingDoLead from "../agenda/BriefingDoLead";
 import {
   getInboxLabels, inboxTag, listUsersLite, threadTitle, userName,
   esperandoDesde, humanizarEspera, exportarConversaTxt,
@@ -149,7 +150,7 @@ export default function WaPage({ onOpenLead }: Props) {
   const espera = t ? esperandoDesde(t) : null;
   const dono = userName(users, sel?.ownerId);
   const foraDaJanela = t?.can_reply === false;
-  const destinos = users.filter((u) => u.is_active && u.role === "sdr" && u.id !== (sel?.ownerId ?? currentUser?.id));
+  const destinos = users.filter((u) => u.is_active && (u.role === "sdr" || u.role === "closer") && u.id !== (sel?.ownerId ?? currentUser?.id));
 
   return (
     <div className="qs-wa h-full flex flex-col overflow-hidden">
@@ -336,6 +337,7 @@ export default function WaPage({ onOpenLead }: Props) {
               </div>
             )}
 
+            <div className="mb-3"><BriefingDoLead leadId={sel.leadId} /></div>
             <dl className="px-4 py-3 space-y-3 text-[12.5px]" style={{ borderBottom: "1px solid var(--line)" }}>
               <div>
                 <dt className="text-[10.5px] font-bold uppercase tracking-wider" style={{ color: "var(--ink3)" }}>

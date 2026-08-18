@@ -79,6 +79,52 @@ export default async function handler(req, res) {
   const leadId = String(req.query?.leadId || '').trim();
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
 
+  // ── Modo BRIEFING: o resumo do lead pro CLOSER ────────────────────────────
+  // As duas reclamações dos closers (18/08) têm a mesma raiz: a RLS de
+  // qs_notes/qs_tasks/qs_leads só libera gestor ou dono — então o closer abria
+  // o card e via VAZIO, mesmo com tudo preenchido no banco. Este modo entrega o
+  // contexto pelo servidor, que valida o papel via assertCanAccessLead (closer
+  // liberado desde 18/08) e lê com a chave de serviço. É o que faz o closer
+  // não precisar perguntar de novo o que o SDR já perguntou.
+  if (req.query?.briefing) {
+    let quem;
+    try {
+      quem = await assertCanAccessLead(userId, leadId);
+    } catch {
+      return res.status(500).json({ error: 'Falha ao validar o lead' });
+    }
+    if (!quem.ok) return res.status(quem.reason === 'lead-de-outro-sdr' ? 403 : 404).json({ error: 'Sem acesso' });
+
+    try {
+      const [notas, tarefas, reunioes, dono] = await Promise.all([
+        rest(`qs_notes?lead_id=eq.${encodeURIComponent(leadId)}&select=body,tags,created_at&order=created_at.desc&limit=12`),
+        rest(`qs_tasks?lead_id=eq.${encodeURIComponent(leadId)}&status=eq.concluida&select=channel_type,contact_result,completed_at,notes&order=completed_at.desc.nullslast&limit=10`),
+        rest(`qs_meetings?lead_id=eq.${encodeURIComponent(leadId)}&select=title,scheduled_at,status,meeting_owner,sal&order=scheduled_at.desc&limit=5`),
+        quem.lead.owner_id
+          ? rest(`qs_users?id=eq.${encodeURIComponent(quem.lead.owner_id)}&select=name,role&limit=1`)
+          : Promise.resolve([]),
+      ]);
+      return res.status(200).json({
+        lead: {
+          nome: quem.lead.full_name ?? null,
+          telefone: quem.lead.phone ?? null,
+          email: quem.lead.email ?? null,
+          fonte: quem.lead.segment ?? null,
+          temperatura: quem.lead.lead_score ?? null,
+          status: quem.lead.status ?? null,
+          dono: Array.isArray(dono) && dono[0] ? dono[0].name : null,
+          papelDono: Array.isArray(dono) && dono[0] ? dono[0].role : null,
+        },
+        notas: Array.isArray(notas) ? notas : [],
+        tarefas: Array.isArray(tarefas) ? tarefas : [],
+        reunioes: Array.isArray(reunioes) ? reunioes : [],
+      });
+    } catch (e) {
+      console.warn('[wa-sync] briefing:', e?.message);
+      return res.status(500).json({ error: 'Não consegui montar o resumo' });
+    }
+  }
+
   // ── Modo ÁUDIO: entrega o arquivo pro navegador ───────────────────────────
   // Por que existe: o áudio mora no Chatwoot, que NÃO manda cabeçalho de CORS.
   // A tag <audio> toca (mídia não precisa de CORS), mas ler os BYTES por script

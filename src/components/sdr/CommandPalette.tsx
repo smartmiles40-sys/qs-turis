@@ -85,9 +85,11 @@ export default function CommandPalette({ onOpenLead }: { onOpenLead: (leadId: st
         .from("qs_leads")
         .select("id, full_name, company_name, phone, email, bitrix_id, status")
         .or(ors.join(","));
-      // Isolamento por dono: SDR/closer só acham o PRÓPRIO lead na busca global.
-      // Backstop de tela — a garantia real é a RLS 0007/0008 no banco.
-      if (currentUser && !canSeeAllData(currentUser.role)) {
+      // Isolamento por dono vale pro SDR. O CLOSER busca QUALQUER lead: ele
+      // atende conversa de todo mundo (0050) e precisa achar o cliente da
+      // próxima reunião — que ainda é do SDR até a transferência. O resultado
+      // real continua limitado pela RLS do banco.
+      if (currentUser && !canSeeAllData(currentUser.role) && currentUser.role !== "closer") {
         sq = sq.eq("owner_id", currentUser.id);
       }
       const { data } = await sq.order("updated_at", { ascending: false }).limit(8);
