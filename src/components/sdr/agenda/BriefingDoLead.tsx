@@ -24,6 +24,7 @@ interface Briefing {
   notas: { body: string; tags: string[] | null; created_at: string }[];
   tarefas: { channel_type: string | null; contact_result: string | null; completed_at: string | null; notes: string | null }[];
   reunioes: { title: string | null; scheduled_at: string; status: string; meeting_owner: string | null; sal: string | null }[];
+  conversa?: { texto: string; deQuem: "nos" | "cliente"; quando: string }[];
 }
 
 const RESULTADO: Record<string, string> = {
@@ -70,9 +71,15 @@ export default function BriefingDoLead({ leadId }: { leadId: string }) {
   if (!dados) return <p className="text-xs text-gray-400">Carregando o resumo do atendimento…</p>;
 
   const { lead, notas, tarefas, reunioes } = dados;
-  // Só notas com conteúdo humano — as automáticas de origem ficam por último.
-  const notasHumanas = notas.filter((n) => !(n.tags || []).includes("origem"));
+  // Notas que CONTAM algo. "Ligação — Caixa postal" é eco do histórico de
+  // contatos logo abaixo: repetida aqui, empurrava a nota útil pra fora do
+  // corte de 4 e o closer via um resumo que não resumia nada.
+  const notasHumanas = notas.filter(
+    (n) => !(n.tags || []).includes("origem") &&
+      !/^(ligação|liga[çc]ao|whatsapp|e-?mail)\s*[—–-]\s*(caixa postal|não atendeu|nao atendeu|desligou|sem conex|número|numero)/i.test(n.body.trim())
+  );
   const ligacoes = tarefas.filter((t) => t.contact_result);
+  const conversa = dados.conversa ?? [];
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white">
@@ -126,6 +133,28 @@ export default function BriefingDoLead({ leadId }: { leadId: string }) {
             </div>
           ) : (
             <p className="text-xs text-gray-400">O SDR não deixou notas neste lead.</p>
+          )}
+
+          {/* O QUE FOI FALADO. É a resposta literal do pedido: o closer lê a
+              conversa que o SDR teve e não repete a mesma entrevista. */}
+          {conversa.length > 0 && (
+            <div>
+              <p className="text-[11px] font-semibold text-gray-400 mb-1">
+                A conversa no WhatsApp · últimas {Math.min(conversa.length, 12)}
+              </p>
+              <div className="max-h-52 overflow-y-auto rounded-lg bg-gray-50 p-2 space-y-1">
+                {conversa.slice(-12).map((m, i) => (
+                  <p key={i} className="text-[12px] leading-snug">
+                    <span className={m.deQuem === "cliente" ? "font-bold text-gray-900" : "font-semibold text-gray-400"}>
+                      {m.deQuem === "cliente" ? "Cliente" : "Nós"}:{" "}
+                    </span>
+                    <span className={m.deQuem === "cliente" ? "text-gray-800" : "text-gray-500"}>
+                      {m.texto.length > 220 ? m.texto.slice(0, 220) + "…" : m.texto}
+                    </span>
+                  </p>
+                ))}
+              </div>
+            </div>
           )}
 
           {/* As tentativas de contato e como terminaram. */}

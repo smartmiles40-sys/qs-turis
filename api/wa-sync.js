@@ -96,13 +96,18 @@ export default async function handler(req, res) {
     if (!quem.ok) return res.status(quem.reason === 'lead-de-outro-sdr' ? 403 : 404).json({ error: 'Sem acesso' });
 
     try {
-      const [notas, tarefas, reunioes, dono] = await Promise.all([
+      const [notas, tarefas, reunioes, dono, conversa] = await Promise.all([
         rest(`qs_notes?lead_id=eq.${encodeURIComponent(leadId)}&select=body,tags,created_at&order=created_at.desc&limit=12`),
         rest(`qs_tasks?lead_id=eq.${encodeURIComponent(leadId)}&status=eq.concluida&select=channel_type,contact_result,completed_at,notes&order=completed_at.desc.nullslast&limit=10`),
         rest(`qs_meetings?lead_id=eq.${encodeURIComponent(leadId)}&select=title,scheduled_at,status,meeting_owner,sal&order=scheduled_at.desc&limit=5`),
         quem.lead.owner_id
           ? rest(`qs_users?id=eq.${encodeURIComponent(quem.lead.owner_id)}&select=name,role&limit=1`)
           : Promise.resolve([]),
+        // O QUE FOI FALADO de verdade. As notas contam o que o SDR resolveu
+        // registrar; a conversa é o que o CLIENTE disse — é ali que está o
+        // destino, a data, quantas pessoas, o orçamento. Sem isto o closer
+        // reabre a mesma entrevista, que é justamente a reclamação dele.
+        rest(`qs_wa_messages?lead_id=eq.${encodeURIComponent(leadId)}&deleted_at=is.null&select=content,direction,transcricao,sent_at&order=sent_at.desc&limit=40`),
       ]);
       return res.status(200).json({
         lead: {
@@ -118,6 +123,18 @@ export default async function handler(req, res) {
         notas: Array.isArray(notas) ? notas : [],
         tarefas: Array.isArray(tarefas) ? tarefas : [],
         reunioes: Array.isArray(reunioes) ? reunioes : [],
+        // Do mais antigo pro mais novo (a busca vem invertida pra pegar as
+        // ÚLTIMAS), já sem as vazias — anexo sem legenda não conta história.
+        conversa: (Array.isArray(conversa) ? conversa : [])
+          .reverse()
+          .map((m) => ({
+            // A assinatura "*Yanca*\n" que o robô põe na frente é ruído aqui —
+            // quem escreveu já está na etiqueta da linha.
+            texto: (m.content || m.transcricao || '').replace(/^\*[^*\n]{1,40}\*\s*\n?/, '').trim(),
+            deQuem: m.direction === 'out' ? 'nos' : 'cliente',
+            quando: m.sent_at,
+          }))
+          .filter((m) => m.texto),
       });
     } catch (e) {
       console.warn('[wa-sync] briefing:', e?.message);
