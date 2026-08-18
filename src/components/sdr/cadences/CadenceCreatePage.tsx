@@ -3,7 +3,8 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchQsUsers } from "@/lib/qs/queries";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
-import { notifyError } from "@/lib/qs/notify";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import { aplicarPlanoNosLeads, contarLeadsAtivos } from "@/lib/qs/cadenceSync";
 import { peekDuplicateSource, clearDuplicateSource } from "./duplicateSource";
 import type {
   ChannelType,
@@ -552,6 +553,61 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
           form.owner_ids.map((userId) => ({ cadence_id: savedCadenceId, user_id: userId, rr_pointer: false }))
         );
         if (ownErr) { console.warn("Erro ao salvar os SDRs da cadência:", ownErr); notifyError("Cadência salva, mas os SDRs responsáveis NÃO foram gravados — reabra e tente de novo."); }
+      }
+    }
+
+    // ── O PLANO NOVO VALE PARA QUEM JÁ ESTÁ NA CADÊNCIA ────────────────────
+    // Até 18/08 as atividades eram um retrato do plano no momento da entrada:
+    // editar a cadência não mudava nada para os leads que já estavam dentro, e
+    // a fila seguia executando o fluxo antigo sem ninguém perceber. Pedido do
+    // Bruno: "quando alteramos o fluxo da cadência, ela adicionar as atividades
+    // que atualizamos".
+    //
+    // Pergunta antes porque a conta é grande — uma edição pode encostar em
+    // centenas de filas — e porque só o gestor sabe se aquela edição foi um
+    // conserto (vale para todo mundo) ou um plano novo (vale só daqui pra
+    // frente). Recusar aqui não desfaz nada: a cadência já foi salva.
+    if (savedCadenceId && cadenceId) {
+      const ativos = await contarLeadsAtivos(savedCadenceId);
+      if (ativos > 0) {
+        // Calcula ANTES de perguntar. Uma troca de dias que parece pequena na
+        // tela (1,3,7,10 → 1,2,5,7) vira centenas de atividades novas em
+        // centenas de filas — o gestor decide com o número na mão.
+        const p = await aplicarPlanoNosLeads(savedCadenceId, true);
+        if (p.erro) {
+          notifyError(`A cadência foi salva, mas não consegui conferir o impacto nos leads: ${p.erro}`);
+        } else if (p.criadas === 0 && p.encerradas === 0) {
+          notifySuccess("Cadência salva. Os leads que já estão nela seguem em dia com o plano.");
+        } else {
+        const ok = window.confirm(
+          `Aplicar este plano aos leads que JÁ estão nesta cadência?
+
+` +
+          `Leads afetados: ${p.leads} (de ${ativos} na cadência)
+` +
+          `Atividades a criar: ${p.criadas}${p.paraHoje > 0 ? ` — ${p.paraHoje} cairiam HOJE` : ""}
+` +
+          `Atividades a encerrar: ${p.encerradas}
+
+` +
+          `O que já foi feito não é tocado, e nada nasce atrasado.
+` +
+          `Se recusar, o plano novo vale só para os próximos leads.`
+        );
+        if (ok) {
+          const r = await aplicarPlanoNosLeads(savedCadenceId);
+          if (r.erro) {
+            notifyError(`A cadência foi salva, mas não consegui aplicar nos leads: ${r.erro}`);
+          } else if (r.criadas === 0 && r.encerradas === 0) {
+            notifySuccess("Cadência salva. Os leads que já estavam nela seguem em dia com o plano.");
+          } else {
+            notifySuccess(
+              `Cadência salva e aplicada em ${r.leads} lead(s): ` +
+              `${r.criadas} atividade(s) criada(s), ${r.encerradas} encerrada(s).`
+            );
+          }
+        }
+        }
       }
     }
 
