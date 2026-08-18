@@ -152,6 +152,16 @@ export default function ScheduleMeetingModal({
       return;
     }
 
+    // O PRODUTO é obrigatório (Bruno, 17/08). Sem ele o card do closer chega
+    // com "Reunião — Fulano", que não diz o que vai ser vendido: ele abre a
+    // call às cegas e o campo do Bitrix fica em branco pra sempre. Medido em
+    // 18/08: 5 das 12 reuniões futuras estavam assim.
+    if (!title.trim()) {
+      setError("Diga o que é a reunião — o produto/expedição que foi negociado. É isso que o especialista vê antes de entrar na call.");
+      setSaving(false);
+      return;
+    }
+
     const emailLimpo = email.trim();
     if (emailLimpo && !emailValido(emailLimpo)) {
       setError("O e-mail do lead não parece válido — o Google recusaria o convite.");
@@ -353,9 +363,12 @@ export default function ScheduleMeetingModal({
               </div>
 
               <div>
-                <label className={labelClass}>Produto — o que é a reunião</label>
+                <label className={labelClass}>
+                  Produto — o que é a reunião <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
+                  required
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Expedição Itália, Pacote Japão/China/Coreia…"
