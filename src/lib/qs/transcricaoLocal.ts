@@ -141,10 +141,8 @@ export async function transcreverLocalmente(
   }
 }
 
-/** Começa a baixar o modelo antes de alguém pedir (chame quando a aba abrir). */
-export function prepararTranscricao(onProgresso?: (pct: number) => void): void {
-  try {
-    aoBaixar = onProgresso ?? null;
-    obterWorker().postMessage({ tipo: 'preparar' });
-  } catch { /* sem suporte a worker: o botão simplesmente falha na hora do uso */ }
-}
+// Havia aqui um `prepararTranscricao()` que baixava o modelo assim que a aba
+// abrisse. Removido em 18/08: ninguém chegou a chamá-lo, e o modelo passou a ser
+// o "small" (~325 MB). Puxar isso de todo mundo, todo dia, sem ninguém ter
+// pedido nada, seria gastar a internet do escritório à toa. O download acontece
+// no primeiro clique em "Transcrever" — uma vez por computador.

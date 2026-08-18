@@ -206,8 +206,14 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   const [mostrarFigurinhas, setMostrarFigurinhas] = useState(false);
   // Qual mensagem está com a paleta de reação aberta (id) — uma por vez.
   const [reagindoA, setReagindoA] = useState<string | null>(null);
-  // Qual áudio está sendo transcrito agora (id da mensagem).
-  const [transcrevendo, setTranscrevendo] = useState<string | null>(null);
+  // Quais áudios estão na fila de transcrição (ids das mensagens).
+  //
+  // É um conjunto, e não "um por vez", porque cada áudio leva perto de um
+  // minuto: medido em 18/08, 45 s para um áudio de 12 s. Com um único lugar, o
+  // SDR que quisesse ler três áudios seguidos levava "espere a transcrição
+  // atual terminar" na cara duas vezes e teria que ficar voltando. O worker
+  // processa um de cada vez de qualquer jeito; a fila só evita o não.
+  const [transcrevendo, setTranscrevendo] = useState<Set<string>>(new Set());
   // Só na primeira vez: o modelo precisa ser baixado antes de transcrever.
   const [baixandoModelo, setBaixandoModelo] = useState<number | null>(null);
   // Onde estava o cursor no campo de escrever. Precisa ser lembrado por fora
@@ -287,20 +293,23 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
   const transcrever = useCallback(async (m: WaMessage) => {
     if (m.transcricao) return;                 // já tem texto na tela
-    if (transcrevendo) { notifyError("Espere a transcrição atual terminar."); return; }
     if (!temAudio(m)) return;
-    setTranscrevendo(m.id);
-    setBaixandoModelo(null);
+    setTranscrevendo((prev) => {
+      if (prev.has(m.id)) return prev;         // clique repetido no mesmo áudio
+      const n = new Set(prev); n.add(m.id); return n;
+    });
     // Roda NA MÁQUINA do SDR (Whisper em WebAssembly): nenhuma API, nenhum
     // custo, e o áudio do cliente não sai do computador dele.
     const r = await transcreverLocalmente(leadId, m.id, (pct) => setBaixandoModelo(pct));
-    setTranscrevendo(null);
-    setBaixandoModelo(null);
+    setTranscrevendo((prev) => { const n = new Set(prev); n.delete(m.id); return n; });
     if (r.error || !r.texto) { notifyError(r.error || "Não identifiquei fala neste áudio."); return; }
     setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, transcricao: r.texto ?? null } : x)));
-    // Guarda pra ninguém precisar transcrever de novo (migration 0051).
+    // GUARDA NO BANCO, e isso não é só cache: a transcrição custa perto de um
+    // minuto de processador. Salva, o áudio é transcrito UMA vez para a empresa
+    // inteira — o closer que abrir a mesma conversa amanhã já acha o texto
+    // pronto, e o resumo do lead também (BriefingDoLead lê esta coluna).
     void salvarTranscricao(m.id, r.texto);
-  }, [leadId, transcrevendo]);
+  }, [leadId]);
 
   const copiar = useCallback(async (m: WaMessage) => {
     const t = waPlain(m.content) || "";
@@ -1035,17 +1044,37 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                         do player. Vale nos dois sentidos: ler o que o cliente
                         mandou sem precisar ouvir, e conferir/copiar o que a
                         gente gravou. Só aparece depois que alguém pede. */}
-                    {temAudio(m) && (m.transcricao || transcrevendo === m.id) && (
+                    {temAudio(m) && (m.transcricao || transcrevendo.has(m.id)) && (
                       <p className="mt-1 mb-1 px-2 py-1.5 rounded-lg text-[12.5px] leading-[1.45] whitespace-pre-wrap break-words"
                          style={{ background: meu ? "rgba(0,0,0,.07)" : "var(--card2)", color: meu ? "var(--wa-ink)" : "var(--ink2)" }}>
-                        {transcrevendo === m.id
+                        {transcrevendo.has(m.id)
                           ? <span style={{ opacity: .7 }}>
+                              {/* Os dois tempos são reais e vale dizê-los: sem
+                                  isso, um minuto de espera parece travamento e
+                                  o SDR recarrega a página no meio — perdendo o
+                                  download e a transcrição. */}
                               {baixandoModelo != null && baixandoModelo < 100
-                                ? `preparando a transcrição pela primeira vez… ${baixandoModelo}%`
-                                : "transcrevendo o áudio…"}
+                                ? `preparando este computador para transcrever… ${baixandoModelo}% — acontece só na primeira vez`
+                                : "transcrevendo… leva cerca de um minuto, pode continuar trabalhando"}
                             </span>
                           : m.transcricao}
                       </p>
+                    )}
+                    {/* O BOTÃO PRECISA ESTAR À VISTA. Até 18/08 transcrever só
+                        existia no menu do botão direito — e ninguém do time
+                        chegou a usar: 208 áudios na base, zero transcritos.
+                        Recurso escondido em menu de contexto, num sistema que
+                        também se usa no celular, é recurso que não existe. */}
+                    {temAudio(m) && !m.transcricao && !transcrevendo.has(m.id) && (
+                      <button type="button" onClick={() => void transcrever(m)}
+                              className="mt-1 mb-0.5 inline-flex items-center gap-1 text-[11.5px] rounded-md px-1.5 py-0.5 transition-opacity hover:opacity-100"
+                              style={{ color: meu ? "var(--wa-ink)" : "var(--ink3)", opacity: .8 }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M4 7h16M4 12h10M4 17h7" />
+                        </svg>
+                        {transcrevendo.size ? "Transcrever (entra na fila)" : "Transcrever áudio"}
+                      </button>
                     )}
                     {m.content && (
                       <p className="whitespace-pre-wrap break-words"
