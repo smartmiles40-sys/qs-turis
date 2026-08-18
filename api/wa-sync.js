@@ -130,7 +130,7 @@ export default async function handler(req, res) {
           .map((m) => ({
             // A assinatura "*Yanca*\n" que o robô põe na frente é ruído aqui —
             // quem escreveu já está na etiqueta da linha.
-            texto: (m.content || m.transcricao || '').replace(/^\*[^*\n]{1,40}\*\s*\n?/, '').trim(),
+            texto: (m.content || m.transcricao || '').replace(/^\*{1,2}[^*\n]{1,40}\*{1,2}\s*\n?/, '').trim(),
             deQuem: m.direction === 'out' ? 'nos' : 'cliente',
             quando: m.sent_at,
           }))
