@@ -137,7 +137,7 @@ function LossReasonsChart({
               .eq("status", "perdido")
               .not("loss_reason_id", "is", null)
               .order("id");
-            if (selectedUser !== "all") q = q.eq("owner_id", selectedUser);
+            if (selectedUser && selectedUser !== "all") q = q.eq("owner_id", selectedUser);
             if (from) q = q.gte(closedCol, from);
             if (to) q = q.lte(closedCol, to);
             return q.range(f, t);
@@ -598,7 +598,14 @@ function getDateRange(periodId: string, customStart: string, customEnd: string):
 }
 
 export default function SdrDashboard() {
-  const [selectedUser, setSelectedUser] = useState("all");
+  // Nasce como "pendente", não como "all". Antes o estado inicial era "all" e o
+  // efeito que o corrige para o próprio usuário rodava no MESMO flush das
+  // buscas: saía uma primeira rodada sem dono, ou seja, com os números da
+  // empresa inteira, e como não há guard de resposta obsoleta, se ela chegasse
+  // depois o hero "Meu dia · só os seus números" exibia o total da operação.
+  // Passava batido porque, antes da 0052, as duas rodadas davam o mesmo número
+  // para quem não é gestor. Iniciar vazio faz as buscas esperarem o papel.
+  const [selectedUser, setSelectedUser] = useState("");
   const [selectedPeriod, setSelectedPeriod] = useState("mtd");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -673,7 +680,8 @@ export default function SdrDashboard() {
   // SDR só enxerga o próprio: força o "qualificador" para ele e esconde o
   // seletor (feito no render). Efeitos que dependem de selectedUser reagem sozinhos.
   useEffect(() => {
-    if (currentUser && !canSeeAllData(currentUser.role)) setSelectedUser(currentUser.id);
+    if (!currentUser) return;
+    setSelectedUser(canSeeAllData(currentUser.role) ? "all" : currentUser.id);
   }, [currentUser]);
 
   const periodLabel = PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label || "Mês atual";
@@ -734,6 +742,8 @@ export default function SdrDashboard() {
     if (!silent) setLoadingKpis(true);
     try {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      // Ainda não sabemos de quem é a tela (o papel decide): não busca nada.
+      if (!selectedUser) return;
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
       // Metas mensais reais (qs_goals). Um SDR selecionado → a meta DELE (ou o
@@ -882,6 +892,8 @@ export default function SdrDashboard() {
     if (!silent) setLoadingChannels(true);
     try {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      // Ainda não sabemos de quem é a tela (o papel decide): não busca nada.
+      if (!selectedUser) return;
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
       // Paginado (cap 1000 do PostgREST) — mês com >1000 atividades subestimava
@@ -938,6 +950,8 @@ export default function SdrDashboard() {
     try {
       // respeita o período selecionado — antes era all-time e não respondia "esse mês"
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      // Ainda não sabemos de quem é a tela (o papel decide): não busca nada.
+      if (!selectedUser) return;
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
       // Paginado (cap 1000 do PostgREST).
@@ -994,6 +1008,8 @@ export default function SdrDashboard() {
       // respeita o período selecionado (leads que CHEGARAM no período) —
       // antes era all-time e não respondia "esse mês"
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      // Ainda não sabemos de quem é a tela (o papel decide): não busca nada.
+      if (!selectedUser) return;
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
       // Leads chegados no período — paginado (cap 1000 do PostgREST).
@@ -1074,6 +1090,8 @@ export default function SdrDashboard() {
     if (!silent) setLoadingOperational(true);
     try {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      // Ainda não sabemos de quem é a tela (o papel decide): não busca nada.
+      if (!selectedUser) return;
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
       // Data de FECHAMENTO real (closed_at, migration 0012; fallback updated_at).
@@ -1273,6 +1291,8 @@ export default function SdrDashboard() {
     if (!silent) setLoadingFunnel(true);
     try {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      // Ainda não sabemos de quem é a tela (o papel decide): não busca nada.
+      if (!selectedUser) return;
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
 
       // Tudo paginado (cap 1000 do PostgREST) — o funil somava só os 1000
@@ -1336,6 +1356,8 @@ export default function SdrDashboard() {
     if (!silent) setLoadingBusiness(true);
     try {
       const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+      // Ainda não sabemos de quem é a tela (o papel decide): não busca nada.
+      if (!selectedUser) return;
       const ownerId = selectedUser === "all" ? undefined : selectedUser;
       const closedColWon = await getClosedAtColumn();
 

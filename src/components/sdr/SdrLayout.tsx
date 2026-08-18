@@ -283,6 +283,13 @@ export default function SdrLayout() {
   const sweepRan = useRef(false);
   useEffect(() => {
     if (!currentUser || sweepRan.current) return;
+    // O motor de cadência é assunto de quem PROSPECTA. O alcance dele segue a
+    // RLS, e desde a 0052 o closer lê a base inteira: rodar isto no login dele
+    // varreria todos os leads da empresa e gravaria a nota de fim de cadência
+    // em cada um (notes_insert é "with check (true)", então passaria). Além de
+    // ser trabalho que não é dele, o toast diria "N leads aguardando SUA
+    // decisão" com o número da operação toda.
+    if (currentUser.role === "closer") return;
     sweepRan.current = true;
     sweepCadenceEndings().then(({ redirected, lost, finished }) => {
       if (redirected > 0) notifySuccess(`${redirected} lead(s) terminaram a cadência e foram redirecionados automaticamente.`);

@@ -109,12 +109,19 @@ async function loadRetro(uid: string): Promise<RetroData> {
       .gte("created_at", yStart.toISOString()).lte("created_at", yEnd.toISOString()),
     // Abertas até o fim de hoje (carga de hoje + pendências que sobraram).
     supabase.from("qs_tasks")
-      .select("id, lead_id, priority, scheduled_at")
+      .select("id, lead_id, priority, scheduled_at, tags")
       .eq("owner_id", uid).in("status", ["pendente", "atrasada"])
       .lte("scheduled_at", todayEnd.toISOString()),
     // Status dos leads: lead já fechado (ganho/perdido) sai da carga — mesma regra
     // do "A fazer" do antigo Meu Dia (tarefa residual não é trabalho pendente).
-    supabase.from("qs_leads").select("id, status"),
+    //
+    // Só dos leads DESTAS tarefas, e não da tabela inteira. Dois motivos: sem
+    // filtro o PostgREST corta em 1000 de ~1400 sem ordenação, então quais
+    // leads entram é sorteio; e desde a 0052 o closer lê a base toda, o que
+    // faria a lista de "fechados" engolir as cobranças dele — que vivem
+    // justamente em leads com status ganho — e o modal abriria "0 atividades"
+    // com o Painel logo atrás mostrando dezenas.
+    supabase.from("qs_leads").select("id, status").in("status", ["ganho", "perdido"]),
     // Concluídas nos últimos 7 dias FECHADOS (base da média/dia).
     supabase.from("qs_tasks")
       .select("id", { count: "exact", head: true })
@@ -138,8 +145,15 @@ async function loadRetro(uid: string): Promise<RetroData> {
   );
 
   // ── Bloco B — hoje (e pendências que sobraram) ──────────────────────────────
-  const openTasks = rowsOf<{ id: string; lead_id: string; priority: string; scheduled_at: string }>(rOpen)
-    .filter((t) => !closedLeadIds.has(t.lead_id));
+  const openTasks = rowsOf<{ id: string; lead_id: string; priority: string; scheduled_at: string; tags: string[] | null }>(rOpen)
+    // Mesma isenção do Painel: no QS "ganho" quer dizer REUNIÃO AGENDADA, então
+    // toda cobrança de confirmação/desfecho vive num lead ganho. Sem isentá-las,
+    // este modal abriria "0 atividades hoje" para o especialista — com o Painel,
+    // logo atrás, mostrando dezenas.
+    .filter((t) => {
+      if (t.tags?.some((tag) => tag === "re_contato" || tag === "confirmar" || tag === "desfecho")) return true;
+      return !closedLeadIds.has(t.lead_id);
+    });
   const hojeTotal = openTasks.length;
   // Dia ÚTIL, a mesma régua do Painel (`isOverdue`). Antes contava por
   // calendário: na segunda o modal abria dizendo "N atrasadas — limpe essas

@@ -402,12 +402,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [loadError, setLoadError] = useState(false);
   const loadData = useCallback(async () => {
     setLoading(true);
-    // Escopo da fila: SDR/closer vê só a dele; admin/gestor vê a do time inteiro.
+    // Escopo da fila: SDR/closer vê só as tarefas dele; admin/gestor, as do time.
     const queueOwnerId = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
+    // Mas o MAPA DE LEADS não pode usar o mesmo recorte para o closer: as
+    // cobranças dele ("registre o desfecho") apontam para leads que ainda são
+    // do SDR que agendou. Filtrando por dono, o mapa vinha vazio e o card
+    // renderizava "Lead desconhecido" — o mesmo sintoma que a 0052 matou no
+    // WhatsApp, só que aqui quem escondia era o front, não o banco.
+    const leadsOwnerId = currentUser?.role === "closer" ? null : queueOwnerId;
     try {
       const [queueTasks, queueLeads, cadencesRes, usersData, productsRes, notesRes, contactedRes, scriptsData, availableData] = await Promise.all([
         fetchQueueTasks(queueOwnerId),   // paginado — nunca corta em 1000 (número real)
-        fetchQueueLeads(queueOwnerId),   // paginado — leadsMap completo
+        fetchQueueLeads(leadsOwnerId),   // paginado — leadsMap completo
         supabase.from("qs_cadences").select("*"),
         fetchQsUsers(),
         supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
@@ -474,10 +480,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const refreshQueue = useCallback(async () => {
     if (document.hidden || pollBusyRef.current) return;
     const queueOwnerId = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
+    const leadsOwnerId = currentUser?.role === "closer" ? null : queueOwnerId;  // ver loadData
     try {
       const [queueTasks, queueLeads, notesRes, contactedRes] = await Promise.all([
         fetchQueueTasks(queueOwnerId),   // paginado (número real, sem teto de 1000)
-        fetchQueueLeads(queueOwnerId),   // paginado
+        fetchQueueLeads(leadsOwnerId),   // paginado
         fetchNoteCountsByLead(queueOwnerId),
         fetchContactedLeadIds(queueOwnerId),
       ]);
