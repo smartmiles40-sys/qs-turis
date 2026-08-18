@@ -21,9 +21,13 @@
 //   Os apelidos ficam em qs_settings.webhook_listas. Apelido desconhecido
 //   responde 400 — nunca cai na padrão em silêncio.
 //
-//   &mover=1 (opcional) → quando o lead JÁ EXISTE, traz ele para a cadência
-//   desta lista em vez de só devolver "deduped". NÃO move lead ganho, com
-//   reunião marcada ou com atividade em aberto — nesses casos volta o motivo.
+//   &duplicar=1 (o modo da carga de lista) → o lead entra como card PRÓPRIO na
+//   cadência da lista, mesmo que já exista alguém com o mesmo telefone, e sem
+//   abrir negócio no Bitrix. O card antigo não é tocado.
+//
+//   &mover=1 (alternativa) → em vez de criar card novo, MOVE o lead existente
+//   para a cadência desta lista. NÃO move lead ganho, com reunião marcada ou
+//   com atividade em aberto — nesses casos volta o motivo do bloqueio.
 //
 // Resposta: { success, lead_id, owner_id, cadence_id, tasks_created }
 // -----------------------------------------------------------------------------
@@ -112,6 +116,12 @@ export default async function handler(req, res) {
   // Fica desligado por padrão: mexer na cadência de um lead alheio é o tipo de
   // coisa que tem que ser pedida, nunca acontecer por acidente.
   const mover = /^(1|true|sim)$/i.test(String(req.query?.mover ?? ''));
+  // &duplicar=1 — o modo da carga de lista. O lead entra como card PRÓPRIO na
+  // cadência da lista, mesmo que já exista alguém com o mesmo telefone, e SEM
+  // abrir negócio no Bitrix. O card antigo não é tocado: continua com o
+  // histórico e a cadência dele. É o caminho mais seguro pra uma frente de
+  // trabalho paralela, porque nada é sobrescrito.
+  const duplicar = /^(1|true|sim)$/i.test(String(req.query?.duplicar ?? ''));
   if (lista) {
     let destino;
     try {
@@ -132,7 +142,7 @@ export default async function handler(req, res) {
   try {
     // Com &mover=1 a busca por duplicado ignora a janela de 24h: numa carga de
     // resgate as pessoas estão no QS há meses, e sem isso todas duplicariam.
-    const { lead, ownerId, cadenceId, tasks, deduped } = await createInboundLead(body, { buscarEmQualquerEpoca: mover });
+    const { lead, ownerId, cadenceId, tasks, deduped } = await createInboundLead(body, { buscarEmQualquerEpoca: mover, cardProprio: duplicar });
 
     // O lead JÁ existia e a URL pediu &mover=1: traz ele pra cadência da lista.
     // Sem isto, a lista de resgate não funciona na prática — a maioria dessas
@@ -141,7 +151,7 @@ export default async function handler(req, res) {
     // ganho, com reunião marcada ou com atividade em aberto NÃO é movido, e o
     // motivo volta na resposta pra aparecer no histórico do n8n.
     let movido = null;
-    if (deduped && mover && lista && lead) {
+    if (deduped && mover && !duplicar && lista && lead) {
       try {
         movido = await moverLeadParaCadencia(lead, body.cadence_id);
       } catch (e) {

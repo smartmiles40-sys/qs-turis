@@ -372,10 +372,26 @@ export async function createInboundLead(payload, opts = {}) {
   const email = normEmail(payload.email);
   const phone = normPhone(payload.phone);
 
+  // CARD PRÓPRIO NA LISTA (opts.cardProprio, ligado pelo &duplicar=1).
+  //
+  // Decisão do Bruno em 18/08: "todo mundo que for para uma nova cadência pode
+  // sim criar duplicado e sem estar atrelado a um novo contato". Faz sentido:
+  // a lista de resgate é uma FRENTE DE TRABALHO separada, não uma correção do
+  // cadastro antigo. Com card próprio, o lead original nem é tocado — ele
+  // continua perdido, na cadência dele, com o histórico intacto — e some o
+  // risco de atropelar quem está sendo trabalhado, porque nada é sobrescrito.
+  //
+  // Duas consequências que o modo assume de propósito:
+  //   • o mesmo telefone passa a existir em dois cards (o antigo e o de
+  //     resgate). É o preço de separar as frentes, e foi escolhido.
+  //   • nada é criado no Bitrix (ver o bloco de vinculação lá embaixo): a lista
+  //     de resgate não abre negócio novo no funil.
+  const cardProprio = !!opts.cardProprio;
+
   // 0) Dedupe por bitrix_id (defensivo: se a coluna ainda não existir no banco,
   //    o filtro falha e seguimos pro fluxo normal de criação).
   const bitrixId = payload.bitrix_id ? String(payload.bitrix_id).trim() : null;
-  if (bitrixId) {
+  if (bitrixId && !cardProprio) {
     try {
       const existing = await rest(`qs_leads?select=*&bitrix_id=eq.${encodeURIComponent(bitrixId)}&limit=1`);
       if (existing && existing[0]) {
@@ -441,7 +457,7 @@ export async function createInboundLead(payload, opts = {}) {
   //     Vale também quando o Bitrix manda um ID de negócio NOVO pra alguém que
   //     já está na base: o 0a só adota card sem bitrix_id, e aqui a intenção
   //     declarada é justamente reencontrar quem já existe.
-  if (opts.buscarEmQualquerEpoca && phone) {
+  if (opts.buscarEmQualquerEpoca && !cardProprio && phone) {
     try {
       const achado = await findLeadByPhone(phone);
       if (achado?.id) {
@@ -460,7 +476,7 @@ export async function createInboundLead(payload, opts = {}) {
   // 0b) Dedupe secundário SEM bitrix_id (form de LP, retry do n8n): mesmo e-mail
   //     ou telefone nas últimas 24h → devolve o existente em vez de duplicar
   //     card + tarefas da cadência.
-  if (!bitrixId && (email || phone)) {
+  if (!bitrixId && !cardProprio && (email || phone)) {
     try {
       const since = new Date(Date.now() - 24 * 3600_000).toISOString();
       const ors = [];
@@ -539,7 +555,14 @@ export async function createInboundLead(payload, opts = {}) {
   //    Antes esse caso caía no retry sem bitrix_id = card DUPLICADO e sem vínculo.
   let created;
   try {
-    created = await insert('qs_leads', bitrixId ? { ...leadRow, bitrix_id: bitrixId } : leadRow);
+    // No modo cardProprio o bitrix_id NÃO vai junto — e não é só a decisão do
+    // Bruno ("sem estar atrelado a um novo contato"): existe índice único em
+    // bitrix_id (0006), então o segundo card com o mesmo id seria recusado com
+    // 23505 e a carga inteira morreria no primeiro lead repetido. O card de
+    // resgate é uma frente de trabalho nova; o vínculo com o negócio do Bitrix
+    // continua no card original.
+    const gravarBitrix = bitrixId && !cardProprio;
+    created = await insert('qs_leads', gravarBitrix ? { ...leadRow, bitrix_id: bitrixId } : leadRow);
   } catch (e) {
     const code = e?.details?.code || e?.code || '';
     if (bitrixId && code === '23505') {
@@ -573,7 +596,10 @@ export async function createInboundLead(payload, opts = {}) {
   // QS: com dono e cadência aqui, invisíveis pro comercial lá. Agora o negócio
   // é criado no mesmo instante, no funil de Pré-Vendas, com o dono do QS como
   // responsável. Best-effort: Bitrix fora não impede o lead de entrar.
-  if (lead && !bitrixId) {
+  // cardProprio NÃO abre negócio: a lista de resgate trabalha gente que já tem
+  // (ou já teve) card no Bitrix. Criar de novo encheria o funil de Pré-Vendas
+  // de duplicatas e estragaria a contagem do comercial.
+  if (lead && !bitrixId && !cardProprio) {
     try {
       const novoId = await vincularLeadAoBitrix({ ...lead, owner_id: finalOwner });
       if (novoId) lead.bitrix_id = novoId;
