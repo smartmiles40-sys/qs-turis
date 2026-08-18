@@ -18,9 +18,10 @@
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cwForm,
   ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, ingestMessage,
-  inboxPermitida, assinarComoUsuario, CW_BASE,
+  inboxPermitida, assinarComoUsuario, CW_BASE, canalDaInbox, canalEhApiOficial,
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
+import { webmParaOggBytes, ehWebm } from './_opusRemux.js';
 
 const MAX_BYTES = 3 * 1024 * 1024;
 
@@ -181,6 +182,42 @@ export default async function handler(req, res) {
       inboxId = r.conversation.inbox_id ?? inboxPedida ?? defaultInboxId();
     }
 
+    // ── ÁUDIO: garantir OGG antes de sair ─────────────────────────────────
+    // A Meta recusa webm ("131053: Media upload error") e a recusa dela é
+    // CALADA pro SDR: a bolha aparece na tela do QS do mesmo jeito. Em 18/08,
+    // 7 de 9 áudios do dia morreram assim.
+    //
+    // Isto roda mesmo com a conversão já feita no navegador, e de propósito: a
+    // aba do QS fica aberta o dia inteiro, e aba velha roda código velho. Aqui
+    // não existe aba velha. Quando o navegador já mandou ogg, `ehWebm` é falso
+    // e nada acontece.
+    const ehAudio = mimeFinal.startsWith('audio/');
+    if (ehAudio && ehWebm(bytes)) {
+      const ogg = webmParaOggBytes(bytes);
+      if (ogg) {
+        console.log(`[wa-send-media] áudio convertido webm→ogg (${bytes.length}→${ogg.length} bytes)`);
+        bytes = ogg;
+        mimeFinal = 'audio/ogg';
+      } else {
+        // Não deu pra converter. Pelo número comum seguimos: a Evolution tem
+        // ffmpeg no caminho e resolve. Pelo oficial, mandar seria enganar o
+        // SDR — a Meta vai recusar e ele vai achar que o cliente ouviu.
+        let oficial = false;
+        try {
+          oficial = canalEhApiOficial(await canalDaInbox(inboxId));
+        } catch (e) {
+          console.warn('[wa-send-media] não consegui saber o canal da caixa:', e?.message);
+        }
+        if (oficial) {
+          return res.status(415).json({
+            error: 'Não consegui preparar este áudio para o número oficial. Grave de novo, ou mande por escrito.',
+            motivo: 'audio-webm-nao-convertido',
+          });
+        }
+        console.warn('[wa-send-media] áudio segue em webm (caixa não é a oficial)');
+      }
+    }
+
     // Legenda assinada, mesma regra do texto. Duas exceções:
     // - NOTA DE VOZ: o WhatsApp nem mostra legenda, e o nome sozinho viraria
     //   uma bolha de texto solta antes do áudio.
@@ -235,9 +272,16 @@ export default async function handler(req, res) {
           source_id: sent?.source_id ?? null,
         },
       });
-      tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);
     } catch (e) {
       console.error('[wa-send-media] enviado, mas falhou ao gravar no QS:', e?.message);
+    }
+
+    // Fora do try acima pelo mesmo motivo do wa-send: falha ao gravar a bolha
+    // não pode deixar a atividade aberta depois do cliente já ter sido atendido.
+    try {
+      tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);
+    } catch (e) {
+      console.warn('[wa-send-media] não consegui concluir a atividade:', e?.message);
     }
 
     return res.status(200).json({ ok: true, conversationId, messageId: sent?.id ?? null, tarefaConcluida: tarefa });
