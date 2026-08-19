@@ -1,25 +1,36 @@
 // src/components/sdr/AvisoDoVigia.tsx
-// Aviso de número de WhatsApp fora do ar (ver @/lib/qs/vigiaWhatsApp).
+// A perna do vigia que mora dentro do app (ver @/lib/qs/vigiaWhatsApp).
 // Montado uma vez no SdrLayout.
 //
-// Fica no TOPO e em vermelho, ao contrário do aviso de versão (canto, discreto):
-// número caído significa que o cliente está mandando mensagem pra um número
-// morto e ninguém no time está recebendo. É a única coisa no QS que justifica
-// interromper quem está trabalhando.
+// ⚠️ A FAIXA ESTÁ DESLIGADA (19/08, a pedido do Bruno) — MAS O COMPONENTE NÃO.
 //
-// Sem botão de fechar, de propósito e pelo mesmo motivo do AvisoDeVersao: o
-// problema não some porque a pessoa fechou o aviso, e esconder isso é como o
-// número dos Closers ficou deslogado por dias em 06/08.
+// Ao religar o vigia, as instâncias "Comercial - SDRs (1595)" e "Comercial -
+// Closers (1935)" voltaram `close`, enquanto a caixa 2 seguia trocando mensagem
+// no mesmo dia. Ou o status da Evolution está velho, ou aquelas instâncias foram
+// abandonadas na migração pra API oficial (978 de cada 1000 mensagens passam
+// hoje pela caixa 3). Faixa vermelha permanente por alarme que talvez seja falso
+// é o jeito mais rápido de o time aprender a ignorar alarme.
+//
+// O componente CONTINUA montado de propósito: é o `useEffect` dele que faz o QS
+// aberto na tela das SDRs acionar a ronda de 5 em 5 minutos — a única perna do
+// vigia que funciona quando NADA está chegando. Tirar o componente do layout
+// mataria isso em silêncio, que é exatamente o erro que estamos consertando.
+//
+// Pra religar a faixa: MOSTRAR_FAIXA = true.
 
 import { useEffect, useState } from "react";
 import { vigiarWhatsApp, type SaudeWhatsApp } from "@/lib/qs/vigiaWhatsApp";
 
+/** Desligada enquanto as duas instâncias antigas seguem reportando `close`. */
+const MOSTRAR_FAIXA = false;
+
 export default function AvisoDoVigia() {
   const [saude, setSaude] = useState<SaudeWhatsApp | null>(null);
 
+  // Roda sempre: é isto que mantém o vigia vivo pelo app.
   useEffect(() => vigiarWhatsApp(setSaude), []);
 
-  if (!saude) return null;
+  if (!MOSTRAR_FAIXA || !saude) return null;
 
   const texto = saude.semServidor
     ? "Não estou conseguindo falar com o servidor de WhatsApp. Pode ser que mensagem nenhuma esteja entrando no QS."
