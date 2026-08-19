@@ -36,7 +36,7 @@ import {
   semDesfecho,
   chaveDoEspecialista,
 } from "@/lib/qs/closerAgenda";
-import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, reagendarReuniao, type DadosDaVenda } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, reagendarReuniao, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
 import BriefingDoLead from "./BriefingDoLead";
 import { getSetting } from "@/lib/qsSettings";
@@ -548,14 +548,20 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
     void load();
   };
 
-  const mudarStatus = async (m: Meeting, status: MeetingStatus, venda?: DadosDaVenda) => {
+  const mudarStatus = async (m: Meeting, status: MeetingStatus, venda?: DesfechoCompleto) => {
     if (demo) {
       const novo = { ...m, status };
       setMeetings((ms) => ms.map((x) => (x.id === m.id ? novo : x)));
       setSelecionada(novo);
       return;
     }
-    const r = await setMeetingStatus(m, status, m.lead?.bitrix_id, venda);
+    // O SAL viaja junto com o desfecho desde 19/08 (antes era um segundo
+    // clique, e por isso quase nunca acontecia).
+    const { sal: salEscolhido, ...dadosDaVenda } = venda ?? {};
+    const r = await setMeetingStatus(
+      m, status, m.lead?.bitrix_id, dadosDaVenda,
+      salEscolhido ? { ...salEscolhido, by: currentUser?.id ?? null } : null
+    );
     if (!r.ok) return notifyError(r.error);
     notifySuccess(`Reunião marcada como ${STATUS[status].label.toLowerCase()}.`);
     setSelecionada(r.meeting);
@@ -956,7 +962,7 @@ interface PainelProps {
   coluna?: Coluna;
   agora: Date;
   onFechar: () => void;
-  onStatus: (s: MeetingStatus, venda?: DadosDaVenda) => void;
+  onStatus: (s: MeetingStatus, desfecho?: DesfechoCompleto) => void;
   onSal: (s: MeetingSal, motivo?: string) => void;
   /** Lista fechada de motivos (qs_settings.sal_motivos). */
   motivos: string[];
@@ -1072,7 +1078,8 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
               <DesfechoVenda
                 tipo={fechando}
                 onVoltar={() => setFechando(null)}
-                onConfirmar={(venda) => { setFechando(null); onStatus(fechando, venda); }}
+                pedirSal={(reuniao.tipo ?? "primeira") !== "retomada"}
+                onConfirmar={(desfecho) => { setFechando(null); onStatus(fechando, desfecho); }}
               />
             </div>
           )}

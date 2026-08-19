@@ -20,6 +20,15 @@ export type MeetingStatus = "agendada" | "confirmada" | "realizada" | "no_show" 
 
 /** Sales Accepted Lead: o especialista aceitou ou recusou o lead na reunião (0028). */
 export type MeetingSal = "aceito" | "recusado";
+
+/**
+ * O papel da reunião na negociação (migration 0054).
+ *
+ * Expedição fecha em uma call; pacote leva 3 ou mais. Sem essa distinção, quem
+ * vende pacote aparecia com o triplo de "reuniões realizadas" sem ter atendido
+ * um cliente a mais.
+ */
+export type MeetingTipo = "primeira" | "retomada";
 export type CustomFieldScope = "pessoal" | "empresa" | "contato";
 
 export interface SdrUser {
@@ -176,6 +185,15 @@ export interface Meeting {
   /** Reunião que esta substitui, quando é remarcação (0032). Separa
    *  reagendamento (avisou) de no-show (sumiu). */
   reagendado_de?: string | null;
+  /**
+   * "primeira" (a call que qualifica) ou "retomada" (continuação da negociação,
+   * típica de pacote — 3 calls ou mais). Migration 0054.
+   *
+   * Retomada ocupa a agenda igual, mas NÃO conta como reunião realizada nos
+   * indicadores e não pede SAL. Undefined = banco sem a 0054; trate como
+   * "primeira", que é o que toda reunião era antes de 19/08.
+   */
+  tipo?: MeetingTipo | null;
   /** Dia em que o agendamento foi FEITO (0006) — com o scheduled_at, dá a
    *  antecedência, que é o que mais explica no-show. Vai pro Bitrix. */
   booking_date?: string | null;

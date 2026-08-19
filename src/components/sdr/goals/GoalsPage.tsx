@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { colunaTipoPronta } from "@/lib/qs/meetings";
 import { notifyError } from "@/lib/qs/notify";
 import { getClosedAtColumn } from "@/lib/qs/queries";
 import type { Goal, GoalPeriod, GoalType, SdrUser } from "../types";
@@ -65,12 +66,15 @@ async function computeGoalCurrent(goal: Goal): Promise<number> {
 
   if (goal.type === "reunioes") {
     // Reuniões agendadas no período (canceladas ficam de fora).
+    // Retomada também fica (0054): a meta é de reunião GERADA, e a 2ª call de um
+    // pacote não é lead novo — contá-la fazia a meta bater sozinha.
     let q = supabase
       .from("qs_meetings")
       .select("id", { count: "exact", head: true })
       .neq("status", "cancelada")
       .gte("created_at", from)
       .lte("created_at", to);
+    if (await colunaTipoPronta()) q = q.neq("tipo", "retomada");
     if (owner) q = q.eq("owner_id", owner);
     const { count } = await q;
     return count ?? 0;

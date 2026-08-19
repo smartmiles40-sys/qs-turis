@@ -1,5 +1,6 @@
 // src/lib/qs/queries.ts — Data access layer for the QS (Qualificacao SDR) system
 import { supabase } from "@/lib/supabase";
+import { colunaTipoPronta } from "@/lib/qs/meetings";
 import { notifyError } from "@/lib/qs/notify";
 import { planCadenceDates, loadWorkHours, scheduleWeekdays, nextWorkMoment, clampToWorkWindow } from "@/lib/workHours";
 import type {
@@ -309,12 +310,17 @@ export async function fetchMeetingCounts(ownerId?: string | null): Promise<Meeti
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   try {
+    // Retomada fica de fora (0054): é a 2ª/3ª call do mesmo cliente num pacote e
+    // inflava o placar de quem vende pacote. O filtro só entra se a migration
+    // já estiver aplicada — filtrar por coluna inexistente zeraria o contador.
+    const temTipo = await colunaTipoPronta();
     let qDay = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
       .neq("status", "cancelada")
       .gte("scheduled_at", dayStart.toISOString()).lt("scheduled_at", dayEnd.toISOString());
     let qMonth = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
       .neq("status", "cancelada")
       .gte("scheduled_at", monthStart.toISOString()).lt("scheduled_at", monthEnd.toISOString());
+    if (temTipo) { qDay = qDay.neq("tipo", "retomada"); qMonth = qMonth.neq("tipo", "retomada"); }
     if (ownerId) { qDay = qDay.eq("owner_id", ownerId); qMonth = qMonth.eq("owner_id", ownerId); }
     const [d, m] = await Promise.all([qDay, qMonth]);
     return { today: d.count ?? 0, month: m.count ?? 0 };
@@ -1230,4 +1236,4 @@ export async function fetchDashboardStats(
     throw err;
   }
 }
-
+

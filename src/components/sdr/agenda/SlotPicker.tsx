@@ -36,6 +36,8 @@ import { WEEKDAY_SHORT, hhmm } from "@/lib/qs/calendarLayout";
 const HORIZON_DAYS = 56;
 /** Dias mostrados na régua de datas. */
 const STRIP_DAYS = 14;
+/** Durações de um clique. Qualquer outro valor entra no campo ao lado. */
+const DURACOES = [30, 45, 60, 90];
 
 export interface SlotSelection {
   closerId: string;
@@ -54,7 +56,10 @@ interface SlotPickerProps {
   /** Pré-seleção (clique numa célula do calendário). */
   initialCloserId?: string | null;
   initialDate?: Date | null;
-  /** Gestor pode encaixar fora da grade de slots. */
+  /**
+   * @deprecated Desde 19/08 digitar outro horário vale pra todo mundo. A prop
+   * ficou só pra não quebrar quem ainda passa; não faz mais nada.
+   */
   allowManual?: boolean;
 }
 
@@ -64,7 +69,6 @@ export default function SlotPicker({
   ignoreMeetingId,
   initialCloserId,
   initialDate,
-  allowManual = false,
 }: SlotPickerProps) {
   const [closers, setClosers] = useState<SdrUser[]>([]);
   const [configs, setConfigs] = useState<CloserConfig[]>([]);
@@ -80,9 +84,13 @@ export default function SlotPicker({
   const [manualTime, setManualTime] = useState("");
   // Horário comercial da grade (09:00–19:30 por padrão, ajustável em qs_settings).
   const [janela, setJanela] = useState<JanelaAgendamento>(JANELA_AGENDAMENTO_PADRAO);
-  // Quantos blocos da grade do closer a reunião ocupa. 1 = o padrão de antes,
-  // então nada muda pra quem não mexer aqui.
-  // Toda reunião ocupa UM bloco de 1h — não há mais escolha de duração.
+  // ── Duração escolhida (19/08) ─────────────────────────────────────────────
+  // Era fixa em 1h. O time reclamou de não conseguir marcar reunião curta nem
+  // horário quebrado pela agenda — sendo que pelo card de Ganho e pela lista de
+  // reuniões conseguia. Agora a grade é feita de blocos DESSA duração, colados:
+  // 30 min faz aparecer 09:00, 09:30, 10:00… e cada slot já é a reunião inteira.
+  const [duracaoMin, setDuracaoMin] = useState<number>(DURACAO_PADRAO_MIN);
+  // Cada slot passou a ser a reunião inteira, então não há mais o que emendar.
   const blocos = 1;
 
   useEffect(() => {
@@ -129,20 +137,13 @@ export default function SlotPicker({
 
   const slots: Slot[] = useMemo(() => {
     if (!slotInput) return [];
-    return computeDaySlots(slotInput, day, { ignoreMeetingId, janela });
-  }, [slotInput, day, ignoreMeetingId, janela]);
+    return computeDaySlots(slotInput, day, { ignoreMeetingId, janela, duracaoMin });
+  }, [slotInput, day, ignoreMeetingId, janela, duracaoMin]);
 
   const stripDays = useMemo(
     () => Array.from({ length: STRIP_DAYS }, (_, i) => addDays(stripStart, i)),
     [stripStart]
   );
-
-  // ── Duração ───────────────────────────────────────────────────────────────
-  // A grade do closer é feita de blocos de `slot_minutes`. Uma reunião mais
-  // longa ocupa blocos SEGUIDOS — então o horário só serve se os seguintes
-  // também estiverem livres e colados. Sem esta conta, o SDR escolheria 1h num
-  // horário com 30 min livres e o banco recusaria na hora de salvar.
-  const duracaoMin = DURACAO_PADRAO_MIN;
 
   /** Inícios que NÃO comportam a duração escolhida. */
   const naoCabe = useMemo(() => {
@@ -182,10 +183,10 @@ export default function SlotPicker({
     if (!slotInput) return new Map<number, number>();
     const map = new Map<number, number>();
     for (const d of stripDays) {
-      map.set(d.getTime(), countFreeSlots(slotInput, d, { ignoreMeetingId, janela }));
+      map.set(d.getTime(), countFreeSlots(slotInput, d, { ignoreMeetingId, janela, duracaoMin }));
     }
     return map;
-  }, [slotInput, stripDays, ignoreMeetingId, janela]);
+  }, [slotInput, stripDays, ignoreMeetingId, janela, duracaoMin]);
 
   function pick(slot: Slot) {
     if (!selectedCloser || !config) return;
@@ -343,9 +344,45 @@ export default function SlotPicker({
             </div>
           </div>
 
-          {/* Duração: FIXA em 1h (Bruno, 17/08). O seletor saiu — escolher
-              tempo no meio do agendamento era mais uma decisão pra errar, e
-              reunião de 30/90 min desalinhava a grade de todo mundo. */}
+          {/* ── Duração ──
+              Voltou em 19/08. Ficou fixa em 1h desde 17/08 porque o seletor
+              desalinhava a grade — agora não desalinha mais: a grade É feita da
+              duração escolhida, então 30 min mostra 09:00/09:30/10:00 certinho. */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">Duração</label>
+            <div className="flex flex-wrap gap-1.5">
+              {DURACOES.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => { setDuracaoMin(d); onChange(null); }}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                    duracaoMin === d
+                      ? "border-[#0147FF] bg-[#0147FF] text-white"
+                      : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                  }`}
+                >
+                  {d >= 60 && d % 60 === 0 ? `${d / 60}h` : `${d} min`}
+                </button>
+              ))}
+              <input
+                type="number"
+                min={5}
+                max={480}
+                step={5}
+                value={DURACOES.includes(duracaoMin) ? "" : duracaoMin}
+                placeholder="outra"
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n) || n < 5) return;
+                  setDuracaoMin(Math.min(480, Math.round(n)));
+                  onChange(null);
+                }}
+                className="w-20 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-700"
+                aria-label="Outra duração, em minutos"
+              />
+            </div>
+          </div>
 
           {/* ── Horários ── */}
           <div>
@@ -353,13 +390,15 @@ export default function SlotPicker({
               <label className="block text-xs font-medium text-gray-700">
                 Horário {freeSlots.length > 0 && <span className="text-gray-400 font-normal">· {freeSlots.length} livre{freeSlots.length > 1 ? "s" : ""}</span>}
               </label>
-              {allowManual && (
+              {/* Liberado pra todo mundo em 19/08 (era só gestor): marcar 14:37
+                  é decisão de quem está com o cliente na linha, não privilégio. */}
+              {(
                 <button
                   type="button"
                   onClick={() => { setManual((v) => !v); onChange(null); }}
                   className="text-[11px] font-semibold text-[#0147FF] hover:underline"
                 >
-                  {manual ? "Voltar aos slots" : "Encaixar fora da grade"}
+                  {manual ? "Voltar aos horários livres" : "Digitar outro horário"}
                 </button>
               )}
             </div>
@@ -367,9 +406,9 @@ export default function SlotPicker({
             {manual ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                 <p className="text-[11px] text-amber-800 mb-2">
-                  Encaixe manual: ignora a grade e o horário comercial — dá pra marcar
-                  antes das {janela.inicio} ou depois das {janela.fim}. A trava de choque
-                  de agenda do banco continua valendo.
+                  Qualquer horário, inclusive quebrado (14:37) e fora da grade. A única
+                  coisa que segue valendo é a trava de dois clientes na mesma hora com o
+                  mesmo especialista — essa o banco recusa e avisa aqui.
                 </p>
                 <input
                   type="time"

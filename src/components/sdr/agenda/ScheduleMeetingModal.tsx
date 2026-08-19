@@ -11,7 +11,16 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
 import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser } from "@/lib/qs/meetings";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
-import type { Lead, Meeting } from "../types";
+import type { Lead, Meeting, MeetingTipo } from "../types";
+
+/**
+ * Tamanho mínimo do resumo pro especialista.
+ *
+ * Não é burocracia: o especialista nunca falou com esse cliente e o que ele
+ * sabe é o que está escrito aqui. O piso existe pra "ok" e "vai ver na
+ * conversa" não passarem — não pra medir texto.
+ */
+const RESUMO_MINIMO = 20;
 
 /** Barra grosseiramente o que nem chega a parecer e-mail (o Google recusa o resto). */
 function emailValido(v: string): boolean {
@@ -61,6 +70,10 @@ export default function ScheduleMeetingModal({
   const [pick, setPick] = useState<SlotSelection | null>(null);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
+  // Primeira call ou retomada (migration 0054). Retomada é a 2ª/3ª conversa de
+  // um pacote: ocupa a agenda igual, mas não conta como reunião realizada nem
+  // pede SAL — foi assim que o indicador do closer parou de inflar.
+  const [tipo, setTipo] = useState<MeetingTipo>("primeira");
   const [link, setLink] = useState("");
   // E-mail pra onde vai o convite do Google. Vem do cadastro quando existe; o
   // SDR completa quando não — e o que ele digitar volta pro cadastro do lead.
@@ -156,6 +169,15 @@ export default function ScheduleMeetingModal({
     // com "Reunião — Fulano", que não diz o que vai ser vendido: ele abre a
     // call às cegas e o campo do Bitrix fica em branco pra sempre. Medido em
     // 18/08: 5 das 12 reuniões futuras estavam assim.
+    // O RESUMO é obrigatório (Bruno, 19/08). O especialista entra na call sem
+    // ter falado com o cliente uma única vez; o que ele sabe é o que a SDR
+    // escreveu aqui. Deixar opcional era garantir que viria vazio na correria.
+    if (notes.trim().length < RESUMO_MINIMO) {
+      setError(`Escreva o resumo pro especialista — o que o cliente quer, o que já foi conversado e o que ficou pendente. Pelo menos ${RESUMO_MINIMO} caracteres.`);
+      setSaving(false);
+      return;
+    }
+
     if (!title.trim()) {
       setError("Diga o que é a reunião — o produto/expedição que foi negociado. É isso que o especialista vê antes de entrar na call.");
       setSaving(false);
@@ -185,6 +207,7 @@ export default function ScheduleMeetingModal({
       location: gerarMeet ? "Google Meet" : link.trim() ? "Online" : null,
       meeting_link: gerarMeet ? null : link,
       notes,
+      tipo,
     });
 
     if (!res.ok) {
@@ -422,14 +445,49 @@ export default function ScheduleMeetingModal({
                 </div>
               )}
               <div>
-                <label className={labelClass}>Anotações</label>
+                <label className={labelClass}>Tipo da reunião</label>
+                <div className="flex gap-1.5">
+                  {([
+                    { v: "primeira" as const, rotulo: "Primeira conversa" },
+                    { v: "retomada" as const, rotulo: "Retomada" },
+                  ]).map((op) => (
+                    <button
+                      key={op.v}
+                      type="button"
+                      onClick={() => setTipo(op.v)}
+                      className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                        tipo === op.v
+                          ? "border-[#0147FF] bg-[#0147FF] text-white"
+                          : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      {op.rotulo}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[11px] text-gray-400">
+                  {tipo === "retomada"
+                    ? "Continuação da negociação (pacote costuma levar 3 calls). Ocupa a agenda, mas não conta como reunião realizada e não pede SAL."
+                    : "A call que qualifica o lead — conta no indicador e pede SAL no desfecho."}
+                </p>
+              </div>
+
+              <div>
+                <label className={labelClass}>
+                  Resumo pro especialista <span className="font-normal text-gray-400">· obrigatório</span>
+                </label>
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  rows={2}
-                  placeholder="Contexto pro closer: dor do cliente, orçamento, destino de interesse..."
+                  rows={3}
+                  placeholder="O que o cliente quer, o que já foi conversado, orçamento, o que ficou pendente…"
                   className={`${inputClass} resize-none`}
                 />
+                <p className="mt-1 text-[11px] text-gray-400">
+                  {notes.trim().length < RESUMO_MINIMO
+                    ? `Faltam ${RESUMO_MINIMO - notes.trim().length} caracteres — é o único contexto que o especialista tem antes da call.`
+                    : "Isso aparece no card do especialista antes da reunião."}
+                </p>
               </div>
             </>
           )}

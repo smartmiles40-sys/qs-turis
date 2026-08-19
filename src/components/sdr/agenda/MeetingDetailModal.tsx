@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { setMeetingStatus, setMeetingSal, deleteMeeting, type DadosDaVenda } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, deleteMeeting, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
 import BriefingDoLead from "./BriefingDoLead";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
@@ -105,14 +105,19 @@ export default function MeetingDetailModal({
   const start = new Date(meeting.scheduled_at);
   const end = new Date(start.getTime() + (meeting.duration_min ?? 30) * 60_000);
 
-  async function mudarStatus(status: MeetingStatus, venda?: DadosDaVenda) {
+  async function mudarStatus(status: MeetingStatus, desfecho?: DesfechoCompleto) {
     if (!meeting) return;
     if (status === "cancelada") {
       const quem = meeting.lead_name ? ` com ${meeting.lead_name}` : "";
       if (!window.confirm(`Cancelar a reunião${quem}? A atividade de confirmação também será encerrada.`)) return;
     }
     setBusy(true);
-    const res = await setMeetingStatus(meeting, status, meeting.lead?.bitrix_id, venda);
+    // SAL junto com o desfecho (19/08): o mesmo caminho da agenda do dia.
+    const { sal, ...venda } = desfecho ?? {};
+    const res = await setMeetingStatus(
+      meeting, status, meeting.lead?.bitrix_id, venda,
+      sal ? { ...sal, by: currentUser?.id ?? null } : null
+    );
     setBusy(false);
     if (!res.ok) {
       notifyError(res.error);
@@ -172,6 +177,13 @@ export default function MeetingDetailModal({
               <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusClasses(meeting.status)}`}>
                 {MEETING_STATUS_LABELS[meeting.status]}
               </span>
+              {/* Retomada precisa ser visível: é o que explica por que esta
+                  reunião não pede SAL e não entra no indicador do mês. */}
+              {meeting.tipo === "retomada" && (
+                <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                  Retomada
+                </span>
+              )}
               <h2 className="mt-1.5 text-base font-bold text-gray-900 truncate">
                 {meeting.lead_name ?? meeting.lead?.full_name ?? "Reunião"}
               </h2>
@@ -303,7 +315,8 @@ export default function MeetingDetailModal({
                 tipo={fechando}
                 busy={busy}
                 onVoltar={() => setFechando(null)}
-                onConfirmar={(venda) => void mudarStatus(fechando, venda)}
+                pedirSal={(meeting.tipo ?? "primeira") !== "retomada"}
+                onConfirmar={(desfecho) => void mudarStatus(fechando, desfecho)}
               />
             )}
 

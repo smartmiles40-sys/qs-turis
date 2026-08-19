@@ -296,6 +296,16 @@ export interface SlotOptions {
    * o encaixe manual do gestor precisa.
    */
   janela?: JanelaAgendamento | null;
+  /**
+   * Duração da reunião que se quer marcar. A grade passa a ser feita de blocos
+   * DESSE tamanho, colados: escolher 30 min faz aparecer 09:00, 09:30, 10:00…
+   *
+   * Antes era fixo em 60 e o horário quebrado não existia na tela — o time
+   * reclamou de não conseguir marcar 14:30 pela agenda, sendo que pelo card de
+   * Ganho e pela lista de reuniões conseguia. Grade e formulário agora oferecem
+   * a mesma liberdade.
+   */
+  duracaoMin?: number;
 }
 
 function parseTime(hms: string): [number, number] {
@@ -373,7 +383,10 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
   // Teto diário e antecedência mínima SAÍRAM (Bruno, 17/08): eram limite de
   // configuração, não da realidade — o especialista podia ter a hora livre e o
   // SDR não conseguia marcar. Sem buffer entre reuniões pelo mesmo motivo.
-  const step = DURACAO_PADRAO_MIN;
+  // A grade acompanha a duração escolhida (ver SlotOptions.duracaoMin): cada
+  // slot É a reunião inteira, então não existe mais "emendar blocos".
+  const dur = Math.max(5, Math.round(opts.duracaoMin ?? DURACAO_PADRAO_MIN));
+  const step = dur;
   const buffer = 0;
 
   // O recorte comercial (09:00–19:30) FOI REMOVIDO a pedido do Bruno (14/08):
@@ -386,9 +399,9 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
     const wStart = atTime(dayStart, w.start_time);
     const wEnd = atTime(dayStart, w.end_time);
     // Trava de segurança: janela absurda não pode virar loop infinito.
-    for (let i = 0, t = wStart.getTime(); i < 300; i++, t += step * 60_000) {
+    for (let i = 0, t = wStart.getTime(); i < 400; i++, t += step * 60_000) {
       const sStart = t;
-      const sEnd = t + DURACAO_PADRAO_MIN * 60_000;
+      const sEnd = t + dur * 60_000;
       if (sEnd > wEnd.getTime()) break;
 
       const start = new Date(sStart);

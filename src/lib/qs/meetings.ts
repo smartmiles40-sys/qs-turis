@@ -24,7 +24,7 @@ import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
 import { cancelarEvento, criarEvento, reagendarEvento } from "@/lib/qs/agendaMeet";
 import { loadWorkHours, nextWorkMoment, clampToWorkWindow, type WorkHours } from "@/lib/workHours";
-import type { ChannelType, Meeting, MeetingSal, MeetingStatus } from "@/components/sdr/types";
+import type { ChannelType, Meeting, MeetingSal, MeetingStatus, MeetingTipo } from "@/components/sdr/types";
 
 // ── Configuração da atividade de confirmação ────────────────────────────────
 
@@ -397,6 +397,12 @@ export interface CreateMeetingInput {
   status?: MeetingStatus;
   /** Dia em que o agendamento foi FEITO (o n8n leva pro Bitrix). Padrão: hoje. */
   booking_date?: string | null;
+  /**
+   * "retomada" = continuação da negociação (pacote costuma levar 3 calls).
+   * Ocupa a agenda igual, mas não conta como reunião realizada e não pede SAL.
+   * Padrão "primeira". Migration 0054.
+   */
+  tipo?: MeetingTipo;
 }
 
 export type MeetingResult =
@@ -442,13 +448,23 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
     meeting_owner: input.closer_name ?? null,
     client_email: input.lead_email ?? null,
     booking_date: input.booking_date ?? new Date().toISOString().slice(0, 10),
+    tipo: input.tipo ?? "primeira",
   };
 
   let { data, error } = await supabase.from("qs_meetings").insert(row).select().single();
 
+  // A 0054 ainda não foi colada? Grava sem o tipo. Perder a marcação de retomada
+  // é ruim (o indicador infla), mas impedir o agendamento é pior — e o deploy do
+  // front não acontece no mesmo segundo que o paste da migration.
+  if (error && /tipo/i.test(error.message ?? "") && isMissingSchema(error)) {
+    console.warn("[meetings] 0054 ainda não aplicada; gravando sem `tipo`:", error.message);
+    const { tipo: _tipo, ...semTipo } = row;
+    ({ data, error } = await supabase.from("qs_meetings").insert(semTipo).select().single());
+  }
+
   if (error && isMissingSchema(error)) {
     console.warn("[meetings] 0027 ainda não aplicada; gravando sem closer_id/lead_name:", error.message);
-    const { closer_id: _closer, lead_name: _leadName, ...legacy } = row;
+    const { closer_id: _closer, lead_name: _leadName, tipo: _t, ...legacy } = row;
     ({ data, error } = await supabase.from("qs_meetings").insert(legacy).select().single());
   }
 
@@ -750,6 +766,15 @@ function isCheckViolation(error: { code?: string; message?: string } | null): bo
 }
 
 /** O que o closer informa ao fechar a reunião (vai pro card do Bitrix). */
+/**
+ * Tudo que o desfecho carrega: os dados da venda MAIS o SAL, que desde 19/08 é
+ * perguntado no mesmo momento (ver SalEscolhido). Anda junto entre a tela e o
+ * serviço pra não existir um caminho que grave o desfecho e esqueça o SAL.
+ */
+export interface DesfechoCompleto extends DadosDaVenda {
+  sal?: { valor: MeetingSal; motivo: string | null } | null;
+}
+
 export interface DadosDaVenda {
   /** Valor do negócio — vira o "Total" do card. */
   valor?: number | null;
@@ -757,11 +782,70 @@ export interface DadosDaVenda {
   tipoVenda?: string | null;
 }
 
+/**
+ * O SAL escolhido no MESMO momento do desfecho (Bruno, 19/08).
+ *
+ * Antes o SAL era uma ação solta, num segundo clique, depois de fechar a
+ * reunião — e por isso ficava em branco na maioria das vezes. Agora ele é mais
+ * um campo do desfecho: sai junto ou não sai.
+ */
+export interface SalEscolhido {
+  valor: MeetingSal;
+  /** Obrigatório quando "recusado" (o banco recusa sem ele desde a 0032). */
+  motivo?: string | null;
+  /** Quem decidiu — vai pra `sal_by`. */
+  by?: string | null;
+}
+
+/**
+ * O lead não foi aceito pelo especialista: vira perdido na hora.
+ *
+ * Regra do Bruno (19/08): "quando colocar que não é SAL, deve ir direto
+ * perdido". Sem isso o lead recusado ficava vivo na fila do SDR, que seguia
+ * fazendo follow-up de alguém que o closer já descartou.
+ *
+ * Mesmos três passos do "Perdido" da fila, pra não existir um perdido de
+ * segunda classe: grava MEDINDO (sob RLS a recusa volta 0 linhas sem erro),
+ * avisa o Bitrix e encerra as atividades que sobraram.
+ */
+async function marcarLeadPerdidoPorSal(meeting: Meeting, motivo: string | null): Promise<void> {
+  const { data, error } = await supabase
+    .from("qs_leads")
+    .update({ status: "perdido" })
+    .eq("id", meeting.lead_id)
+    .select("id");
+
+  if (error || !data || data.length === 0) {
+    notifyError(
+      "O SAL foi gravado, mas o lead NÃO foi marcado como perdido — marque pelo perfil dele."
+    );
+    return;
+  }
+
+  notifyBitrix("perdido", {
+    lead_id: meeting.lead_id,
+    bitrix_id: meeting.lead?.bitrix_id,
+    full_name: meeting.lead?.full_name ?? meeting.lead_name ?? undefined,
+  });
+
+  // As atividades pendentes precisam sair da fila junto: lead perdido que segue
+  // cobrando follow-up é a reclamação mais antiga do time.
+  const { error: errTarefas } = await supabase
+    .from("qs_tasks")
+    .update({ status: "ignorada", skip_reason: `Lead recusado no SAL${motivo ? ` — ${motivo}` : ""}` })
+    .eq("lead_id", meeting.lead_id)
+    .eq("status", "pendente");
+  if (errTarefas) {
+    notifyError("O lead foi perdido, mas as atividades dele podem reaparecer na fila.");
+  }
+}
+
 export async function setMeetingStatus(
   meeting: Meeting,
   status: MeetingStatus,
   leadBitrixId?: string | null,
-  venda?: DadosDaVenda
+  venda?: DadosDaVenda,
+  sal?: SalEscolhido | null
 ): Promise<MeetingResult> {
   // `realizada_em` carimba QUANDO a reunião de fato aconteceu. Existe desde a
   // 0032 e nunca era preenchido por ninguém — é ele que ancora o SAL no mês da
@@ -822,6 +906,22 @@ export async function setMeetingStatus(
       valor: venda?.valor ?? undefined,
       tipo_venda: venda?.tipoVenda || undefined,
     });
+  }
+
+  // ── SAL, no mesmo movimento do desfecho ──────────────────────────────────
+  // Retomada NÃO pede SAL: a qualificação do lead se decide na primeira call, e
+  // um "não é SAL" marcado na 2ª call de um pacote mandaria pra perdido um
+  // cliente que está em negociação (decisão do Bruno, 19/08).
+  const ehRetomada = (meeting.tipo ?? "primeira") === "retomada";
+  if (sal && !ehRetomada && (status === "realizada" || status === "no_show")) {
+    const rSal = await setMeetingSal(
+      data as Meeting, sal.valor, sal.by ?? null,
+      leadBitrixId ?? meeting.lead?.bitrix_id, sal.motivo ?? null
+    );
+    // O desfecho JÁ está gravado — falhar aqui não pode virar "não salvou nada",
+    // senão o closer repete a ação e a reunião fecha duas vezes.
+    if (!rSal.ok) notifyError(rSal.error);
+    else if (sal.valor === "recusado") await marcarLeadPerdidoPorSal(meeting, sal.motivo ?? null);
   }
 
   // Reunião que não vai mais acontecer não pode continuar ocupando a agenda do
@@ -948,6 +1048,39 @@ export async function reagendarReuniao(input: {
   }
 
   return { ok: true, meeting: nova };
+}
+
+/**
+ * Esta reunião entra nos indicadores de reunião? (migration 0054)
+ *
+ * Retomada não entra. Expedição fecha em uma call; pacote leva 3 ou mais, e
+ * contar cada uma como reunião realizada fazia o número do mês inflar sozinho —
+ * o closer que vende pacote aparecia com o triplo de reuniões sem ter atendido
+ * um cliente a mais.
+ *
+ * `tipo` ausente = banco ainda sem a 0054 = trata como "primeira", que é o que
+ * toda reunião era antes de 19/08.
+ */
+export function contaNoIndicador(m: { tipo?: string | null }): boolean {
+  return (m.tipo ?? "primeira") !== "retomada";
+}
+
+/**
+ * A coluna `tipo` já existe no banco? (a 0054 foi colada?)
+ *
+ * O front sobe pela Vercel no push; a migration é colada à mão depois. Nesse
+ * intervalo, pedir `tipo` num select derruba a consulta inteira com 42703 — e
+ * quem paga é o dashboard, que fica em branco. Então perguntamos uma vez e
+ * guardamos: sem a coluna, os contadores seguem como antes (tudo conta), que é
+ * exatamente o comportamento anterior a 19/08.
+ */
+let tipoDisponivel: boolean | null = null;
+export async function colunaTipoPronta(): Promise<boolean> {
+  if (tipoDisponivel !== null) return tipoDisponivel;
+  const { error } = await supabase.from("qs_meetings").select("tipo").limit(1);
+  tipoDisponivel = !error;
+  if (error) console.warn("[meetings] 0054 ainda não aplicada — retomada não será separada nos indicadores.");
+  return tipoDisponivel;
 }
 
 // ── SAL (Sales Accepted Lead) ───────────────────────────────────────────────

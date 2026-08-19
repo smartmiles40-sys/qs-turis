@@ -7,6 +7,7 @@ import type { SdrUser } from "../types";
 import { CHANNEL_LABELS } from "../types";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import RankingPanel from "./RankingPanel";
+import { contaNoIndicador, colunaTipoPronta } from "@/lib/qs/meetings";
 import DailyFlowPanel from "./DailyFlowPanel";
 
 // Desfechos que contam como CONEXÃO (falou com a pessoa certa): o legado
@@ -1364,8 +1365,14 @@ export default function SdrDashboard() {
       // Todas paginadas (cap 1000 do PostgREST) — pipeline com >1000 leads em
       // aberto "perdia" dinheiro da soma sem avisar.
       // 1. Reuniões do período (agendadas no período, pelo created_at)
-      const mPromise = fetchAllRows<{ status: string }>((f, t) => {
-        let q = supabase.from("qs_meetings").select("status, created_at").order("id");
+      // `tipo` só entra no select se a 0054 já estiver no banco — pedir coluna
+      // inexistente derruba a consulta e deixa o dashboard em branco.
+      const temTipo = await colunaTipoPronta();
+      const mPromise = fetchAllRows<{ status: string; tipo?: string | null }>((f, t) => {
+        // O cast existe porque o select é montado em runtime: o supabase-js
+        // valida a string de colunas em tempo de tipo e não aceita variável.
+        const cols = (temTipo ? "status, created_at, tipo" : "status, created_at") as "status, created_at";
+        let q = supabase.from("qs_meetings").select(cols).order("id");
         if (ownerId) q = q.eq("owner_id", ownerId);
         if (from) q = q.gte("created_at", from);
         if (to) q = q.lte("created_at", to);
@@ -1412,9 +1419,12 @@ export default function SdrDashboard() {
       if (mGoalRes.error) throw mGoalRes.error;
 
       // Reuniões
-      const agendadas = meetings.filter((m) => m.status !== "cancelada").length;
-      const realizadas = meetings.filter((m) => m.status === "realizada").length;
-      const noShow = meetings.filter((m) => m.status === "no_show").length;
+      // Retomada fica de FORA de todos eles (0054): é a 2ª/3ª call do mesmo
+      // cliente num pacote, e contá-la inflava o mês de quem vende pacote.
+      const doIndicador = meetings.filter(contaNoIndicador);
+      const agendadas = doIndicador.filter((m) => m.status !== "cancelada").length;
+      const realizadas = doIndicador.filter((m) => m.status === "realizada").length;
+      const noShow = doIndicador.filter((m) => m.status === "no_show").length;
       const decididas = realizadas + noShow;
       // Meta MENSAL de reuniões por dono (vigente + dono ativo, mais recente).
       const goalByOwner: Record<string, number> = {};

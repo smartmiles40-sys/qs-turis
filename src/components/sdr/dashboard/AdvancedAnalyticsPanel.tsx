@@ -16,6 +16,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows, getClosedAtColumn } from "@/lib/qs/queries";
+import { contaNoIndicador, colunaTipoPronta } from "@/lib/qs/meetings";
 import { SOURCE_LABELS } from "@/components/sdr/types";
 import type { LeadSource } from "@/components/sdr/types";
 
@@ -92,7 +93,7 @@ function one<T>(v: T | T[] | null | undefined): T | null {
 // ── Tipos das linhas cruas ───────────────────────────────────────────────────
 
 interface CallRow { ownerId: string | null; answered: boolean; durationSec: number; createdAt: string }
-interface MeetingTermRow { status: string; scheduledAt: string | null; createdAt: string | null; source: string | null }
+interface MeetingTermRow { status: string; scheduledAt: string | null; createdAt: string | null; source: string | null; tipo?: string | null }
 interface LeadRow { id: string; ownerId: string | null; source: string | null; status: string; arrivedAt: string | null; createdAt: string }
 interface WonRow { source: string | null; closedValue: number | null }
 
@@ -133,10 +134,18 @@ export default function AdvancedAnalyticsPanel() {
 
       // (C) Reuniões com desfecho TERMINAL no período (ancoradas em scheduled_at =
       // quando a reunião de fato aconteceu/deveria ter acontecido) + fonte do lead.
+      // Retomada não entra (0054): é a 2ª/3ª call do mesmo cliente num pacote.
+      // O `tipo` só vai no select se a migration já estiver aplicada — coluna
+      // inexistente derrubaria a análise inteira.
+      const temTipo = await colunaTipoPronta();
       const meetTermP = fetchAllRows<any>((f, t) =>
         supabase
           .from("qs_meetings")
-          .select("status, scheduled_at, created_at, lead:qs_leads(source, segment)")
+          .select(
+            temTipo
+              ? "status, scheduled_at, created_at, tipo, lead:qs_leads(source, segment)"
+              : "status, scheduled_at, created_at, lead:qs_leads(source, segment)"
+          )
           .in("status", ["realizada", "no_show"])
           .gte("scheduled_at", cut)
           .order("id")
@@ -213,6 +222,7 @@ export default function AdvancedAnalyticsPanel() {
       })));
 
       setMeetingsTerm(meetTermRows.map((r) => ({
+        tipo: (r.tipo as string | null) ?? null,
         status: (r.status as string) ?? "",
         scheduledAt: (r.scheduled_at as string) ?? null,
         createdAt: (r.created_at as string) ?? null,
@@ -304,6 +314,7 @@ export default function AdvancedAnalyticsPanel() {
   const showBySrc = new Map<string, ShowRow>();
   const showTotal: ShowRow = { realizada: 0, noShow: 0, leadDays: 0, leadCount: 0 };
   for (const m of meetingsTerm) {
+    if (!contaNoIndicador(m)) continue; // retomada não entra no indicador (0054)
     const key = sourceLabel(m.source);
     const r = showBySrc.get(key) ?? { realizada: 0, noShow: 0, leadDays: 0, leadCount: 0 };
     for (const t of [r, showTotal]) {
