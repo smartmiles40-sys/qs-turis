@@ -429,6 +429,65 @@ function isMissingSchema(error: { code?: string; message?: string } | null): boo
   return /column .*(closer_id|lead_name)|qs_closer_/i.test(error?.message ?? "");
 }
 
+/**
+ * Reunião marcada = prospecção encerrada.
+ *
+ * POR QUE EXISTE (Victor Hugo, 19/08). Havia DOIS jeitos de agendar e eles não
+ * faziam a mesma coisa. O card "Ganho / Agendou" do painel marcava o lead como
+ * ganho e encerrava a cadência; agendar pela agenda ou pela ficha do lead
+ * apenas criava a reunião e passava o lead pro closer. Resultado medido:
+ * **7 leads com reunião marcada seguiam rodando cadência de prospecção**, com
+ * 37 atividades pendentes no colo dos closers — a Ina tinha 9 atividades de
+ * "primeiro contato" abertas no dia da própria reunião.
+ *
+ * E, do lado do SDR, o agendamento não virava conquista nenhuma: o lead não
+ * ficava "ganho", saía da fila dele e sumia da vista. Daí "agendei e não foi
+ * marcado no QS".
+ *
+ * ATIVIDADE DA REUNIÃO NÃO É CADÊNCIA: tudo que carrega a marca `meeting:<id>`
+ * (confirmar presença, registrar desfecho) sobrevive. Encerrar essas seria
+ * apagar justamente o trabalho que a reunião cria.
+ *
+ * Roda ANTES da transferência pro closer, e isso é obrigatório: depois dela o
+ * SDR perde a posse do lead e a RLS recusaria estas duas gravações em silêncio.
+ *
+ * Best-effort: a reunião já está gravada quando isto roda. Falhar aqui não
+ * pode virar "não agendou" — vira aviso.
+ */
+async function encerrarProspeccao(leadId: string, motivo: string): Promise<void> {
+  try {
+    // Só mexe em lead ainda em andamento: um lead já ganho/perdido tem história
+    // própria e não é para ser reescrito por um agendamento novo.
+    await supabase
+      .from("qs_leads")
+      .update({ status: "ganho" })
+      .eq("id", leadId)
+      .not("status", "in", "(ganho,perdido)");
+
+    const { data: pendentes } = await supabase
+      .from("qs_tasks")
+      .select("id, tags")
+      .eq("lead_id", leadId)
+      .eq("status", "pendente");
+
+    const daCadencia = (pendentes ?? [])
+      .filter((t) => !(t.tags ?? []).some((g: string) => String(g).startsWith("meeting:")))
+      .map((t) => t.id);
+
+    if (daCadencia.length) {
+      await supabase
+        .from("qs_tasks")
+        .update({ status: "ignorada", skip_reason: motivo })
+        .in("id", daCadencia);
+    }
+  } catch (e) {
+    console.warn("[meetings] não consegui encerrar a prospecção do lead:", e);
+    notifyError(
+      "A reunião foi agendada, mas as atividades de prospecção deste lead continuam abertas — encerre pelo card do lead."
+    );
+  }
+}
+
 export async function createMeeting(input: CreateMeetingInput): Promise<MeetingResult> {
   const status: MeetingStatus = input.status ?? "agendada";
   const row = {
@@ -507,6 +566,13 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
       durationMin: meeting.duration_min,
       leadName: input.lead_name,
     });
+  }
+
+  // Reunião marcada encerra a prospecção — em QUALQUER caminho de agendamento,
+  // não só no card de Ganho. Retroativa (já realizada/no-show) não entra: ali a
+  // reunião é história, e o lead pode ter qualquer desfecho.
+  if (status === "agendada") {
+    await encerrarProspeccao(input.lead_id, "Reunião agendada — cadência de prospecção encerrada");
   }
 
   // O PRODUTO da reunião vai direto pro campo do card ("Produto (Descritivo da

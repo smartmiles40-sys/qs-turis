@@ -1188,8 +1188,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     if (!meetingFor || savingMeeting) return;
     const { taskId, leadId, leadName } = meetingFor;
     const ok = await confirmar({
-      titulo: `Finalizar ${leadName} como ganho?`,
-      mensagem: "Sem agendar nova reunião — use só quando o cliente já tem reunião marcada.",
+      titulo: `Finalizar ${leadName} sem criar reunião?`,
+      mensagem:
+        "NENHUMA reunião será criada: nada entra na agenda do especialista e nenhum " +
+        "convite do Google é enviado. Use só quando a reunião JÁ EXISTE no QS. " +
+        "Se você acabou de combinar o horário com o cliente, feche pelo botão " +
+        "\"Ganho / Agendou\" — é ele que registra o agendamento.",
       confirmarLabel: "Finalizar como ganho",
     });
     if (!ok) return;
@@ -3995,14 +3999,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 </button>
               </div>
               {/* Cliente que JÁ tem reunião marcada não precisa de outra: este
-                  caminho fecha o ganho sem agendar nada (pedido dos SDRs, 14/08). */}
+                  caminho fecha o ganho sem agendar nada (pedido dos SDRs, 14/08).
+                  O rótulo diz "NÃO cria reunião" desde 19/08: três leads do
+                  Victor Hugo (14 e 17/08) foram fechados por aqui achando que o
+                  agendamento estava sendo registrado, e ficaram sem reunião
+                  nenhuma no QS. "Já tem reunião marcada" era lido como "acabei
+                  de marcar com o cliente". */}
               <button
                 onClick={() => void handleGanhoSemReuniao()}
                 disabled={savingMeeting}
                 className="mt-2 w-full py-2 rounded-lg text-[13px] font-semibold border disabled:opacity-50"
                 style={{ borderColor: "var(--green)", color: "var(--green)", background: "transparent" }}
               >
-                Finalizar como ganho (já tem reunião marcada)
+                Finalizar SEM criar reunião no QS
               </button>
             </div>
           </div>
