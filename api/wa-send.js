@@ -97,6 +97,48 @@ async function resolverModelo(modelo) {
  * Best-effort: checagem quebrada NUNCA bloqueia o envio — só a certeza bloqueia.
  * Devolve a mensagem de erro, ou null pra seguir.
  */
+/**
+ * A janela de 24h da Meta está fechada para este lead?
+ *
+ * POR QUE ISTO EXISTE. Pelo número oficial, texto livre só é entregue se o
+ * cliente falou com a gente nas últimas 24 horas; fora disso a Meta recusa e a
+ * recusa é SILENCIOSA — a bolha aparece no QS e a SDR acha que o cliente leu.
+ * Medido em 19/08: das 40 mensagens que falharam desde 01/08, 18 eram isso
+ * (8 com o cliente calado há mais de um dia, 10 que nunca falaram com a gente).
+ *
+ * A conta é feita no NOSSO banco (custo zero, temos todas as entradas). Mas o
+ * QS já perdeu mensagem de entrada antes — e barrar um envio legítimo é pior
+ * que deixar passar um que vai falhar. Por isso, quando a resposta local é
+ * "fechada", confirmamos com o Chatwoot (`can_reply`, que vem da própria Meta)
+ * antes de recusar. Uma chamada a mais, só no caminho que ia dar errado.
+ */
+async function foraDaJanela24h(leadId, conversationId) {
+  const desde = new Date(Date.now() - 24 * 3600_000).toISOString();
+  try {
+    const ent = await rest(
+      `qs_wa_messages?select=id&lead_id=eq.${encodeURIComponent(leadId)}` +
+      `&direction=eq.in&sent_at=gte.${encodeURIComponent(desde)}&limit=1`
+    );
+    if (Array.isArray(ent) && ent.length) return false;
+  } catch (e) {
+    // Sem conseguir olhar, não bloqueia: deixa a Meta decidir.
+    console.warn('[wa-send] não consegui conferir a janela de 24h:', e?.message);
+    return false;
+  }
+
+  if (conversationId == null) return true;
+  try {
+    const d = await cw(`/conversations/${conversationId}`);
+    const conv = d?.id != null ? d : (d?.payload?.id != null ? d.payload : null);
+    // Só o `true` explícito reabre: `undefined` (versão de Chatwoot que não
+    // manda o campo) não pode virar "pode enviar".
+    if (conv?.can_reply === true) return false;
+  } catch (e) {
+    console.warn('[wa-send] can_reply indisponível, valendo o cálculo local:', e?.message);
+  }
+  return true;
+}
+
 async function numeroCaido(inboxId) {
   try {
     if (!evoConfigured() || inboxId == null) return null;
@@ -254,6 +296,17 @@ export default async function handler(req, res) {
     if (!templateParams) {
       const caido = await numeroCaido(inboxId);
       if (caido) return res.status(409).json({ error: caido, motivo: 'numero-desconectado' });
+
+      // A outra recusa silenciosa, e a mais comum: número oficial + janela de
+      // 24h fechada. Só o oficial passa por isso — a Evolution não tem janela.
+      const canal = await canalDaInbox(inboxId);
+      if (canalEhApiOficial(canal) && await foraDaJanela24h(leadId, conversationId)) {
+        return res.status(409).json({
+          error: 'O cliente não fala com a gente há mais de 24h. Pelo número oficial, ' +
+                 'a Meta só entrega MODELO aprovado — use um modelo para reabrir a conversa.',
+          motivo: 'fora-da-janela-24h',
+        });
+      }
     }
 
     // O nome de quem está falando vai na primeira linha. Sai daqui, e não do

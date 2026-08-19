@@ -20,8 +20,13 @@
 // log na Vercel com o motivo.
 // -----------------------------------------------------------------------------
 
-import { findLeadByPhone, ingestMessage, inboxAceita, completeWhatsAppTask, directionOf } from './_wa.js';
+import {
+  findLeadByPhone, ingestMessage, inboxAceita, completeWhatsAppTask, directionOf,
+  reabrirPorFalha, extractStatus, parseCwDate,
+} from './_wa.js';
 import { insert, rest, segredoConfere } from './_supabaseAdmin.js';
+import { verificarSeVencido } from './_waAlerta.js';
+import { avisarGloria } from './_gloria.js';
 
 /**
  * O cliente apagou a mensagem no celular dele.
@@ -157,6 +162,14 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Não autorizado' });
   }
 
+  // ── O VIGIA PEGA CARONA NO MOVIMENTO ───────────────────────────────────────
+  // Fica ANTES do tratamento do evento de propósito: a maior parte do que o
+  // Chatwoot manda é evento repetido que ignoramos logo abaixo, e esses hits
+  // valem como pulso igual. Assim o vigia depende do WhatsApp estar sendo
+  // usado — não de um agendador externo que morre calado (foi o que aconteceu
+  // entre 17/08 e 19/08). Trava de 10min: uma ronda a cada ~50 mensagens.
+  await verificarSeVencido().catch(() => {});
+
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const event = body?.event || '';
 
@@ -272,7 +285,26 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, leadId: lead.id, novo: saved, tarefaConcluida: tarefa });
+    // E o contrário: a mensagem que baixou a atividade acabou de virar "falhou".
+    // Sem isto, a fila dá o lead como atendido por uma mensagem que o cliente
+    // nunca recebeu — o buraco que deixou 40 mensagens mortas desde 01/08.
+    let reaberta = null;
+    if (ehNossa && event === 'message_updated' && extractStatus(message) === 'failed') {
+      reaberta = await reabrirPorFalha(lead.id, lead.owner_id ?? null, parseCwDate(message?.created_at));
+    }
+
+    // ── A GLÓRIA (IA) FICA SABENDO ─────────────────────────────────────────
+    // Só de mensagem NOVA do cliente: `saved` false é evento repetido do
+    // Chatwoot (acontece o tempo todo) e faria a IA responder duas vezes.
+    // Se ela deve ou não falar, quem decide é o banco — aqui é só o aviso.
+    let gloria = null;
+    if (saved && directionOf(message) === 'in' && (!event || event === 'message_created')) {
+      gloria = await avisarGloria({
+        lead, message, conversationId: conv.id ?? null, telefone: phone,
+      });
+    }
+
+    return res.status(200).json({ ok: true, leadId: lead.id, novo: saved, tarefaConcluida: tarefa, reaberta, gloria });
   } catch (e) {
     // Erro nosso: loga e responde 200 mesmo assim (ver cabeçalho do arquivo).
     console.error('[wa-webhook]', e?.message, e?.details || '');

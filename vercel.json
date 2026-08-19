@@ -16,6 +16,9 @@
     "api/wa-send.js": {
       "maxDuration": 30
     },
+    "api/gloria-responder.js": {
+      "maxDuration": 30
+    },
     "api/*.js": {
       "maxDuration": 10
     }

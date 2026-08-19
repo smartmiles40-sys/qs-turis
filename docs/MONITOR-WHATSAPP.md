@@ -14,7 +14,20 @@ Duas camadas, de propósito — uma cobre o buraco da outra:
 | Camada | Gatilho | Pega | Não pega |
 |---|---|---|---|
 | Webhook | evento `CONNECTION_UPDATE` da Evolution | queda na hora que acontece | Evolution/VPS fora (não há quem emita o evento) |
+| Carona no tráfego | cada mensagem que entra pelo `wa-webhook` | queda enquanto o WhatsApp está sendo usado | tudo parado (sem mensagem, sem pulso) |
+| Batimento do app | o QS aberto na tela das SDRs chama `/api/wa-vigia` a cada 5 min | justamente o caso acima: nada chegando | madrugada, com ninguém logado |
 | Varredura | agendador externo bate em `/api/wa-monitor` | tudo, inclusive servidor fora | nada — mas só descobre no próximo ciclo |
+
+⚠️ **A lição de 17/08.** Até essa data só existiam a 1ª e a última camada. O
+agendador externo parou de disparar às 15:13 e o vigia ficou **dois dias mudo**
+sem ninguém perceber — vigia morto é pior que vigia nenhum, porque o silêncio
+passa por "está tudo bem". As duas camadas do meio existem para que o vigia
+dependa de o QS estar sendo usado, e não de um serviço de fora que morre calado.
+
+E há um caso em que o alerta por WhatsApp nunca vai chegar: quando o problema é
+o próprio servidor de WhatsApp. Por isso o aviso também sai por um canal que não
+depende dele — uma **faixa vermelha no topo do QS** (`AvisoDoVigia`), que o time
+vê mesmo com todos os números fora.
 
 As duas chamam a mesma função (`verificar()` em `api/_waAlerta.js`), então a
 regra de "quando avisar" mora num lugar só.

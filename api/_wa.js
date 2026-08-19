@@ -1036,3 +1036,49 @@ export async function resgatarConversaPerdida(lead) {
 
   return { resgatadas, conversationId: convPrincipal.id, descartes: linhas.length };
 }
+
+/**
+ * A mensagem que baixou a atividade não chegou ao cliente. Desfaz a baixa.
+ *
+ * POR QUE EXISTE. O QS conclui a tarefa no instante do envio — antes de saber
+ * se a Meta aceitou. Quando a mensagem falha (janela de 24h fechada, número
+ * inválido, formato recusado), o recibo da bolha vira "⚠ falhou", mas a
+ * atividade permanecia concluída: a fila dava o lead como atendido e ninguém
+ * voltava nele. Cliente sem resposta e SDR sem cobrança — o pior dos dois.
+ *
+ * SÓ desfaz o que foi automático: `contact_result` nulo. Tarefa que a SDR
+ * fechou escolhendo um desfecho (atendeu, caixa postal, sem interesse…) é
+ * decisão de gente e não se mexe, mesmo que uma mensagem falhe por perto.
+ *
+ * A janela de 10 minutos amarra a baixa àquele envio; sem ela, uma falha de
+ * hoje reabriria a atividade concluída ontem.
+ */
+export async function reabrirPorFalha(leadId, ownerId = null, quandoIso = null) {
+  const quando = quandoIso ? new Date(quandoIso) : new Date();
+  if (Number.isNaN(quando.getTime())) return null;
+  const de = new Date(quando.getTime() - 10 * 60_000).toISOString();
+  const ate = new Date(quando.getTime() + 10 * 60_000).toISOString();
+  const filtroDono = ownerId ? `&owner_id=eq.${encodeURIComponent(ownerId)}` : '';
+
+  try {
+    const fechadas = await rest(
+      `qs_tasks?select=id&lead_id=eq.${encodeURIComponent(leadId)}&status=eq.concluida` +
+      `&contact_result=is.null&completed_at=gte.${encodeURIComponent(de)}` +
+      `&completed_at=lte.${encodeURIComponent(ate)}` + filtroDono +
+      `&order=completed_at.desc&limit=1`
+    );
+    const alvo = fechadas?.[0];
+    if (!alvo) return null;
+
+    await rest(`qs_tasks?id=eq.${encodeURIComponent(alvo.id)}`, {
+      method: 'PATCH',
+      body: { status: 'pendente', completed_at: null },
+      prefer: 'return=minimal',
+    });
+    console.log(`[wa] atividade ${alvo.id} reaberta: a mensagem que a fechou falhou`);
+    return alvo.id;
+  } catch (e) {
+    console.warn('[wa] reabrirPorFalha:', e?.message);
+    return null;
+  }
+}

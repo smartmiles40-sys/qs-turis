@@ -1,0 +1,464 @@
+{
+  "name": "Glória — carregar a base de conhecimento",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "base-0001-4000-8000-000000000001",
+      "name": "Rodar quando você clicar",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1180,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "SUPABASE_URL",
+              "value": "https://eabfjomrnucymduqnbci.supabase.co",
+              "type": "string"
+            },
+            {
+              "id": "b2",
+              "name": "SITEMAP",
+              "value": "https://setuforeuvouviagens.com.br/sitemap.xml",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "base-0002-4000-8000-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -980,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.SITEMAP }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "base-0003-4000-8000-000000000003",
+      "name": "Baixar o sitemap",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -780,
+        380
+      ],
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "neverError: sitemap que não existe não pode derrubar a carga. O próximo nó cai na lista manual."
+    },
+    {
+      "parameters": {
+        "jsCode": "// De onde sai a lista de páginas que a Glória vai ler.\n//\n// Primeiro tenta o sitemap do site: assim, LP nova entra sozinha na próxima\n// carga e ninguém precisa lembrar de vir aqui. Se o sitemap não existir (ou\n// mudar de endereço), a lista de baixo assume.\n\nconst LISTA_MANUAL = [\n  // Cole aqui as páginas, uma por linha, se o sitemap falhar:\n  // 'https://setuforeuvouviagens.com.br/islandia',\n  // 'https://setuforeuvouviagens.com.br/patagonia',\n];\n\n// Páginas que não ajudam a responder lead e só gastam embedding.\nconst IGNORAR = /(politica|privacidade|termos|cookies|obrigado|thank|login|admin|\\.(jpg|png|webp|pdf|xml)$)/i;\n\nconst xml = String($json.data || $json.body || '');\nconst doSitemap = [...xml.matchAll(/<loc>\\s*([^<]+?)\\s*<\\/loc>/gi)].map((m) => m[1]);\n\nconst urls = [...new Set((doSitemap.length ? doSitemap : LISTA_MANUAL))]\n  .map((u) => String(u).trim())\n  .filter((u) => /^https?:\\/\\//.test(u) && !IGNORAR.test(u));\n\nif (!urls.length) {\n  throw new Error(\n    'Nenhuma página pra ler. O sitemap não respondeu e a LISTA_MANUAL está vazia — ' +\n    'abra este nó e cole os endereços das LPs.'\n  );\n}\n\nreturn urls.map((url) => ({ json: { url } }));"
+      },
+      "id": "base-0004-4000-8000-000000000004",
+      "name": "Lista de páginas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -580,
+        380
+      ],
+      "notesInFlow": true,
+      "notes": "É AQUI que você mexe pra escolher o que a IA lê. LP nova no sitemap entra sozinha."
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 3,
+              "batchInterval": 1500
+            }
+          }
+        }
+      },
+      "id": "base-0005-4000-8000-000000000005",
+      "name": "Baixar a página",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -380,
+        380
+      ],
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "3 páginas por vez, com 1,5s entre as levas. O site é da casa, mas martelar o próprio domínio com 30 requisições simultâneas é como se descobre que a Vercel tem limite."
+    },
+    {
+      "parameters": {
+        "jsCode": "// HTML vira texto de leitura.\n//\n// Sem isto, o que entra no banco é <div class=\"hero\"> — e a IA passa a\n// responder com pedaço de CSS. Não é bonito, mas é o suficiente pra uma LP:\n// tira script e style, troca as tags por espaço e desfaz as entidades.\n\nconst url = $('Lista de páginas').item.json.url;\nconst html = String($json.data || $json.body || '');\n\nconst semLixo = html\n  .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n  .replace(/<noscript[\\s\\S]*?<\\/noscript>/gi, ' ');\n\nconst titulo = (semLixo.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1] || url).trim();\n\nconst texto = semLixo\n  .replace(/<br\\s*\\/?>/gi, '\\n')\n  .replace(/<\\/(p|div|section|h[1-6]|li|tr)>/gi, '\\n')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/&nbsp;/g, ' ')\n  .replace(/&amp;/g, '&')\n  .replace(/&quot;/g, '\"')\n  .replace(/&#39;/g, \"'\")\n  .replace(/&lt;/g, '<')\n  .replace(/&gt;/g, '>')\n  .replace(/[ \\t]+/g, ' ')\n  .replace(/\\n\\s*\\n\\s*\\n+/g, '\\n\\n')\n  .trim();\n\n// Página curta demais é erro de carregamento (site que monta tudo no\n// navegador, 404 estilizado). Gravar isso ensinaria a IA a não saber nada.\nif (texto.length < 400) {\n  return [{ json: { url, titulo, texto: '', ignorada: true, motivo: 'pagina_curta_demais', tamanho: texto.length } }];\n}\n\nreturn [{ json: { url, titulo, texto, ignorada: false, tamanho: texto.length } }];"
+      },
+      "id": "base-0006-4000-8000-000000000006",
+      "name": "HTML vira texto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        380
+      ],
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "i1",
+              "leftValue": "={{ $json.ignorada }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "base-0007-4000-8000-000000000007",
+      "name": "Veio conteúdo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        20,
+        380
+      ],
+      "notesInFlow": true,
+      "notes": "Página que não carregou vai pro ramo de baixo e aparece no resumo, em vez de virar um documento vazio que a IA leria como se fosse verdade."
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/gloria_documents?metadata->>url=eq.{{ encodeURIComponent($json.url) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {}
+      },
+      "id": "base-0008-4000-8000-000000000008",
+      "name": "Apagar a versão antiga desta página",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA_ID_SUPABASE_QS",
+          "name": "Supabase QS (service_role)"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Sem isto, cada carga EMPILHA uma cópia da mesma LP. A IA passaria a citar o preço do ano passado com a mesma confiança do de hoje, e o de ontem apareceria primeiro na busca."
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": {
+          "__rl": true,
+          "value": "gloria_documents",
+          "mode": "name"
+        },
+        "options": {
+          "queryName": "match_gloria_documents"
+        }
+      },
+      "id": "base-0009-4000-8000-000000000009",
+      "name": "Gravar no banco do QS",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA_ID_SUPABASE_QS",
+          "name": "Supabase QS (service_role)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $('HTML vira texto').item.json.texto }}",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "url",
+                "value": "={{ $('HTML vira texto').item.json.url }}"
+              },
+              {
+                "name": "titulo",
+                "value": "={{ $('HTML vira texto').item.json.titulo }}"
+              }
+            ]
+          }
+        },
+        "textSplittingMode": "custom"
+      },
+      "id": "base-0010-4000-8000-000000000010",
+      "name": "Documento",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1,
+      "position": [
+        460,
+        500
+      ],
+      "notesInFlow": true,
+      "notes": "A url vai no metadata porque é ela que o nó de apagar usa pra achar a versão antiga desta mesma página."
+    },
+    {
+      "parameters": {
+        "chunkSize": 1000,
+        "chunkOverlap": 150,
+        "options": {}
+      },
+      "id": "base-0011-4000-8000-000000000011",
+      "name": "Picar em pedaços",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        460,
+        680
+      ],
+      "notesInFlow": true,
+      "notes": "1000 caracteres com 150 de sobreposição. A sobreposição existe pra a frase que fala do preço não ser cortada exatamente no meio entre dois pedaços."
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "base-0012-4000-8000-000000000012",
+      "name": "Embeddings OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        500
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "DLGX90KZkDRpKl5G",
+          "name": "OpenAI account"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "TEM que ser o mesmo modelo do workflow de atendimento. Modelos diferentes geram números que não se comparam, e a busca devolve qualquer coisa."
+    },
+    {
+      "parameters": {
+        "jsCode": "// O que entrou nesta carga.\nconst itens = $input.all().map((i) => i.json);\nreturn [{ json: {\n  paginas_processadas: itens.length,\n  quando: $now.toISO(),\n  aviso: 'Confira no Supabase: select count(*), metadata->>\\'url\\' from gloria_documents group by 2 order by 1 desc;',\n} }];"
+      },
+      "id": "base-0013-4000-8000-000000000013",
+      "name": "Resumo da carga",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "base-0014-4000-8000-000000000014",
+      "name": "Páginas que não carregaram",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        240,
+        520
+      ],
+      "notesInFlow": true,
+      "notes": "Abra este nó depois de rodar: cada item aqui é uma LP que a IA NÃO vai saber responder."
+    }
+  ],
+  "connections": {
+    "Rodar quando você clicar": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Baixar o sitemap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar o sitemap": {
+      "main": [
+        [
+          {
+            "node": "Lista de páginas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lista de páginas": {
+      "main": [
+        [
+          {
+            "node": "Baixar a página",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar a página": {
+      "main": [
+        [
+          {
+            "node": "HTML vira texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML vira texto": {
+      "main": [
+        [
+          {
+            "node": "Veio conteúdo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Veio conteúdo?": {
+      "main": [
+        [
+          {
+            "node": "Apagar a versão antiga desta página",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Páginas que não carregaram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apagar a versão antiga desta página": {
+      "main": [
+        [
+          {
+            "node": "Gravar no banco do QS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar no banco do QS": {
+      "main": [
+        [
+          {
+            "node": "Resumo da carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documento": {
+      "ai_document": [
+        [
+          {
+            "node": "Gravar no banco do QS",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Picar em pedaços": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Documento",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Gravar no banco do QS",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "91aa63e4f74d7cbe350736303e89cc11603c939156428dd97f3f611c857dbb64"
+  },
+  "tags": []
+}

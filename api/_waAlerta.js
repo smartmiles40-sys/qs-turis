@@ -235,3 +235,70 @@ export async function verificar() {
     ...envio,
   };
 }
+
+/**
+ * A mesma verificação, mas só se já passou tempo bastante desde a última.
+ *
+ * POR QUE EXISTE: até 19/08 o vigia dependia de UM agendador externo
+ * (UptimeRobot) batendo na rota. Ele parou de disparar em 17/08 às 15:13 e
+ * ninguém percebeu por dois dias — um vigia morto é pior que nenhum, porque o
+ * silêncio parece "está tudo bem". Agora o próprio movimento do QS aciona o
+ * vigia: cada mensagem que chega do Chatwoot passa por aqui, e uma em cada
+ * ~50 (a primeira depois da trava vencer) faz a ronda.
+ *
+ * A trava mora no banco (`verificadoEm`), não em memória: função serverless
+ * não guarda nada entre execuções e há várias rodando ao mesmo tempo.
+ *
+ * NUNCA lança. Quem chama é um webhook cuja obrigação é responder 200 ao
+ * Chatwoot — vigia com defeito não pode derrubar a entrada de mensagem.
+ */
+export async function verificarSeVencido(maxIdadeMs = 10 * 60 * 1000) {
+  try {
+    if (!evoConfigured()) return { pulou: true, motivo: 'sem-config' };
+
+    const estado = await lerEstado();
+    const ultimo = estado?.verificadoEm ? new Date(estado.verificadoEm).getTime() : 0;
+    const idade = Date.now() - ultimo;
+    if (Number.isFinite(idade) && idade < maxIdadeMs) {
+      return { pulou: true, motivo: 'recente', idadeMs: idade };
+    }
+
+    // Marca a vez ANTES de trabalhar. Duas mensagens que cheguem no mesmo
+    // segundo não podem virar duas rondas — a segunda vê o carimbo novo e sai.
+    await salvarEstado({ ...estado, verificadoEm: new Date().toISOString() });
+
+    const resumo = await verificar();
+    return { pulou: false, ...resumo };
+  } catch (e) {
+    // Evolution fora do ar cai aqui — e é EXATAMENTE o caso que não pode
+    // passar em silêncio. Registra pro QS conseguir mostrar na tela.
+    console.error('[vigia] ronda falhou:', e?.message);
+    try {
+      const estado = await lerEstado();
+      await salvarEstado({
+        ...estado,
+        falha: { em: new Date().toISOString(), motivo: String(e?.message || 'erro') },
+      });
+    } catch { /* banco fora também: não há mais o que fazer aqui */ }
+    return { pulou: false, erro: String(e?.message || 'erro') };
+  }
+}
+
+/**
+ * Há quanto tempo o vigia não roda, e o que ele viu por último.
+ * É o que a tela do QS mostra — o silêncio precisa ser visível.
+ */
+export async function saudeDoVigia() {
+  const estado = await lerEstado();
+  const ultimo = estado?.verificadoEm ? new Date(estado.verificadoEm).getTime() : null;
+  const instancias = Object.entries(estado?.instancias || {}).map(([nome, v]) => ({
+    nome, status: v?.status || null, noAr: noAr(v?.status), desde: v?.desde || null,
+  }));
+  return {
+    verificadoEm: estado?.verificadoEm || null,
+    paradoHaMs: ultimo ? Date.now() - ultimo : null,
+    falha: estado?.falha || null,
+    instancias,
+    caidas: instancias.filter((i) => !i.noAr).map((i) => i.nome),
+  };
+}

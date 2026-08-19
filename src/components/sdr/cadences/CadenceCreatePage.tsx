@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { fetchQsUsers } from "@/lib/qs/queries";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { aplicarPlanoNosLeads, contarLeadsAtivos } from "@/lib/qs/cadenceSync";
+import { aplicarPlanoNosLeads } from "@/lib/qs/cadenceSync";
 import { peekDuplicateSource, clearDuplicateSource } from "./duplicateSource";
 import type {
   ChannelType,
@@ -559,55 +559,31 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
     // ── O PLANO NOVO VALE PARA QUEM JÁ ESTÁ NA CADÊNCIA ────────────────────
     // Até 18/08 as atividades eram um retrato do plano no momento da entrada:
     // editar a cadência não mudava nada para os leads que já estavam dentro, e
-    // a fila seguia executando o fluxo antigo sem ninguém perceber. Pedido do
-    // Bruno: "quando alteramos o fluxo da cadência, ela adicionar as atividades
-    // que atualizamos".
+    // a fila seguia executando o fluxo antigo sem ninguém perceber.
     //
-    // Pergunta antes porque a conta é grande — uma edição pode encostar em
-    // centenas de filas — e porque só o gestor sabe se aquela edição foi um
-    // conserto (vale para todo mundo) ou um plano novo (vale só daqui pra
-    // frente). Recusar aqui não desfaz nada: a cadência já foi salva.
+    // Em 18/08 isso passou a ser aplicável, mas atrás de uma pergunta. Em 19/08
+    // o Bruno tirou a pergunta: "sempre que adicionarmos algo na cadência, já
+    // atualize as atividades que os SDRs têm, assim sempre mantendo o padrão
+    // que definimos na cadência". A cadência passa a ser a FONTE DA VERDADE da
+    // fila — e fonte da verdade que depende de alguém clicar "sim" não é fonte
+    // da verdade: basta um "não" distraído para as filas divergirem em silêncio.
+    //
+    // O que NÃO muda, porque é o que torna aplicar sempre seguro: atividade já
+    // concluída não é tocada, avulsa (is_extra) não é tocada, e nada nasce
+    // atrasado. O resultado aparece no toast — automático não pode ser invisível.
     if (savedCadenceId && cadenceId) {
-      const ativos = await contarLeadsAtivos(savedCadenceId);
-      if (ativos > 0) {
-        // Calcula ANTES de perguntar. Uma troca de dias que parece pequena na
-        // tela (1,3,7,10 → 1,2,5,7) vira centenas de atividades novas em
-        // centenas de filas — o gestor decide com o número na mão.
-        const p = await aplicarPlanoNosLeads(savedCadenceId, true);
-        if (p.erro) {
-          notifyError(`A cadência foi salva, mas não consegui conferir o impacto nos leads: ${p.erro}`);
-        } else if (p.criadas === 0 && p.encerradas === 0) {
-          notifySuccess("Cadência salva. Os leads que já estão nela seguem em dia com o plano.");
-        } else {
-        const ok = window.confirm(
-          `Aplicar este plano aos leads que JÁ estão nesta cadência?
-
-` +
-          `Leads afetados: ${p.leads} (de ${ativos} na cadência)
-` +
-          `Atividades a criar: ${p.criadas}${p.paraHoje > 0 ? ` — ${p.paraHoje} cairiam HOJE` : ""}
-` +
-          `Atividades a encerrar: ${p.encerradas}
-
-` +
-          `O que já foi feito não é tocado, e nada nasce atrasado.
-` +
-          `Se recusar, o plano novo vale só para os próximos leads.`
+      const r = await aplicarPlanoNosLeads(savedCadenceId);
+      if (r.erro) {
+        notifyError(`A cadência foi salva, mas não consegui aplicar nos leads: ${r.erro}`);
+      } else if (r.criadas === 0 && r.encerradas === 0) {
+        notifySuccess("Cadência salva. Os leads que já estão nela seguem em dia com o plano.");
+      } else {
+        notifySuccess(
+          `Cadência salva e aplicada em ${r.leads} lead(s): ` +
+          `${r.criadas} atividade(s) criada(s)` +
+          (r.paraHoje > 0 ? ` — ${r.paraHoje} para hoje` : "") +
+          `, ${r.encerradas} encerrada(s).`
         );
-        if (ok) {
-          const r = await aplicarPlanoNosLeads(savedCadenceId);
-          if (r.erro) {
-            notifyError(`A cadência foi salva, mas não consegui aplicar nos leads: ${r.erro}`);
-          } else if (r.criadas === 0 && r.encerradas === 0) {
-            notifySuccess("Cadência salva. Os leads que já estavam nela seguem em dia com o plano.");
-          } else {
-            notifySuccess(
-              `Cadência salva e aplicada em ${r.leads} lead(s): ` +
-              `${r.criadas} atividade(s) criada(s), ${r.encerradas} encerrada(s).`
-            );
-          }
-        }
-        }
       }
     }
 

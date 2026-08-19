@@ -78,6 +78,7 @@ import NotificationsPanel from "./notifications/NotificationsPanel";
 import CommsDock from "./comms/CommsDock";
 import ErroDeParte from "./ErroDeParte";
 import AvisoDeVersao from "./AvisoDeVersao";
+import AvisoDoVigia from "./AvisoDoVigia";
 import GlobalToasts from "./GlobalToasts";
 import ConfirmDialog from "./ConfirmDialog";
 import CommandPalette from "./CommandPalette";
@@ -349,6 +350,8 @@ export default function SdrLayout() {
     <div className="h-dvh flex overflow-hidden" style={{ background: "var(--bg)" }}>
       {/* ── COLUNA PRINCIPAL (topo + conteúdo) — divide a tela com o atendimento ── */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+      {/* Número de WhatsApp fora do ar: acima de tudo, inclusive do topo. */}
+      <AvisoDoVigia />
       {/* ── TOP BAR ────────────────────────────────────────────────────── */}
       <header
         className="shrink-0 z-50 flex items-center justify-between px-3 sm:px-4 h-[52px] select-none pl-safe pr-safe"

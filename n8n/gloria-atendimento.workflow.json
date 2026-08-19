@@ -1,0 +1,897 @@
+{
+  "name": "Glória — atendimento de IA no WhatsApp (QS)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gloria-atendimento",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "gloria-0001-4000-8000-000000000001",
+      "name": "Mensagem recebida (QS)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1500,
+        420
+      ],
+      "webhookId": "c3f2b0aa-0002-4a11-9f00-gloria-chat-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA_ID_GLORIA_SECRET",
+          "name": "Glória (x-gloria-secret)"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "O QS chama aqui a cada mensagem NOVA do cliente (api/wa-webhook.js). Corpo: lead_id, telefone, nome, mensagem, conversation_id, cw_message_id, sent_at. O header x-gloria-secret vem da credencial."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "SUPABASE_URL",
+              "value": "https://eabfjomrnucymduqnbci.supabase.co",
+              "type": "string"
+            },
+            {
+              "id": "c2",
+              "name": "QS_BASE",
+              "value": "https://qs.setuforeuvouviagens.com.br",
+              "type": "string"
+            },
+            {
+              "id": "c3",
+              "name": "ESPERA_SEGUNDOS",
+              "value": 8,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gloria-0002-4000-8000-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1300,
+        420
+      ],
+      "notesInFlow": true,
+      "notes": "Só endereços. Segredo e chave do banco ficam nas credenciais, nunca aqui: este arquivo vai pro Git."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "lead_id",
+              "value": "={{ $json.body.lead_id }}",
+              "type": "string"
+            },
+            {
+              "id": "f2",
+              "name": "mensagem",
+              "value": "={{ $json.body.mensagem }}",
+              "type": "string"
+            },
+            {
+              "id": "f3",
+              "name": "nome",
+              "value": "={{ $json.body.nome || 'lead' }}",
+              "type": "string"
+            },
+            {
+              "id": "f4",
+              "name": "telefone",
+              "value": "={{ ($json.body.telefone || '').replace(/\\D/g, '') }}",
+              "type": "string"
+            },
+            {
+              "id": "f5",
+              "name": "conversation_id",
+              "value": "={{ $json.body.conversation_id }}",
+              "type": "string"
+            },
+            {
+              "id": "f6",
+              "name": "sent_at",
+              "value": "={{ $json.body.sent_at || $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "f7",
+              "name": "session_id",
+              "value": "={{ $json.body.lead_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gloria-0003-4000-8000-000000000003",
+      "name": "Normalizar entrada",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1100,
+        420
+      ],
+      "notesInFlow": true,
+      "notes": "session_id = lead_id, e não o telefone. O mesmo número aparece como 5562..., 62... e +55 62... conforme a origem; amarrar a memória no telefone faz a IA perder a conversa no meio."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, recebido: true, lead_id: $json.lead_id }) }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "gloria-0004-4000-8000-000000000004",
+      "name": "Responder pro QS na hora",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -900,
+        260
+      ],
+      "notesInFlow": true,
+      "notes": "Responde ANTES de pensar, de propósito. A função do QS na Vercel morre em 10s e o modelo leva de 10 a 40s. Respondendo aqui, o QS segue a vida e o resto do workflow continua rodando sozinho."
+    },
+    {
+      "parameters": {
+        "amount": 8,
+        "unit": "seconds"
+      },
+      "id": "gloria-0005-4000-8000-000000000005",
+      "name": "Esperar o lead terminar de escrever",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -900,
+        420
+      ],
+      "webhookId": "c3f2b0aa-0002-4a11-9f00-gloria-wait-001",
+      "notesInFlow": true,
+      "notes": "Ninguém escreve \"oi\", \"quero saber da Islândia\" e \"quanto custa\" numa mensagem só. Sem esta pausa cada uma vira uma resposta, e a IA fala três vezes por cima de si mesma. Depois da pausa o banco diz qual execução responde."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/rpc/qs_gloria_contexto",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_lead: $('Normalizar entrada').first().json.lead_id, p_sent_at: $('Normalizar entrada').first().json.sent_at }) }}",
+        "options": {},
+        "contentType": "json"
+      },
+      "id": "gloria-0006-4000-8000-000000000006",
+      "name": "Posso responder? (banco do QS)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -700,
+        420
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA_ID_SUPABASE_QS",
+          "name": "Supabase QS (service_role)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notesInFlow": true,
+      "notes": "Uma chamada só devolve tudo: IA ligada, janela de 24h, o que o lead escreveu desde a nossa última resposta e a qualificação que já existe. A REGRA MORA NO BANCO (migration 0053), não aqui."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "p1",
+              "leftValue": "={{ $json.pode_responder }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "gloria-0007-4000-8000-000000000007",
+      "name": "Pode responder?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -480,
+        420
+      ],
+      "notesInFlow": true,
+      "notes": "Falso é o caso NORMAL, não erro: IA desligada, humano já respondeu, chegou mensagem mais nova, lead ganho ou perdido. O motivo vem junto em $json.motivo."
+    },
+    {
+      "parameters": {},
+      "id": "gloria-0008-4000-8000-000000000008",
+      "name": "Fim, não era pra responder",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        620
+      ],
+      "notesInFlow": true,
+      "notes": "Execução verde e silenciosa. Abra e leia $json.motivo pra saber por quê."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "j1",
+              "leftValue": "={{ $json.janela_aberta }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "gloria-0009-4000-8000-000000000009",
+      "name": "Janela de 24h aberta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -260,
+        420
+      ],
+      "notesInFlow": true,
+      "notes": "Fora da janela a Meta só aceita template aprovado. Template é decisão comercial, não de IA, então a conversa volta pro time."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.QS_BASE }}/api/gloria-transferir",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $('Normalizar entrada').first().json.lead_id, motivo: 'fora_da_janela_24h', resumo: 'O lead escreveu fora da janela de 24h. Só um template aprovado alcança ele agora.' }) }}",
+        "options": {},
+        "contentType": "json"
+      },
+      "id": "gloria-0010-4000-8000-000000000010",
+      "name": "Devolver pro time (fora da janela)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -40,
+        620
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA_ID_GLORIA_SECRET",
+          "name": "Glória (x-gloria-secret)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "Cria nota e tarefa pro dono do lead no QS. A IA não dispara template."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Contexto do lead\nNome {{ $json.lead.nome }}\nTelefone {{ $json.lead.telefone }}\nExpedição de interesse {{ $json.lead.expedicao }}\nFonte do card {{ $json.lead.fonte }}\n\nQualificação já respondida ({{ $json.sessao.respondidas }} de 5)\nData faz sentido {{ $json.sessao.resposta_data || 'ainda não perguntei' }}\nInvestimento {{ $json.sessao.resposta_investimento || 'ainda não perguntei' }}\nPrazo de decisão {{ $json.sessao.resposta_decisao || 'ainda não perguntei' }}\nPerfil de viajante {{ $json.sessao.perfil_viajante || 'ainda não perguntei' }}\nComo pretende viajar {{ $json.sessao.como_pretende_viajar || 'ainda não perguntei' }}\n\nMensagens novas do lead, na ordem em que ele escreveu\n{{ $json.mensagens }}",
+        "options": {
+          "systemMessage": "Você é a Glória, consultora de viagens da Se Tu For, Eu Vou! Viagens e Expedições, uma agência brasileira de expedições internacionais em grupos pequenos.\n\n# Missão\nFazer o primeiro atendimento do lead no WhatsApp, responder as dúvidas dele sobre a expedição de interesse e qualificar com as 5 perguntas oficiais, até deixar tudo pronto para o especialista agendar a call.\n\n# Como você escreve\nPortuguês do Brasil, tom de gente de verdade, próximo e caloroso.\nMensagens curtas, de 1 a 3 linhas, uma ideia por mensagem.\nNunca use travessão nem dois pontos nas mensagens.\nSempre no enquadramento positivo, fale do que a pessoa ganha com a experiência, nunca de erro, problema ou dor.\nNo máximo 2 emojis na conversa inteira.\nChame a pessoa pelo primeiro nome de vez em quando, não em toda mensagem.\n\n# Quantos balões\nSua resposta vira balões de WhatsApp. Separe cada balão com uma linha em branco.\nNo máximo 3 balões, e no máximo 1 pergunta por resposta. Duas perguntas juntas fazem a pessoa responder só a última.\n\n# Quem você é\nVocê faz parte do time de atendimento da agência.\nSe perguntarem diretamente se você é um robô, uma IA ou um atendimento automático, responda que sim, que você é a assistente virtual do time, e ofereça na hora passar para uma pessoa. Nunca negue. Mentir sobre isso é o tipo de coisa que vira print e queima a agência, e o lead que pergunta já desconfia.\n\n# Regra de ouro sobre informação\nToda informação de roteiro, data, valor, hospedagem, incluso, não incluso, nível de dificuldade e vagas vem da ferramenta base_conhecimento_site.\nConsulte a ferramenta antes de responder qualquer dúvida factual, mesmo que você ache que sabe.\nSe a informação não estiver na base, não improvise e não arredonde. Diga que vai confirmar com o time e chame transferir_para_humano com motivo duvida_sem_resposta.\n\n# O que você nunca faz\nNão inventa valor, data, vaga ou condição de pagamento.\nNão promete desconto nem negocia preço.\nNão confirma reserva nem diz que a vaga está garantida.\nNão pede CPF, documento, dado bancário ou qualquer forma de pagamento.\n\n# Pilares da agência, para usar como argumento\nSegurança, essência, transparência, fator uau e vínculo.\n\n# Fluxo da conversa\n1. Cumprimente pelo nome, se apresente e confirme qual expedição despertou o interesse\n2. Responda a dúvida imediata usando a base de conhecimento, isso gera confiança antes de perguntar\n3. Conduza as perguntas de qualificação uma por vez, encaixadas na conversa, nunca em bloco\n4. Chame salvar_qualificacao assim que receber cada resposta nova, mandando só o campo que você acabou de descobrir\n5. Com as 5 respostas, defina a temperatura, salve e chame transferir_para_humano com motivo qualificado\n6. Se o lead pedir para falar com uma pessoa, demonstrar urgência real ou reclamar, chame transferir_para_humano na hora\n\nO bloco \"Qualificação já respondida\" no contexto mostra o que você já sabe. Nunca repita uma pergunta que já está respondida ali.\n\n# As 5 perguntas de qualificação, nesta ordem\n1. resposta_data, essa data faz sentido para você\n2. resposta_investimento, a faixa de investimento faz sentido para você\n3. resposta_decisao, em quanto tempo você imagina tomar uma decisão sobre essa viagem\n4. perfil_viajante, como você se define como viajante\n5. como_pretende_viajar, como você pretende viajar, sozinho, em casal, com amigos ou com família\n\n# Temperatura\nQuente, data e investimento fazem sentido e a decisão sai em até 30 dias\nMorno, gostou da proposta mas tem uma restrição clara de data ou de investimento\nFrio, sem data definida, investimento fora da faixa ou decisão acima de 90 dias\n\n# Depois de transferir\nAssim que transferir_para_humano responder ok, escreva no máximo uma mensagem curta de despedida, dizendo que o especialista assume daqui, e pare. Não faça mais perguntas e não chame a ferramenta de novo.\n\n# Encerramento\nAo qualificar, ofereça a conversa com o especialista e confirme o melhor período do dia para o contato. Reforce que a call é para desenhar a experiência junto com a pessoa.",
+          "maxIterations": 6,
+          "returnIntermediateSteps": false
+        }
+      },
+      "id": "gloria-0011-4000-8000-000000000011",
+      "name": "Glória (IA)",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.9,
+      "position": [
+        -40,
+        400
+      ],
+      "onError": "continueErrorOutput",
+      "notesInFlow": true,
+      "notes": "Saída de cima é a resposta, saída de baixo é erro. Erro NUNCA morre calado aqui: vira transferência pro humano, senão o lead fica falando sozinho."
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5",
+          "mode": "list",
+          "cachedResultName": "gpt-5"
+        },
+        "options": {}
+      },
+      "id": "gloria-0012-4000-8000-000000000012",
+      "name": "Cérebro OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -260,
+        760
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "DLGX90KZkDRpKl5G",
+          "name": "OpenAI account"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Sem temperature de propósito: a família gpt-5 recusa valor diferente de 1 e a execução volta 400. Quem controla o tom é o system message."
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Normalizar entrada').first().json.session_id }}",
+        "tableName": "gloria_chat_memory",
+        "contextWindowLength": 12
+      },
+      "id": "gloria-0013-4000-8000-000000000013",
+      "name": "Memória da conversa",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        -100,
+        760
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "SUBSTITUA_ID_POSTGRES_QS",
+          "name": "Postgres QS (Supabase pooler)"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Postgres do MESMO Supabase do QS (0053 cria a tabela). Conexão pelo Session Pooler, porta 5432 do host aws-0-...pooler.supabase.com, com SSL."
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "base_conhecimento_site",
+        "toolDescription": "Conteúdo oficial do site da agência sobre as expedições. Consulte para qualquer dúvida de roteiro, datas, valores, hospedagem, incluso, não incluso, nível de dificuldade, vagas e diferenciais. Pergunte com as palavras do lead, incluindo o nome do destino.",
+        "tableName": {
+          "__rl": true,
+          "value": "gloria_documents",
+          "mode": "name"
+        },
+        "topK": 5,
+        "options": {
+          "queryName": "match_gloria_documents"
+        }
+      },
+      "id": "gloria-0014-4000-8000-000000000014",
+      "name": "base_conhecimento_site",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.1,
+      "position": [
+        60,
+        760
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA_ID_SUPABASE_QS",
+          "name": "Supabase QS (service_role)"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Tabela gloria_documents e função match_gloria_documents, as duas criadas pela 0053 no banco do QS. Enquanto a tabela estiver vazia a IA não sabe preço nenhum, e é melhor assim que inventar."
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "gloria-0015-4000-8000-000000000015",
+      "name": "Embeddings OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        60,
+        940
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "DLGX90KZkDRpKl5G",
+          "name": "OpenAI account"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "1536 dimensões, igual à coluna embedding da 0053. Trocar de modelo obriga a recriar a coluna e reindexar tudo."
+    },
+    {
+      "parameters": {
+        "toolDescription": "Salva a qualificação do lead no QS. Chame assim que o lead responder qualquer uma das 5 perguntas, mandando SÓ o campo que você acabou de descobrir. Chamar várias vezes não apaga o que já estava salvo.",
+        "method": "POST",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/rpc/qs_gloria_salvar",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "parametersBody": {
+          "values": [
+            {
+              "name": "p_lead",
+              "valueProvider": "fieldValue",
+              "value": "={{ $('Normalizar entrada').first().json.lead_id }}"
+            },
+            {
+              "name": "p_resposta_data",
+              "valueProvider": "modelOptional"
+            },
+            {
+              "name": "p_resposta_investimento",
+              "valueProvider": "modelOptional"
+            },
+            {
+              "name": "p_resposta_decisao",
+              "valueProvider": "modelOptional"
+            },
+            {
+              "name": "p_perfil_viajante",
+              "valueProvider": "modelOptional"
+            },
+            {
+              "name": "p_como_pretende_viajar",
+              "valueProvider": "modelOptional"
+            },
+            {
+              "name": "p_temperatura",
+              "valueProvider": "modelOptional"
+            },
+            {
+              "name": "p_resumo",
+              "valueProvider": "modelOptional"
+            }
+          ]
+        },
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "p_resposta_data",
+              "description": "O que o lead disse sobre a data fazer sentido, nas palavras dele",
+              "type": "string"
+            },
+            {
+              "name": "p_resposta_investimento",
+              "description": "O que o lead disse sobre a faixa de investimento",
+              "type": "string"
+            },
+            {
+              "name": "p_resposta_decisao",
+              "description": "Em quanto tempo o lead pretende decidir",
+              "type": "string"
+            },
+            {
+              "name": "p_perfil_viajante",
+              "description": "Como o lead se define como viajante",
+              "type": "string"
+            },
+            {
+              "name": "p_como_pretende_viajar",
+              "description": "Sozinho, em casal, com amigos ou com família",
+              "type": "string"
+            },
+            {
+              "name": "p_temperatura",
+              "description": "Exatamente uma destas palavras, Quente, Morno ou Frio",
+              "type": "string"
+            },
+            {
+              "name": "p_resumo",
+              "description": "Resumo de duas linhas do que o lead contou até agora",
+              "type": "string"
+            }
+          ]
+        },
+        "contentType": "json"
+      },
+      "id": "gloria-0016-4000-8000-000000000016",
+      "name": "salvar_qualificacao",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        760
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUBSTITUA_ID_SUPABASE_QS",
+          "name": "Supabase QS (service_role)"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "O lead_id vem do workflow, NÃO do modelo. Modelo que escolhe id escreve no card errado, e isso não dá erro nenhum, só estraga o dado de outra pessoa. Um parâmetro por campo, e não um JSON, porque aspas na fala do lead quebrariam o corpo."
+    },
+    {
+      "parameters": {
+        "toolDescription": "Devolve a conversa para o time humano do QS e desliga você desta conversa. Chame quando o lead pedir para falar com uma pessoa, demonstrar urgência real, reclamar, quando a qualificação terminar, ou quando você não tiver a informação que ele pediu.",
+        "method": "POST",
+        "url": "={{ $('Config').first().json.QS_BASE }}/api/gloria-transferir",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "parametersBody": {
+          "values": [
+            {
+              "name": "lead_id",
+              "valueProvider": "fieldValue",
+              "value": "={{ $('Normalizar entrada').first().json.lead_id }}"
+            },
+            {
+              "name": "motivo",
+              "valueProvider": "modelRequired"
+            },
+            {
+              "name": "resumo",
+              "valueProvider": "modelRequired"
+            },
+            {
+              "name": "temperatura",
+              "valueProvider": "modelOptional"
+            }
+          ]
+        },
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "motivo",
+              "description": "Uma destas palavras, pedido_humano, qualificado, urgencia, reclamacao ou duvida_sem_resposta",
+              "type": "string"
+            },
+            {
+              "name": "resumo",
+              "description": "Duas linhas contando o que o lead quer e onde a conversa parou, para o SDR ler antes de assumir",
+              "type": "string"
+            },
+            {
+              "name": "temperatura",
+              "description": "Quente, Morno ou Frio, se você já souber",
+              "type": "string"
+            }
+          ]
+        },
+        "contentType": "json"
+      },
+      "id": "gloria-0017-4000-8000-000000000017",
+      "name": "transferir_para_humano",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        420,
+        760
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA_ID_GLORIA_SECRET",
+          "name": "Glória (x-gloria-secret)"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Cria nota e tarefa pro dono do lead e desliga a IA nesta conversa. A última mensagem de despedida ainda sai, a rota gloria-responder abre 2 minutos pra ela."
+    },
+    {
+      "parameters": {
+        "jsCode": "// A resposta da Glória vira balões de WhatsApp.\n//\n// Duas coisas que este nó garante e que o QS não teria como consertar depois:\n// nenhum pedaço da resposta é jogado fora, e nenhum balão sai maior do que a\n// rota /api/gloria-responder aceita (ela recusa acima de 900 e a resposta\n// inteira se perderia com um 400).\n\nconst ctx = $('Normalizar entrada').first().json;\nconst ctxBanco = $('Posso responder? (banco do QS)').first().json;\nconst bruto = String($json.output || '').trim();\n\nconst LIMITE_BALAO = 320;   // tamanho confortável de leitura no celular\nconst MAX_BALOES = 3;\nconst TETO_ROTA = 850;      // o QS recusa acima de 900\n\nif (!bruto) {\n  return [{ json: { ok: false, motivo: 'resposta_vazia', lead_id: ctx.lead_id, mensagens: [] } }];\n}\n\n// 1) O modelo já separa os balões por linha em branco.\nconst partes = bruto.split(/\\n{2,}/).map((s) => s.trim()).filter(Boolean);\n\n// 2) Balão comprido demais quebra por frase, não no meio da palavra.\nconst baloes = [];\nfor (const parte of partes) {\n  if (parte.length <= LIMITE_BALAO) { baloes.push(parte); continue; }\n  let atual = '';\n  for (const frase of parte.split(/(?<=[.!?])\\s+/)) {\n    if (atual && (atual + ' ' + frase).trim().length > LIMITE_BALAO) {\n      baloes.push(atual.trim());\n      atual = frase;\n    } else {\n      atual = (atual + ' ' + frase).trim();\n    }\n  }\n  if (atual) baloes.push(atual.trim());\n}\n\n// 3) Passou de 3 balões, o excedente é COLADO no último, nunca descartado.\n//    Cortar em silêncio (era o que a versão anterior fazia com .slice(0,3)) é\n//    como a resposta chega pela metade, e o pedaço que some costuma ser\n//    justamente a pergunta da qualificação, que vem no fim.\nconst finais = baloes.slice(0, MAX_BALOES - 1);\nlet resto = baloes.slice(MAX_BALOES - 1).join('\\n');\nif (resto.length > TETO_ROTA) {\n  const corte = resto.lastIndexOf('. ', TETO_ROTA);\n  resto = resto.slice(0, corte > 200 ? corte + 1 : TETO_ROTA).trim();\n}\nif (resto) finais.push(resto);\n\nconst mensagens = finais.map((texto, i) => ({\n  ordem: i + 1,\n  texto,\n  // Tempo de digitação entre um balão e outro. Quem manda dormir é o QS.\n  delay_ms: Math.min(1200 + texto.length * 35, 6000),\n}));\n\nreturn [{\n  json: {\n    ok: true,\n    lead_id: ctx.lead_id,\n    telefone: ctx.telefone,\n    baloes: mensagens.length,\n    mensagens,\n    // Até onde da conversa esta resposta leu. O QS grava isso na sessão: é o\n    // que impede a próxima rodada de repetir o que já foi respondido e, ao\n    // mesmo tempo, garante que a mensagem que chegou enquanto a IA pensava\n    // continue pendente em vez de sumir.\n    respondida_ate: ctxBanco.pendentes_ate || null,\n  },\n}];"
+      },
+      "id": "gloria-0018-4000-8000-000000000018",
+      "name": "Quebrar em balões",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.QS_BASE }}/api/gloria-responder",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.lead_id, mensagens: $json.mensagens, respondida_ate: $json.respondida_ate }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "contentType": "json"
+      },
+      "id": "gloria-0019-4000-8000-000000000019",
+      "name": "Enviar pelo QS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        380
+      ],
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "Quem fala com o cliente é o QS, sempre. Assim a mensagem sai pelo número oficial, cai na conversa certa do Chatwoot e aparece na tela do SDR. neverError porque 409 aqui é resposta legítima (humano assumiu no meio), não falha."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.QS_BASE }}/api/gloria-transferir",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $('Normalizar entrada').first().json.lead_id, motivo: 'erro_da_ia', resumo: 'A IA não conseguiu responder esta mensagem. Erro: ' + ($json.error?.message || $json.error || 'desconhecido') }) }}",
+        "options": {},
+        "contentType": "json"
+      },
+      "id": "gloria-0020-4000-8000-000000000020",
+      "name": "Deu erro, chama o time",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        560
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUBSTITUA_ID_GLORIA_SECRET",
+          "name": "Glória (x-gloria-secret)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "OpenAI fora do ar, base de conhecimento inacessível, resposta vazia. O lead não pode ficar esperando uma resposta que não vem, então vira tarefa pro dono do lead na hora."
+    }
+  ],
+  "connections": {
+    "Mensagem recebida (QS)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Normalizar entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar entrada": {
+      "main": [
+        [
+          {
+            "node": "Responder pro QS na hora",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responder pro QS na hora": {
+      "main": [
+        [
+          {
+            "node": "Esperar o lead terminar de escrever",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar o lead terminar de escrever": {
+      "main": [
+        [
+          {
+            "node": "Posso responder? (banco do QS)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Posso responder? (banco do QS)": {
+      "main": [
+        [
+          {
+            "node": "Pode responder?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pode responder?": {
+      "main": [
+        [
+          {
+            "node": "Janela de 24h aberta?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim, não era pra responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Janela de 24h aberta?": {
+      "main": [
+        [
+          {
+            "node": "Glória (IA)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Devolver pro time (fora da janela)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Glória (IA)": {
+      "main": [
+        [
+          {
+            "node": "Quebrar em balões",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Deu erro, chama o time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quebrar em balões": {
+      "main": [
+        [
+          {
+            "node": "Enviar pelo QS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cérebro OpenAI": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Glória (IA)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memória da conversa": {
+      "ai_memory": [
+        [
+          {
+            "node": "Glória (IA)",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "base_conhecimento_site": {
+      "ai_tool": [
+        [
+          {
+            "node": "Glória (IA)",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {
+            "node": "base_conhecimento_site",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "salvar_qualificacao": {
+      "ai_tool": [
+        [
+          {
+            "node": "Glória (IA)",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "transferir_para_humano": {
+      "ai_tool": [
+        [
+          {
+            "node": "Glória (IA)",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "91aa63e4f74d7cbe350736303e89cc11603c939156428dd97f3f611c857dbb64"
+  },
+  "tags": []
+}
