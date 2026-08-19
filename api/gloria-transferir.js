@@ -77,6 +77,25 @@ export default async function handler(req, res) {
     const lead = await buscarLead(leadId);
     if (!lead) return res.status(404).json({ error: 'Lead não encontrado' });
 
+    // MODO TESTE: nada é desligado, nenhuma nota e nenhuma tarefa nascem.
+    // Vale principalmente aqui: esta rota é chamada pelo MODELO quando ele
+    // decide transferir, então sem esta trava um teste conversacional criaria
+    // tarefa de verdade na fila de alguém.
+    if (body.teste === true || body.teste === 'true') {
+      return res.status(200).json({
+        ok: true,
+        teste: true,
+        aviso: 'MODO TESTE — a IA continua ligada, nenhuma nota ou tarefa foi criada.',
+        transferiria: {
+          lead: { id: lead.id, nome: lead.first_name || lead.full_name },
+          para: lead.owner_id,
+          motivo,
+          temperatura,
+          resumo: resumo || null,
+        },
+      });
+    }
+
     // (1) Desliga a IA. Se a 0053 não estiver colada, isto falha e o resto nem
     // deve tentar — o time seria avisado de uma transferência que não aconteceu.
     try {

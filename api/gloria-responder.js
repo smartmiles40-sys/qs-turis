@@ -111,6 +111,40 @@ export default async function handler(req, res) {
       return res.status(409).json({ ok: false, motivo: ses?.motivo || 'ia_desligada', enviadas: 0 });
     }
 
+    // ── MODO TESTE ────────────────────────────────────────────────────────
+    // `teste: true` faz tudo o que é LEITURA e para antes de qualquer efeito:
+    // nenhum WhatsApp sai, nada é gravado, nada é pausado. Devolve os balões
+    // que teriam ido e o estado que decidiria o envio.
+    //
+    // POR QUE NO SERVIDOR e não num IF do n8n: a ferramenta de transferência
+    // quem dispara é o MODELO, no meio do raciocínio dele. Um desvio no
+    // workflow não segura isso — a trava tem que estar de quem executa.
+    //
+    // O que é conferido ANTES daqui continua valendo no teste (lead existe,
+    // sessão ativa, balões dentro do limite), que é o que torna o teste útil.
+    if (body.teste === true || body.teste === 'true') {
+      let janela = null;
+      let conversa = null;
+      try {
+        const t = await rest(
+          `qs_wa_threads?select=can_reply,cw_conversation_id&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
+        );
+        janela = t?.[0]?.can_reply ?? null;
+        conversa = t?.[0]?.cw_conversation_id ?? null;
+      } catch { /* sem thread ainda: o teste segue */ }
+
+      return res.status(200).json({
+        ok: true,
+        teste: true,
+        enviadas: 0,
+        aviso: 'MODO TESTE — nada foi enviado ao cliente e nada foi gravado.',
+        lead: { id: lead.id, nome: lead.first_name || lead.full_name, telefone: lead.phone },
+        janela_de_24h_aberta: janela !== false,
+        conversa_que_seria_usada: conversa,
+        baloes: mensagens.map((m, i) => ({ ordem: i + 1, texto: m.texto, delay_ms: m.delay_ms })),
+      });
+    }
+
     // Resolve a conversa. A blindagem é a mesma do wa-send: responde onde o
     // cliente falou por último, que sai das mensagens e não do ponteiro da
     // thread (que já foi flagrado errado em 17/08).

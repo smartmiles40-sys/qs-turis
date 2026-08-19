@@ -108,6 +108,52 @@ vezes não duplica nada.
 
 **6. Ative** o workflow de atendimento (o botão Active, no topo).
 
+## Testar antes de ligar (modo teste)
+
+O `Config` do workflow nasce com **`MODO_TESTE = true`**. Com ele ligado, a
+Glória pensa, consulta a base, decide tudo — e **nada sai**: nenhum WhatsApp
+para o cliente, nenhuma nota, nenhuma tarefa, nenhuma sessão pausada. As rotas
+do QS devolvem o que *teriam* feito.
+
+A trava mora nas rotas (`api/gloria-responder.js` e `api/gloria-transferir.js`),
+não num desvio do workflow — e isso é de propósito: quem chama
+`transferir_para_humano` é o **modelo**, no meio do raciocínio. Um IF no n8n não
+seguraria essa chamada; a trava tem que estar em quem executa.
+
+### Como rodar
+
+1. Abra o nó **Lead de teste** e troque `COLE_AQUI_O_UUID_DE_UM_LEAD` pelo uuid
+   de um lead de verdade (qualquer um — nada será enviado a ele).
+2. Mude a mensagem para o que você quiser testar.
+3. Clique em **Testar à mão** → *Execute workflow*.
+
+O caminho manual passa pelos mesmos nós do caminho real. O único desvio é o
+`Veio do webhook?`, que pula a resposta ao webhook — execução manual não tem
+webhook para responder.
+
+No nó **Enviar pelo QS** você vê a resposta:
+
+```json
+{
+  "teste": true,
+  "aviso": "MODO TESTE — nada foi enviado ao cliente e nada foi gravado.",
+  "janela_de_24h_aberta": true,
+  "baloes": [{ "ordem": 1, "texto": "Oi Ana! ...", "delay_ms": 2320 }]
+}
+```
+
+### O que dá para testar assim
+
+Objeção de preço, lead pedindo para falar com humano (a IA chama
+`transferir_para_humano` e você vê o que ela transferiria), pergunta fora da
+base, três mensagens seguidas, lead sem nome. Rode quantas vezes quiser: como
+nada é gravado, não há o que limpar depois.
+
+### Quando for para produção
+
+`MODO_TESTE = false` no nó **Config**. Continue no piloto (abaixo) antes de
+soltar para a base inteira — as duas travas são independentes.
+
 ## Ligar
 
 Nada acontece até você ligar a chave. Recomendado: comece pelo piloto, com o seu
