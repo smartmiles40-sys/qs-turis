@@ -27,8 +27,9 @@ import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cw, ingestMessage,
   ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, inboxPermitida,
   assinarComoUsuario, canalDaInbox, canalEhApiOficial, conversaOndeOClienteFala,
+  linhaDeEnvio,
 } from './_wa.js';
-import { evoConfigured, evoInstanceForInbox, listarInstancias, noAr } from './_evolution.js';
+import { evoConfigured, instanciaDaCaixa, listarInstancias, noAr } from './_evolution.js';
 import { rest } from './_supabaseAdmin.js';
 
 const MAX_LEN = 4000;
@@ -145,7 +146,7 @@ async function numeroCaido(inboxId) {
     const canal = await canalDaInbox(inboxId);
     // Caixa da Meta não passa pela Evolution; sem canal conhecido, não barra.
     if (!canal || canalEhApiOficial(canal) || !String(canal).toLowerCase().includes('api')) return null;
-    const instancia = evoInstanceForInbox(inboxId);
+    const instancia = await instanciaDaCaixa(inboxId);
     const lista = await listarInstancias();
     const alvo = instancia
       ? lista.find((i) => i.nome === instancia)
@@ -231,6 +232,18 @@ export default async function handler(req, res) {
       templateParams = r.templateParams;
       textoModelo = r.texto;
       inboxPedida = r.inboxId;
+    }
+
+    // A LINHA DE QUEM ESTÁ ESCREVENDO (0056). Sem escolha na tela e com o
+    // cliente calado há mais de um dia, a mensagem sai pelo número do PAPEL —
+    // é o que tira o closer do celular pessoal. Cliente que acabou de escrever
+    // continua sendo respondido onde escreveu (linhaDeEnvio devolve null).
+    if (inboxPedida == null) {
+      const linha = await linhaDeEnvio({ leadId, user: auth.user });
+      if (linha.inboxId != null) {
+        inboxPedida = linha.inboxId;
+        console.log(`[wa-send] linha ${inboxPedida} por ${linha.motivo} (${auth.user?.role || '?'})`);
+      }
     }
 
     // Caminho rápido: conversa que o QS já conhece. Só cai no Chatwoot se não souber.

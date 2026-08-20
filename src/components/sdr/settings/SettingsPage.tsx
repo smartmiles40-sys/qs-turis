@@ -11,6 +11,7 @@ import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, del
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
 import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } from "@/lib/qs/chatProvider";
 import WaInboxLabels from "./WaInboxLabels";
+import LinhasDoTime from "./LinhasDoTime";
 import ModelosMeta from "./ModelosMeta";
 import { WA_SIGNATURE_MAP_KEY, WA_SIGNATURE_ENABLED_KEY, nomeCurto } from "@/lib/qs/waSignature";
 import type {
@@ -1769,6 +1770,8 @@ function AtendimentoSection() {
         })}
       </div>
 
+      {provider === "qs" && <LinhasDoTime />}
+
       {provider === "qs" && <WaInboxLabels />}
 
       {provider === "qs" && (
@@ -1778,7 +1781,7 @@ function AtendimentoSection() {
             <li>O SDR <b>não precisa de conta no Chatwoot</b> — ele atende sem sair do QS.</li>
             <li>Quem enxerga a conversa é decidido pelo <b>dono do lead</b>, no banco (migration 0024). Gestor e admin veem todas.</li>
             <li>Precisa do webhook do Chatwoot apontando pro QS — senão as mensagens novas não entram (só o histórico, ao abrir o lead).</li>
-            <li>Mensagem enviada daqui sai pelo número da caixa configurada em <code>CHATWOOT_DEFAULT_INBOX_ID</code>.</li>
+            <li>Cada papel envia pela <b>linha dele</b> (quadro acima). Sem esse mapa preenchido, tudo sai por <code>CHATWOOT_DEFAULT_INBOX_ID</code>, como antes.</li>
           </ul>
         </div>
       )}

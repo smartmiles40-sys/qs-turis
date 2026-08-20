@@ -526,16 +526,43 @@ export function defaultInboxId() {
   return WA_INBOX_IDS[0] ?? null;
 }
 
-/** source_id = a "linha" que liga aquele contato àquela caixa; a conversa precisa dela. */
-async function sourceIdFor(contactId, inboxId) {
+/**
+ * source_id = a "linha" que liga aquele contato àquela caixa; a conversa precisa dela.
+ *
+ * ⚠️ O `estrito` existe por causa das linhas por papel (0056). O fallback
+ * `|| payload[0]` era inofensivo com UM número: não achou a caixa pedida, pega a
+ * primeira que existir. Com DUAS linhas ele vira o próprio bug que estamos
+ * evitando — o closer manda pelo 1935 e a conversa nasce com o source_id do
+ * número da SDR. Quando a caixa foi ESCOLHIDA (pelo atendente ou pelo papel),
+ * pegar outra é sempre errado: melhor abrir a linha que falta.
+ */
+async function sourceIdFor(contactId, inboxId, { estrito = false } = {}) {
+  let payload = [];
   try {
-    const { payload = [] } = await cw(`/contacts/${contactId}/contactable_inboxes`);
-    const hit = payload.find((p) => (p.inbox?.id ?? p.inbox_id) === inboxId) || payload[0];
-    return hit?.source_id || null;
+    ({ payload = [] } = await cw(`/contacts/${contactId}/contactable_inboxes`));
   } catch (e) {
     console.warn('[wa] contactable_inboxes:', e?.message);
-    return null;
+    if (!estrito) return null;
   }
+
+  const daCaixa = payload.find((p) => Number(p.inbox?.id ?? p.inbox_id) === Number(inboxId));
+  if (daCaixa?.source_id) return daCaixa.source_id;
+  if (!estrito) return payload[0]?.source_id || null;
+
+  // Contato que nunca falou por esta caixa ainda não tem linha nela. O Chatwoot
+  // cria uma sob demanda — é o mesmo que acontece quando o cliente escreve pela
+  // primeira vez naquele número.
+  try {
+    const novo = await cw(`/contacts/${contactId}/contact_inboxes`, {
+      method: 'POST',
+      body: { inbox_id: Number(inboxId) },
+    });
+    const sid = novo?.source_id || novo?.payload?.source_id || null;
+    if (sid) return sid;
+  } catch (e) {
+    console.warn(`[wa] não consegui abrir a linha do contato ${contactId} na caixa ${inboxId}:`, e?.message);
+  }
+  return null;
 }
 
 /**
@@ -569,7 +596,9 @@ export async function ensureConversation(lead, inboxEscolhida = null) {
   const existing = await pickConversation(contact.id, inboxId);
   if (existing) return { conversation: existing, contact };
 
-  const sourceId = await sourceIdFor(contact.id, inboxId);
+  // Caixa escolhida (atendente ou papel) exige a linha DAQUELA caixa; caixa
+  // herdada do padrão do servidor mantém o comportamento antigo, mais tolerante.
+  const sourceId = await sourceIdFor(contact.id, inboxId, { estrito: inboxEscolhida != null });
   if (!sourceId) return { error: 'sem-source-id' };
 
   try {
@@ -598,6 +627,119 @@ export function inboxPermitida(id) {
   return n;
 }
 
+// ── AS LINHAS DO TIME: qual número é de quem ────────────────────────────────
+//
+// Até 20/08 o QS tinha UM número padrão (CHATWOOT_DEFAULT_INBOX_ID) e todo mundo
+// escrevia por ele. Funciona enquanto só a SDR fala. Quebra na virada pro
+// closer: a SDR prospecta pelo número comercial, o lead é transferido, e o
+// closer — que precisa continuar a conversa — só tem o CELULAR DELE. O cliente
+// passa a receber mensagem de um número pessoal que o QS não vê: fora do
+// histórico, fora do indicador, e perdido no dia em que a pessoa sair.
+//
+// O mapa mora em qs_settings.wa_caixas (config muda na tela, não em deploy):
+//
+//   { "porPapel":   { "sdr": 3, "closer": 4 },
+//     "porUsuario": { "<uuid>": 4 },                     // exceção, vence o papel
+//     "instancias": { "4": "Comercial - Closers (1935)" } // caixa → instância Evolution
+//   }
+//
+// VAZIO = COMPORTAMENTO DE HOJE, de propósito: `caixaDoUsuario` devolve null e
+// quem chama cai no padrão de sempre. O front sobe antes de alguém configurar,
+// e um mapa pela metade não pode desviar a mensagem de ninguém.
+
+export const WA_CAIXAS_KEY = 'wa_caixas';
+
+const CAIXAS_TTL = 60_000;
+let cacheCaixas = { em: 0, valor: null };
+
+/** O mapa das linhas, sempre com as três chaves preenchidas (mesmo vazio). */
+export async function lerCaixas(force = false) {
+  if (cacheCaixas.valor && !force && Date.now() - cacheCaixas.em < CAIXAS_TTL) return cacheCaixas.valor;
+  let valor = { porPapel: {}, porUsuario: {}, instancias: {} };
+  try {
+    const rows = await rest(`qs_settings?select=value&key=eq.${WA_CAIXAS_KEY}&limit=1`);
+    const v = rows?.[0]?.value;
+    if (v && typeof v === 'object') {
+      valor = {
+        porPapel: obj(v.porPapel),
+        porUsuario: obj(v.porUsuario),
+        instancias: obj(v.instancias),
+      };
+    }
+  } catch (e) {
+    // Falhou a leitura? Cai no comportamento antigo por 1 minuto. NUNCA derruba
+    // o envio: sem linha configurada o QS já sabia funcionar.
+    console.warn('[wa] não consegui ler wa_caixas:', e?.message);
+  }
+  cacheCaixas = { em: Date.now(), valor };
+  return valor;
+}
+
+function obj(v) {
+  return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+}
+
+/**
+ * A linha de quem está escrevendo. `null` = ninguém configurou ainda, e quem
+ * chama deve seguir exatamente como seguia antes.
+ *
+ * A exceção individual (porUsuario) vence o papel — é o caso do gestor que
+ * atende pelo número do comercial, ou de um closer que herdou outro número.
+ */
+export async function caixaDoUsuario(user) {
+  if (!user) return null;
+  const mapa = await lerCaixas();
+  const escolhido = mapa.porUsuario?.[String(user.id)] ?? mapa.porPapel?.[String(user.role || '')];
+  const n = Number(escolhido);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** O cliente escreveu pra gente nas últimas `horas`? (qualquer linha) */
+export async function clienteFalouRecente(leadId, horas = 24) {
+  const desde = new Date(Date.now() - horas * 3600_000).toISOString();
+  try {
+    const rows = await rest(
+      `qs_wa_messages?select=id&lead_id=eq.${encodeURIComponent(leadId)}` +
+      `&direction=eq.in&sent_at=gte.${encodeURIComponent(desde)}&limit=1`
+    );
+    return Array.isArray(rows) && rows.length > 0;
+  } catch (e) {
+    // Na dúvida, "sim": responder onde o cliente falou é o comportamento antigo,
+    // e o antigo é sempre o palpite seguro.
+    console.warn('[wa] clienteFalouRecente:', e?.message);
+    return true;
+  }
+}
+
+/**
+ * POR QUAL NÚMERO ESTA MENSAGEM SAI. A ordem é a regra do produto inteiro:
+ *
+ *  1. O atendente ESCOLHEU um número na tela  → é esse, sem discussão.
+ *  2. O cliente escreveu nas últimas 24h      → responde na MESMA linha em que
+ *     ele escreveu (o caminho antigo, que a rota já resolve pela conversa).
+ *     Responder de outro número um cliente que acabou de escrever é o pior dos
+ *     dois mundos: ele não vê resposta na conversa dele e recebe mensagem de um
+ *     número desconhecido.
+ *  3. Ninguém falou faz tempo (ou nunca falou) → a linha de QUEM ESTÁ ESCREVENDO.
+ *     É aqui que o closer assume: nova abordagem sai pelo número dele, não pelo
+ *     da SDR e muito menos pelo celular pessoal.
+ *  4. Sem mapa configurado                    → null, e a rota segue como antes.
+ *
+ * Devolve { inboxId, motivo } — o motivo vai pro log, que é o que transforma
+ * "saiu pelo número errado" em algo investigável.
+ */
+export async function linhaDeEnvio({ leadId, user, inboxPedida = null, horasDeJanela = 24 }) {
+  if (inboxPedida != null) return { inboxId: Number(inboxPedida), motivo: 'escolha-do-atendente' };
+
+  const minha = await caixaDoUsuario(user);
+  if (minha == null) return { inboxId: null, motivo: 'sem-mapa' };
+
+  if (await clienteFalouRecente(leadId, horasDeJanela)) {
+    return { inboxId: null, motivo: 'cliente-falou-recente' };
+  }
+  return { inboxId: minha, motivo: 'linha-de-quem-escreve' };
+}
+
 /** Mensagem humana pros erros de ensureConversation. */
 export function motivoHumano(code) {
   return {
@@ -605,7 +747,7 @@ export function motivoHumano(code) {
     'inbox-nao-configurada': 'Falta dizer por qual número enviar (CHATWOOT_DEFAULT_INBOX_ID).',
     'falha-ao-criar-contato': 'Não consegui criar o contato no atendimento.',
     'falha-ao-criar-conversa': 'Não consegui abrir a conversa no atendimento.',
-    'sem-source-id': 'A caixa de WhatsApp não aceitou este contato.',
+    'sem-source-id': 'Este número não conseguiu abrir conversa com o cliente. Confira em Configurações → Atendimento se a linha está no ar.',
     'sem-contato': 'Não consegui identificar o contato no atendimento.',
   }[code] || 'Não consegui abrir a conversa.';
 }

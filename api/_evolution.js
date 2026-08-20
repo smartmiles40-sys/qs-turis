@@ -18,7 +18,7 @@
 // a reação só fica visível dentro do QS até o Bruno ligar os fios.
 // -----------------------------------------------------------------------------
 
-import { toE164BR } from './_wa.js';
+import { toE164BR, lerCaixas } from './_wa.js';
 
 export const EVO_BASE = String(process.env.EVOLUTION_URL || '').replace(/\/+$/, '');
 
@@ -39,6 +39,98 @@ export function evoInstanceForInbox(inboxId) {
     }
   }
   return process.env.EVOLUTION_INSTANCE || null;
+}
+
+/**
+ * A instância que atende a caixa, agora perguntando PRIMEIRO à configuração
+ * (qs_settings.wa_caixas.instancias) e só depois à env.
+ *
+ * POR QUE INVERTER A ORDEM (0056): o mapa caixa→instância vivia só na
+ * EVOLUTION_INSTANCES, uma variável da Vercel. Ligar um número novo — que é
+ * exatamente o que se faz ao pôr o closer no 1935 — exigia editar env e
+ * redeployar; e enquanto ninguém fizesse isso, o QS achava que a caixa nova era
+ * a instância antiga: a checagem de "número caído" olhava o número errado e o
+ * envio saía achando que estava tudo bem. Agora o gestor arruma na tela.
+ *
+ * A env continua valendo como padrão — nada quebra em quem já tem ela montada.
+ */
+export async function instanciaDaCaixa(inboxId) {
+  if (inboxId != null) {
+    try {
+      const mapa = await lerCaixas();
+      const hit = mapa.instancias?.[String(inboxId)];
+      if (hit) return String(hit);
+    } catch { /* configuração indisponível: cai na env, como antes */ }
+  }
+  return evoInstanceForInbox(inboxId);
+}
+
+/**
+ * O QR CODE pra conectar (ou reconectar) um número.
+ *
+ * Devolve { base64, pairingCode, jaConectada }. A Evolution responde de duas
+ * formas conforme a versão: `{ base64, code, pairingCode }` na v2, ou o estado
+ * quando a instância JÁ está no ar — e nesse caso não há QR nenhum pra mostrar,
+ * o que a tela precisa saber pra não ficar esperando uma imagem que não vem.
+ */
+export async function conectarInstancia(nome) {
+  const estado = await estadoInstancia(nome);
+  if (noAr(estado)) return { base64: null, pairingCode: null, jaConectada: true };
+
+  const out = await evoGet(`/instance/connect/${encodeURIComponent(nome)}`);
+  const base64 = out?.base64 || out?.qrcode?.base64 || null;
+  return {
+    // A Evolution v2 já devolve com o prefixo data:image; a v1, cru.
+    base64: base64 ? (String(base64).startsWith('data:') ? String(base64) : `data:image/png;base64,${base64}`) : null,
+    pairingCode: out?.pairingCode || out?.qrcode?.pairingCode || null,
+    jaConectada: false,
+  };
+}
+
+/** O estado atual da instância: 'open' | 'close' | 'connecting' | 'desconhecido'. */
+export async function estadoInstancia(nome) {
+  try {
+    const out = await evoGet(`/instance/connectionState/${encodeURIComponent(nome)}`);
+    const i = out?.instance && typeof out.instance === 'object' ? out.instance : out;
+    return String(i?.state || i?.connectionStatus || 'desconhecido');
+  } catch (e) {
+    console.warn('[evo] connectionState:', e?.message);
+    return 'desconhecido';
+  }
+}
+
+/**
+ * Desloga o número (o "Desconectar" do WhatsApp Web). Usado pra TROCAR o
+ * aparelho/chip de uma linha: sem deslogar antes, o QR novo é recusado porque a
+ * instância ainda acha que está pareada.
+ */
+export async function desconectarInstancia(nome) {
+  const url = `${EVO_BASE}/instance/logout/${encodeURIComponent(nome)}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  try {
+    const r = await fetch(url, {
+      method: 'DELETE',
+      headers: { apikey: process.env.EVOLUTION_APIKEY || '' },
+      signal: ctrl.signal,
+    });
+    const text = await r.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+    if (!r.ok) {
+      const err = new Error((json && (json.message || json.error)) || `Evolution HTTP ${r.status}`);
+      err.status = r.status;
+      throw err;
+    }
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Reinicia a instância — primeira coisa a tentar quando ela trava em `connecting`. */
+export async function reiniciarInstancia(nome) {
+  return evo(`/instance/restart/${encodeURIComponent(nome)}`, {});
 }
 
 /** POST na Evolution com timeout. Nunca deixa a função serverless pendurada. */

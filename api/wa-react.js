@@ -32,7 +32,7 @@ import {
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 import {
-  evoConfigured, evoInstanceForInbox, resolveJid, sendReaction, deleteForEveryone,
+  evoConfigured, instanciaDaCaixa, resolveJid, sendReaction, deleteForEveryone,
 } from './_evolution.js';
 
 function safeParse(s) {
@@ -104,7 +104,7 @@ async function montarKeyDoWhatsApp(leadId, lead, msg) {
   const threads = await rest(
     `qs_wa_threads?select=cw_inbox_id&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
   );
-  const instance = evoInstanceForInbox(threads?.[0]?.cw_inbox_id ?? null);
+  const instance = await instanciaDaCaixa(threads?.[0]?.cw_inbox_id ?? null);
   if (!instance) return { motivo: 'instancia-nao-mapeada' };
 
   const jid = await resolveJid(instance, lead.phone);

@@ -23,7 +23,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
-import { evoConfigured, evoInstanceForInbox, fetchProfilePicture } from './_evolution.js';
+import { evoConfigured, instanciaDaCaixa, fetchProfilePicture } from './_evolution.js';
 
 const BUCKET = 'wa-avatars';
 const MAX_BYTES = 2 * 1024 * 1024;   // teto do bucket; foto de perfil é ~10-40 KB
@@ -114,7 +114,7 @@ export async function resolverFoto({ leadId, phone, inboxId, thumbnailChatwoot =
   if (thumbnailChatwoot && /^https?:\/\//i.test(thumbnailChatwoot)) return thumbnailChatwoot;
 
   if (!evoConfigured()) return null;
-  const instance = evoInstanceForInbox(inboxId ?? null);
+  const instance = await instanciaDaCaixa(inboxId ?? null);
   if (!instance) return null;
 
   const origem = await fetchProfilePicture(instance, phone);

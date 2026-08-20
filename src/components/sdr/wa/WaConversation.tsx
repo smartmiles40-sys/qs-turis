@@ -1304,6 +1304,10 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                   <span className="flex-1 min-w-0 truncate text-[12px]" style={{ color: "var(--ink)" }}>
                     {n.numero || n.nome}
                     {n.tipo === "api" && <span style={{ color: "var(--ink3)" }}> · oficial</span>}
+                    {/* "seu número" = a linha do papel de quem está logado
+                        (0056). É por ela que sai a abordagem nova — dizer isso
+                        aqui evita o closer procurar qual dos números é o dele. */}
+                    {n.minha && <span style={{ color: "var(--ink3)" }}> · seu número</span>}
                   </span>
                   {ativo && <span className="text-[10px] font-bold" style={{ color: "var(--wa-ok-ink)" }}>usando</span>}
                 </button>

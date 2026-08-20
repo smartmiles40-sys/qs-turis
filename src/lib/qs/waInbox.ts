@@ -46,6 +46,9 @@ export interface WaMessage {
   reply_preview?: string | null;
   /** Texto do áudio (migration 0051). Só existe depois que alguém transcreve. */
   transcricao?: string | null;
+  /** Por qual dos NOSSOS números esta mensagem passou (0056). Nulo em mensagem
+   *  antiga — e nulo vira "sem selo", que é honesto. */
+  cw_inbox_id?: number | null;
 }
 
 export interface WaThreadLead {
@@ -216,6 +219,8 @@ export interface WaNumero {
   numero: string | null;
   /** É por este que sai quando o SDR não escolhe nada. */
   padrao: boolean;
+  /** É a linha DESTE usuário (papel/exceção, 0056) — "seu número" na tela. */
+  minha: boolean;
 }
 
 /** Template aprovado na Meta (número oficial) — vem pronto do /api/wa-config. */
@@ -236,6 +241,8 @@ interface WaConfigBruta {
   inboxes: { id: number; nome: string; canal: string; telefone?: string | null }[];
   modelos: WaModelo[];
   padrao: number | null;
+  /** A linha DESTE usuario (0056). null = ninguem configurou o mapa ainda. */
+  minhaLinha: number | null;
 }
 
 // Uma promessa só, compartilhada: o painel pede atalhos e números ao mesmo
@@ -245,7 +252,7 @@ let configPromise: Promise<WaConfigBruta> | null = null;
 function buscarConfig(force = false): Promise<WaConfigBruta> {
   if (configPromise && !force) return configPromise;
   configPromise = (async () => {
-    const vazio: WaConfigBruta = { respostas: [], inboxes: [], modelos: [], padrao: null };
+    const vazio: WaConfigBruta = { respostas: [], inboxes: [], modelos: [], padrao: null, minhaLinha: null };
     try {
       const res = await fetch("/api/wa-config", { headers: await authHeaders() });
       if (!res.ok) return vazio;
@@ -255,6 +262,7 @@ function buscarConfig(force = false): Promise<WaConfigBruta> {
         inboxes: Array.isArray(d?.inboxes) ? d.inboxes : [],
         modelos: Array.isArray(d?.modelos) ? d.modelos : [],
         padrao: d?.padrao ?? null,
+        minhaLinha: d?.minhaLinha ?? null,
       };
     } catch {
       configPromise = null;   // deixa tentar de novo na próxima
@@ -273,6 +281,7 @@ function buscarConfig(force = false): Promise<WaConfigBruta> {
 export async function listWaNumeros(force = false): Promise<WaNumero[]> {
   const [cfg, labels] = await Promise.all([buscarConfig(force), getInboxLabels()]);
   const padraoId = Number(cfg.padrao);
+  const minhaId = cfg.minhaLinha == null ? null : Number(cfg.minhaLinha);
   return cfg.inboxes.map((i) => {
     const l = labels[String(i.id)];
     return {
@@ -285,6 +294,7 @@ export async function listWaNumeros(force = false): Promise<WaNumero[]> {
       telefone: i.telefone ?? null,
       numero: numeroCurto(i.telefone),
       padrao: i.id === padraoId,
+      minha: minhaId != null && i.id === minhaId,
     };
   });
 }
@@ -358,6 +368,103 @@ export async function excluirModeloNaMeta(nome: string): Promise<{ ok: boolean; 
     return { ok: false, error: "Sem conexão." };
   }
 }
+
+// ── AS LINHAS DO TIME (0056) ────────────────────────────────────────────────
+// Quem fala por qual número, e se aquele número está de fato no ar. Só
+// admin/gestor: o QR code de um número é a chave dele — quem vê, pareia.
+
+export const WA_CAIXAS_KEY = "wa_caixas";
+
+/** O mapa que fica em qs_settings.wa_caixas. */
+export interface MapaDeLinhas {
+  /** papel → id da caixa no Chatwoot. */
+  porPapel: Record<string, number>;
+  /** uuid do usuário → id da caixa. Vence o papel. */
+  porUsuario: Record<string, number>;
+  /** id da caixa → nome da instância na Evolution. */
+  instancias: Record<string, string>;
+}
+
+export interface CaixaDaLinha {
+  id: number;
+  nome: string;
+  canal: string;
+  telefone: string | null;
+  tipo: "oficial" | "comum";
+  /** Nome da instância na Evolution (null na caixa oficial: ela é da Meta). */
+  instancia: string | null;
+  /** A instância mapeada existe mesmo na Evolution? (null quando é a oficial) */
+  instanciaExiste: boolean | null;
+  /** 'open' | 'close' | 'connecting' | 'sem-instancia' | 'oficial' | 'desconhecido' */
+  status: string;
+  /** O número que está pareado agora, direto do WhatsApp. */
+  numeroConectado: string | null;
+}
+
+export interface InstanciaEvolution {
+  nome: string;
+  status: string;
+  numero: string | null;
+  /** A caixa do Chatwoot que aponta pra ela, quando alguém mapeou. */
+  caixa: number | null;
+  /** Nenhuma caixa aponta pra ela — número no ar que o QS não usa. */
+  orfa: boolean;
+}
+
+export interface PainelDeLinhas {
+  caixas: CaixaDaLinha[];
+  instancias: InstanciaEvolution[];
+  mapa: MapaDeLinhas;
+  evolucao: boolean;
+  /** false = a Evolution não respondeu; diferente de "não tem instância". */
+  evolucaoRespondeu: boolean;
+}
+
+export async function carregarLinhas(): Promise<{ painel: PainelDeLinhas | null; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config?linhas=1", { headers: await authHeaders() });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { painel: null, error: d?.error || "Não consegui carregar os números." };
+    return { painel: d as PainelDeLinhas };
+  } catch {
+    return { painel: null, error: "Sem conexão." };
+  }
+}
+
+export interface RespostaQr {
+  ok: boolean;
+  /** data:image/png;base64,… — o QR pra apontar o celular. */
+  base64?: string | null;
+  /** Código de pareamento por número, quando a Evolution devolve. */
+  pairingCode?: string | null;
+  jaConectada?: boolean;
+  estado?: string;
+  error?: string;
+}
+
+async function acaoDeLinha(acao: string, instancia: string): Promise<RespostaQr> {
+  try {
+    const res = await fetch("/api/wa-config", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ acao, instancia }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: d?.error || "A Evolution não respondeu." };
+    return { ok: true, ...d };
+  } catch {
+    return { ok: false, error: "Sem conexão." };
+  }
+}
+
+/** Pede o QR pra parear o número. Já conectado, devolve `jaConectada`. */
+export const pedirQrCode = (instancia: string) => acaoDeLinha("conectar", instancia);
+/** Só pra conferir se o pareamento pegou — usado pelo relógio da tela do QR. */
+export const estadoDaLinha = (instancia: string) => acaoDeLinha("estado", instancia);
+/** Desloga o número. É o que se faz pra TROCAR o chip/aparelho de uma linha. */
+export const desconectarLinha = (instancia: string) => acaoDeLinha("desconectar", instancia);
+/** Primeira coisa a tentar quando a instância trava em `connecting`. */
+export const reiniciarLinha = (instancia: string) => acaoDeLinha("reiniciar", instancia);
 
 /** O corpo do modelo com as variáveis preenchidas (pré-visualização do envio). */
 export function previewModelo(m: WaModelo, valores: Record<string, string>): string {

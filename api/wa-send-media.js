@@ -19,6 +19,7 @@ import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cwForm,
   ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, ingestMessage,
   inboxPermitida, assinarComoUsuario, CW_BASE, canalDaInbox, canalEhApiOficial,
+  linhaDeEnvio,
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 import { webmParaOggBytes, ehWebm } from './_opusRemux.js';
@@ -151,6 +152,13 @@ export default async function handler(req, res) {
 
   if (!cwConfigured()) {
     return res.status(503).json({ error: 'Atendimento não configurado (falta CHATWOOT_AGENT_TOKEN)' });
+  }
+
+  // A linha de quem está escrevendo (0056) — mesma regra do wa-send: só entra
+  // quando o SDR não escolheu número E o cliente não falou nas últimas 24h.
+  if (inboxPedida == null) {
+    const linha = await linhaDeEnvio({ leadId, user: auth.user });
+    if (linha.inboxId != null) inboxPedida = linha.inboxId;
   }
 
   try {
