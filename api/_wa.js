@@ -466,6 +466,37 @@ export async function findContact(phoneE164) {
  * é o que permite o SDR escolher por qual número falar: no Chatwoot cada conversa
  * pertence a uma caixa só, então trocar de número é trocar de conversa.
  */
+/**
+ * TODAS as conversas de WhatsApp daquele contato, da mais recente pra mais
+ * antiga.
+ *
+ * POR QUE PRECISOU EXISTIR (auditoria de 20/08). O `wa-sync` — que é o resgate
+ * quando o webhook falha — puxava UMA conversa só: a que o cliente usou por
+ * último *segundo o que o QS já tinha*. Isso cria um ponto cego que se
+ * alimenta sozinho: se a mensagem do número novo nunca entrou, o QS acha que a
+ * conversa do cliente é a antiga, sincroniza a antiga, e a nova continua
+ * invisível — abrir o lead, que é o conserto que a gente ensina pro time, não
+ * conserta nada.
+ *
+ * Hoje isso quase não morde (só 1 lead tem conversa em duas caixas). Passa a
+ * morder no dia em que o closer atender pelo número dele: aí TODO lead
+ * transferido tem duas conversas.
+ */
+export async function conversasDeWhatsAppDoContato(contactId) {
+  try {
+    const { payload = [] } = await cw(`/contacts/${contactId}/conversations`);
+    let convs = Array.isArray(payload) ? payload : [];
+    const permitidas = await idsDeWhatsApp();
+    if (permitidas && permitidas.size) {
+      convs = convs.filter((c) => permitidas.has(Number(c.inbox_id)));
+    }
+    return convs.sort((a, b) => (b.last_activity_at || 0) - (a.last_activity_at || 0));
+  } catch (e) {
+    console.warn('[wa] conversas do contato:', e?.message);
+    return [];
+  }
+}
+
 export async function pickConversation(contactId, inboxId = null) {
   try {
     const { payload = [] } = await cw(`/contacts/${contactId}/conversations`);
@@ -1047,6 +1078,67 @@ export async function ingestMessage({ leadId, conversationId, message, contactId
 // Chatwoot estiver fora, se a 0047 não tiver sido colada, se o contato não
 // existir — o lead entra igual. Resgate que derruba a entrada de leads seria um
 // remédio pior que a doença.
+
+/**
+ * VARREDURA DOS DESCARTES PENDENTES — a corrida que ninguém volta pra ver.
+ *
+ * O resgate por telefone (`resgatarConversaPerdida`) só roda pendurado na
+ * CRIAÇÃO do lead pelo webhook de entrada (`_leads.js`). Lead que nasce por
+ * outro caminho — sincronização do Bitrix, cadastro na mão dentro do QS — não
+ * dispara nada, e o descarte fica pendente pra sempre.
+ *
+ * Medido em 20/08: 12 descartes pendentes cujo lead JÁ EXISTE hoje. Todos são
+ * corrida (o lead nasceu no mesmo minuto ou depois), nenhum é falha de
+ * casamento de telefone — mas nenhum foi resgatado, porque ninguém volta neles.
+ *
+ * Esta varredura fecha o buraco: roda de carona no vigia (que já pulsa a cada
+ * mensagem que entra e a cada 5 min com o QS aberto), pega os pendentes
+ * recentes, pergunta se o lead existe AGORA e resgata quem tiver dono.
+ *
+ * Barata de propósito: teto de linhas por rodada e só descarte dos últimos 30
+ * dias. Best-effort — nunca deixa uma exceção subir pro vigia.
+ */
+export async function varrerDescartesPendentes({ teto = 8 } = {}) {
+  let alvos;
+  try {
+    // A pergunta é feita NO BANCO (RPC da 0057) e não aqui, de propósito.
+    // A varredura ingênua — "pega os N pendentes mais recentes e pergunta se
+    // já tem lead" — passa fome: dos 222 pendentes, a maioria é gente que
+    // realmente não é lead, e eles ocupariam as N vagas em toda rodada, para
+    // sempre. O RPC devolve só o que dá pra resgatar, um por lead.
+    alvos = await rest(`rpc/qs_wa_descartes_com_dono`, {
+      method: 'POST', body: { p_limite: teto },
+    });
+  } catch (e) {
+    // 0057 ainda não aplicada: sem ela a varredura simplesmente não roda. Não
+    // vale cair no varredor ingênuo — ele gastaria consulta sem nunca chegar
+    // nos resgatáveis.
+    if (!/qs_wa_descartes_com_dono|schema cache|function/i.test(String(e?.message))) {
+      console.warn('[wa] varredura de descartes:', e?.message);
+    }
+    return { olhados: 0, resgatados: 0, motivo: 'sem-0057' };
+  }
+
+  const lista = Array.isArray(alvos) ? alvos : [];
+  if (!lista.length) return { olhados: 0, resgatados: 0 };
+
+  let resgatados = 0;
+  for (const alvo of lista) {
+    try {
+      const lead = await getLead(alvo.lead_id);
+      if (!lead) continue;
+      const r = await resgatarConversaPerdida(lead);
+      if (r.resgatadas > 0) {
+        resgatados += r.resgatadas;
+        console.log(`[wa] varredura resgatou ${r.resgatadas} mensagem(ns) do lead ${lead.id}`);
+      }
+    } catch (e) {
+      // Um lead que falhou não pode levar os outros junto.
+      console.warn(`[wa] varredura do lead ${alvo.lead_id}:`, e?.message);
+    }
+  }
+  return { olhados: lista.length, resgatados };
+}
 
 /** As linhas de descarte que são deste telefone e ainda esperam tratamento. */
 async function descartesPendentesDe(key) {

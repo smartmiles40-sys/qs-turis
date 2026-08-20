@@ -19,6 +19,7 @@
 import { rest } from './_supabaseAdmin.js';
 import { listarInstancias, noAr, sendText, evoConfigured, EVO_BASE } from './_evolution.js';
 import { conferirRecebimento, textoDoAlerta } from './_waConferencia.js';
+import { varrerDescartesPendentes } from './_wa.js';
 
 const CHAVE = 'wa_monitor_estado';
 const REPETIR_MS = 6 * 60 * 60 * 1000;
@@ -180,7 +181,7 @@ export async function entregar(avisos, instancias) {
  * Uma verificação completa: lê o servidor, compara, avisa, guarda.
  * Devolve o resumo pra rota responder (e pro agendador enxergar no log).
  */
-export async function verificar() {
+export async function verificar({ completo = true } = {}) {
   if (!evoConfigured()) {
     const err = new Error('EVOLUTION_URL / EVOLUTION_APIKEY não configurados');
     err.code = 'CONFIG';
@@ -196,18 +197,49 @@ export async function verificar() {
   // Número no ar não garante nada: em 10/08 o WhatsApp estava perfeito e 25
   // mensagens ficaram só no Chatwoot. Best-effort: a conferência nunca pode
   // derrubar o monitor dos números, que é o trabalho principal dele.
+  // ⚠️ SÓ NA RONDA COMPLETA (auditoria de 20/08). A conferência varre páginas de
+  // conversas no Chatwoot e a varredura resgata descartes — as duas somam vários
+  // segundos. Enquanto isso rodava pendurado no `wa-webhook`, esse tempo entrava
+  // NO CAMINHO DA MENSAGEM: a função da Vercel tem ~10s pra tudo, e estourar ali
+  // não atrasa um relatório, faz a mensagem do cliente não ser gravada. O
+  // webhook agora só confere o status dos números (uma chamada); o trabalho
+  // pesado fica com /api/wa-vigia (o QS aberto, de 5 em 5 min) e /api/wa-monitor,
+  // que não têm ninguém esperando do outro lado.
+  // RELÓGIO PRÓPRIO PRA RONDA PESADA. Sem isto, o conserto acima viraria outro
+  // bug: o webhook (que é quem quase sempre ganha a corrida, porque mensagem
+  // chega o tempo todo) carimba `verificadoEm` e a trava de 10 min some — então
+  // a ronda COMPLETA, que só o /api/wa-vigia dispara, encontraria o carimbo
+  // fresco e nunca rodaria. A conferência tem o carimbo dela.
+  const CONFERIR_MS = 10 * 60 * 1000;
+  const ultimaConf = anterior?.conferidoEm ? new Date(anterior.conferidoEm).getTime() : 0;
+  const deveConferir = completo && (quando - ultimaConf >= CONFERIR_MS);
+
   let conferencia = null;
-  try {
-    conferencia = await conferirRecebimento();
-    if (conferencia.faltando.length) {
-      avisos.push({
-        tipo: 'mensagem-nao-recebida',
-        instancia: 'QS',
-        texto: textoDoAlerta(conferencia.faltando),
-      });
+  let varredura = null;
+  if (deveConferir) {
+    try {
+      conferencia = await conferirRecebimento();
+      if (conferencia.faltando.length) {
+        avisos.push({
+          tipo: 'mensagem-nao-recebida',
+          instancia: 'QS',
+          texto: textoDoAlerta(conferencia.faltando),
+        });
+      }
+    } catch (e) {
+      console.warn('[wa-monitor] conferência de recebimento falhou:', e?.message);
     }
-  } catch (e) {
-    console.warn('[wa-monitor] conferência de recebimento falhou:', e?.message);
+
+    // A CORRIDA QUE NINGUÉM VOLTA PRA VER. O resgate por telefone só rodava
+    // pendurado na criação do lead pelo webhook de entrada; lead que nasce pelo
+    // Bitrix ou na mão deixava o descarte pendente pra sempre (12 casos assim em
+    // 20/08). Aqui a pergunta é refeita de tempos em tempos: "o dono apareceu?".
+    // Silencioso de propósito — resgate que funcionou não é notícia, é o normal.
+    try {
+      varredura = await varrerDescartesPendentes();
+    } catch (e) {
+      console.warn('[wa-monitor] varredura de descartes falhou:', e?.message);
+    }
   }
 
   const envio = await entregar(avisos, instancias);
@@ -222,6 +254,11 @@ export async function verificar() {
       if (linha) linha.ultimoAviso = anterior?.instancias?.[aviso.instancia]?.ultimoAviso || null;
     }
   }
+  // O carimbo da conferência anda sozinho: só avança quando ela REALMENTE
+  // rodou, e sobrevive às rondas leves do webhook (que reescrevem este objeto).
+  novoEstado.conferidoEm = deveConferir
+    ? new Date(quando).toISOString()
+    : (anterior?.conferidoEm ?? null);
   await salvarEstado(novoEstado);
 
   return {
@@ -232,6 +269,7 @@ export async function verificar() {
     recebimento: conferencia
       ? { conferidas: conferencia.conferidas, faltando: conferencia.faltando.length, detalhe: conferencia.faltando.slice(0, 5) }
       : { erro: 'nao-conferido' },
+    varredura,
     ...envio,
   };
 }
@@ -252,12 +290,20 @@ export async function verificar() {
  * NUNCA lança. Quem chama é um webhook cuja obrigação é responder 200 ao
  * Chatwoot — vigia com defeito não pode derrubar a entrada de mensagem.
  */
-export async function verificarSeVencido(maxIdadeMs = 10 * 60 * 1000) {
+export async function verificarSeVencido(maxIdadeMs = 10 * 60 * 1000, { completo = false } = {}) {
   try {
     if (!evoConfigured()) return { pulou: true, motivo: 'sem-config' };
 
     const estado = await lerEstado();
-    const ultimo = estado?.verificadoEm ? new Date(estado.verificadoEm).getTime() : 0;
+    // Quem pede a ronda COMPLETA se guia pelo relógio DELA. Sem isso o conserto
+    // não fecha: o webhook carimba `verificadoEm` a cada poucos minutos, e o
+    // /api/wa-vigia — o único que faz a ronda completa — sairia daqui por
+    // "recente" sem nunca conferir nada. A trava da parte pesada continua
+    // valendo lá dentro (`conferidoEm`), então isto não vira rajada.
+    const marco = completo
+      ? (estado?.conferidoEm ?? estado?.verificadoEm)
+      : estado?.verificadoEm;
+    const ultimo = marco ? new Date(marco).getTime() : 0;
     const idade = Date.now() - ultimo;
     if (Number.isFinite(idade) && idade < maxIdadeMs) {
       return { pulou: true, motivo: 'recente', idadeMs: idade };
@@ -267,7 +313,7 @@ export async function verificarSeVencido(maxIdadeMs = 10 * 60 * 1000) {
     // segundo não podem virar duas rondas — a segunda vê o carimbo novo e sai.
     await salvarEstado({ ...estado, verificadoEm: new Date().toISOString() });
 
-    const resumo = await verificar();
+    const resumo = await verificar({ completo });
     return { pulou: false, ...resumo };
   } catch (e) {
     // Evolution fora do ar cai aqui — e é EXATAMENTE o caso que não pode

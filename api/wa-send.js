@@ -113,12 +113,20 @@ async function resolverModelo(modelo) {
  * "fechada", confirmamos com o Chatwoot (`can_reply`, que vem da própria Meta)
  * antes de recusar. Uma chamada a mais, só no caminho que ia dar errado.
  */
-async function foraDaJanela24h(leadId, conversationId) {
+async function foraDaJanela24h(leadId, conversationId, inboxId = null) {
   const desde = new Date(Date.now() - 24 * 3600_000).toISOString();
   try {
+    // ⚠️ A JANELA É DA CAIXA, NÃO DO LEAD (auditoria de 20/08). A conta era
+    // feita sobre TODAS as mensagens do lead: uma resposta dele no número comum
+    // "abria" a janela do número oficial, onde ele nunca escreveu — e a Meta
+    // recusava calada, que é exatamente o buraco que esta função existe pra
+    // fechar. Com uma linha por papel isso deixa de ser exceção e vira o normal.
+    // Mensagem antiga sem caixa carimbada (`cw_inbox_id is null`) fica de fora:
+    // ela não prova janela nenhuma.
+    const filtroCaixa = inboxId != null ? `&cw_inbox_id=eq.${Number(inboxId)}` : '';
     const ent = await rest(
       `qs_wa_messages?select=id&lead_id=eq.${encodeURIComponent(leadId)}` +
-      `&direction=eq.in&sent_at=gte.${encodeURIComponent(desde)}&limit=1`
+      `&direction=eq.in&sent_at=gte.${encodeURIComponent(desde)}${filtroCaixa}&limit=1`
     );
     if (Array.isArray(ent) && ent.length) return false;
   } catch (e) {
@@ -313,7 +321,7 @@ export default async function handler(req, res) {
       // A outra recusa silenciosa, e a mais comum: número oficial + janela de
       // 24h fechada. Só o oficial passa por isso — a Evolution não tem janela.
       const canal = await canalDaInbox(inboxId);
-      if (canalEhApiOficial(canal) && await foraDaJanela24h(leadId, conversationId)) {
+      if (canalEhApiOficial(canal) && await foraDaJanela24h(leadId, conversationId, inboxId)) {
         return res.status(409).json({
           error: 'O cliente não fala com a gente há mais de 24h. Pelo número oficial, ' +
                  'a Meta só entrega MODELO aprovado — use um modelo para reabrir a conversa.',

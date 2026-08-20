@@ -43,7 +43,7 @@ export default async function handler(req, res) {
   // A ronda é best-effort: se a Evolution estiver fora, `verificarSeVencido`
   // registra a falha no estado e não lança. A tela precisa da SAÚDE de
   // qualquer jeito — inclusive (e principalmente) quando a ronda falhou.
-  const ronda = await verificarSeVencido();
+  const ronda = await verificarSeVencido(10 * 60 * 1000, { completo: true });
 
   try {
     const saude = await saudeDoVigia();

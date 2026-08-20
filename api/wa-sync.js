@@ -17,6 +17,7 @@ import { rest } from './_supabaseAdmin.js';
 import {
   assertCanAccessLead, getSupabaseUserId, cwConfigured, cw,
   toE164BR, findContact, escolherConversaDoLead, ingestMessage,
+  conversasDeWhatsAppDoContato, conversaOndeOClienteFala,
 } from './_wa.js';
 import { resolverFoto, preencherFotosEmLote } from './_waFoto.js';
 
@@ -231,20 +232,64 @@ export default async function handler(req, res) {
       return res.status(200).json({ conversationId: null, contactId: contact.id, importadas: 0, motivo: 'sem-conversa' });
     }
 
-    const data = await cw(`/conversations/${conv.id}/messages`);
-    const list = Array.isArray(data?.payload) ? data.payload : [];
+    // ── TODAS as conversas do cliente, não só a "dele" ─────────────────────
+    //
+    // Auditoria de 20/08: puxar só a conversa escolhida cria um ponto cego que
+    // se alimenta sozinho. A escolha usa a última mensagem do cliente QUE O QS
+    // JÁ TEM — então, se a mensagem do outro número nunca entrou, o QS escolhe
+    // a conversa velha, sincroniza a velha, e a nova segue invisível. Abrir o
+    // lead, que é o conserto que a gente ensina pro time, não consertava nada.
+    //
+    // O teto de 5 é o orçamento de tempo da Vercel (10s pra função inteira):
+    // são 5 idas ao Chatwoot no pior caso, e um cliente com mais de 5 conversas
+    // de WhatsApp não existe na prática — as mais recentes vêm primeiro.
+    const todas = await conversasDeWhatsAppDoContato(contact.id);
+    const aSincronizar = (todas.length ? todas : [conv]).slice(0, 5);
+    // A escolhida entra sempre, mesmo que o Chatwoot não a tenha listado.
+    if (!aSincronizar.some((c) => Number(c.id) === Number(conv.id))) aSincronizar.push(conv);
 
     let importadas = 0;
-    for (const m of list) {
-      const novo = await ingestMessage({
-        leadId,
-        conversationId: conv.id,
-        message: m,
-        contactId: contact.id,
-        canReply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
-        inboxId: conv.inbox_id ?? null,
-      });
-      if (novo) importadas++;
+    let lidas = 0;
+    for (const c of aSincronizar) {
+      let list = [];
+      try {
+        const data = await cw(`/conversations/${c.id}/messages`);
+        list = Array.isArray(data?.payload) ? data.payload : [];
+      } catch (e) {
+        // Uma conversa que falhou não pode levar as outras junto.
+        console.warn(`[wa-sync] conversa ${c.id} não respondeu:`, e?.message);
+        continue;
+      }
+      lidas += list.length;
+      for (const m of list) {
+        const novo = await ingestMessage({
+          leadId,
+          conversationId: c.id,
+          message: m,
+          contactId: contact.id,
+          canReply: typeof c.can_reply === 'boolean' ? c.can_reply : null,
+          inboxId: c.inbox_id ?? null,
+        });
+        if (novo) importadas++;
+      }
+    }
+
+    // O PONTEIRO SE DECIDE DEPOIS DE TUDO ENTRAR, não antes.
+    //
+    // A conversa foi escolhida lá em cima com o que o QS SABIA na hora. Agora
+    // ele sabe mais: acabaram de entrar as mensagens de todas as conversas. Se
+    // a mensagem mais recente do cliente está em outra, é ela que vale — senão
+    // o `saveThreadMeta` abaixo gravaria a escolha velha por cima do conserto
+    // que o próprio ingest acabou de fazer (`conversaSegueOCliente`).
+    let alvo = conv;
+    try {
+      const doCliente = await conversaOndeOClienteFala(leadId);
+      const achada = doCliente != null
+        ? aSincronizar.find((c) => Number(c.id) === Number(doCliente))
+        : null;
+      if (achada) alvo = achada;
+    } catch (e) {
+      console.warn('[wa-sync] não consegui reconferir o ponteiro (fica o escolhido):', e?.message);
     }
 
     // Foto: o thumbnail do Chatwoot quando existe (já hospedado e estável) e,
@@ -256,7 +301,7 @@ export default async function handler(req, res) {
       const nova = await resolverFoto({
         leadId,
         phone: auth.lead.phone,
-        inboxId: conv.inbox_id ?? null,
+        inboxId: alvo.inbox_id ?? null,
         thumbnailChatwoot: contact.thumbnail || null,
       });
       if (nova) foto = nova;
@@ -265,21 +310,22 @@ export default async function handler(req, res) {
     }
 
     await saveThreadMeta(leadId, {
-      cw_conversation_id: conv.id,
+      cw_conversation_id: alvo.id,
       cw_contact_id: contact.id,
-      cw_inbox_id: conv.inbox_id ?? null,
+      cw_inbox_id: alvo.inbox_id ?? null,
       // Coluna da migration 0026. Se ela não existir, o PostgREST recusa a
       // linha inteira — por isso saveThreadMeta engole o erro e o resto segue.
       avatar_url: foto,
-      can_reply: typeof conv.can_reply === 'boolean' ? conv.can_reply : null,
+      can_reply: typeof alvo.can_reply === 'boolean' ? alvo.can_reply : null,
       synced_at: new Date().toISOString(),
     });
 
     return res.status(200).json({
-      conversationId: conv.id,
+      conversationId: alvo.id,
       contactId: contact.id,
-      canReply: conv.can_reply ?? null,
-      lidas: list.length,
+      canReply: alvo.can_reply ?? null,
+      conversas: aSincronizar.length,
+      lidas,
       importadas,
     });
   } catch (e) {

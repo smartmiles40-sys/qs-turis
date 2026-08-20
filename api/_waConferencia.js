@@ -38,17 +38,34 @@ export async function conferirRecebimento({ janelaMin = JANELA_MIN } = {}) {
   let conferidas = 0;
 
   for (const inboxId of caixas) {
-    let lista;
-    try {
-      const d = await cw(`/conversations?inbox_id=${inboxId}&status=all`);
-      lista = d?.data?.payload || [];
-    } catch (e) {
-      console.warn('[wa-conferencia] não consegui listar conversas:', e?.message);
-      continue;
-    }
+    // ── PAGINAR (auditoria de 20/08) ─────────────────────────────────────
+    // O Chatwoot devolve 25 conversas por página. Sem paginar, a conferência
+    // olhava só as 25 mais ativas — e num dia movimentado passam bem mais que
+    // 25 conversas em 90 minutos. O ponto cego era exatamente o horário de
+    // pico: quanto mais mensagem, menos a conferência enxergava.
+    //
+    // A lista vem ordenada por `last_activity_at` desc, então a parada é
+    // natural: chegou numa página cujo item mais recente já está fora da
+    // janela, acabou. O teto de 8 páginas (200 conversas) existe só pra uma
+    // resposta estranha do Chatwoot não virar laço infinito.
+    const recentes = [];
+    for (let page = 1; page <= 8; page++) {
+      let lista;
+      try {
+        const d = await cw(`/conversations?inbox_id=${inboxId}&status=all&page=${page}`);
+        lista = d?.data?.payload || [];
+      } catch (e) {
+        console.warn('[wa-conferencia] não consegui listar conversas:', e?.message);
+        break;
+      }
+      if (!lista.length) break;
 
-    // `last_activity_at` vem em epoch de segundos. Só o que mexeu na janela.
-    const recentes = lista.filter((c) => Number(c.last_activity_at || 0) * 1000 >= limite);
+      // `last_activity_at` vem em epoch de segundos. Só o que mexeu na janela.
+      const daPagina = lista.filter((c) => Number(c.last_activity_at || 0) * 1000 >= limite);
+      recentes.push(...daPagina);
+      // Página que já não tem NADA na janela: daqui pra trás só fica mais velho.
+      if (daPagina.length < lista.length) break;
+    }
 
     for (const c of recentes) {
       const ultima = c.last_non_activity_message;
