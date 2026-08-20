@@ -20,15 +20,46 @@ interface QsAuthContextType {
   isAuthenticated: boolean;
   /** Aviso de sessão encerrada à força (ex.: conta desativada) — o LoginPage exibe. */
   sessionNotice: string | null;
+  /**
+   * O servidor não respondeu na abertura do app.
+   *
+   * POR QUE EXISTE (20/08/2026): o gateway do Supabase ficou inalcançável a
+   * partir da rede do escritório por alguns minutos. O `getSession()` não tem
+   * timeout, então a promessa nunca resolvia, o `setLoading(false)` nunca
+   * rodava e TODO SDR ficou olhando "Carregando..." pra sempre — sem erro, sem
+   * botão, sem pista. O QS estava perfeito e o banco também; o que faltou foi o
+   * app saber dizer "não consegui falar com o servidor".
+   */
+  bootFalhou: boolean;
   login: (email: string, password: string) => Promise<LoginResult>;
   logout: () => void;
 }
+
+/**
+ * Promessa com prazo. Sem isto, qualquer chamada de rede que fica pendurada
+ * (rede do escritório caindo, gateway fora) trava a abertura do app pra sempre:
+ * o `finally` que desligaria o "Carregando..." nunca chega a rodar.
+ */
+function comLimite<T>(p: PromiseLike<T>, ms: number, oQue: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`tempo esgotado: ${oQue}`)), ms);
+    Promise.resolve(p).then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+/** Quanto o app espera o servidor antes de assumir que ele não vem. */
+const LIMITE_BOOT_MS = 10_000;
+const LIMITE_PERFIL_MS = 8_000;
 
 const QsAuthContext = createContext<QsAuthContextType>({
   currentUser: null,
   loading: true,
   isAuthenticated: false,
   sessionNotice: null,
+  bootFalhou: false,
   login: async () => "bad_credentials",
   logout: () => {},
 });
@@ -98,6 +129,7 @@ export function QsAuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<SdrUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const [bootFalhou, setBootFalhou] = useState(false);
 
   // Resultado do carregamento do perfil — DISTINGUE "sem perfil" (conta
   // desativada/removida → derruba a sessão) de "erro de rede/servidor"
@@ -113,12 +145,15 @@ export function QsAuthProvider({ children }: { children: ReactNode }) {
     // maybeSingle (não single): 0 linhas vira data=null SEM erro — assim um
     // "sem perfil ativo" não se confunde com uma falha de rede/servidor (que
     // preenche `error`). É a distinção que evita o logout indevido.
-    const { data, error } = await supabase
-      .from("qs_users")
-      .select("*")
-      .eq("id", userId)
-      .eq("is_active", true)
-      .maybeSingle();
+    // Com prazo: o supabase-js NAO tem timeout proprio, entao um servidor
+    // pendurado aqui trava o boot do mesmo jeito que travava no getSession.
+    let data, error;
+    try {
+      ({ data, error } = await comLimite(
+        supabase.from("qs_users").select("*").eq("id", userId).eq("is_active", true).maybeSingle(),
+        LIMITE_PERFIL_MS, "perfil",
+      ));
+    } catch { return { status: "error" }; }
     if (error) return { status: "error" };
     if (!data) return { status: "no_profile" };
     return { status: "ok", profile: data as SdrUser };
@@ -141,26 +176,38 @@ export function QsAuthProvider({ children }: { children: ReactNode }) {
     let active = true;
 
     // Sessão atual (o supabase-js persiste sozinho no localStorage).
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!active) return;
-      if (session?.user) {
-        const res = await loadProfileResilient(session.user.id);
+    //
+    // ⚠️ O `.catch` e o `comLimite` são obrigatórios aqui. Este `.then` é o
+    // ÚNICO caminho que desliga o "Carregando..." da abertura. Sem prazo e sem
+    // captura de erro, um servidor que não responde não vira erro — vira uma
+    // promessa pendurada, e o app fica preso na tela de carregamento pra
+    // sempre. Foi exatamente o que aconteceu em 20/08 com o time inteiro.
+    comLimite(supabase.auth.getSession(), LIMITE_BOOT_MS, "sessão")
+      .then(async ({ data: { session } }) => {
         if (!active) return;
-        if (res.status === "ok") setCurrentUser(res.profile);
-        else if (res.status === "no_profile") {
-          // sem perfil ativo → derruba a sessão, avisando o porquê no login
-          setSessionNotice(DEACTIVATED_MSG);
-          await supabase.auth.signOut();
+        if (session?.user) {
+          const res = await loadProfileResilient(session.user.id);
+          if (!active) return;
+          if (res.status === "ok") setCurrentUser(res.profile);
+          else if (res.status === "no_profile") {
+            // sem perfil ativo → derruba a sessão, avisando o porquê no login
+            setSessionNotice(DEACTIVATED_MSG);
+            await supabase.auth.signOut();
+          } else {
+            // status "error": as 3 tentativas falharam. NÃO desloga (a sessão é
+            // válida e pode ser só a rede), mas agora DIZ isso na tela em vez
+            // de mandar o SDR pro login sem explicação nenhuma.
+            setBootFalhou(true);
+          }
         }
-        // status "error": rede oscilou no boot (as 3 tentativas do resilient
-        // falharam) — NÃO desloga e NÃO mostra o aviso de "conta desativada" (era
-        // o bug). A sessão de auth do supabase-js fica preservada no localStorage,
-        // mas currentUser continua null, então a tela de Login aparece; um refresh
-        // (ou novo login) com a rede de volta recarrega o perfil. O watchdog de 60s
-        // NÃO cobre este caso — ele só roda com currentUser definido.
-      }
-      setLoading(false);
-    });
+        setLoading(false);
+      })
+      .catch((e) => {
+        if (!active) return;
+        console.warn("[QS] o servidor não respondeu na abertura:", e?.message);
+        setBootFalhou(true);
+        setLoading(false);
+      });
 
     // Reage a logout externo / troca de sessão.
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
@@ -255,6 +302,7 @@ export function QsAuthProvider({ children }: { children: ReactNode }) {
         loading,
         isAuthenticated: !!currentUser,
         sessionNotice,
+        bootFalhou,
         login,
         logout,
       }}

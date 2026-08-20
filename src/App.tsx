@@ -27,7 +27,41 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 function AppContent() {
-  const { isAuthenticated, loading } = useQsAuth();
+  const { isAuthenticated, loading, bootFalhou } = useQsAuth();
+
+  // ── O SERVIDOR NÃO RESPONDEU ──────────────────────────────────────────────
+  // Em 20/08 o gateway do Supabase ficou inalcançável da rede do escritório por
+  // alguns minutos. O QS estava no ar, o banco também — mas o app não sabia
+  // dizer isso: ficava em "Carregando..." pra sempre. O time entendeu como "o
+  // QS quebrou", e não havia nem um botão pra tentar de novo.
+  //
+  // Aqui a falha vira uma frase e um botão. Não conserta a rede; conserta o
+  // não-saber — que é o que faz alguém ficar 40 minutos olhando pra tela.
+  if (bootFalhou && !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: "var(--bg)" }}>
+        <div className="flex flex-col items-center gap-3 text-center max-w-sm">
+          <div className="flex items-center justify-center w-10 h-10 rounded-xl text-white font-bold text-sm" style={{ background: "#B42318" }}>
+            QS
+          </div>
+          <p className="text-base font-semibold" style={{ color: "var(--ink)" }}>
+            Não consegui falar com o servidor
+          </p>
+          <p className="text-sm leading-snug" style={{ color: "var(--ink3)" }}>
+            Sua conta está certa e nada foi perdido — é a conexão com o banco de dados que não
+            respondeu. Costuma ser a internet do escritório. Tente de novo em alguns instantes.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-1 px-4 py-2 rounded-lg text-sm font-bold text-white"
+            style={{ background: "#0147FF" }}
+          >
+            Tentar de novo
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
