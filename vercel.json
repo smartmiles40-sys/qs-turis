@@ -13,6 +13,9 @@
     "api/wa-sync.js": {
       "maxDuration": 60
     },
+    "api/wa-bitrix-digest.js": {
+      "maxDuration": 60
+    },
     "api/wa-send.js": {
       "maxDuration": 30
     },

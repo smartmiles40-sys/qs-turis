@@ -18,6 +18,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
+import { waKey } from './_wa.js';
 
 const FUNIL_PRE_VENDAS = 25;
 const ETAPA_NOVO_LEAD = 'C25:PREPAYMENT_INVOIC';   // "Novo Lead - Aguardando resposta"
@@ -125,6 +126,94 @@ async function acharOuCriarContato({ nome, telefone, email }) {
   }
 }
 
+// ── PERGUNTAR AO BITRIX ANTES DE CRIAR (Bruno, 20/08) ───────────────────────
+//
+// Quando um número desconhecido escreve na linha oficial, a pergunta certa não é
+// "crio ou descarto?" — é "essa pessoa já existe lá?".
+//
+// A medição de 13/08 (docs/WHATSAPP-SEM-LEAD.md, 50 números reais) explica por
+// quê: 13 deles JÁ ESTAVAM no Bitrix (cliente antigo do Comercial, pós-venda) e
+// só 5 eram gente nova. Criar card pros 13 foi exatamente o que sujou o funil em
+// 18/08. Achando o negócio que já existe, o lead nasce no QS AMARRADO nele:
+// ninguém duplica e o cliente para de ficar invisível.
+//
+// O telefone é procurado em VÁRIOS formatos de propósito. "Cliente já cadastrado
+// com telefone em outro formato" foi uma das causas listadas em 18/08 — o Bitrix
+// guarda ora com 55, ora sem, ora com o 9 do celular, ora sem.
+
+/** 55+DDD+9+8, 55+DDD+8, DDD+9+8 e DDD+8 — todas as formas plausíveis do mesmo número. */
+export function variantesDeTelefone(raw) {
+  const chave = waKey(raw);                    // DDD + 8 dígitos (ou "i:…" se for de fora)
+  const cru = String(raw || '').replace(/\D/g, '');
+  const fora = new Set();
+  if (cru) fora.add(cru);
+  if (chave && !chave.startsWith('i:')) {
+    const ddd = chave.slice(0, 2);
+    const oito = chave.slice(2);
+    fora.add(`55${ddd}9${oito}`);
+    fora.add(`55${ddd}${oito}`);
+    fora.add(`${ddd}9${oito}`);
+    fora.add(`${ddd}${oito}`);
+  }
+  return [...fora].slice(0, 8);   // o findbycomm aceita lista; 8 cobre tudo sem abusar
+}
+
+/**
+ * Procura, pelo telefone, um contato e o negócio mais recente dele no Bitrix.
+ *
+ * Devolve SEMPRE um objeto, e a distinção importa mais do que parece:
+ *
+ *   { achou: true,  dealId, contatoId, deal }  → é cliente conhecido
+ *   { achou: false }                           → perguntei, e não existe lá
+ *   { indisponivel: true, motivo }             → NÃO CONSEGUI PERGUNTAR
+ *
+ * "Não existe" e "não consegui perguntar" nunca podem virar a mesma coisa. Se
+ * o Bitrix cair e os dois se confundirem, o QS volta a criar card às cegas pra
+ * todo mundo que escreve — exatamente a sujeira de 18/08, só que disfarçada de
+ * indisponibilidade. Quem chama trata `indisponivel` como "não decide agora".
+ *
+ * Timeout curto de propósito: isto roda no caminho do webhook, que tem 10s no
+ * total na Vercel. Bitrix lento não pode atrasar a entrada da mensagem.
+ */
+export async function procurarNegocioPorTelefone(phone, timeoutMs = 4_000) {
+  if (!bitrixConfigurado()) return { indisponivel: true, motivo: 'sem BITRIX_WEBHOOK_BASE' };
+  const valores = variantesDeTelefone(phone);
+  if (!valores.length) return { achou: false };
+
+  try {
+    const dup = await bx('crm.duplicate.findbycomm', {
+      entity_type: 'CONTACT', type: 'PHONE', values: valores,
+    }, timeoutMs);
+    const contatoId = Array.isArray(dup?.CONTACT) ? dup.CONTACT[0] : null;
+    if (!contatoId) return { achou: false };
+
+    // O negócio mais recente desse contato. Pode não ter nenhum (contato solto
+    // no Bitrix): nesse caso devolvemos o contato mesmo assim, pra reaproveitar
+    // no crm.deal.add em vez de criar um contato duplicado.
+    let deal = null;
+    try {
+      const deals = await bx('crm.deal.list', {
+        filter: { CONTACT_ID: contatoId },
+        select: ['ID', 'TITLE', 'CATEGORY_ID', 'STAGE_ID', 'ASSIGNED_BY_ID', 'DATE_CREATE'],
+        order: { DATE_CREATE: 'DESC' },
+      }, timeoutMs);
+      deal = (Array.isArray(deals) && deals[0]) || null;
+    } catch (e) {
+      console.warn('[bitrix-lead] negócios do contato:', e?.message);
+    }
+
+    return {
+      achou: true,
+      contatoId: String(contatoId),
+      dealId: deal?.ID ? String(deal.ID) : null,
+      deal,
+    };
+  } catch (e) {
+    console.warn('[bitrix-lead] busca por telefone falhou:', e?.message);
+    return { indisponivel: true, motivo: e?.message || 'erro no Bitrix' };
+  }
+}
+
 // ── O negócio ───────────────────────────────────────────────────────────────
 
 /**
@@ -162,6 +251,26 @@ export async function criarNegocioParaLead(lead) {
     return dealId ? String(dealId) : null;
   } catch (e) {
     console.error('[bitrix-lead] criar negócio:', e?.message);
+    return null;
+  }
+}
+
+/**
+ * Escreve um comentário na timeline de um negócio.
+ *
+ * É o que leva a conversa de WhatsApp pro card (ver api/wa-bitrix-digest.js).
+ * Devolve o id do comentário, ou null — nunca estoura: o resumo é enfeite pro
+ * Comercial, e falhar aqui não pode derrubar o job nem o atendimento.
+ */
+export async function comentarNoNegocio(dealId, texto, timeoutMs = 8_000) {
+  if (!bitrixConfigurado() || !dealId || !texto) return null;
+  try {
+    const id = await bx('crm.timeline.comment.add', {
+      fields: { ENTITY_ID: Number(dealId), ENTITY_TYPE: 'deal', COMMENT: texto },
+    }, timeoutMs);
+    return id ? String(id) : null;
+  } catch (e) {
+    console.warn(`[bitrix-lead] comentário no negócio ${dealId}:`, e?.message);
     return null;
   }
 }

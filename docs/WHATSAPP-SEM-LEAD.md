@@ -84,3 +84,57 @@ corrida.
 Não foi mexido porque juntar dois cards é decisão de negócio: qual nome fica,
 qual dono, qual status vale, o que fazer com as tarefas e o histórico de cada
 metade. A lista completa sai com a consulta no fim da 0047.
+
+---
+
+# ATUALIZAÇÃO 20/08/2026 — pergunta-se ao Bitrix antes de decidir
+
+A regra deste documento (nunca criar automático, tudo pra triagem) **mudou**. O
+que estava acima descreve o estado de 13–18/08; o que vale agora é isto.
+
+## Por que mudou
+
+A triagem manual resolvia a sujeira, mas criou um buraco pior: em 20/08 havia
+**38 pessoas pendentes**, a mais antiga de 06/08, e a última tratada foi em
+17/08. Elas escreveram para a agência e não existiam em lugar nenhum — nem no
+QS, nem no Bitrix. Fila que ninguém trata é o mesmo que descartar, só que devagar.
+
+## A regra nova
+
+O erro era a pergunta, não a resposta. Não é "crio ou descarto?", é **"essa
+pessoa já existe no Bitrix?"** — e quem sabe isso é o Bitrix. Quando um número
+desconhecido escreve (`api/wa-webhook.js`, função `nascerDoWhatsApp`):
+
+| Situação | O que acontece |
+|---|---|
+| Tem negócio no Bitrix | Lead nasce no QS **amarrado** a ele. Sem card novo, **sem cadência** — é cliente, não prospect |
+| Não tem nada no Bitrix | Lead nasce no QS **e** ganha card (é gente nova de verdade) |
+| Número do time | Ignorado |
+| Mensagem **enviada** por nós | Ignorada — quem começou fomos nós |
+| **Bitrix fora do ar** | Cai na triagem de sempre |
+
+A última linha é a que segura o resto: sem resposta do Bitrix, "não achei" e
+"não consegui perguntar" seriam a mesma coisa, e o QS voltaria a criar card às
+cegas justamente quando não dá pra conferir. Ver `procurarNegocioPorTelefone`
+em `api/_bitrixLead.js`, que devolve `{achou}` e `{indisponivel}` separados.
+
+Isso cobre os dois grupos medidos em 13/08 — os **13 que já estavam no Bitrix**
+(entram ligados, sem duplicar) e os **5 novos** (ganham card) — sem repetir os
+~18 cards-lixo que motivaram o desligamento de 18/08.
+
+O telefone é procurado em **4 formatos** (`55DDD9XXXXXXXX`, `55DDDXXXXXXXX`,
+`DDD9XXXXXXXX`, `DDDXXXXXXXX`), porque "cliente já cadastrado com telefone em
+outro formato" foi uma das causas da sujeira. Testado: os 4 formatos do mesmo
+número convergem para o mesmo conjunto.
+
+**A triagem continua existindo** e as 38 pendentes **não foram tocadas** —
+decisão do Bruno em 20/08: a regra nova vale daqui pra frente, o passivo é
+tratado à mão.
+
+## Números do time
+
+Vêm de `qs_users.whatsapp_number` mais a chave `wa_ignorar_numeros` em
+`qs_settings` (lista de telefones em texto, para acrescentar exceção sem
+deploy). **Hoje só 2 dos 9 usuários têm o número preenchido** — enquanto os
+outros 7 não estiverem, um colega que escrever para a linha oficial vira lead.
+Preencher na tela de usuários fecha isso.

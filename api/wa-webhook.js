@@ -22,9 +22,11 @@
 
 import {
   findLeadByPhone, ingestMessage, inboxAceita, completeWhatsAppTask, directionOf,
-  reabrirPorFalha, extractStatus, parseCwDate,
+  reabrirPorFalha, extractStatus, parseCwDate, waKey,
 } from './_wa.js';
 import { insert, rest, segredoConfere } from './_supabaseAdmin.js';
+import { procurarNegocioPorTelefone } from './_bitrixLead.js';
+import { createInboundLead } from './_leads.js';
 import { verificarSeVencido } from './_waAlerta.js';
 import { avisarGloria } from './_gloria.js';
 
@@ -97,6 +99,116 @@ async function registrarDescarte(motivo, dados = {}) {
     }
     console.warn('[wa-webhook] não deu pra registrar o descarte:', e?.message);
   }
+}
+
+/**
+ * Os números que NUNCA viram lead: o próprio time.
+ *
+ * Vem de `qs_users.whatsapp_number` (o cadastro que já existe na tela de
+ * usuários) mais a chave `wa_ignorar_numeros` em `qs_settings` — uma lista de
+ * telefones em texto, pro Bruno acrescentar caso de exceção sem precisar de
+ * deploy. Comparação pela chave canônica, então o formato tanto faz.
+ *
+ * Cache de 5 min: isto roda no caminho do webhook e a lista quase nunca muda.
+ */
+let cacheIgnorados = null;
+
+async function numerosIgnorados() {
+  if (cacheIgnorados && Date.now() - cacheIgnorados.em < 5 * 60_000) return cacheIgnorados.set;
+  const set = new Set();
+  try {
+    const users = await rest('qs_users?select=whatsapp_number&whatsapp_number=not.is.null');
+    for (const u of (users || [])) {
+      const k = waKey(u.whatsapp_number);
+      if (k) set.add(k);
+    }
+  } catch (e) {
+    console.warn('[wa-webhook] não deu pra ler os números do time:', e?.message);
+  }
+  try {
+    const s = await rest(`qs_settings?select=value&key=eq.wa_ignorar_numeros&limit=1`);
+    const bruto = s?.[0]?.value;
+    const lista = Array.isArray(bruto) ? bruto : String(bruto ?? '').split(/[,;\s]+/);
+    for (const n of lista) {
+      const k = waKey(n);
+      if (k) set.add(k);
+    }
+  } catch {
+    // chave inexistente é o normal — não é erro.
+  }
+  cacheIgnorados = { set, em: Date.now() };
+  return set;
+}
+
+/**
+ * Número desconhecido escreveu: decide se vira lead e devolve o lead criado
+ * (ou null pra cair na triagem de sempre).
+ *
+ * Só nasce lead de mensagem RECEBIDA. Se fomos NÓS que escrevemos primeiro pra
+ * um número solto — disparo do time, contato pessoal de alguém, teste —, criar
+ * card seria inventar demanda: o time não perdeu ninguém, ele que iniciou.
+ */
+async function nascerDoWhatsApp({ phone, nome, direcao, inboxId }) {
+  if (direcao !== 'in') return null;
+
+  const chave = waKey(phone);
+  if (!chave) return null;
+  if ((await numerosIgnorados()).has(chave)) {
+    console.log('[wa-webhook] número do time escreveu; não vira lead:', chave);
+    return null;
+  }
+
+  // O Bitrix é a fonte da verdade sobre "essa pessoa já é nossa cliente?".
+  const noBitrix = await procurarNegocioPorTelefone(phone);
+
+  // Bitrix fora do ar não autoriza chutar. Sem a resposta dele, criar seria
+  // apostar que a pessoa é nova — e a medição de 13/08 diz que a aposta perde:
+  // 13 em cada 18 já existiam lá. Cai na triagem, que é reversível; card
+  // duplicado no funil do Comercial não é.
+  if (noBitrix?.indisponivel) {
+    console.warn('[wa-webhook] Bitrix indisponível, mando pra triagem:', noBitrix.motivo);
+    return null;
+  }
+
+  const payload = {
+    full_name: nome || `WhatsApp ${String(phone).replace(/\D/g, '').slice(-8)}`,
+    phone,
+    source: 'api',
+    segment: 'WhatsApp (API oficial)',
+    // Achou negócio lá: o lead nasce colado nele. O createInboundLead entende
+    // `bitrix_id` preenchido como "já tem card" e NÃO abre negócio novo — que é
+    // justamente o que evita a duplicata que sujou o funil em 18/08.
+    ...(noBitrix?.dealId ? { bitrix_id: noBitrix.dealId } : {}),
+  };
+
+  const { lead } = await createInboundLead(payload, {
+    // Cliente que já está no Bitrix entra sem cadência (ver o porquê no
+    // _leads.js). Gente nova de verdade entra na cadência padrão.
+    semCadencia: !!noBitrix?.dealId,
+  });
+  if (!lead) return null;
+
+  // Rastro pra quem abrir o card entender de onde ele saiu — e, quando veio do
+  // Bitrix, que NÃO é um lead novo apesar de ter acabado de aparecer no QS.
+  try {
+    await insert('qs_notes', {
+      lead_id: lead.id,
+      author_id: null,
+      body: (noBitrix?.dealId
+        ? `📲 Escreveu no WhatsApp (API oficial).\nJá existia no Bitrix — negócio ${noBitrix.dealId}. Card do QS ligado a ele, sem abrir negócio novo.`
+        : '📲 Escreveu no WhatsApp (API oficial) e não existia no Bitrix. Lead e negócio criados agora.')
+        // Qual LINHA recebeu importa: o time tem mais de uma (SDR na API
+        // oficial, closer no número conectado por QR). Saber por onde a pessoa
+        // entrou é o que permite responder pela linha certa depois.
+        + (inboxId ? `\nCaixa: ${inboxId}.` : ''),
+      tags: ['whatsapp', 'origem'],
+    }, { returning: false });
+  } catch (e) {
+    console.warn('[wa-webhook] nota de origem do WhatsApp falhou (segue):', e?.message);
+  }
+
+  console.log(`[wa-webhook] lead ${lead.id} nasceu do WhatsApp (${noBitrix?.dealId ? 'reaproveitou negócio ' + noBitrix.dealId : 'negócio novo ' + (lead.bitrix_id || '-')})`);
+  return lead;
 }
 
 /** O nome que o Chatwoot mostra pro contato da conversa (pode não existir). */
@@ -232,25 +344,42 @@ export default async function handler(req, res) {
     }
 
     if (!lead) lead = await findLeadByPhone(phone);
-    // ── NÃO SE CRIA CARD AUTOMÁTICO (Bruno, 18/08 — urgente) ───────────────
-    // De 13/08 a 18/08 a caixa oficial criava lead sozinha pra QUALQUER número
-    // que escrevesse. A intenção era não perder cliente antigo; o efeito real
-    // foram ~18 cards de gente que não é lead novo — cliente já cadastrado com
-    // telefone em outro formato, pós-venda, colega de time, curioso. Base suja
-    // é pior que fila de triagem: polui métrica, cadência e rodízio, e alguém
-    // tem que limpar depois.
+
+    // ── PERGUNTA AO BITRIX ANTES DE CRIAR (Bruno, 20/08) ───────────────────
     //
-    // A mensagem NÃO SE PERDE: cai no registro logo abaixo e aparece na triagem
-    // ("N sem lead", na aba de WhatsApp), onde uma pessoa decide se vira lead.
-    // Criar o card continua sendo um clique — só deixou de ser automático.
+    // Histórico curto, porque ele explica a regra: de 13 a 18/08 a caixa oficial
+    // criava lead pra QUALQUER número que escrevesse, e isso rendeu ~18 cards de
+    // gente que não era lead novo (cliente antigo com telefone em outro formato,
+    // pós-venda, colega de time). Em 18/08 a criação foi desligada e todo mundo
+    // passou a cair numa fila de triagem manual — que acumulou 38 pessoas sem
+    // ninguém tratar, e aí o cliente ficava invisível nos DOIS sistemas.
+    //
+    // A saída não é escolher entre sujar e sumir: é PERGUNTAR AO BITRIX.
+    //   • Achou negócio lá  → o lead nasce no QS AMARRADO nele. Nenhum card
+    //                         novo, nenhuma cadência: é cliente, não prospect.
+    //   • Não achou         → gente nova de verdade: nasce no QS e ganha card.
+    //   • Número do time    → ignora (ninguém quer card do próprio colega).
+    //
+    // Tudo best-effort: qualquer erro cai na triagem de antes, que continua
+    // existindo. Nada aqui pode custar a mensagem.
     if (!lead) {
-      // Não é erro: é gente falando com a agência que ainda não virou lead.
-      // Registrado porque essa lista É oportunidade comercial — e porque, sem
-      // ela, "sumiu mensagem" não tem onde ser investigado.
-      await registrarDescarte('sem-lead-correspondente', {
-        phone, inboxId, messageId: message?.id, nome: extractNome(body, message),
-      });
-      return res.status(200).json({ ignored: 'sem-lead-correspondente' });
+      const nomeContato = extractNome(body, message);
+      try {
+        lead = await nascerDoWhatsApp({
+          phone, nome: nomeContato, direcao: directionOf(message), inboxId,
+        });
+      } catch (e) {
+        console.warn('[wa-webhook] nascimento pelo WhatsApp falhou (vai pra triagem):', e?.message);
+      }
+      if (!lead) {
+        // Não é erro: é gente falando com a agência que ainda não virou lead.
+        // Registrado porque essa lista É oportunidade comercial — e porque, sem
+        // ela, "sumiu mensagem" não tem onde ser investigado.
+        await registrarDescarte('sem-lead-correspondente', {
+          phone, inboxId, messageId: message?.id, nome: nomeContato,
+        });
+        return res.status(200).json({ ignored: 'sem-lead-correspondente' });
+      }
     }
 
     const conv = body?.conversation || message?.conversation || {};

@@ -501,7 +501,15 @@ export async function createInboundLead(payload, opts = {}) {
   // 2) Cadência: usa a informada ou uma disponível padrão.
   let cadenceId = payload.cadence_id || null;
   let priority = 'media';
-  if (!cadenceId) {
+  if (!cadenceId && opts.semCadencia) {
+    // SEM CADÊNCIA DE PROPÓSITO (opts.semCadencia, usado pelo wa-webhook).
+    //
+    // Quem já tem negócio no Bitrix e escreveu no WhatsApp não é prospect novo:
+    // é cliente do Comercial, pós-venda ou alguém em negociação. Entra no QS
+    // pra conversa ter onde morar — mas jogar essa pessoa numa cadência de
+    // prospecção geraria tarefa pro SDR e sujaria métrica e rodízio, que foi
+    // exatamente a reclamação de 18/08. Fica `nao_iniciado`: visível, sem fila.
+  } else if (!cadenceId) {
     const c = await pickDefaultCadence();
     if (c) { cadenceId = c.id; priority = c.priority || 'media'; }
   } else {
