@@ -74,6 +74,7 @@ const SettingsPage = lazyPagina(() => import("./settings/SettingsPage"));
 const CoveragePanel = lazyPagina(() => import("./dashboard/CoveragePanel"));
 const MinhaAgendaPage = lazyPagina(() => import("./agenda/MinhaAgendaPage"));
 const WaPage = lazyPagina(() => import("./wa/WaPage"));
+const PipelineIAPage = lazyPagina(() => import("./gloria/PipelineIAPage"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import CommsDock from "./comms/CommsDock";
 import ErroDeParte from "./ErroDeParte";
@@ -104,6 +105,7 @@ export type SdrNav =
   | "declaracao"
   | "historicos"
   | "cobertura"
+  | "atendimento-ia"
   | "configuracoes";
 
 // ── Dropdown Menu ────────────────────────────────────────────────────────────
@@ -133,6 +135,7 @@ const MENU: (MenuGroup | MenuItem)[] = [
       // atividade e outra continua com o dock lateral, sem sair da fila.
       { id: "whatsapp", label: "WhatsApp", description: "Atendimento em tela cheia" },
       { id: "cobertura", label: "Cobertura de Leads", description: "Leads aguardando contato" },
+      { id: "atendimento-ia", label: "Atendimento IA", description: "O pipeline da Glória: quem ela está atendendo agora" },
     ],
   },
   {
@@ -712,6 +715,11 @@ export default function SdrLayout() {
         {activeNav === "cobertura" && (
           <PageErrorBoundary pageName="Cobertura de Leads">
             <CoveragePanel onOpenLead={openLeadDetail} />
+          </PageErrorBoundary>
+        )}
+        {activeNav === "atendimento-ia" && (
+          <PageErrorBoundary pageName="Atendimento IA">
+            <PipelineIAPage onOpenLead={openLeadDetail} />
           </PageErrorBoundary>
         )}
         {activeNav === "minha-agenda" && (

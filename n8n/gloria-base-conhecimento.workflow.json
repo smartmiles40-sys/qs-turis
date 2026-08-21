@@ -21,12 +21,6 @@
               "name": "SUPABASE_URL",
               "value": "https://eabfjomrnucymduqnbci.supabase.co",
               "type": "string"
-            },
-            {
-              "id": "b2",
-              "name": "SITEMAP",
-              "value": "https://setuforeuvouviagens.com.br/sitemap.xml",
-              "type": "string"
             }
           ]
         },
@@ -39,152 +33,34 @@
       "position": [
         -980,
         380
-      ]
-    },
-    {
-      "parameters": {
-        "url": "={{ $json.SITEMAP }}",
-        "options": {
-          "response": {
-            "response": {
-              "neverError": true,
-              "responseFormat": "text"
-            }
-          }
-        }
-      },
-      "id": "base-0003-4000-8000-000000000003",
-      "name": "Baixar o sitemap",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -780,
-        380
-      ],
-      "onError": "continueRegularOutput",
-      "notesInFlow": true,
-      "notes": "neverError: sitemap que não existe não pode derrubar a carga. O próximo nó cai na lista manual."
-    },
-    {
-      "parameters": {
-        "jsCode": "// De onde sai a lista de páginas que a Glória vai ler.\n//\n// Primeiro tenta o sitemap do site: assim, LP nova entra sozinha na próxima\n// carga e ninguém precisa lembrar de vir aqui. Se o sitemap não existir (ou\n// mudar de endereço), a lista de baixo assume.\n\nconst LISTA_MANUAL = [\n  // Cole aqui as páginas, uma por linha, se o sitemap falhar:\n  // 'https://setuforeuvouviagens.com.br/islandia',\n  // 'https://setuforeuvouviagens.com.br/patagonia',\n];\n\n// Páginas que não ajudam a responder lead e só gastam embedding.\nconst IGNORAR = /(politica|privacidade|termos|cookies|obrigado|thank|login|admin|\\.(jpg|png|webp|pdf|xml)$)/i;\n\nconst xml = String($json.data || $json.body || '');\nconst doSitemap = [...xml.matchAll(/<loc>\\s*([^<]+?)\\s*<\\/loc>/gi)].map((m) => m[1]);\n\nconst urls = [...new Set((doSitemap.length ? doSitemap : LISTA_MANUAL))]\n  .map((u) => String(u).trim())\n  .filter((u) => /^https?:\\/\\//.test(u) && !IGNORAR.test(u));\n\nif (!urls.length) {\n  throw new Error(\n    'Nenhuma página pra ler. O sitemap não respondeu e a LISTA_MANUAL está vazia — ' +\n    'abra este nó e cole os endereços das LPs.'\n  );\n}\n\nreturn urls.map((url) => ({ json: { url } }));"
-      },
-      "id": "base-0004-4000-8000-000000000004",
-      "name": "Lista de páginas",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -580,
-        380
       ],
       "notesInFlow": true,
-      "notes": "É AQUI que você mexe pra escolher o que a IA lê. LP nova no sitemap entra sozinha."
-    },
-    {
-      "parameters": {
-        "url": "={{ $json.url }}",
-        "options": {
-          "response": {
-            "response": {
-              "neverError": true,
-              "responseFormat": "text"
-            }
-          },
-          "batching": {
-            "batch": {
-              "batchSize": 3,
-              "batchInterval": 1500
-            }
-          }
-        }
-      },
-      "id": "base-0005-4000-8000-000000000005",
-      "name": "Baixar a página",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -380,
-        380
-      ],
-      "onError": "continueRegularOutput",
-      "notesInFlow": true,
-      "notes": "3 páginas por vez, com 1,5s entre as levas. O site é da casa, mas martelar o próprio domínio com 30 requisições simultâneas é como se descobre que a Vercel tem limite."
-    },
-    {
-      "parameters": {
-        "jsCode": "// HTML vira texto de leitura.\n//\n// Sem isto, o que entra no banco é <div class=\"hero\"> — e a IA passa a\n// responder com pedaço de CSS. Não é bonito, mas é o suficiente pra uma LP:\n// tira script e style, troca as tags por espaço e desfaz as entidades.\n\nconst url = $('Lista de páginas').item.json.url;\nconst html = String($json.data || $json.body || '');\n\nconst semLixo = html\n  .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n  .replace(/<noscript[\\s\\S]*?<\\/noscript>/gi, ' ');\n\nconst titulo = (semLixo.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1] || url).trim();\n\nconst texto = semLixo\n  .replace(/<br\\s*\\/?>/gi, '\\n')\n  .replace(/<\\/(p|div|section|h[1-6]|li|tr)>/gi, '\\n')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/&nbsp;/g, ' ')\n  .replace(/&amp;/g, '&')\n  .replace(/&quot;/g, '\"')\n  .replace(/&#39;/g, \"'\")\n  .replace(/&lt;/g, '<')\n  .replace(/&gt;/g, '>')\n  .replace(/[ \\t]+/g, ' ')\n  .replace(/\\n\\s*\\n\\s*\\n+/g, '\\n\\n')\n  .trim();\n\n// Página curta demais é erro de carregamento (site que monta tudo no\n// navegador, 404 estilizado). Gravar isso ensinaria a IA a não saber nada.\nif (texto.length < 400) {\n  return [{ json: { url, titulo, texto: '', ignorada: true, motivo: 'pagina_curta_demais', tamanho: texto.length } }];\n}\n\nreturn [{ json: { url, titulo, texto, ignorada: false, tamanho: texto.length } }];"
-      },
-      "id": "base-0006-4000-8000-000000000006",
-      "name": "HTML vira texto",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -180,
-        380
-      ],
-      "executeOnce": false
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "i1",
-              "leftValue": "={{ $json.ignorada }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "false",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "looseTypeValidation": true,
-        "options": {}
-      },
-      "id": "base-0007-4000-8000-000000000007",
-      "name": "Veio conteúdo?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        20,
-        380
-      ],
-      "notesInFlow": true,
-      "notes": "Página que não carregou vai pro ramo de baixo e aparece no resumo, em vez de virar um documento vazio que a IA leria como se fosse verdade."
+      "notes": "Só o endereço do banco. A chave mora na credencial."
     },
     {
       "parameters": {
         "method": "DELETE",
-        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/gloria_documents?metadata->>url=eq.{{ encodeURIComponent($json.url) }}",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/gloria_documents?metadata->>fonte_id=eq.{{ $json.id }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "supabaseApi",
         "options": {}
       },
       "id": "base-0008-4000-8000-000000000008",
-      "name": "Apagar a versão antiga desta página",
+      "name": "Apagar a versão antiga desta ficha",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        240,
-        300
+        -2080,
+        2208
       ],
       "credentials": {
         "supabaseApi": {
-          "id": "SUBSTITUA_ID_SUPABASE_QS",
-          "name": "Supabase QS (service_role)"
+          "id": "sRrvPzrQSNoQ3412",
+          "name": "Supabase account 2"
         }
       },
       "notesInFlow": true,
-      "notes": "Sem isto, cada carga EMPILHA uma cópia da mesma LP. A IA passaria a citar o preço do ano passado com a mesma confiança do de hoje, e o de ontem apareceria primeiro na busca."
+      "notes": "Sem isto, cada carga EMPILHA uma cópia da mesma ficha. A IA passaria a citar o preço do ano passado com a mesma confiança do de hoje, e o velho apareceria primeiro na busca."
     },
     {
       "parameters": {
@@ -203,51 +79,62 @@
       "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
       "typeVersion": 1.1,
       "position": [
-        460,
-        300
+        -1632,
+        2208
       ],
       "credentials": {
         "supabaseApi": {
-          "id": "SUBSTITUA_ID_SUPABASE_QS",
-          "name": "Supabase QS (service_role)"
+          "id": "sRrvPzrQSNoQ3412",
+          "name": "Supabase account 2"
         }
       }
     },
     {
       "parameters": {
         "jsonMode": "expressionData",
-        "jsonData": "={{ $('HTML vira texto').item.json.texto }}",
+        "jsonData": "={{ $json.conteudo }}",
         "options": {
           "metadata": {
             "metadataValues": [
               {
-                "name": "url",
-                "value": "={{ $('HTML vira texto').item.json.url }}"
+                "name": "fonte_id",
+                "value": "={{ $json.id }}"
+              },
+              {
+                "name": "slug",
+                "value": "={{ $json.slug }}"
+              },
+              {
+                "name": "secao",
+                "value": "={{ $json.secao }}"
               },
               {
                 "name": "titulo",
-                "value": "={{ $('HTML vira texto').item.json.titulo }}"
+                "value": "={{ $json.titulo }}"
+              },
+              {
+                "name": "url",
+                "value": "={{ $json.url }}"
               }
             ]
           }
-        },
-        "textSplittingMode": "custom"
+        }
       },
       "id": "base-0010-4000-8000-000000000010",
       "name": "Documento",
       "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
       "typeVersion": 1,
       "position": [
-        460,
-        500
+        -1632,
+        2416
       ],
       "notesInFlow": true,
-      "notes": "A url vai no metadata porque é ela que o nó de apagar usa pra achar a versão antiga desta mesma página."
+      "notes": "O fonte_id vai no metadata porque é por ele que a carga seguinte acha e apaga a versão antiga desta mesma ficha. O slug e a seção servem pra conferir no Supabase o que a IA sabe."
     },
     {
       "parameters": {
-        "chunkSize": 1000,
-        "chunkOverlap": 150,
+        "chunkSize": 1800,
+        "chunkOverlap": 200,
         "options": {}
       },
       "id": "base-0011-4000-8000-000000000011",
@@ -255,11 +142,11 @@
       "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
       "typeVersion": 1,
       "position": [
-        460,
-        680
+        -1632,
+        2592
       ],
       "notesInFlow": true,
-      "notes": "1000 caracteres com 150 de sobreposição. A sobreposição existe pra a frase que fala do preço não ser cortada exatamente no meio entre dois pedaços."
+      "notes": "Pedaço grande de propósito: cada ficha JÁ é uma seção fechada (resumo, investimento, roteiro...) e quase sempre cabe inteira em um pedaço só. É isso que impede a busca de devolver meia tabela de preço sem dizer de qual expedição."
     },
     {
       "parameters": {
@@ -271,8 +158,8 @@
       "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
       "typeVersion": 1.2,
       "position": [
-        660,
-        500
+        -1440,
+        2416
       ],
       "credentials": {
         "openAiApi": {
@@ -285,29 +172,92 @@
     },
     {
       "parameters": {
-        "jsCode": "// O que entrou nesta carga.\nconst itens = $input.all().map((i) => i.json);\nreturn [{ json: {\n  paginas_processadas: itens.length,\n  quando: $now.toISO(),\n  aviso: 'Confira no Supabase: select count(*), metadata->>\\'url\\' from gloria_documents group by 2 order by 1 desc;',\n} }];"
+        "jsCode": "// O que a Glória sabe depois desta carga.\nconst fichas = $('Trazer as fichas de volta').all().map((i) => i.json);\nconst paginas = [...new Set(fichas.map((f) => f.slug))];\n\nreturn [{ json: {\n  fichas_carregadas: fichas.length,\n  paginas: paginas.length,\n  quais: paginas.join(\", \"),\n  quando: $now.toISO(),\n  confira: \"select metadata->>'slug' pagina, count(*) pedacos from gloria_documents group by 1 order by 1;\",\n} }];"
       },
       "id": "base-0013-4000-8000-000000000013",
       "name": "Resumo da carga",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        700,
-        300
+        -960,
+        2208
       ]
     },
     {
-      "parameters": {},
-      "id": "base-0014-4000-8000-000000000014",
-      "name": "Páginas que não carregaram",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
+      "parameters": {
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/gloria_fontes?ativo=eq.true&select=id,slug,secao,titulo,url,conteudo&order=slug.asc,secao.asc",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {}
+      },
+      "id": "b0f0c2d4-0001-4a11-9f00-gloria-fichas",
+      "name": "Fichas (gloria_fontes)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
-        240,
-        520
+        -2304,
+        2208
       ],
       "notesInFlow": true,
-      "notes": "Abra este nó depois de rodar: cada item aqui é uma LP que a IA NÃO vai saber responder."
+      "credentials": {
+        "supabaseApi": {
+          "id": "sRrvPzrQSNoQ3412",
+          "name": "Supabase account 2"
+        }
+      },
+      "notes": "DE ONDE VEM O QUE A GLÓRIA SABE.\n\nNão é mais do site: as LPs são React e o HTML que o servidor entrega é uma casca vazia (~40 caracteres por página, sem preço, sem data, sem roteiro). Quem escreve as fichas é scripts/gloria-fichas.mjs, no repo do QS, a partir dos DADOS das LPs.\n\nMudou preço, data ou roteiro numa LP? Rode lá: node scripts/gloria-fichas.mjs --apply\nDepois rode este workflow."
+    },
+    {
+      "parameters": {
+        "jsCode": "// O DELETE acima devolve corpo vazio. Este nó devolve as fichas de volta,\n// na mesma ordem, pra quem vem depois ter o texto pra gravar.\n//\n// $('Fichas...').all() em vez de .item: não depende do n8n conseguir casar\n// cada resposta vazia com a ficha que a originou.\nreturn $('Fichas (gloria_fontes)').all();"
+      },
+      "id": "b0f0c2d4-0002-4a11-9f00-gloria-recompor",
+      "name": "Trazer as fichas de volta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1856,
+        2208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// O que ficou pra trás.\n//\n// Ficha desligada (expedição esgotada, pacote fora do ar) some de\n// gloria_fontes, mas os pedaços dela continuariam no gloria_documents —\n// e a IA seguiria vendendo, com preço e tudo, uma turma que já fechou.\n\nconst ids = $('Trazer as fichas de volta').all().map((i) => i.json.id).filter((x) => x != null);\n\nreturn [\n  { json: { o_que: 'fichas que saíram da base', filtro: `metadata->>fonte_id=not.in.(${ids.join(',')})` } },\n  { json: { o_que: 'pedaços sem dono (carga antiga, do tempo em que lia o site)', filtro: 'metadata->>fonte_id=is.null' } },\n];"
+      },
+      "id": "b0f0c2d4-0003-4a11-9f00-gloria-ordens-limpeza",
+      "name": "O que ficou pra trás",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1408,
+        2208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Config').first().json.SUPABASE_URL }}/rest/v1/gloria_documents?{{ $json.filtro }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {}
+      },
+      "id": "b0f0c2d4-0004-4a11-9f00-gloria-limpar",
+      "name": "Tirar o que saiu da base",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1184,
+        2208
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "sRrvPzrQSNoQ3412",
+          "name": "Supabase account 2"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Roda duas vezes, uma por ordem do nó anterior. Se falhar, a carga nova já está gravada — o estrago seria conteúdo velho sobrando, não conteúdo novo faltando."
     }
   ],
   "connections": {
@@ -326,76 +276,36 @@
       "main": [
         [
           {
-            "node": "Baixar o sitemap",
+            "node": "Fichas (gloria_fontes)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Baixar o sitemap": {
+    "Fichas (gloria_fontes)": {
       "main": [
         [
           {
-            "node": "Lista de páginas",
+            "node": "Apagar a versão antiga desta ficha",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Lista de páginas": {
+    "Apagar a versão antiga desta ficha": {
       "main": [
         [
           {
-            "node": "Baixar a página",
+            "node": "Trazer as fichas de volta",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Baixar a página": {
-      "main": [
-        [
-          {
-            "node": "HTML vira texto",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "HTML vira texto": {
-      "main": [
-        [
-          {
-            "node": "Veio conteúdo?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Veio conteúdo?": {
-      "main": [
-        [
-          {
-            "node": "Apagar a versão antiga desta página",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Páginas que não carregaram",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Apagar a versão antiga desta página": {
+    "Trazer as fichas de volta": {
       "main": [
         [
           {
@@ -407,6 +317,28 @@
       ]
     },
     "Gravar no banco do QS": {
+      "main": [
+        [
+          {
+            "node": "O que ficou pra trás",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "O que ficou pra trás": {
+      "main": [
+        [
+          {
+            "node": "Tirar o que saiu da base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tirar o que saiu da base": {
       "main": [
         [
           {
@@ -452,8 +384,7 @@
     }
   },
   "settings": {
-    "executionOrder": "v1",
-    "saveManualExecutions": true
+    "executionOrder": "v1"
   },
   "pinData": {},
   "meta": {

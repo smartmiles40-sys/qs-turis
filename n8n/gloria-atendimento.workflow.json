@@ -20,8 +20,8 @@
       "webhookId": "c3f2b0aa-0002-4a11-9f00-gloria-chat-001",
       "credentials": {
         "httpHeaderAuth": {
-          "id": "SUBSTITUA_ID_GLORIA_SECRET",
-          "name": "Glória (x-gloria-secret)"
+          "id": "nFYfkjovaZqHtWWT",
+          "name": "Header Auth account"
         }
       },
       "notesInFlow": true,
@@ -68,7 +68,7 @@
         420
       ],
       "notesInFlow": true,
-      "notes": "Só endereços. Segredo e chave do banco ficam nas credenciais, nunca aqui: este arquivo vai pro Git."
+      "notes": "Só endereços e os dois interruptores. Segredo e chave do banco ficam nas credenciais, nunca aqui: este arquivo vai pro Git.\n\nMODO_TESTE = true: ela pensa, consulta a base e decide tudo, e NADA sai — nenhum WhatsApp, nenhuma nota, nenhuma tarefa. Vire pra false só depois de testar."
     },
     {
       "parameters": {
@@ -115,6 +115,18 @@
               "name": "session_id",
               "value": "={{ $json.body.lead_id }}",
               "type": "string"
+            },
+            {
+              "id": "f8",
+              "name": "modo",
+              "value": "={{ $json.body.modo || 'resposta' }}",
+              "type": "string"
+            },
+            {
+              "id": "f9",
+              "name": "passo",
+              "value": "={{ $json.body.passo || 0 }}",
+              "type": "number"
             }
           ]
         },
@@ -129,7 +141,7 @@
         420
       ],
       "notesInFlow": true,
-      "notes": "session_id = lead_id, e não o telefone. O mesmo número aparece como 5562..., 62... e +55 62... conforme a origem; amarrar a memória no telefone faz a IA perder a conversa no meio."
+      "notes": "session_id = lead_id, e não o telefone. O mesmo número aparece como 5562..., 62... e +55 62... conforme a origem; amarrar a memória no telefone faz a IA perder a conversa no meio.\n\nmodo = \"resposta\" (o lead falou) ou \"toque\" (a cadência dela puxando a conversa de volta). Quem manda o modo é o QS; quem decide se PODE é o banco."
     },
     {
       "parameters": {
@@ -152,7 +164,7 @@
     },
     {
       "parameters": {
-        "amount": 8,
+        "amount": "={{ $('Config').first().json.ESPERA_SEGUNDOS }}",
         "unit": "seconds"
       },
       "id": "gloria-0005-4000-8000-000000000005",
@@ -165,7 +177,7 @@
       ],
       "webhookId": "c3f2b0aa-0002-4a11-9f00-gloria-wait-001",
       "notesInFlow": true,
-      "notes": "Ninguém escreve \"oi\", \"quero saber da Islândia\" e \"quanto custa\" numa mensagem só. Sem esta pausa cada uma vira uma resposta, e a IA fala três vezes por cima de si mesma. Depois da pausa o banco diz qual execução responde."
+      "notes": "Ninguém escreve \"oi\", \"quero saber da Islândia\" e \"quanto custa\" numa mensagem só. Sem esta pausa cada uma vira uma resposta, e a IA fala três vezes por cima de si mesma. Depois da pausa o banco diz qual execução responde.\n\nA UNIDADE (segundos) é escrita à mão de propósito: o padrão do nó é HORAS, e um export que perca este campo faz a IA responder no dia seguinte sem dar erro nenhum."
     },
     {
       "parameters": {
@@ -175,7 +187,7 @@
         "nodeCredentialType": "supabaseApi",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ p_lead: $('Normalizar entrada').first().json.lead_id, p_sent_at: $('Normalizar entrada').first().json.sent_at }) }}",
+        "jsonBody": "={{ JSON.stringify({ p_lead: $('Normalizar entrada').first().json.lead_id, p_sent_at: $('Normalizar entrada').first().json.sent_at, p_modo: $('Normalizar entrada').first().json.modo, p_passo: $('Normalizar entrada').first().json.passo }) }}",
         "options": {},
         "contentType": "json"
       },
@@ -189,15 +201,15 @@
       ],
       "credentials": {
         "supabaseApi": {
-          "id": "SUBSTITUA_ID_SUPABASE_QS",
-          "name": "Supabase QS (service_role)"
+          "id": "sRrvPzrQSNoQ3412",
+          "name": "Supabase account 2"
         }
       },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
       "notesInFlow": true,
-      "notes": "Uma chamada só devolve tudo: IA ligada, janela de 24h, o que o lead escreveu desde a nossa última resposta e a qualificação que já existe. A REGRA MORA NO BANCO (migration 0053), não aqui."
+      "notes": "Uma chamada só devolve tudo: IA ligada, lead no pipeline dela, janela de 24h, o que o lead escreveu desde a nossa última resposta e a qualificação que já existe. No modo \"toque\" devolve também qual passo da cadência vencer agora. A REGRA MORA NO BANCO (0053/0059/0060), não aqui."
     },
     {
       "parameters": {
@@ -308,8 +320,8 @@
       ],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "SUBSTITUA_ID_GLORIA_SECRET",
-          "name": "Glória (x-gloria-secret)"
+          "id": "nFYfkjovaZqHtWWT",
+          "name": "Header Auth account"
         }
       },
       "onError": "continueRegularOutput",
@@ -319,10 +331,10 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Contexto do lead\nNome {{ $json.lead.nome }}\nTelefone {{ $json.lead.telefone }}\nExpedição de interesse {{ $json.lead.expedicao }}\nFonte do card {{ $json.lead.fonte }}\n\nQualificação já respondida ({{ $json.sessao.respondidas }} de 5)\nData faz sentido {{ $json.sessao.resposta_data || 'ainda não perguntei' }}\nInvestimento {{ $json.sessao.resposta_investimento || 'ainda não perguntei' }}\nPrazo de decisão {{ $json.sessao.resposta_decisao || 'ainda não perguntei' }}\nPerfil de viajante {{ $json.sessao.perfil_viajante || 'ainda não perguntei' }}\nComo pretende viajar {{ $json.sessao.como_pretende_viajar || 'ainda não perguntei' }}\n\nMensagens novas do lead, na ordem em que ele escreveu\n{{ $json.mensagens }}",
+        "text": "=Contexto do lead\nNome {{ $json.lead.nome }}\nTelefone {{ $json.lead.telefone }}\nExpedição de interesse {{ $json.lead.expedicao }}\nFonte do card {{ $json.lead.fonte }}\n\nQualificação já respondida ({{ $json.sessao.respondidas }} de 5)\nData faz sentido {{ $json.sessao.resposta_data || 'ainda não perguntei' }}\nInvestimento {{ $json.sessao.resposta_investimento || 'ainda não perguntei' }}\nPrazo de decisão {{ $json.sessao.resposta_decisao || 'ainda não perguntei' }}\nPerfil de viajante {{ $json.sessao.perfil_viajante || 'ainda não perguntei' }}\nComo pretende viajar {{ $json.sessao.como_pretende_viajar || 'ainda não perguntei' }}\n\n{{ $json.toque\n  ? 'ESTA MENSAGEM NÃO É RESPOSTA A NADA. O lead está em silêncio há ' + Math.round(($json.toque.silencio_min || 0) / 60) + ' horas e este é o toque ' + $json.toque.passo + ' de 3 da sua cadência.\\n\\nComo a conversa parou (as últimas mensagens):\\n' + ($json.conversa || 'sem histórico') + '\\n\\nO que fazer neste toque: ' + $json.toque.instrucao + '\\n\\nUma mensagem só, no máximo dois balões. Não cumprimente como se a conversa estivesse começando agora, não peça desculpa por incomodar, não cobre resposta e não repita pergunta que já está respondida acima.'\n  : 'Mensagens novas do lead, na ordem em que ele escreveu\\n' + $json.mensagens }}",
         "options": {
-          "systemMessage": "Você é a Glória, consultora de viagens da Se Tu For, Eu Vou! Viagens e Expedições, uma agência brasileira de expedições internacionais em grupos pequenos.\n\n# Missão\nFazer o primeiro atendimento do lead no WhatsApp, responder as dúvidas dele sobre a expedição de interesse e qualificar com as 5 perguntas oficiais, até deixar tudo pronto para o especialista agendar a call.\n\n# Como você escreve\nPortuguês do Brasil, tom de gente de verdade, próximo e caloroso.\nMensagens curtas, de 1 a 3 linhas, uma ideia por mensagem.\nNunca use travessão nem dois pontos nas mensagens.\nSempre no enquadramento positivo, fale do que a pessoa ganha com a experiência, nunca de erro, problema ou dor.\nNo máximo 2 emojis na conversa inteira.\nChame a pessoa pelo primeiro nome de vez em quando, não em toda mensagem.\n\n# Quantos balões\nSua resposta vira balões de WhatsApp. Separe cada balão com uma linha em branco.\nNo máximo 3 balões, e no máximo 1 pergunta por resposta. Duas perguntas juntas fazem a pessoa responder só a última.\n\n# Quem você é\nVocê faz parte do time de atendimento da agência.\nSe perguntarem diretamente se você é um robô, uma IA ou um atendimento automático, responda que sim, que você é a assistente virtual do time, e ofereça na hora passar para uma pessoa. Nunca negue. Mentir sobre isso é o tipo de coisa que vira print e queima a agência, e o lead que pergunta já desconfia.\n\n# Regra de ouro sobre informação\nToda informação de roteiro, data, valor, hospedagem, incluso, não incluso, nível de dificuldade e vagas vem da ferramenta base_conhecimento_site.\nConsulte a ferramenta antes de responder qualquer dúvida factual, mesmo que você ache que sabe.\nSe a informação não estiver na base, não improvise e não arredonde. Diga que vai confirmar com o time e chame transferir_para_humano com motivo duvida_sem_resposta.\n\n# O que você nunca faz\nNão inventa valor, data, vaga ou condição de pagamento.\nNão promete desconto nem negocia preço.\nNão confirma reserva nem diz que a vaga está garantida.\nNão pede CPF, documento, dado bancário ou qualquer forma de pagamento.\n\n# Pilares da agência, para usar como argumento\nSegurança, essência, transparência, fator uau e vínculo.\n\n# Fluxo da conversa\n1. Cumprimente pelo nome, se apresente e confirme qual expedição despertou o interesse\n2. Responda a dúvida imediata usando a base de conhecimento, isso gera confiança antes de perguntar\n3. Conduza as perguntas de qualificação uma por vez, encaixadas na conversa, nunca em bloco\n4. Chame salvar_qualificacao assim que receber cada resposta nova, mandando só o campo que você acabou de descobrir\n5. Com as 5 respostas, defina a temperatura, salve e chame transferir_para_humano com motivo qualificado\n6. Se o lead pedir para falar com uma pessoa, demonstrar urgência real ou reclamar, chame transferir_para_humano na hora\n\nO bloco \"Qualificação já respondida\" no contexto mostra o que você já sabe. Nunca repita uma pergunta que já está respondida ali.\n\n# As 5 perguntas de qualificação, nesta ordem\n1. resposta_data, essa data faz sentido para você\n2. resposta_investimento, a faixa de investimento faz sentido para você\n3. resposta_decisao, em quanto tempo você imagina tomar uma decisão sobre essa viagem\n4. perfil_viajante, como você se define como viajante\n5. como_pretende_viajar, como você pretende viajar, sozinho, em casal, com amigos ou com família\n\n# Temperatura\nQuente, data e investimento fazem sentido e a decisão sai em até 30 dias\nMorno, gostou da proposta mas tem uma restrição clara de data ou de investimento\nFrio, sem data definida, investimento fora da faixa ou decisão acima de 90 dias\n\n# Depois de transferir\nAssim que transferir_para_humano responder ok, escreva no máximo uma mensagem curta de despedida, dizendo que o especialista assume daqui, e pare. Não faça mais perguntas e não chame a ferramenta de novo.\n\n# Encerramento\nAo qualificar, ofereça a conversa com o especialista e confirme o melhor período do dia para o contato. Reforce que a call é para desenhar a experiência junto com a pessoa.",
-          "maxIterations": 6,
+          "systemMessage": "Você é a Glória, consultora de viagens da Se Tu For, Eu Vou! Viagens e Expedições, uma agência brasileira de expedições internacionais em grupos pequenos.\n\n# Missão\nFazer o primeiro atendimento do lead no WhatsApp, responder as dúvidas dele sobre a expedição de interesse e qualificar com as 5 perguntas oficiais, até deixar tudo pronto para o especialista agendar a call.\n\n# Como você escreve\nPortuguês do Brasil, tom de gente de verdade, próximo e caloroso.\nMensagens curtas, de 1 a 3 linhas, uma ideia por mensagem.\nNunca use travessão nem dois pontos nas mensagens.\nSempre no enquadramento positivo, fale do que a pessoa ganha com a experiência, nunca de erro, problema ou dor.\nNo máximo 2 emojis na conversa inteira.\nChame a pessoa pelo primeiro nome de vez em quando, não em toda mensagem.\n\n# Quantos balões\nSua resposta vira balões de WhatsApp. Separe cada balão com uma linha em branco.\nNo máximo 3 balões, e no máximo 1 pergunta por resposta. Duas perguntas juntas fazem a pessoa responder só a última.\n\n# Quem você é\nVocê faz parte do time de atendimento da agência.\nSe perguntarem diretamente se você é um robô, uma IA ou um atendimento automático, responda que sim, que você é a assistente virtual do time, e ofereça na hora passar para uma pessoa. Nunca negue. Mentir sobre isso é o tipo de coisa que vira print e queima a agência, e o lead que pergunta já desconfia.\n\n# Regra de ouro sobre informação\nToda informação de roteiro, data, valor, hospedagem, incluso, não incluso, nível de dificuldade e vagas vem da ferramenta base_conhecimento_site.\nConsulte a ferramenta antes de responder qualquer dúvida factual, mesmo que você ache que sabe.\nSempre pergunte à ferramenta com o nome do destino junto do assunto, por exemplo investimento da Islândia ou roteiro do Egito. A base tem uma ficha por expedição e perguntar sem o destino traz o pedaço da viagem errada.\nAntes de citar um valor ou uma data, confira que o pedaço que voltou da base fala do MESMO destino que o lead perguntou. Valor da expedição errada é o erro mais caro que existe aqui.\nSe a informação não estiver na base, não improvise e não arredonde. Diga que vai confirmar com o time e chame transferir_para_humano com motivo duvida_sem_resposta.\nSe o lead perguntar de uma saída que a base marca como ESGOTADA, diga que aquela turma fechou e ofereça a saída aberta do mesmo destino.\n\n# O que você nunca faz\nNão inventa valor, data, vaga ou condição de pagamento.\nNão promete desconto nem negocia preço.\nNão confirma reserva nem diz que a vaga está garantida.\nNão pede CPF, documento, dado bancário ou qualquer forma de pagamento.\n\n# Pilares da agência, para usar como argumento\nSegurança, essência, transparência, fator uau e vínculo.\n\n# Fluxo da conversa\n1. Cumprimente pelo nome, se apresente e confirme qual expedição despertou o interesse\n2. Responda a dúvida imediata usando a base de conhecimento, isso gera confiança antes de perguntar\n3. Conduza as perguntas de qualificação uma por vez, encaixadas na conversa, nunca em bloco\n4. Chame salvar_qualificacao assim que receber cada resposta nova, mandando só o campo que você acabou de descobrir\n5. Com as 5 respostas, defina a temperatura, salve e chame transferir_para_humano com motivo qualificado\n6. Se o lead pedir para falar com uma pessoa, demonstrar urgência real ou reclamar, chame transferir_para_humano na hora\n\nO bloco \"Qualificação já respondida\" no contexto mostra o que você já sabe. Nunca repita uma pergunta que já está respondida ali.\n\n# As 5 perguntas de qualificação, nesta ordem\n1. resposta_data, essa data faz sentido para você\n2. resposta_investimento, a faixa de investimento faz sentido para você\n3. resposta_decisao, em quanto tempo você imagina tomar uma decisão sobre essa viagem\n4. perfil_viajante, como você se define como viajante\n5. como_pretende_viajar, como você pretende viajar, sozinho, em casal, com amigos ou com família\n\n# Temperatura\nQuente, data e investimento fazem sentido e a decisão sai em até 30 dias\nMorno, gostou da proposta mas tem uma restrição clara de data ou de investimento\nFrio, sem data definida, investimento fora da faixa ou decisão acima de 90 dias\n\n# Quando é você que puxa a conversa\nÀs vezes o lead some no meio e você volta a falar sem que ele tenha escrito nada. O contexto vai dizer que é um toque da cadência, qual o número dele e o que fazer.\nNesses toques, seja mais curta ainda: uma ideia, no máximo dois balões.\nNunca escreva coisas como \"vi que você não respondeu\", \"ainda está aí?\" ou \"desculpa insistir\". Cobrança e culpa afastam.\nTrês toques é o limite, e quem conta é o sistema. Depois do terceiro a conversa vai para uma pessoa do time — você não precisa se preocupar com isso.\n\n# Depois de transferir\nAssim que transferir_para_humano responder ok, escreva no máximo uma mensagem curta de despedida, dizendo que o especialista assume daqui, e pare. Não faça mais perguntas e não chame a ferramenta de novo.\n\n# Encerramento\nAo qualificar, ofereça a conversa com o especialista e confirme o melhor período do dia para o contato. Reforce que a call é para desenhar a experiência junto com a pessoa.",
+          "maxIterations": 8,
           "returnIntermediateSteps": false
         }
       },
@@ -369,37 +381,30 @@
       "parameters": {
         "sessionIdType": "customKey",
         "sessionKey": "={{ $('Normalizar entrada').first().json.session_id }}",
-        "tableName": "gloria_chat_memory",
-        "contextWindowLength": 12
+        "contextWindowLength": 10
       },
       "id": "gloria-0013-4000-8000-000000000013",
       "name": "Memória da conversa",
-      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
-      "typeVersion": 1.3,
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
       "position": [
         -100,
         760
       ],
-      "credentials": {
-        "postgres": {
-          "id": "SUBSTITUA_ID_POSTGRES_QS",
-          "name": "Postgres QS (Supabase pooler)"
-        }
-      },
       "notesInFlow": true,
-      "notes": "Postgres do MESMO Supabase do QS (0053 cria a tabela). Conexão pelo Session Pooler, porta 5432 do host aws-0-...pooler.supabase.com, com SSL."
+      "notes": "A chave é o LEAD, nunca o telefone: o mesmo número aparece como 5562..., 62... e +55 62... conforme a origem, e amarrar a memória no telefone faz a IA perder a conversa no meio.\n\nEsta memória vive na RAM do n8n: reiniciou o n8n, a conversa recomeça do zero (a qualificação NÃO se perde — ela mora no banco e volta pelo contexto). Se isso incomodar, troque este nó por \"Postgres Chat Memory\" apontando pra tabela gloria_chat_memory, que a 0053 já criou."
     },
     {
       "parameters": {
         "mode": "retrieve-as-tool",
         "toolName": "base_conhecimento_site",
-        "toolDescription": "Conteúdo oficial do site da agência sobre as expedições. Consulte para qualquer dúvida de roteiro, datas, valores, hospedagem, incluso, não incluso, nível de dificuldade, vagas e diferenciais. Pergunte com as palavras do lead, incluindo o nome do destino.",
+        "toolDescription": "Conteúdo oficial da agência sobre as expedições e pacotes: roteiro, datas, valores, hospedagem, incluso, não incluso, formas de pagamento, vagas e diferenciais. Consulte ANTES de responder qualquer dúvida factual. Pergunte sempre com o NOME DO DESTINO junto do assunto (\"investimento da Islândia\", \"roteiro do Egito\") — a base tem uma ficha por expedição e perguntar sem o destino traz o pedaço da viagem errada.",
         "tableName": {
           "__rl": true,
           "value": "gloria_documents",
           "mode": "name"
         },
-        "topK": 5,
+        "topK": 6,
         "options": {
           "queryName": "match_gloria_documents"
         }
@@ -414,12 +419,12 @@
       ],
       "credentials": {
         "supabaseApi": {
-          "id": "SUBSTITUA_ID_SUPABASE_QS",
-          "name": "Supabase QS (service_role)"
+          "id": "sRrvPzrQSNoQ3412",
+          "name": "Supabase account 2"
         }
       },
       "notesInFlow": true,
-      "notes": "Tabela gloria_documents e função match_gloria_documents, as duas criadas pela 0053 no banco do QS. Enquanto a tabela estiver vazia a IA não sabe preço nenhum, e é melhor assim que inventar."
+      "notes": "Tabela gloria_documents e função match_gloria_documents (0053). O que entra aqui vem de gloria_fontes, carregada pelo outro workflow.\n\n6 pedaços, e não 20: cada ficha já vem inteira e fechada, então 20 só enche o prompt de outras expedições — que é como a IA responde o preço da viagem errada."
     },
     {
       "parameters": {
@@ -540,8 +545,8 @@
       ],
       "credentials": {
         "supabaseApi": {
-          "id": "SUBSTITUA_ID_SUPABASE_QS",
-          "name": "Supabase QS (service_role)"
+          "id": "sRrvPzrQSNoQ3412",
+          "name": "Supabase account 2"
         }
       },
       "notesInFlow": true,
@@ -613,8 +618,8 @@
       ],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "SUBSTITUA_ID_GLORIA_SECRET",
-          "name": "Glória (x-gloria-secret)"
+          "id": "nFYfkjovaZqHtWWT",
+          "name": "Header Auth account"
         }
       },
       "notesInFlow": true,
@@ -662,7 +667,13 @@
       ],
       "onError": "continueRegularOutput",
       "notesInFlow": true,
-      "notes": "Quem fala com o cliente é o QS, sempre. Assim a mensagem sai pelo número oficial, cai na conversa certa do Chatwoot e aparece na tela do SDR. neverError porque 409 aqui é resposta legítima (humano assumiu no meio), não falha."
+      "notes": "Quem fala com o cliente é o QS, sempre. Assim a mensagem sai pelo número oficial, cai na conversa certa do Chatwoot e aparece na tela do SDR.\n\nA CREDENCIAL (x-gloria-secret) é obrigatória aqui. Sem ela o QS responde 401, o neverError faz a execução ficar VERDE e o lead nunca recebe nada — a falha mais silenciosa deste workflow inteiro. O nó seguinte existe pra isso não passar batido.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nFYfkjovaZqHtWWT",
+          "name": "Header Auth account"
+        }
+      }
     },
     {
       "parameters": {
@@ -672,7 +683,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ lead_id: $('Normalizar entrada').first().json.lead_id, motivo: 'erro_da_ia', resumo: 'A IA não conseguiu responder esta mensagem. Erro: ' + ($json.error?.message || $json.error || 'desconhecido') }) }}",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $('Normalizar entrada').first().json.lead_id, motivo: 'erro_da_ia', resumo: 'A IA não conseguiu responder esta mensagem. Motivo: ' + ($json.error?.message || $json.body?.error || $json.error || ('o QS recusou o envio com HTTP ' + ($json.statusCode || '?'))), teste: $('Config').first().json.MODO_TESTE }) }}",
         "options": {},
         "contentType": "json"
       },
@@ -681,18 +692,18 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        220,
-        560
+        352,
+        1328
       ],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "SUBSTITUA_ID_GLORIA_SECRET",
-          "name": "Glória (x-gloria-secret)"
+          "id": "nFYfkjovaZqHtWWT",
+          "name": "Header Auth account"
         }
       },
       "onError": "continueRegularOutput",
       "notesInFlow": true,
-      "notes": "OpenAI fora do ar, base de conhecimento inacessível, resposta vazia. O lead não pode ficar esperando uma resposta que não vem, então vira tarefa pro dono do lead na hora."
+      "notes": "OpenAI fora do ar, base inacessível, resposta vazia, QS recusando o envio. O lead não pode ficar esperando uma resposta que não vem, então vira tarefa pro dono do lead na hora.\n\nRespeita o MODO_TESTE: teste que cria tarefa de verdade na fila de alguém não é teste."
     },
     {
       "parameters": {},
@@ -738,6 +749,18 @@
               "name": "body.sent_at",
               "value": "={{ $now.toISO() }}",
               "type": "string"
+            },
+            {
+              "id": "t6",
+              "name": "body.modo",
+              "value": "resposta",
+              "type": "string"
+            },
+            {
+              "id": "t7",
+              "name": "body.passo",
+              "value": 0,
+              "type": "number"
             }
           ]
         },
@@ -750,7 +773,9 @@
       "position": [
         -120,
         520
-      ]
+      ],
+      "notesInFlow": true,
+      "notes": "Pra testar um TOQUE da cadência à mão: modo = toque e passo = 1, 2 ou 3. O banco ainda decide se o toque é devido — se o lead acabou de falar, ela não toca (e isso está certo)."
     },
     {
       "parameters": {
@@ -782,6 +807,99 @@
       "position": [
         560,
         300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "r1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "a1f0c2d4-0001-4a11-9f00-gloria-tem-resposta",
+      "name": "Sobrou resposta pra enviar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -144,
+        880
+      ],
+      "notesInFlow": true,
+      "notes": "Modelo que devolve texto vazio acontece. Sem este desvio o QS recebia uma lista vazia, respondia 400 e ninguém ficava sabendo — o lead esperando uma resposta que nunca vem."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 400,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "e2",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 409,
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "a1f0c2d4-0002-4a11-9f00-gloria-qs-recusou",
+      "name": "O QS recusou?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        176,
+        1008
+      ],
+      "notesInFlow": true,
+      "notes": "409 NÃO é falha: é o QS dizendo que um humano assumiu no meio, ou que a janela fechou. Aí a conversa já é de gente e não há o que avisar.\n\nQualquer outro erro (400, 502, 503) é resposta que não chegou no cliente, e isso vira tarefa pro dono do lead em vez de sumir no log."
+    },
+    {
+      "parameters": {},
+      "id": "a1f0c2d4-0003-4a11-9f00-gloria-fim-enviado",
+      "name": "Pronto, respondeu",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        352,
+        1120
       ]
     }
   ],
@@ -910,7 +1028,7 @@
       "main": [
         [
           {
-            "node": "Enviar pelo QS",
+            "node": "Sobrou resposta pra enviar?",
             "type": "main",
             "index": 0
           }
@@ -1022,12 +1140,57 @@
           }
         ]
       ]
+    },
+    "Sobrou resposta pra enviar?": {
+      "main": [
+        [
+          {
+            "node": "Enviar pelo QS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Deu erro, chama o time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar pelo QS": {
+      "main": [
+        [
+          {
+            "node": "O QS recusou?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "O QS recusou?": {
+      "main": [
+        [
+          {
+            "node": "Deu erro, chama o time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pronto, respondeu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
-    "executionOrder": "v1",
-    "saveManualExecutions": true,
-    "saveDataErrorExecution": "all"
+    "executionOrder": "v1"
   },
   "pinData": {},
   "meta": {

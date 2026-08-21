@@ -44,12 +44,34 @@ function avisar(s: SaudeWhatsApp | null) {
   });
 }
 
+/**
+ * A CADÊNCIA DA GLÓRIA PEGA CARONA NESTA MESMA BATIDA.
+ *
+ * Ela precisa da mesma coisa que o vigia: alguém acionando o servidor de tempos
+ * em tempos, sem depender de agendador externo (que já morreu calado uma vez).
+ * O trabalho de verdade é do servidor, com trava de 5 minutos no banco — aqui é
+ * só a batida. Falhou, não importa: a próxima mensagem que chegar no webhook
+ * também aciona a fila.
+ */
+async function baterNaCadenciaDaGloria(token: string): Promise<void> {
+  try {
+    await fetch("/api/gloria-toques", {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+  } catch {
+    /* rede oscilando não é problema da cadência */
+  }
+}
+
 async function verificar(): Promise<void> {
   try {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     // Sem sessão não há o que vigiar — e a rota recusaria de qualquer forma.
     if (!token) return;
+
+    void baterNaCadenciaDaGloria(token);
 
     const r = await fetch("/api/wa-vigia", {
       headers: { Authorization: `Bearer ${token}` },

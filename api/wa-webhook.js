@@ -28,7 +28,7 @@ import { insert, rest, segredoConfere } from './_supabaseAdmin.js';
 import { procurarNegocioPorTelefone } from './_bitrixLead.js';
 import { createInboundLead } from './_leads.js';
 import { verificarSeVencido } from './_waAlerta.js';
-import { avisarGloria } from './_gloria.js';
+import { avisarGloria, rodarFilaDeToques } from './_gloria.js';
 
 /**
  * O cliente apagou a mensagem no celular dele.
@@ -281,6 +281,14 @@ export default async function handler(req, res) {
   // usado — não de um agendador externo que morre calado (foi o que aconteceu
   // entre 17/08 e 19/08). Trava de 10min: uma ronda a cada ~50 mensagens.
   await verificarSeVencido().catch(() => {});
+
+  // ── A CADÊNCIA DA GLÓRIA PEGA CARONA NO MESMO MOVIMENTO ────────────────────
+  // Mesma ideia, mesma lição: agendador externo morre calado. Aqui o limite é
+  // DOIS de propósito — o caminho do webhook não pode engordar (auditoria de
+  // 20/08), e a fila tem trava de 5 minutos, então a esmagadora maioria das
+  // mensagens só paga um SELECT. A perna principal continua sendo o QS aberto
+  // na tela, que roda a fila inteira.
+  await rodarFilaDeToques({ limite: 2 }).catch(() => {});
 
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const event = body?.event || '';
