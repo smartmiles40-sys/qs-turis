@@ -22,6 +22,9 @@
     "api/gloria-responder.js": {
       "maxDuration": 30
     },
+    "api/gloria-toques.js": {
+      "maxDuration": 30
+    },
     "api/*.js": {
       "maxDuration": 10
     }

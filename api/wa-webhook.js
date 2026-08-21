@@ -284,11 +284,16 @@ export default async function handler(req, res) {
 
   // ── A CADÊNCIA DA GLÓRIA PEGA CARONA NO MESMO MOVIMENTO ────────────────────
   // Mesma ideia, mesma lição: agendador externo morre calado. Aqui o limite é
-  // DOIS de propósito — o caminho do webhook não pode engordar (auditoria de
-  // 20/08), e a fila tem trava de 5 minutos, então a esmagadora maioria das
-  // mensagens só paga um SELECT. A perna principal continua sendo o QS aberto
-  // na tela, que roda a fila inteira.
-  await rodarFilaDeToques({ limite: 2 }).catch(() => {});
+  // UM de propósito. Esta rota tem 10 segundos no total (vercel.json) e o
+  // caminho do webhook não pode engordar (auditoria de 20/08); cada toque
+  // dispara uma chamada ao n8n que, no pior caso — n8n fora do ar —, gasta os
+  // 3s do timeout. Um toque é no máximo 3s de teto; dois já seriam metade do
+  // orçamento da função por uma tarefa que não é a dela.
+  //
+  // Com a trava de 5 minutos, a esmagadora maioria das mensagens só paga um
+  // SELECT. A perna principal continua sendo o QS aberto na tela, que roda a
+  // fila inteira com 30s de orçamento.
+  await rodarFilaDeToques({ limite: 1 }).catch(() => {});
 
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const event = body?.event || '';
