@@ -36,7 +36,7 @@ import {
   semDesfecho,
   chaveDoEspecialista,
 } from "@/lib/qs/closerAgenda";
-import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, reagendarReuniao, type DesfechoCompleto } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, reagendarReuniao, gerarSalaMeet, avisarBitrixDaSala, deleteMeeting, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
 import BriefingDoLead from "./BriefingDoLead";
 import { getSetting } from "@/lib/qsSettings";
@@ -568,6 +568,49 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
     void load();
   };
 
+  /**
+   * Cria a sala do Meet de uma reunião que ficou sem ela.
+   *
+   * A sala nasce junto com o agendamento; quando essa criação falha — entre
+   * 21/08 e 24/08 a agenda devolveu 403 em todas as chamadas — a reunião fica
+   * salva e o cliente sem convite, e não havia como tentar de novo: reagendar
+   * também não cria, porque o código só mexe no evento quando já existe um.
+   * Aqui o gatilho é o único diferente; o caminho é o mesmo do agendamento.
+   */
+  const criarSala = async (m: Meeting) => {
+    if (demo) return;
+    const sala = await gerarSalaMeet(m);
+    if (!sala.link) {
+      // O aviso já vem dizendo o motivo, e o gerarSalaMeet grava em
+      // calendar_error — então a próxima abertura do painel mostra o porquê.
+      notifyError(sala.aviso ?? "Não consegui criar a sala do Meet.");
+      void load();
+      return;
+    }
+    avisarBitrixDaSala(m, { bitrix_id: m.lead?.bitrix_id, lead_name: m.lead_name, link: sala.link });
+    notifySuccess("Sala criada e convite enviado pro cliente.");
+    setSelecionada(null);
+    void load();
+  };
+
+  /**
+   * Apaga a reunião de vez (some da lista e da agenda).
+   *
+   * Diferente de "cancelar", que mantém a linha com status cancelada e continua
+   * contando no histórico. Este é pro caso de reunião criada por engano ou
+   * duplicada — que só dava pra resolver pela agenda mensal, enquanto o time
+   * trabalha aqui.
+   */
+  const excluirReuniao = async (m: Meeting) => {
+    if (demo) return;
+    if (!window.confirm("Excluir permanentemente esta reunião? Esta ação não pode ser desfeita.")) return;
+    const r = await deleteMeeting(m.id);
+    if (!r.ok) return notifyError(r.error ?? "Não foi possível excluir.");
+    notifySuccess("Reunião excluída.");
+    setSelecionada(null);
+    void load();
+  };
+
   const marcarSal = async (m: Meeting, sal: MeetingSal, motivo?: string | null) => {
     const alvo = m.sal === sal ? null : sal;
     // Recusar SEM motivo não é permitido — nem aqui nem no banco (CHECK da
@@ -929,6 +972,8 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
             setSelecionada(null);
           }}
           onAbrirLead={onOpenLead ? () => onOpenLead(selecionada.lead_id) : undefined}
+          onCriarSala={() => void criarSala(selecionada)}
+          onExcluir={() => void excluirReuniao(selecionada)}
         />
       )}
 
@@ -973,9 +1018,13 @@ interface PainelProps {
   somenteLeitura?: boolean;
   onRemarcar: () => void;
   onAbrirLead?: () => void;
+  /** Refaz a sala do Meet de uma reunião que ficou sem link. */
+  onCriarSala: () => void;
+  /** Apaga a reunião de vez — diferente de cancelar, que mantém a linha. */
+  onExcluir: () => void;
 }
 
-function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRemarcar, onAbrirLead, motivos, pedindoMotivo, onCancelarMotivo, somenteLeitura }: PainelProps) {
+function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRemarcar, onAbrirLead, motivos, pedindoMotivo, onCancelarMotivo, somenteLeitura, onCriarSala, onExcluir }: PainelProps) {
   const [copiado, setCopiado] = useState(false);
   // Mesmo passo do modal de detalhe: antes de fechar, pergunta valor e tipo.
   const [fechando, setFechando] = useState<"realizada" | "no_show" | null>(null);
@@ -1021,7 +1070,13 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
         </button>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-auto px-5 py-4 text-sm">
+      {/* pb-24: o botão flutuante do WhatsApp é `fixed` no canto inferior
+          direito com z-[45], e este painel é z-40 — ou seja, ele fica POR CIMA
+          daqui. Sem esta folga, o que estiver no fim do painel (cancelar,
+          excluir, o desfecho quando a lista é longa) nasce escondido embaixo
+          dele. Reservar o espaço é mais seguro do que disputar z-index com um
+          lançador que precisa mesmo ficar acima do conteúdo. */}
+      <div className="flex-1 space-y-4 overflow-auto px-5 py-4 pb-24 text-sm">
         {/* O contexto que faltava: o closer lançava o desfecho aqui SEM ver
             nada do que o SDR conversou. O resumo vem pelo servidor, então
             funciona mesmo antes da migration de leitura (0052). */}
@@ -1056,6 +1111,27 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
               className="rounded-lg border border-gray-200 px-3 text-gray-500 transition hover:bg-gray-50 hover:text-gray-900"
             >
               {copiado ? <IcCheck /> : <IcCopy />}
+            </button>
+          </div>
+        )}
+
+        {/* SEM SALA. Reunião marcada cujo evento no Google nunca foi criado — o
+            cliente não recebeu convite e ninguém tinha como saber, porque o
+            único sintoma era a ausência do botão "Entrar na reunião". */}
+        {!reuniao.meeting_link && !somenteLeitura &&
+          (reuniao.status === "agendada" || reuniao.status === "confirmada") && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <p className="text-xs text-amber-900">
+              Esta reunião está <b>sem link</b> — o cliente não recebeu convite.
+            </p>
+            {reuniao.calendar_error && (
+              <p className="mt-1 text-[11px] text-amber-700">Motivo: {reuniao.calendar_error}</p>
+            )}
+            <button
+              onClick={onCriarSala}
+              className="mt-2 w-full rounded-lg bg-amber-600 py-2 text-xs font-bold text-white transition hover:bg-amber-700"
+            >
+              Criar sala do Meet
             </button>
           </div>
         )}
@@ -1184,7 +1260,7 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
               <IcExternal /> Abrir o lead no CRM
             </button>
           )}
-          {reuniao.status !== "cancelada" && (
+          {reuniao.status !== "cancelada" && !somenteLeitura && (
             <button
               onClick={() => {
                 if (window.confirm("Cancelar esta reunião?")) onStatus("cancelada");
@@ -1192,6 +1268,18 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
               className="w-full rounded-lg py-2 text-xs font-semibold text-gray-400 transition hover:bg-gray-50 hover:text-red-600"
             >
               Cancelar reunião
+            </button>
+          )}
+          {/* EXCLUIR ≠ CANCELAR. Cancelar mantém a linha (a reunião existiu e
+              conta no histórico); excluir apaga, e serve pra registro criado por
+              engano ou duplicado. Só existia na agenda mensal, mas o time
+              trabalha nesta tela — então não havia como apagar de onde se olha. */}
+          {!somenteLeitura && (
+            <button
+              onClick={onExcluir}
+              className="w-full rounded-lg py-2 text-xs font-semibold text-gray-300 transition hover:bg-red-50 hover:text-red-600"
+            >
+              Excluir reunião
             </button>
           )}
         </div>
