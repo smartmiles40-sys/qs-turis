@@ -88,7 +88,23 @@ async function baterNoResumoDoBitrix(token: string): Promise<void> {
   }
 }
 
+/**
+ * Trava de martelo. `verificar()` tem QUATRO gatilhos (abertura, timer,
+ * visibilitychange e focus) e, medido em 21/08, a rota da cadência da Glória
+ * estava sendo chamada de 2 em 2 segundos: cada foco de janela — e cada
+ * remontagem do <AvisoDoVigia>, que zera o timer e dispara uma verificação na
+ * hora — vira uma rodada nova. O trabalho pesado tem trava no banco, então não
+ * duplicava toque nenhum; o custo era invocação de função à toa o dia inteiro.
+ * O piso mora aqui porque é aqui que os quatro gatilhos se encontram.
+ */
+const PISO_ENTRE_RODADAS_MS = 60_000;
+let ultimaRodadaEm = 0;
+
 async function verificar(): Promise<void> {
+  const agora = Date.now();
+  if (agora - ultimaRodadaEm < PISO_ENTRE_RODADAS_MS) return;
+  ultimaRodadaEm = agora;
+
   try {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;

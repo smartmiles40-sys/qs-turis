@@ -182,6 +182,10 @@ export const MOTIVOS_DE_SAIDA = {
   fora_da_janela_24h: 'janela de 24h fechada — só template aprovado passa',
   erro_da_ia: 'a IA não conseguiu responder',
   duvida_sem_resposta: 'o lead perguntou algo que não está na base de conhecimento',
+  // A Glória NÃO empurra reunião pra quem já disse não (data, investimento ou
+  // momento). Reunião empurrada é o que queima a agenda do especialista.
+  nao_qualificado: 'o lead não tem perfil para agendar agora (data, investimento ou momento)',
+  pacote_personalizado: 'o lead quer roteiro sob medida, e preço de personalizado é do especialista',
   // Fim da cadência da IA: ela deu os toques e o lead não voltou.
   sem_resposta: 'a cadência da IA terminou sem resposta do lead',
 };
@@ -190,13 +194,13 @@ export const MOTIVOS_DE_SAIDA = {
 function blocoQualificacao(s) {
   if (!s) return '';
   const linhas = [
-    ['Data faz sentido', s.resposta_data],
-    ['Investimento', s.resposta_investimento],
+    ['Necessidade (perfil, por que o destino)', s.perfil_viajante],
+    ['Autoridade (com quem viaja, quem decide)', s.como_pretende_viajar],
+    ['Orçamento (a faixa faz sentido)', s.resposta_investimento],
+    ['Prazo (a data faz sentido)', s.resposta_data],
     ['Prazo de decisão', s.resposta_decisao],
-    ['Perfil de viajante', s.perfil_viajante],
-    ['Como pretende viajar', s.como_pretende_viajar],
   ].filter(([, v]) => v);
-  if (!linhas.length) return '\n\nQualificação: ainda não respondeu nenhuma das 5.';
+  if (!linhas.length) return '\n\nQualificação: a Glória ainda não descobriu nenhum ponto do BANT.';
   return `\n\nQualificação (${linhas.length}/5)\n` + linhas.map(([k, v]) => `• ${k}: ${v}`).join('\n');
 }
 
