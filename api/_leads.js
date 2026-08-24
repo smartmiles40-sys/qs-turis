@@ -609,7 +609,13 @@ export async function createInboundLead(payload, opts = {}) {
   // de duplicatas e estragaria a contagem do comercial.
   if (lead && !bitrixId && !cardProprio) {
     try {
-      const novoId = await vincularLeadAoBitrix({ ...lead, owner_id: finalOwner });
+      // `bitrixContatoId`: quem já perguntou ao Bitrix (o wa-webhook) achou o
+      // CONTATO mas não achou negócio nenhum. Passar o id evita que a criação
+      // do negócio procure o contato de novo — e crie um duplicado quando o
+      // telefone está lá em outro formato.
+      const novoId = await vincularLeadAoBitrix({
+        ...lead, owner_id: finalOwner, bitrix_contato_id: opts.bitrixContatoId || null,
+      });
       if (novoId) lead.bitrix_id = novoId;
     } catch (e) {
       console.warn('[leads] criação no Bitrix falhou (o lead entrou mesmo assim):', e?.message);

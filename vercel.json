@@ -19,6 +19,9 @@
     "api/wa-send.js": {
       "maxDuration": 30
     },
+    "api/bitrix-sync.js": {
+      "maxDuration": 30
+    },
     "api/gloria-responder.js": {
       "maxDuration": 30
     },
@@ -29,6 +32,12 @@
       "maxDuration": 10
     }
   },
+  "crons": [
+    {
+      "path": "/api/wa-bitrix-digest",
+      "schedule": "0 9 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

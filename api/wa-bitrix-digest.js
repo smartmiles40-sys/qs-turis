@@ -29,8 +29,9 @@
 //       SUPABASE_SERVICE_ROLE_KEY
 // -----------------------------------------------------------------------------
 
-import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
+import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { comentarNoNegocio, bitrixConfigurado } from './_bitrixLead.js';
+import { getSupabaseUserId } from './_wa.js';
 
 const FUSO = 'America/Sao_Paulo';
 
@@ -110,8 +111,22 @@ export default async function handler(req, res) {
     res.setHeader('Allow', 'POST, GET');
     return res.status(405).json({ error: 'Use POST' });
   }
-  if (!segredoConfere(req.query?.secret, process.env.WA_WEBHOOK_SECRET)) {
-    return res.status(401).json({ error: 'segredo inválido' });
+  // TRÊS PORTAS, todas com credencial — e é de propósito que sejam três.
+  //
+  // Até 24/08 só existia a primeira, e a tabela de controle tinha ZERO linhas:
+  // o job estava no ar desde 20/08 e nunca rodou uma única vez, porque o
+  // "agendador externo" que o cabeçalho pressupunha não existia. É o mesmo modo
+  // de falha do vigia em 17/08 — silêncio parece "está tudo bem".
+  //
+  //   1. ?secret=…            na mão, ou agendador externo (reprocessar um dia)
+  //   2. Bearer CRON_SECRET   o cron da Vercel — a perna principal
+  //   3. Bearer <JWT>         o QS aberto na tela de alguém — a rede de segurança
+  const porSegredo = segredoConfere(req.query?.secret, process.env.WA_WEBHOOK_SECRET);
+  const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+  const porCron = segredoConfere(bearer, process.env.CRON_SECRET);
+  const userId = (porSegredo || porCron) ? null : await getSupabaseUserId(req.headers.authorization);
+  if (!porSegredo && !porCron && !userId) {
+    return res.status(401).json({ error: 'Não autorizado' });
   }
   if (!bitrixConfigurado()) {
     return res.status(200).json({ ok: false, motivo: 'BITRIX_WEBHOOK_BASE não configurada' });
@@ -126,6 +141,25 @@ export default async function handler(req, res) {
 
   const limite = Math.min(Math.max(Number(req.query?.limite) || 25, 1), 60);
   const { de, ate } = janelaUtc(dia);
+
+  // TRAVA DA CARONA. Cinco SDRs com o QS aberto batem aqui a cada 5 minutos;
+  // sem isto seriam cinco leituras de até 5000 mensagens por rodada. As pernas
+  // do cron e do segredo NÃO passam por aqui de propósito: quem chamou na mão
+  // quer que rode agora. Usa o `enviado_em` que a 0058 já tem — sem estado novo.
+  if (userId) {
+    try {
+      const ultimo = await rest(
+        `qs_wa_bitrix_digest?select=enviado_em&dia=eq.${encodeURIComponent(dia)}&order=enviado_em.desc&limit=1`
+      );
+      const em = ultimo?.[0]?.enviado_em ? Date.parse(ultimo[0].enviado_em) : 0;
+      if (em && Date.now() - em < 30 * 60_000) {
+        return res.status(200).json({ ok: true, dia, pulou: 'rodada recente' });
+      }
+    } catch {
+      // Não conseguir ler a trava não pode impedir a rodada — no pior caso ela
+      // roda de novo, e a UNIQUE (lead_id, dia) já garante que isso é inofensivo.
+    }
+  }
 
   try {
     // 1) Quem conversou nesse dia. Traz lead_id de todas as mensagens da janela
@@ -145,8 +179,13 @@ export default async function handler(req, res) {
     }
 
     // 2) Tira quem já foi enviado nesse dia (a idempotência da 0058).
+    //
+    // `erro=is.null` é o que separa "foi" de "tentou e falhou". Sem esse filtro,
+    // uma recusa passageira do Bitrix gravava a linha com o erro preenchido, e a
+    // partir dali o lead era pulado PRA SEMPRE — a conversa daquele dia nunca
+    // mais chegava no card, sem nenhum sinal de que faltava.
     const jaForam = await rest(
-      `qs_wa_bitrix_digest?select=lead_id&dia=eq.${encodeURIComponent(dia)}&limit=5000`
+      `qs_wa_bitrix_digest?select=lead_id&dia=eq.${encodeURIComponent(dia)}&erro=is.null&limit=5000`
     );
     for (const r of (jaForam || [])) porLead.delete(r.lead_id);
 
@@ -190,19 +229,25 @@ export default async function handler(req, res) {
       const commentId = await comentarNoNegocio(lead.bitrix_id, texto);
 
       try {
-        await insert('qs_wa_bitrix_digest', {
-          lead_id: lead.id,
-          dia,
-          bitrix_deal_id: String(lead.bitrix_id),
-          mensagens: mensagens.length,
-          erro: commentId ? null : 'comentário não foi aceito pelo Bitrix',
-        }, { returning: false });
+        // UPSERT, não INSERT. Agora que a falha é reprocessável (o passo 2 só
+        // pula quem foi sem erro), a segunda tentativa encontra a linha da
+        // primeira: com INSERT ela bateria na UNIQUE, o 23505 seria engolido
+        // como "já existia" e o `erro` ficaria gravado pra sempre. Com o
+        // merge-duplicates, o sucesso LIMPA o erro da tentativa anterior.
+        await rest('qs_wa_bitrix_digest?on_conflict=lead_id,dia', {
+          method: 'POST',
+          prefer: 'resolution=merge-duplicates,return=minimal',
+          body: {
+            lead_id: lead.id,
+            dia,
+            bitrix_deal_id: String(lead.bitrix_id),
+            mensagens: mensagens.length,
+            enviado_em: new Date().toISOString(),
+            erro: commentId ? null : 'comentário não foi aceito pelo Bitrix',
+          },
+        });
       } catch (e) {
-        // 23505 = já existia (outra perna passou aqui no mesmo segundo). É o
-        // comportamento esperado da UNIQUE, não um erro.
-        if (!/23505|duplicate key/i.test(String(e?.message))) {
-          console.warn('[wa-digest] não deu pra marcar o envio:', e?.message);
-        }
+        console.warn('[wa-digest] não deu pra marcar o envio:', e?.message);
       }
 
       if (commentId) enviados++; else falhas++;

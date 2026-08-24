@@ -32,7 +32,7 @@ export function bitrixConfigurado() {
   return !!base();
 }
 
-async function bx(metodo, params = {}, timeoutMs = 8_000) {
+export async function bx(metodo, params = {}, timeoutMs = 8_000) {
   const url = `${base()}/${metodo}.json`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -97,13 +97,28 @@ async function responsavelNoBitrix(ownerId) {
 
 // ── Contato ─────────────────────────────────────────────────────────────────
 
-/** Acha o contato pelo telefone; cria se não existir. Devolve o ID ou null. */
-async function acharOuCriarContato({ nome, telefone, email }) {
+/**
+ * Acha o contato pelo telefone; cria se não existir. Devolve o ID ou null.
+ *
+ * `contatoConhecido` é o atalho: quem já perguntou ao Bitrix (o wa-webhook,
+ * pelo `procurarNegocioPorTelefone`) passa o id que achou e NÃO paga a busca de
+ * novo. Antes esse id era descartado e a busca recomeçava aqui — com UM formato
+ * de telefone só, enquanto a de lá tentava oito. Quando o Bitrix guardava o
+ * número em outro formato (o caso listado em 18/08), o contato "não existia" e
+ * nascia um DUPLICADO ao lado do original.
+ */
+async function acharOuCriarContato({ nome, telefone, email, contatoConhecido }) {
+  if (contatoConhecido) return String(contatoConhecido);
+
   const fone = String(telefone || '').replace(/\D/g, '');
   if (fone) {
     try {
-      // Mesma busca que o Bitrix usa pra apontar duplicado no painel.
-      const dup = await bx('crm.duplicate.findbycomm', { entity_type: 'CONTACT', type: 'PHONE', values: [fone] });
+      // Mesma busca que o Bitrix usa pra apontar duplicado no painel — e com as
+      // MESMAS variantes do procurarNegocioPorTelefone (com 55, sem 55, com e
+      // sem o 9 do celular). O findbycomm aceita a lista inteira de uma vez.
+      const dup = await bx('crm.duplicate.findbycomm', {
+        entity_type: 'CONTACT', type: 'PHONE', values: variantesDeTelefone(telefone),
+      });
       const achado = Array.isArray(dup?.CONTACT) ? dup.CONTACT[0] : null;
       if (achado) return achado;
     } catch (e) {
@@ -225,7 +240,9 @@ export async function criarNegocioParaLead(lead) {
   if (!bitrixConfigurado() || !lead?.id) return null;
 
   const nome = lead.full_name || [lead.first_name, lead.last_name].filter(Boolean).join(' ') || null;
-  const contatoId = await acharOuCriarContato({ nome, telefone: lead.phone, email: lead.email });
+  const contatoId = await acharOuCriarContato({
+    nome, telefone: lead.phone, email: lead.email, contatoConhecido: lead.bitrix_contato_id,
+  });
   const assignedTo = await responsavelNoBitrix(lead.owner_id);
 
   const campos = {

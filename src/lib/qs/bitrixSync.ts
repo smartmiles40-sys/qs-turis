@@ -67,7 +67,12 @@ export function notifyBitrix(event: BitrixSyncEvent, payload: BitrixSyncPayload)
         body: JSON.stringify({ event, ...payload }),
         keepalive: true,
       });
-      const json = (await res.json().catch(() => null)) as { success?: boolean; code?: string } | null;
+      const json = (await res.json().catch(() => null)) as {
+        success?: boolean;
+        code?: string;
+        /** "n8n HTTP 403", "bitrix-recusou", … — é o que diz QUEM recusou. */
+        error?: string;
+      } | null;
 
       if (json?.code === "not_configured") {
         if (!warnedNotConfigured) {
@@ -78,7 +83,16 @@ export function notifyBitrix(event: BitrixSyncEvent, payload: BitrixSyncPayload)
       }
       if (!res.ok || !json?.success) {
         console.warn(`[bitrixSync] "${event}" falhou:`, res.status, json);
-        notifyError("O Bitrix não recebeu esta atualização. O QS salvou normalmente — atualize o negócio no Bitrix manualmente.");
+        // A mensagem diz QUEM recusou. A antiga culpava o Bitrix sempre — e em
+        // agosto o Bitrix estava bem: quem devolvia 403 era o n8n, com os
+        // endereços registrados num workflow antigo. Diagnóstico começou no
+        // lugar errado por causa deste texto.
+        const erro = String(json?.error ?? "");
+        notifyError(
+          erro.startsWith("n8n ")
+            ? "A automação recusou esta atualização (o Bitrix não chegou a ser chamado). O QS salvou normalmente — atualize o negócio no Bitrix manualmente."
+            : "O Bitrix não recebeu esta atualização. O QS salvou normalmente — atualize o negócio no Bitrix manualmente."
+        );
       }
     } catch (err) {
       console.warn(`[bitrixSync] "${event}" falhou:`, err);

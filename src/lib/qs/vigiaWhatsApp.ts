@@ -64,6 +64,30 @@ async function baterNaCadenciaDaGloria(token: string): Promise<void> {
   }
 }
 
+/**
+ * O RESUMO DIÁRIO DO WHATSAPP NO CARD DO BITRIX TAMBÉM PEGA CARONA.
+ *
+ * Mesma história das outras duas: a rota existe desde 20/08 e, medido em 24/08,
+ * a tabela de controle tinha ZERO linhas — nunca rodou, porque dependia de um
+ * agendador externo que ninguém chegou a criar. Agora a perna principal é o cron
+ * da Vercel (6h da manhã) e esta aqui é a rede de segurança, pro caso de ele
+ * falhar calado como o UptimeRobot falhou em 17/08.
+ *
+ * A trava de 30 minutos mora no servidor: cinco abas abertas não viram cinco
+ * rodadas, e a UNIQUE (lead, dia) já torna repetir inofensivo.
+ */
+async function baterNoResumoDoBitrix(token: string): Promise<void> {
+  try {
+    await fetch("/api/wa-bitrix-digest", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+  } catch {
+    /* rede oscilando não é problema do resumo */
+  }
+}
+
 async function verificar(): Promise<void> {
   try {
     const { data } = await supabase.auth.getSession();
@@ -72,6 +96,7 @@ async function verificar(): Promise<void> {
     if (!token) return;
 
     void baterNaCadenciaDaGloria(token);
+    void baterNoResumoDoBitrix(token);
 
     const r = await fetch("/api/wa-vigia", {
       headers: { Authorization: `Bearer ${token}` },

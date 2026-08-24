@@ -583,7 +583,12 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
   // "Reunião — Fulano" é o título que o sistema monta sozinho quando ninguém
   // escreveu nada: não descreve produto nenhum e só sujaria o campo do Bitrix.
   const ehTituloAutomatico = !produto || /^reuni[ãa]o\s*[—–-]/i.test(produto);
-  if (produto && !ehTituloAutomatico && input.lead_bitrix_id) {
+  // Sem `&& input.lead_bitrix_id`: o servidor resolve o bitrix_id a partir do
+  // lead_id e ignora o do cliente. Exigir o campo aqui era a MESMA armadilha já
+  // corrigida dentro do notifyBitrix — a Agenda do Dia carrega reuniões sem o
+  // embed do lead, então o "Produto (Descritivo da Reunião)" nunca chegava no
+  // card quando o agendamento saía por ali.
+  if (produto && !ehTituloAutomatico) {
     notifyBitrix("reuniao-campos", {
       lead_id: input.lead_id,
       bitrix_id: input.lead_bitrix_id,
@@ -1112,6 +1117,29 @@ export async function reagendarReuniao(input: {
   if (input.closerId && input.closerId !== meeting.closer_id) {
     await transferirLeadProCloser(nova.lead_id, input.closerId, input.closerNome);
   }
+
+  // O CARD PRECISA SABER QUE A REUNIÃO MUDOU DE HORÁRIO, não só que houve um
+  // reagendamento. Faltava este aviso: o `reuniao-campos` acima grava a data do
+  // reagendamento, mas quem preenche horário, link do Meet, e-mail do cliente e
+  // responsável é o evento `reuniao` — e ele nunca era disparado por aqui. O
+  // card ficava mostrando o horário e o link da reunião VELHA, e a linha nova
+  // nunca era marcada como sincronizada (14 reuniões "reagendada" só em agosto).
+  notifyBitrix("reuniao", {
+    lead_id: nova.lead_id,
+    meeting_id: nova.id,
+    bitrix_id: meeting.lead?.bitrix_id,
+    full_name: nova.lead_name ?? meeting.lead_name ?? null,
+    title: nova.title,
+    scheduled_at: nova.scheduled_at,
+    duration_min: nova.duration_min,
+    location: nova.location,
+    meeting_link: nova.meeting_link,
+    notes: nova.notes,
+    scheduled_by: nova.scheduled_by,
+    meeting_owner: nova.meeting_owner,
+    client_email: nova.client_email,
+    booking_date: nova.booking_date,
+  });
 
   return { ok: true, meeting: nova };
 }

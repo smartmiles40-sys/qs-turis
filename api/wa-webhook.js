@@ -185,6 +185,11 @@ async function nascerDoWhatsApp({ phone, nome, direcao, inboxId }) {
     // Cliente que já está no Bitrix entra sem cadência (ver o porquê no
     // _leads.js). Gente nova de verdade entra na cadência padrão.
     semCadencia: !!noBitrix?.dealId,
+    // Contato que existe no Bitrix SEM negócio: o id vai junto pra que o
+    // negócio novo seja aberto no contato que já está lá, em vez de nascer um
+    // contato duplicado ao lado (a busca daqui tenta 8 formatos de telefone; a
+    // de dentro do crm.deal.add tentava um só).
+    bitrixContatoId: noBitrix?.contatoId || null,
   });
   if (!lead) return null;
 

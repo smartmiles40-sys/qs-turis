@@ -95,3 +95,50 @@ concluída pelo SDR move.
 
 Consequência: se o 1º contato acontece pelo canal aberto, quem move o card é o
 lado do **QS** (`qs-primeiro-contato`), não este workflow.
+
+---
+
+## Os 403 do n8n, e por que 3 eventos saíram de lá (24/08/2026)
+
+Sintoma: o card nunca saía de "Novo Lead" quando a SDR concluía a primeira
+atividade. Nos logs da Vercel, em 17 dias:
+
+| evento | 403 do n8n | chegou no Bitrix? |
+|---|---|---|
+| `primeiro-contato` | 227 | nunca |
+| `nota` | 257 | nunca |
+| `perdido` | 33 | nunca |
+| `reuniao` | 2 | sim — 71 reuniões sincronizadas |
+
+**A pista é a linha da reunião.** Os cinco eventos saem do MESMO código, na
+mesma rota, com os MESMOS headers — `bitrix-sync.js` não diferencia um do outro.
+Header igual com resultado diferente não é credencial errada: é **outro dono do
+endereço**. Existiam dois workflows declarando `qs-nota`, `qs-primeiro-contato`,
+`qs-perdido`, `qs-ganho` e `qs-reuniao`; o n8n registra UM dono por path, e as
+cópias antigas ficaram com três deles, com outra credencial.
+
+Diagnóstico em 1 minuto: se um evento passa e outro não, **não mexa na
+credencial** — procure workflow duplicado (n8n → Workflows, e Executions pra ver
+sob QUAL workflow a execução aparece).
+
+Havia ainda um segundo defeito no ramo da nota: o nó `Config Nota` é um Set sem
+"Include Other Input Fields", então descartava o corpo do webhook, e o
+`Comentario da nota` lia `$json.body.bitrix_id` — sempre `undefined`. Mesmo com
+o 403 resolvido, a nota não chegaria.
+
+### O que mudou
+
+`primeiro-contato`, `nota` e `perdido` agora vão **direto ao Bitrix** pelo
+`/api/bitrix-sync` (`BITRIX_WEBHOOK_BASE`), sem n8n — mesma decisão do
+`reuniao-campos` desde 14/08. Regras preservadas: o 1º contato só move quem
+ainda está em `C25:PREPAYMENT_INVOIC`, e o perdido só mexe na coluna se o
+negócio estiver mesmo no funil 25 (mandar `C25:LOSE` pra um card de outro funil
+o arrasta pra fora do kanban de quem cuida dele).
+
+`ganho` e `reuniao` continuam no n8n: o ganho depende de uma coluna que ninguém
+decidiu (STAGE_GANHO vazio) e a reunião depende do catálogo de campos (0042).
+
+**Observabilidade:** `qs_leads.bitrix_status_synced` (coluna da 0006, sem uso
+desde que o sync virou por evento) passa a guardar o último evento de funil
+espelhado. É o que permite CONTAR quantos cards o robô moveu — a falta disso é a
+razão de 17 dias de 403 passarem despercebidos.

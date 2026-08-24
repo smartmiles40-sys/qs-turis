@@ -22,7 +22,8 @@
 // Sem N8N_SYNC_BASE → responde { code: "not_configured" } e o front ignora.
 // -----------------------------------------------------------------------------
 
-import { rest, segredoConfere } from './_supabaseAdmin.js';
+import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
+import { bx, comentarNoNegocio, bitrixConfigurado } from './_bitrixLead.js';
 
 // 'primeiro-contato' (2026-07-28): o SDR conclui a 1ª atividade no QS e o negócio
 // anda sozinho de "Novo lead" para "Follow-up 1" no Bitrix. Quem decide se move é
@@ -145,6 +146,140 @@ async function atualizarCamposBitrix(bitrixId, fields) {
   }
 }
 
+// ─── 1º CONTATO, NOTA e PERDIDO: direto no Bitrix, sem passar pelo n8n ───────
+//
+// POR QUE SAÍRAM DO n8n (medição de produção em 24/08). Em 17 dias, os logs da
+// Vercel acumularam 227 × "n8n respondeu 403 para primeiro-contato" e 257 ×
+// "403 para nota" — enquanto `reuniao`, que sai do MESMO código com os MESMOS
+// headers, passava (71 reuniões sincronizadas no período). Header igual com
+// resultado diferente só tem uma explicação: quem atendia esses endereços não
+// era o workflow que a gente editava, e sim uma cópia antiga registrada no
+// mesmo path, com outra credencial.
+//
+// Foi o TERCEIRO modo de falha do mesmo elo em três semanas — credencial
+// trocada (07/08), endereço disputado por dois workflows (24/08), e o nó
+// `Config Nota` que descartava o corpo do webhook e quebrava o comentário
+// mesmo quando a chamada entrava.
+//
+// Mover o card é um `crm.deal.get` + um `crm.deal.update`. Comentar é uma
+// chamada. Nada disso precisa de workflow — e sem workflow não existe header
+// pra divergir nem path pra disputar. É a mesma decisão (e o mesmo caminho) que
+// o `reuniao-campos` já usava desde 14/08.
+//
+// `ganho` e `reuniao` continuam no n8n de propósito: o ganho depende de uma
+// coluna que ninguém decidiu ainda (STAGE_GANHO vazio no fluxo) e a reunião
+// depende do catálogo de campos (0042), que é trabalho de workflow de verdade.
+const PRE_VENDAS = {
+  novo_lead:  'C25:PREPAYMENT_INVOIC',  // "Novo Lead - Aguardando resposta"
+  follow_up1: 'C25:UC_271QUB',          // "Follow-up 1"
+  perdido:    'C25:LOSE',               // "Leads perdidos"
+  categoria:  '25',                     // funil "Pré-Vendas - Comercial"
+};
+
+const EVENTOS_DIRETOS = new Set(['primeiro-contato', 'nota', 'perdido']);
+
+/** Lê o negócio no Bitrix. `null` = recusou ou não existe (nunca estoura). */
+async function lerNegocio(bitrixId) {
+  try {
+    return (await bx('crm.deal.get', { id: Number(bitrixId) }, 6_000)) || null;
+  } catch (err) {
+    console.error('[bitrix-sync] crm.deal.get', bitrixId, ':', err?.message);
+    return null;
+  }
+}
+
+/**
+ * O 1º contato move o card de "Novo Lead" para "Follow-up 1".
+ *
+ * A regra é a MESMA do n8n, copiada intacta: só anda quem AINDA está na
+ * primeira coluna. Não existe contador nem flag — da 2ª atividade em diante o
+ * evento chega, olha e não faz nada. É isso que torna o disparo idempotente e
+ * impede o robô de puxar PRA TRÁS um negócio que já avançou (Reunião, Ganho,
+ * Perdido).
+ */
+async function moverPrimeiroContato(bitrixId) {
+  const deal = await lerNegocio(bitrixId);
+  if (!deal) return { ok: false, code: 'bitrix-inacessivel' };
+  if (String(deal.STAGE_ID || '') !== PRE_VENDAS.novo_lead) {
+    return { ok: true, code: 'ja_saiu_de_novo_lead' };
+  }
+  try {
+    await bx('crm.deal.update', {
+      id: Number(bitrixId),
+      fields: { STAGE_ID: PRE_VENDAS.follow_up1 },
+      params: { REGISTER_SONET_EVENT: 'Y' },
+    }, 6_000);
+  } catch (err) {
+    console.error('[bitrix-sync] mover pra Follow-up 1:', err?.message);
+    return { ok: false, code: 'bitrix-recusou' };
+  }
+  return { ok: true, code: 'movido' };
+}
+
+/**
+ * Perdido: manda o card pra "Leads perdidos" e diz por quê.
+ *
+ * A GUARDA DE FUNIL importa. `C25:LOSE` só existe dentro do funil 25. Mandar
+ * essa etapa pra um negócio de OUTRO funil (o do closer, por exemplo) arrasta o
+ * card pra fora do lugar onde o time trabalha — some do kanban de quem estava
+ * cuidando dele. Fora do 25, a perda vira só um comentário na timeline, que é
+ * informação sem estrago.
+ */
+async function moverParaPerdido(bitrixId, motivo) {
+  const deal = await lerNegocio(bitrixId);
+  if (!deal) return { ok: false, code: 'bitrix-inacessivel' };
+
+  const noFunil25 = String(deal.CATEGORY_ID ?? '') === PRE_VENDAS.categoria;
+  if (noFunil25 && String(deal.STAGE_ID || '') !== PRE_VENDAS.perdido) {
+    try {
+      await bx('crm.deal.update', {
+        id: Number(bitrixId),
+        fields: { STAGE_ID: PRE_VENDAS.perdido },
+        params: { REGISTER_SONET_EVENT: 'Y' },
+      }, 6_000);
+    } catch (err) {
+      console.error('[bitrix-sync] mover pra Perdido:', err?.message);
+      return { ok: false, code: 'bitrix-recusou' };
+    }
+  }
+
+  await comentarNoNegocio(bitrixId,
+    `❌ Lead marcado como PERDIDO no QS.\nMotivo: ${motivo || 'não informado'}` +
+    (noFunil25 ? '' : '\n(a coluna não foi alterada: este negócio não está no funil de Pré-Vendas)'),
+    6_000);
+  return { ok: true, code: noFunil25 ? 'movido' : 'so_comentario' };
+}
+
+/**
+ * Carimba no lead o último evento de funil já espelhado no Bitrix.
+ *
+ * Reaproveita `qs_leads.bitrix_status_synced`, criada pela 0006 pro modelo
+ * antigo de polling e sem uso desde que o sync virou por evento. Serve a duas
+ * coisas: (1) o 1º contato de um lead já espelhado nem consulta o Bitrix, o que
+ * mata a rajada da conclusão em lote — que dispara um evento POR TAREFA num
+ * CRM que aceita ~2 req/s; (2) dá pra CONTAR quantos leads o robô moveu, que
+ * era exatamente o que faltava: o caminho antigo não escrevia nada de volta, e
+ * por isso ninguém percebeu 17 dias de 403.
+ */
+async function marcarFunilSincronizado(leadId, valor) {
+  try {
+    await rest(`qs_leads?id=eq.${encodeURIComponent(leadId)}`, {
+      method: 'PATCH', body: { bitrix_status_synced: valor }, prefer: 'return=minimal',
+    });
+  } catch (err) {
+    console.warn('[bitrix-sync] não deu pra marcar o lead', leadId, ':', err?.message);
+  }
+}
+
+/** Deixa no histórico do lead o rastro de que o card andou (best-effort). */
+async function anotarNoLead(leadId, corpo, tags) {
+  try {
+    await insert('qs_notes', { lead_id: leadId, author_id: null, body: corpo, tags }, { returning: false });
+  } catch (err) {
+    console.warn('[bitrix-sync] nota do movimento falhou (segue):', err?.message);
+  }
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
@@ -176,14 +311,18 @@ async function getSupabaseUserId(authHeader) {
   }
 }
 
-/** Este usuário pode mexer neste lead? Mesma regra da RLS (0007/0022). */
-async function podeMexerNoLead(userId, leadId) {
-  const [users, leads] = await Promise.all([
-    rest(`qs_users?select=role,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`),
-    rest(`qs_leads?select=owner_id&id=eq.${encodeURIComponent(leadId)}&limit=1`),
-  ]);
+/**
+ * Este usuário pode mexer neste lead? Mesma regra da RLS (0007/0022).
+ *
+ * Recebe o lead JÁ LIDO. Antes esta função buscava `qs_leads` por conta própria
+ * e o handler buscava a MESMA linha logo depois pro `bitrix_id` — duas idas ao
+ * PostgREST pro mesmo lead, numa rota que tinha 10s no total. O
+ * "Task timed out after 10 seconds" apareceu 360 vezes em agosto, com esta rota
+ * na lista.
+ */
+async function podeMexerNoLead(userId, lead) {
+  const users = await rest(`qs_users?select=role,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
   const user = (Array.isArray(users) && users[0]) || null;
-  const lead = (Array.isArray(leads) && leads[0]) || null;
   if (!user || user.is_active === false) return { ok: false, reason: 'usuario-invalido' };
   if (!lead) return { ok: false, reason: 'lead-inexistente' };
   if (user.role === 'admin' || user.role === 'gestor' || user.role === 'closer') return { ok: true };
@@ -225,10 +364,23 @@ export default async function handler(req, res) {
   // de um lead que não é dele — e forjar closed_value junto. Agora a posse é
   // conferida no banco, com a mesma regra da RLS. O caminho do segredo interno
   // (n8n) segue sem essa checagem, de propósito: lá não existe "usuário".
+  // UMA leitura do lead atende os três usos: a posse, o bitrix_id e a marca do
+  // funil. Eram duas antes, pro mesmo lead, na mesma requisição.
+  let lead = null;
+  try {
+    const rows = await rest(
+      `qs_leads?select=owner_id,bitrix_id,bitrix_status_synced&id=eq.${encodeURIComponent(leadId)}&limit=1`
+    );
+    lead = (rows && rows[0]) || null;
+  } catch (err) {
+    console.error('[bitrix-sync] falha ao ler o lead', leadId, ':', err?.message);
+    return res.status(502).json({ success: false, error: 'Falha ao consultar o lead' });
+  }
+
   if (userId) {
     let posse;
     try {
-      posse = await podeMexerNoLead(userId, leadId);
+      posse = await podeMexerNoLead(userId, lead);
     } catch (err) {
       console.error('[bitrix-sync] falha ao checar posse do lead', leadId, ':', err?.message);
       return res.status(502).json({ success: false, error: 'Falha ao validar o lead' });
@@ -240,14 +392,7 @@ export default async function handler(req, res) {
     }
   }
 
-  let serverBitrixId = null;
-  try {
-    const rows = await rest(`qs_leads?select=bitrix_id&id=eq.${encodeURIComponent(leadId)}&limit=1`);
-    serverBitrixId = (rows && rows[0] && rows[0].bitrix_id) || null;
-  } catch (err) {
-    console.error('[bitrix-sync] falha ao resolver bitrix_id do lead', leadId, ':', err?.message);
-    return res.status(502).json({ success: false, error: 'Falha ao consultar o lead' });
-  }
+  const serverBitrixId = (lead && lead.bitrix_id) || null;
   if (!serverBitrixId) {
     // Lead sem vínculo com o Bitrix (não veio de lá) — mesmo comportamento de
     // sempre: pula sem erro (o front já pulava quando não tinha bitrix_id).
@@ -274,6 +419,52 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: false, code: 'not_configured' });
     }
     return res.status(r.ok ? 200 : 502).json(r.ok ? { success: true } : { success: false, error: r.code });
+  }
+
+  // ── Caminho DIRETO ao Bitrix (sem n8n) ────────────────────────────────────
+  // Só quando o Bitrix está configurado. Sem BITRIX_WEBHOOK_BASE, cai no n8n
+  // como antes — nada regride num ambiente que ainda não tem a env.
+  if (EVENTOS_DIRETOS.has(event) && bitrixConfigurado()) {
+    if (event === 'nota') {
+      const corpo = String(payload.body || '').trim();
+      if (!corpo) return res.status(400).json({ success: false, error: 'nota sem corpo' });
+      const id = await comentarNoNegocio(serverBitrixId, `📝 QS Turis: ${corpo}`, 6_000);
+      return id
+        ? res.status(200).json({ success: true, code: 'comentado' })
+        : res.status(502).json({ success: false, error: 'bitrix-recusou' });
+    }
+
+    if (event === 'primeiro-contato') {
+      // Lead já espelhado nem consulta o Bitrix: é o que segura a rajada da
+      // conclusão em lote (um evento por tarefa) num CRM de ~2 req/s.
+      if (lead.bitrix_status_synced) {
+        return res.status(200).json({ success: true, code: 'ja_espelhado' });
+      }
+      const r = await moverPrimeiroContato(serverBitrixId);
+      if (!r.ok) return res.status(502).json({ success: false, error: r.code });
+
+      if (r.code === 'movido') {
+        await comentarNoNegocio(serverBitrixId,
+          '🤖 1º CONTATO FEITO (QS Turis) — negócio movido de "Novo Lead" para "Follow-up 1".' +
+          `\nCanal: ${payload.canal || '-'}` +
+          `\nDesfecho: ${payload.desfecho || '-'}` +
+          `\nSDR: ${payload.sdr || '-'}`,
+          6_000);
+        await anotarNoLead(leadId,
+          '🤖 Bitrix: card movido de "Novo Lead" para "Follow-up 1" (1º contato).',
+          ['bitrix', 'primeiro-contato']);
+      }
+      // Carimba inclusive quando o card já tinha saído da coluna: a resposta do
+      // Bitrix não muda, e perguntar de novo a cada atividade é desperdício.
+      await marcarFunilSincronizado(leadId, 'primeiro-contato');
+      return res.status(200).json({ success: true, code: r.code });
+    }
+
+    // perdido
+    const r = await moverParaPerdido(serverBitrixId, payload.loss_reason);
+    if (!r.ok) return res.status(502).json({ success: false, error: r.code });
+    await marcarFunilSincronizado(leadId, 'perdido');
+    return res.status(200).json({ success: true, code: r.code });
   }
 
   const base = (process.env.N8N_SYNC_BASE || '').trim().replace(/\/+$/, '');
