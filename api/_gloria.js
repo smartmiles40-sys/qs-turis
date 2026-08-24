@@ -155,6 +155,23 @@ export async function avisarGloria({
       }),
       signal: ctrl.signal,
     });
+    // 403 AQUI NAO CRIA EXECUCAO NENHUMA NO n8n, e ate 24/08 nao deixava rastro
+    // aqui tambem — o retorno ia pro corpo da resposta do webhook e ninguem le
+    // corpo de webhook. O sintoma era "nao chega nada no n8n", que parece "o QS
+    // nao chamou". Custou duas horas em 21/08 e mais duas em 24/08, as duas
+    // vezes pela credencial `Header Auth account` do n8n nao bater com o
+    // GLORIA_SECRET da Vercel. Agora grita.
+    if (!r.ok) {
+      console.error(
+        `[gloria] o n8n RECUSOU o aviso: HTTP ${r.status}. ` +
+        (r.status === 403
+          ? 'A credencial do webhook no n8n nao bate com o GLORIA_SECRET da Vercel. ' +
+            'Confira o header (x-gloria-secret) e o valor nos DOIS lados.'
+          : r.status === 404
+            ? 'O workflow esta INATIVO ou a GLORIA_WEBHOOK_URL esta errada.'
+            : 'Veja a execucao no n8n.')
+      );
+    }
     return { ok: r.ok, status: r.status };
   } catch (e) {
     console.warn('[gloria] não consegui avisar o n8n:', e?.name === 'AbortError' ? 'timeout' : e?.message);
