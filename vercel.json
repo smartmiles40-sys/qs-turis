@@ -4,6 +4,12 @@
     "api/wa-send-media.js": {
       "maxDuration": 60
     },
+    "api/wa-webhook.js": {
+      "maxDuration": 30
+    },
+    "api/wa-vigia.js": {
+      "maxDuration": 30
+    },
     "api/wa-history.js": {
       "maxDuration": 60
     },
