@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { setMeetingStatus, setMeetingSal, deleteMeeting, type DesfechoCompleto } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, deleteMeeting, gerarSalaMeet, avisarBitrixDaSala, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
 import BriefingDoLead from "./BriefingDoLead";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
@@ -80,6 +80,7 @@ export default function MeetingDetailModal({
   // 17/08). Perguntamos aqui, na hora do desfecho, porque é o único momento em
   // que o closer tem os dois na cabeça — depois vira campo em branco pra sempre.
   const [fechando, setFechando] = useState<"realizada" | "no_show" | null>(null);
+  const [criandoSala, setCriandoSala] = useState(false);
 
   useEffect(() => {
     void getSetting<string[]>("sal_motivos").then((lista) => {
@@ -150,6 +151,39 @@ export default function MeetingDetailModal({
     }
     notifySuccess(alvo ? `Lead ${alvo} pelo especialista.` : "SAL desmarcado.");
     onChanged();
+  }
+
+  /**
+   * Cria a sala do Meet de uma reunião que ficou sem ela.
+   *
+   * É o MESMO caminho do agendamento (gerarSalaMeet → /api/agenda-meet), não um
+   * atalho: a rota grava o event_id, o link e a localização na própria reunião,
+   * e o Google manda o convite pro cliente. A única coisa que muda é o gatilho.
+   */
+  async function criarSala() {
+    if (!meeting || criandoSala) return;
+    setCriandoSala(true);
+    try {
+      const sala = await gerarSalaMeet(meeting);
+      if (!sala.link) {
+        // O aviso já vem pronto e dizendo o motivo (agenda desligada, n8n fora,
+        // sessão). O gerarSalaMeet também grava isso em calendar_error, então a
+        // próxima abertura do modal mostra o porquê sem precisar de log.
+        notifyError(sala.aviso ?? "Não consegui criar a sala do Meet.");
+        return;
+      }
+      // O card do Bitrix também precisa do link — é o mesmo aviso que o
+      // agendamento dispara depois de criar a sala.
+      avisarBitrixDaSala(meeting, {
+        bitrix_id: meeting.lead?.bitrix_id,
+        lead_name: meeting.lead_name,
+        link: sala.link,
+      });
+      notifySuccess("Sala criada e convite enviado pro cliente.");
+      onChanged();
+    } finally {
+      setCriandoSala(false);
+    }
   }
 
   async function excluir() {
@@ -242,6 +276,30 @@ export default function MeetingDetailModal({
               </svg>
               Entrar na reunião
             </a>
+          )}
+
+          {/* REUNIÃO SEM SALA. A sala é criada no momento do agendamento; quando
+              essa criação falha (em 21–24/08 a agenda ficou 3 dias devolvendo
+              403), a reunião fica salva e o cliente sem link — e não existia
+              nenhum jeito de tentar de novo a não ser reagendar, que também não
+              cria (o código só mexe no evento quando já existe um). Daí este
+              botão: refaz só a parte que falhou. */}
+          {!meeting.meeting_link && (meeting.status === "agendada" || meeting.status === "confirmada") && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
+              <p className="text-xs text-amber-900">
+                Esta reunião está <b>sem link</b> — o cliente não recebeu convite.
+              </p>
+              {meeting.calendar_error && (
+                <p className="mt-1 text-[11px] text-amber-700">Motivo: {meeting.calendar_error}</p>
+              )}
+              <button
+                onClick={criarSala}
+                disabled={criandoSala}
+                className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+              >
+                {criandoSala ? "Criando a sala…" : "Criar sala do Meet"}
+              </button>
+            </div>
           )}
 
           {meeting.notes && (
