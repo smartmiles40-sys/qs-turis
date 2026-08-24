@@ -22,6 +22,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import { useQsAuth } from "@/contexts/QsAuthContext";
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -108,6 +109,34 @@ const MOTIVOS: Record<string, string> = {
   saiu_do_pipeline: "tirado do pipeline",
 };
 
+// ── Lead de teste ───────────────────────────────────────────────────────────
+// A expedição de interesse NÃO é um campo: a view a extrai de `segment` pelo
+// que estiver entre colchetes (`[Islândia] - Tráfego`). O prompt da Glória
+// recebe esse valor, e sem ele ela abre a conversa sem saber de qual viagem se
+// está falando — que é justamente o que o teste precisa exercitar.
+const EXPEDICOES = [
+  "Islândia", "Egito", "Japão", "Tailândia", "Turquia e Grécia",
+  "Itália", "Peru", "Amazônia", "Japão e China",
+];
+
+/** O sufixo que marca o lead como teste no lugar de `Tráfego` / `Orgânico`. */
+const ORIGEM_TESTE = "Teste IA";
+
+/**
+ * Mesma regra do servidor (`waKey` em api/_wa.js): a comparação de telefone que
+ * sobrevive a qualquer formatação são os 8 dígitos finais.
+ */
+function ultimos8(raw: string): string {
+  return raw.replace(/\D/g, "").slice(-8);
+}
+
+/** Guarda no formato dos outros leads: só dígitos, com o 55 na frente. */
+function telefoneCanonico(raw: string): string {
+  const d = raw.replace(/\D/g, "");
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  return d;
+}
+
 // ── Página ──────────────────────────────────────────────────────────────────
 
 export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: string) => void }) {
@@ -121,6 +150,11 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
   const [achados, setAchados] = useState<Achado[]>([]);
   const [buscando, setBuscando] = useState(false);
   const [adicionando, setAdicionando] = useState<string | null>(null);
+
+  const { currentUser } = useQsAuth();
+  const [formTeste, setFormTeste] = useState(false);
+  const [teste, setTeste] = useState({ nome: "", telefone: "", expedicao: EXPEDICOES[0] });
+  const [salvandoTeste, setSalvandoTeste] = useState(false);
 
   const carregar = useCallback(async (inicial = false) => {
     if (inicial) setCarregando(true);
@@ -213,6 +247,79 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
       setAdicionando(null);
     }
   }, [carregar]);
+
+  /**
+   * CADASTRAR UM LEAD DE TESTE e já jogar no pipeline, numa tacada.
+   *
+   * O trabalho de verdade daqui é o passo 2, não o insert: **se já existe um
+   * lead com esse telefone, ele é REAPROVEITADO**. O webhook do WhatsApp casa a
+   * mensagem com o lead pelos 8 dígitos finais e desempata por `updated_at`
+   * (`findLeadByPhone`, api/_wa.js) — dois leads com o mesmo número brigam pela
+   * conversa, e a mensagem de teste cai naquele que por acaso foi tocado por
+   * último. Quem estivesse testando veria a Glória "não responder" sem nunca
+   * descobrir que a conversa foi parar no lead gêmeo.
+   *
+   * O dono é quem cadastrou, de propósito: sem `owner_id` o gatilho de rodízio
+   * (0008) entrega o lead de teste pra uma SDR de verdade, que abre a fila e
+   * encontra um cliente que não existe.
+   */
+  const cadastrarTeste = useCallback(async () => {
+    const nome = teste.nome.trim();
+    const digitos = teste.telefone.replace(/\D/g, "");
+    if (nome.length < 2) { notifyError("Dê um nome ao lead de teste."); return; }
+    if (digitos.length < 10) { notifyError("Telefone incompleto — precisa de DDD + número."); return; }
+
+    setSalvandoTeste(true);
+    try {
+      // 1. Esse telefone já é de alguém?
+      const chave = ultimos8(digitos);
+      const { data: existentes } = await supabase
+        .from("qs_leads")
+        .select("id, full_name, phone, status")
+        .ilike("phone", `%${chave}%`)
+        .order("updated_at", { ascending: false })
+        .limit(20);
+
+      const gemeo = ((existentes ?? []) as { id: string; full_name: string | null; phone: string | null; status: string }[])
+        .find((l) => ultimos8(l.phone ?? "") === chave);
+
+      if (gemeo) {
+        notifySuccess(`Esse número já é do lead "${gemeo.full_name || "sem nome"}" — reaproveitei em vez de criar um duplicado.`);
+        setFormTeste(false);
+        setTeste({ nome: "", telefone: "", expedicao: EXPEDICOES[0] });
+        await colocarNoPipeline(gemeo.id, gemeo.full_name || nome);
+        return;
+      }
+
+      // 2. Não existe: cadastra.
+      const partes = nome.split(" ");
+      const { data: criado, error } = await supabase
+        .from("qs_leads")
+        .insert({
+          full_name: nome,
+          first_name: partes[0],
+          last_name: partes.slice(1).join(" ") || null,
+          phone: telefoneCanonico(digitos),
+          segment: `[${teste.expedicao}] - ${ORIGEM_TESTE}`,
+          owner_id: currentUser?.id ?? null,
+          source: "manual",
+          status: "nao_iniciado",
+          arrived_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+
+      if (error || !criado) throw error ?? new Error("o banco não devolveu o lead criado");
+
+      setFormTeste(false);
+      setTeste({ nome: "", telefone: "", expedicao: EXPEDICOES[0] });
+      await colocarNoPipeline(criado.id, nome);
+    } catch (e: unknown) {
+      notifyError((e as { message?: string })?.message ?? "não deu pra cadastrar o lead de teste");
+    } finally {
+      setSalvandoTeste(false);
+    }
+  }, [teste, currentUser, colocarNoPipeline]);
 
   const tirarDoPipeline = useCallback(async (leadId: string, nome: string) => {
     try {
@@ -308,11 +415,78 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
 
       {/* ── Colocar lead no pipeline ──────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 px-4 md:px-6 py-4">
-        <p className="text-[13px] font-semibold text-gray-900 mb-1">Colocar um lead no atendimento por IA</p>
-        <p className="text-[12px] text-gray-500 mb-3">
-          As atividades pendentes do plano humano são encerradas — é o que se está pedindo ao mover o lead.
-          Reunião marcada e cliente ganho não entram.
-        </p>
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+          <div>
+            <p className="text-[13px] font-semibold text-gray-900 mb-1">Colocar um lead no atendimento por IA</p>
+            <p className="text-[12px] text-gray-500">
+              As atividades pendentes do plano humano são encerradas — é o que se está pedindo ao mover o lead.
+              Reunião marcada e cliente ganho não entram.
+            </p>
+          </div>
+          <button
+            onClick={() => setFormTeste((v) => !v)}
+            className="shrink-0 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+          >
+            {formTeste ? "Cancelar" : "Cadastrar lead de teste"}
+          </button>
+        </div>
+
+        {/* ── Lead de teste ─────────────────────────────────────────────────
+            Existe pra não obrigar quem está testando a sair da tela, ir em
+            Leads, cadastrar, voltar e procurar. E, principalmente, pra que o
+            teste use SEMPRE um lead de teste: colocar um cliente de verdade no
+            pipeline encerra as atividades pendentes dele na fila de uma SDR. */}
+        {formTeste && (
+          <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-3 max-w-lg">
+            <p className="text-[12px] text-gray-600 mb-3">
+              Use o seu próprio celular. <strong>Você</strong> tem que mandar a primeira mensagem pro número
+              oficial: fora da janela de 24h do WhatsApp só passa template aprovado, e a Glória não tem nenhum.
+            </p>
+            <div className="space-y-2">
+              <input
+                value={teste.nome}
+                onChange={(e) => setTeste((t) => ({ ...t, nome: e.target.value }))}
+                placeholder="Nome (ex.: Arthur Teste IA)"
+                className="w-full text-[13px] border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-800 focus:outline-none focus:border-blue-400"
+              />
+              <input
+                value={teste.telefone}
+                onChange={(e) => setTeste((t) => ({ ...t, telefone: e.target.value }))}
+                placeholder="WhatsApp com DDD (ex.: 11 99222-1156)"
+                inputMode="tel"
+                className="w-full text-[13px] border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-800 focus:outline-none focus:border-blue-400"
+              />
+              <label className="block">
+                <span className="text-[11px] text-gray-500">Expedição de interesse</span>
+                <select
+                  value={teste.expedicao}
+                  onChange={(e) => setTeste((t) => ({ ...t, expedicao: e.target.value }))}
+                  className="mt-0.5 w-full text-[13px] border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-800 focus:outline-none focus:border-blue-400"
+                >
+                  {EXPEDICOES.map((x) => <option key={x} value={x}>{x}</option>)}
+                </select>
+                <span className="text-[11px] text-gray-400">
+                  É o que a Glória vê como interesse do lead. Pergunte o preço dessa mesma expedição no teste —
+                  citar o valor da viagem errada é o erro mais caro que ela pode cometer.
+                </span>
+              </label>
+            </div>
+            <button
+              disabled={salvandoTeste}
+              onClick={() => void cadastrarTeste()}
+              className="mt-3 text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-60"
+              style={{ background: "#0147FF" }}
+            >
+              {salvandoTeste ? "cadastrando…" : "Cadastrar e colocar na IA"}
+            </button>
+            {!ligada && (
+              <p className="text-[11px] mt-2" style={{ color: "#9A3412" }}>
+                A IA está desligada (<code>gloria_ativa = false</code>) — o lead entra no quadro, mas ela não
+                responde até alguém ligar.
+              </p>
+            )}
+          </div>
+        )}
         <input
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
