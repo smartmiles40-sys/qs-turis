@@ -72,7 +72,11 @@ export function useQsAuth() {
 
 const MENU_ACCESS: Record<UserRole, string[]> = {
   admin: ["*"], // all
-  gestor: ["minha-agenda", "painel", "whatsapp", "cobertura", "leads", "cadencias", "reunioes", "dashboard", "analises", "lead-detail", "cadencia-criar", "cadencia-editar"],
+  // "atendimento-ia" entrou aqui em 24/08: a tela nasceu na 0060 com o item de
+  // menu, mas ficou de fora desta lista — ou seja, existia só pro admin, e quem
+  // precisa acompanhar o que a IA está fazendo com a carteira é justamente a
+  // coordenação. Ninguém notou porque o Bruno entra como admin.
+  gestor: ["minha-agenda", "painel", "whatsapp", "cobertura", "atendimento-ia", "leads", "cadencias", "reunioes", "dashboard", "analises", "lead-detail", "cadencia-criar", "cadencia-editar"],
   sdr: ["painel", "whatsapp", "cobertura", "leads", "reunioes", "dashboard", "lead-detail"],
   // O Painel entrou pro closer junto com a atividade de DESFECHO: sem ele, a
   // cobrança nasceria numa fila que o closer não enxerga.
