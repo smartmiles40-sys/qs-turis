@@ -31,3 +31,6 @@ dist-ssr
 n8n/*.local.*
 
 .vercel
+
+# despejo do corpus da Glória (conversa de cliente, nunca vai pro git)
+tmp/
