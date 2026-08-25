@@ -2,7 +2,8 @@
 
 Dois workflows, duas migrations, um script e duas rotas no QS. A Glória responde
 o lead no WhatsApp, tira dúvida com o conteúdo das expedições, faz as 5 perguntas
-de qualificação e devolve a conversa pro time.
+de qualificação, **marca a reunião na agenda do especialista** e devolve a
+conversa pro time quando não é caso de agendar.
 
 | Arquivo | Para quê |
 |---|---|
@@ -15,7 +16,12 @@ de qualificação e devolve a conversa pro time.
 | `../api/gloria-responder.js` | O n8n manda o que ela escreveu; **quem envia é o QS**. |
 | `../api/gloria-transferir.js` | Ela sai da conversa e o time entra (nota + tarefa). |
 | `../api/gloria-toques.js` | Roda a cadência: quem está devendo toque leva toque. |
+| `../api/gloria-agendar.js` | **Ela marca a reunião sozinha** — oferece dois horários e agenda. |
+| `../api/_agenda.js` | A agenda do lado do servidor: horários livres, rodízio e a reserva. |
 | `../src/components/sdr/gloria/PipelineIAPage.tsx` | A tela **Atendimento IA** (menu Execução). |
+| `GLORIA-VOZ.md` | A voz do time medida em 150 conversas reais — de onde o prompt dela sai. |
+| `gloria-prompt.txt` | O prompt dela solto, pra colar no nó do n8n (cópia gerada). |
+| `../scripts/gloria-corpus.mjs` | Refaz a medição da voz quando o time mudar de script. |
 
 ## Segunda-feira, na ordem
 
@@ -426,6 +432,63 @@ update qs_gloria_sessoes set ativa = false, motivo = 'desligada na mão'
 - **Áudio e imagem não são dela.** Mensagem sem texto nem chega no n8n.
 - **Se der erro, chama gente.** OpenAI fora do ar, resposta vazia ou envio
   recusado pelo QS viram tarefa pro dono do lead, não silêncio.
+
+## Ela marca a reunião (25/08)
+
+Até aqui ela levava a conversa até a porta e chamava o time. Agora ela abre a
+porta: **duas ferramentas novas** no workflow, `horarios_livres` e
+`agendar_reuniao`, as duas na rota `/api/gloria-agendar`.
+
+**A separação em duas ferramentas é o que torna isto seguro.** `horarios_livres`
+devolve DUAS opções reais da agenda, cada uma com um `id`; `agendar_reuniao` só
+aceita um desses ids de volta. O modelo nunca escreve um horário — ele devolve o
+que acabou de receber. Isso elimina de uma vez a classe de erro que mais assusta
+aqui: ela inventar "quinta às 15h" e marcar em cima de outra reunião, num sábado
+ou num horário que já passou. Se o id não existe mais na agenda, a rota recusa
+com um recado dizendo pra oferecer os dois horários novos.
+
+As regras dela são mais apertadas que as do time, de propósito (decisões do
+Bruno, 25/08):
+
+| | A IA | O time |
+|---|---|---|
+| Janela | 11h–18h, seg a sex | 07h–22h, todo dia |
+| Antecedência mínima | 3 horas | nenhuma |
+| Opções oferecidas | sempre 2, do mesmo especialista | a grade inteira |
+| Especialista | alternância fixa entre os ativos | escolhe na mão |
+
+A alternância fica em `qs_settings.gloria_ultimo_closer` — se morasse na memória
+do processo, cada função serverless nova começaria do zero e o primeiro da lista
+levaria tudo. E ela é uma PREFERÊNCIA, não uma promessa: se o da vez não tem
+horário no período que a pessoa pediu, quem tem leva. Agenda vazia por causa de
+rodízio seria trocar o cliente pela planilha.
+
+**O que uma reunião dela faz, além da linha em `qs_meetings`:** cria a atividade
+de confirmar presença e a de registrar o desfecho (as duas no colo do
+especialista), encerra a prospecção do lead (vira ganho, cadência encerrada),
+passa o lead pro especialista, cria a sala do Meet, avisa o Bitrix, escreve a
+nota com o BANT e desliga a IA naquela conversa. É o mesmo ritual do agendamento
+pela tela — refeito em service_role, porque a IA não tem sessão de usuário.
+
+**Duas coisas que essa falta de sessão quebrou** e que só apareceram na prova:
+
+- `qs_transferir_lead` começa com `auth.uid() is null → 'Sessão inválida'`. Foi
+  escrita pra tela. O `_agenda.js` refaz na mão as três coisas que ela faz
+  (dono, atividades em aberto, histórico em `qs_handovers`). Se um dia a função
+  mudar, este trecho muda junto.
+- `/api/agenda-meet` exige o JWT de um SDR logado, então a sala do Meet é pedida
+  direto ao webhook do n8n, com os dois nomes de header — igual à tela faz.
+
+**Fuso.** A função roda em UTC; "11h da manhã" é conta feita em
+`America/Sao_Paulo` com `Intl`, nunca com `getHours()` (que ali devolveria 8h).
+E o deslocamento é descoberto, não escrito na mão: no dia em que o Brasil voltar
+a ter horário de verão, isto continua certo.
+
+**Testar sem marcar nada:** o `MODO_TESTE` do Config vale para as duas
+ferramentas. `horarios_livres` mostra a agenda de verdade (ler é inofensivo) e
+`agendar_reuniao` devolve `marcaria: {...}` sem gravar linha nenhuma.
+
+---
 
 ## O que ela não faz (está no prompt, e é de propósito)
 
