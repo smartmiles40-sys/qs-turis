@@ -50,8 +50,13 @@ export default async function handler(req, res) {
     });
   }
 
-  const base = process.env.N8N_AGENDA_URL;
-  const secret = process.env.N8N_AGENDA_SECRET;
+  const base = (process.env.N8N_AGENDA_URL || '').trim();
+  // O .trim() NÃO é decoração. Segredo colado no painel da Vercel vem com
+  // espaço ou quebra de linha invisível com frequência alta demais, e o sintoma
+  // é 403 em tudo — indistinguível de credencial errada no n8n. A `portaria()`
+  // da Glória já trimava desde o primeiro dia; esta rota, não, e foi por isso
+  // que 5 dias de conserto do lado do n8n não mudaram nada.
+  const secret = (process.env.N8N_AGENDA_SECRET || '').trim();
   if (!base) {
     // Integração não ligada. NÃO é silêncio: em 05/08, três reuniões reais
     // nasceram sem evento no Google porque este caminho não deixava rastro — nem
@@ -172,8 +177,15 @@ export default async function handler(req, res) {
       // O webhook responde 200 até em falha; status != 2xx aqui é o próprio n8n
       // fora do ar, URL errada ou segredo recusado.
       if (!r.ok) {
-        await marcarErro(meeting.id, `n8n HTTP ${r.status}`);
-        return res.status(200).json({ ok: false, acao, meeting_id: meeting.id, codigo: r.status, erro: `n8n respondeu HTTP ${r.status}` });
+        // O QUE FOI MANDADO, junto do erro. "n8n HTTP 403" sozinho custou cinco
+        // dias: não dava pra saber se o segredo estava vazio, com espaço no fim
+        // ou simplesmente diferente do que o n8n espera. Vai o tamanho e a
+        // origem do valor, NUNCA o valor.
+        const usou = secret ? 'N8N_AGENDA_SECRET' : (alt ? 'N8N_SYNC_SECRET (fallback)' : 'NENHUM SEGREDO');
+        const pista = `n8n HTTP ${r.status} · mandei x-qs-agenda-secret de ${usou} (${(secret || alt || '').length} caracteres)`;
+        console.error('[agenda-meet]', acao, pista);
+        await marcarErro(meeting.id, pista);
+        return res.status(200).json({ ok: false, acao, meeting_id: meeting.id, codigo: r.status, erro: pista });
       }
     } finally {
       clearTimeout(timer);
