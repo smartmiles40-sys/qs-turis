@@ -61,6 +61,10 @@ export default async function handler(req, res) {
         motivo: body.motivo,
         resumo: body.resumo,
         temperatura: body.temperatura,
+        // Só é lido quando o motivo é `perdido`. Uma das quatro palavras que
+        // ela pode julgar (ver MOTIVOS_DE_PERDA em _gloria.js); qualquer outra
+        // coisa e o lead vira perdido sem motivo em vez de com motivo errado.
+        motivoPerda: body.motivo_perda ?? body.motivoPerda ?? null,
       });
     } catch (e) {
       if (/qs_gloria_pausar|schema cache|does not exist/i.test(String(e?.message))) {

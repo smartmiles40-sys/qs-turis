@@ -225,7 +225,9 @@ async function moverPrimeiroContato(bitrixId) {
  * cuidando dele. Fora do 25, a perda vira só um comentário na timeline, que é
  * informação sem estrago.
  */
-async function moverParaPerdido(bitrixId, motivo) {
+// Exportada porque a Glória também marca lead como perdido (api/_gloria.js) e
+// duplicar o mapa de etapas do funil 25 é como os dois lados divergem.
+export async function moverParaPerdido(bitrixId, motivo) {
   const deal = await lerNegocio(bitrixId);
   if (!deal) return { ok: false, code: 'bitrix-inacessivel' };
 

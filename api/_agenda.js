@@ -563,15 +563,30 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
 
   const tag = `meeting:${meeting.id}`;
   const quando = porExtenso(inicio);
+
+  // CONFIRMAR PRESENÇA É DO SDR, não do closer (decisão do Bruno, 25/08).
+  //
+  // Quem conversou com a pessoa foi ele, e era o buraco do desenho anterior: a
+  // Glória marcava, o lead passava pro closer e o SDR não ficava sabendo de
+  // nada — o lead só sumia da fila dele. Pior, ela promete na conversa que
+  // "ele vai te chamar por aqui", e não havia ninguém do outro lado dessa
+  // promessa.
+  //
+  // Ele continua enxergando o lead depois da transferência: `qs_owns_lead`
+  // (0050) inclui quem passou o lead adiante, e o handover é gravado logo
+  // abaixo com ele como `from_user_id`.
+  const sdr = lead.owner_id && lead.owner_id !== closer.id ? lead.owner_id : closer.id;
   await criarTarefa({
     lead_id: lead.id,
-    owner_id: closer.id,
+    owner_id: sdr,
     channel_type: 'whatsapp',
     priority: 'alta',
     scheduled_at: (await momentoDaConfirmacao(inicio, agora)).toISOString(),
     status: 'pendente',
     is_extra: true,
-    notes: `Confirmar presença na reunião de ${quando} com ${nome}. Agendada pela Glória (IA). Se não confirmar, remarque pela Agenda.`,
+    notes:
+      `A Glória agendou esta reunião: ${quando}, ${nome} com ${closer.name}. ` +
+      `Confirme a presença com o cliente. Se ele não confirmar, remarque pela Agenda.`,
     tags: ['reuniao', 'confirmar', 'gloria', tag],
   });
   await criarTarefa({

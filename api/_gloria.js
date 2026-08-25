@@ -208,7 +208,97 @@ export const MOTIVOS_DE_SAIDA = {
   // Ela mesma marcou a reunião (gloria-agendar). A conversa passa pro
   // especialista dono do horário, não pro SDR.
   agendada: 'a Glória agendou a reunião com o especialista',
+  // Desqualificado de vez: o lead vira PERDIDO no QS e o card sai do funil.
+  perdido: 'o lead se desqualificou e a Glória marcou como perdido',
 };
+
+/**
+ * Os motivos de perda que ela pode escolher SOZINHA.
+ *
+ * A tabela `qs_loss_reasons` tem sete, e ela só pode usar quatro: os que saem
+ * da boca do cliente na conversa. "Comprou com concorrente" e "Contato
+ * inválido" ela não tem como saber, e "Não respondeu" já é a cadência dela
+ * (motivo `sem_resposta`). Motivo de perda chutado é pior que motivo em
+ * branco, porque vira número no relatório e ninguém desconfia de número.
+ *
+ * A chave é a palavra que o modelo manda; o valor é o `label` da tabela. O id
+ * é procurado em tempo de execução de propósito: uuid escrito na mão aqui vira
+ * lead perdido com motivo errado no dia em que alguém reordenar a lista.
+ */
+const MOTIVOS_DE_PERDA = {
+  sem_orcamento: 'Sem orçamento no momento',
+  momento: 'Momento inadequado',
+  sem_interesse: 'Sem interesse',
+  fora_do_perfil: 'Fora do perfil (ICP)',
+};
+
+async function idDoMotivoDePerda(chave) {
+  const label = MOTIVOS_DE_PERDA[String(chave || '').trim().toLowerCase()];
+  if (!label) return null;
+  try {
+    const rows = await rest(`qs_loss_reasons?select=id&label=eq.${encodeURIComponent(label)}&limit=1`);
+    return rows?.[0]?.id ?? null;
+  } catch (e) {
+    console.warn('[gloria] motivo de perda não resolvido:', e?.message);
+    return null;
+  }
+}
+
+/**
+ * O lead se desqualificou de vez.
+ *
+ * Sem isto, `nao_qualificado` só pausava a IA e deixava o lead em prospecção
+ * para sempre: a fila do SDR enchia de gente que já tinha dito não, e o card
+ * ficava parado no funil do Bitrix. Agora fecha de verdade dos dois lados.
+ *
+ * Best-effort de cima a baixo. A sessão já foi pausada antes de chegar aqui, e
+ * é isso que importa; se o Bitrix estiver fora, o QS continua sendo a fonte da
+ * verdade e o card fica pra trás (visível em `bitrix_status_synced`).
+ */
+async function marcarPerdido(lead, chaveMotivo, resumo) {
+  const reasonId = await idDoMotivoDePerda(chaveMotivo);
+  const label = MOTIVOS_DE_PERDA[String(chaveMotivo || '').trim().toLowerCase()] || 'não informado';
+
+  try {
+    const patch = { status: 'perdido' };
+    if (reasonId) patch.loss_reason_id = reasonId;
+    await rest(
+      `qs_leads?id=eq.${encodeURIComponent(lead.id)}&status=not.in.(ganho,perdido)`,
+      { method: 'PATCH', prefer: 'return=minimal', body: patch }
+    );
+  } catch (e) {
+    console.error('[gloria] lead NÃO virou perdido:', e?.message);
+    return { ok: false, erro: e?.message };
+  }
+
+  // As atividades do plano humano morrem junto. As da reunião não: se existe
+  // reunião marcada, ela tem história própria e não é isto que a apaga.
+  try {
+    const pendentes = await rest(
+      `qs_tasks?select=id,tags&lead_id=eq.${encodeURIComponent(lead.id)}&status=eq.pendente`
+    );
+    for (const t of (Array.isArray(pendentes) ? pendentes : [])) {
+      if ((t.tags || []).some((g) => String(g).startsWith('meeting:'))) continue;
+      await rest(`qs_tasks?id=eq.${t.id}`, {
+        method: 'PATCH', prefer: 'return=minimal',
+        body: { status: 'ignorada', skip_reason: `Lead perdido pela Glória: ${label}` },
+      }).catch(() => {});
+    }
+  } catch (e) {
+    console.warn('[gloria] atividades seguem abertas no lead perdido:', e?.message);
+  }
+
+  if (lead.bitrix_id) {
+    try {
+      const { moverParaPerdido } = await import('./bitrix-sync.js');
+      await moverParaPerdido(lead.bitrix_id, `${label}${resumo ? ` — ${resumo}` : ''}`);
+    } catch (e) {
+      console.warn('[gloria] card do Bitrix não foi movido:', e?.message);
+    }
+  }
+
+  return { ok: true, motivo_perda: label };
+}
 
 /** A qualificação que ela já tinha juntado, em texto de gente. */
 export function blocoQualificacao(s) {
@@ -238,7 +328,7 @@ export function blocoQualificacao(s) {
  * cenário é o time ser avisado por outro caminho — e não a IA continuar
  * falando com alguém que pediu para falar com uma pessoa.
  */
-export async function devolverProTime({ leadId, motivo, resumo = '', temperatura = null, lead = null, teste = false }) {
+export async function devolverProTime({ leadId, motivo, resumo = '', temperatura = null, lead = null, teste = false, motivoPerda = null }) {
   const alvo = lead || (await buscarLead(leadId));
   if (!alvo) return { ok: false, motivo: 'lead_inexistente' };
 
@@ -251,6 +341,7 @@ export async function devolverProTime({ leadId, motivo, resumo = '', temperatura
       ok: true, teste: true,
       aviso: 'MODO TESTE — a IA continua ligada, nenhuma nota ou tarefa foi criada.',
       transferiria: { lead: { id: alvo.id, nome: alvo.first_name || alvo.full_name }, para: alvo.owner_id, motivo: razao, temperatura: temp, resumo: texto || null },
+      marcaria_perdido: razao === 'perdido' ? (MOTIVOS_DE_PERDA[String(motivoPerda||'').toLowerCase()] || 'motivo invalido') : undefined,
     };
   }
 
@@ -261,6 +352,15 @@ export async function devolverProTime({ leadId, motivo, resumo = '', temperatura
       method: 'POST',
       body: { p_lead: leadId, p_temperatura: temp },
     }).catch((e) => console.warn('[gloria] temperatura:', e?.message));
+  }
+
+  // PERDIDO fecha o lead dos dois lados. Vem DEPOIS do pausar, pela mesma razão
+  // de sempre: se qualquer coisa aqui falhar, o pior cenário é um lead que
+  // continua em prospecção — nunca uma IA que segue falando com quem já disse
+  // não.
+  let perda = null;
+  if (razao === 'perdido') {
+    perda = await marcarPerdido(alvo, motivoPerda, texto);
   }
 
   // A qualificação DEPOIS do pausar: assim a nota já sai com o que ela acabou
@@ -274,8 +374,9 @@ export async function devolverProTime({ leadId, motivo, resumo = '', temperatura
   }
 
   const corpoNota =
-    '🤖 Glória (IA) devolveu a conversa\n' +
+    (perda?.ok ? '🤖 Glória (IA) marcou este lead como PERDIDO\n' : '🤖 Glória (IA) devolveu a conversa\n') +
     `Motivo: ${MOTIVOS_DE_SAIDA[razao] || razao}` +
+    (perda?.ok ? `\nMotivo da perda: ${perda.motivo_perda}` : '') +
     (ses?.temperatura ? `\nTemperatura: ${ses.temperatura}` : '') +
     (ses?.toques ? `\nToques da cadência da IA: ${ses.toques}` : '') +
     (texto ? `\n\n${texto}` : '') +
@@ -289,29 +390,40 @@ export async function devolverProTime({ leadId, motivo, resumo = '', temperatura
     console.warn('[gloria] nota:', e?.message);
   }
 
-  // `is_extra` porque não faz parte do plano de nenhuma cadência — não pode
-  // contar como o toque do dia nem empurrar os próximos.
+  // LEAD PERDIDO NÃO GERA TAREFA. Cobrar contato de quem acabou de dizer não é
+  // exatamente o que entope a fila do SDR, e foi pra isso que este caminho
+  // passou a existir. A nota fica; a cobrança, não.
+  //
+  // Nos outros casos vai com `is_extra`, porque não faz parte do plano de
+  // nenhuma cadência: não pode contar como o toque do dia nem empurrar os
+  // próximos.
   let tarefaOk = false;
-  try {
-    await insert('qs_tasks', {
-      lead_id: leadId,
-      owner_id: alvo.owner_id ?? null,
-      channel_type: 'whatsapp',
-      priority: razao === 'qualificado' || razao === 'urgencia' ? 'alta' : 'media',
-      scheduled_at: new Date().toISOString(),
-      status: 'pendente',
-      is_extra: true,
-      notes: `Glória devolveu a conversa: ${MOTIVOS_DE_SAIDA[razao] || razao}`.slice(0, 500),
-      tags: ['gloria', razao],
-    }, { returning: false });
-    tarefaOk = true;
-  } catch (e) {
-    console.warn('[gloria] tarefa:', e?.message);
+  if (!perda?.ok) {
+    try {
+      await insert('qs_tasks', {
+        lead_id: leadId,
+        owner_id: alvo.owner_id ?? null,
+        channel_type: 'whatsapp',
+        priority: razao === 'qualificado' || razao === 'urgencia' ? 'alta' : 'media',
+        scheduled_at: new Date().toISOString(),
+        status: 'pendente',
+        is_extra: true,
+        notes: `Glória devolveu a conversa: ${MOTIVOS_DE_SAIDA[razao] || razao}`.slice(0, 500),
+        tags: ['gloria', razao],
+      }, { returning: false });
+      tarefaOk = true;
+    } catch (e) {
+      console.warn('[gloria] tarefa:', e?.message);
+    }
   }
 
-  await registrar(leadId, 'evento', texto || null, `transferida: ${razao}`, { notaOk, tarefaOk });
+  await registrar(leadId, 'evento', texto || null, `transferida: ${razao}`, { notaOk, tarefaOk, perdido: perda?.ok || undefined });
 
-  return { ok: true, lead_id: leadId, motivo: razao, nota: notaOk, tarefa: tarefaOk, owner_id: alvo.owner_id ?? null };
+  return {
+    ok: true, lead_id: leadId, motivo: razao, nota: notaOk, tarefa: tarefaOk,
+    owner_id: alvo.owner_id ?? null,
+    ...(perda?.ok ? { perdido: true, motivo_perda: perda.motivo_perda } : {}),
+  };
 }
 
 // ─── A CADÊNCIA DELA ─────────────────────────────────────────────────────────
