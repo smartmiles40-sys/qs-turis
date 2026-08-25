@@ -205,10 +205,13 @@ export const MOTIVOS_DE_SAIDA = {
   pacote_personalizado: 'o lead quer roteiro sob medida, e preço de personalizado é do especialista',
   // Fim da cadência da IA: ela deu os toques e o lead não voltou.
   sem_resposta: 'a cadência da IA terminou sem resposta do lead',
+  // Ela mesma marcou a reunião (gloria-agendar). A conversa passa pro
+  // especialista dono do horário, não pro SDR.
+  agendada: 'a Glória agendou a reunião com o especialista',
 };
 
 /** A qualificação que ela já tinha juntado, em texto de gente. */
-function blocoQualificacao(s) {
+export function blocoQualificacao(s) {
   if (!s) return '';
   const linhas = [
     ['Necessidade (perfil, por que o destino)', s.perfil_viajante],
@@ -332,6 +335,47 @@ async function salvarEstadoDaFila(valor) {
 }
 
 /**
+ * Pega a trava da rodada. Devolve true só pra QUEM PEGOU — e é o ponto todo.
+ *
+ * A trava antiga lia o carimbo e depois gravava. Em 25/08, às 8h25, três
+ * chamadas caíram no mesmo milissegundo (o webhook de uma mensagem que entrou +
+ * o QS abrindo em duas telas): as três leram o carimbo velho, as três acharam
+ * que eram a rodada da vez, e o mesmo lead levou o mesmo toque TRÊS vezes — em
+ * três redações diferentes, então nem a checagem de duplicata do responder
+ * segurou. Pior que o incômodo: cada rodada carimbou um toque, a cadência de 3
+ * virou 4, e o lead foi devolvido pro time 10 horas antes da hora tendo
+ * recebido 1 dos 3 toques.
+ *
+ * Agora quem decide é o Postgres, num UPDATE condicional na própria linha: duas
+ * chamadas simultâneas disputam a MESMA linha, o banco serializa, e a segunda
+ * reavalia o filtro contra o valor já carimbado pela primeira — não casa, volta
+ * zero linhas, não roda. Não dá pra fazer isso lendo antes e gravando depois.
+ */
+async function pegarATrava(minutos, estado) {
+  const corte = new Date(Date.now() - minutos * 60_000).toISOString();
+  const valor = { ...estado, rodadaEm: new Date().toISOString() };
+  try {
+    const linhas = await rest(
+      `qs_settings?key=eq.${CHAVE_FILA}` +
+      `&or=(value->>rodadaEm.is.null,value->>rodadaEm.lt."${corte}")`,
+      { method: 'PATCH', body: { value: valor, updated_at: valor.rodadaEm }, prefer: 'return=representation' }
+    );
+    if (Array.isArray(linhas) && linhas.length > 0) return true;
+  } catch (e) {
+    console.warn('[gloria] trava da fila:', e?.message);
+    return false; // Banco ruim não é hora de martelar lead.
+  }
+  // Zero linhas tem duas leituras: ou alguém pegou a trava agora, ou a chave
+  // nunca existiu. Só o segundo caso pode virar rodada.
+  const existe = await rest(`qs_settings?select=key&key=eq.${CHAVE_FILA}&limit=1`).catch(() => null);
+  if (Array.isArray(existe) && existe.length === 0) {
+    await salvarEstadoDaFila(valor);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Roda a cadência da IA: quem está devendo um toque leva o toque, quem chegou
  * ao fim volta pro time.
  *
@@ -352,12 +396,15 @@ export async function rodarFilaDeToques({ limite = 8, forcar = false, minutos = 
 
   const estado = await estadoDaFila();
   const idade = estado?.rodadaEm ? Date.now() - new Date(estado.rodadaEm).getTime() : Infinity;
-  if (!forcar && Number.isFinite(idade) && idade < minutos * 60_000) {
-    return { pulou: true, motivo: 'recente', idadeMs: idade };
+
+  // A trava é o carimbo, e ele vem ANTES de qualquer trabalho: quem não pegou,
+  // não roda. `forcar` (só pela porta do segredo) fura a espera, mas ainda
+  // carimba, senão duas forçadas juntas voltariam ao mesmo problema.
+  if (forcar) {
+    await salvarEstadoDaFila({ ...estado, rodadaEm: new Date().toISOString() });
+  } else if (!(await pegarATrava(minutos, estado))) {
+    return { pulou: true, motivo: 'recente', idadeMs: Number.isFinite(idade) ? idade : null };
   }
-  // Carimba ANTES de trabalhar: duas mensagens no mesmo segundo não podem virar
-  // duas rodadas.
-  await salvarEstadoDaFila({ ...estado, rodadaEm: new Date().toISOString() });
 
   let fila = [];
   try {

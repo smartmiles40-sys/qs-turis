@@ -205,15 +205,22 @@ export default async function handler(req, res) {
       }
 
       // Tempo de digitação entre um balão e outro. Nenhuma pausa antes do
-      // primeiro: o lead já esperou o n8n pensar.
-      if (i > 0) {
+      // primeiro que sai: o lead já esperou o n8n pensar.
+      if (enviadas.length > 0) {
         const espera = Math.min(Math.max(m.delay_ms, 800), Math.max(TETO_PAUSA_MS - gastoMs, 0));
         if (espera > 0) { await pausa(espera); gastoMs += espera; }
       }
 
-      // A assinatura vai só no PRIMEIRO balão, e no formato do time (*Nome* na
-      // primeira linha). Nos balões seguintes ela poluiria a conversa.
-      const texto = i === 0 ? `*Glória*\n${m.texto}` : m.texto;
+      // A assinatura vai só no PRIMEIRO balão QUE SAI, e no formato do time
+      // (*Nome* na primeira linha). Nos balões seguintes ela poluiria a
+      // conversa.
+      //
+      // "que sai", e não "de índice 0": o balão de reconhecimento dela ("Showw,
+      // Bruno ✈️") é o mesmo em toda conversa, então é justamente ele que a
+      // checagem de duplicata mais descarta. Medido em 24/08: três respostas
+      // saíram sem assinatura nenhuma porque o balão 1 tinha sido descartado e
+      // o balão 2 não é índice 0.
+      const texto = enviadas.length === 0 ? `*Glória*\n${m.texto}` : m.texto;
 
       let sent;
       try {
