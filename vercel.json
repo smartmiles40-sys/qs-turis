@@ -5,7 +5,7 @@
       "maxDuration": 60
     },
     "api/wa-webhook.js": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "api/wa-vigia.js": {
       "maxDuration": 30

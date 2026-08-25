@@ -29,6 +29,7 @@ import { procurarNegocioPorTelefone } from './_bitrixLead.js';
 import { createInboundLead } from './_leads.js';
 import { verificarSeVencido } from './_waAlerta.js';
 import { avisarGloria, rodarFilaDeToques } from './_gloria.js';
+import { transcrever, audioDaMensagem, transcricaoConfigurada } from './_transcrever.js';
 
 /**
  * O cliente apagou a mensagem no celular dele.
@@ -445,13 +446,44 @@ export default async function handler(req, res) {
     // Chatwoot (acontece o tempo todo) e faria a IA responder duas vezes.
     // Se ela deve ou não falar, quem decide é o banco — aqui é só o aviso.
     let gloria = null;
+    let transcrito = null;
     if (saved && directionOf(message) === 'in' && (!event || event === 'message_created')) {
+      // ── ÁUDIO VIRA TEXTO ANTES DE QUALQUER COISA ────────────────────────
+      // Sem isto a Glória é surda (ela desiste em `sem_texto`) e o SDR precisa
+      // ouvir um por um. A transcrição fica gravada na mensagem, então serve
+      // pro time todo, não só pra ela.
+      //
+      // Só quando NÃO veio texto junto: legenda escrita pelo cliente vale mais
+      // que transcrição, e transcrever nesse caso seria pagar por nada.
+      let paraGloria = message;
+      if (!String(message?.content || '').trim() && transcricaoConfigurada()) {
+        const url = audioDaMensagem(message);
+        if (url) {
+          const t = await transcrever(url);
+          if (t.texto) {
+            transcrito = t.texto;
+            paraGloria = { ...message, content: t.texto };
+            // Grava na própria mensagem. Direto, e não pela rpc
+            // `qs_wa_salvar_transcricao`: aquela exige `auth.uid()` e aqui não
+            // há usuário nenhum, é máquina falando com máquina.
+            await rest(
+              `qs_wa_messages?cw_message_id=eq.${encodeURIComponent(message.id)}`,
+              { method: 'PATCH', prefer: 'return=minimal', body: { transcricao: t.texto } }
+            ).catch((e) => console.warn('[wa-webhook] transcrição não gravada:', e?.message));
+          } else {
+            // Falhar aqui é o comportamento de sempre: sem texto, a IA não
+            // responde e a conversa fica com o humano. Mas fica dito por quê.
+            console.warn('[wa-webhook] áudio não transcrito:', t.erro);
+          }
+        }
+      }
+
       gloria = await avisarGloria({
-        lead, message, conversationId: conv.id ?? null, telefone: phone,
+        lead, message: paraGloria, conversationId: conv.id ?? null, telefone: phone,
       });
     }
 
-    return res.status(200).json({ ok: true, leadId: lead.id, novo: saved, tarefaConcluida: tarefa, reaberta, gloria });
+    return res.status(200).json({ ok: true, leadId: lead.id, novo: saved, tarefaConcluida: tarefa, reaberta, gloria, transcrito: transcrito ? transcrito.slice(0, 80) : undefined });
   } catch (e) {
     // Erro nosso: loga e responde 200 mesmo assim (ver cabeçalho do arquivo).
     console.error('[wa-webhook]', e?.message, e?.details || '');
