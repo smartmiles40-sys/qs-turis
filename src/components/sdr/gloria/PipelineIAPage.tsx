@@ -20,6 +20,7 @@
 // -----------------------------------------------------------------------------
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import type { DragEvent } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { useQsAuth } from "@/contexts/QsAuthContext";
@@ -122,6 +123,24 @@ function corDaTemperatura(t: string | null): { bg: string; text: string } | null
   }
 }
 
+/**
+ * De onde cada coluna VEM.
+ *
+ * Usada quando alguém tenta soltar um card numa coluna que não aceita. A
+ * resposta útil ali não é "não pode": é dizer que aquela coluna é consequência
+ * de uma coisa que aconteceu na conversa, e por isso não é um lugar onde se
+ * põe card.
+ */
+const PORQUE_A_COLUNA: Record<string, string> = {
+  nova: "o começo do atendimento",
+  qualificando: "quantas das 5 perguntas o lead já respondeu",
+  qualificada: "o lead ter respondido as 5",
+  em_follow_up: "a cadência estar tocando porque o lead sumiu",
+  transferida: "a IA ter entregado a conversa pro time",
+  com_o_time: "alguém do time ter respondido na conversa",
+  sem_resposta: "a cadência ter terminado sem o lead voltar",
+};
+
 // O `motivo` é escrito por quem desligou a sessão — banco, rota ou gatilho.
 // Aqui ele vira frase de gente.
 const MOTIVOS: Record<string, string> = {
@@ -172,6 +191,8 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
   const [passos, setPassos] = useState<Passo[]>([]);
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [placar, setPlacar] = useState<Placar | null>(null);
+  const [arrastando, setArrastando] = useState<string | null>(null);
+  const [alvo, setAlvo] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -292,6 +313,55 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
       setAdicionando(null);
     }
   }, [carregar]);
+
+  /**
+   * REABRIR: devolver um lead de uma coluna final para "Nova".
+   *
+   * É a mesma `qs_gloria_entrar_no_pipeline` que a busca usa, e isso não é
+   * economia de código, é a definição certa: "voltar pra Nova" É uma estadia
+   * nova. Ela liga a sessão, limpa o motivo, zera os toques e carimba
+   * `entrou_em = now()` — e esse carimbo é o que dá os 30 minutos de carência
+   * da 0061. Sem ele, um lead calado há 20h voltaria pro quadro e levaria o
+   * toque 3 (a despedida da cadência) no minuto seguinte, porque a fila conta
+   * pelo silêncio do lead, não pelo tempo de pipeline.
+   *
+   * A etapa não é escolhida por quem arrasta: ela é recalculada do que o lead
+   * já respondeu. Quem tinha 3 de 5 volta pra "Qualificando", não pra "Nova" —
+   * e está certo, porque a coluna é leitura do estado, não um lugar onde a
+   * gente guarda o card.
+   */
+  const reabrir = useCallback(async (leadId: string, nome: string) => {
+    await colocarNoPipeline(leadId, nome);
+  }, [colocarNoPipeline]);
+
+  /**
+   * ARRASTAR CARD, MAS SÓ PRO QUE EXISTE.
+   *
+   * Kanban comum guarda a coluna do card. Aqui não: a coluna é CALCULADA pela
+   * view a partir do estado real (a sessão está ligada? quantas respostas? quem
+   * falou por último?). Arrastar um card pra "Qualificada" não faria o lead ter
+   * respondido as 5 perguntas — faria a tela mentir, e no primeiro F5 o card
+   * voltaria pro lugar, o que é pior do que não deixar arrastar.
+   *
+   * Então soltar só vale onde existe uma AÇÃO por trás. Hoje é uma: "Nova",
+   * que reabre o atendimento. As outras recusam e dizem de onde a coluna vem —
+   * é a mesma informação que o `title` do cabeçalho dá, na hora em que a
+   * pessoa está perguntando.
+   */
+  const soltarEm = useCallback(async (coluna: string, e: DragEvent) => {
+    e.preventDefault();
+    setAlvo(null);
+    const leadId = e.dataTransfer.getData("text/lead");
+    const nome = e.dataTransfer.getData("text/nome") || "o lead";
+    setArrastando(null);
+    if (!leadId) return;
+    if (coluna === "nova") { await reabrir(leadId, nome); return; }
+    notifyError(
+      `"${COLUNAS.find((c) => c.id === coluna)?.label}" não é um lugar onde se põe o card: ela é ` +
+      `${PORQUE_A_COLUNA[coluna] ?? "calculada do estado do lead"}. Pra trazer ${nome} de volta pra IA, ` +
+      `solte em "Nova".`
+    );
+  }, [reabrir]);
 
   /**
    * CADASTRAR UM LEAD DE TESTE e já jogar no pipeline, numa tacada.
@@ -603,6 +673,13 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
       </div>
 
       {/* ── O quadro ──────────────────────────────────────────────────────── */}
+      {!carregando && linhas.length > 0 && (
+        <p className="text-[12px] text-gray-500 px-1">
+          As colunas são <strong className="text-gray-700">leitura do estado</strong>, não gavetas: elas saem do que
+          aconteceu na conversa. Por isso só dá pra arrastar um card de volta pra <strong className="text-gray-700">Nova</strong>,
+          que é a única que tem ação por trás — reabre o atendimento pela IA, zera os toques e dá 30 minutos de carência.
+        </p>
+      )}
       {carregando ? (
         <p className="text-[13px] text-gray-400 px-1">carregando o quadro…</p>
       ) : (
@@ -610,7 +687,23 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
           {COLUNAS.map((col) => {
             const cards = porColuna.get(col.id) ?? [];
             return (
-              <div key={col.id} className="shrink-0 w-[268px] bg-white rounded-xl border border-gray-200 flex flex-col">
+              <div
+                key={col.id}
+                onDragOver={(e) => {
+                  // preventDefault é o que AUTORIZA o drop. Só na "Nova": nas
+                  // outras o cursor continua de "não pode", que é a resposta
+                  // certa antes de a pessoa soltar.
+                  if (!arrastando || col.id !== "nova") return;
+                  e.preventDefault();
+                  setAlvo(col.id);
+                }}
+                onDragLeave={() => setAlvo((a) => (a === col.id ? null : a))}
+                onDrop={(e) => void soltarEm(col.id, e)}
+                className="shrink-0 w-[268px] bg-white rounded-xl border flex flex-col transition-colors"
+                style={alvo === col.id
+                  ? { borderColor: col.cor, background: "#F8FAFF" }
+                  : { borderColor: "#E5E7EB" }}
+              >
                 <div className="px-3 py-2.5 border-b border-gray-100 flex items-center gap-2" title={col.ajuda}>
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: col.cor }} />
                   <span className="text-[13px] font-semibold text-gray-900 flex-1">{col.label}</span>
@@ -624,7 +717,19 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
                   {cards.map((l) => {
                     const temp = corDaTemperatura(l.temperatura);
                     return (
-                      <div key={l.lead_id} className="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-2 hover:bg-white transition-colors">
+                      <div
+                        key={l.lead_id}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/lead", l.lead_id);
+                          e.dataTransfer.setData("text/nome", l.nome);
+                          e.dataTransfer.effectAllowed = "move";
+                          setArrastando(l.lead_id);
+                        }}
+                        onDragEnd={() => { setArrastando(null); setAlvo(null); }}
+                        className="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-2 hover:bg-white transition-colors cursor-grab active:cursor-grabbing"
+                        style={arrastando === l.lead_id ? { opacity: 0.4 } : undefined}
+                      >
                         <div className="flex items-start justify-between gap-2">
                           <button
                             onClick={() => onOpenLead?.(l.lead_id)}
@@ -658,13 +763,27 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
 
                         <div className="flex items-center justify-between gap-2 mt-1.5">
                           <span className="text-[10px] text-gray-400 truncate">{l.dono ?? "sem dono"}</span>
-                          <button
-                            onClick={() => void tirarDoPipeline(l.lead_id, l.nome)}
-                            className="text-[10px] font-semibold text-gray-400 hover:text-[#B4242A]"
-                            title="Tirar este lead do atendimento por IA"
-                          >
-                            tirar
-                          </button>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* Arrastar é bonito e ninguém descobre sozinho. Nas
+                                colunas finais o botão faz a mesma coisa. */}
+                            {!l.ativa && (
+                              <button
+                                onClick={() => void reabrir(l.lead_id, l.nome)}
+                                disabled={adicionando === l.lead_id}
+                                className="text-[10px] font-semibold text-[#0147FF] hover:underline disabled:opacity-50"
+                                title="Reabrir o atendimento por IA: liga a sessão de novo, zera os toques e dá 30 min de carência antes do próximo"
+                              >
+                                {adicionando === l.lead_id ? "…" : "reabrir"}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => void tirarDoPipeline(l.lead_id, l.nome)}
+                              className="text-[10px] font-semibold text-gray-400 hover:text-[#B4242A]"
+                              title="Tirar este lead do atendimento por IA"
+                            >
+                              tirar
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
