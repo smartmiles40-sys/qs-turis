@@ -26,6 +26,9 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
 
+/** O que a rota de agendamento grava em qs_meetings.scheduled_by. */
+const ASSINATURA_IA = "Glória (IA)";
+
 interface LinhaPipeline {
   lead_id: string;
   nome: string;
@@ -45,6 +48,31 @@ interface LinhaPipeline {
   ultima_mensagem: string | null;
   parado_min: number | null;
   coluna: string;
+}
+
+/**
+ * O PLACAR DELA.
+ *
+ * O quadro conta quem está em atendimento AGORA. Isso não responde a única
+ * pergunta que decide se ela fica ou sai: ela está ajudando ou está entupindo a
+ * agenda do especialista?
+ *
+ * A resposta já estava no banco e ninguém olhava. Toda reunião que ela marca
+ * nasce com `scheduled_by = 'Glória (IA)'`, e o desfecho que o closer registra
+ * vira o status. Então dá pra ler o funil inteiro sem tabela nova: marcou →
+ * aconteceu → não apareceu.
+ *
+ * REUNIÃO MARCADA NÃO É A MÉTRICA. No-show alto custa mais caro que agenda
+ * vazia — foi por isso que a regra dela virou "agendar certo, não agendar
+ * muito". Por isso o número grande aqui é o de reuniões que ACONTECERAM, e o
+ * de no-show fica do lado, sem eufemismo.
+ */
+interface Placar {
+  marcadas: number;
+  agendadas: number;
+  realizadas: number;
+  noShow: number;
+  outras: number;
 }
 
 interface Passo {
@@ -143,6 +171,7 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
   const [linhas, setLinhas] = useState<LinhaPipeline[]>([]);
   const [passos, setPassos] = useState<Passo[]>([]);
   const [config, setConfig] = useState<Record<string, unknown>>({});
+  const [placar, setPlacar] = useState<Placar | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -159,17 +188,33 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
   const carregar = useCallback(async (inicial = false) => {
     if (inicial) setCarregando(true);
     try {
-      const [quadro, cadencia, chaves] = await Promise.all([
+      const [quadro, cadencia, chaves, reunioes] = await Promise.all([
         supabase.from("qs_gloria_pipeline").select("*").eq("no_pipeline", true).order("atualizada_em", { ascending: false }),
         supabase.from("qs_gloria_passos").select("ordem, atraso_min, tipo, instrucao, ativo").order("ordem"),
         supabase.from("qs_settings").select("key, value")
           .in("key", ["gloria_ativa", "gloria_so_pipeline", "gloria_toque_inicio", "gloria_toque_fim"]),
+        // O placar. `scheduled_by` é texto livre no banco (o n8n do Bitrix lê
+        // dele), e a rota de agendamento dela grava sempre esta frase exata.
+        supabase.from("qs_meetings").select("status").eq("scheduled_by", ASSINATURA_IA),
       ]);
 
       if (quadro.error) throw quadro.error;
       setLinhas((quadro.data ?? []) as LinhaPipeline[]);
       setPassos(((cadencia.data ?? []) as Passo[]).filter((p) => p.ativo));
       setConfig(Object.fromEntries(((chaves.data ?? []) as { key: string; value: unknown }[]).map((r) => [r.key, r.value])));
+
+      // O placar não pode derrubar a tela: ele é o extra, o quadro é o
+      // essencial. Se a consulta falhar (RLS, coluna nova), fica sem placar.
+      const status = ((reunioes.data ?? []) as { status: string }[]).map((m) => m.status);
+      setPlacar(reunioes.error ? null : {
+        marcadas: status.length,
+        // "confirmada" ainda vai acontecer, então conta junto com "agendada":
+        // são as que ainda estão de pé, esperando o dia chegar.
+        agendadas: status.filter((s) => s === "agendada" || s === "confirmada").length,
+        realizadas: status.filter((s) => s === "realizada").length,
+        noShow: status.filter((s) => s === "no_show").length,
+        outras: status.filter((s) => s === "reagendada" || s === "cancelada").length,
+      });
       setErro(null);
     } catch (e: unknown) {
       const msg = (e as { message?: string })?.message ?? "falha ao carregar";
@@ -410,6 +455,47 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
           style={{ background: "var(--err-bg)", border: "1px solid var(--err-line)", color: "var(--err-ink)" }}
         >
           {erro}
+        </div>
+      )}
+
+      {/* ── O placar ──────────────────────────────────────────────────────── */}
+      {placar && placar.marcadas > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 px-4 md:px-6 py-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+            <div>
+              <p className="text-[13px] font-semibold text-gray-900">O que ela já entregou</p>
+              <p className="text-[12px] text-gray-500 mt-0.5">
+                Reuniões marcadas pela Glória, pelo desfecho que o especialista registrou.
+                O número que vale é o das que aconteceram.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-stretch flex-wrap gap-3">
+            <div className="rounded-lg px-4 py-3 min-w-[110px]" style={{ background: "#F0FDF4" }}>
+              <p className="text-[24px] font-bold leading-none" style={{ color: "#16A34A" }}>{placar.realizadas}</p>
+              <p className="text-[12px] text-gray-600 mt-1.5">aconteceram</p>
+            </div>
+            <div className="rounded-lg px-4 py-3 min-w-[110px]" style={{ background: "#EEF4FF" }}>
+              <p className="text-[24px] font-bold leading-none" style={{ color: "#0147FF" }}>{placar.agendadas}</p>
+              <p className="text-[12px] text-gray-600 mt-1.5">ainda de pé</p>
+            </div>
+            <div className="rounded-lg px-4 py-3 min-w-[110px]" style={{ background: placar.noShow > 0 ? "#FEF2F2" : "#F9FAFB" }}>
+              <p className="text-[24px] font-bold leading-none" style={{ color: placar.noShow > 0 ? "#B4242A" : "#9CA3AF" }}>{placar.noShow}</p>
+              <p className="text-[12px] text-gray-600 mt-1.5">não apareceram</p>
+            </div>
+            {placar.outras > 0 && (
+              <div className="rounded-lg px-4 py-3 min-w-[110px]" style={{ background: "#F9FAFB" }}>
+                <p className="text-[24px] font-bold leading-none text-gray-500">{placar.outras}</p>
+                <p className="text-[12px] text-gray-600 mt-1.5">remarcadas ou canceladas</p>
+              </div>
+            )}
+            <div className="flex items-center px-2 text-[12px] text-gray-500 max-w-xs">
+              {placar.realizadas + placar.noShow === 0
+                ? `${placar.marcadas} marcada${placar.marcadas > 1 ? "s" : ""}, nenhuma com desfecho registrado ainda. O placar de verdade começa quando a primeira acontecer.`
+                : `${Math.round((placar.realizadas / (placar.realizadas + placar.noShow)) * 100)}% de comparecimento nas que já tiveram desfecho.`}
+            </div>
+          </div>
         </div>
       )}
 
