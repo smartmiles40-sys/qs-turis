@@ -170,7 +170,7 @@ export default async function handler(req, res) {
     // o comportamento de sempre. Lead pago perdido não tem desfazer.
     let ia;
     try {
-      ia = await entregarAGloria({ lead, cadenceId, deduped });
+      ia = await entregarAGloria({ lead, cadenceId, ownerId, deduped });
     } catch (e) {
       console.error('[lead-inbound] entrada na IA falhou:', e?.message || e);
       ia = { ok: false, motivo: 'erro', detalhe: e?.message };
