@@ -24,6 +24,9 @@ import type { DragEvent } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { useQsAuth } from "@/contexts/QsAuthContext";
+import { authHeaders } from "@/lib/qs/waInbox";
+import PrimeiroContatoCard from "./PrimeiroContatoCard";
+import SaudeIntegracoes from "./SaudeIntegracoes";
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -206,6 +209,12 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
   const [teste, setTeste] = useState({ nome: "", telefone: "", expedicao: EXPEDICOES[0] });
   const [salvandoTeste, setSalvandoTeste] = useState(false);
 
+  // Quantos primeiros contatos ela já deu hoje. Vem junto com a saúde das
+  // portas (uma chamada só) e alimenta o card do primeiro contato, que é
+  // onde o número faz sentido: ao lado do teto.
+  const [hojeAbordados, setHojeAbordados] = useState<number | null>(null);
+  const [abordando, setAbordando] = useState<string | null>(null);
+
   const carregar = useCallback(async (inicial = false) => {
     if (inicial) setCarregando(true);
     try {
@@ -333,6 +342,46 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
   const reabrir = useCallback(async (leadId: string, nome: string) => {
     await colocarNoPipeline(leadId, nome);
   }, [colocarNoPipeline]);
+
+  /**
+   * ELA PUXA ASSUNTO COM ESTE LEAD, AGORA.
+   *
+   * O caminho normal e automatico: lead que entra pela cadencia da IA ja e
+   * abordado sozinho (api/_gloriaEntrada.js). Este botao existe pros tres
+   * casos em que o automatico nao rodou e alguem precisa destravar sem abrir
+   * o WhatsApp:
+   *
+   *   - o lead entrou no pipeline na mao, pelo quadro;
+   *   - bateu o teto do dia, e agora tem espaco;
+   *   - a abordagem falhou (n8n fora, modelo pausado) e o problema foi resolvido.
+   *
+   * A rota devolve 200 mesmo quando NAO abordou, com o motivo por extenso:
+   * "ela ja falou com este lead" nao e erro de servidor, e resposta. Por isso
+   * o sucesso aqui se mede por `ok`, e nao pelo status HTTP.
+   */
+  const abordarAgora = useCallback(async (leadId: string, nome: string) => {
+    setAbordando(leadId);
+    try {
+      const r = await fetch("/api/gloria-abordar", {
+        method: "POST",
+        headers: { ...(await authHeaders()), "Content-Type": "application/json" },
+        body: JSON.stringify({ lead_id: leadId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { notifyError(d?.error ?? "Nao consegui pedir a abordagem."); return; }
+      if (!d?.ok) { notifyError(nome + ": " + (d?.explicacao ?? d?.motivo ?? "nao abordou")); return; }
+      notifySuccess(
+        d.porta === "template"
+          ? "Modelo \"" + d.modelo + "\" enviado pra " + nome + "."
+          : "A Gloria vai responder " + nome + " - ela ja tinha mensagem dele esperando."
+      );
+      await carregar();
+    } catch {
+      notifyError("Sem conexao.");
+    } finally {
+      setAbordando(null);
+    }
+  }, [carregar]);
 
   /**
    * ARRASTAR CARD, MAS SÓ PRO QUE EXISTE.
@@ -569,6 +618,13 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
         </div>
       )}
 
+      {/* ── Primeiro contato e portas ─────────────────────────────────────
+          Os dois vivem juntos porque respondem a mesma pergunta, que e a
+          unica que importa antes de ligar trafego: ela consegue falar? */}
+      <PrimeiroContatoCard hojeAbordados={hojeAbordados} onMudou={() => void carregar()} />
+
+      <SaudeIntegracoes onRetrato={(r) => setHojeAbordados(r?.primeiroContato?.hoje ?? null)} />
+
       {/* ── Colocar lead no pipeline ──────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 px-4 md:px-6 py-4">
         <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
@@ -595,8 +651,8 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
         {formTeste && (
           <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-3 max-w-lg">
             <p className="text-[12px] text-gray-600 mb-3">
-              Use o seu próprio celular. <strong>Você</strong> tem que mandar a primeira mensagem pro número
-              oficial: fora da janela de 24h do WhatsApp só passa template aprovado, e a Glória não tem nenhum.
+              Use o seu próprio celular. Se ainda não houver modelo aprovado no Primeiro contato,{" "}<strong>você</strong> tem que mandar a primeira mensagem pro número
+              oficial: fora da janela de 24h do WhatsApp só passa modelo aprovado. Com modelo escolhido, o botão “falar” do card faz ela puxar assunto sozinha.
             </p>
             <div className="space-y-2">
               <input
@@ -774,6 +830,16 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
                                 title="Reabrir o atendimento por IA: liga a sessão de novo, zera os toques e dá 30 min de carência antes do próximo"
                               >
                                 {adicionando === l.lead_id ? "…" : "reabrir"}
+                              </button>
+                            )}
+                            {l.ativa && (
+                              <button
+                                onClick={() => void abordarAgora(l.lead_id, l.nome)}
+                                disabled={abordando === l.lead_id}
+                                className="text-[10px] font-semibold text-[#0147FF] hover:underline disabled:opacity-50"
+                                title="Pedir pra Gloria puxar assunto agora. Fora da janela de 24h sai o modelo aprovado; dentro dela, ela responde a ultima mensagem do lead."
+                              >
+                                {abordando === l.lead_id ? "…" : "falar"}
                               </button>
                             )}
                             <button

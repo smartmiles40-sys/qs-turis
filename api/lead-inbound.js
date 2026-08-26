@@ -33,6 +33,7 @@
 // -----------------------------------------------------------------------------
 import { createInboundLead, moverLeadParaCadencia } from './_leads.js';
 import { segredoConfere, rest } from './_supabaseAdmin.js';
+import { entregarAGloria } from './_gloriaEntrada.js';
 
 // UUID v4 (formato geral de UUID). cadence_id/owner_id inválidos antes iam
 // direto pra querystring do PostgREST e o caller recebia o erro cru do banco.
@@ -160,6 +161,21 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── ATENDIMENTO POR IA ────────────────────────────────────────────────
+    // A cadência de destino é a da Glória? Então o lead entra no pipeline dela
+    // e ela puxa assunto — sem ninguém arrastar card. É isto que faz uma
+    // campanha de tráfego cair na IA em vez de na fila do SDR.
+    //
+    // Nunca derruba a criação do lead: falhar aqui deixa um lead normal, que é
+    // o comportamento de sempre. Lead pago perdido não tem desfazer.
+    let ia;
+    try {
+      ia = await entregarAGloria({ lead, cadenceId, deduped });
+    } catch (e) {
+      console.error('[lead-inbound] entrada na IA falhou:', e?.message || e);
+      ia = { ok: false, motivo: 'erro', detalhe: e?.message };
+    }
+
     return res.status(200).json({
       success: true,
       lead_id: lead.id,
@@ -175,6 +191,10 @@ export default async function handler(req, res) {
       // { movido: true, tarefas: N } ou { movido: false, motivo: "..." }.
       movido: movido || undefined,
       cadence_id_final: movido?.movido ? body.cadence_id : cadenceId,
+      // Só aparece quando a cadência de destino é a do atendimento por IA.
+      // { entrou: true, abordagem: { ok, porta } } — o n8n registra isso no
+      // histórico, então dá pra ver pelo lado de fora se ela falou ou não.
+      ia: ia?.aplicavel ? ia : undefined,
     });
   } catch (err) {
     // Detalhe completo SÓ no log do servidor (Vercel). Pro caller vai mensagem

@@ -37,6 +37,15 @@
     "api/gloria-agendar.js": {
       "maxDuration": 60
     },
+    "api/gloria-abordar.js": {
+      "maxDuration": 30
+    },
+    "api/lead-inbound.js": {
+      "maxDuration": 30
+    },
+    "api/gloria-saude.js": {
+      "maxDuration": 30
+    },
     "api/gloria-transferir.js": {
       "maxDuration": 30
     },

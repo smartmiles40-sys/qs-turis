@@ -1316,3 +1316,62 @@ export async function reabrirPorFalha(leadId, ownerId = null, quandoIso = null) 
     return null;
   }
 }
+
+
+// ─── TEMPLATE APROVADO ────────────────────────────────────────────────────────
+/**
+ * Busca no Chatwoot o template aprovado com esse nome/idioma e devolve o corpo
+ * já preenchido. A fonte é o Chatwoot (que sincroniza da Meta) — nunca o texto
+ * que veio do navegador: template adulterado a Meta recusa, e template certo
+ * com corpo errado gravaria no QS uma coisa diferente do que o cliente recebeu.
+ */
+export async function resolverModelo(modelo) {
+  const nome = String(modelo?.nome || '').trim();
+  if (!nome) return { error: 'modelo-sem-nome' };
+  const params = (modelo?.params && typeof modelo.params === 'object') ? modelo.params : {};
+
+  const data = await cw('/inboxes');
+  const list = Array.isArray(data?.payload) ? data.payload : [];
+  for (const i of list) {
+    if (!String(i.channel_type || '').includes('Channel::Whatsapp')) continue;
+    const t = (Array.isArray(i.message_templates) ? i.message_templates : []).find((x) =>
+      x.name === nome &&
+      String(x.status || '').toLowerCase() === 'approved' &&
+      (!modelo.idioma || x.language === modelo.idioma)
+    );
+    if (!t) continue;
+
+    const comp = Array.isArray(t.components) ? t.components : [];
+    const corpo = comp.find((c) => String(c.type).toUpperCase() === 'BODY')?.text || '';
+    if (!corpo) return { error: 'modelo-sem-corpo' };
+
+    let faltando = null;
+    const preenchido = corpo.replace(/{{\s*([^}]+?)\s*}}/g, (_, chave) => {
+      const v = params[chave];
+      if (v == null || String(v).trim() === '') { faltando = chave; return ''; }
+      return String(v).trim();
+    });
+    if (faltando) return { error: 'modelo-variavel-vazia', variavel: faltando };
+
+    return {
+      inboxId: Number(i.id),
+      texto: preenchido,
+      templateParams: {
+        name: t.name,
+        category: t.category,
+        language: t.language,
+        // ⚠️ MEDIDO EM 17/08: o Chatwoot valida `namespace` como STRING. Template
+        // da Cloud API não tem namespace (é conceito da API antiga), então mandar
+        // `null` fazia TODO envio de modelo morrer com 422 "must be of type
+        // string". Só entra quando existe de verdade.
+        ...(typeof t.namespace === 'string' && t.namespace ? { namespace: t.namespace } : {}),
+        // Tem que ser objeto/hash — array também é recusado.
+        processed_params: Object.fromEntries(
+          Object.entries(params).map(([k, v]) => [k, String(v).trim()])
+        ),
+      },
+    };
+  }
+  return { error: 'modelo-nao-encontrado' };
+}
+
