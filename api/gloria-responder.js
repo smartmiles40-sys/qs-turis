@@ -28,6 +28,7 @@ import {
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 import { portaria, corpo, buscarLead, sessao, registrar, pausar, ASSINATURA_IA } from './_gloria.js';
+import { rodadaVazou } from './_vazamento.js';
 
 const MAX_BALOES = 3;
 const MAX_LEN = 900;
@@ -109,6 +110,42 @@ export default async function handler(req, res) {
     if (!ses || (ses.ativa === false && !despedida)) {
       await registrar(leadId, 'evento', 'resposta descartada: IA já estava desligada', ses?.motivo || 'sessao_inativa');
       return res.status(409).json({ ok: false, motivo: ses?.motivo || 'ia_desligada', enviadas: 0 });
+    }
+
+    // ── (2) O MODELO VAZOU O RACIOCÍNIO? ──────────────────────────────────
+    // Em 25/08 saiu pro cliente, com status `sent`, o monólogo interno em
+    // inglês citando o prompt literal ("We need to produce a reply... must
+    // follow «Assim que transferir_para_humano responder ok...»"). Ver o
+    // cabeçalho de `_vazamento.js` pro caso inteiro.
+    //
+    // Fica ANTES do modo teste de propósito: `teste: true` também precisa
+    // acusar, senão o ensaio passa e o vazamento só aparece no cliente.
+    //
+    // Recusa a RODADA INTEIRA, não só o balão sujo: se o modelo vazou num
+    // balão, o que ele produziu naquele turno não é confiável, e entregar
+    // metade é o cliente recebendo uma resposta que termina no meio. O 422 cai
+    // no "O QS recusou?" do n8n e vira tarefa pro dono — o lead fica com uma
+    // pessoa, não sem resposta.
+    const vazou = rodadaVazou(mensagens);
+    if (vazou) {
+      console.error(
+        `[gloria-responder] VAZAMENTO BLOQUEADO lead=${leadId} sinal=${vazou.sinal} ` +
+        `detalhe=${vazou.detalhe} balao=${vazou.balao}/${vazou.de} :: ${vazou.trecho}`
+      );
+      await registrar(
+        leadId, 'evento',
+        `balão ${vazou.balao}/${vazou.de} recusado (${vazou.sinal}: ${vazou.detalhe}) :: ${vazou.trecho}`,
+        'vazamento_bloqueado'
+      );
+      return res.status(422).json({
+        ok: false,
+        motivo: 'vazamento_de_raciocinio',
+        sinal: vazou.sinal,
+        detalhe: vazou.detalhe,
+        balao: vazou.balao,
+        enviadas: 0,
+        error: `A resposta parecia raciocínio do modelo (${vazou.sinal}: ${vazou.detalhe}) e não foi enviada.`,
+      });
     }
 
     // ── MODO TESTE ────────────────────────────────────────────────────────
