@@ -168,3 +168,122 @@ export function validarModelo({ nome, categoria, corpo }) {
   }
   return null;
 }
+
+// ─── ENVIO DIRETO PELA CLOUD API ─────────────────────────────────────────────
+//
+// POR QUE NÃO PELO CHATWOOT, aqui. O resto do QS manda WhatsApp pelo Chatwoot
+// de propósito: a mensagem cai na conversa e aparece na tela do SDR. O disparo
+// de PRIMEIRO CONTATO é a exceção, por duas razões que só valem pra ele:
+//
+//   1. O vídeo não precisa aparecer pra equipe (Bruno, 28/08) — é um disparo,
+//      não uma conversa. A conversa começa quando o lead responde, e a resposta
+//      entra pelo caminho normal (Chatwoot → wa-webhook).
+//   2. O Chatwoot NÃO entrega template com cabeçalho de mídia: a issue #13159
+//      (aberta desde 29/12/2025) mostra que ele monta um payload inválido pra
+//      Meta e a mensagem fica presa em "sending". Aqui o payload é montado
+//      certo, por nós.
+//
+// De quebra, isto libera o `media_id`: sem o Chatwoot no meio, dá pra subir o
+// vídeo UMA vez e reusar por 30 dias, em vez de a Meta baixar 5,7 MB do bucket
+// a cada lead.
+
+/**
+ * Sobe um arquivo por URL pra Meta e devolve o `media_id`.
+ *
+ * Vale 30 dias. Quem chama guarda o id e a data — e re-sobe antes de vencer,
+ * porque id vencido a Meta recusa com a mensagem mais inútil possível.
+ */
+export async function subirMidiaPorUrl(url) {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
+
+  let bytes; let tipo;
+  try {
+    const r = await fetch(url, { redirect: 'follow' });
+    if (!r.ok) return { erro: 'arquivo-inacessivel', detalhe: `HTTP ${r.status}` };
+    tipo = String(r.headers.get('content-type') || '').split(';')[0].trim() || 'video/mp4';
+    bytes = new Uint8Array(await r.arrayBuffer());
+  } catch (e) {
+    return { erro: 'arquivo-inacessivel', detalhe: e?.message };
+  }
+
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', tipo);
+  form.append('file', new Blob([bytes], { type: tipo }), 'midia');
+
+  try {
+    const r = await fetch(
+      `${GRAPH}/${cr.phoneId}/media?access_token=${encodeURIComponent(cr.token)}`,
+      { method: 'POST', body: form }
+    );
+    const j = await r.json().catch(() => null);
+    if (j?.error) return { erro: 'meta-recusou', detalhe: j.error.message };
+    if (!j?.id) return { erro: 'sem-id-na-resposta' };
+    return { id: String(j.id), tipo, bytes: bytes.length };
+  } catch (e) {
+    return { erro: 'falha-no-upload', detalhe: e?.message };
+  }
+}
+
+/**
+ * Manda um template aprovado direto pela Cloud API.
+ *
+ * `midia` aceita { id } (preferido) ou { url }. A Meta exige um OU outro, nunca
+ * os dois — com `url` ela baixa o arquivo a cada envio; com `id` não baixa nada.
+ *
+ * `params` é o mapa posicional do corpo ({ "1": "Bruno" }); a Meta lê por
+ * ORDEM, então a ordenação numérica aqui não é estética: fora de ordem, o
+ * cliente recebe as variáveis trocadas de lugar.
+ */
+export async function enviarTemplate({ para, nome, idioma = 'pt_BR', params = {}, midia = null, formatoMidia = 'VIDEO' }) {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
+
+  const components = [];
+
+  if (midia?.id || midia?.url) {
+    const tipo = String(formatoMidia || 'VIDEO').toLowerCase(); // video | image | document
+    components.push({
+      type: 'header',
+      parameters: [{ type: tipo, [tipo]: midia.id ? { id: midia.id } : { link: midia.url } }],
+    });
+  }
+
+  const ordenados = Object.keys(params)
+    .filter((k) => /^\d+$/.test(k))
+    .sort((a, b) => Number(a) - Number(b));
+  if (ordenados.length) {
+    components.push({
+      type: 'body',
+      parameters: ordenados.map((k) => ({ type: 'text', text: String(params[k] ?? '') })),
+    });
+  }
+
+  try {
+    const j = await graph(`/${cr.phoneId}/messages`, {
+      method: 'POST',
+      token: cr.token,
+      timeoutMs: 20_000,
+      body: {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: String(para),
+        type: 'template',
+        template: {
+          name: nome,
+          language: { code: idioma || 'pt_BR' },
+          ...(components.length ? { components } : {}),
+        },
+      },
+    });
+    // O wamid é o comprovante: é por ele que se acha a mensagem no suporte da
+    // Meta quando o cliente jura que não recebeu.
+    return { wamid: j?.messages?.[0]?.id || null };
+  } catch (e) {
+    return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
+  }
+}
+

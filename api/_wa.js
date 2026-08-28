@@ -1345,6 +1345,17 @@ export async function resolverModelo(modelo) {
     const corpo = comp.find((c) => String(c.type).toUpperCase() === 'BODY')?.text || '';
     if (!corpo) return { error: 'modelo-sem-corpo' };
 
+    // ── CABEÇALHO DE MÍDIA ──────────────────────────────────────────────────
+    // Template de vídeo/imagem carrega a mídia POR LINK a cada envio — ela não
+    // fica guardada no modelo. Quem passa o link é quem chama (a tela de
+    // configuração), e sem ele a Meta recusa o template inteiro.
+    const cab = comp.find((c) => String(c.type).toUpperCase() === 'HEADER');
+    const formatoCab = String(cab?.format || 'TEXT').toUpperCase();
+    const cabEhMidia = formatoCab === 'IMAGE' || formatoCab === 'VIDEO' || formatoCab === 'DOCUMENT';
+    const midiaUrl = String(modelo?.midia?.url || '').trim();
+    if (cabEhMidia && !midiaUrl) return { error: 'modelo-precisa-de-midia', formato: formatoCab };
+    if (!cabEhMidia && midiaUrl) return { error: 'modelo-nao-aceita-midia', formato: formatoCab };
+
     let faltando = null;
     const preenchido = corpo.replace(/{{\s*([^}]+?)\s*}}/g, (_, chave) => {
       const v = params[chave];
@@ -1353,9 +1364,45 @@ export async function resolverModelo(modelo) {
     });
     if (faltando) return { error: 'modelo-variavel-vazia', variavel: faltando };
 
+    // Os params do corpo, sempre no formato plano — que é o que os templates de
+    // texto usam hoje e o que está PROVADO funcionando em produção.
+    const paramsCorpo = Object.fromEntries(
+      Object.entries(params).map(([k, v]) => [k, String(v).trim()])
+    );
+
+    // ⚠️ DOIS FORMATOS, e a escolha NÃO é estética.
+    //
+    // Sem mídia, o `processed_params` continua PLANO — exatamente como estava.
+    // Mudar o que já funciona pelo formato novo arriscaria quebrar todo envio de
+    // modelo do time por causa de um caso que ainda nem foi testado.
+    //
+    // Com mídia, o Chatwoot exige o formato ANINHADO ({ body, header }), que é o
+    // único jeito de ele saber que o cabeçalho é um vídeo e não um texto.
+    //
+    // ⚠️ NÃO TESTADO EM PRODUÇÃO ATÉ 28/08. A issue chatwoot#13159 (aberta em
+    // 29/12/2025) relata que o Chatwoot monta um payload INVÁLIDO pra Meta em
+    // template com cabeçalho de mídia — manda parâmetro de texto onde a Meta
+    // espera um componente `header` com `type: video` — e a mensagem fica presa
+    // em "sending" sem nunca ser entregue. Se o vídeo não chegar, o problema é
+    // esse e não este arquivo: confira mandando o mesmo template pela interface
+    // do próprio Chatwoot. Se lá também não for, é o bug.
+    const processed = cabEhMidia
+      ? {
+          body: paramsCorpo,
+          header: {
+            media_url: midiaUrl,
+            media_type: formatoCab.toLowerCase(), // video | image | document
+          },
+        }
+      : paramsCorpo;
+
     return {
       inboxId: Number(i.id),
       texto: preenchido,
+      // Quem chama precisa saber se havia mídia — é o que separa "não chegou
+      // porque o modelo está errado" de "não chegou pelo bug do Chatwoot".
+      headerFormato: formatoCab,
+      temMidia: cabEhMidia,
       templateParams: {
         name: t.name,
         category: t.category,
@@ -1366,9 +1413,7 @@ export async function resolverModelo(modelo) {
         // string". Só entra quando existe de verdade.
         ...(typeof t.namespace === 'string' && t.namespace ? { namespace: t.namespace } : {}),
         // Tem que ser objeto/hash — array também é recusado.
-        processed_params: Object.fromEntries(
-          Object.entries(params).map(([k, v]) => [k, String(v).trim()])
-        ),
+        processed_params: processed,
       },
     };
   }

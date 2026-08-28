@@ -1,0 +1,80 @@
+{
+  "name": "Bitrix → QS: primeiro contato (vídeo)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Bitrix → QS · primeiro contato\n\nQuem cai na etapa \"primeiro contato\" no Bitrix recebe o vídeo de apresentação.\n\nO workflow tem DOIS nós de propósito. Toda regra mora no QS:\n\n• qual template e qual vídeo → Configurações → Mensagem Automática\n• dedupe (nunca dois vídeos no mesmo lead) → chave primária de qs_primeiro_contato\n• telefone inválido → 400 com motivo, em vez de POST com telefone vazio\n• teto do dia → configuração da tela\n\nO fluxo antigo (ChatApp) tinha 5 nós, normalizava telefone aqui e NÃO lia o próprio resultado da validação: número torto seguia e o POST saía com chatId vazio, falhando calado.",
+        "height": 420,
+        "width": 620
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Como funciona",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [320, 160]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-apresentacao",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Webhook Bitrix (primeiro contato)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [400, 640],
+      "webhookId": "lead-apresentacao",
+      "notesInFlow": true,
+      "notes": "MESMO path do fluxo antigo (lead-apresentacao). Assim a automação do Bitrix não precisa ser reapontada — só ative este workflow e desative o do ChatApp.\n\nO Bitrix manda os campos na QUERY, não no body: $json.query.Telefone."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qs.setuforeuvouviagens.com.br/api/primeiro-contato",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lead-secret",
+              "value": "={{ $env.LEAD_INBOUND_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ telefone: $json.query?.Telefone || $json.query?.telefone || $json.body?.Telefone, origem: 'bitrix' }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Disparar pelo QS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 640],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notesInFlow": true,
+      "notes": "O QS decide TUDO: se está ligado, se o telefone presta, se o lead existe, se já recebeu, se bateu o teto, qual template e qual vídeo.\n\nRetry é seguro por causa do dedupe: a segunda tentativa devolve motivo=ja_enviado e não manda de novo.\n\nSEM onError de propósito — se a rota cair depois dos 3 retries, a execução fica VERMELHA no log em vez de fingir sucesso.\n\nRespostas 200 que NÃO enviaram (leia o motivo): desligado, sem_template, ja_enviado, teto_do_dia."
+    }
+  ],
+  "connections": {
+    "Webhook Bitrix (primeiro contato)": {
+      "main": [
+        [
+          {
+            "node": "Disparar pelo QS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "91aa63e4f74d7cbe350736303e89cc11603c939156428dd97f3f611c857dbb64"
+  }
+}

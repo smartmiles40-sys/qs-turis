@@ -175,15 +175,23 @@ function extrairModelos(inboxList) {
       const corpo = comp.find((c) => String(c.type).toUpperCase() === 'BODY')?.text || '';
       if (!corpo) continue;
       const header = comp.find((c) => String(c.type).toUpperCase() === 'HEADER');
-      // Só oferecemos template de cabeçalho TEXTO: os de mídia exigem anexar um
-      // arquivo no envio, e oferecer pra depois falhar é pior que não oferecer.
-      if (header && String(header.format || 'TEXT').toUpperCase() !== 'TEXT') continue;
+      const headerFormato = String(header?.format || 'TEXT').toUpperCase();
+      // ATÉ 28/08 os de mídia eram descartados aqui, com este motivo: "exigem
+      // anexar um arquivo no envio, e oferecer pra depois falhar é pior que não
+      // oferecer". Continua verdade — a diferença é que agora existe quem saiba
+      // mandar (o disparo de primeiro contato pede a URL do vídeo na tela).
+      //
+      // Então em vez de esconder, MARCA. Cada tela decide: a da Glória só usa
+      // TEXT, porque a abordagem dela não tem onde pedir um link de mídia.
       modelos.push({
         inboxId: Number(i.id),
         nome: String(t.name || ''),
         idioma: String(t.language || 'pt_BR'),
         categoria: String(t.category || ''),
         cabecalho: header?.text || null,
+        headerFormato,
+        // true = o envio PRECISA de uma URL de mídia junto, senão a Meta recusa.
+        precisaMidia: headerFormato === 'IMAGE' || headerFormato === 'VIDEO' || headerFormato === 'DOCUMENT',
         corpo,
         rodape: comp.find((c) => String(c.type).toUpperCase() === 'FOOTER')?.text || null,
         variaveis: [...corpo.matchAll(/{{\s*([^}]+?)\s*}}/g)].map((m) => m[1]),

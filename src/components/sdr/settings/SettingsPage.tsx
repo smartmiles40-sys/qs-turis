@@ -13,6 +13,7 @@ import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } f
 import WaInboxLabels from "./WaInboxLabels";
 import LinhasDoTime from "./LinhasDoTime";
 import ModelosMeta from "./ModelosMeta";
+import MensagemAutomatica from "./MensagemAutomatica";
 import { WA_SIGNATURE_MAP_KEY, WA_SIGNATURE_ENABLED_KEY, nomeCurto } from "@/lib/qs/waSignature";
 import type {
   LossReason,
@@ -42,7 +43,7 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "modelos-meta" | "motivos" | "classificacao" | "horario" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "motivos" | "classificacao" | "horario" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -63,6 +64,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
   { key: "atendimento", label: "Atendimento (WhatsApp)", group: "INTEGRAÇÕES" },
   { key: "modelos-meta", label: "Modelos de Mensagem", group: "INTEGRAÇÕES" },
+  { key: "mensagem-automatica", label: "Mensagem Automática", group: "INTEGRAÇÕES" },
   { key: "integracoes", label: "Integrações (status)", group: "INTEGRAÇÕES" },
 ];
 
@@ -2072,6 +2074,7 @@ export default function SettingsPage() {
         {activeSection === "horario" && <HorarioSection />}
         {activeSection === "agenda" && <AgendaSection />}
         {activeSection === "modelos-meta" && <ModelosMeta />}
+        {activeSection === "mensagem-automatica" && <MensagemAutomatica />}
         {activeSection === "atendimento" && <AtendimentoSection />}
         {activeSection === "webfone" && <WebfoneSection />}
         {activeSection === "webfone-webrtc" && <WebfoneWebrtcSection />}
