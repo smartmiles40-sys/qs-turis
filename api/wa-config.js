@@ -29,7 +29,8 @@ import {
   getSupabaseUserId, cwConfigured, cw, defaultInboxId,
   caixaDoUsuario, lerCaixas, canalEhApiOficial,
 } from './_wa.js';
-import { listarModelos, criarModelo, excluirModelo } from './_meta.js';
+import { listarModelos, criarModelo, excluirModelo,
+         lerConfigChamadas, ativarChamadas, pedirPermissaoDeLigacao } from './_meta.js';
 import {
   evoConfigured, listarInstancias, conectarInstancia, estadoInstancia,
   desconectarInstancia, reiniciarInstancia,
@@ -304,7 +305,30 @@ export default async function handler(req, res) {
       if (r.erro) return res.status(r.erro === 'sem-caixa-oficial' ? 503 : 400).json({ error: r.mensagem || 'Não consegui criar o modelo.' });
       return res.status(200).json({ ok: true, id: r.id, status: r.status });
     }
+    // ── CHAMADAS (Cloud API Calling) ────────────────────────────────────
+    // Trilho separado do de mensagem. Vive aqui, e nao numa rota nova, pela
+    // mesma razao do resto do arquivo.
+    if (body.acao === 'calling-ativar') {
+      const r = await ativarChamadas();
+      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      return res.status(200).json({ ok: true });
+    }
+    if (body.acao === 'calling-permissao') {
+      // Pedido de permissao pra ligar. NAO e template — e mensagem interativa,
+      // e exige conversa ABERTA (a pessoa escreveu nas ultimas 24h).
+      const r = await pedirPermissaoDeLigacao(body.telefone, body.texto);
+      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      return res.status(200).json({ ok: true, wamid: r.wamid });
+    }
     return res.status(400).json({ error: 'Ação inválida.' });
+  }
+
+  // Diagnostico de chamadas: diz se o numero esta MESMO com calling ligado.
+  if (req.query?.calling === '1') {
+    if (!(await ehAdmin(userId))) return res.status(403).json({ error: 'Só administrador ou gestor.' });
+    const r = await lerConfigChamadas();
+    if (r.erro) return res.status(503).json({ error: r.detalhe || r.erro, motivo: r.erro });
+    return res.status(200).json(r);
   }
 
   if (!cwConfigured()) {

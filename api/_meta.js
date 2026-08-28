@@ -287,3 +287,86 @@ export async function enviarTemplate({ para, nome, idioma = 'pt_BR', params = {}
   }
 }
 
+
+// ─── CHAMADAS (Cloud API Calling) ────────────────────────────────────────────
+//
+// Trilho SEPARADO do de mensagem, e vale dizer porque confunde: ativar o
+// webhook `calls` não faz template aparecer, e template nenhum pede permissão
+// de ligação. São coisas diferentes que a Meta chama pelo mesmo nome.
+
+/** Lê o bloco `calling` do número. É o único jeito de saber se está mesmo ligado. */
+export async function lerConfigChamadas() {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
+  try {
+    const j = await graph(`/${cr.phoneId}/settings`, { token: cr.token });
+    return { calling: j?.calling ?? null, phoneId: cr.phoneId };
+  } catch (e) {
+    return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
+  }
+}
+
+/**
+ * Liga chamadas no número.
+ *
+ * PRÉ-REQUISITO DA META: limite de mensagens de 2.000 ou mais. Abaixo disso ela
+ * recusa, e a mensagem de erro dela não diz isso com clareza — por isso o
+ * chamador deve conferir o tier antes de culpar o código.
+ */
+export async function ativarChamadas() {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
+  try {
+    const j = await graph(`/${cr.phoneId}/settings`, {
+      method: 'POST', token: cr.token,
+      body: {
+        calling: {
+          status: 'ENABLED',
+          call_icon_visibility: 'DEFAULT',
+          callback_permission_status: 'ENABLED',
+        },
+      },
+    });
+    return { ok: j?.success === true };
+  } catch (e) {
+    return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
+  }
+}
+
+/**
+ * Pede permissão pra ligar. NÃO é template — é mensagem interativa do tipo
+ * `call_permission_request`.
+ *
+ * EXIGE CONVERSA ABERTA: a pessoa precisa ter escrito nas últimas 24h. Quem
+ * nunca respondeu não pode receber o pedido — e é justamente o lead de
+ * formulário que o SDR mais quer ligar. Limite: 1 pedido por 24h e 2 por
+ * semana, por pessoa.
+ */
+export async function pedirPermissaoDeLigacao(telefone, texto) {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
+  const para = String(telefone || '').replace(/\D/g, '');
+  if (!para) return { erro: 'telefone-invalido' };
+  try {
+    const j = await graph(`/${cr.phoneId}/messages`, {
+      method: 'POST', token: cr.token,
+      body: {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: para,
+        type: 'interactive',
+        interactive: {
+          type: 'call_permission_request',
+          action: { name: 'call_permission_request' },
+          body: { text: String(texto || 'Podemos te ligar por aqui pelo WhatsApp?').slice(0, 1024) },
+        },
+      },
+    });
+    return { wamid: j?.messages?.[0]?.id || null };
+  } catch (e) {
+    return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
+  }
+}

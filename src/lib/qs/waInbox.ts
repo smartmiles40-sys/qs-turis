@@ -1232,3 +1232,54 @@ export function shortWhen(iso: string | null): string {
   if (d.toDateString() === ontem.toDateString()) return "ontem";
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
+
+// ── Ligação pelo WhatsApp (Cloud API Calling) ───────────────────────────────
+// Trilho separado do de mensagem: template não pede permissão de ligação, e
+// ativar o webhook `calls` não faz template aparecer.
+
+export interface ConfigChamadas {
+  status?: string;
+  call_icon_visibility?: string;
+  callback_permission_status?: string;
+  call_hours?: unknown;
+  sip?: unknown;
+}
+
+export async function lerChamadas(): Promise<{ calling: ConfigChamadas | null; phoneId?: string; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config?calling=1", { headers: await authHeaders() });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { calling: null, error: d?.error || "Não consegui ler as configurações de chamada." };
+    return { calling: d?.calling ?? null, phoneId: d?.phoneId };
+  } catch {
+    return { calling: null, error: "Sem conexão." };
+  }
+}
+
+export async function ativarChamadasNaMeta(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ acao: "calling-ativar" }),
+    });
+    const d = await res.json().catch(() => ({}));
+    return res.ok ? { ok: true } : { ok: false, error: d?.error || "A Meta recusou." };
+  } catch {
+    return { ok: false, error: "Sem conexão." };
+  }
+}
+
+export async function pedirPermissaoLigacao(telefone: string, texto?: string): Promise<{ ok: boolean; wamid?: string; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ acao: "calling-permissao", telefone, texto }),
+    });
+    const d = await res.json().catch(() => ({}));
+    return res.ok ? { ok: true, wamid: d?.wamid } : { ok: false, error: d?.error || "A Meta recusou." };
+  } catch {
+    return { ok: false, error: "Sem conexão." };
+  }
+}
