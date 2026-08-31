@@ -204,3 +204,151 @@ export async function ligarPeloWhatsApp(
     callId: () => callId,
   };
 }
+
+
+// ─── A PONTE PRO RESTO DO QS ────────────────────────────────────────────────
+//
+// O Painel e o modal do WhatsApp não devem saber o que é SDP. Eles chamam
+// `dialViaOficial(telefone, contexto)` — o MESMO formato do antigo
+// `dialViaWavoip` — e escutam o fim da chamada pelo `setOnCallEndedOficial`,
+// que emite o MESMO `CallEndedInfo` do Wavoip e do webfone VoxFree. É isso que
+// deixa o desfecho automático (o "Não atendeu" com contagem de 10s) funcionar
+// igual, sem tocar em nada da tela de tarefas.
+//
+// UMA ligação por vez, de propósito: duas chamadas simultâneas no mesmo
+// navegador dividem o microfone e o SDR fala com o cliente errado.
+
+export interface ContextoLigacao {
+  leadName?: string | null;
+  leadId?: string | null;
+  ownerId?: string | null;
+  displayName?: string | null;
+}
+
+export type ResultadoDiscagem = { ok: true } | { ok: false; error: string };
+
+/** Mesmo formato que wavoip.ts e webphone.ts emitem — o Painel já sabe reagir. */
+export interface CallEndedInfo {
+  leadId: string | null;
+  phone: string | null;
+  answered: boolean;
+  durationSec: number;
+}
+
+/** O que o widget precisa desenhar. */
+export interface EstadoNaTela {
+  ativa: boolean;
+  estado: EstadoLigacao | null;
+  leadName: string | null;
+  phone: string | null;
+  atendidaEm: number | null;
+  calado: boolean;
+  detalhe?: string;
+}
+
+const VAZIO: EstadoNaTela = {
+  ativa: false, estado: null, leadName: null, phone: null, atendidaEm: null, calado: false,
+};
+
+let naTela: EstadoNaTela = VAZIO;
+let atual: Ligacao | null = null;
+let contexto: ContextoLigacao = {};
+let desfechoEmitido = false;
+let aoEncerrar: ((info: CallEndedInfo) => void) | null = null;
+const ouvintes = new Set<(e: EstadoNaTela) => void>();
+
+function avisar() { ouvintes.forEach((cb) => cb(naTela)); }
+
+/** O widget se inscreve aqui. Devolve a função de cancelar. */
+export function assinarLigacaoAtual(cb: (e: EstadoNaTela) => void): () => void {
+  ouvintes.add(cb);
+  cb(naTela);
+  return () => { ouvintes.delete(cb); };
+}
+
+/** Quem reage ao fim da chamada (o Painel abre o desfecho). */
+export function setOnCallEndedOficial(cb: ((info: CallEndedInfo) => void) | null): void {
+  aoEncerrar = cb;
+}
+
+function encerrarDeVez(estado: EstadoLigacao, detalhe?: string) {
+  const atendida = naTela.atendidaEm;
+  const info: CallEndedInfo = {
+    leadId: contexto.leadId ?? null,
+    phone: naTela.phone,
+    answered: !!atendida,
+    durationSec: atendida ? Math.round((Date.now() - atendida) / 1000) : 0,
+  };
+  naTela = { ...naTela, ativa: false, estado, detalhe };
+  avisar();
+  atual = null;
+  // Só um desfecho por chamada: o `terminate` da Meta e o clique em "Desligar"
+  // chegam os dois, e abrir a tela de desfecho duas vezes é pior que não abrir.
+  if (!desfechoEmitido) {
+    desfechoEmitido = true;
+    try { aoEncerrar?.(info); } catch (e) { console.warn("[ligacao] desfecho:", e); }
+  }
+  // Some com o widget depois de um instante, pra pessoa ler o que aconteceu.
+  window.setTimeout(() => { if (!atual) { naTela = VAZIO; avisar(); } }, 4000);
+}
+
+/**
+ * Liga pro cliente pelo NÚMERO OFICIAL. Substitui o `dialViaWavoip` nos pontos
+ * onde a ligação é "pelo WhatsApp".
+ */
+export async function dialViaOficial(
+  phone?: string | null,
+  ctx?: ContextoLigacao,
+): Promise<ResultadoDiscagem> {
+  if (atual) return { ok: false, error: "Já existe uma ligação em andamento — desligue a atual primeiro." };
+
+  const para = String(phone || "").replace(/\D/g, "");
+  if (para.length < 12) return { ok: false, error: "Telefone inválido para ligar (precisa de DDI e DDD)." };
+
+  contexto = ctx ?? {};
+  desfechoEmitido = false;
+  naTela = {
+    ativa: true, estado: "pedindo-microfone", leadName: ctx?.leadName ?? ctx?.displayName ?? null,
+    phone: para, atendidaEm: null, calado: false,
+  };
+  avisar();
+
+  try {
+    atual = await ligarPeloWhatsApp(para, (p) => {
+      if (p.estado === "falando" && !naTela.atendidaEm) {
+        naTela = { ...naTela, estado: p.estado, atendidaEm: Date.now() };
+        avisar();
+        return;
+      }
+      if (p.estado === "encerrada" || p.estado === "recusada" || p.estado === "erro") {
+        encerrarDeVez(p.estado, p.detalhe);
+        return;
+      }
+      naTela = { ...naTela, estado: p.estado };
+      avisar();
+    });
+    return { ok: true };
+  } catch (e) {
+    atual = null;
+    naTela = VAZIO;
+    avisar();
+    return { ok: false, error: (e as Error)?.message ?? "Não consegui ligar." };
+  }
+}
+
+/** Desliga a chamada em andamento (botão do widget). */
+export async function desligarAtual(): Promise<void> {
+  const l = atual;
+  if (!l) return;
+  await l.desligar();
+  encerrarDeVez("encerrada");
+}
+
+/** Cala/abre o microfone da chamada em andamento. */
+export function alternarMudoAtual(): void {
+  if (!atual) return;
+  const calado = !naTela.calado;
+  atual.mudo(calado);
+  naTela = { ...naTela, calado };
+  avisar();
+}

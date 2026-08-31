@@ -88,6 +88,7 @@ import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { sweepCadenceEndings } from "@/lib/qs/cadenceSweep";
 import TelefoneOnboarding from "@/components/sdr/telefone/TelefoneOnboarding";
 import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
+import LigacaoOficialWidget from "@/components/sdr/telefone/LigacaoOficialWidget";
 import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 
 export type SdrNav =
@@ -552,6 +553,8 @@ export default function SdrLayout() {
 
       {/* UI flutuante da ligação WebRTC (VoxFree) — só aparece durante a chamada */}
       <WebphoneWidget />
+      {/* Ligação pelo número oficial (Cloud API Calling) — some quando não há chamada. */}
+      <LigacaoOficialWidget />
 
       {/* ── MENU LATERAL (MOBILE) ────────────────────────────────────────── */}
       {mobileNavOpen && (

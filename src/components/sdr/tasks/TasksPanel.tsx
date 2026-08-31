@@ -26,7 +26,8 @@ import { getLeadScore } from "@/lib/leadScore";
 import { formatPhoneDisplay, fillTemplate, startWhatsAppCall, isDialablePhone } from "@/lib/whatsapp";
 import WhatsAppModal from "../whatsapp/WhatsAppModal";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
-import { dialViaWavoip, setOnCallEnded, getWavoipToken } from "@/lib/wavoip";
+import { setOnCallEnded } from "@/lib/wavoip";
+import { dialViaOficial, setOnCallEndedOficial } from "@/lib/qs/waCall";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
 import { logCallEnded } from "@/lib/qs/callLog";
@@ -1928,8 +1929,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const tasksRef = useRef<Task[]>(tasks);
   tasksRef.current = tasks;
   useEffect(() => {
-    // Mesmo desfecho automático pros DOIS webfones: Wavoip (WhatsApp) e WebRTC
-    // (VoxFree). Ambos emitem o mesmo formato de CallEndedInfo.
+    // Mesmo desfecho automático pros TRÊS caminhos de voz: WhatsApp oficial
+    // (Cloud API), webfone WebRTC (VoxFree) e o Wavoip que ainda responde por
+    // chamadas antigas. Os três emitem o mesmo CallEndedInfo — é o que deixa
+    // esta tela não saber por onde a ligação saiu.
     const handleCallEnded = (info: { leadId: string | null; phone: string | null; answered: boolean; durationSec: number }) => {
       // Loga TODA chamada encerrada (atendida ou não, com ou sem lead) — telemetria
       // fire-and-forget pras análises de telefonia. Vai ANTES do guard de leadId.
@@ -1950,7 +1953,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     };
     setOnCallEnded(handleCallEnded);
     setOnCallEndedWebphone(handleCallEnded);
-    return () => { setOnCallEnded(null); setOnCallEndedWebphone(null); };
+    setOnCallEndedOficial(handleCallEnded);   // WhatsApp oficial (31/08)
+    return () => { setOnCallEnded(null); setOnCallEndedWebphone(null); setOnCallEndedOficial(null); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2353,7 +2357,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </button>
           )}
           {(task.channel_type === "ligacao_whatsapp" || task.channel_type === "ligacao") && lead?.phone && (
-            <button onClick={(e) => { e.stopPropagation(); pinTaskForCall(task); if (task.channel_type === "ligacao") callViaSip(lead.phone); else callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-pa qsx-pa-wa" title={task.channel_type === "ligacao" ? "Ligar (BravoTech)" : "Ligar pelo webfone (Wavoip)"}>
+            <button onClick={(e) => { e.stopPropagation(); pinTaskForCall(task); if (task.channel_type === "ligacao") callViaSip(lead.phone); else callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-pa qsx-pa-wa" title={task.channel_type === "ligacao" ? "Ligar (BravoTech)" : "Ligar pelo WhatsApp oficial"}>
               <ChannelIcon type="ligacao" size={17} />
             </button>
           )}
@@ -2392,44 +2396,49 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
   }
 
-  // Liga pelo WEBFONE (Wavoip) — TODA ligação do sistema sai por aqui.
-  // Sem fallback pra WhatsApp externo: se o webfone não estiver configurado,
-  // o SDR vê o erro na tela (e configura o token em Config → Webfone).
+  // Liga pelo WHATSAPP OFICIAL (Cloud API Calling) — 31/08.
+  //
+  // Era Wavoip: um BSP paralelo, com o WhatsApp pareado por QR num dispositivo
+  // deles. Agora sai pelo MESMO número oficial que manda as mensagens, o que
+  // muda três coisas que importam pro comercial: o cliente vê a empresa (não um
+  // número desconhecido), a Meta registra a ligação na conta certa, e não tem
+  // mais um QR pra cair no meio do turno.
+  //
+  // O áudio é deste navegador — quem gera o SDP é ele. Estado, mudo e desligar
+  // vivem no LigacaoOficialWidget; aqui só disparamos.
   async function callViaWebfone(
     phone?: string | null,
     opts?: { leadName?: string | null; leadId?: string | null },
   ) {
     if (!(await confirmarLigacao(phone, opts?.leadName))) return;
-    const r = await dialViaWavoip(phone, {
+    const r = await dialViaOficial(phone, {
       displayName: opts?.leadName ?? undefined,
       leadName: opts?.leadName ?? undefined,
       leadId: opts?.leadId ?? null,
       ownerId: currentUser?.id ?? null,
     });
     if (!r.ok) {
-      console.warn("[QS] webfone indisponível:", r.error);
-      notifyError(r.error || "Webfone indisponível — confira o token em Configurações → Webfone.");
+      console.warn("[QS] ligação oficial indisponível:", r.error);
+      notifyError(r.error || "Não consegui ligar pelo WhatsApp oficial.");
     }
   }
 
-  // Liga pelo WHATSAPP. Se houver token do webfone Wavoip, faz a chamada DENTRO do
-  // navegador (com desfecho automático ao encerrar). Sem token/config, abre a
-  // conversa do lead no WhatsApp — o botão de ligar do WhatsApp fica a 1 toque
-  // (fallback universal que sempre funciona, sem depender de setup).
+  // Liga pelo WHATSAPP OFICIAL. Se a chamada não puder sair (sem permissão do
+  // cliente, sem microfone, número sem WhatsApp), cai no fallback universal:
+  // abrir a conversa do lead, onde o ícone de ligar fica a um toque. O fallback
+  // continua existindo porque ele nunca depende de configuração nenhuma.
   async function callViaWhatsApp(phone?: string | null, opts?: { leadName?: string | null; leadId?: string | null }) {
     if (!(await confirmarLigacao(phone, opts?.leadName))) return;
-    const token = await getWavoipToken();
-    if (token) {
-      const r = await dialViaWavoip(phone, {
-        displayName: opts?.leadName ?? undefined,
-        leadName: opts?.leadName ?? undefined,
-        leadId: opts?.leadId ?? null,
-        ownerId: currentUser?.id ?? null,
-      });
-      if (r.ok) return;
-      console.warn("[QS] Wavoip indisponível, abrindo a conversa do WhatsApp:", r.error);
-    }
-    if (!isDialablePhone(phone)) { notifyError("Telefone do lead inválido para ligar pelo WhatsApp."); return; }
+    const r = await dialViaOficial(phone, {
+      displayName: opts?.leadName ?? undefined,
+      leadName: opts?.leadName ?? undefined,
+      leadId: opts?.leadId ?? null,
+      ownerId: currentUser?.id ?? null,
+    });
+    if (r.ok) return;
+    console.warn("[QS] ligação oficial indisponível, abrindo a conversa do WhatsApp:", r.error);
+    notifyError(r.error);
+    if (!isDialablePhone(phone)) return;
     startWhatsAppCall(phone); // abre a conversa do lead — ligar em 1 toque
     showToast("Abrindo o WhatsApp do lead — toque no ícone de ligar pra iniciar a chamada.");
   }
@@ -2466,7 +2475,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   }
 
   // Botão do canal da tarefa. "Ligação" = softphone BravoTech (SIP); "Ligação
-  // WhatsApp" continua no webfone Wavoip.
+  // WhatsApp" = número oficial pela Cloud API.
   function renderChannelAction(task: Task, lead: Lead | undefined) {
     switch (task.channel_type) {
       case "ligacao":
@@ -2685,7 +2694,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <ChannelIcon type="ligacao" size={16} />Ligar
             </button>
             {/* Ligação via WhatsApp: opção ao lado da ligação manual. Usa o webfone
-                Wavoip se houver token; senão abre a conversa do lead pra ligar em 1 toque. */}
+                número oficial; se não der, abre a conversa do lead pra ligar em 1 toque. */}
             <button
               onClick={() => { pinTaskForCall(task); callViaWhatsApp(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13.5px] font-bold text-white"

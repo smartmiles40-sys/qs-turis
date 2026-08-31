@@ -3,7 +3,7 @@
 // Modal de WhatsApp para um lead. O envio sai pelo canal NATIVO do QS
 // (/api/wa-send: Chatwoot → Evolution → WhatsApp) — a mesma conversa do inbox,
 // assinada com o nome do SDR no servidor. Fallback: abrir no wa.me.
-// Também oferece ligar pelo webfone (Wavoip).
+// Também oferece ligar pelo NÚMERO OFICIAL (Cloud API Calling).
 // Cada interação é registrada em qs_whatsapp_messages.
 // -----------------------------------------------------------------------------
 
@@ -18,7 +18,7 @@ import {
   sendWhatsAppMessage,
   WA_TEMPLATES,
 } from "@/lib/whatsapp";
-import { dialViaWavoip } from "@/lib/wavoip";
+import { dialViaOficial } from "@/lib/qs/waCall";
 import { confirmar } from "@/lib/qs/confirmar";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { assinarTexto, loadSignatureName } from "@/lib/qs/waSignature";
@@ -140,9 +140,10 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
     });
     if (!ok) return;
     setCalling(true);
-    // O log da ligação sai automaticamente no fim (call:ended) com desfecho+duração
-    // — ver setupCallLogging em @/lib/wavoip; por isso não gravamos "pending" aqui.
-    const r = await dialViaWavoip(lead.phone, {
+    // O log da ligação sai automaticamente no fim, com desfecho e duração — quem
+    // emite é o `setOnCallEndedOficial` do waCall.ts. Por isso não gravamos
+    // "pending" aqui: linha de log a mais é pior que linha de log atrasada.
+    const r = await dialViaOficial(lead.phone, {
       displayName: lead.name ?? undefined,
       leadName: lead.name ?? undefined,
       leadId: lead.id ?? null,
@@ -258,7 +259,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
             </div>
           </div>
 
-          {/* ── LIGAÇÃO (tudo pelo Wavoip) ───────────────────────────────── */}
+          {/* ── LIGAÇÃO (número oficial, Cloud API Calling) ───────────────── */}
           <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--line)" }}>
             <div className="flex items-center gap-3 px-4 py-3" style={{ background: "var(--card2)" }}>
               <span className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0" style={{ background: "rgba(18,161,138,.14)", color: "#0E7C6A" }}>
@@ -273,7 +274,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
                 </p>
               </div>
               <span className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--wa-ok-bg)", color: "#0E7C6A" }}>
-                Wavoip
+                Oficial
               </span>
             </div>
             <button
@@ -298,7 +299,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
             </button>
           </div>
           <p className="text-[10px] text-gray-400 text-center">
-            A ligação toca no WhatsApp do cliente, direto do sistema (Wavoip). Token em Configurações → Webfone.
+            A ligação toca no WhatsApp do cliente e sai pelo número oficial da empresa — o áudio é deste navegador.
           </p>
         </div>
       </div>
