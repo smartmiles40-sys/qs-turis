@@ -2,24 +2,30 @@
 // -----------------------------------------------------------------------------
 // MENSAGEM AUTOMÁTICA DE PRIMEIRO CONTATO
 //
-// Quem cai na etapa "primeiro contato" no Bitrix recebe o vídeo de
-// apresentação. NÃO tem IA nenhuma aqui — é template aprovado da Meta,
-// disparado pelo QS (`/api/primeiro-contato`).
+// Quem entra como lead novo recebe o vídeo de apresentação. NÃO tem IA nenhuma
+// aqui — é template aprovado da Meta, disparado pelo QS.
 //
 // Antes isso vivia dentro de um workflow do n8n, apontando pro ChatApp: trocar
 // a mensagem era editar JSON e reimportar workflow. Esta tela existe pra que
 // trocar a mensagem seja trocar a mensagem.
 //
-// AS QUATRO DECISÕES SÃO DO BRUNO, NÃO DO CÓDIGO:
-//   1. qual modelo aprovado
-//   2. qual vídeo vai no cabeçalho (a Meta pede o link a cada envio; ele não
+// AS CINCO DECISÕES SÃO DO BRUNO, NÃO DO CÓDIGO:
+//   1. QUANDO dispara — assim que o lead entra no QS, ou só quando o Bitrix
+//      mandar (31/08: o QS passou a disparar sozinho; o Bitrix virou o plano B)
+//   2. qual modelo aprovado
+//   3. qual vídeo vai no cabeçalho (a Meta pede o link a cada envio; ele não
 //      fica guardado no modelo)
-//   3. quantos por dia, no máximo — cada conversa iniciada por template é
+//   4. quantos por dia, no máximo — cada conversa iniciada por template é
 //      cobrada pela Meta, e campanha que escala de madrugada não pede licença
-//   4. ligado ou desligado
+//   5. ligado ou desligado
+//
+// A PRÉVIA E O PAINEL EXISTEM PELO MESMO MOTIVO DA TELA. De nada adianta
+// qualquer um poder trocar a mensagem se, pra saber o que vai sair e se saiu,
+// ainda precisar chamar alguém: a prévia mostra o texto com as variáveis já
+// preenchidas, e o painel mostra quantos saíram hoje e o que falhou.
 // -----------------------------------------------------------------------------
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { listarModelosAdmin, type WaModeloAdmin } from "@/lib/qs/waInbox";
@@ -27,19 +33,46 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 
 const CHAVE = "primeiro_contato_auto";
 
-/** PRECISA bater com `montarParams` de api/primeiro-contato.js. */
+/**
+ * PRECISA bater com `montarParams` de api/_primeiroContato.js. Apelido que só
+ * existe de um lado vira variável vazia — e variável vazia faz a Meta recusar o
+ * template inteiro.
+ *
+ * `exemplo` é só da prévia: é o que aparece no lugar da variável pra quem está
+ * conferindo o texto antes de ligar.
+ */
 const APELIDOS = [
-  { valor: "{{primeiro_nome}}", label: "Primeiro nome", ajuda: "Bruno" },
-  { valor: "{{nome}}", label: "Nome completo", ajuda: "Bruno Oliveira" },
-  { valor: "{{expedicao}}", label: "Expedição/fonte do lead", ajuda: "vem do campo Fonte" },
-  { valor: "{{empresa}}", label: "Nome da agência", ajuda: "Se Tu For, Eu Vou" },
+  { valor: "{{primeiro_nome}}", label: "Primeiro nome", ajuda: "Bruno", exemplo: "Bruno" },
+  { valor: "{{nome}}", label: "Nome completo", ajuda: "Bruno Oliveira", exemplo: "Bruno Oliveira" },
+  { valor: "{{expedicao}}", label: "Expedição/fonte do lead", ajuda: "vem do campo Fonte", exemplo: "Japão Outubro" },
+  { valor: "{{empresa}}", label: "Nome da agência", ajuda: "Se Tu For, Eu Vou", exemplo: "Se Tu For, Eu Vou" },
 ];
+
+type Gatilho = "lead_novo" | "externo";
 
 interface Config {
   ativo?: boolean;
+  gatilho?: Gatilho;
   teto_dia?: number;
   template?: { nome: string; idioma?: string | null; params?: Record<string, string> };
   midia?: { url?: string; tipo?: string };
+}
+
+interface Disparo {
+  lead_id: string;
+  status: string;
+  motivo: string | null;
+  origem: string | null;
+  criado_em: string;
+}
+
+/** Meia-noite de hoje no fuso do time (não no do navegador de quem abriu). */
+function inicioDoDiaSP(): string {
+  const agora = new Date();
+  const emSP = new Date(agora.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const meiaNoite = new Date(emSP);
+  meiaNoite.setHours(0, 0, 0, 0);
+  return new Date(agora.getTime() - (emSP.getTime() - meiaNoite.getTime())).toISOString();
 }
 
 export default function MensagemAutomatica() {
@@ -47,7 +80,8 @@ export default function MensagemAutomatica() {
   const podeMexer = currentUser?.role === "admin" || currentUser?.role === "gestor";
 
   const [modelos, setModelos] = useState<WaModeloAdmin[]>([]);
-  const [cfg, setCfg] = useState<Config>({ ativo: false, teto_dia: 200 });
+  const [cfg, setCfg] = useState<Config>({ ativo: false, gatilho: "lead_novo", teto_dia: 200 });
+  const [disparos, setDisparos] = useState<Disparo[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -56,15 +90,23 @@ export default function MensagemAutomatica() {
     setCarregando(true);
     setErro(null);
     try {
-      const [{ modelos: ms, error: eM }, { data }] = await Promise.all([
+      const [{ modelos: ms, error: eM }, { data }, { data: hist }] = await Promise.all([
         listarModelosAdmin(),
         supabase.from("qs_settings").select("value").eq("key", CHAVE).maybeSingle(),
+        // O painel. A RLS da 0067 já limita o que cada um enxerga (gestão vê
+        // tudo, SDR vê os leads dele), então não há filtro a fazer aqui.
+        supabase
+          .from("qs_primeiro_contato")
+          .select("lead_id,status,motivo,origem,criado_em")
+          .order("criado_em", { ascending: false })
+          .limit(200),
       ]);
       if (eM) setErro(eM);
       // Só APPROVED entra: oferecer modelo pendente é prometer um envio que a
       // Meta vai recusar na hora.
       setModelos((ms || []).filter((m) => String(m.status).toUpperCase() === "APPROVED"));
-      if (data?.value) setCfg(data.value as Config);
+      if (data?.value) setCfg({ gatilho: "lead_novo", ...(data.value as Config) });
+      setDisparos((hist as Disparo[] | null) ?? []);
     } catch (e: unknown) {
       setErro((e as { message?: string })?.message ?? "Não consegui carregar.");
     } finally {
@@ -79,14 +121,47 @@ export default function MensagemAutomatica() {
   // texto (VIDEO, IMAGE, DOCUMENT). Se tem, o envio exige o link.
   const precisaMidia = !!escolhido?.cabecalhoMidia;
   const faltaMidia = precisaMidia && !cfg.midia?.url?.trim();
-  const variaveis = escolhido?.variaveis ?? [];
+  const variaveis = useMemo(() => escolhido?.variaveis ?? [], [escolhido]);
   const faltaVariavel = variaveis.some((v) => !cfg.template?.params?.[v]);
+  const gatilho: Gatilho = cfg.gatilho === "externo" ? "externo" : "lead_novo";
+
+  /**
+   * O corpo do modelo com os {{buracos}} já preenchidos pelo exemplo do apelido
+   * escolhido. Variável ainda não mapeada aparece marcada, porque é exatamente
+   * ela que faz a Meta recusar o template inteiro — melhor ver o buraco aqui do
+   * que descobrir no primeiro lead.
+   */
+  const previa = useMemo(() => {
+    if (!escolhido?.corpo) return null;
+    return escolhido.corpo.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_todo, chave: string) => {
+      const escolha = cfg.template?.params?.[String(chave)];
+      if (!escolha) return "⟨falta mapear⟩";
+      const apelido = APELIDOS.find((a) => a.valor === escolha);
+      return apelido ? apelido.exemplo : String(escolha);
+    });
+  }, [escolhido, cfg.template?.params]);
+
+  const resumo = useMemo(() => {
+    const corte = inicioDoDiaSP();
+    const hoje = disparos.filter((d) => d.criado_em >= corte);
+    const conta = (s: string) => hoje.filter((d) => d.status === s).length;
+    return {
+      enviados: conta("enviado"),
+      falhas: conta("falhou"),
+      bloqueados: conta("bloqueado"),
+      pendentes: conta("pendente"),
+      // As falhas recentes valem mais que a contagem: é delas que sai o
+      // "por que aquele lead não recebeu" sem abrir log da Vercel.
+      ultimasFalhas: disparos.filter((d) => d.status === "falhou").slice(0, 5),
+    };
+  }, [disparos]);
 
   const salvar = useCallback(async () => {
     setSalvando(true);
     try {
       const value: Config = {
         ativo: !!cfg.ativo,
+        gatilho,
         teto_dia: Math.max(0, Math.floor(Number(cfg.teto_dia ?? 200))),
         template: cfg.template?.nome
           ? { nome: cfg.template.nome, idioma: cfg.template.idioma ?? null, params: cfg.template.params ?? {} }
@@ -104,17 +179,18 @@ export default function MensagemAutomatica() {
     } finally {
       setSalvando(false);
     }
-  }, [cfg, escolhido, carregar]);
+  }, [cfg, gatilho, escolhido, carregar]);
 
   if (carregando) return <p className="text-sm text-gray-500">Carregando…</p>;
 
   return (
-    <div className="max-w-3xl space-y-4">
+    <div className="max-w-3xl space-y-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Mensagem automática de primeiro contato</h2>
         <p className="mt-1 text-[13px] text-gray-600">
-          Quem cai em <strong>primeiro contato</strong> no Bitrix recebe esta mensagem, uma vez só.
-          O mesmo lead nunca recebe duas vezes, mesmo que o Bitrix repita o gatilho.
+          Todo lead novo recebe esta mensagem, <strong>uma vez só</strong>. A mesma pessoa nunca
+          recebe duas vezes — nem quando o Bitrix repete o gatilho, nem quando ela entra de novo
+          por uma lista.
         </p>
       </div>
 
@@ -131,6 +207,59 @@ export default function MensagemAutomatica() {
         <span className="text-sm font-medium text-gray-900">Ligada</span>
         {!cfg.ativo && <span className="text-[12px] text-gray-500">— nada é disparado enquanto estiver desligada</span>}
       </label>
+
+      {/* ── PASSO 1: QUANDO DISPARA ─────────────────────────────────────────
+          O passo que faltava. Antes esta decisão morava numa automação do
+          Bitrix apontando pra um workflow do n8n: pra mudar quando a mensagem
+          saía, era preciso mexer em duas ferramentas fora do QS. */}
+      <fieldset className="rounded-lg border border-gray-200 p-3">
+        <legend className="px-1 text-[13px] font-medium text-gray-800">Quando disparar</legend>
+
+        <label className="flex cursor-pointer items-start gap-2">
+          <input
+            type="radio"
+            name="gatilho"
+            className="mt-1"
+            checked={gatilho === "lead_novo"}
+            disabled={!podeMexer}
+            onChange={() => setCfg((c) => ({ ...c, gatilho: "lead_novo" }))}
+          />
+          <span>
+            <span className="text-sm font-medium text-gray-900">Assim que o lead entra no QS</span>
+            <span className="block text-[12px] text-gray-500">
+              O QS dispara sozinho quando o card nasce — landing page, tráfego, Bitrix, qualquer
+              origem. Não depende de ninguém arrastar o card nem do n8n estar de pé.
+            </span>
+          </span>
+        </label>
+
+        <label className="mt-3 flex cursor-pointer items-start gap-2">
+          <input
+            type="radio"
+            name="gatilho"
+            className="mt-1"
+            checked={gatilho === "externo"}
+            disabled={!podeMexer}
+            onChange={() => setCfg((c) => ({ ...c, gatilho: "externo" }))}
+          />
+          <span>
+            <span className="text-sm font-medium text-gray-900">Só quando o Bitrix mandar</span>
+            <span className="block text-[12px] text-gray-500">
+              Como era antes: a etapa &quot;primeiro contato&quot; no Bitrix chama o n8n, que chama
+              o QS. É o plano B — use se o disparo automático precisar ser desligado sem desligar a
+              mensagem inteira.
+            </span>
+          </span>
+        </label>
+
+        {gatilho === "lead_novo" && (
+          <p className="mt-3 rounded-md bg-gray-50 p-2 text-[12px] text-gray-600">
+            <strong>Quem não recebe, mesmo com isto ligado:</strong> lead que já existia no QS (pode
+            estar no meio de uma negociação) e lead que entrou por carga de lista/resgate (é gente
+            que já foi trabalhada). Nesses casos o disparo continua sendo manual.
+          </p>
+        )}
+      </fieldset>
 
       {/* Modelo */}
       <div>
@@ -154,9 +283,6 @@ export default function MensagemAutomatica() {
             </option>
           ))}
         </select>
-        {escolhido && (
-          <p className="mt-1 whitespace-pre-wrap rounded-md bg-gray-50 p-2 text-[13px] text-gray-700">{escolhido.corpo}</p>
-        )}
       </div>
 
       {/* Mídia do cabeçalho */}
@@ -210,6 +336,30 @@ export default function MensagemAutomatica() {
         </div>
       )}
 
+      {/* Prévia — o texto como o lead vai ler, não como o modelo é escrito */}
+      {previa && (
+        <div>
+          <p className="text-[13px] font-medium text-gray-800">Como o lead vai ver</p>
+          <div className="mt-1 rounded-lg bg-[#e6ddd4] p-3">
+            {precisaMidia && (
+              <div className="mb-2 flex items-center gap-2 rounded-md bg-white/70 px-2 py-3 text-[12px] text-gray-600">
+                <span>▶</span>
+                <span>{String(escolhido?.cabecalhoMidia).toLowerCase()} do cabeçalho</span>
+              </div>
+            )}
+            <p className="whitespace-pre-wrap rounded-lg bg-white p-2 text-[13px] leading-relaxed text-gray-800 shadow-sm">
+              {previa}
+            </p>
+            {escolhido?.rodape && (
+              <p className="mt-1 px-2 text-[11px] text-gray-500">{escolhido.rodape}</p>
+            )}
+          </div>
+          <p className="mt-1 text-[12px] text-gray-500">
+            Os nomes são exemplo — no envio entram os dados do lead.
+          </p>
+        </div>
+      )}
+
       {/* Teto */}
       <div>
         <label className="block text-[13px] font-medium text-gray-800">Máximo por dia</label>
@@ -222,7 +372,7 @@ export default function MensagemAutomatica() {
           onChange={(e) => setCfg((c) => ({ ...c, teto_dia: Number(e.target.value) }))}
         />
         <p className="mt-1 text-[12px] text-gray-500">
-          Bater o teto NÃO perde o lead: o disparo fica registrado como bloqueado e você vê na auditoria.
+          Bater o teto NÃO perde o lead: o disparo fica registrado como bloqueado e você vê aqui embaixo.
         </p>
       </div>
 
@@ -246,6 +396,50 @@ export default function MensagemAutomatica() {
       ) : (
         <p className="text-[13px] text-gray-500">Só administrador ou gestor altera esta configuração.</p>
       )}
+
+      {/* ── COMO ESTÁ INDO ──────────────────────────────────────────────────
+          Sem isto, "está funcionando?" continua sendo pergunta pro time de
+          tec — que era metade do problema que esta tela veio resolver. */}
+      <div className="border-t border-gray-200 pt-4">
+        <p className="text-[13px] font-medium text-gray-800">Como está indo (hoje)</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Placar rotulo="Enviados" valor={resumo.enviados} />
+          <Placar rotulo="Falharam" valor={resumo.falhas} alerta={resumo.falhas > 0} />
+          <Placar rotulo="Bloqueados pelo teto" valor={resumo.bloqueados} alerta={resumo.bloqueados > 0} />
+          {resumo.pendentes > 0 && <Placar rotulo="Em andamento" valor={resumo.pendentes} />}
+        </div>
+
+        {resumo.ultimasFalhas.length > 0 && (
+          <div className="mt-3">
+            <p className="text-[12px] font-medium text-gray-700">Últimas falhas</p>
+            <ul className="mt-1 space-y-1">
+              {resumo.ultimasFalhas.map((d) => (
+                <li key={d.lead_id} className="rounded-md bg-red-50 px-2 py-1 text-[12px] text-red-800">
+                  <span className="text-red-500">
+                    {new Date(d.criado_em).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}
+                  </span>{" "}
+                  — {d.motivo || "sem motivo registrado"}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {disparos.length === 0 && (
+          <p className="mt-2 text-[12px] text-gray-500">
+            Nenhum disparo registrado ainda.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Placar({ rotulo, valor, alerta = false }: { rotulo: string; valor: number; alerta?: boolean }) {
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${alerta ? "border-red-200 bg-red-50" : "border-gray-200 bg-gray-50"}`}>
+      <p className={`text-lg font-semibold ${alerta ? "text-red-700" : "text-gray-900"}`}>{valor}</p>
+      <p className="text-[11px] text-gray-600">{rotulo}</p>
     </div>
   );
 }

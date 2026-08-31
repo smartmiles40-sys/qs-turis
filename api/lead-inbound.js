@@ -34,6 +34,7 @@
 import { createInboundLead, moverLeadParaCadencia } from './_leads.js';
 import { segredoConfere, rest } from './_supabaseAdmin.js';
 import { entregarAGloria } from './_gloriaEntrada.js';
+import { dispararPrimeiroContato, lerConfig, gatilhoDe } from './_primeiroContato.js';
 
 // UUID v4 (formato geral de UUID). cadence_id/owner_id inválidos antes iam
 // direto pra querystring do PostgREST e o caller recebia o erro cru do banco.
@@ -161,10 +162,62 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── MENSAGEM AUTOMÁTICA DE PRIMEIRO CONTATO ───────────────────────────
+    // O vídeo de apresentação sai AQUI, no instante em que o card nasce.
+    //
+    // Até 31/08 quem disparava era o Bitrix: uma automação chamava um workflow
+    // do n8n, que chamava `/api/primeiro-contato`. Três peças e duas redes no
+    // caminho de uma mensagem que é sempre a mesma — e o lead só recebia
+    // quando alguém (ou uma automação) empurrava o card pra etapa certa lá.
+    // Agora o QS não pede licença: o lead entrou, a mensagem sai.
+    //
+    // O GATILHO ANTIGO CONTINUA DE PÉ. A rota HTTP não foi apagada, e a tela
+    // tem "Quando disparar" — pôr em `externo` devolve o comando pro Bitrix
+    // sem deploy. Trocar o gatilho e queimar o anterior no mesmo dia é ficar
+    // sem rede se algo der errado com tráfego ligado.
+    //
+    // DUAS PORTAS FICAM FECHADAS AQUI, de propósito:
+    //
+    //   • LEAD QUE JÁ EXISTIA (`deduped`). Pode estar no meio de uma negociação
+    //     com um humano há semanas; mandar "oi, prazer, assista o vídeo" no
+    //     meio disso é pior que não mandar nada. Mesma regra da Glória.
+    //   • CARGA DE LISTA (`duplicar=1`). É gente que já foi trabalhada — o card
+    //     é novo, a pessoa não. O dedupe por TELEFONE (0069) já segura quem
+    //     recebeu, mas quem nunca recebeu também não é caso de boas-vindas.
+    //
+    // Quem quiser disparar num desses casos usa a rota HTTP com `lead_id`, que
+    // é uma decisão consciente. Aqui, não.
+    //
+    // Best-effort, como tudo daqui pra baixo: `dispararPrimeiroContato` não
+    // levanta exceção, e mesmo assim vai dentro de try — lead pago perdido não
+    // tem desfazer.
+    let primeiroContato;
+    if (lead && !deduped && !duplicar) {
+      try {
+        const cfgPC = await lerConfig();
+        if (gatilhoDe(cfgPC) === 'lead_novo') {
+          primeiroContato = await dispararPrimeiroContato({
+            lead, origem: lista ? `lista:${lista}` : 'lead-novo', cfg: cfgPC,
+          });
+          if (!primeiroContato.ok && primeiroContato.motivo !== 'desligado') {
+            console.warn(`[lead-inbound] primeiro contato não saiu (${primeiroContato.motivo}) lead=${lead.id}`);
+          }
+        }
+      } catch (e) {
+        console.error('[lead-inbound] primeiro contato falhou:', e?.message || e);
+        primeiroContato = { ok: false, motivo: 'erro', detalhe: e?.message };
+      }
+    }
+
     // ── ATENDIMENTO POR IA ────────────────────────────────────────────────
     // A cadência de destino é a da Glória? Então o lead entra no pipeline dela
     // e ela puxa assunto — sem ninguém arrastar card. É isto que faz uma
     // campanha de tráfego cair na IA em vez de na fila do SDR.
+    //
+    // VEM DEPOIS DO VÍDEO, e a ordem é decisão do Bruno (31/08): o lead da IA
+    // recebe as duas coisas — a apresentação e, em seguida, a Glória puxando
+    // assunto. Se um dia isso virar mensagem demais, o lugar de cortar é aqui
+    // (pular o disparo quando `cadenceId` é o da IA), não na tela.
     //
     // Nunca derruba a criação do lead: falhar aqui deixa um lead normal, que é
     // o comportamento de sempre. Lead pago perdido não tem desfazer.
@@ -191,6 +244,10 @@ export default async function handler(req, res) {
       // { movido: true, tarefas: N } ou { movido: false, motivo: "..." }.
       movido: movido || undefined,
       cadence_id_final: movido?.movido ? body.cadence_id : cadenceId,
+      // O disparo do vídeo de apresentação. Vem SEMPRE que o gatilho automático
+      // está ligado — inclusive quando não mandou: `{ ok:false, motivo:"..." }`
+      // é o que diz, no histórico do n8n, por que aquele lead não recebeu.
+      primeiro_contato: primeiroContato || undefined,
       // Só aparece quando a cadência de destino é a do atendimento por IA.
       // { entrou: true, abordagem: { ok, porta } } — o n8n registra isso no
       // histórico, então dá pra ver pelo lado de fora se ela falou ou não.

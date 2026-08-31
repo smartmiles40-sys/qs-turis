@@ -41,7 +41,10 @@
       "maxDuration": 30
     },
     "api/lead-inbound.js": {
-      "maxDuration": 30
+      "maxDuration": 60
+    },
+    "api/primeiro-contato.js": {
+      "maxDuration": 60
     },
     "api/gloria-saude.js": {
       "maxDuration": 30
