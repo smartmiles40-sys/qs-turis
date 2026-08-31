@@ -30,7 +30,9 @@ import {
   caixaDoUsuario, lerCaixas, canalEhApiOficial,
 } from './_wa.js';
 import { listarModelos, criarModelo, excluirModelo,
-         lerConfigChamadas, ativarChamadas, pedirPermissaoDeLigacao } from './_meta.js';
+         lerConfigChamadas, ativarChamadas, pedirPermissaoDeLigacao,
+         diagnosticoChamadas, iniciarLigacao, encerrarLigacao,
+         lerPermissaoDeLigacao } from './_meta.js';
 import {
   evoConfigured, listarInstancias, conectarInstancia, estadoInstancia,
   desconectarInstancia, reiniciarInstancia,
@@ -320,7 +322,47 @@ export default async function handler(req, res) {
       if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
       return res.status(200).json({ ok: true, wamid: r.wamid });
     }
+    // ── A VOLTA: LIGAR PRO CLIENTE ──────────────────────────────────────
+    // O SDP vem do navegador (só ele tem microfone). O servidor é o carteiro:
+    // leva o offer, devolve o `wacid`, e o áudio começa quando o webhook
+    // `connect` trouxer o answer — que chega pelo wa-calls, não por aqui.
+    if (body.acao === 'calling-ligar') {
+      const r = await iniciarLigacao({ para: body.telefone, sdp: body.sdp, marcador: body.marcador });
+      if (r.erro) {
+        // 138006 é o único erro que tem conserto na tela: falta permissão.
+        const dica = r.codigo === 138006
+          ? ' — essa pessoa ainda não deu permissão de ligação.'
+          : '';
+        return res.status(400).json({ error: (r.detalhe || r.erro) + dica, motivo: r.erro, codigo: r.codigo });
+      }
+      return res.status(200).json({ ok: true, callId: r.callId });
+    }
+    if (body.acao === 'calling-desligar') {
+      const r = await encerrarLigacao(body.callId);
+      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      return res.status(200).json({ ok: true });
+    }
+    if (body.acao === 'calling-permissao-status') {
+      const r = await lerPermissaoDeLigacao(body.telefone);
+      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      return res.status(200).json(r);
+    }
     return res.status(400).json({ error: 'Ação inválida.' });
+  }
+
+  // Diagnostico COMPLETO: numero, bloco calling inteiro, apps assinados na
+  // WABA e — a pergunta que trava tudo — quais CAMPOS o app de chamadas assina.
+  // Junto vao os ultimos eventos recebidos, pra tela responder "chegou algo?"
+  // sem ninguem abrir o Supabase.
+  if (req.query?.calling === 'diag') {
+    if (!(await ehAdmin(userId))) return res.status(403).json({ error: 'Só administrador ou gestor.' });
+    const d = await diagnosticoChamadas();
+    if (d.erro) return res.status(503).json({ error: 'Não achei o número oficial no atendimento.', motivo: d.erro });
+    let eventos = [];
+    try {
+      eventos = await rest('qs_wa_calls?select=recebido_em,evento,direcao,de,para&order=recebido_em.desc&limit=5');
+    } catch (e) { console.warn('[wa-config] eventos de chamada:', e?.message); }
+    return res.status(200).json({ ...d, eventos: Array.isArray(eventos) ? eventos : [] });
   }
 
   // Diagnostico de chamadas: diz se o numero esta MESMO com calling ligado.

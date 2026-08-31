@@ -370,3 +370,163 @@ export async function pedirPermissaoDeLigacao(telefone, texto) {
     return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
   }
 }
+
+/**
+ * DIAGNÓSTICO COMPLETO DA LIGAÇÃO — as quatro perguntas numa resposta só.
+ *
+ * Existe porque a configuração de chamada mente por omissão: `subscribed_apps`
+ * diz QUAIS apps estão na WABA mas não QUAIS CAMPOS cada um assina, e o painel
+ * mostra o toggle `calls` aceso mesmo quando a assinatura não foi gravada. O
+ * resultado é o pior tipo de bug: tudo responde `success: true` e nada é
+ * entregue — foi a tarde inteira do dia 31/08 nisso, no Graph Explorer, uma
+ * pergunta por vez.
+ *
+ * A pergunta que fecha o caso é a 4: `GET /{app_id}/subscriptions` com token de
+ * APP (`app_id|app_secret`) é o único lugar que lista os campos de verdade.
+ */
+export async function diagnosticoChamadas() {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+
+  const out = { phoneId: cr.phoneId, waba: cr.waba };
+
+  // 1. O bloco `calling` INTEIRO — não só os três campos que a tela mostrava.
+  //    `connection_mode` mora aqui: se estiver em SIP, o evento vai pro servidor
+  //    SIP da empresa e NUNCA pro webhook, por definição.
+  try {
+    const j = await graph(`/${cr.phoneId}/settings`, { token: cr.token });
+    out.calling = j?.calling ?? null;
+  } catch (e) { out.callingErro = e?.message; }
+
+  // 2. Quem é esse phone_number_id por extenso. A tela pega o id do Chatwoot;
+  //    WABA com mais de um número deixa a gente lendo a config de um e ligando
+  //    pro outro — e isso não aparece em lugar nenhum.
+  try {
+    const j = await graph(`/${cr.waba}/phone_numbers?fields=id,display_phone_number,verified_name`, { token: cr.token });
+    out.numeros = (j?.data || []).map((n) => ({ id: n.id, numero: n.display_phone_number, nome: n.verified_name }));
+  } catch (e) { out.numerosErro = e?.message; }
+
+  // 3. Apps assinados na WABA.
+  try {
+    const j = await graph(`/${cr.waba}/subscribed_apps`, { token: cr.token });
+    out.apps = (j?.data || []).map((a) => ({
+      id: a?.whatsapp_business_api_data?.id || null,
+      nome: a?.whatsapp_business_api_data?.name || null,
+    }));
+  } catch (e) { out.appsErro = e?.message; }
+
+  // 4. OS CAMPOS. Token de app, não de usuário: é o que dá acesso ao
+  //    /subscriptions. O app secret já está na Vercel (o webhook confere HMAC
+  //    com ele); falta só o id, que não é segredo.
+  const appId = String(process.env.META_CALLS_APP_ID || '').trim();
+  const appSecret = String(process.env.META_CALLS_APP_SECRET || '').trim();
+  if (!appId || !appSecret) {
+    out.camposErro = appId ? 'sem-META_CALLS_APP_SECRET' : 'sem-META_CALLS_APP_ID';
+  } else {
+    try {
+      const j = await graph(`/${appId}/subscriptions`, { token: `${appId}|${appSecret}` });
+      const wa = (j?.data || []).find((x) => x?.object === 'whatsapp_business_account');
+      out.campos = (wa?.fields || []).map((f) => (typeof f === 'string' ? f : f?.name)).filter(Boolean);
+      out.assinaCalls = out.campos.includes('calls');
+      out.callbackUrl = wa?.callback_url || null;
+      out.appNome = appId;
+    } catch (e) { out.camposErro = e?.message; }
+  }
+
+  return out;
+}
+
+// ─── A VOLTA: LIGAR PRO CLIENTE (business-initiated) ─────────────────────────
+//
+// Ao contrário da mensagem, aqui o servidor NÃO consegue ligar sozinho: a Meta
+// exige um SDP offer de verdade no corpo do pedido, e SDP só sai de um ponto de
+// áudio real. Quem gera é o navegador do SDR; este arquivo só carrega o
+// envelope até a Meta e traz a resposta de volta.
+//
+// O fluxo inteiro, medido contra a doc e contra o evento real de 31/08:
+//   1. navegador  -> offer            (getUserMedia + RTCPeerConnection)
+//   2. QS         -> POST /calls action=connect  { session: {sdp_type:'offer', sdp} }
+//                    devolve o `wacid` na hora — mas NÃO o áudio
+//   3. Meta       -> webhook `connect` com sdp_type=answer   ← chega pelo wa-calls
+//   4. navegador  -> setRemoteDescription(answer), e aí sim o áudio flui
+//   5. desligar   -> POST /calls action=terminate (obrigatório mesmo com RTCP BYE)
+//
+// O passo 3 chegar por WEBHOOK, e não na resposta do passo 2, é o que obriga o
+// navegador a ficar esperando: é assíncrono por natureza.
+
+/**
+ * Pede pra Meta ligar pro cliente, carregando o SDP offer do navegador.
+ *
+ * `to` com DDI, só dígitos. Erro 138006 da Meta = falta permissão de ligação
+ * daquela pessoa — e permissão é assunto do `call_permission_request`, não deste
+ * endpoint.
+ */
+export async function iniciarLigacao({ para, sdp, marcador }) {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
+  const to = String(para || '').replace(/\D/g, '');
+  if (!to) return { erro: 'telefone-invalido' };
+  if (!sdp) return { erro: 'sem-sdp' };
+
+  try {
+    const j = await graph(`/${cr.phoneId}/calls`, {
+      method: 'POST', token: cr.token, timeoutMs: 20_000,
+      body: {
+        messaging_product: 'whatsapp',
+        to,
+        action: 'connect',
+        session: { sdp_type: 'offer', sdp: String(sdp) },
+        ...(marcador ? { biz_opaque_callback_data: String(marcador).slice(0, 512) } : {}),
+      },
+    });
+    return { callId: j?.calls?.[0]?.id || null };
+  } catch (e) {
+    return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
+  }
+}
+
+/**
+ * Desliga. A Meta é explícita: mandar `terminate` é OBRIGATÓRIO mesmo quando o
+ * RTCP BYE já foi pelo caminho de mídia — sem isso a chamada fica aberta do
+ * lado dela, contando minuto.
+ */
+export async function encerrarLigacao(callId) {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
+  if (!callId) return { erro: 'sem-call-id' };
+  try {
+    const j = await graph(`/${cr.phoneId}/calls`, {
+      method: 'POST', token: cr.token,
+      body: { messaging_product: 'whatsapp', call_id: String(callId), action: 'terminate' },
+    });
+    return { ok: j?.success !== false };
+  } catch (e) {
+    return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
+  }
+}
+
+/**
+ * "Posso ligar pra essa pessoa AGORA?" — sem tentar e tomar 138006 na cara do
+ * cliente. Devolve granted | pending | denied | expired e as ações possíveis.
+ */
+export async function lerPermissaoDeLigacao(telefone) {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
+  const wa = String(telefone || '').replace(/\D/g, '');
+  if (!wa) return { erro: 'telefone-invalido' };
+  try {
+    const j = await graph(`/${cr.phoneId}/call_permissions?user_wa_id=${encodeURIComponent(wa)}`, { token: cr.token });
+    const p = j?.permission || j?.data?.[0] || j || {};
+    return {
+      status: p.status || p.permission_status || null,
+      expiraEm: p.expiration_timestamp || p.expires_at || null,
+      acoes: p.actions || null,
+      cru: j,
+    };
+  } catch (e) {
+    return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
+  }
+}

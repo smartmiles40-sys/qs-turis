@@ -171,9 +171,26 @@ export default async function handler(req, res) {
       if (ch?.field !== 'calls') continue;
       const value = ch.value || {};
       const lista = Array.isArray(value.calls) ? value.calls : [];
+
+      // ── `statuses`: a OUTRA lista, que só aparece na ligação de saída ──────
+      // RINGING / ACCEPTED / REJECTED vêm num array separado, com outro formato
+      // (`recipient_id` no lugar de `to`). Sem tratar aqui, o "o cliente está
+      // tocando" cairia como evento desconhecido — e é justamente o que a tela
+      // do SDR precisa mostrar enquanto ninguém atende.
+      for (const st of Array.isArray(value.statuses) ? value.statuses : []) {
+        eventos.push({
+          payload: { ...value, statuses: [st] },
+          call_id: st.id ?? null,
+          evento: st.status ?? null,          // RINGING | ACCEPTED | REJECTED
+          direcao: 'BUSINESS_INITIATED',
+          para: st.recipient_id ?? null,
+          de: value?.metadata?.display_phone_number ?? null,
+        });
+      }
+
       // Evento sem lista de chamadas ainda vale registro: é assim que se
       // descobre um formato diferente do esperado, em vez de descartar calado.
-      if (!lista.length) { eventos.push({ payload: value }); continue; }
+      if (!lista.length) { if (!Array.isArray(value.statuses) || !value.statuses.length) eventos.push({ payload: value }); continue; }
       for (const c of lista) {
         eventos.push({
           payload: { ...value, calls: [c] },
@@ -203,9 +220,16 @@ export default async function handler(req, res) {
     // O dono do telefone, quando existe. Chamada de número desconhecido NÃO é
     // descartada: `lead_id` fica nulo e a RLS deixa ver assim mesmo — esconder
     // até saber de quem é seria o mesmo que não atender.
+    // De quem é o telefone do CLIENTE muda com a direção: na ligação que ele
+    // faz, é o `de`; na que nós fazemos, é o `para` — e o `de` é a empresa.
+    // Procurar sempre pelo `de` amarraria toda ligação de saída no lead errado
+    // (ou em nenhum), e a RLS esconderia a chamada de quem a fez.
+    const foneDoCliente = String(ev.direcao || '').toUpperCase() === 'BUSINESS_INITIATED'
+      ? ev.para
+      : ev.de;
     let leadId = null;
     try {
-      if (ev.de) leadId = (await findLeadByPhone(ev.de))?.id ?? null;
+      if (foneDoCliente) leadId = (await findLeadByPhone(foneDoCliente))?.id ?? null;
     } catch (e) { console.warn('[wa-calls] lead nao resolvido:', e?.message); }
 
     try {

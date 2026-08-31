@@ -1283,3 +1283,47 @@ export async function pedirPermissaoLigacao(telefone: string, texto?: string): P
     return { ok: false, error: "Sem conexão." };
   }
 }
+
+/** O que a Meta responde sobre a ligação, junto num lugar só (ver `diagnosticoChamadas`). */
+export interface DiagnosticoChamadas {
+  phoneId?: string | null;
+  waba?: string | null;
+  calling?: ConfigChamadas | null;
+  callingErro?: string;
+  numeros?: { id: string; numero?: string; nome?: string }[];
+  numerosErro?: string;
+  apps?: { id: string | null; nome: string | null }[];
+  appsErro?: string;
+  campos?: string[];
+  assinaCalls?: boolean;
+  callbackUrl?: string | null;
+  camposErro?: string;
+  eventos?: { recebido_em: string; evento?: string | null; direcao?: string | null; de?: string | null; para?: string | null }[];
+}
+
+export async function lerDiagnosticoChamadas(): Promise<{ diag: DiagnosticoChamadas | null; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config?calling=diag", { headers: await authHeaders() });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { diag: null, error: d?.error || "Não consegui ler o diagnóstico." };
+    return { diag: d as DiagnosticoChamadas };
+  } catch {
+    return { diag: null, error: "Sem conexão." };
+  }
+}
+
+/** "Posso ligar pra essa pessoa agora?" — antes de tentar e tomar 138006. */
+export async function lerPermissaoDeLigacao(telefone: string): Promise<{ status?: string | null; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ acao: "calling-permissao-status", telefone }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: d?.error || "Não consegui conferir." };
+    return { status: d?.status ?? null };
+  } catch {
+    return { error: "Sem conexão." };
+  }
+}
