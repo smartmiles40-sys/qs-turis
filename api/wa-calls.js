@@ -61,15 +61,31 @@ async function corpoCru(req) {
   return Buffer.concat(partes);
 }
 
-/** HMAC-SHA256 do corpo com o app secret, comparado sem vazar tempo. */
+/**
+ * HMAC-SHA256 do corpo com o app secret, comparado sem vazar tempo.
+ *
+ * Devolve o PORQUÊ junto com o veredito. Um 401 mudo aqui é indistinguível
+ * entre "secret do app errado" e "corpo chegou vazio", e as duas coisas se
+ * consertam em lugares opostos — foi o que custou a noite de 31/08.
+ */
 function assinaturaConfere(raw, cabecalho, segredo) {
-  const recebida = String(cabecalho || '');
-  if (!recebida.startsWith('sha256=')) return false;
-  const esperada = 'sha256=' + crypto.createHmac('sha256', segredo).update(raw).digest('hex');
-  const a = Buffer.from(recebida);
-  const b = Buffer.from(esperada);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+  const recebida = String(cabecalho || '').trim();
+  if (!recebida) return { ok: false, motivo: 'sem-cabecalho' };
+  // A Meta manda `sha256=<hex>`. Tolerar o hex pelado não custa nada e evita um
+  // 401 idiota se ela mudar o formato.
+  const hexRecebido = (recebida.startsWith('sha256=') ? recebida.slice(7) : recebida).toLowerCase();
+  const hexEsperado = crypto.createHmac('sha256', segredo).update(raw).digest('hex');
+  if (hexRecebido.length !== hexEsperado.length) {
+    return { ok: false, motivo: 'formato', hexRecebido, hexEsperado };
+  }
+  // Buffer.from(x, 'hex') PARA no primeiro caractere que não é hex, calado. Sem
+  // conferir o tamanho depois, um cabeçalho lixo derruba a rota com RangeError
+  // no timingSafeEqual — 500 em vez de 401, e a Meta entra em retentativa.
+  const a = Buffer.from(hexRecebido, 'hex');
+  const b = Buffer.from(hexEsperado, 'hex');
+  if (a.length !== b.length || a.length === 0) return { ok: false, motivo: 'nao-e-hex', hexRecebido, hexEsperado };
+  const ok = crypto.timingSafeEqual(a, b);
+  return { ok, motivo: ok ? null : 'digest-diferente', hexRecebido, hexEsperado };
 }
 
 export default async function handler(req, res) {
@@ -106,10 +122,36 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'corpo invalido' });
   }
 
-  if (!assinaturaConfere(raw, req.headers['x-hub-signature-256'], segredo)) {
-    console.warn('[wa-calls] assinatura nao confere');
+  // ── REDE DE SEGURANÇA: O RUNTIME PODE TER BEBIDO O STREAM PRIMEIRO ─────────
+  //
+  // `bodyParser: false` é o jeito documentado de manter o corpo cru numa função
+  // Node da Vercel. Mas se por qualquer razão ele não valer (mudança de
+  // runtime, a rota servida por outro caminho), o parser lê o stream ANTES do
+  // handler e o `for await` acima devolve ZERO byte — e aí o HMAC é calculado
+  // sobre nada e o 401 é garantido, com o app secret certíssimo.
+  //
+  // Reserializar o `req.body` recupera os mesmos bytes na esmagadora maioria
+  // dos casos (o JSON da Meta não tem espaço sobrando e o JSON.parse preserva a
+  // ordem das chaves). Não é a fonte da verdade — é o plano B, e ele se anuncia
+  // no log pra ninguém depurar o mistério errado.
+  let deOnde = 'stream';
+  if (!raw.length && req.body != null) {
+    raw = Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body), 'utf8');
+    deOnde = 'req.body (stream ja consumido)';
+  }
+
+  const conf = assinaturaConfere(raw, req.headers['x-hub-signature-256'], segredo);
+  if (!conf.ok) {
+    // O digest NÃO é segredo (a Meta manda o dela no cabeçalho, aberto). Os 12
+    // primeiros caracteres dos dois lados dizem, de um olhar, se é secret
+    // trocado (digests diferentes) ou corpo vazio (tamanho 0 acima).
+    console.warn(
+      `[wa-calls] assinatura nao confere — motivo: ${conf.motivo}, corpo: ${raw.length}b de ${deOnde}, ` +
+      `esperado ${String(conf.hexEsperado || '').slice(0, 12)}…, recebido ${String(conf.hexRecebido || '').slice(0, 12)}…`
+    );
     return res.status(401).json({ error: 'assinatura invalida' });
   }
+  if (deOnde !== 'stream') console.warn(`[wa-calls] assinatura OK, mas o corpo veio do ${deOnde}`);
 
   let body;
   try {
