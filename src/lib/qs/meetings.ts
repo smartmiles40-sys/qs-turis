@@ -469,92 +469,114 @@ async function bitrixIdDoLead(leadId: string): Promise<string | null> {
  * Beatrice. Em vez de um "duplicate key" cru, a mensagem diz de quem é, porque
  * quem está agendando é a única pessoa capaz de decidir qual card vale.
  */
-/**
- * Os 8 ultimos digitos do telefone. E a comparacao que ignora de uma vez o
- * +55, o DDI grudado e o nono digito — as tres formas de o MESMO numero
- * aparecer diferente entre Bitrix, Chatwoot e formulario da LP.
- */
-function fimDoTelefone(bruto: string | null | undefined): string {
-  const d = String(bruto ?? "").replace(/\D/g, "");
-  return d.length >= 8 ? d.slice(-8) : "";
-}
-
 export interface VinculoBitrix {
-  /** O card onde a reuniao deve nascer. Pode NAO ser o que o usuario abriu. */
+  /** O card onde a reuniao vai nascer. E SEMPRE o que o usuario abriu. */
   leadId: string;
-  /** true = o ID pertence a um card irmao e a reuniao foi redirecionada pra la. */
-  trocouDeCard: boolean;
-  /** Nome do card de destino, quando houve troca (pra avisar quem agendou). */
-  nome?: string | null;
+  /** Preenchido quando o id foi TIRADO de outro card pra vir pra este. */
+  moveuDe?: { id: string; nome: string | null } | null;
 }
 
 /**
- * Resolve em QUAL card a reuniao deve nascer, dado o ID do negocio digitado.
+ * Gruda o ID do negocio do Bitrix NESTE card. Se outro card estiver com o id,
+ * o vinculo MUDA DE CARD — nao trava.
  *
- * -- POR QUE ISTO NAO E SO UM UPDATE (01/09, no mesmo dia) --------------------
+ * -- POR QUE MOVER, E NAO RECUSAR NEM REDIRECIONAR (Bruno, 01/09) ------------
  *
- * A primeira versao apenas gravava o `bitrix_id` no lead e, no 23505 do indice
- * unico, recusava com "esse negocio ja esta no card de Fulano". A ideia era que
- * o conflito revelasse as duplicatas. Revelou — e travou o time junto: sao 583
- * cards sem `bitrix_id` que tem um card IRMAO, do mesmo telefone, com o id.
- * O SDR abria o duplicado, digitava o id CERTO do cliente e nao conseguia
- * agendar de jeito nenhum. A trava virou beco sem saida em vez de aviso.
+ * Este arquivo ja errou duas vezes no mesmo dia, e as duas por nao ouvir o que
+ * o gesto do usuario quer dizer:
  *
- * O erro de leitura foi tratar "id ja existe" como uma coisa so. Sao duas:
+ *   1a: RECUSAVA quando outro card tinha o id. Travou o time: sao 583 cards sem
+ *       `bitrix_id` que tem irmao com o id, e o SDR digitava o numero CERTO e
+ *       nao conseguia agendar.
+ *   2a: REDIRECIONAVA a reuniao pro card irmao. Resolvia o bloqueio, mas
+ *       decidia pelo usuario: ele cadastra o negocio AQUI e a reuniao nascia
+ *       noutro lugar.
  *
- *   MESMO TELEFONE  -> e a mesma pessoa em dois cards. Nao ha conflito de
- *                      verdade: existe um card certo, e ele nao e o que esta
- *                      aberto. A reuniao vai pra LA e o trabalho continua.
- *   OUTRO TELEFONE  -> o id e de outro cliente. Ai sim recusa: gravar seria
- *                      pendurar a reuniao no negocio de outra pessoa.
+ * A leitura certa e a do Bruno: digitar o ID do negocio E a declaracao de qual
+ * card representa aquele negocio. Quem esta com o cliente na linha sabe disso
+ * melhor que o banco. Entao o card aberto ganha o vinculo, e o antigo perde.
  *
- * O card duplicado nao e mexido nem apagado — juntar os dois e decisao de
- * gestao, nao efeito colateral de um agendamento com pressa.
+ * O indice unico continua valendo, e e ele que garante que "qual card e o do
+ * negocio 41785" tenha UMA resposta. Por isso mover e tirar de la antes de por
+ * aqui — nao existe estado com dois donos.
+ *
+ * O CARD ANTIGO NAO E APAGADO nem esvaziado: conversa, notas e historico ficam
+ * onde estao. Ele so deixa de ser o endereco daquele negocio. Juntar os dois
+ * continua sendo decisao de gestao.
+ *
+ * As duas pontas ganham NOTA. Desvincular um card em silencio e como se perde a
+ * confianca no sistema: daqui a tres semanas alguem abre o card antigo, ve que
+ * o Bitrix sumiu e nao tem como saber se foi bug, alguem ou quando.
  */
-export async function vincularOuAcharCardDoBitrix(
+export async function vincularCardAoBitrix(
   leadId: string,
   bitrixId: string
 ): Promise<{ ok: true; vinculo: VinculoBitrix } | { ok: false; error: string }> {
   const id = somenteDigitos(bitrixId);
   if (!id) return { ok: false, error: "O ID do Bitrix deve ter só números." };
 
-  const { error } = await supabase.from("qs_leads").update({ bitrix_id: id }).eq("id", leadId);
-  if (!error) return { ok: true, vinculo: { leadId, trocouDeCard: false } };
+  const gravar = () => supabase.from("qs_leads").update({ bitrix_id: id }).eq("id", leadId);
+
+  const { error } = await gravar();
+  if (!error) return { ok: true, vinculo: { leadId } };
 
   const conflito = error.code === "23505" || /duplicate key|bitrix_id/i.test(error.message ?? "");
   if (!conflito) return { ok: false, error: `Não consegui gravar o ID do Bitrix: ${error.message}` };
 
-  // Quem e o dono do id, e e a mesma pessoa?
-  const [{ data: dono }, { data: aberto }] = await Promise.all([
-    supabase.from("qs_leads").select("id, full_name, phone").eq("bitrix_id", id).maybeSingle(),
-    supabase.from("qs_leads").select("phone").eq("id", leadId).maybeSingle(),
-  ]);
+  // ── Alguem esta com o id. Tira de la pra trazer pra ca. ───────────────────
+  const { data: dono } = await supabase
+    .from("qs_leads")
+    .select("id, full_name")
+    .eq("bitrix_id", id)
+    .maybeSingle();
+  const d = dono as { id: string; full_name?: string | null } | null;
 
-  const d = dono as { id: string; full_name?: string | null; phone?: string | null } | null;
   if (!d) {
-    // O indice recusou mas ninguem aparece como dono: quase sempre e RLS — o
-    // card do outro SDR existe e este usuario nao enxerga. Dizer "nao achei"
-    // seria mentir; melhor mandar pra quem consegue ver os dois.
+    // O indice recusou mas ninguem aparece: o card do outro SDR existe e a RLS
+    // esconde dele. Nao da pra soltar o id de um card que nao se enxerga — e
+    // dizer "nao achei" seria mentir sobre o motivo.
     return {
       ok: false,
-      error: `O negócio ${id} já está em outro card do QS que você não tem permissão de ver. Peça pra gestão conferir qual é.`,
+      error:
+        `O negócio ${id} está num card que você não tem permissão de ver, então não consigo mover o vínculo. ` +
+        `Peça pra gestão — ela enxerga os dois cards.`,
     };
   }
+  if (d.id === leadId) return { ok: true, vinculo: { leadId } }; // ja era deste card
 
-  const mesmaPessoa =
-    !!fimDoTelefone(d.phone) &&
-    fimDoTelefone(d.phone) === fimDoTelefone((aberto as { phone?: string | null } | null)?.phone);
-
-  if (mesmaPessoa) {
-    return { ok: true, vinculo: { leadId: d.id, trocouDeCard: true, nome: d.full_name ?? null } };
+  const { error: erroSolta } = await supabase
+    .from("qs_leads").update({ bitrix_id: null }).eq("id", d.id);
+  if (erroSolta) {
+    return { ok: false, error: `Não consegui soltar o negócio ${id} do card anterior: ${erroSolta.message}` };
   }
 
-  return {
-    ok: false,
-    error:
-      `O negócio ${id} pertence ao card de "${d.full_name ?? "outro lead"}", que tem OUTRO telefone. ` +
-      `Confira o número do negócio no Bitrix — do jeito que está, a reunião entraria no card de outro cliente.`,
-  };
+  const { error: erroGrava } = await gravar();
+  if (erroGrava) {
+    // Devolve pro card antigo: melhor voltar ao estado de antes do que deixar o
+    // negocio sem card nenhum, que e o unico estado do qual ninguem se recupera
+    // sozinho (o id some da tela e some da busca).
+    await supabase.from("qs_leads").update({ bitrix_id: id }).eq("id", d.id);
+    return { ok: false, error: `Não consegui mover o negócio ${id} para este card: ${erroGrava.message}` };
+  }
+
+  // Rastro nas duas pontas (best-effort: o vinculo ja mudou, e falhar aqui nao
+  // pode desfazer isso).
+  const quando = new Date().toLocaleString("pt-BR");
+  void supabase.from("qs_notes").insert([
+    {
+      lead_id: d.id, author_id: null,
+      body: `🔗 O negócio ${id} do Bitrix deixou de apontar para este card em ${quando} — foi vinculado a outro card do mesmo cliente durante um agendamento. O histórico deste card não foi alterado.`,
+      tags: ["bitrix", "vinculo"],
+    },
+    {
+      lead_id: leadId, author_id: null,
+      body: `🔗 O negócio ${id} do Bitrix passou a apontar para este card em ${quando}` +
+            (d.full_name ? ` (antes estava em "${d.full_name}")` : "") + ".",
+      tags: ["bitrix", "vinculo"],
+    },
+  ]);
+
+  return { ok: true, vinculo: { leadId, moveuDe: { id: d.id, nome: d.full_name ?? null } } };
 }
 
 /** Erro 23P01 = a trava anti-choque do banco (constraint EXCLUDE da 0027). */

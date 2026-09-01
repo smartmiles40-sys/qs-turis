@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
-import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, vincularOuAcharCardDoBitrix, somenteDigitos } from "@/lib/qs/meetings";
+import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, vincularCardAoBitrix, somenteDigitos } from "@/lib/qs/meetings";
 import CampoBitrixId from "./CampoBitrixId";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
 import type { Lead, Meeting, MeetingTipo } from "../types";
@@ -202,11 +202,8 @@ export default function ScheduleMeetingModal({
     // no QS e o card do negócio nunca se mexe — foi o que aconteceu com a
     // Beatrice Bessa. O `createMeeting` recusa de qualquer jeito; a checagem
     // aqui existe pra dizer isso ANTES, com o campo do lado pra preencher.
-    // O card onde a reunião vai nascer. Normalmente é o que está aberto — mas
-    // quando o ID digitado pertence a um card IRMÃO (mesma pessoa, telefone
-    // igual), a reunião vai pra lá: é ele que representa o negócio. Ver
-    // vincularOuAcharCardDoBitrix.
-    let leadDaReuniao = leadId;
+    // Digitar o ID é declarar que ESTE card é o do negócio. A reunião nasce
+    // sempre aqui; se outro card estava com o id, o vínculo vem pra cá.
     let avisoDeTroca: string | null = null;
 
     if (!leadJaTemBitrix) {
@@ -216,23 +213,22 @@ export default function ScheduleMeetingModal({
         setSaving(false);
         return;
       }
-      const r = await vincularOuAcharCardDoBitrix(leadId, idLimpo);
+      const r = await vincularCardAoBitrix(leadId, idLimpo);
       if (!r.ok) {
         setError(r.error);
         setSaving(false);
         return;
       }
-      if (r.vinculo.trocouDeCard) {
-        leadDaReuniao = r.vinculo.leadId;
+      if (r.vinculo.moveuDe) {
         avisoDeTroca =
-          `Este cliente já tinha um card com o negócio ${idLimpo}` +
-          (r.vinculo.nome ? ` ("${r.vinculo.nome}")` : "") +
-          ". A reunião foi agendada nesse card, que é o ligado ao Bitrix.";
+          `O negócio ${idLimpo} estava em outro card` +
+          (r.vinculo.moveuDe.nome ? ` ("${r.vinculo.moveuDe.nome}")` : "") +
+          " e passou para este. Os dois cards ficaram com uma nota registrando a mudança.";
       }
     }
 
     const res = await createMeeting({
-      lead_id: leadDaReuniao,
+      lead_id: leadId,
       lead_name: selectedLead?.full_name ?? null,
       lead_bitrix_id: selectedLead?.bitrix_id ?? somenteDigitos(bitrixId) ?? null,
       lead_email: emailLimpo || selectedLead?.email || null,

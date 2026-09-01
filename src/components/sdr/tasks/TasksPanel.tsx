@@ -11,7 +11,7 @@ import type {
 import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
-import { createMeeting, avisarBitrixDaSala, transferirLeadProCloser, vincularOuAcharCardDoBitrix, somenteDigitos } from "@/lib/qs/meetings";
+import { createMeeting, avisarBitrixDaSala, transferirLeadProCloser, vincularCardAoBitrix, somenteDigitos } from "@/lib/qs/meetings";
 import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
 import { fetchClosers, fetchCloserConfigs, configFor, validarHorario } from "@/lib/qs/closerAgenda";
 import { getSetting } from "@/lib/qsSettings";
@@ -1270,27 +1270,24 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // que não deu erro nenhum porque não houve tentativa. O `createMeeting`
     // recusa de qualquer jeito; aqui a gente diz antes, com o campo do lado.
     const leadDaVez = leads.find((l) => l.id === meetingFor.leadId);
-    // O card onde a reunião vai nascer. Normalmente é o que está aberto — mas
-    // se o ID digitado for de um card IRMÃO (mesma pessoa), vai pra lá: é ele
-    // que representa o negócio. Ver vincularOuAcharCardDoBitrix.
-    let leadDaReuniao = meetingFor.leadId;
+    // Digitar o ID é declarar que ESTE card é o do negócio: a reunião nasce
+    // aqui, e o vínculo vem pra cá se estava em outro card.
     if (!somenteDigitos(leadDaVez?.bitrix_id)) {
       const idLimpo = somenteDigitos(meeting.bitrixId);
       if (!idLimpo) {
         notifyError("Preencha o ID do negócio no Bitrix — só os números, sem o #.");
         return;
       }
-      const r = await vincularOuAcharCardDoBitrix(meetingFor.leadId, idLimpo);
+      const r = await vincularCardAoBitrix(meetingFor.leadId, idLimpo);
       if (!r.ok) {
         notifyError(r.error);
         return;
       }
-      if (r.vinculo.trocouDeCard) {
-        leadDaReuniao = r.vinculo.leadId;
+      if (r.vinculo.moveuDe) {
         notifySuccess(
-          `Este cliente já tinha um card com o negócio ${idLimpo}` +
-          (r.vinculo.nome ? ` ("${r.vinculo.nome}")` : "") +
-          ". A reunião foi agendada nesse card."
+          `O negócio ${idLimpo} estava em outro card` +
+          (r.vinculo.moveuDe.nome ? ` ("${r.vinculo.moveuDe.nome}")` : "") +
+          " e passou para este."
         );
       }
     }
@@ -1334,7 +1331,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       // de confirmação e avisa o Bitrix (o aviso separado que existia aqui saiu,
       // senão o negócio receberia o evento "reuniao" duas vezes).
       const res = await createMeeting({
-        lead_id: leadDaReuniao,
+        lead_id: meetingFor.leadId,
         lead_name: leadName,
         lead_bitrix_id: leads.find((l) => l.id === leadId)?.bitrix_id ?? null,
         lead_email: meeting.emailCliente || null,
