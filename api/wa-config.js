@@ -319,6 +319,30 @@ export default async function handler(req, res) {
         // Erro da Meta NÃO barra: instabilidade da Graph API não pode virar
         // "ninguém liga hoje". Segue e deixa a própria discagem responder.
         if (!p?.erro && p.liberado === false) {
+          // ── DUAS CAUSAS, UMA RECUSA ──────────────────────────────────────
+          // `can_perform_action: false` no `start_call` significa "não pode
+          // ligar agora", e isso acontece por dois motivos MUITO diferentes:
+          //   • não há permissão            → o conserto é PEDIR;
+          //   • há permissão, mas o teto de 5 chamadas atendidas em 24h com
+          //     essa pessoa estourou       → o conserto é ESPERAR.
+          //
+          // Tratar os dois como falta de permissão fazia a tela mandar o SDR
+          // pedir autorização a quem JÁ autorizou — e cada pedido desses queima
+          // o limite de 1 por 24h, então o erro não era só de texto: gastava a
+          // única bala que a pessoa tinha pro dia seguinte.
+          const temPermissao = p.vale === true;
+          if (temPermissao) {
+            const lim = p.limiteLigar;
+            return res.status(400).json({
+              error: 'Essa pessoa autorizou, mas o limite de ligações das últimas 24 horas com ela já foi atingido'
+                + (lim?.max_allowed ? ` (${lim.current_usage ?? lim.max_allowed} de ${lim.max_allowed}).` : '.')
+                + ' Tente de novo mais tarde.',
+              motivo: 'limite-de-chamadas',
+              // Sem 138006 de propósito: é esse código que faz a tela virar o
+              // botão pra "Pedir permissão", e aqui pedir seria o erro.
+              permissao: { status: p.status, expiraEm: p.expiraEm, limite: lim },
+            });
+          }
           return res.status(400).json({
             error: 'Essa pessoa ainda não autorizou receber ligação da empresa. Mande o pedido de permissão pela conversa (ela precisa ter escrito nas últimas 24h).',
             motivo: 'sem-permissao',

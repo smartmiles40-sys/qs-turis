@@ -33,6 +33,7 @@
 
 import { rest } from './_supabaseAdmin.js';
 import { lerPermissaoDeLigacao } from './_meta.js';
+import { moverLeadParaCadencia } from './_leads.js';
 
 /** Permissão temporária da Meta dura 7 dias — é a janela que a doc publica. */
 const DIAS_TEMPORARIA = 7;
@@ -204,6 +205,16 @@ export function permissaoPorLigacaoDoCliente(waId) {
  * ganho, com reunião marcada ou com atividade de cadência em aberto NÃO é
  * movido. Autorizar ligação não pode atropelar quem já está sendo trabalhado —
  * a graça é pescar quem estava parado.
+ *
+ * O IMPORT DO `_leads.js` É ESTÁTICO, e a escolha tem motivo. Ele era `await
+ * import()` pra não pesar o caminho do webhook, mas a economia é ilusória: o
+ * `_leads.js` só arrasta o `_bitrixLead.js` a mais (o `_supabaseAdmin` e o
+ * `_wa` esta rota já carrega), e nenhum dos dois tem efeito colateral de
+ * módulo. Em troca, o import dinâmico dependia de o rastreador de arquivos da
+ * Vercel enxergar a string — e se não enxergasse, a cadência falharia com
+ * MODULE_NOT_FOUND só no dia em que alguém ligasse a automação pela primeira
+ * vez. Trocar centavos de cold start por uma falha que só aparece na estreia é
+ * mau negócio.
  */
 export async function moverParaCadenciaDePermissao(lead) {
   if (!lead?.id) return { movido: false, motivo: 'sem-lead' };
@@ -218,9 +229,5 @@ export async function moverParaCadenciaDePermissao(lead) {
   }
   if (!cadenciaId) return { movido: false, motivo: 'cadencia-nao-configurada' };
 
-  // Import tardio de propósito: o `_leads.js` puxa meia dúzia de módulos, e o
-  // caminho do webhook de chamada não pode pagar por isso quando ninguém
-  // configurou a cadência.
-  const { moverLeadParaCadencia } = await import('./_leads.js');
   return moverLeadParaCadencia(lead, cadenciaId);
 }
