@@ -302,6 +302,7 @@ export default async function handler(req, res) {
   // pergunta antes do telefone tocar.
   const acoesDeChamada = new Set([
     'calling-ligar', 'calling-desligar', 'calling-permissao', 'calling-permissao-status',
+    'calling-permissao-lote',
   ]);
   if (acoesDeChamada.has(String(body.acao || ''))) {
     const eu = await perfil(userId);
@@ -415,6 +416,29 @@ export default async function handler(req, res) {
         lead_id: body.leadId ?? null, pedido_em: new Date().toISOString(),
       });
       return res.status(200).json({ ok: true, wamid: r.wamid });
+    }
+    // ── QUEM DA FILA PODE RECEBER LIGACAO ────────────────────────────────
+    // A fila esconde a atividade de "Ligar no WhatsApp" de quem nao autorizou —
+    // e pra decidir isso precisa SABER, o que a tabela sozinha nao resolve: ela
+    // nasceu em 01/09 e quem autorizou antes disso nao tem linha nenhuma.
+    //
+    // TETO DE 25 e em PARALELO: sequencial estouraria o tempo da funcao, e sem
+    // teto uma fila grande viraria centenas de idas a Graph API por
+    // carregamento. Quem chama manda so os que ainda nao conhece — o resultado
+    // fica gravado, entao cada telefone e perguntado UMA vez, nao toda vez.
+    if (body.acao === 'calling-permissao-lote') {
+      const lista = Array.isArray(body.telefones) ? body.telefones.slice(0, 25) : [];
+      if (!lista.length) return res.status(200).json({ permissoes: {} });
+      const pares = await Promise.all(lista.map(async (tel) => {
+        try {
+          const p = await sincronizarPermissao(tel, null);
+          if (p?.erro) return null;
+          return [String(tel).replace(/\D/g, ''), { status: p.status, expiraEm: p.expiraEm }];
+        } catch { return null; }
+      }));
+      const mapa = Object.fromEntries(pares.filter(Boolean));
+      console.log(`[wa-config] permissao em lote: ${Object.keys(mapa).length}/${lista.length} respondidos`);
+      return res.status(200).json({ permissoes: mapa });
     }
     if (body.acao === 'calling-permissao-status') {
       const r = await sincronizarPermissao(body.telefone, body.leadId ?? null);

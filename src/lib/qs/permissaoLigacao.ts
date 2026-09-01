@@ -135,6 +135,37 @@ export async function carregarPermissao(
   return { permissao: mapa.get(soDigitos(telefone)) ?? null, leu };
 }
 
+/**
+ * Pergunta à Meta a permissão de VÁRIOS telefones de uma vez (teto de 25).
+ *
+ * Existe pra fila conseguir esconder a atividade de "Ligar no WhatsApp" de quem
+ * não autorizou: a tabela sozinha não responde, porque nasceu em 01/09 e quem
+ * autorizou antes não tem linha. Mande só os que você ainda NÃO conhece — o
+ * servidor grava o resultado, então cada telefone é perguntado uma vez na vida,
+ * não a cada carregamento.
+ */
+export async function sincronizarLote(
+  telefones: (string | null | undefined)[],
+): Promise<Map<string, { status: StatusPermissao; expiraEm: string | null }>> {
+  const mapa = new Map<string, { status: StatusPermissao; expiraEm: string | null }>();
+  const chaves = [...new Set(telefones.map(soDigitos).filter((t) => t.length >= 12))].slice(0, 25);
+  if (!chaves.length) return mapa;
+  try {
+    const res = await fetch("/api/wa-config", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ acao: "calling-permissao-lote", telefones: chaves }),
+    });
+    if (!res.ok) return mapa;
+    const d = await res.json().catch(() => ({}));
+    for (const [wa, v] of Object.entries(d?.permissoes ?? {})) {
+      const p = v as { status: StatusPermissao; expiraEm: string | null };
+      mapa.set(wa, { status: p.status, expiraEm: p.expiraEm ?? null });
+    }
+  } catch { /* sem rede: a fila segue otimista, que é o padrão da casa */ }
+  return mapa;
+}
+
 export interface ConferenciaNaMeta {
   liberado?: boolean;
   status?: StatusPermissao;

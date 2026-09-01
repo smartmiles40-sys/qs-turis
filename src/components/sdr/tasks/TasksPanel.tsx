@@ -29,7 +29,7 @@ import WhatsAppModal from "../whatsapp/WhatsAppModal";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
 import { dialViaOficial, setOnCallEndedOficial } from "@/lib/qs/waCall";
 import {
-  carregarPermissoes, pedirPermissao, permissaoVale, validadeEmTexto,
+  carregarPermissoes, pedirPermissao, permissaoVale, sincronizarLote, validadeEmTexto,
   type Permissao,
 } from "@/lib/qs/permissaoLigacao";
 import { dialViaSip } from "@/lib/sip";
@@ -1794,6 +1794,29 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       return st !== "ganho" && st !== "perdido";
     });
 
+    // ── LIGAÇÃO DE WHATSAPP SÓ APARECE PRA QUEM AUTORIZOU (Bruno, 01/09) ────
+    //
+    // A Meta exige autorização do cliente pra ligar. Uma atividade "Ligar no
+    // WhatsApp" num lead que não autorizou é trabalho que não pode ser feito: o
+    // SDR clica, libera o microfone, espera, e leva 138006 na cara.
+    //
+    // ESCONDE SÓ QUANDO SABE QUE NÃO PODE. Não saber deixa passar — a mesma
+    // regra do botão, e aqui ela é ainda mais importante: esconder por engano é
+    // sumir com trabalho legítimo da fila de alguém.
+    //
+    // O que fica escondido é CONTADO e mostrado acima da fila. Tarefa pendente
+    // que some sem deixar rastro é como nasceram as 48 'desfecho' e 31
+    // 'confirmar' invisíveis de 13/08 — o defeito não pode ser reintroduzido
+    // pela porta da frente.
+    filtered = filtered.filter((t) => {
+      if (t.channel_type !== "ligacao_whatsapp") return true;
+      const lead = getLeadForTask(t);
+      const wa = (lead?.phone || "").replace(/\D/g, "");
+      const p = permissoes.get(wa);
+      if (!p) return true;              // desconhecido = deixa passar
+      return permissaoVale(p);
+    });
+
     // Role-based filtering: SDR only sees their own tasks
     if (currentUser && !canSeeAllData(currentUser.role)) {
       filtered = filtered.filter((t) => t.owner_id === currentUser.id);
@@ -1873,7 +1896,23 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
 
     return filtered;
-  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser, workHours]);
+  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser, workHours, permissoes]);
+
+  // ── O QUE FOI ESCONDIDO POR FALTA DE PERMISSÃO ────────────────────────────
+  // Conta as atividades de "Ligar no WhatsApp" que saíram da fila porque a Meta
+  // diz que o cliente não autorizou. Existe pra o número aparecer na tela: fila
+  // que encolhe sem explicação é a mesma doença das tarefas invisíveis.
+  const ligacoesSemPermissao = useMemo(() => {
+    if (!permissoes.size) return [] as Task[];
+    return tasks.filter((t) => {
+      if (t.channel_type !== "ligacao_whatsapp") return false;
+      if (t.status !== "pendente" && t.status !== "atrasada") return false;
+      if (currentUser && !canSeeAllData(currentUser.role) && t.owner_id !== currentUser.id) return false;
+      const lead = leads.find((l) => l.id === t.lead_id);
+      const p = permissoes.get((lead?.phone || "").replace(/\D/g, ""));
+      return !!p && !permissaoVale(p);
+    });
+  }, [tasks, leads, permissoes, currentUser]);
 
   // Card "hero" atual (o que o SDR está atendendo) — usado no render E nos atalhos.
   const heroTaskMemo = useMemo(() => {
@@ -1981,16 +2020,55 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     () => [...new Set(leads.map((l) => (l.phone || "").replace(/\D/g, "")).filter((t) => t.length >= 12))].sort().join(","),
     [leads],
   );
+  // Telefones que TÊM atividade de "Ligar no WhatsApp" em aberto. Só sobre eles
+  // vale gastar uma pergunta à Meta: é a fila desse canal que precisa da
+  // resposta, e perguntar pela fila inteira seria pagar caro por informação que
+  // ninguém vai usar.
+  const telefonesComLigacaoWa = useMemo(() => {
+    const ids = new Set(
+      tasks
+        .filter((t) => t.channel_type === "ligacao_whatsapp" && (t.status === "pendente" || t.status === "atrasada"))
+        .map((t) => t.lead_id),
+    );
+    return [...new Set(
+      leads.filter((l) => ids.has(l.id)).map((l) => (l.phone || "").replace(/\D/g, "")).filter(Boolean),
+    )].sort().join(",");
+  }, [tasks, leads]);
+
   useEffect(() => {
     if (!telefonesDaFila) { setSeiDasPermissoes(true); return; }
     let vivo = true;
-    void carregarPermissoes(telefonesDaFila.split(",")).then(({ mapa, leu }) => {
+    void (async () => {
+      const { mapa, leu } = await carregarPermissoes(telefonesDaFila.split(","));
       if (!vivo) return;
       setPermissoes(mapa);
       setSeiDasPermissoes(leu);
-    });
+
+      // ── COMPLETA O QUE FALTA, PERGUNTANDO À META ──────────────────────────
+      // A tabela nasceu em 01/09: quem autorizou antes disso não tem linha, e
+      // sem isto a fila esconderia a atividade de gente que PODE receber
+      // ligação — o pior erro possível aqui. Só os desconhecidos, só quem tem
+      // atividade desse canal, teto de 25 por vez, e o resultado fica gravado:
+      // cada telefone é perguntado uma vez na vida, não a cada carregamento.
+      const faltando = telefonesComLigacaoWa
+        ? telefonesComLigacaoWa.split(",").filter((t) => !mapa.has(t))
+        : [];
+      if (!faltando.length || !leu) return;
+      const extra = await sincronizarLote(faltando);
+      if (!vivo || !extra.size) return;
+      setPermissoes((prev) => {
+        const m = new Map(prev);
+        for (const [wa, v] of extra) {
+          m.set(wa, {
+            waId: wa, status: v.status, expiraEm: v.expiraEm,
+            pedidoEm: null, respondidoEm: null, fonte: "api", confirmado: true,
+          });
+        }
+        return m;
+      });
+    })();
     return () => { vivo = false; };
-  }, [telefonesDaFila]);
+  }, [telefonesDaFila, telefonesComLigacaoWa]);
 
   /**
    * "Posso ligar pra esse AGORA?" — a pergunta do botão.
@@ -2033,6 +2111,36 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
     setSeiDasPermissoes(true);
   }, []);
+
+  const [pedindoEmLote, setPedindoEmLote] = useState(false);
+
+  /**
+   * Pede permissão pra TODOS os que sairam da fila.
+   *
+   * Um por um, e sem parar no primeiro erro: a Meta recusa individualmente (por
+   * janela de 24h fechada, ou por já termos pedido hoje) e cada recusa vale só
+   * pra aquela pessoa. O relatório no fim diz quantos foram, quantos já podiam e
+   * quantos não deu — porque "pedi pra 12" sem saber o desfecho de cada um não
+   * ajuda ninguém.
+   */
+  const pedirPermissaoEmLote = useCallback(async () => {
+    setPedindoEmLote(true);
+    let ok = 0, jaTinha = 0, falhou = 0;
+    for (const t of ligacoesSemPermissao) {
+      const lead = leads.find((l) => l.id === t.lead_id);
+      if (!lead?.phone) { falhou++; continue; }
+      const r = await pedirPermissao(lead.phone, lead.id);
+      if (r.ok && r.jaTinha) jaTinha++;
+      else if (r.ok) { ok++; anotarPermissao(lead.phone, { pedidoEm: new Date().toISOString() }); }
+      else falhou++;
+    }
+    setPedindoEmLote(false);
+    showToast(
+      `Pedido de permissão: ${ok} enviado(s)` +
+      (jaTinha ? `, ${jaTinha} já podiam receber ligação` : "") +
+      (falhou ? `, ${falhou} não deu (janela de 24h fechada ou já pedimos hoje)` : ""),
+    );
+  }, [ligacoesSemPermissao, leads, anotarPermissao]);
 
   /** Manda o "podemos te ligar?" pelo card, sem abrir o modal. */
   const pedirPermissaoDaFila = useCallback(async (lead: Lead | undefined) => {
@@ -3963,6 +4071,32 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             )}
           </div>
         </div>
+
+        {/* ── O QUE SAIU DA FILA POR FALTA DE PERMISSÃO ─────────────────────
+            A atividade de "Ligar no WhatsApp" só aparece pra quem autorizou —
+            mas o que sumiu tem que ser CONTADO aqui. Fila que encolhe sem
+            explicação é como nasceram as tarefas invisíveis de 13/08.
+            O botão resolve a causa: manda o pedido de permissão pra todos de
+            uma vez, e cada lead que autorizar volta pra fila sozinho. */}
+        {ligacoesSemPermissao.length > 0 && (
+          <div className="qsx-page mt-3">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <span className="text-[12.5px] text-amber-900">
+                <b>{ligacoesSemPermissao.length}</b>{" "}
+                {ligacoesSemPermissao.length === 1 ? "atividade de Ligar no WhatsApp está fora da fila" : "atividades de Ligar no WhatsApp estão fora da fila"}
+                {" "}— esses clientes ainda não autorizaram receber ligação.
+              </span>
+              <button
+                onClick={() => void pedirPermissaoEmLote()}
+                disabled={pedindoEmLote}
+                className="ml-auto shrink-0 rounded-md bg-amber-700 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-amber-800 disabled:opacity-60"
+                title="Manda o pedido de permissão pra cada um desses clientes. A Meta só aceita com conversa aberta de 24h e 1 pedido por dia por pessoa."
+              >
+                {pedindoEmLote ? "Pedindo…" : "Pedir permissão a todos"}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Quantas atividades por CANAL na fila (WhatsApp: 200, Ligação: 200…).
             Clicar num canal filtra a fila por ele (toca de novo pra limpar). */}
