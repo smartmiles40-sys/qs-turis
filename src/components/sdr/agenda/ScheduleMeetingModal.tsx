@@ -9,7 +9,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
-import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser } from "@/lib/qs/meetings";
+import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, salvarBitrixIdDoLead, somenteDigitos } from "@/lib/qs/meetings";
+import CampoBitrixId from "./CampoBitrixId";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
 import type { Lead, Meeting, MeetingTipo } from "../types";
 
@@ -81,6 +82,8 @@ export default function ScheduleMeetingModal({
   // Sala do Meet criada automaticamente. Desligar libera o campo de link manual
   // (reunião por Zoom/Teams, ou a sala fixa do especialista).
   const [gerarMeet, setGerarMeet] = useState(true);
+  // O ID do negócio no Bitrix, quando o lead ainda não tem (ver CampoBitrixId).
+  const [bitrixId, setBitrixId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,6 +98,7 @@ export default function ScheduleMeetingModal({
     setLink(reschedule?.meeting_link ?? "");
     setEmail(lead?.email ?? "");
     setGerarMeet(true);
+    setBitrixId("");
     setError(null);
   }, [open, lead, reschedule]);
 
@@ -118,6 +122,9 @@ export default function ScheduleMeetingModal({
   }, [pick, gerarMeet]);
 
   const selectedLead = lead ?? leads.find((l) => l.id === leadId) ?? null;
+  // Lead já vinculado a um negócio do Bitrix não vê o campo — pedir de novo o
+  // que o sistema já sabe é como se ensina o time a preencher qualquer coisa.
+  const leadJaTemBitrix = !!somenteDigitos(selectedLead?.bitrix_id);
 
   // Escolheu o lead na lista: o e-mail do cadastro entra sozinho. Só preenche
   // campo vazio — não apaga o que o SDR já tiver digitado.
@@ -191,10 +198,33 @@ export default function ScheduleMeetingModal({
       return;
     }
 
+    // O ID DO BITRIX (Bruno, 01/09). Sem ele a reunião nasce órfã: fica gravada
+    // no QS e o card do negócio nunca se mexe — foi o que aconteceu com a
+    // Beatrice Bessa. O `createMeeting` recusa de qualquer jeito; a checagem
+    // aqui existe pra dizer isso ANTES, com o campo do lado pra preencher.
+    if (!leadJaTemBitrix) {
+      const idLimpo = somenteDigitos(bitrixId);
+      if (!idLimpo) {
+        setError("Preencha o ID do negócio no Bitrix — só os números, sem o #.");
+        setSaving(false);
+        return;
+      }
+      // Grava no lead ANTES de criar a reunião: é o vínculo do lead que o
+      // servidor lê pra saber qual card mexer. Se falhar (o caso comum é o id
+      // já pertencer a outro card, ou seja, lead duplicado), para aqui — nada
+      // de reunião órfã.
+      const vinculo = await salvarBitrixIdDoLead(leadId, idLimpo);
+      if (!vinculo.ok) {
+        setError(vinculo.error);
+        setSaving(false);
+        return;
+      }
+    }
+
     const res = await createMeeting({
       lead_id: leadId,
       lead_name: selectedLead?.full_name ?? null,
-      lead_bitrix_id: selectedLead?.bitrix_id ?? null,
+      lead_bitrix_id: selectedLead?.bitrix_id ?? somenteDigitos(bitrixId) ?? null,
       lead_email: emailLimpo || selectedLead?.email || null,
       cadence_id: selectedLead?.cadence_id ?? null,
       owner_id: currentUser?.id ?? null,
@@ -363,6 +393,17 @@ export default function ScheduleMeetingModal({
 
           {!remarcando && (
             <>
+              {/* Sem o negócio do Bitrix a reunião nasce órfã: fica no QS e o
+                  card nunca se mexe. Só aparece quando o lead não tem vínculo. */}
+              <CampoBitrixId
+                value={bitrixId}
+                onChange={setBitrixId}
+                jaVinculado={leadJaTemBitrix || !leadId}
+                disabled={saving}
+                className={inputClass}
+                labelClassName={labelClass}
+              />
+
               {/* E-mail do cliente: é pra ELE que o Google manda o convite com o
                   link. Sem e-mail a reunião acontece igual, mas o cliente só
                   recebe o link se o SDR mandar no WhatsApp. */}

@@ -11,7 +11,8 @@ import type {
 import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
-import { createMeeting, avisarBitrixDaSala, transferirLeadProCloser } from "@/lib/qs/meetings";
+import { createMeeting, avisarBitrixDaSala, transferirLeadProCloser, salvarBitrixIdDoLead, somenteDigitos } from "@/lib/qs/meetings";
+import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
 import { fetchClosers, fetchCloserConfigs, configFor, validarHorario } from "@/lib/qs/closerAgenda";
 import { getSetting } from "@/lib/qsSettings";
 import AgendaMiniatura from "@/components/sdr/agenda/AgendaMiniatura";
@@ -651,7 +652,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Perguntar era pedir pro SDR digitar o que o sistema já sabe — e a lista fixa
   // nem tinha todo mundo (a Yanca não estava lá, e sem escolher não dava pra
   // confirmar o ganho).
-  const [meeting, setMeeting] = useState({ emailCliente: "", dataAgendamento: "", responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60, produto: "" });
+  const [meeting, setMeeting] = useState({ emailCliente: "", dataAgendamento: "", responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60, produto: "", bitrixId: "" });
   const [savingMeeting, setSavingMeeting] = useState(false);
 
   // New Lead Modal
@@ -1144,7 +1145,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const yyyy = hoje.getFullYear();
     const mm = String(hoje.getMonth() + 1).padStart(2, "0");
     const dd = String(hoje.getDate()).padStart(2, "0");
-    setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 , produto: "" });
+    setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 , produto: "", bitrixId: "" });
     setPendingResult(null);
     setMeetingFor({ taskId: task.id, leadId: task.lead_id, leadName: lead?.full_name ?? "Lead" });
   }
@@ -1245,6 +1246,26 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     if (!emailValido(meeting.emailCliente)) {
       notifyError("Informe o e-mail do cliente — é por ele que o convite do Google Meet é enviado.");
       return;
+    }
+    // O ID DO BITRIX (Bruno, 01/09). Sem vínculo com o negócio a reunião nasce
+    // órfã: fica no QS e o card nunca se mexe — foi o caso da Beatrice Bessa,
+    // que não deu erro nenhum porque não houve tentativa. O `createMeeting`
+    // recusa de qualquer jeito; aqui a gente diz antes, com o campo do lado.
+    const leadDaVez = leads.find((l) => l.id === meetingFor.leadId);
+    if (!somenteDigitos(leadDaVez?.bitrix_id)) {
+      const idLimpo = somenteDigitos(meeting.bitrixId);
+      if (!idLimpo) {
+        notifyError("Preencha o ID do negócio no Bitrix — só os números, sem o #.");
+        return;
+      }
+      // Grava no lead ANTES da reunião: é esse vínculo que o servidor lê pra
+      // saber qual card mexer. Falhou (id já é de outro card = lead duplicado)?
+      // Para aqui, em vez de criar mais uma reunião invisível.
+      const vinculo = await salvarBitrixIdDoLead(meetingFor.leadId, idLimpo);
+      if (!vinculo.ok) {
+        notifyError(vinculo.error);
+        return;
+      }
     }
     // O horário é conferido contra a agenda do closer ANTES de gravar (janela de
     // atendimento, bloqueio, antecedência, choque). O banco só barra o choque.
@@ -3901,6 +3922,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   {currentUser?.name ?? "—"}
                 </span>
               </div>
+              {/* Sem o negócio do Bitrix a reunião nasce órfã: fica no QS e o
+                  card nunca se mexe. Só aparece quando o lead não tem vínculo. */}
+              <CampoBitrixId
+                value={meeting.bitrixId}
+                onChange={(v) => setMeeting((m) => ({ ...m, bitrixId: v }))}
+                jaVinculado={!!somenteDigitos(leads.find((l) => l.id === meetingFor?.leadId)?.bitrix_id)}
+                disabled={savingMeeting}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"
+                labelClassName="text-xs font-medium text-gray-500 block mb-1"
+              />
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">E-mail do cliente *</label>
                 <input

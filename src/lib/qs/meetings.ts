@@ -407,7 +407,94 @@ export interface CreateMeetingInput {
 
 export type MeetingResult =
   | { ok: true; meeting: Meeting }
-  | { ok: false; error: string; conflict?: boolean };
+  | { ok: false; error: string; conflict?: boolean; semBitrixId?: boolean };
+
+// ── O ID DO NEGÓCIO NO BITRIX ───────────────────────────────────────────────
+//
+// POR QUE ISTO VIROU OBRIGATÓRIO (Bruno, 01/09).
+//
+// A reunião da Beatrice Bessa foi agendada num card sem `bitrix_id` e o card
+// 41785 nunca saiu do lugar. Não houve erro: `bitrix_error` ficou NULO, porque
+// não houve tentativa que falhasse — o servidor resolve o negócio a partir do
+// lead, e o lead não apontava pra negócio nenhum. O comercial só descobre
+// quando o cliente entra na call que ninguém sabia que existia.
+//
+// Não é caso isolado: 583 leads estão sem `bitrix_id` tendo um card irmão, do
+// mesmo telefone, que TEM. Nasceram das cargas de lista (`?duplicar=1`), que de
+// propósito criam card próprio e não abrem negócio.
+//
+// A trava fica AQUI, e não só na tela, porque são três telas que agendam
+// (agenda, lista de Reuniões e o modal de Ganho). Regra que mora na tela é
+// regra que vale em duas delas.
+
+/**
+ * Só os dígitos. O time cola o número do jeito que ele aparece no Bitrix —
+ * "#41785", "nº 41785", "41785 " — e o `#` fazia o id não casar com nada.
+ * Limpar é mais gentil que recusar: a intenção estava certa.
+ */
+export function somenteDigitos(v: string | null | undefined): string {
+  return String(v ?? "").replace(/\D/g, "");
+}
+
+/**
+ * O lead já aponta pra um negócio do Bitrix?
+ *
+ * Lê do BANCO, nunca do que a tela mandou: a Agenda do Dia carrega reuniões sem
+ * o embed do lead, então `input.lead_bitrix_id` chega nulo em agendamento
+ * perfeitamente válido. Confiar no campo da tela transformaria esta trava
+ * justamente no tipo de falso "não pode" que faz o time contornar o sistema.
+ */
+async function bitrixIdDoLead(leadId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("qs_leads")
+    .select("bitrix_id")
+    .eq("id", leadId)
+    .maybeSingle();
+  // Não conseguiu ler? NÃO trava. Uma falha de rede não pode virar "você não
+  // pode agendar" — o prejuízo de bloquear um agendamento real é maior que o
+  // de deixar passar um sem id, que é o que já acontecia antes desta trava.
+  if (error) {
+    console.warn("[meetings] não consegui conferir o bitrix_id do lead:", error.message);
+    return "__nao_verificado__";
+  }
+  const id = somenteDigitos((data as { bitrix_id?: string | null } | null)?.bitrix_id);
+  return id || null;
+}
+
+/**
+ * Gruda o ID do negócio no lead. É o que faz o agendamento chegar no card.
+ *
+ * O erro que importa é o 23505: existe índice único em `bitrix_id` (0006), então
+ * um id que já é de OUTRO card significa card duplicado — exatamente o caso da
+ * Beatrice. Em vez de um "duplicate key" cru, a mensagem diz de quem é, porque
+ * quem está agendando é a única pessoa capaz de decidir qual card vale.
+ */
+export async function salvarBitrixIdDoLead(
+  leadId: string,
+  bitrixId: string
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const id = somenteDigitos(bitrixId);
+  if (!id) return { ok: false, error: "O ID do Bitrix deve ter só números." };
+
+  const { error } = await supabase.from("qs_leads").update({ bitrix_id: id }).eq("id", leadId);
+  if (!error) return { ok: true, id };
+
+  if (error.code === "23505" || /duplicate key|bitrix_id/i.test(error.message ?? "")) {
+    const { data: dono } = await supabase
+      .from("qs_leads")
+      .select("full_name")
+      .eq("bitrix_id", id)
+      .maybeSingle();
+    const nome = (dono as { full_name?: string } | null)?.full_name;
+    return {
+      ok: false,
+      error: nome
+        ? `O negócio ${id} já está no card de "${nome}". Provavelmente é a mesma pessoa em dois cards — agende no card que já tem o Bitrix, ou fale com a gestão pra juntar os dois.`
+        : `O negócio ${id} já está em outro card do QS.`,
+    };
+  }
+  return { ok: false, error: `Não consegui gravar o ID do Bitrix: ${error.message}` };
+}
 
 /** Erro 23P01 = a trava anti-choque do banco (constraint EXCLUDE da 0027). */
 function isConflict(error: { code?: string; message?: string } | null): boolean {
@@ -489,6 +576,28 @@ async function encerrarProspeccao(leadId: string, motivo: string): Promise<void>
 }
 
 export async function createMeeting(input: CreateMeetingInput): Promise<MeetingResult> {
+  // ── SEM ID DO BITRIX NÃO AGENDA (ver o bloco do topo) ─────────────────────
+  // Antes da linha nascer, não depois: reunião gravada que não chega no card é
+  // pior que agendamento recusado — ela existe no QS, some do comercial, e
+  // ninguém fica sabendo porque não há erro pra ninguém ver.
+  const idBitrix = await bitrixIdDoLead(input.lead_id);
+  if (idBitrix === null) {
+    return {
+      ok: false,
+      semBitrixId: true,
+      error:
+        "Este lead não tem o ID do negócio no Bitrix. Preencha o ID (só números) para agendar — " +
+        "sem ele o card não sai do lugar e o especialista não fica sabendo da reunião.",
+    };
+  }
+
+  // O id que vai pro n8n sai do BANCO, não da tela. A Agenda do Dia carrega
+  // reuniões sem o embed do lead e mandava `null` daqui — o mesmo buraco que já
+  // tinha sido tapado dentro do notifyBitrix, e que voltava por este caminho.
+  // Só cai no valor da tela quando a leitura não pôde ser feita.
+  const bitrixParaOSync =
+    idBitrix === "__nao_verificado__" ? input.lead_bitrix_id ?? null : idBitrix;
+
   const status: MeetingStatus = input.status ?? "agendada";
   const row = {
     lead_id: input.lead_id,
@@ -591,7 +700,7 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
   if (produto && !ehTituloAutomatico) {
     notifyBitrix("reuniao-campos", {
       lead_id: input.lead_id,
-      bitrix_id: input.lead_bitrix_id,
+      bitrix_id: bitrixParaOSync,
       desfecho: "produto",
       produto,
     });
@@ -602,7 +711,7 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
     // O n8n grava o resultado de volta NESTA reunião (bitrix_synced / bitrix_error).
     // Sem o id ele teria que adivinhar a linha por lead + horário.
     meeting_id: meeting.id,
-    bitrix_id: input.lead_bitrix_id,
+    bitrix_id: bitrixParaOSync,
     full_name: input.lead_name ?? null,
     title: row.title,
     scheduled_at: row.scheduled_at,

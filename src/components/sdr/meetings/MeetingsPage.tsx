@@ -6,7 +6,8 @@ import { MEETING_STATUS_LABELS } from "../types";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { fetchAllRows } from "@/lib/qs/queries";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
-import { createMeeting, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser } from "@/lib/qs/meetings";
+import { createMeeting, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, salvarBitrixIdDoLead, somenteDigitos } from "@/lib/qs/meetings";
+import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
 import AgendaMes from "../agenda/AgendaMes";
 import AgendaDia from "../agenda/AgendaDia";
@@ -112,6 +113,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const [fLink, setFLink] = useState("");
   // E-mail pra onde vai o convite do Google (e que volta pro cadastro do lead).
   const [fEmail, setFEmail] = useState("");
+  // O ID do negócio no Bitrix, quando o lead ainda não tem (ver CampoBitrixId).
+  const [fBitrixId, setFBitrixId] = useState("");
   // Sala do Meet criada automaticamente ao agendar. Desligar libera o link manual.
   const [fGerarMeet, setFGerarMeet] = useState(true);
   const [fNotes, setFNotes] = useState("");
@@ -174,6 +177,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     setFormError(null);
     setFLeadId("");
     setFLeadSearch("");
+    setFBitrixId("");
     setFTitle("");
     setFWhen("");
     setFDuration("30");
@@ -212,6 +216,23 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     if (emailLimpo && !emailValido(emailLimpo)) {
       setFormError("O e-mail do lead não parece válido — o Google recusaria o convite.");
       return;
+    }
+
+    // O ID DO BITRIX (Bruno, 01/09). Vale também pro lançamento retroativo: uma
+    // reunião registrada aqui que não chega no card é exatamente a que o
+    // comercial não vê. O `createMeeting` recusa de qualquer jeito; a checagem
+    // aqui existe pra dizer isso com o campo do lado pra preencher.
+    if (!editingId && !somenteDigitos(leads.find((l) => l.id === fLeadId)?.bitrix_id)) {
+      const idLimpo = somenteDigitos(fBitrixId);
+      if (!idLimpo) {
+        setFormError("Preencha o ID do negócio no Bitrix — só os números, sem o #.");
+        return;
+      }
+      const vinculo = await salvarBitrixIdDoLead(fLeadId, idLimpo);
+      if (!vinculo.ok) {
+        setFormError(vinculo.error);
+        return;
+      }
     }
 
     let duration: number | null = null;
@@ -600,6 +621,18 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
               {/* E-mail do cliente: é pra ELE que o Google manda o convite com o
                   link da sala. Sem e-mail a reunião acontece igual, mas o link
                   só chega se o SDR mandar no WhatsApp. */}
+              {/* Sem o negócio do Bitrix a reunião nasce órfã: fica no QS e o
+                  card nunca se mexe. Só aparece quando o lead não tem vínculo. */}
+              <CampoBitrixId
+                value={fBitrixId}
+                onChange={setFBitrixId}
+                jaVinculado={
+                  !!editingId || !fLeadId ||
+                  !!somenteDigitos(leads.find((l) => l.id === fLeadId)?.bitrix_id)
+                }
+                className={inputClass}
+                labelClassName={labelClass}
+              />
               <div>
                 <label className={labelClass}>
                   E-mail do lead{" "}
