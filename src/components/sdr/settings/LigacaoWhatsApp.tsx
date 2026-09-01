@@ -79,12 +79,22 @@ export default function LigacaoWhatsApp() {
 
   const carregar = useCallback(async () => {
     setCarregando(true);
-    const [r, d] = await Promise.all([lerChamadas(), lerDiagnosticoChamadas()]);
-    setCfg(r.calling);
-    setPhoneId(r.phoneId ?? null);
-    setErro(r.error ?? null);
-    setDiag(d.diag);
-    setCarregando(false);
+    // `finally` obrigatório: o `carregando` desabilita o botão de pedir
+    // permissão, então qualquer exceção aqui deixaria o botão morto PRA SEMPRE,
+    // sem explicação — que é exatamente o defeito que este arquivo acabou de
+    // consertar. Hoje as duas leituras tratam o próprio erro e não lançam, mas
+    // "hoje não lança" não é garantia de nada.
+    try {
+      const [r, d] = await Promise.all([lerChamadas(), lerDiagnosticoChamadas()]);
+      setCfg(r.calling);
+      setPhoneId(r.phoneId ?? null);
+      setErro(r.error ?? null);
+      setDiag(d.diag);
+    } catch (e) {
+      setErro((e as Error)?.message ?? "Não consegui ler a configuração de chamadas.");
+    } finally {
+      setCarregando(false);
+    }
   }, []);
 
   useEffect(() => { void carregar(); }, [carregar]);
