@@ -77,10 +77,14 @@ create index if not exists idx_qs_call_perm_vivas on public.qs_call_permissions 
 -- temporaria vale enquanto nao expirou, o resto nao vale. Front, cadencia e
 -- servidor perguntam pra mesma funcao — tres copias dessa regra viravam tres
 -- respostas diferentes pro mesmo lead.
+-- `stable`, NAO `immutable`: a funcao le `now()`, e o resultado muda com o
+-- tempo mesmo com os mesmos argumentos. Declarar immutable seria mentir pro
+-- planejador, que pode dobrar a chamada numa constante e congelar a resposta —
+-- uma permissao vencida continuaria "valendo" pro resto da sessao.
 create or replace function public.qs_permissao_vale(
   p_status text, p_expira timestamptz
 ) returns boolean
-language sql immutable as $$
+language sql stable as $$
   select case
     when p_status = 'permanent' then true
     when p_status = 'temporary' then coalesce(p_expira, 'epoch'::timestamptz) > now()
