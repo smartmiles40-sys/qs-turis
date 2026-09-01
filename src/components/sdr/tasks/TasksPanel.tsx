@@ -1895,22 +1895,6 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return filtered;
   }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser, workHours, permissoes]);
 
-  // ── O QUE FOI ESCONDIDO POR FALTA DE PERMISSÃO ────────────────────────────
-  // Conta as atividades de "Ligar no WhatsApp" que saíram da fila porque a Meta
-  // diz que o cliente não autorizou. Existe pra o número aparecer na tela: fila
-  // que encolhe sem explicação é a mesma doença das tarefas invisíveis.
-  const ligacoesSemPermissao = useMemo(() => {
-    if (!permissoes.size) return [] as Task[];
-    return tasks.filter((t) => {
-      if (t.channel_type !== "ligacao_whatsapp") return false;
-      if (t.status !== "pendente" && t.status !== "atrasada") return false;
-      if (currentUser && !canSeeAllData(currentUser.role) && t.owner_id !== currentUser.id) return false;
-      const lead = leads.find((l) => l.id === t.lead_id);
-      const p = permissoes.get((lead?.phone || "").replace(/\D/g, ""));
-      return !!p && !permissaoVale(p);
-    });
-  }, [tasks, leads, permissoes, currentUser]);
-
   // Card "hero" atual (o que o SDR está atendendo) — usado no render E nos atalhos.
   const heroTaskMemo = useMemo(() => {
     const normais = filteredTasks.filter((t) => !t.is_extra);
@@ -2108,36 +2092,6 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
     setSeiDasPermissoes(true);
   }, []);
-
-  const [pedindoEmLote, setPedindoEmLote] = useState(false);
-
-  /**
-   * Pede permissão pra TODOS os que sairam da fila.
-   *
-   * Um por um, e sem parar no primeiro erro: a Meta recusa individualmente (por
-   * janela de 24h fechada, ou por já termos pedido hoje) e cada recusa vale só
-   * pra aquela pessoa. O relatório no fim diz quantos foram, quantos já podiam e
-   * quantos não deu — porque "pedi pra 12" sem saber o desfecho de cada um não
-   * ajuda ninguém.
-   */
-  const pedirPermissaoEmLote = useCallback(async () => {
-    setPedindoEmLote(true);
-    let ok = 0, jaTinha = 0, falhou = 0;
-    for (const t of ligacoesSemPermissao) {
-      const lead = leads.find((l) => l.id === t.lead_id);
-      if (!lead?.phone) { falhou++; continue; }
-      const r = await pedirPermissao(lead.phone, lead.id);
-      if (r.ok && r.jaTinha) jaTinha++;
-      else if (r.ok) { ok++; anotarPermissao(lead.phone, { pedidoEm: new Date().toISOString() }); }
-      else falhou++;
-    }
-    setPedindoEmLote(false);
-    showToast(
-      `Pedido de permissão: ${ok} enviado(s)` +
-      (jaTinha ? `, ${jaTinha} já podiam receber ligação` : "") +
-      (falhou ? `, ${falhou} não deu (janela de 24h fechada ou já pedimos hoje)` : ""),
-    );
-  }, [ligacoesSemPermissao, leads, anotarPermissao]);
 
   /** Manda o "podemos te ligar?" pelo card, sem abrir o modal. */
   const pedirPermissaoDaFila = useCallback(async (lead: Lead | undefined) => {
@@ -4068,32 +4022,6 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             )}
           </div>
         </div>
-
-        {/* ── O QUE SAIU DA FILA POR FALTA DE PERMISSÃO ─────────────────────
-            A atividade de "Ligar no WhatsApp" só aparece pra quem autorizou —
-            mas o que sumiu tem que ser CONTADO aqui. Fila que encolhe sem
-            explicação é como nasceram as tarefas invisíveis de 13/08.
-            O botão resolve a causa: manda o pedido de permissão pra todos de
-            uma vez, e cada lead que autorizar volta pra fila sozinho. */}
-        {ligacoesSemPermissao.length > 0 && (
-          <div className="qsx-page mt-3">
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-              <span className="text-[12.5px] text-amber-900">
-                <b>{ligacoesSemPermissao.length}</b>{" "}
-                {ligacoesSemPermissao.length === 1 ? "atividade de Ligar no WhatsApp está fora da fila" : "atividades de Ligar no WhatsApp estão fora da fila"}
-                {" "}— esses clientes ainda não autorizaram receber ligação.
-              </span>
-              <button
-                onClick={() => void pedirPermissaoEmLote()}
-                disabled={pedindoEmLote}
-                className="ml-auto shrink-0 rounded-md bg-amber-700 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-amber-800 disabled:opacity-60"
-                title="Manda o pedido de permissão pra cada um desses clientes. A Meta só aceita com conversa aberta de 24h e 1 pedido por dia por pessoa."
-              >
-                {pedindoEmLote ? "Pedindo…" : "Pedir permissão a todos"}
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Quantas atividades por CANAL na fila (WhatsApp: 200, Ligação: 200…).
             Clicar num canal filtra a fila por ele (toca de novo pra limpar). */}
