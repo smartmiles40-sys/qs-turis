@@ -33,6 +33,22 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { getSetting, setSetting } from "@/lib/qsSettings";
 import { supabase } from "@/lib/supabase";
 
+interface LinhaPermissao {
+  wa_id: string;
+  status: string;
+  expira_em: string | null;
+  fonte: string | null;
+  confirmado: boolean;
+  atualizado_em: string;
+  qs_leads: { full_name: string | null } | { full_name: string | null }[] | null;
+}
+
+/** Aceita o objeto e o array — ver o comentário do estado `quemLiberou`. */
+function nomeDoLead(l: LinhaPermissao): string | null {
+  const r = Array.isArray(l.qs_leads) ? l.qs_leads[0] : l.qs_leads;
+  return r?.full_name ?? null;
+}
+
 export default function LigacaoWhatsApp() {
   const { currentUser } = useQsAuth();
   const podeMexer = currentUser?.role === "admin" || currentUser?.role === "gestor";
@@ -52,6 +68,14 @@ export default function LigacaoWhatsApp() {
   const [cadencias, setCadencias] = useState<{ id: string; name: string }[]>([]);
   const [cadenciaPermissao, setCadenciaPermissao] = useState<string>("");
   const [salvandoCadencia, setSalvandoCadencia] = useState(false);
+  // Quem liberou, em ordem de quem liberou por último. Existe pra a pergunta
+  // "está entrando alguma permissão?" ter resposta SEM abrir o Supabase — que
+  // é o único jeito de saber hoje.
+  // `qs_leads` vem como OBJETO no PostgREST (a relação é muitos-para-um), mas os
+  // tipos gerados do supabase-js declaram array. Guardamos os dois formatos e
+  // normalizamos na hora de ler — apostar num só quebra em silêncio no dia em
+  // que o outro aparecer.
+  const [quemLiberou, setQuemLiberou] = useState<LinhaPermissao[]>([]);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -74,6 +98,20 @@ export default function LigacaoWhatsApp() {
       setCadencias((data ?? []) as { id: string; name: string }[]);
       const atual = await getSetting<string>("cadencia_permissao_ligacao");
       setCadenciaPermissao(typeof atual === "string" ? atual : "");
+    })();
+  }, []);
+
+  // Lê direto da tabela (não pela Meta): é a foto que o webhook mantém, e é
+  // exatamente essa foto que pinta os botões da fila. Ver aqui o que a fila vê
+  // é o ponto — se divergir da Meta, o problema é a foto, e isso é diagnóstico.
+  useEffect(() => {
+    void (async () => {
+      const { data } = await supabase
+        .from("qs_call_permissions")
+        .select("wa_id,status,expira_em,fonte,confirmado,atualizado_em,qs_leads(full_name)")
+        .order("atualizado_em", { ascending: false })
+        .limit(15);
+      setQuemLiberou((data ?? []) as unknown as LinhaPermissao[]);
     })();
   }, []);
 
@@ -356,6 +394,45 @@ export default function LigacaoWhatsApp() {
           <p className="mt-2 text-[12px] text-amber-700">
             Nenhuma cadência com status <b>disponível</b> — crie uma em Cadências pra poder escolher aqui.
           </p>
+        )}
+      </div>
+
+      {/* ── QUEM LIBEROU ────────────────────────────────────────────────────
+          Sem esta lista, "está entrando permissão?" só se responde abrindo o
+          Supabase. E é a pergunta que se faz todo dia no começo. */}
+      <div className="rounded-lg border border-gray-200 p-3">
+        <h3 className="text-[13px] font-semibold text-gray-900">Quem liberou a ligação</h3>
+        <p className="mt-1 text-[12px] text-gray-600">
+          As últimas 15 respostas, em ordem de quem liberou por último. É a mesma foto que
+          pinta os botões de ligar na fila.
+        </p>
+        {!quemLiberou.length ? (
+          <p className="mt-2 text-[12px] text-gray-500">
+            Ninguém ainda. A permissão entra sozinha quando o cliente responde ao pedido — ou
+            quando ele liga pra empresa.
+          </p>
+        ) : (
+          <ul className="mt-2 divide-y divide-gray-100">
+            {quemLiberou.map((l) => {
+              const vale = l.status === "permanent"
+                || (l.status === "temporary" && !!l.expira_em && new Date(l.expira_em).getTime() > Date.now());
+              return (
+                <li key={l.wa_id} className="flex items-center justify-between gap-3 py-1.5 text-[12px]">
+                  <span className="min-w-0 truncate text-gray-800">
+                    {nomeDoLead(l) || l.wa_id}
+                    {/* Inferida de o cliente ter ligado: vale pra fila, mas não veio
+                        de um "sim" — dizer isso evita explicar o mesmo toda semana. */}
+                    {!l.confirmado && <span className="ml-1 text-gray-400">(pelo retorno da ligação)</span>}
+                  </span>
+                  <span className={vale ? "shrink-0 font-medium text-green-700" : "shrink-0 text-gray-400"}>
+                    {l.status === "permanent" ? "sem prazo"
+                      : vale ? `até ${new Date(l.expira_em!).toLocaleDateString("pt-BR")}`
+                      : l.status === "temporary" ? "vencida" : "não liberou"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
 
