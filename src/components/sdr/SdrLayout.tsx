@@ -71,7 +71,13 @@ const CadencesPage = lazyPagina(() => import("./cadences/CadencesPage"));
 const CadenceCreatePage = lazyPagina(() => import("./cadences/CadenceCreatePage"));
 const MeetingsPage = lazyPagina(() => import("./meetings/MeetingsPage"));
 const SettingsPage = lazyPagina(() => import("./settings/SettingsPage"));
-const CoveragePanel = lazyPagina(() => import("./dashboard/CoveragePanel"));
+// A "Cobertura de Leads" respondia "quem espera contato AGORA" — pergunta de
+// plantao, que some quando zera. A Carteira responde "quem e meu", que inclui
+// quem esfriou e quem nunca respondeu: e la que esta o trabalho que a fila do
+// dia nunca aponta. O CoveragePanel segue no repo, sem rota, ate a Carteira
+// provar que cobre o uso — apagar tela que o time usa todo dia sem periodo de
+// convivencia e como se perde a confianca numa troca.
+const CarteiraPage = lazyPagina(() => import("./carteira/CarteiraPage"));
 const MinhaAgendaPage = lazyPagina(() => import("./agenda/MinhaAgendaPage"));
 const WaPage = lazyPagina(() => import("./wa/WaPage"));
 const PipelineIAPage = lazyPagina(() => import("./gloria/PipelineIAPage"));
@@ -134,7 +140,10 @@ const MENU: (MenuGroup | MenuItem)[] = [
       // Tela cheia pra quem atende o dia inteiro. Quem só conversa entre uma
       // atividade e outra continua com o dock lateral, sem sair da fila.
       { id: "whatsapp", label: "WhatsApp", description: "Atendimento em tela cheia" },
-      { id: "cobertura", label: "Cobertura de Leads", description: "Leads aguardando contato" },
+      // O id continua "cobertura" de proposito: trocar o id do item quebraria
+      // o MENU_ACCESS de todos os papeis e a ORDEM_EXECUCAO de uma vez, por uma
+      // mudanca que e de rotulo. O que o usuario ve e o label.
+      { id: "cobertura", label: "Carteira de Leads", description: "Seus clientes — quem já é seu continua seu" },
       { id: "atendimento-ia", label: "Atendimento IA", description: "O pipeline da Glória: quem ela está atendendo agora" },
     ],
   },
@@ -726,8 +735,8 @@ export default function SdrLayout() {
           </PageErrorBoundary>
         )}
         {activeNav === "cobertura" && (
-          <PageErrorBoundary pageName="Cobertura de Leads">
-            <CoveragePanel onOpenLead={openLeadDetail} />
+          <PageErrorBoundary pageName="Carteira de Leads">
+            <CarteiraPage onOpenLead={openLeadDetail} />
           </PageErrorBoundary>
         )}
         {activeNav === "atendimento-ia" && (
