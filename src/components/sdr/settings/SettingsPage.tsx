@@ -5,7 +5,6 @@ import { createQsAuthUser, updateQsAuthUser, deleteQsAuthUser } from "@/lib/admi
 import { loadWorkHours, saveWorkHours, DEFAULT_WORK_HOURS, WEEKDAY_NAMES, type WorkHours } from "@/lib/workHours";
 import { getSetting, setSetting } from "@/lib/qsSettings";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { WAVOIP_TOKEN_KEY, ensureWavoipDevice } from "@/lib/wavoip";
 import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PREFIX_KEY, SIP_INSTALLER_URL_KEY, SIP_RAMAIS_KEY, DEFAULT_SIP_HOST } from "@/lib/sip";
 import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, deleteSipLine, ensureRegistered, type SipLineAdmin } from "@/lib/webphone";
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
@@ -44,7 +43,7 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "motivos" | "classificacao" | "horario" | "agenda" | "atendimento" | "webfone" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "motivos" | "classificacao" | "horario" | "agenda" | "atendimento" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -59,7 +58,6 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "classificacao", label: "Classificação Automática", group: "PLATAFORMA" },
   { key: "horario", label: "Horário de Trabalho", group: "EMPRESA" },
   { key: "agenda", label: "Agenda (Google) — legado", group: "EMPRESA" },
-  { key: "webfone", label: "Webfone (Wavoip)", group: "EMPRESA" },
   { key: "webfone-webrtc", label: "Webfone WebRTC (VoxFree)", group: "EMPRESA" },
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
@@ -930,120 +928,6 @@ function HorarioSection() {
 //
 // Mantida como explicação, e SEM CONTROLE NENHUM de propósito: um editor que não
 // altera mais nada é pior do que tela nenhuma.
-
-// ── Webfone (Wavoip) ─────────────────────────────────────────────────────────
-// Token do dispositivo Wavoip (instância do WhatsApp) usado pelo webfone para
-// fazer/receber chamadas de voz. Salvo em qs_settings (chave "wavoip_token").
-
-function WebfoneSection() {
-  const [token, setToken] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [show, setShow] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
-
-  useEffect(() => {
-    getSetting<string>(WAVOIP_TOKEN_KEY).then((t) => {
-      setToken((t ?? "").trim());
-      setLoading(false);
-    });
-  }, []);
-
-  async function handleSave() {
-    setSaving(true);
-    const ok = await setSetting(WAVOIP_TOKEN_KEY, token.trim());
-    setSaving(false);
-    setSaved(ok);
-    if (ok) { notifySuccess("Token do webfone salvo."); setTimeout(() => setSaved(false), 2500); }
-    else notifyError("Não foi possível salvar o token — tente novamente.");
-  }
-
-  // Testa registrando o dispositivo Wavoip com o token atual (carrega a lib +
-  // device.add). Não faz ligação — só confirma que o token é aceito.
-  async function handleTest() {
-    setTesting(true);
-    setTestResult(null);
-    const r = await ensureWavoipDevice();
-    setTesting(false);
-    if (r.ok) {
-      setTestResult({ ok: true, msg: "Token OK — dispositivo registrado. Abra o telefone para conectar." });
-      notifySuccess("Webfone: token válido e dispositivo registrado.");
-    } else {
-      const msg = r.error || "Não foi possível registrar o dispositivo.";
-      setTestResult({ ok: false, msg });
-      notifyError(`Webfone: ${msg}`);
-    }
-  }
-
-  if (loading) return <p className="text-sm text-gray-500 py-6 text-center">Carregando...</p>;
-
-  return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-bold text-gray-900">Webfone (Wavoip)</h2>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Ligações de voz pelo WhatsApp <b>dentro do sistema</b>. Cole aqui o token do dispositivo
-          Wavoip (instância do WhatsApp). O botão do webfone fica no canto inferior esquerdo.
-        </p>
-      </div>
-
-      <div className="bg-white border border-gray-100 rounded-xl p-4 max-w-xl">
-        <label className="text-xs font-bold uppercase tracking-wider text-gray-500 block mb-2">
-          Token do dispositivo
-        </label>
-        <div className="flex items-center gap-2">
-          <input
-            type={show ? "text" : "password"}
-            value={token}
-            onChange={(e) => { setToken(e.target.value); setSaved(false); }}
-            placeholder="Ex.: a1b2c3d4-1234-5678-90ab-cdef12345678"
-            className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 font-mono"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <button
-            type="button"
-            onClick={() => setShow((s) => !s)}
-            className="px-3 py-2 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50"
-          >
-            {show ? "Ocultar" : "Mostrar"}
-          </button>
-        </div>
-        <p className="text-[11px] text-gray-400 mt-2">
-          Onde encontrar: painel da Wavoip → sua instância do WhatsApp → token do dispositivo.
-          Um <code className="text-gray-500">VITE_WAVOIP_TOKEN</code> definido no ambiente, se existir, tem prioridade sobre este campo.
-        </p>
-      </div>
-
-      <div className="flex items-center gap-3 flex-wrap">
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-          style={{ background: "#2563EB" }}
-        >
-          {saving ? "Salvando..." : "Salvar token"}
-        </button>
-        <button
-          onClick={handleTest}
-          disabled={testing}
-          className="px-5 py-2.5 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-        >
-          {testing ? "Testando..." : "Testar conexão"}
-        </button>
-        {saved && <span className="text-sm font-medium text-green-600">Salvo ✓ — recarregue a página para o webfone reconectar.</span>}
-      </div>
-
-      {testResult && (
-        <p className={`text-sm font-medium ${testResult.ok ? "text-green-600" : "text-red-600"}`}>
-          {testResult.ok ? "✓ " : "✗ "}{testResult.msg}
-        </p>
-      )}
-    </div>
-  );
-}
 
 // ── Telefone (SIP) ───────────────────────────────────────────────────────────
 // Discagem por SIP como 2ª forma de contato. O navegador não fala SIP direto:
@@ -2079,7 +1963,6 @@ export default function SettingsPage() {
         {activeSection === "mensagem-automatica" && <MensagemAutomatica />}
         {activeSection === "ligacao-whatsapp" && <LigacaoWhatsApp />}
         {activeSection === "atendimento" && <AtendimentoSection />}
-        {activeSection === "webfone" && <WebfoneSection />}
         {activeSection === "webfone-webrtc" && <WebfoneWebrtcSection />}
         {activeSection === "telefone-sip" && <SipSection />}
         {activeSection === "usuarios" && <UsuariosSection />}

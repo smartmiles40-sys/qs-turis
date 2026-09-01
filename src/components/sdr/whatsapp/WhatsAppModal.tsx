@@ -19,7 +19,10 @@ import {
   WA_TEMPLATES,
 } from "@/lib/whatsapp";
 import { dialViaOficial } from "@/lib/qs/waCall";
-import { pedirPermissaoLigacao } from "@/lib/qs/waInbox";
+import {
+  carregarPermissao, pedirPermissao, permissaoVale, validadeEmTexto,
+  type Permissao,
+} from "@/lib/qs/permissaoLigacao";
 import { confirmar } from "@/lib/qs/confirmar";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { assinarTexto, loadSignatureName } from "@/lib/qs/waSignature";
@@ -54,6 +57,13 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   // pedido exige conversa aberta e a conversa está aberta nesta tela.
   const [pedindoPermissao, setPedindoPermissao] = useState(false);
   const [semPermissao, setSemPermissao] = useState(false);
+  // A permissão que o banco já conhece. Chega instantânea (o webhook mantém a
+  // tabela em dia) e é o que decide a CARA do botão. A verdade absoluta só é
+  // consultada na Meta no momento do clique — pintar botão com ida à Graph API
+  // seria lento e, pior, inútil: a pessoa pode revogar entre a pintura e o
+  // clique de qualquer jeito.
+  const [permissao, setPermissao] = useState<Permissao | null>(null);
+  const [lendoPermissao, setLendoPermissao] = useState(true);
   const [sending, setSending] = useState(false);
   // Nome que vai na primeira linha da mensagem. O envio pela API é assinado no
   // servidor; aqui a assinatura serve pro texto COPIADO e pro link wa.me, que
@@ -62,6 +72,15 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
 
   const phone = useMemo(() => normalizePhoneBR(lead.phone), [lead.phone]);
   const dialable = isDialablePhone(lead.phone);
+  // Enquanto a permissão não carregou, o botão fica OTIMISTA: travar a ligação
+  // por causa de uma consulta lenta seria trocar um erro raro (138006, que a
+  // discagem trata) por um estorvo em toda ligação.
+  const liberado = lendoPermissao ? true : permissaoVale(permissao);
+  const validade = validadeEmTexto(permissao);
+  // Já mandamos o pedido nas últimas 24h? A Meta só deixa 1 por dia, e insistir
+  // queima o limite sem chegar em lugar nenhum.
+  const pedidoRecente = !!permissao?.pedidoEm
+    && Date.now() - new Date(permissao.pedidoEm).getTime() < 24 * 3_600_000;
   const firstName = (lead.name || "").split(/\s+/)[0] || "lead";
 
   useEffect(() => {
@@ -74,6 +93,20 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   useEffect(() => {
     if (open) void loadSignatureName(currentUser).then(setAssinatura);
   }, [open, currentUser]);
+
+  // Lê a permissão de ligação ao abrir. É consulta ao BANCO, não à Meta: chega
+  // junto com o resto da tela e não segura a abertura do modal.
+  useEffect(() => {
+    if (!open || !lead.phone) { setLendoPermissao(false); return; }
+    let vivo = true;
+    setLendoPermissao(true);
+    void carregarPermissao(lead.phone).then((p) => {
+      if (!vivo) return;
+      setPermissao(p);
+      setLendoPermissao(false);
+    });
+    return () => { vivo = false; };
+  }, [open, lead.phone]);
 
   if (!open) return null;
 
@@ -155,7 +188,19 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
       leadId: lead.id ?? null,
       ownerId: ownerId ?? null,
     });
-    setSemPermissao(!r.ok && r.codigo === 138006);
+    // A Meta recusou por falta de permissão: o selo e o botão têm que virar na
+    // hora. Sem isto o "Ligar agora" continua verde depois de já ter sido
+    // recusado, e a pessoa clica de novo.
+    if (!r.ok && r.codigo === 138006) {
+      setSemPermissao(true);
+      setPermissao((p) => ({
+        waId: p?.waId ?? "", status: "no_permission", expiraEm: null,
+        pedidoEm: p?.pedidoEm ?? null, respondidoEm: p?.respondidoEm ?? null,
+        fonte: "api", confirmado: true,
+      }));
+    } else {
+      setSemPermissao(false);
+    }
     setResult(r.ok ? { ok: true, msg: "Ligando pelo webfone… atenda pelo painel que abriu." } : { ok: false, msg: r.error });
     setCalling(false);
   }
@@ -167,10 +212,10 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   async function handlePedirPermissao() {
     if (!lead.phone || pedindoPermissao) return;
     setPedindoPermissao(true);
-    const r = await pedirPermissaoLigacao(lead.phone);
+    const r = await pedirPermissao(lead.phone, lead.id ?? null);
     setResult(
       r.ok
-        ? { ok: true, msg: "Pedido enviado no WhatsApp. Quando o cliente autorizar, o botão de ligar funciona." }
+        ? { ok: true, msg: "Pedido enviado no WhatsApp. Assim que o cliente autorizar, o botão de ligar libera sozinho." }
         : { ok: false, msg: r.error || "Não consegui mandar o pedido de permissão." },
     );
     if (r.ok) setSemPermissao(false);
@@ -306,33 +351,81 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
                   {dialable ? formatPhoneDisplay(lead.phone) : "sem telefone cadastrado"}
                 </p>
               </div>
-              <span className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--wa-ok-bg)", color: "#0E7C6A" }}>
-                Oficial
-              </span>
-            </div>
-            <button
-              onClick={handleWebfoneCall}
-              disabled={!dialable || calling}
-              className="w-full flex items-center justify-center gap-2.5 py-3.5 text-[15px] font-bold text-white transition-all hover:opacity-90 disabled:opacity-50"
-              style={{ background: WA_GREEN }}
-            >
-              {calling ? (
-                <>
-                  <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                  Ligando…
-                </>
+              {/* O SELO DA PERMISSÃO. Vale mais que o "Oficial" que estava aqui:
+                  ninguém duvida de qual número sai a ligação, mas todo mundo
+                  precisa saber se ela PODE sair. */}
+              {lendoPermissao ? (
+                <span className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 text-gray-400">…</span>
+              ) : liberado ? (
+                <span
+                  className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0"
+                  style={{ background: "var(--wa-ok-bg)", color: "#0E7C6A" }}
+                  title={`O cliente autorizou receber ligação${validade ? ` — vale por ${validade}` : ""}.`}
+                >
+                  Liberado{validade ? ` · ${validade}` : ""}
+                </span>
               ) : (
-                <>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
-                  </svg>
-                  Ligar agora
-                </>
+                <span
+                  className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 bg-amber-50 text-amber-700"
+                  title="A Meta só deixa ligar depois que o cliente autoriza."
+                >
+                  Sem permissão
+                </span>
               )}
-            </button>
+            </div>
+            {/* SEM PERMISSÃO, O BOTÃO NÃO É "LIGAR" — É "PEDIR PERMISSÃO".
+                Deixar o "Ligar agora" aceso e recusar depois é o pior dos dois
+                mundos: o SDR já liberou o microfone, já esperou, e o cliente
+                nem soube que existia uma ligação. Trocar o botão diz o que
+                fazer AGORA pra poder ligar daqui a pouco. */}
+            {liberado ? (
+              <button
+                onClick={handleWebfoneCall}
+                disabled={!dialable || calling}
+                className="w-full flex items-center justify-center gap-2.5 py-3.5 text-[15px] font-bold text-white transition-all hover:opacity-90 disabled:opacity-50"
+                style={{ background: WA_GREEN }}
+              >
+                {calling ? (
+                  <>
+                    <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                    Ligando…
+                  </>
+                ) : (
+                  <>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+                    </svg>
+                    Ligar agora
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={() => void handlePedirPermissao()}
+                disabled={!dialable || pedindoPermissao || pedidoRecente}
+                className="w-full flex items-center justify-center gap-2.5 py-3.5 text-[15px] font-bold text-white transition-all hover:opacity-90 disabled:opacity-60"
+                style={{ background: pedidoRecente ? "#9CA3AF" : "#B45309" }}
+                title={pedidoRecente
+                  ? "Já mandamos o pedido nas últimas 24h — a Meta só deixa um por dia."
+                  : "Manda a pergunta no WhatsApp do cliente. Exige conversa aberta (ele precisa ter escrito nas últimas 24h)."}
+              >
+                {pedindoPermissao ? (
+                  <>
+                    <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                    Mandando o pedido…
+                  </>
+                ) : pedidoRecente ? (
+                  "Pedido já enviado — aguardando o cliente"
+                ) : (
+                  "Pedir permissão pra ligar"
+                )}
+              </button>
+            )}
           </div>
           <p className="text-[10px] text-gray-400 text-center">
-            A ligação toca no WhatsApp do cliente e sai pelo número oficial da empresa — o áudio é deste navegador.
+            {liberado
+              ? "A ligação toca no WhatsApp do cliente e sai pelo número oficial da empresa — o áudio é deste navegador."
+              : "A Meta só permite ligar depois que o cliente autoriza. Ele responde no WhatsApp e o botão libera sozinho."}
           </p>
         </div>
       </div>

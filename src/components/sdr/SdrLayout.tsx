@@ -83,8 +83,7 @@ import AvisoDoVigia from "./AvisoDoVigia";
 import GlobalToasts from "./GlobalToasts";
 import ConfirmDialog from "./ConfirmDialog";
 import CommandPalette from "./CommandPalette";
-import { toggleWebphone } from "@/lib/wavoip";
-import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import { notifySuccess } from "@/lib/qs/notify";
 import { sweepCadenceEndings } from "@/lib/qs/cadenceSweep";
 import TelefoneOnboarding from "@/components/sdr/telefone/TelefoneOnboarding";
 import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
@@ -335,16 +334,6 @@ export default function SdrLayout() {
     setActiveNav("cadencia-editar");
   }
 
-  // Abre o webfone (Wavoip) a partir do topo — carrega sob demanda (sem widget solto).
-  async function handleOpenPhone() {
-    const r = await toggleWebphone();
-    if (!r.ok) {
-      console.warn("[webfone]", r.error);
-      // Sem isso o clique "não fazia nada" — o SDR precisa saber o que configurar.
-      notifyError(r.error || "Webfone indisponível — confira o token em Configurações → Webfone.");
-    }
-  }
-
   const visualActiveNav: SdrNav =
     activeNav === "lead-detail" ? "leads" :
     activeNav === "cadencia-criar" || activeNav === "cadencia-editar" ? "cadencias" :
@@ -454,18 +443,6 @@ export default function SdrLayout() {
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             <span className="hidden lg:inline text-[12px] font-medium">Buscar</span>
             <kbd className="hidden lg:inline text-[10px] font-bold px-1 py-0.5 rounded border border-gray-200 text-gray-400">Ctrl K</kbd>
-          </button>
-          {/* Webfone (Wavoip) — abre o discador dentro do QS, sob demanda */}
-          <button
-            onClick={handleOpenPhone}
-            title="Telefone (Webfone)"
-            aria-label="Abrir o telefone (Webfone)"
-            className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-gray-50 transition-colors"
-            style={{ color: "#0147FF" }}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />
-            </svg>
           </button>
           {/* Sino de notificações/lembretes */}
           <NotificationsPanel

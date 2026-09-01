@@ -28,6 +28,8 @@ import { lerChamadas, ativarChamadasNaMeta, pedirPermissaoLigacao, lerDiagnostic
          lerPermissaoDeLigacao, type ConfigChamadas, type DiagnosticoChamadas } from "@/lib/qs/waInbox";
 import { ligarPeloWhatsApp, type Ligacao, type PassoLigacao } from "@/lib/qs/waCall";
 import { useQsAuth } from "@/contexts/QsAuthContext";
+import { getSetting, setSetting } from "@/lib/qsSettings";
+import { supabase } from "@/lib/supabase";
 
 export default function LigacaoWhatsApp() {
   const { currentUser } = useQsAuth();
@@ -44,6 +46,10 @@ export default function LigacaoWhatsApp() {
   const [ocupado, setOcupado] = useState(false);
   const [telefone, setTelefone] = useState("");
   const [texto, setTexto] = useState("Podemos te ligar por aqui pelo WhatsApp?");
+  // A CADÊNCIA DE QUEM LIBEROU (0070). Vazia = desligado, que é como nasce.
+  const [cadencias, setCadencias] = useState<{ id: string; name: string }[]>([]);
+  const [cadenciaPermissao, setCadenciaPermissao] = useState<string>("");
+  const [salvandoCadencia, setSalvandoCadencia] = useState(false);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -56,6 +62,28 @@ export default function LigacaoWhatsApp() {
   }, []);
 
   useEffect(() => { void carregar(); }, [carregar]);
+
+  // Cadências disponíveis + a que está escolhida hoje.
+  useEffect(() => {
+    void (async () => {
+      const { data } = await supabase
+        .from("qs_cadences").select("id,name")
+        .eq("status", "disponivel").order("name");
+      setCadencias((data ?? []) as { id: string; name: string }[]);
+      const atual = await getSetting<string>("cadencia_permissao_ligacao");
+      setCadenciaPermissao(typeof atual === "string" ? atual : "");
+    })();
+  }, []);
+
+  const salvarCadencia = async (id: string) => {
+    setSalvandoCadencia(true);
+    // String vazia vira null de propósito: é assim que se DESLIGA a automação
+    // sem precisar de um segundo controle na tela.
+    const ok = await setSetting("cadencia_permissao_ligacao", id || null);
+    setSalvandoCadencia(false);
+    if (ok) { setCadenciaPermissao(id); notifySuccess(id ? "Cadência salva." : "Automação desligada."); }
+    else notifyError("Não consegui salvar.");
+  };
 
   const ligado = String(cfg?.status || "").toUpperCase() === "ENABLED";
 
@@ -294,6 +322,37 @@ export default function LigacaoWhatsApp() {
             {passo.estado === "recusada" && "O cliente recusou."}
             {passo.estado === "encerrada" && "Chamada encerrada."}
             {passo.estado === "erro" && `Falhou: ${passo.detalhe ?? "erro no áudio"}`}
+          </p>
+        )}
+      </div>
+
+      {/* ── A CADÊNCIA DE QUEM LIBEROU ──────────────────────────────────────
+          O pulo do gato do fluxo comercial: o cliente autoriza a ligação e o
+          lead cai sozinho numa cadência de ligação, sem ninguém vigiar caixa de
+          entrada. A permissão temporária dura 7 dias — quem não ligar dentro
+          dela precisa pedir de novo, e o limite é 1 pedido por 24h. */}
+      <div className="rounded-lg border border-gray-200 p-3">
+        <h3 className="text-[13px] font-semibold text-gray-900">Cadência de quem liberou a ligação</h3>
+        <p className="mt-1 text-[12px] text-gray-600">
+          Quando o cliente autorizar a ligação no WhatsApp, o lead entra sozinho nesta cadência.
+          As travas de sempre valem: lead ganho, com reunião marcada ou com atividade em aberto
+          <b> não</b> é movido — a automação só pesca quem estava parado.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <select
+            value={cadenciaPermissao}
+            onChange={(e) => void salvarCadencia(e.target.value)}
+            disabled={!podeMexer || salvandoCadencia}
+            className="rounded-md border border-gray-300 px-2 py-1.5 text-[13px] disabled:opacity-50"
+          >
+            <option value="">Desligado — só registra a permissão</option>
+            {cadencias.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          {salvandoCadencia && <span className="text-[12px] text-gray-500">salvando…</span>}
+        </div>
+        {!cadencias.length && (
+          <p className="mt-2 text-[12px] text-amber-700">
+            Nenhuma cadência com status <b>disponível</b> — crie uma em Cadências pra poder escolher aqui.
           </p>
         )}
       </div>

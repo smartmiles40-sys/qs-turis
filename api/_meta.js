@@ -508,8 +508,27 @@ export async function encerrarLigacao(callId) {
 }
 
 /**
- * "Posso ligar pra essa pessoa AGORA?" — sem tentar e tomar 138006 na cara do
- * cliente. Devolve granted | pending | denied | expired e as ações possíveis.
+ * "POSSO LIGAR PRA ESSA PESSOA AGORA?" — a fonte da verdade da Meta, sem tentar
+ * e tomar 138006 na cara do cliente.
+ *
+ * O FORMATO REAL DA RESPOSTA (conferido na doc em 01/09, porque a versão
+ * anterior desta função chutava os nomes e perdia a validade da permissão):
+ *
+ *   { permission: { status: 'no_permission' | 'temporary' | 'permanent',
+ *                   expiration_time: 1745343479 },      ← em SEGUNDOS, e o nome
+ *     actions: [                                          NÃO é expiration_timestamp
+ *       { action_name: 'send_call_permission_request',
+ *         can_perform_action: true,
+ *         limits: [{ time_period: 'PT24H', max_allowed: 1, current_usage: 0 }] },
+ *       { action_name: 'start_call',
+ *         can_perform_action: false,
+ *         limits: [{ time_period: 'PT24H', max_allowed: 5, current_usage: 5 }] } ] }
+ *
+ * `actions` vale MAIS que `status`, e é a parte que faltava: a permissão pode
+ * estar válida e mesmo assim a ligação ser recusada, porque o teto é de 5
+ * chamadas atendidas por 24h com a mesma pessoa. `can_perform_action` já traz
+ * essa conta pronta — perguntar só o `status` é como olhar o saldo e ignorar o
+ * limite diário.
  */
 export async function lerPermissaoDeLigacao(telefone) {
   const cr = await credenciaisDaMeta();
@@ -519,11 +538,20 @@ export async function lerPermissaoDeLigacao(telefone) {
   if (!wa) return { erro: 'telefone-invalido' };
   try {
     const j = await graph(`/${cr.phoneId}/call_permissions?user_wa_id=${encodeURIComponent(wa)}`, { token: cr.token });
-    const p = j?.permission || j?.data?.[0] || j || {};
+    const p = j?.permission || {};
+    const acao = (nome) => (Array.isArray(j?.actions) ? j.actions : []).find((a) => a?.action_name === nome) || null;
+    const ligar = acao('start_call');
+    const pedir = acao('send_call_permission_request');
+    // Segundos → ISO. A Meta manda epoch em segundos; jogar isso direto num
+    // timestamptz daria 1970 e a permissão nasceria vencida.
+    const seg = p.expiration_time ?? p.expiration_timestamp ?? null;
     return {
-      status: p.status || p.permission_status || null,
-      expiraEm: p.expiration_timestamp || p.expires_at || null,
-      acoes: p.actions || null,
+      status: p.status || 'no_permission',
+      expiraEm: seg ? new Date(Number(seg) * 1000).toISOString() : null,
+      podeLigar: ligar ? ligar.can_perform_action === true : null,
+      podePedir: pedir ? pedir.can_perform_action === true : null,
+      limiteLigar: ligar?.limits?.[0] ?? null,
+      limitePedir: pedir?.limits?.[0] ?? null,
       cru: j,
     };
   } catch (e) {

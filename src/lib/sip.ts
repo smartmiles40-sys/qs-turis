@@ -2,10 +2,10 @@
 // -----------------------------------------------------------------------------
 // Camada de LIGAÇÃO POR SIP — a 2ª forma de contato de voz do QS.
 //
-// A Wavoip expõe um tronco SIP (host sipv2.wavoip.com) que faz/recebe chamadas
-// pelo WhatsApp. O navegador NÃO fala SIP direto (só por WSS/WebRTC, que a Wavoip
-// não oferece), então quem discа é um SOFTPHONE instalado no computador do SDR
-// (MicroSIP no Windows, Zoiper, etc.), registrado com as credenciais SIP.
+// Quem disca aqui é um SOFTPHONE instalado no computador do SDR (MicroSIP no
+// Windows, Zoiper, etc.), registrado no tronco da BravoTech — o navegador não
+// fala SIP direto. Este é o telefone COMUM, e não tem nada a ver com a ligação
+// pelo WhatsApp, que sai pelo número oficial da Meta.
 //
 // O CRM entra como "click-to-dial": monta um URI `sip:<numero>@<host>` e entrega
 // ao softphone (handler de protocolo do SO) — igual ao `tel:`. As credenciais
@@ -23,6 +23,12 @@ export const SIP_USER_KEY = "sip_user";
 // completar a ligação — ex.: "1*" ou "01*". Vazio = disca o número puro.
 export const SIP_PREFIX_KEY = "sip_prefix";
 
+// ⚠️ NÃO APAGUE, mesmo com a Wavoip fora do QS desde 01/09. Este valor não é
+// mais um "padrão": virou SENTINELA. O `sip_host` gravado no banco ainda é
+// `sipv2.wavoip.com` (herança da Wavoip), e é comparando com esta constante que
+// o `dialViaSip` sabe IGNORAR aquele host e discar `sip:NUMERO` pelado — que é
+// como a BravoTech quer. Apagar a constante faria o QS voltar a montar
+// `sip:NUMERO@sipv2.wavoip.com` e o softphone discaria pra um tronco morto.
 export const DEFAULT_SIP_HOST = "sipv2.wavoip.com";
 
 export type SipDialResult = { ok: true; uri: string } | { ok: false; error: string };
@@ -36,7 +42,7 @@ export async function dialViaSip(phone?: string | null): Promise<SipDialResult> 
   if (!to || to.length < 11) return { ok: false, error: "Telefone inválido para ligar." };
   // BravoTech: o softphone disca pela PRÓPRIA conta (ramal) registrada, então a
   // URI vai "pelada" — sip:NUMERO. Só anexa @host se o admin configurou um
-  // domínio SIP próprio (diferente do default herdado da Wavoip).
+  // domínio SIP próprio, e o host herdado da Wavoip conta como "não configurou".
   const raw = (await getSetting<string>(SIP_HOST_KEY))?.trim() ?? "";
   const host = raw && raw !== DEFAULT_SIP_HOST ? raw : "";
   // Prefixo de rota que a BravoTech pede na frente do número (ex.: "1*"/"01*").

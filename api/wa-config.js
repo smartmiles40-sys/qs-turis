@@ -38,6 +38,7 @@ import {
   desconectarInstancia, reiniciarInstancia,
 } from './_evolution.js';
 import { rest } from './_supabaseAdmin.js';
+import { sincronizarPermissao, gravarPermissao, lerPermissaoLocal, permissaoVale } from './_permissaoLigacao.js';
 
 /** Só admin/gestor mexe nos modelos: eles vão pra análise da Meta em nome da
  *  empresa, e modelo reprovado sujando a conta afeta o número inteiro. */
@@ -309,6 +310,23 @@ export default async function handler(req, res) {
     // leva o offer, devolve o `wacid`, e o áudio começa quando o webhook
     // `connect` trouxer o answer — que chega pelo wa-calls, não por aqui.
     if (body.acao === 'calling-ligar') {
+      // A CONFERÊNCIA ANTES DA DISCAGEM. O `?conferir=0` existe pro caso de a
+      // Graph API estar lenta e a pessoa preferir tentar direto — mas o padrão
+      // é conferir, porque tomar 138006 depois de liberar o microfone é o
+      // desperdício que essa consulta compra barato.
+      if (body.conferir !== false) {
+        const p = await sincronizarPermissao(body.telefone, body.leadId ?? null);
+        // Erro da Meta NÃO barra: instabilidade da Graph API não pode virar
+        // "ninguém liga hoje". Segue e deixa a própria discagem responder.
+        if (!p?.erro && p.liberado === false) {
+          return res.status(400).json({
+            error: 'Essa pessoa ainda não autorizou receber ligação da empresa. Mande o pedido de permissão pela conversa (ela precisa ter escrito nas últimas 24h).',
+            motivo: 'sem-permissao',
+            codigo: 138006,
+            permissao: { status: p.status, expiraEm: p.expiraEm, podePedir: p.podePedir },
+          });
+        }
+      }
       const r = await iniciarLigacao({ para: body.telefone, sdp: body.sdp, marcador: body.marcador });
       if (r.erro) {
         // 138006 é o único erro que tem conserto na tela: falta permissão.
@@ -331,11 +349,26 @@ export default async function handler(req, res) {
       // e exige conversa ABERTA (a pessoa escreveu nas ultimas 24h).
       const r = await pedirPermissaoDeLigacao(body.telefone, body.texto);
       if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      // Marca que o pedido SAIU. Sem isso a tela não distingue "nunca pedimos"
+      // de "pedimos e a pessoa não respondeu" — e é a diferença entre insistir
+      // e queimar o limite de 1 pedido por 24h.
+      await gravarPermissao(body.telefone, {
+        lead_id: body.leadId ?? null, pedido_em: new Date().toISOString(),
+      });
       return res.status(200).json({ ok: true, wamid: r.wamid });
     }
     if (body.acao === 'calling-permissao-status') {
-      const r = await lerPermissaoDeLigacao(body.telefone);
-      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      const r = await sincronizarPermissao(body.telefone, body.leadId ?? null);
+      if (r.erro) {
+        // A Meta não respondeu — devolve o que o banco já sabia, dizendo que é
+        // memória e não a verdade de agora. Melhor que uma tela em branco.
+        const local = await lerPermissaoLocal(body.telefone);
+        if (!local) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+        return res.status(200).json({
+          status: local.status, expiraEm: local.expira_em, vale: permissaoVale(local),
+          liberado: permissaoVale(local), fonte: local.fonte, desatualizado: true,
+        });
+      }
       return res.status(200).json(r);
     }
   }

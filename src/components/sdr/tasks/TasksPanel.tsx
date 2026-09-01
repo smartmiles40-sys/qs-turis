@@ -26,7 +26,6 @@ import { getLeadScore } from "@/lib/leadScore";
 import { formatPhoneDisplay, fillTemplate, startWhatsAppCall, isDialablePhone } from "@/lib/whatsapp";
 import WhatsAppModal from "../whatsapp/WhatsAppModal";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
-import { setOnCallEnded } from "@/lib/wavoip";
 import { dialViaOficial, setOnCallEndedOficial } from "@/lib/qs/waCall";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
@@ -1929,10 +1928,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const tasksRef = useRef<Task[]>(tasks);
   tasksRef.current = tasks;
   useEffect(() => {
-    // Mesmo desfecho automático pros TRÊS caminhos de voz: WhatsApp oficial
-    // (Cloud API), webfone WebRTC (VoxFree) e o Wavoip que ainda responde por
-    // chamadas antigas. Os três emitem o mesmo CallEndedInfo — é o que deixa
-    // esta tela não saber por onde a ligação saiu.
+    // Mesmo desfecho automático pros DOIS caminhos de voz que sobraram:
+    // WhatsApp oficial (Cloud API Calling) e o webfone WebRTC da telefonia
+    // (VoxFree). O Wavoip saiu em 01/09 — era um BSP paralelo, com o WhatsApp
+    // pareado por QR num aparelho deles, e agora a ligação de WhatsApp sai pelo
+    // mesmo número oficial que manda a mensagem. Os dois emitem o mesmo
+    // CallEndedInfo, e é isso que deixa esta tela não saber por onde a ligação
+    // saiu.
     const handleCallEnded = (info: { leadId: string | null; phone: string | null; answered: boolean; durationSec: number }) => {
       // Loga TODA chamada encerrada (atendida ou não, com ou sem lead) — telemetria
       // fire-and-forget pras análises de telefonia. Vai ANTES do guard de leadId.
@@ -1951,10 +1953,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       // traz o card pra vista
       scrollHeroIntoView();
     };
-    setOnCallEnded(handleCallEnded);
     setOnCallEndedWebphone(handleCallEnded);
     setOnCallEndedOficial(handleCallEnded);   // WhatsApp oficial (31/08)
-    return () => { setOnCallEnded(null); setOnCallEndedWebphone(null); setOnCallEndedOficial(null); };
+    return () => { setOnCallEndedWebphone(null); setOnCallEndedOficial(null); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

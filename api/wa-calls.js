@@ -32,7 +32,19 @@
 //
 // Callback URL:  https://qs.setuforeuvouviagens.com.br/api/wa-calls
 // Verify token:  META_CALLS_VERIFY_TOKEN
-// Campo:         calls   (só ele — mensagem continua com o Chatwoot)
+// Campos:        calls  +  messages
+//
+// ⚠️ O `messages` entrou em 01/09 e o motivo é contraintuitivo: a RESPOSTA do
+// cliente ao pedido de permissão de ligação (`call_permission_reply`) NÃO viaja
+// no campo `calls`. Ela é uma mensagem interativa, e viaja no `messages`. Sem
+// assinar `messages` aqui, o QS nunca fica sabendo que alguém autorizou — e
+// "quem liberou pra gente ligar?" não tem resposta.
+//
+// Isso NÃO atrapalha o Chatwoot: cada app assinado na WABA recebe a sua própria
+// cópia do webhook. O Chatwoot continua recebendo as mensagens pelo app dele.
+// Do nosso lado, tudo que não for resposta de permissão é IGNORADO aqui — quem
+// cuida de conversa é o wa-webhook, e duas portas gravando a mesma mensagem
+// seria pior que não ter nenhuma.
 //
 // ⚠️ Assinar o APP na WABA não é automático na interface nova da Meta. WABA sem
 // app assinado não entrega webhook NENHUM, e não avisa. Se nada chegar aqui,
@@ -44,6 +56,10 @@
 import crypto from 'node:crypto';
 import { insert } from './_supabaseAdmin.js';
 import { findLeadByPhone } from './_wa.js';
+import {
+  gravarPermissao, lerRespostaDePermissao, permissaoPorLigacaoDoCliente,
+  moverParaCadenciaDePermissao,
+} from './_permissaoLigacao.js';
 
 // Sem isto o corpo chega parseado e a assinatura da Meta é inconferível: o HMAC
 // é sobre os BYTES, e reserializar o JSON muda espaços e ordem de chaves.
@@ -166,8 +182,21 @@ export default async function handler(req, res) {
   // eu errei um nome, o dado continua aqui e o conserto é uma migration, não
   // "liga de novo pra eu ver".
   const eventos = [];
+  // As respostas de permissão que vierem no campo `messages`. Ficam separadas
+  // dos eventos de chamada porque não são chamada: são o "sim, pode me ligar".
+  const permissoes = [];
   for (const entry of Array.isArray(body?.entry) ? body.entry : []) {
     for (const ch of Array.isArray(entry?.changes) ? entry.changes : []) {
+      // ── CAMPO `messages`: só a resposta de permissão nos interessa ─────────
+      // Tudo o mais (texto, áudio, status de entrega) é assunto do wa-webhook,
+      // que recebe pelo Chatwoot. Gravar aqui também duplicaria a conversa.
+      if (ch?.field === 'messages') {
+        for (const m of Array.isArray(ch.value?.messages) ? ch.value.messages : []) {
+          const p = lerRespostaDePermissao(m);
+          if (p) permissoes.push(p);
+        }
+        continue;
+      }
       if (ch?.field !== 'calls') continue;
       const value = ch.value || {};
       const lista = Array.isArray(value.calls) ? value.calls : [];
@@ -206,7 +235,36 @@ export default async function handler(req, res) {
     }
   }
 
+  // ── "PODE ME LIGAR" — o evento que a fila inteira estava esperando ────────
+  // Vem antes dos eventos de chamada porque a resposta de permissão chega
+  // sozinha, sem chamada nenhuma junto: se saíssemos pelo caminho do "sem
+  // evento de chamada" logo abaixo, ela seria descartada como corpo estranho.
+  let permissoesGravadas = 0;
+  for (const p of permissoes) {
+    const { de, cru, ...campos } = p;
+    let lead = null;
+    try { lead = de ? await findLeadByPhone(de) : null; }
+    catch (e) { console.warn('[wa-calls] permissao: lead nao resolvido:', e?.message); }
+
+    await gravarPermissao(de, { ...campos, lead_id: lead?.id ?? null, cru });
+    permissoesGravadas++;
+
+    // A CADÊNCIA DE QUEM LIBEROU. Só quando autorizou (recusa não muda fila) e
+    // só se o gestor configurou a cadência — sem config, isto não faz nada.
+    if (campos.resposta === 'accept' && lead) {
+      try {
+        const m = await moverParaCadenciaDePermissao(lead);
+        console.log(`[wa-calls] permissao de ${String(de).slice(-4)}: ${campos.status} — cadencia: ${m.movido ? `movido (${m.tarefas} atividades)` : m.motivo}`);
+      } catch (e) { console.warn('[wa-calls] cadencia de permissao falhou:', e?.message); }
+    } else {
+      console.log(`[wa-calls] permissao de ${String(de).slice(-4)}: ${campos.resposta} (${campos.status})`);
+    }
+  }
+
   if (!eventos.length) {
+    if (permissoesGravadas) {
+      return res.status(200).json({ ok: true, gravados: 0, permissoes: permissoesGravadas });
+    }
     // Não é erro: a Meta manda outros campos por este mesmo endereço se alguém
     // assinar mais coisa. Registrar o corpo inteiro é o que permite descobrir.
     try {
@@ -237,6 +295,24 @@ export default async function handler(req, res) {
       gravados++;
     } catch (e) {
       console.error('[wa-calls] evento nao gravado:', e?.message);
+    }
+
+    // ── A SEGUNDA FONTE DE PERMISSÃO: O CLIENTE LIGOU PRA GENTE ──────────────
+    // Com `callback_permission_status: ENABLED` — que é como o número está
+    // configurado — quem liga pra empresa autoriza a empresa a ligar de volta.
+    // É a permissão MAIS BARATA que existe: ninguém precisou pedir nada, e o
+    // lead que liga é justamente o mais quente da fila.
+    //
+    // Só no `connect` de propósito: o `terminate` da mesma chamada regravaria a
+    // mesma linha com validade nova a cada evento, esticando a permissão sem
+    // que a Meta tenha esticado nada.
+    if (String(ev.direcao || '').toUpperCase() === 'USER_INITIATED'
+        && String(ev.evento || '').toLowerCase() === 'connect'
+        && foneDoCliente) {
+      const p = permissaoPorLigacaoDoCliente(foneDoCliente);
+      const { de, ...campos } = p;
+      try { await gravarPermissao(de, { ...campos, lead_id: leadId }); }
+      catch (e) { console.warn('[wa-calls] permissao por ligacao nao gravada:', e?.message); }
     }
   }
 

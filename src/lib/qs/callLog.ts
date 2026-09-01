@@ -12,9 +12,12 @@
 import { supabase } from "@/lib/supabase";
 
 /** Provedor da chamada. Hoje o Painel loga sem distinguir (callback único). */
-export type CallProvider = "wavoip" | "webrtc";
+// `wavoip` continua no tipo por causa das LINHAS ANTIGAS: a Wavoip saiu do QS em
+// 01/09, mas o histórico de ligações que ela gerou não sai do banco junto.
+// `oficial` é a Cloud API Calling, que é por onde a ligação de WhatsApp sai hoje.
+export type CallProvider = "wavoip" | "webrtc" | "oficial";
 
-/** Mesmo formato do CallEndedInfo emitido por wavoip.ts e webphone.ts. */
+/** Mesmo formato do CallEndedInfo emitido por waCall.ts e webphone.ts. */
 export interface CallEndedInfo {
   leadId: string | null;
   phone: string | null;

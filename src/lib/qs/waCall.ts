@@ -107,6 +107,7 @@ async function pedir(acao: string, corpo: Record<string, unknown>) {
 export async function ligarPeloWhatsApp(
   telefone: string,
   onPasso: (p: PassoLigacao) => void,
+  leadDaChamada: string | null = null,
 ): Promise<Ligacao> {
   const para = String(telefone || "").replace(/\D/g, "");
   if (para.length < 12) throw new Error("Telefone com DDI e DDD, ex.: 5511999999999.");
@@ -186,7 +187,11 @@ export async function ligarPeloWhatsApp(
     await esperarIce(pc);
 
     onPasso({ estado: "discando" });
-    const r = await pedir("calling-ligar", { telefone: para, sdp: pc.localDescription?.sdp });
+    // `leadId` vai junto pra conferência de permissão do servidor amarrar a
+    // linha ao lead — sem ele a permissão fica órfã e a RLS esconde do dono.
+    const r = await pedir("calling-ligar", {
+      telefone: para, sdp: pc.localDescription?.sdp, leadId: leadDaChamada,
+    });
     callId = r?.callId || null;
     if (!callId) throw new Error("A Meta aceitou o pedido mas não devolveu o id da chamada.");
     onPasso({ estado: "discando", callId });
@@ -373,7 +378,7 @@ export async function dialViaOficial(
       }
       naTela = { ...naTela, estado: p.estado };
       avisar();
-    });
+    }, ctx?.leadId ?? null);
     return { ok: true };
   } catch (e) {
     atual = null;
