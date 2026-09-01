@@ -108,13 +108,23 @@ pra **pescar quem estava parado** — que é exatamente o caso de quem responde
    ligar. Primeiro faz o lead responder; depois pede permissão.
 2. **1 pedido por 24h e 2 por semana**, por pessoa.
 3. **Permissão temporária: 7 dias.** "Permitir" é permanente.
-4. **5 chamadas atendidas por 24h** com a mesma pessoa.
+4. **5 chamadas atendidas por 24h** com a mesma pessoa. Estourou, o QS diz que é
+   limite — e **não** oferece pedir permissão de novo (ver o sintoma abaixo).
 5. **4 não atendidas seguidas revogam** a permissão sozinhas.
 6. A pessoa revoga quando quiser, e **a Meta não avisa**.
 
 ---
 
 ## Quando alguma coisa não funcionar
+
+**"Deu erro dizendo que o limite das últimas 24h foi atingido"**
+Não é falta de permissão — é o **teto de 5 chamadas atendidas por 24h** com aquela
+pessoa. O botão continua verde de propósito: pedir permissão a quem já autorizou
+não conserta nada e ainda **queima o limite de 1 pedido por dia**, que é a bala
+que você vai querer amanhã. O conserto é esperar.
+
+> Essa distinção é feita no servidor: a Meta responde `can_perform_action: false`
+> para as duas situações, e só o `status` da permissão separa uma da outra.
 
 **"O botão está âmbar mas eu sei que o cliente liberou"**
 A tabela é uma foto. Abra o lead: o modal consulta a Meta ao ligar e regrava.
