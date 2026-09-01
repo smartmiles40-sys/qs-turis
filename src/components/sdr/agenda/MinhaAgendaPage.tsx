@@ -82,6 +82,13 @@ function primeiroNome(nome: string | null | undefined): string {
 export default function MinhaAgendaPage({ onOpenLead }: Props) {
   const { currentUser } = useQsAuth();
   const gestor = currentUser ? canSeeAllData(currentUser.role) : false;
+  // A MESMA TELA, DOIS PONTOS DE VISTA (Bruno, 01/09).
+  //
+  // Pro closer, "pendente" é reunião DELE que ele não registrou — é cobrança.
+  // Pro SDR é reunião que ELE marcou e o closer ainda não deu desfecho — é
+  // acompanhamento: ele não pode registrar, mas é o único que sabe cobrar,
+  // porque foi quem prometeu a call pro cliente. Até aqui ele nem via a tela.
+  const visaoSdr = currentUser?.role === "sdr";
 
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -91,6 +98,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
   const [sdrs, setSdrs] = useState<Map<string, string>>(new Map());
   const [detalhe, setDetalhe] = useState<Meeting | null>(null);
   const [remarcar, setRemarcar] = useState<Meeting | null>(null);
+  const [agendando, setAgendando] = useState(false);
 
   const SELECT = "*, lead:qs_leads(id,full_name,phone,email,segment,owner_id)";
 
@@ -115,7 +123,12 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
         .order("scheduled_at", { ascending: true })
         .limit(100);
 
-      if (!gestor) {
+      if (visaoSdr) {
+        // `owner_id` é quem AGENDOU (ver createMeeting) — não o closer que
+        // atende. É por ele que o SDR reencontra o que prometeu.
+        qPend = qPend.eq("owner_id", currentUser.id);
+        qProx = qProx.eq("owner_id", currentUser.id);
+      } else if (!gestor) {
         qPend = qPend.or(`closer_id.eq.${currentUser.id},meeting_owner.eq.${(currentUser.name ?? "").replace(/,/g, "")}`);
         qProx = qProx.or(`closer_id.eq.${currentUser.id},meeting_owner.eq.${(currentUser.name ?? "").replace(/,/g, "")}`);
       }
@@ -161,7 +174,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
     } finally {
       setCarregando(false);
     }
-  }, [currentUser, gestor]);
+  }, [currentUser, gestor, visaoSdr]);
 
   useEffect(() => { void carregar(); }, [carregar]);
   // As cobranças de desfecho nasciam só quando alguém abria a aba Reuniões — o
@@ -204,11 +217,23 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto">
       {/* ── Cabeçalho ─────────────────────────────────────────────────────── */}
-      <header className="mb-5">
-        <h1 className="text-2xl font-bold text-gray-900">
-          {saudacao()}{currentUser?.name ? `, ${primeiroNome(currentUser.name)}` : ""}
-        </h1>
-        <p className="text-sm text-gray-500 mt-0.5 capitalize">{titulo}</p>
+      <header className="mb-5 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {saudacao()}{currentUser?.name ? `, ${primeiroNome(currentUser.name)}` : ""}
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5 capitalize">{titulo}</p>
+        </div>
+        {/* AGENDAR DAQUI (Bruno, 01/09). O modal já existia nesta tela, mas só
+            abria em modo REMARCAR — pra marcar uma reunião nova o closer tinha
+            que sair da própria casa e ir na aba Reuniões. A sala do Meet e o
+            link saem iguais aos de lá: é o mesmo ScheduleMeetingModal. */}
+        <button
+          onClick={() => setAgendando(true)}
+          className="shrink-0 px-3.5 py-2 rounded-lg bg-[#0147FF] text-white text-sm font-semibold hover:bg-[#0139cc]"
+        >
+          + Nova reunião
+        </button>
       </header>
 
       {erro && (
@@ -223,9 +248,13 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
           <div className="px-4 py-3 border-b border-amber-200/70 flex items-center gap-2">
             <span className="text-lg leading-none">⚠️</span>
             <p className="text-sm font-bold text-amber-900">
-              {pendentes.length === 1
-                ? "1 reunião esperando seu desfecho"
-                : `${pendentes.length} reuniões esperando seu desfecho`}
+              {visaoSdr
+                ? (pendentes.length === 1
+                    ? "1 reunião que você marcou e o closer ainda não registrou"
+                    : `${pendentes.length} reuniões que você marcou e o closer ainda não registrou`)
+                : (pendentes.length === 1
+                    ? "1 reunião esperando seu desfecho"
+                    : `${pendentes.length} reuniões esperando seu desfecho`)}
             </p>
           </div>
           <ul className="divide-y divide-amber-200/60">
@@ -244,7 +273,9 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                   onClick={() => setDetalhe(m)}
                   className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-bold hover:bg-amber-700"
                 >
-                  Registrar
+                  {/* O SDR não registra o desfecho — quem esteve na call é que
+                      sabe no que deu. Ele abre pra ver com quem cobrar. */}
+                  {visaoSdr ? "Ver" : "Registrar"}
                 </button>
               </li>
             ))}
@@ -400,6 +431,14 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
         reschedule={remarcar}
         onClose={() => setRemarcar(null)}
         onSaved={() => { setRemarcar(null); void carregar(); }}
+      />
+
+      {/* Agendamento novo. Sem `reschedule`, o modal abre no modo de criar —
+          com escolha de lead, produto, resumo, e-mail e sala do Meet. */}
+      <ScheduleMeetingModal
+        open={agendando}
+        onClose={() => setAgendando(false)}
+        onSaved={() => { setAgendando(false); void carregar(); }}
       />
     </div>
   );
