@@ -19,6 +19,7 @@
 // -----------------------------------------------------------------------------
 
 import { supabase } from "@/lib/supabase";
+import { authHeaders } from "@/lib/qs/waInbox";
 import { getSetting } from "@/lib/qsSettings";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
@@ -480,33 +481,28 @@ export interface VinculoBitrix {
  * Gruda o ID do negocio do Bitrix NESTE card. Se outro card estiver com o id,
  * o vinculo MUDA DE CARD — nao trava.
  *
- * -- POR QUE MOVER, E NAO RECUSAR NEM REDIRECIONAR (Bruno, 01/09) ------------
+ * -- POR QUE PASSA PELO SERVIDOR (Bruno, 01/09) ------------------------------
  *
- * Este arquivo ja errou duas vezes no mesmo dia, e as duas por nao ouvir o que
- * o gesto do usuario quer dizer:
+ * Este arquivo errou tres vezes no mesmo dia, e as tres por nao ouvir o que o
+ * gesto do usuario quer dizer:
  *
- *   1a: RECUSAVA quando outro card tinha o id. Travou o time: sao 583 cards sem
- *       `bitrix_id` que tem irmao com o id, e o SDR digitava o numero CERTO e
- *       nao conseguia agendar.
- *   2a: REDIRECIONAVA a reuniao pro card irmao. Resolvia o bloqueio, mas
- *       decidia pelo usuario: ele cadastra o negocio AQUI e a reuniao nascia
- *       noutro lugar.
+ *   1a: RECUSAVA quando outro card tinha o id, apostando que o conflito
+ *       revelaria as duplicatas. Revelou e travou o time junto.
+ *   2a: REDIRECIONAVA a reuniao pro card irmao. Destravou, mas decidia pelo
+ *       usuario: ele cadastra o negocio AQUI e a reuniao nascia noutro lugar.
+ *   3a: MOVIA o vinculo, so que pelo navegador — e ai a RLS derrubava
+ *       exatamente o caso comum. O negocio 37639 estava no card da Yanca, e
+ *       quem agendava era outra SDR: o update nao achava linha e a tela mandava
+ *       "peca pra gestao". Verdade tecnica, resposta inutil.
  *
  * A leitura certa e a do Bruno: digitar o ID do negocio E a declaracao de qual
  * card representa aquele negocio. Quem esta com o cliente na linha sabe disso
- * melhor que o banco. Entao o card aberto ganha o vinculo, e o antigo perde.
+ * melhor que o banco.
  *
- * O indice unico continua valendo, e e ele que garante que "qual card e o do
- * negocio 41785" tenha UMA resposta. Por isso mover e tirar de la antes de por
- * aqui — nao existe estado com dois donos.
- *
- * O CARD ANTIGO NAO E APAGADO nem esvaziado: conversa, notas e historico ficam
- * onde estao. Ele so deixa de ser o endereco daquele negocio. Juntar os dois
- * continua sendo decisao de gestao.
- *
- * As duas pontas ganham NOTA. Desvincular um card em silencio e como se perde a
- * confianca no sistema: daqui a tres semanas alguem abre o card antigo, ve que
- * o Bitrix sumiu e nao tem como saber se foi bug, alguem ou quando.
+ * Por isso a escrita mora em /api/lead-bitrix, com service_role: o SDR nao
+ * precisa VER o card antigo pra dizer que o negocio agora e deste. A RLS
+ * continua valendo pra tudo que ela existe pra proteger — ele nao le nome,
+ * telefone nem conversa de la.
  */
 export async function vincularCardAoBitrix(
   leadId: string,
@@ -515,68 +511,21 @@ export async function vincularCardAoBitrix(
   const id = somenteDigitos(bitrixId);
   if (!id) return { ok: false, error: "O ID do Bitrix deve ter só números." };
 
-  const gravar = () => supabase.from("qs_leads").update({ bitrix_id: id }).eq("id", leadId);
-
-  const { error } = await gravar();
-  if (!error) return { ok: true, vinculo: { leadId } };
-
-  const conflito = error.code === "23505" || /duplicate key|bitrix_id/i.test(error.message ?? "");
-  if (!conflito) return { ok: false, error: `Não consegui gravar o ID do Bitrix: ${error.message}` };
-
-  // ── Alguem esta com o id. Tira de la pra trazer pra ca. ───────────────────
-  const { data: dono } = await supabase
-    .from("qs_leads")
-    .select("id, full_name")
-    .eq("bitrix_id", id)
-    .maybeSingle();
-  const d = dono as { id: string; full_name?: string | null } | null;
-
-  if (!d) {
-    // O indice recusou mas ninguem aparece: o card do outro SDR existe e a RLS
-    // esconde dele. Nao da pra soltar o id de um card que nao se enxerga — e
-    // dizer "nao achei" seria mentir sobre o motivo.
-    return {
-      ok: false,
-      error:
-        `O negócio ${id} está num card que você não tem permissão de ver, então não consigo mover o vínculo. ` +
-        `Peça pra gestão — ela enxerga os dois cards.`,
-    };
+  try {
+    const res = await fetch("/api/lead-bitrix", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ lead_id: leadId, bitrix_id: id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, error: data?.error || "Não consegui vincular o negócio do Bitrix." };
+    }
+    const moveu = (data as { moveu_de?: { id: string; nome: string | null } | null })?.moveu_de ?? null;
+    return { ok: true, vinculo: { leadId, moveuDe: moveu } };
+  } catch {
+    return { ok: false, error: "Sem conexão com o servidor — o ID do Bitrix não foi gravado." };
   }
-  if (d.id === leadId) return { ok: true, vinculo: { leadId } }; // ja era deste card
-
-  const { error: erroSolta } = await supabase
-    .from("qs_leads").update({ bitrix_id: null }).eq("id", d.id);
-  if (erroSolta) {
-    return { ok: false, error: `Não consegui soltar o negócio ${id} do card anterior: ${erroSolta.message}` };
-  }
-
-  const { error: erroGrava } = await gravar();
-  if (erroGrava) {
-    // Devolve pro card antigo: melhor voltar ao estado de antes do que deixar o
-    // negocio sem card nenhum, que e o unico estado do qual ninguem se recupera
-    // sozinho (o id some da tela e some da busca).
-    await supabase.from("qs_leads").update({ bitrix_id: id }).eq("id", d.id);
-    return { ok: false, error: `Não consegui mover o negócio ${id} para este card: ${erroGrava.message}` };
-  }
-
-  // Rastro nas duas pontas (best-effort: o vinculo ja mudou, e falhar aqui nao
-  // pode desfazer isso).
-  const quando = new Date().toLocaleString("pt-BR");
-  void supabase.from("qs_notes").insert([
-    {
-      lead_id: d.id, author_id: null,
-      body: `🔗 O negócio ${id} do Bitrix deixou de apontar para este card em ${quando} — foi vinculado a outro card do mesmo cliente durante um agendamento. O histórico deste card não foi alterado.`,
-      tags: ["bitrix", "vinculo"],
-    },
-    {
-      lead_id: leadId, author_id: null,
-      body: `🔗 O negócio ${id} do Bitrix passou a apontar para este card em ${quando}` +
-            (d.full_name ? ` (antes estava em "${d.full_name}")` : "") + ".",
-      tags: ["bitrix", "vinculo"],
-    },
-  ]);
-
-  return { ok: true, vinculo: { leadId, moveuDe: { id: d.id, nome: d.full_name ?? null } } };
 }
 
 /** Erro 23P01 = a trava anti-choque do banco (constraint EXCLUDE da 0027). */
