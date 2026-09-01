@@ -533,22 +533,47 @@ export function humanizarEspera(iso: string): string {
  * enxuga a lista é o filtro de quem está esperando resposta — que a tela liga
  * sozinha nessas duas abas.
  */
-export async function listMyThreads(limit = 2000): Promise<WaThread[]> {
-  const { data, error } = await supabase
-    .from("qs_wa_threads")
-    .select(THREAD_COLS)
-    .order("last_at", { ascending: false, nullsFirst: false })
-    .limit(limit);
-  if (error) {
-    console.warn("[wa] listMyThreads:", error.message);
-    return [];
-  }
-  // O PostgREST devolve o embed como objeto ou array de 1 conforme a relação.
-  return (data ?? []).map((r) => {
-    const raw = r as unknown as Record<string, unknown>;
+/** O PostgREST devolve o embed como objeto ou array de 1 conforme a relação. */
+function mapearThreads(rows: unknown[]): WaThread[] {
+  return rows.map((r) => {
+    const raw = r as Record<string, unknown>;
     const lead = Array.isArray(raw.lead) ? (raw.lead[0] ?? null) : (raw.lead ?? null);
     return { ...(raw as unknown as WaThread), lead: lead as WaThreadLead | null };
   });
+}
+
+export async function listMyThreads(limit = 20000): Promise<WaThread[]> {
+  // PAGINADO — o `.limit(2000)` de antes mentia. O PostgREST corta TODA
+  // resposta em 1000 linhas (max-rows do Supabase) e não avisa: voltava
+  // 200 OK com "Content-Range: 0-999" e o resto da lista simplesmente não
+  // existia na tela. Com 2.593 conversas ordenadas por last_at, sumia tudo
+  // que parou de falar há mais de ~5 dias — 1.593 delas — e a busca da
+  // lista, que filtra em MEMÓRIA, não achava nem por nome nem por telefone
+  // (Bruno, 01/09: um lead com comprovante pago estava invisível assim).
+  // Mesmo teto que já tinha mordido o LeadsPage e as views da 0043 em 13/08.
+  //
+  // O desempate por lead_id (a PK) é obrigatório: sem ele, duas conversas
+  // com o mesmo last_at podem trocar de lugar entre uma página e outra, e aí
+  // a paginação repete uma e PULA a outra.
+  const linhas: unknown[] = [];
+  for (let page = 0; linhas.length < limit; page++) {
+    const de = page * 1000;
+    const { data, error } = await supabase
+      .from("qs_wa_threads")
+      .select(THREAD_COLS)
+      .order("last_at", { ascending: false, nullsFirst: false })
+      .order("lead_id")
+      .range(de, Math.min(de + 999, limit - 1));
+    if (error) {
+      console.warn("[wa] listMyThreads:", error.message);
+      // Meia lista é melhor que lista nenhuma: quem já veio, fica.
+      return mapearThreads(linhas);
+    }
+    const rows = data ?? [];
+    linhas.push(...rows);
+    if (rows.length < 1000) break;
+  }
+  return mapearThreads(linhas);
 }
 
 /**
