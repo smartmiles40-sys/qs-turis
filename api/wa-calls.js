@@ -110,6 +110,10 @@ export default async function handler(req, res) {
     const token = String(process.env.META_CALLS_VERIFY_TOKEN || '').trim();
     const q = req.query || {};
     if (token && q['hub.mode'] === 'subscribe' && String(q['hub.verify_token']) === token) {
+      // O handshake ACEITO era o único caminho silencioso desta rota — e um
+      // caminho silencioso que devolve 200 é indistinguível, no log, de "não
+      // chegou nada". Uma linha aqui separa as duas coisas.
+      console.log('[wa-calls] handshake aceito');
       res.setHeader('Content-Type', 'text/plain');
       return res.status(200).send(String(q['hub.challenge'] ?? ''));
     }
@@ -185,11 +189,17 @@ export default async function handler(req, res) {
   // As respostas de permissão que vierem no campo `messages`. Ficam separadas
   // dos eventos de chamada porque não são chamada: são o "sim, pode me ligar".
   const permissoes = [];
+  // Que campos vieram neste hit. Existe pra UMA pergunta que custou meia tarde
+  // de log: "a Meta está mesmo entregando `messages` aqui?". Sem isto, um
+  // webhook de mensagem que não é permissão passa e não deixa rastro nenhum —
+  // e "não chegou nada" fica indistinguível de "chegou e foi ignorado".
+  const camposVistos = [];
   for (const entry of Array.isArray(body?.entry) ? body.entry : []) {
     for (const ch of Array.isArray(entry?.changes) ? entry.changes : []) {
       // ── CAMPO `messages`: só a resposta de permissão nos interessa ─────────
       // Tudo o mais (texto, áudio, status de entrega) é assunto do wa-webhook,
       // que recebe pelo Chatwoot. Gravar aqui também duplicaria a conversa.
+      if (ch?.field) camposVistos.push(ch.field);
       if (ch?.field === 'messages') {
         for (const m of Array.isArray(ch.value?.messages) ? ch.value.messages : []) {
           const p = lerRespostaDePermissao(m);
@@ -263,10 +273,27 @@ export default async function handler(req, res) {
 
   if (!eventos.length) {
     if (permissoesGravadas) {
+      console.log(`[wa-calls] ${permissoesGravadas} permissao(oes) — campos: ${camposVistos.join(', ') || 'nenhum'}`);
       return res.status(200).json({ ok: true, gravados: 0, permissoes: permissoesGravadas });
     }
-    // Não é erro: a Meta manda outros campos por este mesmo endereço se alguém
-    // assinar mais coisa. Registrar o corpo inteiro é o que permite descobrir.
+
+    // ── MENSAGEM COMUM NÃO ENTRA AQUI ────────────────────────────────────────
+    // Assinar `messages` (01/09, pra receber o `call_permission_reply`) fez esta
+    // rota passar a receber TODA mensagem da empresa — centenas por dia. O
+    // registro de "corpo estranho" abaixo copiava o payload INTEIRO em
+    // qs_wa_calls, então cada conversa do comercial viraria uma linha numa
+    // tabela de sinalização de chamada: a tabela cresceria sem teto e o texto
+    // das conversas ficaria duplicado num lugar com outra regra de acesso.
+    //
+    // `messages` sem resposta de permissão é o caso NORMAL e esperado — quem
+    // cuida de conversa é o wa-webhook. Sai calado.
+    if (camposVistos.length && camposVistos.every((c) => c === 'messages')) {
+      return res.status(200).json({ ok: true, gravados: 0, motivo: 'mensagem-sem-permissao' });
+    }
+
+    // Campo que não é `calls` nem `messages`: aí sim vale registrar o corpo, que
+    // é como se descobre um formato novo em vez de descartar calado.
+    console.warn(`[wa-calls] corpo sem evento — campos: ${camposVistos.join(', ') || 'nenhum'}`);
     try {
       await insert('qs_wa_calls', { payload: body, evento: 'desconhecido' }, { returning: false });
     } catch (e) { console.warn('[wa-calls] evento desconhecido nao gravado:', e?.message); }
@@ -316,7 +343,7 @@ export default async function handler(req, res) {
     }
   }
 
-  console.log(`[wa-calls] ${gravados} evento(s): ${eventos.map((e) => e.evento || '?').join(', ')}`);
+  console.log(`[wa-calls] ${gravados} evento(s) [${camposVistos.join(', ')}]: ${eventos.map((e) => e.evento || '?').join(', ')}`);
   // 200 sempre que a assinatura conferiu: webhook que recebe erro entra em
   // retentativa e a Meta pode suspender a inscrição. O que falhou está no log.
   return res.status(200).json({ ok: true, gravados });
