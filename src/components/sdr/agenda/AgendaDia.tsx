@@ -68,6 +68,10 @@ const STATUS: Record<MeetingStatus, StatusToken> = {
   realizada:  { label: "Realizada",  cor: "#059669", fundo: "rgba(5,150,105,0.12)",   texto: "#047857" },
   no_show:    { label: "No-show",    cor: "#DC2626", fundo: "rgba(220,38,38,0.10)",   texto: "#B91C1C" },
   reagendada: { label: "Reagendada", cor: "#D97706", fundo: "rgba(217,119,6,0.12)",   texto: "#B45309" },
+  // Cinza mais apagado que "cancelada" de propósito: a arquivada não é um
+  // desfecho, é a ausência dele. Ela existe na tela pra não sumir do histórico,
+  // não pra disputar atenção com o que ainda precisa de ação.
+  arquivada:  { label: "Arquivada",  cor: "#9CA3AF", fundo: "rgba(156,163,175,0.10)", texto: "#6B7280" },
   cancelada:  { label: "Cancelada",  cor: "#64748B", fundo: "rgba(100,116,139,0.10)", texto: "#475569" },
 };
 

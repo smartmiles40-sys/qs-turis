@@ -71,7 +71,7 @@ async function computeGoalCurrent(goal: Goal): Promise<number> {
     let q = supabase
       .from("qs_meetings")
       .select("id", { count: "exact", head: true })
-      .neq("status", "cancelada")
+      .not("status", "in", "(cancelada,arquivada)")
       .gte("created_at", from)
       .lte("created_at", to);
     if (await colunaTipoPronta()) q = q.neq("tipo", "retomada");

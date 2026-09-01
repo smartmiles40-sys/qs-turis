@@ -16,7 +16,10 @@ export type GoalType = "ganhos" | "leads_finalizados" | "atividades" | "conversa
 export type GoalPeriod = "diario" | "mensal";
 // "confirmada" e "reagendada" chegam junto com a integração do Bitrix e só são
 // graváveis depois da migration 0028 (o CHECK antigo aceitava só os outros 4).
-export type MeetingStatus = "agendada" | "confirmada" | "realizada" | "no_show" | "reagendada" | "cancelada";
+// "arquivada" (0072): passou e ninguém registrou o desfecho. NÃO é desfecho —
+// é a ausência dele, dita em voz alta. Fica fora de todo indicador: contar como
+// realizada inflaria, como cancelada derrubaria, e as duas mentiriam.
+export type MeetingStatus = "agendada" | "confirmada" | "realizada" | "no_show" | "reagendada" | "cancelada" | "arquivada";
 
 /** Sales Accepted Lead: o especialista aceitou ou recusou o lead na reunião (0028). */
 export type MeetingSal = "aceito" | "recusado";
@@ -372,6 +375,7 @@ export const MEETING_STATUS_LABELS: Record<MeetingStatus, string> = {
   no_show: "No-show",
   reagendada: "Reagendada",
   cancelada: "Cancelada",
+  arquivada: "Arquivada (sem registro)",
 };
 
 export const SOURCE_LABELS: Record<LeadSource, string> = {

@@ -1,6 +1,6 @@
 // src/components/sdr/SdrLayout.tsx — QS (Qualificação System)
 import { useState, useRef, useEffect, Component, Suspense, type ReactNode } from "react";
-import { useQsAuth, canAccessNav, telaInicial } from "@/contexts/QsAuthContext";
+import { useQsAuth, canAccessNav, telaInicial, ORDEM_EXECUCAO } from "@/contexts/QsAuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { lazyPagina } from "@/lib/qs/lazyPagina";
 
@@ -251,6 +251,8 @@ export default function SdrLayout() {
     if (inicial !== "painel") setActiveNav(inicial);
   }, [currentUser]);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  // A tela de onde o lead foi aberto, pro "Voltar" devolver pra ela.
+  const [origemDoLead, setOrigemDoLead] = useState<SdrNav | null>(null);
   const [editingCadenceId, setEditingCadenceId] = useState<string | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -307,21 +309,50 @@ export default function SdrLayout() {
     if (isGroup(item)) {
       const filteredItems = item.items.filter((sub) => canAccessNav(userRole, sub.id));
       if (filteredItems.length === 0) return null;
+      // A ORDEM DE EXECUÇÃO MUDA POR PAPEL (Bruno, 01/09). A primeira tela da
+      // lista é onde a pessoa volta o dia inteiro: pro closer é a agenda, pro
+      // SDR é a fila. Ver ORDEM_EXECUCAO. Item fora da lista vai pro fim, nunca
+      // some — ordenar não pode virar um jeito acidental de esconder tela.
+      const ordem = item.id === "execucao" ? ORDEM_EXECUCAO[userRole] : undefined;
+      if (ordem) {
+        const posicao = (id: string) => {
+          const i = ordem.indexOf(id);
+          return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+        };
+        filteredItems.sort((x, y) => posicao(x.id) - posicao(y.id));
+      }
       return { ...item, items: filteredItems };
     }
     // Direct item (e.g. Configurações)
     return canAccessNav(userRole, item.id) ? item : null;
   }).filter(Boolean) as (MenuGroup | MenuItem)[];
 
+  // Preenchido por openLeadDetail; lido por voltarDoLead e pelo item aceso do menu.
   function navigate(nav: SdrNav) {
     setActiveNav(nav);
     setSelectedLeadId(null);
     setEditingCadenceId(null);
   }
 
+  // DE ONDE O LEAD FOI ABERTO (Bruno, 01/09).
+  //
+  // Antes o "Voltar" ia sempre pra tela de Leads, viesse de onde viesse. Quem
+  // abria um lead a partir da Agenda pra conferir uma coisa era cuspido numa
+  // lista que não estava usando e tinha que refazer o caminho inteiro — o
+  // suficiente pra deixar de abrir o lead, que é justamente onde está o
+  // contexto da reunião.
   function openLeadDetail(leadId: string) {
+    // A origem é a tela em que a pessoa ESTAVA. Abrir um lead a partir de outro
+    // lead não empilha: continua valendo a tela de onde a sequência começou,
+    // senão o Voltar viraria um vaivém entre dois cards.
+    if (activeNav !== "lead-detail") setOrigemDoLead(activeNav);
     setSelectedLeadId(leadId);
     setActiveNav("lead-detail");
+  }
+
+  /** Volta pra tela de onde o lead foi aberto (Leads, quando não se sabe). */
+  function voltarDoLead() {
+    navigate(origemDoLead ?? "leads");
   }
 
   function openCadenceCreate() {
@@ -335,7 +366,9 @@ export default function SdrLayout() {
   }
 
   const visualActiveNav: SdrNav =
-    activeNav === "lead-detail" ? "leads" :
+    // Aceso fica o item de ONDE o lead foi aberto: quem veio da Agenda continua
+    // vendo "Minha Agenda" marcada, que é o que diz onde o Voltar vai cair.
+    activeNav === "lead-detail" ? (origemDoLead ?? "leads") :
     activeNav === "cadencia-criar" || activeNav === "cadencia-editar" ? "cadencias" :
     activeNav;
 
@@ -662,7 +695,7 @@ export default function SdrLayout() {
           <PageErrorBoundary pageName="Detalhes do Lead">
             <LeadDetailPage
               leadId={selectedLeadId}
-              onBack={() => navigate("leads")}
+              onBack={voltarDoLead}
             />
           </PageErrorBoundary>
         )}

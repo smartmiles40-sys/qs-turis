@@ -315,10 +315,10 @@ export async function fetchMeetingCounts(ownerId?: string | null): Promise<Meeti
     // já estiver aplicada — filtrar por coluna inexistente zeraria o contador.
     const temTipo = await colunaTipoPronta();
     let qDay = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
-      .neq("status", "cancelada")
+      .not("status", "in", "(cancelada,arquivada)")
       .gte("scheduled_at", dayStart.toISOString()).lt("scheduled_at", dayEnd.toISOString());
     let qMonth = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
-      .neq("status", "cancelada")
+      .not("status", "in", "(cancelada,arquivada)")
       .gte("scheduled_at", monthStart.toISOString()).lt("scheduled_at", monthEnd.toISOString());
     if (temTipo) { qDay = qDay.neq("tipo", "retomada"); qMonth = qMonth.neq("tipo", "retomada"); }
     if (ownerId) { qDay = qDay.eq("owner_id", ownerId); qMonth = qMonth.eq("owner_id", ownerId); }

@@ -77,7 +77,10 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   // precisa acompanhar o que a IA está fazendo com a carteira é justamente a
   // coordenação. Ninguém notou porque o Bruno entra como admin.
   gestor: ["minha-agenda", "painel", "whatsapp", "cobertura", "atendimento-ia", "leads", "cadencias", "reunioes", "dashboard", "analises", "lead-detail", "cadencia-criar", "cadencia-editar"],
-  sdr: ["painel", "whatsapp", "cobertura", "leads", "reunioes", "dashboard", "lead-detail"],
+  // "minha-agenda" entrou pro SDR em 01/09: ele precisa ver as reunioes que
+  // ELE agendou e que o closer ainda nao deu desfecho. Sem isso, quem marcou a
+  // reuniao e a unica pessoa sem como saber se ela virou alguma coisa.
+  sdr: ["painel", "minha-agenda", "whatsapp", "cobertura", "leads", "reunioes", "dashboard", "lead-detail"],
   // O Painel entrou pro closer junto com a atividade de DESFECHO: sem ele, a
   // cobrança nasceria numa fila que o closer não enxerga.
   closer: ["minha-agenda", "painel", "whatsapp", "leads", "reunioes", "dashboard", "lead-detail"],
@@ -85,6 +88,23 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   // Painel e o WhatsApp (telas de EXECUÇÃO — quem não executa não atende) e as
   // Configurações (que só existem pra mudar coisa).
   marketing: ["leads", "lead-detail", "cobertura", "cadencias", "reunioes", "dashboard", "analises"],
+};
+
+/**
+ * A ORDEM do grupo Execução, por papel (Bruno, 01/09).
+ *
+ * Não é preferência estética: a primeira tela da lista é onde a pessoa volta o
+ * dia inteiro. O closer trabalha por reunião — a agenda é o trabalho dele, e a
+ * fila de atividades é o resto. O SDR é o contrário: a fila é o trabalho, e a
+ * agenda é conferência.
+ *
+ * Quem não estiver aqui (admin, gestor, marketing) mantém a ordem do MENU.
+ * Item que exista no menu e falte nesta lista vai pro fim, em vez de sumir —
+ * ordenação nunca pode virar um jeito acidental de esconder tela.
+ */
+export const ORDEM_EXECUCAO: Partial<Record<UserRole, string[]>> = {
+  closer: ["minha-agenda", "whatsapp", "painel"],
+  sdr: ["painel", "minha-agenda", "whatsapp", "cobertura"],
 };
 
 export function canAccessNav(role: UserRole, navId: string): boolean {

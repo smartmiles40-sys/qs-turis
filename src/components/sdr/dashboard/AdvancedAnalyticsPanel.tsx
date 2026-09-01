@@ -161,9 +161,9 @@ export default function AdvancedAnalyticsPanel() {
           .select("lead_id")
           .not("lead_id", "is", null)
           // Reunião CANCELADA não conta como "teve reunião" (mesmo critério do funil
-          // do dashboard principal, que usa .neq("status","cancelada")) — senão a
+          // do dashboard principal, que usa .not("status", "in", "(cancelada,arquivada)")) — senão a
           // etapa reunião infla e diverge do outro painel.
-          .neq("status", "cancelada")
+          .not("status", "in", "(cancelada,arquivada)")
           .order("id")
           .range(f, t),
       );

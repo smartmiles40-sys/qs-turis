@@ -1200,7 +1200,7 @@ export default function SdrDashboard() {
           // (closer_id) e o embed curto passou a devolver PGRST201, derrubando
           // este bloco inteiro de métricas do gestor.
           .select("owner_id, status, owner:qs_users!qs_meetings_owner_id_fkey(name)")
-          .neq("status", "cancelada")
+          .not("status", "in", "(cancelada,arquivada)")
           .order("id");
         if (ownerId) q = q.eq("owner_id", ownerId);
         if (from) q = q.gte("created_at", from);
@@ -1314,7 +1314,7 @@ export default function SdrDashboard() {
           return q.range(f, t);
         }),
         fetchAllRows<{ lead_id: string }>((f, t) => {
-          let q = supabase.from("qs_meetings").select("lead_id").neq("status", "cancelada").order("id");
+          let q = supabase.from("qs_meetings").select("lead_id").not("status", "in", "(cancelada,arquivada)").order("id");
           if (from) q = q.gte("created_at", from);
           return q.range(f, t);
         }),
@@ -1615,7 +1615,7 @@ export default function SdrDashboard() {
           supabase.from("qs_tasks").select("lead_id, owner_id").eq("status", "concluida").order("id").range(f, t)
         ),
         fetchAllRows<{ lead_id: string; owner_id: string | null }>((f, t) =>
-          supabase.from("qs_meetings").select("lead_id, owner_id").neq("status", "cancelada").order("id").range(f, t)
+          supabase.from("qs_meetings").select("lead_id, owner_id").not("status", "in", "(cancelada,arquivada)").order("id").range(f, t)
         ),
         supabase.from("qs_users").select("id, name").eq("is_active", true).in("role", ["sdr", "closer", "gestor"]).order("name"),
       ]);

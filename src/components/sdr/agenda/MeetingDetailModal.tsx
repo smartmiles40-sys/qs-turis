@@ -40,6 +40,9 @@ function statusClasses(status: MeetingStatus): string {
     case "no_show": return "bg-red-50 text-red-700";
     case "reagendada": return "bg-amber-50 text-amber-700";
     case "cancelada": return "bg-gray-100 text-gray-500";
+    // Arquivada (0072): passou sem ninguém registrar. Cinza mais fraco que a
+    // cancelada — não é desfecho, é a falta de um.
+    case "arquivada": return "bg-gray-50 text-gray-400";
   }
 }
 
