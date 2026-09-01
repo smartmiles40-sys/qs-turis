@@ -28,9 +28,13 @@ import { formatPhoneDisplay, fillTemplate, startWhatsAppCall, isDialablePhone } 
 import WhatsAppModal from "../whatsapp/WhatsAppModal";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
 import { dialViaOficial, setOnCallEndedOficial } from "@/lib/qs/waCall";
+import {
+  carregarPermissoes, pedirPermissao, permissaoVale, validadeEmTexto,
+  type Permissao,
+} from "@/lib/qs/permissaoLigacao";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
-import { logCallEnded } from "@/lib/qs/callLog";
+import { logCallEnded, type CallProvider } from "@/lib/qs/callLog";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, nextWorkMoment, clampToWorkWindow, scheduleWeekdays, isWithinHours, workdaysBetween, type WorkHours } from "@/lib/workHours";
 import type { SdrUser } from "../types";
 
@@ -383,6 +387,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Roteiros por atividade da cadência (script_text) — o gestor escreve e o SDR
   // agora VÊ no card (antes era gravado e nunca lido — auditoria 2026-07-14).
   const [cadenceScripts, setCadenceScripts] = useState<CadenceScriptRow[]>([]);
+  // ── PERMISSÃO DE LIGAÇÃO, POR TELEFONE ────────────────────────────────────
+  // A fila é ONDE O TIME TRABALHA — o modal do lead é a exceção, não a regra.
+  // Sem isto o SDR descobria que não podia ligar depois de clicar, liberar o
+  // microfone e esperar a Meta recusar com 138006.
+  //
+  // Uma consulta serve a fila inteira (a chave é o telefone, e o webhook mantém
+  // a tabela em dia sozinho). Não custa nada à Meta: a ida à Graph API acontece
+  // só no clique, dentro do /api/wa-config.
+  const [permissoes, setPermissoes] = useState<Map<string, Permissao>>(new Map());
+  // `false` = a consulta não respondeu (migration/RLS/rede). NÃO é "sem
+  // permissão": não saber tem que deixar passar, senão uma falha de leitura
+  // trava o telefone da operação inteira.
+  const [seiDasPermissoes, setSeiDasPermissoes] = useState(false);
+
   // Leads que JÁ tiveram o primeiro contato (≥1 atividade concluída) — some o "SEM CONTATO".
   const [contactedLeadIds, setContactedLeadIds] = useState<Set<string>>(new Set());
   const markContacted = useCallback((leadId: string) => {
@@ -1946,6 +1964,79 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // ── Desfecho automático pós-ligação (webfone) ─────────────────────────────
   // A chamada terminou → seleciona o card do lead e abre o desfecho. Se não foi
   // atendida, já pré-seleciona "Não atendeu" (o SDR só confirma com Enter).
+  // ── Carrega a permissão de todo mundo que está na fila ────────────────────
+  // Depende da lista de TELEFONES, não do array de leads: o `leads` muda de
+  // identidade a cada refresh do realtime, e refazer a consulta a cada piscada
+  // seria varrer a fila inteira sem nada ter mudado.
+  const telefonesDaFila = useMemo(
+    () => [...new Set(leads.map((l) => (l.phone || "").replace(/\D/g, "")).filter((t) => t.length >= 12))].sort().join(","),
+    [leads],
+  );
+  useEffect(() => {
+    if (!telefonesDaFila) { setSeiDasPermissoes(true); return; }
+    let vivo = true;
+    void carregarPermissoes(telefonesDaFila.split(",")).then(({ mapa, leu }) => {
+      if (!vivo) return;
+      setPermissoes(mapa);
+      setSeiDasPermissoes(leu);
+    });
+    return () => { vivo = false; };
+  }, [telefonesDaFila]);
+
+  /**
+   * "Posso ligar pra esse AGORA?" — a pergunta do botão.
+   *
+   * OTIMISTA POR PROJETO: enquanto não sei (consulta não respondeu, ou o
+   * telefone nunca apareceu na tabela), devolve `true`. O custo de um falso
+   * "pode" é um erro tratado no clique; o de um falso "não pode" é o SDR sem
+   * telefone. E a tabela é sempre uma FOTO — a pessoa pode revogar a permissão
+   * nas configurações do WhatsApp sem ninguém ser avisado, então a conferência
+   * de verdade é a do servidor, na hora de discar.
+   */
+  const permissaoDoLead = useCallback((phone?: string | null) => {
+    const wa = String(phone || "").replace(/\D/g, "");
+    const p = permissoes.get(wa) ?? null;
+    const sei = seiDasPermissoes && !!p;
+    return {
+      p,
+      sei,
+      liberado: sei ? permissaoVale(p) : true,
+      validade: validadeEmTexto(p),
+      // A Meta só aceita 1 pedido por 24h por pessoa: insistir queima o limite
+      // sem chegar a lugar nenhum.
+      pedidoRecente: !!p?.pedidoEm && Date.now() - new Date(p.pedidoEm).getTime() < 24 * 3_600_000,
+    };
+  }, [permissoes, seiDasPermissoes]);
+
+  /** Marca na hora, sem esperar o webhook — o botão tem que reagir ao clique. */
+  const anotarPermissao = useCallback((phone: string | null | undefined, patch: Partial<Permissao>) => {
+    const wa = String(phone || "").replace(/\D/g, "");
+    if (!wa) return;
+    setPermissoes((prev) => {
+      const m = new Map(prev);
+      const atual = m.get(wa);
+      m.set(wa, {
+        waId: wa, status: "no_permission", expiraEm: null, pedidoEm: null,
+        respondidoEm: null, fonte: null, confirmado: false,
+        ...(atual ?? {}), ...patch,
+      });
+      return m;
+    });
+    setSeiDasPermissoes(true);
+  }, []);
+
+  /** Manda o "podemos te ligar?" pelo card, sem abrir o modal. */
+  const pedirPermissaoDaFila = useCallback(async (lead: Lead | undefined) => {
+    if (!lead?.phone) return;
+    const r = await pedirPermissao(lead.phone, lead.id ?? null);
+    if (r.ok) {
+      anotarPermissao(lead.phone, { pedidoEm: new Date().toISOString() });
+      showToast("Pedido de permissão enviado no WhatsApp — o botão de ligar libera quando o cliente autorizar.");
+    } else {
+      notifyError(r.error || "Não consegui mandar o pedido de permissão.");
+    }
+  }, [anotarPermissao]);
+
   const tasksRef = useRef<Task[]>(tasks);
   tasksRef.current = tasks;
   useEffect(() => {
@@ -1956,10 +2047,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // mesmo número oficial que manda a mensagem. Os dois emitem o mesmo
     // CallEndedInfo, e é isso que deixa esta tela não saber por onde a ligação
     // saiu.
-    const handleCallEnded = (info: { leadId: string | null; phone: string | null; answered: boolean; durationSec: number }) => {
+    const handleCallEnded = (
+      info: { leadId: string | null; phone: string | null; answered: boolean; durationSec: number },
+      // POR ONDE a ligação saiu. A tela continua sem saber (o desfecho é o mesmo
+      // pros dois caminhos), mas o LOG precisa saber: sem isto todo registro
+      // nascia com `provider: null` e a análise de telefonia não conseguia
+      // separar a ligação de WhatsApp da ligação comum.
+      provider: CallProvider,
+    ) => {
       // Loga TODA chamada encerrada (atendida ou não, com ou sem lead) — telemetria
       // fire-and-forget pras análises de telefonia. Vai ANTES do guard de leadId.
-      void logCallEnded(info);
+      void logCallEnded(info, provider);
       if (!info.leadId) return;
       const task = tasksRef.current.find((t) => t.lead_id === info.leadId && (t.status === "pendente" || t.status === "atrasada"));
       if (!task) return;
@@ -1974,8 +2072,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       // traz o card pra vista
       scrollHeroIntoView();
     };
-    setOnCallEndedWebphone(handleCallEnded);
-    setOnCallEndedOficial(handleCallEnded);   // WhatsApp oficial (31/08)
+    setOnCallEndedWebphone((info) => handleCallEnded(info, "webrtc"));
+    setOnCallEndedOficial((info) => handleCallEnded(info, "oficial"));   // WhatsApp oficial (31/08)
     return () => { setOnCallEndedWebphone(null); setOnCallEndedOficial(null); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2379,7 +2477,25 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </button>
           )}
           {(task.channel_type === "ligacao_whatsapp" || task.channel_type === "ligacao") && lead?.phone && (
-            <button onClick={(e) => { e.stopPropagation(); pinTaskForCall(task); if (task.channel_type === "ligacao") callViaSip(lead.phone); else callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-pa qsx-pa-wa" title={task.channel_type === "ligacao" ? "Ligar (BravoTech)" : "Ligar pelo WhatsApp oficial"}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (task.channel_type === "ligacao") { pinTaskForCall(task); callViaSip(lead.phone); return; }
+                // Sem permissão o clique MANDA O PEDIDO em vez de discar. O
+                // atalho da fila é o botão mais clicado do QS: ele tem que
+                // fazer a coisa útil do momento, não a que vai ser recusada.
+                if (!permissaoDoLead(lead.phone).liberado) { void pedirPermissaoDaFila(lead); return; }
+                pinTaskForCall(task);
+                callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id });
+              }}
+              className={`qsx-pa ${task.channel_type !== "ligacao" && !permissaoDoLead(lead.phone).liberado ? "qsx-pa-lock" : "qsx-pa-wa"}`}
+              title={task.channel_type === "ligacao"
+                ? "Ligar (BravoTech)"
+                : !permissaoDoLead(lead.phone).liberado
+                  ? (permissaoDoLead(lead.phone).pedidoRecente
+                      ? "Pedido de permissão já enviado nas últimas 24h — aguardando o cliente"
+                      : "O cliente ainda não autorizou ligação — clique pra mandar o pedido")
+                  : `Ligar pelo WhatsApp oficial${permissaoDoLead(lead.phone).validade ? ` (permissão vale ${permissaoDoLead(lead.phone).validade})` : ""}`}>
               <ChannelIcon type="ligacao" size={17} />
             </button>
           )}
@@ -2441,6 +2557,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
     if (!r.ok) {
       console.warn("[QS] ligação oficial indisponível:", r.error);
+      // 138006 = a Meta confirmou que não há permissão. Anotar aqui é o que faz
+      // o botão virar "Pedir permissão" na hora, em vez de continuar verde
+      // convidando pra um segundo clique que vai ser recusado igual.
+      if (r.codigo === 138006) anotarPermissao(phone, { status: "no_permission", expiraEm: null, fonte: "api", confirmado: true });
       notifyError(r.error || "Não consegui ligar pelo WhatsApp oficial.");
     }
   }
@@ -2459,6 +2579,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
     if (r.ok) return;
     console.warn("[QS] ligação oficial indisponível, abrindo a conversa do WhatsApp:", r.error);
+    if (r.codigo === 138006) anotarPermissao(phone, { status: "no_permission", expiraEm: null, fonte: "api", confirmado: true });
     notifyError(r.error);
     if (!isDialablePhone(phone)) return;
     startWhatsAppCall(phone); // abre a conversa do lead — ligar em 1 toque
@@ -2505,7 +2626,38 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         // visível), então aqui não repetimos o botão.
         return null;
       case "ligacao_whatsapp":
-        return lead?.phone ? <button onClick={() => { pinTaskForCall(task); callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }} className="qsx-btn qsx-btn-green"><IconWhatsAppCall size={16} />Ligar no WhatsApp</button> : null;
+        if (!lead?.phone) return null;
+        {
+          const perm = permissaoDoLead(lead.phone);
+          // Sem permissão o botão não é "Ligar" — é "Pedir permissão". Deixar o
+          // verde aceso e ser recusado depois gasta o microfone do SDR e não
+          // avisa o cliente de nada.
+          if (!perm.liberado) {
+            return (
+              <button
+                onClick={() => void pedirPermissaoDaFila(lead)}
+                disabled={perm.pedidoRecente}
+                className="qsx-btn qsx-btn-amber"
+                title={perm.pedidoRecente
+                  ? "Já pedimos nas últimas 24h — a Meta só deixa um pedido por dia."
+                  : "Manda a pergunta no WhatsApp do cliente (exige conversa aberta de 24h)."}
+              >
+                <IconWhatsAppCall size={16} />
+                {perm.pedidoRecente ? "Permissão pedida — aguardando" : "Pedir permissão pra ligar"}
+              </button>
+            );
+          }
+          return (
+            <button
+              onClick={() => { pinTaskForCall(task); callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }}
+              className="qsx-btn qsx-btn-green"
+              title={perm.validade ? `Permissão do cliente vale ${perm.validade}` : undefined}
+            >
+              <IconWhatsAppCall size={16} />Ligar no WhatsApp
+              {perm.validade && <span className="qsx-validade">{perm.validade}</span>}
+            </button>
+          );
+        }
       case "whatsapp":
         // "WhatsApp" (abrir conversa) já está na barra de contato fixa do card.
         return null;
@@ -2715,16 +2867,43 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             >
               <ChannelIcon type="ligacao" size={16} />Ligar
             </button>
-            {/* Ligação via WhatsApp: opção ao lado da ligação manual. Usa o webfone
-                número oficial; se não der, abre a conversa do lead pra ligar em 1 toque. */}
-            <button
-              onClick={() => { pinTaskForCall(task); callViaWhatsApp(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13.5px] font-bold text-white"
-              style={{ background: "#25D366", boxShadow: "0 6px 14px -8px rgba(37,211,102,.6)" }}
-              title="Ligar pelo WhatsApp (abre a conversa do lead pra iniciar a chamada)"
-            >
-              <IconWhatsAppCall size={16} />Ligação WhatsApp
-            </button>
+            {/* Ligação via WhatsApp: opção ao lado da ligação manual (esta é uma
+                atividade de "Ligação", então o WhatsApp aqui é alternativa, não o
+                canal da tarefa). Sem permissão do cliente ela vira o pedido — a
+                ligação comum ao lado continua disponível e não depende de nada
+                disso, que é o ponto: o SDR nunca fica sem caminho. */}
+            {(() => {
+              const perm = permissaoDoLead(lead.phone);
+              if (!perm.liberado) {
+                return (
+                  <button
+                    onClick={() => void pedirPermissaoDaFila(lead)}
+                    disabled={perm.pedidoRecente}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13.5px] font-bold text-white disabled:opacity-60"
+                    style={{ background: perm.pedidoRecente ? "#9CA3AF" : "#B45309" }}
+                    title={perm.pedidoRecente
+                      ? "Já pedimos nas últimas 24h — a Meta só deixa um pedido por dia."
+                      : "O cliente ainda não autorizou ligação pelo WhatsApp. Clique pra mandar o pedido."}
+                  >
+                    <IconWhatsAppCall size={16} />
+                    {perm.pedidoRecente ? "Permissão pedida" : "Pedir permissão"}
+                  </button>
+                );
+              }
+              return (
+                <button
+                  onClick={() => { pinTaskForCall(task); callViaWhatsApp(lead.phone, { leadName: lead.full_name, leadId: lead.id }); }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13.5px] font-bold text-white"
+                  style={{ background: "#25D366", boxShadow: "0 6px 14px -8px rgba(37,211,102,.6)" }}
+                  title={perm.validade
+                    ? `Ligar pelo WhatsApp oficial — permissão do cliente vale ${perm.validade}`
+                    : "Ligar pelo WhatsApp oficial"}
+                >
+                  <IconWhatsAppCall size={16} />Ligação WhatsApp
+                  {perm.validade && <span className="qsx-validade">{perm.validade}</span>}
+                </button>
+              );
+            })()}
           </div>
         )}
         {lead?.phone && task.channel_type === "whatsapp" && (
@@ -3232,6 +3411,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-btn { height: 48px; padding: 0 18px; border-radius: 14px; font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px; border: 0; color: #fff; cursor: pointer; white-space: nowrap; transition: filter .15s; }
         .qsx-btn:hover { filter: brightness(1.06); }
         .qsx-btn-green { background: var(--green); box-shadow: 0 8px 18px -8px rgba(18,161,138,.6); }
+        /* Sem permissão de ligação: âmbar, não vermelho. Não é erro nem bloqueio
+           — é um passo que falta, e o botão faz esse passo. */
+        .qsx-btn-amber { background: #B45309; box-shadow: 0 8px 18px -8px rgba(180,83,9,.55); }
+        .qsx-btn-amber:disabled { background: #9CA3AF; box-shadow: none; cursor: default; }
+        /* O atalho compacto da fila quando falta permissão. */
+        .qsx-pa-lock { background: rgba(180,83,9,.12); color: #B45309; border: 0; }
+        .qsx-pa-lock:hover { background: rgba(180,83,9,.2); }
+        /* Quanto tempo a permissão ainda vale, colado no botão de ligar. A
+           permissão temporária dura 7 dias: quem não ligar dentro dela precisa
+           pedir de novo, e o pedido tem limite de 1 por 24h. */
+        .qsx-validade { margin-left: 6px; font-size: 10.5px; font-weight: 800; letter-spacing: .02em; padding: 1px 6px; border-radius: 999px; background: rgba(255,255,255,.24); }
         .qsx-btn-blue { background: var(--blue); box-shadow: 0 8px 18px -8px rgba(37,99,235,.6); }
         .qsx-btn-orange { background: var(--orange); box-shadow: 0 8px 18px -8px rgba(245,130,31,.6); }
         .qsx-btn-ghost { background: var(--card); border: 1px solid var(--line); color: var(--ink); }

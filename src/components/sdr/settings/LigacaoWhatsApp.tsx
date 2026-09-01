@@ -9,17 +9,19 @@
 //      verdade em GET /{phone_number_id}/settings)
 //   2. O pedido de permissão chega no aparelho, e como aparece?
 //
-// A LIGAÇÃO EM SI AINDA NÃO EXISTE no QS. Ela precisa de troca de SDP e
-// WebRTC no navegador — o `WebphoneWidget` de hoje fala SIP (JsSIP), que não
-// serve pra Cloud API. É o próximo passo, e só vale a pena depois que o teste
-// de permissão mostrar que o fluxo comercial fecha.
+// A LIGAÇÃO JÁ EXISTE no QS desde 31/08 (`waCall.ts`: o navegador do SDR gera o
+// SDP e o áudio sai por ele). O "Ligar" desta tela é o TESTE de bancada — quem
+// liga no dia a dia é o card do lead e a fila.
 //
 // AS REGRAS DA META QUE DECIDEM SE ISSO SERVE (e que a tela repete, porque
 // esquecer delas é como se perde uma tarde):
 //   • o pedido exige CONVERSA ABERTA — quem nunca respondeu não pode receber;
 //   • 1 pedido por 24h e 2 por semana, por pessoa;
-//   • permissão concedida vale 7 dias e 5 ligações atendidas;
-//   • 4 ligações não atendidas seguidas revogam a permissão sozinhas.
+//   • permissão temporária vale 7 dias; "Permitir" (permanente) não expira;
+//   • teto de 5 chamadas atendidas por 24h com a mesma pessoa;
+//   • a pessoa pode revogar quando quiser, nas configurações do WhatsApp — e a
+//     Meta NÃO avisa ninguém disso. É por isso que a permissão guardada no
+//     banco é sempre uma foto, e a conferência de verdade é no clique.
 // -----------------------------------------------------------------------------
 
 import { useState, useEffect, useCallback } from "react";
