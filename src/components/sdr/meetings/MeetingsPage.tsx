@@ -6,7 +6,7 @@ import { MEETING_STATUS_LABELS } from "../types";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { fetchAllRows } from "@/lib/qs/queries";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
-import { createMeeting, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, salvarBitrixIdDoLead, somenteDigitos } from "@/lib/qs/meetings";
+import { createMeeting, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, vincularOuAcharCardDoBitrix, somenteDigitos } from "@/lib/qs/meetings";
 import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
 import AgendaMes from "../agenda/AgendaMes";
@@ -222,16 +222,27 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     // reunião registrada aqui que não chega no card é exatamente a que o
     // comercial não vê. O `createMeeting` recusa de qualquer jeito; a checagem
     // aqui existe pra dizer isso com o campo do lado pra preencher.
+    let leadDaReuniao = fLeadId;
     if (!editingId && !somenteDigitos(leads.find((l) => l.id === fLeadId)?.bitrix_id)) {
       const idLimpo = somenteDigitos(fBitrixId);
       if (!idLimpo) {
         setFormError("Preencha o ID do negócio no Bitrix — só os números, sem o #.");
         return;
       }
-      const vinculo = await salvarBitrixIdDoLead(fLeadId, idLimpo);
-      if (!vinculo.ok) {
-        setFormError(vinculo.error);
+      const r = await vincularOuAcharCardDoBitrix(fLeadId, idLimpo);
+      if (!r.ok) {
+        setFormError(r.error);
         return;
+      }
+      // ID de um card irmão (mesma pessoa): a reunião vai pra lá, que é o card
+      // ligado ao negócio. Ver vincularOuAcharCardDoBitrix.
+      if (r.vinculo.trocouDeCard) {
+        leadDaReuniao = r.vinculo.leadId;
+        notifySuccess(
+          `Este cliente já tinha um card com o negócio ${idLimpo}` +
+          (r.vinculo.nome ? ` ("${r.vinculo.nome}")` : "") +
+          ". A reunião foi agendada nesse card."
+        );
       }
     }
 
@@ -293,7 +304,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       // lançamento retroativo (já realizada / no-show) não ganha evento.
       const querMeet = fGerarMeet && fStatus === "agendada";
       const res = await createMeeting({
-        lead_id: fLeadId,
+        lead_id: leadDaReuniao,
         lead_name: novoLead?.full_name ?? null,
         lead_bitrix_id: novoLead?.bitrix_id ?? null,
         lead_email: emailLimpo || novoLead?.email || null,

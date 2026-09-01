@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
-import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, salvarBitrixIdDoLead, somenteDigitos } from "@/lib/qs/meetings";
+import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, vincularOuAcharCardDoBitrix, somenteDigitos } from "@/lib/qs/meetings";
 import CampoBitrixId from "./CampoBitrixId";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
 import type { Lead, Meeting, MeetingTipo } from "../types";
@@ -202,6 +202,13 @@ export default function ScheduleMeetingModal({
     // no QS e o card do negócio nunca se mexe — foi o que aconteceu com a
     // Beatrice Bessa. O `createMeeting` recusa de qualquer jeito; a checagem
     // aqui existe pra dizer isso ANTES, com o campo do lado pra preencher.
+    // O card onde a reunião vai nascer. Normalmente é o que está aberto — mas
+    // quando o ID digitado pertence a um card IRMÃO (mesma pessoa, telefone
+    // igual), a reunião vai pra lá: é ele que representa o negócio. Ver
+    // vincularOuAcharCardDoBitrix.
+    let leadDaReuniao = leadId;
+    let avisoDeTroca: string | null = null;
+
     if (!leadJaTemBitrix) {
       const idLimpo = somenteDigitos(bitrixId);
       if (!idLimpo) {
@@ -209,20 +216,23 @@ export default function ScheduleMeetingModal({
         setSaving(false);
         return;
       }
-      // Grava no lead ANTES de criar a reunião: é o vínculo do lead que o
-      // servidor lê pra saber qual card mexer. Se falhar (o caso comum é o id
-      // já pertencer a outro card, ou seja, lead duplicado), para aqui — nada
-      // de reunião órfã.
-      const vinculo = await salvarBitrixIdDoLead(leadId, idLimpo);
-      if (!vinculo.ok) {
-        setError(vinculo.error);
+      const r = await vincularOuAcharCardDoBitrix(leadId, idLimpo);
+      if (!r.ok) {
+        setError(r.error);
         setSaving(false);
         return;
+      }
+      if (r.vinculo.trocouDeCard) {
+        leadDaReuniao = r.vinculo.leadId;
+        avisoDeTroca =
+          `Este cliente já tinha um card com o negócio ${idLimpo}` +
+          (r.vinculo.nome ? ` ("${r.vinculo.nome}")` : "") +
+          ". A reunião foi agendada nesse card, que é o ligado ao Bitrix.";
       }
     }
 
     const res = await createMeeting({
-      lead_id: leadId,
+      lead_id: leadDaReuniao,
       lead_name: selectedLead?.full_name ?? null,
       lead_bitrix_id: selectedLead?.bitrix_id ?? somenteDigitos(bitrixId) ?? null,
       lead_email: emailLimpo || selectedLead?.email || null,
@@ -246,6 +256,10 @@ export default function ScheduleMeetingModal({
       if (res.conflict) setPick(null); // força escolher outro horário
       return;
     }
+
+    // Trocou de card? Quem agendou PRECISA saber — senão vai procurar a reunião
+    // no card que abriu e não vai achar.
+    if (avisoDeTroca) notifySuccess(avisoDeTroca);
 
     // Daqui pra baixo a reunião JÁ está gravada: nada pode virar "não agendou".
     // O e-mail volta pro cadastro do lead pra vir pronto no próximo agendamento.
