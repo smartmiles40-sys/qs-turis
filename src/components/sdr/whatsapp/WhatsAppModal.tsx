@@ -229,7 +229,10 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   // nesse caso o erro dela é o próprio recado pro SDR (primeiro faça o lead
   // responder). Limite: 1 pedido por 24h e 2 por semana, por pessoa.
   async function handlePedirPermissao() {
-    if (!lead.phone || pedindoPermissao) return;
+    // Sem telefone o clique sumia calado — e "cliquei e não aconteceu nada" é
+    // exatamente o que não se consegue diagnosticar depois.
+    if (!lead.phone) { setResult({ ok: false, msg: "Esse lead não tem telefone cadastrado." }); return; }
+    if (pedindoPermissao) return;
     setPedindoPermissao(true);
     const r = await pedirPermissao(lead.phone, lead.id ?? null);
     setResult(

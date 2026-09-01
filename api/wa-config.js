@@ -216,6 +216,12 @@ export default async function handler(req, res) {
 
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
 
+  // TODO POST SE ANUNCIA. A pergunta que custou a noite de 01/09 foi sempre a
+  // mesma — "o clique virou requisição ou morreu no navegador?" — e o log não
+  // respondia: sem POST e POST-que-falhou-calado têm a mesma aparência (nenhuma).
+  // POST aqui é raro (dezenas por dia), então a linha é barata e decisiva.
+  if (req.method === 'POST') console.log(`[wa-config] POST acao=${body.acao || '(sem acao)'}`);
+
   // ── PAINEL DAS LINHAS (só admin/gestor) ───────────────────────────────────
   // Mora nesta rota, e não numa nova, pela mesma razão do resto do arquivo: o
   // projeto está no teto prático de funções da Vercel.
@@ -343,6 +349,7 @@ export default async function handler(req, res) {
               permissao: { status: p.status, expiraEm: p.expiraEm, limite: lim },
             });
           }
+          console.warn(`[wa-config] ligacao barrada por falta de permissao: …${String(body.telefone || '').slice(-4)} (status ${p.status}, pode pedir: ${p.podePedir})`);
           return res.status(400).json({
             error: 'Essa pessoa ainda não autorizou receber ligação da empresa. Mande o pedido de permissão pela conversa (ela precisa ter escrito nas últimas 24h).',
             motivo: 'sem-permissao',

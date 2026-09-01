@@ -2027,7 +2027,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
   /** Manda o "podemos te ligar?" pelo card, sem abrir o modal. */
   const pedirPermissaoDaFila = useCallback(async (lead: Lead | undefined) => {
-    if (!lead?.phone) return;
+    if (!lead?.phone) { notifyError("Esse lead não tem telefone cadastrado."); return; }
     const r = await pedirPermissao(lead.phone, lead.id ?? null);
     if (r.ok) {
       anotarPermissao(lead.phone, { pedidoEm: new Date().toISOString() });
