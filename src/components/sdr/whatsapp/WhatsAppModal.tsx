@@ -79,7 +79,21 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   // Enquanto a permissão não carregou, o botão fica OTIMISTA: travar a ligação
   // por causa de uma consulta lenta seria trocar um erro raro (138006, que a
   // discagem trata) por um estorvo em toda ligação.
-  const liberado = lendoPermissao || !seiDaPermissao ? true : permissaoVale(permissao);
+  // NÃO SABER DEIXA PASSAR — a mesma regra da fila, que esta tela estava
+  // violando: linha ausente na tabela é "nunca vi essa pessoa", não é "ela não
+  // autorizou". Alguém que autorizou antes de a tabela existir (ou que ligou pra
+  // empresa) tem permissão de verdade e não tem linha aqui. Enquanto o modal
+  // dizia "sem permissão" e a fila dizia "pode ligar", o MESMO lead tinha duas
+  // respostas em duas telas — e nenhuma das duas era confiável.
+  //
+  // Quem decide de verdade é o servidor, que pergunta pra Meta antes de mandar
+  // o SDP. Aqui a cor é só a melhor pista disponível.
+  const conheco = seiDaPermissao && !!permissao;
+  const liberado = lendoPermissao || !conheco ? true : permissaoVale(permissao);
+  // Vale mostrar o "pedir permissão" como ação secundária sempre que a permissão
+  // não estiver CONFIRMADA e válida — inclusive quando não conheço a pessoa.
+  // Sem isso o pedido só era alcançável errando uma ligação primeiro.
+  const permissaoConfirmada = conheco && permissaoVale(permissao);
   const validade = validadeEmTexto(permissao);
   // Já mandamos o pedido nas últimas 24h? A Meta só deixa 1 por dia, e insistir
   // queima o limite sem chegar em lugar nenhum.
@@ -359,8 +373,17 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               {/* O SELO DA PERMISSÃO. Vale mais que o "Oficial" que estava aqui:
                   ninguém duvida de qual número sai a ligação, mas todo mundo
                   precisa saber se ela PODE sair. */}
-              {lendoPermissao || !seiDaPermissao ? (
+              {lendoPermissao ? (
                 <span className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 text-gray-400">…</span>
+              ) : !conheco ? (
+                // Nem verde nem âmbar: cinza de "não sei". Fingir certeza aqui
+                // seria o mesmo erro, só que com outra cor.
+                <span
+                  className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 bg-gray-100 text-gray-500"
+                  title="O QS ainda não viu resposta de permissão dessa pessoa. A Meta é consultada na hora de ligar."
+                >
+                  Permissão não conferida
+                </span>
               ) : liberado ? (
                 <span
                   className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0"
@@ -427,6 +450,25 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               </button>
             )}
           </div>
+          {/* ── O PEDIDO DE PERMISSÃO, SEMPRE ALCANÇÁVEL ─────────────────────
+              Antes ele só existia quando o botão principal já estava âmbar — ou
+              seja, era preciso ERRAR uma ligação pra descobrir como pedir. Agora
+              fica aqui como ação secundária sempre que a permissão não estiver
+              confirmada, inclusive quando o QS ainda não conhece a pessoa. */}
+          {!permissaoConfirmada && liberado && dialable && (
+            <button
+              onClick={() => void handlePedirPermissao()}
+              disabled={pedindoPermissao || pedidoRecente}
+              className="w-full py-2 text-[12.5px] font-semibold text-amber-800 underline underline-offset-2 disabled:opacity-60 disabled:no-underline"
+              title={pedidoRecente
+                ? "Já mandamos o pedido nas últimas 24h — a Meta só deixa um por dia."
+                : "Manda a pergunta no WhatsApp do cliente. Exige conversa aberta (ele precisa ter escrito nas últimas 24h)."}
+            >
+              {pedindoPermissao ? "Mandando o pedido…"
+                : pedidoRecente ? "Pedido de permissão já enviado nas últimas 24h"
+                : "Pedir permissão pra ligar"}
+            </button>
+          )}
           <p className="text-[10px] text-gray-400 text-center">
             {liberado
               ? "A ligação toca no WhatsApp do cliente e sai pelo número oficial da empresa — o áudio é deste navegador."

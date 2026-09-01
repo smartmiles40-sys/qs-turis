@@ -236,14 +236,36 @@ export default function LigacaoWhatsApp() {
           disabled={!podeMexer}
           onChange={(e) => setTexto(e.target.value)}
         />
+        {/* BOTÃO DESABILITADO TEM QUE DIZER POR QUÊ. Um clique que não faz nada
+            e não explica nada é indistinguível de "o sistema está quebrado" — e
+            foi assim que se perdeu tempo em 01/09 tentando mandar um pedido que
+            nunca virou requisição. O motivo vai no `title` (passar o mouse) e em
+            texto embaixo, porque nem todo mundo passa o mouse. */}
         <button
           onClick={() => void pedir()}
-          disabled={ocupado || !podeMexer || !ligado}
+          disabled={ocupado || !podeMexer || !ligado || carregando}
+          title={
+            carregando ? "Ainda lendo a configuração do número na Meta…"
+            : !podeMexer ? "Só administrador ou gestor manda pedido de permissão."
+            : !ligado ? "As chamadas não estão ativadas neste número — a Meta recusaria o pedido."
+            : ocupado ? "Aguarde a operação anterior terminar."
+            : "Manda a pergunta no WhatsApp da pessoa (exige conversa aberta de 24h)."
+          }
           className="mt-2 rounded-md bg-gray-900 px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
         >
           Enviar pedido de permissão
         </button>
-        {!ligado && <p className="mt-2 text-[12px] text-amber-700">Ative as chamadas antes — sem isso a Meta recusa o pedido.</p>}
+        {carregando && <p className="mt-2 text-[12px] text-gray-500">Lendo a configuração do número na Meta… o botão libera em seguida.</p>}
+        {!carregando && !ligado && (
+          <p className="mt-2 text-[12px] text-amber-700">
+            <b>O botão está desabilitado</b> porque as chamadas não aparecem como ativadas neste
+            número {erro ? `(não consegui ler a configuração: ${erro})` : `(a Meta respondeu "${cfg?.status ?? "sem status"}")`}.
+            Use o botão “Ativar chamadas” acima e recarregue.
+          </p>
+        )}
+        {!carregando && ligado && !podeMexer && (
+          <p className="mt-2 text-[12px] text-amber-700">Só administrador ou gestor manda pedido de permissão.</p>
+        )}
       </div>
 
       {/* ── POR QUE O EVENTO NÃO CHEGA ────────────────────────────────────

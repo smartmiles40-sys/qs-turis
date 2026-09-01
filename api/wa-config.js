@@ -372,7 +372,15 @@ export default async function handler(req, res) {
       // Pedido de permissao pra ligar. NAO e template — e mensagem interativa,
       // e exige conversa ABERTA (a pessoa escreveu nas ultimas 24h).
       const r = await pedirPermissaoDeLigacao(body.telefone, body.texto);
-      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      if (r.erro) {
+        // SEM ISTO A RECUSA ERA INVISÍVEL NO SERVIDOR. Só o navegador de quem
+        // clicou via a mensagem — então "tentei e não foi" não tinha como ser
+        // investigado depois, e a resposta mais provável (janela de 24h fechada)
+        // é exatamente a que a pessoa não consegue diagnosticar sozinha.
+        console.warn(`[wa-config] pedido de permissao recusado: ${eu.name || userId} → …${String(body.telefone || '').slice(-4)} (${r.erro}${r.codigo ? ' cod ' + r.codigo : ''}) ${r.detalhe || ''}`);
+        return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      }
+      console.log(`[wa-config] pedido de permissao enviado por ${eu.name || userId} → …${String(body.telefone || '').slice(-4)}`);
       // Marca que o pedido SAIU. Sem isso a tela não distingue "nunca pedimos"
       // de "pedimos e a pessoa não respondeu" — e é a diferença entre insistir
       // e queimar o limite de 1 pedido por 24h.
