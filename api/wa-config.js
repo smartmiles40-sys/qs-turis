@@ -392,6 +392,9 @@ export default async function handler(req, res) {
     if (body.acao === 'calling-permissao-status') {
       const r = await sincronizarPermissao(body.telefone, body.leadId ?? null);
       if (r.erro) {
+        // Este 400 era o último da rota a sair calado — e foi justamente ele que
+        // apareceu no log de 01/09 como "400 sem motivo nenhum".
+        console.warn(`[wa-config] permissao-status falhou: …${String(body.telefone || '').slice(-4)} (${r.erro}${r.codigo ? ' cod ' + r.codigo : ''}) ${r.detalhe || ''}`);
         // A Meta não respondeu — devolve o que o banco já sabia, dizendo que é
         // memória e não a verdade de agora. Melhor que uma tela em branco.
         const local = await lerPermissaoLocal(body.telefone);

@@ -12,9 +12,25 @@
 // ⚠️ O token NUNCA vai para o navegador. Toda chamada à Meta acontece aqui.
 // -----------------------------------------------------------------------------
 
-import { cw } from './_wa.js';
+import { cw, toE164BR } from './_wa.js';
 
 const GRAPH = 'https://graph.facebook.com/v20.0';
+
+/**
+ * O NÚMERO COMO A META QUER: só dígitos, COM DDI.
+ *
+ * Não é preciosismo — é o defeito de 01/09. O caminho de MENSAGEM já passava por
+ * `toE164BR` e por isso funcionava com lead cadastrado como "11992221156"; o
+ * caminho de LIGAÇÃO fazia `replace(/\D/g,'')` e mandava os 11 dígitos crus, que
+ * a Meta recusa. Mesmo lead, mesma tela: mensagem ia, ligação não.
+ *
+ * Todo número que sai daqui pra Meta passa por esta função. Colocar a regra em
+ * cada chamada era o que já tinha dado errado.
+ */
+function foneMeta(raw) {
+  const e164 = toE164BR(raw);
+  return e164 ? e164.replace(/\D/g, '') : '';
+}
 
 let cache = null;   // { token, waba, phoneId, em } — vale por execução
 
@@ -348,7 +364,7 @@ export async function pedirPermissaoDeLigacao(telefone, texto) {
   const cr = await credenciaisDaMeta();
   if (!cr) return { erro: 'sem-caixa-oficial' };
   if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
-  const para = String(telefone || '').replace(/\D/g, '');
+  const para = foneMeta(telefone);
   if (!para) return { erro: 'telefone-invalido' };
   try {
     const j = await graph(`/${cr.phoneId}/messages`, {
@@ -465,7 +481,7 @@ export async function iniciarLigacao({ para, sdp, marcador }) {
   const cr = await credenciaisDaMeta();
   if (!cr) return { erro: 'sem-caixa-oficial' };
   if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
-  const to = String(para || '').replace(/\D/g, '');
+  const to = foneMeta(para);
   if (!to) return { erro: 'telefone-invalido' };
   if (!sdp) return { erro: 'sem-sdp' };
 
@@ -534,7 +550,7 @@ export async function lerPermissaoDeLigacao(telefone) {
   const cr = await credenciaisDaMeta();
   if (!cr) return { erro: 'sem-caixa-oficial' };
   if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
-  const wa = String(telefone || '').replace(/\D/g, '');
+  const wa = foneMeta(telefone);
   if (!wa) return { erro: 'telefone-invalido' };
   try {
     const j = await graph(`/${cr.phoneId}/call_permissions?user_wa_id=${encodeURIComponent(wa)}`, { token: cr.token });

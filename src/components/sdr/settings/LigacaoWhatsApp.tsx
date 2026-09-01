@@ -32,6 +32,7 @@ import { ligarPeloWhatsApp, type Ligacao, type PassoLigacao } from "@/lib/qs/waC
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { getSetting, setSetting } from "@/lib/qsSettings";
 import { supabase } from "@/lib/supabase";
+import { normalizePhoneBR } from "@/lib/whatsapp";
 
 interface LinhaPermissao {
   wa_id: string;
@@ -148,8 +149,12 @@ export default function LigacaoWhatsApp() {
   };
 
   const pedir = async () => {
-    const fone = telefone.replace(/\D/g, "");
-    if (fone.length < 12) { notifyError("Telefone com DDI e DDD, ex.: 5511999999999."); return; }
+    // NORMALIZA em vez de recusar. Exigir 12 dígitos fazia a tela rejeitar
+    // "11992221156" — um número perfeitamente válido, só sem o DDI — e o clique
+    // morria aqui, sem virar requisição: foi o "não enviou" de 01/09. Quem sabe
+    // prefixar o 55 é o sistema, não a pessoa que digita.
+    const fone = normalizePhoneBR(telefone);
+    if (fone.length < 12) { notifyError("Telefone incompleto — informe ao menos DDD e número, ex.: 11999999999."); return; }
     setOcupado(true);
     const r = await pedirPermissaoLigacao(fone, texto);
     setOcupado(false);
@@ -162,7 +167,7 @@ export default function LigacaoWhatsApp() {
   // navegador só concede a permissão em resposta a um clique, e pedir antes da
   // hora treina a pessoa a dizer "bloquear".
   const ligar = async () => {
-    const fone = telefone.replace(/\D/g, "");
+    const fone = normalizePhoneBR(telefone);
     setPasso(null);
     setCalado(false);
     try {

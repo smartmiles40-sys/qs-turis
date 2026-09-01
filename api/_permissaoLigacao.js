@@ -34,12 +34,23 @@
 import { rest } from './_supabaseAdmin.js';
 import { lerPermissaoDeLigacao } from './_meta.js';
 import { moverLeadParaCadencia } from './_leads.js';
+import { toE164BR } from './_wa.js';
 
 /** Permissão temporária da Meta dura 7 dias — é a janela que a doc publica. */
 const DIAS_TEMPORARIA = 7;
 
+/**
+ * A CHAVE DA TABELA — e ela precisa ser a MESMA dos dois lados.
+ *
+ * O webhook da Meta entrega `5511992221156`; o cadastro do lead pode estar
+ * `11992221156` (11 de 2.935 leads estão assim). Sem normalizar, a autorização
+ * chegaria gravada numa chave e a fila procuraria em outra: a permissão existiria
+ * no banco e a tela juraria que não. Por isso o 55 entra AQUI, e não em cada
+ * chamador.
+ */
 export function soDigitos(telefone) {
-  return String(telefone || '').replace(/\D/g, '');
+  const e164 = toE164BR(telefone);
+  return e164 ? e164.replace(/\D/g, '') : '';
 }
 
 /**

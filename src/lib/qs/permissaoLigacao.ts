@@ -25,6 +25,7 @@
 
 import { supabase } from "../supabase";
 import { authHeaders } from "./waInbox";
+import { normalizePhoneBR } from "../whatsapp";
 
 /** Como a Meta chama: `no_permission` | `temporary` | `permanent`. */
 export type StatusPermissao = "no_permission" | "temporary" | "permanent";
@@ -42,8 +43,16 @@ export interface Permissao {
   confirmado: boolean;
 }
 
+/**
+ * A MESMA chave do servidor (`_permissaoLigacao.js`) e da tabela.
+ *
+ * Era `replace(/\D/g,"")` cru, e isso tinha dois efeitos, os dois silenciosos:
+ * o lead cadastrado sem DDI ("11992221156") era DESCARTADO pelo filtro de 12
+ * dígitos abaixo — nunca consultado —, e se fosse consultado procuraria numa
+ * chave que o webhook nunca escreve, porque a Meta entrega com o 55.
+ */
 function soDigitos(t?: string | null): string {
-  return String(t || "").replace(/\D/g, "");
+  return normalizePhoneBR(t);
 }
 
 /**

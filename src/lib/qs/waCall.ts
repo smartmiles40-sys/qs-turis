@@ -36,6 +36,7 @@
 
 import { supabase } from "../supabase";
 import { authHeaders } from "./waInbox";
+import { normalizePhoneBR } from "../whatsapp";
 
 export type EstadoLigacao =
   | "pedindo-microfone"
@@ -109,8 +110,11 @@ export async function ligarPeloWhatsApp(
   onPasso: (p: PassoLigacao) => void,
   leadDaChamada: string | null = null,
 ): Promise<Ligacao> {
-  const para = String(telefone || "").replace(/\D/g, "");
-  if (para.length < 12) throw new Error("Telefone com DDI e DDD, ex.: 5511999999999.");
+  // Prefixa o 55 quando falta, em vez de recusar: lead cadastrado como
+  // "11992221156" é válido, só está sem DDI — e recusar aqui deixava a ligação
+  // morrer no navegador, sem nem tentar.
+  const para = normalizePhoneBR(telefone);
+  if (para.length < 12) throw new Error("Telefone incompleto — precisa de DDD e número.");
 
   onPasso({ estado: "pedindo-microfone" });
   let microfone: MediaStream;
@@ -354,8 +358,8 @@ export async function dialViaOficial(
 ): Promise<ResultadoDiscagem> {
   if (atual) return { ok: false, error: "Já existe uma ligação em andamento — desligue a atual primeiro." };
 
-  const para = String(phone || "").replace(/\D/g, "");
-  if (para.length < 12) return { ok: false, error: "Telefone inválido para ligar (precisa de DDI e DDD)." };
+  const para = normalizePhoneBR(phone);
+  if (para.length < 12) return { ok: false, error: "Telefone incompleto para ligar (precisa de DDD e número)." };
 
   contexto = ctx ?? {};
   desfechoEmitido = false;
