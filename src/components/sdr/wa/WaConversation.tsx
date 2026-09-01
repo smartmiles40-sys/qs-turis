@@ -32,7 +32,7 @@ import { webmParaOgg } from "@/lib/qs/opusRemux";
 import { transcreverLocalmente } from "@/lib/qs/transcricaoLocal";
 import { dialViaOficial } from "@/lib/qs/waCall";
 import {
-  carregarPermissao, pedirPermissao, permissaoVale, validadeEmTexto,
+  carregarPermissao, conferirNaMeta, pedirPermissao, permissaoVale, validadeEmTexto,
   type Permissao,
 } from "@/lib/qs/permissaoLigacao";
 
@@ -396,13 +396,24 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   useEffect(() => {
     if (!phone) { setSeiDaPermissao(false); return; }
     let vivo = true;
-    void carregarPermissao(phone).then(({ permissao: p, leu }) => {
+    void carregarPermissao(phone).then(async ({ permissao: p, leu }) => {
       if (!vivo) return;
-      setPermissao(p);
-      setSeiDaPermissao(leu && !!p);
+      if (leu && p) { setPermissao(p); setSeiDaPermissao(true); return; }
+      // NUNCA VIMOS ESSA PESSOA. Aqui vale UMA ida à Meta: abrir uma conversa é
+      // ato deliberado (não é render de lista), e sem isto o botão chutava —
+      // foi assim que ele ofereceu "pedir permissão" pra quem JÁ tinha, e a Meta
+      // devolveu 138017. A tabela só nasceu hoje; quem autorizou antes disso não
+      // tem linha nenhuma, e só a Meta sabe.
+      const m = await conferirNaMeta(phone, leadId ?? null);
+      if (!vivo || m.error) return;
+      setPermissao({
+        waId: "", status: m.status ?? "no_permission", expiraEm: m.expiraEm ?? null,
+        pedidoEm: null, respondidoEm: null, fonte: "api", confirmado: true,
+      });
+      setSeiDaPermissao(true);
     });
     return () => { vivo = false; };
-  }, [phone]);
+  }, [phone, leadId]);
 
   /** Manda o "podemos te ligar?" — daqui, com a janela de 24h à vista. */
   const mandarPedidoDePermissao = async () => {
@@ -410,7 +421,17 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setPedindoPermissao(true);
     const r = await pedirPermissao(phone, leadId ?? null);
     setPedindoPermissao(false);
-    if (r.ok) {
+    if (r.ok && r.jaTinha) {
+      // A Meta disse que já dá pra ligar. O servidor já regravou o estado real;
+      // aqui só refletimos, pro botão virar "ligar" na hora.
+      const m = await conferirNaMeta(phone, leadId ?? null);
+      setPermissao({
+        waId: "", status: m.status ?? "permanent", expiraEm: m.expiraEm ?? null,
+        pedidoEm: null, respondidoEm: null, fonte: "api", confirmado: true,
+      });
+      setSeiDaPermissao(true);
+      notifySuccess(r.mensagem || "Essa pessoa já autorizou — pode ligar direto.");
+    } else if (r.ok) {
       setPermissao((p) => ({
         waId: p?.waId ?? "", status: p?.status ?? "no_permission", expiraEm: p?.expiraEm ?? null,
         respondidoEm: p?.respondidoEm ?? null, fonte: p?.fonte ?? null, confirmado: p?.confirmado ?? false,

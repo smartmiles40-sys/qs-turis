@@ -171,7 +171,7 @@ export async function conferirNaMeta(telefone: string, leadId?: string | null): 
  */
 export async function pedirPermissao(
   telefone: string, leadId?: string | null, texto?: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; jaTinha?: boolean; mensagem?: string }> {
   try {
     const res = await fetch("/api/wa-config", {
       method: "POST",
@@ -179,7 +179,11 @@ export async function pedirPermissao(
       body: JSON.stringify({ acao: "calling-permissao", telefone, leadId: leadId ?? null, texto }),
     });
     const d = await res.json().catch(() => ({}));
-    return res.ok ? { ok: true } : { ok: false, error: d?.error || "A Meta recusou o pedido." };
+    // `jaTinha` = a Meta respondeu 138017 ("já pode ligar pra essa pessoa"). Não
+    // é erro, é o contrário: a permissão já existe e não há o que pedir.
+    return res.ok
+      ? { ok: true, jaTinha: d?.jaTinha === true, mensagem: d?.mensagem }
+      : { ok: false, error: d?.error || "A Meta recusou o pedido." };
   } catch {
     return { ok: false, error: "Sem conexão." };
   }

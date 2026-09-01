@@ -379,6 +379,26 @@ export default async function handler(req, res) {
       // Pedido de permissao pra ligar. NAO e template — e mensagem interativa,
       // e exige conversa ABERTA (a pessoa escreveu nas ultimas 24h).
       const r = await pedirPermissaoDeLigacao(body.telefone, body.texto);
+
+      // ── 138017: "ja pode ligar pra essa pessoa" ──────────────────────────
+      // NAO E ERRO — e a melhor noticia possivel, chegando com cara de falha.
+      // A Meta recusa PEDIR uma permissao que ja existe, e o QS ficava repetindo
+      // "a mensagem nao chega" sem entender que nao havia o que pedir.
+      //
+      // Aproveita pra APRENDER: pergunta o estado real e grava. O buraco era
+      // esse — a permissao existia na Meta desde 31/08 e nunca existiu na nossa
+      // tabela, porque a tabela so nasceu hoje e ninguem foi conferir o passado.
+      if (r.codigo === 138017) {
+        const p = await sincronizarPermissao(body.telefone, body.leadId ?? null);
+        console.log(`[wa-config] 138017 — …${String(body.telefone || '').slice(-4)} JA tem permissao (status ${p?.status ?? '?'}); tabela atualizada`);
+        return res.status(200).json({
+          ok: true,
+          jaTinha: true,
+          mensagem: 'Essa pessoa já autorizou receber ligação — pode ligar direto.',
+          permissao: p?.erro ? null : { status: p.status, expiraEm: p.expiraEm },
+        });
+      }
+
       if (r.erro) {
         // SEM ISTO A RECUSA ERA INVISÍVEL NO SERVIDOR. Só o navegador de quem
         // clicou via a mensagem — então "tentei e não foi" não tinha como ser
