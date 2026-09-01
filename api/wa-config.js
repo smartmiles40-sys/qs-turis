@@ -278,6 +278,68 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Ação inválida.' });
   }
 
+  // ── LIGAR PRO CLIENTE (Cloud API Calling) ─────────────────────────────────
+  //
+  // BLOCO PRÓPRIO, E ANTES DO PORTAL DE MODELOS — e o "antes" é a correção.
+  // O portal de modelos abre com `req.method === 'POST'`, ou seja, TODO POST
+  // desta rota caía nele, e a primeira linha dele é a trava de admin/gestor.
+  // Resultado: a SDR clicava "Ligar" e tomava 403 dizendo
+  // "Só administrador ou gestor gerencia os modelos" — uma frase sobre modelo
+  // de mensagem, num botão de telefone. Ligar pro lead é o trabalho dela.
+  //
+  // O que continua sendo só de admin/gestor é o `calling-ativar`, que mexe na
+  // configuração do NÚMERO inteiro na Meta: esse ficou lá embaixo, de propósito.
+  //
+  // A trava daqui é a que faz sentido pra esta ação: usuário que existe e está
+  // ativo. Quem pode ver o lead pode ligar pra ele — a RLS já respondeu essa
+  // pergunta antes do telefone tocar.
+  const acoesDeChamada = new Set([
+    'calling-ligar', 'calling-desligar', 'calling-permissao', 'calling-permissao-status',
+  ]);
+  if (acoesDeChamada.has(String(body.acao || ''))) {
+    const eu = await perfil(userId);
+    if (!eu || eu.is_active === false) {
+      return res.status(403).json({ error: 'Seu usuário está inativo — fale com o gestor.' });
+    }
+    if (!cwConfigured()) {
+      return res.status(503).json({ error: 'O número oficial não está configurado no atendimento.' });
+    }
+
+    // O SDP vem do navegador (só ele tem microfone). O servidor é o carteiro:
+    // leva o offer, devolve o `wacid`, e o áudio começa quando o webhook
+    // `connect` trouxer o answer — que chega pelo wa-calls, não por aqui.
+    if (body.acao === 'calling-ligar') {
+      const r = await iniciarLigacao({ para: body.telefone, sdp: body.sdp, marcador: body.marcador });
+      if (r.erro) {
+        // 138006 é o único erro que tem conserto na tela: falta permissão.
+        const dica = r.codigo === 138006
+          ? ' — essa pessoa ainda não autorizou receber ligação da empresa. Mande o pedido de permissão pela conversa (ela precisa ter escrito nas últimas 24h).'
+          : '';
+        console.warn(`[wa-config] calling-ligar recusado: ${eu.name || userId} → ${String(body.telefone || '').slice(-4)} (${r.erro}${r.codigo ? ' ' + r.codigo : ''})`);
+        return res.status(400).json({ error: (r.detalhe || r.erro) + dica, motivo: r.erro, codigo: r.codigo });
+      }
+      console.log(`[wa-config] ligacao iniciada por ${eu.name || userId}: ${r.callId}`);
+      return res.status(200).json({ ok: true, callId: r.callId });
+    }
+    if (body.acao === 'calling-desligar') {
+      const r = await encerrarLigacao(body.callId);
+      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      return res.status(200).json({ ok: true });
+    }
+    if (body.acao === 'calling-permissao') {
+      // Pedido de permissao pra ligar. NAO e template — e mensagem interativa,
+      // e exige conversa ABERTA (a pessoa escreveu nas ultimas 24h).
+      const r = await pedirPermissaoDeLigacao(body.telefone, body.texto);
+      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      return res.status(200).json({ ok: true, wamid: r.wamid });
+    }
+    if (body.acao === 'calling-permissao-status') {
+      const r = await lerPermissaoDeLigacao(body.telefone);
+      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
+      return res.status(200).json(r);
+    }
+  }
+
   // ── PORTAL DE MODELOS (só admin/gestor) ───────────────────────────────────
   // Vive nesta rota, e não numa nova, pela mesma razão do resto do arquivo: o
   // projeto está no teto prático de funções da Vercel.
@@ -314,38 +376,6 @@ export default async function handler(req, res) {
       const r = await ativarChamadas();
       if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
       return res.status(200).json({ ok: true });
-    }
-    if (body.acao === 'calling-permissao') {
-      // Pedido de permissao pra ligar. NAO e template — e mensagem interativa,
-      // e exige conversa ABERTA (a pessoa escreveu nas ultimas 24h).
-      const r = await pedirPermissaoDeLigacao(body.telefone, body.texto);
-      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
-      return res.status(200).json({ ok: true, wamid: r.wamid });
-    }
-    // ── A VOLTA: LIGAR PRO CLIENTE ──────────────────────────────────────
-    // O SDP vem do navegador (só ele tem microfone). O servidor é o carteiro:
-    // leva o offer, devolve o `wacid`, e o áudio começa quando o webhook
-    // `connect` trouxer o answer — que chega pelo wa-calls, não por aqui.
-    if (body.acao === 'calling-ligar') {
-      const r = await iniciarLigacao({ para: body.telefone, sdp: body.sdp, marcador: body.marcador });
-      if (r.erro) {
-        // 138006 é o único erro que tem conserto na tela: falta permissão.
-        const dica = r.codigo === 138006
-          ? ' — essa pessoa ainda não deu permissão de ligação.'
-          : '';
-        return res.status(400).json({ error: (r.detalhe || r.erro) + dica, motivo: r.erro, codigo: r.codigo });
-      }
-      return res.status(200).json({ ok: true, callId: r.callId });
-    }
-    if (body.acao === 'calling-desligar') {
-      const r = await encerrarLigacao(body.callId);
-      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
-      return res.status(200).json({ ok: true });
-    }
-    if (body.acao === 'calling-permissao-status') {
-      const r = await lerPermissaoDeLigacao(body.telefone);
-      if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
-      return res.status(200).json(r);
     }
     return res.status(400).json({ error: 'Ação inválida.' });
   }

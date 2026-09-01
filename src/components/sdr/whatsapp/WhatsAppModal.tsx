@@ -19,6 +19,7 @@ import {
   WA_TEMPLATES,
 } from "@/lib/whatsapp";
 import { dialViaOficial } from "@/lib/qs/waCall";
+import { pedirPermissaoLigacao } from "@/lib/qs/waInbox";
 import { confirmar } from "@/lib/qs/confirmar";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { assinarTexto, loadSignatureName } from "@/lib/qs/waSignature";
@@ -48,6 +49,11 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   const [text, setText] = useState(defaultText ?? "");
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [calling, setCalling] = useState(false);
+  // Só aparece quando a Meta recusou POR FALTA DE PERMISSÃO (138006). É o único
+  // erro de ligação com conserto na hora — e o conserto é daqui mesmo, porque o
+  // pedido exige conversa aberta e a conversa está aberta nesta tela.
+  const [pedindoPermissao, setPedindoPermissao] = useState(false);
+  const [semPermissao, setSemPermissao] = useState(false);
   const [sending, setSending] = useState(false);
   // Nome que vai na primeira linha da mensagem. O envio pela API é assinado no
   // servidor; aqui a assinatura serve pro texto COPIADO e pro link wa.me, que
@@ -149,8 +155,26 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
       leadId: lead.id ?? null,
       ownerId: ownerId ?? null,
     });
+    setSemPermissao(!r.ok && r.codigo === 138006);
     setResult(r.ok ? { ok: true, msg: "Ligando pelo webfone… atenda pelo painel que abriu." } : { ok: false, msg: r.error });
     setCalling(false);
+  }
+
+  // Manda o "podemos te ligar?" — mensagem interativa, não template. A Meta só
+  // aceita dentro da janela de 24h, então quem nunca respondeu não pode receber:
+  // nesse caso o erro dela é o próprio recado pro SDR (primeiro faça o lead
+  // responder). Limite: 1 pedido por 24h e 2 por semana, por pessoa.
+  async function handlePedirPermissao() {
+    if (!lead.phone || pedindoPermissao) return;
+    setPedindoPermissao(true);
+    const r = await pedirPermissaoLigacao(lead.phone);
+    setResult(
+      r.ok
+        ? { ok: true, msg: "Pedido enviado no WhatsApp. Quando o cliente autorizar, o botão de ligar funciona." }
+        : { ok: false, msg: r.error || "Não consegui mandar o pedido de permissão." },
+    );
+    if (r.ok) setSemPermissao(false);
+    setPedindoPermissao(false);
   }
 
 
@@ -226,6 +250,15 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
           {result && (
             <div className={`text-xs rounded-lg px-3 py-2 ${result.ok ? "text-green-700 bg-green-50 border border-green-100" : "text-red-700 bg-red-50 border border-red-100"}`}>
               {result.msg}
+              {semPermissao && (
+                <button
+                  onClick={() => void handlePedirPermissao()}
+                  disabled={pedindoPermissao}
+                  className="mt-2 block w-full rounded-md bg-red-700 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-red-800 disabled:opacity-60"
+                >
+                  {pedindoPermissao ? "Mandando o pedido…" : "Pedir permissão pra ligar"}
+                </button>
+              )}
             </div>
           )}
 

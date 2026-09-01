@@ -89,7 +89,14 @@ async function pedir(acao: string, corpo: Record<string, unknown>) {
     body: JSON.stringify({ acao, ...corpo }),
   });
   const d = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(d?.error || "A Meta recusou.");
+  if (!res.ok) {
+    // O CÓDIGO DA META VIAJA JUNTO. Sem ele, "falta permissão" (138006) chega na
+    // tela como texto e nada mais — e é o único erro de ligação que a pessoa
+    // consegue resolver ali mesmo, mandando o pedido pela conversa aberta.
+    const err = new Error(d?.error || "A Meta recusou.") as Error & { codigo?: number };
+    if (typeof d?.codigo === "number") err.codigo = d.codigo;
+    throw err;
+  }
   return d;
 }
 
@@ -124,11 +131,21 @@ export async function ligarPeloWhatsApp(
   document.body.appendChild(alto);
 
   microfone.getTracks().forEach((t) => pc.addTrack(t, microfone));
-  pc.ontrack = (e) => { alto.srcObject = e.streams[0]; };
+  // `autoplay` sozinho não basta: o srcObject só chega DEPOIS que o elemento já
+  // está no DOM, e nesse caso o Chrome não retoma a reprodução sozinho em toda
+  // versão. O play() explícito é barato e o catch é silencioso de propósito —
+  // o gesto do clique em "Ligar" já autorizou o som.
+  pc.ontrack = (e) => { alto.srcObject = e.streams[0]; void alto.play().catch(() => { /* já toca */ }); };
 
   let callId: string | null = null;
   let vivo = true;
   let vigia: number | undefined;
+  // A Meta é ICE-LITE: ela só responde, nunca procura caminho. Quem tem que
+  // alcançar o IP dela (157.240.x.x:3480/UDP) é a rede do escritório — e não
+  // existe TURN nosso pra dar a volta. Sem vigiar isso, firewall que bloqueia
+  // UDP alto vira "a ligação conectou e ninguém ouve nada", que é o pior tipo
+  // de defeito pra uma SDR descrever no meio do turno.
+  let jaConectou = false;
 
   const limpar = () => {
     vivo = false;
@@ -137,6 +154,23 @@ export async function ligarPeloWhatsApp(
     try { pc.close(); } catch { /* já fechou */ }
     try { alto.remove(); } catch { /* já saiu */ }
   };
+
+  pc.addEventListener("connectionstatechange", () => {
+    if (!vivo) return;
+    if (pc.connectionState === "connected") { jaConectou = true; return; }
+    if (pc.connectionState !== "failed") return;
+    // Falhou DEPOIS de ter conectado = a chamada caiu (ou o cliente desligou):
+    // o `terminate` da Meta vem logo atrás e cuida do desfecho. Falhou SEM
+    // nunca ter conectado = o áudio não saiu da rede, e isso ninguém descobre
+    // sozinho.
+    if (jaConectou) return;
+    onPasso({
+      estado: "erro",
+      callId,
+      detalhe: "o áudio não conseguiu sair desta rede (UDP bloqueado?) — tente por 4G",
+    });
+    limpar();
+  });
 
   const desligar = async () => {
     const id = callId;
@@ -176,10 +210,20 @@ export async function ligarPeloWhatsApp(
       ultimoId = linha.id;
       const evento = String(linha.evento || "").toUpperCase();
 
+      // ── O ANSWER NÃO É "ATENDEU" ─────────────────────────────────────────
+      // Custou o desfecho automático inteiro: a Meta manda o `connect` com o
+      // SDP answer ANTES de o telefone tocar (medido em 31/08: answer às
+      // 22:56:22.105, RINGING às 22:56:22.766). Marcar "falando" aqui fazia
+      // TODA ligação nascer atendida — inclusive a que ninguém pegou — e o
+      // `answered: true` que sai daqui é justamente o que decide se a tela de
+      // tarefas pré-seleciona "Não atendeu". Ou seja: o "Não atendeu" com
+      // contagem de 10s nunca disparava, e o log de telefonia registrava
+      // duração de chamada que nunca existiu.
+      //
+      // Aplicar o answer só abre o caminho do áudio. Quem atendeu é o ACCEPTED.
       if (linha.sdp_tipo === "answer" && linha.sdp && pc.signalingState !== "stable") {
         try {
           await pc.setRemoteDescription({ type: "answer", sdp: String(linha.sdp) });
-          onPasso({ estado: "falando", callId });
         } catch (err) {
           onPasso({ estado: "erro", callId, detalhe: (err as Error)?.message });
           limpar();
@@ -225,7 +269,10 @@ export interface ContextoLigacao {
   displayName?: string | null;
 }
 
-export type ResultadoDiscagem = { ok: true } | { ok: false; error: string };
+export type ResultadoDiscagem =
+  | { ok: true }
+  /** `codigo` é o erro da Meta quando existe — 138006 = sem permissão de ligação. */
+  | { ok: false; error: string; codigo?: number };
 
 /** Mesmo formato que wavoip.ts e webphone.ts emitem — o Painel já sabe reagir. */
 export interface CallEndedInfo {
@@ -332,7 +379,11 @@ export async function dialViaOficial(
     atual = null;
     naTela = VAZIO;
     avisar();
-    return { ok: false, error: (e as Error)?.message ?? "Não consegui ligar." };
+    return {
+      ok: false,
+      error: (e as Error)?.message ?? "Não consegui ligar.",
+      codigo: (e as Error & { codigo?: number })?.codigo,
+    };
   }
 }
 
