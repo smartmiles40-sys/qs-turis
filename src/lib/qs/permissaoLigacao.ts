@@ -89,10 +89,13 @@ function daLinha(r: Record<string, unknown>): Permissao {
  *
  * Telefone que não está no mapa nunca foi visto: é "sem permissão", não é erro.
  */
-export async function carregarPermissoes(telefones: (string | null | undefined)[]): Promise<Map<string, Permissao>> {
+export async function carregarPermissoes(
+  telefones: (string | null | undefined)[],
+): Promise<{ mapa: Map<string, Permissao>; leu: boolean }> {
   const chaves = [...new Set(telefones.map(soDigitos).filter((t) => t.length >= 12))];
   const mapa = new Map<string, Permissao>();
-  if (!chaves.length) return mapa;
+  if (!chaves.length) return { mapa, leu: true };
+  let leu = true;
   // Lotes de 200: um `in.()` com a fila inteira estoura o tamanho da URL, e o
   // erro que sai disso ("414") não se parece nem um pouco com a causa.
   for (let i = 0; i < chaves.length; i += 200) {
@@ -100,16 +103,27 @@ export async function carregarPermissoes(telefones: (string | null | undefined)[
       .from("qs_call_permissions")
       .select("wa_id,status,expira_em,pedido_em,respondido_em,fonte,confirmado")
       .in("wa_id", chaves.slice(i, i + 200));
-    if (error) { console.warn("[permissao] não carreguei:", error.message); continue; }
+    if (error) { console.warn("[permissao] não carreguei:", error.message); leu = false; continue; }
     for (const r of data ?? []) mapa.set(String(r.wa_id), daLinha(r as Record<string, unknown>));
   }
-  return mapa;
+  return { mapa, leu };
 }
 
-/** Uma só — pro modal do lead, que não tem fila. */
-export async function carregarPermissao(telefone?: string | null): Promise<Permissao | null> {
-  const m = await carregarPermissoes([telefone]);
-  return m.get(soDigitos(telefone)) ?? null;
+/**
+ * Uma só — pro modal do lead, que não tem fila.
+ *
+ * `leu: false` NÃO é o mesmo que "não tem permissão", e a diferença é o que
+ * evita um estrago: enquanto a migration 0070 não estiver aplicada (ou se a
+ * consulta falhar), a tabela não responde — e tratar isso como "sem permissão"
+ * trocaria o botão de ligar de TODO MUNDO por "Pedir permissão". Quem não leu
+ * não sabe, e quem não sabe deixa passar: a discagem confere na Meta de
+ * qualquer jeito.
+ */
+export async function carregarPermissao(
+  telefone?: string | null,
+): Promise<{ permissao: Permissao | null; leu: boolean }> {
+  const { mapa, leu } = await carregarPermissoes([telefone]);
+  return { permissao: mapa.get(soDigitos(telefone)) ?? null, leu };
 }
 
 export interface ConferenciaNaMeta {

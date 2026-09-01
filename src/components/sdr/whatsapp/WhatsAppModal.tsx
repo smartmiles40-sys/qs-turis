@@ -64,6 +64,10 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   // clique de qualquer jeito.
   const [permissao, setPermissao] = useState<Permissao | null>(null);
   const [lendoPermissao, setLendoPermissao] = useState(true);
+  // A consulta respondeu? `false` = a tabela não respondeu (0070 ainda não
+  // aplicada, RLS, rede). Não é "sem permissão" — é "não sei", e não saber não
+  // pode travar o botão de ligar de ninguém.
+  const [seiDaPermissao, setSeiDaPermissao] = useState(false);
   const [sending, setSending] = useState(false);
   // Nome que vai na primeira linha da mensagem. O envio pela API é assinado no
   // servidor; aqui a assinatura serve pro texto COPIADO e pro link wa.me, que
@@ -75,7 +79,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   // Enquanto a permissão não carregou, o botão fica OTIMISTA: travar a ligação
   // por causa de uma consulta lenta seria trocar um erro raro (138006, que a
   // discagem trata) por um estorvo em toda ligação.
-  const liberado = lendoPermissao ? true : permissaoVale(permissao);
+  const liberado = lendoPermissao || !seiDaPermissao ? true : permissaoVale(permissao);
   const validade = validadeEmTexto(permissao);
   // Já mandamos o pedido nas últimas 24h? A Meta só deixa 1 por dia, e insistir
   // queima o limite sem chegar em lugar nenhum.
@@ -100,9 +104,10 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
     if (!open || !lead.phone) { setLendoPermissao(false); return; }
     let vivo = true;
     setLendoPermissao(true);
-    void carregarPermissao(lead.phone).then((p) => {
+    void carregarPermissao(lead.phone).then(({ permissao: p, leu }) => {
       if (!vivo) return;
       setPermissao(p);
+      setSeiDaPermissao(leu);
       setLendoPermissao(false);
     });
     return () => { vivo = false; };
@@ -354,7 +359,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               {/* O SELO DA PERMISSÃO. Vale mais que o "Oficial" que estava aqui:
                   ninguém duvida de qual número sai a ligação, mas todo mundo
                   precisa saber se ela PODE sair. */}
-              {lendoPermissao ? (
+              {lendoPermissao || !seiDaPermissao ? (
                 <span className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 text-gray-400">…</span>
               ) : liberado ? (
                 <span
