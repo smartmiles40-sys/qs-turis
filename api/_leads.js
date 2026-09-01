@@ -367,6 +367,9 @@ function normSource(v) {
   return ALLOWED_SOURCE.has(s) ? s : 'integracao';
 }
 
+/** Formato geral de UUID — só pra conferir o que a RPC da carteira devolveu. */
+const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function createInboundLead(payload, opts = {}) {
   // Contato normalizado UMA vez — usado no dedupe, no patch e na gravação.
   const email = normEmail(payload.email);
@@ -493,10 +496,35 @@ export async function createInboundLead(payload, opts = {}) {
     }
   }
 
-  // 1) Responsável: se o payload não trouxer, o GATILHO do banco decide
-  //    (rodízio circular — ver migration 0028). Não escolhemos aqui pra ter UM
-  //    algoritmo só e não divergir do que entra direto (n8n).
-  const ownerId = payload.owner_id || null;
+  // 1) Responsável: a CARTEIRA vem ANTES do rodízio (0073).
+  //
+  //    Quem já é de alguém continua sendo. Sem isto, a mesma pessoa voltando ao
+  //    QS — e ela volta muito: 583 cards sem `bitrix_id` têm card irmão do
+  //    mesmo telefone — cai com outro SDR, que começa do zero uma conversa que
+  //    já tinha história. É o que impede alguém de responder pela qualidade do
+  //    relacionamento: ninguém é dono de ninguém.
+  //
+  //    Sem carteira, o GATILHO do banco decide (rodízio circular, 0028). Não
+  //    escolhemos aqui pra ter UM algoritmo só e não divergir do que entra
+  //    direto pelo n8n.
+  //
+  //    Falha de leitura NÃO trava: cai no rodízio, que é o comportamento de
+  //    sempre. Lead pago parado é pior que lead com o dono errado.
+  let ownerId = payload.owner_id || null;
+  if (!ownerId && phone) {
+    try {
+      const dono = await rest('rpc/qs_carteira_do_telefone', {
+        method: 'POST', body: { p_telefone: phone },
+      });
+      const id = typeof dono === 'string' ? dono : (Array.isArray(dono) ? dono[0] : null);
+      if (id && UUID_LIKE.test(String(id))) {
+        ownerId = String(id);
+        console.log(`[leads] carteira: telefone já é de ${ownerId} — sem rodízio`);
+      }
+    } catch (e) {
+      console.warn('[leads] não consegui ler a carteira (segue no rodízio):', e?.message);
+    }
+  }
 
   // 2) Cadência: usa a informada ou uma disponível padrão.
   let cadenceId = payload.cadence_id || null;
@@ -619,6 +647,30 @@ export async function createInboundLead(payload, opts = {}) {
       if (novoId) lead.bitrix_id = novoId;
     } catch (e) {
       console.warn('[leads] criação no Bitrix falhou (o lead entrou mesmo assim):', e?.message);
+    }
+  }
+
+  // A CARTEIRA APRENDE SOZINHA (0073). O lead nasceu pelo rodízio e este
+  // telefone ainda não tinha dono — então o dono sorteado vira o titular, e a
+  // próxima vez que esta pessoa aparecer já cai com ele. É isto que dispensa
+  // carga manual: a carteira se preenche com o uso.
+  //
+  // `on_conflict=chave_telefone` com `ignore-duplicates`: quem JÁ tem carteira
+  // não é sobrescrito. Um lead novo nunca pode roubar cliente de outro SDR.
+  if (lead && phone && finalOwner) {
+    try {
+      // A chave sai do BANCO (qs_wa_key), nunca do `waKey` daqui: as duas
+      // implementações não são idênticas — a de JS trata número internacional e
+      // a de SQL não. Gravar com uma e consultar com a outra seria divergência
+      // silenciosa, do tipo que só aparece quando um cliente estrangeiro volta
+      // pro SDR errado.
+      await rest('rpc/qs_carteira_registrar', {
+        method: 'POST',
+        prefer: 'return=minimal',
+        body: { p_telefone: phone, p_sdr: finalOwner, p_motivo: 'primeiro-contato' },
+      });
+    } catch (e) {
+      console.warn('[leads] carteira não gravada (o lead entrou mesmo assim):', e?.message);
     }
   }
 
