@@ -30,6 +30,11 @@ import { WaAudio, WaAvatar, WaSeloNumero } from "./WaBits";
 import { WaTexto, tamanhoEmojiSolto, waPlain } from "./waFormat";
 import { webmParaOgg } from "@/lib/qs/opusRemux";
 import { transcreverLocalmente } from "@/lib/qs/transcricaoLocal";
+import { dialViaOficial } from "@/lib/qs/waCall";
+import {
+  carregarPermissao, pedirPermissao, permissaoVale, validadeEmTexto,
+  type Permissao,
+} from "@/lib/qs/permissaoLigacao";
 
 // O seletor carrega junto com a lista de emojis, e só quando a SDR abre pela
 // primeira vez — não é peso que todo mundo paga pra ver a conversa.
@@ -195,6 +200,18 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   // Nome com que este SDR assina. Quem carimba é o /api/wa-send; isto aqui é só
   // pra ele não descobrir depois, olhando a conversa do cliente.
   const [assinatura, setAssinatura] = useState("");
+
+  // ── LIGAÇÃO E PERMISSÃO, AQUI NA CONVERSA ─────────────────────────────────
+  //
+  // Faltava, e a falta era grave: o pedido de permissão de ligação EXIGE conversa
+  // aberta de 24h, e esta é a única tela que sabe se a janela está aberta — o
+  // cronômetro está a dois centímetros daqui. O botão morava só no modal do lead
+  // e na fila; quem estava conversando com o cliente, no momento exato em que o
+  // pedido é permitido, não tinha como pedir. Foi o que travou o teste de 01/09:
+  // o SDR estava nesta tela e clicava procurando um botão que não existia.
+  const [permissao, setPermissao] = useState<Permissao | null>(null);
+  const [seiDaPermissao, setSeiDaPermissao] = useState(false);
+  const [pedindoPermissao, setPedindoPermissao] = useState(false);
 
   // Respostas prontas (/atalho)
   const [canned, setCanned] = useState<CannedResponse[]>([]);
@@ -373,6 +390,38 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       },
     ];
   }, [apagar, copiar, transcrever]);
+
+  // Lê a permissão de ligação deste contato. Consulta ao BANCO (a foto que o
+  // webhook mantém), não à Meta — a conferência de verdade acontece no clique.
+  useEffect(() => {
+    if (!phone) { setSeiDaPermissao(false); return; }
+    let vivo = true;
+    void carregarPermissao(phone).then(({ permissao: p, leu }) => {
+      if (!vivo) return;
+      setPermissao(p);
+      setSeiDaPermissao(leu && !!p);
+    });
+    return () => { vivo = false; };
+  }, [phone]);
+
+  /** Manda o "podemos te ligar?" — daqui, com a janela de 24h à vista. */
+  const mandarPedidoDePermissao = async () => {
+    if (!phone) { notifyError("Esse contato não tem telefone."); return; }
+    setPedindoPermissao(true);
+    const r = await pedirPermissao(phone, leadId ?? null);
+    setPedindoPermissao(false);
+    if (r.ok) {
+      setPermissao((p) => ({
+        waId: p?.waId ?? "", status: p?.status ?? "no_permission", expiraEm: p?.expiraEm ?? null,
+        respondidoEm: p?.respondidoEm ?? null, fonte: p?.fonte ?? null, confirmado: p?.confirmado ?? false,
+        pedidoEm: new Date().toISOString(),
+      }));
+      setSeiDaPermissao(true);
+      notifySuccess("Pedido enviado — ele aparece como uma pergunta no WhatsApp do cliente.");
+    } else {
+      notifyError(r.error || "Não consegui mandar o pedido de permissão.");
+    }
+  };
 
   useEffect(() => { listCanned().then(setCanned); }, []);
   useEffect(() => { listWaNumeros().then(setNumeros); }, []);
@@ -1263,6 +1312,54 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                 : `fecha em ${humanizarJanela(janela.restante)}`}
             </span>
           )}
+          {/* ── LIGAR / PEDIR PERMISSÃO ──────────────────────────────────────
+              Fica COLADO no cronômetro da janela de propósito: o pedido de
+              permissão só é aceito com a janela aberta, e as duas informações
+              precisam ser lidas juntas. Só na caixa oficial — ligação pela Cloud
+              API não existe no número comum. */}
+          {ehOficial && phone && (() => {
+            const liberado = seiDaPermissao ? permissaoVale(permissao) : true;
+            const validade = validadeEmTexto(permissao);
+            const pedidoRecente = !!permissao?.pedidoEm
+              && Date.now() - new Date(permissao.pedidoEm).getTime() < 24 * 3_600_000;
+            // Permissão confirmada e válida = nada a pedir; o que falta é ligar.
+            if (liberado && seiDaPermissao) {
+              return (
+                <button
+                  onClick={() => { void dialViaOficial(phone, { leadId, leadName }); }}
+                  className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold"
+                  style={{ background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }}
+                  title={`Ligar pelo WhatsApp oficial${validade ? ` — permissão vale ${validade}` : ""}`}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />
+                  </svg>
+                  ligar{validade ? ` · ${validade}` : ""}
+                </button>
+              );
+            }
+            return (
+              <button
+                onClick={() => void mandarPedidoDePermissao()}
+                disabled={pedindoPermissao || pedidoRecente || janela?.estado === "fechada" || janela?.estado === "nunca-abriu"}
+                className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold disabled:opacity-50"
+                style={{ background: "#FFF7ED", color: "#9A3412" }}
+                title={
+                  janela?.estado === "fechada" || janela?.estado === "nunca-abriu"
+                    ? "A janela de 24h está fechada — o pedido de permissão só sai com o cliente tendo escrito nas últimas 24h."
+                    : pedidoRecente
+                      ? "Já pedimos nas últimas 24h — a Meta só aceita um pedido por dia."
+                      : "Manda a pergunta \"podemos te ligar?\" no WhatsApp do cliente."
+                }
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />
+                </svg>
+                {pedindoPermissao ? "pedindo…" : pedidoRecente ? "permissão pedida" : "pedir permissão"}
+              </button>
+            );
+          })()}
+
           {/* TROCAR DE NÚMERO. O servidor já aceitava a escolha; faltava a tela
               deixar escolher — e é o que o SDR pede pra abordar cliente novo
               pelo número certo. Só aparece com mais de um número disponível. */}
