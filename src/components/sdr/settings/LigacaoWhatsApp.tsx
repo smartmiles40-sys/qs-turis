@@ -411,9 +411,13 @@ export default function LigacaoWhatsApp() {
       <div className="rounded-lg border border-gray-200 p-3">
         <h3 className="text-[13px] font-semibold text-gray-900">Cadência de quem liberou a ligação</h3>
         <p className="mt-1 text-[12px] text-gray-600">
-          Quando o cliente autorizar a ligação no WhatsApp, o lead entra sozinho nesta cadência.
-          As travas de sempre valem: lead ganho, com reunião marcada ou com atividade em aberto
-          <b> não</b> é movido — a automação só pesca quem estava parado.
+          Quando o cliente autorizar a ligação no WhatsApp, as atividades desta cadência
+          nascem <b>por cima</b> — o lead continua na cadência em que já está, com o mesmo
+          dono. É assim que a ligação sai da cadência do SDR sem tirar o lead dele.
+        </p>
+        <p className="mt-1 text-[12px] text-gray-500">
+          Lead ganho ou perdido não recebe. E quem já tem atividade desta cadência em aberto
+          não recebe de novo, então uma segunda autorização não duplica a fila.
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <select

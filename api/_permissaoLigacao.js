@@ -33,7 +33,7 @@
 
 import { rest } from './_supabaseAdmin.js';
 import { lerPermissaoDeLigacao } from './_meta.js';
-import { moverLeadParaCadencia } from './_leads.js';
+import { generateCadenceTasks } from './_leads.js';
 import { toE164BR } from './_wa.js';
 
 /** Permissão temporária da Meta dura 7 dias — é a janela que a doc publica. */
@@ -212,10 +212,10 @@ export function permissaoPorLigacaoDoCliente(waId) {
  * Chave `cadencia_permissao_ligacao` em qs_settings; sem ela, não faz nada — é
  * assim que a coisa nasce desligada e o Bruno escolhe a cadência na tela.
  *
- * A troca passa pelo `moverLeadParaCadencia`, que já carrega as travas: lead
- * ganho, com reunião marcada ou com atividade de cadência em aberto NÃO é
- * movido. Autorizar ligação não pode atropelar quem já está sendo trabalhado —
- * a graça é pescar quem estava parado.
+ * As atividades dela são ACRESCENTADAS ao lead — ele não sai da cadência em que
+ * está. É o desenho que o Bruno pediu em 02/09: tirar a ligação de WhatsApp da
+ * cadência do SDR (onde poluía a métrica com atividade que quase ninguém pode
+ * executar) e deixá-la nascer só quando o cliente autoriza.
  *
  * O IMPORT DO `_leads.js` É ESTÁTICO, e a escolha tem motivo. Ele era `await
  * import()` pra não pesar o caminho do webhook, mas a economia é ilusória: o
@@ -229,6 +229,11 @@ export function permissaoPorLigacaoDoCliente(waId) {
  */
 export async function moverParaCadenciaDePermissao(lead) {
   if (!lead?.id) return { movido: false, motivo: 'sem-lead' };
+  // Cliente fechado não volta pra fila de prospecção, nem pra ligar.
+  if (lead.status === 'ganho' || lead.status === 'perdido') {
+    return { movido: false, motivo: `lead-${lead.status}` };
+  }
+
   let cadenciaId = null;
   try {
     const r = await rest('qs_settings?select=value&key=eq.cadencia_permissao_ligacao&limit=1');
@@ -240,5 +245,47 @@ export async function moverParaCadenciaDePermissao(lead) {
   }
   if (!cadenciaId) return { movido: false, motivo: 'cadencia-nao-configurada' };
 
-  return moverLeadParaCadencia(lead, cadenciaId);
+  // ── ACRESCENTA, NÃO MOVE ──────────────────────────────────────────────────
+  //
+  // Era `moverLeadParaCadencia`, e estava errado pro que esta cadência é. Mover
+  // troca o `cadence_id` do lead: ele SAI da cadência do SDR: o trabalho de
+  // prospecção que estava em curso é abandonado porque o cliente aceitou uma
+  // ligação. E as travas do "mover" recusam qualquer lead com atividade em
+  // aberto — ou seja, justamente os que estão sendo trabalhados nunca
+  // ganhariam a ligação. Os dois desfechos são ruins e opostos.
+  //
+  // A cadência de ligação é ADICIONAL: as atividades dela nascem por cima, o
+  // lead continua na cadência de sempre, e a métrica do SDR não muda de dono.
+  // `generateCadenceTasks` grava o `cadence_id` NA TAREFA sem tocar no lead —
+  // é isso que torna as duas cadências capazes de conviver.
+  //
+  // O DONO É O DO LEAD: a atividade tem que cair na fila de quem já cuida dele.
+
+  // Não duplica: um segundo `call_permission_reply` (a pessoa reabre o pedido,
+  // a Meta reentrega o webhook) não pode gerar a mesma cadência de novo.
+  try {
+    const abertas = await rest(
+      `qs_tasks?select=id&lead_id=eq.${encodeURIComponent(lead.id)}` +
+      `&cadence_id=eq.${encodeURIComponent(cadenciaId)}&status=in.(pendente,atrasada)&limit=1`
+    );
+    if (Array.isArray(abertas) && abertas.length) {
+      return { movido: false, motivo: 'ja-tem-a-cadencia-de-ligacao' };
+    }
+  } catch (e) {
+    // Na dúvida NÃO gera: duplicar atividade na fila do SDR é pior que atrasar.
+    console.warn('[permissao] não conferi as atividades existentes:', e?.message);
+    return { movido: false, motivo: 'nao-consegui-conferir' };
+  }
+
+  try {
+    const tarefas = await generateCadenceTasks({
+      leadId: lead.id,
+      cadenceId: cadenciaId,
+      ownerId: lead.owner_id ?? null,
+    });
+    return { movido: tarefas > 0, tarefas, motivo: tarefas ? null : 'cadencia-sem-atividades' };
+  } catch (e) {
+    console.error('[permissao] cadência de ligação não gerou atividades:', e?.message);
+    return { movido: false, motivo: 'falhou-ao-gerar' };
+  }
 }

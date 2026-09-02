@@ -83,21 +83,29 @@ recarregar a tela.
 
 **Configurações → Ligação pelo WhatsApp → "Cadência de quem liberou a ligação".**
 
-Escolhida a cadência, todo cliente que autorizar entra nela sozinho, no instante
-da resposta. Nasce **desligada** (opção "Desligado — só registra a permissão").
+Escolhida a cadência, todo cliente que autorizar recebe as atividades dela no
+instante da resposta. Nasce **desligada** (opção "Desligado — só registra a
+permissão").
 
-A troca passa pelo `moverLeadParaCadencia`, então as travas de sempre valem:
+**As atividades são ACRESCENTADAS — o lead não sai da cadência em que está.**
+Ele continua com o mesmo dono e a mesma cadência de prospecção; só ganha a
+atividade de ligar por cima. É isso que permite tirar o "Ligar no WhatsApp" da
+cadência do SDR (onde poluía a métrica com trabalho que quase ninguém podia
+executar) sem tirar o lead de ninguém.
 
-- lead **ganho** não é movido;
-- lead com **reunião marcada** não é movido;
-- lead com **atividade de cadência em aberto** não é movido.
+As duas travas:
 
-Autorizar ligação não atropela quem já está sendo trabalhado. A automação existe
-pra **pescar quem estava parado** — que é exatamente o caso de quem responde
-"pode ligar" e ninguém vê.
+- lead **ganho ou perdido** não recebe;
+- lead que **já tem atividade dessa cadência em aberto** não recebe de novo — uma
+  segunda autorização (a pessoa reabre o pedido, a Meta reentrega o webhook) não
+  duplica a fila.
 
 > Como a permissão temporária dura 7 dias, vale a cadência ser curta e começar no
 > mesmo dia. Quem não ligar dentro da janela precisa pedir permissão de novo.
+
+> ⚠️ Tirar a atividade da cadência do SDR **não apaga as que já foram geradas**.
+> As tarefas antigas continuam pendentes no banco; some da cadência quem ainda
+> não passou por ela.
 
 ---
 
