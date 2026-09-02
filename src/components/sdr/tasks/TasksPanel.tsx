@@ -24,7 +24,7 @@ import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getChatProvider, defaultChatProvider, type ChatProvider } from "@/lib/qs/chatProvider";
 import { getLeadScore } from "@/lib/leadScore";
-import { formatPhoneDisplay, fillTemplate } from "@/lib/whatsapp";
+import { formatPhoneDisplay, fillTemplate, normalizePhoneBR } from "@/lib/whatsapp";
 import WhatsAppModal from "../whatsapp/WhatsAppModal";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
 import { dialViaOficial, setOnCallEndedOficial } from "@/lib/qs/waCall";
@@ -1775,6 +1775,28 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   }
 
   // Filter logic
+  /**
+   * A REGRA DE "ESSA ATIVIDADE PODE APARECER?", EM UM LUGAR SÓ.
+   *
+   * Ela nasceu duplicada e a duplicata custou caro: a FILA escondia a atividade
+   * de "Ligar no WhatsApp" de quem não autorizou, mas os CONTADORES eram
+   * calculados direto de `tasks` e continuavam somando as mesmas atividades. O
+   * time via "Atrasadas: 515", clicava, e encontrava uma lista curta — cobrado
+   * por trabalho que não aparece e que a Meta não deixa fazer.
+   *
+   * Contador e lista têm que responder à MESMA pergunta. Por isso a regra é uma
+   * função só, usada nos dois, e não uma linha repetida em dois `filter`.
+   */
+  const atividadeVisivel = useCallback((t: Task, lead: Lead | undefined) => {
+    if (t.channel_type !== "ligacao_whatsapp") return true;
+    // `normalizePhoneBR` e não os dígitos crus: as chaves da tabela têm DDI, e
+    // comparar "11992221156" com "5511992221156" dava sempre "não conheço" —
+    // o lead voltava pra fila por engano.
+    const p = permissoes.get(normalizePhoneBR(lead?.phone));
+    if (!p) return true;                 // não sei = deixa passar
+    return permissaoVale(p);
+  }, [permissoes]);
+
   const filteredTasks = useMemo(() => {
     let filtered = [...tasks];
 
@@ -1805,14 +1827,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // que some sem deixar rastro é como nasceram as 48 'desfecho' e 31
     // 'confirmar' invisíveis de 13/08 — o defeito não pode ser reintroduzido
     // pela porta da frente.
-    filtered = filtered.filter((t) => {
-      if (t.channel_type !== "ligacao_whatsapp") return true;
-      const lead = getLeadForTask(t);
-      const wa = (lead?.phone || "").replace(/\D/g, "");
-      const p = permissoes.get(wa);
-      if (!p) return true;              // desconhecido = deixa passar
-      return permissaoVale(p);
-    });
+    filtered = filtered.filter((t) => atividadeVisivel(t, getLeadForTask(t)));
 
     // Role-based filtering: SDR only sees their own tasks
     if (currentUser && !canSeeAllData(currentUser.role)) {
@@ -1893,7 +1908,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
 
     return filtered;
-  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser, workHours, permissoes]);
+  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser, workHours, atividadeVisivel]);
 
   // Card "hero" atual (o que o SDR está atendendo) — usado no render E nos atalhos.
   const heroTaskMemo = useMemo(() => {
@@ -1998,7 +2013,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // identidade a cada refresh do realtime, e refazer a consulta a cada piscada
   // seria varrer a fila inteira sem nada ter mudado.
   const telefonesDaFila = useMemo(
-    () => [...new Set(leads.map((l) => (l.phone || "").replace(/\D/g, "")).filter((t) => t.length >= 12))].sort().join(","),
+    () => [...new Set(leads.map((l) => normalizePhoneBR(l.phone)).filter((t) => t.length >= 12))].sort().join(","),
     [leads],
   );
   // Telefones que TÊM atividade de "Ligar no WhatsApp" em aberto. Só sobre eles
@@ -2012,7 +2027,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .map((t) => t.lead_id),
     );
     return [...new Set(
-      leads.filter((l) => ids.has(l.id)).map((l) => (l.phone || "").replace(/\D/g, "")).filter(Boolean),
+      leads.filter((l) => ids.has(l.id)).map((l) => normalizePhoneBR(l.phone)).filter(Boolean),
     )].sort().join(",");
   }, [tasks, leads]);
 
@@ -2183,8 +2198,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     if (currentUser && !canSeeAllData(currentUser.role)) {
       base = base.filter((t) => t.owner_id === currentUser.id);
     }
-    return base.filter((t) => new Date(t.scheduled_at).getTime() <= endTodayMs);
-  }, [tasks, leadsMap, currentUser, endTodayMs]);
+    base = base.filter((t) => new Date(t.scheduled_at).getTime() <= endTodayMs);
+    // A MESMA regra da fila. Sem esta linha o contador cobra o que a lista não
+    // mostra — foi a reclamação do time em 02/09 sobre as "atrasadas do
+    // WhatsApp".
+    return base.filter((t) => atividadeVisivel(t, leadsMap.get(t.lead_id)));
+  }, [tasks, leadsMap, currentUser, endTodayMs, atividadeVisivel]);
   // Partição por dia ÚTIL (2026-07-24): "atrasada" só quando venceu em dia útil
   // anterior — no fim de semana a fila de sexta continua contando como "de hoje".
   const overdueTasks = counterBase.filter((t) => workdaysBetween(workHours, new Date(t.scheduled_at), new Date()) >= 1);
