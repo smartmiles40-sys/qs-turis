@@ -23,6 +23,7 @@ import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getChatProvider, defaultChatProvider, type ChatProvider } from "@/lib/qs/chatProvider";
+import { useWhatsAppApp } from "@/lib/qs/waApp";
 import { getLeadScore } from "@/lib/leadScore";
 import { formatPhoneDisplay, fillTemplate, normalizePhoneBR } from "@/lib/whatsapp";
 import WhatsAppModal from "../whatsapp/WhatsAppModal";
@@ -348,6 +349,9 @@ function paraInputLocal(d: Date): string {
 export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const { currentUser } = useQsAuth();
   const chatDock = useChatAppDock();
+  // MODO APARELHO (SDR, desde 03/09): as atividades de WhatsApp levam o SDR pra
+  // conversa no celular dele, com o roteiro já escrito. Ver src/lib/qs/waApp.ts.
+  const { modoApp, abrirNoApp } = useWhatsAppApp();
 
   // Abre o dock focando um lead (copia o telefone pra colar na busca).
   const openWhatsApp = useCallback((lead: Lead | undefined | null, draft?: string | null) => {
@@ -1528,6 +1532,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // Copia junto: se o dock não conseguir pré-preencher (provider antigo por
     // iframe), o SDR só dá Ctrl+V em vez de digitar tudo de novo.
     try { await navigator.clipboard.writeText(texto); } catch { /* sem clipboard: segue */ }
+    // MODO APARELHO: o convite vai pro WhatsApp do celular, já escrito.
+    // (O clipboard acima continua valendo como rede de segurança — se o app
+    // ignorar o ?text= por algum motivo, o texto está a um "colar" de distância.)
+    if (modoApp) {
+      abrirNoApp({
+        leadId: d.leadId,
+        name: d.leadName,
+        phone: d.leadPhone,
+        ownerId: d.leadOwnerId,
+        texto,
+      });
+      setMeetingDone(null);
+      return;
+    }
     chatDock.openForLead({
       leadId: d.leadId,
       name: d.leadName,
@@ -1760,6 +1778,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const script = task.channel_type === "whatsapp" ? getScriptForTask(task) : null;
     const texto = script ? fillTemplate(script, { name: lead.full_name }) : null;
 
+    // MODO APARELHO: um clique só, e ele termina dentro da conversa do lead no
+    // WhatsApp do celular — com o roteiro já digitado. Não passa por modal: o
+    // caminho antigo (dock com o texto pronto) também era um clique, e trocar
+    // um clique por dois seria cobrar do SDR o preço da API ter caído.
+    if (modoApp) {
+      abrirNoApp({
+        leadId: lead.id,
+        name: lead.full_name ?? lead.first_name ?? null,
+        phone: lead.phone ?? null,
+        ownerId: lead.owner_id ?? null,
+        texto,
+      });
+      return;
+    }
+
     // Atendimento nativo: abre a conversa do lead aqui dentro, já com o roteiro
     // no campo de mensagem. Zero tempo procurando o contato no WhatsApp.
     if (chatProvider === "qs") {
@@ -1789,13 +1822,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
    */
   const atividadeVisivel = useCallback((t: Task, lead: Lead | undefined) => {
     if (t.channel_type !== "ligacao_whatsapp") return true;
+    // MODO APARELHO: a ligação sai do celular do SDR, não da Cloud API — a
+    // autorização que a Meta exige simplesmente não se aplica. Continuar
+    // escondendo essas atividades seria sumir com trabalho executável por causa
+    // de uma regra de um canal que não está mais em uso.
+    if (modoApp) return true;
     // `normalizePhoneBR` e não os dígitos crus: as chaves da tabela têm DDI, e
     // comparar "11992221156" com "5511992221156" dava sempre "não conheço" —
     // o lead voltava pra fila por engano.
     const p = permissoes.get(normalizePhoneBR(lead?.phone));
     if (!p) return true;                 // não sei = deixa passar
     return permissaoVale(p);
-  }, [permissoes]);
+  }, [permissoes, modoApp]);
 
   const filteredTasks = useMemo(() => {
     let filtered = [...tasks];
@@ -2557,12 +2595,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 e.stopPropagation();
                 pinTaskForCall(task);
                 if (task.channel_type === "ligacao") callViaSip(lead.phone);
+                // MODO APARELHO: não existe discagem pela Cloud API. Abrimos a
+                // conversa no celular do SDR — o botão de ligar do WhatsApp
+                // fica a um toque, que é exatamente o que este canal sempre
+                // significou ("Ligação de voz pelo WhatsApp").
+                else if (modoApp) abrirNoApp({ leadId: lead.id, name: lead.full_name, phone: lead.phone, ownerId: lead.owner_id });
                 else callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id });
               }}
               className="qsx-pa qsx-pa-wa"
               title={task.channel_type === "ligacao"
                 ? "Ligar (BravoTech)"
-                : `Ligar pelo WhatsApp oficial${permissaoDoLead(lead.phone).validade ? ` — permissão vale ${permissaoDoLead(lead.phone).validade}` : ""}`}>
+                : modoApp
+                  ? "Abrir a conversa no seu WhatsApp e ligar por lá"
+                  : `Ligar pelo WhatsApp oficial${permissaoDoLead(lead.phone).validade ? ` — permissão vale ${permissaoDoLead(lead.phone).validade}` : ""}`}>
               <ChannelIcon type="ligacao" size={17} />
             </button>
           )}
@@ -2674,6 +2719,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       case "ligacao_whatsapp":
         if (!lead?.phone) return null;
         {
+          // MODO APARELHO: o botão deixa de discar e passa a ABRIR a conversa
+          // no celular. Nada de selo de permissão — ela era da Meta, e a
+          // ligação não passa mais por lá.
+          if (modoApp) {
+            return (
+              <button
+                onClick={() => { pinTaskForCall(task); abrirNoApp({ leadId: lead.id, name: lead.full_name, phone: lead.phone, ownerId: lead.owner_id }); }}
+                className="qsx-btn qsx-btn-green"
+                title="Abre a conversa deste lead no WhatsApp do seu celular — o botão de ligar fica a um toque"
+              >
+                <IconWhatsAppCall size={16} />Abrir no WhatsApp pra ligar
+              </button>
+            );
+          }
           const perm = permissaoDoLead(lead.phone);
           // Sem botão de "pedir permissão" aqui: a solicitação passou a ser por
           // TEMPLATE, dentro da conversa (decisão do Bruno, 01/09). A fila só

@@ -9,6 +9,7 @@ import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PREFIX_KEY, SIP_INSTAL
 import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, deleteSipLine, ensureRegistered, type SipLineAdmin } from "@/lib/webphone";
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
 import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } from "@/lib/qs/chatProvider";
+import { getWaModoApp, setWaModoApp, type WaModoApp } from "@/lib/qs/waApp";
 import WaInboxLabels from "./WaInboxLabels";
 import LinhasDoTime from "./LinhasDoTime";
 import ModelosMeta from "./ModelosMeta";
@@ -1526,6 +1527,159 @@ function IntegracoesSection() {
   );
 }
 
+// ── Modo aparelho: quem conversa pelo WhatsApp do celular ────────────────────
+//
+// Nasceu em 03/09, quando a API oficial caiu e cada SDR ganhou um celular. Não
+// é uma chave global de propósito: o closer atende pelo 1935, que é Evolution
+// conectada por QR e continua funcionando — virar tudo de uma vez derrubaria o
+// atendimento de quem está trabalhando bem. Ver src/lib/qs/waApp.ts.
+
+const PAPEIS_MODO_APP: { key: UserRole; label: string }[] = [
+  { key: "sdr", label: "SDR" },
+  { key: "closer", label: "Closer" },
+  { key: "gestor", label: "Gestor" },
+  { key: "admin", label: "Admin" },
+];
+
+function ModoAparelhoCard({ users }: { users: { id: string; name: string; role: string }[] }) {
+  const [cfg, setCfg] = useState<WaModoApp | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { void getWaModoApp().then(setCfg); }, []);
+
+  async function salvar(novo: WaModoApp) {
+    setCfg(novo);                       // otimista: a tela responde na hora
+    setSaving(true);
+    const ok = await setWaModoApp(novo);
+    setSaving(false);
+    if (ok) notifySuccess("Salvo. Quem recarregar o QS já pega a regra nova.");
+    else {
+      notifyError("Não foi possível salvar (só admin/gestor grava configurações).");
+      void getWaModoApp().then(setCfg);  // desfaz o otimismo
+    }
+  }
+
+  if (!cfg) return null;
+  const c = cfg;
+
+  /** O que vale pra esta pessoa hoje: "app", "qs" ou "padrao" (segue o papel). */
+  function estadoDo(u: { id: string }): "app" | "qs" | "padrao" {
+    if (c.excecoes.includes(u.id)) return "qs";
+    if (c.usuarios.includes(u.id)) return "app";
+    return "padrao";
+  }
+
+  function definir(id: string, estado: "app" | "qs" | "padrao") {
+    const usuarios = c.usuarios.filter((x) => x !== id);
+    const excecoes = c.excecoes.filter((x) => x !== id);
+    if (estado === "app") usuarios.push(id);
+    if (estado === "qs") excecoes.push(id);
+    void salvar({ ...c, usuarios, excecoes });
+  }
+
+  return (
+    <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "var(--line, #E8EBF0)", background: "var(--card)" }}>
+      <div className="flex items-start gap-3">
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-gray-900">Conversar pelo WhatsApp do celular</h3>
+          <p className="text-xs text-gray-500 mt-1 leading-snug">
+            Com isto ligado, os botões de WhatsApp do QS abrem a conversa no <b>aparelho do atendente</b>, com a
+            mensagem da atividade já escrita — e o inbox de dentro do QS vira histórico (só leitura) pra quem está
+            neste modo. É o caminho de quem usa um número comum, sem API. Desligue quando a API oficial voltar.
+          </p>
+        </div>
+        <button
+          onClick={() => void salvar({ ...c, ativo: !c.ativo })}
+          disabled={saving}
+          role="switch"
+          aria-checked={c.ativo}
+          className="shrink-0 w-12 h-7 rounded-full transition-colors disabled:opacity-60"
+          style={{ background: c.ativo ? "#25D366" : "#CBD5E1" }}
+          title={c.ativo ? "Ligado" : "Desligado"}
+        >
+          <span className="block w-5 h-5 rounded-full bg-white transition-transform" style={{ transform: c.ativo ? "translateX(24px)" : "translateX(4px)" }} />
+        </button>
+      </div>
+
+      {c.ativo && (
+        <>
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Quem fala pelo aparelho</p>
+            <div className="flex flex-wrap gap-2">
+              {PAPEIS_MODO_APP.map((p) => {
+                const on = c.papeis.includes(p.key);
+                return (
+                  <button
+                    key={p.key}
+                    onClick={() => void salvar({ ...c, papeis: on ? c.papeis.filter((x) => x !== p.key) : [...c.papeis, p.key] })}
+                    disabled={saving}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors disabled:opacity-60"
+                    style={on
+                      ? { borderColor: "#25D366", background: "rgba(37,211,102,.12)", color: "#0E7C6A" }
+                      : { borderColor: "var(--line, #E8EBF0)", color: "#64748B" }}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+            {!c.papeis.includes("closer") && (
+              <p className="text-[11px] text-gray-400 mt-1.5 leading-snug">
+                O closer está de fora: ele atende pelo número conectado por QR (Evolution), que não depende da API da Meta.
+              </p>
+            )}
+          </div>
+
+          {users.length > 0 && (
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Exceções por pessoa</p>
+              <div className="space-y-1">
+                {users.map((u) => {
+                  const est = estadoDo(u);
+                  const herdado = c.papeis.includes(u.role as UserRole) ? "aparelho" : "QS";
+                  return (
+                    <div key={u.id} className="flex items-center gap-2 text-xs">
+                      <span className="flex-1 min-w-0 truncate text-gray-700">
+                        {u.name} <span className="text-gray-400">· {u.role}</span>
+                      </span>
+                      <div className="flex rounded-lg overflow-hidden border shrink-0" style={{ borderColor: "var(--line, #E8EBF0)" }}>
+                        {([
+                          ["padrao", "Padrão (" + herdado + ")"],
+                          ["app", "Aparelho"],
+                          ["qs", "QS"],
+                        ] as const).map(([k, label]) => (
+                          <button
+                            key={k}
+                            onClick={() => definir(u.id, k)}
+                            disabled={saving}
+                            className="px-2.5 py-1 font-semibold transition-colors disabled:opacity-60"
+                            style={est === k
+                              ? { background: "#0147FF", color: "#fff" }
+                              : { background: "transparent", color: "#64748B" }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {!c.ativo && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 leading-snug">
+          Desligado: todo mundo volta a conversar por dentro do QS. Só faz sentido com a API oficial (ou a Evolution)
+          de fato respondendo — senão o SDR escreve e a mensagem não sai.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Atendimento (cockpit de WhatsApp: nativo × Chatwoot) ─────────────────────
 
 function AtendimentoSection() {
@@ -1632,6 +1786,10 @@ function AtendimentoSection() {
         <h2 className="text-lg font-bold text-gray-900">Atendimento (WhatsApp)</h2>
         <p className="text-sm text-gray-500 mt-1">Qual cockpit o SDR usa pra atender no WhatsApp. A troca é imediata (recarregar o QS pega o novo).</p>
       </div>
+
+      {/* Vem PRIMEIRO porque manda mais: quem está no modo aparelho não usa
+          cockpit nenhum, então a escolha "QS × Chatwoot" abaixo nem se aplica. */}
+      <ModoAparelhoCard users={signUsers} />
 
       <div className="grid gap-3 sm:grid-cols-2">
         {OPTIONS.map((o) => {

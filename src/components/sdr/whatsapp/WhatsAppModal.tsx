@@ -1,10 +1,20 @@
 // src/components/sdr/whatsapp/WhatsAppModal.tsx
 // -----------------------------------------------------------------------------
-// Modal de WhatsApp para um lead. O envio sai pelo canal NATIVO do QS
-// (/api/wa-send: Chatwoot → Evolution → WhatsApp) — a mesma conversa do inbox,
-// assinada com o nome do SDR no servidor. Fallback: abrir no wa.me.
-// Também oferece ligar pelo NÚMERO OFICIAL (Cloud API Calling).
-// Cada interação é registrada em qs_whatsapp_messages.
+// Modal de WhatsApp para um lead. Tem DOIS modos, e quem escolhe é o
+// `useWhatsAppApp` (ver src/lib/qs/waApp.ts):
+//
+//   • MODO APARELHO (SDR, desde 03/09) — o QS não envia nada. A tela serve pra
+//     escolher o template e revisar o texto; o botão leva o SDR pra conversa do
+//     lead no WhatsApp do celular dele, com a mensagem já escrita. Sem bloco de
+//     ligação: a Cloud API Calling caiu junto com o resto da API oficial e um
+//     botão que só sabe dar erro é pior que botão nenhum.
+//
+//   • MODO INBOX (closer, e todo mundo quando a API oficial voltar) — o envio
+//     sai pelo canal NATIVO do QS (/api/wa-send: Chatwoot → Evolution →
+//     WhatsApp), na mesma conversa do inbox, assinado no servidor. Oferece
+//     também ligar pelo NÚMERO OFICIAL (Cloud API Calling).
+//
+// Cada interação é registrada em qs_whatsapp_messages nos dois modos.
 // -----------------------------------------------------------------------------
 
 import { useEffect, useMemo, useState } from "react";
@@ -26,6 +36,7 @@ import {
 import { confirmar } from "@/lib/qs/confirmar";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { assinarTexto, loadSignatureName } from "@/lib/qs/waSignature";
+import { useWhatsAppApp } from "@/lib/qs/waApp";
 
 export interface WhatsAppLead {
   id?: string | null;
@@ -49,6 +60,8 @@ const QS_BLUE = "#0147FF";
 
 export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultText, onSent }: Props) {
   const { currentUser } = useQsAuth();
+  // Quem fala pelo aparelho não vê envio nem ligação aqui — ver waApp.ts.
+  const { modoApp } = useWhatsAppApp();
   const [text, setText] = useState(defaultText ?? "");
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [calling, setCalling] = useState(false);
@@ -115,7 +128,9 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   // Lê a permissão de ligação ao abrir. É consulta ao BANCO, não à Meta: chega
   // junto com o resto da tela e não segura a abertura do modal.
   useEffect(() => {
-    if (!open || !lead.phone) { setLendoPermissao(false); return; }
+    // No modo aparelho não existe ligação pela Meta nesta tela — perguntar a
+    // permissão seria uma consulta ao banco pra pintar um botão que nem aparece.
+    if (!open || !lead.phone || modoApp) { setLendoPermissao(false); return; }
     let vivo = true;
     setLendoPermissao(true);
     void carregarPermissao(lead.phone).then(({ permissao: p, leu }) => {
@@ -125,7 +140,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
       setLendoPermissao(false);
     });
     return () => { vivo = false; };
-  }, [open, lead.phone]);
+  }, [open, lead.phone, modoApp]);
 
   if (!open) return null;
 
@@ -181,7 +196,12 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
     if (!dialable) return;
     const t = textoAssinado();
     logWhatsApp({ leadId: lead.id ?? null, ownerId: ownerId ?? null, phone, body: t || null, status: "pending", kind: "message" });
+    // Síncrono e dentro do clique: `window.open` depois de um await é bloqueado
+    // pelo navegador do celular, que é justamente onde este botão importa.
     window.open(waChatLink(lead.phone, t || undefined), "_blank", "noopener,noreferrer");
+    // No modo aparelho ESTE é o botão que executa a atividade — quem chamou o
+    // modal precisa saber que o contato aconteceu.
+    if (modoApp) onSent?.();
   }
 
   async function handleWebfoneCall() {
@@ -332,6 +352,28 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
           {/* ── MENSAGEM ─────────────────────────────────────────────────── */}
           <div className="space-y-2">
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Mensagem</p>
+            {/* MODO APARELHO: um botão só, e ele SAI do QS. Deixar o "Enviar
+                pelo QS" aqui do lado seria oferecer um caminho que não existe
+                mais — o número do SDR é um WhatsApp comum, sem API. */}
+            {modoApp ? (
+              <>
+                <button
+                  onClick={handleOpenChat}
+                  disabled={!dialable}
+                  className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl text-[15px] font-bold text-white transition-all hover:opacity-90 disabled:opacity-50"
+                  style={{ background: WA_GREEN, boxShadow: "0 8px 18px -10px rgba(37,211,102,.75)" }}
+                  title={dialable ? "Abre a conversa deste lead no WhatsApp do seu celular, com a mensagem já escrita" : "Lead sem telefone cadastrado"}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.29.173-1.414-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.002-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
+                  </svg>
+                  Abrir no WhatsApp
+                </button>
+                <p className="text-[11px] text-gray-500 text-center leading-snug">
+                  A conversa abre no <b>seu aparelho</b>, com a mensagem já escrita. Quem aperta enviar é você — o QS registra o contato.
+                </p>
+              </>
+            ) : (
             <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr] gap-2">
               <button
                 onClick={handleSend}
@@ -357,9 +399,15 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
                 WhatsApp
               </button>
             </div>
+            )}
           </div>
 
-          {/* ── LIGAÇÃO (número oficial, Cloud API Calling) ───────────────── */}
+          {/* ── LIGAÇÃO (número oficial, Cloud API Calling) ─────────────────
+              ESCONDIDA NO MODO APARELHO. A ligação daqui sai pela mesma Cloud
+              API que caiu; enquanto ela estiver fora, o botão só sabe cobrar
+              permissão e devolver erro. Quem precisa ligar liga do celular,
+              de dentro da conversa que o botão verde acabou de abrir. */}
+          {!modoApp && (<>
           <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--line)" }}>
             <div className="flex items-center gap-3 px-4 py-3" style={{ background: "var(--card2)" }}>
               <span className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0" style={{ background: "rgba(18,161,138,.14)", color: "#0E7C6A" }}>
@@ -477,6 +525,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               ? "A ligação toca no WhatsApp do cliente e sai pelo número oficial da empresa — o áudio é deste navegador."
               : "A Meta só permite ligar depois que o cliente autoriza. Ele responde no WhatsApp e o botão libera sozinho."}
           </p>
+          </>)}
         </div>
       </div>
     </div>
