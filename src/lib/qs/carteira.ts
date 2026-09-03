@@ -108,3 +108,100 @@ export async function reiniciarLead(
     return { ok: false, error: (e as { message?: string })?.message ?? "Falha ao reiniciar o lead." };
   }
 }
+
+/**
+ * REINICIAR HOJE: um clique, sem escolher nada.
+ *
+ * Repete a cadência em que o lead JÁ ESTAVA. É o caso comum do retrabalho em
+ * volume — "põe esses 30 na minha fila" — onde parar pra escolher a cadência 30
+ * vezes é o que faz ninguém usar a tela.
+ *
+ * Sem cadência vinculada não há o que repetir, e aí a resposta é mandar pro
+ * caminho que resolve (escolher uma), não um erro genérico.
+ */
+export async function reiniciarLeadHoje(
+  leadId: string,
+  ownerId: string | null
+): Promise<{ ok: true; tarefas: number } | { ok: false; error: string }> {
+  try {
+    const { data, error } = await supabase
+      .from("qs_leads")
+      .select("cadence_id")
+      .eq("id", leadId)
+      .maybeSingle();
+    if (error) return { ok: false, error: "Não consegui ler o lead: " + error.message };
+    const cadenceId = (data as { cadence_id: string | null } | null)?.cadence_id ?? null;
+    if (!cadenceId) {
+      return { ok: false, error: 'Esse lead nunca esteve numa cadência — use "Reiniciar cadência" e escolha uma.' };
+    }
+    return reiniciarLead(leadId, cadenceId, ownerId);
+  } catch (e: unknown) {
+    return { ok: false, error: (e as { message?: string })?.message ?? "Falha ao reiniciar o lead." };
+  }
+}
+
+/** O que aconteceu com cada lead de um lote. */
+export interface ResultadoLote {
+  reiniciados: number;
+  tarefas: number;
+  falhas: { leadId: string; nome: string | null; motivo: string }[];
+}
+
+/**
+ * Reinicia vários leads. `cadenceId` null = cada um repete a própria cadência.
+ *
+ * Vai de 4 em 4, e não todos de uma vez: cada lead custa várias idas ao banco
+ * (ler a cadência, criar as tarefas, marcar as tags), e 30 leads soltos em
+ * paralelo viram perto de 90 requisições simultâneas — o Supabase começa a
+ * recusar e o SDR recebe "falhou" num lead que estava perfeito.
+ *
+ * Falha de um NÃO derruba o lote: o retorno diz quantos entraram e lista, com
+ * nome, quem ficou de fora e por quê. Lote que morre inteiro por causa de um
+ * lead sem cadência seria pior que lote nenhum.
+ */
+export async function reiniciarEmLote(
+  leads: { id: string; nome: string | null }[],
+  cadenceId: string | null,
+  ownerId: string | null,
+  aoAvancar?: (feitos: number, total: number) => void
+): Promise<ResultadoLote> {
+  const out: ResultadoLote = { reiniciados: 0, tarefas: 0, falhas: [] };
+  const LOTE = 4;
+  let feitos = 0;
+
+  for (let i = 0; i < leads.length; i += LOTE) {
+    const fatia = leads.slice(i, i + LOTE);
+    const rs = await Promise.all(
+      fatia.map(async (l) => ({
+        lead: l,
+        r: cadenceId
+          ? await reiniciarLead(l.id, cadenceId, ownerId)
+          : await reiniciarLeadHoje(l.id, ownerId),
+      }))
+    );
+    for (const { lead, r } of rs) {
+      if (r.ok) { out.reiniciados++; out.tarefas += r.tarefas; }
+      else out.falhas.push({ leadId: lead.id, nome: lead.nome, motivo: r.error });
+    }
+    feitos += fatia.length;
+    aoAvancar?.(feitos, leads.length);
+  }
+  return out;
+}
+
+/**
+ * Sorteia `quantidade` itens de uma lista.
+ *
+ * Fisher-Yates numa CÓPIA. `sort(() => Math.random() - 0.5)` é o embaralhamento
+ * errado que todo mundo escreve: ele enviesa pro começo da lista, e aqui isso
+ * significaria sortear quase sempre os mesmos leads — exatamente o oposto do
+ * que o botão promete.
+ */
+export function sortear<T>(itens: T[], quantidade: number): T[] {
+  const copia = [...itens];
+  for (let i = copia.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+  }
+  return copia.slice(0, Math.max(0, quantidade));
+}

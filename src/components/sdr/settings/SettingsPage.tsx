@@ -10,6 +10,7 @@ import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, del
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
 import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } from "@/lib/qs/chatProvider";
 import { getWaModoApp, setWaModoApp, type WaModoApp } from "@/lib/qs/waApp";
+import { getRegua, setRegua, REGUA_PADRAO, horasHumanas, type ReguaVelocidade } from "@/lib/qs/carteiraSaude";
 import WaInboxLabels from "./WaInboxLabels";
 import LinhasDoTime from "./LinhasDoTime";
 import ModelosMeta from "./ModelosMeta";
@@ -44,7 +45,7 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "motivos" | "classificacao" | "horario" | "agenda" | "atendimento" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "motivos" | "classificacao" | "horario" | "carteira" | "agenda" | "atendimento" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -58,6 +59,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "motivos", label: "Motivos de Perda", group: "PLATAFORMA" },
   { key: "classificacao", label: "Classificação Automática", group: "PLATAFORMA" },
   { key: "horario", label: "Horário de Trabalho", group: "EMPRESA" },
+  { key: "carteira", label: "Carteira (Saúde)", group: "EMPRESA" },
   { key: "agenda", label: "Agenda (Google) — legado", group: "EMPRESA" },
   { key: "webfone-webrtc", label: "Webfone WebRTC (VoxFree)", group: "EMPRESA" },
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
@@ -1527,6 +1529,94 @@ function IntegracoesSection() {
   );
 }
 
+// ── Carteira: a régua da Saúde ───────────────────────────────────────────────
+//
+// A nota de 0 a 100 mede a velocidade da PRIMEIRA atividade de cada lead novo.
+// Aqui ficam os quatro limites que definem a curva. Eles nasceram medidos
+// (03/09/2026, 30 dias, 1790 leads: mediana do time 1,8h; 43% em menos de 1h),
+// e não cravados no código justamente pra o gestor apertar a meta conforme o
+// time melhora — sem deploy.
+
+const CAMPOS_REGUA: { chave: keyof ReguaVelocidade; rotulo: string; ajuda: string }[] = [
+  { chave: "excelenteH",  rotulo: "Nota 100 até",  ajuda: "Responder dentro desse tempo vale a nota cheia." },
+  { chave: "bomH",        rotulo: "Nota 80 até",   ajuda: "Daqui até o próximo limite a nota desce de 100 a 80." },
+  { chave: "aceitavelH",  rotulo: "Nota 55 até",   ajuda: "Ainda aceitável. Depois disso a queda é rápida." },
+  { chave: "zeroH",       rotulo: "Nota 0 a partir de", ajuda: "Lead sem nenhuma atividade concluída passado esse prazo entra na média como zero." },
+];
+
+function CarteiraSection() {
+  const [regua, setReguaState] = useState<ReguaVelocidade | null>(null);
+  const [salvando, setSalvando] = useState(false);
+
+  useEffect(() => { void getRegua().then(setReguaState); }, []);
+
+  async function salvar(nova: ReguaVelocidade) {
+    setReguaState(nova);
+    setSalvando(true);
+    const ok = await setRegua(nova);
+    setSalvando(false);
+    if (ok) notifySuccess("Régua salva. A Carteira recalcula na próxima abertura.");
+    else {
+      notifyError("Não foi possível salvar (só admin/gestor grava configurações).");
+      void getRegua().then(setReguaState);
+    }
+  }
+
+  if (!regua) return null;
+  const r = regua;
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Carteira (Saúde)</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          A nota de 0 a 100 da Carteira mede uma coisa só: quanto tempo o SDR leva entre o lead
+          <strong> chegar</strong> e a <strong>primeira atividade dele ser concluída</strong>. Aqui você define a régua.
+        </p>
+      </div>
+
+      <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "var(--line, #E8EBF0)", background: "var(--card)" }}>
+        {CAMPOS_REGUA.map((c) => (
+          <div key={c.chave} className="flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-semibold text-gray-900">{c.rotulo}</p>
+              <p className="text-[11.5px] text-gray-500 leading-snug">{c.ajuda}</p>
+            </div>
+            <div className="shrink-0 text-right">
+              <input
+                type="number"
+                step="0.5"
+                min="0.1"
+                value={r[c.chave]}
+                onChange={(e) => salvar({ ...r, [c.chave]: Number(e.target.value) })}
+                disabled={salvando}
+                className="w-24 px-2 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-sm text-right"
+                aria-label={c.rotulo}
+              />
+              <p className="text-[11px] text-gray-400 mt-0.5">{horasHumanas(r[c.chave])}</p>
+            </div>
+          </div>
+        ))}
+
+        <button
+          onClick={() => void salvar(REGUA_PADRAO)}
+          disabled={salvando}
+          className="text-[12px] font-semibold text-gray-500 hover:underline disabled:opacity-60"
+        >
+          Voltar ao padrão ({REGUA_PADRAO.excelenteH}h / {REGUA_PADRAO.bomH}h / {REGUA_PADRAO.aceitavelH}h / {REGUA_PADRAO.zeroH}h)
+        </button>
+      </div>
+
+      <p className="text-[12px] text-gray-500 leading-snug">
+        Os tempos são em <strong>horas de expediente</strong>: noite e fim de semana não contam, então lead que
+        chega domingo e é trabalhado segunda de manhã não pune ninguém. Cuidado com os dois extremos — uma régua
+        onde todo mundo já tira 95 não muda comportamento nenhum, e uma onde todo mundo tira 20 é ignorada na
+        primeira semana. O padrão acima deixa o time em 84 / 79 / 75.
+      </p>
+    </div>
+  );
+}
+
 // ── Modo aparelho: quem conversa pelo WhatsApp do celular ────────────────────
 //
 // Nasceu em 03/09, quando a API oficial caiu e cada SDR ganhou um celular. Não
@@ -2116,6 +2206,7 @@ export default function SettingsPage() {
         {activeSection === "motivos" && <MotivosSection />}
         {activeSection === "classificacao" && <ClassificacaoSection />}
         {activeSection === "horario" && <HorarioSection />}
+        {activeSection === "carteira" && <CarteiraSection />}
         {activeSection === "agenda" && <AgendaSection />}
         {activeSection === "modelos-meta" && <ModelosMeta />}
         {activeSection === "mensagem-automatica" && <MensagemAutomatica />}
