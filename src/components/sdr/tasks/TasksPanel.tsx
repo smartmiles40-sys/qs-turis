@@ -24,7 +24,7 @@ import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getChatProvider, defaultChatProvider, type ChatProvider } from "@/lib/qs/chatProvider";
 import { useWhatsAppApp } from "@/lib/qs/waApp";
-import { getLeadScore } from "@/lib/leadScore";
+import { getLeadScore, type LeadTemperature } from "@/lib/leadScore";
 import { formatPhoneDisplay, fillTemplate, normalizePhoneBR } from "@/lib/whatsapp";
 import WhatsAppModal from "../whatsapp/WhatsAppModal";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
@@ -635,6 +635,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter | null>(null);
   const [channelFilter, setChannelFilter] = useState<ChannelType | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<PriorityLevel | null>(null);
+  // Temperatura do lead (Lead Score que vem do Bitrix). "sem" = lead que o
+  // Bitrix nunca classificou — é uma resposta legítima, não um estado de erro,
+  // e sem essa opção esses leads ficariam inalcançáveis pelo filtro.
+  const [scoreFilter, setScoreFilter] = useState<LeadTemperature | "sem" | null>(null);
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter | null>(null);
   // (ownerFilter é declarado lá em cima, junto do placar, que também depende dele)
 
@@ -1900,6 +1904,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       filtered = filtered.filter((t) => t.priority === priorityFilter);
     }
 
+    // ── TEMPERATURA DO LEAD ────────────────────────────────────────────────
+    // Mesma fonte do chip do card (getLeadScore → rótulo do Bitrix), pra não
+    // existir um lead "Quente" na etiqueta e "Morno" no filtro.
+    if (scoreFilter) {
+      filtered = filtered.filter((t) => {
+        const nivel = getLeadScore(getLeadForTask(t))?.level ?? null;
+        return scoreFilter === "sem" ? nivel === null : nivel === scoreFilter;
+      });
+    }
+
     if (ownerFilter) {
       filtered = filtered.filter((t) => t.owner_id === ownerFilter);
     }
@@ -1946,7 +1960,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     });
 
     return filtered;
-  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, periodFilter, ownerFilter, currentUser, workHours, atividadeVisivel]);
+  }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, scoreFilter, periodFilter, ownerFilter, currentUser, workHours, atividadeVisivel]);
 
   // Card "hero" atual (o que o SDR está atendendo) — usado no render E nos atalhos.
   const heroTaskMemo = useMemo(() => {
@@ -2264,6 +2278,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const channelBreakdown = CHANNEL_ORDER
     .map((ch) => ({ ch, n: channelCounts.get(ch) ?? 0 }))
     .filter((x) => x.n > 0);
+
+  // Quantas atividades por TEMPERATURA do lead. Sai do mesmo counterBase dos
+  // outros contadores — número que o SDR vê no filtro tem que ser o mesmo que
+  // ele encontra ao filtrar, senão vira a discussão de 13/08 outra vez.
+  const scoreCounts = useMemo(() => {
+    const m = new Map<LeadTemperature | "sem", number>();
+    for (const t of counterBase) {
+      const k = getLeadScore(leadsMap.get(t.lead_id))?.level ?? "sem";
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  }, [counterBase, leadsMap]);
 
 
   // Placar real: concluídas hoje/mês vs metas (qs_goals, com fallback nos padrões)
@@ -3978,6 +4004,26 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <option value="baixa">Baixa</option>
             </select>
 
+            {/* Lead Score (temperatura que vem do Bitrix). Numa fila de centenas
+                de atividades, é o filtro que responde "por quem eu começo". */}
+            <select
+              value={scoreFilter || ""}
+              onChange={(e) => setScoreFilter((e.target.value as LeadTemperature | "sem") || null)}
+              className={`qsx-fchip${scoreFilter ? " on" : ""}`}
+              aria-label="Filtrar por Lead Score (temperatura do lead)"
+            >
+              <option value="">Lead Score</option>
+              {([
+                ["quente", "🔥 Quente"],
+                ["morno", "🌤️ Morno"],
+                ["frio", "❄️ Frio"],
+                ["sem", "Sem score"],
+              ] as const).map(([k, label]) => {
+                const n = scoreCounts.get(k) ?? 0;
+                return <option key={k} value={k}>{label}{n > 0 ? ` (${n})` : ""}</option>;
+              })}
+            </select>
+
             <select
               value={periodFilter || ""}
               onChange={(e) => setPeriodFilter(e.target.value as any || null)}
@@ -4001,9 +4047,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               ))}
             </select>
 
-            {(statusFilter || channelFilter || priorityFilter || periodFilter || ownerFilter) && (
+            {(statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter || ownerFilter) && (
               <button
-                onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setPeriodFilter(null); setOwnerFilter(null); }}
+                onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setScoreFilter(null); setPeriodFilter(null); setOwnerFilter(null); }}
                 className="text-[13px] font-semibold hover:underline"
                 style={{ color: "var(--orange)" }}
               >
@@ -4059,7 +4105,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                     Tentar de novo
                   </button>
                 </>
-              ) : (statusFilter || channelFilter || priorityFilter || periodFilter || ownerFilter || search.trim()) ? (
+              ) : (statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter || ownerFilter || search.trim()) ? (
                 <>
                   <span style={{ color: "var(--ink3)" }}><IconFilter /></span>
                   <p className="mt-4 text-sm font-medium" style={{ color: "var(--ink2)" }}>Nenhuma atividade com esses filtros.</p>
