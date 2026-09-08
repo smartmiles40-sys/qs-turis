@@ -908,6 +908,24 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
   // Ele continua enxergando o lead depois da transferência: `qs_owns_lead`
   // (0050) inclui quem passou o lead adiante, e o handover é gravado logo
   // abaixo com ele como `from_user_id`.
+  await encerrarProspeccao(lead.id, meeting.id, origem);
+
+  // O lead passa a ser do especialista — mesma regra do agendamento pela tela.
+  if (!(await transferirProCloser(lead, closer, origem))) {
+    avisos.push('o lead não passou pro especialista');
+  }
+
+  // ── AS TAREFAS NASCEM DEPOIS DA TRANSFERÊNCIA, E A ORDEM É O CONSERTO ──────
+  // Elas eram criadas ANTES, e o `transferirProCloser` — que arrasta toda
+  // tarefa aberta do lead pro novo dono — engolia a de confirmar presença no
+  // mesmo segundo. Resultado: a decisão de 25/08 ("confirmar presença é do
+  // SDR") nunca valeu na prática; a cobrança caía no closer, calada. Vale pra
+  // Glória desde agosto, não só pro autoagendamento — medido em 08/09, com a
+  // tarefa nascendo pra Victor Hugo e terminando com a Talita.
+  //
+  // Criando depois, elas não estão abertas na hora do arrasto e ficam com o
+  // dono certo. Nada mais depende desta ordem: a reunião já está gravada e o
+  // horário já está reservado desde o INSERT lá em cima.
   const sdr = sdrCredito.id;
   await criarTarefa({
     lead_id: lead.id,
@@ -933,13 +951,6 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
     notes: `Registre o desfecho da reunião com ${nome} (${quando}): realizada, no-show ou reagendada — e o SAL. Abra Reuniões → o card da reunião.`,
     tags: ['reuniao', 'desfecho', tag],
   });
-
-  await encerrarProspeccao(lead.id, meeting.id, origem);
-
-  // O lead passa a ser do especialista — mesma regra do agendamento pela tela.
-  if (!(await transferirProCloser(lead, closer, origem))) {
-    avisos.push('o lead não passou pro especialista');
-  }
 
   const sala = await criarSalaDoMeet(meeting, [closer.email, emailLimpo], origem);
   if (sala.ok) {
