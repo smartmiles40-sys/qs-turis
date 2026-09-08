@@ -50,10 +50,17 @@ import {
 
 // Mesma última linha de defesa do /api/lead: se qs_settings sumir ou vier
 // corrompido, a página não para de funcionar.
+//
+// O `stfv-forms-geral.vercel.app` está aqui de propósito, e não só na 0077:
+// medido em 08/09, `forms.setuforeuvouviagens.com.br` AINDA NÃO RESOLVE (o
+// CNAME planejado em 03/09 nunca foi criado), então o endereço .vercel.app é o
+// único lugar de onde o embed pode ser testado hoje. Deixá-lo só na migration
+// garantiria um 403 na primeira tentativa de quem fosse usar isto.
 const ORIGENS_PADRAO = [
   'https://setuforeuvouviagens.com.br',
   'https://live.setuforeuvouviagens.com.br',
   'https://forms.setuforeuvouviagens.com.br',
+  'https://stfv-forms-geral.vercel.app',
 ];
 
 const TETO_PADRAO = 20;          // chamadas por IP por hora
