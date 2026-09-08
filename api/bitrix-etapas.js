@@ -52,13 +52,22 @@ export default async function handler(req, res) {
   if (!base()) return res.status(500).json({ ok: false, error: 'BITRIX_WEBHOOK_BASE não configurado' });
 
   try {
-    // O funil 0 (o "Geral") não aparece em dealcategory.list — ele é implícito.
+    // O funil 0 NÃO aparece em `crm.dealcategory.list` — ele é o padrão, e é
+    // implícito. Mas ele TEM nome no portal, e chutar "Geral" leva a erro de
+    // leitura: aqui ele se chama "Comercial 1", o que só dá pra saber
+    // perguntando. `crm.dealcategory.default.get` é quem responde.
     const categorias = await chamar('crm.dealcategory.list', {
       order: { SORT: 'ASC' },
       select: ['ID', 'NAME', 'SORT'],
     });
 
-    const funis = [{ id: 0, nome: 'Geral (padrão)' }].concat(
+    let nomeDoPadrao = '(funil padrão — nome não obtido)';
+    try {
+      const p = await chamar('crm.dealcategory.default.get', {});
+      if (p?.NAME) nomeDoPadrao = p.NAME;
+    } catch { /* segue com o rótulo genérico */ }
+
+    const funis = [{ id: 0, nome: nomeDoPadrao }].concat(
       (Array.isArray(categorias) ? categorias : []).map((c) => ({ id: Number(c.ID), nome: c.NAME }))
     );
 
