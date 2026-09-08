@@ -815,17 +815,48 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
 
   const emailLimpo = emailValido(email) ? String(email).trim() : null;
   const nome = lead.full_name || lead.first_name || 'cliente';
+
+  // ── QUEM LEVA O CRÉDITO DO AGENDAMENTO ────────────────────────────────────
+  // A convenção do QS (medida em 153 reuniões): `owner_id` é o SDR QUE AGENDOU
+  // e `scheduled_by` é o NOME dele; o closer mora em `closer_id`/`meeting_owner`.
+  //
+  // Aqui estava gravando o CLOSER nos dois, e isso custava duas coisas: o SDR
+  // não via a reunião em lugar nenhum (a Agenda e o sino filtram por owner_id) e
+  // o "Quem fez o agendamento?" do Bitrix não casava com ninguém, porque lá o
+  // casamento é pelo NOME da pessoa — e "Autoagendamento (site)" não é o nome de
+  // ninguém.
+  //
+  // O SDR sai do dono do lead, que o rodízio do banco já sorteou quando o lead
+  // nasceu (trigger trg_qs_assign_owner). Ou seja: um agendamento para cada SDR,
+  // na ordem, sem precisar de um segundo rodízio aqui — que divergiria do
+  // primeiro no primeiro ajuste.
+  //
+  // Cai pro closer só quando o lead já era dele (ele mesmo trabalhou o card).
+  let sdrCredito = { id: closer.id, name: closer.name };
+  if (lead.owner_id && lead.owner_id !== closer.id) {
+    try {
+      const dono = await rest(`qs_users?select=id,name&id=eq.${encodeURIComponent(lead.owner_id)}&limit=1`);
+      if (dono?.[0]?.name) sdrCredito = { id: dono[0].id, name: dono[0].name };
+    } catch (e) {
+      console.warn('[agenda] não deu pra ler o SDR do lead (crédito fica com o closer):', e?.message);
+    }
+  }
+
   const row = {
     lead_id: lead.id,
     lead_name: nome,
-    owner_id: closer.id,
+    owner_id: sdrCredito.id,
     closer_id: closer.id,
     title: titulo || `Reunião · ${nome}`,
     scheduled_at: inicio.toISOString(),
     duration_min: r.duracaoMin,
     location: 'Google Meet',
     status: 'agendada',
-    scheduled_by: origem.rotulo,
+    // O NOME de quem agendou, como em toda reunião do QS. A origem mora na
+    // coluna `origem` (0078) — antes ela ocupava este campo e era por isso que
+    // o SDR sumia do agendamento.
+    scheduled_by: sdrCredito.name,
+    origem: origem.tag,
     meeting_owner: closer.name,
     client_email: emailLimpo,
     booking_date: (() => { const p = emSP(agora); return `${p.ano}-${String(p.mes).padStart(2, '0')}-${String(p.dia).padStart(2, '0')}`; })(),
@@ -877,7 +908,7 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
   // Ele continua enxergando o lead depois da transferência: `qs_owns_lead`
   // (0050) inclui quem passou o lead adiante, e o handover é gravado logo
   // abaixo com ele como `from_user_id`.
-  const sdr = lead.owner_id && lead.owner_id !== closer.id ? lead.owner_id : closer.id;
+  const sdr = sdrCredito.id;
   await criarTarefa({
     lead_id: lead.id,
     owner_id: sdr,
