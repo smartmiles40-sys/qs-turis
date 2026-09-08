@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Agende sua conversa</title>
+<!--
+  AUTOAGENDAMENTO — a página que o cliente vê (Bruno, 08/09/2026).
+
+  Servida em /agendar/ e feita pra viver dentro de um <iframe> no STFV Forms.
+  Ver docs/AUTOAGENDAMENTO.md pro código do embed.
+
+  POR QUE É HTML PURO, E NÃO UMA TELA DO QS:
+  o bundle do QS carrega React, o Supabase e o CRM inteiro, e só serve depois de
+  um login. Esta página é para um desconhecido, dentro de um iframe, muitas vezes
+  no 4G — ela precisa aparecer em menos de um segundo e não pode carregar UMA
+  LINHA do CRM. Sem dependência, sem build, sem chave de banco no navegador: só
+  fala com /api/agendar.
+
+  PARÂMETROS DA URL (todos opcionais):
+    ?expedicao=Japão   -> vira o título da reunião e o interesse no lead
+    ?origem=live-japao -> vira a fonte do lead (é como o dashboard separa)
+    ?embed=1           -> tira o fundo e a moldura (pra encaixar na página de fora)
+-->
+<style>
+  /* ── Tokens ────────────────────────────────────────────────────────────── */
+  :root {
+    --azul: #0147FF;
+    --azul-escuro: #0035c4;
+    --tinta: #0B1220;
+    --tinta2: #47536B;
+    --tinta3: #7A879E;
+    --linha: #E3E8F0;
+    --fundo: #F5F7FB;
+    --papel: #FFFFFF;
+    --erro: #B42318;
+    --ok: #05803F;
+    --raio: 14px;
+    --sombra: 0 1px 2px rgba(11,18,32,.05), 0 12px 32px -12px rgba(11,18,32,.18);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--fundo);
+    color: var(--tinta);
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16px;               /* 16 no mobile evita o zoom automático do iOS ao focar input */
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body.embed { background: transparent; }
+  body.embed .cartao { box-shadow: none; border: none; background: transparent; }
+
+  .cartao {
+    max-width: 560px;
+    margin: 0 auto;
+    background: var(--papel);
+    border: 1px solid var(--linha);
+    border-radius: var(--raio);
+    box-shadow: var(--sombra);
+    padding: 24px 20px 22px;
+  }
+  @media (max-width: 480px) { .cartao { padding: 18px 14px 16px; border-radius: 0; border-left: 0; border-right: 0; } }
+
+  .wrap { padding: 20px 12px; }
+  body.embed .wrap { padding: 0; }
+
+  h1 { font-size: 21px; line-height: 1.25; margin: 0 0 6px; letter-spacing: -.015em; font-weight: 700; }
+  .sub { font-size: 14px; line-height: 1.5; color: var(--tinta2); margin: 0 0 20px; }
+
+  .rotulo {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--tinta3);
+    margin: 0 0 9px;
+  }
+
+  /* ── Faixa dos dias ────────────────────────────────────────────────────── */
+  .dias {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    margin-bottom: 20px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .dia {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    min-width: 72px;
+    padding: 10px 12px;
+    border: 1px solid var(--linha);
+    border-radius: 12px;
+    background: var(--papel);
+    cursor: pointer;
+    text-align: center;
+    font: inherit;
+    color: var(--tinta2);
+    transition: border-color .12s, background .12s, color .12s;
+  }
+  .dia:hover { border-color: #C3CDDE; }
+  .dia .semana { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+  .dia .data { display: block; font-size: 16px; font-weight: 700; color: var(--tinta); margin-top: 3px; }
+  .dia[aria-pressed="true"] { background: var(--azul); border-color: var(--azul); color: #fff; }
+  .dia[aria-pressed="true"] .data { color: #fff; }
+
+  /* ── Grade de horários ─────────────────────────────────────────────────── */
+  .horas { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
+  .hora {
+    padding: 12px 6px;
+    border: 1px solid var(--linha);
+    border-radius: 10px;
+    background: var(--papel);
+    font: inherit;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--tinta);
+    cursor: pointer;
+    transition: border-color .12s, background .12s, color .12s;
+  }
+  .hora:hover { border-color: var(--azul); color: var(--azul); }
+  .hora[aria-pressed="true"] { background: var(--azul); border-color: var(--azul); color: #fff; }
+
+  /* ── Formulário ────────────────────────────────────────────────────────── */
+  .campo { margin-bottom: 14px; }
+  .campo label { display: block; font-size: 13px; font-weight: 600; color: var(--tinta2); margin-bottom: 6px; }
+  .campo input, .campo textarea {
+    width: 100%;
+    padding: 12px 13px;
+    border: 1px solid var(--linha);
+    border-radius: 10px;
+    font: inherit;
+    font-size: 15px;
+    color: var(--tinta);
+    background: var(--papel);
+    transition: border-color .12s, box-shadow .12s;
+  }
+  .campo textarea { resize: vertical; min-height: 68px; }
+  .campo input:focus, .campo textarea:focus {
+    outline: none;
+    border-color: var(--azul);
+    box-shadow: 0 0 0 3px rgba(1,71,255,.12);
+  }
+  .campo input[aria-invalid="true"] { border-color: var(--erro); }
+  .campo .erro { display: none; font-size: 12.5px; color: var(--erro); margin-top: 5px; }
+  .campo.ruim .erro { display: block; }
+
+  /* O campo-armadilha. Fora da tela em vez de display:none — robô moderno
+     ignora o que está escondido com display, mas preenche o que só saiu do
+     enquadramento. aria-hidden + tabindex mantêm leitor de tela e teclado longe. */
+  .armadilha { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+  /* ── Botões ────────────────────────────────────────────────────────────── */
+  .primario {
+    width: 100%;
+    padding: 14px 18px;
+    border: none;
+    border-radius: 11px;
+    background: var(--azul);
+    color: #fff;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .12s, transform .06s;
+  }
+  .primario:hover:not(:disabled) { background: var(--azul-escuro); }
+  .primario:active:not(:disabled) { transform: translateY(1px); }
+  .primario:disabled { opacity: .5; cursor: not-allowed; }
+
+  .voltar {
+    background: none;
+    border: none;
+    padding: 0 0 14px;
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--tinta3);
+    cursor: pointer;
+  }
+  .voltar:hover { color: var(--azul); }
+
+  /* ── Resumo do horário escolhido ───────────────────────────────────────── */
+  .escolhido {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 13px 14px;
+    background: #F0F4FF;
+    border: 1px solid #D5E0FF;
+    border-radius: 11px;
+    margin-bottom: 18px;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .escolhido strong { display: block; color: var(--tinta); }
+  .escolhido span { color: var(--tinta2); font-size: 13px; }
+
+  /* ── Estados ───────────────────────────────────────────────────────────── */
+  .recado {
+    padding: 14px 15px;
+    border-radius: 11px;
+    font-size: 14px;
+    line-height: 1.5;
+    background: #FFF4F2;
+    border: 1px solid #FFD9D2;
+    color: var(--erro);
+    margin-bottom: 16px;
+  }
+  .vazio { padding: 26px 4px; text-align: center; color: var(--tinta2); font-size: 14px; line-height: 1.55; }
+
+  .esqueleto { height: 46px; border-radius: 10px; background: linear-gradient(90deg, #EEF1F7 25%, #F7F9FC 50%, #EEF1F7 75%); background-size: 200% 100%; animation: brilho 1.2s infinite; }
+  @keyframes brilho { to { background-position: -200% 0; } }
+
+  /* ── Sucesso ───────────────────────────────────────────────────────────── */
+  .selo {
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    background: #E7F6EE;
+    color: var(--ok);
+    display: flex; align-items: center; justify-content: center;
+    margin: 4px auto 14px;
+    font-size: 24px; font-weight: 700;
+  }
+  .fim { text-align: center; }
+  .fim h2 { font-size: 19px; margin: 0 0 8px; }
+  .fim .quando { font-size: 16px; font-weight: 700; color: var(--azul); margin: 0 0 4px; }
+  .fim p { font-size: 14px; line-height: 1.55; color: var(--tinta2); margin: 0 0 6px; }
+  .fim .acoes { display: flex; flex-direction: column; gap: 9px; margin-top: 18px; }
+  .fim a.botao {
+    display: block; padding: 13px 16px; border-radius: 11px;
+    text-decoration: none; font-size: 14.5px; font-weight: 700;
+    background: var(--azul); color: #fff;
+  }
+  .fim a.secundario { background: var(--papel); color: var(--tinta2); border: 1px solid var(--linha); }
+
+  .rodape { margin-top: 16px; font-size: 11.5px; line-height: 1.5; color: var(--tinta3); text-align: center; }
+
+  [hidden] { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <main class="cartao" id="cartao">
+
+    <!-- ── Passo 1: dia e hora ────────────────────────────────────────────── -->
+    <section id="passo-horario">
+      <h1 id="titulo">Agende sua conversa</h1>
+      <p class="sub" id="subtitulo">Carregando os horários disponíveis…</p>
+
+      <div id="carregando">
+        <div class="esqueleto" style="margin-bottom:10px"></div>
+        <div class="esqueleto" style="height:120px"></div>
+      </div>
+
+      <div id="sem-horario" class="vazio" hidden></div>
+
+      <div id="grade" hidden>
+        <span class="rotulo">Escolha o dia</span>
+        <div class="dias" id="dias" role="group" aria-label="Dias disponíveis"></div>
+
+        <span class="rotulo">Escolha o horário</span>
+        <div class="horas" id="horas" role="group" aria-label="Horários disponíveis"></div>
+
+        <button type="button" class="primario" id="continuar" disabled style="margin-top:20px">
+          Escolha um horário
+        </button>
+      </div>
+    </section>
+
+    <!-- ── Passo 2: os dados ──────────────────────────────────────────────── -->
+    <section id="passo-dados" hidden>
+      <button type="button" class="voltar" id="voltar">← Trocar o horário</button>
+
+      <!-- Ícone em SVG, não emoji: no Windows o 📅 sai como um retângulo (visto
+           na tela em 08/09). Mesma razão pela qual as LPs desenham bandeira. -->
+      <div class="escolhido">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0147FF" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:0 0 auto;margin-top:1px">
+          <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+          <path d="M16 2v4M8 2v4M3 10h18"></path>
+        </svg>
+        <div>
+          <strong id="resumo-quando"></strong>
+          <span id="resumo-duracao"></span>
+        </div>
+      </div>
+
+      <form id="formulario" novalidate>
+        <div class="campo" id="c-nome">
+          <label for="nome">Seu nome completo</label>
+          <input id="nome" name="nome" type="text" autocomplete="name" required maxlength="120" placeholder="Como podemos te chamar?">
+          <span class="erro" id="e-nome"></span>
+        </div>
+
+        <div class="campo" id="c-telefone">
+          <label for="telefone">WhatsApp com DDD</label>
+          <input id="telefone" name="telefone" type="tel" inputmode="numeric" autocomplete="tel-national" required placeholder="(11) 99999-9999" maxlength="16">
+          <span class="erro" id="e-telefone"></span>
+        </div>
+
+        <div class="campo" id="c-email">
+          <label for="email">Seu melhor e-mail</label>
+          <input id="email" name="email" type="email" autocomplete="email" required maxlength="160" placeholder="voce@email.com">
+          <span class="erro" id="e-email">É pra onde vai o convite da reunião.</span>
+        </div>
+
+        <div class="campo" id="c-observacao">
+          <label for="observacao">Quer adiantar alguma coisa? <span style="font-weight:400;color:var(--tinta3)">(opcional)</span></label>
+          <textarea id="observacao" name="observacao" maxlength="400" placeholder="Destino, quantas pessoas, datas que você tem em mente…"></textarea>
+        </div>
+
+        <!-- campo-armadilha: gente não vê, robô preenche -->
+        <div class="armadilha" aria-hidden="true">
+          <label for="site">Não preencha este campo</label>
+          <input id="site" name="site" type="text" tabindex="-1" autocomplete="off">
+        </div>
+
+        <div class="recado" id="recado-erro" role="alert" hidden></div>
+
+        <button type="submit" class="primario" id="enviar">Confirmar agendamento</button>
+
+        <p class="rodape">
+          Ao confirmar, você concorda em receber o convite e as mensagens sobre esta reunião.
+        </p>
+      </form>
+    </section>
+
+    <!-- ── Passo 3: pronto ────────────────────────────────────────────────── -->
+    <section id="passo-fim" hidden class="fim">
+      <div class="selo" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+      </div>
+      <h2 id="fim-titulo">Reunião confirmada!</h2>
+      <p class="quando" id="fim-quando"></p>
+      <p id="fim-quem"></p>
+      <p id="fim-email"></p>
+      <div class="acoes">
+        <a class="botao" id="fim-meet" href="#" target="_blank" rel="noopener" hidden>Abrir a sala do Google Meet</a>
+        <a class="botao secundario" id="fim-agenda" href="#" target="_blank" rel="noopener" hidden>Adicionar à minha agenda</a>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var API = '/api/agendar';
+  var params = new URLSearchParams(location.search);
+  var expedicao = (params.get('expedicao') || '').slice(0, 80);
+  var origem = (params.get('origem') || '').slice(0, 80);
+  if (params.get('embed') === '1') document.body.classList.add('embed');
+
+  var estado = { dias: [], diaAtivo: null, inicio: null, rotulo: '', duracao: 60, enviando: false };
+
+  var el = function (id) { return document.getElementById(id); };
+
+  // ── Altura pro iframe de fora ──────────────────────────────────────────
+  // Iframe não sabe a altura do que está dentro dele — ou a página de fora
+  // escuta isto, ou o embed vira uma caixa com barra de rolagem interna, que é
+  // o jeito mais rápido de a pessoa não ver o botão de confirmar. Ver o trecho
+  // pro lado de fora em docs/AUTOAGENDAMENTO.md.
+  function avisarAltura() {
+    try {
+      var h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+      parent.postMessage({ tipo: 'qs-agendar:altura', altura: h }, '*');
+    } catch (e) { /* sem pai, ou pai de outra origem que não escuta: tudo bem */ }
+  }
+  window.addEventListener('resize', avisarAltura);
+  if (window.ResizeObserver) new ResizeObserver(avisarAltura).observe(document.body);
+
+  function mostrarPasso(qual) {
+    ['passo-horario', 'passo-dados', 'passo-fim'].forEach(function (p) {
+      el(p).hidden = (p !== qual);
+    });
+    avisarAltura();
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
+  }
+
+  // ── Passo 1: buscar a grade ────────────────────────────────────────────
+  function carregar() {
+    fetch(API, { headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        el('carregando').hidden = true;
+        if (d.titulo) { el('titulo').textContent = d.titulo; document.title = d.titulo; }
+        el('subtitulo').textContent = d.subtitulo || '';
+        estado.duracao = d.duracao_min || 60;
+
+        if (!d.ok || !d.dias || !d.dias.length) {
+          el('subtitulo').textContent = '';
+          el('sem-horario').textContent = d.recado || 'No momento não temos horário disponível.';
+          el('sem-horario').hidden = false;
+          avisarAltura();
+          return;
+        }
+
+        estado.dias = d.dias;
+        el('grade').hidden = false;
+        desenharDias();
+        escolherDia(d.dias[0]);
+      })
+      .catch(function () {
+        el('carregando').hidden = true;
+        el('subtitulo').textContent = '';
+        el('sem-horario').textContent = 'Não consegui carregar os horários agora. Atualize a página em alguns instantes.';
+        el('sem-horario').hidden = false;
+        avisarAltura();
+      });
+  }
+
+  function desenharDias() {
+    var caixa = el('dias');
+    caixa.textContent = '';
+    estado.dias.forEach(function (d) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'dia';
+      b.setAttribute('aria-pressed', 'false');
+      b.dataset.dia = d.dia;
+      // "Hoje" em vez de "segunda-feira" quando é hoje: é o que a pessoa procura.
+      var semana = d.hoje ? 'Hoje' : d.curto;
+      b.innerHTML = '<span class="semana"></span><span class="data"></span>';
+      b.querySelector('.semana').textContent = semana;
+      b.querySelector('.data').textContent = d.data;
+      b.setAttribute('aria-label', (d.hoje ? 'Hoje, ' : d.rotulo + ', ') + d.data + ' — ' + d.horarios.length + ' horário(s)');
+      b.addEventListener('click', function () { escolherDia(d); });
+      caixa.appendChild(b);
+    });
+  }
+
+  function escolherDia(d) {
+    estado.diaAtivo = d;
+    estado.inicio = null;
+    Array.prototype.forEach.call(el('dias').children, function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.dia === d.dia));
+    });
+
+    var caixa = el('horas');
+    caixa.textContent = '';
+    d.horarios.forEach(function (h) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'hora';
+      b.textContent = h.hora;
+      b.setAttribute('aria-pressed', 'false');
+      b.dataset.inicio = h.inicio;
+      b.addEventListener('click', function () { escolherHora(d, h, b); });
+      caixa.appendChild(b);
+    });
+
+    atualizarBotao();
+    avisarAltura();
+  }
+
+  function escolherHora(d, h, botao) {
+    estado.inicio = h.inicio;
+    estado.rotulo = (d.hoje ? 'Hoje' : d.rotulo) + ', ' + d.data + ' às ' + h.hora;
+    Array.prototype.forEach.call(el('horas').children, function (b) {
+      b.setAttribute('aria-pressed', String(b === botao));
+    });
+    atualizarBotao();
+  }
+
+  function atualizarBotao() {
+    var b = el('continuar');
+    b.disabled = !estado.inicio;
+    b.textContent = estado.inicio ? 'Continuar' : 'Escolha um horário';
+  }
+
+  el('continuar').addEventListener('click', function () {
+    if (!estado.inicio) return;
+    el('resumo-quando').textContent = estado.rotulo;
+    el('resumo-duracao').textContent = estado.duracao + ' minutos, por Google Meet';
+    mostrarPasso('passo-dados');
+    el('nome').focus();
+  });
+
+  el('voltar').addEventListener('click', function () { mostrarPasso('passo-horario'); });
+
+  // ── Passo 2: os dados ──────────────────────────────────────────────────
+
+  // Máscara do telefone. Só cosmética: quem normaliza pro formato do banco é o
+  // servidor (normPhone), igual a todo lead que entra no QS.
+  el('telefone').addEventListener('input', function (e) {
+    var d = e.target.value.replace(/\D/g, '').slice(0, 11);
+    var s = d;
+    if (d.length > 2) s = '(' + d.slice(0, 2) + ') ' + d.slice(2);
+    if (d.length > 7) s = '(' + d.slice(0, 2) + ') ' + d.slice(2, d.length > 10 ? 7 : 6) + '-' + d.slice(d.length > 10 ? 7 : 6);
+    e.target.value = s;
+  });
+
+  function marcarErro(campo, mensagem) {
+    el('c-' + campo).classList.add('ruim');
+    el(campo).setAttribute('aria-invalid', 'true');
+    if (mensagem) el('e-' + campo).textContent = mensagem;
+  }
+
+  function limparErros() {
+    ['nome', 'telefone', 'email'].forEach(function (c) {
+      el('c-' + c).classList.remove('ruim');
+      el(c).removeAttribute('aria-invalid');
+    });
+    el('recado-erro').hidden = true;
+  }
+
+  function validar() {
+    limparErros();
+    var ok = true;
+    if (el('nome').value.trim().length < 2) { marcarErro('nome', 'Diga o seu nome, por favor.'); ok = false; }
+    if (el('telefone').value.replace(/\D/g, '').length < 10) { marcarErro('telefone', 'Confira o número com o DDD.'); ok = false; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(el('email').value.trim())) { marcarErro('email', 'Confira o e-mail.'); ok = false; }
+    if (!ok) avisarAltura();
+    return ok;
+  }
+
+  el('formulario').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (estado.enviando || !validar()) return;
+
+    estado.enviando = true;
+    var botao = el('enviar');
+    botao.disabled = true;
+    botao.textContent = 'Marcando…';
+
+    fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nome: el('nome').value.trim(),
+        telefone: el('telefone').value,
+        email: el('email').value.trim(),
+        observacao: el('observacao').value.trim(),
+        inicio: estado.inicio,
+        expedicao: expedicao,
+        origem: origem,
+        site: el('site').value
+      })
+    })
+      .then(function (r) { return r.json().then(function (d) { return { status: r.status, corpo: d }; }); })
+      .then(function (r) {
+        estado.enviando = false;
+        botao.disabled = false;
+        botao.textContent = 'Confirmar agendamento';
+
+        if (r.corpo && r.corpo.ok) return concluir(r.corpo);
+
+        var msg = (r.corpo && r.corpo.error) || 'Não consegui marcar agora. Tente de novo em instantes.';
+        if (r.corpo && r.corpo.campo && el('c-' + r.corpo.campo)) {
+          marcarErro(r.corpo.campo, msg);
+        } else {
+          el('recado-erro').textContent = msg;
+          el('recado-erro').hidden = false;
+        }
+        // Horário tomado no meio do caminho: recarrega a grade, senão a pessoa
+        // fica batendo no mesmo horário que já não existe.
+        if (r.status === 409) {
+          el('recado-erro').textContent = msg + ' Estou atualizando os horários…';
+          setTimeout(function () {
+            mostrarPasso('passo-horario');
+            el('grade').hidden = true;
+            el('carregando').hidden = false;
+            estado.inicio = null;
+            carregar();
+          }, 1400);
+        }
+        avisarAltura();
+      })
+      .catch(function () {
+        estado.enviando = false;
+        botao.disabled = false;
+        botao.textContent = 'Confirmar agendamento';
+        el('recado-erro').textContent = 'A conexão falhou. Confira sua internet e tente de novo.';
+        el('recado-erro').hidden = false;
+        avisarAltura();
+      });
+  });
+
+  // ── Passo 3: pronto ────────────────────────────────────────────────────
+  function concluir(d) {
+    el('fim-titulo').textContent = d.ja_existia ? 'Você já tem uma reunião marcada' : 'Reunião confirmada!';
+    el('fim-quando').textContent = d.quando_extenso || d.quando || estado.rotulo;
+    el('fim-quem').textContent = d.especialista
+      ? 'Você vai conversar com ' + d.especialista + '.'
+      : 'Um especialista vai te atender.';
+    el('fim-email').textContent = d.ja_existia
+      ? 'Não marcamos outra para não duplicar. Se precisar mudar, é só falar com a gente.'
+      : 'O convite com o link foi enviado para ' + el('email').value.trim() + '.';
+
+    if (d.link) {
+      el('fim-meet').href = d.link;
+      el('fim-meet').hidden = false;
+    }
+
+    var google = linkDaAgenda(d);
+    if (google) {
+      el('fim-agenda').href = google;
+      el('fim-agenda').hidden = false;
+    }
+
+    mostrarPasso('passo-fim');
+    // Pra página de fora saber que terminou (pixel de conversão, obrigado, etc.).
+    try { parent.postMessage({ tipo: 'qs-agendar:concluido', quando: d.quando || null }, '*'); } catch (e) {}
+  }
+
+  /** "Adicionar à minha agenda" — link do Google Calendar montado na mão. */
+  function linkDaAgenda(d) {
+    if (!estado.inicio) return null;
+    var ini = new Date(estado.inicio);
+    if (isNaN(ini.getTime())) return null;
+    var fim = new Date(ini.getTime() + estado.duracao * 60000);
+    var f = function (x) { return x.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); };
+    var titulo = expedicao ? ('Expedição ' + expedicao + ' — Se Tu For, Eu Vou') : 'Conversa com um especialista — Se Tu For, Eu Vou';
+    var detalhes = d.link ? ('Sala da reunião: ' + d.link) : 'O link da sala chega por e-mail antes da reunião.';
+    return 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+      + '&text=' + encodeURIComponent(titulo)
+      + '&dates=' + f(ini) + '/' + f(fim)
+      + '&details=' + encodeURIComponent(detalhes)
+      + (d.link ? '&location=' + encodeURIComponent(d.link) : '')
+      + '&ctz=America/Sao_Paulo';
+  }
+
+  carregar();
+})();
+</script>
+</body>
+</html>

@@ -36,6 +36,37 @@ export const DURACAO_MIN = 60;
 export const ANTECEDENCIA_MIN = 180;
 /** Até onde ela procura horário livre. Duas semanas úteis é mais que suficiente. */
 const DIAS_A_FRENTE = 14;
+/** Segunda a sexta. Existe como constante porque o autoagendamento reusa. */
+const DIAS_UTEIS = [1, 2, 3, 4, 5];
+
+// ── QUEM MAIS USA ESTE ARQUIVO ──────────────────────────────────────────────
+// Desde 08/09 não é só a Glória: o AUTOAGENDAMENTO (o cliente escolhe o próprio
+// horário numa página pública, ver api/agendar.js) entra pela mesma porta —
+// mesma janela, mesma antecedência, mesmo rodízio, mesma trava anti-choque.
+//
+// Foi decisão de desenho não escrever um segundo motor de agenda: dois motores
+// divergem no primeiro ajuste, e o defeito só aparece quando dois clientes caem
+// na mesma hora do mesmo especialista. O que muda entre os dois é só a ASSINATURA
+// (quem marcou), e é isso que `origem` carrega.
+
+/**
+ * Quem marcou a reunião. Vira `scheduled_by`, o texto da nota, o motivo de
+ * encerrar a cadência e o briefing da transferência — tudo o que o time vai LER
+ * depois pra entender de onde aquela reunião veio.
+ */
+export const ORIGEM_GLORIA = {
+  rotulo: 'Glória (IA)',
+  frase: 'Agendada pela Glória (IA) no WhatsApp',
+  quemAgendou: 'A Glória agendou esta reunião',
+  tag: 'gloria',
+};
+
+export const ORIGEM_AUTOAGENDAMENTO = {
+  rotulo: 'Autoagendamento (site)',
+  frase: 'O próprio cliente escolheu este horário na página de agendamento',
+  quemAgendou: 'O cliente marcou esta reunião sozinho pelo site',
+  tag: 'autoagendamento',
+};
 
 const DIAS_SEMANA = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
 
@@ -182,25 +213,26 @@ function doPeriodo(d, periodo) {
  * `dia` (YYYY-MM-DD em São Paulo) prende num dia só — é o que responde "e na
  * quinta, tem ?". Sem ele, varre os próximos dias úteis.
  */
-export async function horariosLivres({ closerId, periodo = null, dia = null, limite = 6, agora = new Date(), janelas = null } = {}) {
+export async function horariosLivres({ closerId, periodo = null, dia = null, limite = 6, agora = new Date(), janelas = null, regras = null } = {}) {
+  const r = comRegras(regras);
   const de = new Date(agora.getTime());
-  const ate = new Date(agora.getTime() + (DIAS_A_FRENTE + 1) * 86_400_000);
+  const ate = new Date(agora.getTime() + (r.diasAFrente + 1) * 86_400_000);
   const ocupado = janelas || (await ocupacao(de, ate));
 
-  const cedoDemais = agora.getTime() + ANTECEDENCIA_MIN * 60_000;
+  const cedoDemais = agora.getTime() + r.antecedenciaMin * 60_000;
   const achados = [];
   const hoje = emSP(agora);
 
-  for (let salto = 0; salto <= DIAS_A_FRENTE && achados.length < limite; salto++) {
+  for (let salto = 0; salto <= r.diasAFrente && achados.length < limite; salto++) {
     const base = new Date(Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia) + salto * 86_400_000);
     const ano = base.getUTCFullYear(), mes = base.getUTCMonth() + 1, d = base.getUTCDate();
     const dow = base.getUTCDay();
-    if (dow === 0 || dow === 6) continue;                    // fim de semana não
+    if (!r.dias.includes(dow)) continue;                     // fim de semana não (por padrão)
     if (dia && dia !== `${ano}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`) continue;
 
-    for (let h = JANELA_IA.primeira; h <= JANELA_IA.ultima && achados.length < limite; h++) {
+    for (let h = r.janela.primeira; h <= r.janela.ultima && achados.length < limite; h++) {
       const inicio = instanteEmSP(ano, mes, d, h, 0);
-      const fim = new Date(inicio.getTime() + DURACAO_MIN * 60_000);
+      const fim = new Date(inicio.getTime() + r.duracaoMin * 60_000);
       if (inicio.getTime() < cedoDemais) continue;
       if (!doPeriodo(inicio, periodo)) continue;
       if (!estaLivre(ocupado, closerId, inicio.getTime(), fim.getTime())) continue;
@@ -208,6 +240,116 @@ export async function horariosLivres({ closerId, periodo = null, dia = null, lim
     }
   }
   return achados;
+}
+
+// ─── As regras, num objeto só ────────────────────────────────────────────────
+
+/**
+ * As regras da agenda, com o padrão da Glória.
+ *
+ * Nasceu quando o autoagendamento precisou das MESMAS regras vindas de
+ * `qs_settings` (pro Bruno mexer sem deploy). Em vez de duplicar a conta, ela
+ * passou a ser parâmetro — e omitir o parâmetro devolve exatamente o
+ * comportamento que a Glória sempre teve.
+ */
+export function comRegras(regras) {
+  const r = regras || {};
+  const j = r.janela || {};
+  const primeira = Number.isFinite(Number(j.primeira)) ? Number(j.primeira) : JANELA_IA.primeira;
+  const ultima = Number.isFinite(Number(j.ultima)) ? Number(j.ultima) : JANELA_IA.ultima;
+  const dias = Array.isArray(r.dias) && r.dias.length
+    ? r.dias.map(Number).filter((d) => d >= 0 && d <= 6)
+    : DIAS_UTEIS;
+  return {
+    janela: { primeira: Math.min(primeira, ultima), ultima: Math.max(primeira, ultima) },
+    dias,
+    duracaoMin: Number.isFinite(Number(r.duracaoMin)) ? Number(r.duracaoMin) : DURACAO_MIN,
+    antecedenciaMin: Number.isFinite(Number(r.antecedenciaMin)) ? Number(r.antecedenciaMin) : ANTECEDENCIA_MIN,
+    diasAFrente: Number.isFinite(Number(r.diasAFrente)) ? Number(r.diasAFrente) : DIAS_A_FRENTE,
+  };
+}
+
+// ─── A GRADE QUE O CLIENTE VÊ (autoagendamento) ──────────────────────────────
+
+/**
+ * Todos os dias e horas em que EXISTE pelo menos um especialista livre.
+ *
+ * Diferente do `duasOpcoes` da Glória de propósito: numa conversa de WhatsApp
+ * duas opções agendam mais que uma lista; numa PÁGINA, esconder a agenda faz a
+ * pessoa fechar a aba. Então aqui a grade é aberta.
+ *
+ * O closer NÃO vai na resposta, e isso é segurança, não economia: a página é
+ * pública. Quem escolhe o especialista é o servidor, na hora de marcar
+ * (`escolherCloserLivre`), respeitando o mesmo rodízio da Glória. Assim ninguém
+ * de fora consegue mapear a agenda de uma pessoa específica do time.
+ *
+ * Uma leitura só do banco cobre as duas semanas inteiras — 14 dias × 7 horas é
+ * uma resposta pequena, e trocar de dia na tela vira instantâneo.
+ */
+export async function gradePublica({ agora = new Date(), regras = null } = {}) {
+  const r = comRegras(regras);
+  const closers = await closersAtivos();
+  if (!closers.length) return { ok: false, motivo: 'sem_closer', dias: [] };
+
+  const ate = new Date(agora.getTime() + (r.diasAFrente + 1) * 86_400_000);
+  const ocupado = await ocupacao(agora, ate);
+  const cedoDemais = agora.getTime() + r.antecedenciaMin * 60_000;
+  const hoje = emSP(agora);
+
+  const dias = [];
+  for (let salto = 0; salto <= r.diasAFrente; salto++) {
+    const base = new Date(Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia) + salto * 86_400_000);
+    const ano = base.getUTCFullYear(), mes = base.getUTCMonth() + 1, d = base.getUTCDate();
+    if (!r.dias.includes(base.getUTCDay())) continue;
+
+    const horarios = [];
+    for (let h = r.janela.primeira; h <= r.janela.ultima; h++) {
+      const inicio = instanteEmSP(ano, mes, d, h, 0);
+      const fim = new Date(inicio.getTime() + r.duracaoMin * 60_000);
+      if (inicio.getTime() < cedoDemais) continue;
+      if (!closers.some((c) => estaLivre(ocupado, c.id, inicio.getTime(), fim.getTime()))) continue;
+      horarios.push({
+        inicio: inicio.toISOString(),
+        hora: `${String(h).padStart(2, '0')}:00`,
+      });
+    }
+    if (!horarios.length) continue;
+
+    dias.push({
+      dia: `${ano}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+      rotulo: DIAS_SEMANA[base.getUTCDay()],
+      curto: DIAS_SEMANA[base.getUTCDay()].slice(0, 3),
+      data: `${String(d).padStart(2, '0')}/${String(mes).padStart(2, '0')}`,
+      hoje: salto === 0,
+      horarios,
+    });
+  }
+
+  return { ok: dias.length > 0, motivo: dias.length ? null : 'sem_horario', dias };
+}
+
+/**
+ * De quem vai ser esta reunião — entre os que ESTÃO livres neste horário.
+ *
+ * O rodízio (`deQuemEAVez`) é preferência, não promessa: exatamente como na
+ * Glória, se o da vez está ocupado nesse horário, quem está livre leva. O
+ * cliente já escolheu a hora; recusar porque a fila apontava pra outra pessoa
+ * seria perder a reunião pra manter a planilha bonita.
+ *
+ * Devolve null quando ninguém está livre — o horário foi preenchido entre a
+ * hora em que a página carregou e o clique.
+ */
+export async function escolherCloserLivre({ inicio, duracaoMin = DURACAO_MIN, agora = new Date() }) {
+  const closers = await closersAtivos();
+  if (!closers.length) return null;
+
+  const fim = new Date(inicio.getTime() + duracaoMin * 60_000);
+  const janelas = await ocupacao(new Date(inicio.getTime() - 3_600_000), new Date(fim.getTime() + 3_600_000));
+  const daVez = await deQuemEAVez(closers);
+  const ordem = [daVez, ...closers.filter((c) => c.id !== daVez?.id)].filter(Boolean);
+
+  void agora;
+  return ordem.find((c) => estaLivre(janelas, c.id, inicio.getTime(), fim.getTime())) || null;
 }
 
 /**
@@ -317,7 +459,7 @@ async function criarTarefa(row) {
  * própria reunião (tag `meeting:<id>`), que são justamente o trabalho que ela
  * cria.
  */
-async function encerrarProspeccao(leadId, meetingId) {
+async function encerrarProspeccao(leadId, meetingId, origem = ORIGEM_GLORIA) {
   try {
     await rest(
       `qs_leads?id=eq.${encodeURIComponent(leadId)}&status=not.in.(ganho,perdido)`,
@@ -336,7 +478,7 @@ async function encerrarProspeccao(leadId, meetingId) {
     for (const id of daCadencia) {
       await rest(`qs_tasks?id=eq.${id}`, {
         method: 'PATCH', prefer: 'return=minimal',
-        body: { status: 'ignorada', skip_reason: 'Reunião agendada pela Glória — cadência encerrada' },
+        body: { status: 'ignorada', skip_reason: `Reunião agendada (${origem.rotulo}) — cadência encerrada` },
       }).catch(() => {});
     }
   } catch (e) {
@@ -357,7 +499,7 @@ async function encerrarProspeccao(leadId, meetingId) {
  * dono, atividades em aberto e histórico. Se um dia ela mudar, este trecho
  * precisa mudar junto (é o preço de não ter uma versão de servidor dela).
  */
-async function transferirProCloser(lead, closer) {
+async function transferirProCloser(lead, closer, origem = ORIGEM_GLORIA) {
   if (lead.owner_id === closer.id) return true;
   try {
     await rest(`qs_leads?id=eq.${encodeURIComponent(lead.id)}`, {
@@ -374,7 +516,7 @@ async function transferirProCloser(lead, closer) {
       lead_id: lead.id,
       from_user_id: lead.owner_id ?? closer.id,
       to_user_id: closer.id,
-      briefing: `Reunião agendada pela Glória (IA) — atendimento passa pro especialista ${closer.name}`,
+      briefing: `Reunião agendada · ${origem.rotulo} — atendimento passa pro especialista ${closer.name}`,
     }, { returning: false }).catch((e) => console.warn('[agenda] handover não registrado:', e?.message));
     return true;
   } catch (e) {
@@ -392,7 +534,7 @@ async function transferirProCloser(lead, closer) {
  * vão juntos pelo mesmo motivo que lá — os webhooks do n8n dividem uma
  * credencial só e o nome dela muda conforme quem mexeu por último.
  */
-async function criarSalaDoMeet(meeting, convidados) {
+async function criarSalaDoMeet(meeting, convidados, origem = ORIGEM_GLORIA) {
   const base = (process.env.N8N_AGENDA_URL || '').trim();
   const secret = (process.env.N8N_AGENDA_SECRET || '').trim();
   const alt = (process.env.N8N_SYNC_SECRET || '').trim();
@@ -417,7 +559,7 @@ async function criarSalaDoMeet(meeting, convidados) {
         fim: fim.toISOString(),
         timezone: TZ,
         titulo: meeting.title || `Reunião · ${meeting.lead_name || 'cliente'}`,
-        descricao: `Agendada pela Glória (IA) no WhatsApp.\nCliente ${meeting.lead_name || ''}`.trim(),
+        descricao: `${origem.frase}.\nCliente ${meeting.lead_name || ''}`.trim(),
         convidados: convidados.filter(Boolean),
       }),
       signal: ctrl.signal,
@@ -491,16 +633,17 @@ async function avisarBitrix(meeting, lead) {
  * uma reunião marcada sem link do Meet é um problema pequeno; um cliente que
  * escolheu horário e não foi marcado é o problema grande.
  */
-export async function marcarReuniao({ lead, opcao, email = null, titulo = null, resumo = null }) {
+export async function marcarReuniao({ lead, opcao, email = null, titulo = null, resumo = null, origem = ORIGEM_GLORIA, regras = null }) {
+  const r = comRegras(regras);
   const closers = await closersAtivos();
   const closer = closers.find((c) => c.id === opcao.closerId);
   if (!closer) return { ok: false, motivo: 'closer_desconhecido' };
 
   const inicio = opcao.quando;
-  const fim = new Date(inicio.getTime() + DURACAO_MIN * 60_000);
+  const fim = new Date(inicio.getTime() + r.duracaoMin * 60_000);
   const agora = new Date();
 
-  if (inicio.getTime() < agora.getTime() + ANTECEDENCIA_MIN * 60_000) {
+  if (inicio.getTime() < agora.getTime() + r.antecedenciaMin * 60_000) {
     return { ok: false, motivo: 'cedo_demais' };
   }
 
@@ -521,16 +664,16 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
     closer_id: closer.id,
     title: titulo || `Reunião · ${nome}`,
     scheduled_at: inicio.toISOString(),
-    duration_min: DURACAO_MIN,
+    duration_min: r.duracaoMin,
     location: 'Google Meet',
     status: 'agendada',
-    scheduled_by: 'Glória (IA)',
+    scheduled_by: origem.rotulo,
     meeting_owner: closer.name,
     client_email: emailLimpo,
     booking_date: (() => { const p = emSP(agora); return `${p.ano}-${String(p.mes).padStart(2, '0')}-${String(p.dia).padStart(2, '0')}`; })(),
     tipo: 'primeira',
     notes: [
-      `Agendada pela Glória (IA) no WhatsApp · Especialista: ${closer.name}`,
+      `${origem.frase} · Especialista: ${closer.name}`,
       emailLimpo ? `E-mail: ${emailLimpo}` : 'SEM E-MAIL — o cliente não quis passar, o convite do Google não vai pra ele',
       resumo || null,
     ].filter(Boolean).join(' · ').slice(0, 2000),
@@ -563,6 +706,7 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
 
   const tag = `meeting:${meeting.id}`;
   const quando = porExtenso(inicio);
+  const marcaOrigem = origem.tag && origem.tag !== 'gloria' ? origem.tag : 'gloria';
 
   // CONFIRMAR PRESENÇA É DO SDR, não do closer (decisão do Bruno, 25/08).
   //
@@ -585,9 +729,9 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
     status: 'pendente',
     is_extra: true,
     notes:
-      `A Glória agendou esta reunião: ${quando}, ${nome} com ${closer.name}. ` +
+      `${origem.quemAgendou}: ${quando}, ${nome} com ${closer.name}. ` +
       `Confirme a presença com o cliente. Se ele não confirmar, remarque pela Agenda.`,
-    tags: ['reuniao', 'confirmar', 'gloria', tag],
+    tags: ['reuniao', 'confirmar', marcaOrigem, tag],
   });
   await criarTarefa({
     lead_id: lead.id,
@@ -601,14 +745,14 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
     tags: ['reuniao', 'desfecho', tag],
   });
 
-  await encerrarProspeccao(lead.id, meeting.id);
+  await encerrarProspeccao(lead.id, meeting.id, origem);
 
   // O lead passa a ser do especialista — mesma regra do agendamento pela tela.
-  if (!(await transferirProCloser(lead, closer))) {
+  if (!(await transferirProCloser(lead, closer, origem))) {
     avisos.push('o lead não passou pro especialista');
   }
 
-  const sala = await criarSalaDoMeet(meeting, [closer.email, emailLimpo]);
+  const sala = await criarSalaDoMeet(meeting, [closer.email, emailLimpo], origem);
   if (sala.ok) {
     const patch = { calendar_error: null, updated_at: new Date().toISOString() };
     if (sala.link) patch.meeting_link = sala.link;

@@ -37,6 +37,9 @@
     "api/gloria-agendar.js": {
       "maxDuration": 60
     },
+    "api/agendar.js": {
+      "maxDuration": 60
+    },
     "api/gloria-abordar.js": {
       "maxDuration": 30
     },
@@ -64,7 +67,7 @@
   ],
   "headers": [
     {
-      "source": "/(.*)",
+      "source": "/((?!agendar).*)",
       "headers": [
         {
           "key": "X-Content-Type-Options",
@@ -81,6 +84,27 @@
         {
           "key": "Strict-Transport-Security",
           "value": "max-age=15552000"
+        }
+      ]
+    },
+    {
+      "source": "/agendar/:path*",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=15552000"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self' https://setuforeuvouviagens.com.br https://*.setuforeuvouviagens.com.br https://stfv-forms-geral.vercel.app"
         }
       ]
     }

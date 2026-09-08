@@ -1,0 +1,216 @@
+# Autoagendamento — o cliente marca o próprio horário
+
+> O que é: uma página pública onde o cliente escolhe dia e hora, preenche nome,
+> WhatsApp e e-mail, e a reunião nasce dentro do QS — com especialista, sala do
+> Meet, card no Bitrix, lead transferido e as tarefas de confirmar presença e
+> registrar desfecho. Feito em 08/09/2026.
+
+- **Página:** `https://qs-turis.vercel.app/agendar/`
+- **Rota:** `api/agendar.js` (`GET` devolve a grade, `POST` marca)
+- **Motor:** `api/_agenda.js` — o mesmo da Glória, sem cópia
+- **Configuração:** `qs_settings.autoagendamento` (não precisa de deploy)
+- **Migration:** `supabase/migrations/0077_autoagendamento.sql`
+
+---
+
+## O fluxo, em 4 passos
+
+```
+1. Cliente abre /agendar/  ──GET /api/agendar──▶  gradePublica()
+                                                  lê qs_meetings + qs_closer_blocks
+                                                  devolve só DIAS e HORAS livres
+                                                  (nunca o nome do especialista)
+
+2. Cliente escolhe 14:00 de quinta e preenche os dados
+
+3. POST /api/agendar  ──▶  reconfere TUDO no servidor (janela, dia, antecedência,
+                           hora cheia, fuso) ──▶ escolherCloserLivre() aplica o
+                           rodízio ──▶ createInboundLead() cria/reaproveita o lead
+                           ──▶ marcarReuniao()
+
+4. marcarReuniao() (o mesmo código da Glória, sem uma linha nova):
+     ├─ grava em qs_meetings  ← a trava anti-choque do banco (0027) mora aqui
+     ├─ n8n → Google Calendar → link do Meet     (N8N_AGENDA_URL)
+     ├─ n8n → Bitrix, atualiza o card            (N8N_SYNC_BASE/qs-reuniao)
+     ├─ encerra a prospecção (lead vira "ganho", cadência fechada)
+     ├─ transfere o lead pro especialista        (+ handover no histórico)
+     ├─ tarefa pro SDR: confirmar presença 24h antes
+     └─ tarefa pro closer: registrar o desfecho + SAL depois da reunião
+```
+
+**O n8n é reaproveitado, não reescrito.** Os dois webhooks que a Glória já usa —
+`agenda-google-meet.workflow.json` (cria o evento e devolve o link do Meet) e o
+`qs-reuniao` do `qs-bitrix-completo.workflow.json` — atendem o autoagendamento
+sem nenhuma alteração. Não existe workflow novo pra importar.
+
+### Por que o agendamento não passa pelo n8n
+
+Foi uma decisão, não um esquecimento. O n8n continua fazendo o que só ele sabe
+fazer (falar com o Google e com o Bitrix, porque as credenciais estão lá), mas a
+**reserva do horário** fica no QS. Motivo: a trava que impede dois clientes na
+mesma hora do mesmo especialista é uma constraint `EXCLUDE` do Postgres — ela só
+funciona no `INSERT`. Se a reserva fosse feita pelo n8n, dois cliques
+simultâneos passariam pelos dois lados da automação e a colisão só apareceria
+depois, na agenda de alguém. Reservar primeiro no banco e avisar o mundo depois
+é a mesma ordem que a tela e a Glória já usam.
+
+---
+
+## Como embutir no STFV Forms (ou em qualquer LP)
+
+Cole isto na página. Troque `expedicao` e `origem` conforme o caso.
+
+```html
+<div id="qs-agendar" style="max-width:560px;margin:0 auto">
+  <iframe
+    src="https://qs-turis.vercel.app/agendar/?embed=1&expedicao=Jap%C3%A3o&origem=live-japao"
+    title="Agende sua conversa"
+    style="width:100%;height:660px;border:0;display:block"
+    loading="lazy"
+    referrerpolicy="strict-origin-when-cross-origin"></iframe>
+</div>
+<script>
+(function () {
+  var quadro = document.querySelector('#qs-agendar iframe');
+  var ORIGEM_QS = 'https://qs-turis.vercel.app';
+  window.addEventListener('message', function (e) {
+    // Conferir a origem é o que impede outro site embutido na mesma página de
+    // se passar pelo agendamento e mexer no seu layout.
+    if (e.origin !== ORIGEM_QS || !e.data || typeof e.data !== 'object') return;
+
+    // O iframe cresce e encolhe sozinho conforme o passo. Sem isto, o embed
+    // vira uma caixa com rolagem interna e a pessoa não vê o botão de confirmar.
+    if (e.data.tipo === 'qs-agendar:altura' && e.data.altura) {
+      quadro.style.height = e.data.altura + 'px';
+    }
+
+    // Reunião marcada: o gancho pro seu evento de conversão.
+    if (e.data.tipo === 'qs-agendar:concluido') {
+      // dataLayer.push({ event: 'reuniao_agendada' });
+    }
+  });
+})();
+</script>
+```
+
+### Os parâmetros da URL
+
+| Parâmetro   | Para que serve                                                            |
+|-------------|---------------------------------------------------------------------------|
+| `embed=1`   | Tira fundo e moldura, pra encaixar no visual da página de fora            |
+| `expedicao` | Vira o **título da reunião** (`Expedição Japão`) e o interesse na nota     |
+| `origem`    | Vira a **Fonte** do lead (`qs_leads.segment`) — é por ela que se separa    |
+
+`origem` é o campo que responde "quantas reuniões vieram da live do Japão".
+Sem ele, a fonte fica só `Autoagendamento`.
+
+### ⚠️ Domínio novo precisa entrar em DOIS lugares
+
+Um site só consegue embutir a página se estiver nas duas listas. Falta em
+qualquer uma delas = **tela em branco, sem mensagem de erro** (o recado fica só
+no console do navegador), e é o jeito mais rápido de perder uma tarde.
+
+1. **`frame-ancestors`** no `vercel.json` → autoriza o `<iframe>`
+2. **`qs_settings.lp_origins`** → autoriza o `fetch` (CORS)
+
+Hoje as duas cobrem: `setuforeuvouviagens.com.br` e subdomínios (incluindo
+`forms.` e `live.`) e `stfv-forms-geral.vercel.app`.
+
+---
+
+## Configuração — mexer sem deploy
+
+Tudo mora em `qs_settings.autoagendamento`. O servidor relê a cada minuto.
+
+```sql
+update qs_settings
+   set value = value || jsonb_build_object('janela', jsonb_build_object('primeira', 9, 'ultima', 18)),
+       updated_at = now()
+ where key = 'autoagendamento';
+```
+
+| Chave             | Padrão                    | O que faz                                        |
+|-------------------|---------------------------|--------------------------------------------------|
+| `ativo`           | `true`                    | `false` desliga a página e mostra o recado        |
+| `janela.primeira` | `11`                      | Primeira hora oferecida                           |
+| `janela.ultima`   | `17`                      | **Última hora de COMEÇO** (17 = termina 18h)      |
+| `dias`            | `[1,2,3,4,5]`             | 0 = domingo … 6 = sábado                          |
+| `duracaoMin`      | `60`                      | Duração da reunião                                |
+| `antecedenciaMin` | `180`                     | Nada com menos de 3h a partir de agora            |
+| `diasAFrente`     | `14`                      | Até onde a grade mostra                           |
+| `titulo`          | `Fale com um especialista`| Título no topo da página                          |
+| `subtitulo`       | …                         | Linha abaixo do título                            |
+| `encerrado`       | …                         | O que aparece quando não há horário nenhum        |
+
+**Por que o padrão é apertado (11h–18h, 3h de antecedência).** São as regras que
+a Glória usa desde 25/08, escolhidas contra no-show: reunião marcada às 10h50
+para as 11h vira falta, e falta custa mais caro que agenda vazia. Abrir mais é
+uma decisão comercial legítima — só não é de graça.
+
+---
+
+## Quando "não aparece horário nenhum"
+
+Na ordem, do mais provável pro menos:
+
+1. **Não existe closer ativo.**
+   `select id, name from qs_users where role = 'closer' and is_active;`
+   Lista vazia = a página nasce vazia, e é o primeiro lugar pra olhar.
+2. **As agendas estão cheias ou bloqueadas** — confira `qs_closer_blocks`.
+3. **`ativo` está `false`** em `qs_settings.autoagendamento`.
+4. **A janela ficou impossível** (ex.: `primeira` maior que `ultima`, ou `dias`
+   com um dia que não existe).
+
+Pra ver a grade exatamente como o cliente vê, sem abrir o navegador:
+
+```bash
+curl -s https://qs-turis.vercel.app/api/agendar | head -c 800
+```
+
+---
+
+## As contenções (a página é pública)
+
+Ela roda no navegador de um desconhecido, então não carrega segredo nenhum.
+O que segura:
+
+- **CORS por allowlist** (`qs_settings.lp_origins`) + o próprio domínio do QS
+- **Campo-armadilha** (`site`) — robô de formulário preenche, gente não vê
+- **Teto por IP por hora** (`qs_lp_rate_bump`, compartilhado com as LPs mas com
+  chave própria `agendar:<hash>`, então um não gasta a cota do outro)
+- **A agenda nunca sai inteira**: o `GET` devolve horas, nunca o especialista —
+  ninguém de fora mapeia a agenda de uma pessoa do time
+- **Quem já tem reunião marcada no futuro não marca outra** — em vez de recusar,
+  a página mostra quando é a que já existe
+- **Toda regra de horário é reconferida no `POST`**. O que o navegador manda é
+  palpite; quem decide é o servidor
+- **A trava do banco** (constraint `EXCLUDE` da 0027) é a última palavra sobre
+  dois clientes no mesmo horário
+
+O pior estrago possível é reunião falsa na agenda — nada destrutivo, nada que
+apague dado, e reunião falsa aparece na Agenda pro time cancelar.
+
+---
+
+## Como medir se valeu a pena
+
+A assinatura é `qs_meetings.scheduled_by = 'Autoagendamento (site)'`
+(a da Glória é `Glória (IA)`; a do time é o nome de quem marcou).
+
+```sql
+-- quantas por semana, por origem
+select date_trunc('week', scheduled_at) as semana,
+       count(*) filter (where scheduled_by = 'Autoagendamento (site)') as self_book,
+       count(*) filter (where scheduled_by = 'Glória (IA)')            as gloria,
+       count(*)                                                        as total
+  from qs_meetings
+ where scheduled_at >= now() - interval '60 days'
+ group by 1 order by 1 desc;
+
+-- e no que deram (o número que decide de verdade)
+select status, count(*) from qs_meetings
+ where scheduled_by = 'Autoagendamento (site)' group by 1 order by 2 desc;
+```
+
+Se o self-book trouxer volume mas com no-show muito acima da média, o botão a
+girar é `antecedenciaMin` — não a janela.
