@@ -170,8 +170,137 @@ async function anotarAVez(closerId) {
 
 // ─── O que ocupa a agenda ────────────────────────────────────────────────────
 
-async function ocupacao(de, ate) {
-  const [reunioes, bloqueios] = await Promise.all([
+// ─── A AGENDA PESSOAL DO CLOSER (Google) ─────────────────────────────────────
+//
+// O QS sabia das reuniões DELE e dos bloqueios que alguém digitou aqui — e mais
+// nada. Compromisso que só existia no Google Calendar (médico, almoço, a
+// reunião interna de terça) não bloqueava horário nenhum, e o cliente marcava
+// por cima. Era o último buraco do autoagendamento.
+//
+// Quem fala com o Google é o n8n, porque é lá que a credencial mora — o mesmo
+// webhook que já cria a sala do Meet, agora com `acao: 'ocupacao'`.
+//
+// USA freeBusy DE PROPÓSITO, e não a listagem de eventos: a API de freeBusy
+// devolve só intervalos ocupado/livre, sem título, sem convidado, sem
+// descrição. A agenda pessoal de quem trabalha aqui não precisa passear pelo
+// nosso servidor pra gente saber que às 15h tem alguém ocupado.
+//
+// FALHA ABERTA, sempre. Google fora do ar, n8n fora do ar, workflow ainda sem a
+// ação nova — tudo isso devolve "não sei" e a grade sai como saía antes. O
+// contrário (grade vazia porque o Google não respondeu) seria trocar um
+// problema raro por um prejuízo diário.
+
+const FREEBUSY_TIMEOUT_MS = 4500;
+const FREEBUSY_CACHE_MS = 60_000;
+let freebusyCache = { chave: null, em: 0, janelas: null };
+
+/**
+ * O INTERRUPTOR — `qs_settings.autoagendamento.google_freebusy` (padrão ligado).
+ *
+ * Existe por um modo de falha concreto: basta um closer ter um evento de dia
+ * inteiro na agenda pessoal (férias marcadas como "ocupado", um "fora do
+ * escritório") pra o freeBusy devolver o dia todo ocupado e a grade nascer
+ * VAZIA. Nesse dia não dá pra esperar deploy: é um UPDATE nesta chave e o
+ * agendamento volta a andar só com o que o QS sabe.
+ *
+ *   update qs_settings
+ *      set value = value || '{"google_freebusy": false}'::jsonb
+ *    where key = 'autoagendamento';
+ */
+let ligadoCache = { em: 0, valor: true };
+
+async function consultarGoogleLigado() {
+  if (Date.now() - ligadoCache.em < FREEBUSY_CACHE_MS) return ligadoCache.valor;
+  let valor = true;
+  try {
+    const rows = await rest("qs_settings?select=value&key=eq.autoagendamento&limit=1", { timeoutMs: 2000 });
+    const cfg = rows?.[0]?.value;
+    if (cfg && typeof cfg === 'object' && cfg.google_freebusy === false) valor = false;
+  } catch {
+    // Sem config legível, o padrão é consultar: o pior caso disso é falhar
+    // aberto lá embaixo, que é o comportamento de antes desta feature.
+  }
+  ligadoCache = { em: Date.now(), valor };
+  return valor;
+}
+
+/**
+ * Os intervalos ocupados na agenda do Google de cada closer, no formato das
+ * janelas daqui ({ closer_id, inicio, fim }).
+ *
+ * Devolve `[]` quando não dá pra saber — e isso é indistinguível de "ninguém
+ * ocupado" de propósito: ver o comentário acima sobre falhar aberto.
+ */
+async function ocupacaoGoogle(closers, de, ate) {
+  const base = (process.env.N8N_AGENDA_URL || '').trim();
+  if (!base || !Array.isArray(closers) || !closers.length) return [];
+  if (!(await consultarGoogleLigado())) return [];
+
+  const comEmail = closers.filter((c) => c.email && String(c.email).includes('@'));
+  if (!comEmail.length) return [];
+
+  // A chave arredonda o fim pra hora cheia: sem isso cada chamada teria um
+  // `ate` diferente por milissegundos e o cache nunca valeria de nada.
+  const chave = `${comEmail.map((c) => c.email).sort().join(',')}|${de.toISOString().slice(0, 13)}|${ate.toISOString().slice(0, 13)}`;
+  if (freebusyCache.chave === chave && Date.now() - freebusyCache.em < FREEBUSY_CACHE_MS) {
+    return freebusyCache.janelas;
+  }
+
+  const secret = (process.env.N8N_AGENDA_SECRET || '').trim();
+  const alt = (process.env.N8N_SYNC_SECRET || '').trim();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FREEBUSY_TIMEOUT_MS);
+  try {
+    const r = await fetch(base, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(secret || alt ? { 'x-qs-agenda-secret': secret || alt, 'x-qs-sync-secret': alt || secret } : {}),
+      },
+      body: JSON.stringify({
+        acao: 'ocupacao',
+        de: de.toISOString(),
+        ate: ate.toISOString(),
+        timezone: TZ,
+        emails: comEmail.map((c) => c.email),
+      }),
+      signal: ctrl.signal,
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const resposta = await r.json().catch(() => null);
+    // Workflow antigo (sem a ação) responde "acao invalida" — e isso NÃO é
+    // erro: é o estado normal até o n8n novo ser importado.
+    if (!resposta || resposta.ok !== true || !resposta.ocupado) return [];
+
+    const porEmail = new Map(comEmail.map((c) => [String(c.email).toLowerCase(), c.id]));
+    const janelas = [];
+    for (const [email, intervalos] of Object.entries(resposta.ocupado)) {
+      const closerId = porEmail.get(String(email).toLowerCase());
+      if (!closerId || !Array.isArray(intervalos)) continue;
+      for (const b of intervalos) {
+        const inicio = new Date(b.inicio || b.start).getTime();
+        const fim = new Date(b.fim || b.end).getTime();
+        if (Number.isNaN(inicio) || Number.isNaN(fim) || fim <= inicio) continue;
+        janelas.push({ closer_id: closerId, inicio, fim, google: true });
+      }
+    }
+    freebusyCache = { chave, em: Date.now(), janelas };
+    return janelas;
+  } catch (e) {
+    // Um aviso, nunca um erro: a grade tem que sair.
+    console.warn('[agenda] agenda do Google indisponível (seguindo só com o QS):', e?.message || e);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * O que ocupa a agenda: reuniões do QS + bloqueios + (quando `closers` vem) a
+ * agenda pessoal do Google de cada um deles.
+ */
+async function ocupacao(de, ate, closers = null) {
+  const [reunioes, bloqueios, doGoogle] = await Promise.all([
     rest(
       // OCUPA A AGENDA TUDO QUE NÃO FOI DESMARCADO — não só 'agendada'.
       //
@@ -195,6 +324,10 @@ async function ocupacao(de, ate) {
       'qs_closer_blocks?select=closer_id,starts_at,ends_at' +
       `&starts_at=lt.${ate.toISOString()}&ends_at=gt.${de.toISOString()}`
     ).catch(() => []),
+    // Em paralelo com o banco: o Google e o Postgres nao esperam um pelo outro.
+    // `closers` nulo = quem chamou nao quer consultar o Google (a Gloria em
+    // conversa, onde 4 segundos de espera custam mais do que valem).
+    ocupacaoGoogle(closers, de, ate),
   ]);
 
   const janelas = [];
@@ -206,6 +339,7 @@ async function ocupacao(de, ate) {
   for (const b of Array.isArray(bloqueios) ? bloqueios : []) {
     janelas.push({ closer_id: b.closer_id, inicio: new Date(b.starts_at).getTime(), fim: new Date(b.ends_at).getTime() });
   }
+  for (const g of doGoogle) janelas.push(g);
   return janelas;
 }
 
@@ -307,7 +441,7 @@ export async function gradePublica({ agora = new Date(), regras = null } = {}) {
   if (!closers.length) return { ok: false, motivo: 'sem_closer', dias: [] };
 
   const ate = new Date(agora.getTime() + (r.diasAFrente + 1) * 86_400_000);
-  const ocupado = await ocupacao(agora, ate);
+  const ocupado = await ocupacao(agora, ate, closers);
   const cedoDemais = agora.getTime() + r.antecedenciaMin * 60_000;
   const hoje = emSP(agora);
 
@@ -359,7 +493,7 @@ export async function escolherCloserLivre({ inicio, duracaoMin = DURACAO_MIN, ag
   if (!closers.length) return null;
 
   const fim = new Date(inicio.getTime() + duracaoMin * 60_000);
-  const janelas = await ocupacao(new Date(inicio.getTime() - 3_600_000), new Date(fim.getTime() + 3_600_000));
+  const janelas = await ocupacao(new Date(inicio.getTime() - 3_600_000), new Date(fim.getTime() + 3_600_000), closers);
   const daVez = await deQuemEAVez(closers);
   const ordem = [daVez, ...closers.filter((c) => c.id !== daVez?.id)].filter(Boolean);
 
@@ -380,7 +514,7 @@ export async function duasOpcoes({ periodo = null, dia = null, agora = new Date(
   const closers = await closersAtivos();
   if (!closers.length) return { ok: false, motivo: 'sem_closer', opcoes: [] };
 
-  const janelas = await ocupacao(agora, new Date(agora.getTime() + (DIAS_A_FRENTE + 1) * 86_400_000));
+  const janelas = await ocupacao(agora, new Date(agora.getTime() + (DIAS_A_FRENTE + 1) * 86_400_000), closers);
   const daVez = await deQuemEAVez(closers);
   // O da vez primeiro; os outros são a rede de segurança de quando ele está cheio.
   const ordem = [daVez, ...closers.filter((c) => c.id !== daVez?.id)].filter(Boolean);
@@ -665,7 +799,7 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
   // Última conferência antes de gravar. Não é a trava (a trava é a constraint),
   // é o que permite devolver "esse acabou de ser preenchido" em vez de um erro
   // de Postgres.
-  const janelas = await ocupacao(new Date(inicio.getTime() - 3_600_000), new Date(fim.getTime() + 3_600_000));
+  const janelas = await ocupacao(new Date(inicio.getTime() - 3_600_000), new Date(fim.getTime() + 3_600_000), [closer]);
   if (!estaLivre(janelas, closer.id, inicio.getTime(), fim.getTime())) {
     return { ok: false, motivo: 'horario_ocupado' };
   }

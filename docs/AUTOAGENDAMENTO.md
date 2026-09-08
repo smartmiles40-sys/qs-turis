@@ -193,6 +193,65 @@ uma decisão comercial legítima — só não é de graça.
 
 ---
 
+## A agenda pessoal do closer (Google freeBusy)
+
+Um horário só é oferecido se, além de livre no QS, o closer também estiver livre
+na **agenda dele no Google**. Sem isso, compromisso que existisse só lá (médico,
+almoço, reunião interna) não bloqueava nada e o cliente marcava por cima.
+
+```
+QS  ──POST N8N_AGENDA_URL { acao: "ocupacao", de, ate, emails }──▶  n8n
+                                                                     │
+                                            Google Calendar freeBusy ◀┘
+                                                                     │
+     ◀── { ok, ocupado: { email: [{inicio,fim}] }, avisos } ──────────┘
+```
+
+**Usa `freeBusy`, não a listagem de eventos.** A API devolve só intervalos
+ocupado/livre — sem título, sem convidado, sem descrição. A agenda pessoal de
+quem trabalha aqui não precisa passear pelo nosso servidor para a gente saber
+que às 15h tem alguém ocupado.
+
+**Falha aberta, sempre.** Google fora, n8n fora, workflow ainda sem a ação — tudo
+devolve "não sei" e a grade sai como saía antes. O contrário (grade vazia porque
+o Google não respondeu) trocaria um problema raro por um prejuízo diário.
+Timeout de 4,5s e cache de 60s por conjunto de e-mails.
+
+### Ligar (uma vez)
+
+O QS **já chama**. Falta o n8n saber responder:
+
+```bash
+node n8n/adicionar-acao-ocupacao.mjs
+# -> n8n/qs-agenda-meet.COM-OCUPACAO.workflow.json
+```
+
+Importar esse arquivo no n8n (Import from File), conferir que a credencial
+*Google Calendar account* continua ligada nos 4 nós HTTP, e ativar. Enquanto o
+workflow antigo estiver no ar, ele responde "acao invalida" e o QS segue com a
+agenda só do banco — sem erro, sem sintoma.
+
+⚠️ **A conta do n8n precisa enxergar o livre/ocupado de cada closer.** Em
+Workspace isso costuma valer para o domínio inteiro; se não valer, o Google
+devolve `errors: [{reason: "notFound"}]` para aquela agenda e ela **sai da
+conta** (tratada como livre, e o motivo vai em `avisos`). Nunca derruba a
+consulta das outras.
+
+### Desligar (sem deploy)
+
+Basta um evento de dia inteiro na agenda pessoal — férias marcadas como
+"ocupado", um "fora do escritório" — para o freeBusy devolver o dia todo
+ocupado e a grade nascer vazia. Nesse dia não dá para esperar deploy:
+
+```sql
+update qs_settings
+   set value = value || '{"google_freebusy": false}'::jsonb,
+       updated_at = now()
+ where key = 'autoagendamento';
+```
+
+Vale em até um minuto (o cache do interruptor).
+
 ## Quando "não aparece horário nenhum"
 
 Na ordem, do mais provável pro menos:
@@ -200,9 +259,14 @@ Na ordem, do mais provável pro menos:
 1. **Não existe closer ativo.**
    `select id, name from qs_users where role = 'closer' and is_active;`
    Lista vazia = a página nasce vazia, e é o primeiro lugar pra olhar.
-2. **As agendas estão cheias ou bloqueadas** — confira `qs_closer_blocks`.
-3. **`ativo` está `false`** em `qs_settings.autoagendamento`.
-4. **A janela ficou impossível** (ex.: `primeira` maior que `ultima`, ou `dias`
+2. **A agenda do Google de todos eles está ocupada** — um evento de dia inteiro
+   basta. É a causa mais provável desde 08/09; o log da Vercel mostra
+   `[agenda] agenda do Google indisponível` só quando a consulta FALHA, não
+   quando ela responde "ocupado". Para descartar em 10 segundos, desligue o
+   `google_freebusy` (ver acima) e recarregue: se os horários voltarem, é isso.
+3. **As agendas estão cheias ou bloqueadas** — confira `qs_closer_blocks`.
+4. **`ativo` está `false`** em `qs_settings.autoagendamento`.
+5. **A janela ficou impossível** (ex.: `primeira` maior que `ultima`, ou `dias`
    com um dia que não existe).
 
 Pra ver a grade exatamente como o cliente vê, sem abrir o navegador:
