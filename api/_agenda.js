@@ -27,6 +27,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, insert } from './_supabaseAdmin.js';
+import { moverNegocioParaReuniao } from './_bitrixLead.js';
 
 const TZ = 'America/Sao_Paulo';
 
@@ -926,6 +927,30 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
   }
 
   await avisarBitrix(meeting, lead);
+
+  // ── O CARD SAI DA PRÉ-VENDA E VAI PRO COMERCIAL ───────────────────────────
+  // Reunião marcada encerra a prospecção no QS (o lead vira "ganho"); no Bitrix
+  // o equivalente é sair do funil de Pré-Vendas e entrar no funil comercial, na
+  // coluna de reunião. Sem isso o card fica parado numa coluna de follow-up que
+  // ninguém mais vai tocar, e o comercial descobre a reunião pelo Google
+  // Calendar — ou não descobre.
+  //
+  // Best-effort e configurável: sem `qs_settings.bitrix_reuniao` não move nada.
+  if (lead.bitrix_id) {
+    try {
+      const rows = await rest('qs_settings?select=value&key=eq.bitrix_reuniao&limit=1');
+      const destino = rows?.[0]?.value ?? null;
+      const mv = await moverNegocioParaReuniao(lead.bitrix_id, destino);
+      if (mv.movido) {
+        console.log(`[agenda] negócio ${lead.bitrix_id} movido para ${mv.etapa} (funil ${mv.categoria})`);
+      } else if (mv.motivo !== 'sem-destino-configurado' && mv.motivo !== 'sem-bitrix') {
+        avisos.push(`o card do Bitrix não mudou de coluna (${mv.motivo})`);
+      }
+    } catch (e) {
+      console.warn('[agenda] não deu pra mover o card do Bitrix:', e?.message);
+    }
+  }
+
   await anotarAVez(closer.id);
 
   return {

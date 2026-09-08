@@ -312,3 +312,60 @@ export async function vincularLeadAoBitrix(lead) {
     return null;
   }
 }
+
+// ─── MOVER O NEGÓCIO QUANDO A REUNIÃO É MARCADA ──────────────────────────────
+//
+// Reunião marcada tira o negócio da PRÉ-VENDAS e joga no funil comercial: é lá
+// que o closer trabalha. Sem isso o card fica parado no funil de prospecção,
+// numa coluna de follow-up que ninguém mais vai tocar, e o comercial descobre a
+// reunião pelo Google Calendar — ou não descobre.
+//
+// ONDE ELE VAI PARAR é configuração, não código (`qs_settings.bitrix_reuniao`):
+//
+//   { "categoria": 0, "etapa": "EXECUTING" }
+//
+// Os ids do Bitrix são opacos e não têm onde consultar sem entrar no portal —
+// `GET /api/bitrix-etapas` (com o x-lead-secret) lista funil e coluna com nome
+// e id. Medido em 08/09: o funil 0 se chama "Comercial 1 - Se tu for eu vou" e
+// a coluna EXECUTING é "Reunião de Vendas".
+//
+// ⚠️ SEM CONFIGURAÇÃO, NÃO MOVE NADA. É de propósito: escrever a coluna errada
+// aqui não dá erro nenhum — o negócio só vai parar num lugar que ninguém olha,
+// que é exatamente o defeito que o `C25:NEW` já causou aqui (naquele funil ele
+// se chama "Ajuste"). Melhor não mover do que mover pro lugar errado em massa.
+//
+// CATEGORY_ID e STAGE_ID vão SEMPRE juntos: mudar de funil sem mudar a coluna
+// deixa o negócio num estado que o Bitrix aceita e a interface não sabe mostrar.
+export async function moverNegocioParaReuniao(dealId, destino) {
+  if (!bitrixConfigurado() || !dealId) return { movido: false, motivo: 'sem-bitrix' };
+  if (!destino || destino.categoria == null || !destino.etapa) {
+    return { movido: false, motivo: 'sem-destino-configurado' };
+  }
+
+  const categoria = Number(destino.categoria);
+  const etapa = String(destino.etapa).trim();
+  if (!Number.isInteger(categoria) || categoria < 0 || !etapa) {
+    return { movido: false, motivo: 'destino-invalido' };
+  }
+
+  // A coluna tem que ser DO funil de destino. O Bitrix aceita a combinação
+  // errada calada, e o negócio some da visão de todo mundo.
+  const prefixo = categoria === 0 ? '' : `C${categoria}:`;
+  if (prefixo && !etapa.startsWith(prefixo)) {
+    return { movido: false, motivo: `etapa ${etapa} nao pertence ao funil ${categoria}` };
+  }
+  if (!prefixo && etapa.includes(':')) {
+    return { movido: false, motivo: `etapa ${etapa} nao pertence ao funil padrao (0)` };
+  }
+
+  try {
+    await bx('crm.deal.update', {
+      id: Number(dealId),
+      fields: { CATEGORY_ID: categoria, STAGE_ID: etapa },
+      params: { REGISTER_SONET_EVENT: 'Y' },   // aparece na timeline do card
+    });
+    return { movido: true, categoria, etapa };
+  } catch (e) {
+    return { movido: false, motivo: e?.message || 'falha no crm.deal.update' };
+  }
+}
