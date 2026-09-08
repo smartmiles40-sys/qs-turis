@@ -111,6 +111,10 @@ qualquer uma delas = **tela em branco, sem mensagem de erro** (o recado fica só
 no console do navegador), e é o jeito mais rápido de perder uma tarde.
 
 1. **`frame-ancestors`** no `vercel.json` → autoriza o `<iframe>`
+   (a regra é `/agendar(.*)` — medido em produção em 08/09: `/agendar/:path*`
+   **não casa com a barra final**, então `/agendar/` saía sem CSP nenhum e
+   qualquer site conseguia embutir. Confira com
+   `curl -sI .../agendar/ | grep -i content-security`)
 2. **`qs_settings.lp_origins`** → autoriza o `fetch` (CORS)
 
 Hoje as duas cobrem: `setuforeuvouviagens.com.br` e subdomínios (incluindo
