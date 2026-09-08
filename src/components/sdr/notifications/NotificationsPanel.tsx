@@ -48,6 +48,7 @@ interface NotifHandover {
   created_at: string;
   lead: NotifTaskLead | null;
   from_user: { name: string } | null;
+  to_user?: { name: string } | null;
 }
 
 interface NotifMeeting {
@@ -264,6 +265,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
   const [todayMeetings, setTodayMeetings] = useState<NotifMeeting[]>([]);
   const [hotLeads, setHotLeads] = useState<NotifLead[]>([]);
   const [received, setReceived] = useState<NotifHandover[]>([]);
+  const [sent, setSent] = useState<NotifHandover[]>([]);
   // Itens dispensados ("lidos"). Como as notificações são DERIVADAS (não há tabela
   // de notificações), a marca de leitura vive no localStorage, por usuário.
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -403,12 +405,28 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
       // sem o OR, o sino do closer nunca avisava a PRÓPRIA reunião.
       meetingsQ = meetingsQ.or(`owner_id.eq.${ownerId},closer_id.eq.${ownerId}`);
 
-    const [overdueRes, todayRes, leadsRes, receivedRes, meetingsRes] = await Promise.all([overdueQ, todayQ, leadsQ, receivedQ, meetingsQ]);
+    // 4b. Leads que SAIRAM da carteira nas ultimas 24h.
+    //
+    // E assim que o SDR fica sabendo que o lead dele marcou reuniao: o
+    // autoagendamento (e a Gloria) passam o lead pro closer na hora, e do lado
+    // do SDR o card simplesmente SUMIA da fila, sem explicacao. A tarefa de
+    // confirmar presenca so nasce 24h antes da reuniao — se ela for daqui a dez
+    // dias, ele passaria nove sem saber que ganhou uma.
+    const sentQ = supabase
+      .from("qs_handovers")
+      .select("id, lead_id, briefing, created_at, lead:qs_leads(full_name, company_name), to_user:qs_users!qs_handovers_to_user_id_fkey(name)")
+      .eq("from_user_id", ownerId)
+      .gte("created_at", h24Iso)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    const [overdueRes, todayRes, leadsRes, receivedRes, meetingsRes, sentRes] = await Promise.all([overdueQ, todayQ, leadsQ, receivedQ, meetingsQ, sentQ]);
 
     if (overdueRes.error) console.warn("[QS] notificações — atrasados:", overdueRes.error);
     if (todayRes.error) console.warn("[QS] notificações — hoje:", todayRes.error);
     if (leadsRes.error) console.warn("[QS] notificações — leads:", leadsRes.error);
     if (receivedRes.error) console.warn("[QS] notificações — recebidos:", receivedRes.error);
+    if (sentRes.error) console.warn("[QS] notificações — leads que saíram:", sentRes.error);
     if (meetingsRes.error) console.warn("[QS] notificações — reuniões de hoje:", meetingsRes.error);
 
     // Lead fechado (ganho/perdido) sai dos lembretes de tarefa — não é mais
@@ -418,6 +436,9 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
     setToday(((todayRes.data ?? []) as unknown as NotifTask[]).filter(isOpenLead));
     setHotLeads((leadsRes.data ?? []) as unknown as NotifLead[]);
     setReceived((receivedRes.data ?? []) as unknown as NotifHandover[]);
+    // O proprio handover de quem transferiu pra si mesmo nao interessa a
+    // ninguem (acontece quando o dono do lead JA era o closer).
+    setSent(((sentRes.data ?? []) as unknown as NotifHandover[]).filter((h) => h.to_user));
     setTodayMeetings((meetingsRes.data ?? []) as unknown as NotifMeeting[]);
     setLoading(false);
   }, [currentUser]);
@@ -464,9 +485,10 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
   const visibleToday = today.filter((t) => !dismissed.has(taskDismissKey(t.id)));
   const visibleMeetings = todayMeetings.filter((m) => !dismissed.has(`meeting:${m.id}`));
   const visibleReceived = received.filter((h) => !dismissed.has(`handover:${h.id}`));
+  const visibleSent = sent.filter((h) => !dismissed.has(`saiu:${h.id}`));
   const visibleHot = hotLeads.filter((l) => !dismissed.has(`lead:${l.id}`));
   const total =
-    visibleOverdue.length + visibleToday.length + visibleMeetings.length + visibleReceived.length + visibleHot.length;
+    visibleOverdue.length + visibleToday.length + visibleMeetings.length + visibleReceived.length + visibleSent.length + visibleHot.length;
 
   const badge = total > 9 ? "9+" : String(total);
 
@@ -631,6 +653,33 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                         subtitle={`${h.from_user?.name ? `de ${h.from_user.name}` : "transferido"}${h.briefing ? ` · ${h.briefing}` : ""}`}
                         meta={`há ${timeAgo(h.created_at)}`}
                         metaColor="#12A18A"
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* 4b. Leads que saíram da carteira — quase sempre porque
+                    marcaram reunião e foram pro especialista. É a única coisa
+                    que avisa o SDR na hora; sem isso o lead só some da fila. */}
+                {visibleSent.length > 0 && (
+                  <div className="pb-2 border-b border-gray-50">
+                    <SectionHeader
+                      icon={<IconSwap />}
+                      label="Reunião marcada — lead passou pro especialista"
+                      count={visibleSent.length}
+                      color="#0147FF"
+                      bg="#E0E9FF"
+                    />
+                    {visibleSent.map((h) => (
+                      <NotifRow
+                        key={h.id}
+                        onClick={() => openLead(h.lead_id)}
+                        onDismiss={() => dismiss(`saiu:${h.id}`)}
+                        accent="#0147FF"
+                        title={leadTitle(h.lead)}
+                        subtitle={`${h.to_user?.name ? `agora é de ${h.to_user.name}` : "transferido"}${h.briefing ? ` · ${h.briefing}` : ""}`}
+                        meta={`há ${timeAgo(h.created_at)}`}
+                        metaColor="#0147FF"
                       />
                     ))}
                   </div>

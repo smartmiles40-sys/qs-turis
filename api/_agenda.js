@@ -272,6 +272,14 @@ async function ocupacaoGoogle(closers, de, ate) {
     // erro: é o estado normal até o n8n novo ser importado.
     if (!resposta || resposta.ok !== true || !resposta.ocupado) return [];
 
+    // AGENDA QUE O GOOGLE RECUSOU não é o mesmo que agenda vazia, e a diferença
+    // é invisível: nos dois casos o closer aparece livre o dia inteiro. Se o
+    // closer não compartilhou o livre/ocupado com a conta da operação, isto aqui
+    // é a ÚNICA pista de que a checagem não está valendo pra ele.
+    if (Array.isArray(resposta.avisos) && resposta.avisos.length) {
+      console.warn('[agenda] o Google não deixou ler estas agendas:', resposta.avisos.join(' | '));
+    }
+
     const porEmail = new Map(comEmail.map((c) => [String(c.email).toLowerCase(), c.id]));
     const janelas = [];
     for (const [email, intervalos] of Object.entries(resposta.ocupado)) {

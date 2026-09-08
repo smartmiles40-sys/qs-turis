@@ -34,7 +34,7 @@
 // que apague dado. E reunião falsa aparece na Agenda pro time cancelar.
 // -----------------------------------------------------------------------------
 import { createHash } from 'node:crypto';
-import { rest } from './_supabaseAdmin.js';
+import { rest, insert } from './_supabaseAdmin.js';
 import { createInboundLead, normPhone } from './_leads.js';
 import {
   gradePublica,
@@ -435,6 +435,31 @@ async function marcar(req, res, { cfg, regras, teto }) {
         error: recados[r.motivo] || 'Não consegui marcar agora. Fale com a gente pelo WhatsApp.',
       });
     }
+
+    // ── 5) O RASTRO NO LEAD ─────────────────────────────────────────────────
+    // O SDR que trabalhou este lead precisa achar isto no histórico. Sem a nota,
+    // do lado dele o lead simplesmente SOME da fila (vira ganho e passa pro
+    // closer) e não sobra explicação nenhuma no card — foi a queixa que a
+    // Glória já tinha gerado em agosto. A tarefa de confirmar presença só
+    // aparece 24h antes da reunião; se ela for daqui a dez dias, ele ficaria
+    // nove sem saber.
+    //
+    // Best-effort de propósito: a reunião já está marcada, e falhar a nota não
+    // pode derrubar a resposta pro cliente.
+    await insert('qs_notes', {
+      lead_id: lead.id,
+      author_id: null,
+      body:
+        '🗓️ O cliente marcou a reunião sozinho, pela página de agendamento\n' +
+        `${r.quando_extenso} · Especialista: ${r.especialista}\n` +
+        (r.link ? `Meet: ${r.link}` : 'SEM link do Meet — crie a sala pela Agenda') +
+        `\nContato: ${email}${telefone ? ' · ' + telefone : ''}` +
+        (expedicao ? `\nInteresse: ${expedicao}` : '') +
+        (origemLp ? `\nOrigem: ${origemLp}` : '') +
+        (observacao ? `\n\nRecado do cliente: ${observacao}` : '') +
+        (r.avisos?.length ? `\n\n⚠️ ${r.avisos.join(' · ')}` : ''),
+      tags: ['autoagendamento', 'reuniao'],
+    }, { returning: false }).catch((e) => console.warn('[agendar] nota não gravada:', e?.message));
 
     return res.status(200).json({
       ok: true,
