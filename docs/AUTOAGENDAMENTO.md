@@ -93,6 +93,46 @@ Cole isto na página. Troque `expedicao` e `origem` conforme o caso.
 </script>
 ```
 
+### Preenchimento automático (quem já digitou não digita de novo)
+
+A página de fora pode mandar os dados que já coletou. Vai por `postMessage`,
+**não pela URL**: endereço de iframe fica no histórico do navegador e em log
+pelo caminho, e nome/e-mail/telefone não têm por que passear por ali.
+
+O aperto de mão tem dois tempos — o iframe avisa `qs-agendar:pronto` quando
+carregou, e só então o pai responde:
+
+```js
+if (e.data.tipo === 'qs-agendar:pronto') {
+  quadro.contentWindow.postMessage({
+    tipo: 'qs-agendar:preencher',
+    nome: 'Ana Paula', email: 'ana@exemplo.com',
+    telefone: '+5511987654321',      // E.164 ou nacional, tanto faz
+    expedicao: 'Egito', origem: '[Egito] - Live',
+    ja_no_bitrix: true               // ver abaixo
+  }, 'https://qs-turis.vercel.app');
+}
+```
+
+⚠️ **`ja_no_bitrix`** diz "o negócio no Bitrix JÁ existe, não crie outro". É o
+caso dos formulários de live: o `/api/save-lead` do STFV Forms cria contato e
+negócio antes de a pessoa ver a agenda. Sem essa flag, a mesma pessoa vira dois
+cards no funil de Pré-Vendas.
+
+Repare que **não é o id do negócio**, de propósito: id de negócio é inteiro
+sequencial, e aceitar um vindo do navegador deixaria qualquer um sobrescrever
+nome e telefone de lead alheio chutando números. Mentir na flag só deixa a
+própria pessoa sem card — o que não é ataque.
+
+A origem que manda o preenchimento é conferida contra uma lista curta dentro da
+própria página (`ORIGENS_QUE_PODEM_PREENCHER`).
+
+**O telefone pode vir em qualquer formato.** A máscara da página é nacional, e
+o formulário manda em E.164 — sem tratar, `+5511987654321` virava
+`(55) 11987-6543`, com o código do país lido como DDD e os dois últimos dígitos
+comidos pelo corte. O código tira o `55` antes de mascarar; conferido nos cinco
+formatos que aparecem na prática, fixo de 10 dígitos incluído.
+
 ### Os parâmetros da URL
 
 | Parâmetro   | Para que serve                                                            |

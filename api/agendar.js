@@ -370,6 +370,15 @@ async function marcar(req, res, { cfg, regras, teto }) {
     // 08/09, mandando "Autoagendamento" e recebendo "integracao" de volta.
     // A fonte de verdade (a que o dashboard agrupa) mora em `segment`, que é
     // texto livre; é o mesmo lugar onde o Bitrix guarda "[Japão] - Live".
+    //
+    // `ja_no_bitrix` vem da página que embute o agendamento (os formulários de
+    // live): ali o negócio no Bitrix JÁ foi criado pelo /api/save-lead antes de
+    // a pessoa ver a agenda, então criar outro aqui daria dois cards da mesma
+    // pessoa. Não é o id do negócio de propósito — ver o comentário em
+    // _leads.js: id vindo do navegador seria uma porta pra sobrescrever lead
+    // alheio. Mentir nesta flag só deixa a própria pessoa sem card.
+    const jaNoBitrix = body.ja_no_bitrix === true || body.ja_no_bitrix === 'true';
+
     const { lead } = await createInboundLead({
       full_name: nome,
       email,
@@ -377,7 +386,7 @@ async function marcar(req, res, { cfg, regras, teto }) {
       source: 'integracao',
       segment: origemLp || 'Autoagendamento',
       lead_score: 'quente',   // quem escolhe horário e dá o e-mail não é frio
-    });
+    }, { semBitrix: jaNoBitrix });
     if (!lead?.id) {
       return res.status(500).json({ ok: false, error: 'Não consegui registrar seus dados. Tente de novo.' });
     }

@@ -635,7 +635,19 @@ export async function createInboundLead(payload, opts = {}) {
   // cardProprio NÃO abre negócio: a lista de resgate trabalha gente que já tem
   // (ou já teve) card no Bitrix. Criar de novo encheria o funil de Pré-Vendas
   // de duplicatas e estragaria a contagem do comercial.
-  if (lead && !bitrixId && !cardProprio) {
+  // `opts.semBitrix` (08/09): o negócio JÁ existe e foi criado por outra ponta.
+  // É o caso do autoagendamento embutido nos formulários de live: o
+  // /api/save-lead do STFV Forms cria contato + negócio no Bitrix ANTES de a
+  // pessoa ver a agenda, e criar de novo aqui daria dois cards da mesma pessoa
+  // no funil de Pré-Vendas. O vínculo é remendado depois, pelo caminho de
+  // sempre: quando o webhook Bitrix→QS chega com o id do negócio, o passo (0a)
+  // acima ADOTA este card pelo telefone e grava o bitrix_id nele.
+  //
+  // Por que isto é uma flag e não o `bitrix_id` de verdade: o id viria do
+  // NAVEGADOR, e id de negócio é inteiro sequencial — quem chutasse um id
+  // existente sobrescreveria nome e telefone do lead alheio. Mentir na flag só
+  // deixa a própria pessoa sem card, o que não é ataque.
+  if (lead && !bitrixId && !cardProprio && !opts.semBitrix) {
     try {
       // `bitrixContatoId`: quem já perguntou ao Bitrix (o wa-webhook) achou o
       // CONTATO mas não achou negócio nenhum. Passar o id evita que a criação

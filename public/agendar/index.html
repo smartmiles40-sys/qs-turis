@@ -368,9 +368,62 @@
   var origem = (params.get('origem') || '').slice(0, 80);
   if (params.get('embed') === '1') document.body.classList.add('embed');
 
-  var estado = { dias: [], diaAtivo: null, inicio: null, rotulo: '', duracao: 60, enviando: false };
+  var estado = { dias: [], diaAtivo: null, inicio: null, rotulo: '', duracao: 60, enviando: false, jaNoBitrix: false };
 
   var el = function (id) { return document.getElementById(id); };
+
+  // ── PREENCHIMENTO VINDO DA PÁGINA DE FORA ──────────────────────────────
+  // Quem chega aqui pelo formulário da live JÁ digitou nome, e-mail e WhatsApp
+  // trinta segundos atrás. Pedir tudo de novo é o jeito mais barato de perder a
+  // reunião que já estava ganha.
+  //
+  // Vem por postMessage, NÃO pela URL: o endereço do iframe fica no histórico
+  // do navegador e em qualquer log pelo caminho, e nome/e-mail/telefone não têm
+  // por que passear por ali.
+  //
+  // A origem é conferida contra uma lista curta. O estrago possível aqui é
+  // pequeno (preencher campo que a pessoa vê e pode corrigir), mas página que
+  // aceita mensagem de qualquer um é hábito ruim.
+  var ORIGENS_QUE_PODEM_PREENCHER = [
+    'https://stfv-forms-geral.vercel.app',
+    'https://forms.setuforeuvouviagens.com.br',
+    'https://setuforeuvouviagens.com.br',
+    'https://live.setuforeuvouviagens.com.br',
+  ];
+
+  function podePreencher(origem) {
+    if (origem === location.origin) return true;
+    if (/^http:\/\/localhost(:\d+)?$/.test(origem)) return true;   // desenvolvimento
+    return ORIGENS_QUE_PODEM_PREENCHER.indexOf(origem) !== -1;
+  }
+
+  window.addEventListener('message', function (e) {
+    if (!podePreencher(e.origin) || !e.data || typeof e.data !== 'object') return;
+    if (e.data.tipo !== 'qs-agendar:preencher') return;
+
+    var d = e.data;
+    if (d.nome)     el('nome').value = String(d.nome).slice(0, 120);
+    if (d.email)    el('email').value = String(d.email).slice(0, 160);
+    if (d.telefone) {
+      var t = el('telefone');
+      var so = String(d.telefone).replace(/\D/g, '');
+      // O formulário manda em E.164 (+5511987654321) e a máscara aqui é
+      // NACIONAL. Sem tirar o 55 ela lê o código do país como DDD e, pior, o
+      // corte de 11 dígitos come os dois últimos números — medido em 08/09:
+      // +5511987654321 virava "(55) 11987-6543", um telefone que não existe.
+      if (so.length > 11 && so.slice(0, 2) === '55') so = so.slice(2);
+      t.value = so;
+      t.dispatchEvent(new Event('input', { bubbles: true }));   // aplica a máscara
+    }
+    // A pessoa já tem card no Bitrix (o formulário criou antes de chegar aqui).
+    if (d.ja_no_bitrix) estado.jaNoBitrix = true;
+    if (d.expedicao && !expedicao) expedicao = String(d.expedicao).slice(0, 80);
+    if (d.origem && !origem) origem = String(d.origem).slice(0, 80);
+  });
+
+  // Avisa a página de fora que já dá pra mandar o preenchimento. Sem este
+  // aviso, o pai teria que adivinhar quando o iframe terminou de carregar.
+  try { parent.postMessage({ tipo: 'qs-agendar:pronto' }, '*'); } catch (e) {}
 
   // ── Altura pro iframe de fora ──────────────────────────────────────────
   // Iframe não sabe a altura do que está dentro dele — ou a página de fora
@@ -551,6 +604,7 @@
         inicio: estado.inicio,
         expedicao: expedicao,
         origem: origem,
+        ja_no_bitrix: estado.jaNoBitrix,
         site: el('site').value
       })
     })
