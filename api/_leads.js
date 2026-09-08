@@ -240,7 +240,7 @@ function normEmail(v) {
  * quando os números vêm colados, corta nos tamanhos que fazem sentido no Brasil
  * (55+DDD+9, 55+DDD+8, DDD+9, DDD+8).
  */
-function normPhone(v) {
+export function normPhone(v) {
   const bruto = String(v ?? '');
   if (!bruto.trim()) return null;
 

@@ -16,6 +16,7 @@ import LinhasDoTime from "./LinhasDoTime";
 import ModelosMeta from "./ModelosMeta";
 import MensagemAutomatica from "./MensagemAutomatica";
 import LigacaoWhatsApp from "./LigacaoWhatsApp";
+import NumerosWhatsApp from "./NumerosWhatsApp";
 import { WA_SIGNATURE_MAP_KEY, WA_SIGNATURE_ENABLED_KEY, nomeCurto } from "@/lib/qs/waSignature";
 import type {
   LossReason,
@@ -45,7 +46,7 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "motivos" | "classificacao" | "horario" | "carteira" | "agenda" | "atendimento" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "motivos" | "classificacao" | "horario" | "carteira" | "agenda" | "atendimento" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "numeros" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -64,6 +65,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "webfone-webrtc", label: "Webfone WebRTC (VoxFree)", group: "EMPRESA" },
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
+  { key: "numeros", label: "Números do WhatsApp", group: "EMPRESA" },
   { key: "atendimento", label: "Atendimento (WhatsApp)", group: "INTEGRAÇÕES" },
   { key: "modelos-meta", label: "Modelos de Mensagem", group: "INTEGRAÇÕES" },
   { key: "mensagem-automatica", label: "Mensagem Automática", group: "INTEGRAÇÕES" },
@@ -2148,8 +2150,15 @@ function ClassificacaoSection() {
 
 export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState<SettingsSection>("produtos");
+  const { currentUser } = useQsAuth();
 
-  const groups = SIDEBAR_ITEMS.reduce<Record<string, SidebarItem[]>>(
+  // "Números do WhatsApp" só aparece pra admin/gestor. A rota /api/sdr-pool já
+  // recusa quem não é (a checagem que vale é a do servidor), mas deixar o botão
+  // à mostra pra um SDR só rende um 403 na cara de quem não podia clicar.
+  const ehGestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const itensVisiveis = SIDEBAR_ITEMS.filter((i) => i.key !== "numeros" || ehGestor);
+
+  const groups = itensVisiveis.reduce<Record<string, SidebarItem[]>>(
     (acc, item) => {
       if (!acc[item.group]) acc[item.group] = [];
       acc[item.group].push(item);
@@ -2215,6 +2224,7 @@ export default function SettingsPage() {
         {activeSection === "webfone-webrtc" && <WebfoneWebrtcSection />}
         {activeSection === "telefone-sip" && <SipSection />}
         {activeSection === "usuarios" && <UsuariosSection />}
+        {activeSection === "numeros" && ehGestor && <NumerosWhatsApp />}
         {activeSection === "integracoes" && <IntegracoesSection />}
       </main>
     </div>

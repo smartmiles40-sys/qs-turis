@@ -1,0 +1,14 @@
+{
+  "name": "qs-local-postgres",
+  "private": true,
+  "type": "module",
+  "description": "Banco Postgres de verdade rodando LOCAL (sem Docker, sem tocar em produção) para testar migrations do QS.",
+  "scripts": {
+    "teste": "node teste-rodizio-local.mjs",
+    "endpoint": "node teste-endpoint-local.mjs"
+  },
+  "dependencies": {
+    "embedded-postgres": "17.10.0-beta.17",
+    "pg": "^8.13.1"
+  }
+}
