@@ -173,7 +173,22 @@ async function anotarAVez(closerId) {
 async function ocupacao(de, ate) {
   const [reunioes, bloqueios] = await Promise.all([
     rest(
-      'qs_meetings?select=closer_id,scheduled_at,ends_at,duration_min&status=eq.agendada' +
+      // OCUPA A AGENDA TUDO QUE NÃO FOI DESMARCADO — não só 'agendada'.
+      //
+      // Estava `status=eq.agendada`, e isso era uma armadilha que se armava
+      // sozinha: a tarefa que o próprio agendamento cria manda o SDR CONFIRMAR
+      // a presença, e confirmar move a reunião pra 'confirmada'. A partir daí o
+      // horário voltava a aparecer como livre na grade — e não era.
+      //
+      // Ninguém tinha visto porque o banco segura: a constraint EXCLUDE da 0027
+      // recusa o INSERT (ela ignora só 'cancelada' e 'reagendada'). O sintoma
+      // seria o cliente escolher um horário e levar "esse acabou de ser
+      // preenchido", sempre, naquele slot. Medido em 08/09: 4 reuniões já estão
+      // em 'confirmada' e 129 em 'arquivada'.
+      //
+      // A lista aqui é a MESMA da constraint, de propósito. Se um dia divergir,
+      // volta o horário-fantasma.
+      'qs_meetings?select=closer_id,scheduled_at,ends_at,duration_min&status=not.in.(cancelada,reagendada)' +
       `&scheduled_at=gte.${de.toISOString()}&scheduled_at=lt.${ate.toISOString()}`
     ).catch(() => []),
     rest(

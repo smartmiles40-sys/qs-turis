@@ -368,7 +368,7 @@
   var origem = (params.get('origem') || '').slice(0, 80);
   if (params.get('embed') === '1') document.body.classList.add('embed');
 
-  var estado = { dias: [], diaAtivo: null, inicio: null, rotulo: '', duracao: 60, enviando: false, jaNoBitrix: false };
+  var estado = { dias: [], diaAtivo: null, inicio: null, rotulo: '', duracao: 60, enviando: false, jaNoBitrix: false, veioDeFormulario: false };
 
   var el = function (id) { return document.getElementById(id); };
 
@@ -416,6 +416,8 @@
       t.dispatchEvent(new Event('input', { bubbles: true }));   // aplica a máscara
     }
     // A pessoa já tem card no Bitrix (o formulário criou antes de chegar aqui).
+    // Quem manda o preenchimento e o formulario da live — e so ele.
+    estado.veioDeFormulario = true;
     if (d.ja_no_bitrix) estado.jaNoBitrix = true;
     if (d.expedicao && !expedicao) expedicao = String(d.expedicao).slice(0, 80);
     if (d.origem && !origem) origem = String(d.origem).slice(0, 80);
@@ -473,7 +475,20 @@
       .catch(function () {
         el('carregando').hidden = true;
         el('subtitulo').textContent = '';
+        // A AGENDA CAIU — E AGORA ESTA PESSOA NÃO TEM PRA ONDE IR.
+        //
+        // Enquanto o formulário mandava todo mundo pro WhatsApp, uma falha aqui
+        // era inofensiva. Agora esta é a última tela do funil: sem um recado
+        // honesto, quem chega até aqui acha que o cadastro se perdeu e desiste.
+        //
+        // A segunda frase só aparece pra quem veio do formulário — aí os dados
+        // realmente já foram enviados. Pra quem abriu a página direto, ela seria
+        // mentira.
         el('sem-horario').textContent = 'Não consegui carregar os horários agora. Atualize a página em alguns instantes.';
+        if (estado.veioDeFormulario) {
+          el('sem-horario').textContent +=
+            ' Seus dados já foram enviados — se não der certo por aqui, nosso time entra em contato.';
+        }
         el('sem-horario').hidden = false;
         avisarAltura();
       });
@@ -654,9 +669,23 @@
     el('fim-quem').textContent = d.especialista
       ? 'Você vai conversar com ' + d.especialista + '.'
       : 'Um especialista vai te atender.';
-    el('fim-email').textContent = d.ja_existia
-      ? 'Não marcamos outra para não duplicar. Se precisar mudar, é só falar com a gente.'
-      : 'O convite com o link foi enviado para ' + el('email').value.trim() + '.';
+    // O QUE SE PROMETE AQUI TEM QUE SER VERDADE.
+    //
+    // Antes esta linha dizia "o convite com o link foi enviado" em todo caso —
+    // inclusive quando o Google falhou e a reunião ficou sem sala (acontece: na
+    // base, 5 a 7% das reuniões têm calendar_error). A pessoa ficaria esperando
+    // um e-mail que não existe, e só descobriria na hora da reunião.
+    //
+    // A reunião ESTÁ marcada nos dois casos — o que muda é quem manda o link.
+    if (d.ja_existia) {
+      el('fim-email').textContent =
+        'Não marcamos outra para não duplicar. Se precisar mudar, é só falar com a gente.';
+    } else if (d.link) {
+      el('fim-email').textContent = 'O convite com o link foi enviado para ' + el('email').value.trim() + '.';
+    } else {
+      el('fim-email').textContent =
+        'Seu horário está reservado. Nosso time envia o link da sala antes da reunião.';
+    }
 
     if (d.link) {
       el('fim-meet').href = d.link;
