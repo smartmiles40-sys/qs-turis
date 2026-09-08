@@ -700,7 +700,18 @@
 
     mostrarPasso('passo-fim');
     // Pra página de fora saber que terminou (pixel de conversão, obrigado, etc.).
-    try { parent.postMessage({ tipo: 'qs-agendar:concluido', quando: d.quando || null }, '*'); } catch (e) {}
+    // A pagina de fora precisa do QUE foi marcado, nao so de que marcou: e com
+    // isto que o formulario da live abre o negocio no Bitrix ja dizendo a
+    // reuniao, o especialista e o link da sala.
+    try {
+      parent.postMessage({
+        tipo: 'qs-agendar:concluido',
+        quando: d.quando_extenso || d.quando || null,
+        especialista: d.especialista || null,
+        link: d.link || null,
+        ja_existia: d.ja_existia === true
+      }, '*');
+    } catch (e) {}
   }
 
   /** "Adicionar à minha agenda" — link do Google Calendar montado na mão. */
