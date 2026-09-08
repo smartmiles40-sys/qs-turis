@@ -108,7 +108,10 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
     try {
       const agora = new Date();
       const hoje0 = inicioDoDia(agora);
-      const ate = new Date(hoje0.getTime() + 8 * 864e5);
+      // 15 e nao 8: o autoagendamento oferece ate 14 dias a frente, e reuniao
+      // marcada pro dia 10 nao aparecia em lugar nenhum pro SDR — ele so ia
+      // descobrir na tarefa de confirmar, 24h antes.
+      const ate = new Date(hoje0.getTime() + 15 * 864e5);
 
       // O gestor enxerga a agenda do time; o closer, a dele. A RLS já corta,
       // mas filtrar aqui evita trazer o que não vai ser mostrado.
@@ -186,10 +189,11 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
     return proximas.filter((m) => mesmoDia(new Date(m.scheduled_at), agora));
   }, [proximas]);
 
-  // Os próximos 7 dias, sem hoje — para "se localizar" sem abrir o calendário.
+  // Os próximos 14 dias, sem hoje — para "se localizar" sem abrir o calendário.
+  // Eram 7, e isso escondia metade do que o autoagendamento marca.
   const semana = useMemo(() => {
     const hoje0 = inicioDoDia(new Date());
-    return Array.from({ length: 7 }, (_, i) => {
+    return Array.from({ length: 14 }, (_, i) => {
       const dia = new Date(hoje0.getTime() + (i + 1) * 864e5);
       const doDia = proximas.filter((m) => mesmoDia(new Date(m.scheduled_at), dia));
       return { dia, reunioes: doDia };
@@ -335,6 +339,11 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                         {m.lead?.full_name ?? m.lead_name ?? "Lead"}
                       </p>
                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-gray-500">
+                        {m.origem === "autoagendamento" && (
+                          <span className="px-1.5 py-0.5 rounded font-bold" style={{ background: "#E0E9FF", color: "#0147FF" }}>
+                            o cliente marcou sozinho
+                          </span>
+                        )}
                         {m.lead?.segment && <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">{m.lead.segment}</span>}
                         {sdrNome && <span>SDR: <b className="text-gray-700 font-semibold">{primeiroNome(sdrNome)}</b></span>}
                         {nContatos > 0 && <span>{nContatos} contato{nContatos > 1 ? "s" : ""} antes</span>}
@@ -383,10 +392,10 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
 
       {/* ── 3. O que vem pela frente ──────────────────────────────────────── */}
       <section>
-        <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Próximos 7 dias</h2>
+        <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Próximos 14 dias</h2>
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
           {semana.every((d) => d.reunioes.length === 0) ? (
-            <p className="px-5 py-6 text-center text-sm text-gray-400">Nada agendado para os próximos 7 dias.</p>
+            <p className="px-5 py-6 text-center text-sm text-gray-400">Nada agendado para os próximos 14 dias.</p>
           ) : (
             <ul className="divide-y divide-gray-100">
               {semana.filter((d) => d.reunioes.length > 0).map(({ dia, reunioes }) => (
@@ -404,6 +413,14 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                         >
                           <span className="text-[12px] font-bold text-gray-700 tabular-nums shrink-0">{hhmm(new Date(m.scheduled_at))}</span>
                           <span className="text-[12.5px] text-gray-600 truncate">{m.lead?.full_name ?? m.lead_name ?? "Lead"}</span>
+                          {/* Sem isto o SDR ve na agenda dele uma reuniao que
+                              nao lembra de ter marcado — e a primeira reacao e
+                              achar que o sistema errou. */}
+                          {m.origem === "autoagendamento" && (
+                            <span className="shrink-0 rounded px-1.5 py-px text-[10px] font-bold" style={{ background: "#E0E9FF", color: "#0147FF" }}>
+                              o cliente marcou
+                            </span>
+                          )}
                           {gestor && m.meeting_owner && (
                             <span className="text-[11px] text-gray-400 shrink-0">· {m.meeting_owner}</span>
                           )}

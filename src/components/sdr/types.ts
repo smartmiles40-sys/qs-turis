@@ -164,6 +164,12 @@ export interface Meeting {
   lead?: Lead;
   owner_id: string | null;
   owner?: SdrUser;
+  /**
+   * De onde veio a reunião (migration 0078): 'autoagendamento' | 'gloria' |
+   * null (marcada pelo time, na tela). O `scheduled_by` segue sendo o NOME de
+   * quem agendou — a origem saiu de lá justamente pra o nome caber.
+   */
+  origem?: string | null;
   /** Closer dono do horário (migration 0027). Antes era só `meeting_owner` em texto. */
   closer_id?: string | null;
   closer?: SdrUser;
