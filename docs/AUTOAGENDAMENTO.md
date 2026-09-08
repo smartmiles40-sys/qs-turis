@@ -193,6 +193,47 @@ uma decisão comercial legítima — só não é de graça.
 
 ---
 
+## Depois que a reunião nasce: quem fica sabendo
+
+| onde | o que chega | quando |
+|------|-------------|--------|
+| `qs_meetings` | horário, closer, `meeting_link`, `calendar_event_id` | na hora |
+| Google Calendar | convite com a sala, pro closer **e** pro cliente | na hora |
+| Nota no lead (`qs_notes`) | quem marcou, quando, com quem, link, contato, interesse, recado | na hora |
+| Sino do SDR | "Reunião marcada — lead passou pro especialista" | na hora |
+| Card do Bitrix | comentário na timeline com data, closer e o link do Meet | na hora |
+| Card do Bitrix | **muda de funil**: vai pra "Comercial 1" → "Reunião de Vendas" | na hora |
+| Tarefa do SDR | confirmar presença com o cliente | 24h antes |
+| Tarefa do closer | registrar o desfecho + SAL | logo depois da reunião |
+
+**Por que a nota e o sino existem.** O agendamento passa o lead pro closer no
+instante em que a reunião é marcada — e do lado do SDR o card simplesmente
+*sumia* da fila, sem explicação. A tarefa de confirmar presença só nasce 24h
+antes: se a reunião for daqui a dez dias, ele passaria nove sem saber que ganhou
+uma. O sino lê os handovers em que ele é o `from_user_id`.
+
+### O funil do Bitrix
+
+```sql
+-- para onde o negócio vai quando a reunião é marcada
+insert into qs_settings (key, value)
+values ('bitrix_reuniao', '{"categoria": 0, "etapa": "EXECUTING"}'::jsonb)
+on conflict (key) do update set value = excluded.value, updated_at = now();
+```
+
+Funil **0** = "Comercial 1 - Se tu for eu vou"; `EXECUTING` = "Reunião de
+Vendas". **Sem essa linha nada é movido** — de propósito: coluna errada no
+Bitrix não dá erro, o negócio só vai parar num lugar que ninguém olha, e em
+massa. (Já aconteceu aqui com o `C25:NEW`, que naquele funil se chama "Ajuste".)
+
+Os ids são opacos e não têm onde consultar sem entrar no portal:
+
+```bash
+curl -s -H "x-lead-secret: $LEAD_INBOUND_SECRET"   https://qs-turis.vercel.app/api/bitrix-etapas
+```
+
+Lista todos os funis e colunas com nome e id. Só lê, não move nada.
+
 ## A agenda pessoal do closer (Google freeBusy)
 
 Um horário só é oferecido se, além de livre no QS, o closer também estiver livre
