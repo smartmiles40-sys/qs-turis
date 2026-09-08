@@ -268,6 +268,11 @@
 
       <div id="sem-horario" class="vazio" hidden></div>
 
+      <!-- Some quando o horario escolhido e reservado por outra pessoa enquanto
+           esta ainda estava preenchendo. Fica AQUI, e nao no passo dos dados,
+           porque e pra ca que ela volta. -->
+      <div id="aviso-horario" class="recado" role="alert" hidden></div>
+
       <div id="grade" hidden>
         <span class="rotulo">Escolha o dia</span>
         <div class="dias" id="dias" role="group" aria-label="Dias disponíveis"></div>
@@ -450,7 +455,18 @@
   }
 
   // ── Passo 1: buscar a grade ────────────────────────────────────────────
-  function carregar() {
+  // ── A GRADE ENVELHECE DEPRESSA ─────────────────────────────────────────
+  // Numa live, centenas de pessoas abrem esta página no mesmo minuto e todas
+  // veem a MESMA grade. Enquanto uma digita o nome, outra marca o horário que
+  // ela escolheu — e ela só descobria no clique final, com um erro seco.
+  //
+  // Overbooking de verdade não acontece (a trava do banco recusa duas reuniões
+  // na mesma hora do mesmo especialista), mas o efeito prático era o mesmo: a
+  // pessoa chegava até o fim e levava não.
+  //
+  // Então a grade se atualiza sozinha. `preservando` mantém o dia e a hora que
+  // a pessoa já escolheu — atualizar não pode desfazer o clique dela.
+  function carregar(preservando) {
     fetch(API, { headers: { Accept: 'application/json' } })
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -463,14 +479,54 @@
           el('subtitulo').textContent = '';
           el('sem-horario').textContent = d.recado || 'No momento não temos horário disponível.';
           el('sem-horario').hidden = false;
+          el('grade').hidden = true;
           avisarAltura();
           return;
         }
 
+        var diaAntes = estado.diaAtivo && estado.diaAtivo.dia;
+        var horaAntes = estado.inicio;
+
         estado.dias = d.dias;
         el('grade').hidden = false;
+        el('sem-horario').hidden = true;
         desenharDias();
-        escolherDia(d.dias[0]);
+
+        if (!preservando) { escolherDia(d.dias[0]); return; }
+
+        // O dia que ela estava olhando ainda existe? Senão, cai no primeiro.
+        var dia = null;
+        for (var i = 0; i < d.dias.length; i++) if (d.dias[i].dia === diaAntes) dia = d.dias[i];
+        escolherDia(dia || d.dias[0]);
+
+        if (!horaAntes) return;
+
+        // O horário que ela tinha escolhido continua livre?
+        var aindaTem = false;
+        if (dia) for (var j = 0; j < dia.horarios.length; j++) if (dia.horarios[j].inicio === horaAntes) aindaTem = true;
+
+        if (aindaTem) {
+          // Reacende a seleção sem mexer em mais nada.
+          var botoes = el('horas').children;
+          for (var k = 0; k < botoes.length; k++) {
+            if (botoes[k].dataset.inicio === horaAntes) {
+              estado.inicio = horaAntes;
+              botoes[k].setAttribute('aria-pressed', 'true');
+            }
+          }
+          atualizarBotao();
+          return;
+        }
+
+        // Sumiu enquanto ela pensava. Avisar AGORA é muito melhor do que
+        // deixar ela preencher tudo e levar erro no fim.
+        estado.inicio = null;
+        atualizarBotao();
+        el('aviso-horario').textContent =
+          'O horário que você tinha escolhido acabou de ser reservado por outra pessoa. Escolha outro, por favor.';
+        el('aviso-horario').hidden = false;
+        mostrarPasso('passo-horario');
+        avisarAltura();
       })
       .catch(function () {
         el('carregando').hidden = true;
@@ -539,6 +595,7 @@
   }
 
   function escolherHora(d, h, botao) {
+    el('aviso-horario').hidden = true;
     estado.inicio = h.inicio;
     estado.rotulo = (d.hoje ? 'Hoje' : d.rotulo) + ', ' + d.data + ' às ' + h.hora;
     Array.prototype.forEach.call(el('horas').children, function (b) {
@@ -555,6 +612,9 @@
 
   el('continuar').addEventListener('click', function () {
     if (!estado.inicio) return;
+    // Daqui até o "Confirmar" pode demorar um minuto. Uma conferência agora
+    // custa nada e evita a pessoa preencher tudo pra levar erro no fim.
+    carregar(true);
     el('resumo-quando').textContent = estado.rotulo;
     el('resumo-duracao').textContent = estado.duracao + ' minutos, por Google Meet';
     mostrarPasso('passo-dados');
@@ -732,6 +792,34 @@
   }
 
   carregar();
+
+  // ── O PULSO ────────────────────────────────────────────────────────────
+  // A cada 25 segundos a grade se atualiza. Numa live, o horário que estava
+  // livre quando a pessoa abriu a página pode não estar mais quando ela
+  // terminar de digitar o e-mail.
+  //
+  // Só com a aba VISÍVEL: uma aba esquecida aberta a tarde inteira bateria na
+  // rota 150 vezes sem ninguém olhando. E só enquanto ela ainda não marcou —
+  // depois do "marcado" não há o que atualizar.
+  //
+  // 25s e não 5s de propósito: mais rápido não deixa a grade mais correta (a
+  // conferência que vale é a do servidor, no clique), só multiplica chamada.
+  var PULSO_MS = 25000;
+  setInterval(function () {
+    if (document.hidden) return;
+    if (estado.enviando) return;                       // no meio do envio, não mexe
+    if (!el('passo-fim').hidden) return;               // já marcou
+    if (el('grade').hidden && el('sem-horario').hidden) return;  // ainda carregando
+    carregar(true);
+  }, PULSO_MS);
+
+  // Voltar pra aba depois de um tempo fora é o momento MAIS provável de a grade
+  // estar velha — atualiza na hora, sem esperar o próximo pulso.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden || estado.enviando) return;
+    if (!el('passo-fim').hidden) return;
+    carregar(true);
+  });
 })();
 </script>
 </body>
