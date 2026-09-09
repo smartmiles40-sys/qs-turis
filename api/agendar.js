@@ -40,6 +40,7 @@ import {
   gradePublica,
   escolherCloserLivre,
   marcarReuniao,
+  quemLevaOCredito,
   comRegras,
   emailValido,
   emSP,
@@ -394,6 +395,10 @@ async function marcar(req, res, { cfg, regras, teto }) {
     // ── 3) Já tem reunião? ──────────────────────────────────────────────────
     const jaTem = await reuniaoQueJaExiste(lead.id, agora);
     if (jaTem) {
+      // Quem é o SDR responsável pelo lead HOJE. NÃO é o `scheduled_by` gravado
+      // na reunião: a marcada antes da correção de 09/09 tem o CLOSER nesse
+      // campo, e passar isso adiante recolocaria closer na medição de SDR.
+      const credito = await quemLevaOCredito(lead, { id: null, name: jaTem.meeting_owner || '' });
       return res.status(200).json({
         ok: true,
         ja_existia: true,
@@ -404,7 +409,7 @@ async function marcar(req, res, { cfg, regras, teto }) {
         // metade justamente para quem voltou e agendou de novo.
         quando_iso: jaTem.scheduled_at || null,
         especialista: jaTem.meeting_owner || null,
-        sdr: jaTem.scheduled_by || null,
+        sdr: credito.ehSdr ? credito.name : null,
         link: jaTem.meeting_link || null,
       });
     }

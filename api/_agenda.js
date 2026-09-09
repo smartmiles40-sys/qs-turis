@@ -779,6 +779,66 @@ async function avisarBitrix(meeting, lead) {
 }
 
 /**
+ * Quem leva o crédito do agendamento: o SDR RESPONSÁVEL pelo lead no QS.
+ *
+ * Ninguém do time clicou nada aqui (foi o cliente, na página pública), então o
+ * crédito é de quem trabalha o lead — é isso que o Bruno mede no "Quem fez o
+ * agendamento?" do Bitrix e na Agenda de cada SDR.
+ *
+ * A ESCADA, e o motivo de cada degrau:
+ *
+ * 1. O dono do lead, quando é SDR de verdade. É o caso normal: o rodízio do
+ *    banco (`trg_qs_assign_owner`) já sorteou quando o lead nasceu, então dá um
+ *    agendamento para cada SDR na ordem, sem um segundo rodízio aqui.
+ *
+ * 2. O ÚLTIMO SDR que teve o lead, pelo histórico de handover. Existe porque
+ *    marcar reunião TRANSFERE o lead pro closer: quem já agendou uma vez está
+ *    com o lead no nome do closer, e o degrau 1 devolvia o CLOSER como "SDR" —
+ *    exatamente o que apareceu no teste de 09/09 (card 43793 saiu com "Talita
+ *    Carvalho", que é closer). Conferido no banco: dos 210 leads que hoje estão
+ *    com closer, TODOS os 210 têm SDR no histórico. Então este degrau resolve o
+ *    caso inteiro, não uma parte dele.
+ *
+ * 3. Nada disso: fica com o closer, como era antes, mas marcado `ehSdr: false`
+ *    — e aí o campo do Bitrix sai VAZIO em vez de contar closer como SDR. Medir
+ *    errado é pior do que medir menos.
+ */
+export async function quemLevaOCredito(lead, closer) {
+  const doCloser = { id: closer.id, name: closer.name, ehSdr: false };
+  try {
+    let dono = null;
+    if (lead.owner_id) {
+      const r = await rest(`qs_users?select=id,name,role&id=eq.${encodeURIComponent(lead.owner_id)}&limit=1`);
+      dono = r?.[0] || null;
+      if (dono?.role === 'sdr') return { id: dono.id, name: dono.name, ehSdr: true };
+    }
+
+    const hist = await rest(
+      `qs_handovers?select=from_user_id,created_at&lead_id=eq.${encodeURIComponent(lead.id)}` +
+      '&order=created_at.desc&limit=20'
+    );
+    const ids = [...new Set((hist || []).map((h) => h.from_user_id).filter(Boolean))];
+    if (ids.length) {
+      const gente = await rest(`qs_users?select=id,name,role&id=in.(${ids.join(',')})`);
+      const porId = new Map((gente || []).map((u) => [u.id, u]));
+      // Na ordem do histórico (mais recente primeiro): o SDR que mexeu no lead
+      // por último é o dono da conversa que virou esta reunião.
+      for (const h of hist) {
+        const u = porId.get(h.from_user_id);
+        if (u?.role === 'sdr') return { id: u.id, name: u.name, ehSdr: true };
+      }
+    }
+
+    // Dono que não é SDR (coordenação, gestão) segue valendo pra Agenda e pro
+    // `scheduled_by` — só não conta como SDR na medição.
+    if (dono?.name && dono.id !== closer.id) return { id: dono.id, name: dono.name, ehSdr: false };
+  } catch (e) {
+    console.warn('[agenda] não deu pra achar o SDR do lead (crédito fica com o closer):', e?.message);
+  }
+  return doCloser;
+}
+
+/**
  * Marca a reunião. É o único lugar do servidor que escreve em `qs_meetings`.
  *
  * ORDEM, e ela não é negociável: a linha no banco vem PRIMEIRO. O horário fica
@@ -831,16 +891,9 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
   // na ordem, sem precisar de um segundo rodízio aqui — que divergiria do
   // primeiro no primeiro ajuste.
   //
-  // Cai pro closer só quando o lead já era dele (ele mesmo trabalhou o card).
-  let sdrCredito = { id: closer.id, name: closer.name };
-  if (lead.owner_id && lead.owner_id !== closer.id) {
-    try {
-      const dono = await rest(`qs_users?select=id,name&id=eq.${encodeURIComponent(lead.owner_id)}&limit=1`);
-      if (dono?.[0]?.name) sdrCredito = { id: dono[0].id, name: dono[0].name };
-    } catch (e) {
-      console.warn('[agenda] não deu pra ler o SDR do lead (crédito fica com o closer):', e?.message);
-    }
-  }
+  // Cai pro closer só quando não sobrou SDR nenhum pra creditar — ver
+  // `quemLevaOCredito`, que é onde mora a regra.
+  const sdrCredito = await quemLevaOCredito(lead, closer);
 
   const row = {
     lead_id: lead.id,
@@ -1009,7 +1062,11 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
     especialista: closer.name,
     // O SDR que leva o crédito, pelo NOME — é por nome que o Bitrix casa o
     // "Quem fez o agendamento?" (lista de opções, não texto livre).
-    sdr: sdrCredito.name,
+    //
+    // Só sai quando é SDR de verdade: esse campo é o que o Bruno usa pra medir
+    // agendamento por SDR, e closer ali dentro estraga a conta. Vazio o card
+    // avisa que faltou; com o nome errado, ninguém descobre.
+    sdr: sdrCredito.ehSdr ? sdrCredito.name : null,
     link: meeting.meeting_link || null,
     avisos,
   };
