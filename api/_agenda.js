@@ -1000,7 +1000,16 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
     meeting_id: meeting.id,
     quando: comoOTimeFala(inicio),
     quando_extenso: quando,
+    // ISO ao lado do texto de gente: quem embute o agendamento (os formulários
+    // de live) precisa preencher um campo de DATA no Bitrix, e "quinta-feira,
+    // 11 de setembro às 18h" não entra em campo de data. Os dois saem porque a
+    // tela mostra o texto e a integração usa o ISO — derivar um do outro do
+    // lado de fora seria reimplementar o nosso formatador em outro repo.
+    quando_iso: inicio.toISOString(),
     especialista: closer.name,
+    // O SDR que leva o crédito, pelo NOME — é por nome que o Bitrix casa o
+    // "Quem fez o agendamento?" (lista de opções, não texto livre).
+    sdr: sdrCredito.name,
     link: meeting.meeting_link || null,
     avisos,
   };

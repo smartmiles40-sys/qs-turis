@@ -767,7 +767,14 @@
       parent.postMessage({
         tipo: 'qs-agendar:concluido',
         quando: d.quando_extenso || d.quando || null,
+        // O MESMO instante em ISO. O texto e pra pessoa ler; o ISO e o que
+        // entra num campo de data do CRM. `estado.inicio` e a rede de
+        // seguranca: e o horario que ela escolheu nesta tela, entao serve
+        // quando a resposta vem de uma versao antiga da API.
+        quando_iso: d.quando_iso || estado.inicio || null,
         especialista: d.especialista || null,
+        // O SDR dono do lead, pelo nome — o CRM casa "quem agendou" por nome.
+        sdr: d.sdr || null,
         link: d.link || null,
         ja_existia: d.ja_existia === true
       }, '*');

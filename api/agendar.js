@@ -217,7 +217,7 @@ function horarioValido(inicio, regras, agora) {
 async function reuniaoQueJaExiste(leadId, agora) {
   try {
     const rows = await rest(
-      `qs_meetings?select=id,scheduled_at,meeting_owner,meeting_link&lead_id=eq.${encodeURIComponent(leadId)}` +
+      `qs_meetings?select=id,scheduled_at,scheduled_by,meeting_owner,meeting_link&lead_id=eq.${encodeURIComponent(leadId)}` +
       `&status=in.(agendada,confirmada)&scheduled_at=gte.${agora.toISOString()}` +
       '&order=scheduled_at&limit=1'
     );
@@ -398,7 +398,13 @@ async function marcar(req, res, { cfg, regras, teto }) {
         ok: true,
         ja_existia: true,
         quando: comoOTimeFala(new Date(jaTem.scheduled_at), agora),
+        // Mesmo formato do caminho de baixo: quem embute o agendamento preenche
+        // campo de data no Bitrix e casa o SDR por nome. Reunião que já existia
+        // tem os dois dados gravados — omiti-los aqui deixaria o card pela
+        // metade justamente para quem voltou e agendou de novo.
+        quando_iso: jaTem.scheduled_at || null,
         especialista: jaTem.meeting_owner || null,
+        sdr: jaTem.scheduled_by || null,
         link: jaTem.meeting_link || null,
       });
     }
@@ -465,7 +471,9 @@ async function marcar(req, res, { cfg, regras, teto }) {
       ok: true,
       quando: r.quando,
       quando_extenso: r.quando_extenso,
+      quando_iso: r.quando_iso,
       especialista: r.especialista,
+      sdr: r.sdr,
       link: r.link,
       // `avisos` não vai pro cliente: "sem link do Meet" é recado pro time (e já
       // está na nota do lead e em calendar_error), não pra quem acabou de
