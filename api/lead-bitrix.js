@@ -42,6 +42,7 @@
 import { rest, insert } from './_supabaseAdmin.js';
 import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
 import { vincularLeadAoBitrix, bitrixConfigurado } from './_bitrixLead.js';
+import { verificarVinculo } from './_vinculo.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -49,27 +50,52 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Use POST' });
   }
 
-  const userId = await getSupabaseUserId(req.headers.authorization);
-  if (!userId) return res.status(401).json({ error: 'Não autorizado' });
-
   const body = typeof req.body === 'string' ? safeJson(req.body) : (req.body || {});
-  const leadId = String(body.lead_id || '').trim();
+
+  // ── DUAS PORTAS, E SÓ ESTA PRIMEIRA NÃO TEM GENTE ATRÁS ────────────────────
+  //
+  // `vinculo` é o crachá assinado pelo servidor no agendamento (api/_vinculo.js).
+  // Quem o apresenta é o /api/save-lead do stfv-forms, DEPOIS de criar o card no
+  // Bitrix — e é assim que o QS finalmente aprende o número do card de quem
+  // agendou por um formulário de live. Sem isso, `qs_leads.bitrix_id` fica nulo e
+  // desfecho, no-show, SAL e movimento de coluna param de voltar pro card, em
+  // silêncio (medido em 09/09: 17 das 18 reuniões do formulário estavam assim).
+  //
+  // O crachá NÃO substitui a sessão no resto: ele nomeia UM lead, foi assinado
+  // por nós e vence em 6 horas. Não dá pra pedir outro lead com ele.
+  const cracha = body.vinculo ? verificarVinculo(body.vinculo) : null;
+  if (body.vinculo && !cracha) {
+    return res.status(401).json({ error: 'Vínculo inválido ou vencido.' });
+  }
+
+  let userId = null;
+  let acesso = { ok: true, user: null };
+  if (!cracha) {
+    userId = await getSupabaseUserId(req.headers.authorization);
+    if (!userId) return res.status(401).json({ error: 'Não autorizado' });
+  }
+
+  const leadId = cracha ? cracha.leadId : String(body.lead_id || '').trim();
   const bitrixId = String(body.bitrix_id ?? '').replace(/\D/g, '');
   // Modo CRIAR (09/09): em vez de grudar um negocio que ja existe, ABRE um novo.
-  const criar = body.criar === true || body.criar === 'true' || body.criar === 1;
+  // Nao vale pelo crachá: quem chega por ali JA criou o card do outro lado.
+  const criar = !cracha && (body.criar === true || body.criar === 'true' || body.criar === 1);
 
   if (!leadId) return res.status(400).json({ error: 'lead_id é obrigatório' });
   if (!criar && !bitrixId) return res.status(400).json({ error: 'O ID do Bitrix deve ter só números.' });
 
   // A permissao e conferida sobre o card de DESTINO — o unico que este usuario
-  // esta declarando ser dono do negocio. Mesma regra do resto do QS.
-  const acesso = await assertCanAccessLead(userId, leadId);
-  if (!acesso.ok) {
-    return res.status(403).json({
-      error: acesso.reason === 'lead-inexistente'
-        ? 'Esse lead não existe mais no QS.'
-        : 'Você não pode alterar este lead.',
-    });
+  // esta declarando ser dono do negocio. Mesma regra do resto do QS. Pelo crachá
+  // nao ha usuario nenhum: quem autoriza e a assinatura, e o lead vem dela.
+  if (!cracha) {
+    acesso = await assertCanAccessLead(userId, leadId);
+    if (!acesso.ok) {
+      return res.status(403).json({
+        error: acesso.reason === 'lead-inexistente'
+          ? 'Esse lead não existe mais no QS.'
+          : 'Você não pode alterar este lead.',
+      });
+    }
   }
 
   // ── ABRIR O NEGOCIO NO BITRIX (Bruno, 09/09) ───────────────────────────────
@@ -157,7 +183,7 @@ export default async function handler(req, res) {
     // semanas, ve que o Bitrix sumiu e nao tem como saber se foi bug, se foi
     // alguem, nem quando.
     if (antigo) {
-      const quem = acesso.user?.name || 'um usuário do QS';
+      const quem = acesso.user?.name || (cracha ? 'o formulário de captação' : 'um usuário do QS');
       const quando = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
       try {
         await insert('qs_notes', [

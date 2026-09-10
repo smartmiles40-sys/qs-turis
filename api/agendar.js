@@ -48,6 +48,7 @@ import {
   comoOTimeFala,
   ORIGEM_AUTOAGENDAMENTO,
 } from './_agenda.js';
+import { assinarVinculo } from './_vinculo.js';
 
 // Mesma última linha de defesa do /api/lead: se qs_settings sumir ou vier
 // corrompido, a página não para de funcionar.
@@ -411,6 +412,10 @@ async function marcar(req, res, { cfg, regras, teto }) {
         especialista: jaTem.meeting_owner || null,
         sdr: credito.ehSdr ? credito.name : null,
         link: jaTem.meeting_link || null,
+        // O crachá vai TAMBÉM aqui: quem já tinha reunião marcada segue pra fase
+        // 2 do formulário e ganha um card novo igual — sem o crachá esse card
+        // nasceria órfão do QS, que é o defeito que o crachá existe pra fechar.
+        vinculo: assinarVinculo({ leadId: lead.id, meetingId: jaTem.id }),
       });
     }
 
@@ -480,6 +485,9 @@ async function marcar(req, res, { cfg, regras, teto }) {
       especialista: r.especialista,
       sdr: r.sdr,
       link: r.link,
+      // Assinado pelo servidor: é com isto que o formulário devolve o número do
+      // card pro QS depois de criá-lo no Bitrix (ver api/_vinculo.js).
+      vinculo: assinarVinculo({ leadId: lead.id, meetingId: r.meeting_id }),
       // `avisos` não vai pro cliente: "sem link do Meet" é recado pro time (e já
       // está na nota do lead e em calendar_error), não pra quem acabou de
       // marcar. Do lado de cá, a reunião está marcada — que é o que importa.

@@ -776,6 +776,10 @@
         // O SDR dono do lead, pelo nome — o CRM casa "quem agendou" por nome.
         sdr: d.sdr || null,
         link: d.link || null,
+        // Bilhete assinado pelo servidor, que a pagina de fora devolve junto com
+        // o numero do card criado no CRM. Passa por aqui SEM ser lido: mexer nele
+        // invalida a assinatura, e o QS so aceita crachá que ele mesmo assinou.
+        vinculo: d.vinculo || null,
         ja_existia: d.ja_existia === true
       }, '*');
     } catch (e) {}
