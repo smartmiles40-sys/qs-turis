@@ -41,6 +41,7 @@
 
 import { rest, insert } from './_supabaseAdmin.js';
 import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
+import { vincularLeadAoBitrix, bitrixConfigurado } from './_bitrixLead.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -54,9 +55,11 @@ export default async function handler(req, res) {
   const body = typeof req.body === 'string' ? safeJson(req.body) : (req.body || {});
   const leadId = String(body.lead_id || '').trim();
   const bitrixId = String(body.bitrix_id ?? '').replace(/\D/g, '');
+  // Modo CRIAR (09/09): em vez de grudar um negocio que ja existe, ABRE um novo.
+  const criar = body.criar === true || body.criar === 'true' || body.criar === 1;
 
   if (!leadId) return res.status(400).json({ error: 'lead_id é obrigatório' });
-  if (!bitrixId) return res.status(400).json({ error: 'O ID do Bitrix deve ter só números.' });
+  if (!criar && !bitrixId) return res.status(400).json({ error: 'O ID do Bitrix deve ter só números.' });
 
   // A permissao e conferida sobre o card de DESTINO — o unico que este usuario
   // esta declarando ser dono do negocio. Mesma regra do resto do QS.
@@ -67,6 +70,53 @@ export default async function handler(req, res) {
         ? 'Esse lead não existe mais no QS.'
         : 'Você não pode alterar este lead.',
     });
+  }
+
+  // ── ABRIR O NEGOCIO NO BITRIX (Bruno, 09/09) ───────────────────────────────
+  //
+  // O lead cadastrado a mao nascia SO no QS. O lead que entra pelo WhatsApp ou
+  // pelo webhook ja abria negocio sozinho (vincularLeadAoBitrix, dentro do
+  // _leads.js) — o cadastro manual era o unico caminho sem essa perna, e o
+  // comercial descobria o cliente pelo boca a boca.
+  //
+  // Aqui e o MESMO codigo daquele caminho: mesmo funil, mesma etapa, mesma
+  // busca de contato duplicado, mesmo responsavel casado por e-mail. Escrever
+  // uma segunda versao "so pro cadastro manual" e como o QS ja criou dois
+  // comportamentos pro mesmo botao antes.
+  //
+  // Nao e best-effort como la: la o lead precisava entrar de qualquer jeito, e o
+  // Bitrix era enfeite. Aqui a pessoa CLICOU em "criar no Bitrix" — se falhar,
+  // ela tem que saber, senao vai embora achando que o card existe.
+  if (criar) {
+    if (!bitrixConfigurado()) {
+      return res.status(503).json({
+        error: 'A integração com o Bitrix está desligada no servidor (falta BITRIX_WEBHOOK_BASE).',
+      });
+    }
+    try {
+      const linhas = await rest(`qs_leads?select=*&id=eq.${encodeURIComponent(leadId)}&limit=1`);
+      const lead = (Array.isArray(linhas) && linhas[0]) || null;
+      if (!lead) return res.status(404).json({ error: 'Esse lead não existe mais no QS.' });
+
+      // Ja tem card: nao abre um segundo. Duplicar negocio no funil e
+      // exatamente a sujeira que a checagem por telefone existe pra evitar.
+      if (lead.bitrix_id) {
+        return res.status(200).json({ ok: true, ja_era: true, lead_id: leadId, bitrix_id: String(lead.bitrix_id) });
+      }
+
+      const novoId = await vincularLeadAoBitrix(lead);
+      if (!novoId) {
+        return res.status(502).json({
+          error: 'O Bitrix não criou o negócio. O lead está salvo no QS — dá pra tentar de novo pelo perfil dele.',
+        });
+      }
+      return res.status(200).json({ ok: true, criado: true, lead_id: leadId, bitrix_id: String(novoId) });
+    } catch (err) {
+      console.error('[lead-bitrix/criar]', err?.message || err);
+      return res.status(502).json({
+        error: 'Falha ao criar o negócio no Bitrix. O lead está salvo no QS.',
+      });
+    }
   }
 
   try {

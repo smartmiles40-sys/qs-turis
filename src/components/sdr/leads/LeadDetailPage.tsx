@@ -75,6 +75,10 @@ const MEETING_COLORS: Record<string, { bg: string; text: string }> = {
   realizada: { bg: "bg-green-50", text: "text-green-700" },
   no_show: { bg: "bg-orange-50", text: "text-orange-700" },
   cancelada: { bg: "bg-red-50", text: "text-red-700" },
+  // 0079: sem isto a desistência caía no fallback e aparecia como "agendada"
+  // (azul) no histórico do lead — dizendo o contrário do que aconteceu.
+  desistencia: { bg: "bg-purple-50", text: "text-purple-700" },
+  arquivada: { bg: "bg-gray-50", text: "text-gray-400" },
 };
 
 const CHANNEL_ICONS: Record<string, React.ReactNode> = {
@@ -929,7 +933,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           ganho: "Ganho / Agendou", concluida: "Concluída", sem_interesse: "Perdido", atendeu: "Atendeu (pediu retorno)",
           nao_atendeu: "Não atendeu", caixa_postal: "Caixa postal", numero_errado: "Nº errado", desligou: "Desligou",
         };
-        const meetingLabels: Record<string, string> = { agendada: "agendada", realizada: "realizada", no_show: "no-show", cancelada: "cancelada" };
+        const meetingLabels: Record<string, string> = { agendada: "agendada", realizada: "realizada", no_show: "no-show", cancelada: "cancelada", desistencia: "encerrada por desistência do cliente" };
         const events: Ev[] = [];
 
         // Chegada do lead

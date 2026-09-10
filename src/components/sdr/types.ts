@@ -19,7 +19,7 @@ export type GoalPeriod = "diario" | "mensal";
 // "arquivada" (0072): passou e ninguém registrou o desfecho. NÃO é desfecho —
 // é a ausência dele, dita em voz alta. Fica fora de todo indicador: contar como
 // realizada inflaria, como cancelada derrubaria, e as duas mentiriam.
-export type MeetingStatus = "agendada" | "confirmada" | "realizada" | "no_show" | "reagendada" | "cancelada" | "arquivada";
+export type MeetingStatus = "agendada" | "confirmada" | "realizada" | "no_show" | "reagendada" | "cancelada" | "arquivada" | "desistencia";
 
 /** Sales Accepted Lead: o especialista aceitou ou recusou o lead na reunião (0028). */
 export type MeetingSal = "aceito" | "recusado";
@@ -216,6 +216,18 @@ export interface Meeting {
   scheduled_by?: string | null;
   meeting_owner?: string | null;
   client_email?: string | null;
+  /**
+   * O desfecho comercial gravado no QS (0079).
+   *
+   * Valor e tipo da venda eram perguntados ao closer e iam DIRETO pro Bitrix,
+   * sem parar aqui — então quando o envio falhava o número digitado sumia e não
+   * havia o que reenviar. Agora eles ficam, e o botão "Enviar pro Bitrix" tem
+   * conteúdo. `undefined` = banco sem a 0079.
+   */
+  venda_valor?: number | null;
+  venda_tipo?: string | null;
+  /** Última vez que o /api/bitrix-sync aceitou este desfecho (0079). */
+  desfecho_enviado_em?: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -382,6 +394,9 @@ export const MEETING_STATUS_LABELS: Record<MeetingStatus, string> = {
   reagendada: "Reagendada",
   cancelada: "Cancelada",
   arquivada: "Arquivada (sem registro)",
+  // Desistência (0079) ≠ cancelada. Cancelada é agenda que mudou; desistência é
+  // cliente que saiu da negociação — e por isso ela leva o lead pra perdido.
+  desistencia: "Desistência",
 };
 
 export const SOURCE_LABELS: Record<LeadSource, string> = {

@@ -21,14 +21,15 @@
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { sweepOutcomeTasks } from "@/lib/qs/meetings";
+import { sweepOutcomeTasks, reenviarDesfechoAoBitrix, temDesfecho } from "@/lib/qs/meetings";
+import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { fetchAllRows } from "@/lib/qs/queries";
 import MeetingDetailModal from "./MeetingDetailModal";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
 import { hhmm, WEEKDAY_SHORT, WEEKDAY_LONG, MONTH_LONG } from "@/lib/qs/calendarLayout";
-import type { Meeting } from "../types";
+import { MEETING_STATUS_LABELS, type Meeting } from "../types";
 
 interface Props {
   onOpenLead: (leadId: string) => void;
@@ -184,10 +185,48 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
   // closer que vive NESTA tela nunca era cobrado. A varredura é idempotente.
   useEffect(() => { void sweepOutcomeTasks(); }, []);
 
+  // O QUE JÁ FOI REGISTRADO DESCE (Bruno, 09/09).
+  //
+  // A lista de hoje vinha em ordem de horário e pronto — então a reunião das 9h
+  // que o closer já fechou às 10h continuava no topo do dia inteiro, disputando
+  // atenção com as que ele ainda tem que atender. Agora ela cai pro fim e fica
+  // esmaecida: continua na tela (é o comprovante de que foi registrada, e é de
+  // onde sai o reenvio pro Bitrix), mas para de poluir o que falta fazer.
+  //
+  // Dentro de cada bloco a ordem segue sendo a do relógio.
   const hoje = useMemo(() => {
     const agora = new Date();
-    return proximas.filter((m) => mesmoDia(new Date(m.scheduled_at), agora));
+    return proximas
+      .filter((m) => mesmoDia(new Date(m.scheduled_at), agora))
+      .slice()
+      .sort((a, b) => {
+        const fa = ABERTAS.includes(a.status) ? 0 : 1;
+        const fb = ABERTAS.includes(b.status) ? 0 : 1;
+        if (fa !== fb) return fa - fb;
+        return new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime();
+      });
   }, [proximas]);
+
+  // ── Reenviar o desfecho pro Bitrix ───────────────────────────────────────
+  // O envio automático é fire-and-forget: quando o n8n ou o Bitrix estão fora,
+  // o closer vê um toast de erro e não tinha segunda tentativa — a única saída
+  // era fechar a reunião de novo, o que registra o desfecho duas vezes.
+  const [enviandoId, setEnviandoId] = useState<string | null>(null);
+
+  async function enviarPraBitrix(m: Meeting) {
+    if (enviandoId) return;
+    setEnviandoId(m.id);
+    const res = await reenviarDesfechoAoBitrix(m);
+    setEnviandoId(null);
+    if (!res.ok) {
+      notifyError(res.error ?? "Não consegui enviar o desfecho pro Bitrix.");
+      return;
+    }
+    notifySuccess("Desfecho enviado pro Bitrix.");
+    // Recarrega pra trazer o carimbo do envio — sem isso o botão continuaria
+    // dizendo "nunca enviado" numa reunião que acabou de ser aceita.
+    void carregar();
+  }
 
   // Os próximos 14 dias, sem hoje — para "se localizar" sem abrir o calendário.
   // Eram 7, e isso escondia metade do que o autoagendamento marca.
@@ -313,15 +352,23 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
               const ini = new Date(m.scheduled_at);
               const fim = new Date(ini.getTime() + (m.duration_min ?? 30) * 60_000);
               const passou = fim.getTime() < Date.now();
-              const agoraNela = !passou && ini.getTime() <= Date.now();
+              // Registrada = já tem desfecho. Ela desceu pro fim da lista (ver o
+              // useMemo do `hoje`) e aqui perde o peso visual: metade da opacidade,
+              // sem anel de "agora", sem cobrança. É o que o closer JÁ fez.
+              const registrada = !ABERTAS.includes(m.status);
+              const agoraNela = !registrada && !passou && ini.getTime() <= Date.now();
               const nContatos = contatos.get(m.lead_id) ?? 0;
               const sdrNome = m.lead?.owner_id ? sdrs.get(m.lead.owner_id) : null;
 
               return (
                 <li
                   key={m.id}
-                  className={`rounded-xl border bg-white overflow-hidden ${
-                    agoraNela ? "border-[#0147FF] ring-2 ring-[#0147FF]/15" : "border-gray-200"
+                  className={`rounded-xl border overflow-hidden transition-opacity ${
+                    registrada
+                      ? "bg-gray-50 border-gray-200 opacity-60 hover:opacity-100"
+                      : agoraNela
+                        ? "bg-white border-[#0147FF] ring-2 ring-[#0147FF]/15"
+                        : "bg-white border-gray-200"
                   }`}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-stretch">
@@ -330,7 +377,9 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                       <p className="text-lg font-bold text-gray-900 leading-none tabular-nums">{hhmm(ini)}</p>
                       <p className="text-[11px] text-gray-400 mt-1 tabular-nums">até {hhmm(fim)}</p>
                       {agoraNela && <p className="text-[10px] font-bold text-[#0147FF] mt-1.5 uppercase">agora</p>}
-                      {passou && <p className="text-[10px] font-semibold text-gray-400 mt-1.5 uppercase">já passou</p>}
+                      {registrada
+                        ? <p className="text-[10px] font-bold text-gray-500 mt-1.5 uppercase">{MEETING_STATUS_LABELS[m.status]}</p>
+                        : passou && <p className="text-[10px] font-semibold text-gray-400 mt-1.5 uppercase">já passou</p>}
                     </div>
 
                     {/* Quem é e o que se sabe dele */}
@@ -354,7 +403,10 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                       )}
 
                       <div className="mt-2.5 flex flex-wrap gap-2">
-                        {m.meeting_link ? (
+                        {/* Reunião registrada não precisa mais do link do Meet —
+                            ela já aconteceu (ou não vai acontecer). O que ela
+                            precisa é do reenvio pro Bitrix. */}
+                        {!registrada && (m.meeting_link ? (
                           <a
                             href={m.meeting_link}
                             target="_blank"
@@ -367,7 +419,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                           <span className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-400 text-xs font-semibold">
                             Sem link
                           </span>
-                        )}
+                        ))}
                         <button
                           onClick={() => onOpenLead(m.lead_id)}
                           className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-semibold hover:bg-gray-50"
@@ -378,8 +430,33 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                           onClick={() => setDetalhe(m)}
                           className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-semibold hover:bg-gray-50"
                         >
-                          {passou ? "Registrar desfecho" : "Detalhes"}
+                          {!registrada && passou ? "Registrar desfecho" : "Detalhes"}
                         </button>
+
+                        {/* ENVIAR PRO BITRIX. O SDR não vê: quem responde pelo
+                            card do negócio é quem registrou o desfecho. */}
+                        {registrada && !visaoSdr && temDesfecho(m) && (
+                          <button
+                            onClick={() => void enviarPraBitrix(m)}
+                            disabled={enviandoId === m.id}
+                            title={
+                              m.desfecho_enviado_em
+                                ? `Último envio: ${new Date(m.desfecho_enviado_em).toLocaleString("pt-BR")}`
+                                : "Este desfecho ainda não foi confirmado pelo Bitrix."
+                            }
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-50 ${
+                              m.desfecho_enviado_em
+                                ? "border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                : "bg-amber-600 text-white hover:bg-amber-700"
+                            }`}
+                          >
+                            {enviandoId === m.id
+                              ? "Enviando…"
+                              : m.desfecho_enviado_em
+                                ? "Reenviar pro Bitrix"
+                                : "Enviar pro Bitrix"}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -409,10 +486,18 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                       <li key={m.id}>
                         <button
                           onClick={() => setDetalhe(m)}
-                          className="w-full text-left flex items-baseline gap-2 rounded px-1.5 py-1 hover:bg-gray-50"
+                          /* Mesma regra do "Hoje": o que já tem desfecho fica
+                             esmaecido, pra lista de compromisso mostrar só o que
+                             ainda é compromisso. */
+                          className={`w-full text-left flex items-baseline gap-2 rounded px-1.5 py-1 hover:bg-gray-50 ${
+                            ABERTAS.includes(m.status) ? "" : "opacity-50"
+                          }`}
                         >
                           <span className="text-[12px] font-bold text-gray-700 tabular-nums shrink-0">{hhmm(new Date(m.scheduled_at))}</span>
                           <span className="text-[12.5px] text-gray-600 truncate">{m.lead?.full_name ?? m.lead_name ?? "Lead"}</span>
+                          {!ABERTAS.includes(m.status) && (
+                            <span className="shrink-0 text-[10px] font-bold uppercase text-gray-400">{MEETING_STATUS_LABELS[m.status]}</span>
+                          )}
                           {/* Sem isto o SDR ve na agenda dele uma reuniao que
                               nao lembra de ter marcado — e a primeira reacao e
                               achar que o sistema errou. */}

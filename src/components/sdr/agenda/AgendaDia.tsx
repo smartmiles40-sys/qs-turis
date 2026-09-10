@@ -73,6 +73,10 @@ const STATUS: Record<MeetingStatus, StatusToken> = {
   // não pra disputar atenção com o que ainda precisa de ação.
   arquivada:  { label: "Arquivada",  cor: "#9CA3AF", fundo: "rgba(156,163,175,0.10)", texto: "#6B7280" },
   cancelada:  { label: "Cancelada",  cor: "#64748B", fundo: "rgba(100,116,139,0.10)", texto: "#475569" },
+  // Roxo (0079): desistência não é "aconteceu" (verde) nem "furou" (vermelho).
+  // É o cliente saindo da negociação — cor própria pra não se confundir com
+  // cancelada, que é a agenda mudando de ideia, não o cliente.
+  desistencia: { label: "Desistência", cor: "#7C3AED", fundo: "rgba(124,58,237,0.10)", texto: "#6D28D9" },
 };
 
 /** Usada até o banco responder e no preview. A de verdade vem de qs_settings. */
@@ -1146,11 +1150,31 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
           <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Desfecho</p>
 
           {!fechando && (
-            <div className="mt-2.5 grid grid-cols-3 gap-1.5">
-              <BotaoDesfecho cor="#059669" icone={<IcCheck />} rotulo="Realizada" onClick={() => setFechando("realizada")} />
-              <BotaoDesfecho cor="#D97706" icone={<IcRedo />} rotulo="Reagendar" onClick={onRemarcar} />
-              <BotaoDesfecho cor="#DC2626" icone={<IcUserX />} rotulo="No-show" onClick={() => setFechando("no_show")} />
-            </div>
+            <>
+              <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+                <BotaoDesfecho cor="#059669" icone={<IcCheck />} rotulo="Realizada" onClick={() => setFechando("realizada")} />
+                <BotaoDesfecho cor="#D97706" icone={<IcRedo />} rotulo="Reagendar" onClick={onRemarcar} />
+                <BotaoDesfecho cor="#DC2626" icone={<IcUserX />} rotulo="No-show" onClick={() => setFechando("no_show")} />
+              </div>
+              {/* DESISTÊNCIA (0079), separada dos três acima porque fala de
+                  outra coisa: aqueles descrevem a REUNIÃO, este descreve o
+                  NEGÓCIO. Sem valor e sem SAL — e o lead vai pra perdido, por
+                  isso o aviso antes do clique. Mesmo botão do modal de detalhe:
+                  o desfecho não pode ser diferente dependendo de por onde o
+                  closer entrou. */}
+              <button
+                onClick={() => {
+                  const quem = reuniao.lead_name || reuniao.lead?.full_name || "este cliente";
+                  if (window.confirm(
+                    `Registrar DESISTÊNCIA de ${quem}?\n\nO lead vai para PERDIDO e as atividades abertas dele são encerradas.`
+                  )) onStatus("desistencia");
+                }}
+                className="mt-1.5 w-full rounded-lg border py-1.5 text-xs font-bold transition hover:brightness-95"
+                style={{ borderColor: "#7C3AED55", color: "#6D28D9", background: "#7C3AED12" }}
+              >
+                Desistência do cliente
+              </button>
+            </>
           )}
 
           {fechando && (

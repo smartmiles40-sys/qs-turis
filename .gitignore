@@ -34,3 +34,6 @@ n8n/*.local.*
 
 # despejo do corpus da Glória (conversa de cliente, nunca vai pro git)
 tmp/
+
+# Scratch do CLI do Supabase (versao baixada, cache) — nao e do projeto.
+supabase/.temp

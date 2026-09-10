@@ -40,6 +40,76 @@ export interface BitrixSyncPayload {
 
 let warnedNotConfigured = false;
 
+/** O que o envio deu, para quem PRECISA saber (um botão, por exemplo). */
+export interface BitrixSyncResult {
+  ok: boolean;
+  /** Servidor sem N8N_SYNC_BASE: não é falha, é integração desligada. */
+  desligado?: boolean;
+  /** O lead não tem card no Bitrix — não houve o que atualizar. */
+  semCard?: boolean;
+  error?: string;
+}
+
+/**
+ * A MESMA entrega do notifyBitrix, mas ESPERÁVEL.
+ *
+ * Existe desde 09/09 por causa do botão "Enviar pro Bitrix" do desfecho: um
+ * botão que não pode dizer se funcionou é pior que não ter botão — o closer
+ * clica, não acontece nada visível, e ele clica de novo. O fire-and-forget
+ * continua sendo o padrão de TODO o resto (nunca travar a UI do SDR); aqui a
+ * espera é o ponto, porque a pessoa pediu o envio e está olhando.
+ *
+ * NÃO lança: devolve o motivo em texto. Quem chama decide o que mostrar.
+ */
+export async function enviarAoBitrix(
+  event: BitrixSyncEvent,
+  payload: BitrixSyncPayload
+): Promise<BitrixSyncResult> {
+  if (!payload.bitrix_id && !payload.lead_id) {
+    return { ok: false, error: "Sem lead_id nem bitrix_id — não há o que sincronizar." };
+  }
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) headers["Authorization"] = `Bearer ${data.session.access_token}`;
+
+    const res = await fetch("/api/bitrix-sync", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ event, ...payload }),
+      keepalive: true,
+    });
+    const json = (await res.json().catch(() => null)) as {
+      success?: boolean;
+      code?: string;
+      error?: string;
+    } | null;
+
+    if (json?.code === "not_configured") return { ok: false, desligado: true };
+    // "Lead sem bitrix_id" volta como SUCESSO do servidor — e é o certo pro
+    // disparo automático, que não pode berrar por cada lead que não veio do
+    // Bitrix. Mas um botão que a pessoa apertou não pode dizer "enviado" quando
+    // não existe card do outro lado: aqui isso vira resposta, não silêncio.
+    if (json?.code === "skipped_no_bitrix_id") return { ok: false, semCard: true };
+    if (!res.ok || !json?.success) {
+      const erro = String(json?.error ?? "");
+      return {
+        ok: false,
+        // Mesma distinção do notifyBitrix: dizer QUEM recusou. Culpar o Bitrix
+        // quando quem devolveu 403 foi o n8n já mandou o diagnóstico pro lugar
+        // errado uma vez (agosto/2026).
+        error: erro.startsWith("n8n ")
+          ? "A automação (n8n) recusou — o Bitrix não chegou a ser chamado."
+          : erro || `O Bitrix não aceitou (HTTP ${res.status}).`,
+      };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.warn(`[bitrixSync] "${event}" falhou:`, err);
+    return { ok: false, error: "Sem conexão com o servidor do QS." };
+  }
+}
+
 /**
  * Dispara o evento pro n8n via /api/bitrix-sync (autenticado com o JWT da sessão).
  */

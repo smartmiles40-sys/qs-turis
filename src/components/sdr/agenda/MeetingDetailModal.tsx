@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { setMeetingStatus, setMeetingSal, deleteMeeting, gerarSalaMeet, avisarBitrixDaSala, type DesfechoCompleto } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, deleteMeeting, gerarSalaMeet, avisarBitrixDaSala, reenviarDesfechoAoBitrix, temDesfecho, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
 import BriefingDoLead from "./BriefingDoLead";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
@@ -43,6 +43,9 @@ function statusClasses(status: MeetingStatus): string {
     // Arquivada (0072): passou sem ninguém registrar. Cinza mais fraco que a
     // cancelada — não é desfecho, é a falta de um.
     case "arquivada": return "bg-gray-50 text-gray-400";
+    // Desistência (0079): roxo, porque não é nem "aconteceu" (verde) nem "o
+    // cliente furou" (vermelho) — é o cliente saindo da negociação.
+    case "desistencia": return "bg-purple-50 text-purple-700";
   }
 }
 
@@ -84,6 +87,10 @@ export default function MeetingDetailModal({
   // que o closer tem os dois na cabeça — depois vira campo em branco pra sempre.
   const [fechando, setFechando] = useState<"realizada" | "no_show" | null>(null);
   const [criandoSala, setCriandoSala] = useState(false);
+  // Reenvio manual do desfecho pro Bitrix — mesmo botão da Minha Agenda. Está
+  // nos dois porque o desfecho é lançado nos dois: ter a segunda tentativa só
+  // num deles é como o QS já criou "a mesma ação com comportamentos diferentes".
+  const [enviandoBitrix, setEnviandoBitrix] = useState(false);
 
   useEffect(() => {
     void getSetting<string[]>("sal_motivos").then((lista) => {
@@ -114,6 +121,14 @@ export default function MeetingDetailModal({
     if (status === "cancelada") {
       const quem = meeting.lead_name ? ` com ${meeting.lead_name}` : "";
       if (!window.confirm(`Cancelar a reunião${quem}? A atividade de confirmação também será encerrada.`)) return;
+    }
+    // Desistência leva o lead pra PERDIDO e tira ele da fila de todo mundo. Um
+    // clique errado aqui apaga trabalho de SDR — avisa antes, como no SAL.
+    if (status === "desistencia") {
+      const quem = meeting.lead_name ?? meeting.lead?.full_name ?? "este cliente";
+      if (!window.confirm(
+        `Registrar DESISTÊNCIA de ${quem}?\n\nO lead vai para PERDIDO e as atividades abertas dele são encerradas.`
+      )) return;
     }
     setBusy(true);
     // SAL junto com o desfecho (19/08): o mesmo caminho da agenda do dia.
@@ -187,6 +202,19 @@ export default function MeetingDetailModal({
     } finally {
       setCriandoSala(false);
     }
+  }
+
+  async function enviarDesfechoPraBitrix() {
+    if (!meeting || enviandoBitrix) return;
+    setEnviandoBitrix(true);
+    const res = await reenviarDesfechoAoBitrix(meeting);
+    setEnviandoBitrix(false);
+    if (!res.ok) {
+      notifyError(res.error ?? "Não consegui enviar o desfecho pro Bitrix.");
+      return;
+    }
+    notifySuccess("Desfecho enviado pro Bitrix.");
+    onChanged();
   }
 
   async function excluir() {
@@ -350,22 +378,36 @@ export default function MeetingDetailModal({
             {/* "Confirmada" também é reunião que ainda vai acontecer: o desfecho
                 tem que estar aqui, senão ela nunca fecha por esta tela. */}
             {(meeting.status === "agendada" || meeting.status === "confirmada") && !fechando && (
-              <div className="grid grid-cols-2 gap-2">
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setFechando("realizada")}
+                    disabled={busy}
+                    className="py-2 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
+                  >
+                    Realizada
+                  </button>
+                  <button
+                    onClick={() => setFechando("no_show")}
+                    disabled={busy}
+                    className="py-2 rounded-lg border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 disabled:opacity-50"
+                  >
+                    No-show
+                  </button>
+                </div>
+                {/* DESISTÊNCIA (0079). Fica separada dos outros dois de
+                    propósito: Realizada e No-show falam do que aconteceu com a
+                    REUNIÃO; desistência fala do que aconteceu com o NEGÓCIO — o
+                    cliente saiu. Ela não pergunta valor nem SAL (não há o que
+                    vender nem o que qualificar) e manda o lead pra perdido. */}
                 <button
-                  onClick={() => setFechando("realizada")}
+                  onClick={() => mudarStatus("desistencia")}
                   disabled={busy}
-                  className="py-2 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
+                  className="w-full py-2 rounded-lg border border-purple-200 bg-purple-50 text-purple-700 text-sm font-semibold hover:bg-purple-100 disabled:opacity-50"
                 >
-                  Realizada
+                  Desistência do cliente
                 </button>
-                <button
-                  onClick={() => setFechando("no_show")}
-                  disabled={busy}
-                  className="py-2 rounded-lg border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 disabled:opacity-50"
-                >
-                  No-show
-                </button>
-              </div>
+              </>
             )}
 
             {/* Valor e tipo da venda antes de fechar — mesmo formulário da
@@ -460,6 +502,35 @@ export default function MeetingDetailModal({
                 )}
               </div>
             )}
+            {/* ENVIAR O DESFECHO PRO BITRIX (0079).
+                O envio automático é fire-and-forget: se o n8n ou o Bitrix
+                estiverem fora na hora do lançamento, o closer via um toast de
+                erro e acabava ali — a única "segunda tentativa" era fechar a
+                reunião de novo, o que grava o desfecho duas vezes. */}
+            {temDesfecho(meeting) && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Bitrix</p>
+                <p className="mt-1 text-[11.5px] text-gray-500">
+                  {meeting.desfecho_enviado_em
+                    ? <>Último envio: <b className="text-gray-700">{new Date(meeting.desfecho_enviado_em).toLocaleString("pt-BR")}</b></>
+                    : "Este desfecho ainda não foi confirmado pelo Bitrix."}
+                </p>
+                <button
+                  onClick={enviarDesfechoPraBitrix}
+                  disabled={busy || enviandoBitrix}
+                  className={`mt-2 w-full py-1.5 rounded-lg text-xs font-bold disabled:opacity-50 ${
+                    meeting.desfecho_enviado_em
+                      ? "border border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                      : "bg-amber-600 text-white hover:bg-amber-700"
+                  }`}
+                >
+                  {enviandoBitrix
+                    ? "Enviando…"
+                    : meeting.desfecho_enviado_em ? "Reenviar pro Bitrix" : "Enviar pro Bitrix"}
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => { onReschedule(meeting); onClose(); }}

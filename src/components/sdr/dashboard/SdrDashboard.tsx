@@ -653,7 +653,7 @@ export default function SdrDashboard() {
   const [meetingGoalByOwner, setMeetingGoalByOwner] = useState<Record<string, number>>({});
 
   // KPIs de negócio (auditoria): reuniões do período, pipeline e conversão por fonte
-  const [meetingKpis, setMeetingKpis] = useState<{ agendadas: number; realizadas: number; noShow: number; showRate: number | null; meta: number } | null>(null);
+  const [meetingKpis, setMeetingKpis] = useState<{ agendadas: number; realizadas: number; noShow: number; desistencias: number; showRate: number | null; meta: number } | null>(null);
   const [pipelineOpen, setPipelineOpen] = useState<number | null>(null);
   const [revenueWon, setRevenueWon] = useState<number | null>(null);
   const [sourceRows, setSourceRows] = useState<{ source: string; total: number; ganhos: number; taxa: number }[]>([]);
@@ -1425,6 +1425,10 @@ export default function SdrDashboard() {
       const agendadas = doIndicador.filter((m) => m.status !== "cancelada").length;
       const realizadas = doIndicador.filter((m) => m.status === "realizada").length;
       const noShow = doIndicador.filter((m) => m.status === "no_show").length;
+      // Desistência (0079) é balde PRÓPRIO e fica FORA do show rate: a reunião
+      // não aconteceu e o cliente também não furou — ele desmarcou a compra.
+      // Somar em no-show inflaria o furo do closer com decisão do cliente.
+      const desistencias = doIndicador.filter((m) => m.status === "desistencia").length;
       const decididas = realizadas + noShow;
       // Meta MENSAL de reuniões por dono (vigente + dono ativo, mais recente).
       const goalByOwner: Record<string, number> = {};
@@ -1457,7 +1461,7 @@ export default function SdrDashboard() {
         meta = sumAll || DEF;
       }
       setMeetingKpis({
-        agendadas, realizadas, noShow,
+        agendadas, realizadas, noShow, desistencias,
         showRate: decididas > 0 ? (realizadas / decididas) * 100 : null,
         meta,
       });
@@ -1914,7 +1918,7 @@ export default function SdrDashboard() {
                     label="Reuniões agendadas"
                     dotColor="#0147FF"
                     value={meetingKpis?.agendadas ?? 0}
-                    sub={`${meetingKpis?.realizadas ?? 0} realizadas · ${meetingKpis?.noShow ?? 0} no-show`}
+                    sub={`${meetingKpis?.realizadas ?? 0} realizadas · ${meetingKpis?.noShow ?? 0} no-show${meetingKpis?.desistencias ? ` · ${meetingKpis.desistencias} desist.` : ""}`}
                   />
                 </div>
               )}
@@ -2046,7 +2050,7 @@ export default function SdrDashboard() {
                     dotColor="#0147FF"
                     value={meetingKpis?.agendadas ?? 0}
                     sub={
-                      `${meetingKpis?.realizadas ?? 0} realizadas · ${meetingKpis?.noShow ?? 0} no-show` +
+                      `${meetingKpis?.realizadas ?? 0} realizadas · ${meetingKpis?.noShow ?? 0} no-show${meetingKpis?.desistencias ? ` · ${meetingKpis.desistencias} desist.` : ""}` +
                       (meetingKpis && meetingKpis.meta > 0
                         ? ` · meta ${meetingKpis.meta}/mês${teamMeetDaily != null ? ` (~${teamMeetDaily}/dia, ${activeSdrCount} SDR${activeSdrCount !== 1 ? "s" : ""})` : ""}`
                         : "")
