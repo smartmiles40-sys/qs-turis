@@ -33,6 +33,15 @@ import { procurarNegocioPorTelefone, bitrixConfigurado } from './_bitrixLead.js'
 /** Quanto tempo entre o card e a reunião ainda conta como "o mesmo evento". */
 const JANELA_MS = 48 * 60 * 60 * 1000;
 
+/**
+ * ORÇAMENTO DE TEMPO. Cada lead custa duas idas ao Bitrix (achar o contato e
+ * listar os negócios dele), e a função da Vercel morre com 504 se a resposta
+ * demorar — foi o que aconteceu na primeira tentativa com 40 leads. Então
+ * processa enquanto der e devolve `restam`: chamar de novo continua de onde
+ * parou, porque quem já foi gravado sai da consulta.
+ */
+const ORCAMENTO_MS = 8000;
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
@@ -64,7 +73,11 @@ export default async function handler(req, res) {
   }
 
   const saida = [];
-  for (const m of Array.isArray(reunioes) ? reunioes : []) {
+  const comeco = Date.now();
+  let restam = 0;
+  const fila = Array.isArray(reunioes) ? reunioes : [];
+  for (const m of fila) {
+    if (Date.now() - comeco > ORCAMENTO_MS) { restam = fila.length - saida.length; break; }
     const lead = m.qs_leads;
     const linha = {
       lead_id: lead?.id, nome: lead?.full_name, telefone: lead?.phone,
@@ -159,6 +172,8 @@ export default async function handler(req, res) {
     ok: true,
     aplicar,
     total: saida.length,
+    // Sobrou por causa do tempo: chame de novo. Não é erro.
+    restam,
     resumo: { gravei: conta('gravei'), gravaria: conta('gravaria'), duvida: conta('duvida'), nao_mexi: conta('nao-mexi'), falhou: conta('falhou') },
     leads: saida,
   });
