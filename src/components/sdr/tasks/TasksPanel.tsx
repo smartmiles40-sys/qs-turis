@@ -16,6 +16,8 @@ import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
 import { fetchClosers, fetchCloserConfigs, configFor, validarHorario } from "@/lib/qs/closerAgenda";
 import { getSetting } from "@/lib/qsSettings";
 import AgendaMiniatura from "@/components/sdr/agenda/AgendaMiniatura";
+import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
+import { carregarRespostasDoFormulario } from "@/lib/qs/formulario";
 import { confirmar } from "@/lib/qs/confirmar";
 import { criarEvento } from "@/lib/qs/agendaMeet";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
@@ -1969,6 +1971,29 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return activeInList ?? normais[0];
   }, [filteredTasks, activeTaskId]);
 
+  // ADIANTA AS RESPOSTAS DOS PRÓXIMOS DA FILA.
+  //
+  // O bloco de respostas do formulário fica ACIMA do botão de ligar. Se ele
+  // chegasse depois da primeira pintura, apareceria empurrando o botão pra
+  // baixo no instante em que o SDR vai clicar — o tipo de salto que faz errar o
+  // clique. Buscando os próximos enquanto ele atende o atual, o bloco já nasce
+  // pronto quando o card troca.
+  //
+  // Em série e de poucos: cada um é uma pergunta ao Bitrix na primeira vez (o
+  // servidor guarda depois), e o portal tem limite de chamadas.
+  useEffect(() => {
+    const proximos = filteredTasks.slice(0, 4).map((t) => t.lead_id).filter(Boolean);
+    if (!proximos.length) return;
+    let vivo = true;
+    void (async () => {
+      for (const leadId of proximos) {
+        if (!vivo) return;
+        await carregarRespostasDoFormulario(leadId).catch(() => {});
+      }
+    })();
+    return () => { vivo = false; };
+  }, [filteredTasks]);
+
   // ── Atalhos de teclado (item 2 da Sprint Velocidade) ──────────────────────
   // 1 Ganho/Agendou · 2 Pediu retorno · 3 Perdido · 4-7 sem contato ·
   // C concluir · Enter confirma desfecho pendente · N próxima da fila.
@@ -2968,6 +2993,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <span className="qsx-chip prio-baixa">{getActivityLabel(task.channel_type)}</span>
             </div>
           </div>
+
+          {/* O QUE O CLIENTE JÁ RESPONDEU no formulário da LP — ACIMA do botão
+              de ligar, que é onde o Bruno pediu (14/09) e onde o olho passa
+              antes de discar. As respostas vivem no card do Bitrix; quem lê é o
+              /api/lead-formulario. Lead sem resposta não ocupa linha nenhuma. */}
+          {lead && <RespostasDoFormulario leadId={lead.id} />}
 
           {/* Ação de contato do card: UMA por atividade, conforme o canal da tarefa.
             Atividade de "Ligação" mostra só "Ligar"; atividade de "WhatsApp" mostra só

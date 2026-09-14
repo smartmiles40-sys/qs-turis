@@ -66,6 +66,9 @@ export interface DesfechoVendaProps {
    * decide na primeira call. Perguntar de novo na 2ª call de um pacote só cria
    * a chance de alguém marcar "não é SAL" e mandar pra perdido um cliente que
    * está em negociação.
+   *
+   * Vale só para "realizada": NO-SHOW nunca pergunta SAL, mesmo com isto em
+   * true — ver `perguntarSal` abaixo.
    */
   pedirSal?: boolean;
   onVoltar: () => void;
@@ -84,19 +87,26 @@ export default function DesfechoVenda({ tipo, busy = false, pedirSal = true, onV
   const [motivos, setMotivos] = useState<string[]>(MOTIVOS_PADRAO);
   const realizada = tipo === "realizada";
 
+  // NO-SHOW NÃO PERGUNTA SAL. SAL é o julgamento de quem CONVERSOU com o lead;
+  // num no-show não houve conversa, então o closer só tinha dois caminhos
+  // ruins: chutar, ou marcar "não é SAL" e mandar pra perdido um lead que
+  // apenas faltou — e que ainda vai ser remarcado. A qualificação fica pra
+  // reunião que de fato acontecer.
+  const perguntarSal = pedirSal && realizada;
+
   useEffect(() => {
-    if (!pedirSal) return;
+    if (!perguntarSal) return;
     void getSetting<string[]>("sal_motivos").then((lista) => {
       if (Array.isArray(lista) && lista.length) setMotivos(lista);
     });
-  }, [pedirSal]);
+  }, [perguntarSal]);
 
   // O SAL é OBRIGATÓRIO aqui, ao contrário de valor e tipo da venda. Ele já
   // existia como ação solta, num segundo clique depois de fechar a reunião — e
   // por isso ficava em branco quase sempre. Ou ele sai junto com o desfecho, ou
   // não sai. Recusado exige motivo: o banco recusa sem ele (0032), e sem motivo
   // ninguém consegue discutir a qualidade do lead depois.
-  const salFalta = pedirSal && (!sal || (sal === "recusado" && !motivo.trim()));
+  const salFalta = perguntarSal && (!sal || (sal === "recusado" && !motivo.trim()));
 
   return (
     <div className="rounded-lg border border-gray-200 p-3 space-y-2.5 text-left">
@@ -135,7 +145,7 @@ export default function DesfechoVenda({ tipo, busy = false, pedirSal = true, onV
         </select>
       </label>
 
-      {pedirSal && (
+      {perguntarSal && (
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5 space-y-2">
           <span className="text-xs font-semibold text-gray-700">
             Esse lead é SAL? <span className="font-normal text-gray-500">· obrigatório</span>
@@ -191,7 +201,7 @@ export default function DesfechoVenda({ tipo, busy = false, pedirSal = true, onV
           onClick={() => onConfirmar({
             valor: valorNumerico(valor),
             tipoVenda: tipoVenda || null,
-            sal: pedirSal && sal ? { valor: sal, motivo: sal === "recusado" ? motivo.trim() : null } : null,
+            sal: perguntarSal && sal ? { valor: sal, motivo: sal === "recusado" ? motivo.trim() : null } : null,
           })}
           disabled={busy || salFalta}
           className={`py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-50 ${

@@ -1198,6 +1198,21 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
             </button>
           )}
 
+          {/* SAL, mas NUNCA no no-show: quem não conversou com o lead não tem
+              como dizer se ele prestava. No-show antigo que já tem SAL gravado
+              mostra o que está lá, só pra leitura. */}
+          {reuniao.status === "no_show" ? (
+            reuniao.sal ? (
+              <>
+                <p className="mt-3.5 text-xs font-bold uppercase tracking-wide text-gray-400">Lead aceito (SAL)</p>
+                <p className="mt-1 text-sm font-bold" style={{ color: reuniao.sal === "aceito" ? "#059669" : "#DC2626" }}>
+                  {reuniao.sal === "aceito" ? "Aceito" : "Recusado"}
+                  {reuniao.sal_motivo ? <span className="font-normal" style={{ color: "var(--ink2)" }}> — {reuniao.sal_motivo}</span> : null}
+                </p>
+              </>
+            ) : null
+          ) : (
+            <>
           <p className="mt-3.5 text-xs font-bold uppercase tracking-wide text-gray-400">Lead aceito (SAL)</p>
           <div className="mt-2 flex gap-1.5">
             {([
@@ -1258,6 +1273,8 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
             registro conta como reunião realizada — o que muda é a qualidade do lead.
             Recusar um lead ruim MELHORA o seu número de conversão.
           </p>
+            </>
+          )}
         </div>}
 
         {/* Espectador vê o desfecho JÁ REGISTRADO, só não pode mudá-lo — o dado

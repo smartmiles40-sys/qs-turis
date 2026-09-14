@@ -17,6 +17,7 @@ import { loadWorkHours, nextWorkMoment } from "@/lib/workHours";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import ScheduleMeetingModal from "@/components/sdr/agenda/ScheduleMeetingModal";
+import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
 import type {
   Lead,
   LeadStatus,
@@ -1086,6 +1087,12 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                 )}
               </div>
             </div>
+
+            {/* As respostas do formulário da LP (Bruno, 14/09). Elas moram no
+                card do Bitrix e nunca chegavam ao QS — o /api/lead-formulario
+                vai buscar. Logo abaixo da ficha porque é a continuação dela:
+                aqui é o que o próprio cliente contou, não o que o sistema sabe. */}
+            <RespostasDoFormulario leadId={lead.id} variante="ficha" />
           </div>
         );
 

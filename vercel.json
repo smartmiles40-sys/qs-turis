@@ -55,6 +55,9 @@
     "api/gloria-transferir.js": {
       "maxDuration": 30
     },
+    "api/lead-formulario.js": {
+      "maxDuration": 20
+    },
     "api/*.js": {
       "maxDuration": 10
     }
