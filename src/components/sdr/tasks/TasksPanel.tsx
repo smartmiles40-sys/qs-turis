@@ -2616,7 +2616,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 {slaAlert.label}
               </span>
             )}
-            {task.is_extra && <span className="qsx-chip prio-baixa">Extra</span>}
+            {task.is_extra && (
+              task.tags?.includes("ligacao-agendada")
+                // O cliente escolheu ESTE horário no formulário pós-live: ligar
+                // antes ou depois é furar um combinado, não adiantar a fila.
+                ? <span className="qsx-chip" style={{ background: "rgba(37,99,235,.12)", color: "var(--blue)", fontWeight: 700 }} title="O cliente marcou este horário pelo formulário pós-live">📞 Marcou às {formatTime(task.scheduled_at)}</span>
+                : <span className="qsx-chip prio-baixa">Extra</span>
+            )}
             {overdue && (
               <span className="qsx-chip" style={{ background: "rgba(220,38,38,.12)", color: "#DC2626", fontWeight: 700 }} title="Atividade atrasada (venceu antes de hoje)">
                 ⚠ Atrasada · era {new Date(task.scheduled_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
@@ -2858,7 +2864,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         <div className="qsx-hero-main">
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="qsx-eyebrow" style={task.is_extra ? { color: "var(--blue)" } : undefined}>
-              {task.is_extra ? "Atividade extra" : isActiveCard ? "Atendendo agora" : "Próxima atividade"}
+              {task.is_extra
+                ? (task.tags?.includes("ligacao-agendada") ? "Ligação marcada pelo cliente" : "Atividade extra")
+                : isActiveCard ? "Atendendo agora" : "Próxima atividade"}
             </span>
             {temp && <span className="qsx-chip" style={{ background: temp.bg, color: temp.color }} title="Temperatura vinda do Bitrix">{temp.label}</span>}
             {othersOnLead.has(task.lead_id) && (

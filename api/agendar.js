@@ -35,7 +35,7 @@
 // -----------------------------------------------------------------------------
 import { createHash } from 'node:crypto';
 import { rest, insert } from './_supabaseAdmin.js';
-import { createInboundLead, normPhone } from './_leads.js';
+import { createInboundLead, generateCadenceTasks, normPhone } from './_leads.js';
 import {
   gradePublica,
   escolherCloserLivre,
@@ -49,6 +49,14 @@ import {
   ORIGEM_AUTOAGENDAMENTO,
 } from './_agenda.js';
 import { assinarVinculo } from './_vinculo.js';
+import {
+  lerConfigSdr,
+  gradeSdr,
+  horarioValidoSdr,
+  escolherSdr,
+  ligacaoQueJaExiste,
+  marcarLigacao,
+} from './_ligacaoSdr.js';
 
 // Mesma última linha de defesa do /api/lead: se qs_settings sumir ou vier
 // corrompido, a página não para de funcionar.
@@ -139,7 +147,10 @@ function origemPermitida(origin, permitidas, proprio) {
 function proprioOrigin(req) {
   const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').trim();
   if (!host) return null;
-  const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+  // A Vercel sempre manda x-forwarded-proto. Sem ele (o `vite dev`), localhost
+  // é http — assumir https ali dava 403 na própria página, só no teste local.
+  const padrao = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? 'http' : 'https';
+  const proto = String(req.headers['x-forwarded-proto'] || padrao).split(',')[0].trim();
   return `${proto}://${host}`;
 }
 
@@ -253,6 +264,16 @@ export default async function handler(req, res) {
   // está sendo barrado.
   if (origin && !permitido) {
     return res.status(403).json({ ok: false, error: 'Origem não autorizada' });
+  }
+
+  // ── LIGAÇÃO COM O SDR (16/09) ─────────────────────────────────────────────
+  // Mesma porta, mesma portaria (CORS, armadilha, teto por IP), outro destino:
+  // o formulário pós-live marca 5 minutos com o SDR em vez de 1 hora com o
+  // closer. Ver api/_ligacaoSdr.js.
+  // Lê da URL também: a ponte de /api do `vite dev` não monta `req.query`.
+  const com = req.query?.com ?? new URL(req.url || '/', 'http://x').searchParams.get('com');
+  if (String(com || '') === 'sdr') {
+    return await ligacaoComSdr(req, res, { teto });
   }
 
   if (cfg.ativo === false) {
@@ -496,4 +517,207 @@ async function marcar(req, res, { cfg, regras, teto }) {
     console.error('[agendar] falha:', e?.message);
     return res.status(500).json({ ok: false, error: 'Não consegui marcar agora. Tente de novo em instantes.' });
   }
+}
+
+// ─── LIGAÇÃO COM O SDR (?com=sdr) ────────────────────────────────────────────
+//
+//   GET  /api/agendar?com=sdr                          -> grade de todos os SDRs
+//   POST /api/agendar?com=sdr { acao:'grade', telefone } -> grade do DONO do lead
+//   POST /api/agendar?com=sdr { nome, telefone, inicio } -> marca a ligação
+//
+// A grade pelo dono vai por POST, não por GET: o telefone da pessoa não pode
+// morar em URL (fica em log e em histórico). Ver api/_ligacaoSdr.js.
+
+async function ligacaoComSdr(req, res, { teto }) {
+  const cfg = await lerConfigSdr();
+  if (!cfg.ativo) {
+    return res.status(200).json({ ok: false, motivo: 'desligado', recado: cfg.encerrado, dias: [] });
+  }
+  const body = req.method === 'POST'
+    ? (typeof req.body === 'string' ? safeJson(req.body) : req.body || {})
+    : {};
+
+  if (req.method === 'GET' || (req.method === 'POST' && body.acao === 'grade')) {
+    try {
+      const grade = await gradeSdr({ telefone: normPhone(body.telefone) || null });
+      return res.status(200).json({
+        ok: grade.ok,
+        motivo: grade.motivo,
+        recado: grade.ok ? null : cfg.encerrado,
+        titulo: cfg.titulo,
+        subtitulo: cfg.subtitulo,
+        duracao_min: cfg.duracaoMin,
+        com: 'sdr',
+        dias: grade.dias,
+      });
+    } catch (e) {
+      console.error('[agendar:sdr] grade:', e?.message);
+      return res.status(200).json({ ok: false, motivo: 'falha', recado: cfg.encerrado, dias: [] });
+    }
+  }
+
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'GET, POST, OPTIONS');
+    return res.status(405).json({ ok: false, error: 'Use GET ou POST' });
+  }
+
+  // Campo-armadilha: finge que deu certo e não grava nada.
+  if (texto(body.site, 200)) {
+    return res.status(200).json({ ok: true, com: 'sdr', quando: 'em breve', sdr: null });
+  }
+
+  const nome = texto(body.nome, 120);
+  const telefone = normPhone(body.telefone || body.whatsapp);
+  const email = texto(body.email, 160);
+  const expedicao = texto(body.expedicao, 80);
+  const origemLp = texto(body.origem, 80);
+  const observacao = texto(body.observacao, 400);
+  const agora = new Date();
+
+  if (!nome || nome.length < 2) {
+    return res.status(400).json({ ok: false, campo: 'nome', error: 'Diga o seu nome, por favor.' });
+  }
+  if (!telefone || telefone.length < 10) {
+    return res.status(400).json({ ok: false, campo: 'telefone', error: 'Confira o número do WhatsApp com o DDD.' });
+  }
+  // E-mail é OPCIONAL aqui: não existe convite do Google, a ligação é no
+  // WhatsApp. Mas se veio, tem que ser válido — e-mail torto sujaria o lead.
+  if (email && !emailValido(email)) {
+    return res.status(400).json({ ok: false, campo: 'email', error: 'Confira o e-mail.' });
+  }
+
+  const inicio = new Date(String(body.inicio || ''));
+  const problema = horarioValidoSdr(inicio, cfg, agora);
+  if (problema) return res.status(400).json({ ok: false, campo: 'inicio', error: problema });
+
+  try {
+    const chave = chaveIp(req);
+    if (chave) {
+      const ok = await rest('rpc/qs_lp_rate_bump', {
+        method: 'POST', body: { p_chave: `agendar:${chave}`, p_teto: teto }, timeoutMs: 2000,
+      });
+      if (ok === false) {
+        return res.status(429).json({ ok: false, error: 'Muitas tentativas. Tente de novo em alguns minutos.' });
+      }
+    }
+  } catch (e) {
+    console.warn('[agendar:sdr] limite por IP indisponível:', e?.message || e);
+  }
+
+  try {
+    // 0) Já marcou antes? Tem que vir ANTES de escolher o SDR: o dono dela está
+    //    ocupado justamente com a ligação que ela já marcou, e a resposta seria
+    //    "horário preenchido" — medido no teste de 16/09.
+    const jaTem = await compromissoPeloTelefone(telefone, agora);
+    if (jaTem) return res.status(200).json(jaTem);
+
+    // 1) Quem liga — ANTES de criar lead, pelo mesmo motivo da reunião.
+    const sdr = await escolherSdr({ inicio, telefone, agora });
+    if (!sdr) {
+      return res.status(409).json({
+        ok: false, motivo: 'horario_ocupado',
+        error: 'Esse horário acabou de ser preenchido. Escolha outro, por favor.',
+      });
+    }
+
+    // 2) O lead. Novo já nasce com o SDR escolhido (sem rodízio por cima);
+    //    existente é reaproveitado. `ja_no_bitrix` como no autoagendamento: o
+    //    formulário cria o card do lado de lá, na Pré-Vendas.
+    const jaNoBitrix = body.ja_no_bitrix === true || body.ja_no_bitrix === 'true';
+    const { lead, deduped, cadenceId } = await createInboundLead({
+      full_name: nome,
+      email,
+      phone: telefone,
+      source: 'integracao',
+      segment: origemLp || 'Ligação com SDR',
+      owner_id: sdr.id,
+    }, { semBitrix: jaNoBitrix, semTarefas: true });
+    if (!lead?.id) {
+      return res.status(500).json({ ok: false, error: 'Não consegui registrar seus dados. Tente de novo.' });
+    }
+
+    // 3) Rede de segurança do passo 0: o telefone chegou em outro formato e o
+    //    dedupe do lead achou a pessoa mesmo assim.
+    const jaTemLead = await compromissoDoLead(lead.id, agora);
+    if (jaTemLead) return res.status(200).json(jaTemLead);
+
+    // 4) Marcar
+    const r = await marcarLigacao({ lead, sdr, inicio, expedicao, origemLp, observacao, email, telefone });
+    if (!r.ok) {
+      // O lead NOVO nasceu sem atividades (semTarefas) contando com a ligação.
+      // Não marcou? Então ganha a cadência normal agora — senão ficaria órfão,
+      // num SDR, sem nada na fila.
+      if (!deduped && cadenceId) {
+        await generateCadenceTasks({ leadId: lead.id, cadenceId, ownerId: sdr.id })
+          .catch((e) => console.warn('[agendar:sdr] cadência de reserva não gerada:', e?.message));
+      }
+      const status = r.motivo === 'horario_ocupado' ? 409 : 500;
+      return res.status(status).json({
+        ok: false, motivo: r.motivo,
+        error: r.motivo === 'horario_ocupado'
+          ? 'Esse horário acabou de ser preenchido. Escolha outro, por favor.'
+          : 'Não consegui marcar agora. Tente de novo em instantes.',
+      });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      com: 'sdr',
+      quando: r.quando,
+      quando_extenso: r.quando_extenso,
+      quando_iso: r.quando_iso,
+      sdr: r.sdr,
+      vinculo: assinarVinculo({ leadId: lead.id }),
+    });
+  } catch (e) {
+    console.error('[agendar:sdr] falha:', e?.message);
+    return res.status(500).json({ ok: false, error: 'Não consegui marcar agora. Tente de novo em instantes.' });
+  }
+}
+
+/** Reunião com especialista ou ligação já marcadas daqui pra frente, pro lead. */
+async function compromissoDoLead(leadId, agora) {
+  // Reunião com especialista: não precisa de ligação de qualificação antes.
+  const reuniao = await reuniaoQueJaExiste(leadId, agora);
+  if (reuniao) {
+    return {
+      ok: true, com: 'sdr', ja_existia: true, tipo_existente: 'reuniao',
+      quando: comoOTimeFala(new Date(reuniao.scheduled_at), agora),
+      quando_iso: reuniao.scheduled_at || null,
+      especialista: reuniao.meeting_owner || null,
+      link: reuniao.meeting_link || null,
+      vinculo: assinarVinculo({ leadId, meetingId: reuniao.id }),
+    };
+  }
+  const ligacao = await ligacaoQueJaExiste(leadId, agora);
+  if (ligacao) {
+    return {
+      ok: true, com: 'sdr', ja_existia: true, tipo_existente: 'ligacao',
+      quando: comoOTimeFala(new Date(ligacao.inicio), agora),
+      quando_iso: ligacao.inicio,
+      sdr: ligacao.sdr?.name || null,
+      vinculo: assinarVinculo({ leadId }),
+    };
+  }
+  return null;
+}
+
+/**
+ * O mesmo, achando o lead pelo telefone SEM criar nada. Só olha os cards com o
+ * telefone exatamente no formato que o QS grava (normPhone) — o formato de quem
+ * entrou por aqui. Falha aberta: sem resposta, segue pra marcar.
+ */
+async function compromissoPeloTelefone(telefone, agora) {
+  try {
+    const leads = await rest(
+      `qs_leads?select=id&phone=eq.${encodeURIComponent(telefone)}&order=created_at.desc&limit=3`
+    );
+    for (const l of Array.isArray(leads) ? leads : []) {
+      const achado = await compromissoDoLead(l.id, agora);
+      if (achado) return achado;
+    }
+  } catch (e) {
+    console.warn('[agendar:sdr] não deu pra conferir pelo telefone:', e?.message);
+  }
+  return null;
 }

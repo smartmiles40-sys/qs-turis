@@ -367,8 +367,14 @@
 (function () {
   'use strict';
 
-  var API = '/api/agendar';
   var params = new URLSearchParams(location.search);
+  // ?com=sdr (16/09): o formulário PÓS-LIVE marca uma ligação de 5 minutos com
+  // o SDR dono do lead, em vez de 1 hora com o especialista. A página é a mesma
+  // de propósito — preenchimento, altura, pulso e conferência já estão provados
+  // aqui. O que muda: a rota, os textos, o e-mail (opcional, não há convite) e
+  // a grade, que sai do dono do lead quando o telefone é conhecido.
+  var COM_SDR = params.get('com') === 'sdr';
+  var API = COM_SDR ? '/api/agendar?com=sdr' : '/api/agendar';
   var expedicao = (params.get('expedicao') || '').slice(0, 80);
   var origem = (params.get('origem') || '').slice(0, 80);
   if (params.get('embed') === '1') document.body.classList.add('embed');
@@ -426,6 +432,12 @@
     if (d.ja_no_bitrix) estado.jaNoBitrix = true;
     if (d.expedicao && !expedicao) expedicao = String(d.expedicao).slice(0, 80);
     if (d.origem && !origem) origem = String(d.origem).slice(0, 80);
+    // Com o telefone em mãos, a grade da ligação passa a ser a do DONO do lead.
+    if (COM_SDR && d.telefone) {
+      estado.telefoneGrade = String(d.telefone);
+      if (estado.esperandoPreenchimento) { estado.esperandoPreenchimento = false; carregar(); }
+      else carregar(true);
+    }
   });
 
   // Avisa a página de fora que já dá pra mandar o preenchimento. Sem este
@@ -467,7 +479,16 @@
   // Então a grade se atualiza sozinha. `preservando` mantém o dia e a hora que
   // a pessoa já escolheu — atualizar não pode desfazer o clique dela.
   function carregar(preservando) {
-    fetch(API, { headers: { Accept: 'application/json' } })
+    var pedido = { headers: { Accept: 'application/json' } };
+    // Grade pelo dono: o telefone vai no CORPO de um POST, nunca na URL.
+    if (COM_SDR && estado.telefoneGrade) {
+      pedido = {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acao: 'grade', telefone: estado.telefoneGrade })
+      };
+    }
+    fetch(API, pedido)
       .then(function (r) { return r.json(); })
       .then(function (d) {
         el('carregando').hidden = true;
@@ -616,7 +637,9 @@
     // custa nada e evita a pessoa preencher tudo pra levar erro no fim.
     carregar(true);
     el('resumo-quando').textContent = estado.rotulo;
-    el('resumo-duracao').textContent = estado.duracao + ' minutos, por Google Meet';
+    el('resumo-duracao').textContent = COM_SDR
+      ? 'Ligação de ' + estado.duracao + ' minutos: a gente te liga no WhatsApp'
+      : estado.duracao + ' minutos, por Google Meet';
     mostrarPasso('passo-dados');
     el('nome').focus();
   });
@@ -654,7 +677,8 @@
     var ok = true;
     if (el('nome').value.trim().length < 2) { marcarErro('nome', 'Diga o seu nome, por favor.'); ok = false; }
     if (el('telefone').value.replace(/\D/g, '').length < 10) { marcarErro('telefone', 'Confira o número com o DDD.'); ok = false; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(el('email').value.trim())) { marcarErro('email', 'Confira o e-mail.'); ok = false; }
+    var emailDigitado = el('email').value.trim();
+    if ((!COM_SDR || emailDigitado) && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailDigitado)) { marcarErro('email', 'Confira o e-mail.'); ok = false; }
     if (!ok) avisarAltura();
     return ok;
   }
@@ -687,7 +711,7 @@
       .then(function (r) {
         estado.enviando = false;
         botao.disabled = false;
-        botao.textContent = 'Confirmar agendamento';
+        botao.textContent = COM_SDR ? 'Confirmar ligação' : 'Confirmar agendamento';
 
         if (r.corpo && r.corpo.ok) return concluir(r.corpo);
 
@@ -715,7 +739,7 @@
       .catch(function () {
         estado.enviando = false;
         botao.disabled = false;
-        botao.textContent = 'Confirmar agendamento';
+        botao.textContent = COM_SDR ? 'Confirmar ligação' : 'Confirmar agendamento';
         el('recado-erro').textContent = 'A conexão falhou. Confira sua internet e tente de novo.';
         el('recado-erro').hidden = false;
         avisarAltura();
@@ -724,6 +748,7 @@
 
   // ── Passo 3: pronto ────────────────────────────────────────────────────
   function concluir(d) {
+    if (COM_SDR) return concluirLigacao(d);
     el('fim-titulo').textContent = d.ja_existia ? 'Você já tem uma reunião marcada' : 'Reunião confirmada!';
     el('fim-quando').textContent = d.quando_extenso || d.quando || estado.rotulo;
     el('fim-quem').textContent = d.especialista
@@ -785,6 +810,49 @@
     } catch (e) {}
   }
 
+  // ── Fim da LIGAÇÃO COM O SDR ───────────────────────────────────────────
+  // Sem Meet e sem convite: o que a pessoa precisa saber é QUE vão ligar, QUANDO
+  // e DE ONDE — senão ela recusa a chamada de um número que não conhece.
+  function concluirLigacao(d) {
+    var jaReuniao = d.ja_existia && d.tipo_existente === 'reuniao';
+    el('fim-titulo').textContent = jaReuniao
+      ? 'Você já tem uma reunião marcada'
+      : (d.ja_existia ? 'Você já tem uma ligação marcada' : 'Ligação marcada!');
+    el('fim-quando').textContent = d.quando_extenso || d.quando || estado.rotulo;
+    if (jaReuniao) {
+      el('fim-quem').textContent = d.especialista
+        ? 'Sua reunião é com ' + d.especialista + '.'
+        : 'Um especialista vai te atender.';
+      el('fim-email').textContent = 'Não precisa de ligação antes: nos vemos na reunião.';
+      if (d.link) { el('fim-meet').href = d.link; el('fim-meet').hidden = false; }
+    } else {
+      el('fim-quem').textContent = d.sdr
+        ? d.sdr + ', do nosso time, vai te ligar no WhatsApp nesse horário.'
+        : 'Nosso time vai te ligar no WhatsApp nesse horário.';
+      el('fim-email').textContent = d.ja_existia
+        ? 'Não marcamos outra para não duplicar. É uma conversa rápida, de 5 minutos.'
+        : 'É uma conversa rápida, de 5 minutos. Deixe o WhatsApp por perto para atender.';
+      var google = linkDaAgenda(d);
+      if (google) { el('fim-agenda').href = google; el('fim-agenda').hidden = false; }
+    }
+    mostrarPasso('passo-fim');
+    // O formulário de fora abre o card na Pré-Vendas com isto. `com` diz qual
+    // funil: quem já tinha reunião com especialista não vira card de ligação.
+    try {
+      parent.postMessage({
+        tipo: 'qs-agendar:concluido',
+        com: jaReuniao ? 'closer' : 'sdr',
+        quando: d.quando_extenso || d.quando || null,
+        quando_iso: d.quando_iso || estado.inicio || null,
+        especialista: jaReuniao ? (d.especialista || null) : null,
+        sdr: d.sdr || null,
+        link: d.link || null,
+        vinculo: d.vinculo || null,
+        ja_existia: d.ja_existia === true
+      }, '*');
+    } catch (e) {}
+  }
+
   /** "Adicionar à minha agenda" — link do Google Calendar montado na mão. */
   function linkDaAgenda(d) {
     if (!estado.inicio) return null;
@@ -792,8 +860,12 @@
     if (isNaN(ini.getTime())) return null;
     var fim = new Date(ini.getTime() + estado.duracao * 60000);
     var f = function (x) { return x.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); };
-    var titulo = expedicao ? ('Expedição ' + expedicao + ' — Se Tu For, Eu Vou') : 'Conversa com um especialista — Se Tu For, Eu Vou';
-    var detalhes = d.link ? ('Sala da reunião: ' + d.link) : 'O link da sala chega por e-mail antes da reunião.';
+    var titulo = COM_SDR
+      ? 'Ligação — Se Tu For, Eu Vou' + (expedicao ? ' (' + expedicao + ')' : '')
+      : (expedicao ? ('Expedição ' + expedicao + ' — Se Tu For, Eu Vou') : 'Conversa com um especialista — Se Tu For, Eu Vou');
+    var detalhes = COM_SDR
+      ? 'Ligação rápida de 5 minutos. Nosso time te liga no WhatsApp.'
+      : (d.link ? ('Sala da reunião: ' + d.link) : 'O link da sala chega por e-mail antes da reunião.');
     return 'https://calendar.google.com/calendar/render?action=TEMPLATE'
       + '&text=' + encodeURIComponent(titulo)
       + '&dates=' + f(ini) + '/' + f(fim)
@@ -802,7 +874,25 @@
       + '&ctz=America/Sao_Paulo';
   }
 
-  carregar();
+  // Modo ligação: textos fixos da página, e a primeira grade espera um instante
+  // pelo telefone que o formulário manda — senão a pessoa veria a agenda de todo
+  // mundo e, um segundo depois, a do SDR dela, com horários sumindo na cara.
+  if (COM_SDR) {
+    el('titulo').textContent = 'Agende uma ligação rápida';
+    el('enviar').textContent = 'Confirmar ligação';
+    el('e-email').textContent = 'Opcional.';
+    el('email').removeAttribute('required');
+    el('c-email').querySelector('label').innerHTML = 'Seu e-mail <span style="font-weight:400;color:var(--tinta3)">(opcional)</span>';
+    el('fim-titulo').textContent = 'Ligação marcada!';
+    var rodape = document.querySelector('#formulario .rodape');
+    if (rodape) rodape.textContent = 'Ao confirmar, você concorda em receber nossa ligação e mensagens pelo WhatsApp sobre esta conversa.';
+    estado.esperandoPreenchimento = true;
+    setTimeout(function () {
+      if (estado.esperandoPreenchimento) { estado.esperandoPreenchimento = false; carregar(); }
+    }, 1500);
+  } else {
+    carregar();
+  }
 
   // ── O PULSO ────────────────────────────────────────────────────────────
   // A cada 25 segundos a grade se atualiza. Numa live, o horário que estava

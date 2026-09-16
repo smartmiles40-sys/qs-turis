@@ -622,7 +622,11 @@ export async function createInboundLead(payload, opts = {}) {
   const finalOwner = (lead && lead.owner_id) || ownerId;
 
   let tasks = 0;
-  if (cadenceId && lead) {
+  // `opts.semTarefas` (16/09, ligação com SDR): o lead entra NA cadência, mas a
+  // primeira atividade dele é a ligação que o próprio cliente marcou — quem
+  // chama cria essa atividade. Gerar a cadência aqui só pra ignorá-la no mesmo
+  // segundo deixava 13 atividades "ignoradas" por lead nas métricas.
+  if (cadenceId && lead && !opts.semTarefas) {
     tasks = await generateCadenceTasks({ leadId: lead.id, cadenceId, ownerId: finalOwner, priority, baseDate: nowIso });
   }
 
