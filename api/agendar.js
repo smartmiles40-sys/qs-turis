@@ -38,6 +38,7 @@ import { rest, insert } from './_supabaseAdmin.js';
 import { createInboundLead, generateCadenceTasks, normPhone } from './_leads.js';
 import {
   gradePublica,
+  depoisDoPrazo,
   escolherCloserLivre,
   marcarReuniao,
   quemLevaOCredito,
@@ -182,6 +183,26 @@ function safeJson(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
 
+/** O corpo do POST, sem explodir quando nao ha corpo (o GET). */
+function body0(req) {
+  const b = typeof req.body === 'string' ? safeJson(req.body) : req.body;
+  return b && typeof b === 'object' ? b : {};
+}
+
+/**
+ * A config com o prazo da expedicao pedida aplicado por cima.
+ *
+ * Comparacao pelo nome exato da expedicao — e o mesmo texto que o formulario
+ * ja manda (`CAMPOS_FIXOS.expedicao`) e que vai pro card do Bitrix. Nome que
+ * nao esta na lista simplesmente nao tem prazo.
+ */
+function comPrazoDaExpedicao(cfg, expedicao) {
+  const limites = cfg.limites && typeof cfg.limites === 'object' ? cfg.limites : null;
+  if (!limites || !expedicao) return cfg;
+  const prazo = limites[expedicao];
+  return typeof prazo === 'string' && prazo ? { ...cfg, ultimoDia: prazo } : cfg;
+}
+
 // ─── A conferência do horário, no servidor ───────────────────────────────────
 
 /**
@@ -215,6 +236,10 @@ function horarioValido(inicio, regras, agora) {
   }
   const maximo = agora.getTime() + (regras.diasAFrente + 1) * 86_400_000;
   if (inicio.getTime() > maximo) return 'Esse horário está longe demais.';
+  // O prazo tambem e reconferido aqui: a grade e um palpite do navegador.
+  if (depoisDoPrazo(regras, p.ano, p.mes, p.dia)) {
+    return 'O prazo para agendar por aqui terminou. Fale com a gente pelo WhatsApp.';
+  }
 
   return null;
 }
@@ -280,7 +305,16 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: false, motivo: 'desligado', recado: cfg.encerrado, dias: [] });
   }
 
-  const regras = comRegras(cfg);
+  // PRAZO POR EXPEDICAO (17/09). O formulario de cada live abre o iframe com
+  // `?expedicao=`, entao da pra fechar a agenda de UMA live sem republicar
+  // formulario nenhum e sem mexer nas outras:
+  //   qs_settings.autoagendamento.limites = {"Japão e China": "2026-09-22"}
+  // Sem entrada na lista, vale `ultimoDia` (se existir) ou nada.
+  const expedicaoPedida = texto(
+    req.query?.expedicao ?? new URL(req.url || '/', 'http://x').searchParams.get('expedicao') ?? body0(req).expedicao,
+    80
+  );
+  const regras = comRegras(comPrazoDaExpedicao(cfg, expedicaoPedida));
 
   if (req.method === 'GET') return await mostrarGrade(res, { cfg, regras });
   if (req.method === 'POST') return await marcar(req, res, { cfg, regras, teto });

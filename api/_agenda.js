@@ -424,7 +424,18 @@ export function comRegras(regras) {
     duracaoMin: Number.isFinite(Number(r.duracaoMin)) ? Number(r.duracaoMin) : DURACAO_MIN,
     antecedenciaMin: Number.isFinite(Number(r.antecedenciaMin)) ? Number(r.antecedenciaMin) : ANTECEDENCIA_MIN,
     diasAFrente: Number.isFinite(Number(r.diasAFrente)) ? Number(r.diasAFrente) : DIAS_A_FRENTE,
+    // ULTIMO DIA (17/09): "so ate terca, dia 22". Uma DATA, nao um numero de
+    // dias — "daqui a 5 dias" vira outro dia amanha, e o prazo de uma campanha
+    // nao anda junto com o calendario. 'YYYY-MM-DD' em Sao Paulo; null = sem
+    // prazo, que e como tudo funcionava antes.
+    ultimoDia: /^\d{4}-\d{2}-\d{2}$/.test(String(r.ultimoDia || '')) ? String(r.ultimoDia) : null,
   };
+}
+
+/** O dia `ano-mes-dia` passou do prazo? (comparacao por texto, ISO ordena) */
+export function depoisDoPrazo(regras, ano, mes, dia) {
+  if (!regras.ultimoDia) return false;
+  return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}` > regras.ultimoDia;
 }
 
 // ─── A GRADE QUE O CLIENTE VÊ (autoagendamento) ──────────────────────────────
@@ -459,6 +470,7 @@ export async function gradePublica({ agora = new Date(), regras = null } = {}) {
     const base = new Date(Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia) + salto * 86_400_000);
     const ano = base.getUTCFullYear(), mes = base.getUTCMonth() + 1, d = base.getUTCDate();
     if (!r.dias.includes(base.getUTCDay())) continue;
+    if (depoisDoPrazo(r, ano, mes, d)) break;   // acabou o prazo desta campanha
 
     const horarios = [];
     for (let h = r.janela.primeira; h <= r.janela.ultima; h++) {

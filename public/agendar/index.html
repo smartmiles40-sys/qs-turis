@@ -479,6 +479,9 @@
   // Então a grade se atualiza sozinha. `preservando` mantém o dia e a hora que
   // a pessoa já escolheu — atualizar não pode desfazer o clique dela.
   function carregar(preservando) {
+    // A expedicao vai junto na grade: e por ela que o servidor aplica um prazo
+    // de UMA campanha ("Japao so ate 22/09") sem mexer nas outras lives.
+    var rota = API + (expedicao ? (API.indexOf('?') === -1 ? '?' : '&') + 'expedicao=' + encodeURIComponent(expedicao) : '');
     var pedido = { headers: { Accept: 'application/json' } };
     // Grade pelo dono: o telefone vai no CORPO de um POST, nunca na URL.
     if (COM_SDR && estado.telefoneGrade) {
@@ -488,7 +491,7 @@
         body: JSON.stringify({ acao: 'grade', telefone: estado.telefoneGrade })
       };
     }
-    fetch(API, pedido)
+    fetch(rota, pedido)
       .then(function (r) { return r.json(); })
       .then(function (d) {
         el('carregando').hidden = true;
