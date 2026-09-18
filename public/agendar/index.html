@@ -22,6 +22,8 @@
     ?expedicao=Japão   -> vira o título da reunião e o interesse no lead
     ?origem=live-japao -> vira a fonte do lead (é como o dashboard separa)
     ?embed=1           -> tira o fundo e a moldura (pra encaixar na página de fora)
+    ?tema=stfv         -> as cores do formulário das LPs (sem título próprio)
+    ?dias=3            -> só os N próximos dias com horário livre (1 a 14)
 -->
 <style>
   /* ── Tokens ────────────────────────────────────────────────────────────── */
@@ -245,6 +247,51 @@
 
   .rodape { margin-top: 16px; font-size: 11.5px; line-height: 1.5; color: var(--tinta3); text-align: center; }
 
+  /* ── TEMA DAS LPs (?tema=stfv) ─────────────────────────────────────────────
+     Embutida como última etapa do formulário do site, a agenda tem que parecer
+     o próprio formulário — azul do QS e fundo cinza no meio da LP entregam que
+     é "outra página" e baixam a confiança bem na hora de marcar. Mesmas cores,
+     cantos e botões do FormularioLead (lime + verde-escuro, pílulas). O título
+     some: a etapa da LP já diz o que é esta tela. */
+  html.tema-stfv, html.tema-stfv body { background: transparent; }
+  body.tema-stfv {
+    --azul: #09282B;
+    --azul-escuro: #0F3A3F;
+    --tinta: #09282B;
+    --tinta2: rgba(9, 40, 43, .72);
+    --tinta3: rgba(9, 40, 43, .5);
+    --linha: rgba(9, 40, 43, .15);
+    --papel: #F8F6F7;
+    --raio: 16px;
+  }
+  body.tema-stfv #titulo, body.tema-stfv #subtitulo { display: none; }
+  body.tema-stfv .rotulo { text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 600; color: var(--tinta); }
+  body.tema-stfv .dias { flex-wrap: wrap; overflow: visible; }
+  body.tema-stfv .dia { flex: 1 1 0; border-radius: 14px; }
+  body.tema-stfv .dia:hover, body.tema-stfv .hora:hover { border-color: rgba(9, 40, 43, .35); color: var(--tinta); }
+  body.tema-stfv .dia[aria-pressed="true"], body.tema-stfv .hora[aria-pressed="true"] {
+    background: rgba(215, 242, 100, .3); border-color: #C0E046; color: var(--tinta);
+  }
+  body.tema-stfv .dia[aria-pressed="true"] .data { color: var(--tinta); }
+  body.tema-stfv .hora { border-radius: 12px; }
+  body.tema-stfv .campo label { color: var(--tinta); }
+  body.tema-stfv .campo input, body.tema-stfv .campo textarea { border-radius: 12px; padding: 14px 16px; }
+  body.tema-stfv .campo input:focus, body.tema-stfv .campo textarea:focus {
+    border-color: #C0E046; box-shadow: 0 0 0 3px rgba(215, 242, 100, .4);
+  }
+  body.tema-stfv .primario, body.tema-stfv .fim a.botao {
+    border-radius: 999px; background: #D7F264; color: #09282B; font-weight: 600; padding: 16px 24px;
+  }
+  body.tema-stfv .primario:hover:not(:disabled), body.tema-stfv .fim a.botao:hover { background: #C0E046; }
+  body.tema-stfv .primario:disabled { background: rgba(9, 40, 43, .08); color: rgba(9, 40, 43, .45); opacity: 1; }
+  body.tema-stfv .fim a.secundario { background: transparent; border: 2px solid rgba(9, 40, 43, .2); color: var(--tinta); }
+  body.tema-stfv .voltar:hover { color: var(--tinta); }
+  body.tema-stfv .escolhido { background: #EDF5DC; border-color: #DFEFC5; border-radius: 14px; }
+  body.tema-stfv .escolhido svg { stroke: #09282B; }
+  body.tema-stfv .selo { background: #D7F264; color: #09282B; }
+  body.tema-stfv .fim .quando { color: var(--tinta); }
+  body.tema-stfv .esqueleto { background: linear-gradient(90deg, #EDF5DC 25%, #F8F6F7 50%, #EDF5DC 75%); background-size: 200% 100%; }
+
   [hidden] { display: none !important; }
 
   @media (prefers-reduced-motion: reduce) {
@@ -378,6 +425,15 @@
   var expedicao = (params.get('expedicao') || '').slice(0, 80);
   var origem = (params.get('origem') || '').slice(0, 80);
   if (params.get('embed') === '1') document.body.classList.add('embed');
+  // ?tema=stfv: as cores do formulário das LPs (ver o CSS do tema).
+  if (params.get('tema') === 'stfv') {
+    document.documentElement.classList.add('tema-stfv');
+    document.body.classList.add('tema-stfv');
+  }
+  // ?dias=3: só os N próximos dias COM horário livre (o formulário orgânico do
+  // site usa 3; as lives seguem com a janela inteira). O servidor reconfere.
+  var diasPedidos = parseInt(params.get('dias') || '', 10);
+  if (!(diasPedidos >= 1 && diasPedidos <= 14)) diasPedidos = null;
 
   var estado = { dias: [], diaAtivo: null, inicio: null, rotulo: '', duracao: 60, enviando: false, jaNoBitrix: false, veioDeFormulario: false };
 
@@ -482,6 +538,7 @@
     // A expedicao vai junto na grade: e por ela que o servidor aplica um prazo
     // de UMA campanha ("Japao so ate 22/09") sem mexer nas outras lives.
     var rota = API + (expedicao ? (API.indexOf('?') === -1 ? '?' : '&') + 'expedicao=' + encodeURIComponent(expedicao) : '');
+    if (diasPedidos) rota += (rota.indexOf('?') === -1 ? '?' : '&') + 'dias=' + diasPedidos;
     var pedido = { headers: { Accept: 'application/json' } };
     // Grade pelo dono: o telefone vai no CORPO de um POST, nunca na URL.
     if (COM_SDR && estado.telefoneGrade) {
@@ -706,6 +763,7 @@
         inicio: estado.inicio,
         expedicao: expedicao,
         origem: origem,
+        dias: diasPedidos,
         ja_no_bitrix: estado.jaNoBitrix,
         site: el('site').value
       })
