@@ -440,7 +440,10 @@ export async function createInboundLead(payload, opts = {}) {
           { const ls = pickLeadScore(payload); if (ls) patch.lead_score = ls; }
           await rest(`qs_leads?id=eq.${mesmo.id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' });
           console.log(`[leads] bitrix ${bitrixId} adotou o card existente ${mesmo.id} (mesmo telefone)`);
-          return { lead: { ...mesmo, ...patch }, ownerId: mesmo.owner_id, cadenceId: mesmo.cadence_id, tasks: 0, deduped: true };
+          // `adotado`: o card ganhou o bitrix_id AGORA. Quem chamou pode ter
+          // coisa a acertar no Bitrix (ex.: a reunião que a pessoa marcou antes
+          // de o negócio existir — ver alcancarCardAdotado em _agenda.js).
+          return { lead: { ...mesmo, ...patch }, ownerId: mesmo.owner_id, cadenceId: mesmo.cadence_id, tasks: 0, deduped: true, adotado: true };
         }
       } catch (e) {
         console.warn('[leads] adoção por telefone falhou (segue criando):', e?.message);

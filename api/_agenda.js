@@ -27,7 +27,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, insert } from './_supabaseAdmin.js';
-import { moverNegocioParaReuniao } from './_bitrixLead.js';
+import { moverNegocioParaReuniao, passarNegocioPara, comentarNoNegocio } from './_bitrixLead.js';
 
 const TZ = 'America/Sao_Paulo';
 
@@ -455,7 +455,12 @@ export function depoisDoPrazo(regras, ano, mes, dia) {
  * Uma leitura só do banco cobre as duas semanas inteiras — 14 dias × 7 horas é
  * uma resposta pequena, e trocar de dia na tela vira instantâneo.
  */
-export async function gradePublica({ agora = new Date(), regras = null } = {}) {
+/**
+ * `maxDias`: os N primeiros dias QUE TÊM horário livre, COMEÇANDO AMANHÃ (Bruno,
+ * 18/09: "3 dias para frente, sem contar o dia atual"). Dia sem horário não
+ * gasta a cota. Sem `maxDias`, a grade de sempre (hoje incluso), como nas lives.
+ */
+export async function gradePublica({ agora = new Date(), regras = null, maxDias = null } = {}) {
   const r = comRegras(regras);
   const closers = await closersAtivos();
   if (!closers.length) return { ok: false, motivo: 'sem_closer', dias: [] };
@@ -467,6 +472,8 @@ export async function gradePublica({ agora = new Date(), regras = null } = {}) {
 
   const dias = [];
   for (let salto = 0; salto <= r.diasAFrente; salto++) {
+    if (maxDias && dias.length >= maxDias) break;
+    if (maxDias && salto === 0) continue;   // janela curta começa amanhã
     const base = new Date(Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia) + salto * 86_400_000);
     const ano = base.getUTCFullYear(), mes = base.getUTCMonth() + 1, d = base.getUTCDate();
     if (!r.dias.includes(base.getUTCDay())) continue;
@@ -788,6 +795,62 @@ async function avisarBitrix(meeting, lead) {
   } catch (e) {
     console.warn('[agenda] Bitrix não avisado:', e?.message);
   }
+}
+
+/**
+ * O card do Bitrix chegou DEPOIS da reunião (18/09, agenda do closer nas LPs).
+ *
+ * O formulário orgânico do site manda o lead pro n8n, que abre o negócio na
+ * Pré-Vendas — e, sendo quente ou morno, a pessoa já marca com o closer ali
+ * mesmo, em segundos. A reunião nasce no QS SEM bitrix_id (o card ainda não
+ * existe), então `marcarReuniao` não tem o que avisar nem mover. Minutos depois
+ * o Bitrix manda o lead pro /api/lead-inbound, que ADOTA o card do QS pelo
+ * telefone. É nesse instante que o card precisa receber o que perdeu: o aviso
+ * da reunião e a mudança de funil. Sem isto ele fica em "Novo Lead" com a
+ * reunião já marcada, e uma SDR liga pra oferecer uma reunião que já existe.
+ *
+ * Best-effort: falhar aqui deixa o card onde o n8n pôs, como era antes.
+ */
+export async function alcancarCardAdotado(lead) {
+  if (!lead?.id || !lead?.bitrix_id) return { ok: false, motivo: 'sem-bitrix' };
+  const desde = new Date(Date.now() - 60 * 60_000).toISOString();
+  const rows = await rest(
+    `qs_meetings?select=*&lead_id=eq.${encodeURIComponent(lead.id)}` +
+    `&origem=eq.autoagendamento&status=not.in.(cancelada,reagendada)` +
+    `&scheduled_at=gte.${encodeURIComponent(desde)}&order=scheduled_at.asc&limit=1`
+  );
+  const meeting = rows?.[0];
+  if (!meeting) return await alcancarLigacaoSdr(lead);
+
+  await avisarBitrix(meeting, lead);
+  const cfg = await rest('qs_settings?select=value&key=eq.bitrix_reuniao&limit=1');
+  const mv = await moverNegocioParaReuniao(lead.bitrix_id, cfg?.[0]?.value ?? null);
+  return { ok: true, meeting_id: meeting.id, movido: !!mv?.movido, motivo: mv?.motivo };
+}
+
+/**
+ * O mesmo, para a LIGAÇÃO COM O SDR (18/09, formulário das LPs de tráfego).
+ *
+ * Todo lead do tráfego marca uma ligação de 5 min com um SDR logo depois do
+ * formulário. O card nasce pelo n8n na Pré-Vendas — que é o lugar certo, então
+ * aqui não se move nada —, mas nasce no nome de quem o n8n/Bitrix escolheu, e
+ * a ligação é de OUTRO SDR (o que estava livre no horário). Sem isto o card
+ * fica com um e a ligação com outro, e os dois tratam o mesmo cliente.
+ */
+async function alcancarLigacaoSdr(lead) {
+  const rows = await rest(
+    `qs_ligacoes_sdr?select=id,sdr_id,inicio&lead_id=eq.${encodeURIComponent(lead.id)}` +
+    `&status=eq.marcada&order=inicio.asc&limit=1`
+  );
+  const lig = rows?.[0];
+  if (!lig) return { ok: false, motivo: 'sem-reuniao-nem-ligacao' };
+
+  const passou = await passarNegocioPara(lead.bitrix_id, lig.sdr_id);
+  await comentarNoNegocio(
+    lead.bitrix_id,
+    `📞 O cliente marcou uma ligação com o SDR pelo formulário da LP: ${porExtenso(new Date(lig.inicio))}.`
+  );
+  return { ok: true, ligacao_id: lig.id, passado: passou.passado, motivo: passou.motivo };
 }
 
 /**

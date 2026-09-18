@@ -126,11 +126,11 @@ function livre(ocupado, sdrId, inicio, fim) {
 }
 
 /** Todos os começos possíveis (sem olhar ocupação), dia a dia, em São Paulo. */
-function horariosDaJanela(cfg, agora) {
+function horariosDaJanela(cfg, agora, desdeAmanha = false) {
   const hoje = emSP(agora);
   const cedo = agora.getTime() + cfg.antecedenciaMin * 60_000;
   const dias = [];
-  for (let salto = 0; salto <= cfg.diasAFrente; salto++) {
+  for (let salto = desdeAmanha ? 1 : 0; salto <= cfg.diasAFrente; salto++) {
     const base = new Date(Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia) + salto * 86_400_000);
     const ano = base.getUTCFullYear(), mes = base.getUTCMonth() + 1, d = base.getUTCDate();
     const dow = base.getUTCDay();
@@ -157,7 +157,7 @@ function horariosDaJanela(cfg, agora) {
  *
  * O SDR nunca sai na resposta: a página é pública.
  */
-export async function gradeSdr({ telefone = null, agora = new Date() } = {}) {
+export async function gradeSdr({ telefone = null, agora = new Date(), maxDias = null } = {}) {
   const cfg = await lerConfigSdr();
   const sdrs = await sdrsAtivos();
   if (!sdrs.length) return { ok: false, motivo: 'sem_sdr', dias: [], cfg };
@@ -167,7 +167,10 @@ export async function gradeSdr({ telefone = null, agora = new Date() } = {}) {
 
   const montar = (quem) => {
     const dias = [];
-    for (const dia of horariosDaJanela(cfg, agora)) {
+    // `maxDias` (formulário do tráfego, 18/09): N dias com horário, a partir
+    // de amanhã — a mesma regra da agenda do closer no orgânico.
+    for (const dia of horariosDaJanela(cfg, agora, !!maxDias)) {
+      if (maxDias && dias.length >= maxDias) break;
       const horarios = dia.inicios
         .filter((ini) => quem.some((s) => livre(ocupado, s.id, ini.getTime(), ini.getTime() + cfg.passoMin * 60_000)))
         .map((ini) => {
@@ -317,7 +320,11 @@ export async function marcarLigacao({ lead, sdr, inicio, expedicao = null, orige
       is_extra: true,
       notes:
         `📞 LIGAÇÃO MARCADA PELO CLIENTE — ${quando}\n` +
-        'Ligação rápida (5 min) pelo WhatsApp. Não assistiu a live (ou viu só parte): qualifique antes de marcar com o especialista.' +
+        // O contexto depende de onde veio: o formulário pós-live (não assistiu)
+        // ou o formulário das LPs de tráfego (acabou de preencher a LP).
+        (/live/i.test(origemLp || '')
+          ? 'Ligação rápida (5 min) pelo WhatsApp. Não assistiu a live (ou viu só parte): qualifique antes de marcar com o especialista.'
+          : 'Ligação rápida (5 min) pelo WhatsApp. Acabou de preencher o formulário da LP e pediu a ligação: qualifique antes de marcar com o especialista.') +
         (expedicao ? `\nInteresse: ${expedicao}` : '') +
         (observacao ? `\nRecado do cliente: ${observacao}` : ''),
       tags: ['ligacao-agendada', `ligacao:${ligacao.id}`, 'autoagendamento'],

@@ -461,6 +461,10 @@
   function podePreencher(origem) {
     if (origem === location.origin) return true;
     if (/^http:\/\/localhost(:\d+)?$/.test(origem)) return true;   // desenvolvimento
+    // As LPs de tráfego moram em subdomínios (lps., lps2. … lps11.) — a mesma
+    // família que o frame-ancestors do vercel.json já libera. Só https, só o
+    // nosso domínio: nada de "setuforeuvouviagens.com.br.qualquercoisa.com".
+    if (/^https:\/\/([a-z0-9-]+\.)*setuforeuvouviagens\.com\.br$/.test(origem)) return true;
     return ORIGENS_QUE_PODEM_PREENCHER.indexOf(origem) !== -1;
   }
 

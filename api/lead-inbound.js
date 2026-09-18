@@ -32,6 +32,7 @@
 // Resposta: { success, lead_id, owner_id, cadence_id, tasks_created }
 // -----------------------------------------------------------------------------
 import { createInboundLead, moverLeadParaCadencia } from './_leads.js';
+import { alcancarCardAdotado } from './_agenda.js';
 import { segredoConfere, rest } from './_supabaseAdmin.js';
 import { entregarAGloria } from './_gloriaEntrada.js';
 import { dispararPrimeiroContato, lerConfig, gatilhoDe } from './_primeiroContato.js';
@@ -144,7 +145,18 @@ export default async function handler(req, res) {
   try {
     // Com &mover=1 a busca por duplicado ignora a janela de 24h: numa carga de
     // resgate as pessoas estão no QS há meses, e sem isso todas duplicariam.
-    const { lead, ownerId, cadenceId, tasks, deduped } = await createInboundLead(body, { buscarEmQualquerEpoca: mover, cardProprio: duplicar });
+    const { lead, ownerId, cadenceId, tasks, deduped, adotado } = await createInboundLead(body, { buscarEmQualquerEpoca: mover, cardProprio: duplicar });
+
+    // O card do Bitrix chegou depois de a pessoa já ter marcado com o closer
+    // pelo formulário do site: leva pro negócio o aviso e a coluna da reunião.
+    let reuniaoAlcancada;
+    if (adotado && lead) {
+      try {
+        reuniaoAlcancada = await alcancarCardAdotado(lead);
+      } catch (e) {
+        console.warn('[lead-inbound] reunião não levada ao card:', e?.message || e);
+      }
+    }
 
     // O lead JÁ existia e a URL pediu &mover=1: traz ele pra cadência da lista.
     // Sem isto, a lista de resgate não funciona na prática — a maioria dessas
@@ -248,6 +260,7 @@ export default async function handler(req, res) {
       // está ligado — inclusive quando não mandou: `{ ok:false, motivo:"..." }`
       // é o que diz, no histórico do n8n, por que aquele lead não recebeu.
       primeiro_contato: primeiroContato || undefined,
+      reuniao_no_card: reuniaoAlcancada || undefined,
       // Só aparece quando a cadência de destino é a do atendimento por IA.
       // { entrou: true, abordagem: { ok, porta } } — o n8n registra isso no
       // histórico, então dá pra ver pelo lado de fora se ela falou ou não.

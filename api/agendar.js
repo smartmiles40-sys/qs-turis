@@ -196,6 +196,14 @@ function body0(req) {
  * ja manda (`CAMPOS_FIXOS.expedicao`) e que vai pro card do Bitrix. Nome que
  * nao esta na lista simplesmente nao tem prazo.
  */
+/** `dias` da URL (GET) ou do corpo (POST), 1..14; qualquer outra coisa = null. */
+function diasDaJanelaCurta(req) {
+  const bruto = Number(
+    req.query?.dias ?? new URL(req.url || '/', 'http://x').searchParams.get('dias') ?? body0(req).dias
+  );
+  return Number.isInteger(bruto) && bruto >= 1 && bruto <= 14 ? bruto : null;
+}
+
 function comPrazoDaExpedicao(cfg, expedicao) {
   const limites = cfg.limites && typeof cfg.limites === 'object' ? cfg.limites : null;
   if (!limites || !expedicao) return cfg;
@@ -298,7 +306,7 @@ export default async function handler(req, res) {
   // Lê da URL também: a ponte de /api do `vite dev` não monta `req.query`.
   const com = req.query?.com ?? new URL(req.url || '/', 'http://x').searchParams.get('com');
   if (String(com || '') === 'sdr') {
-    return await ligacaoComSdr(req, res, { teto });
+    return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req) });
   }
 
   if (cfg.ativo === false) {
@@ -316,8 +324,14 @@ export default async function handler(req, res) {
   );
   const regras = comRegras(comPrazoDaExpedicao(cfg, expedicaoPedida));
 
-  if (req.method === 'GET') return await mostrarGrade(res, { cfg, regras });
-  if (req.method === 'POST') return await marcar(req, res, { cfg, regras, teto });
+  // ?dias=3 (18/09): os formulários do site (orgânico com o closer, tráfego com
+  // o SDR) oferecem só os 3 próximos dias com horário, a partir de AMANHÃ. Vem
+  // na URL no GET e no corpo no POST; fora de 1..14 é ignorado (vale a janela
+  // inteira, como nas lives).
+  const maxDias = diasDaJanelaCurta(req);
+
+  if (req.method === 'GET') return await mostrarGrade(res, { cfg, regras, maxDias });
+  if (req.method === 'POST') return await marcar(req, res, { cfg, regras, teto, maxDias });
 
   res.setHeader('Allow', 'GET, POST, OPTIONS');
   return res.status(405).json({ ok: false, error: 'Use GET ou POST' });
@@ -325,9 +339,9 @@ export default async function handler(req, res) {
 
 // ─── GET: a grade ────────────────────────────────────────────────────────────
 
-async function mostrarGrade(res, { cfg, regras }) {
+async function mostrarGrade(res, { cfg, regras, maxDias }) {
   try {
-    const grade = await gradePublica({ regras });
+    const grade = await gradePublica({ regras, maxDias });
     return res.status(200).json({
       ok: grade.ok,
       motivo: grade.motivo,
@@ -345,7 +359,7 @@ async function mostrarGrade(res, { cfg, regras }) {
 
 // ─── POST: marcar ────────────────────────────────────────────────────────────
 
-async function marcar(req, res, { cfg, regras, teto }) {
+async function marcar(req, res, { cfg, regras, teto, maxDias }) {
   const body = typeof req.body === 'string' ? safeJson(req.body) : req.body || {};
 
   // CAMPO-ARMADILHA. A página tem um input escondido chamado `site`; gente não
@@ -379,6 +393,23 @@ async function marcar(req, res, { cfg, regras, teto }) {
   const inicio = new Date(String(body.inicio || ''));
   const problema = horarioValido(inicio, regras, agora);
   if (problema) return res.status(400).json({ ok: false, campo: 'inicio', error: problema });
+
+  // Com `dias`, o horário tem que cair num dos N dias que a grade ofereceu.
+  // Sem isto, um POST à mão marcaria no 14º dia uma reunião que a página
+  // nunca mostrou. Custa uma consulta a mais, só nesse caso.
+  if (maxDias) {
+    try {
+      const grade = await gradePublica({ regras, maxDias, agora });
+      const primeiro = grade.dias[0]?.dia;
+      const ultimo = grade.dias[grade.dias.length - 1]?.dia;
+      const diaPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(inicio);
+      if (!ultimo || diaPedido < primeiro || diaPedido > ultimo) {
+        return res.status(400).json({ ok: false, campo: 'inicio', error: 'Esse dia não está mais disponível. Escolha outro horário, por favor.' });
+      }
+    } catch (e) {
+      console.warn('[agendar] conferência dos dias indisponível:', e?.message);
+    }
+  }
 
   // ── TETO POR IP ───────────────────────────────────────────────────────────
   // Falha aberta de propósito: se o banco não responde, o limite não se aplica
@@ -562,7 +593,7 @@ async function marcar(req, res, { cfg, regras, teto }) {
 // A grade pelo dono vai por POST, não por GET: o telefone da pessoa não pode
 // morar em URL (fica em log e em histórico). Ver api/_ligacaoSdr.js.
 
-async function ligacaoComSdr(req, res, { teto }) {
+async function ligacaoComSdr(req, res, { teto, maxDias = null }) {
   const cfg = await lerConfigSdr();
   if (!cfg.ativo) {
     return res.status(200).json({ ok: false, motivo: 'desligado', recado: cfg.encerrado, dias: [] });
@@ -573,7 +604,7 @@ async function ligacaoComSdr(req, res, { teto }) {
 
   if (req.method === 'GET' || (req.method === 'POST' && body.acao === 'grade')) {
     try {
-      const grade = await gradeSdr({ telefone: normPhone(body.telefone) || null });
+      const grade = await gradeSdr({ telefone: normPhone(body.telefone) || null, maxDias });
       return res.status(200).json({
         ok: grade.ok,
         motivo: grade.motivo,
@@ -623,6 +654,21 @@ async function ligacaoComSdr(req, res, { teto }) {
   const inicio = new Date(String(body.inicio || ''));
   const problema = horarioValidoSdr(inicio, cfg, agora);
   if (problema) return res.status(400).json({ ok: false, campo: 'inicio', error: problema });
+
+  // Janela curta (?dias): o dia tem que estar entre os que a grade mostrou.
+  if (maxDias) {
+    try {
+      const grade = await gradeSdr({ telefone, maxDias, agora });
+      const primeiro = grade.dias[0]?.dia;
+      const ultimo = grade.dias[grade.dias.length - 1]?.dia;
+      const diaPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(inicio);
+      if (!ultimo || diaPedido < primeiro || diaPedido > ultimo) {
+        return res.status(400).json({ ok: false, campo: 'inicio', error: 'Esse dia não está mais disponível. Escolha outro horário, por favor.' });
+      }
+    } catch (e) {
+      console.warn('[agendar:sdr] conferência dos dias indisponível:', e?.message);
+    }
+  }
 
   try {
     const chave = chaveIp(req);

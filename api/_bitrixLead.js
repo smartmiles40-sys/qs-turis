@@ -279,6 +279,24 @@ export async function criarNegocioParaLead(lead) {
  * Devolve o id do comentário, ou null — nunca estoura: o resumo é enfeite pro
  * Comercial, e falhar aqui não pode derrubar o job nem o atendimento.
  */
+/**
+ * Põe o negócio no nome de um usuário do QS (casado pelo e-mail, como na
+ * criação). Usada quando o card chega do Bitrix DEPOIS de o cliente já ter
+ * marcado a ligação com um SDR: o card tem que estar com quem vai ligar.
+ * Devolve { passado, motivo } e nunca levanta exceção.
+ */
+export async function passarNegocioPara(dealId, ownerId) {
+  if (!bitrixConfigurado() || !dealId) return { passado: false, motivo: 'sem-bitrix' };
+  const usuario = await responsavelNoBitrix(ownerId);
+  if (!usuario) return { passado: false, motivo: 'usuario-sem-correspondente-no-bitrix' };
+  try {
+    await bx('crm.deal.update', { id: Number(dealId), fields: { ASSIGNED_BY_ID: usuario } });
+    return { passado: true, usuario };
+  } catch (e) {
+    return { passado: false, motivo: e?.message || 'falha no crm.deal.update' };
+  }
+}
+
 export async function comentarNoNegocio(dealId, texto, timeoutMs = 8_000) {
   if (!bitrixConfigurado() || !dealId || !texto) return null;
   try {
