@@ -16,6 +16,7 @@ import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { setMeetingStatus, setMeetingSal, deleteMeeting, gerarSalaMeet, avisarBitrixDaSala, reenviarDesfechoAoBitrix, temDesfecho, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
 import BriefingDoLead from "./BriefingDoLead";
+import OportunidadeFuturaModal from "../leads/OportunidadeFuturaModal";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
 import { getSetting } from "@/lib/qsSettings";
 import { MEETING_STATUS_LABELS, type Meeting, type MeetingSal, type MeetingStatus } from "../types";
@@ -86,6 +87,7 @@ export default function MeetingDetailModal({
   // 17/08). Perguntamos aqui, na hora do desfecho, porque é o único momento em
   // que o closer tem os dois na cabeça — depois vira campo em branco pra sempre.
   const [fechando, setFechando] = useState<"realizada" | "no_show" | null>(null);
+  const [oportunidade, setOportunidade] = useState(false);
   const [criandoSala, setCriandoSala] = useState(false);
   // Reenvio manual do desfecho pro Bitrix — mesmo botão da Minha Agenda. Está
   // nos dois porque o desfecho é lançado nos dois: ter a segunda tentativa só
@@ -422,6 +424,27 @@ export default function MeetingDetailModal({
                 onConfirmar={(desfecho) => void mudarStatus(fechando, desfecho)}
               />
             )}
+
+            {!fechando && (<>
+              {/* OPORTUNIDADE FUTURA (0083): o cliente quer, mas não agora. Fala do
+                  NEGÓCIO, como a desistência — por isso mora ao lado dela. */}
+              <button
+                onClick={() => setOportunidade(true)}
+                disabled={busy}
+                className="w-full py-2 rounded-lg border text-sm font-semibold transition hover:brightness-95"
+                style={{ borderColor: "#4F46E555", color: "#4338CA", background: "#4F46E512" }}
+              >
+                Oportunidade futura
+              </button>
+              {oportunidade && (
+                <OportunidadeFuturaModal
+                  leadId={meeting.lead_id}
+                  leadName={meeting.lead_name ?? meeting.lead?.full_name ?? "Cliente"}
+                  meetingId={meeting.id}
+                  onFechar={() => setOportunidade(false)}
+                />
+              )}
+            </>)}
 
             {meeting.status === "agendada" && (
               <button

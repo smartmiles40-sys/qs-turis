@@ -66,12 +66,19 @@
     },
     "api/wa-evolution-webhook.js": {
       "maxDuration": 60
+    },
+    "api/oportunidade-futura.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
     {
       "path": "/api/wa-bitrix-digest",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/oportunidade-futura",
+      "schedule": "5 * * * *"
     }
   ],
   "headers": [

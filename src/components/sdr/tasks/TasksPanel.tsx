@@ -26,6 +26,7 @@ import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { getChatProvider, defaultChatProvider, type ChatProvider } from "@/lib/qs/chatProvider";
 import { useWhatsAppApp } from "@/lib/qs/waApp";
+import { caronaDasOportunidades } from "@/lib/qs/oportunidadeFutura";
 import { getLeadScore, type LeadTemperature } from "@/lib/leadScore";
 import { formatPhoneDisplay, fillTemplate, normalizePhoneBR } from "@/lib/whatsapp";
 import WhatsAppModal from "../whatsapp/WhatsAppModal";
@@ -354,6 +355,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // MODO APARELHO (SDR, desde 03/09): as atividades de WhatsApp levam o SDR pra
   // conversa no celular dele, com o roteiro já escrito. Ver src/lib/qs/waApp.ts.
   const { modoApp, ligarPeloCelular, abrirNoApp } = useWhatsAppApp();
+  // Oportunidades futuras que venceram hoje voltam pra fila de quem retoma.
+  // O cron da Vercel faz isso de hora em hora; abrir a fila também acorda —
+  // pra atividade estar lá quando o SDR chega, sem depender só do agendador.
+  useEffect(() => { caronaDasOportunidades(); }, []);
 
   // Abre o dock focando um lead (copia o telefone pra colar na busca).
   const openWhatsApp = useCallback((lead: Lead | undefined | null, draft?: string | null) => {

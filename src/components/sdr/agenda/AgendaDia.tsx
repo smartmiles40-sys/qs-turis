@@ -41,6 +41,7 @@ import DesfechoVenda from "./DesfechoVenda";
 import BriefingDoLead from "./BriefingDoLead";
 import { getSetting } from "@/lib/qsSettings";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
+import OportunidadeFuturaModal from "../leads/OportunidadeFuturaModal";
 import type {
   CloserAvailability,
   CloserBlock,
@@ -1036,6 +1037,7 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
   const [copiado, setCopiado] = useState(false);
   // Mesmo passo do modal de detalhe: antes de fechar, pergunta valor e tipo.
   const [fechando, setFechando] = useState<"realizada" | "no_show" | null>(null);
+  const [oportunidade, setOportunidade] = useState(false);
   const st = STATUS[reuniao.status] ?? STATUS.agendada;
   const ini = new Date(reuniao.scheduled_at);
   const fim = fimDaReuniao(reuniao);
@@ -1174,6 +1176,23 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
               >
                 Desistência do cliente
               </button>
+              {/* OPORTUNIDADE FUTURA (0083): o cliente quer, mas não agora. Fala do
+                  NEGÓCIO, como a desistência — por isso mora ao lado dela. */}
+              <button
+                onClick={() => setOportunidade(true)}
+                className="mt-1.5 w-full rounded-lg border py-1.5 text-xs font-bold transition hover:brightness-95"
+                style={{ borderColor: "#4F46E555", color: "#4338CA", background: "#4F46E512" }}
+              >
+                Oportunidade futura
+              </button>
+              {oportunidade && (
+                <OportunidadeFuturaModal
+                  leadId={reuniao.lead_id}
+                  leadName={reuniao.lead_name || reuniao.lead?.full_name || "Cliente"}
+                  meetingId={reuniao.id}
+                  onFechar={() => setOportunidade(false)}
+                />
+              )}
             </>
           )}
 

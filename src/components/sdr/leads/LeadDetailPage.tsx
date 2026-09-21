@@ -18,6 +18,7 @@ import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import ScheduleMeetingModal from "@/components/sdr/agenda/ScheduleMeetingModal";
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
+import OportunidadeFuturaModal, { FaixaOportunidadeFutura } from "@/components/sdr/leads/OportunidadeFuturaModal";
 import type {
   Lead,
   LeadStatus,
@@ -221,6 +222,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [activeTab, setActiveTab] = useState<TabKey>("historico");
   const [newNote, setNewNote] = useState("");
   const [showHandoverModal, setShowHandoverModal] = useState(false);
+  // Oportunidade futura (0083): o modal e um contador que faz a faixa reler.
+  const [mostrarOportunidade, setMostrarOportunidade] = useState(false);
+  const [versaoOportunidade, setVersaoOportunidade] = useState(0);
   const [selectedCloser, setSelectedCloser] = useState("");
   const [handoverSuccess, setHandoverSuccess] = useState(false);
   const [showReEngagement, setShowReEngagement] = useState(false);
@@ -1479,6 +1483,25 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
         Voltar para Leads
       </button>
 
+      {/* Oportunidade futura em aberto: aparece ANTES de tudo, pra ninguém
+          ligar no meio da espera que o cliente pediu. */}
+      <div className="mb-4 empty:hidden">
+        <FaixaOportunidadeFutura
+          leadId={lead.id}
+          podeAgir={!!currentUser && (canSeeAllData(currentUser.role) || currentUser.role === "closer")}
+          versao={versaoOportunidade}
+          onMudou={() => { void fetchLead(); void reloadTasks(); }}
+        />
+      </div>
+      {mostrarOportunidade && (
+        <OportunidadeFuturaModal
+          leadId={lead.id}
+          leadName={lead.full_name || "Cliente"}
+          onFechar={() => setMostrarOportunidade(false)}
+          onSalvo={() => { setVersaoOportunidade((v) => v + 1); void reloadTasks(); }}
+        />
+      )}
+
       {/* Lead Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6">
         <div className="flex items-center gap-4">
@@ -1609,6 +1632,15 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             </svg>
             Enviar para Closer
           </button>
+          {/* Oportunidade futura: decisão do closer (ou da gestão) sobre o NEGÓCIO. */}
+          {!!currentUser && (canSeeAllData(currentUser.role) || currentUser.role === "closer") && (
+            <button
+              onClick={() => setMostrarOportunidade(true)}
+              className="px-4 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
+            >
+              Oportunidade futura
+            </button>
+          )}
           {/* Lead fechado esconde Ganho/Perdido (Sprint 4): re-clicar re-disparava
               o evento no Bitrix e sobrescrevia o desfecho já dado. */}
           {!isClosed && (
