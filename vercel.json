@@ -61,13 +61,7 @@
     "api/*.js": {
       "maxDuration": 10
     },
-    "api/wa-linha.js": {
-      "maxDuration": 60
-    },
     "api/wa-evolution-webhook.js": {
-      "maxDuration": 60
-    },
-    "api/oportunidade-futura.js": {
       "maxDuration": 60
     }
   },
