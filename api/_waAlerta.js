@@ -191,7 +191,14 @@ export async function verificar({ completo = true } = {}) {
   const quando = Date.now();
   const instancias = await listarInstancias();
   const anterior = await lerEstado();
-  const { avisos, novoEstado } = decidir(anterior, instancias, quando);
+  const decisao = decidir(anterior, instancias, quando);
+  const { novoEstado } = decisao;
+  // QUEDA/VOLTA DE NÚMERO NÃO VAI MAIS PRO WHATSAPP (Bruno, 21/09): "não temos
+  // necessidade de ficar recebendo mensagem se o número caiu". O 1935 cai o
+  // tempo todo e o alerta virou ruído. O estado continua sendo gravado, então a
+  // faixa vermelha do QS (AvisoDoVigia) segue mostrando quem está fora. Pra
+  // religar, basta tirar este filtro.
+  const avisos = decisao.avisos.filter((a) => !['queda', 'volta', 'lembrete', 'sumiu'].includes(a.tipo));
 
   // MENSAGEM QUE NÃO CHEGOU NO QS — a outra metade do "está tudo funcionando?".
   // Número no ar não garante nada: em 10/08 o WhatsApp estava perfeito e 25
