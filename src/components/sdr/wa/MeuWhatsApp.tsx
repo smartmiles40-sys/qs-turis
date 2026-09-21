@@ -15,7 +15,7 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { confirmar } from "@/lib/qs/confirmar";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import {
-  acaoDaLinha, formatarNumero, linhasDoTime, marcarMinhaLinha, recarregarMinhaLinha, useMinhaLinha,
+  WHATSAPP_DO_SDR_LIGADO, acaoDaLinha, formatarNumero, linhasDoTime, marcarMinhaLinha, recarregarMinhaLinha, useMinhaLinha,
   type LinhaDoTime,
 } from "@/lib/qs/waLinha";
 
@@ -42,7 +42,7 @@ function quando(iso: string | null | undefined): string {
 
 export function BotaoMeuWhatsApp({ onAbrir }: { onAbrir: () => void }) {
   const { linha, carregado } = useMinhaLinha();
-  if (!carregado) return null;
+  if (!WHATSAPP_DO_SDR_LIGADO || !carregado) return null;
   const cor = linha ? (COR_DO_ESTADO[linha.status] ?? "var(--ink3)") : "var(--ink3)";
   return (
     <button onClick={onAbrir}

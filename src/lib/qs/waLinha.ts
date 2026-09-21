@@ -12,6 +12,15 @@
 import { useEffect, useState } from "react";
 import { authHeaders } from "@/lib/qs/waInbox";
 
+/**
+ * DESLIGADO em 21/09/2026, a pedido do Bruno: na primeira tarde, um dos chips
+ * caiu depois de conectar pela Evolution e o time voltou pro WhatsApp Web.
+ * Com false: o botão "Meu WhatsApp" some, ninguém consulta /api/wa-linha e o
+ * modo aparelho volta a valer pra todo SDR. O servidor e a 0082 continuam
+ * lá, parados — religar é trocar isto pra true.
+ */
+export const WHATSAPP_DO_SDR_LIGADO = false;
+
 export type EstadoLinha = "open" | "close" | "connecting" | string;
 
 export interface MinhaLinha {
@@ -92,6 +101,7 @@ export function useMinhaLinha() {
   const [, forcar] = useState(0);
   useEffect(() => {
     const f = () => forcar((n) => n + 1);
+    if (!WHATSAPP_DO_SDR_LIGADO) return;
     ouvintes.add(f);
     if (!carregado) void recarregarMinhaLinha();
     const t = window.setInterval(() => void recarregarMinhaLinha(), 120_000);
@@ -103,6 +113,7 @@ export function useMinhaLinha() {
       document.removeEventListener("visibilitychange", foco);
     };
   }, []);
+  if (!WHATSAPP_DO_SDR_LIGADO) return { linha: null, carregado: true, noAr: false };
   return { linha: atual, carregado, noAr: atual?.status === "open" };
 }
 

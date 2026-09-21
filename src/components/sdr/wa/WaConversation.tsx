@@ -27,7 +27,7 @@ import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { loadSignatureName } from "@/lib/qs/waSignature";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { useWhatsAppApp } from "@/lib/qs/waApp";
-import { useMinhaLinha, formatarNumero } from "@/lib/qs/waLinha";
+import { useMinhaLinha, formatarNumero, WHATSAPP_DO_SDR_LIGADO } from "@/lib/qs/waLinha";
 import MeuWhatsApp from "./MeuWhatsApp";
 import { WaAudio, WaAvatar, WaSeloNumero } from "./WaBits";
 import { WaTexto, tamanhoEmojiSolto, waPlain } from "./waFormat";
@@ -1488,11 +1488,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               </p>
               {/* O caminho de volta pro QS (0082): conectado o chip, o campo de
                   escrever reaparece aqui e a conversa passa a ficar registrada. */}
-              <button onClick={() => setConectandoMeuWa(true)}
+              {WHATSAPP_DO_SDR_LIGADO && <button onClick={() => setConectandoMeuWa(true)}
                       className="mt-0.5 text-[11.5px] font-semibold underline underline-offset-2"
                       style={{ color: "var(--wa)" }}>
                 {minhaLinha ? "Reconectar meu WhatsApp no QS" : "Conectar meu WhatsApp no QS"}
-              </button>
+              </button>}
               {conectandoMeuWa && <MeuWhatsApp onFechar={() => setConectandoMeuWa(false)} />}
             </div>
             <button
