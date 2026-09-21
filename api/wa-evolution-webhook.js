@@ -2,6 +2,16 @@
 // -----------------------------------------------------------------------------
 // Rota serverless (Vercel): POST /api/wa-evolution-webhook?secret=<EVOLUTION_WEBHOOK_SECRET>
 //
+// DUAS FUNÇÕES:
+//
+// 1) NÚMEROS DOS SDRs (0082, 21/09/2026) — cada SDR conecta o chip dele pelo QR
+//    dentro do QS, e TUDO desse número entra por aqui: mensagem recebida,
+//    mensagem mandada do celular, recibo (✓✓/azul), apagada e conexão. O QS cria
+//    essas instâncias já apontando o webhook pra cá (ver _waLinha.js).
+//
+// 2) NÚMEROS ANTIGOS (1935, marketing…) — só a reação do cliente e o aviso de
+//    número caído, como antes. Mensagem comum desses entra pelo Chatwoot.
+//
 // É por aqui que a REAÇÃO DO CLIENTE chega no QS. A ponte Evolution→Chatwoot
 // não repassa reação (ela vira, no máximo, um emoji solto perdido) — então a
 // própria Evolution avisa o QS direto, e a reação aparece pendurada na
@@ -22,6 +32,8 @@
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { verificar } from './_waAlerta.js';
+import { linhaDaInstancia, atualizarLinha, numeroDaInstancia } from './_waLinha.js';
+import { receberDaLinha, recibosDaLinha, apagadaNaLinha } from './_waLinhaEntrada.js';
 
 function safeParse(s) {
   try { return JSON.parse(s); } catch { return {}; }
@@ -55,6 +67,56 @@ export default async function handler(req, res) {
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const event = String(body?.event || '').toLowerCase().replace(/_/g, '.');
 
+  // Esta instância é o número de um SDR? (null = instância antiga)
+  let linha = null;
+  try {
+    linha = await linhaDaInstancia(String(body?.instance || body?.instanceName || ''));
+  } catch (e) {
+    // Tabela ausente (0082 não aplicada) ou banco lento: trata como antiga.
+    console.warn('[wa-evo] não consegui ler qs_wa_linhas:', e?.message);
+  }
+
+  if (linha && event === 'connection.update') {
+    const estado = String(body?.data?.state || body?.data?.status || '').toLowerCase();
+    if (estado) {
+      const agora = new Date().toISOString();
+      const patch = { status: estado, status_em: agora };
+      if (estado === 'open') {
+        patch.conectado_em = agora;
+        const numero = await numeroDaInstancia(linha.instancia);
+        if (numero) patch.numero = numero;
+      }
+      await atualizarLinha(linha.user_id, patch)
+        .catch((e) => console.warn('[wa-evo] status da linha não gravado:', e?.message));
+    }
+    return res.status(200).json({ ok: true, linha: linha.instancia, estado });
+  }
+
+  if (linha && event === 'messages.update') {
+    const recibos = await recibosDaLinha(linha, eventosDe(body));
+    return res.status(200).json({ ok: true, recibos });
+  }
+
+  if (linha && event === 'messages.upsert') {
+    const resultado = [];
+    for (const item of eventosDe(body)) {
+      if (item?.message?.reactionMessage) continue;   // tratada logo abaixo
+      if (item?.message?.protocolMessage) {
+        resultado.push({ apagada: await apagadaNaLinha(linha, item) });
+        continue;
+      }
+      try {
+        resultado.push(await receberDaLinha(linha, item));
+      } catch (e) {
+        // 200 mesmo assim: erro aqui viraria retentativa eterna da Evolution.
+        console.error('[wa-evo] mensagem da linha não gravada:', e?.message);
+        resultado.push({ erro: e?.message });
+      }
+    }
+    const reacoes = await gravarReacoes(eventosDe(body));
+    return res.status(200).json({ ok: true, linha: linha.instancia, resultado, reacoes });
+  }
+
   // Número caiu/voltou. Em vez de decidir aqui, dispara a MESMA verificação do
   // /api/wa-monitor: o estado e a regra anti-spam ficam num lugar só, e o
   // aviso sai na hora em vez de esperar a próxima varredura do agendador.
@@ -72,8 +134,18 @@ export default async function handler(req, res) {
     return res.status(200).json({ ignored: 'evento-nao-tratado', event });
   }
 
+  const reacoes = await gravarReacoes(eventosDe(body));
+  return res.status(200).json({ ok: true, reacoes });
+}
+
+/**
+ * Reação do cliente pendurada na mensagem certa. Serve às duas famílias de
+ * número: a mensagem alvo é achada pelo id do WhatsApp (source_id), que as
+ * mensagens da linha do SDR também gravam.
+ */
+async function gravarReacoes(itens) {
   let reacoes = 0;
-  for (const item of eventosDe(body)) {
+  for (const item of itens) {
     const reacao = item?.message?.reactionMessage;
     if (!reacao?.key?.id) continue;
 
@@ -118,5 +190,5 @@ export default async function handler(req, res) {
     }
   }
 
-  return res.status(200).json({ ok: true, reacoes });
+  return reacoes;
 }

@@ -33,6 +33,7 @@ import { useWaAvisos } from "@/lib/qs/waAvisos";
 import WaThreadList from "./WaThreadList";
 import WaConversation from "./WaConversation";
 import WaDesconhecidos from "./WaDesconhecidos";
+import MeuWhatsApp, { BotaoMeuWhatsApp } from "./MeuWhatsApp";
 import { countDesconhecidos } from "@/lib/qs/waDesconhecidos";
 import { WaAvatar, WaSeloNumero } from "./WaBits";
 import BriefingDoLead from "../agenda/BriefingDoLead";
@@ -91,6 +92,7 @@ export default function WaPage({ onOpenLead }: Props) {
   // qs_wa_descartadas devolve zero pro SDR, então o botão simplesmente não
   // aparece pra ele em vez de aparecer e recusar o clique.
   const [triagem, setTriagem] = useState(false);
+  const [meuWa, setMeuWa] = useState(false);
   const [desconhecidos, setDesconhecidos] = useState(0);
 
   useEffect(() => {
@@ -169,6 +171,8 @@ export default function WaPage({ onOpenLead }: Props) {
           </p>
         </div>
 
+        <BotaoMeuWhatsApp onAbrir={() => setMeuWa(true)} />
+
         {desconhecidos > 0 && !triagem && (
           <button onClick={() => setTriagem(true)}
                   title="Números que escreveram e não são lead"
@@ -198,6 +202,8 @@ export default function WaPage({ onOpenLead }: Props) {
           </button>
         )}
       </header>
+
+      {meuWa && <MeuWhatsApp onFechar={() => setMeuWa(false)} />}
 
       {/* A triagem toma a tela inteira de propósito: decidir quem vira lead é
           um trabalho em si, não algo pra fazer de canto de olho enquanto uma

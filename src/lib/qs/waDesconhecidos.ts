@@ -44,6 +44,8 @@ export interface Desconhecido {
    * assim), é trazer a conversa.
    */
   leadId: string | null;
+  /** Escreveu pro número de um SDR (0082) — o lead nasce DELE, e a conversa vem da Evolution. */
+  linhaUserId: string | null;
 }
 
 export interface ListaDesconhecidos {
@@ -59,6 +61,7 @@ interface LinhaBruta {
   inbox_id: number | null;
   created_at: string;
   lead_id: string | null;
+  linha_user_id?: string | null;
 }
 
 /**
@@ -82,6 +85,7 @@ function agrupar(linhas: LinhaBruta[]): Desconhecido[] {
         primeira: l.created_at,
         ultima: l.created_at,
         leadId: l.lead_id || null,
+        linhaUserId: l.linha_user_id || null,
       });
       continue;
     }
@@ -98,7 +102,7 @@ function agrupar(linhas: LinhaBruta[]): Desconhecido[] {
 export async function listDesconhecidos(limite = 500): Promise<ListaDesconhecidos> {
   const { data, error } = await supabase
     .from("qs_wa_descartadas")
-    .select("id, phone, contato_nome, inbox_id, created_at, lead_id")
+    .select("id, phone, contato_nome, inbox_id, created_at, lead_id, linha_user_id")
     .eq("situacao", "pendente")
     .eq("motivo", "sem-lead-correspondente")
     .order("created_at", { ascending: false })

@@ -101,10 +101,18 @@ async function montarKeyDoWhatsApp(leadId, lead, msg) {
   // como apontar pra ela lá fora.
   if (!msg.source_id) return { motivo: 'mensagem-sem-id-do-whatsapp' };
 
-  const threads = await rest(
-    `qs_wa_threads?select=cw_inbox_id&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
-  );
-  const instance = await instanciaDaCaixa(threads?.[0]?.cw_inbox_id ?? null);
+  // Mensagem do número de um SDR (0082): a instância é a DAQUELE número —
+  // reagir por outro chip mandaria a reação pra uma conversa que não existe.
+  let instance = null;
+  if (msg.linha_user_id) {
+    const l = await rest(`qs_wa_linhas?select=instancia&user_id=eq.${encodeURIComponent(msg.linha_user_id)}&limit=1`);
+    instance = l?.[0]?.instancia || null;
+  } else {
+    const threads = await rest(
+      `qs_wa_threads?select=cw_inbox_id&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
+    );
+    instance = await instanciaDaCaixa(threads?.[0]?.cw_inbox_id ?? null);
+  }
   if (!instance) return { motivo: 'instancia-nao-mapeada' };
 
   const jid = await resolveJid(instance, lead.phone);
@@ -168,11 +176,19 @@ export default async function handler(req, res) {
     // A mensagem tem que ser DESTE lead — sem isso, um messageId chutado
     // reagiria na conversa de outro cliente.
     const rows = await rest(
-      `qs_wa_messages?select=id,direction,source_id,cw_message_id,cw_conversation_id&id=eq.${encodeURIComponent(messageId)}` +
+      `qs_wa_messages?select=id,direction,source_id,cw_message_id,cw_conversation_id,linha_user_id&id=eq.${encodeURIComponent(messageId)}` +
       `&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
     );
     const msg = Array.isArray(rows) && rows[0];
     if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
+
+    // A mensagem do número de um SDR é só dele (e da gestão/closer) — mesma
+    // regra da RLS da 0082. Sem isto, outro SDR com acesso ao LEAD reagiria ou
+    // apagaria mensagem de uma conversa que ele nem enxerga.
+    const podeTudo = ['admin', 'gestor', 'closer'].includes(auth.user?.role);
+    if (msg.linha_user_id && msg.linha_user_id !== userId && !podeTudo) {
+      return res.status(403).json({ error: 'Esta mensagem é do WhatsApp de outra pessoa.' });
+    }
 
 
     // ── APAGAR PARA TODOS ─────────────────────────────────────────────────

@@ -23,6 +23,8 @@ import {
 } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 import { webmParaOggBytes, ehWebm } from './_opusRemux.js';
+import { linhaParaEnviar } from './_waLinha.js';
+import { enviarArquivoPelaLinha } from './_waLinhaEnvio.js';
 
 const MAX_BYTES = 3 * 1024 * 1024;
 
@@ -148,6 +150,37 @@ export default async function handler(req, res) {
   if (!auth.ok) {
     const status = auth.reason === 'lead-de-outro-sdr' ? 403 : 404;
     return res.status(status).json({ error: 'Sem acesso a este lead', motivo: auth.reason });
+  }
+
+  // ── O NÚMERO DO PRÓPRIO SDR (0082) — mesma regra do wa-send ───────────────
+  if (inboxPedida == null) {
+    const propria = await linhaParaEnviar(userId);
+    if (propria?.erro) return res.status(409).json({ error: propria.erro, motivo: propria.motivo });
+    if (propria?.linha) {
+      try {
+        const ehNotaDeVoz = isVoiceMessage && mimeFinal.startsWith('audio/');
+        const ehFigurinha = mimeFinal === 'image/webp' && !caption;
+        const legenda = (ehNotaDeVoz || ehFigurinha) ? caption : await assinarComoUsuario(caption, auth.user);
+        const r = await enviarArquivoPelaLinha({
+          linha: propria.linha, lead: auth.lead, user: auth.user, bytes, mime: mimeFinal,
+          nomeArquivo: nomeComExtensaoCerta(fileName, mimeFinal), legenda, notaDeVoz: ehNotaDeVoz,
+        });
+        if (r.erro) return res.status(r.status || 409).json({ error: r.erro, motivo: r.motivo });
+        let tarefa = null;
+        try {
+          tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);
+        } catch (e) {
+          console.warn('[wa-send-media] não consegui concluir a atividade:', e?.message);
+        }
+        return res.status(200).json({ ok: true, linha: propria.linha.instancia, sourceId: r.sourceId, tarefaConcluida: tarefa });
+      } catch (e) {
+        console.error('[wa-send-media] pela linha do SDR:', e?.message, e?.body ? JSON.stringify(e.body).slice(0, 300) : '');
+        return res.status(502).json({
+          error: 'O WhatsApp não aceitou o arquivo. Confira se o seu número está conectado e tente de novo.',
+          motivo: 'evolution-falhou',
+        });
+      }
+    }
   }
 
   if (!cwConfigured()) {

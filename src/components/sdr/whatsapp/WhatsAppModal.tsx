@@ -61,7 +61,7 @@ const QS_BLUE = "#0147FF";
 export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultText, onSent }: Props) {
   const { currentUser } = useQsAuth();
   // Quem fala pelo aparelho não vê envio nem ligação aqui — ver waApp.ts.
-  const { modoApp } = useWhatsAppApp();
+  const { modoApp, ligarPeloCelular } = useWhatsAppApp();
   const [text, setText] = useState(defaultText ?? "");
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [calling, setCalling] = useState(false);
@@ -130,7 +130,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   useEffect(() => {
     // No modo aparelho não existe ligação pela Meta nesta tela — perguntar a
     // permissão seria uma consulta ao banco pra pintar um botão que nem aparece.
-    if (!open || !lead.phone || modoApp) { setLendoPermissao(false); return; }
+    if (!open || !lead.phone || ligarPeloCelular) { setLendoPermissao(false); return; }
     let vivo = true;
     setLendoPermissao(true);
     void carregarPermissao(lead.phone).then(({ permissao: p, leu }) => {
@@ -140,7 +140,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
       setLendoPermissao(false);
     });
     return () => { vivo = false; };
-  }, [open, lead.phone, modoApp]);
+  }, [open, lead.phone, ligarPeloCelular]);
 
   if (!open) return null;
 
@@ -407,7 +407,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               API que caiu; enquanto ela estiver fora, o botão só sabe cobrar
               permissão e devolver erro. Quem precisa ligar liga do celular,
               de dentro da conversa que o botão verde acabou de abrir. */}
-          {!modoApp && (<>
+          {!ligarPeloCelular && (<>
           <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--line)" }}>
             <div className="flex items-center gap-3 px-4 py-3" style={{ background: "var(--card2)" }}>
               <span className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0" style={{ background: "rgba(18,161,138,.14)", color: "#0E7C6A" }}>

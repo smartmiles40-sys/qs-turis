@@ -27,6 +27,7 @@ import {
   type Desconhecido,
 } from "@/lib/qs/waDesconhecidos";
 import { WaAvatar } from "./WaBits";
+import { acaoDaLinha } from "@/lib/qs/waLinha";
 
 interface Props {
   onFechar: () => void;
@@ -99,10 +100,27 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
    * pessoa — a base já tem 68 casos assim, alguns com "ganho" num card e
    * "perdido" no outro. O que falta aqui é puxar o histórico.
    */
+  /**
+   * De onde vem a conversa: quem escreveu pro número de um SDR (0082) tem a
+   * conversa na Evolution daquele chip; o resto, no Chatwoot, como sempre.
+   */
+  const buscarConversa = async (leadId: string, d: Desconhecido) => {
+    if (!d.linhaUserId) return syncThread(leadId);
+    const r = await acaoDaLinha("historico", {
+      telefone: d.phone,
+      ...(d.linhaUserId !== currentUser?.id ? { userId: d.linhaUserId } : {}),
+    });
+    return {
+      conversationId: r.ok ? 1 : null,
+      importadas: r.importadas ?? 0,
+      motivo: r.ok ? undefined : (r.motivo || r.error),
+    };
+  };
+
   const trazerConversa = async (d: Desconhecido) => {
     if (!d.leadId) return;
     setOcupado(true);
-    const sync = await syncThread(d.leadId);
+    const sync = await buscarConversa(d.leadId, d);
     if (sync.importadas > 0 || sync.conversationId) {
       // O retorno importa: se a RLS recusar o carimbo, o item voltaria no
       // próximo carregamento — remover da tela agora seria fingir sucesso.
@@ -139,6 +157,8 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
 
     // owner_id vai NULO de propósito: o gatilho de rodízio (0028) escolhe o SDR
     // da vez. Mandar um dono daqui furaria a fila de distribuição.
+    // EXCEÇÃO (0082): quem escreveu pro chip de um SDR é lead DESSE SDR — foi
+    // com ele que a pessoa falou, e é pelo número dele que a conversa segue.
     const { data: criado, error } = await supabase
       .from("qs_leads")
       .insert({
@@ -146,7 +166,7 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
         first_name: partes[0],
         last_name: partes.slice(1).join(" ") || null,
         phone: d.phone,
-        owner_id: null,
+        owner_id: d.linhaUserId ?? null,
         cadence_id: cadenciaId || null,
         // "manual", não "whatsapp": o CHECK de qs_leads.source só aceita
         // manual|api|integracao|importacao — "whatsapp" estourava 23514 e o
@@ -181,7 +201,7 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
 
     // Puxa a conversa do Chatwoot pro lead novo. É o que faz a mensagem que
     // motivou tudo isto finalmente aparecer na tela de atendimento.
-    const sync = await syncThread(criado.id);
+    const sync = await buscarConversa(criado.id, d);
     const carimbou = await vincularDesconhecido(d.ids, criado.id);
 
     setOcupado(false);

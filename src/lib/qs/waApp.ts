@@ -29,6 +29,7 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import type { UserRole } from "@/components/sdr/types";
 import { normalizePhoneBR, waChatLink, logWhatsApp } from "@/lib/whatsapp";
 import { assinarTexto, loadSignatureName } from "@/lib/qs/waSignature";
+import { useMinhaLinha } from "@/lib/qs/waLinha";
 
 export const WA_MODO_APP_KEY = "wa_modo_app";
 
@@ -169,7 +170,13 @@ export function useWhatsAppApp() {
     return () => { vivo = false; };
   }, [currentUser]);
 
-  const modoApp = modoAppVale(cfg, currentUser);
+  // O WHATSAPP DO PRÓPRIO SDR (0082): conectou o chip dele no QS, a MENSAGEM
+  // volta a sair daqui — o modo aparelho deixa de valer pra escrever. A
+  // LIGAÇÃO não: o número conectado por QR não faz chamada de voz, então quem
+  // está no modo aparelho continua ligando pelo celular.
+  const { noAr: linhaNoAr } = useMinhaLinha();
+  const ligarPeloCelular = modoAppVale(cfg, currentUser);
+  const modoApp = ligarPeloCelular && !linhaNoAr;
 
   const abrirNoApp = useCallback(
     (alvo: AlvoNoApp) => abrirConversaNoApp(
@@ -179,5 +186,5 @@ export function useWhatsAppApp() {
     [assinatura, currentUser],
   );
 
-  return { modoApp, abrirNoApp, assinatura, config: cfg };
+  return { modoApp, ligarPeloCelular, abrirNoApp, assinatura, config: cfg };
 }

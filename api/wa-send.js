@@ -31,6 +31,8 @@ import {
 } from './_wa.js';
 import { evoConfigured, instanciaDaCaixa, listarInstancias, noAr } from './_evolution.js';
 import { rest } from './_supabaseAdmin.js';
+import { linhaParaEnviar } from './_waLinha.js';
+import { enviarTextoPelaLinha } from './_waLinhaEnvio.js';
 
 const MAX_LEN = 4000;
 
@@ -160,6 +162,37 @@ export default async function handler(req, res) {
   if (!auth.ok) {
     const status = auth.reason === 'lead-de-outro-sdr' ? 403 : 404;
     return res.status(status).json({ error: 'Sem acesso a este lead', motivo: auth.reason });
+  }
+
+  // ── O NÚMERO DO PRÓPRIO SDR (0082) ────────────────────────────────────────
+  // Quem conectou o chip dele no QS manda por ele, direto na Evolution. Duas
+  // exceções seguem o caminho antigo: MODELO (só existe no número oficial) e
+  // número escolhido à mão no topo do chat.
+  if (!modelo && inboxPedida == null) {
+    const propria = await linhaParaEnviar(userId);
+    if (propria?.erro) return res.status(409).json({ error: propria.erro, motivo: propria.motivo });
+    if (propria?.linha) {
+      try {
+        const textoFinal = await assinarComoUsuario(text, auth.user);
+        const r = await enviarTextoPelaLinha({
+          linha: propria.linha, lead: auth.lead, user: auth.user, texto: textoFinal, respondendoA,
+        });
+        if (r.erro) return res.status(r.status || 409).json({ error: r.erro, motivo: r.motivo });
+        let tarefa = null;
+        try {
+          tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);
+        } catch (e) {
+          console.warn('[wa-send] não consegui concluir a atividade:', e?.message);
+        }
+        return res.status(200).json({ ok: true, linha: propria.linha.instancia, sourceId: r.sourceId, tarefaConcluida: tarefa });
+      } catch (e) {
+        console.error('[wa-send] pela linha do SDR:', e?.message, e?.body ? JSON.stringify(e.body).slice(0, 300) : '');
+        return res.status(502).json({
+          error: 'O WhatsApp não aceitou a mensagem. Confira se o seu número está conectado e tente de novo.',
+          motivo: 'evolution-falhou',
+        });
+      }
+    }
   }
 
   if (!cwConfigured()) {

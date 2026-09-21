@@ -353,7 +353,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const chatDock = useChatAppDock();
   // MODO APARELHO (SDR, desde 03/09): as atividades de WhatsApp levam o SDR pra
   // conversa no celular dele, com o roteiro já escrito. Ver src/lib/qs/waApp.ts.
-  const { modoApp, abrirNoApp } = useWhatsAppApp();
+  const { modoApp, ligarPeloCelular, abrirNoApp } = useWhatsAppApp();
 
   // Abre o dock focando um lead (copia o telefone pra colar na busca).
   const openWhatsApp = useCallback((lead: Lead | undefined | null, draft?: string | null) => {
@@ -1832,14 +1832,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // autorização que a Meta exige simplesmente não se aplica. Continuar
     // escondendo essas atividades seria sumir com trabalho executável por causa
     // de uma regra de um canal que não está mais em uso.
-    if (modoApp) return true;
+    if (ligarPeloCelular) return true;
     // `normalizePhoneBR` e não os dígitos crus: as chaves da tabela têm DDI, e
     // comparar "11992221156" com "5511992221156" dava sempre "não conheço" —
     // o lead voltava pra fila por engano.
     const p = permissoes.get(normalizePhoneBR(lead?.phone));
     if (!p) return true;                 // não sei = deixa passar
     return permissaoVale(p);
-  }, [permissoes, modoApp]);
+  }, [permissoes, ligarPeloCelular]);
 
   const filteredTasks = useMemo(() => {
     let filtered = [...tasks];
@@ -2656,13 +2656,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 // conversa no celular do SDR — o botão de ligar do WhatsApp
                 // fica a um toque, que é exatamente o que este canal sempre
                 // significou ("Ligação de voz pelo WhatsApp").
-                else if (modoApp) abrirNoApp({ leadId: lead.id, name: lead.full_name, phone: lead.phone, ownerId: lead.owner_id });
+                else if (ligarPeloCelular) abrirNoApp({ leadId: lead.id, name: lead.full_name, phone: lead.phone, ownerId: lead.owner_id });
                 else callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id });
               }}
               className="qsx-pa qsx-pa-wa"
               title={task.channel_type === "ligacao"
                 ? "Ligar (BravoTech)"
-                : modoApp
+                : ligarPeloCelular
                   ? "Abrir a conversa no seu WhatsApp e ligar por lá"
                   : `Ligar pelo WhatsApp oficial${permissaoDoLead(lead.phone).validade ? ` — permissão vale ${permissaoDoLead(lead.phone).validade}` : ""}`}>
               <ChannelIcon type="ligacao" size={17} />
@@ -2779,7 +2779,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           // MODO APARELHO: o botão deixa de discar e passa a ABRIR a conversa
           // no celular. Nada de selo de permissão — ela era da Meta, e a
           // ligação não passa mais por lá.
-          if (modoApp) {
+          if (ligarPeloCelular) {
             return (
               <button
                 onClick={() => { pinTaskForCall(task); abrirNoApp({ leadId: lead.id, name: lead.full_name, phone: lead.phone, ownerId: lead.owner_id }); }}

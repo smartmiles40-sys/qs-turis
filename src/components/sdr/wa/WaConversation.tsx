@@ -27,6 +27,8 @@ import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { loadSignatureName } from "@/lib/qs/waSignature";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { useWhatsAppApp } from "@/lib/qs/waApp";
+import { useMinhaLinha, formatarNumero } from "@/lib/qs/waLinha";
+import MeuWhatsApp from "./MeuWhatsApp";
 import { WaAudio, WaAvatar, WaSeloNumero } from "./WaBits";
 import { WaTexto, tamanhoEmojiSolto, waPlain } from "./waFormat";
 import { webmParaOgg } from "@/lib/qs/opusRemux";
@@ -194,6 +196,10 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   // o lugar de ler tudo que já foi conversado — só o campo de escrever some,
   // porque o envio agora acontece no celular. Ver src/lib/qs/waApp.ts.
   const { modoApp, abrirNoApp } = useWhatsAppApp();
+  // O chip do próprio SDR conectado no QS (0082). Enquanto ele não escolher
+  // outro número no topo do chat, é por ele que tudo sai.
+  const { noAr: minhaLinhaNoAr, linha: minhaLinha } = useMinhaLinha();
+  const [conectandoMeuWa, setConectandoMeuWa] = useState(false);
   const [messages, setMessages] = useState<WaMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -790,7 +796,20 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
 
   // Qual dos nossos números atende esta conversa. Sem conversa ainda, mostra por
   // onde ela VAI sair (o padrão do servidor) — é a mesma pergunta do SDR.
+  // O número do SDR como uma opção da lista (id -1: não é caixa do Chatwoot).
+  const numeroDoSdr = useMemo<WaNumero | null>(() => (minhaLinhaNoAr ? {
+    id: -1, nome: "seu WhatsApp", tipo: "normal", canal: "evolution",
+    telefone: minhaLinha?.numero ?? null, numero: formatarNumero(minhaLinha?.numero) || null,
+    padrao: true, minha: true,
+  } : null), [minhaLinhaNoAr, minhaLinha?.numero]);
+  const pelaMinhaLinha = numeroDoSdr != null && inboxEscolhida == null;
+  const opcoesDeNumero = useMemo(
+    () => (numeroDoSdr ? [numeroDoSdr, ...numeros] : numeros),
+    [numeroDoSdr, numeros],
+  );
+
   const numeroDaConversa = useMemo(() => {
+    if (pelaMinhaLinha) return numeroDoSdr;
     if (!numeros.length) return null;
     // A escolha do SDR vence; depois o número da conversa; por último o padrão.
     if (inboxEscolhida != null) {
@@ -800,12 +819,12 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       return numeros.find((n) => n.id === inboxAtual) ?? null;
     }
     return numeros.find((n) => n.padrao) ?? (numeros.length === 1 ? numeros[0] : null);
-  }, [numeros, inboxAtual, inboxEscolhida]);
+  }, [numeros, inboxAtual, inboxEscolhida, pelaMinhaLinha, numeroDoSdr]);
 
   /** Trocar de número só faz sentido com mais de um disponível. */
-  const podeTrocarNumero = numeros.length > 1;
+  const podeTrocarNumero = opcoesDeNumero.length > 1;
   /** A escolha diverge da conversa que já existe? Isso ABRE conversa nova lá. */
-  const numeroTrocado = inboxEscolhida != null && inboxAtual != null && inboxEscolhida !== inboxAtual;
+  const numeroTrocado = !pelaMinhaLinha && inboxEscolhida != null && inboxAtual != null && inboxEscolhida !== inboxAtual;
 
   // ── Janela de 24h (só no número oficial da Meta) ──────────────────────────
   // A âncora é a ÚLTIMA mensagem que o CLIENTE mandou: é dela que a Meta conta
@@ -1297,7 +1316,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             <path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 21l2.1-5.7A8.4 8.4 0 1 1 21 11.5z" />
           </svg>
           <span className="text-[11px] min-w-0 truncate" style={{ color: "var(--ink3)" }}>
-            {inboxAtual == null || inboxEscolhida != null ? "Vai sair pelo " : "Conversa pelo "}
+            {pelaMinhaLinha ? "Sai pelo " : inboxAtual == null || inboxEscolhida != null ? "Vai sair pelo " : "Conversa pelo "}
             <b style={{ color: "var(--ink2)" }}>{numeroDaConversa.nome}</b>
           </span>
           {/* A bolinha verde: nuvem = número oficial (mora na Meta), aparelho =
@@ -1416,12 +1435,12 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       {trocandoNumero && podeTrocarNumero && !gravando && (
         <div className="shrink-0 px-3 pt-2" style={{ background: "var(--card)" }}>
           <div className="rounded-xl p-2 grid gap-1" style={{ background: "var(--card2)", border: "1px solid var(--line)" }}>
-            {numeros.map((n) => {
+            {opcoesDeNumero.map((n) => {
               const ativo = numeroDaConversa?.id === n.id;
               return (
                 <button
                   key={n.id}
-                  onClick={() => { setInboxEscolhida(n.id); setTrocandoNumero(false); }}
+                  onClick={() => { setInboxEscolhida(n.id === -1 ? null : n.id); setTrocandoNumero(false); }}
                   className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left"
                   style={ativo ? { background: "var(--wa-ok-bg)" } : undefined}
                 >
@@ -1467,6 +1486,14 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               <p className="text-[11.5px] leading-snug" style={{ color: "var(--ink2)" }}>
                 As mensagens saem do seu celular. Toque no botão pra continuar a conversa por lá.
               </p>
+              {/* O caminho de volta pro QS (0082): conectado o chip, o campo de
+                  escrever reaparece aqui e a conversa passa a ficar registrada. */}
+              <button onClick={() => setConectandoMeuWa(true)}
+                      className="mt-0.5 text-[11.5px] font-semibold underline underline-offset-2"
+                      style={{ color: "var(--wa)" }}>
+                {minhaLinha ? "Reconectar meu WhatsApp no QS" : "Conectar meu WhatsApp no QS"}
+              </button>
+              {conectandoMeuWa && <MeuWhatsApp onFechar={() => setConectandoMeuWa(false)} />}
             </div>
             <button
               onClick={() => abrirNoApp({ leadId, name: leadName, phone, texto: initialText })}
