@@ -11,6 +11,8 @@ import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
 import AgendaMes from "../agenda/AgendaMes";
 import AgendaDia from "../agenda/AgendaDia";
+import { FaixaBloqueioDesfecho } from "../agenda/BloqueioDesfecho";
+import { useBloqueioDesfecho } from "@/lib/qs/bloqueioDesfecho";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -85,6 +87,9 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   //   agenda   — o MÊS inteiro, na grade da Google Agenda (o dia abre num painel
   //              dentro dela mesma)
   const [view, setView] = useState<"reunioes" | "agenda">("reunioes");
+  // Agenda trancada do closer sem desfecho (Bruno, 21/09) — a faixa aparece
+  // aqui também, porque é por esta aba que ele chega nas reuniões do dia.
+  const { pendentes: atrasadasDoCloser } = useBloqueioDesfecho();
 
   // Dia que a aba Reuniões mostra. Nasce nulo (= hoje) e só muda quando o
   // usuário clica num dia na Agenda do mês.
@@ -463,6 +468,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     return (
       <div className="space-y-4" style={{ fontFamily: "inherit" }}>
         {viewToggle}
+        <FaixaBloqueioDesfecho pendentes={atrasadasDoCloser} />
         <AgendaMes onOpenLead={onOpenLead} onAbrirDia={(d) => { setDiaReunioes(d); setView("reunioes"); }} />
       </div>
     );
@@ -530,6 +536,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
           Agenda. O botão "Agendar Reunião" acima CONTINUA aqui de propósito: o
           agendamento por slot depende de closer cadastrado, e hoje não há
           nenhum no banco — sem este formulário não haveria como criar reunião. */}
+      <FaixaBloqueioDesfecho pendentes={atrasadasDoCloser} />
       <AgendaDia onOpenLead={onOpenLead} dataInicial={diaReunioes} />
 
       {/* ── Create / Edit Modal ─────────────────────────────────────────── */}

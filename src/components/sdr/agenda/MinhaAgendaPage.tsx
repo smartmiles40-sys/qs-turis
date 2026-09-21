@@ -27,6 +27,8 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { fetchAllRows } from "@/lib/qs/queries";
 import MeetingDetailModal from "./MeetingDetailModal";
+import { FaixaBloqueioDesfecho } from "./BloqueioDesfecho";
+import { useBloqueioDesfecho, ehPendenteDeDesfecho, recarregarBloqueio } from "@/lib/qs/bloqueioDesfecho";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
 import { hhmm, WEEKDAY_SHORT, WEEKDAY_LONG, MONTH_LONG } from "@/lib/qs/calendarLayout";
 import { MEETING_STATUS_LABELS, type Meeting } from "../types";
@@ -100,6 +102,10 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
   const [detalhe, setDetalhe] = useState<Meeting | null>(null);
   const [remarcar, setRemarcar] = useState<Meeting | null>(null);
   const [agendando, setAgendando] = useState(false);
+  // Agenda trancada: closer com reunião de dia anterior sem desfecho não abre
+  // as de hoje em diante (Bruno, 21/09). Só vale pro papel closer.
+  const { bloqueado, pendentes: semDesfecho } = useBloqueioDesfecho();
+  const trancada = (m: Meeting) => bloqueado && !ehPendenteDeDesfecho(m);
 
   const SELECT = "*, lead:qs_leads(id,full_name,phone,email,segment,owner_id)";
 
@@ -181,6 +187,16 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
   }, [currentUser, gestor, visaoSdr]);
 
   useEffect(() => { void carregar(); }, [carregar]);
+  // Qualquer mudança nesta tela (remarcar, excluir, desfecho) relê a trava.
+  useEffect(() => { recarregarBloqueio(); }, [pendentes]);
+
+  // A faixa lista as atrasadas; clicar abre direto o desfecho daquela reunião.
+  async function abrirPendente(id: string) {
+    const achada = pendentes.find((m) => m.id === id);
+    if (achada) { setDetalhe(achada); return; }
+    const { data } = await supabase.from("qs_meetings").select(SELECT).eq("id", id).maybeSingle();
+    if (data) setDetalhe(data as Meeting);
+  }
   // As cobranças de desfecho nasciam só quando alguém abria a aba Reuniões — o
   // closer que vive NESTA tela nunca era cobrado. A varredura é idempotente.
   useEffect(() => { void sweepOutcomeTasks(); }, []);
@@ -282,6 +298,8 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
       {erro && (
         <p className="mb-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{erro}</p>
       )}
+
+      <FaixaBloqueioDesfecho pendentes={semDesfecho} onAbrir={(id) => void abrirPendente(id)} />
 
       {/* ── 1. O que ficou pendente ───────────────────────────────────────── */}
       {/* Vem antes do dia de hoje de propósito: é o que já deveria ter sido
@@ -406,7 +424,11 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                         {/* Reunião registrada não precisa mais do link do Meet —
                             ela já aconteceu (ou não vai acontecer). O que ela
                             precisa é do reenvio pro Bitrix. */}
-                        {!registrada && (m.meeting_link ? (
+                        {!registrada && trancada(m) ? (
+                          <span className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-bold" title="Dê o desfecho das reuniões atrasadas primeiro">
+                            🔒 Trancada
+                          </span>
+                        ) : !registrada && (m.meeting_link ? (
                           <a
                             href={m.meeting_link}
                             target="_blank"
@@ -426,12 +448,14 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                         >
                           Ver histórico
                         </button>
-                        <button
-                          onClick={() => setDetalhe(m)}
-                          className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-semibold hover:bg-gray-50"
-                        >
-                          {!registrada && passou ? "Registrar desfecho" : "Detalhes"}
-                        </button>
+                        {!trancada(m) && (
+                          <button
+                            onClick={() => setDetalhe(m)}
+                            className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-semibold hover:bg-gray-50"
+                          >
+                            {!registrada && passou ? "Registrar desfecho" : "Detalhes"}
+                          </button>
+                        )}
 
                         {/* ENVIAR PRO BITRIX. O SDR não vê: quem responde pelo
                             card do negócio é quem registrou o desfecho. */}
@@ -485,7 +509,9 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                     {reunioes.map((m) => (
                       <li key={m.id}>
                         <button
-                          onClick={() => setDetalhe(m)}
+                          onClick={() => { if (!trancada(m)) setDetalhe(m); }}
+                          disabled={trancada(m)}
+                          title={trancada(m) ? "Trancada: dê o desfecho das reuniões atrasadas primeiro" : undefined}
                           /* Mesma regra do "Hoje": o que já tem desfecho fica
                              esmaecido, pra lista de compromisso mostrar só o que
                              ainda é compromisso. */

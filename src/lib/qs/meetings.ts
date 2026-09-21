@@ -25,6 +25,7 @@ import { notifyBitrix, enviarAoBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError } from "@/lib/qs/notify";
 import { cancelarEvento, criarEvento, reagendarEvento } from "@/lib/qs/agendaMeet";
 import { loadWorkHours, nextWorkMoment, clampToWorkWindow, type WorkHours } from "@/lib/workHours";
+import { recarregarBloqueio } from "@/lib/qs/bloqueioDesfecho";
 import type { ChannelType, Meeting, MeetingSal, MeetingStatus, MeetingTipo } from "@/components/sdr/types";
 
 // ── Configuração da atividade de confirmação ────────────────────────────────
@@ -1073,6 +1074,20 @@ async function marcarLeadPerdido(
 }
 
 export async function setMeetingStatus(
+  meeting: Meeting,
+  status: MeetingStatus,
+  leadBitrixId?: string | null,
+  venda?: DadosDaVenda,
+  sal?: SalEscolhido | null
+): Promise<MeetingResult> {
+  // Todo desfecho passa por aqui — é daqui que a agenda trancada do closer
+  // (bloqueioDesfecho.ts) fica sabendo que pode destravar, seja qual for a tela.
+  const r = await gravarStatusDaReuniao(meeting, status, leadBitrixId, venda, sal);
+  recarregarBloqueio();
+  return r;
+}
+
+async function gravarStatusDaReuniao(
   meeting: Meeting,
   status: MeetingStatus,
   leadBitrixId?: string | null,

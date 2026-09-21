@@ -42,6 +42,8 @@ import BriefingDoLead from "./BriefingDoLead";
 import { getSetting } from "@/lib/qsSettings";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
 import OportunidadeFuturaModal from "../leads/OportunidadeFuturaModal";
+import { ReuniaoTrancada } from "./BloqueioDesfecho";
+import { useBloqueioDesfecho, ehPendenteDeDesfecho } from "@/lib/qs/bloqueioDesfecho";
 import type {
   CloserAvailability,
   CloserBlock,
@@ -1042,6 +1044,15 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
   const ini = new Date(reuniao.scheduled_at);
   const fim = fimDaReuniao(reuniao);
   const atrasada = semDesfecho(reuniao, agora);
+  // Agenda trancada (Bruno, 21/09): mesma regra da Minha Agenda e do modal.
+  const { bloqueado, pendentes: atrasadasDoCloser } = useBloqueioDesfecho();
+  if (bloqueado && !ehPendenteDeDesfecho(reuniao)) {
+    return (
+      <div className="fixed inset-y-0 right-0 z-40 flex w-full flex-col justify-center border-l border-gray-200 bg-white p-5 shadow-2xl sm:w-96">
+        <ReuniaoTrancada pendentes={atrasadasDoCloser.length} onFechar={onFechar} />
+      </div>
+    );
+  }
 
   const copiarLink = async () => {
     if (!reuniao.meeting_link) return;

@@ -17,6 +17,8 @@ import { setMeetingStatus, setMeetingSal, deleteMeeting, gerarSalaMeet, avisarBi
 import DesfechoVenda from "./DesfechoVenda";
 import BriefingDoLead from "./BriefingDoLead";
 import OportunidadeFuturaModal from "../leads/OportunidadeFuturaModal";
+import { ReuniaoTrancada } from "./BloqueioDesfecho";
+import { useBloqueioDesfecho, ehPendenteDeDesfecho } from "@/lib/qs/bloqueioDesfecho";
 import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/calendar";
 import { getSetting } from "@/lib/qsSettings";
 import { MEETING_STATUS_LABELS, type Meeting, type MeetingSal, type MeetingStatus } from "../types";
@@ -109,7 +111,23 @@ export default function MeetingDetailModal({
     })();
   }, [meeting]);
 
+  // Agenda trancada (Bruno, 21/09): closer com reunião de dia anterior sem
+  // desfecho não abre as outras. As atrasadas abrem normal — é por elas que
+  // ele destrava. Vale pra quem chega aqui pela Minha Agenda ou pelo mês.
+  const { bloqueado, pendentes: semDesfecho } = useBloqueioDesfecho();
+
   if (!meeting) return null;
+
+  if (bloqueado && !ehPendenteDeDesfecho(meeting)) {
+    return (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+        <div className="relative w-full max-w-md rounded-xl bg-white p-4">
+          <ReuniaoTrancada pendentes={semDesfecho.length} onFechar={onClose} />
+        </div>
+      </div>
+    );
+  }
 
   const isManager = currentUser?.role === "admin" || currentUser?.role === "gestor";
   const podeMexer =
