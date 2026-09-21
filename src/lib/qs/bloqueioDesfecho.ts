@@ -28,6 +28,13 @@ export const MENSAGEM_BLOQUEIO =
 
 const ABERTAS = ["agendada", "confirmada"];
 
+/**
+ * A trava só começa a valer a partir deste dia (Bruno, 21/09: "bloquear a
+ * agenda somente amanhã"). Antes disso ninguém fica trancado — o closer ganha
+ * o resto de hoje pra limpar o atrasado sem a agenda travada.
+ */
+export const BLOQUEIO_VALE_A_PARTIR_DE = new Date(2026, 8, 22, 0, 0, 0); // 22/09/2026 00:00 (horário local)
+
 export interface ReuniaoPendente {
   id: string;
   scheduled_at: string;
@@ -104,6 +111,7 @@ export function useBloqueioDesfecho() {
     };
   }, [currentUser, ehCloser]);
 
-  const meus = ehCloser && donoAtual === currentUser?.id ? pendentes : [];
+  const valendo = Date.now() >= BLOQUEIO_VALE_A_PARTIR_DE.getTime();
+  const meus = valendo && ehCloser && donoAtual === currentUser?.id ? pendentes : [];
   return { bloqueado: meus.length > 0, pendentes: meus };
 }
