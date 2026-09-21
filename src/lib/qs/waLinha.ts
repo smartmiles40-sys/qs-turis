@@ -44,6 +44,8 @@ export interface RespostaLinha {
   importadas?: number;
   leads?: number;
   fim?: boolean;
+  aindaSincronizando?: boolean;
+  resumo?: { conversas: number; semTelefone: number; semLead: number; comLead: number; lid: number };
 }
 
 // ── Estado compartilhado ────────────────────────────────────────────────────

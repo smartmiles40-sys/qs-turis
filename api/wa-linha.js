@@ -164,7 +164,7 @@ export default async function handler(req, res) {
       // lead de quem escreveu sem ser lead). Não conta como importação completa.
       const telefone = body.telefone ? String(body.telefone) : null;
       const r = await importarHistorico(linha, Number(body.cursor) || 0, { telefone });
-      if (r.fim && !telefone) await atualizarLinha(alvo.id, { historico_em: new Date().toISOString() });
+      if (r.fim && !telefone && !r.aindaSincronizando) await atualizarLinha(alvo.id, { historico_em: new Date().toISOString() });
       return res.status(200).json({ ok: true, ...r });
     }
 
@@ -188,9 +188,11 @@ async function importarHistorico(linha, cursor, { telefone: soEste = null } = {}
   const chaveAlvo = soEste ? waKey(soEste) : null;
   const inicio = Date.now();
   const desde = Date.now() - DIAS_DE_HISTORICO * 86_400_000;
+  const inst = encodeURIComponent(linha.instancia);
 
-  const bruto = await evo(`/chat/findChats/${encodeURIComponent(linha.instancia)}`, {}, { timeoutMs: 25_000 });
-  const chats = (Array.isArray(bruto) ? bruto : [])
+  const bruto = await evo(`/chat/findChats/${inst}`, {}, { timeoutMs: 25_000 });
+  const todas = Array.isArray(bruto) ? bruto : [];
+  const chats = todas
     .filter((c) => !ehConversaIgnorada(c?.remoteJid))
     .filter((c) => {
       const t = Date.parse(c?.updatedAt || '') || 0;
@@ -198,27 +200,52 @@ async function importarHistorico(linha, cursor, { telefone: soEste = null } = {}
     })
     .sort((a, b) => String(a.remoteJid).localeCompare(String(b.remoteJid)));
 
+  // O que aconteceu com cada conversa. Vai pro log da Vercel e pra tela: a 1ª
+  // versão respondia "terminei" sem dizer POR QUE não trouxe nada (21/09).
+  const conta = { conversas: chats.length, semTelefone: 0, semLead: 0, comLead: 0, lid: 0 };
+
   let i = cursor;
   let importadas = 0;
   let leads = 0;
   for (; i < chats.length; i++) {
     if (Date.now() - inicio > ORCAMENTO_MS) break;
     const chat = chats[i];
-    const telefone = telefoneDoContato({
+    const ehLid = String(chat.remoteJid || '').endsWith('@lid');
+    if (ehLid) conta.lid += 1;
+
+    let telefone = telefoneDoContato({
       remoteJid: chat.remoteJid,
       remoteJidAlt: chat.remoteJidAlt || chat.lastMessage?.key?.remoteJidAlt,
       senderPn: chat.lastMessage?.key?.senderPn,
     });
-    if (!telefone) continue;
+
+    // Primeira página já lida aqui quando o telefone não veio no chat: conversa
+    // @lid cuja ÚLTIMA mensagem não traz o número real. Alguma das outras traz
+    // (remoteJidAlt/senderPn) — é a mesma página que seria importada depois.
+    let primeiraPagina = null;
+    if (!telefone && ehLid) {
+      primeiraPagina = await evo(`/chat/findMessages/${inst}`, {
+        where: { key: { remoteJid: chat.remoteJid } }, page: 1, offset: 50,
+      }, { timeoutMs: 20_000 }).catch(() => null);
+      const regs = primeiraPagina?.messages?.records || [];
+      for (const r of regs) {
+        telefone = telefoneDoContato(r?.key || {});
+        if (telefone) break;
+      }
+    }
+    if (!telefone) { conta.semTelefone += 1; continue; }
     if (chaveAlvo && waKey(telefone) !== chaveAlvo) continue;
     const lead = await leadDoTelefone(telefone, linha.user_id);
-    if (!lead) continue;
+    if (!lead) { conta.semLead += 1; continue; }
+    conta.comLead += 1;
 
     let achouAlguma = false;
     for (let pagina = 1; pagina <= 10; pagina++) {
-      const out = await evo(`/chat/findMessages/${encodeURIComponent(linha.instancia)}`, {
-        where: { key: { remoteJid: chat.remoteJid } }, page: pagina, offset: 50,
-      }, { timeoutMs: 20_000 });
+      const out = pagina === 1 && primeiraPagina
+        ? primeiraPagina
+        : await evo(`/chat/findMessages/${inst}`, {
+          where: { key: { remoteJid: chat.remoteJid } }, page: pagina, offset: 50,
+        }, { timeoutMs: 20_000 });
       const registros = out?.messages?.records || (Array.isArray(out) ? out : []);
       if (!registros.length) break;
       let passouDoLimite = false;
@@ -238,5 +265,15 @@ async function importarHistorico(linha, cursor, { telefone: soEste = null } = {}
     if (achouAlguma) leads += 1;
   }
 
-  return { cursor: i, total: chats.length, importadas, leads, fim: i >= chats.length };
+  const fim = i >= chats.length;
+  console.log(`[wa-linha] histórico ${linha.instancia}: cursor ${cursor}→${i} · brutas ${todas.length}`,
+    JSON.stringify({ ...conta, importadas, leads, fim }));
+
+  // Cedo demais? O WhatsApp manda o histórico em lotes nos primeiros minutos
+  // depois do QR. Importar aos 17 segundos (foi o que aconteceu em 21/09) acha
+  // meia dúzia de conversas e diz "pronto". Aqui a tela avisa pra esperar.
+  const conectouHaMin = linha.conectado_em ? (Date.now() - Date.parse(linha.conectado_em)) / 60_000 : 999;
+  const aindaSincronizando = fim && cursor === 0 && conectouHaMin < 10 && todas.length < 30;
+
+  return { cursor: i, total: chats.length, importadas, leads, fim, aindaSincronizando, resumo: conta };
 }

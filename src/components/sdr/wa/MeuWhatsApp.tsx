@@ -140,17 +140,27 @@ export default function MeuWhatsApp({ onFechar }: { onFechar: () => void }) {
     setOcupado("historico");
     let cursor = 0;
     let importadas = 0;
+    let leads = 0;
+    let semLead = 0;
     for (let volta = 0; volta < 60; volta++) {
       const r = await acaoDaLinha("historico", { cursor });
       if (!vivo.current) return;
       if (!r.ok) { notifyError(r.error || "A importação parou no meio. Pode tentar de novo — nada duplica."); break; }
       importadas += r.importadas ?? 0;
+      leads += r.leads ?? 0;
+      semLead += r.resumo?.semLead ?? 0;
       cursor = r.cursor ?? cursor;
       setProgresso({ feitas: cursor, total: r.total ?? 0, importadas });
       if (r.fim) {
-        notifySuccess(importadas
-          ? `${importadas} mensagens antigas trazidas pro QS.`
-          : "Histórico conferido — não havia nada novo pra trazer.");
+        // O WhatsApp manda o histórico aos poucos nos primeiros minutos depois
+        // do QR — importar cedo demais acha quase nada e parecia "pronto".
+        if (r.aindaSincronizando) {
+          notifyError("O WhatsApp ainda está mandando o histórico pro QS. Espere uns 5 minutos e clique de novo em \"Importar conversas antigas\".");
+        } else {
+          notifySuccess(importadas
+            ? `${importadas} mensagens de ${leads} leads trazidas pro QS.${semLead ? ` (${semLead} conversas com quem não é lead ficaram só no celular.)` : ""}`
+            : `Histórico conferido — nada novo pra trazer (${r.total ?? 0} conversas no celular, ${semLead} com quem não é lead).`);
+        }
         break;
       }
     }
