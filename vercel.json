@@ -67,6 +67,9 @@
     "api/oportunidade-futura.js": {
       "maxDuration": 60
     },
+    "api/wa-calls.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }

@@ -56,6 +56,7 @@
 import crypto from 'node:crypto';
 import { insert } from './_supabaseAdmin.js';
 import { findLeadByPhone } from './_wa.js';
+import { processarMensagensDaMeta } from './_metaEntrada.js';
 import {
   gravarPermissao, lerRespostaDePermissao, permissaoPorLigacaoDoCliente,
   moverParaCadenciaDePermissao,
@@ -194,13 +195,21 @@ export default async function handler(req, res) {
   // webhook de mensagem que não é permissão passa e não deixa rastro nenhum —
   // e "não chegou nada" fica indistinguível de "chegou e foi ignorado".
   const camposVistos = [];
+  // As mensagens em si (0084): até 21/09 eram descartadas aqui — ver
+  // _metaEntrada.js. Ecos e histórico só existem com Coexistence.
+  const mensagensMeta = [];
   for (const entry of Array.isArray(body?.entry) ? body.entry : []) {
     for (const ch of Array.isArray(entry?.changes) ? entry.changes : []) {
       // ── CAMPO `messages`: só a resposta de permissão nos interessa ─────────
       // Tudo o mais (texto, áudio, status de entrega) é assunto do wa-webhook,
       // que recebe pelo Chatwoot. Gravar aqui também duplicaria a conversa.
       if (ch?.field) camposVistos.push(ch.field);
+      if (ch?.field === 'smb_message_echoes' || ch?.field === 'history') {
+        mensagensMeta.push(ch);
+        continue;
+      }
       if (ch?.field === 'messages') {
+        mensagensMeta.push(ch);
         for (const m of Array.isArray(ch.value?.messages) ? ch.value.messages : []) {
           const p = lerRespostaDePermissao(m);
           if (p) permissoes.push(p);
@@ -242,6 +251,21 @@ export default async function handler(req, res) {
           sdp_tipo: c.session?.sdp_type ?? null,
         });
       }
+    }
+  }
+
+  // ── AS MENSAGENS ENTRAM NO QS (0084) ─────────────────────────────────────
+  // Antes de tudo e fora de qualquer early-return: é o que o time mais precisa
+  // ver (o cliente respondeu). Nunca derruba o resto — permissão e ligação
+  // continuam sendo tratadas abaixo mesmo se isto falhar.
+  let mensagens = null;
+  if (mensagensMeta.length) {
+    try {
+      mensagens = await processarMensagensDaMeta(mensagensMeta);
+      const soma = Object.values(mensagens).reduce((a, b) => a + b, 0);
+      if (soma) console.log(`[wa-calls] mensagens da Meta: ${JSON.stringify(mensagens)}`);
+    } catch (e) {
+      console.error('[wa-calls] mensagens da Meta falharam:', e?.message);
     }
   }
 
@@ -287,8 +311,8 @@ export default async function handler(req, res) {
     //
     // `messages` sem resposta de permissão é o caso NORMAL e esperado — quem
     // cuida de conversa é o wa-webhook. Sai calado.
-    if (camposVistos.length && camposVistos.every((c) => c === 'messages')) {
-      return res.status(200).json({ ok: true, gravados: 0, motivo: 'mensagem-sem-permissao' });
+    if (camposVistos.length && camposVistos.every((c) => ['messages', 'smb_message_echoes', 'history'].includes(c))) {
+      return res.status(200).json({ ok: true, gravados: 0, mensagens });
     }
 
     // Campo que não é `calls` nem `messages`: aí sim vale registrar o corpo, que
