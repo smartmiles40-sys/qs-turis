@@ -35,7 +35,7 @@ import { createInboundLead, moverLeadParaCadencia } from './_leads.js';
 import { alcancarCardAdotado } from './_agenda.js';
 import { segredoConfere, rest } from './_supabaseAdmin.js';
 import { entregarAGloria } from './_gloriaEntrada.js';
-import { dispararPrimeiroContato, lerConfig, gatilhoDe } from './_primeiroContato.js';
+import { dispararPrimeiroContato, lerConfig, gatilhoDe, pularPorSerLp } from './_primeiroContato.js';
 
 // UUID v4 (formato geral de UUID). cadence_id/owner_id inválidos antes iam
 // direto pra querystring do PostgREST e o caller recebia o erro cru do banco.
@@ -207,7 +207,10 @@ export default async function handler(req, res) {
     if (lead && !deduped && !duplicar) {
       try {
         const cfgPC = await lerConfig();
-        if (gatilhoDe(cfgPC) === 'lead_novo') {
+        if (pularPorSerLp(cfgPC, lead)) {
+          // Lead de LP: vai pro WhatsApp do SDR e escreve primeiro. Sem vídeo.
+          primeiroContato = { ok: false, motivo: 'lead_de_lp' };
+        } else if (gatilhoDe(cfgPC) === 'lead_novo') {
           primeiroContato = await dispararPrimeiroContato({
             lead, origem: lista ? `lista:${lista}` : 'lead-novo', cfg: cfgPC,
           });

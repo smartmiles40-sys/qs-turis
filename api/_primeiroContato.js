@@ -103,6 +103,26 @@ export function gatilhoDe(cfg) {
   return cfg?.gatilho === 'externo' ? 'externo' : 'lead_novo';
 }
 
+/**
+ * O lead veio de formulario de LP (trafego, organico ou live)?
+ *
+ * Esses leads NAO recebem o video (Bruno, 22/09): quem preenche a LP vai ser
+ * mandado pro WhatsApp de um SDR e escreve primeiro. O video saindo do numero
+ * oficial logo antes vira abordagem em dobro — um dos motivos dos bloqueios de
+ * 24h nos chips (ver whatsapp-bloqueio-24h-analise).
+ *
+ * Quem diz de onde veio e a "Fonte" do Bitrix (`segment`), no formato
+ * "[Destino] - Trafego|Organico|Live". Fonte vazia NAO conta como LP: sem
+ * saber, o lead segue recebendo como antes.
+ *
+ * Pra voltar a mandar pra todo mundo sem deploy: `pular_lps: false` na config.
+ */
+export function pularPorSerLp(cfg, lead) {
+  if (cfg?.pular_lps === false) return false;
+  const fonte = String(lead?.segment || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+  return /-\s*(trafego|organico|live)\s*$/i.test(fonte);
+}
+
 /** Quantos JA sairam hoje, no fuso de Sao Paulo (o do time, nao o do UTC). */
 async function enviadosHoje() {
   const agora = new Date();
