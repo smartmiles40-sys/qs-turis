@@ -477,7 +477,7 @@ export default async function handler(req, res) {
 
     if (body.acao === 'excluir') {
       const r = await excluirModelo(String(body.nome || ''));
-      if (r.erro) return res.status(r.erro === 'sem-caixa-oficial' ? 503 : 400).json({ error: r.mensagem || 'Não consegui excluir.' });
+      if (r.erro) return res.status(faltaConfig(r.erro) ? 503 : 400).json({ error: r.mensagem || textoDeConfig(r.erro) || 'Não consegui excluir.' });
       return res.status(200).json({ ok: true });
     }
     if (body.acao === 'criar') {
@@ -485,7 +485,7 @@ export default async function handler(req, res) {
         nome: body.nome, categoria: body.categoria, idioma: body.idioma,
         corpo: body.corpo, cabecalho: body.cabecalho, rodape: body.rodape,
       });
-      if (r.erro) return res.status(r.erro === 'sem-caixa-oficial' ? 503 : 400).json({ error: r.mensagem || 'Não consegui criar o modelo.' });
+      if (r.erro) return res.status(faltaConfig(r.erro) ? 503 : 400).json({ error: r.mensagem || textoDeConfig(r.erro) || 'Não consegui criar o modelo.' });
       return res.status(200).json({ ok: true, id: r.id, status: r.status });
     }
     // ── CHAMADAS (Cloud API Calling) ────────────────────────────────────
@@ -552,4 +552,19 @@ export default async function handler(req, res) {
 
 function safeParse(s) {
   try { return JSON.parse(s); } catch { return {}; }
+}
+
+
+/** Os erros que significam "falta variável de ambiente", não "o pedido está errado". */
+function faltaConfig(erro) {
+  return erro === 'sem-caixa-oficial' || erro === 'sem-waba-id' || erro === 'sem-phone-number-id';
+}
+
+/** A frase que diz QUAL variável falta — sem isso o 503 vira adivinhação. */
+function textoDeConfig(erro) {
+  return {
+    'sem-caixa-oficial': 'Sem credenciais da Meta. Preencha META_CALLS_TOKEN no ambiente.',
+    'sem-waba-id': 'Falta META_WABA_ID — é o id da conta do WhatsApp Business na Meta.',
+    'sem-phone-number-id': 'Falta META_PHONE_NUMBER_ID — é o id do número oficial na Meta.',
+  }[erro] || null;
 }

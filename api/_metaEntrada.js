@@ -25,6 +25,7 @@ import { rest } from './_supabaseAdmin.js';
 import { completeWhatsAppTask } from './_wa.js';
 import { credenciaisDaMeta } from './_meta.js';
 import { registrarDescarte, nascerDoWhatsApp } from './_waNascimento.js';
+import { ehPedidoDeParada, registrarOptout } from './_waOptout.js';
 import { transcrever, transcricaoConfigurada } from './_transcrever.js';
 import { guardarMidia, rotuloDaMidia } from './_waLinha.js';
 import { leadDoTelefone } from './_waLinhaEntrada.js';
@@ -185,6 +186,19 @@ async function gravarUma({ numero, m, direcao, telefoneCliente, nomeCliente, aoV
     },
   });
   if (novo !== true || !aoVivo) return { leadId: lead.id, novo: novo === true };
+
+  // ── "PARAR" ──────────────────────────────────────────────────────────────
+  // Antes de qualquer outra coisa que aconteça com uma mensagem que ENTRA: se a
+  // pessoa pediu para sair, isso precisa valer a partir de agora, não a partir
+  // da próxima vez que alguém olhar. Quem pede para parar e continua recebendo é
+  // quem denuncia — e denúncia derruba a qualidade do número, que derruba o teto
+  // diário de todo o resto. Ver a 0087.
+  if (direcao === 'in' && texto && ehPedidoDeParada(texto)) {
+    const primeiraVez = await registrarOptout(lead.id, texto);
+    if (primeiraVez) {
+      console.log(`[meta-entrada] lead ${lead.id} pediu para parar: "${String(texto).slice(0, 60)}"`);
+    }
+  }
 
   if (direcao === 'out') {
     await completeWhatsAppTask(lead.id, lead.owner_id ?? null)

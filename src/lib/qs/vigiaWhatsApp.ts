@@ -24,11 +24,26 @@ const INTERVALO_MS = 5 * 60_000;
 /** Falha mais velha que isto é história, não incidente. */
 const FALHA_RECENTE_MS = 20 * 60_000;
 
+/**
+ * A caixa oficial (Cloud API da Meta) — o ponto cego que custou 20 dias de
+ * silêncio entre 02/09 e 22/09/2026. `motivo` separa as três causas que, de
+ * fora, parecem a mesma coisa. Ver `saudeDaCaixaOficial` na API e a 0086.
+ */
+export type SaudeOficial = {
+  ok: boolean | null;
+  motivo: "nao-chega" | "assinatura" | "chega-e-ignora" | "sem-pulso" | "sem-leitura" | null;
+  ultimoValidoEm?: string | null;
+  silencioMs?: number | null;
+  recusadasHoje?: number;
+};
+
 export type SaudeWhatsApp = {
   caidas: string[];
   /** Não consegui nem falar com o servidor da Evolution. */
   semServidor: boolean;
   verificadoEm: string | null;
+  /** Nulo quando a caixa oficial está saudável (ou quando ainda não há pulso). */
+  oficial?: SaudeOficial | null;
 };
 
 type Listener = (saude: SaudeWhatsApp | null) => void;
@@ -125,9 +140,16 @@ async function verificar(): Promise<void> {
     const semServidor = !!falha && Date.now() - falha < FALHA_RECENTE_MS;
     const caidas: string[] = Array.isArray(j?.caidas) ? j.caidas : [];
 
+    // A caixa oficial só entra no aviso quando está comprovadamente quebrada.
+    // `ok: null` ("ainda não há pulso") NÃO vira faixa vermelha: até a 0086
+    // subir e a primeira batida chegar, não saber é o estado normal — e faixa
+    // vermelha por "não sei" é como um alarme perde a credibilidade.
+    const bruta = j?.oficial ?? null;
+    const oficial: SaudeOficial | null = bruta && bruta.ok === false ? bruta : null;
+
     // Nada errado → null, e o aviso some sozinho quando o número volta.
-    avisar(caidas.length || semServidor
-      ? { caidas, semServidor, verificadoEm: j?.verificadoEm ?? null }
+    avisar(caidas.length || semServidor || oficial
+      ? { caidas, semServidor, oficial, verificadoEm: j?.verificadoEm ?? null }
       : null);
   } catch {
     // Rede da SDR oscilando não é queda de WhatsApp. Silêncio é a resposta

@@ -46,6 +46,7 @@
 // -----------------------------------------------------------------------------
 
 import { enviarTemplate, subirMidiaPorUrl } from './_meta.js';
+import { pediuParaParar } from './_waOptout.js';
 import { rest, insert } from './_supabaseAdmin.js';
 
 export const CHAVE_CONFIG = 'primeiro_contato_auto';
@@ -260,6 +261,22 @@ export async function dispararPrimeiroContato({ lead, telefone, origem = 'api', 
       };
     }
 
+    // ── QUEM PEDIU PARA PARAR NAO RECEBE ────────────────────────────────────
+    // A checagem vem ANTES da reserva de dedupe de proposito: reservar primeiro
+    // gastaria a vaga do lead e marcaria como "ja enviado" um disparo que nunca
+    // aconteceu — e aí o lead ficaria sem primeiro contato para sempre, mesmo
+    // se o opt-out fosse desfeito depois.
+    //
+    // Vale so para o envio AUTOMATICO. O SDR continua podendo falar com a
+    // pessoa a mao, que e como se desfaz um mal-entendido. Ver a 0087.
+    if (await pediuParaParar(lead.id)) {
+      return {
+        ok: false, motivo: 'optout',
+        detalhe: 'Este lead pediu para nao receber mais mensagens no WhatsApp.',
+        lead_id: lead.id,
+      };
+    }
+
     // ── DEDUPE: reserva ANTES de enviar (ver cabecalho) ─────────────────────
     // Sao DUAS travas, e a segunda so existe desde a 0069: a chave primaria
     // (o mesmo lead) e o indice unico do TELEFONE (a mesma pessoa em outro
@@ -309,8 +326,9 @@ export async function dispararPrimeiroContato({ lead, telefone, origem = 'api', 
 
     if (r.erro) {
       const humano = {
-        'sem-caixa-oficial': 'Nao achei o numero oficial no atendimento.',
-        'sem-phone-number-id': 'A caixa oficial esta sem phone_number_id no Chatwoot.',
+        'sem-caixa-oficial': 'Nao achei as credenciais da Meta. Preencha META_CALLS_TOKEN e META_PHONE_NUMBER_ID.',
+        'sem-phone-number-id': 'Falta META_PHONE_NUMBER_ID (o id do numero oficial na Meta).',
+        'sem-waba-id': 'Falta META_WABA_ID (o id da conta do WhatsApp Business na Meta).',
         'meta-recusou': `A Meta recusou: ${r.detalhe || 'sem detalhe'}`,
       }[r.erro] || r.erro;
       console.error(`[primeiro-contato] envio falhou lead=${lead.id} :: ${humano}`);

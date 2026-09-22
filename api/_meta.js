@@ -3,11 +3,21 @@
 // Fala com a Graph API da Meta para gerenciar os MODELOS de mensagem do WhatsApp
 // (o que o Gerenciador do WhatsApp Business faz na mão).
 //
-// De onde vêm as credenciais: da própria caixa oficial no Chatwoot. Quando o
-// número da Cloud API foi ligado lá, o Chatwoot guardou `api_key` (token de
-// usuário de sistema, que não expira), `phone_number_id` e `business_account_id`
-// no provider_config da inbox. Reusar isso evita criar env nova — e evita ter o
-// mesmo segredo em dois lugares, que é como um deles fica velho sem ninguém ver.
+// De onde vêm as credenciais, NESTA ORDEM (22/09/2026):
+//
+//   1. VARIÁVEL DE AMBIENTE — META_CALLS_TOKEN (ou META_WA_TOKEN),
+//      META_WABA_ID e META_PHONE_NUMBER_ID;
+//   2. a caixa oficial no Chatwoot, como antes.
+//
+// A ordem inverteu porque a premissa mudou. O Chatwoot era o lugar natural das
+// credenciais enquanto ele era o transporte; desde a 0084 ele não recebe mais
+// mensagem nenhuma para o QS, e o time parou de abrir a tela dele. Guardar o
+// token do WhatsApp inteiro dentro de um serviço que ninguém usa mais é
+// depender de algo que pode ser desligado numa tarde sem que ninguém associe a
+// queda ao disparo que parou.
+//
+// O fallback continua vivo de propósito: enquanto as envs não estiverem
+// preenchidas, nada muda de comportamento.
 //
 // ⚠️ O token NUNCA vai para o navegador. Toda chamada à Meta acontece aqui.
 // -----------------------------------------------------------------------------
@@ -34,13 +44,34 @@ function foneMeta(raw) {
 
 let cache = null;   // { token, waba, phoneId, em } — vale por execução
 
+/** As credenciais que estão no ambiente, se estiverem. */
+function credenciaisDoAmbiente() {
+  const token = String(process.env.META_WA_TOKEN || process.env.META_CALLS_TOKEN || '').trim();
+  if (!token) return null;
+  const waba = String(process.env.META_WABA_ID || '').trim();
+  const phoneId = String(process.env.META_PHONE_NUMBER_ID || '').trim();
+  // Token sozinho já serve para ENVIAR (basta token + phoneId) e para ler a
+  // saúde do número. Só a parte de MODELOS precisa do WABA, e quem precisa dele
+  // confere e devolve um erro nomeado — melhor meia credencial funcionando do
+  // que exigir as três e não ter nenhuma.
+  if (!waba && !phoneId) return null;
+  return { token, waba: waba || null, phoneId: phoneId || null, em: Date.now(), origem: 'env' };
+}
+
 /**
- * Acha a caixa da API oficial no Chatwoot e devolve as credenciais da Meta.
- * Devolve null quando não há caixa oficial configurada (aí o portal se desliga
- * sozinho em vez de estourar).
+ * As credenciais da Meta: ambiente primeiro, Chatwoot como rede de segurança.
+ * Devolve null quando não há nenhuma das duas (aí o portal se desliga sozinho
+ * em vez de estourar).
  */
 export async function credenciaisDaMeta() {
   if (cache && Date.now() - cache.em < 5 * 60_000) return cache;
+
+  const doAmbiente = credenciaisDoAmbiente();
+  if (doAmbiente) {
+    cache = doAmbiente;
+    return cache;
+  }
+
   try {
     const d = await cw('/inboxes');
     const lista = Array.isArray(d?.payload) ? d.payload : [];
@@ -48,13 +79,35 @@ export async function credenciaisDaMeta() {
       if (!String(i.channel_type || '').includes('Channel::Whatsapp')) continue;
       const c = i.provider_config || {};
       if (!c.api_key || !c.business_account_id) continue;
-      cache = { token: c.api_key, waba: c.business_account_id, phoneId: c.phone_number_id || null, em: Date.now() };
+      cache = {
+        token: c.api_key,
+        waba: c.business_account_id,
+        phoneId: c.phone_number_id || null,
+        em: Date.now(),
+        origem: 'chatwoot',
+      };
+      console.warn(
+        '[meta] credenciais vindas do Chatwoot. Preencha META_WABA_ID e META_PHONE_NUMBER_ID ' +
+        'para o QS parar de depender dele.'
+      );
       return cache;
     }
   } catch (e) {
     console.warn('[meta] não consegui ler as credenciais no Chatwoot:', e?.message);
   }
   return null;
+}
+
+/** Diagnóstico para a tela de configuração: de onde vieram e o que falta. */
+export async function origemDasCredenciais() {
+  const cr = await credenciaisDaMeta();
+  return {
+    origem: cr?.origem || null,
+    temToken: Boolean(cr?.token),
+    temWaba: Boolean(cr?.waba),
+    temPhoneId: Boolean(cr?.phoneId),
+    dependeDoChatwoot: cr?.origem === 'chatwoot',
+  };
 }
 
 async function graph(path, { method = 'GET', body, token, timeoutMs = 12_000 } = {}) {
@@ -84,6 +137,7 @@ async function graph(path, { method = 'GET', body, token, timeoutMs = 12_000 } =
 export async function listarModelos() {
   const cr = await credenciaisDaMeta();
   if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.waba) return { erro: 'sem-waba-id' };
   const d = await graph(`/${cr.waba}/message_templates?limit=200`, { token: cr.token });
   const modelos = (d?.data || []).map((t) => {
     const comp = Array.isArray(t.components) ? t.components : [];
@@ -119,6 +173,7 @@ export async function listarModelos() {
 export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, rodape }) {
   const cr = await credenciaisDaMeta();
   if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.waba) return { erro: 'sem-waba-id' };
 
   const problema = validarModelo({ nome, categoria, corpo });
   if (problema) return { erro: 'invalido', mensagem: problema };
@@ -143,6 +198,7 @@ export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, r
 export async function excluirModelo(nome) {
   const cr = await credenciaisDaMeta();
   if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.waba) return { erro: 'sem-waba-id' };
   try {
     await graph(`/${cr.waba}/message_templates?name=${encodeURIComponent(nome)}`, { method: 'DELETE', token: cr.token });
     return { ok: true };
@@ -404,7 +460,12 @@ export async function diagnosticoChamadas() {
   const cr = await credenciaisDaMeta();
   if (!cr) return { erro: 'sem-caixa-oficial' };
 
-  const out = { phoneId: cr.phoneId, waba: cr.waba };
+  // Sem WABA o diagnóstico continua: ele é a tela que alguém abre JUSTAMENTE
+  // quando falta credencial. Os blocos que precisam do WABA se anunciam
+  // sozinhos logo abaixo; desligar tudo aqui esconderia a resposta de quem veio
+  // procurar por ela.
+  const out = { phoneId: cr.phoneId, waba: cr.waba, origemDasCredenciais: cr.origem || null };
+  if (!cr.waba) out.avisoWaba = 'Sem META_WABA_ID: números e apps inscritos não podem ser conferidos.';
 
   // 1. O bloco `calling` INTEIRO — não só os três campos que a tela mostrava.
   //    `connection_mode` mora aqui: se estiver em SIP, o evento vai pro servidor
@@ -418,12 +479,14 @@ export async function diagnosticoChamadas() {
   //    WABA com mais de um número deixa a gente lendo a config de um e ligando
   //    pro outro — e isso não aparece em lugar nenhum.
   try {
+    if (!cr.waba) throw new Error('sem META_WABA_ID');
     const j = await graph(`/${cr.waba}/phone_numbers?fields=id,display_phone_number,verified_name`, { token: cr.token });
     out.numeros = (j?.data || []).map((n) => ({ id: n.id, numero: n.display_phone_number, nome: n.verified_name }));
   } catch (e) { out.numerosErro = e?.message; }
 
   // 3. Apps assinados na WABA.
   try {
+    if (!cr.waba) throw new Error('sem META_WABA_ID');
     const j = await graph(`/${cr.waba}/subscribed_apps`, { token: cr.token });
     out.apps = (j?.data || []).map((a) => ({
       id: a?.whatsapp_business_api_data?.id || null,

@@ -54,7 +54,7 @@
 // -----------------------------------------------------------------------------
 
 import crypto from 'node:crypto';
-import { insert } from './_supabaseAdmin.js';
+import { insert, rest } from './_supabaseAdmin.js';
 import { findLeadByPhone } from './_wa.js';
 import { processarMensagensDaMeta } from './_metaEntrada.js';
 import {
@@ -65,6 +65,30 @@ import {
 // Sem isto o corpo chega parseado e a assinatura da Meta é inconferível: o HMAC
 // é sobre os BYTES, e reserializar o JSON muda espaços e ordem de chaves.
 export const config = { api: { bodyParser: false } };
+
+/**
+ * O PULSO: conta CADA batida da Meta nesta porta, inclusive as recusadas.
+ *
+ * Existe por causa dos 20 dias de silêncio (02/09 → 22/09) em que a caixa
+ * oficial não gravou uma mensagem e NADA no sistema tinha como notar. De fora,
+ * três causas muito diferentes parecem a mesma coisa:
+ *
+ *   • a Meta parou de chamar;
+ *   • a Meta chama e nós recusamos (app secret trocado → 401 em tudo);
+ *   • a Meta chama, aceitamos, e o evento é ignorado por formato.
+ *
+ * Contar antes de julgar é o que separa as três. Ver a 0086.
+ *
+ * NUNCA lança e NUNCA é esperado: o webhook tem que responder rápido, e um
+ * contador de telemetria não pode ser motivo de retentativa da Meta.
+ */
+function pulso(resultado) {
+  rest('rpc/qs_wa_meta_pulso', {
+    method: 'POST',
+    body: { p_resultado: resultado },
+    prefer: 'return=minimal',
+  }).catch((e) => console.warn('[wa-calls] pulso nao gravado:', e?.message));
+}
 
 /** Lê o corpo cru. Teto de 1 MB: SDP é texto, e o que passar disso não é nosso. */
 async function corpoCru(req) {
@@ -115,12 +139,14 @@ export default async function handler(req, res) {
       // caminho silencioso que devolve 200 é indistinguível, no log, de "não
       // chegou nada". Uma linha aqui separa as duas coisas.
       console.log('[wa-calls] handshake aceito');
+      pulso('handshake');
       res.setHeader('Content-Type', 'text/plain');
       return res.status(200).send(String(q['hub.challenge'] ?? ''));
     }
     // 403 é o que a Meta espera quando o token não bate — e o log diz qual dos
     // dois lados está faltando, que é a única dúvida real nessa hora.
     console.warn(`[wa-calls] handshake recusado (token no servidor: ${token ? 'sim' : 'NAO'})`);
+    pulso('handshake-recusado');
     return res.status(403).send('forbidden');
   }
 
@@ -132,6 +158,7 @@ export default async function handler(req, res) {
   const segredo = String(process.env.META_CALLS_APP_SECRET || '').trim();
   if (!segredo) {
     console.error('[wa-calls] META_CALLS_APP_SECRET ausente — rota desligada');
+    pulso('sem-app-secret');
     return res.status(503).json({ error: 'Webhook de chamadas nao configurado' });
   }
 
@@ -140,6 +167,7 @@ export default async function handler(req, res) {
     raw = await corpoCru(req);
   } catch (e) {
     console.warn('[wa-calls] corpo ilegivel:', e?.message);
+    pulso('corpo-invalido');
     return res.status(400).json({ error: 'corpo invalido' });
   }
 
@@ -170,6 +198,7 @@ export default async function handler(req, res) {
       `[wa-calls] assinatura nao confere — motivo: ${conf.motivo}, corpo: ${raw.length}b de ${deOnde}, ` +
       `esperado ${String(conf.hexEsperado || '').slice(0, 12)}…, recebido ${String(conf.hexRecebido || '').slice(0, 12)}…`
     );
+    pulso('assinatura-invalida');
     return res.status(401).json({ error: 'assinatura invalida' });
   }
   if (deOnde !== 'stream') console.warn(`[wa-calls] assinatura OK, mas o corpo veio do ${deOnde}`);
@@ -178,6 +207,7 @@ export default async function handler(req, res) {
   try {
     body = JSON.parse(raw.toString('utf8'));
   } catch {
+    pulso('json-invalido');
     return res.status(400).json({ error: 'json invalido' });
   }
 
@@ -264,9 +294,19 @@ export default async function handler(req, res) {
       mensagens = await processarMensagensDaMeta(mensagensMeta);
       const soma = Object.values(mensagens).reduce((a, b) => a + b, 0);
       if (soma) console.log(`[wa-calls] mensagens da Meta: ${JSON.stringify(mensagens)}`);
+      // O pulso distingue "a Meta entregou e nós GRAVAMOS" de "a Meta entregou
+      // e nós ignoramos por formato" — as duas responderiam 200 e, sem isto,
+      // seriam a mesma linha no log.
+      pulso(soma ? 'gravado' : 'ignorado');
     } catch (e) {
       console.error('[wa-calls] mensagens da Meta falharam:', e?.message);
+      pulso('erro-ao-gravar');
     }
+  } else if (camposVistos.length) {
+    // Chegou evento que não é mensagem (calls, statuses): também é sinal de
+    // vida da Meta, e é ele que impede o vigia de gritar num dia em que só
+    // houve ligação e nenhuma conversa.
+    pulso('recibo');
   }
 
   // ── "PODE ME LIGAR" — o evento que a fila inteira estava esperando ────────
