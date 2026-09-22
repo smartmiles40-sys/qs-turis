@@ -52,6 +52,7 @@ const CAMPO = {
   tipo_venda:      'UF_CRM_1743296167520', // enum  "Tipo de venda" (2119 negócios usam)
   valor:           'OPPORTUNITY',          // double — o "Total" do card, campo nativo
   produto:         'UF_CRM_1773954690276', // string "Produto (Descritivo da Reunião)" (443 usam)
+  desist_motivo:   'UF_CRM_1789683835018', // string "motivo da desistência" (obrigatório na coluna)
 };
 
 // ⚠️ ENUM DO BITRIX É STRING (medido 17/08 nos 671 negócios que já têm o campo:
@@ -72,7 +73,50 @@ const ETAPA = {
   negociacao:    'UC_YGG9JY',  // "Em Negociação"  — para onde vai quem fez a reunião
   no_show:       'UC_3Y96XD',  // "No-Show"
   reagendamento: 'UC_ANBZSL',  // "Reagendamento"  — separado do no-show a pedido do Bruno
+  desistencia:   'UC_NV92A7',  // "Cancelamento/Desistência" (o Dashboard conta por ela)
 };
+
+// ─── O DESFECHO NUNCA PUXA O CARD PRA TRÁS (22/09) ───────────────────────────
+// Antes o STAGE_ID ia sem olhar onde o card estava. Na noite de 21/09 os closers
+// lançaram desfechos atrasados (a agenda trancada cobrava) e o QS tirou 12 cards
+// de Perdidos / Em Emissão / Desistência e jogou em Em Negociação ou No-Show.
+//
+// A reunião só move o card enquanto ele está na parte do funil que É sobre
+// reunião. Daqui pra frente (Oportunidade futura, Em Emissão, pagamento,
+// contrato, venda, perdido, desistência) quem manda é o closer no Bitrix: o
+// desfecho grava os fatos (data, "Reunião realizada?", SAL) e deixa a etapa.
+// Ordem do funil 0 lida do portal em 22/09 (crm.status.list, SORT 10…130).
+const ETAPAS_DA_REUNIAO = new Set([
+  'NEW',                 // Leads - Qualificação
+  'PREPAYMENT_INVOICE',  // SQL - Orçamentos e Propostas
+  'EXECUTING',           // Reunião de Vendas
+  ETAPA.negociacao,
+  ETAPA.reagendamento,
+  ETAPA.no_show,
+]);
+
+// A desistência vale até a venda fechar: cliente que desiste em Em Emissão ou
+// no contrato é cancelamento, e é exatamente essa coluna que o Dashboard lê.
+// De Venda realizada / Perdidos / já em Desistência, não mexe — só comenta.
+const ETAPAS_QUE_ACEITAM_DESISTENCIA = new Set([
+  ...ETAPAS_DA_REUNIAO,
+  'UC_PV9OAM',  // Oportunidade futura
+  'UC_70BW8E',  // Em Emissão / Pix Expedição
+  'UC_IHT3PF',  // Gerar Pagamento
+  'UC_FYJCD5',  // Envio de contrato
+]);
+
+/** Nome das etapas pro comentário no card (o time não lê "UC_70BW8E"). */
+const NOME_ETAPA = {
+  NEW: 'Leads - Qualificação', PREPAYMENT_INVOICE: 'SQL - Orçamentos e Propostas',
+  EXECUTING: 'Reunião de Vendas', UC_YGG9JY: 'Em Negociação', UC_ANBZSL: 'Reagendamento',
+  UC_3Y96XD: 'No-Show', UC_PV9OAM: 'Oportunidade futura', UC_70BW8E: 'Em Emissão / Pix Expedição',
+  UC_IHT3PF: 'Gerar Pagamento', UC_FYJCD5: 'Envio de contrato', WON: 'Venda realizada',
+  LOSE: 'Perdidos', UC_NV92A7: 'Cancelamento/Desistência',
+};
+
+/** Campos que só fazem sentido enquanto o card anda por causa da reunião. */
+const CAMPOS_DE_ETAPA = new Set(['STAGE_ID', CAMPO.valor, CAMPO.tipo_venda]);
 
 /**
  * Os campos que cada desfecho escreve. `d` = dados que o front mandou.
@@ -87,9 +131,12 @@ const ETAPA = {
  * embaixo tira o resto, pra nunca APAGAR um valor que já esteja no card.
  */
 const CAMPOS_POR_DESFECHO = {
+  // `sal` vai junto desde 22/09: antes o SAL era um segundo envio solto, e
+  // quando um dos dois falhava o card ficava com a data e sem o SAL.
   realizada: (d) => ({
     [CAMPO.realizada_data]: d.data,
     [CAMPO.realizada_flag]: OPCAO.realizada_sim,
+    [CAMPO.sal]: d.sal === 'aceito' ? OPCAO.sal_aceito : d.sal === 'recusado' ? OPCAO.sal_recusado : undefined,
     [CAMPO.valor]: d.valor,
     [CAMPO.tipo_venda]: d.tipo_venda,
     STAGE_ID: ETAPA.negociacao,
@@ -98,9 +145,16 @@ const CAMPOS_POR_DESFECHO = {
     [CAMPO.no_show_data]: d.data,
     [CAMPO.no_show_texto]: 'Sim',
     [CAMPO.realizada_flag]: OPCAO.realizada_nao,
+    [CAMPO.sal]: d.sal === 'aceito' ? OPCAO.sal_aceito : d.sal === 'recusado' ? OPCAO.sal_recusado : undefined,
     [CAMPO.valor]: d.valor,
     [CAMPO.tipo_venda]: d.tipo_venda,
     STAGE_ID: ETAPA.no_show,
+  }),
+  // Desistência (22/09): vai pra coluna própria com o motivo — antes virava só
+  // um comentário de "perdido" e o card ficava onde estava (12 de 12).
+  desistencia: (d) => ({
+    [CAMPO.desist_motivo]: d.motivo,
+    STAGE_ID: ETAPA.desistencia,
   }),
   remarcada: (d) => ({
     [CAMPO.reagendamento]: d.nova_data,
@@ -322,13 +376,28 @@ async function getSupabaseUserId(authHeader) {
  * "Task timed out after 10 seconds" apareceu 360 vezes em agosto, com esta rota
  * na lista.
  */
-async function podeMexerNoLead(userId, lead) {
+async function podeMexerNoLead(userId, lead, leadId) {
   const users = await rest(`qs_users?select=role,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
   const user = (Array.isArray(users) && users[0]) || null;
   if (!user || user.is_active === false) return { ok: false, reason: 'usuario-invalido' };
   if (!lead) return { ok: false, reason: 'lead-inexistente' };
   if (user.role === 'admin' || user.role === 'gestor' || user.role === 'closer') return { ok: true };
   if (lead.owner_id === userId || lead.owner_id == null) return { ok: true };
+
+  // A SDR QUE ACOMPANHOU O LEAD (22/09). Marcar reunião TRANSFERE o lead pro
+  // closer — e daí em diante toda ação dela no Bitrix era recusada aqui. Só que
+  // é ela quem confirma a reunião e, muitas vezes, lança o desfecho: desde 01/09
+  // foram 27 desfechos lançados por SDR, os 27 recusados, e o card ficou sem
+  // "Reunião realizada?" nem SAL. Passa quem já foi dona (handover) ou marcou
+  // uma reunião deste lead — as duas regras cobriam os 27. SDR estranha ao lead
+  // continua barrada, que é o motivo de esta checagem existir.
+  const id = encodeURIComponent(leadId);
+  const u = encodeURIComponent(userId);
+  const [foiDona, marcou] = await Promise.all([
+    rest(`qs_handovers?select=id&lead_id=eq.${id}&from_user_id=eq.${u}&limit=1`).catch(() => []),
+    rest(`qs_meetings?select=id&lead_id=eq.${id}&owner_id=eq.${u}&limit=1`).catch(() => []),
+  ]);
+  if ((Array.isArray(foiDona) && foiDona.length) || (Array.isArray(marcou) && marcou.length)) return { ok: true };
   return { ok: false, reason: 'lead-de-outro-sdr' };
 }
 
@@ -349,7 +418,7 @@ export default async function handler(req, res) {
   const body = typeof req.body === 'string' ? safeJson(req.body) : req.body || {};
   const { event, ...payload } = body;
   if (!EVENTS.has(event)) {
-    return res.status(400).json({ success: false, error: 'event inválido (perdido|ganho|reuniao|nota|primeiro-contato)' });
+    return res.status(400).json({ success: false, error: 'event inválido (perdido|ganho|reuniao|nota|primeiro-contato|reuniao-campos)' });
   }
 
   // bitrix_id NUNCA vem do cliente (auditoria 2026-07-14): qualquer usuário
@@ -382,7 +451,7 @@ export default async function handler(req, res) {
   if (userId) {
     let posse;
     try {
-      posse = await podeMexerNoLead(userId, lead);
+      posse = await podeMexerNoLead(userId, lead, leadId);
     } catch (err) {
       console.error('[bitrix-sync] falha ao checar posse do lead', leadId, ':', err?.message);
       return res.status(502).json({ success: false, error: 'Falha ao validar o lead' });
@@ -406,21 +475,61 @@ export default async function handler(req, res) {
   if (event === 'reuniao-campos') {
     const monta = CAMPOS_POR_DESFECHO[String(payload.desfecho || '')];
     if (!monta) {
-      return res.status(400).json({ success: false, error: 'desfecho inválido (realizada|no_show|remarcada|sal_aceito|sal_recusado)' });
+      return res.status(400).json({ success: false, error: 'desfecho inválido (realizada|no_show|remarcada|desistencia|sal_aceito|sal_recusado)' });
     }
     // Só entra no update o que veio preenchido — mandar undefined pro Bitrix
     // apagaria o valor que está lá.
     const fields = Object.fromEntries(
       Object.entries(monta(payload)).filter(([, v]) => v !== undefined && v !== null && v !== '')
     );
-    if (!Object.keys(fields).length) {
+    if (payload.desfecho === 'desistencia' && !fields[CAMPO.desist_motivo]) {
+      return res.status(400).json({ success: false, error: 'desistência sem motivo' });
+    }
+
+    // Quem mexe em ETAPA olha antes onde o card está (ver ETAPAS_DA_REUNIAO).
+    let etapaMantida = null;
+    if ('STAGE_ID' in fields) {
+      const deal = await lerNegocio(serverBitrixId);
+      if (!deal) return res.status(502).json({ success: false, error: 'bitrix-inacessivel' });
+      const atual = String(deal.STAGE_ID || '');
+      const podeMover = String(deal.CATEGORY_ID ?? '') === '0' && (
+        payload.desfecho === 'desistencia'
+          ? ETAPAS_QUE_ACEITAM_DESISTENCIA.has(atual)
+          : ETAPAS_DA_REUNIAO.has(atual)
+      );
+      if (!podeMover) {
+        etapaMantida = atual || '(sem etapa)';
+        for (const c of CAMPOS_DE_ETAPA) delete fields[c];
+      } else if (atual === fields.STAGE_ID) {
+        delete fields.STAGE_ID;
+      }
+      // Valor e tipo da venda: o QS só PREENCHE, nunca corrige o card. Em 7
+      // cards de setembro o closer já tinha acertado o total no Bitrix (34.990
+      // no card × 35.000 no QS) — um reenvio desfaria a correção dele.
+      if (Number(deal.OPPORTUNITY) > 0) delete fields[CAMPO.valor];
+      if (deal[CAMPO.tipo_venda]) delete fields[CAMPO.tipo_venda];
+    }
+
+    if (Object.keys(fields).length) {
+      const r = await atualizarCamposBitrix(serverBitrixId, fields);
+      if (!r.ok && r.code === 'not_configured') {
+        return res.status(200).json({ success: false, code: 'not_configured' });
+      }
+      if (!r.ok) return res.status(502).json({ success: false, error: r.code });
+    } else if (!etapaMantida) {
       return res.status(400).json({ success: false, error: 'nenhum campo a atualizar' });
     }
-    const r = await atualizarCamposBitrix(serverBitrixId, fields);
-    if (!r.ok && r.code === 'not_configured') {
-      return res.status(200).json({ success: false, code: 'not_configured' });
+
+    // Etapa preservada: fica escrito no card o porquê, pra ninguém achar que o
+    // desfecho não chegou. Best-effort — o que importava (os fatos) já foi.
+    if (etapaMantida) {
+      await comentarNoNegocio(serverBitrixId,
+        `ℹ️ QS Turis: desfecho "${({ realizada: 'Realizada', no_show: 'No-show', remarcada: 'Reagendamento', desistencia: 'Desistência' })[payload.desfecho] || payload.desfecho}" registrado, mas a etapa NÃO foi alterada — ` +
+        `o card já estava em "${NOME_ETAPA[etapaMantida] || etapaMantida}"` +
+        (payload.desfecho === 'desistencia' && payload.motivo ? `.\nMotivo da desistência: ${payload.motivo}` : '.'),
+        6_000);
     }
-    return res.status(r.ok ? 200 : 502).json(r.ok ? { success: true } : { success: false, error: r.code });
+    return res.status(200).json({ success: true, code: etapaMantida ? 'etapa_mantida' : 'atualizado' });
   }
 
   // ── Caminho DIRETO ao Bitrix (sem n8n) ────────────────────────────────────

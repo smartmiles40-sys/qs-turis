@@ -997,6 +997,11 @@ export interface DadosDaVenda {
   valor?: number | null;
   /** Id da opção de "Tipo de venda" no Bitrix (ex.: "69" = Expedições). */
   tipoVenda?: string | null;
+  /**
+   * Obrigatório na DESISTÊNCIA (22/09): vai pro campo "motivo da desistência"
+   * do card, que o Bitrix exige na coluna Cancelamento/Desistência.
+   */
+  motivoDesistencia?: string | null;
 }
 
 /**
@@ -1042,7 +1047,12 @@ async function marcarLeadPerdidoPorSal(meeting: Meeting, motivo: string | null):
  */
 async function marcarLeadPerdido(
   meeting: Meeting,
-  opts: { motivoTarefa: string; avisoFalha: string }
+  /**
+   * `semBitrix`: a desistência leva o card pra coluna própria pelo envio do
+   * desfecho — o "perdido" aqui só comentaria "a coluna não foi alterada",
+   * contradizendo o que o card acabou de fazer.
+   */
+  opts: { motivoTarefa: string; avisoFalha: string; semBitrix?: boolean }
 ): Promise<void> {
   const { data, error } = await supabase
     .from("qs_leads")
@@ -1055,11 +1065,13 @@ async function marcarLeadPerdido(
     return;
   }
 
-  notifyBitrix("perdido", {
-    lead_id: meeting.lead_id,
-    bitrix_id: meeting.lead?.bitrix_id,
-    full_name: meeting.lead?.full_name ?? meeting.lead_name ?? undefined,
-  });
+  if (!opts.semBitrix) {
+    notifyBitrix("perdido", {
+      lead_id: meeting.lead_id,
+      bitrix_id: meeting.lead?.bitrix_id,
+      full_name: meeting.lead?.full_name ?? meeting.lead_name ?? undefined,
+    });
+  }
 
   // As atividades pendentes precisam sair da fila junto: lead perdido que segue
   // cobrando follow-up é a reclamação mais antiga do time.
@@ -1108,9 +1120,28 @@ async function gravarStatusDaReuniao(
   // e em agosto falhou por dias — o número que o closer digitou morria na tela,
   // sem ninguém pra reenviar. Só grava o que veio preenchido: campo em branco
   // não pode APAGAR o que já está no card.
-  const colunas0079: string[] = [];
-  if (venda?.valor != null) { patch.venda_valor = venda.valor; colunas0079.push("venda_valor"); }
-  if (venda?.tipoVenda) { patch.venda_tipo = venda.tipoVenda; colunas0079.push("venda_tipo"); }
+  const colunasNovas: string[] = [];
+  if (venda?.valor != null) { patch.venda_valor = venda.valor; colunasNovas.push("venda_valor"); }
+  if (venda?.tipoVenda) { patch.venda_tipo = venda.tipoVenda; colunasNovas.push("venda_tipo"); }
+
+  // Desistência sem motivo não sai (22/09): o card do Bitrix exige o motivo na
+  // coluna Cancelamento/Desistência, e é o único lugar onde ele fica escrito.
+  const motivoDesistencia = String(venda?.motivoDesistencia ?? "").trim();
+  if (status === "desistencia") {
+    if (!motivoDesistencia) {
+      return { ok: false, error: "Informe o motivo da desistência — ele vai pro card do Bitrix." };
+    }
+    patch.desistencia_motivo = motivoDesistencia;
+    colunasNovas.push("desistencia_motivo");
+  }
+
+  // Desfecho novo = envio novo: o carimbo do envio anterior (de outro desfecho)
+  // não pode continuar dizendo "chegou".
+  if (temDesfecho({ status })) {
+    patch.desfecho_enviado_em = null;
+    patch.desfecho_erro = null;
+    colunasNovas.push("desfecho_enviado_em", "desfecho_erro");
+  }
 
   let { data, error } = await supabase
     .from("qs_meetings")
@@ -1119,12 +1150,12 @@ async function gravarStatusDaReuniao(
     .select()
     .single();
 
-  // Banco sem a 0079: grava o desfecho do mesmo jeito, sem as colunas novas. O
-  // closer não pode perder o registro da reunião porque falta uma migration —
-  // ele perde só a possibilidade de reenviar depois, e isso é o de hoje.
-  if (error && colunas0079.length > 0 && isMissingSchema(error)) {
-    console.warn("[meetings] 0079 ainda não aplicada; gravando sem valor/tipo da venda:", error.message);
-    for (const c of colunas0079) delete patch[c];
+  // Banco sem a 0079/0085: grava o desfecho do mesmo jeito, sem as colunas
+  // novas. O closer não pode perder o registro da reunião porque falta uma
+  // migration — o envio pro Bitrix usa os valores da tela, não os do banco.
+  if (error && colunasNovas.length > 0 && isMissingSchema(error)) {
+    console.warn("[meetings] 0079/0085 ainda não aplicada; gravando sem as colunas novas:", error.message);
+    for (const c of colunasNovas) delete patch[c];
     ({ data, error } = await supabase
       .from("qs_meetings").update(patch).eq("id", meeting.id).select().single());
   }
@@ -1156,8 +1187,10 @@ async function gravarStatusDaReuniao(
     await closeConfirmTask(meeting.id, `Reunião ${comoFechou}`);
   }
 
+  // Status que NÃO são desfecho (confirmada, cancelada…) seguem como sempre:
+  // uma nota na timeline. O desfecho tem envio próprio, lá embaixo.
   const phrase = STATUS_PHRASE[status];
-  if (phrase) {
+  if (phrase && !temDesfecho({ status })) {
     notifyBitrix("nota", {
       lead_id: meeting.lead_id,
       bitrix_id: leadBitrixId ?? meeting.lead?.bitrix_id,
@@ -1165,24 +1198,7 @@ async function gravarStatusDaReuniao(
     });
   }
 
-  // Campos do negócio no Bitrix (mapeamento confirmado com o Bruno em 14/08):
-  // realizada → "Data da reunião realizada" + "Reunião realizada? = Sim";
-  // no-show → "Data de No Show" + "No Show? = Sim" + "Reunião realizada? = Não".
-  // A data é a DA REUNIÃO (realizada_em/scheduled_at), não a de quando alguém
-  // lembrou de registrar — mesma âncora do SAL (0032).
-  if (status === "realizada" || status === "no_show") {
-    const quando = String((data as Meeting).realizada_em ?? meeting.scheduled_at).slice(0, 10);
-    notifyBitrix("reuniao-campos", {
-      lead_id: meeting.lead_id,
-      bitrix_id: leadBitrixId ?? meeting.lead?.bitrix_id,
-      desfecho: status,
-      data: quando,
-      // Só vão se o closer preencheu: campo vazio é descartado no servidor pra
-      // não APAGAR um valor que já esteja no card do Bitrix.
-      valor: venda?.valor ?? undefined,
-      tipo_venda: venda?.tipoVenda || undefined,
-    });
-  }
+  let final = data as Meeting;
 
   // ── SAL, no mesmo movimento do desfecho ──────────────────────────────────
   // Retomada NÃO pede SAL: a qualificação do lead se decide na primeira call, e
@@ -1190,14 +1206,19 @@ async function gravarStatusDaReuniao(
   // cliente que está em negociação (decisão do Bruno, 19/08).
   const ehRetomada = (meeting.tipo ?? "primeira") === "retomada";
   if (sal && !ehRetomada && (status === "realizada" || status === "no_show")) {
+    // semBitrix: o SAL viaja no MESMO envio do desfecho (lá embaixo). Mandar
+    // separado era como o card ficava com a data e sem o SAL.
     const rSal = await setMeetingSal(
-      data as Meeting, sal.valor, sal.by ?? null,
-      leadBitrixId ?? meeting.lead?.bitrix_id, sal.motivo ?? null
+      final, sal.valor, sal.by ?? null,
+      leadBitrixId ?? meeting.lead?.bitrix_id, sal.motivo ?? null, { semBitrix: true }
     );
     // O desfecho JÁ está gravado — falhar aqui não pode virar "não salvou nada",
     // senão o closer repete a ação e a reunião fecha duas vezes.
     if (!rSal.ok) notifyError(rSal.error);
-    else if (sal.valor === "recusado") await marcarLeadPerdidoPorSal(meeting, sal.motivo ?? null);
+    else {
+      final = rSal.meeting ?? final;
+      if (sal.valor === "recusado") await marcarLeadPerdidoPorSal(meeting, sal.motivo ?? null);
+    }
   }
 
   // ── DESISTÊNCIA (0079) ───────────────────────────────────────────────────
@@ -1207,8 +1228,30 @@ async function gravarStatusDaReuniao(
   // recebendo follow-up, que é a reclamação mais antiga do time.
   if (status === "desistencia") {
     await marcarLeadPerdido(meeting, {
-      motivoTarefa: "Cliente desistiu (registrado no desfecho da reunião)",
+      motivoTarefa: `Cliente desistiu — ${motivoDesistencia}`,
       avisoFalha: "A desistência foi registrada, mas o lead NÃO foi marcado como perdido — marque pelo perfil dele.",
+      semBitrix: true,
+    });
+  }
+
+  // ── O DESFECHO VAI PRO BITRIX, E FICA ESCRITO SE CHEGOU (22/09) ──────────
+  // Antes eram 2-3 disparos soltos (nota, campos, SAL) sem retorno: quando o
+  // servidor recusava — 27 desfechos de SDR desde 01/09 —, sobrava um toast que
+  // sumia e ninguém sabia. Agora é UM envio, o mesmo do botão "Reenviar", que
+  // carimba a reunião com `desfecho_enviado_em` ou `desfecho_erro`. Não trava a
+  // tela: o closer segue, e a falha aparece na reunião e na lista de pendentes.
+  if (temDesfecho({ status })) {
+    const paraEnviar: Meeting = {
+      ...final,
+      // O banco pode não ter as colunas novas ainda: os valores da tela valem.
+      venda_valor: final.venda_valor ?? venda?.valor ?? null,
+      venda_tipo: final.venda_tipo ?? venda?.tipoVenda ?? null,
+      desistencia_motivo: final.desistencia_motivo ?? (motivoDesistencia || null),
+    };
+    void enviarDesfecho(paraEnviar).then((r) => {
+      if (!r.ok) {
+        notifyError(`O desfecho foi salvo no QS, mas NÃO chegou no Bitrix: ${r.error ?? "motivo desconhecido"} Abra a reunião e use "Reenviar pro Bitrix".`);
+      }
     });
   }
 
@@ -1220,7 +1263,7 @@ async function gravarStatusDaReuniao(
     void cancelarEvento({ meetingId: meeting.id, eventId: meeting.calendar_event_id });
   }
 
-  return { ok: true, meeting: data as Meeting };
+  return { ok: true, meeting: final };
 }
 
 // ── Reenviar o desfecho pro Bitrix ──────────────────────────────────────────
@@ -1248,54 +1291,111 @@ export async function reenviarDesfechoAoBitrix(meeting: Meeting): Promise<Meetin
   if (!temDesfecho(meeting)) {
     return { ok: false, error: "Esta reunião ainda não tem desfecho registrado." };
   }
-  const bitrixId = meeting.lead?.bitrix_id;
-  if (!bitrixId && !meeting.lead_id) {
+  return enviarDesfecho(meeting);
+}
+
+/**
+ * O ENVIO DO DESFECHO — um só, usado no lançamento e no botão (22/09).
+ *
+ * Nota na timeline (com SAL e motivo escritos) + campos do negócio. Os campos:
+ *   realizada/no-show → data, "Reunião realizada?", SAL, valor, tipo e etapa;
+ *   desistência       → motivo + coluna Cancelamento/Desistência.
+ * O servidor NUNCA puxa o card pra trás (ETAPAS_DA_REUNIAO em bitrix-sync.js):
+ * se ele já passou da reunião, grava os fatos e comenta que a etapa ficou.
+ *
+ * E carimba a reunião: `desfecho_enviado_em` quando os dois chegaram,
+ * `desfecho_erro` quando não. É esse carimbo que permite listar o que falta.
+ */
+async function enviarDesfecho(meeting: Meeting): Promise<MeetingResult> {
+  if (!meeting.lead_id) {
     return { ok: false, error: "Esta reunião não está ligada a nenhum lead." };
   }
+  const bitrixId = meeting.lead?.bitrix_id;
+  const ehRetomada = (meeting.tipo ?? "primeira") === "retomada";
+  const sal = !ehRetomada && (meeting.status === "realizada" || meeting.status === "no_show") ? meeting.sal ?? null : null;
+  const motivo = meeting.status === "desistencia"
+    ? (meeting.desistencia_motivo?.trim() || "não informado (desistência registrada no QS antes de 22/09)")
+    : null;
+
+  const falhou = async (erro: string): Promise<MeetingResult> => {
+    await registrarEnvioDoDesfecho(meeting.id, erro);
+    return { ok: false, error: erro };
+  };
 
   const nota = await enviarAoBitrix("nota", {
     lead_id: meeting.lead_id,
     bitrix_id: bitrixId,
-    body: `Reunião de ${formatDateTime(meeting.scheduled_at)}${meeting.title ? ` (${meeting.title})` : ""} ${STATUS_PHRASE[meeting.status] ?? `está como ${meeting.status}`} no QS.`,
+    body:
+      `Reunião de ${formatDateTime(meeting.scheduled_at)}${meeting.title ? ` (${meeting.title})` : ""} ` +
+      `${STATUS_PHRASE[meeting.status] ?? `está como ${meeting.status}`} no QS.` +
+      (sal ? ` SAL: ${sal === "aceito" ? "ACEITO" : "RECUSADO"}${sal === "recusado" && meeting.sal_motivo ? ` (${meeting.sal_motivo})` : ""}.` : "") +
+      (motivo ? ` Motivo: ${motivo}.` : ""),
   });
+  // Integração desligada não é falha do desfecho: não carimba nada.
   if (nota.desligado) {
     return { ok: false, error: "A integração com o Bitrix está desligada no servidor." };
   }
   if (nota.semCard) {
-    return {
-      ok: false,
-      error: "Este lead não tem negócio no Bitrix — não há card pra atualizar. Vincule ou crie o negócio pelo perfil do lead.",
-    };
+    return falhou("Este lead não tem negócio no Bitrix — vincule ou crie o negócio pelo perfil do lead e reenvie.");
   }
-  if (!nota.ok) return { ok: false, error: nota.error ?? "O Bitrix não aceitou o envio." };
+  if (!nota.ok) return falhou(nota.error ?? "O Bitrix não aceitou o envio.");
 
-  // Os campos do negócio só existem pra realizada/no-show — é o mapeamento
-  // fechado com o Bruno em 14/08. Desistência entra só como nota: não há campo
-  // no card pra ela, e inventar um aqui seria escrever num lugar que ninguém lê.
-  if (meeting.status === "realizada" || meeting.status === "no_show") {
-    const campos = await enviarAoBitrix("reuniao-campos", {
-      lead_id: meeting.lead_id,
-      bitrix_id: bitrixId,
-      desfecho: meeting.status,
-      data: String(meeting.realizada_em ?? meeting.scheduled_at).slice(0, 10),
-      valor: meeting.venda_valor ?? undefined,
-      tipo_venda: meeting.venda_tipo || undefined,
-    });
-    if (!campos.ok) {
-      return { ok: false, error: campos.error ?? "A nota foi, mas os campos do negócio não." };
-    }
+  const campos = await enviarAoBitrix("reuniao-campos", {
+    lead_id: meeting.lead_id,
+    bitrix_id: bitrixId,
+    desfecho: meeting.status,
+    data: String(meeting.realizada_em ?? meeting.scheduled_at).slice(0, 10),
+    valor: meeting.venda_valor ?? undefined,
+    tipo_venda: meeting.venda_tipo || undefined,
+    sal: sal ?? undefined,
+    motivo: motivo ?? undefined,
+  });
+  if (!campos.ok) {
+    return falhou(`A nota chegou, mas os campos do card não: ${campos.error ?? "o Bitrix recusou"}.`);
   }
 
-  // Carimba só depois do aceite: é isso que separa "mandei" de "chegou". Falhar
-  // AQUI não desfaz o envio — por isso o carimbo é best-effort e o retorno é ok.
-  const { data } = await supabase
+  const atualizada = await registrarEnvioDoDesfecho(meeting.id, null);
+  return { ok: true, meeting: atualizada ? { ...meeting, ...atualizada } : meeting };
+}
+
+/**
+ * Carimba o resultado do envio na reunião. Best-effort: o envio já aconteceu
+ * (ou não), e falhar aqui não pode mudar o que se diz pro closer.
+ */
+async function registrarEnvioDoDesfecho(meetingId: string, erro: string | null): Promise<Meeting | null> {
+  const patch: Record<string, unknown> = erro
+    ? { desfecho_erro: erro.slice(0, 300) }
+    : { desfecho_enviado_em: new Date().toISOString(), desfecho_erro: null };
+  let { data, error } = await supabase
+    .from("qs_meetings").update(patch).eq("id", meetingId).select().maybeSingle();
+  // Banco sem a 0085 (sem desfecho_erro): o sucesso ainda carimba o enviado_em.
+  if (error && isMissingSchema(error) && !erro) {
+    ({ data, error } = await supabase
+      .from("qs_meetings").update({ desfecho_enviado_em: patch.desfecho_enviado_em })
+      .eq("id", meetingId).select().maybeSingle());
+  }
+  if (error) console.warn("[meetings] não deu pra carimbar o envio do desfecho:", error.message);
+  return (data as Meeting | null) ?? null;
+}
+
+/**
+ * Desfechos que NÃO chegaram no Bitrix (falharam ou nunca foram enviados),
+ * desde `desde`. É a lista que o gestor usa pra reenviar em lote.
+ */
+export async function desfechosNaoEnviados(desde: string): Promise<Meeting[]> {
+  const { data, error } = await supabase
     .from("qs_meetings")
-    .update({ desfecho_enviado_em: new Date().toISOString() })
-    .eq("id", meeting.id)
-    .select()
-    .maybeSingle();
-
-  return { ok: true, meeting: (data as Meeting) ?? meeting };
+    .select("*, lead:qs_leads(id, full_name, bitrix_id)")
+    .in("status", ["realizada", "no_show", "desistencia"])
+    .is("desfecho_enviado_em", null)
+    .gte("scheduled_at", desde)
+    .order("scheduled_at", { ascending: true })
+    .limit(500);
+  if (error) {
+    console.warn("[meetings] lista de desfechos não enviados:", error.message);
+    return [];
+  }
+  return (data ?? []) as Meeting[];
 }
 
 // ── Reagendar ───────────────────────────────────────────────────────────────
@@ -1323,6 +1423,15 @@ export async function reagendarReuniao(input: {
   por?: string | null;
 }): Promise<MeetingResult> {
   const { meeting } = input;
+  // Reunião com desfecho não se reagenda (22/09; o banco também barra, 0085):
+  // a linha antiga virava 'reagendada' e o desfecho — SAL, valor — sumia dos
+  // números. 3 casos em setembro, entre eles uma reunião com R$ 44 mil lançados.
+  if (temDesfecho(meeting)) {
+    return {
+      ok: false,
+      error: "Esta reunião já tem desfecho — pra falar de novo com o cliente, marque uma reunião nova (de retomada).",
+    };
+  }
   const { data, error } = await supabase.rpc("qs_reagendar_reuniao", {
     p_meeting_id: meeting.id,
     p_scheduled_at: input.scheduledAt.toISOString(),
@@ -1485,7 +1594,9 @@ export async function setMeetingSal(
   by?: string | null,
   leadBitrixId?: string | null,
   /** Obrigatório quando `sal` é "recusado" — o banco recusa sem ele (0032). */
-  motivo?: string | null
+  motivo?: string | null,
+  /** `semBitrix`: chamado de dentro do desfecho, que já leva o SAL no envio dele. */
+  opts?: { semBitrix?: boolean }
 ): Promise<MeetingResult> {
   // Barra antes de ir ao banco: a mensagem daqui explica o que fazer, a do
   // Postgres seria "violates check constraint qs_meetings_sal_motivo_check".
@@ -1517,7 +1628,7 @@ export async function setMeetingSal(
   }
   if (!data) return { ok: false, error: "Você não tem permissão para alterar esta reunião." };
 
-  if (sal) {
+  if (sal && !opts?.semBitrix) {
     notifyBitrix("nota", {
       lead_id: meeting.lead_id,
       bitrix_id: leadBitrixId ?? meeting.lead?.bitrix_id,

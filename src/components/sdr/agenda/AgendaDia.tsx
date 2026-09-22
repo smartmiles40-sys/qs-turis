@@ -44,6 +44,8 @@ import ScheduleMeetingModal from "./ScheduleMeetingModal";
 import OportunidadeFuturaModal from "../leads/OportunidadeFuturaModal";
 import { ReuniaoTrancada } from "./BloqueioDesfecho";
 import { useBloqueioDesfecho, ehPendenteDeDesfecho } from "@/lib/qs/bloqueioDesfecho";
+import { perguntarMotivoDesistencia } from "@/lib/qs/motivoDesistencia";
+import DesfechosNaoEnviados from "./DesfechosNaoEnviados";
 import type {
   CloserAvailability,
   CloserBlock,
@@ -722,6 +724,10 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
         </div>
       </div>
 
+      {/* Desfechos que não chegaram no Bitrix (22/09) — só pra gestão, que é
+          quem responde pelo número do Dashboard. */}
+      {!demo && (currentUser?.role === "admin" || currentUser?.role === "gestor") && <DesfechosNaoEnviados />}
+
       {/* ── Filtros ────────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-200 px-4 py-2">
         {chips.map(({ chave, rotulo }) => {
@@ -1178,9 +1184,9 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
               <button
                 onClick={() => {
                   const quem = reuniao.lead_name || reuniao.lead?.full_name || "este cliente";
-                  if (window.confirm(
-                    `Registrar DESISTÊNCIA de ${quem}?\n\nO lead vai para PERDIDO e as atividades abertas dele são encerradas.`
-                  )) onStatus("desistencia");
+                  // O motivo vai pro card do Bitrix (22/09) — mesma pergunta do modal.
+                  const motivo = perguntarMotivoDesistencia(quem);
+                  if (motivo) onStatus("desistencia", { motivoDesistencia: motivo });
                 }}
                 className="mt-1.5 w-full rounded-lg border py-1.5 text-xs font-bold transition hover:brightness-95"
                 style={{ borderColor: "#7C3AED55", color: "#6D28D9", background: "#7C3AED12" }}

@@ -66,6 +66,9 @@ function notifyMeetingStatusToBitrix(
   });
 }
 
+/** Os status que esta tela pode gravar — nenhum deles é desfecho (22/09). */
+const STATUS_EDITAVEIS: MeetingStatus[] = ["agendada", "confirmada", "cancelada"];
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 interface MeetingsPageProps {
@@ -773,18 +776,36 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                 </>
               )}
 
-              <div>
-                <label className={labelClass}>Status</label>
-                <select
-                  value={fStatus}
-                  onChange={(e) => setFStatus(e.target.value as MeetingStatus)}
-                  className={inputClass}
-                >
-                  {(Object.keys(MEETING_STATUS_LABELS) as MeetingStatus[]).map((k) => (
-                    <option key={k} value={k}>{MEETING_STATUS_LABELS[k]}</option>
-                  ))}
-                </select>
-              </div>
+              {/* DESFECHO NÃO SE LANÇA AQUI (22/09). Este select gravava
+                  "Realizada"/"Desistência" cru: sem SAL, sem valor, sem mudar o
+                  card no Bitrix e sem levar a desistência pra perdido. O
+                  desfecho mora na Agenda (dia ou detalhe da reunião), que faz
+                  tudo isso. Aqui ficam só os status de reunião que ainda vai
+                  acontecer; reunião que já tem outro status aparece travada. */}
+              {(() => {
+                const original = editingId ? meetings.find((m) => m.id === editingId)?.status : undefined;
+                const travado = !!original && !STATUS_EDITAVEIS.includes(original);
+                return (
+                  <div>
+                    <label className={labelClass}>Status</label>
+                    <select
+                      value={fStatus}
+                      onChange={(e) => setFStatus(e.target.value as MeetingStatus)}
+                      className={inputClass}
+                      disabled={travado}
+                    >
+                      {(travado ? [fStatus] : STATUS_EDITAVEIS).map((k) => (
+                        <option key={k} value={k}>{MEETING_STATUS_LABELS[k]}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-gray-400">
+                      {travado
+                        ? "Esta reunião já tem desfecho — pra mudar, abra ela na Agenda."
+                        : "Realizada, no-show e desistência são lançados pela Agenda (levam SAL, valor e o card do Bitrix)."}
+                    </p>
+                  </div>
+                );
+              })()}
 
               <div>
                 <label className={labelClass}>Anotações</label>

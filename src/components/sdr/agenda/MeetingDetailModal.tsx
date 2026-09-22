@@ -15,6 +15,7 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { setMeetingStatus, setMeetingSal, deleteMeeting, gerarSalaMeet, avisarBitrixDaSala, reenviarDesfechoAoBitrix, temDesfecho, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
+import { perguntarMotivoDesistencia } from "@/lib/qs/motivoDesistencia";
 import BriefingDoLead from "./BriefingDoLead";
 import OportunidadeFuturaModal from "../leads/OportunidadeFuturaModal";
 import { ReuniaoTrancada } from "./BloqueioDesfecho";
@@ -143,12 +144,14 @@ export default function MeetingDetailModal({
       if (!window.confirm(`Cancelar a reunião${quem}? A atividade de confirmação também será encerrada.`)) return;
     }
     // Desistência leva o lead pra PERDIDO e tira ele da fila de todo mundo. Um
-    // clique errado aqui apaga trabalho de SDR — avisa antes, como no SAL.
+    // clique errado aqui apaga trabalho de SDR — avisa antes, como no SAL. E
+    // pede o MOTIVO (22/09): o card vai pra coluna Cancelamento/Desistência,
+    // que exige o motivo. Cancelar a pergunta = não registra nada.
     if (status === "desistencia") {
       const quem = meeting.lead_name ?? meeting.lead?.full_name ?? "este cliente";
-      if (!window.confirm(
-        `Registrar DESISTÊNCIA de ${quem}?\n\nO lead vai para PERDIDO e as atividades abertas dele são encerradas.`
-      )) return;
+      const motivo = perguntarMotivoDesistencia(quem);
+      if (!motivo) return;
+      desfecho = { ...(desfecho ?? {}), motivoDesistencia: motivo };
     }
     setBusy(true);
     // SAL junto com o desfecho (19/08): o mesmo caminho da agenda do dia.
@@ -556,6 +559,11 @@ export default function MeetingDetailModal({
                     ? <>Último envio: <b className="text-gray-700">{new Date(meeting.desfecho_enviado_em).toLocaleString("pt-BR")}</b></>
                     : "Este desfecho ainda não foi confirmado pelo Bitrix."}
                 </p>
+                {/* O motivo da última falha (0085) — sem ele o closer via só
+                    "não confirmado" e não sabia se era rede, card ou permissão. */}
+                {!meeting.desfecho_enviado_em && meeting.desfecho_erro && (
+                  <p className="mt-1 text-[11.5px] font-semibold text-red-600">Não chegou: {meeting.desfecho_erro}</p>
+                )}
                 <button
                   onClick={enviarDesfechoPraBitrix}
                   disabled={busy || enviandoBitrix}

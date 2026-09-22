@@ -228,6 +228,10 @@ export interface Meeting {
   venda_tipo?: string | null;
   /** Última vez que o /api/bitrix-sync aceitou este desfecho (0079). */
   desfecho_enviado_em?: string | null;
+  /** Último erro do envio do desfecho (0085). Nulo com enviado_em = chegou. */
+  desfecho_erro?: string | null;
+  /** Motivo informado na desistência — vai pro card do Bitrix (0085). */
+  desistencia_motivo?: string | null;
   created_at: string;
   updated_at?: string;
 }

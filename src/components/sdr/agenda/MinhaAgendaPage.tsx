@@ -466,7 +466,9 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                             title={
                               m.desfecho_enviado_em
                                 ? `Último envio: ${new Date(m.desfecho_enviado_em).toLocaleString("pt-BR")}`
-                                : "Este desfecho ainda não foi confirmado pelo Bitrix."
+                                : m.desfecho_erro
+                                  ? `Não chegou no Bitrix: ${m.desfecho_erro}`
+                                  : "Este desfecho ainda não foi confirmado pelo Bitrix."
                             }
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-50 ${
                               m.desfecho_enviado_em
@@ -478,7 +480,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                               ? "Enviando…"
                               : m.desfecho_enviado_em
                                 ? "Reenviar pro Bitrix"
-                                : "Enviar pro Bitrix"}
+                                : m.desfecho_erro ? "⚠ Não chegou — reenviar" : "Enviar pro Bitrix"}
                           </button>
                         )}
                       </div>
