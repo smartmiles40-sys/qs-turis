@@ -29,7 +29,7 @@
 // vez que a tela abre.
 //
 // POST BATE NA PORTA de verdade — e bater na porta tem custo: uma chamada ao
-// n8n cria execução, uma ao Chatwoot consome API. Então é botão, não é
+// n8n cria execução, uma à Meta consome API. Então é botão, não é
 // automático. Só admin/gestor, porque o retorno diz quais integrações existem.
 //
 // ── O QUE ESTA ROTA NUNCA FAZ ───────────────────────────────────────────────
@@ -168,28 +168,29 @@ async function bater_openai() {
 }
 
 /**
- * O WhatsApp oficial, pelo Chatwoot — e, junto, o template do primeiro contato.
+ * O WhatsApp oficial, pela Cloud API da Meta — e, junto, o modelo do primeiro
+ * contato. (Até 22/09 isto perguntava ao Chatwoot, que saiu do QS em 23/09.)
  *
  * Esta é a checagem que ninguém pensa em fazer e que morde na hora errada: a
- * Meta PAUSA template que recebe reclamação, e template pausado só aparece como
+ * Meta PAUSA modelo que recebe reclamação, e modelo pausado só aparece como
  * "a abordagem não saiu" no meio de uma campanha rodando.
  */
-async function bater_chatwoot() {
-  const { cwConfigured, cw } = await import('./_wa.js');
-  if (!cwConfigured()) return porta('WhatsApp oficial (Chatwoot)', 'erro', 'As variáveis do Chatwoot não estão configuradas.');
-
-  let inboxes;
-  try {
-    const d = await cw('/inboxes', { timeoutMs: TIMEOUT_MS });
-    inboxes = Array.isArray(d?.payload) ? d.payload : [];
-  } catch (e) {
-    return porta('WhatsApp oficial (Chatwoot)', 'erro', `O Chatwoot não respondeu: ${e?.message}`);
+async function bater_meta() {
+  const NOME = 'WhatsApp oficial (Meta)';
+  const { credenciaisDaMeta, listarModelos } = await import('./_meta.js');
+  if (!(await credenciaisDaMeta())) {
+    return porta(NOME, 'erro', 'Faltam META_CALLS_TOKEN e META_PHONE_NUMBER_ID na Vercel.');
   }
 
-  const wa = inboxes.filter((i) => String(i.channel_type || '').includes('Channel::Whatsapp'));
-  if (!wa.length) return porta('WhatsApp oficial (Chatwoot)', 'erro', 'Nenhuma caixa de WhatsApp encontrada no Chatwoot.');
+  let lista;
+  try {
+    const r = await comPrazo(() => listarModelos());
+    if (r?.erro) return porta(NOME, 'erro', `Não consegui ler os modelos na Meta (${r.erro}).`);
+    lista = r.modelos || [];
+  } catch (e) {
+    return porta(NOME, 'erro', `A Meta não respondeu: ${e?.message}`);
+  }
 
-  // O template escolhido ainda está aprovado?
   let modelo = null;
   try {
     const rows = await rest(`qs_settings?select=value&key=eq.${CHAVE_TEMPLATE}&limit=1`);
@@ -197,29 +198,22 @@ async function bater_chatwoot() {
   } catch { /* segue */ }
 
   if (!modelo?.nome) {
-    return porta('WhatsApp oficial (Chatwoot)', 'atencao',
-      `${wa.length} caixa(s) de WhatsApp respondendo. Falta escolher o modelo do primeiro contato.`,
+    return porta(NOME, 'atencao', 'Número oficial respondendo. Falta escolher o modelo do primeiro contato.',
       { conserto: 'Sem modelo aprovado ela não consegue puxar assunto com quem veio de formulário — só responde quem escrever primeiro.' });
   }
 
-  const achado = wa
-    .flatMap((i) => (Array.isArray(i.message_templates) ? i.message_templates : []))
-    .find((t) => t.name === modelo.nome && (!modelo.idioma || t.language === modelo.idioma));
-
+  const achado = lista.find((t) => t.nome === modelo.nome && (!modelo.idioma || t.idioma === modelo.idioma));
   if (!achado) {
-    return porta('WhatsApp oficial (Chatwoot)', 'erro',
-      `O modelo "${modelo.nome}" não existe mais nesta conta da Meta.`,
+    return porta(NOME, 'erro', `O modelo "${modelo.nome}" não existe mais nesta conta da Meta.`,
       { conserto: 'Escolha outro modelo aprovado em Atendimento IA → Primeiro contato.' });
   }
   const situacao = String(achado.status || '').toLowerCase();
   if (situacao !== 'approved') {
-    return porta('WhatsApp oficial (Chatwoot)', 'erro',
+    return porta(NOME, 'erro',
       `O modelo "${modelo.nome}" está ${situacao.toUpperCase()} na Meta — nenhuma abordagem sai enquanto isso.`,
       { conserto: 'A Meta pausa modelo que recebe reclamação. Veja no Gerenciador do WhatsApp e escolha outro enquanto isso.' });
   }
-
-  return porta('WhatsApp oficial (Chatwoot)', 'ok',
-    `${wa.length} caixa(s) respondendo. Modelo "${modelo.nome}" aprovado.`);
+  return porta(NOME, 'ok', `Número oficial respondendo. Modelo "${modelo.nome}" aprovado.`);
 }
 
 /** O Bitrix, que recebe a reunião marcada. Falhar aqui não para a Glória. */
@@ -283,7 +277,8 @@ async function retrato() {
       N8N_AGENDA_SECRET: posto(process.env.N8N_AGENDA_SECRET),
       OPENAI_API_KEY: posto(process.env.OPENAI_API_KEY),
       BITRIX_WEBHOOK_BASE: posto(process.env.BITRIX_WEBHOOK_BASE),
-      CHATWOOT_API_TOKEN: posto(process.env.CHATWOOT_API_TOKEN),
+      META_CALLS_TOKEN: posto(process.env.META_CALLS_TOKEN || process.env.META_WA_TOKEN),
+      META_PHONE_NUMBER_ID: posto(process.env.META_PHONE_NUMBER_ID),
     },
   };
 }
@@ -329,7 +324,7 @@ export default async function handler(req, res) {
     // Em paralelo de propósito: seis portas em série passariam do prazo da
     // função, e a mais lenta (Bitrix) não pode segurar as outras cinco.
     const portas = await Promise.all([
-      bater_n8nGloria(), bater_n8nAgenda(), bater_openai(), bater_chatwoot(), bater_bitrix(),
+      bater_n8nGloria(), bater_n8nAgenda(), bater_openai(), bater_meta(), bater_bitrix(),
     ]);
     const pior = portas.some((p) => p.estado === 'erro') ? 'erro'
       : portas.some((p) => p.estado === 'atencao') ? 'atencao' : 'ok';

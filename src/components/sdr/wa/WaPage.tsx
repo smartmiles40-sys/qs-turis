@@ -12,9 +12,8 @@
 //
 //  1. TRÊS colunas: lista · conversa · contexto. O dock só cabia duas, então
 //     saber "quem é essa pessoa" exigia sair da conversa e abrir o card.
-//  2. O contexto mostra o aviso de JANELA DE 24H. Passa a valer dinheiro quando
-//     o número oficial entrar: fora da janela, a Meta só aceita template, e
-//     descobrir isso pelo erro de envio é descobrir tarde.
+//  2. O contexto mostra o aviso de JANELA DE 24H: fora da janela, a Meta só
+//     aceita template, e descobrir isso pelo erro de envio é descobrir tarde.
 //  3. Reaproveita <WaThreadList/> e <WaConversation/> INTEIROS. Nada aqui é
 //     cópia — se fossem duas versões, cada correção viraria dois lugares pra
 //     lembrar, e um deles ficaria pra trás.
@@ -33,14 +32,13 @@ import { useWaAvisos } from "@/lib/qs/waAvisos";
 import WaThreadList from "./WaThreadList";
 import WaConversation from "./WaConversation";
 import WaDesconhecidos from "./WaDesconhecidos";
-import MeuWhatsApp, { BotaoMeuWhatsApp } from "./MeuWhatsApp";
 import { countDesconhecidos } from "@/lib/qs/waDesconhecidos";
-import { WaAvatar, WaSeloNumero } from "./WaBits";
+import { WaAvatar } from "./WaBits";
 import BriefingDoLead from "../agenda/BriefingDoLead";
 import {
-  getInboxLabels, inboxTag, listUsersLite, threadTitle, userName,
+  listUsersLite, threadTitle, userName,
   esperandoDesde, humanizarEspera, exportarConversaTxt,
-  type WaThread, type UserLite, type InboxLabels,
+  type WaThread, type UserLite,
 } from "@/lib/qs/waInbox";
 
 interface Props {
@@ -53,7 +51,7 @@ interface Selecao {
   nome: string;
   phone: string | null;
   ownerId: string | null;
-  /** A linha completa, quando veio da lista — traz janela de 24h, caixa, espera. */
+  /** A linha completa, quando veio da lista — traz janela de 24h e espera. */
   thread: WaThread | null;
   /** Rascunho vindo de um roteiro de cadência (quando o SDR chega de uma tarefa). */
   draft?: string | null;
@@ -82,7 +80,6 @@ export default function WaPage({ onOpenLead }: Props) {
 
   const [sel, setSel] = useState<Selecao | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
-  const [rotulos, setRotulos] = useState<InboxLabels>({});
   const [contextoAberto, setContextoAberto] = useState(true);
 
   const [transferindo, setTransferindo] = useState(false);
@@ -92,12 +89,10 @@ export default function WaPage({ onOpenLead }: Props) {
   // qs_wa_descartadas devolve zero pro SDR, então o botão simplesmente não
   // aparece pra ele em vez de aparecer e recusar o clique.
   const [triagem, setTriagem] = useState(false);
-  const [meuWa, setMeuWa] = useState(false);
   const [desconhecidos, setDesconhecidos] = useState(0);
 
   useEffect(() => {
     void listUsersLite().then(setUsers);
-    void getInboxLabels().then(setRotulos);
     void countDesconhecidos().then(setDesconhecidos);
   }, []);
 
@@ -148,7 +143,6 @@ export default function WaPage({ onOpenLead }: Props) {
   }, [sel, transferBusy, currentUser]);
 
   const t = sel?.thread ?? null;
-  const tag = inboxTag(rotulos, t?.cw_inbox_id ?? null);
   const espera = t ? esperandoDesde(t) : null;
   const dono = userName(users, sel?.ownerId);
   const foraDaJanela = t?.can_reply === false;
@@ -170,8 +164,6 @@ export default function WaPage({ onOpenLead }: Props) {
               : "Nenhuma conversa esperando"}
           </p>
         </div>
-
-        <BotaoMeuWhatsApp onAbrir={() => setMeuWa(true)} />
 
         {desconhecidos > 0 && !triagem && (
           <button onClick={() => setTriagem(true)}
@@ -202,8 +194,6 @@ export default function WaPage({ onOpenLead }: Props) {
           </button>
         )}
       </header>
-
-      {meuWa && <MeuWhatsApp onFechar={() => setMeuWa(false)} />}
 
       {/* A triagem toma a tela inteira de propósito: decidir quem vira lead é
           um trabalho em si, não algo pra fazer de canto de olho enquanto uma
@@ -246,21 +236,16 @@ export default function WaPage({ onOpenLead }: Props) {
                   <p className="text-[14.5px] font-semibold leading-tight truncate" style={{ color: "var(--ink)" }}>
                     {sel.nome}
                   </p>
-                  <span className="flex items-center gap-1.5 leading-tight">
-                    <span className="text-[11.5px] truncate tabular-nums" style={{ color: "var(--ink3)" }}>
-                      {formatPhoneDisplay(sel.phone) || "WhatsApp"}
-                    </span>
-                    {/* Por qual dos NOSSOS números essa conversa corre. Aqui
-                        aparece sempre: e uma linha so, nao 566. */}
-                    {tag && <WaSeloNumero tipo={tag.tipo} nome={tag.nome} numero={tag.numero} compacto />}
-                  </span>
+                  <p className="text-[11.5px] leading-tight truncate tabular-nums" style={{ color: "var(--ink3)" }}>
+                    {formatPhoneDisplay(sel.phone) || "WhatsApp"}
+                  </p>
                 </div>
                 {/* Abaixo de xl o painel de contexto não existe: estas duas
                     informações são as que mudam a decisão de escrever agora. */}
                 {foraDaJanela && (
                   <span className="xl:hidden shrink-0 px-2 py-1 rounded-lg text-[11px] font-semibold"
                         style={{ background: "var(--wa-err-bg)", color: "var(--wa-err-ink)" }}
-                        title="O cliente não escreve há mais de 24h — num número oficial, só sai template aprovado.">
+                        title="O cliente não escreve há mais de 24h — só sai modelo aprovado pela Meta.">
                     fora da janela
                   </span>
                 )}
@@ -330,8 +315,8 @@ export default function WaPage({ onOpenLead }: Props) {
                 {foraDaJanela && (
                   <div className="rounded-lg px-3 py-2 text-[11.5px] leading-snug"
                        style={{ background: "var(--wa-err-bg)", color: "var(--wa-err-ink)" }}>
-                    <b>Fora da janela de 24h.</b> O cliente não escreve há mais de um dia. Num
-                    número oficial da Meta, só sai template aprovado — texto livre é recusado.
+                    <b>Fora da janela de 24h.</b> O cliente não escreve há mais de um dia: só
+                    sai modelo aprovado pela Meta — texto livre é recusado.
                   </div>
                 )}
                 {espera && (
@@ -357,17 +342,6 @@ export default function WaPage({ onOpenLead }: Props) {
                     Situação do lead
                   </dt>
                   <dd className="mt-0.5" style={{ color: "var(--ink)" }}>{t.lead.status}</dd>
-                </div>
-              )}
-              {tag && (
-                <div>
-                  <dt className="text-[10.5px] font-bold uppercase tracking-wider" style={{ color: "var(--ink3)" }}>
-                    Número
-                  </dt>
-                  <dd className="mt-1 flex flex-wrap items-center gap-1.5" style={{ color: "var(--ink)" }}>
-                    <span className="min-w-0 truncate">{tag.nome}</span>
-                    <WaSeloNumero tipo={tag.tipo} nome={tag.nome} numero={tag.numero} />
-                  </dd>
                 </div>
               )}
             </dl>

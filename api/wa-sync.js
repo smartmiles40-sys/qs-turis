@@ -1,58 +1,21 @@
 // api/wa-sync.js
 // -----------------------------------------------------------------------------
-// Rota serverless (Vercel): GET /api/wa-sync?leadId=<uuid>
+// Rota serverless (Vercel): GET /api/wa-sync?leadId=<uuid>&(briefing=1|audio=<id>)
 //
-// Puxa o histórico da conversa daquele lead do Chatwoot pra dentro do QS. Serve
-// pra duas coisas: (1) a primeira vez que alguém abre um lead — o webhook só
-// grava o que acontece DEPOIS que ele foi ligado, então o passado precisa vir
-// por aqui; (2) rede de segurança, se um webhook se perder.
+//   briefing — o resumo do lead pro CLOSER (notas, tarefas, reuniões, conversa)
+//   audio    — entrega o arquivo de um áudio pro navegador transcrever
 //
-// Idempotente: reingerir a mesma mensagem não duplica (chave é o id do Chatwoot).
+// Até 22/09 o modo padrão (sem briefing/audio) puxava o histórico da conversa
+// do Chatwoot. O Chatwoot saiu do QS em 23/09: o histórico agora entra só pelo
+// webhook da Meta (wa-calls → _metaEntrada), então o modo padrão responde
+// "nada a importar" e o front segue funcionando.
 //
 // SEGURANÇA: não basta estar logado — o servidor confere que o lead é DESTE
 // usuário antes de devolver qualquer coisa. Lead de outro SDR responde 403.
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
-import {
-  assertCanAccessLead, getSupabaseUserId, cwConfigured, cw,
-  toE164BR, findContact, escolherConversaDoLead, ingestMessage,
-  conversasDeWhatsAppDoContato, conversaOndeOClienteFala,
-} from './_wa.js';
-import { resolverFoto, preencherFotosEmLote } from './_waFoto.js';
-
-async function gravarThread(leadId, patch) {
-  await rest('qs_wa_threads?on_conflict=lead_id', {
-    method: 'POST',
-    body: [{ lead_id: leadId, ...patch }],
-    prefer: 'resolution=merge-duplicates,return=minimal',
-  });
-}
-
-/**
- * Grava o estado da conversa. Se a coluna `avatar_url` ainda não existir (a
- * migration 0026 é opcional), o PostgREST recusa a linha INTEIRA — e aí se
- * perderiam também a caixa, o id da conversa e o synced_at. Por isso, ao falhar
- * com a foto, tenta de novo sem ela em vez de desistir de tudo.
- */
-async function saveThreadMeta(leadId, patch) {
-  try {
-    await gravarThread(leadId, patch);
-  } catch (e) {
-    if ('avatar_url' in patch) {
-      const { avatar_url: _ignorado, ...semFoto } = patch;
-      try {
-        await gravarThread(leadId, semFoto);
-        console.warn('[wa-sync] avatar_url ignorado — aplique a migration 0026 pra ver as fotos');
-        return;
-      } catch (e2) {
-        console.warn('[wa-sync] saveThreadMeta:', e2?.message);
-        return;
-      }
-    }
-    console.warn('[wa-sync] saveThreadMeta:', e?.message);
-  }
-}
+import { assertCanAccessLead, getSupabaseUserId } from './_wa.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -63,19 +26,9 @@ export default async function handler(req, res) {
   const userId = await getSupabaseUserId(req.headers['authorization']);
   if (!userId) return res.status(401).json({ error: 'Não autorizado' });
 
-  // ── Modo LOTE: preencher as fotos que faltam ──────────────────────────────
-  // Vive aqui, e não numa rota nova, porque o projeto já roda no limite prático
-  // de funções da Vercel. Só gestor/admin: é uma rodada de consultas ao
-  // WhatsApp, não algo pra qualquer um disparar a qualquer hora.
-  if (req.query?.fotos) {
-    const users = await rest(`qs_users?select=role,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
-    const u = Array.isArray(users) && users[0];
-    if (!u || u.is_active === false || (u.role !== 'admin' && u.role !== 'gestor')) {
-      return res.status(403).json({ error: 'Só gestor ou admin pode preencher as fotos.' });
-    }
-    const r = await preencherFotosEmLote(Number(req.query.fotos));
-    return res.status(r.ok ? 200 : 503).json(r);
-  }
+  // Fotos de perfil vinham do Chatwoot/Evolution; a Meta não entrega foto de
+  // cliente. O botão antigo recebe "nada preenchido" em vez de erro.
+  if (req.query?.fotos) return res.status(200).json({ ok: true, preenchidas: 0, motivo: 'sem-fonte-de-foto' });
 
   const leadId = String(req.query?.leadId || '').trim();
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
@@ -144,7 +97,7 @@ export default async function handler(req, res) {
   }
 
   // ── Modo ÁUDIO: entrega o arquivo pro navegador ───────────────────────────
-  // Por que existe: o áudio mora no Chatwoot, que NÃO manda cabeçalho de CORS.
+  // Por que existe: o áudio mora num bucket que NÃO manda cabeçalho de CORS.
   // A tag <audio> toca (mídia não precisa de CORS), mas ler os BYTES por script
   // é bloqueado pelo navegador — e a transcrição, que roda na máquina do SDR,
   // precisa exatamente dos bytes. Buscar aqui no servidor resolve: servidor com
@@ -195,141 +148,5 @@ export default async function handler(req, res) {
     }
   }
 
-  let auth;
-  try {
-    auth = await assertCanAccessLead(userId, leadId);
-  } catch (e) {
-    console.error('[wa-sync] checagem de acesso:', e?.message);
-    return res.status(500).json({ error: 'Falha ao validar o lead' });
-  }
-  if (!auth.ok) {
-    const status = auth.reason === 'lead-de-outro-sdr' ? 403 : 404;
-    return res.status(status).json({ error: 'Sem acesso a este lead', motivo: auth.reason });
-  }
-
-  if (!cwConfigured()) {
-    console.warn('[wa-sync] CHATWOOT_AGENT_TOKEN ausente — configure na Vercel');
-    return res.status(200).json({ configured: false, conversationId: null, importadas: 0 });
-  }
-
-  const phone = toE164BR(auth.lead.phone);
-  if (!phone) return res.status(200).json({ conversationId: null, importadas: 0, motivo: 'lead-sem-telefone' });
-
-  try {
-    const contact = await findContact(phone);
-    if (!contact) {
-      await saveThreadMeta(leadId, { synced_at: new Date().toISOString() });
-      return res.status(200).json({ conversationId: null, importadas: 0, motivo: 'sem-contato-no-chatwoot' });
-    }
-
-    // A conversa que vale é a do cliente — não a "mais ativa" do Chatwoot.
-    // Era AQUI que o ponteiro da thread voltava pro número morto (17/08): o
-    // upsert lá embaixo grava conv/caixa por cima, então escolher errado aqui
-    // desfazia o roteamento certo segundos depois.
-    const conv = await escolherConversaDoLead(leadId, contact.id);
-    if (!conv) {
-      await saveThreadMeta(leadId, { cw_contact_id: contact.id, synced_at: new Date().toISOString() });
-      return res.status(200).json({ conversationId: null, contactId: contact.id, importadas: 0, motivo: 'sem-conversa' });
-    }
-
-    // ── TODAS as conversas do cliente, não só a "dele" ─────────────────────
-    //
-    // Auditoria de 20/08: puxar só a conversa escolhida cria um ponto cego que
-    // se alimenta sozinho. A escolha usa a última mensagem do cliente QUE O QS
-    // JÁ TEM — então, se a mensagem do outro número nunca entrou, o QS escolhe
-    // a conversa velha, sincroniza a velha, e a nova segue invisível. Abrir o
-    // lead, que é o conserto que a gente ensina pro time, não consertava nada.
-    //
-    // O teto de 5 é o orçamento de tempo da Vercel (10s pra função inteira):
-    // são 5 idas ao Chatwoot no pior caso, e um cliente com mais de 5 conversas
-    // de WhatsApp não existe na prática — as mais recentes vêm primeiro.
-    const todas = await conversasDeWhatsAppDoContato(contact.id);
-    const aSincronizar = (todas.length ? todas : [conv]).slice(0, 5);
-    // A escolhida entra sempre, mesmo que o Chatwoot não a tenha listado.
-    if (!aSincronizar.some((c) => Number(c.id) === Number(conv.id))) aSincronizar.push(conv);
-
-    let importadas = 0;
-    let lidas = 0;
-    for (const c of aSincronizar) {
-      let list = [];
-      try {
-        const data = await cw(`/conversations/${c.id}/messages`);
-        list = Array.isArray(data?.payload) ? data.payload : [];
-      } catch (e) {
-        // Uma conversa que falhou não pode levar as outras junto.
-        console.warn(`[wa-sync] conversa ${c.id} não respondeu:`, e?.message);
-        continue;
-      }
-      lidas += list.length;
-      for (const m of list) {
-        const novo = await ingestMessage({
-          leadId,
-          conversationId: c.id,
-          message: m,
-          contactId: contact.id,
-          canReply: typeof c.can_reply === 'boolean' ? c.can_reply : null,
-          inboxId: c.inbox_id ?? null,
-        });
-        if (novo) importadas++;
-      }
-    }
-
-    // O PONTEIRO SE DECIDE DEPOIS DE TUDO ENTRAR, não antes.
-    //
-    // A conversa foi escolhida lá em cima com o que o QS SABIA na hora. Agora
-    // ele sabe mais: acabaram de entrar as mensagens de todas as conversas. Se
-    // a mensagem mais recente do cliente está em outra, é ela que vale — senão
-    // o `saveThreadMeta` abaixo gravaria a escolha velha por cima do conserto
-    // que o próprio ingest acabou de fazer (`conversaSegueOCliente`).
-    let alvo = conv;
-    try {
-      const doCliente = await conversaOndeOClienteFala(leadId);
-      const achada = doCliente != null
-        ? aSincronizar.find((c) => Number(c.id) === Number(doCliente))
-        : null;
-      if (achada) alvo = achada;
-    } catch (e) {
-      console.warn('[wa-sync] não consegui reconferir o ponteiro (fica o escolhido):', e?.message);
-    }
-
-    // Foto: o thumbnail do Chatwoot quando existe (já hospedado e estável) e,
-    // quando não existe — o caso de ~92% dos contatos —, a Evolution, com a
-    // imagem rehospedada no nosso Storage. Best-effort: sem foto, o avatar cai
-    // nas iniciais coloridas e o sync das mensagens segue igual.
-    let foto = contact.thumbnail || null;
-    try {
-      const nova = await resolverFoto({
-        leadId,
-        phone: auth.lead.phone,
-        inboxId: alvo.inbox_id ?? null,
-        thumbnailChatwoot: contact.thumbnail || null,
-      });
-      if (nova) foto = nova;
-    } catch (e) {
-      console.warn('[wa-sync] foto de perfil:', e?.message);
-    }
-
-    await saveThreadMeta(leadId, {
-      cw_conversation_id: alvo.id,
-      cw_contact_id: contact.id,
-      cw_inbox_id: alvo.inbox_id ?? null,
-      // Coluna da migration 0026. Se ela não existir, o PostgREST recusa a
-      // linha inteira — por isso saveThreadMeta engole o erro e o resto segue.
-      avatar_url: foto,
-      can_reply: typeof alvo.can_reply === 'boolean' ? alvo.can_reply : null,
-      synced_at: new Date().toISOString(),
-    });
-
-    return res.status(200).json({
-      conversationId: alvo.id,
-      contactId: contact.id,
-      canReply: alvo.can_reply ?? null,
-      conversas: aSincronizar.length,
-      lidas,
-      importadas,
-    });
-  } catch (e) {
-    console.error('[wa-sync]', e?.message);
-    return res.status(500).json({ error: 'Falha ao sincronizar com o Chatwoot' });
-  }
+  return res.status(200).json({ configured: true, conversationId: null, importadas: 0 });
 }

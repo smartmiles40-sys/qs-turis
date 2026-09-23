@@ -33,11 +33,10 @@ function obterWorker(): Worker {
 /**
  * Baixa o arquivo e devolve o sinal no formato que o Whisper espera.
  *
- * O áudio NÃO é buscado direto no Chatwoot: ele não manda cabeçalho de CORS, e
- * o navegador bloqueia a leitura dos bytes por script (a tag <audio> toca
- * normalmente, porque mídia não passa por essa regra — foi o que fez a primeira
- * versão falhar com "não consegui transcrever"). Quem busca é o nosso servidor,
- * em /api/wa-sync?audio=, que entrega o arquivo já liberado.
+ * O áudio NÃO é buscado direto na origem: sem cabeçalho de CORS o navegador
+ * bloqueia a leitura dos bytes por script (a tag <audio> toca normalmente).
+ * Quem busca é o nosso servidor, em /api/wa-sync?audio=, que entrega o
+ * arquivo já liberado.
  */
 async function prepararAudio(leadId: string, messageId: string): Promise<Float32Array> {
   const { authHeaders } = await import('@/lib/qs/waInbox');

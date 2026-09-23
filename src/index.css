@@ -147,30 +147,6 @@ body {
 .min-h-dvh { min-height: 100vh; min-height: 100dvh; }
 .h-dvh { height: 100vh; height: 100dvh; }
 
-/* ── Webfone (Wavoip): softphone FLUTUANTE — nada de backdrop/blur ──────────────
-   A lib monta a UI num <div id="webphone"> no body, com o próprio painel fixado
-   no canto. Escondido por padrão; quando aberto (classe .qs-webfone-open no
-   <html>, controlada por src/lib/wavoip.ts) aparece flutuando SEM bloquear a
-   tela: dá pra falar e continuar navegando/clicando no sistema ao mesmo tempo. */
-#webphone { display: none !important; }
-
-html.qs-webfone-open #webphone {
-  display: block !important;
-  z-index: 2147483000;
-}
-/* Polimento leve no painel da lib, sem interferir no posicionamento dela */
-html.qs-webfone-open #webphone > * {
-  border-radius: 18px !important;
-  box-shadow: 0 22px 60px -20px rgba(16, 24, 40, .45), 0 0 0 1px rgba(23, 32, 46, .07) !important;
-  overflow: hidden !important;
-  animation: qsWebfonePop .18s cubic-bezier(.16, 1, .3, 1);
-}
-@keyframes qsWebfonePop { from { opacity: 0; transform: translateY(8px) scale(.98) } to { opacity: 1; transform: none } }
-
-@media (prefers-reduced-motion: reduce) {
-  html.qs-webfone-open #webphone > * { animation: none !important; }
-}
-
 /* ── Camada de override do Modo Noturno (utilitários Tailwind) ────────────────
    Seletores compostos (html.dark .classe) têm mais especificidade que o utilitário
    puro e vêm depois no arquivo → vencem sem !important. Estilos inline com hex

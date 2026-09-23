@@ -24,12 +24,10 @@ import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, fetchNoteCountsByLead, fetchContactedLeadIds, fetchLossReasons, type CadenceScriptRow, type ContactBreakdownRow } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
-import { getChatProvider, defaultChatProvider, type ChatProvider } from "@/lib/qs/chatProvider";
 import { useWhatsAppApp } from "@/lib/qs/waApp";
 import { caronaDasOportunidades } from "@/lib/qs/oportunidadeFutura";
 import { getLeadScore, type LeadTemperature } from "@/lib/leadScore";
 import { formatPhoneDisplay, fillTemplate, normalizePhoneBR } from "@/lib/whatsapp";
-import WhatsAppModal from "../whatsapp/WhatsAppModal";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
 import { dialViaOficial, setOnCallEndedOficial } from "@/lib/qs/waCall";
 import {
@@ -354,7 +352,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const chatDock = useChatAppDock();
   // MODO APARELHO (SDR, desde 03/09): as atividades de WhatsApp levam o SDR pra
   // conversa no celular dele, com o roteiro já escrito. Ver src/lib/qs/waApp.ts.
-  const { modoApp, ligarPeloCelular, abrirNoApp } = useWhatsAppApp();
+  const { modoApp, abrirNoApp } = useWhatsAppApp();
   // Oportunidades futuras que venceram hoje voltam pra fila de quem retoma.
   // O cron da Vercel faz isso de hora em hora; abrir a fila também acorda —
   // pra atividade estar lá quando o SDR chega, sem depender só do agendador.
@@ -371,16 +369,6 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       draft: draft ?? null,
     });
   }, [chatDock]);
-
-  // Qual cockpit está ativo. No atendimento nativo ("qs") a atividade de
-  // WhatsApp abre a conversa DENTRO do QS com o roteiro já escrito, em vez de
-  // jogar o SDR pro WhatsApp Web pra procurar o contato na mão.
-  const [chatProvider, setChatProvider] = useState<ChatProvider>(() => defaultChatProvider());
-  useEffect(() => {
-    let vivo = true;
-    getChatProvider().then((p) => { if (vivo) setChatProvider(p); });
-    return () => { vivo = false; };
-  }, []);
 
   // ── Supabase data ──────────────────────────────────────────────────
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -722,14 +710,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [savingEdit, setSavingEdit] = useState(false);
   // Roteiro da atividade (script_text) — colapsável no hero (Sprint 4 — item 6).
   const [scriptOpen, setScriptOpen] = useState(true);
-  // Modal de WhatsApp com o roteiro pré-preenchido (quando a atividade tem script).
-  const [waModal, setWaModal] = useState<{ lead: Lead; text: string } | null>(null);
 
   // O polling pausa enquanto o SDR está no meio de algo (atualizado a cada render).
   pollBusyRef.current = Boolean(
     meetingFor || transferOpen || pendingResult || obsText.trim() || savingObs ||
     showNewLeadModal || showExtraTaskModal || showDialer || skipMenuOpen || finalizing || classifyFor ||
-    taskMenuOpen || editFor || waModal
+    taskMenuOpen || editFor
   );
 
   // Celebration (shown once per session when daily goal hit)
@@ -1782,8 +1768,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return cands[0]?.script_text ?? null;
   }
 
-  // WhatsApp da tarefa: com roteiro → abre o modal com a mensagem PRONTA
-  // (defaultText); sem roteiro → segue no dock de atendimento como antes.
+  // WhatsApp da tarefa: abre a conversa com o roteiro (se houver) já escrito.
   function openWhatsAppForTask(task: Task, lead: Lead | undefined | null) {
     if (!lead) return;
     const script = task.channel_type === "whatsapp" ? getScriptForTask(task) : null;
@@ -1804,18 +1789,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       return;
     }
 
-    // Atendimento nativo: abre a conversa do lead aqui dentro, já com o roteiro
-    // no campo de mensagem. Zero tempo procurando o contato no WhatsApp.
-    if (chatProvider === "qs") {
-      openWhatsApp(lead, texto);
-      return;
-    }
-
-    if (texto) {
-      setWaModal({ lead, text: texto });
-      return;
-    }
-    openWhatsApp(lead);
+    // Abre a conversa do lead aqui dentro, já com o roteiro no campo de
+    // mensagem. Zero tempo procurando o contato no WhatsApp.
+    openWhatsApp(lead, texto);
   }
 
   // Filter logic
@@ -1837,14 +1813,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // autorização que a Meta exige simplesmente não se aplica. Continuar
     // escondendo essas atividades seria sumir com trabalho executável por causa
     // de uma regra de um canal que não está mais em uso.
-    if (ligarPeloCelular) return true;
+    if (modoApp) return true;
     // `normalizePhoneBR` e não os dígitos crus: as chaves da tabela têm DDI, e
     // comparar "11992221156" com "5511992221156" dava sempre "não conheço" —
     // o lead voltava pra fila por engano.
     const p = permissoes.get(normalizePhoneBR(lead?.phone));
     if (!p) return true;                 // não sei = deixa passar
     return permissaoVale(p);
-  }, [permissoes, ligarPeloCelular]);
+  }, [permissoes, modoApp]);
 
   const filteredTasks = useMemo(() => {
     let filtered = [...tasks];
@@ -2012,11 +1988,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   shortcutCtx.current = {
     hero: heroTaskMemo,
     pending: pendingResult,
-    // classifyFor/editFor/menu/waModal também PAUSAM os atalhos (item 10): com a
+    // classifyFor/editFor/menu também PAUSAM os atalhos (item 10): com a
     // classificação de ligação aberta, "C"/números agiam por baixo do bloco.
     // meetingDone idem: com o modal de sucesso aberto o hero já é o PRÓXIMO
     // lead — um "c" perdido concluía a atividade dele por baixo do modal.
-    busy: !!(meetingFor || transferOpen || skipMenuOpen || showExtraTaskModal || showDialer || showNewLeadModal || finalizing || classifyFor || editFor || taskMenuOpen || waModal || meetingDone),
+    busy: !!(meetingFor || transferOpen || skipMenuOpen || showExtraTaskModal || showDialer || showNewLeadModal || finalizing || classifyFor || editFor || taskMenuOpen || meetingDone),
     // O Enter precisa do motivo de perda FRESCO (não o do render em que o
     // listener nasceu) pra poder espelhar a regra do botão Finalizar.
     lossReason: pendingLossReason,
@@ -2661,13 +2637,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 // conversa no celular do SDR — o botão de ligar do WhatsApp
                 // fica a um toque, que é exatamente o que este canal sempre
                 // significou ("Ligação de voz pelo WhatsApp").
-                else if (ligarPeloCelular) abrirNoApp({ leadId: lead.id, name: lead.full_name, phone: lead.phone, ownerId: lead.owner_id });
+                else if (modoApp) abrirNoApp({ leadId: lead.id, name: lead.full_name, phone: lead.phone, ownerId: lead.owner_id });
                 else callViaWebfone(lead.phone, { leadName: lead.full_name, leadId: lead.id });
               }}
               className="qsx-pa qsx-pa-wa"
               title={task.channel_type === "ligacao"
                 ? "Ligar (BravoTech)"
-                : ligarPeloCelular
+                : modoApp
                   ? "Abrir a conversa no seu WhatsApp e ligar por lá"
                   : `Ligar pelo WhatsApp oficial${permissaoDoLead(lead.phone).validade ? ` — permissão vale ${permissaoDoLead(lead.phone).validade}` : ""}`}>
               <ChannelIcon type="ligacao" size={17} />
@@ -2784,7 +2760,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           // MODO APARELHO: o botão deixa de discar e passa a ABRIR a conversa
           // no celular. Nada de selo de permissão — ela era da Meta, e a
           // ligação não passa mais por lá.
-          if (ligarPeloCelular) {
+          if (modoApp) {
             return (
               <button
                 onClick={() => { pinTaskForCall(task); abrirNoApp({ leadId: lead.id, name: lead.full_name, phone: lead.phone, ownerId: lead.owner_id }); }}
@@ -4843,18 +4819,6 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         </div>
       )}
 
-      {/* ══ MODAL WHATSAPP COM ROTEIRO (Sprint 4, item 6) ════════════════════
-          Abre quando a atividade de WhatsApp tem script_text: a mensagem já vem
-          preenchida com o roteiro do gestor ({nome}/{primeiro_nome} resolvidos). */}
-      {waModal && (
-        <WhatsAppModal
-          open
-          onClose={() => setWaModal(null)}
-          lead={{ id: waModal.lead.id, name: waModal.lead.full_name, phone: waModal.lead.phone }}
-          ownerId={currentUser?.id ?? null}
-          defaultText={waModal.text}
-        />
-      )}
     </div>
   );
 }

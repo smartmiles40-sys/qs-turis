@@ -16,9 +16,9 @@
 // De quem é o número decide quem vê: `qs_wa_numeros_meta`. Número compartilhado
 // (o oficial) = regra de sempre; número de SDR = só o dono (+ gestão/closer).
 //
-// A Glória (IA) NÃO é avisada daqui de propósito: ela está `ativa` no banco mas
-// parada desde 02/09 porque não entrava mensagem. Religar a entrada não pode
-// religar a IA respondendo cliente sem alguém decidir isso.
+// A Glória (IA) é avisada daqui SÓ com a chave `qs_settings.gloria_ouve_meta`
+// ligada (23/09/2026, ver gravarUma). Ela ficou parada desde 02/09 porque não
+// entrava mensagem; religar a IA respondendo cliente é decisão de alguém.
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
@@ -27,8 +27,8 @@ import { credenciaisDaMeta } from './_meta.js';
 import { registrarDescarte, nascerDoWhatsApp } from './_waNascimento.js';
 import { ehPedidoDeParada, registrarOptout } from './_waOptout.js';
 import { transcrever, transcricaoConfigurada } from './_transcrever.js';
-import { guardarMidia, rotuloDaMidia } from './_waLinha.js';
-import { leadDoTelefone } from './_waLinhaEntrada.js';
+import { guardarMidia, rotuloDaMidia, leadDoTelefone } from './_waMidia.js';
+import { avisarGloria } from './_gloria.js';
 
 const GRAPH = 'https://graph.facebook.com/v20.0';
 
@@ -204,15 +204,43 @@ async function gravarUma({ numero, m, direcao, telefoneCliente, nomeCliente, aoV
     await completeWhatsAppTask(lead.id, lead.owner_id ?? null)
       .catch((e) => console.warn('[meta-entrada] atividade não concluída:', e?.message));
   }
+  let transcrito = null;
   if (direcao === 'in' && lida.midia?.tipo === 'audio' && !lida.texto && anexos[0]?.url && transcricaoConfigurada()) {
     const t = await transcrever(anexos[0].url);
     if (t?.texto) {
+      transcrito = t.texto;
       await rest(`qs_wa_messages?source_id=eq.${encodeURIComponent(lida.id)}`, {
         method: 'PATCH', prefer: 'return=minimal', body: { transcricao: t.texto },
       }).catch(() => {});
     }
   }
+
+  // ── A GLÓRIA (IA) FICA SABENDO ─────────────────────────────────────────
+  // Só de mensagem NOVA do cliente, e só com a chave `gloria_ouve_meta` ligada
+  // (23/09/2026). A chave existe porque em 23/09 havia 11 sessões "ativas"
+  // paradas desde 29/08: ligar a escuta sem aviso faria a IA voltar a falar
+  // com esses clientes no mesmo minuto. Quem decide se ela responde continua
+  // sendo o banco (sessão ativa) — aqui é só o aviso.
+  if (direcao === 'in' && (lida.texto || transcrito) && await gloriaOuveMeta()) {
+    await avisarGloria({
+      lead,
+      telefone: telefoneCliente,
+      message: { id: lida.id, content: lida.texto || transcrito, created_at: lida.enviadaEm },
+    }).catch((e) => console.warn('[meta-entrada] Glória não avisada:', e?.message));
+  }
   return { leadId: lead.id, novo: true };
+}
+
+let cacheGloria = { em: 0, v: false };
+async function gloriaOuveMeta() {
+  if (Date.now() - cacheGloria.em < 60_000) return cacheGloria.v;
+  let v = false;
+  try {
+    const r = await rest('qs_settings?select=value&key=eq.gloria_ouve_meta&limit=1');
+    v = r?.[0]?.value === true || r?.[0]?.value === 'true';
+  } catch { /* na dúvida, calada */ }
+  cacheGloria = { em: Date.now(), v };
+  return v;
 }
 
 async function reacaoDoCliente(m, nomeCliente) {

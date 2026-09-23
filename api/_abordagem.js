@@ -48,13 +48,12 @@
 // abordagem sai no dia seguinte, ou um humano assume. Perder lead pago é o
 // único erro que não dá pra desfazer.
 //
-// Envs: CHATWOOT_* (ver _wa.js) + SUPABASE_*
+// Envs: META_* (ver _meta.js) + SUPABASE_*
 // -----------------------------------------------------------------------------
 
-import {
-  cwConfigured, cw, ingestMessage, ensureConversation, defaultInboxId,
-  clienteFalouRecente, resolverModelo,
-} from './_wa.js';
+import { clienteFalouRecente, toE164BR } from './_wa.js';
+import { enviarTemplate } from './_meta.js';
+import { resolverModeloMeta, registrarSaida } from './_waSaida.js';
 import { rest } from './_supabaseAdmin.js';
 import { avisarGloria, registrar, ASSINATURA_IA } from './_gloria.js';
 
@@ -221,7 +220,7 @@ async function abordarPelaJanela({ leadId, lead, origem, teste }) {
   let ultima = null;
   try {
     const rows = await rest(
-      `qs_wa_messages?select=cw_message_id,content,transcricao,sent_at,cw_conversation_id` +
+      `qs_wa_messages?select=source_id,content,transcricao,sent_at` +
       `&lead_id=eq.${encodeURIComponent(leadId)}&direction=eq.in&order=sent_at.desc&limit=1`
     );
     ultima = rows?.[0] || null;
@@ -237,9 +236,8 @@ async function abordarPelaJanela({ leadId, lead, origem, teste }) {
   const r = await avisarGloria({
     lead,
     telefone: lead.phone,
-    conversationId: ultima.cw_conversation_id ?? null,
     message: {
-      id: ultima.cw_message_id ?? null,
+      id: ultima.source_id ?? null,
       content: texto,
       created_at: ultima.sent_at ?? null,
     },
@@ -261,8 +259,6 @@ async function abordarPelaJanela({ leadId, lead, origem, teste }) {
  * dentro de uma execução do n8n.
  */
 async function abordarPorTemplate({ leadId, lead, origem, teste }) {
-  if (!cwConfigured()) return { ok: false, motivo: 'chatwoot_nao_configurado' };
-
   const modelo = await config(CHAVE_TEMPLATE, null);
   if (!modelo?.nome) {
     return {
@@ -277,83 +273,31 @@ async function abordarPorTemplate({ leadId, lead, origem, teste }) {
   const p = montarParams(modelo, lead);
   if (p.erro) return { ok: false, motivo: 'template_incompleto', detalhe: p.erro };
 
-  const resolvido = await resolverModelo({ nome: modelo.nome, idioma: modelo.idioma, params: p.params });
+  const resolvido = await resolverModeloMeta({ nome: modelo.nome, idioma: modelo.idioma, params: p.params });
   if (resolvido?.error) return { ok: false, motivo: resolvido.error, detalhe: resolvido.variavel || null };
 
   if (teste) {
     return { ok: true, teste: true, porta: 'template', modelo: modelo.nome, texto: resolvido.texto };
   }
 
-  // A conversa pode não existir: lead de formulário nunca escreveu.
-  let conversationId = null;
-  let contactId = null;
-  let inboxId = resolvido.inboxId || defaultInboxId();
-  try {
-    const rows = await rest(
-      `qs_wa_threads?select=cw_conversation_id,cw_contact_id,cw_inbox_id` +
-      `&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
-    );
-    conversationId = rows?.[0]?.cw_conversation_id ?? null;
-    contactId = rows?.[0]?.cw_contact_id ?? null;
-    if (rows?.[0]?.cw_inbox_id) inboxId = rows[0].cw_inbox_id;
-  } catch { /* sem thread ainda é o normal aqui */ }
-
-  if (!conversationId) {
-    try {
-      // A inbox do template MANDA: o template foi aprovado num número
-      // específico. Mandar por outro é 422 na hora.
-      const r = await ensureConversation(lead, resolvido.inboxId || null);
-      conversationId = r?.conversation?.id ?? null;
-      contactId = r?.contact?.id ?? contactId;
-      inboxId = r?.conversation?.inbox_id ?? inboxId;
-    } catch (e) {
-      return { ok: false, motivo: 'falha_ao_abrir_conversa', detalhe: e?.message };
-    }
-  }
-  if (!conversationId) return { ok: false, motivo: 'sem_conversa' };
-
-  let sent;
-  try {
-    sent = await cw(`/conversations/${conversationId}/messages`, {
-      method: 'POST',
-      body: {
-        // O corpo aprovado, sem assinatura por cima: assinatura muda o texto e a
-        // Meta recusa. Se ela precisa se apresentar, isso mora na copy do
-        // template — que é onde a Meta consegue ler.
-        content: resolvido.texto,
-        message_type: 'outgoing',
-        private: false,
-        template_params: resolvido.templateParams,
-      },
-    });
-  } catch (e) {
-    await registrar(leadId, 'erro', resolvido.texto, `abordagem_falhou: ${e?.message || 'erro'}`);
-    return { ok: false, motivo: 'envio_falhou', detalhe: e?.message };
-  }
-
-  // ⚠️ DAQUI PRA BAIXO A MENSAGEM JÁ SAIU. O log vem ANTES da ingestão pela
-  // mesma razão do gloria-responder: é por ele que o gatilho da 0053 reconhece
-  // o eco desta mensagem e não a confunde com "humano assumiu a conversa".
-  await registrar(leadId, 'out', resolvido.texto, MOTIVO_LOG, {
-    porta: 'template', modelo: modelo.nome, origem, cw_message_id: sent?.id ?? null,
+  // Direto na Cloud API (23/09/2026 — Chatwoot fora do QS). O corpo aprovado,
+  // sem assinatura por cima: assinatura muda o texto e a Meta recusa.
+  const r = await enviarTemplate({
+    para: String(toE164BR(lead.phone) || '').replace(/\D/g, ''),
+    nome: resolvido.nome, idioma: resolvido.idioma, params: resolvido.params,
   });
-
-  try {
-    await ingestMessage({
-      leadId, conversationId, contactId, inboxId,
-      message: {
-        id: sent?.id ?? null,
-        content: resolvido.texto,
-        message_type: 1,
-        created_at: sent?.created_at ?? null,
-        sender: { name: ASSINATURA_IA },
-        source_id: sent?.source_id ?? null,
-        status: sent?.status || 'sent',
-      },
-    });
-  } catch (e) {
-    console.error('[abordagem] enviado, mas falhou ao gravar:', e?.message);
+  if (r.erro) {
+    await registrar(leadId, 'erro', resolvido.texto, `abordagem_falhou: ${r.detalhe || r.erro}`);
+    return { ok: false, motivo: 'envio_falhou', detalhe: r.detalhe || r.erro };
   }
 
-  return { ok: true, porta: 'template', modelo: modelo.nome, conversationId };
+  // ⚠️ DAQUI PRA BAIXO A MENSAGEM JÁ SAIU. O log vem ANTES da gravação da bolha:
+  // é por ele que o gatilho da 0053 reconhece esta mensagem e não a confunde
+  // com "humano assumiu a conversa".
+  await registrar(leadId, 'out', resolvido.texto, MOTIVO_LOG, {
+    porta: 'template', modelo: modelo.nome, origem, wamid: r.wamid ?? null,
+  });
+  await registrarSaida({ leadId, wamid: r.wamid, texto: resolvido.texto, remetente: ASSINATURA_IA });
+
+  return { ok: true, porta: 'template', modelo: modelo.nome, wamid: r.wamid ?? null };
 }

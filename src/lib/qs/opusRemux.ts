@@ -7,8 +7,7 @@
 // mono"). O Chrome, que é o navegador do time, só grava `audio/webm;codecs=opus`
 // pelo MediaRecorder. Resultado: todo áudio enviado pelo número oficial voltava
 // com "131053: Media upload error" e o SDR achava que a API não manda áudio.
-// Pelo número comum funcionava porque a Evolution converte com ffmpeg no meio do
-// caminho; a Meta não converte nada.
+// A Meta não converte nada.
 //
 // A SAÍDA: os dois contêineres carregam o MESMO áudio Opus. Então não é preciso
 // recodificar (nem ffmpeg, nem wasm, nem servidor) — basta tirar os pacotes Opus

@@ -9,10 +9,9 @@
 //     ligação: a Cloud API Calling caiu junto com o resto da API oficial e um
 //     botão que só sabe dar erro é pior que botão nenhum.
 //
-//   • MODO INBOX (closer, e todo mundo quando a API oficial voltar) — o envio
-//     sai pelo canal NATIVO do QS (/api/wa-send: Chatwoot → Evolution →
-//     WhatsApp), na mesma conversa do inbox, assinado no servidor. Oferece
-//     também ligar pelo NÚMERO OFICIAL (Cloud API Calling).
+//   • MODO INBOX — o envio sai pelo número oficial (/api/wa-send), na mesma
+//     conversa do inbox, assinado no servidor. Oferece também ligar pelo
+//     NÚMERO OFICIAL (Cloud API Calling).
 //
 // Cada interação é registrada em qs_whatsapp_messages nos dois modos.
 // -----------------------------------------------------------------------------
@@ -61,7 +60,7 @@ const QS_BLUE = "#0147FF";
 export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultText, onSent }: Props) {
   const { currentUser } = useQsAuth();
   // Quem fala pelo aparelho não vê envio nem ligação aqui — ver waApp.ts.
-  const { modoApp, ligarPeloCelular } = useWhatsAppApp();
+  const { modoApp } = useWhatsAppApp();
   const [text, setText] = useState(defaultText ?? "");
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [calling, setCalling] = useState(false);
@@ -130,7 +129,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
   useEffect(() => {
     // No modo aparelho não existe ligação pela Meta nesta tela — perguntar a
     // permissão seria uma consulta ao banco pra pintar um botão que nem aparece.
-    if (!open || !lead.phone || ligarPeloCelular) { setLendoPermissao(false); return; }
+    if (!open || !lead.phone || modoApp) { setLendoPermissao(false); return; }
     let vivo = true;
     setLendoPermissao(true);
     void carregarPermissao(lead.phone).then(({ permissao: p, leu }) => {
@@ -140,7 +139,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
       setLendoPermissao(false);
     });
     return () => { vivo = false; };
-  }, [open, lead.phone, ligarPeloCelular]);
+  }, [open, lead.phone, modoApp]);
 
   if (!open) return null;
 
@@ -407,7 +406,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
               API que caiu; enquanto ela estiver fora, o botão só sabe cobrar
               permissão e devolver erro. Quem precisa ligar liga do celular,
               de dentro da conversa que o botão verde acabou de abrir. */}
-          {!ligarPeloCelular && (<>
+          {!modoApp && (<>
           <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--line)" }}>
             <div className="flex items-center gap-3 px-4 py-3" style={{ background: "var(--card2)" }}>
               <span className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0" style={{ background: "rgba(18,161,138,.14)", color: "#0E7C6A" }}>

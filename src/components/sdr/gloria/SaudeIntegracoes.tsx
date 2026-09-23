@@ -3,7 +3,7 @@
 // AS PORTAS DA GLÓRIA.
 //
 // Ela depende de cinco coisas que moram fora do QS: o n8n que pensa, o n8n que
-// marca no Google, a OpenAI que ouve áudio, o Chatwoot que fala com a Meta e o
+// marca no Google, a OpenAI que ouve áudio, a Meta (número oficial) e o
 // Bitrix que recebe a reunião. Quando uma delas fecha, o sintoma é sempre o
 // mesmo — "a Glória não fez nada" — e a causa é sempre diferente.
 //
@@ -13,7 +13,7 @@
 //
 // A LISTA CARREGA SOZINHA (o que dá pra saber de graça: variável configurada,
 // última rodada da fila, últimos erros dela). BATER NA PORTA é botão, porque
-// bater tem custo: cada teste cria execução no n8n e consome API do Chatwoot.
+// bater tem custo: cada teste cria execução no n8n e consome API da Meta.
 // -----------------------------------------------------------------------------
 
 import { useState, useEffect, useCallback } from "react";
@@ -60,7 +60,8 @@ const O_QUE_QUEBRA: Record<string, string> = {
   N8N_AGENDA_SECRET: "sem isto a agenda recusa com 403",
   OPENAI_API_KEY: "sem isto áudio do cliente entra sem transcrição e ela não responde",
   BITRIX_WEBHOOK_BASE: "sem isto a reunião não vira atividade no card do Bitrix",
-  CHATWOOT_API_TOKEN: "sem isto nada sai no WhatsApp",
+  META_CALLS_TOKEN: "sem isto nada sai no WhatsApp",
+  META_PHONE_NUMBER_ID: "sem isto nada sai no WhatsApp (é o id do número oficial na Meta)",
 };
 
 function haQuantoTempo(ms: number | null): string {
@@ -73,7 +74,7 @@ function haQuantoTempo(ms: number | null): string {
 }
 
 export default function SaudeIntegracoes({ onRetrato }: { onRetrato?: (r: Retrato) => void }) {
-  // Bater na porta cria execucao no n8n e consome API do Chatwoot, entao a
+  // Bater na porta cria execucao no n8n e consome API da Meta, entao a
   // rota so aceita gestor/admin. O retrato (GET) todo mundo ve: saber que a
   // cadencia dela parou e informacao operacional, nao privilegio.
   const { currentUser } = useQsAuth();

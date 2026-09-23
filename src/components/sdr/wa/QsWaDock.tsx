@@ -1,10 +1,9 @@
 // src/components/sdr/wa/QsWaDock.tsx
 // -----------------------------------------------------------------------------
-// O cockpit de atendimento do SDR — versão NATIVA (provider "qs").
+// O cockpit de atendimento do SDR (painel lateral de WhatsApp).
 //
-// A conversa é do QS: o SDR não navega no Chatwoot, não precisa de conta lá, e
-// não tem como abrir a caixa dos colegas — o banco só entrega as conversas dos
-// leads dele (RLS das migrations 0024/0025).
+// A conversa é do QS: o SDR não tem como abrir a caixa dos colegas — o banco só
+// entrega as conversas dos leads dele (RLS das migrations 0024/0025).
 //
 // DESENHO — as duas decisões que mudam a experiência:
 //

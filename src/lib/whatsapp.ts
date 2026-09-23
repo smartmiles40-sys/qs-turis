@@ -2,8 +2,8 @@
 // -----------------------------------------------------------------------------
 // Camada de WhatsApp do front. Junta:
 //   - normalização de telefone (BR)
-//   - envio de mensagem via rota serverless /api/wa-send (canal nativo:
-//     Chatwoot → Evolution → WhatsApp — o mesmo do inbox do QS)
+//   - envio de mensagem via rota serverless /api/wa-send (número oficial da
+//     Meta — o mesmo do inbox do QS)
 //   - REGISTRO (log) de cada envio na tabela qs_whatsapp_messages
 //   - links de "clique-para-conversar" e "clique-para-ligar" (wa.me), que abrem
 //     o app/WhatsApp Web do próprio atendente (fallback que sempre funciona).
@@ -83,13 +83,11 @@ export function startWhatsAppCall(phone?: string | null): string {
   return url;
 }
 
-export type WaSendResult =
-  | { ok: true; conversationId: number | null }
-  | { ok: false; error: string };
+export type WaSendResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Envia mensagem ao lead pelo canal NATIVO (/api/wa-send: Chatwoot → Evolution),
- * o mesmo do inbox do QS. O servidor valida a posse do lead (SDR só escreve pra
+ * Envia mensagem ao lead pelo número oficial (/api/wa-send), o mesmo do inbox
+ * do QS. O servidor valida a posse do lead (SDR só escreve pra
  * lead da carteira dele), assina com o nome do usuário e grava a bolha na
  * conversa — por isso aqui só precisa de leadId + texto.
  * O log em qs_whatsapp_messages é best-effort e não bloqueia o envio.
@@ -113,16 +111,14 @@ export async function sendWhatsAppMessage(input: {
 
   let ok = false;
   let error = "Falha ao enviar";
-  let conversationId: number | null = null;
   try {
     const res = await fetch("/api/wa-send", {
       method: "POST",
       headers,
       body: JSON.stringify({ leadId: input.leadId, text: input.text }),
     });
-    const json = (await res.json()) as { ok?: boolean; conversationId?: number; error?: string };
+    const json = (await res.json()) as { ok?: boolean; error?: string };
     ok = res.ok && json.ok === true;
-    conversationId = json.conversationId ?? null;
     if (!ok) error = json.error || `Falha ao enviar (HTTP ${res.status})`;
   } catch {
     error = "Falha de rede ao chamar /api/wa-send";
@@ -137,7 +133,7 @@ export async function sendWhatsAppMessage(input: {
     error: ok ? null : error,
   });
 
-  if (ok) return { ok: true, conversationId };
+  if (ok) return { ok: true };
   return { ok: false, error };
 }
 

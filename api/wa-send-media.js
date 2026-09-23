@@ -2,35 +2,36 @@
 // -----------------------------------------------------------------------------
 // Rota serverless (Vercel): POST /api/wa-send-media
 //   { leadId, fileName, mimeType, dataBase64, caption? }
+//   (áudio sempre sai como nota de voz: OGG/Opus é o que a Meta entrega assim)
+//   { leadId, stickerUrl }   → figurinha salva da galeria
 //
-// Envia áudio (nota de voz gravada no navegador), imagem ou arquivo. Mesma trava
-// do /api/wa-send: o servidor confirma que o lead é deste usuário ANTES de tocar
-// no Chatwoot — não existe caminho pra mandar mídia pro lead de outro SDR.
+// Envia áudio (nota de voz gravada no navegador), imagem, vídeo, PDF ou
+// figurinha pelo número OFICIAL, direto na Cloud API (23/09/2026 — Chatwoot e
+// Evolution saíram do QS). Mesma trava do /api/wa-send: o servidor confirma que
+// o lead é deste usuário antes de mandar qualquer coisa.
 //
-// Por que base64 e não upload direto: o navegador não pode falar com o Chatwoot
-// (o token é server-side). O arquivo vem em JSON, vira Blob aqui e sai como
-// multipart pro Chatwoot, que repassa pra Evolution e daí pro WhatsApp.
+// O caminho do arquivo: navegador (base64) → aqui → sobe pra Meta (/media,
+// devolve um id) → manda a mensagem com esse id → guarda uma cópia no bucket
+// `wa-midia` pra bolha do QS mostrar o arquivo.
 //
 // ⚠️ Limite: a Vercel aceita ~4,5 MB de corpo, e base64 infla ~33%. Por isso o
 // teto é 3 MB de arquivo — o navegador já comprime imagem antes de mandar.
 // -----------------------------------------------------------------------------
 
 import {
-  assertCanAccessLead, getSupabaseUserId, cwConfigured, cwForm,
-  ensureConversation, defaultInboxId, motivoHumano, completeWhatsAppTask, ingestMessage,
-  inboxPermitida, assinarComoUsuario, CW_BASE, canalDaInbox, canalEhApiOficial,
-  linhaDeEnvio,
+  assertCanAccessLead, getSupabaseUserId, completeWhatsAppTask, assinarComoUsuario,
 } from './_wa.js';
-import { rest } from './_supabaseAdmin.js';
+import { subirMidiaBytes, enviarMidia } from './_meta.js';
+import { janelaAberta, registrarSaida } from './_waSaida.js';
+import { guardarMidia, rotuloDaMidia } from './_waMidia.js';
+import { pediuParaParar } from './_waOptout.js';
 import { webmParaOggBytes, ehWebm } from './_opusRemux.js';
-import { linhaParaEnviar } from './_waLinha.js';
-import { enviarArquivoPelaLinha } from './_waLinhaEnvio.js';
 
 const MAX_BYTES = 3 * 1024 * 1024;
 
 const TIPOS_OK = [
   'image/jpeg', 'image/png', 'image/webp', 'image/gif',
-  'audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/wav',
+  'audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/aac',
   'video/mp4', 'application/pdf',
 ];
 
@@ -39,34 +40,26 @@ function safeParse(s) {
 }
 
 /**
- * A Evolution decide "isso é áudio ou vídeo?" pela EXTENSÃO que aparece na URL do
- * anexo — e na tabela mime que ela usa, `.webm` é **video/webm**; a extensão de
- * áudio WebM é `.weba`. Ou seja: um áudio chamado `.webm` chegava no cliente como
- * mensagem de VÍDEO, sem imagem, num contêiner que o iPhone não abre. Era o
- * "áudio estranho".
- *
- * Com a extensão certa ela classifica como áudio, roda o ffmpeg embutido e manda
- * OGG/Opus mono com ptt — a nota de voz de verdade, com bolinha e onda.
+ * Como a Meta quer cada tipo. Ela é mais estreita que o WhatsApp do celular:
+ * imagem só JPG/PNG, WebP só como FIGURINHA, GIF só como documento.
  */
-const EXT_POR_MIME = {
-  'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a',
-  'audio/aac': 'm4a', 'audio/wav': 'wav', 'audio/webm': 'weba',
-};
-
-function nomeComExtensaoCerta(nome, mime) {
-  const ext = EXT_POR_MIME[mime];
-  if (!ext) return nome;
-  if (nome.toLowerCase().endsWith('.' + ext)) return nome;
-  const base = nome.replace(/\.[^.]+$/, '') || 'audio';
-  return `${base}.${ext}`;
+function tipoNaMeta(mime) {
+  if (mime === 'image/jpeg' || mime === 'image/png') return 'image';
+  if (mime === 'image/webp') return 'sticker';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime === 'video/mp4') return 'video';
+  return 'document';
 }
 
-/** Rótulo pra bolha não ficar vazia quando o Chatwoot ainda não devolveu a URL. */
-function rotuloDe(mime) {
-  if (mime.startsWith('audio/')) return '🎤 áudio';
-  if (mime.startsWith('image/')) return '📷 imagem';
-  if (mime.startsWith('video/')) return '🎬 vídeo';
-  return '📎 arquivo';
+/** A bolha do QS usa os tipos de sempre (image/audio/video/file). */
+function tipoDaBolha(tipoMeta) {
+  return { image: 'image', sticker: 'image', audio: 'audio', video: 'video' }[tipoMeta] || 'file';
+}
+
+/** Figurinha salva: só aceita arquivo do NOSSO bucket, senão vira proxy aberto. */
+function urlDoNossoBucket(url) {
+  const base = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+  return Boolean(base) && url.startsWith(`${base}/storage/v1/object/public/wa-midia/`);
 }
 
 export default async function handler(req, res) {
@@ -85,49 +78,27 @@ export default async function handler(req, res) {
   const mimeType = String(body.mimeType || '').toLowerCase().split(';')[0].trim();
   const caption = String(body.caption || '').trim().slice(0, 1000);
   const dataBase64 = String(body.dataBase64 || '');
-  const isVoiceMessage = body.isVoiceMessage === true || body.isVoiceMessage === 'true';
-
-  // Figurinha salva da galeria: o navegador manda só a URL (o arquivo mora no
-  // Chatwoot e o CORS impede o front de baixá-lo). O servidor busca — e SÓ do
-  // nosso Chatwoot: URL de fora é recusada, senão isto vira um proxy aberto.
   const stickerUrl = String(body.stickerUrl || '').trim();
 
   if (!leadId) return res.status(400).json({ error: 'leadId obrigatório' });
   if (!dataBase64 && !stickerUrl) return res.status(400).json({ error: 'Arquivo vazio' });
 
-  let inboxPedida = null;
-  if (body.inboxId != null && body.inboxId !== '') {
-    // Mesmo conserto do wa-send: pedido só quando o SDR escolheu de verdade.
-    inboxPedida = inboxPermitida(body.inboxId);
-    if (inboxPedida == null) {
-      return res.status(400).json({ error: 'Esse número não está liberado para envio.' });
-    }
-  }
   let bytes;
   let mimeFinal = mimeType;
 
   if (stickerUrl) {
-    if (!stickerUrl.startsWith(`${CW_BASE}/`)) {
-      return res.status(400).json({ error: 'Figurinha inválida.' });
-    }
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15_000);
+    if (!urlDoNossoBucket(stickerUrl)) return res.status(400).json({ error: 'Figurinha inválida.' });
     try {
-      const r = await fetch(stickerUrl, { signal: ctrl.signal });
+      const r = await fetch(stickerUrl, { signal: AbortSignal.timeout(15_000) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       bytes = Buffer.from(await r.arrayBuffer());
-      const tipo = String(r.headers.get('content-type') || '').split(';')[0].trim();
-      mimeFinal = TIPOS_OK.includes(tipo) ? tipo : 'image/webp';
+      mimeFinal = 'image/webp';
     } catch (e) {
       console.error('[wa-send-media] baixar figurinha:', e?.message);
       return res.status(502).json({ error: 'Não consegui baixar a figurinha salva.' });
-    } finally {
-      clearTimeout(timer);
     }
   } else {
-    if (!TIPOS_OK.includes(mimeType)) {
-      return res.status(415).json({ error: 'Tipo de arquivo não aceito.' });
-    }
+    if (!TIPOS_OK.includes(mimeType)) return res.status(415).json({ error: 'Tipo de arquivo não aceito.' });
     try {
       bytes = Buffer.from(dataBase64, 'base64');
     } catch {
@@ -136,9 +107,7 @@ export default async function handler(req, res) {
   }
 
   if (!bytes.length) return res.status(400).json({ error: 'Arquivo vazio' });
-  if (bytes.length > MAX_BYTES) {
-    return res.status(413).json({ error: 'Arquivo grande demais (máx. 3 MB).' });
-  }
+  if (bytes.length > MAX_BYTES) return res.status(413).json({ error: 'Arquivo grande demais (máx. 3 MB).' });
 
   let auth;
   try {
@@ -151,186 +120,76 @@ export default async function handler(req, res) {
     const status = auth.reason === 'lead-de-outro-sdr' ? 403 : 404;
     return res.status(status).json({ error: 'Sem acesso a este lead', motivo: auth.reason });
   }
+  const telefone = auth.lead?.phone;
+  if (!telefone) return res.status(409).json({ error: 'Este lead não tem telefone.', motivo: 'sem-telefone' });
 
-  // ── O NÚMERO DO PRÓPRIO SDR (0082) — mesma regra do wa-send ───────────────
-  if (inboxPedida == null) {
-    const propria = await linhaParaEnviar(userId);
-    if (propria?.erro) return res.status(409).json({ error: propria.erro, motivo: propria.motivo });
-    if (propria?.linha) {
-      try {
-        const ehNotaDeVoz = isVoiceMessage && mimeFinal.startsWith('audio/');
-        const ehFigurinha = mimeFinal === 'image/webp' && !caption;
-        const legenda = (ehNotaDeVoz || ehFigurinha) ? caption : await assinarComoUsuario(caption, auth.user);
-        const r = await enviarArquivoPelaLinha({
-          linha: propria.linha, lead: auth.lead, user: auth.user, bytes, mime: mimeFinal,
-          nomeArquivo: nomeComExtensaoCerta(fileName, mimeFinal), legenda, notaDeVoz: ehNotaDeVoz,
-        });
-        if (r.erro) return res.status(r.status || 409).json({ error: r.erro, motivo: r.motivo });
-        let tarefa = null;
-        try {
-          tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);
-        } catch (e) {
-          console.warn('[wa-send-media] não consegui concluir a atividade:', e?.message);
-        }
-        return res.status(200).json({ ok: true, linha: propria.linha.instancia, sourceId: r.sourceId, tarefaConcluida: tarefa });
-      } catch (e) {
-        console.error('[wa-send-media] pela linha do SDR:', e?.message, e?.body ? JSON.stringify(e.body).slice(0, 300) : '');
-        return res.status(502).json({
-          error: 'O WhatsApp não aceitou o arquivo. Confira se o seu número está conectado e tente de novo.',
-          motivo: 'evolution-falhou',
-        });
-      }
+  if (await pediuParaParar(leadId).catch(() => false)) {
+    return res.status(409).json({ error: 'Este cliente pediu para não receber mais mensagens.', motivo: 'optout' });
+  }
+  // Arquivo é mensagem livre: só dentro da janela de 24h.
+  if (!(await janelaAberta(leadId))) {
+    return res.status(409).json({
+      error: 'O cliente não fala com a gente há mais de 24h. Pelo número oficial só sai MODELO aprovado.',
+      motivo: 'fora-da-janela-24h',
+    });
+  }
+
+  // ── ÁUDIO: a Meta só aceita OGG/Opus (webm é recusado, e calado) ─────────
+  // Roda mesmo com a conversão já feita no navegador: aba aberta o dia inteiro
+  // roda código velho, e aqui não existe aba velha.
+  if (mimeFinal.startsWith('audio/') && ehWebm(bytes)) {
+    const ogg = webmParaOggBytes(bytes);
+    if (!ogg) {
+      return res.status(415).json({
+        error: 'Não consegui preparar este áudio para o WhatsApp. Grave de novo, ou mande por escrito.',
+        motivo: 'audio-webm-nao-convertido',
+      });
     }
+    bytes = ogg;
+    mimeFinal = 'audio/ogg';
   }
+  if (mimeFinal === 'audio/webm') mimeFinal = 'audio/ogg';
 
-  if (!cwConfigured()) {
-    return res.status(503).json({ error: 'Atendimento não configurado (falta CHATWOOT_AGENT_TOKEN)' });
-  }
-
-  // A linha de quem está escrevendo (0056) — mesma regra do wa-send: só entra
-  // quando o SDR não escolheu número E o cliente não falou nas últimas 24h.
-  if (inboxPedida == null) {
-    const linha = await linhaDeEnvio({ leadId, user: auth.user });
-    if (linha.inboxId != null) inboxPedida = linha.inboxId;
-  }
+  const tipo = tipoNaMeta(mimeFinal);
+  // Legenda assinada, como o texto — menos em nota de voz e figurinha, que não
+  // levam legenda nenhuma no WhatsApp.
+  const legenda = (tipo === 'audio' || tipo === 'sticker') ? null : await assinarComoUsuario(caption, auth.user);
 
   try {
-    let conversationId = null;
-    let contactId = null;
-    let inboxId = null;
-    try {
-      const rows = await rest(
-        `qs_wa_threads?select=cw_conversation_id,cw_contact_id,cw_inbox_id&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
-      );
-      conversationId = rows?.[0]?.cw_conversation_id ?? null;
-      contactId = rows?.[0]?.cw_contact_id ?? null;
-      inboxId = rows?.[0]?.cw_inbox_id ?? null;
-    } catch { /* segue pro caminho completo */ }
-
-    // Mesma regra do wa-send: pediu número específico, o atalho só vale se a
-    // conversa conhecida for daquele número.
-    if (inboxPedida != null && Number(inboxId) !== Number(inboxPedida)) {
-      conversationId = null;
-      contactId = null;
-      inboxId = null;
+    const up = await subirMidiaBytes(bytes, mimeFinal, fileName);
+    if (up.erro) {
+      console.warn(`[wa-send-media] upload recusado (${up.erro}): ${up.detalhe || ''}`);
+      return res.status(502).json({ error: up.detalhe || 'A Meta não aceitou o arquivo.', motivo: up.erro });
     }
-
-    if (!conversationId) {
-      const r = await ensureConversation(auth.lead, inboxPedida);
-      if (r.error) return res.status(409).json({ error: motivoHumano(r.error), motivo: r.error });
-      conversationId = r.conversation.id;
-      contactId = r.contact.id;
-      inboxId = r.conversation.inbox_id ?? inboxPedida ?? defaultInboxId();
-    }
-
-    // ── ÁUDIO: garantir OGG antes de sair ─────────────────────────────────
-    // A Meta recusa webm ("131053: Media upload error") e a recusa dela é
-    // CALADA pro SDR: a bolha aparece na tela do QS do mesmo jeito. Em 18/08,
-    // 7 de 9 áudios do dia morreram assim.
-    //
-    // Isto roda mesmo com a conversão já feita no navegador, e de propósito: a
-    // aba do QS fica aberta o dia inteiro, e aba velha roda código velho. Aqui
-    // não existe aba velha. Quando o navegador já mandou ogg, `ehWebm` é falso
-    // e nada acontece.
-    const ehAudio = mimeFinal.startsWith('audio/');
-    if (ehAudio && ehWebm(bytes)) {
-      const ogg = webmParaOggBytes(bytes);
-      if (ogg) {
-        console.log(`[wa-send-media] áudio convertido webm→ogg (${bytes.length}→${ogg.length} bytes)`);
-        bytes = ogg;
-        mimeFinal = 'audio/ogg';
-      } else {
-        // Não deu pra converter. Pelo número comum seguimos: a Evolution tem
-        // ffmpeg no caminho e resolve. Pelo oficial, mandar seria enganar o
-        // SDR — a Meta vai recusar e ele vai achar que o cliente ouviu.
-        let oficial = false;
-        try {
-          oficial = canalEhApiOficial(await canalDaInbox(inboxId));
-        } catch (e) {
-          console.warn('[wa-send-media] não consegui saber o canal da caixa:', e?.message);
-        }
-        if (oficial) {
-          return res.status(415).json({
-            error: 'Não consegui preparar este áudio para o número oficial. Grave de novo, ou mande por escrito.',
-            motivo: 'audio-webm-nao-convertido',
-          });
-        }
-        console.warn('[wa-send-media] áudio segue em webm (caixa não é a oficial)');
+    const r = await enviarMidia({ para: telefone, tipo, mediaId: up.id, legenda, nomeArquivo: fileName });
+    if (r.erro) {
+      console.warn(`[wa-send-media] a Meta recusou (${r.erro}${r.codigo ? ' ' + r.codigo : ''}): ${r.detalhe || ''}`);
+      if (r.codigo === 131047) {
+        return res.status(409).json({ error: 'A janela de 24h está fechada. Use um modelo aprovado.', motivo: 'fora-da-janela-24h' });
       }
+      return res.status(502).json({ error: r.detalhe || 'A Meta não aceitou o arquivo.', motivo: r.erro, codigo: r.codigo });
     }
 
-    // Legenda assinada, mesma regra do texto. Duas exceções:
-    // - NOTA DE VOZ: o WhatsApp nem mostra legenda, e o nome sozinho viraria
-    //   uma bolha de texto solta antes do áudio.
-    // - FIGURINHA (webp sem legenda): sticker não carrega texto — a assinatura
-    //   entraria como legenda (assinarTexto('') devolve `*Nome*`) e forçaria o
-    //   envio como imagem comum em vez de figurinha.
-    const ehNotaDeVoz = isVoiceMessage && mimeFinal.startsWith('audio/');
-    const ehFigurinha = mimeFinal === 'image/webp' && !caption;
-    const captionFinal = (ehNotaDeVoz || ehFigurinha)
-      ? caption
-      : await assinarComoUsuario(caption, auth.user);
-
-    const form = new FormData();
-    form.append('message_type', 'outgoing');
-    form.append('private', 'false');
-    if (captionFinal) form.append('content', captionFinal);
-    // Marca a bolha como nota de voz no Chatwoot (player com onda em vez de
-    // "arquivo"). Quem manda no WhatsApp é o formato — isto é só a UI de lá.
-    if (isVoiceMessage && mimeFinal.startsWith('audio/')) {
-      form.append('is_voice_message', 'true');
-    }
-    form.append(
-      'attachments[]',
-      new Blob([bytes], { type: mimeFinal }),
-      nomeComExtensaoCerta(fileName, mimeFinal)
-    );
-
-    const sent = await cwForm(`/conversations/${conversationId}/messages`, form);
-
-    // ⚠️ DAQUI PRA BAIXO O ARQUIVO JÁ SAIU PRO CLIENTE.
-    // Nada aqui pode virar "não consegui enviar" — o SDR reenviaria e o cliente
-    // receberia o mesmo áudio duas vezes. Falha de gravação é problema nosso.
-    const anexos = Array.isArray(sent?.attachments) ? sent.attachments : [];
-    const temUrl = anexos.some((a) => a.data_url || a.thumb_url);
+    // ⚠️ DAQUI PRA BAIXO O ARQUIVO JÁ SAIU PRO CLIENTE: nada pode virar erro.
+    const url = await guardarMidia(bytes, mimeFinal, { leadId, nomeArquivo: fileName }).catch(() => null);
+    const bolha = tipoDaBolha(tipo);
+    await registrarSaida({
+      leadId,
+      wamid: r.wamid,
+      texto: legenda || (url ? '' : rotuloDaMidia(bolha)),
+      anexos: url ? [{ type: bolha, url }] : [],
+      remetente: auth.user?.name || null,
+    });
 
     let tarefa = null;
-    try {
-      await ingestMessage({
-        leadId,
-        conversationId,
-        contactId,
-        inboxId,
-        message: {
-          id: sent?.id ?? null,
-          content: captionFinal || (temUrl ? '' : rotuloDe(mimeFinal)),
-          message_type: 1,
-          created_at: sent?.created_at ?? null,
-          attachments: anexos,
-          sender: { name: auth.user?.name || null },
-          // O id no WhatsApp costuma chegar só no message_updated do webhook,
-          // mas quando o Chatwoot já devolve, aproveita.
-          source_id: sent?.source_id ?? null,
-        },
-      });
-    } catch (e) {
-      console.error('[wa-send-media] enviado, mas falhou ao gravar no QS:', e?.message);
-    }
-
-    // Fora do try acima pelo mesmo motivo do wa-send: falha ao gravar a bolha
-    // não pode deixar a atividade aberta depois do cliente já ter sido atendido.
     try {
       tarefa = await completeWhatsAppTask(leadId, auth.lead?.owner_id ?? null);
     } catch (e) {
       console.warn('[wa-send-media] não consegui concluir a atividade:', e?.message);
     }
-
-    return res.status(200).json({ ok: true, conversationId, messageId: sent?.id ?? null, tarefaConcluida: tarefa });
+    return res.status(200).json({ ok: true, wamid: r.wamid, tarefaConcluida: tarefa });
   } catch (e) {
     console.error('[wa-send-media]', e?.message);
-    if (e?.status === 401 || e?.status === 403) {
-      return res.status(503).json({ error: 'O atendimento recusou o token (CHATWOOT_AGENT_TOKEN).' });
-    }
     return res.status(502).json({ error: 'Não consegui enviar o arquivo. Tente de novo.' });
   }
 }

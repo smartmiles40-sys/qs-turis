@@ -8,7 +8,7 @@
 // alguém burlar, e o realtime do Supabase respeita a mesma regra.
 //
 // A escrita (enviar mensagem) NÃO passa por aqui direto: vai pelo /api/wa-send,
-// que revalida a posse do lead no servidor antes de falar com o Chatwoot.
+// que revalida a posse do lead no servidor antes de falar com a Meta.
 // -----------------------------------------------------------------------------
 
 import { supabase } from "@/lib/supabase";
@@ -24,7 +24,6 @@ export interface WaReacao {
 export interface WaMessage {
   id: string;
   lead_id: string;
-  cw_message_id: number | null;
   direction: "in" | "out";
   content: string | null;
   attachments: { type: string; url: string }[];
@@ -46,9 +45,6 @@ export interface WaMessage {
   reply_preview?: string | null;
   /** Texto do áudio (migration 0051). Só existe depois que alguém transcreve. */
   transcricao?: string | null;
-  /** Por qual dos NOSSOS números esta mensagem passou (0056). Nulo em mensagem
-   *  antiga — e nulo vira "sem selo", que é honesto. */
-  cw_inbox_id?: number | null;
 }
 
 export interface WaThreadLead {
@@ -62,8 +58,6 @@ export interface WaThreadLead {
 
 export interface WaThread {
   lead_id: string;
-  cw_conversation_id: number | null;
-  cw_inbox_id: number | null;
   last_message: string | null;
   last_direction: "in" | "out" | null;
   last_at: string | null;
@@ -136,96 +130,8 @@ export async function togglePin(leadId: string): Promise<boolean | null> {
   return Boolean(data);
 }
 
-// ── Rótulo de cada número (normal x API oficial) ────────────────────────────
-//
-// O tipo é DERIVADO do canal que o Chatwoot informa, não digitado à mão. Antes
-// dependia só de qs_settings.wa_inbox_labels — e como esse registro nunca foi
-// preenchido, `inboxTag` devolvia null para TODAS as conversas e o selo nunca
-// apareceu pra ninguém, em nenhuma das 566 conversas da base.
-//
-// O canal é um sinal confiável e automático:
-//   Channel::Whatsapp → API oficial da Meta (Cloud API / 360dialog)
-//   Channel::Api      → número comum, via Evolution (Baileys/QR)
-//
-// A configuração manual continua existindo e VENCE quando preenchida: serve pra
-// dar um nome humano ("Comercial", "Pós-venda") a cada número. O que ela deixa
-// de fazer é ser condição pro selo existir.
-
-export interface InboxLabel { nome: string; tipo: "normal" | "api"; telefone?: string | null }
-export type InboxLabels = Record<string, InboxLabel>;
-
-/** "+551148636051" → "11 4863-6051" (o que o SDR reconhece de bater o olho). */
-export function numeroCurto(tel: string | null | undefined): string | null {
-  const d = String(tel || "").replace(/\D/g, "");
-  if (d.length < 10) return null;
-  const sem55 = d.startsWith("55") ? d.slice(2) : d;
-  const ddd = sem55.slice(0, 2);
-  const resto = sem55.slice(2);
-  if (resto.length < 8) return null;
-  return `${ddd} ${resto.slice(0, resto.length - 4)}-${resto.slice(-4)}`;
-}
-
-export const WA_INBOX_LABELS_KEY = "wa_inbox_labels";
-
-/** Canal do Chatwoot → é número oficial da Meta? */
-export function canalEhApiOficial(canal: string | null | undefined): boolean {
-  return String(canal || "").toLowerCase().includes("whatsapp");
-}
-
-export async function getInboxLabels(): Promise<InboxLabels> {
-  // Base automática: uma entrada por caixa que existe de verdade no Chatwoot.
-  const auto: InboxLabels = {};
-  try {
-    const cfg = await buscarConfig();
-    for (const i of cfg.inboxes) {
-      auto[String(i.id)] = {
-        nome: i.nome,
-        tipo: canalEhApiOficial(i.canal) ? "api" : "normal",
-        telefone: i.telefone ?? null,
-      };
-    }
-  } catch { /* sem config, segue só com o que estiver salvo à mão */ }
-
-  // Ajuste manual por cima (só o que foi realmente preenchido).
-  try {
-    const { getSetting } = await import("@/lib/qsSettings");
-    const v = await getSetting<InboxLabels>(WA_INBOX_LABELS_KEY);
-    if (v && typeof v === "object") {
-      for (const [id, l] of Object.entries(v)) {
-        if (!l) continue;
-        auto[id] = {
-          nome: l.nome || auto[id]?.nome || `Caixa ${id}`,
-          tipo: l.tipo === "api" || l.tipo === "normal" ? l.tipo : (auto[id]?.tipo ?? "normal"),
-          // O telefone vem do Chatwoot, não do ajuste manual — o ajuste é só
-          // pra dar nome humano à caixa.
-          telefone: auto[id]?.telefone ?? null,
-        };
-      }
-    }
-  } catch { /* segue com a base automática */ }
-
-  return auto;
-}
-
-/** Um número disponível pra enviar, já com o rótulo que o SDR entende. */
-export interface WaNumero {
-  id: number;
-  nome: string;
-  tipo: "normal" | "api";
-  canal: string;
-  /** O telefone da caixa, quando o Chatwoot informa. */
-  telefone: string | null;
-  /** O mesmo telefone já legível: "11 4863-6051". */
-  numero: string | null;
-  /** É por este que sai quando o SDR não escolhe nada. */
-  padrao: boolean;
-  /** É a linha DESTE usuário (papel/exceção, 0056) — "seu número" na tela. */
-  minha: boolean;
-}
-
 /** Template aprovado na Meta (número oficial) — vem pronto do /api/wa-config. */
 export interface WaModelo {
-  inboxId: number;
   nome: string;
   idioma: string;
   categoria: string;
@@ -238,31 +144,24 @@ export interface WaModelo {
 
 interface WaConfigBruta {
   respostas: CannedResponse[];
-  inboxes: { id: number; nome: string; canal: string; telefone?: string | null }[];
   modelos: WaModelo[];
-  padrao: number | null;
-  /** A linha DESTE usuario (0056). null = ninguem configurou o mapa ainda. */
-  minhaLinha: number | null;
 }
 
-// Uma promessa só, compartilhada: o painel pede atalhos e números ao mesmo
+// Uma promessa só, compartilhada: o painel pede atalhos e modelos ao mesmo
 // tempo, e sem isso seriam duas chamadas concorrentes pro mesmo endpoint.
 let configPromise: Promise<WaConfigBruta> | null = null;
 
 function buscarConfig(force = false): Promise<WaConfigBruta> {
   if (configPromise && !force) return configPromise;
   configPromise = (async () => {
-    const vazio: WaConfigBruta = { respostas: [], inboxes: [], modelos: [], padrao: null, minhaLinha: null };
+    const vazio: WaConfigBruta = { respostas: [], modelos: [] };
     try {
       const res = await fetch("/api/wa-config", { headers: await authHeaders() });
       if (!res.ok) return vazio;
       const d = await res.json();
       return {
         respostas: Array.isArray(d?.respostas) ? d.respostas : [],
-        inboxes: Array.isArray(d?.inboxes) ? d.inboxes : [],
         modelos: Array.isArray(d?.modelos) ? d.modelos : [],
-        padrao: d?.padrao ?? null,
-        minhaLinha: d?.minhaLinha ?? null,
       };
     } catch {
       configPromise = null;   // deixa tentar de novo na próxima
@@ -270,33 +169,6 @@ function buscarConfig(force = false): Promise<WaConfigBruta> {
     }
   })();
   return configPromise;
-}
-
-/**
- * Quais números estão REALMENTE disponíveis pra enviar. Vem do Chatwoot (só
- * existe caixa se o número estiver conectado) e é enfeitado com os rótulos de
- * Config → Atendimento. Por isso o número da API oficial aparece sozinho no
- * seletor no dia em que você conectar — e some se for removido.
- */
-export async function listWaNumeros(force = false): Promise<WaNumero[]> {
-  const [cfg, labels] = await Promise.all([buscarConfig(force), getInboxLabels()]);
-  const padraoId = Number(cfg.padrao);
-  const minhaId = cfg.minhaLinha == null ? null : Number(cfg.minhaLinha);
-  return cfg.inboxes.map((i) => {
-    const l = labels[String(i.id)];
-    return {
-      id: i.id,
-      nome: l?.nome || i.nome,
-      // Sem ajuste manual, o tipo vem do canal do Chatwoot — não do padrão
-      // "normal", que marcaria o número oficial como comum.
-      tipo: l?.tipo ?? (canalEhApiOficial(i.canal) ? "api" : "normal"),
-      canal: i.canal,
-      telefone: i.telefone ?? null,
-      numero: numeroCurto(i.telefone),
-      padrao: i.id === padraoId,
-      minha: minhaId != null && i.id === minhaId,
-    };
-  });
 }
 
 /** Templates aprovados da Meta (vazio se o número oficial não está ligado). */
@@ -369,103 +241,6 @@ export async function excluirModeloNaMeta(nome: string): Promise<{ ok: boolean; 
   }
 }
 
-// ── AS LINHAS DO TIME (0056) ────────────────────────────────────────────────
-// Quem fala por qual número, e se aquele número está de fato no ar. Só
-// admin/gestor: o QR code de um número é a chave dele — quem vê, pareia.
-
-export const WA_CAIXAS_KEY = "wa_caixas";
-
-/** O mapa que fica em qs_settings.wa_caixas. */
-export interface MapaDeLinhas {
-  /** papel → id da caixa no Chatwoot. */
-  porPapel: Record<string, number>;
-  /** uuid do usuário → id da caixa. Vence o papel. */
-  porUsuario: Record<string, number>;
-  /** id da caixa → nome da instância na Evolution. */
-  instancias: Record<string, string>;
-}
-
-export interface CaixaDaLinha {
-  id: number;
-  nome: string;
-  canal: string;
-  telefone: string | null;
-  tipo: "oficial" | "comum";
-  /** Nome da instância na Evolution (null na caixa oficial: ela é da Meta). */
-  instancia: string | null;
-  /** A instância mapeada existe mesmo na Evolution? (null quando é a oficial) */
-  instanciaExiste: boolean | null;
-  /** 'open' | 'close' | 'connecting' | 'sem-instancia' | 'oficial' | 'desconhecido' */
-  status: string;
-  /** O número que está pareado agora, direto do WhatsApp. */
-  numeroConectado: string | null;
-}
-
-export interface InstanciaEvolution {
-  nome: string;
-  status: string;
-  numero: string | null;
-  /** A caixa do Chatwoot que aponta pra ela, quando alguém mapeou. */
-  caixa: number | null;
-  /** Nenhuma caixa aponta pra ela — número no ar que o QS não usa. */
-  orfa: boolean;
-}
-
-export interface PainelDeLinhas {
-  caixas: CaixaDaLinha[];
-  instancias: InstanciaEvolution[];
-  mapa: MapaDeLinhas;
-  evolucao: boolean;
-  /** false = a Evolution não respondeu; diferente de "não tem instância". */
-  evolucaoRespondeu: boolean;
-}
-
-export async function carregarLinhas(): Promise<{ painel: PainelDeLinhas | null; error?: string }> {
-  try {
-    const res = await fetch("/api/wa-config?linhas=1", { headers: await authHeaders() });
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) return { painel: null, error: d?.error || "Não consegui carregar os números." };
-    return { painel: d as PainelDeLinhas };
-  } catch {
-    return { painel: null, error: "Sem conexão." };
-  }
-}
-
-export interface RespostaQr {
-  ok: boolean;
-  /** data:image/png;base64,… — o QR pra apontar o celular. */
-  base64?: string | null;
-  /** Código de pareamento por número, quando a Evolution devolve. */
-  pairingCode?: string | null;
-  jaConectada?: boolean;
-  estado?: string;
-  error?: string;
-}
-
-async function acaoDeLinha(acao: string, instancia: string): Promise<RespostaQr> {
-  try {
-    const res = await fetch("/api/wa-config", {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify({ acao, instancia }),
-    });
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) return { ok: false, error: d?.error || "A Evolution não respondeu." };
-    return { ok: true, ...d };
-  } catch {
-    return { ok: false, error: "Sem conexão." };
-  }
-}
-
-/** Pede o QR pra parear o número. Já conectado, devolve `jaConectada`. */
-export const pedirQrCode = (instancia: string) => acaoDeLinha("conectar", instancia);
-/** Só pra conferir se o pareamento pegou — usado pelo relógio da tela do QR. */
-export const estadoDaLinha = (instancia: string) => acaoDeLinha("estado", instancia);
-/** Desloga o número. É o que se faz pra TROCAR o chip/aparelho de uma linha. */
-export const desconectarLinha = (instancia: string) => acaoDeLinha("desconectar", instancia);
-/** Primeira coisa a tentar quando a instância trava em `connecting`. */
-export const reiniciarLinha = (instancia: string) => acaoDeLinha("reiniciar", instancia);
-
 /** O corpo do modelo com as variáveis preenchidas (pré-visualização do envio). */
 export function previewModelo(m: WaModelo, valores: Record<string, string>): string {
   return m.corpo.replace(/{{\s*([^}]+?)\s*}}/g, (todo, chave) => {
@@ -492,19 +267,6 @@ export function humanizarJanela(msRestante: number): string {
   const min = Math.max(0, Math.floor(msRestante / 60_000));
   if (min < 60) return `${min}min`;
   return `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}min`;
-}
-
-export function inboxTag(labels: InboxLabels, inboxId: number | null | undefined) {
-  if (inboxId == null) return null;
-  const l = labels[String(inboxId)];
-  if (!l) return null;
-  return {
-    nome: l.nome,
-    tipo: l.tipo,
-    ehApi: l.tipo === "api",
-    telefone: l.telefone ?? null,
-    numero: numeroCurto(l.telefone),
-  };
 }
 
 // ── "Esperando resposta" ────────────────────────────────────────────────────
@@ -622,20 +384,15 @@ export async function countUnread(): Promise<number> {
   return (data ?? []).reduce((s, r) => s + ((r as { unread: number }).unread || 0), 0);
 }
 
-/**
- * Por qual dos nossos números esta conversa acontece. O SDR precisa ver isso
- * ANTES de escrever — cada conversa do Chatwoot pertence a um número só, e o
- * cliente vê a mensagem chegando daquele contato.
- */
-export async function getThreadInbox(leadId: string): Promise<{ inbox: number | null; avatar: string | null }> {
+/** Foto do cliente guardada na conversa (só as antigas têm: a Meta não manda foto). */
+export async function getThreadAvatar(leadId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from("qs_wa_threads")
     .select("*")
     .eq("lead_id", leadId)
     .maybeSingle();
-  if (error || !data) return { inbox: null, avatar: null };
-  const d = data as { cw_inbox_id?: number | null; avatar_url?: string | null };
-  return { inbox: d.cw_inbox_id ?? null, avatar: d.avatar_url ?? null };
+  if (error || !data) return null;
+  return (data as { avatar_url?: string | null }).avatar_url ?? null;
 }
 
 export async function listMessages(leadId: string, limit = 200): Promise<WaMessage[]> {
@@ -766,31 +523,6 @@ export async function authHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
-export interface WaSyncResult {
-  conversationId: number | null;
-  importadas: number;
-  motivo?: string;
-  configured?: boolean;
-}
-
-/**
- * Traz do Chatwoot o histórico que o webhook não viu (tudo que é anterior a ele).
- * Idempotente — pode chamar toda vez que abrir a conversa.
- */
-export async function syncThread(leadId: string): Promise<WaSyncResult> {
-  const vazio: WaSyncResult = { conversationId: null, importadas: 0 };
-  try {
-    const res = await fetch(`/api/wa-sync?leadId=${encodeURIComponent(leadId)}`, {
-      headers: await authHeaders(),
-    });
-    if (!res.ok) return vazio;
-    return (await res.json()) as WaSyncResult;
-  } catch (e) {
-    console.warn("[wa] syncThread:", e);
-    return vazio;
-  }
-}
-
 export interface WaSendResult {
   ok: boolean;
   error?: string;
@@ -799,7 +531,6 @@ export interface WaSendResult {
 export async function sendWaMessage(
   leadId: string,
   text: string,
-  inboxId?: number | null,
   /** Id (no QS) da mensagem que esta está respondendo — a citação do WhatsApp. */
   respondendoA?: string | null
 ): Promise<WaSendResult> {
@@ -807,7 +538,7 @@ export async function sendWaMessage(
     const res = await fetch("/api/wa-send", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ leadId, text, inboxId: inboxId ?? null, respondendoA: respondendoA ?? null }),
+      body: JSON.stringify({ leadId, text, respondendoA: respondendoA ?? null }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };
@@ -819,8 +550,8 @@ export async function sendWaMessage(
 
 /**
  * Envia um TEMPLATE aprovado da Meta (o único jeito de falar fora da janela de
- * 24h ou de abrir conversa pelo número oficial). O corpo real é resolvido no
- * servidor a partir do template do Chatwoot — daqui vão só o nome e os valores.
+ * 24h ou de abrir conversa). O corpo real é resolvido no servidor a partir do
+ * modelo da Meta — daqui vão só o nome e os valores.
  */
 export async function sendWaTemplate(
   leadId: string,
@@ -869,7 +600,7 @@ function blobParaBase64(blob: Blob): Promise<string> {
 export async function comprimirImagem(file: File, maxLado = 1600, qualidade = 0.82): Promise<Blob> {
   if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
   // WebP passa intacto: figurinha de WhatsApp É um .webp, e reencodar pra JPEG
-  // mataria a transparência e a chance de a Evolution tratá-la como figurinha.
+  // mataria a transparência e a chance de ela chegar como figurinha.
   if (file.type === "image/webp") return file;
   try {
     const bitmap = await createImageBitmap(file);
@@ -894,9 +625,7 @@ export async function sendWaMedia(
   leadId: string,
   blob: Blob,
   fileName: string,
-  caption = "",
-  isVoiceMessage = false,
-  inboxId?: number | null
+  caption = ""
 ): Promise<WaSendResult> {
   if (blob.size > MAX_MEDIA_BYTES) {
     return { ok: false, error: "Arquivo grande demais (máx. 3 MB)." };
@@ -906,10 +635,7 @@ export async function sendWaMedia(
     const res = await fetch("/api/wa-send-media", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({
-        leadId, fileName, mimeType: blob.type, dataBase64, caption, isVoiceMessage,
-        inboxId: inboxId ?? null,
-      }),
+      body: JSON.stringify({ leadId, fileName, mimeType: blob.type, dataBase64, caption }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };
@@ -952,14 +678,6 @@ export async function reagirMensagem(
 }
 
 /**
- * Apaga a mensagem no WhatsApp do CLIENTE. Aqui ela continua: o QS é o arquivo
- * da conversa, e some dele seria perder a auditoria do que foi combinado — a
- * mensagem só ganha a marca `deleted_at` (migration 0046).
- *
- * O servidor recusa mensagem do cliente e mensagem velha demais, e devolve o
- * motivo em português pra tela repassar como está.
- */
-/**
  * Guarda o texto do áudio na mensagem. A transcrição em si acontece na máquina
  * do SDR (ver transcricaoLocal.ts) — aqui só persistimos o resultado, pra quem
  * abrir a conversa depois já ler sem processar de novo.
@@ -975,10 +693,14 @@ export async function salvarTranscricao(messageId: string, texto: string): Promi
   if (error) console.warn("[wa] transcrição não pôde ser salva:", error.message);
 }
 
+/**
+ * Esconde a mensagem NOSSA da tela do QS (marca `deleted_at`). A Meta não tem
+ * "apagar para todos": o cliente continua vendo — `aviso` diz isso.
+ */
 export async function apagarMensagem(
   leadId: string,
   messageId: string
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; aviso?: string }> {
   try {
     const res = await fetch("/api/wa-react", {
       method: "POST",
@@ -986,41 +708,16 @@ export async function apagarMensagem(
       body: JSON.stringify({ leadId, messageId, acao: "apagar" }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return { ok: false, error: data?.error || "Não consegui apagar." };
-    return { ok: true };
+    if (!res.ok) return { ok: false, error: data?.error || "Não consegui esconder." };
+    return { ok: true, aviso: data?.aviso };
   } catch {
     return { ok: false, error: "Sem conexão. Tente de novo." };
   }
 }
 
-/**
- * Preenche as fotos de perfil que faltam, em lote (só gestor/admin).
- * Roda de N em N de propósito: do outro lado é um WhatsApp de verdade, e
- * rajada de consulta é o padrão que derruba número por abuso.
- */
-export async function preencherFotos(
-  quantidade = 25
-): Promise<{ ok: boolean; preenchidas: number; tentadas: number; error?: string }> {
-  try {
-    const res = await fetch(`/api/wa-sync?fotos=${quantidade}`, { headers: await authHeaders() });
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return {
-        ok: false, preenchidas: 0, tentadas: 0,
-        error: d?.error || (d?.motivo === "evolution-nao-configurada"
-          ? "A Evolution não está configurada na Vercel (faltam EVOLUTION_URL e EVOLUTION_APIKEY)."
-          : "Não consegui buscar as fotos."),
-      };
-    }
-    return { ok: true, preenchidas: d?.preenchidas ?? 0, tentadas: d?.tentadas ?? 0 };
-  } catch {
-    return { ok: false, preenchidas: 0, tentadas: 0, error: "Sem conexão. Tente de novo." };
-  }
-}
-
 // ── Figurinhas (a galeria pessoal do SDR) ───────────────────────────────────
 // `dado` é um data-url (figurinha que o SDR subiu, convertida no navegador) ou
-// a URL do Chatwoot (figurinha salva de uma conversa). A tabela tem RLS por
+// a URL do nosso bucket (figurinha salva de uma conversa). A tabela tem RLS por
 // dono — cada um enxerga só a própria galeria.
 
 export interface Figurinha { id: string; dado: string }
@@ -1060,20 +757,20 @@ export async function removerFigurinha(id: string): Promise<boolean> {
 }
 
 /** Manda uma figurinha da galeria pra conversa. */
-export async function enviarFigurinha(leadId: string, fig: Figurinha, inboxId?: number | null): Promise<WaSendResult> {
+export async function enviarFigurinha(leadId: string, fig: Figurinha): Promise<WaSendResult> {
   // Subida pelo SDR: o arquivo está no próprio dado (data-url) — vira Blob e
   // segue o caminho normal de mídia.
   if (fig.dado.startsWith("data:")) {
     const blob = await (await fetch(fig.dado)).blob();
-    return sendWaMedia(leadId, blob, "figurinha.webp", "", false, inboxId);
+    return sendWaMedia(leadId, blob, "figurinha.webp");
   }
-  // Salva de uma conversa: só temos a URL do Chatwoot, e o CORS impede o
-  // navegador de baixá-la — quem busca o arquivo é o servidor.
+  // Salva de uma conversa: só temos a URL — quem busca o arquivo é o servidor
+  // (e ele só aceita o nosso bucket wa-midia; URL antiga do Chatwoot é recusada).
   try {
     const res = await fetch("/api/wa-send-media", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ leadId, stickerUrl: fig.dado, fileName: "figurinha.webp" , inboxId: inboxId ?? null }),
+      body: JSON.stringify({ leadId, stickerUrl: fig.dado, fileName: "figurinha.webp" }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data?.error || "Não consegui enviar." };
@@ -1127,36 +824,36 @@ export async function converterParaFigurinha(file: File): Promise<{ dado?: strin
 
 export interface CannedResponse { atalho: string; texto: string }
 
-export async function listCanned(): Promise<CannedResponse[]> {
-  const cfg = await buscarConfig();
+export async function listCanned(force = false): Promise<CannedResponse[]> {
+  const cfg = await buscarConfig(force);
   return cfg.respostas;
 }
 
-/** Troca as variáveis do Chatwoot pelo dado real do lead. */
+/** Salva a lista inteira (só admin/gestor). Devolve a lista já limpa pelo servidor. */
+export async function salvarRespostasProntas(
+  respostas: CannedResponse[]
+): Promise<{ ok: boolean; respostas?: CannedResponse[]; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ acao: "respostas-salvar", respostas }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: d?.error || "Não consegui salvar." };
+    configPromise = null;   // o chat relê na próxima abertura
+    return { ok: true, respostas: Array.isArray(d?.respostas) ? d.respostas : respostas };
+  } catch {
+    return { ok: false, error: "Sem conexão." };
+  }
+}
+
+/** Troca as variáveis {{contact.name}} / {{contact.first_name}} pelo dado real do lead. */
 export function preencherCanned(texto: string, lead: { nome?: string | null }): string {
   const primeiro = (lead.nome || "").trim().split(/\s+/)[0] || "";
   return texto
     .replace(/\{\{\s*contact\.first_name\s*\}\}/gi, primeiro)
     .replace(/\{\{\s*contact\.name\s*\}\}/gi, (lead.nome || "").trim());
-}
-
-// ── Histórico completo ──────────────────────────────────────────────────────
-
-export interface WaHistoryResult { importadas: number; lidas?: number; completo?: boolean; error?: string }
-
-export async function downloadHistory(leadId: string): Promise<WaHistoryResult> {
-  try {
-    const res = await fetch("/api/wa-history", {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify({ leadId }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return { importadas: 0, error: data?.error || "Falha ao baixar." };
-    return data as WaHistoryResult;
-  } catch {
-    return { importadas: 0, error: "Sem conexão." };
-  }
 }
 
 // ── Realtime ────────────────────────────────────────────────────────────────

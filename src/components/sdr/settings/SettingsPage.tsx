@@ -8,11 +8,9 @@ import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { SIP_ENABLED_KEY, SIP_HOST_KEY, SIP_USER_KEY, SIP_PREFIX_KEY, SIP_INSTALLER_URL_KEY, SIP_RAMAIS_KEY, DEFAULT_SIP_HOST } from "@/lib/sip";
 import { getSipSharedConfig, saveSipSharedConfig, listSipLines, saveSipLine, deleteSipLine, ensureRegistered, type SipLineAdmin } from "@/lib/webphone";
 import { getAgendaEmbed, saveAgendaEmbed, buildAgendaEmbedSrc } from "@/lib/qs/agenda";
-import { getChatProvider, setChatProvider, getChatwootUrl, type ChatProvider } from "@/lib/qs/chatProvider";
 import { getWaModoApp, setWaModoApp, type WaModoApp } from "@/lib/qs/waApp";
 import { getRegua, setRegua, REGUA_PADRAO, horasHumanas, type ReguaVelocidade } from "@/lib/qs/carteiraSaude";
-import WaInboxLabels from "./WaInboxLabels";
-import LinhasDoTime from "./LinhasDoTime";
+import { listCanned, salvarRespostasProntas, type CannedResponse } from "@/lib/qs/waInbox";
 import ModelosMeta from "./ModelosMeta";
 import MensagemAutomatica from "./MensagemAutomatica";
 import LigacaoWhatsApp from "./LigacaoWhatsApp";
@@ -1473,7 +1471,7 @@ function AgendaSection() {
 //     leads já estão VINCULADOS ao Bitrix (qs_leads.bitrix_id) — se há vínculos,
 //     a integração está trazendo dados.
 // (O card do ChatApp saiu em 2026-08 junto com o BSP — o WhatsApp agora é 100%
-//  pelo canal nativo, cujo status aparece na seção Atendimento.)
+//  pelo número oficial da Meta.)
 
 function IntegracoesSection() {
   const [loading, setLoading] = useState(true);
@@ -1621,10 +1619,9 @@ function CarteiraSection() {
 
 // ── Modo aparelho: quem conversa pelo WhatsApp do celular ────────────────────
 //
-// Nasceu em 03/09, quando a API oficial caiu e cada SDR ganhou um celular. Não
-// é uma chave global de propósito: o closer atende pelo 1935, que é Evolution
-// conectada por QR e continua funcionando — virar tudo de uma vez derrubaria o
-// atendimento de quem está trabalhando bem. Ver src/lib/qs/waApp.ts.
+// Nasceu em 03/09, quando a API oficial caiu e cada SDR ganhou um celular. É
+// por papel (com exceções por pessoa), não uma chave global: dá pra deixar só
+// parte do time no aparelho. Ver src/lib/qs/waApp.ts.
 
 const PAPEIS_MODO_APP: { key: UserRole; label: string }[] = [
   { key: "sdr", label: "SDR" },
@@ -1715,11 +1712,6 @@ function ModoAparelhoCard({ users }: { users: { id: string; name: string; role: 
                 );
               })}
             </div>
-            {!c.papeis.includes("closer") && (
-              <p className="text-[11px] text-gray-400 mt-1.5 leading-snug">
-                O closer está de fora: ele atende pelo número conectado por QR (Evolution), que não depende da API da Meta.
-              </p>
-            )}
           </div>
 
           {users.length > 0 && (
@@ -1764,7 +1756,7 @@ function ModoAparelhoCard({ users }: { users: { id: string; name: string; role: 
 
       {!c.ativo && (
         <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 leading-snug">
-          Desligado: todo mundo volta a conversar por dentro do QS. Só faz sentido com a API oficial (ou a Evolution)
+          Desligado: todo mundo volta a conversar por dentro do QS. Só faz sentido com o número oficial
           de fato respondendo — senão o SDR escreve e a mensagem não sai.
         </p>
       )}
@@ -1772,27 +1764,103 @@ function ModoAparelhoCard({ users }: { users: { id: string; name: string; role: 
   );
 }
 
-// ── Atendimento (cockpit de WhatsApp: nativo × Chatwoot) ─────────────────────
+// ── Respostas prontas (/atalho no chat) ──────────────────────────────────────
+// Moravam no Chatwoot; desde 23/09/2026 ficam no QS (qs_settings.wa_respostas),
+// gravadas pelo /api/wa-config. Só admin/gestor edita.
 
-function AtendimentoSection() {
-  const [provider, setProvider] = useState<ChatProvider | null>(null);
+function RespostasProntasCard() {
+  const [lista, setLista] = useState<CannedResponse[] | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Mapa "usuário QS → id do agente no Chatwoot" (auto-atribuição da conversa
-  // ao SDR dono do lead — sprint 2026-07-24). Key: chatwoot_agent_map.
-  const [agentUsers, setAgentUsers] = useState<{ id: string; name: string; role: string }[]>([]);
-  const [agentMap, setAgentMap] = useState<Record<string, string>>({});
-  const [savingMap, setSavingMap] = useState(false);
+  useEffect(() => { void listCanned(true).then(setLista); }, []);
+
+  function mudar(i: number, patch: Partial<CannedResponse>) {
+    setLista((l) => (l ?? []).map((r, k) => (k === i ? { ...r, ...patch } : r)));
+  }
+
+  async function salvar() {
+    if (!lista) return;
+    setSaving(true);
+    const r = await salvarRespostasProntas(lista);
+    setSaving(false);
+    if (!r.ok) { notifyError(r.error || "Não foi possível salvar."); return; }
+    setLista(r.respostas ?? lista);
+    notifySuccess("Respostas prontas salvas.");
+  }
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl p-4">
+      <h3 className="text-sm font-semibold text-gray-900">Respostas prontas</h3>
+      <p className="text-xs text-gray-500 mt-1 leading-snug">
+        No chat, quem digita <b>/</b> vê esta lista e escolhe uma. Escreva <code>{"{{contact.first_name}}"}</code> onde
+        quiser o primeiro nome do cliente. Atalho sem espaço.
+      </p>
+      {lista === null ? (
+        <p className="text-sm text-gray-400 mt-3">Carregando…</p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {lista.length === 0 && <p className="text-sm text-gray-400">Nenhuma resposta pronta ainda.</p>}
+          {lista.map((r, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <div className="flex items-center shrink-0 w-36 rounded-lg border border-gray-200 px-2">
+                <span className="text-sm text-gray-400">/</span>
+                <input
+                  value={r.atalho}
+                  onChange={(e) => mudar(i, { atalho: e.target.value.replace(/\s+/g, "-") })}
+                  placeholder="atalho"
+                  maxLength={40}
+                  className="w-full py-1.5 pl-0.5 text-sm text-gray-700 focus:outline-none bg-transparent"
+                />
+              </div>
+              <textarea
+                value={r.texto}
+                onChange={(e) => mudar(i, { texto: e.target.value })}
+                placeholder="Texto da resposta"
+                rows={2}
+                className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+              />
+              <button
+                onClick={() => setLista((l) => (l ?? []).filter((_, k) => k !== i))}
+                className="shrink-0 px-2 py-1.5 text-xs font-semibold text-red-600 hover:underline"
+              >
+                Apagar
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setLista((l) => [...(l ?? []), { atalho: "", texto: "" }])}
+              className="text-sm font-semibold text-[#0147FF] hover:underline"
+            >
+              + Adicionar resposta
+            </button>
+            <button
+              onClick={() => void salvar()}
+              disabled={saving}
+              className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 transition-colors"
+            >
+              {saving ? "Salvando..." : "Salvar respostas"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Atendimento (WhatsApp) ───────────────────────────────────────────────────
+
+function AtendimentoSection() {
+  const { currentUser } = useQsAuth();
+  const ehGestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
 
   // Assinatura do SDR na mensagem (2026-07-28). Todo mundo escreve pelo mesmo
-  // token do Chatwoot, então sem isto o cliente não sabe com quem está falando.
+  // número, então sem isto o cliente não sabe com quem está falando.
   // Key: wa_signature_names { "<qs_user_id>": "Victor Hugo" } + wa_signature_enabled.
   const [signUsers, setSignUsers] = useState<{ id: string; name: string; role: string }[]>([]);
   const [signMap, setSignMap] = useState<Record<string, string>>({});
   const [signOn, setSignOn] = useState(true);
   const [savingSign, setSavingSign] = useState(false);
-
-  useEffect(() => { getChatProvider().then(setProvider); }, []);
 
   useEffect(() => {
     (async () => {
@@ -1831,110 +1899,18 @@ function AtendimentoSection() {
     }
   }
 
-  useEffect(() => {
-    (async () => {
-      const [{ data: users }, map] = await Promise.all([
-        supabase.from("qs_users").select("id, name, role").eq("is_active", true).in("role", ["sdr", "gestor", "admin"]).order("name"),
-        getSetting<Record<string, number | string>>("chatwoot_agent_map"),
-      ]);
-      setAgentUsers(((users ?? []) as { id: string; name: string; role: string }[]));
-      const m: Record<string, string> = {};
-      if (map && typeof map === "object") for (const [k, v] of Object.entries(map)) m[k] = String(v ?? "");
-      setAgentMap(m);
-    })();
-  }, []);
-
-  async function saveAgentMap() {
-    setSavingMap(true);
-    const clean: Record<string, number> = {};
-    for (const [k, v] of Object.entries(agentMap)) {
-      const n = Number(String(v).trim());
-      if (Number.isFinite(n) && n > 0) clean[k] = n;
-    }
-    const ok = await setSetting("chatwoot_agent_map", clean);
-    setSavingMap(false);
-    if (ok) notifySuccess("Mapa SDR → agente salvo. O dock passa a atribuir a conversa ao dono do lead.");
-    else notifyError("Não foi possível salvar o mapa (só admin/gestor grava configurações).");
-  }
-
-  async function choose(p: ChatProvider) {
-    if (p === provider || saving) return;
-    setSaving(true);
-    const ok = await setChatProvider(p);
-    setSaving(false);
-    const nome = p === "qs" ? "Atendimento no QS (carteira separada)" : "Chatwoot (embedado)";
-    if (ok) { setProvider(p); notifySuccess(`Cockpit de atendimento: ${nome}.`); }
-    else notifyError("Não foi possível salvar (só admin pode trocar).");
-  }
-
-  const OPTIONS: { key: ChatProvider; title: string; desc: string }[] = [
-    { key: "qs", title: "Atendimento no QS ✅", desc: "A conversa acontece dentro do QS e cada SDR só enxerga os leads da carteira dele (regra no banco, não na tela)." },
-    { key: "chatwoot", title: "Chatwoot (embedado)", desc: "Painel do Chatwoot dentro do QS, com deep-link pro lead. Atenção: todo agente enxerga a caixa inteira." },
-  ];
-
   return (
     <div className="space-y-4 max-w-2xl">
       <div>
         <h2 className="text-lg font-bold text-gray-900">Atendimento (WhatsApp)</h2>
-        <p className="text-sm text-gray-500 mt-1">Qual cockpit o SDR usa pra atender no WhatsApp. A troca é imediata (recarregar o QS pega o novo).</p>
+        <p className="text-sm text-gray-500 mt-1">
+          Todo o WhatsApp sai pelo número oficial da Meta. Aqui ficam o modo aparelho, as respostas prontas e a assinatura.
+        </p>
       </div>
 
-      {/* Vem PRIMEIRO porque manda mais: quem está no modo aparelho não usa
-          cockpit nenhum, então a escolha "QS × Chatwoot" abaixo nem se aplica. */}
       <ModoAparelhoCard users={signUsers} />
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        {OPTIONS.map((o) => {
-          const active = provider === o.key;
-          return (
-            <button
-              key={o.key}
-              onClick={() => choose(o.key)}
-              disabled={saving || provider === null}
-              className="text-left rounded-xl border p-4 transition-colors disabled:opacity-60"
-              style={active
-                ? { borderColor: "#0147FF", background: "#0147FF0d" }
-                : { borderColor: "var(--line, #E8EBF0)", background: "var(--card)" }}
-            >
-              <div className="flex items-center gap-2">
-                <span className="w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0" style={{ borderColor: active ? "#0147FF" : "#CBD5E1" }}>
-                  {active && <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#0147FF" }} />}
-                </span>
-                <span className="text-sm font-semibold text-gray-900">{o.title}</span>
-              </div>
-              <p className="text-xs text-gray-500 mt-1.5 leading-snug">{o.desc}</p>
-            </button>
-          );
-        })}
-      </div>
-
-      {provider === "qs" && <LinhasDoTime />}
-
-      {provider === "qs" && <WaInboxLabels />}
-
-      {provider === "qs" && (
-        <div className="bg-white border border-gray-100 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-gray-900">Atendimento no QS</h3>
-          <ul className="text-[11.5px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
-            <li>O SDR <b>não precisa de conta no Chatwoot</b> — ele atende sem sair do QS.</li>
-            <li>Quem enxerga a conversa é decidido pelo <b>dono do lead</b>, no banco (migration 0024). Gestor e admin veem todas.</li>
-            <li>Precisa do webhook do Chatwoot apontando pro QS — senão as mensagens novas não entram (só o histórico, ao abrir o lead).</li>
-            <li>Cada papel envia pela <b>linha dele</b> (quadro acima). Sem esse mapa preenchido, tudo sai por <code>CHATWOOT_DEFAULT_INBOX_ID</code>, como antes.</li>
-          </ul>
-        </div>
-      )}
-
-      <div className="bg-white border border-gray-100 rounded-xl p-4">
-        <h3 className="text-sm font-semibold text-gray-900">Chatwoot</h3>
-        <p className="text-xs text-gray-400 mt-0.5">
-          URL: <code className="text-gray-600">{getChatwootUrl()}</code>
-        </p>
-        <ul className="text-[11.5px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
-          <li>Só funciona acessando o QS por <b>qs.setuforeuvouviagens.com.br</b> (mesmo domínio do Chatwoot — senão o login não gruda no iframe).</li>
-          <li>O SDR faz login no Chatwoot <b>uma vez</b> dentro do painel; a sessão persiste.</li>
-          <li>Notificação/som de nova mensagem no navegador não funciona embedado (limite do browser) — use o app do Chatwoot no celular pra alertas.</li>
-        </ul>
-      </div>
+      {ehGestor && <RespostasProntasCard />}
 
       {/* Assinatura: o nome do SDR na primeira linha da mensagem */}
       <div className="bg-white border border-gray-100 rounded-xl p-4">
@@ -1979,15 +1955,6 @@ function AtendimentoSection() {
           nome diferente do cadastrado.
         </p>
 
-        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-          <p className="text-[11px] text-amber-800 leading-snug">
-            ⚠️ Se a instância da Evolution estiver com <code>signMsg: true</code>, o Chatwoot também
-            carimba um nome (o do dono do token — igual pra todos) e o cliente veria <b>duas</b>
-            assinaturas. Desligue lá: <code>POST /chatwoot/set/&lt;instancia&gt;</code> com
-            <code> "signMsg": false</code>.
-          </p>
-        </div>
-
         <button
           onClick={saveSignatures}
           disabled={savingSign}
@@ -1996,42 +1963,6 @@ function AtendimentoSection() {
         >
           {savingSign ? "Salvando..." : "Salvar assinatura"}
         </button>
-      </div>
-
-      {/* Auto-atribuição: SDR do QS → agente do Chatwoot */}
-      <div className="bg-white border border-gray-100 rounded-xl p-4">
-        <h3 className="text-sm font-semibold text-gray-900">Atribuição automática (SDR → agente do Chatwoot)</h3>
-        <p className="text-xs text-gray-500 mt-1 leading-snug">
-          Quando o dock abre a conversa de um lead, o QS atribui a conversa ao agente do Chatwoot mapeado pro
-          <b> dono do lead</b> (se ela ainda não tiver dono lá). O ID do agente aparece no Chatwoot em
-          <b> Agentes</b> (ou na URL do perfil do agente).
-        </p>
-        <div className="mt-3 space-y-2">
-          {agentUsers.length === 0 && <p className="text-sm text-gray-400">Carregando usuários…</p>}
-          {agentUsers.map((u) => (
-            <div key={u.id} className="flex items-center gap-3">
-              <span className="flex-1 text-sm text-gray-700 truncate">{u.name} <span className="text-[10.5px] text-gray-400 uppercase">({u.role})</span></span>
-              <input
-                value={agentMap[u.id] ?? ""}
-                onChange={(e) => setAgentMap({ ...agentMap, [u.id]: e.target.value })}
-                placeholder="ID do agente"
-                inputMode="numeric"
-                className="w-28 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 text-right focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
-              />
-            </div>
-          ))}
-        </div>
-        {agentUsers.length > 0 && (
-          <div className="flex justify-end mt-3">
-            <button
-              onClick={saveAgentMap}
-              disabled={savingMap}
-              className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 transition-colors"
-            >
-              {savingMap ? "Salvando..." : "Salvar mapa"}
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

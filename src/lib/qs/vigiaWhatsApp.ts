@@ -1,28 +1,17 @@
 // src/lib/qs/vigiaWhatsApp.ts
 // -----------------------------------------------------------------------------
-// A PERNA DE DENTRO DO APP do vigia dos números de WhatsApp.
+// A PERNA DE DENTRO DO APP do vigia do número oficial de WhatsApp.
 //
-// O problema que isto resolve não é "o número caiu" — isso o monitor já sabia
-// detectar. É "ninguém ficou sabendo". Em 17/08 o agendador externo parou de
-// bater na rota do vigia e o sistema ficou dois dias sem ronda nenhuma, mudo.
-// E há um caso em que o alerta por WhatsApp NUNCA vai funcionar: quando o
-// problema é justamente o servidor de WhatsApp — não há por onde mandar o
-// aviso de que não há por onde mandar.
-//
-// Por isso o aviso também entra por um canal que não depende do WhatsApp: a
-// tela do QS, que o time tem aberta o dia inteiro. E a mesma chamada que
-// pergunta "está tudo no ar?" faz o servidor rodar a ronda, então enquanto
-// houver alguém trabalhando o vigia está vivo — sem agendador, sem segredo.
-//
-// A trava de 10 minutos mora no servidor: cinco SDRs com o QS aberto não viram
-// cinco chamadas à Evolution.
+// O problema que isto resolve é "ninguém ficou sabendo": entre 02/09 e 22/09 o
+// número oficial ficou mudo e ninguém viu. O aviso entra pela tela do QS, que o
+// time tem aberta o dia inteiro, e a mesma batida mantém vivas a cadência da
+// Glória e o resumo do Bitrix — sem agendador externo.
+// (Até 23/09 também vigiava as instâncias da Evolution, que saiu do QS.)
 // -----------------------------------------------------------------------------
 
 import { supabase } from "@/lib/supabase";
 
 const INTERVALO_MS = 5 * 60_000;
-/** Falha mais velha que isto é história, não incidente. */
-const FALHA_RECENTE_MS = 20 * 60_000;
 
 /**
  * A caixa oficial (Cloud API da Meta) — o ponto cego que custou 20 dias de
@@ -37,22 +26,14 @@ export type SaudeOficial = {
   recusadasHoje?: number;
 };
 
-export type SaudeWhatsApp = {
-  caidas: string[];
-  /** Não consegui nem falar com o servidor da Evolution. */
-  semServidor: boolean;
-  verificadoEm: string | null;
-  /** Nulo quando a caixa oficial está saudável (ou quando ainda não há pulso). */
-  oficial?: SaudeOficial | null;
-};
-
-type Listener = (saude: SaudeWhatsApp | null) => void;
+/** Nulo = número oficial saudável (ou ainda sem pulso). */
+type Listener = (saude: SaudeOficial | null) => void;
 const listeners = new Set<Listener>();
 
-let ultima: SaudeWhatsApp | null = null;
+let ultima: SaudeOficial | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 
-function avisar(s: SaudeWhatsApp | null) {
+function avisar(s: SaudeOficial | null) {
   ultima = s;
   listeners.forEach((l) => {
     try { l(s); } catch { /* um listener quebrado não derruba os outros */ }
@@ -136,23 +117,13 @@ async function verificar(): Promise<void> {
     if (!r.ok) return;
     const j = await r.json();
 
-    const falha = j?.falha?.em ? Date.parse(j.falha.em) : null;
-    const semServidor = !!falha && Date.now() - falha < FALHA_RECENTE_MS;
-    const caidas: string[] = Array.isArray(j?.caidas) ? j.caidas : [];
-
-    // A caixa oficial só entra no aviso quando está comprovadamente quebrada.
-    // `ok: null` ("ainda não há pulso") NÃO vira faixa vermelha: até a 0086
-    // subir e a primeira batida chegar, não saber é o estado normal — e faixa
-    // vermelha por "não sei" é como um alarme perde a credibilidade.
-    const bruta = j?.oficial ?? null;
-    const oficial: SaudeOficial | null = bruta && bruta.ok === false ? bruta : null;
-
+    // Só acende com prova (`ok === false`). `ok: null` ("ainda não há pulso")
+    // não vira faixa vermelha: alarme por "não sei" perde a credibilidade.
     // Nada errado → null, e o aviso some sozinho quando o número volta.
-    avisar(caidas.length || semServidor || oficial
-      ? { caidas, semServidor, oficial, verificadoEm: j?.verificadoEm ?? null }
-      : null);
+    const bruta = j?.oficial ?? null;
+    avisar(bruta && bruta.ok === false ? (bruta as SaudeOficial) : null);
   } catch {
-    // Rede da SDR oscilando não é queda de WhatsApp. Silêncio é a resposta
+    // Rede da SDR oscilando não é queda do número. Silêncio é a resposta
     // certa: alerta que grita por engano é alerta que o time aprende a ignorar.
   }
 }

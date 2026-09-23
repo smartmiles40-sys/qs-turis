@@ -283,7 +283,7 @@ export type ResultadoDiscagem =
   /** `codigo` é o erro da Meta quando existe — 138006 = sem permissão de ligação. */
   | { ok: false; error: string; codigo?: number };
 
-/** Mesmo formato que wavoip.ts e webphone.ts emitem — o Painel já sabe reagir. */
+/** Mesmo formato que webphone.ts emite — o Painel já sabe reagir. */
 export interface CallEndedInfo {
   leadId: string | null;
   phone: string | null;

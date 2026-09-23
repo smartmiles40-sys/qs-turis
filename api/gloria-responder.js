@@ -5,8 +5,7 @@
 //   { lead_id, mensagens: [{ texto, delay_ms }], resumo? }
 //
 // A Glória (IA, no n8n) escreve; QUEM MANDA É O QS. De propósito: assim a
-// mensagem sai pelo mesmo número oficial do time, cai na mesma conversa do
-// Chatwoot, é gravada na thread do lead com o nome dela e aparece na tela do SDR
+// mensagem sai pelo mesmo número oficial do time (Cloud API da Meta), é gravada na thread do lead com o nome dela e aparece na tela do SDR
 // junto com o resto — em vez de existir só dentro de uma execução do n8n.
 //
 // TRÊS COISAS QUE ESTA ROTA RECUSA (e é bom que recuse):
@@ -19,21 +18,19 @@
 // 3. Mensagem repetida. Se o texto já saiu pra este lead nos últimos 10
 //    minutos, não sai de novo — é o remendo final contra execução duplicada.
 //
-// Envs: GLORIA_SECRET + CHATWOOT_* (ver _wa.js) + SUPABASE_*
+// Envs: GLORIA_SECRET + META_* (ver _meta.js) + SUPABASE_*
 // -----------------------------------------------------------------------------
 
-import {
-  cwConfigured, cw, ingestMessage, ensureConversation, defaultInboxId,
-  motivoHumano, conversaOndeOClienteFala,
-} from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
+import { enviarTexto } from './_meta.js';
+import { janelaAberta, registrarSaida } from './_waSaida.js';
 import { portaria, corpo, buscarLead, sessao, registrar, pausar, ASSINATURA_IA } from './_gloria.js';
 import { rodadaVazou } from './_vazamento.js';
 
 const MAX_BALOES = 3;
 const MAX_LEN = 900;
 // Teto do tempo total de digitação. A função tem 30s (vercel.json) e cada balão
-// ainda gasta uma ida ao Chatwoot: passar disso é a função morrer no meio, com
+// ainda gasta uma ida à Meta: passar disso é a função morrer no meio, com
 // metade da resposta entregue.
 const TETO_PAUSA_MS = 9_000;
 
@@ -78,10 +75,6 @@ export default async function handler(req, res) {
   if (!mensagens.length) return res.status(400).json({ error: 'Nada pra enviar' });
   if (mensagens.some((m) => m.texto.length > MAX_LEN)) {
     return res.status(400).json({ error: `Balão muito longo (máx. ${MAX_LEN})` });
-  }
-
-  if (!cwConfigured()) {
-    return res.status(503).json({ error: 'Atendimento não configurado (falta CHATWOOT_AGENT_TOKEN)' });
   }
 
   try {
@@ -159,76 +152,24 @@ export default async function handler(req, res) {
     //
     // O que é conferido ANTES daqui continua valendo no teste (lead existe,
     // sessão ativa, balões dentro do limite), que é o que torna o teste útil.
-    if (body.teste === true || body.teste === 'true') {
-      let janela = null;
-      let conversa = null;
-      try {
-        const t = await rest(
-          `qs_wa_threads?select=can_reply,cw_conversation_id&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
-        );
-        janela = t?.[0]?.can_reply ?? null;
-        conversa = t?.[0]?.cw_conversation_id ?? null;
-      } catch { /* sem thread ainda: o teste segue */ }
+    const aberta = await janelaAberta(leadId);
 
+    if (body.teste === true || body.teste === 'true') {
       return res.status(200).json({
         ok: true,
         teste: true,
         enviadas: 0,
         aviso: 'MODO TESTE — nada foi enviado ao cliente e nada foi gravado.',
         lead: { id: lead.id, nome: lead.first_name || lead.full_name, telefone: lead.phone },
-        janela_de_24h_aberta: janela !== false,
-        conversa_que_seria_usada: conversa,
+        janela_de_24h_aberta: aberta,
         baloes: mensagens.map((m, i) => ({ ordem: i + 1, texto: m.texto, delay_ms: m.delay_ms })),
       });
     }
 
-    // Resolve a conversa. A blindagem é a mesma do wa-send: responde onde o
-    // cliente falou por último, que sai das mensagens e não do ponteiro da
-    // thread (que já foi flagrado errado em 17/08).
-    let conversationId = null;
-    let contactId = null;
-    let inboxId = null;
-    try {
-      const rows = await rest(
-        `qs_wa_threads?select=cw_conversation_id,cw_contact_id,cw_inbox_id,can_reply` +
-        `&lead_id=eq.${encodeURIComponent(leadId)}&limit=1`
-      );
-      conversationId = rows?.[0]?.cw_conversation_id ?? null;
-      contactId = rows?.[0]?.cw_contact_id ?? null;
-      inboxId = rows?.[0]?.cw_inbox_id ?? null;
-
-      // (2) Janela de 24h fechada: a IA não dispara template. Devolve pro time.
-      if (rows?.[0]?.can_reply === false) {
-        await pausar(leadId, 'fora_da_janela_24h', 'Janela de 24h fechada — só template aprovado passa.', false);
-        return res.status(409).json({ ok: false, motivo: 'fora_da_janela_24h', enviadas: 0 });
-      }
-    } catch (e) {
-      console.warn('[gloria-responder] thread:', e?.message);
-    }
-
-    const doCliente = await conversaOndeOClienteFala(leadId);
-    if (doCliente != null && Number(doCliente) !== Number(conversationId)) {
-      try {
-        const d = await cw(`/conversations/${doCliente}`);
-        const convCerta = d?.id != null ? d : (d?.payload?.id != null ? d.payload : null);
-        if (convCerta) {
-          conversationId = convCerta.id;
-          inboxId = convCerta.inbox_id ?? inboxId;
-        }
-      } catch (e) {
-        console.warn('[gloria-responder] conversa do cliente:', e?.message);
-      }
-    }
-
-    if (!conversationId) {
-      const r = await ensureConversation(lead, null);
-      if (r.error) {
-        await registrar(leadId, 'erro', 'não consegui abrir conversa', r.error);
-        return res.status(409).json({ error: motivoHumano(r.error), motivo: r.error });
-      }
-      conversationId = r.conversation.id;
-      contactId = r.contact.id;
-      inboxId = r.conversation.inbox_id ?? defaultInboxId();
+    // (2) Janela de 24h fechada: a IA não dispara modelo. Devolve pro time.
+    if (!aberta) {
+      await pausar(leadId, 'fora_da_janela_24h', 'Janela de 24h fechada — só modelo aprovado passa.', false);
+      return res.status(409).json({ ok: false, motivo: 'fora_da_janela_24h', enviadas: 0 });
     }
 
     const enviadas = [];
@@ -259,52 +200,28 @@ export default async function handler(req, res) {
       // o balão 2 não é índice 0.
       const texto = enviadas.length === 0 ? `*Glória*\n${m.texto}` : m.texto;
 
-      let sent;
-      try {
-        sent = await cw(`/conversations/${conversationId}/messages`, {
-          method: 'POST',
-          body: { content: texto, message_type: 'outgoing', private: false },
-        });
-      } catch (e) {
+      // Direto na Cloud API (23/09/2026 — Chatwoot fora do QS).
+      const r = await enviarTexto({ para: lead.phone, texto });
+      if (r.erro) {
         // Balão que não saiu para a fila aqui: insistir nos próximos entregaria
         // a resposta pela metade e fora de ordem.
-        console.error('[gloria-responder] falha ao enviar:', e?.message);
-        await registrar(leadId, 'erro', m.texto, `envio_falhou: ${e?.message || 'erro'}`);
+        console.error(`[gloria-responder] a Meta recusou (${r.erro}${r.codigo ? ' ' + r.codigo : ''}): ${r.detalhe || ''}`);
+        await registrar(leadId, 'erro', m.texto, `envio_falhou: ${r.detalhe || r.erro}`);
         break;
       }
 
       // ⚠️ DAQUI PRA BAIXO A MENSAGEM JÁ SAIU PRO CLIENTE. Nada abaixo pode
       // virar "não enviei" — o n8n reenviaria e o cliente receberia duas vezes.
 
-      // O log ANTES da ingestão, de propósito: é ele que o gatilho da 0053 usa
-      // pra reconhecer o eco desta mensagem e não confundir com "humano
-      // assumiu". Se o webhook do Chatwoot chegar antes da nossa ingestão, o
-      // log já está lá.
-      await registrar(leadId, 'out', m.texto, 'resposta_da_ia', { ordem: i + 1, cw_message_id: sent?.id ?? null });
+      // O log ANTES da bolha, de propósito: é ele que o gatilho da 0053 usa pra
+      // reconhecer esta mensagem e não confundir com "humano assumiu".
+      await registrar(leadId, 'out', m.texto, 'resposta_da_ia', { ordem: i + 1, wamid: r.wamid ?? null });
 
-      try {
-        await ingestMessage({
-          leadId,
-          conversationId,
-          contactId,
-          inboxId,
-          message: {
-            id: sent?.id ?? null,
-            content: texto,
-            message_type: 1,
-            created_at: sent?.created_at ?? null,
-            // O nome que o gatilho da 0053 procura. Sem ele, a própria resposta
-            // da IA desligaria a IA.
-            sender: { name: ASSINATURA_IA },
-            source_id: sent?.source_id ?? null,
-            status: sent?.status || 'sent',
-          },
-        });
-      } catch (e) {
-        console.error('[gloria-responder] enviado, mas falhou ao gravar:', e?.message);
-      }
+      // O remetente é o nome que o gatilho da 0053 procura. Sem ele, a própria
+      // resposta da IA desligaria a IA.
+      await registrarSaida({ leadId, wamid: r.wamid, texto, remetente: ASSINATURA_IA });
 
-      enviadas.push({ ordem: i + 1, cw_message_id: sent?.id ?? null });
+      enviadas.push({ ordem: i + 1, wamid: r.wamid ?? null });
     }
 
     // ATÉ ONDE DA CONVERSA ESTA RESPOSTA LEU.
@@ -336,13 +253,10 @@ export default async function handler(req, res) {
       }).catch((e) => console.warn('[gloria-responder] resumo:', e?.message));
     }
 
-    return res.status(200).json({ ok: true, enviadas: enviadas.length, conversationId, mensagens: enviadas });
+    return res.status(200).json({ ok: true, enviadas: enviadas.length, mensagens: enviadas });
   } catch (e) {
     console.error('[gloria-responder]', e?.message, e?.details || '');
     await registrar(leadId, 'erro', null, e?.message || 'falha');
-    if (e?.status === 401 || e?.status === 403) {
-      return res.status(503).json({ error: 'O atendimento recusou o token (CHATWOOT_AGENT_TOKEN).' });
-    }
     return res.status(502).json({ error: 'Não consegui enviar a mensagem.' });
   }
 }

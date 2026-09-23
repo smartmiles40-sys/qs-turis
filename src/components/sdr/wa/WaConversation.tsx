@@ -4,7 +4,7 @@
 //
 // Lê as mensagens direto do Supabase (a RLS de 0024/0025 garante que só aparecem
 // as dos leads deste SDR) e escuta o realtime pra mensagem nova cair na tela sem
-// F5. Ao abrir, sincroniza com o Chatwoot pra trazer o histórico recente.
+// F5. Tudo sai pelo número oficial (Cloud API da Meta).
 //
 // Escrever manda por /api/wa-send; áudio/imagem/arquivo por /api/wa-send-media.
 // Nenhum dos dois confia no navegador: o servidor revalida a posse do lead.
@@ -14,11 +14,11 @@ import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { lazyPagina } from "@/lib/qs/lazyPagina";
 import ErroDeParte from "../ErroDeParte";
 import {
-  listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages, syncThread,
-  listCanned, preencherCanned, comprimirImagem, downloadHistory, listWaNumeros, getThreadInbox,
+  listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages,
+  listCanned, preencherCanned, comprimirImagem, getThreadAvatar,
   reagirMensagem, salvarFigurinha, enviarFigurinha, apagarMensagem,
   listWaModelos, sendWaTemplate, janelaFechaEm, humanizarJanela, salvarTranscricao,
-  type WaMessage, type CannedResponse, type WaNumero, type Figurinha, type WaReacao, type WaModelo,
+  type WaMessage, type CannedResponse, type Figurinha, type WaReacao, type WaModelo,
 } from "@/lib/qs/waInbox";
 import WaMenuContexto, { IconeMenu, PATHS, useToqueLongo, type ItemMenu, type PosMenu } from "./WaMenuContexto";
 import { confirmar } from "@/lib/qs/confirmar";
@@ -27,9 +27,7 @@ import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { loadSignatureName } from "@/lib/qs/waSignature";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { useWhatsAppApp } from "@/lib/qs/waApp";
-import { useMinhaLinha, formatarNumero, WHATSAPP_DO_SDR_LIGADO } from "@/lib/qs/waLinha";
-import MeuWhatsApp from "./MeuWhatsApp";
-import { WaAudio, WaAvatar, WaSeloNumero } from "./WaBits";
+import { WaAudio, WaAvatar } from "./WaBits";
 import { WaTexto, tamanhoEmojiSolto, waPlain } from "./waFormat";
 import { webmParaOgg } from "@/lib/qs/opusRemux";
 import { transcreverLocalmente } from "@/lib/qs/transcricaoLocal";
@@ -44,7 +42,7 @@ import {
 const WaEmojiPicker = lazyPagina(() => import("./WaEmojiPicker"));
 // Mesma regra pra galeria de figurinhas.
 const WaFigurinhas = lazyPagina(() => import("./WaFigurinhas"));
-// E pro painel de modelos da Meta (só quem atende pelo número oficial abre).
+// E pro painel de modelos da Meta.
 const WaModelos = lazyPagina(() => import("./WaModelos"));
 
 // As seis do WhatsApp — reagir de novo com a mesma troca por remoção.
@@ -88,8 +86,8 @@ interface Props {
  * O recibo do WhatsApp (✓ enviada, ✓✓ entregue, ✓✓ azul lida, ⚠ falhou).
  *
  * Só em mensagem NOSSA — no WhatsApp o recibo da mensagem do outro não existe.
- * `null` quando o banco ainda não tem a coluna (migration 0045) ou quando o
- * Chatwoot não informou: melhor nada do que inventar um estado.
+ * `null` quando o banco ainda não tem a coluna (migration 0045) ou quando a
+ * Meta não informou: melhor nada do que inventar um estado.
  *
  * O "falhou" é o que mais importa e o que menos aparece: hoje uma mensagem
  * recusada (fora da janela de 24h no número oficial, por exemplo) fica na tela
@@ -196,17 +194,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   // o lugar de ler tudo que já foi conversado — só o campo de escrever some,
   // porque o envio agora acontece no celular. Ver src/lib/qs/waApp.ts.
   const { modoApp, abrirNoApp } = useWhatsAppApp();
-  // O chip do próprio SDR conectado no QS (0082). Enquanto ele não escolher
-  // outro número no topo do chat, é por ele que tudo sai.
-  const { noAr: minhaLinhaNoAr, linha: minhaLinha } = useMinhaLinha();
-  const [conectandoMeuWa, setConectandoMeuWa] = useState(false);
   const [messages, setMessages] = useState<WaMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [semConversa, setSemConversa] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   // Nome com que este SDR assina. Quem carimba é o /api/wa-send; isto aqui é só
   // pra ele não descobrir depois, olhando a conversa do cliente.
@@ -249,19 +241,9 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   // três emojis seguidos, ou buscou "aviao", perderia o lugar a cada clique.
   const caretRef = useRef<number | null>(null);
 
-  // Por qual dos NOSSOS números esta conversa acontece. É informação, não
-  // escolha: quem decide é a conversa que já existe no Chatwoot. O SDR precisa
-  // saber disso antes de escrever, porque é o número que o cliente vê chegando.
-  const [numeros, setNumeros] = useState<WaNumero[]>([]);
-  const [inboxAtual, setInboxAtual] = useState<number | null>(null);
-  // Por qual número o SDR ESCOLHEU falar nesta conversa (null = o da conversa,
-  // ou o padrão quando ela ainda não existe). O servidor já aceitava a escolha
-  // desde sempre — o que faltava era a tela deixar escolher.
-  const [inboxEscolhida, setInboxEscolhida] = useState<number | null>(null);
-  const [trocandoNumero, setTrocandoNumero] = useState(false);
   const [avatarLead, setAvatarLead] = useState<string | null>(null);
 
-  // Modelos da Meta + o relógio da janela de 24h (só valem no número oficial).
+  // Modelos da Meta + o relógio da janela de 24h.
   const [modelos, setModelos] = useState<WaModelo[]>([]);
   const [mostrarModelos, setMostrarModelos] = useState(false);
   const [agora, setAgora] = useState(() => Date.now());
@@ -302,21 +284,22 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     if (alvoToque.current) setMenu({ pos, m: alvoToque.current });
   }, []));
 
-  const apagar = useCallback(async (m: WaMessage) => {
+  // A Meta não tem "apagar para todos": o botão só esconde a mensagem da tela
+  // do QS (fica no banco e no .txt exportado). A tela diz isso antes do clique.
+  const esconder = useCallback(async (m: WaMessage) => {
     const ok = await confirmar({
-      titulo: "Apagar esta mensagem no WhatsApp do cliente?",
-      mensagem: "Ela some do aparelho dele e não dá pra desfazer. Aqui no QS a mensagem CONTINUA no histórico, marcada como apagada.",
-      confirmarLabel: "Apagar no WhatsApp",
+      titulo: "Esconder esta mensagem no QS?",
+      mensagem: "Some só da tela do QS — o cliente continua vendo no WhatsApp dele.",
+      confirmarLabel: "Esconder no QS",
       recusarLabel: "Manter",
     });
     if (!ok) return;
     const r = await apagarMensagem(leadId, m.id);
-    if (!r.ok) { notifyError(r.error || "Não consegui apagar."); return; }
-    // Otimista: só a marca. O conteúdo fica — o QS é o arquivo da conversa.
+    if (!r.ok) { notifyError(r.error || "Não consegui esconder."); return; }
     setMessages((prev) => prev.map((x) =>
       x.id === m.id ? { ...x, deleted_at: new Date().toISOString() } : x
     ));
-    notifySuccess("Apagada no WhatsApp do cliente. Continua aqui no histórico.");
+    notifySuccess(r.aviso || "Escondida no QS. O cliente continua vendo no WhatsApp dele.");
   }, [leadId]);
 
   const transcrever = useCallback(async (m: WaMessage) => {
@@ -391,16 +374,15 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       },
       {
         id: "apagar",
-        label: "Apagar no WhatsApp",
+        label: "Esconder no QS",
         icone: <IconeMenu d={PATHS.apagar} />,
         perigo: true,
-        // O WhatsApp só deixa apagar o que é NOSSO. Esconder é mais honesto do
-        // que oferecer e devolver erro depois do clique.
+        // Só mensagem NOSSA (o servidor recusa as do cliente).
         escondido: apagada || m.direction !== "out",
-        onClick: () => void apagar(m),
+        onClick: () => void esconder(m),
       },
     ];
-  }, [apagar, copiar, transcrever]);
+  }, [esconder, copiar, transcrever]);
 
   // Lê a permissão de ligação deste contato. Consulta ao BANCO (a foto que o
   // webhook mantém), não à Meta — a conferência de verdade acontece no clique.
@@ -456,24 +438,19 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   };
 
   useEffect(() => { listCanned().then(setCanned); }, []);
-  useEffect(() => { listWaNumeros().then(setNumeros); }, []);
   useEffect(() => { listWaModelos().then(setModelos); }, []);
   useEffect(() => { void loadSignatureName(currentUser).then(setAssinatura); }, [currentUser]);
 
-  // Carga inicial + sincronização com o Chatwoot.
+  // Carga inicial.
   useEffect(() => {
     let vivo = true;
     setLoading(true);
     setErro(null);
     setAviso(null);
-    setSemConversa(false);
     setMostrarEmojis(false);
     setMostrarFigurinhas(false);
     setMostrarModelos(false);
     setReagindoA(null);
-    // A escolha de número é por CONVERSA: trocar de lead volta pro número dela.
-    setInboxEscolhida(null);
-    setTrocandoNumero(false);
     stickToBottom.current = true;
     caretRef.current = null;
     setText(initialText || "");
@@ -483,24 +460,13 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       if (!vivo) return;
       setMessages(local);
       setLoading(false);
-
-      setSyncing(true);
-      const r = await syncThread(leadId);
-      if (!vivo) return;
-      setSyncing(false);
-      if (r.importadas > 0) await recarregar();
-      if (!r.conversationId && local.length === 0) setSemConversa(true);
       markThreadRead(leadId);
-      // Depois do sync, porque é ele que descobre/grava a caixa da conversa.
-      getThreadInbox(leadId).then((m) => {
-        if (!vivo) return;
-        setInboxAtual(m.inbox);
-        setAvatarLead(m.avatar);
-      });
+      const avatar = await getThreadAvatar(leadId);
+      if (vivo) setAvatarLead(avatar);
     })();
 
     return () => { vivo = false; };
-  }, [leadId, recarregar, initialText]);
+  }, [leadId, initialText]);
 
   // Realtime: mensagem nova (dos dois lados) entra sem recarregar — e mudança
   // numa mensagem que já está na tela (reação que chegou/saiu) atualiza a bolha.
@@ -603,7 +569,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     }
     setSending(true);
     setErro(null);
-    const r = await sendWaMessage(leadId, corpo, inboxEscolhida ?? undefined, respondendo?.id ?? null);
+    const r = await sendWaMessage(leadId, corpo, respondendo?.id ?? null);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar."); return; }
     setText("");
@@ -611,14 +577,13 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setMostrarCanned(false);
     setMostrarEmojis(false);
     caretRef.current = null;
-    setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
-  }, [text, sending, leadId, recarregar, respondendo?.id, inboxEscolhida]);
+  }, [text, sending, leadId, recarregar, respondendo?.id]);
 
-  const enviarMidia = useCallback(async (blob: Blob, nome: string, legenda = "", notaDeVoz = false) => {
-    // A janela de 24h vale pra TUDO na caixa oficial, não só texto. Sem esta
-    // barreira o áudio/foto "saía" e a Meta recusava calada.
+  const enviarMidia = useCallback(async (blob: Blob, nome: string, legenda = "") => {
+    // A janela de 24h vale pra TUDO, não só texto. Sem esta barreira o
+    // áudio/foto "saía" e a Meta recusava calada.
     if (soModeloRef.current) {
       setErro("A janela de 24h fechou — pela API oficial, mídia também não sai. Envie um modelo primeiro.");
       setMostrarModelos(true);
@@ -626,13 +591,12 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     }
     setSending(true);
     setErro(null);
-    const r = await sendWaMedia(leadId, blob, nome, legenda, notaDeVoz, inboxEscolhida ?? undefined);
+    const r = await sendWaMedia(leadId, blob, nome, legenda);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar o arquivo."); return; }
-    setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
-  }, [leadId, recarregar, inboxEscolhida]);
+  }, [leadId, recarregar]);
 
   const escolherArquivo = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -675,9 +639,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, reactions: r.reactions ?? [] } : x)));
     // Honestidade: reação que ficou só no QS não pode passar por entregue.
     if (alvo && r.entregue === false) {
-      setAviso(r.motivo === "evolution-nao-configurada"
-        ? "Reação registrada no QS. Pra ela chegar no WhatsApp do cliente, falta ligar a Evolution (Config)."
-        : "Reação registrada no QS, mas não chegou no WhatsApp do cliente.");
+      setAviso("Reação registrada no QS, mas não chegou no WhatsApp do cliente.");
       window.setTimeout(() => setAviso(null), 6000);
     }
   }, [leadId, currentUser?.id]);
@@ -701,10 +663,9 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       setSending(false);
       return;
     }
-    const r = await enviarFigurinha(leadId, fig, inboxEscolhida ?? undefined);
+    const r = await enviarFigurinha(leadId, fig);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar a figurinha."); return; }
-    setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
   }, [leadId, recarregar]);
@@ -726,9 +687,8 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       streamRef.current = stream;
 
       // OGG primeiro: é o formato que o WhatsApp entende como nota de voz. Só o
-      // Firefox grava OGG nativo; Chrome/Edge/Safari caem no WebM, e aí quem
-      // converte é o ffmpeg da Evolution (por isso a extensão certa importa —
-      // ver nomeComExtensaoCerta em api/wa-send-media.js).
+      // Firefox grava OGG nativo; Chrome/Edge/Safari caem no WebM, que é
+      // reembalado em OGG logo abaixo.
       const preferidos = ["audio/ogg;codecs=opus", "audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
       const mime = preferidos.find((t) => MediaRecorder.isTypeSupported?.(t));
       const mr = new MediaRecorder(stream, {
@@ -760,16 +720,14 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         // todo áudio pelo número oficial). A lista dela é aac/amr/mp3/m4a/ogg —
         // e o Chrome só grava webm. Como os dois contêineres carregam o MESMO
         // Opus, trocamos a embalagem sem recodificar. Falhou a troca? Segue com
-        // o original: pelo número comum a Evolution converte e funciona igual.
+        // o original e o servidor tenta converter.
         if (tipo.includes("webm")) {
           const ogg = await webmParaOgg(blob);
           if (ogg) { blob = ogg; tipo = "audio/ogg"; }
         }
 
-        // ".weba" (e não ".webm") é o que faz a Evolution tratar como ÁUDIO e
-        // converter pra nota de voz. O servidor reforça isso de qualquer jeito.
         const ext = tipo.includes("ogg") ? "ogg" : tipo.includes("mp4") ? "m4a" : "weba";
-        await enviarMidia(blob, `audio-${Date.now()}.${ext}`, "", true);
+        await enviarMidia(blob, `audio-${Date.now()}.${ext}`);
       };
 
       recorderRef.current = mr;
@@ -794,44 +752,10 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     return canned.filter((c) => !q || c.atalho.toLowerCase().includes(q)).slice(0, 6);
   }, [canned, text, mostrarCanned]);
 
-  // Qual dos nossos números atende esta conversa. Sem conversa ainda, mostra por
-  // onde ela VAI sair (o padrão do servidor) — é a mesma pergunta do SDR.
-  // O número do SDR como uma opção da lista (id -1: não é caixa do Chatwoot).
-  const numeroDoSdr = useMemo<WaNumero | null>(() => (minhaLinhaNoAr ? {
-    id: -1, nome: "seu WhatsApp", tipo: "normal", canal: "evolution",
-    telefone: minhaLinha?.numero ?? null, numero: formatarNumero(minhaLinha?.numero) || null,
-    padrao: true, minha: true,
-  } : null), [minhaLinhaNoAr, minhaLinha?.numero]);
-  const pelaMinhaLinha = numeroDoSdr != null && inboxEscolhida == null;
-  const opcoesDeNumero = useMemo(
-    () => (numeroDoSdr ? [numeroDoSdr, ...numeros] : numeros),
-    [numeroDoSdr, numeros],
-  );
-
-  const numeroDaConversa = useMemo(() => {
-    if (pelaMinhaLinha) return numeroDoSdr;
-    if (!numeros.length) return null;
-    // A escolha do SDR vence; depois o número da conversa; por último o padrão.
-    if (inboxEscolhida != null) {
-      return numeros.find((n) => n.id === inboxEscolhida) ?? null;
-    }
-    if (inboxAtual != null) {
-      return numeros.find((n) => n.id === inboxAtual) ?? null;
-    }
-    return numeros.find((n) => n.padrao) ?? (numeros.length === 1 ? numeros[0] : null);
-  }, [numeros, inboxAtual, inboxEscolhida, pelaMinhaLinha, numeroDoSdr]);
-
-  /** Trocar de número só faz sentido com mais de um disponível. */
-  const podeTrocarNumero = opcoesDeNumero.length > 1;
-  /** A escolha diverge da conversa que já existe? Isso ABRE conversa nova lá. */
-  const numeroTrocado = !pelaMinhaLinha && inboxEscolhida != null && inboxAtual != null && inboxEscolhida !== inboxAtual;
-
-  // ── Janela de 24h (só no número oficial da Meta) ──────────────────────────
+  // ── Janela de 24h da Meta ─────────────────────────────────────────────────
   // A âncora é a ÚLTIMA mensagem que o CLIENTE mandou: é dela que a Meta conta
   // as 24h de texto livre. Sem mensagem dele, a janela nunca abriu — primeira
   // abordagem é por modelo, sempre.
-  const ehOficial = numeroDaConversa?.tipo === "api";
-
   const ultimaDoCliente = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].direction === "in") return messages[i].sent_at;
@@ -840,30 +764,21 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   }, [messages]);
 
   const janela = useMemo(() => {
-    if (!ehOficial) return null;
-    // TROCOU pro oficial numa conversa que corre em OUTRO número? A janela de
-    // lá não vale aqui: na caixa oficial esse cliente nunca abriu janela — a
-    // primeira mensagem é por modelo, sempre. Sem este corte, a última mensagem
-    // do número comum deixava o cronômetro verde e a Meta recusava o texto.
-    if (inboxEscolhida != null && inboxAtual != null && inboxEscolhida !== inboxAtual) {
-      return { estado: "nunca-abriu" as const, restante: 0 };
-    }
     const fecha = janelaFechaEm(ultimaDoCliente);
     if (!fecha) return { estado: "nunca-abriu" as const, restante: 0 };
     const restante = fecha.getTime() - agora;
     if (restante <= 0) return { estado: "fechada" as const, restante: 0 };
     return { estado: (restante < 3 * 3600_000 ? "fechando" : "aberta") as "fechando" | "aberta", restante };
-  }, [ehOficial, ultimaDoCliente, agora, inboxEscolhida, inboxAtual]);
+  }, [ultimaDoCliente, agora]);
 
-  const soModelo = janela != null && janela.estado !== "aberta" && janela.estado !== "fechando";
+  const soModelo = janela.estado !== "aberta" && janela.estado !== "fechando";
   soModeloRef.current = soModelo;
 
-  // O cronômetro só precisa de precisão de minuto — e só gira na conversa oficial.
+  // O cronômetro só precisa de precisão de minuto.
   useEffect(() => {
-    if (!ehOficial) return;
     const t = setInterval(() => setAgora(Date.now()), 30_000);
     return () => clearInterval(t);
-  }, [ehOficial]);
+  }, []);
 
   const enviarModelo = useCallback(async (m: WaModelo, valores: Record<string, string>) => {
     if (sending) return;
@@ -873,7 +788,6 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar o modelo."); return; }
     setMostrarModelos(false);
-    setSemConversa(false);
     stickToBottom.current = true;
     await recarregar();
   }, [sending, leadId, recarregar]);
@@ -937,22 +851,8 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     }
   };
 
-  const baixarTudo = useCallback(async () => {
-    setAviso("baixando histórico…");
-    const r = await downloadHistory(leadId);
-    if (r.error) { setAviso(null); setErro(r.error); return; }
-    await recarregar();
-    // `completo === false` = a função bateu no teto de segurança do servidor
-    // (~400 msgs por chamada) — o clique seguinte CONTINUA de onde parou.
-    const aindaTem = r.completo === false;
-    setAviso(r.importadas > 0
-      ? `${r.importadas} ${r.importadas > 1 ? "mensagens trazidas" : "mensagem trazida"} do histórico.${aindaTem ? " Ainda tem mais — clique de novo pra continuar." : ""}`
-      : aindaTem
-        ? "Histórico parcial — clique de novo pra continuar."
-        : "Nada novo no histórico.");
-    window.setTimeout(() => setAviso(null), aindaTem ? 7000 : 4000);
-  }, [leadId, recarregar]);
-
+  // Mensagem NOSSA escondida no QS some da tela (continua no banco e no .txt).
+  const visiveis = messages.filter((m) => !(m.deleted_at && m.direction === "out"));
   let ultimoDia = "";
 
   return (
@@ -960,17 +860,6 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
       {/* Mensagens */}
       <div ref={scrollRef} onScroll={onScroll}
            className="flex-1 min-h-0 overflow-y-auto px-3 py-3" style={{ background: "var(--bg)" }}>
-        {/* Trazer tudo que já foi conversado com este cliente */}
-        {!loading && (
-          <div className="text-center mb-3">
-            <button onClick={baixarTudo}
-                    className="wa-chip text-[11px] font-semibold px-3 py-1.5 rounded-lg"
-                    style={{ background: "transparent", color: "var(--ink3)", border: "1px solid var(--line)" }}>
-              Baixar histórico completo
-            </button>
-          </div>
-        )}
-
         {loading ? (
           // Esqueleto no formato das bolhas: carregar mostra a FORMA do
           // conteúdo, não a palavra "carregando".
@@ -981,19 +870,17 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               </div>
             ))}
           </div>
-        ) : messages.length === 0 ? (
+        ) : visiveis.length === 0 ? (
           <div className="text-center py-10 px-6">
             <p className="text-[14px] font-semibold" style={{ color: "var(--ink2)" }}>
-              {semConversa ? "Nenhuma conversa ainda" : "Sem mensagens"}
+              Nenhuma conversa ainda
             </p>
             <p className="text-[12px] mt-1.5 leading-relaxed" style={{ color: "var(--ink3)" }}>
-              {semConversa
-                ? "Mande a primeira mensagem aqui embaixo — ela abre a conversa no WhatsApp."
-                : "As mensagens aparecem aqui assim que chegarem."}
+              A primeira mensagem sai por um modelo aprovado — use o botão de modelos aqui embaixo.
             </p>
           </div>
         ) : (
-          messages.map((m, i) => {
+          visiveis.map((m, i) => {
             const dia = diaLabel(m.sent_at);
             const mostraDia = dia !== ultimoDia;
             ultimoDia = dia;
@@ -1011,7 +898,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             const reacoes = Array.isArray(m.reactions) ? m.reactions : [];
             const grupos = reacoes.length ? agruparReacoes(reacoes) : [];
 
-            const prox = messages[i + 1];
+            const prox = visiveis[i + 1];
             const fimDoBloco =
               !prox ||
               prox.direction !== m.direction ||
@@ -1101,11 +988,8 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                       </p>
                     )}
 
-                    {/* Apagada = SUMIU DO CELULAR DO CLIENTE, não daqui. O QS é
-                        o arquivo da conversa: é dele que sai a auditoria do que
-                        foi combinado, e ela não pode ter buraco. Fica a marca —
-                        o atendente precisa saber que o outro lado não vê mais
-                        essa mensagem (não dá pra cobrar algo invisível). */}
+                    {/* O cliente apagou: o texto fica aqui, com a marca — o
+                        atendente precisa saber que o outro lado não vê mais. */}
                     {m.deleted_at && (
                       <p className="flex items-center gap-1 mb-1 text-[11px] font-semibold"
                          style={{ opacity: .75, color: meu ? "var(--wa-ink)" : "var(--ink3)" }}>
@@ -1113,7 +997,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                              strokeWidth="2" strokeLinecap="round" aria-hidden>
                           <path d="M4.9 4.9 19 19M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />
                         </svg>
-                        {meu ? "apagada para o cliente" : "o cliente apagou"} · só você vê
+                        o cliente apagou · só você vê
                       </p>
                     )}
 
@@ -1218,9 +1102,6 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             );
           })
         )}
-        {syncing && (
-          <p className="text-center text-[11px] py-2" style={{ color: "var(--ink3)" }}>Buscando histórico…</p>
-        )}
         <div ref={bottomRef} />
       </div>
 
@@ -1306,65 +1187,45 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
         </ErroDeParte>
       )}
 
-      {/* De qual WhatsApp esta conversa é — informação, não escolha.
-          O cliente vê a mensagem chegando DESTE número; o SDR precisa saber
-          disso antes de escrever, e não pode trocar sem querer. */}
-      {numeroDaConversa && !gravando && (
+      {/* Faixa acima do campo: janela de 24h, ligação e assinatura. */}
+      {!gravando && (
         <div className="shrink-0 flex items-center gap-1.5 px-3 pt-2" style={{ background: "var(--card)" }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               strokeWidth="2" strokeLinecap="round" style={{ color: "var(--ink3)" }}>
-            <path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 21l2.1-5.7A8.4 8.4 0 1 1 21 11.5z" />
-          </svg>
-          <span className="text-[11px] min-w-0 truncate" style={{ color: "var(--ink3)" }}>
-            {pelaMinhaLinha ? "Sai pelo " : inboxAtual == null || inboxEscolhida != null ? "Vai sair pelo " : "Conversa pelo "}
-            <b style={{ color: "var(--ink2)" }}>{numeroDaConversa.nome}</b>
-          </span>
-          {/* A bolinha verde: nuvem = número oficial (mora na Meta), aparelho =
-              WhatsApp comum. Mostra o telefone quando o Chatwoot informa. */}
-          <WaSeloNumero
-            tipo={numeroDaConversa.tipo}
-            nome={numeroDaConversa.nome}
-            numero={numeroDaConversa.numero}
-          />
           {/* O cronômetro da janela de 24h. Verde = tranquilo; âmbar piscando =
               menos de 3h; vermelho = fechou (ou o cliente nunca respondeu) e
               texto livre a Meta recusa — daqui em diante é modelo. */}
-          {janela && (
-            <span
-              className={"shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums" +
-                (janela.estado === "fechando" ? " animate-pulse" : "")}
-              style={
-                janela.estado === "aberta"
-                  ? { background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }
-                  : janela.estado === "fechando"
-                    ? { background: "#FFF7ED", color: "#9A3412" }
-                    : { background: "#FEF2F2", color: "#B91C1C" }
-              }
-              title={
-                janela.estado === "nunca-abriu"
-                  ? "O cliente ainda não respondeu — a primeira mensagem pela API oficial sai por modelo aprovado."
-                  : janela.estado === "fechada"
-                    ? "Passaram 24h desde a última mensagem do cliente — agora só sai modelo aprovado."
-                    : "Tempo restante pra responder com texto livre (24h desde a última mensagem do cliente)."
-              }
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="2.4" strokeLinecap="round">
-                <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
-              </svg>
-              {janela.estado === "nunca-abriu" ? "só modelo"
-                : janela.estado === "fechada" ? "janela fechada"
-                : `fecha em ${humanizarJanela(janela.restante)}`}
-            </span>
-          )}
+          <span
+            className={"shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums" +
+              (janela.estado === "fechando" ? " animate-pulse" : "")}
+            style={
+              janela.estado === "aberta"
+                ? { background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }
+                : janela.estado === "fechando"
+                  ? { background: "#FFF7ED", color: "#9A3412" }
+                  : { background: "#FEF2F2", color: "#B91C1C" }
+            }
+            title={
+              janela.estado === "nunca-abriu"
+                ? "O cliente ainda não respondeu — a primeira mensagem sai por modelo aprovado."
+                : janela.estado === "fechada"
+                  ? "Passaram 24h desde a última mensagem do cliente — agora só sai modelo aprovado."
+                  : "Tempo restante pra responder com texto livre (24h desde a última mensagem do cliente)."
+            }
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2.4" strokeLinecap="round">
+              <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+            </svg>
+            {janela.estado === "nunca-abriu" ? "só modelo"
+              : janela.estado === "fechada" ? "janela fechada"
+              : `fecha em ${humanizarJanela(janela.restante)}`}
+          </span>
           {/* ── LIGAR / PEDIR PERMISSÃO ──────────────────────────────────────
               Fica COLADO no cronômetro da janela de propósito: o pedido de
               permissão só é aceito com a janela aberta, e as duas informações
-              precisam ser lidas juntas. Só na caixa oficial — ligação pela Cloud
-              API não existe no número comum. */}
+              precisam ser lidas juntas. */}
           {/* No modo aparelho não há ligação pela Cloud API nem pedido de
               permissão: quem liga é o celular do SDR, de dentro do WhatsApp. */}
-          {ehOficial && phone && !modoApp && (() => {
+          {phone && !modoApp && (() => {
             const liberado = seiDaPermissao ? permissaoVale(permissao) : true;
             const validade = validadeEmTexto(permissao);
             const pedidoRecente = !!permissao?.pedidoEm
@@ -1388,11 +1249,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             return (
               <button
                 onClick={() => void mandarPedidoDePermissao()}
-                disabled={pedindoPermissao || pedidoRecente || janela?.estado === "fechada" || janela?.estado === "nunca-abriu"}
+                disabled={pedindoPermissao || pedidoRecente || janela.estado === "fechada" || janela.estado === "nunca-abriu"}
                 className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold disabled:opacity-50"
                 style={{ background: "#FFF7ED", color: "#9A3412" }}
                 title={
-                  janela?.estado === "fechada" || janela?.estado === "nunca-abriu"
+                  janela.estado === "fechada" || janela.estado === "nunca-abriu"
                     ? "A janela de 24h está fechada — o pedido de permissão só sai com o cliente tendo escrito nas últimas 24h."
                     : pedidoRecente
                       ? "Já pedimos nas últimas 24h — a Meta só aceita um pedido por dia."
@@ -1407,20 +1268,6 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             );
           })()}
 
-          {/* TROCAR DE NÚMERO. O servidor já aceitava a escolha; faltava a tela
-              deixar escolher — e é o que o SDR pede pra abordar cliente novo
-              pelo número certo. Só aparece com mais de um número disponível. */}
-          {podeTrocarNumero && (
-            <button
-              onClick={() => setTrocandoNumero((v) => !v)}
-              className="shrink-0 text-[11px] font-semibold underline underline-offset-2"
-              style={{ color: "var(--wa)" }}
-              aria-expanded={trocandoNumero}
-              title="Escolher por qual número esta mensagem sai"
-            >
-              trocar
-            </button>
-          )}
           {/* Como o cliente vai ver quem está falando. O carimbo é feito no
               servidor no momento do envio — aqui é só o SDR saber de antemão. */}
           {assinatura && (
@@ -1428,46 +1275,6 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               · assina como <b style={{ color: "var(--ink2)" }}>{assinatura}</b>
             </span>
           )}
-        </div>
-      )}
-
-      {/* A lista de números, quando o SDR clicou em "trocar". */}
-      {trocandoNumero && podeTrocarNumero && !gravando && (
-        <div className="shrink-0 px-3 pt-2" style={{ background: "var(--card)" }}>
-          <div className="rounded-xl p-2 grid gap-1" style={{ background: "var(--card2)", border: "1px solid var(--line)" }}>
-            {opcoesDeNumero.map((n) => {
-              const ativo = numeroDaConversa?.id === n.id;
-              return (
-                <button
-                  key={n.id}
-                  onClick={() => { setInboxEscolhida(n.id === -1 ? null : n.id); setTrocandoNumero(false); }}
-                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left"
-                  style={ativo ? { background: "var(--wa-ok-bg)" } : undefined}
-                >
-                  <WaSeloNumero tipo={n.tipo} nome={n.nome} numero={n.numero} compacto />
-                  <span className="flex-1 min-w-0 truncate text-[12px]" style={{ color: "var(--ink)" }}>
-                    {n.numero || n.nome}
-                    {n.tipo === "api" && <span style={{ color: "var(--ink3)" }}> · oficial</span>}
-                    {/* "seu número" = a linha do papel de quem está logado
-                        (0056). É por ela que sai a abordagem nova — dizer isso
-                        aqui evita o closer procurar qual dos números é o dele. */}
-                    {n.minha && <span style={{ color: "var(--ink3)" }}> · seu número</span>}
-                  </span>
-                  {ativo && <span className="text-[10px] font-bold" style={{ color: "var(--wa-ok-ink)" }}>usando</span>}
-                </button>
-              );
-            })}
-            {/* Trocar de número numa conversa que já existe NÃO move a conversa:
-                abre outra, naquele número. Dizer isso antes evita a surpresa de
-                "sumiu o histórico" — ele continua aqui, na conversa de origem. */}
-            {numeroTrocado && (
-              <p className="px-2 pb-0.5 text-[11px]" style={{ color: "#9A3412" }}>
-                A conversa deste lead começou em outro número. Enviando por aqui, o cliente
-                recebe de um número novo — o histórico antigo continua nesta tela.
-                <button onClick={() => setInboxEscolhida(null)} className="ml-1 underline font-semibold">desfazer</button>
-              </p>
-            )}
-          </div>
         </div>
       )}
 
@@ -1486,14 +1293,6 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               <p className="text-[11.5px] leading-snug" style={{ color: "var(--ink2)" }}>
                 As mensagens saem do seu celular. Toque no botão pra continuar a conversa por lá.
               </p>
-              {/* O caminho de volta pro QS (0082): conectado o chip, o campo de
-                  escrever reaparece aqui e a conversa passa a ficar registrada. */}
-              {WHATSAPP_DO_SDR_LIGADO && <button onClick={() => setConectandoMeuWa(true)}
-                      className="mt-0.5 text-[11.5px] font-semibold underline underline-offset-2"
-                      style={{ color: "var(--wa)" }}>
-                {minhaLinha ? "Reconectar meu WhatsApp no QS" : "Conectar meu WhatsApp no QS"}
-              </button>}
-              {conectandoMeuWa && <MeuWhatsApp onFechar={() => setConectandoMeuWa(false)} />}
             </div>
             <button
               onClick={() => abrirNoApp({ leadId, name: leadName, phone, texto: initialText })}
@@ -1579,21 +1378,19 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                 <path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l9.2-9.2a3.67 3.67 0 1 1 5.18 5.18l-9.2 9.2a1.83 1.83 0 1 1-2.6-2.6l8.5-8.48" />
               </svg>
             </button>
-            {/* Modelos da Meta — só faz sentido na conversa do número oficial.
-                Ganha destaque quando é o ÚNICO caminho (janela fechada). */}
-            {ehOficial && (
-              <button onClick={() => setMostrarModelos((v) => !v)} disabled={sending}
-                      aria-expanded={mostrarModelos} aria-label="Modelos aprovados"
-                      title={soModelo ? "Janela de 24h fechada — enviar modelo aprovado" : "Modelos aprovados da Meta"}
-                      data-aberto={mostrarModelos || undefined}
-                      className="wa-icon-btn wa-emoji-toggle shrink-0 w-9 h-9 grid place-items-center rounded-lg"
-                      style={soModelo ? { color: "#B91C1C" } : undefined}>
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M8 3.5h8a2.5 2.5 0 0 1 2.5 2.5v12a2.5 2.5 0 0 1-2.5 2.5H8A2.5 2.5 0 0 1 5.5 18V6A2.5 2.5 0 0 1 8 3.5z" />
-                  <path d="M9 8.5h6M9 12h6M9 15.5h3.5" />
-                </svg>
-              </button>
-            )}
+            {/* Modelos da Meta — ganha destaque quando é o ÚNICO caminho
+                (janela fechada). */}
+            <button onClick={() => setMostrarModelos((v) => !v)} disabled={sending}
+                    aria-expanded={mostrarModelos} aria-label="Modelos aprovados"
+                    title={soModelo ? "Janela de 24h fechada — enviar modelo aprovado" : "Modelos aprovados da Meta"}
+                    data-aberto={mostrarModelos || undefined}
+                    className="wa-icon-btn wa-emoji-toggle shrink-0 w-9 h-9 grid place-items-center rounded-lg"
+                    style={soModelo ? { color: "#B91C1C" } : undefined}>
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 3.5h8a2.5 2.5 0 0 1 2.5 2.5v12a2.5 2.5 0 0 1-2.5 2.5H8A2.5 2.5 0 0 1 5.5 18V6A2.5 2.5 0 0 1 8 3.5z" />
+                <path d="M9 8.5h6M9 12h6M9 15.5h3.5" />
+              </svg>
+            </button>
             <button onClick={iniciarGravacao} disabled={sending}
                     title="Gravar áudio" aria-label="Gravar áudio"
                     className="wa-icon-btn shrink-0 w-9 h-9 grid place-items-center rounded-lg">

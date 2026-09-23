@@ -82,7 +82,7 @@ const MinhaAgendaPage = lazyPagina(() => import("./agenda/MinhaAgendaPage"));
 const WaPage = lazyPagina(() => import("./wa/WaPage"));
 const PipelineIAPage = lazyPagina(() => import("./gloria/PipelineIAPage"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
-import CommsDock from "./comms/CommsDock";
+import QsWaDock from "./wa/QsWaDock";
 import ErroDeParte from "./ErroDeParte";
 import AvisoDeVersao from "./AvisoDeVersao";
 import AvisoDoVigia from "./AvisoDoVigia";
@@ -768,8 +768,7 @@ export default function SdrLayout() {
       </main>
       </div>
 
-      {/* Cockpit de atendimento (nativo ou Chatwoot, pela flag chat_provider) —
-          divide a tela; montado uma única vez e persistente */}
+      {/* Painel de atendimento — divide a tela; montado uma única vez e persistente */}
       {/* Cerca: uma falha no painel de atendimento (ex.: pedaço do app que sumiu
           num deploy) NÃO pode derrubar o Painel junto — foi exatamente o que
           aconteceu e virou "as SDRs não conseguem concluir a atividade". */}
@@ -778,7 +777,7 @@ export default function SdrLayout() {
           apitar em dobro. Sair da aba remonta o dock com o estado de sempre. */}
       {activeNav !== "whatsapp" && (
         <ErroDeParte parte="o WhatsApp" modo="discreto">
-          <CommsDock onOpenLead={openLeadDetail} />
+          <QsWaDock onOpenLead={openLeadDetail} />
         </ErroDeParte>
       )}
 

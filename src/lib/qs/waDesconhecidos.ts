@@ -21,8 +21,7 @@
 // de trabalho ensinaria o time a ignorar a tela inteira.
 //
 // O CONTEÚDO da mensagem não é guardado aqui — a decisão de LGPD da 0038
-// continua valendo. A tela mostra quem, quando e por qual número; o texto está
-// no Chatwoot pra quem precisar abrir.
+// continua valendo. A tela mostra quem e quando.
 // -----------------------------------------------------------------------------
 
 import { supabase } from "@/lib/supabase";
@@ -34,18 +33,11 @@ export interface Desconhecido {
   ids: number[];
   phone: string;
   nome: string | null;
-  inboxId: number | null;
   mensagens: number;
   primeira: string;
   ultima: string;
-  /**
-   * Preenchido quando o lead JÁ existe e só a conversa nunca foi puxada. Aqui a
-   * saída não é criar lead (duplicaria a pessoa — e a base já tem 68 casos
-   * assim), é trazer a conversa.
-   */
+  /** Preenchido quando o lead JÁ existe: criar outro duplicaria a pessoa. */
   leadId: string | null;
-  /** Escreveu pro número de um SDR (0082) — o lead nasce DELE, e a conversa vem da Evolution. */
-  linhaUserId: string | null;
 }
 
 export interface ListaDesconhecidos {
@@ -58,10 +50,8 @@ interface LinhaBruta {
   id: number;
   phone: string | null;
   contato_nome: string | null;
-  inbox_id: number | null;
   created_at: string;
   lead_id: string | null;
-  linha_user_id?: string | null;
 }
 
 /**
@@ -80,12 +70,10 @@ function agrupar(linhas: LinhaBruta[]): Desconhecido[] {
         ids: [l.id],
         phone,
         nome: l.contato_nome || null,
-        inboxId: l.inbox_id ?? null,
         mensagens: 1,
         primeira: l.created_at,
         ultima: l.created_at,
         leadId: l.lead_id || null,
-        linhaUserId: l.linha_user_id || null,
       });
       continue;
     }
@@ -102,7 +90,7 @@ function agrupar(linhas: LinhaBruta[]): Desconhecido[] {
 export async function listDesconhecidos(limite = 500): Promise<ListaDesconhecidos> {
   const { data, error } = await supabase
     .from("qs_wa_descartadas")
-    .select("id, phone, contato_nome, inbox_id, created_at, lead_id, linha_user_id")
+    .select("id, phone, contato_nome, created_at, lead_id")
     .eq("situacao", "pendente")
     .eq("motivo", "sem-lead-correspondente")
     .order("created_at", { ascending: false })

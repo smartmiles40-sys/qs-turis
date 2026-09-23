@@ -7,12 +7,11 @@
 // Criar lead automático encheria a fila de prospecção de colega de trabalho —
 // e é assim que um time aprende a ignorar uma tela.
 //
-// O que a tela mostra: quem (o nome que o WhatsApp exibe), quando, quantas
-// mensagens e por qual número. O TEXTO não é guardado no QS (LGPD, decisão da
-// 0038); quem precisa ler abre a conversa no Chatwoot.
+// O que a tela mostra: quem (o nome que o WhatsApp exibe), quando e quantas
+// mensagens. O TEXTO não é guardado no QS (LGPD, decisão da 0038).
 //
-// Duas saídas, ambas definitivas: vira lead (e a conversa é puxada junto) ou é
-// ignorado. Um item tratado nunca mais volta.
+// Duas saídas, ambas definitivas: vira lead ou é ignorado. Um item tratado
+// nunca mais volta. As próximas mensagens dele já entram na conversa do lead.
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
@@ -21,13 +20,11 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { createCadenceTasks } from "@/lib/qs/queries";
-import { syncThread, getInboxLabels, inboxTag, type InboxLabels } from "@/lib/qs/waInbox";
 import {
   listDesconhecidos, ignorarDesconhecido, vincularDesconhecido, marcarResgatado,
   type Desconhecido,
 } from "@/lib/qs/waDesconhecidos";
 import { WaAvatar } from "./WaBits";
-import { acaoDaLinha } from "@/lib/qs/waLinha";
 
 interface Props {
   onFechar: () => void;
@@ -51,7 +48,6 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
   const [itens, setItens] = useState<Desconhecido[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [precisaMigration, setPrecisaMigration] = useState(false);
-  const [rotulos, setRotulos] = useState<InboxLabels>({});
   const [cadencias, setCadencias] = useState<CadenciaLite[]>([]);
 
   // Qual item está com o formulário aberto, e o que já foi digitado nele.
@@ -72,7 +68,6 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
   useEffect(() => { void carregar(); }, [carregar]);
 
   useEffect(() => {
-    void getInboxLabels().then(setRotulos);
     void supabase
       .from("qs_cadences")
       .select("id, name")
@@ -96,47 +91,15 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
   };
 
   /**
-   * O lead já existe e só a conversa nunca veio. Criar outro lead duplicaria a
-   * pessoa — a base já tem 68 casos assim, alguns com "ganho" num card e
-   * "perdido" no outro. O que falta aqui é puxar o histórico.
+   * O lead já existe — criar outro duplicaria a pessoa. Só tira da fila,
+   * apontando pro lead.
    */
-  /**
-   * De onde vem a conversa: quem escreveu pro número de um SDR (0082) tem a
-   * conversa na Evolution daquele chip; o resto, no Chatwoot, como sempre.
-   */
-  const buscarConversa = async (leadId: string, d: Desconhecido) => {
-    if (!d.linhaUserId) return syncThread(leadId);
-    const r = await acaoDaLinha("historico", {
-      telefone: d.phone,
-      ...(d.linhaUserId !== currentUser?.id ? { userId: d.linhaUserId } : {}),
-    });
-    return {
-      conversationId: r.ok ? 1 : null,
-      importadas: r.importadas ?? 0,
-      motivo: r.ok ? undefined : (r.motivo || r.error),
-    };
-  };
-
-  const trazerConversa = async (d: Desconhecido) => {
+  const resolverJaLead = async (d: Desconhecido) => {
     if (!d.leadId) return;
     setOcupado(true);
-    const sync = await buscarConversa(d.leadId, d);
-    if (sync.importadas > 0 || sync.conversationId) {
-      // O retorno importa: se a RLS recusar o carimbo, o item voltaria no
-      // próximo carregamento — remover da tela agora seria fingir sucesso.
-      const ok = await marcarResgatado(d.ids, d.leadId);
-      if (!ok) { setOcupado(false); return; } // o erro já foi notificado
-      remover(d.phone);
-      notifySuccess(
-        sync.importadas > 0
-          ? `Conversa trazida — ${sync.importadas} mensagem(ns) agora aparecem no atendimento.`
-          : "Conversa vinculada."
-      );
-    } else {
-      // Sem conversa no Chatwoot não há o que trazer, e carimbar como resolvido
-      // esconderia o caso pra sempre. Fica na fila com o motivo à vista.
-      notifyError(`Não veio nada do Chatwoot (${sync.motivo || "sem conversa"}).`);
-    }
+    // Se a RLS recusar o carimbo, o item voltaria no próximo carregamento —
+    // remover da tela agora seria fingir sucesso.
+    if (await marcarResgatado(d.ids, d.leadId)) remover(d.phone);
     setOcupado(false);
   };
 
@@ -157,8 +120,6 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
 
     // owner_id vai NULO de propósito: o gatilho de rodízio (0028) escolhe o SDR
     // da vez. Mandar um dono daqui furaria a fila de distribuição.
-    // EXCEÇÃO (0082): quem escreveu pro chip de um SDR é lead DESSE SDR — foi
-    // com ele que a pessoa falou, e é pelo número dele que a conversa segue.
     const { data: criado, error } = await supabase
       .from("qs_leads")
       .insert({
@@ -166,7 +127,7 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
         first_name: partes[0],
         last_name: partes.slice(1).join(" ") || null,
         phone: d.phone,
-        owner_id: d.linhaUserId ?? null,
+        owner_id: null,
         cadence_id: cadenciaId || null,
         // "manual", não "whatsapp": o CHECK de qs_leads.source só aceita
         // manual|api|integracao|importacao — "whatsapp" estourava 23514 e o
@@ -199,9 +160,6 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
       await createCadenceTasks(criado.id, cadenciaId, criado.owner_id ?? null);
     }
 
-    // Puxa a conversa do Chatwoot pro lead novo. É o que faz a mensagem que
-    // motivou tudo isto finalmente aparecer na tela de atendimento.
-    const sync = await buscarConversa(criado.id, d);
     const carimbou = await vincularDesconhecido(d.ids, criado.id);
 
     setOcupado(false);
@@ -210,19 +168,12 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
       // O lead JÁ EXISTE — o que falhou foi o carimbo (RLS/rede). Remover o
       // item fingiria sucesso; mantê-lo como estava convidaria um SEGUNDO
       // clique em "Criar lead" = a mesma pessoa duas vezes na base. O item
-      // fica, mas apontando pro lead criado: o botão vira "Trazer conversa".
+      // fica, mas apontando pro lead criado: o botão vira "Já é lead".
       setItens((prev) => prev.map((x) => (x.phone === d.phone ? { ...x, leadId: criado.id } : x)));
       return;
     }
     remover(d.phone);
-    notifySuccess(
-      sync.importadas > 0
-        ? `${nomeFinal} virou lead — ${sync.importadas} mensagem(ns) trazidas pra conversa.`
-        : `${nomeFinal} virou lead.`
-    );
-    if (sync.importadas === 0 && sync.motivo) {
-      console.warn("[wa] triagem: conversa não veio —", sync.motivo);
-    }
+    notifySuccess(`${nomeFinal} virou lead.`);
   };
 
   return (
@@ -278,7 +229,6 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
 
         <ul className="flex flex-col gap-2">
           {itens.map((d) => {
-            const tag = inboxTag(rotulos, d.inboxId);
             const aberto = criando === d.phone;
             return (
               <li
@@ -295,11 +245,10 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
                     <p className="text-[12px] truncate" style={{ color: "var(--ink3)" }}>
                       {d.nome ? `${formatPhoneDisplay(d.phone) || d.phone} · ` : ""}
                       {d.mensagens} mensagem{d.mensagens > 1 ? "s" : ""} · {quando(d.ultima)}
-                      {tag ? ` · ${tag.nome}` : ""}
                     </p>
                     {d.leadId && (
                       <p className="text-[12px] mt-0.5" style={{ color: "var(--orange)" }}>
-                        Já é lead — a conversa é que nunca foi trazida pro QS.
+                        Já é lead — é só tirar da fila.
                       </p>
                     )}
                   </div>
@@ -317,12 +266,12 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
                           mesma pessoa duas vezes na base, cada metade com um
                           pedaço da história. */}
                       <button
-                        onClick={() => (d.leadId ? trazerConversa(d) : abrirFormulario(d))}
+                        onClick={() => (d.leadId ? resolverJaLead(d) : abrirFormulario(d))}
                         disabled={ocupado}
                         className="px-3 h-9 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50"
                         style={{ background: "var(--wa)" }}
                       >
-                        {d.leadId ? "Trazer conversa" : "Criar lead"}
+                        {d.leadId ? "Tirar da fila" : "Criar lead"}
                       </button>
                     </div>
                   )}
@@ -357,7 +306,7 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
                       </label>
                     </div>
                     <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
-                      O SDR sai do rodízio automático. A conversa do WhatsApp vem junto.
+                      O SDR sai do rodízio automático. As próximas mensagens entram na conversa do lead.
                     </p>
                     <div className="flex items-center gap-2">
                       <button
@@ -366,7 +315,7 @@ export default function WaDesconhecidos({ onFechar, onMudou }: Props) {
                         className="px-4 h-10 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50"
                         style={{ background: "var(--wa)" }}
                       >
-                        {ocupado ? "Criando…" : "Criar e trazer a conversa"}
+                        {ocupado ? "Criando…" : "Criar lead"}
                       </button>
                       <button
                         onClick={() => setCriando(null)}

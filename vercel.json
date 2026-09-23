@@ -4,14 +4,8 @@
     "api/wa-send-media.js": {
       "maxDuration": 60
     },
-    "api/wa-webhook.js": {
-      "maxDuration": 60
-    },
     "api/wa-vigia.js": {
       "maxDuration": 30
-    },
-    "api/wa-history.js": {
-      "maxDuration": 60
     },
     "api/agenda-meet.js": {
       "maxDuration": 30
@@ -57,12 +51,6 @@
     },
     "api/lead-formulario.js": {
       "maxDuration": 20
-    },
-    "api/wa-evolution-webhook.js": {
-      "maxDuration": 60
-    },
-    "api/wa-linha.js": {
-      "maxDuration": 60
     },
     "api/oportunidade-futura.js": {
       "maxDuration": 60

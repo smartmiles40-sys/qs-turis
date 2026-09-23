@@ -1,28 +1,23 @@
 // api/_meta.js
 // -----------------------------------------------------------------------------
-// Fala com a Graph API da Meta para gerenciar os MODELOS de mensagem do WhatsApp
-// (o que o Gerenciador do WhatsApp Business faz na mão).
+// Fala com a Graph API da Meta: mensagens, arquivos, reações, MODELOS e ligações
+// do número oficial. É o ÚNICO caminho de WhatsApp do QS desde 23/09/2026.
 //
-// De onde vêm as credenciais, NESTA ORDEM (22/09/2026):
+// De onde vêm as credenciais (23/09/2026): SÓ das variáveis de ambiente.
 //
-//   1. VARIÁVEL DE AMBIENTE — META_CALLS_TOKEN (ou META_WA_TOKEN),
-//      META_WABA_ID e META_PHONE_NUMBER_ID;
-//   2. a caixa oficial no Chatwoot, como antes.
+//   META_CALLS_TOKEN (ou META_WA_TOKEN) — o token do app na Meta;
+//   META_PHONE_NUMBER_ID                — o número oficial;
+//   META_WABA_ID                        — a conta do WhatsApp Business. Opcional:
+//                                         sem ela, o QS descobre sozinho pelo
+//                                         próprio token (ver descobrirWaba).
 //
-// A ordem inverteu porque a premissa mudou. O Chatwoot era o lugar natural das
-// credenciais enquanto ele era o transporte; desde a 0084 ele não recebe mais
-// mensagem nenhuma para o QS, e o time parou de abrir a tela dele. Guardar o
-// token do WhatsApp inteiro dentro de um serviço que ninguém usa mais é
-// depender de algo que pode ser desligado numa tarde sem que ninguém associe a
-// queda ao disparo que parou.
-//
-// O fallback continua vivo de propósito: enquanto as envs não estiverem
-// preenchidas, nada muda de comportamento.
+// Até 22/09 havia uma rede de segurança que buscava as credenciais dentro da
+// caixa oficial do Chatwoot. O Chatwoot saiu do QS em 23/09 e a rede saiu junto.
 //
 // ⚠️ O token NUNCA vai para o navegador. Toda chamada à Meta acontece aqui.
 // -----------------------------------------------------------------------------
 
-import { cw, toE164BR } from './_wa.js';
+import { toE164BR } from './_wa.js';
 
 const GRAPH = 'https://graph.facebook.com/v20.0';
 
@@ -44,69 +39,75 @@ function foneMeta(raw) {
 
 let cache = null;   // { token, waba, phoneId, em } — vale por execução
 
-/** As credenciais que estão no ambiente, se estiverem. */
-function credenciaisDoAmbiente() {
-  const token = String(process.env.META_WA_TOKEN || process.env.META_CALLS_TOKEN || '').trim();
-  if (!token) return null;
-  const waba = String(process.env.META_WABA_ID || '').trim();
-  const phoneId = String(process.env.META_PHONE_NUMBER_ID || '').trim();
-  // Token sozinho já serve para ENVIAR (basta token + phoneId) e para ler a
-  // saúde do número. Só a parte de MODELOS precisa do WABA, e quem precisa dele
-  // confere e devolve um erro nomeado — melhor meia credencial funcionando do
-  // que exigir as três e não ter nenhuma.
-  if (!waba && !phoneId) return null;
-  return { token, waba: waba || null, phoneId: phoneId || null, em: Date.now(), origem: 'env' };
-}
-
 /**
- * As credenciais da Meta: ambiente primeiro, Chatwoot como rede de segurança.
- * Devolve null quando não há nenhuma das duas (aí o portal se desliga sozinho
- * em vez de estourar).
+ * O WABA a partir do próprio token, quando META_WABA_ID não está preenchida.
+ *
+ * O token de usuário de sistema carrega, no `debug_token`, a lista das contas
+ * que ele pode administrar (`granular_scopes` → whatsapp_business_management).
+ * Com uma conta só — o nosso caso — é ela. Com mais de uma, não chuta: devolve
+ * null e a tela pede a variável.
  */
-export async function credenciaisDaMeta() {
-  if (cache && Date.now() - cache.em < 5 * 60_000) return cache;
-
-  const doAmbiente = credenciaisDoAmbiente();
-  if (doAmbiente) {
-    cache = doAmbiente;
-    return cache;
-  }
-
+async function descobrirWaba(token) {
   try {
-    const d = await cw('/inboxes');
-    const lista = Array.isArray(d?.payload) ? d.payload : [];
-    for (const i of lista) {
-      if (!String(i.channel_type || '').includes('Channel::Whatsapp')) continue;
-      const c = i.provider_config || {};
-      if (!c.api_key || !c.business_account_id) continue;
-      cache = {
-        token: c.api_key,
-        waba: c.business_account_id,
-        phoneId: c.phone_number_id || null,
-        em: Date.now(),
-        origem: 'chatwoot',
-      };
-      console.warn(
-        '[meta] credenciais vindas do Chatwoot. Preencha META_WABA_ID e META_PHONE_NUMBER_ID ' +
-        'para o QS parar de depender dele.'
-      );
-      return cache;
+    const r = await fetch(
+      `${GRAPH}/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`
+    );
+    const j = await r.json().catch(() => null);
+    const escopos = Array.isArray(j?.data?.granular_scopes) ? j.data.granular_scopes : [];
+    const ids = escopos.find((s) => s.scope === 'whatsapp_business_management')?.target_ids || [];
+    if (ids.length === 1) return String(ids[0]);
+    if (ids.length > 1) {
+      console.warn('[meta] o token enxerga mais de uma WABA — preencha META_WABA_ID');
+      return null;
     }
   } catch (e) {
-    console.warn('[meta] não consegui ler as credenciais no Chatwoot:', e?.message);
+    console.warn('[meta] debug_token falhou:', e?.message);
   }
+  // Segundo caminho: a empresa dona do token e as contas de WhatsApp dela.
+  try {
+    const r = await fetch(
+      `${GRAPH}/me/businesses?fields=owned_whatsapp_business_accounts{id}&access_token=${encodeURIComponent(token)}`
+    );
+    const j = await r.json().catch(() => null);
+    const ids = (j?.data || []).flatMap((b) => (b.owned_whatsapp_business_accounts?.data || []).map((w) => w.id));
+    if (ids.length === 1) return String(ids[0]);
+  } catch (e) {
+    console.warn('[meta] /me/businesses falhou:', e?.message);
+  }
+  console.warn('[meta] não descobri a WABA pelo token — preencha META_WABA_ID na Vercel');
   return null;
 }
 
-/** Diagnóstico para a tela de configuração: de onde vieram e o que falta. */
+/**
+ * As credenciais da Meta, do ambiente. Devolve null quando falta o token ou o
+ * número (aí cada tela se desliga com um aviso em vez de estourar).
+ */
+export async function credenciaisDaMeta() {
+  if (cache && Date.now() - cache.em < 30 * 60_000) return cache;
+
+  const token = String(process.env.META_WA_TOKEN || process.env.META_CALLS_TOKEN || '').trim();
+  const phoneId = String(process.env.META_PHONE_NUMBER_ID || '').trim();
+  if (!token || !phoneId) return null;
+
+  let waba = String(process.env.META_WABA_ID || '').trim() || null;
+  let origemWaba = waba ? 'env' : null;
+  if (!waba) {
+    waba = await descobrirWaba(token);
+    if (waba) origemWaba = 'token';
+  }
+  cache = { token, waba, phoneId, em: Date.now(), origem: 'env', origemWaba };
+  return cache;
+}
+
+/** Diagnóstico para a tela de configuração: o que está preenchido e o que falta. */
 export async function origemDasCredenciais() {
   const cr = await credenciaisDaMeta();
   return {
     origem: cr?.origem || null,
     temToken: Boolean(cr?.token),
     temWaba: Boolean(cr?.waba),
+    wabaDescoberta: cr?.origemWaba === 'token',
     temPhoneId: Boolean(cr?.phoneId),
-    dependeDoChatwoot: cr?.origem === 'chatwoot',
   };
 }
 
@@ -357,6 +358,111 @@ export async function enviarTemplate({ para, nome, idioma = 'pt_BR', params = {}
   } catch (e) {
     return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
   }
+}
+
+// ─── CONVERSA PELO NÚMERO OFICIAL (23/09/2026) ───────────────────────────────
+//
+// Desde que Chatwoot e Evolution saíram, TODA mensagem do QS sai por aqui: texto
+// do SDR/closer, arquivo, reação e as respostas da Glória. O número é
+// um só (o oficial); quem escreveu vai assinado na primeira linha.
+//
+// A regra que a Meta impõe e que a tela precisa respeitar: texto livre só é
+// entregue se o cliente escreveu nas últimas 24h. Fora disso, só MODELO
+// aprovado (`enviarTemplate`). Quem chama confere a janela antes.
+
+/** Um POST em /{phone}/messages. Devolve { wamid } ou { erro, detalhe, codigo }. */
+async function mandar(para, conteudo, { responderA = null } = {}) {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  const numero = foneMeta(para);
+  if (!numero) return { erro: 'telefone-invalido' };
+  try {
+    const j = await graph(`/${cr.phoneId}/messages`, {
+      method: 'POST',
+      token: cr.token,
+      timeoutMs: 20_000,
+      body: {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: numero,
+        ...(responderA ? { context: { message_id: String(responderA) } } : {}),
+        ...conteudo,
+      },
+    });
+    return { wamid: j?.messages?.[0]?.id || null };
+  } catch (e) {
+    return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
+  }
+}
+
+/** Texto livre (dentro da janela de 24h). `responderA` = wamid da mensagem citada. */
+export function enviarTexto({ para, texto, responderA = null }) {
+  return mandar(para, { type: 'text', text: { body: String(texto), preview_url: true } }, { responderA });
+}
+
+/**
+ * Sobe bytes pra Meta (o arquivo que o SDR anexou) e devolve o `media_id`.
+ * Irmã da `subirMidiaPorUrl`, pra quando o arquivo já está na memória.
+ */
+export async function subirMidiaBytes(bytes, mime, nomeArquivo = 'arquivo') {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  const tipo = String(mime || 'application/octet-stream').split(';')[0].trim();
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', tipo);
+  form.append('file', new Blob([bytes], { type: tipo }), nomeArquivo);
+  try {
+    const r = await fetch(`${GRAPH}/${cr.phoneId}/media?access_token=${encodeURIComponent(cr.token)}`, {
+      method: 'POST', body: form,
+    });
+    const j = await r.json().catch(() => null);
+    if (j?.error) return { erro: 'meta-recusou', detalhe: j.error.message, codigo: j.error.code };
+    if (!j?.id) return { erro: 'sem-id-na-resposta' };
+    return { id: String(j.id) };
+  } catch (e) {
+    return { erro: 'falha-no-upload', detalhe: e?.message };
+  }
+}
+
+/**
+ * Arquivo: `tipo` image | video | audio | document | sticker. Legenda não
+ * existe em áudio nem figurinha (a Meta recusa); nome do arquivo só em documento.
+ */
+export function enviarMidia({ para, tipo, mediaId, legenda = null, nomeArquivo = null, responderA = null }) {
+  const t = ['image', 'video', 'audio', 'document', 'sticker'].includes(tipo) ? tipo : 'document';
+  const corpo = { id: String(mediaId) };
+  if (legenda && t !== 'audio' && t !== 'sticker') corpo.caption = String(legenda);
+  if (nomeArquivo && t === 'document') corpo.filename = String(nomeArquivo);
+  return mandar(para, { type: t, [t]: corpo }, { responderA });
+}
+
+/** Reação a uma mensagem (emoji vazio tira a reação). */
+export function enviarReacao({ para, wamid, emoji }) {
+  return mandar(para, { type: 'reaction', reaction: { message_id: String(wamid), emoji: String(emoji ?? '') } });
+}
+
+/**
+ * Os modelos APROVADOS, no formato que a tela do chat usa (corpo com os
+ * {{buracos}}, variáveis em ordem, se precisa de mídia). Antes vinham do
+ * Chatwoot, que sincronizava os modelos da caixa oficial; agora vêm da Meta.
+ */
+export async function modelosAprovados() {
+  const r = await listarModelos().catch((e) => ({ erro: e?.message }));
+  if (r?.erro || !Array.isArray(r?.modelos)) return [];
+  return r.modelos
+    .filter((m) => String(m.status).toUpperCase() === 'APPROVED' && m.corpo)
+    .map((m) => ({
+      nome: m.nome,
+      idioma: m.idioma || 'pt_BR',
+      categoria: m.categoria || '',
+      cabecalho: m.cabecalho || null,
+      headerFormato: m.cabecalhoMidia ? String(m.cabecalhoMidia).toUpperCase() : 'TEXT',
+      precisaMidia: ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(String(m.cabecalhoMidia || '').toUpperCase()),
+      corpo: m.corpo,
+      rodape: m.rodape || null,
+      variaveis: m.variaveis || [],
+    }));
 }
 
 

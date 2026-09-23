@@ -10,17 +10,12 @@
 // funcionou: entregar o SDR dentro da conversa certa, com o texto certo já
 // escrito, no aparelho dele. É o `wa.me`, que o WhatsApp abre no app instalado.
 //
-// O QUE ESTE MÓDULO **NÃO** MUDA: o closer. Ele atende pelo 1935, que é
-// Evolution conectada por QR — essa linha não passa pela Meta e não caiu. Por
-// isso o modo é POR PAPEL, e não uma chave global: virar tudo de uma vez
-// derrubaria o inbox de quem está trabalhando bem.
+// O modo é POR PAPEL, e não uma chave global: virar tudo de uma vez
+// derrubaria o inbox de quem está trabalhando bem pelo número oficial.
 //
 // A configuração mora em qs_settings.wa_modo_app e é editável em
 // Configurações → Atendimento. O PADRÃO (sem linha no banco) já é "SDR no
 // aparelho": quando a API voltar, é um clique pra desligar — não um deploy.
-//
-// Ver também: `chatProvider.ts` (qual cockpit o inbox usa) — são perguntas
-// diferentes. Este aqui decide se o SDR usa cockpit ALGUM.
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
@@ -29,7 +24,6 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import type { UserRole } from "@/components/sdr/types";
 import { normalizePhoneBR, waChatLink, logWhatsApp } from "@/lib/whatsapp";
 import { assinarTexto, loadSignatureName } from "@/lib/qs/waSignature";
-import { useMinhaLinha } from "@/lib/qs/waLinha";
 
 export const WA_MODO_APP_KEY = "wa_modo_app";
 
@@ -170,13 +164,7 @@ export function useWhatsAppApp() {
     return () => { vivo = false; };
   }, [currentUser]);
 
-  // O WHATSAPP DO PRÓPRIO SDR (0082): conectou o chip dele no QS, a MENSAGEM
-  // volta a sair daqui — o modo aparelho deixa de valer pra escrever. A
-  // LIGAÇÃO não: o número conectado por QR não faz chamada de voz, então quem
-  // está no modo aparelho continua ligando pelo celular.
-  const { noAr: linhaNoAr } = useMinhaLinha();
-  const ligarPeloCelular = modoAppVale(cfg, currentUser);
-  const modoApp = ligarPeloCelular && !linhaNoAr;
+  const modoApp = modoAppVale(cfg, currentUser);
 
   const abrirNoApp = useCallback(
     (alvo: AlvoNoApp) => abrirConversaNoApp(
@@ -186,5 +174,5 @@ export function useWhatsAppApp() {
     [assinatura, currentUser],
   );
 
-  return { modoApp, ligarPeloCelular, abrirNoApp, assinatura, config: cfg };
+  return { modoApp, abrirNoApp, assinatura, config: cfg };
 }

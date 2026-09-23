@@ -11,7 +11,14 @@
 // -----------------------------------------------------------------------------
 
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
-import { parseCwDate } from './_wa.js';
+
+/** Data em ISO. Aceita epoch em SEGUNDOS (herança do Chatwoot) ou texto de data. */
+function paraIso(v) {
+  if (v == null || v === '') return new Date().toISOString();
+  if (typeof v === 'number' || /^\d+$/.test(String(v))) return new Date(Number(v) * 1000).toISOString();
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
 
 /**
  * O nome com que as mensagens dela são gravadas.
@@ -149,9 +156,9 @@ export async function avisarGloria({
         cw_message_id: message?.id ?? null,
         // O n8n usa este instante pra saber se, depois de esperar o lead
         // terminar de escrever, chegou mensagem mais nova que esta.
-        // parseCwDate porque o Chatwoot manda epoch em SEGUNDOS: `new Date(x)`
-        // cru daria 1970 e a comparação lá no banco perderia o sentido.
-        sent_at: parseCwDate(message?.created_at),
+        // paraIso porque data em epoch de SEGUNDOS, crua no `new Date(x)`,
+        // daria 1970 e a comparação lá no banco perderia o sentido.
+        sent_at: paraIso(message?.created_at),
       }),
       signal: ctrl.signal,
     });
