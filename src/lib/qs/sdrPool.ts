@@ -18,6 +18,9 @@ export interface CardSdr {
   numero: string | null;
   status: "ativo" | "sem-numero";
   desde: string | null;
+  /** Último dia FORA (AAAA-MM-DD, fuso SP). Nulo = trabalhando. Ver 0090. */
+  ausente_ate: string | null;
+  ausente_motivo: string | null;
   leads_7d: number;
   reservas_7d: number;
 }
@@ -45,9 +48,9 @@ export interface PainelNumeros {
   queimados: NumeroQueimado[];
 }
 
-type Acao = "listar" | "desativar" | "trocar";
+type Acao = "listar" | "desativar" | "trocar" | "afastar";
 
-async function chamar(action: Acao, sdr_id?: string): Promise<PainelNumeros> {
+async function chamar(action: Acao, sdr_id?: string, extra: Record<string, unknown> = {}): Promise<PainelNumeros> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) {
     throw new Error("Sessão expirada. Entre de novo para gerenciar os números.");
@@ -55,7 +58,7 @@ async function chamar(action: Acao, sdr_id?: string): Promise<PainelNumeros> {
   const res = await fetch("/api/sdr-pool", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ access_token: session.access_token, action, sdr_id }),
+    body: JSON.stringify({ access_token: session.access_token, action, sdr_id, ...extra }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok || !json?.ok) {
@@ -71,6 +74,14 @@ export const desativarNumero = (sdrId: string) => chamar("desativar", sdrId);
 
 /** Queima o chip atual e promove a reserva mais antiga (a mais aquecida). */
 export const trocarPorReserva = (sdrId: string) => chamar("trocar", sdrId);
+
+/**
+ * Afasta o SDR até `ate` (AAAA-MM-DD, último dia FORA, inclusive). Enquanto
+ * afastado ele sai do WhatsApp das LPs, dos leads novos e da agenda de ligação.
+ * `ate = null` traz de volta na hora.
+ */
+export const afastarSdr = (sdrId: string, ate: string | null, motivo?: string) =>
+  chamar("afastar", sdrId, { ate, motivo: motivo || null });
 
 /**
  * 5511987654321 -> +55 (11) 98765-4321

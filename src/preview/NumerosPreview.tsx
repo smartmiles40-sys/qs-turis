@@ -29,13 +29,13 @@ const banco: {
   sdrs: [
     { sdr_id: "1", nome: "Mariana", email: "mariana.rodrigues@agenciasetuforeuvou.com",
       pool_id: "p1", numero: "5511988880001", status: "ativo", desde: "2026-08-20T12:00:00Z",
-      leads_7d: 41, reservas_7d: 12 },
+      ausente_ate: null, ausente_motivo: null, leads_7d: 41, reservas_7d: 12 },
     { sdr_id: "2", nome: "Victor Hugo", email: "victor.hugo@agenciasetuforeuvou.com",
       pool_id: "p2", numero: "5511988880002", status: "ativo", desde: "2026-08-20T12:00:00Z",
-      leads_7d: 38, reservas_7d: 11 },
+      ausente_ate: "2026-09-25", ausente_motivo: "Atestado", leads_7d: 38, reservas_7d: 11 },
     { sdr_id: "3", nome: "Yanca Manuella Ruivo", email: "yanca.manuella@agenciasetuforeuvou.com",
       pool_id: null, numero: null, status: "sem-numero", desde: null,
-      leads_7d: 29, reservas_7d: 8 },
+      ausente_ate: null, ausente_motivo: null, leads_7d: 29, reservas_7d: 8 },
   ],
   proximo_sdr_id: "2",
   reservas: [
@@ -62,7 +62,7 @@ window.fetch = (async (entrada: RequestInfo | URL, init?: RequestInit) => {
   const url = String(typeof entrada === "string" ? entrada : entrada instanceof URL ? entrada.href : entrada.url);
   if (!url.includes("/api/sdr-pool")) return fetchOriginal(entrada, init);
 
-  const { action, sdr_id } = JSON.parse(String(init?.body ?? "{}"));
+  const { action, sdr_id, ate, motivo } = JSON.parse(String(init?.body ?? "{}"));
   await new Promise((r) => setTimeout(r, 350));          // latência, pra ver o estado "Aplicando…"
 
   const card = banco.sdrs.find((s) => s.sdr_id === sdr_id);
@@ -70,6 +70,11 @@ window.fetch = (async (entrada: RequestInfo | URL, init?: RequestInit) => {
   if (action === "desativar" && card?.numero) {
     banco.queimados.unshift({ id: `q${Date.now()}`, numero: card.numero, sdr_nome: card.nome, updated_at: new Date().toISOString() });
     card.numero = null; card.pool_id = null; card.status = "sem-numero"; card.desde = null;
+  }
+
+  if (action === "afastar" && card) {
+    card.ausente_ate = ate || null;
+    card.ausente_motivo = ate ? motivo || null : null;
   }
 
   if (action === "trocar") {
@@ -88,7 +93,7 @@ window.fetch = (async (entrada: RequestInfo | URL, init?: RequestInit) => {
 
   // Quem é o próximo, recalculado como o servidor faz: o seguinte na roda,
   // considerando só quem tem chip.
-  const fila = banco.sdrs.filter((s) => s.status === "ativo");
+  const fila = banco.sdrs.filter((s) => s.status === "ativo" && !s.ausente_ate);
   if (fila.length) {
     const i = fila.findIndex((s) => s.sdr_id === banco.proximo_sdr_id);
     banco.proximo_sdr_id = fila[i >= 0 ? i : 0].sdr_id;

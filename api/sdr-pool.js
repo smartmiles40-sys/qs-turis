@@ -8,7 +8,8 @@
 // nenhuma delas — de propósito. Então a tela passa por aqui, e aqui a gente
 // confere quem está pedindo antes de usar a chave forte.
 //
-// Body (JSON): { access_token, action: 'listar' | 'desativar' | 'trocar', sdr_id? }
+// Body (JSON): { access_token, action: 'listar' | 'desativar' | 'trocar' | 'afastar', sdr_id?, ate?, motivo? }
+//   afastar: ate = 'AAAA-MM-DD' (último dia FORA) ou null pra voltar agora (0090).
 //
 // Só admin/gestor. Um SDR não troca o próprio número: trocar chip é decisão de
 // operação (custo, aquecimento, risco de bloqueio), não de quem atende.
@@ -48,7 +49,7 @@ async function verifyCaller(accessToken) {
  */
 async function listar() {
   const [sdrs, pool, contagens, ponteiro] = await Promise.all([
-    rest('qs_users?select=id,name,email&role=eq.sdr&is_active=eq.true&order=created_at.asc'),
+    rest('qs_users?select=id,name,email,ausente_ate,ausente_motivo&role=eq.sdr&is_active=eq.true&order=created_at.asc'),
     rest('sdr_pool?select=id,sdr_id,sdr_nome,numero,status,created_at,updated_at&order=created_at.asc'),
     rest('rpc/qs_leads_por_sdr', { method: 'POST', body: { p_dias: DIAS_CONTADOR } }),
     rest('qs_assign_state?select=scope,last_owner_id,updated_at&scope=eq.fila%3Aforms&limit=1'),
@@ -57,7 +58,11 @@ async function listar() {
   const porSdr = new Map((contagens || []).map((c) => [c.sdr_id, c]));
   const ativos = new Map((pool || []).filter((p) => p.status === 'ativo').map((p) => [p.sdr_id, p]));
 
+  // Hoje no fuso de São Paulo, AAAA-MM-DD (en-CA formata assim).
+  const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+
   const cards = (sdrs || []).map((u) => {
+    const afastado = !!u.ausente_ate && u.ausente_ate >= hoje;
     const chip = ativos.get(u.id) || null;
     const c = porSdr.get(u.id) || {};
     return {
@@ -70,6 +75,9 @@ async function listar() {
       // 'sem-numero' = está ativo no QS mas fora do rodízio das LPs.
       status: chip ? 'ativo' : 'sem-numero',
       desde: chip?.updated_at || chip?.created_at || null,
+      // Afastado (atestado, folga): fora de TODOS os rodízios até essa data.
+      ausente_ate: afastado ? u.ausente_ate : null,
+      ausente_motivo: afastado ? (u.ausente_motivo || null) : null,
       leads_7d: Number(c.leads || 0),
       reservas_7d: Number(c.reservas || 0),
     };
@@ -78,7 +86,7 @@ async function listar() {
   // Quem leva o PRÓXIMO lead. O ponteiro guarda quem levou o último; o próximo é
   // o seguinte na roda, considerando só quem tem chip. Mostrar isso na tela
   // transforma "confia que gira" em "olha lá, é a vez da Mariana".
-  const fila = cards.filter((c) => c.status === 'ativo');
+  const fila = cards.filter((c) => c.status === 'ativo' && !c.ausente_ate);
   const ultimo = ponteiro && ponteiro[0] ? ponteiro[0].last_owner_id : null;
   let proximo = null;
   if (fila.length) {
@@ -120,7 +128,7 @@ export default async function handler(req, res) {
   }
 
   const body = typeof req.body === 'string' ? safeJson(req.body) : req.body || {};
-  const { access_token, action, sdr_id } = body;
+  const { access_token, action, sdr_id, ate, motivo } = body;
 
   // 1) Quem está pedindo?
   const callerId = await verifyCaller(access_token);
@@ -158,6 +166,18 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, numero: linha?.numero || null, ...(await listar()) });
     }
 
+    if (action === 'afastar') {
+      const data = ate == null || ate === '' ? null : String(ate);
+      if (data !== null && !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+        return res.status(400).json({ ok: false, error: 'Data inválida.' });
+      }
+      // eslint-disable-next-line no-control-regex
+      const mot = motivo == null ? null : String(motivo).replace(/[\x00-\x1F\x7F]/g, ' ').trim().slice(0, 80) || null;
+      await rest('rpc/qs_afastar_sdr', { method: 'POST', body: { p_sdr_id: sdr_id, p_ate: data, p_motivo: mot } });
+      console.log(`[sdr-pool] ${callerId} ${data ? 'afastou' : 'trouxe de volta'} o SDR ${sdr_id}${data ? ' até ' + data : ''}`);
+      return res.status(200).json({ ok: true, ...(await listar()) });
+    }
+
     if (action === 'trocar') {
       const r = await rest('rpc/qs_promover_reserva', { method: 'POST', body: { p_sdr_id: sdr_id } });
       const linha = Array.isArray(r) ? r[0] : r;
@@ -176,6 +196,12 @@ export default async function handler(req, res) {
     // Erros que o time comercial precisa entender sem chamar ninguém.
     if (msg.includes('sem-reserva')) {
       return res.status(409).json({ ok: false, error: 'Não há número reserva disponível. Cadastre um chip novo antes de trocar.' });
+    }
+    if (msg.includes('data-no-passado')) {
+      return res.status(400).json({ ok: false, error: 'Escolha hoje ou uma data futura.' });
+    }
+    if (msg.includes('data-longe-demais')) {
+      return res.status(400).json({ ok: false, error: 'Afastamento de no máximo 60 dias por vez.' });
     }
     if (msg.includes('sem-numero-ativo')) {
       return res.status(409).json({ ok: false, error: 'Esse SDR já está sem número ativo.' });

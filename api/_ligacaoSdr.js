@@ -88,8 +88,25 @@ export async function lerConfigSdr() {
 // ─── Quem ────────────────────────────────────────────────────────────────────
 
 export async function sdrsAtivos() {
-  const rows = await rest('qs_users?select=id,name,email&role=eq.sdr&is_active=is.true&order=name');
+  const rows = await rest('qs_users?select=id,name,email,ausente_ate&role=eq.sdr&is_active=is.true&order=name');
   return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * Afastamento (0090: atestado, folga) vira horário OCUPADO até o fim do último
+ * dia fora. Assim quem faltou hoje some da agenda de hoje, mas os horários dela
+ * de amanhã continuam à venda — tirar a pessoa da lista inteira esconderia os
+ * dias em que ela já estará de volta.
+ */
+function bloqueiosDeAfastamento(sdrs) {
+  const out = [];
+  for (const s of sdrs) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s.ausente_ate || ''));
+    if (!m) continue;
+    const fim = instanteEmSP(Number(m[1]), Number(m[2]), Number(m[3]), 23, 59).getTime() + 60_000;
+    out.push({ sdr_id: s.id, inicio: 0, fim });
+  }
+  return out;
 }
 
 /**
@@ -163,7 +180,8 @@ export async function gradeSdr({ telefone = null, agora = new Date(), maxDias = 
   if (!sdrs.length) return { ok: false, motivo: 'sem_sdr', dias: [], cfg };
 
   const ate = new Date(agora.getTime() + (cfg.diasAFrente + 1) * 86_400_000);
-  const [ocupado, dono] = await Promise.all([reservas(agora, ate), donoDoTelefone(telefone, sdrs)]);
+  const [marcadas, dono] = await Promise.all([reservas(agora, ate), donoDoTelefone(telefone, sdrs)]);
+  const ocupado = marcadas.concat(bloqueiosDeAfastamento(sdrs));
 
   const montar = (quem) => {
     const dias = [];
@@ -227,7 +245,8 @@ export async function escolherSdr({ inicio, telefone, agora = new Date() }) {
   if (!sdrs.length) return null;
 
   const ate = new Date(agora.getTime() + (cfg.diasAFrente + 1) * 86_400_000);
-  const [ocupado, dono] = await Promise.all([reservas(agora, ate), donoDoTelefone(telefone, sdrs)]);
+  const [marcadas, dono] = await Promise.all([reservas(agora, ate), donoDoTelefone(telefone, sdrs)]);
+  const ocupado = marcadas.concat(bloqueiosDeAfastamento(sdrs));
   const ini = inicio.getTime(), fim = ini + cfg.passoMin * 60_000;
 
   if (dono) {
