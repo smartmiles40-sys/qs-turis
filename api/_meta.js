@@ -90,17 +90,23 @@ export function limparCacheMeta() {
  * ela — o primeiro conectado pelo painel que não é de ninguém.
  */
 async function numeroPadrao() {
-  const env = String(process.env.META_PHONE_NUMBER_ID || '').trim();
-  if (env) return env;
+  // 1º o número oficial conectado PELO PAINEL (o mais recente). É o que vale
+  // desde 23/09/2026, quando o 4863-6051 da Vercel foi banido pela Meta.
   try {
     const r = await rest(
       'qs_wa_numeros_meta?select=phone_number_id&status=eq.conectado&user_id=is.null' +
-      '&segredo_id=not.is.null&order=conectado_em.asc&limit=1'
+      '&segredo_id=not.is.null&order=conectado_em.desc&limit=1'
     );
-    return r?.[0]?.phone_number_id || null;
-  } catch {
-    return null;
-  }
+    if (r?.[0]?.phone_number_id) return r[0].phone_number_id;
+  } catch { /* segue pro da Vercel */ }
+  // 2º o da Vercel — só se ninguém o desativou no painel.
+  const env = String(process.env.META_PHONE_NUMBER_ID || '').trim();
+  if (!env) return null;
+  try {
+    const r = await rest(`qs_wa_numeros_meta?select=status&phone_number_id=eq.${encodeURIComponent(env)}&limit=1`);
+    if (r?.[0]?.status === 'desconectado') return null;
+  } catch { /* na dúvida, usa */ }
+  return env;
 }
 
 /**
@@ -134,7 +140,7 @@ export async function credenciaisDaMeta(phoneId = null) {
   }
 
   const envPhone = String(process.env.META_PHONE_NUMBER_ID || '').trim();
-  if (!token && alvo && alvo === envPhone) {
+  if (!token && alvo && alvo === envPhone && await numeroPadrao() === envPhone) {
     token = String(process.env.META_WA_TOKEN || process.env.META_CALLS_TOKEN || '').trim() || null;
     waba = String(process.env.META_WABA_ID || '').trim() || null;
     origem = 'env';

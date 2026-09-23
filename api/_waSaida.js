@@ -9,7 +9,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
-import { modelosAprovados } from './_meta.js';
+import { modelosAprovados, credenciaisDaMeta } from './_meta.js';
 
 let cacheLinha = null;
 
@@ -20,8 +20,9 @@ let cacheLinha = null;
  * parece ter dois números.
  */
 export async function caixaOficial() {
-  if (cacheLinha && Date.now() - cacheLinha.em < 10 * 60_000) return cacheLinha.v;
-  const phoneId = String(process.env.META_PHONE_NUMBER_ID || '').trim();
+  if (cacheLinha && Date.now() - cacheLinha.em < 60_000) return cacheLinha.v;
+  // O número PADRÃO de agora (o conectado pelo painel, ou o da Vercel).
+  const phoneId = (await credenciaisDaMeta())?.phoneId || '';
   let v = null;
   try {
     const r = await rest(

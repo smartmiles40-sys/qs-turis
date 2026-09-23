@@ -105,7 +105,7 @@ export default function ConexaoMeta() {
   }
 
   async function desconectar(n: NumeroMeta) {
-    if (!window.confirm(`Desconectar ${n.numero || n.phoneId} do QS? As mensagens deste número param de chegar aqui.`)) return;
+    if (!window.confirm(`${n.origem === "vercel" ? "Desativar" : "Desconectar"} ${n.numero || n.phoneId} no QS? O QS para de enviar e receber por este número.`)) return;
     setOcupado(true);
     try {
       await desconectarNumeroMeta(n.phoneId);
@@ -183,10 +183,10 @@ export default function ConexaoMeta() {
                   style={{ background: AZUL }}>
                   {ligado ? "Reconectar" : "Conectar"}
                 </button>
-                {n.origem === "painel" && ligado && (
+                {ligado && (
                   <button disabled={ocupado} onClick={() => void desconectar(n)}
                     className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
-                    Desconectar
+                    {n.origem === "vercel" ? "Desativar" : "Desconectar"}
                   </button>
                 )}
               </div>
@@ -194,6 +194,16 @@ export default function ConexaoMeta() {
           );
         })}
       </section>
+
+      {!pronto && (
+        <div className="p-3 rounded-lg text-sm" style={{ background: "#EEF2FF", color: "#1E3A8A" }}>
+          <strong>Os botões de conectar estão travados</strong> porque falta{" "}
+          {!painel.cadastro.appId ? "o META_CALLS_APP_ID na Vercel"
+            : !painel.cadastro.podeTrocarCodigo ? "o META_CALLS_APP_SECRET na Vercel"
+            : "colar o ID da configuração da Meta no quadro \"Configuração do botão\", aqui embaixo"}.
+          {" "}É um passo feito uma vez só.
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <button disabled={!pronto || ocupado} onClick={() => setPedido({ modo: "cloud", userId: "", pin: "" })}

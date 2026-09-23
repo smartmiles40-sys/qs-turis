@@ -130,6 +130,8 @@ export async function conectarNumero({ code, wabaId, phoneId, modo, pin, userId,
         p_modo: m, p_token: token, p_user: userId || null, p_rotulo: rotulo || null, p_por: por || null,
       },
     });
+    // A marca do número nas mensagens (0092): a janela de 24h é por número.
+    await rest('rpc/qs_meta_marcar_caixa', { method: 'POST', body: { p_phone: String(phoneId) } });
   } catch (e) {
     return { erro: `Conectado na Meta, mas não consegui guardar no QS: ${e.message}` };
   }
