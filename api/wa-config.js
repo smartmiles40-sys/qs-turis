@@ -19,7 +19,7 @@ import { getSupabaseUserId } from './_wa.js';
 import { listarModelos, criarModelo, excluirModelo,
          lerConfigChamadas, ativarChamadas, pedirPermissaoDeLigacao,
          diagnosticoChamadas, iniciarLigacao, encerrarLigacao,
-         credenciaisDaMeta, modelosAprovados } from './_meta.js';
+         credenciaisDaMeta, modelosAprovados, apontarWebhookProQs } from './_meta.js';
 import { caixaOficial } from './_waSaida.js';
 import { rest } from './_supabaseAdmin.js';
 import { sincronizarPermissao, gravarPermissao, lerPermissaoLocal, permissaoVale } from './_permissaoLigacao.js';
@@ -344,6 +344,21 @@ export default async function handler(req, res) {
       const r = await ativarChamadas();
       if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
       return res.status(200).json({ ok: true });
+    }
+    // Aponta o webhook da Meta pro QS (mensagens + ligações). Ver _meta.js.
+    if (body.acao === 'webhook-apontar') {
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+      if (!host) return res.status(400).json({ error: 'Não sei o endereço do QS.' });
+      const r = await apontarWebhookProQs(`https://${host}`);
+      if (r.erro) {
+        console.warn(`[wa-config] webhook-apontar falhou (${r.erro}${r.etapa ? ' em ' + r.etapa : ''}): ${r.detalhe || ''}`);
+        const texto = r.erro === 'sem-dados-do-app'
+          ? 'Faltam META_CALLS_APP_ID, META_CALLS_APP_SECRET ou META_CALLS_VERIFY_TOKEN na Vercel.'
+          : (textoDeConfig(r.erro) || `A Meta recusou${r.etapa ? ' (' + r.etapa + ')' : ''}: ${r.detalhe || r.erro}`);
+        return res.status(400).json({ error: texto, motivo: r.erro, codigo: r.codigo });
+      }
+      console.log(`[wa-config] webhook da Meta apontado para ${r.callbackUrl}`);
+      return res.status(200).json(r);
     }
     return res.status(400).json({ error: 'Ação inválida.' });
   }

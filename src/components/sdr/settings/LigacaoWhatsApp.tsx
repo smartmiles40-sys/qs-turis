@@ -26,7 +26,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { lerChamadas, ativarChamadasNaMeta, pedirPermissaoLigacao, lerDiagnosticoChamadas,
+import { lerChamadas, ativarChamadasNaMeta, apontarWebhookDaMeta, pedirPermissaoLigacao, lerDiagnosticoChamadas,
          lerPermissaoDeLigacao, type ConfigChamadas, type DiagnosticoChamadas } from "@/lib/qs/waInbox";
 import { ligarPeloWhatsApp, type Ligacao, type PassoLigacao } from "@/lib/qs/waCall";
 import { useQsAuth } from "@/contexts/QsAuthContext";
@@ -146,6 +146,14 @@ export default function LigacaoWhatsApp() {
     // A Meta exige limite de 2.000 destinatários/24h. Abaixo disso ela recusa —
     // e a mensagem dela não diz isso, por isso a dica vai junto.
     else notifyError(`${r.error} — confira se o número tem limite de 2.000/24h.`);
+  };
+
+  const apontarWebhook = async () => {
+    setOcupado(true);
+    const r = await apontarWebhookDaMeta();
+    setOcupado(false);
+    if (r.ok) { notifySuccess(`Webhook apontado para ${r.callbackUrl}. As mensagens voltam a chegar.`); void carregar(); }
+    else notifyError(r.error || "A Meta recusou.");
   };
 
   const pedir = async () => {
@@ -329,6 +337,21 @@ export default function LigacaoWhatsApp() {
           <dt className="text-gray-600">Callback do app</dt>
           <dd className="break-all font-mono text-[11px] text-gray-700">{diag?.callbackUrl ?? "—"}</dd>
         </dl>
+
+        {/* Sem o webhook apontado pro QS, a resposta do cliente não chega. */}
+        {!(diag?.callbackUrl?.endsWith("/api/wa-calls") && diag?.campos?.includes("messages")) && (
+          <div className="mt-3 rounded-lg p-3 text-[12px]" style={{ background: "#FEF0C7", color: "#B54708" }}>
+            <strong>A Meta não está entregando as mensagens dos clientes ao QS.</strong> O webhook precisa
+            apontar pra <span className="font-mono">/api/wa-calls</span> com o campo <em>messages</em>.
+            <button
+              disabled={ocupado}
+              onClick={() => void apontarWebhook()}
+              className="ml-2 rounded-md px-2 py-1 font-medium text-white disabled:opacity-50"
+              style={{ background: "#B54708" }}>
+              Apontar o webhook da Meta para o QS
+            </button>
+          </div>
+        )}
 
         {/* O placar que responde "chegou algo?" sem ninguém abrir o Supabase. */}
         <div className="mt-3 border-t border-gray-100 pt-2 text-[12px]">

@@ -621,6 +621,59 @@ export async function diagnosticoChamadas() {
   return out;
 }
 
+/**
+ * APONTA O WEBHOOK DA META PRO QS (23/09/2026).
+ *
+ * Medido em 23/09: a Meta não entregava NADA ao /api/wa-calls desde 01/09 —
+ * nenhum evento de ligação, nenhuma mensagem de cliente. O envio funcionava, a
+ * volta não. Isto faz as duas coisas que a Meta exige para entregar:
+ *
+ *   1. o app assinado na WABA   → POST /{waba}/subscribed_apps (token do sistema)
+ *   2. a URL e os CAMPOS do app → POST /{app}/subscriptions (token do APP:
+ *      app_id|app_secret) com callback = /api/wa-calls, campos messages + calls.
+ *
+ * No passo 2 a Meta chama o GET de verificação na hora; o wa-calls responde com
+ * META_CALLS_VERIFY_TOKEN. Se a URL antiga do app era a do Chatwoot, ela deixa
+ * de receber — que é o certo desde que o Chatwoot saiu do QS.
+ */
+export async function apontarWebhookProQs(urlBase) {
+  const cr = await credenciaisDaMeta();
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  if (!cr.waba) return { erro: 'sem-waba-id' };
+  const appId = String(process.env.META_CALLS_APP_ID || '').trim();
+  const appSecret = String(process.env.META_CALLS_APP_SECRET || '').trim();
+  const verify = String(process.env.META_CALLS_VERIFY_TOKEN || '').trim();
+  if (!appId || !appSecret || !verify) return { erro: 'sem-dados-do-app' };
+
+  const out = {};
+  try {
+    const j = await graph(`/${cr.waba}/subscribed_apps`, { method: 'POST', token: cr.token });
+    out.appAssinado = j?.success === true;
+  } catch (e) {
+    return { erro: 'meta-recusou', etapa: 'subscribed_apps', detalhe: e?.message, codigo: e?.metaCode };
+  }
+  try {
+    const callback = `${String(urlBase).replace(/\/+$/, '')}/api/wa-calls`;
+    const j = await graph(`/${appId}/subscriptions`, {
+      method: 'POST',
+      token: `${appId}|${appSecret}`,
+      timeoutMs: 20_000,
+      body: {
+        object: 'whatsapp_business_account',
+        callback_url: callback,
+        verify_token: verify,
+        fields: 'messages,calls',
+        include_values: true,
+      },
+    });
+    out.webhook = j?.success === true;
+    out.callbackUrl = callback;
+  } catch (e) {
+    return { ...out, erro: 'meta-recusou', etapa: 'subscriptions', detalhe: e?.message, codigo: e?.metaCode };
+  }
+  return { ok: true, ...out };
+}
+
 // ─── A VOLTA: LIGAR PRO CLIENTE (business-initiated) ─────────────────────────
 //
 // Ao contrário da mensagem, aqui o servidor NÃO consegue ligar sozinho: a Meta

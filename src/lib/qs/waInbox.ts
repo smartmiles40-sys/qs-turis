@@ -992,6 +992,24 @@ export async function ativarChamadasNaMeta(): Promise<{ ok: boolean; error?: str
   }
 }
 
+/**
+ * Aponta o webhook da Meta pro QS (mensagens + ligações). Sem isso a Meta não
+ * entrega nada ao /api/wa-calls — foi o que aconteceu de 01/09 a 23/09/2026.
+ */
+export async function apontarWebhookDaMeta(): Promise<{ ok: boolean; callbackUrl?: string; error?: string }> {
+  try {
+    const res = await fetch("/api/wa-config", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ acao: "webhook-apontar" }),
+    });
+    const d = await res.json().catch(() => ({}));
+    return res.ok ? { ok: true, callbackUrl: d?.callbackUrl } : { ok: false, error: d?.error || "A Meta recusou." };
+  } catch {
+    return { ok: false, error: "Sem conexão." };
+  }
+}
+
 export async function pedirPermissaoLigacao(telefone: string, texto?: string): Promise<{ ok: boolean; wamid?: string; error?: string }> {
   try {
     const res = await fetch("/api/wa-config", {
