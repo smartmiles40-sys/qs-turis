@@ -16,6 +16,7 @@ import {
   type NumeroMeta, type PainelMeta,
 } from "@/lib/qs/metaConexao";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
+import { apontarWebhookDaMeta } from "@/lib/qs/waInbox";
 
 const AZUL = "#0147FF";
 
@@ -104,6 +105,14 @@ export default function ConexaoMeta() {
     }
   }
 
+  async function apontar() {
+    setOcupado(true);
+    const r = await apontarWebhookDaMeta();
+    setOcupado(false);
+    if (r.ok) { notifySuccess(`Webhook apontado para ${r.callbackUrl}. Mande um "oi" pro número pra testar.`); await carregar(); }
+    else notifyError(r.error || "A Meta recusou.");
+  }
+
   async function registrar(n: NumeroMeta) {
     const pin = window.prompt("Crie um PIN de 6 números para este número (anote — é a verificação em duas etapas dele):") || "";
     if (!pin) return;
@@ -163,8 +172,11 @@ export default function ConexaoMeta() {
           style={entrada.ok ? { background: "#DCFCE7", color: "#0F7B34" } : { background: "#FEF0C7", color: "#B54708" }}>
           {entrada.ok
             ? <>Mensagens dos clientes chegando normalmente (último sinal: {quando(entrada.ultimoValidoEm ?? null)}).</>
-            : <><strong>{MOTIVO_ENTRADA[entrada.motivo || ""] || "Entrada de mensagens com problema."}</strong> Conectar
-                (ou reconectar) o número oficial abaixo aponta o webhook para o QS.</>}
+            : <><strong>{MOTIVO_ENTRADA[entrada.motivo || ""] || "Entrada de mensagens com problema."}</strong>{" "}
+                <button disabled={ocupado} onClick={() => void apontar()}
+                  className="ml-1 rounded-md px-2 py-1 font-medium text-white disabled:opacity-50" style={{ background: "#B54708" }}>
+                  Apontar o webhook da Meta para o QS
+                </button></>}
         </div>
       )}
 
