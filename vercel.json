@@ -4,9 +4,6 @@
     "api/wa-send-media.js": {
       "maxDuration": 60
     },
-    "api/wa-vigia.js": {
-      "maxDuration": 30
-    },
     "api/agenda-meet.js": {
       "maxDuration": 30
     },

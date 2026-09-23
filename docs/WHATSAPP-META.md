@@ -107,6 +107,6 @@ nasceu desligada.
 
 ## Saúde
 
-A faixa de aviso do QS (`/api/wa-vigia` → `_waSaude.js`) acende quando a Meta
+O painel Configurações → WhatsApp (Meta) (`_waSaude.js`) avisa quando a Meta
 para de entregar mensagem, e diz se é "não chega", "assinatura recusada" ou
 "chega e é ignorada". O alerta por WhatsApp que existia (via Evolution) saiu.
