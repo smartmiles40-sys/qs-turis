@@ -14,6 +14,7 @@ import { listCanned, salvarRespostasProntas, type CannedResponse } from "@/lib/q
 import ModelosMeta from "./ModelosMeta";
 import MensagemAutomatica from "./MensagemAutomatica";
 import LigacaoWhatsApp from "./LigacaoWhatsApp";
+import ConexaoMeta from "./ConexaoMeta";
 import NumerosWhatsApp from "./NumerosWhatsApp";
 import { WA_SIGNATURE_MAP_KEY, WA_SIGNATURE_ENABLED_KEY, nomeCurto } from "@/lib/qs/waSignature";
 import type {
@@ -44,7 +45,7 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "motivos" | "classificacao" | "horario" | "carteira" | "agenda" | "atendimento" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "numeros" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "whatsapp-meta" | "motivos" | "classificacao" | "horario" | "carteira" | "agenda" | "atendimento" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "numeros" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -64,6 +65,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
   { key: "numeros", label: "Números do WhatsApp", group: "EMPRESA" },
+  { key: "whatsapp-meta", label: "WhatsApp (Meta)", group: "INTEGRAÇÕES" },
   { key: "atendimento", label: "Atendimento (WhatsApp)", group: "INTEGRAÇÕES" },
   { key: "modelos-meta", label: "Modelos de Mensagem", group: "INTEGRAÇÕES" },
   { key: "mensagem-automatica", label: "Mensagem Automática", group: "INTEGRAÇÕES" },
@@ -2087,7 +2089,7 @@ export default function SettingsPage() {
   // recusa quem não é (a checagem que vale é a do servidor), mas deixar o botão
   // à mostra pra um SDR só rende um 403 na cara de quem não podia clicar.
   const ehGestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
-  const itensVisiveis = SIDEBAR_ITEMS.filter((i) => i.key !== "numeros" || ehGestor);
+  const itensVisiveis = SIDEBAR_ITEMS.filter((i) => (i.key !== "numeros" && i.key !== "whatsapp-meta") || ehGestor);
 
   const groups = itensVisiveis.reduce<Record<string, SidebarItem[]>>(
     (acc, item) => {
@@ -2151,6 +2153,7 @@ export default function SettingsPage() {
         {activeSection === "modelos-meta" && <ModelosMeta />}
         {activeSection === "mensagem-automatica" && <MensagemAutomatica />}
         {activeSection === "ligacao-whatsapp" && <LigacaoWhatsApp />}
+        {activeSection === "whatsapp-meta" && ehGestor && <ConexaoMeta />}
         {activeSection === "atendimento" && <AtendimentoSection />}
         {activeSection === "webfone-webrtc" && <WebfoneWebrtcSection />}
         {activeSection === "telefone-sip" && <SipSection />}

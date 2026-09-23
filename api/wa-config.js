@@ -21,6 +21,7 @@ import { listarModelos, criarModelo, excluirModelo,
          diagnosticoChamadas, iniciarLigacao, encerrarLigacao,
          credenciaisDaMeta, modelosAprovados, apontarWebhookProQs } from './_meta.js';
 import { caixaOficial } from './_waSaida.js';
+import { conectarNumero, desconectarNumero, listarConexoes, salvarConfigCadastro } from './_metaConexao.js';
 import { rest } from './_supabaseAdmin.js';
 import { sincronizarPermissao, gravarPermissao, lerPermissaoLocal, permissaoVale } from './_permissaoLigacao.js';
 
@@ -345,6 +346,33 @@ export default async function handler(req, res) {
       if (r.erro) return res.status(400).json({ error: r.detalhe || r.erro, motivo: r.erro, codigo: r.codigo });
       return res.status(200).json({ ok: true });
     }
+    // ── PAINEL DE CONEXÃO (Cadastro Incorporado) ────────────────────────────
+    if (body.acao === 'meta-conectar') {
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+      const r = await conectarNumero({
+        code: String(body.code || ''), wabaId: String(body.wabaId || ''), phoneId: String(body.phoneId || ''),
+        modo: body.modo, pin: body.pin, userId: body.userId || null, rotulo: body.rotulo || null,
+        por: userId, urlBase: `https://${host}`,
+      });
+      if (r.erro) {
+        console.warn(`[wa-config] meta-conectar falhou: ${r.erro}`);
+        return res.status(400).json({ error: r.erro });
+      }
+      console.log(`[wa-config] número conectado pelo painel: ${r.numero} (${body.modo || 'cloud'})`);
+      return res.status(200).json(r);
+    }
+    if (body.acao === 'meta-desconectar') {
+      const r = await desconectarNumero(body.phoneId);
+      if (r.erro) return res.status(400).json({ error: r.erro });
+      console.log(`[wa-config] número desconectado pelo painel: ${body.phoneId}`);
+      return res.status(200).json(r);
+    }
+    if (body.acao === 'meta-cadastro-salvar') {
+      const r = await salvarConfigCadastro({ configId: body.configId });
+      if (r.erro) return res.status(400).json({ error: r.erro });
+      return res.status(200).json(r);
+    }
+
     // Aponta o webhook da Meta pro QS (mensagens + ligações). Ver _meta.js.
     if (body.acao === 'webhook-apontar') {
       const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
@@ -361,6 +389,13 @@ export default async function handler(req, res) {
       return res.status(200).json(r);
     }
     return res.status(400).json({ error: 'Ação inválida.' });
+  }
+
+  // O painel de conexão: números, saúde da entrada e a configuração do botão.
+  if (req.query?.conexoes != null) {
+    if (!(await ehAdmin(userId))) return res.status(403).json({ error: 'Só administrador ou gestor.' });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json(await listarConexoes());
   }
 
   // Diagnóstico COMPLETO das chamadas: número, bloco calling, apps assinados.

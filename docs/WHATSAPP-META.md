@@ -49,6 +49,30 @@ Podem ser **apagadas** da Vercel depois do deploy (nada mais lê):
 respostas prontas terem sido copiadas (primeira abertura do chat — ver abaixo);
 depois pode apagar também.
 
+## Painel de conexão ("igual ManyChat") — Configurações → WhatsApp (Meta)
+
+Conecta número pela janela oficial da Meta (Cadastro Incorporado), sem copiar
+token. Cada número conectado guarda o token no Vault (0091) e aparece com
+qualidade, limite de envio e a última mensagem recebida.
+
+- **Número oficial (Cloud API):** PIN de 6 dígitos só para número novo.
+- **WhatsApp Business de um SDR (Coexistência):** o chip continua no app
+  WhatsApp Business do celular; as conversas entram no QS como "do SDR" (só ele,
+  gestão e closer veem). Sem QR da Evolution.
+
+Preparação, uma vez só, no app da Meta (developers.facebook.com):
+1. Produto **Login do Facebook para Empresas** → Configurações → criar
+   configuração **Cadastro incorporado do WhatsApp** → copiar o **ID da
+   configuração** e colar no painel.
+2. Em Login do Facebook para Empresas → Configurações, colocar
+   `qs-turis.vercel.app` em **Domínios permitidos para o SDK do JavaScript** e
+   em **Domínios de app** (Configurações do app → Básico).
+3. App em **modo Ao vivo** e empresa verificada.
+
+Hoje o QS ENVIA só pelo número padrão (oficial). Números de SDR conectados
+por Coexistência RECEBEM no QS; o SDR responde pelo celular e a resposta
+também aparece no QS (eco da Meta).
+
 ## No painel da Meta (developers.facebook.com → o app → WhatsApp → Configuração)
 
 1. **Webhook**: URL `https://qs-turis.vercel.app/api/wa-calls`, token de

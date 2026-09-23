@@ -3,13 +3,13 @@
 // Fala com a Graph API da Meta: mensagens, arquivos, reações, MODELOS e ligações
 // do número oficial. É o ÚNICO caminho de WhatsApp do QS desde 23/09/2026.
 //
-// De onde vêm as credenciais (23/09/2026): SÓ das variáveis de ambiente.
+// De onde vêm as credenciais (23/09/2026), por NÚMERO:
 //
-//   META_CALLS_TOKEN (ou META_WA_TOKEN) — o token do app na Meta;
-//   META_PHONE_NUMBER_ID                — o número oficial;
-//   META_WABA_ID                        — a conta do WhatsApp Business. Opcional:
-//                                         sem ela, o QS descobre sozinho pelo
-//                                         próprio token (ver descobrirWaba).
+//   1. o PAINEL de conexão (Configurações → WhatsApp (Meta)): o botão
+//      "Conectar" guarda o token de cada número no Vault (0091);
+//   2. pro número oficial de antes, as variáveis da Vercel:
+//      META_CALLS_TOKEN (ou META_WA_TOKEN), META_PHONE_NUMBER_ID e, opcional,
+//      META_WABA_ID (sem ela, o QS descobre pelo token — ver descobrirWaba).
 //
 // Até 22/09 havia uma rede de segurança que buscava as credenciais dentro da
 // caixa oficial do Chatwoot. O Chatwoot saiu do QS em 23/09 e a rede saiu junto.
@@ -18,6 +18,7 @@
 // -----------------------------------------------------------------------------
 
 import { toE164BR } from './_wa.js';
+import { rest } from './_supabaseAdmin.js';
 
 const GRAPH = 'https://graph.facebook.com/v20.0';
 
@@ -37,7 +38,8 @@ function foneMeta(raw) {
   return e164 ? e164.replace(/\D/g, '') : '';
 }
 
-let cache = null;   // { token, waba, phoneId, em } — vale por execução
+// Por número (phone_number_id → credenciais). Vale por execução, até 30 min.
+const cache = new Map();
 
 /**
  * O WABA a partir do próprio token, quando META_WABA_ID não está preenchida.
@@ -78,25 +80,75 @@ async function descobrirWaba(token) {
   return null;
 }
 
+/** Esquece as credenciais guardadas (depois de conectar/desconectar um número). */
+export function limparCacheMeta() {
+  cache.clear();
+}
+
 /**
- * As credenciais da Meta, do ambiente. Devolve null quando falta o token ou o
- * número (aí cada tela se desliga com um aviso em vez de estourar).
+ * O número PADRÃO (o oficial, compartilhado pelo time): o da Vercel, ou — sem
+ * ela — o primeiro conectado pelo painel que não é de ninguém.
  */
-export async function credenciaisDaMeta() {
-  if (cache && Date.now() - cache.em < 30 * 60_000) return cache;
+async function numeroPadrao() {
+  const env = String(process.env.META_PHONE_NUMBER_ID || '').trim();
+  if (env) return env;
+  try {
+    const r = await rest(
+      'qs_wa_numeros_meta?select=phone_number_id&status=eq.conectado&user_id=is.null' +
+      '&segredo_id=not.is.null&order=conectado_em.asc&limit=1'
+    );
+    return r?.[0]?.phone_number_id || null;
+  } catch {
+    return null;
+  }
+}
 
-  const token = String(process.env.META_WA_TOKEN || process.env.META_CALLS_TOKEN || '').trim();
-  const phoneId = String(process.env.META_PHONE_NUMBER_ID || '').trim();
-  if (!token || !phoneId) return null;
+/**
+ * As credenciais de UM número (sem argumento: o número padrão).
+ *
+ * Ordem (23/09/2026): o token guardado pelo PAINEL de conexão (Vault, 0091) e,
+ * pro número oficial de antes, as variáveis da Vercel. Devolve null quando não
+ * há nenhum dos dois — cada tela se desliga com um aviso em vez de estourar.
+ */
+export async function credenciaisDaMeta(phoneId = null) {
+  const alvo = String(phoneId || '').trim() || await numeroPadrao();
+  const chave = alvo || 'padrao';
+  const hit = cache.get(chave);
+  if (hit && Date.now() - hit.em < 30 * 60_000) return hit;
 
-  let waba = String(process.env.META_WABA_ID || '').trim() || null;
-  let origemWaba = waba ? 'env' : null;
+  let token = null;
+  let waba = null;
+  let origem = null;
+  if (alvo) {
+    try {
+      const t = await rest('rpc/qs_meta_token', { method: 'POST', body: { p_phone: alvo } });
+      if (typeof t === 'string' && t) {
+        token = t;
+        origem = 'painel';
+        const r = await rest(`qs_wa_numeros_meta?select=waba_id&phone_number_id=eq.${encodeURIComponent(alvo)}&limit=1`);
+        waba = r?.[0]?.waba_id || null;
+      }
+    } catch (e) {
+      console.warn('[meta] não li o token do painel:', e?.message);
+    }
+  }
+
+  const envPhone = String(process.env.META_PHONE_NUMBER_ID || '').trim();
+  if (!token && alvo && alvo === envPhone) {
+    token = String(process.env.META_WA_TOKEN || process.env.META_CALLS_TOKEN || '').trim() || null;
+    waba = String(process.env.META_WABA_ID || '').trim() || null;
+    origem = 'env';
+  }
+  if (!token || !alvo) return null;
+
+  let origemWaba = waba ? origem : null;
   if (!waba) {
     waba = await descobrirWaba(token);
     if (waba) origemWaba = 'token';
   }
-  cache = { token, waba, phoneId, em: Date.now(), origem: 'env', origemWaba };
-  return cache;
+  const cr = { token, waba, phoneId: alvo, em: Date.now(), origem, origemWaba };
+  cache.set(chave, cr);
+  return cr;
 }
 
 /** Diagnóstico para a tela de configuração: o que está preenchido e o que falta. */
@@ -111,7 +163,7 @@ export async function origemDasCredenciais() {
   };
 }
 
-async function graph(path, { method = 'GET', body, token, timeoutMs = 12_000 } = {}) {
+export async function graph(path, { method = 'GET', body, token, timeoutMs = 12_000 } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {

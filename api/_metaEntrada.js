@@ -104,10 +104,10 @@ export function lerMensagemMeta(m) {
 }
 
 /** Baixa a mídia da Meta (id → URL assinada → bytes) e guarda no QS. */
-async function baixarMidiaMeta(midia, leadId) {
+async function baixarMidiaMeta(midia, leadId, phoneId = null) {
   if (!midia?.id) return [];
   try {
-    const cred = await credenciaisDaMeta();
+    const cred = await credenciaisDaMeta(phoneId);
     const token = cred?.token || String(process.env.META_CALLS_TOKEN || '').trim();
     if (!token) return [];
     const info = await fetch(`${GRAPH}/${encodeURIComponent(midia.id)}`, {
@@ -162,7 +162,7 @@ async function gravarUma({ numero, m, direcao, telefoneCliente, nomeCliente, aoV
     return { ignorada: 'sem-lead' };
   }
 
-  const anexos = baixar ? await baixarMidiaMeta(lida.midia, lead.id) : [];
+  const anexos = baixar ? await baixarMidiaMeta(lida.midia, lead.id, numero?.phone_number_id) : [];
   const texto = lida.texto || (lida.midia && !anexos.length ? rotuloDaMidia(lida.midia.tipo) : '');
   const remetente = direcao === 'in'
     ? (nomeCliente || lead.first_name || lead.full_name || null)
