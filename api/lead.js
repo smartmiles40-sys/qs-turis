@@ -13,6 +13,7 @@
 // responsável certo. Ver supabase/migrations/0076_pool_de_numeros.sql.
 //
 // Body (JSON): { nome, telefone, email, origem, expedicao, fila? }
+//          ou { clique: true, origem } — botão sem formulário (pacotes/portal)
 // Resposta:    { ok, numero, sdr_nome, fallback }
 //
 // ── ESTA ROTA É PÚBLICA, E ISSO É DE PROPÓSITO ──────────────────────────────
@@ -72,6 +73,11 @@ async function lerConfig() {
  * `endsWith('setuforeuvouviagens.com.br')` deixaria passar
  * `https://setuforeuvouviagens.com.br.evil.com`, que é um domínio de outra
  * pessoa. Comparação exata é a única que não tem esse buraco.
+ *
+ * Curinga `https://*.dominio` (23/09/2026): vale pra QUALQUER subdomínio, com
+ * o ponto na frente — `x.dominio` passa, `dominio.evil.com` e `evildominio`
+ * não. Existe porque cada LP isolada ganha um subdomínio novo (lps9, stfv9…),
+ * e esquecer de cadastrar um fazia o botão cair no número de emergência calado.
  */
 function origemPermitida(origin, permitidas) {
   if (!origin) return false;
@@ -79,6 +85,8 @@ function origemPermitida(origin, permitidas) {
   try { o = new URL(origin); } catch { return false; }
   const normal = `${o.protocol}//${o.host}`;
   return permitidas.some((p) => {
+    const curinga = /^https:\/\/\*\.([a-z0-9.-]+)$/i.exec(p);
+    if (curinga) return o.protocol === 'https:' && !o.port && o.hostname.endsWith(`.${curinga[1].toLowerCase()}`);
     try { const u = new URL(p); return `${u.protocol}//${u.host}` === normal; } catch { return false; }
   });
 }
@@ -173,9 +181,15 @@ export default async function handler(req, res) {
 
   const fallback = process.env.WHATSAPP_FALLBACK || null;
 
+  // CLIQUE SEM FORMULÁRIO (23/09/2026): pacotes e portal só têm o botão de
+  // WhatsApp — não há telefone, logo não há bilhete. Mesmo assim a pessoa entra
+  // na MESMA roda das LPs e o clique fica registrado (sdr_da_vez, 0089).
+  // Telefone presente sempre vence: com ele o caminho é o do bilhete, abaixo.
+  const clique = body.clique === true && !(telefone && telefone.length >= 10);
+
   // Telefone é o único campo obrigatório: é a chave do bilhete. Sem ele não há
   // como o trigger casar o lead do n8n com o SDR que atendeu.
-  if (!telefone || telefone.length < 10) {
+  if (!clique && (!telefone || telefone.length < 10)) {
     return res.status(400).json({ ok: false, error: 'Telefone inválido' });
   }
 
@@ -193,6 +207,9 @@ export default async function handler(req, res) {
       });
       if (ok === false) {
         console.warn('[lead] teto por IP atingido');
+        // Clique em botão NUNCA pode morrer: quem estourou o teto vai pro número
+        // de emergência, sem girar a roda.
+        if (clique) return responder(res, fallback, null, true);
         return res.status(429).json({ ok: false, error: 'Muitos envios. Tente de novo em alguns minutos.' });
       }
     }
@@ -202,18 +219,24 @@ export default async function handler(req, res) {
 
   // ── A DECISÃO ─────────────────────────────────────────────────────────────
   try {
-    const linhas = await rest('rpc/reservar_sdr', {
-      method: 'POST',
-      body: {
-        p_nome: nome,
-        p_telefone: telefone,
-        p_email: email,
-        p_origem: origem,
-        p_expedicao: expedicao,
-        p_fila: fila,
-      },
-      timeoutMs: RPC_TIMEOUT_MS,
-    });
+    const linhas = clique
+      ? await rest('rpc/sdr_da_vez', {
+        method: 'POST',
+        body: { p_origem: origem ? `clique:${origem}` : 'clique', p_fila: fila },
+        timeoutMs: RPC_TIMEOUT_MS,
+      })
+      : await rest('rpc/reservar_sdr', {
+        method: 'POST',
+        body: {
+          p_nome: nome,
+          p_telefone: telefone,
+          p_email: email,
+          p_origem: origem,
+          p_expedicao: expedicao,
+          p_fila: fila,
+        },
+        timeoutMs: RPC_TIMEOUT_MS,
+      });
 
     const r = Array.isArray(linhas) ? linhas[0] : linhas;
 
