@@ -21,7 +21,7 @@ import { listarModelos, criarModelo, excluirModelo,
          diagnosticoChamadas, iniciarLigacao, encerrarLigacao,
          credenciaisDaMeta, modelosAprovados, apontarWebhookProQs } from './_meta.js';
 import { caixaOficial } from './_waSaida.js';
-import { conectarNumero, desconectarNumero, listarConexoes, salvarConfigCadastro } from './_metaConexao.js';
+import { conectarNumero, desconectarNumero, listarConexoes, salvarConfigCadastro, registrarNumero } from './_metaConexao.js';
 import { rest } from './_supabaseAdmin.js';
 import { sincronizarPermissao, gravarPermissao, lerPermissaoLocal, permissaoVale } from './_permissaoLigacao.js';
 
@@ -359,6 +359,12 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: r.erro });
       }
       console.log(`[wa-config] número conectado pelo painel: ${r.numero} (${body.modo || 'cloud'})`);
+      return res.status(200).json(r);
+    }
+    if (body.acao === 'meta-registrar') {
+      const r = await registrarNumero(String(body.phoneId || ''), body.pin);
+      if (r.erro) return res.status(400).json({ error: r.erro });
+      console.log(`[wa-config] número registrado na Cloud API: ${body.phoneId}`);
       return res.status(200).json(r);
     }
     if (body.acao === 'meta-desconectar') {

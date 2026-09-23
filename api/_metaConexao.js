@@ -20,7 +20,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
-import { graph, credenciaisDaMeta, limparCacheMeta, apontarWebhookProQs } from './_meta.js';
+import { graph, credenciaisDaMeta, limparCacheMeta, apontarWebhookProQs, garantirNumeroDaVercel } from './_meta.js';
 import { saudeDaCaixaOficial } from './_waSaude.js';
 
 const GRAPH = 'https://graph.facebook.com/v20.0';
@@ -149,6 +149,24 @@ export async function conectarNumero({ code, wabaId, phoneId, modo, pin, userId,
   };
 }
 
+/**
+ * Registra na Cloud API um número que já está na conta mas aparece "Pendente"
+ * (caso de quem adiciona o número pelo painel da Meta em vez do botão). O PIN
+ * de 6 dígitos vira a verificação em duas etapas do número.
+ */
+export async function registrarNumero(phoneId, pin) {
+  const p = String(pin || '').trim();
+  if (!/^\d{6}$/.test(p)) return { erro: 'O PIN tem 6 números.' };
+  const cr = await credenciaisDaMeta(phoneId);
+  if (!cr) return { erro: 'Não tenho o token deste número (confira META_CALLS_TOKEN na Vercel).' };
+  try {
+    await graph(`/${cr.phoneId}/register`, { method: 'POST', token: cr.token, body: { messaging_product: 'whatsapp', pin: p } });
+    return { ok: true };
+  } catch (e) {
+    return { erro: `A Meta recusou o registro: ${e.message}` };
+  }
+}
+
 export async function desconectarNumero(phoneId) {
   if (!/^\d+$/.test(String(phoneId || ''))) return { erro: 'Número inválido.' };
   await rest('rpc/qs_meta_desconectar', { method: 'POST', body: { p_phone: String(phoneId) } });
@@ -162,6 +180,7 @@ export async function desconectarNumero(phoneId) {
  * entrada de mensagens e a configuração do botão.
  */
 export async function listarConexoes() {
+  await garantirNumeroDaVercel();
   const [linhas, cfg, saude, users] = await Promise.all([
     rest('qs_wa_numeros_meta?select=phone_number_id,user_id,rotulo,waba_id,numero,nome_verificado,modo,status,segredo_id,conectado_em,cw_inbox_id,ultimo_erro&order=criado_em.asc')
       .catch(() => []),

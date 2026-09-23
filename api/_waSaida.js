@@ -9,7 +9,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
-import { modelosAprovados, credenciaisDaMeta } from './_meta.js';
+import { modelosAprovados, credenciaisDaMeta, garantirNumeroDaVercel } from './_meta.js';
 
 let cacheLinha = null;
 
@@ -23,6 +23,7 @@ export async function caixaOficial() {
   if (cacheLinha && Date.now() - cacheLinha.em < 60_000) return cacheLinha.v;
   // O número PADRÃO de agora (o conectado pelo painel, ou o da Vercel).
   const phoneId = (await credenciaisDaMeta())?.phoneId || '';
+  await garantirNumeroDaVercel();
   let v = null;
   try {
     const r = await rest(

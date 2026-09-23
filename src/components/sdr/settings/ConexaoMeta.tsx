@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  carregarPainelMeta, conectarPelaMeta, desconectarNumeroMeta, salvarConfigId,
+  carregarPainelMeta, conectarPelaMeta, desconectarNumeroMeta, registrarNumeroMeta, salvarConfigId,
   type NumeroMeta, type PainelMeta,
 } from "@/lib/qs/metaConexao";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
@@ -104,6 +104,22 @@ export default function ConexaoMeta() {
     }
   }
 
+  async function registrar(n: NumeroMeta) {
+    const pin = window.prompt("Crie um PIN de 6 números para este número (anote — é a verificação em duas etapas dele):") || "";
+    if (!pin) return;
+    if (!/^\d{6}$/.test(pin)) { notifyError("O PIN tem 6 números."); return; }
+    setOcupado(true);
+    try {
+      await registrarNumeroMeta(n.phoneId, pin);
+      notifySuccess("Número registrado na Cloud API.");
+      await carregar();
+    } catch (e) {
+      notifyError(e instanceof Error ? e.message : "Não consegui registrar.");
+    } finally {
+      setOcupado(false);
+    }
+  }
+
   async function desconectar(n: NumeroMeta) {
     if (!window.confirm(`${n.origem === "vercel" ? "Desativar" : "Desconectar"} ${n.numero || n.phoneId} no QS? O QS para de enviar e receber por este número.`)) return;
     setOcupado(true);
@@ -175,6 +191,15 @@ export default function ConexaoMeta() {
               {q && <div className="text-[12px] font-medium" style={{ color: q.cor }}>● {q.txt}</div>}
               {n.limite && <div className="text-[12px] text-gray-600">Limite: {LIMITE[n.limite] || n.limite}</div>}
               {n.metaErro && <div className="text-[12px]" style={{ color: "#B42318" }}>A Meta respondeu: {n.metaErro}</div>}
+              {ligado && n.statusMeta && n.statusMeta !== "CONNECTED" && (
+                <div className="p-2 rounded-lg text-[12px]" style={{ background: "#FEF0C7", color: "#B54708" }}>
+                  Na Meta este número está <strong>{n.statusMeta}</strong> — ainda não envia nem recebe.
+                  <button disabled={ocupado} onClick={() => void registrar(n)}
+                    className="ml-2 rounded-md px-2 py-1 font-medium text-white" style={{ background: "#B54708" }}>
+                    Registrar com PIN
+                  </button>
+                </div>
+              )}
               <div className="text-[11px] text-gray-400">Última mensagem de cliente: {quando(n.ultimaEntrada)}</div>
               <div className="flex gap-2 pt-1">
                 <button disabled={!pronto || ocupado}

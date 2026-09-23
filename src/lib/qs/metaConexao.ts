@@ -52,6 +52,7 @@ export async function carregarPainelMeta(): Promise<PainelMeta> {
 
 export const salvarConfigId = (configId: string) => post({ acao: "meta-cadastro-salvar", configId });
 export const desconectarNumeroMeta = (phoneId: string) => post({ acao: "meta-desconectar", phoneId });
+export const registrarNumeroMeta = (phoneId: string, pin: string) => post({ acao: "meta-registrar", phoneId, pin });
 
 // ── O SDK da Meta ────────────────────────────────────────────────────────────
 

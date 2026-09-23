@@ -80,6 +80,31 @@ async function descobrirWaba(token) {
   return null;
 }
 
+/**
+ * O número configurado na VERCEL (META_PHONE_NUMBER_ID) também precisa existir
+ * em qs_wa_numeros_meta — é de lá que sai a marca dele nas mensagens (0092) e
+ * a linha dele no painel. Número que entrou pela Vercel, e não pelo botão,
+ * nascia sem linha: sem marca, sem cartão. Isto cria na primeira vez.
+ */
+export async function garantirNumeroDaVercel() {
+  const phone = String(process.env.META_PHONE_NUMBER_ID || '').trim();
+  if (!phone) return null;
+  try {
+    const r = await rest(`qs_wa_numeros_meta?select=phone_number_id&phone_number_id=eq.${encodeURIComponent(phone)}&limit=1`);
+    if (!r?.length) {
+      await rest('qs_wa_numeros_meta', {
+        method: 'POST',
+        prefer: 'resolution=ignore-duplicates,return=minimal',
+        body: { phone_number_id: phone, modo: 'env', status: 'conectado', rotulo: 'Número oficial' },
+      });
+    }
+    await rest('rpc/qs_meta_marcar_caixa', { method: 'POST', body: { p_phone: phone } });
+  } catch (e) {
+    console.warn('[meta] não consegui registrar o número da Vercel no banco:', e?.message);
+  }
+  return phone;
+}
+
 /** Esquece as credenciais guardadas (depois de conectar/desconectar um número). */
 export function limparCacheMeta() {
   cache.clear();
