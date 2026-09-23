@@ -23,6 +23,7 @@ import { listarModelos, criarModelo, excluirModelo,
 import { caixaOficial } from './_waSaida.js';
 import { conectarNumero, desconectarNumero, listarConexoes, salvarConfigCadastro, registrarNumero } from './_metaConexao.js';
 import { rest } from './_supabaseAdmin.js';
+import { diagAutorizado, diagnosticoMeta } from './_metaDiag.js';
 import { sincronizarPermissao, gravarPermissao, lerPermissaoLocal, permissaoVale } from './_permissaoLigacao.js';
 
 /** Só admin/gestor mexe nos modelos e nas respostas prontas. */
@@ -116,6 +117,17 @@ export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Use GET' });
+  }
+
+  // Diagnóstico de suporte (sem login, com QS_DIAG_SECRET). Ver _metaDiag.js.
+  if (diagAutorizado(req)) {
+    res.setHeader('Cache-Control', 'no-store');
+    const b = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
+    if (b.acao === 'apontar') {
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+      return res.status(200).json(await apontarWebhookProQs(`https://${host}`));
+    }
+    return res.status(200).json(await diagnosticoMeta());
   }
 
   const userId = await getSupabaseUserId(req.headers['authorization']);
