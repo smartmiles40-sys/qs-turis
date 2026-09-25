@@ -18,8 +18,9 @@ export function perguntarMotivoDesistencia(quem: string): string | null {
   for (;;) {
     const resposta = window.prompt(
       `${aviso}Registrar DESISTÊNCIA de ${quem}?\n\n` +
-      "O lead vai para PERDIDO, as atividades abertas dele são encerradas e o card " +
-      "do Bitrix vai para Cancelamento/Desistência.\n\n" +
+      "O lead vai para PERDIDO e as atividades abertas dele são encerradas. No Bitrix, " +
+      "o card vai para PERDIDOS — ou para Cancelamento/Desistência se o cliente já tinha " +
+      "comprado (Em emissão, pagamento ou contrato).\n\n" +
       "Qual foi o motivo? (vai para o card)"
     );
     if (resposta === null) return null;

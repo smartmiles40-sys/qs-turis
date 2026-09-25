@@ -95,13 +95,22 @@ const ETAPAS_DA_REUNIAO = new Set([
   ETAPA.no_show,
 ]);
 
-// A desistência vale até a venda fechar: cliente que desiste em Em Emissão ou
-// no contrato é cancelamento, e é exatamente essa coluna que o Dashboard lê.
-// De Venda realizada / Perdidos / já em Desistência, não mexe — só comenta.
-const ETAPAS_QUE_ACEITAM_DESISTENCIA = new Set([
+// ─── PERDIDOS × CANCELAMENTO/DESISTÊNCIA (Bruno, 25/09) ──────────────────────
+// "Cancelamento/Desistência" é SÓ de quem JÁ COMPROU e desistiu/cancelou.
+// Negociação que não fechou — perdido do SDR, "não é SAL", ou desistência antes
+// da compra — vai pra PERDIDOS. Até 25/09 toda desistência ia pra Cancelamento,
+// e a coluna misturava venda cancelada com negociação perdida.
+//
+//   não comprou (reunião, negociação, oportunidade futura) → Perdidos (LOSE)
+//   já comprou (Em emissão, Gerar pagamento, Envio de contrato) → Cancelamento
+//   Venda realizada / Perdidos / Cancelamento → não mexe, só comenta
+const ETAPA_PERDIDOS_CLOSER = 'LOSE';
+const ETAPAS_NAO_COMPROU = new Set([
   ...ETAPAS_DA_REUNIAO,
   'UC_PV9OAM',  // Oportunidade futura
-  'UC_70BW8E',  // Em Emissão / Pix Expedição
+]);
+const ETAPAS_JA_COMPROU = new Set([
+  'UC_70BW8E',  // Em Emissão / Pix Expedição (conta como venda no Dashboard)
   'UC_IHT3PF',  // Gerar Pagamento
   'UC_FYJCD5',  // Envio de contrato
 ]);
@@ -286,11 +295,16 @@ export async function moverParaPerdido(bitrixId, motivo) {
   if (!deal) return { ok: false, code: 'bitrix-inacessivel' };
 
   const noFunil25 = String(deal.CATEGORY_ID ?? '') === PRE_VENDAS.categoria;
-  if (noFunil25 && String(deal.STAGE_ID || '') !== PRE_VENDAS.perdido) {
+  // Funil do closer (25/09): negociação que não chegou à compra também vai pra
+  // Perdidos. Card que já comprou não é "perdido" — fica e ganha comentário.
+  const etapaAtual = String(deal.STAGE_ID || '');
+  const noCloserSemCompra = String(deal.CATEGORY_ID ?? '') === '0' && ETAPAS_NAO_COMPROU.has(etapaAtual);
+  const destino = noFunil25 ? PRE_VENDAS.perdido : noCloserSemCompra ? ETAPA_PERDIDOS_CLOSER : null;
+  if (destino && etapaAtual !== destino) {
     try {
       await bx('crm.deal.update', {
         id: Number(bitrixId),
-        fields: { STAGE_ID: PRE_VENDAS.perdido },
+        fields: { STAGE_ID: destino },
         params: { REGISTER_SONET_EVENT: 'Y' },
       }, 6_000);
     } catch (err) {
@@ -301,9 +315,9 @@ export async function moverParaPerdido(bitrixId, motivo) {
 
   await comentarNoNegocio(bitrixId,
     `❌ Lead marcado como PERDIDO no QS.\nMotivo: ${motivo || 'não informado'}` +
-    (noFunil25 ? '' : '\n(a coluna não foi alterada: este negócio não está no funil de Pré-Vendas)'),
+    (destino ? '' : `\n(a coluna não foi alterada: o card está em "${NOME_ETAPA[etapaAtual] || etapaAtual}")`),
     6_000);
-  return { ok: true, code: noFunil25 ? 'movido' : 'so_comentario' };
+  return { ok: true, code: destino ? 'movido' : 'so_comentario' };
 }
 
 /**
@@ -492,9 +506,14 @@ export default async function handler(req, res) {
       const deal = await lerNegocio(serverBitrixId);
       if (!deal) return res.status(502).json({ success: false, error: 'bitrix-inacessivel' });
       const atual = String(deal.STAGE_ID || '');
-      const podeMover = String(deal.CATEGORY_ID ?? '') === '0' && (
+      const noCloser = String(deal.CATEGORY_ID ?? '') === '0';
+      if (payload.desfecho === 'desistencia' && noCloser) {
+        // O destino depende de ter havido compra (ver ETAPAS_JA_COMPROU).
+        fields.STAGE_ID = ETAPAS_JA_COMPROU.has(atual) ? ETAPA.desistencia : ETAPA_PERDIDOS_CLOSER;
+      }
+      const podeMover = noCloser && (
         payload.desfecho === 'desistencia'
-          ? ETAPAS_QUE_ACEITAM_DESISTENCIA.has(atual)
+          ? ETAPAS_NAO_COMPROU.has(atual) || ETAPAS_JA_COMPROU.has(atual)
           : ETAPAS_DA_REUNIAO.has(atual)
       );
       if (!podeMover) {

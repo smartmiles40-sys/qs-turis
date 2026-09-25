@@ -1325,7 +1325,7 @@ export async function reenviarDesfechoAoBitrix(meeting: Meeting): Promise<Meetin
  *
  * Nota na timeline (com SAL e motivo escritos) + campos do negócio. Os campos:
  *   realizada/no-show → data, "Reunião realizada?", SAL, valor, tipo e etapa;
- *   desistência       → motivo + coluna Cancelamento/Desistência.
+ *   desistência       → motivo + Perdidos (ou Cancelamento/Desistência se já comprou).
  * O servidor NUNCA puxa o card pra trás (ETAPAS_DA_REUNIAO em bitrix-sync.js):
  * se ele já passou da reunião, grava os fatos e comenta que a etapa ficou.
  *
