@@ -204,7 +204,7 @@ export default function CadenceHealthPanel() {
             {/* Números-chave */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
               <StatTile label="Na fila (em FUP)" value={total} color="var(--ink)" />
-              <StatTile label="Fim de cadência" value={finishedCount} color={finishedCount > 0 ? AMBER : "var(--ink)"} hint="plano concluído — aguardando decisão" />
+              <StatTile label="Fim de cadência" value={finishedCount} color={finishedCount > 0 ? AMBER : "var(--ink)"} hint="plano concluído — voltou pra carteira do SDR" />
               <StatTile label="Atrasadas" value={atrasadas} color={RED} />
               <StatTile label="Backlog (dias)" value={backlogDias} color={backlogDias >= 3 ? RED : "var(--ink)"} hint="atividade parada há mais tempo" />
             </div>

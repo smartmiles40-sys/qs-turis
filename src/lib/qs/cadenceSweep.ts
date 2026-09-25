@@ -54,6 +54,7 @@ interface SweepCadence {
 interface SweepLead {
   id: string;
   full_name: string | null;
+  phone: string | null;
   bitrix_id: string | null;
   owner_id: string | null;
   cadence_id: string;
@@ -107,7 +108,7 @@ export async function sweepCadenceEndings(): Promise<SweepResult> {
       const rows = await fetchAllRows<SweepLead>((from, to) =>
         supabase
           .from("qs_leads")
-          .select("id, full_name, bitrix_id, owner_id, cadence_id, cadence_started_at, arrived_at")
+          .select("id, full_name, phone, bitrix_id, owner_id, cadence_id, cadence_started_at, arrived_at")
           .in("cadence_id", ids)
           .in("status", ["nao_iniciado", "em_prospeccao"])
           .order("id")
@@ -224,14 +225,19 @@ export async function sweepCadenceEndings(): Promise<SweepResult> {
         continue;
       }
 
-      // 3c. SEM REGRA (2026-07-24): encerra a cadência DE VERDADE — nota única
-      //     "🏁" pro lead sair do limbo e aparecer como "aguardando decisão" na
-      //     Saúde da Cadência. Ninguém perde/ganha sozinho: a decisão é humana.
+      // 3c. SEM REGRA: o lead VOLTA PRA CARTEIRA do SDR (Bruno, 25/09). Não
+      //     perde, não ganha e não pede decisão: fica aberto, sem atividade, na
+      //     carteira de quem trabalhou — pra ser reiniciado quando o SDR quiser.
+      //     A nota 🏁 marca o fim (e evita repetir). Garante o registro na
+      //     carteira: 8 de 814 leads nesse estado não estavam nela.
       if (alreadyFinished.has(lead.id)) continue;
+      if (lead.phone && lead.owner_id) {
+        await supabase.rpc("qs_carteira_registrar", { p_telefone: lead.phone, p_sdr: lead.owner_id, p_motivo: "fim-cadencia" });
+      }
       const { error: noteErr } = await supabase.from("qs_notes").insert({
         lead_id: lead.id,
         author_id: null,
-        body: `🏁 Fim da cadência "${rule.name}" sem desfecho — todas as atividades do plano foram concluídas. Decida: ganho, perdido ou vincular a uma nova cadência.`,
+        body: `🏁 Fim da cadência "${rule.name}" sem desfecho — todas as atividades do plano foram concluídas. O lead voltou pra carteira do SDR e pode ser reiniciado por lá.`,
         tags: ["cadencia", "fim-cadencia"],
       });
       if (!noteErr) result.finished++;

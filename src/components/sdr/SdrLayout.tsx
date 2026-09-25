@@ -330,7 +330,7 @@ export default function SdrLayout() {
     sweepCadenceEndings().then(({ redirected, lost, finished }) => {
       if (redirected > 0) notifySuccess(`${redirected} lead(s) terminaram a cadência e foram redirecionados automaticamente.`);
       if (lost > 0) notifySuccess(`${lost} lead(s) marcados como perdidos automaticamente (fim de cadência) — perda espelhada no Bitrix.`);
-      if (finished > 0) notifySuccess(`${finished} lead(s) concluíram a cadência sem regra de fim — aguardando sua decisão (veja a Saúde da Cadência).`);
+      if (finished > 0) notifySuccess(`${finished} lead(s) terminaram a cadência e voltaram pra carteira — dá pra reiniciar por lá.`);
     });
   }, [currentUser]);
 
