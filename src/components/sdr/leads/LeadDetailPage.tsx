@@ -9,7 +9,6 @@ import {
   deleteQsLead,
   updateQsNote,
   deleteQsNote,
-  updateQsMeeting,
   LEAD_SELECT,
 } from "@/lib/qs/queries";
 import { getLeadScore } from "@/lib/leadScore";
@@ -17,6 +16,7 @@ import { loadWorkHours, nextWorkMoment } from "@/lib/workHours";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import ScheduleMeetingModal from "@/components/sdr/agenda/ScheduleMeetingModal";
+import MeetingDetailModal from "@/components/sdr/agenda/MeetingDetailModal";
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
 import OportunidadeFuturaModal, { FaixaOportunidadeFutura } from "@/components/sdr/leads/OportunidadeFuturaModal";
 import type {
@@ -28,7 +28,6 @@ import type {
   CadenceDay,
   Note,
   Meeting,
-  MeetingStatus,
   Task,
 } from "../types";
 import {
@@ -137,29 +136,6 @@ const TEMPERATURE_OPTIONS: { label: string; color: string }[] = [
   { label: "Frio", color: "#2563EB" },
 ];
 
-// ── Espelho do desfecho da reunião no Bitrix ─────────────────────────────────
-// Mesma lógica do helper da MeetingsPage: o sync só conhece os eventos
-// perdido|ganho|reuniao|nota (whitelist do /api/bitrix-sync e do n8n), então o
-// desfecho (realizada/no-show/cancelada) vira comentário "nota" na timeline,
-// sem mover coluna. Fire-and-forget — sem bitrix_id o notifyBitrix pula sozinho.
-function notifyMeetingStatusToBitrix(
-  meeting: Pick<Meeting, "lead_id" | "scheduled_at" | "title">,
-  bitrixId: string | null | undefined,
-  status: MeetingStatus
-): void {
-  const phrases: Partial<Record<MeetingStatus, string>> = {
-    realizada: "foi REALIZADA",
-    no_show: "teve NO-SHOW (cliente não compareceu)",
-    cancelada: "foi CANCELADA",
-  };
-  const phrase = phrases[status];
-  if (!phrase) return; // "agendada" não tem nota própria — a criação já dispara o evento "reuniao"
-  notifyBitrix("nota", {
-    lead_id: meeting.lead_id,
-    bitrix_id: bitrixId,
-    body: `Reunião de ${formatDateTime(meeting.scheduled_at)}${meeting.title ? ` (${meeting.title})` : ""} ${phrase} no QS.`,
-  });
-}
 
 // ── Editar lead (modal do header) ────────────────────────────────────────────
 
@@ -235,6 +211,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
 
   // ── Agendar Reunião: modal único do QS (agenda dos closers, 0027) ──
   const [showMeetingModal, setShowMeetingModal] = useState(false);
+  // Reunião aberta no modal OFICIAL de desfecho, e a que está sendo remarcada.
+  const [reuniaoAberta, setReuniaoAberta] = useState<Meeting | null>(null);
+  const [reuniaoRemarcar, setReuniaoRemarcar] = useState<Meeting | null>(null);
 
   // ── WhatsApp (Task 3) ──
   const [showWhatsApp, setShowWhatsApp] = useState(false);
@@ -262,7 +241,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteBody, setEditingNoteBody] = useState("");
   const [savingNoteEdit, setSavingNoteEdit] = useState(false);
-  const [updatingMeetingId, setUpdatingMeetingId] = useState<string | null>(null);
 
   // ── Data state ──
   const [lead, setLead] = useState<Lead | null>(null);
@@ -788,29 +766,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     setActiveTab("reunioes");
   }
 
-  // ── Meeting status quick actions (Sprint 4 — realizada / no-show / cancelar) ──
-  async function changeMeetingStatus(meeting: Meeting, status: MeetingStatus) {
-    if (!lead || updatingMeetingId) return;
-    // Cancelar é 1 clique — misclick não pode cancelar reunião de cliente.
-    if (status === "cancelada" && !window.confirm(`Cancelar a reunião de ${formatDateTime(meeting.scheduled_at)}?`)) return;
-    setUpdatingMeetingId(meeting.id);
-    try {
-      // updateQsMeeting MEDE a gravação (.single() falha com 0 linhas sob RLS)
-      // e avisa por toast quando o banco recusa.
-      const updated = await updateQsMeeting(meeting.id, {
-        status,
-        updated_at: new Date().toISOString(),
-      });
-      if (!updated) return;
-      // Espelha o desfecho na timeline do negócio no Bitrix (evento "nota").
-      notifyMeetingStatusToBitrix(meeting, lead.bitrix_id, status);
-      await reloadMeetings();
-      notifySuccess(`Reunião marcada como ${MEETING_STATUS_LABELS[status].toLowerCase()}.`);
-    } finally {
-      setUpdatingMeetingId(null);
-    }
-  }
-
   // ── Loading / Not found ──
   if (loading) {
     return (
@@ -1239,7 +1194,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           <div className="space-y-3">
             {meetings.map((meeting) => {
               const mColor = MEETING_COLORS[meeting.status] ?? MEETING_COLORS.agendada;
-              const busy = updatingMeetingId === meeting.id;
               return (
                 <div key={meeting.id} className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
                   <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
@@ -1294,29 +1248,17 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                     )}
                   </div>
 
-                  {/* Ações de desfecho — só pra reunião ainda agendada */}
-                  {meeting.status === "agendada" && (
+                  {/* DESFECHO SÓ PELO MODAL OFICIAL (25/09). Aqui havia Realizada/
+                      No-show/Cancelar que gravavam o status cru: sem SAL, sem
+                      valor, sem o envio único ao Bitrix, sem encerrar a atividade
+                      de confirmação nem destravar a agenda do closer. */}
+                  {(meeting.status === "agendada" || meeting.status === "confirmada") && (
                     <div className="flex items-center gap-2 flex-wrap mt-4 pt-3 border-t border-gray-100">
                       <button
-                        onClick={() => changeMeetingStatus(meeting, "realizada")}
-                        disabled={busy || !!updatingMeetingId}
-                        className="px-3 py-1.5 rounded-lg bg-green-50 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        onClick={() => setReuniaoAberta(meeting)}
+                        className="px-3 py-1.5 rounded-lg bg-blue-50 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
                       >
-                        {busy ? "Salvando..." : "✓ Realizada"}
-                      </button>
-                      <button
-                        onClick={() => changeMeetingStatus(meeting, "no_show")}
-                        disabled={busy || !!updatingMeetingId}
-                        className="px-3 py-1.5 rounded-lg bg-orange-50 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      >
-                        No-show
-                      </button>
-                      <button
-                        onClick={() => changeMeetingStatus(meeting, "cancelada")}
-                        disabled={busy || !!updatingMeetingId}
-                        className="px-3 py-1.5 rounded-lg bg-red-50 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      >
-                        Cancelar
+                        Lançar desfecho / remarcar
                       </button>
                     </div>
                   )}
@@ -1975,6 +1917,19 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       )}
 
       {/* Agendar reunião — modal único do QS (closer + horários livres) */}
+      <MeetingDetailModal
+        meeting={reuniaoAberta}
+        onClose={() => setReuniaoAberta(null)}
+        onChanged={() => { void reloadMeetings(); }}
+        onReschedule={(m) => { setReuniaoAberta(null); setReuniaoRemarcar(m); }}
+      />
+      <ScheduleMeetingModal
+        open={!!reuniaoRemarcar}
+        reschedule={reuniaoRemarcar}
+        onClose={() => setReuniaoRemarcar(null)}
+        onSaved={() => { setReuniaoRemarcar(null); void reloadMeetings(); }}
+      />
+
       <ScheduleMeetingModal
         open={showMeetingModal}
         onClose={() => setShowMeetingModal(false)}

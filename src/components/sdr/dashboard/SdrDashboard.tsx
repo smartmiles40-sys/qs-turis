@@ -1187,6 +1187,16 @@ export default function SdrDashboard() {
       if (ownerId) {
         qOpenTotal = qOpenTotal.eq("owner_id", ownerId);
         qPendVencida = qPendVencida.eq("owner_id", ownerId);
+      } else {
+        // Visão do time = fila dos SDRs (25/09). Sem o filtro, as cobranças de
+        // reunião dos closers entravam aqui: 48 vencidas, todas de closer, com
+        // o hero "Atrasadas (time)" ao lado marcando 0.
+        const { data: sdrs } = await supabase.from("qs_users").select("id").eq("role", "sdr");
+        const ids = ((sdrs ?? []) as { id: string }[]).map((u) => u.id);
+        if (ids.length) {
+          qOpenTotal = qOpenTotal.in("owner_id", ids);
+          qPendVencida = qPendVencida.in("owner_id", ids);
+        }
       }
 
       // 5. Reuniões Agendadas por SDR — paginado. Mesmo critério do hero
@@ -1200,7 +1210,7 @@ export default function SdrDashboard() {
           // (closer_id) e o embed curto passou a devolver PGRST201, derrubando
           // este bloco inteiro de métricas do gestor.
           .select("owner_id, status, owner:qs_users!qs_meetings_owner_id_fkey(name)")
-          .not("status", "in", "(cancelada,arquivada)")
+          .not("status", "in", "(cancelada,reagendada)")
           .order("id");
         if (ownerId) q = q.eq("owner_id", ownerId);
         if (from) q = q.gte("created_at", from);
@@ -1422,7 +1432,9 @@ export default function SdrDashboard() {
       // Retomada fica de FORA de todos eles (0054): é a 2ª/3ª call do mesmo
       // cliente num pacote, e contá-la inflava o mês de quem vende pacote.
       const doIndicador = meetings.filter(contaNoIndicador);
-      const agendadas = doIndicador.filter((m) => m.status !== "cancelada").length;
+      // Reagendada fica FORA (25/09): a remarcação cria uma linha nova, que é a que
+      // conta — somar as duas inflava +38 em agosto e +51 em setembro.
+      const agendadas = doIndicador.filter((m) => m.status !== "cancelada" && m.status !== "reagendada").length;
       const realizadas = doIndicador.filter((m) => m.status === "realizada").length;
       const noShow = doIndicador.filter((m) => m.status === "no_show").length;
       // Desistência (0079) é balde PRÓPRIO e fica FORA do show rate: a reunião

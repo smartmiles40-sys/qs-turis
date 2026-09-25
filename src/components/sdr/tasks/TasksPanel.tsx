@@ -347,6 +347,17 @@ function paraInputLocal(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/**
+ * A tarefa aparece na fila? Uma regra só, pra lista E pros contadores.
+ * Lead encerrado (ganho/perdido) não aparece — exceto as tarefas que nascem
+ * justamente depois do encerramento: re_contato (perdido de propósito) e as
+ * cobranças de reunião confirmar/desfecho (ganho no QS = reunião agendada).
+ */
+function tarefaVisivelNaFila(t: Task, statusDoLead: string | undefined): boolean {
+  if (t.tags?.some((tag) => tag === "re_contato" || tag === "confirmar" || tag === "desfecho")) return true;
+  return statusDoLead !== "ganho" && statusDoLead !== "perdido";
+}
+
 export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const { currentUser } = useQsAuth();
   const chatDock = useChatAppDock();
@@ -1221,7 +1232,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const obs = obsText.trim();
     const failures: string[] = [];
     try {
-      await completeTask(taskId, "ganho");
+      // Se a atividade não fechou (outro SDR, duplo clique, banco recusou), não
+      // segue marcando ganho por cima — era um ganho sem rastro de quem fez.
+      const fechou = await completeTask(taskId, "ganho");
+      if (!fechou) {
+        setSavingMeeting(false);
+        return;
+      }
       const { data: wonRows, error: wonErr } = await supabase
         .from("qs_leads").update({ status: "ganho" }).eq("id", leadId).select("id");
       if (wonErr || !wonRows || wonRows.length === 0) {
@@ -1832,11 +1849,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     //     então TODA cobrança de confirmação/desfecho vive num lead "ganho").
     //     Medido em 13/08: 48 'desfecho' + 31 'confirmar' abertas e invisíveis —
     //     a causa-código das reuniões vencidas sem desfecho.
-    filtered = filtered.filter((t) => {
-      if (t.tags?.some((tag) => tag === "re_contato" || tag === "confirmar" || tag === "desfecho")) return true;
-      const st = getLeadForTask(t)?.status;
-      return st !== "ganho" && st !== "perdido";
-    });
+    filtered = filtered.filter((t) => tarefaVisivelNaFila(t, getLeadForTask(t)?.status));
 
     // ── LIGAÇÃO DE WHATSAPP SÓ APARECE PRA QUEM AUTORIZOU (Bruno, 01/09) ────
     //
@@ -2248,11 +2261,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // a fila inteira do time + dias futuros e o número da saudação não batia.
   const endTodayMs = (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d.getTime(); })();
   const counterBase = useMemo(() => {
-    let base = tasks.filter((t) => {
-      if (t.tags?.includes("re_contato")) return true;
-      const st = leadsMap.get(t.lead_id)?.status;
-      return st !== "ganho" && st !== "perdido";
-    });
+    // A MESMA regra da lista (25/09): aqui só passava re_contato, e o closer via
+    // 32 cobranças vencidas na lista com o contador de atrasadas marcando 0.
+    let base = tasks.filter((t) => tarefaVisivelNaFila(t, leadsMap.get(t.lead_id)?.status));
     if (currentUser && !canSeeAllData(currentUser.role)) {
       base = base.filter((t) => t.owner_id === currentUser.id);
     }
@@ -2455,6 +2466,25 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   async function concluirEmMassa(resultado: string) {
     const ids = [...selecionadas];
     if (!ids.length) return;
+
+    // LIGAÇÃO NÃO SE "CONCLUI" EM LOTE (25/09). Uma a uma, ligação exige a
+    // classificação; o lote era a porta lateral — 1.438 ligações de setembro
+    // fechadas como "concluída", sem resultado e sem próximo passo (o lead
+    // saía de todas as filas). Em lote, ligação só como "não atendeu"/"caixa
+    // postal", que geram o follow-up.
+    if (resultado === "concluida") {
+      const ligacoes = ids.filter((id) => {
+        const t = tasks.find((x) => x.id === id);
+        return !!t && CALL_CHANNELS.includes(t.channel_type);
+      }).length;
+      if (ligacoes > 0) {
+        notifyError(
+          `${ligacoes} das selecionadas são ligações — ligação precisa de resultado. ` +
+          `Use "Não atendeu"/"Caixa postal" no lote, ou classifique uma a uma.`
+        );
+        return;
+      }
+    }
 
     const rotulo = ROTULO_MASSA[resultado] ?? resultado;
     const ok = await confirmar({

@@ -36,7 +36,7 @@ import {
   semDesfecho,
   chaveDoEspecialista,
 } from "@/lib/qs/closerAgenda";
-import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, reagendarReuniao, gerarSalaMeet, avisarBitrixDaSala, deleteMeeting, type DesfechoCompleto } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, temDesfecho, reagendarReuniao, gerarSalaMeet, avisarBitrixDaSala, deleteMeeting, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
 import BriefingDoLead from "./BriefingDoLead";
 import { getSetting } from "@/lib/qsSettings";
@@ -1168,7 +1168,10 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
         {!somenteLeitura && <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
           <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Desfecho</p>
 
-          {!fechando && (
+          {/* Desfecho só em reunião ABERTA (25/09). Antes os botões apareciam em
+              cancelada/reagendada/realizada — e o "Cancelar" apagava desfecho (10
+              casos). O banco também trava (0093). */}
+          {!fechando && (reuniao.status === "agendada" || reuniao.status === "confirmada") && (
             <>
               <div className="mt-2.5 grid grid-cols-3 gap-1.5">
                 <BotaoDesfecho cor="#059669" icone={<IcCheck />} rotulo="Realizada" onClick={() => setFechando("realizada")} />
@@ -1341,7 +1344,7 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
               <IcExternal /> Abrir o lead no CRM
             </button>
           )}
-          {reuniao.status !== "cancelada" && !somenteLeitura && (
+          {reuniao.status !== "cancelada" && !temDesfecho(reuniao) && !somenteLeitura && (
             <button
               onClick={() => {
                 if (window.confirm("Cancelar esta reunião?")) onStatus("cancelada");
@@ -1355,7 +1358,7 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
               conta no histórico); excluir apaga, e serve pra registro criado por
               engano ou duplicado. Só existia na agenda mensal, mas o time
               trabalha nesta tela — então não havia como apagar de onde se olha. */}
-          {!somenteLeitura && (
+          {!somenteLeitura && !temDesfecho(reuniao) && (
             <button
               onClick={onExcluir}
               className="w-full rounded-lg py-2 text-xs font-semibold text-gray-300 transition hover:bg-red-50 hover:text-red-600"

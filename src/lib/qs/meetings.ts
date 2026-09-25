@@ -1033,6 +1033,7 @@ export interface SalEscolhido {
 async function marcarLeadPerdidoPorSal(meeting: Meeting, motivo: string | null): Promise<void> {
   return marcarLeadPerdido(meeting, {
     motivoTarefa: `Lead recusado no SAL${motivo ? ` — ${motivo}` : ""}`,
+    motivoPerda: "Não é SAL",
     avisoFalha: "O SAL foi gravado, mas o lead NÃO foi marcado como perdido — marque pelo perfil dele.",
   });
 }
@@ -1052,8 +1053,32 @@ async function marcarLeadPerdido(
    * desfecho — o "perdido" aqui só comentaria "a coluna não foi alterada",
    * contradizendo o que o card acabou de fazer.
    */
-  opts: { motivoTarefa: string; avisoFalha: string; semBitrix?: boolean }
+  opts: { motivoTarefa: string; avisoFalha: string; semBitrix?: boolean; motivoPerda: string }
 ): Promise<void> {
+  // PELA REUNIÃO, NÃO PELO LEAD (0093, 25/09). O lead já é do closer; quando
+  // quem lança é o SDR que agendou, o UPDATE direto voltava 0 linhas pela RLS
+  // e o lead ficava "ganho" — 8 desistências e 6 "não é SAL" assim. A RPC
+  // confere a permissão da reunião, grava o motivo e encerra as atividades de
+  // qualquer dono.
+  const rpc = await supabase.rpc("qs_perder_lead_da_reuniao", {
+    p_meeting: meeting.id,
+    p_motivo_perda: opts.motivoPerda,
+    p_motivo_tarefa: opts.motivoTarefa,
+  });
+  const semRpc = rpc.error && (rpc.error.code === "PGRST202" || rpc.error.code === "42883");
+  if (!semRpc) {
+    if (rpc.error) { notifyError(opts.avisoFalha); return; }
+    if (!opts.semBitrix) {
+      notifyBitrix("perdido", {
+        lead_id: meeting.lead_id,
+        bitrix_id: meeting.lead?.bitrix_id,
+        full_name: meeting.lead?.full_name ?? meeting.lead_name ?? undefined,
+      });
+    }
+    return;
+  }
+
+  // Caminho antigo, só enquanto a 0093 não estiver no banco.
   const { data, error } = await supabase
     .from("qs_leads")
     .update({ status: "perdido" })
@@ -1229,6 +1254,7 @@ async function gravarStatusDaReuniao(
   if (status === "desistencia") {
     await marcarLeadPerdido(meeting, {
       motivoTarefa: `Cliente desistiu — ${motivoDesistencia}`,
+      motivoPerda: "Desistência",
       avisoFalha: "A desistência foi registrada, mas o lead NÃO foi marcado como perdido — marque pelo perfil dele.",
       semBitrix: true,
     });
@@ -1479,6 +1505,11 @@ export async function reagendarReuniao(input: {
       notifyError(`Reunião remarcada, mas o convite do Google não mudou de horário (${r.aviso}) — avise o cliente.`);
     }
   }
+
+  // A reunião velha leva as atividades dela junto (25/09). Sem isto, o SDR
+  // ficava com "confirmar" e o closer com "desfecho" de uma reunião que já não
+  // existe — 31 atividades fantasma assim no dia da auditoria.
+  await closeConfirmTask(meeting.id, "Reunião reagendada");
 
   await ensureConfirmTask({
     meetingId: nova.id,

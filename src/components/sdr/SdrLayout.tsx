@@ -90,6 +90,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import CommandPalette from "./CommandPalette";
 import { notifySuccess } from "@/lib/qs/notify";
 import { sweepCadenceEndings } from "@/lib/qs/cadenceSweep";
+import { varrerRetrabalhoVencido } from "@/lib/qs/carteira";
 import TelefoneOnboarding from "@/components/sdr/telefone/TelefoneOnboarding";
 import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
 import LigacaoOficialWidget from "@/components/sdr/telefone/LigacaoOficialWidget";
@@ -291,6 +292,27 @@ export default function SdrLayout() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  // O retrabalho de ontem fecha no LOGIN, não na Carteira (25/09). Rodando só
+  // na abertura da Carteira, o SDR que foi direto pro Painel via o retrabalho
+  // de ontem como atraso — o Victor Hugo amanheceu com 376 assim. Cada um varre
+  // o que é seu (RLS); o realtime da fila tira as linhas da tela sozinho.
+  // E de novo quando o DIA VIRA com a aba aberta (checa a cada 15 min): aba
+  // deixada aberta de um dia pro outro não passava pelo login.
+  const retrabalhoVarridoEm = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser) return;
+    const diaSP = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    const varrer = () => {
+      const hoje = diaSP();
+      if (retrabalhoVarridoEm.current === hoje) return;
+      retrabalhoVarridoEm.current = hoje;
+      void varrerRetrabalhoVencido();
+    };
+    varrer();
+    const t = window.setInterval(varrer, 15 * 60_000);
+    return () => window.clearInterval(t);
+  }, [currentUser]);
 
   // Fim de cadência (redirecionamento / perda automática) — roda 1x por sessão,
   // depois do login. Idempotente; se nada foi tratado, fica em silêncio.

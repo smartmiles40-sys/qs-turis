@@ -415,7 +415,14 @@ export async function completeTask(
       contact_result: contactResult,
     };
     if (notes !== undefined) updateData.notes = notes;
-    if (tags !== undefined) updateData.tags = tags;
+    if (tags !== undefined) {
+      // SOMA, não troca (25/09). Trocar apagava `dia:N`/`tentativa:N`: 2.831
+      // ligações classificadas em setembro perderam o FUP, a análise por
+      // tentativa contava todas como "1ª" e o follow-up seguinte recomeçava.
+      const { data: atual } = await supabase.from("qs_tasks").select("tags").eq("id", id).maybeSingle();
+      const antigas = ((atual as { tags: string[] | null } | null)?.tags ?? []);
+      updateData.tags = [...new Set([...antigas, ...tags])];
+    }
 
     // Só conclui se ainda estiver aberta: duplo clique / Enter+clique / dois SDRs
     // no mesmo lead não geram segunda conclusão (nem follow-up duplicado).
@@ -599,7 +606,9 @@ export async function skipTask(
 export async function createCadenceTasks(
   leadId: string,
   cadenceId: string,
-  ownerId: string | null
+  ownerId: string | null,
+  // Só o 1º dia do plano. É o retrabalho da Carteira: uma sessão, não um plano.
+  opts?: { soPrimeiroDia?: boolean }
 ): Promise<Task[] | null> {
   try {
     // A prioridade de cada tarefa agora vem do PERÍODO da atividade (manhã/tarde/
@@ -630,11 +639,18 @@ export async function createCadenceTasks(
     const wh = await loadWorkHours();
     const allowedWeekdays = scheduleWeekdays(wh, cadPlan?.execution_weekdays ?? null);
 
-    const dayList = days as (CadenceDay & { activities: CadenceActivity[] })[];
+    const todosOsDias = days as (CadenceDay & { activities: CadenceActivity[] })[];
+    const menorDia = Math.min(...todosOsDias.map((d) => d.day_number ?? 1));
+    const dayList = opts?.soPrimeiroDia
+      ? todosOsDias.filter((d) => (d.day_number ?? 1) === menorDia)
+      : todosOsDias;
     const dateByDay = planCadenceDates(
       dayList.map((d) => d.day_number ?? 1),
       allowedWeekdays,
-      cadPlan?.offday_policy ?? null
+      cadPlan?.offday_policy ?? null,
+      // Parte do próximo momento de trabalho (25/09): lead da noite não pode
+      // ganhar Dia 1 e Dia 2 no mesmo dia útil. Ver api/_leads.js.
+      nextWorkMoment(wh, new Date())
     );
 
     // 1º dia da cadência (menor day_number, que cairia HOJE na chegada do lead).

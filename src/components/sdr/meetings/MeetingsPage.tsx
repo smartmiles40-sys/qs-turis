@@ -6,7 +6,7 @@ import { MEETING_STATUS_LABELS } from "../types";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { fetchAllRows } from "@/lib/qs/queries";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
-import { createMeeting, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, vincularCardAoBitrix, somenteDigitos } from "@/lib/qs/meetings";
+import { createMeeting, closeConfirmTask, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, vincularCardAoBitrix, somenteDigitos } from "@/lib/qs/meetings";
 import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
 import AgendaMes from "../agenda/AgendaMes";
@@ -418,6 +418,9 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     // Se o status mudou pelo modal (ex.: marcada como realizada), registra na
     // timeline do Bitrix — mesmo efeito das ações rápidas.
     if (prev && prev.status !== fStatus) {
+      // Cancelada pela edição leva as atividades da reunião junto (25/09) —
+      // senão sobram "confirmar" e "desfecho" de reunião que não vai existir.
+      if (fStatus === "cancelada") await closeConfirmTask(editingId, "Reunião cancelada");
       notifyMeetingStatusToBitrix(
         { lead_id: fLeadId, scheduled_at: base.scheduled_at, title: base.title, lead: selLead ?? prev.lead },
         fStatus

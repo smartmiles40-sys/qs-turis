@@ -149,7 +149,10 @@ export async function generateCadenceTasks({ leadId, cadenceId, ownerId, priorit
   // toda a conta no relógio BRT (campos UTC de um ms deslocado) e gravamos o
   // instante real somando +3h no fim.
   const baseMs = baseDate ? new Date(baseDate).getTime() : Date.now();
-  const brtBase = new Date(baseMs - BRT_OFFSET_H * 3600_000); // "agora" em Brasília, lido pelos campos UTC
+  // O plano parte do PRÓXIMO MOMENTO DE TRABALHO, não de "agora" (25/09). Lead
+  // das 21h ganhava o Dia 1 empurrado pra amanhã e o Dia 2 também amanhã —
+  // 252 de 1.781 leads com dois dias da cadência no mesmo dia (toque em dobro).
+  const brtBase = new Date(nextWorkMomentBrt(wh, baseMs - BRT_OFFSET_H * 3600_000));
   const brtNowMs = Date.now() - BRT_OFFSET_H * 3600_000;      // "agora" BRT em wall-clock ms
   const rows = [];
   let prevDayUtc = null; // meia-noite UTC do último dia agendado (guarda anti-colapso)

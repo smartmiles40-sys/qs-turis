@@ -588,7 +588,7 @@ export default function MeetingDetailModal({
               >
                 Remarcar
               </button>
-              {meeting.status !== "cancelada" ? (
+              {temDesfecho(meeting) ? null : meeting.status !== "cancelada" ? (
                 <button
                   onClick={() => mudarStatus("cancelada")}
                   disabled={busy}

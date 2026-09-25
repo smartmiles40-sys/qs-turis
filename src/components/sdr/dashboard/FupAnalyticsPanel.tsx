@@ -31,8 +31,11 @@ const RED = "#DC2626";
 // Cobre os valores legados ("atendeu", "ganho") e as classificações novas
 // ("com_avanco"/"sem_avanco" — só existem quando houve conversa).
 const CONNECTED = new Set(["atendeu", "ganho", "com_avanco", "sem_avanco"]);
-// "Não atendeu" agrega os três desfechos legados de ligação sem contato.
-const NO_ANSWER = new Set(["nao_atendeu", "caixa_postal", "desligou"]);
+// "Não atendeu" = ligação sem falar com a pessoa. Legados + as classificações
+// novas equivalentes (25/09): "sem_conexao" é a classificação mais usada (6.548
+// em 60 dias) e ficava fora; "gatekeeper"/"persona_indisponivel" = falou com
+// alguém, mas não com o lead — pra curva de conexão, é não atendeu.
+const NO_ANSWER = new Set(["nao_atendeu", "caixa_postal", "desligou", "sem_conexao", "gatekeeper", "persona_indisponivel"]);
 // Telefone que não serve: valor novo + o legado equivalente.
 const BAD_PHONE = new Set(["telefone_incorreto", "numero_errado"]);
 // Seção 2 olha só canais de LIGAÇÃO: é onde "tentativa" e "conexão" fazem

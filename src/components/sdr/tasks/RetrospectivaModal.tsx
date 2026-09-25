@@ -121,7 +121,9 @@ async function loadRetro(uid: string): Promise<RetroData> {
     // faria a lista de "fechados" engolir as cobranças dele — que vivem
     // justamente em leads com status ganho — e o modal abriria "0 atividades"
     // com o Painel logo atrás mostrando dezenas.
-    supabase.from("qs_leads").select("id, status").in("status", ["ganho", "perdido"]),
+    // (buscado logo abaixo, pelos ids das tarefas abertas — 25/09: esta linha
+    // dizia isso mas buscava a tabela inteira, e o corte de 1000 sorteava.)
+    Promise.resolve(null),
     // Concluídas nos últimos 7 dias FECHADOS (base da média/dia).
     supabase.from("qs_tasks")
       .select("id", { count: "exact", head: true })
@@ -139,7 +141,13 @@ async function loadRetro(uid: string): Promise<RetroData> {
   const reunioesOntem = rowsOf(rM).length;
 
   // ── Leads fechados (exclusão da carga) ──────────────────────────────────────
-  const leadRows = rowsOf<{ id: string; status: string | null }>(rLeads);
+  void rLeads;
+  const idsAbertos = [...new Set(rowsOf<{ lead_id: string }>(rOpen).map((t) => t.lead_id).filter(Boolean))];
+  const leadRows: { id: string; status: string | null }[] = [];
+  for (let i = 0; i < idsAbertos.length; i += 200) {
+    const { data } = await supabase.from("qs_leads").select("id, status").in("id", idsAbertos.slice(i, i + 200));
+    leadRows.push(...((data ?? []) as { id: string; status: string | null }[]));
+  }
   const closedLeadIds = new Set(
     leadRows.filter((l) => l.status === "ganho" || l.status === "perdido").map((l) => l.id)
   );

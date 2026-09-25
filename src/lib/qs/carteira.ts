@@ -10,16 +10,17 @@
 // exatamente essa: fila que não zera deixa de ser fila e vira ruído.
 //
 // Então a atividade nasce para HOJE e, se não for executada, fecha sozinha como
-// `ignorada` na primeira abertura de tela do dia seguinte. O lead volta pra
-// carteira inteiro e pode ser reiniciado outro dia.
+// `ignorada` no dia seguinte. O lead volta pra carteira inteiro — e, se era
+// um PERDIDO reaberto pelo retrabalho e ninguém mexeu, volta a ser perdido.
 //
 // -- POR QUE A VARREDURA É NO CLIENTE ----------------------------------------
 //
 // Não há cron. Poderia haver — e o `wa-vigia` já mostrou o preço de depender de
 // um agendador externo: ficou dois dias mudo sem ninguém perceber. A varredura
-// aqui pega carona no tráfego real: é idempotente, custa um UPDATE filtrado, e
-// só roda quando alguém abre a carteira, que é justamente quando o número
-// importa. Se ninguém abre, não há quem esteja sendo enganado pelo atraso.
+// aqui pega carona no tráfego real: é idempotente e custa um UPDATE filtrado.
+// Roda no LOGIN (SdrLayout) e ao abrir a Carteira. Até 25/09 rodava só na
+// Carteira — quem ia direto pro Painel via o retrabalho de ontem como atraso
+// (o Victor Hugo amanheceu com 376).
 // -----------------------------------------------------------------------------
 
 import { supabase } from "@/lib/supabase";
@@ -55,11 +56,45 @@ export async function varrerRetrabalhoVencido(): Promise<number> {
       .contains("tags", [TAG_RETRABALHO])
       .in("status", ["pendente", "atrasada"])
       .lt("scheduled_at", inicioDoDiaSP())
-      .select("id");
+      .select("id, lead_id");
     if (error) return 0;
-    return (data ?? []).length;
+    const fechadas = (data ?? []) as { id: string; lead_id: string }[];
+    await devolverPerdidosNaoTrabalhados([...new Set(fechadas.map((t) => t.lead_id))]);
+    return fechadas.length;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * O retrabalho reabre PERDIDO como em_prospeccao (27 dos 31 leads reiniciados
+ * até 25/09 eram perdidos com motivo). Se expirou sem ninguém executar nada, o
+ * lead fica aberto, sem atividade, pra sempre — engordando os "esquecidos".
+ * Volta a perdido quem: tem motivo de perda gravado, está em prospecção, não
+ * tem mais nada aberto e não teve NENHUMA atividade de retrabalho concluída.
+ */
+async function devolverPerdidosNaoTrabalhados(leadIds: string[]): Promise<void> {
+  if (!leadIds.length) return;
+  try {
+    const { data: leads } = await supabase
+      .from("qs_leads")
+      .select("id")
+      .in("id", leadIds)
+      .eq("status", "em_prospeccao")
+      .not("loss_reason_id", "is", null);
+    const candidatos = ((leads ?? []) as { id: string }[]).map((l) => l.id);
+    if (!candidatos.length) return;
+    const { data: mexidas } = await supabase
+      .from("qs_tasks")
+      .select("lead_id, status, tags")
+      .in("lead_id", candidatos)
+      .or(`status.in.(pendente,atrasada),and(status.eq.concluida,tags.cs.{${TAG_RETRABALHO}})`);
+    const tocados = new Set(((mexidas ?? []) as { lead_id: string }[]).map((t) => t.lead_id));
+    const devolver = candidatos.filter((id) => !tocados.has(id));
+    if (!devolver.length) return;
+    await supabase.from("qs_leads").update({ status: "perdido" }).in("id", devolver).eq("status", "em_prospeccao");
+  } catch {
+    /* higiene: não derruba a tela */
   }
 }
 
@@ -84,12 +119,15 @@ export async function reiniciarLead(
       .eq("id", leadId);
     if (eLead) return { ok: false, error: `Não consegui atualizar o lead: ${eLead.message}` };
 
-    const criadas = await createCadenceTasks(leadId, cadenceId, ownerId);
+    // SÓ O 1º DIA DO PLANO (25/09). Antes vinha a cadência inteira espremida em
+    // hoje: 29 leads do Victor Hugo viraram 376 atividades num dia só — ~13
+    // toques no mesmo lead, que ninguém executa e que a Meta lê como spam.
+    const criadas = await createCadenceTasks(leadId, cadenceId, ownerId, { soPrimeiroDia: true });
     if (!criadas) return { ok: false, error: "O lead foi reiniciado, mas as atividades não foram criadas." };
 
-    // Duas coisas de uma vez, e as duas obrigatórias: puxar tudo pra HOJE (a
-    // cadência espalha ao longo de dias, e retrabalho é uma sessão só) e marcar
-    // com a tag, que é o que faz a varredura achar isso amanhã.
+    // Duas coisas de uma vez, e as duas obrigatórias: puxar pra HOJE (retrabalho
+    // é uma sessão só) e marcar com a tag, que é o que faz a varredura achar isso
+    // amanhã.
     const agora = new Date().toISOString();
     const ids = criadas.map((t) => t.id);
     if (ids.length) {
@@ -160,7 +198,7 @@ export interface ResultadoLote {
  * lead sem cadência seria pior que lote nenhum.
  */
 export async function reiniciarEmLote(
-  leads: { id: string; nome: string | null }[],
+  leads: { id: string; nome: string | null; donoId?: string | null }[],
   cadenceId: string | null,
   ownerId: string | null,
   aoAvancar?: (feitos: number, total: number) => void
@@ -175,8 +213,8 @@ export async function reiniciarEmLote(
       fatia.map(async (l) => ({
         lead: l,
         r: cadenceId
-          ? await reiniciarLead(l.id, cadenceId, ownerId)
-          : await reiniciarLeadHoje(l.id, ownerId),
+          ? await reiniciarLead(l.id, cadenceId, l.donoId ?? ownerId)
+          : await reiniciarLeadHoje(l.id, l.donoId ?? ownerId),
       }))
     );
     for (const { lead, r } of rs) {

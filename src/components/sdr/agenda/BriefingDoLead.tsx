@@ -33,6 +33,7 @@ const RESULTADO: Record<string, string> = {
   com_avanco: "ligação com avanço", sem_avanco: "ligação sem avanço",
   gatekeeper: "falou com intermediário", persona_indisponivel: "decisor indisponível",
   telefone_incorreto: "telefone incorreto", sem_conexao: "sem conexão",
+  sem_interesse: "perdido (sem interesse)", concluida: "concluída",
 };
 
 function quando(iso: string | null): string {

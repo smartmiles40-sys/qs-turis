@@ -44,8 +44,15 @@ import {
   getRegua, fetchSaude, fetchSerie,
   type ReguaVelocidade, type SaudeSdr, type PontoSerie,
 } from "@/lib/qs/carteiraSaude";
-import { fetchActivityGoals } from "@/lib/qs/queries";
+import { fetchActivityGoals, fetchAllRows } from "@/lib/qs/queries";
 import SaudeCarteira from "./SaudeCarteira";
+
+/** O pedaço do lead que a carteira usa. */
+interface LeadDaCarteira {
+  id: string; full_name: string | null; phone: string | null; bitrix_id: string | null;
+  status: string; segment: string | null; owner_id: string | null; cadence_id: string | null;
+  updated_at: string; created_at: string;
+}
 
 interface Props {
   onOpenLead: (leadId: string) => void;
@@ -129,13 +136,20 @@ export default function CarteiraPage({ onOpenLead }: Props) {
     setCarregando(true);
     setErro(null);
     try {
-      // A RLS da 0073 já corta pro dono (e pra quem está cobrindo). O gestor vê
-      // tudo — por isso o limite: carteira do time inteiro passa de 2 mil.
-      const { data: linhas, error: e1 } = await supabase
-        .from("qs_carteira")
-        .select("chave_telefone, sdr_id, substituto_id, substituto_ate")
-        .limit(gestor ? 500 : 2000);
-      if (e1) throw e1;
+      // A RLS da 0073 já corta pro dono (e pra quem está cobrindo). PAGINADO
+      // (25/09): o PostgREST devolve no máximo 1000 linhas, em silêncio — a
+      // Yanca via 536 dos 789 leads dela, e o gestor 1000 de 1.303 atividades
+      // abertas (lead com atividade aparecia "livre" e o Iniciar duplicava).
+      const linhas = await fetchAllRows<{
+        chave_telefone: string; sdr_id: string;
+        substituto_id: string | null; substituto_ate: string | null;
+      }>((de, ate) =>
+        supabase
+          .from("qs_carteira")
+          .select("chave_telefone, sdr_id, substituto_id, substituto_ate")
+          .order("chave_telefone")
+          .range(de, ate)
+      );
 
       const chaves = (linhas ?? []) as {
         chave_telefone: string; sdr_id: string;
@@ -147,18 +161,22 @@ export default function CarteiraPage({ onOpenLead }: Props) {
       // por card, então casa-se pelo dono: o SDR só enxerga os cards dele mesmo,
       // que é o que ele vai retrabalhar.
       const donos = [...new Set(chaves.map((c) => c.substituto_id ?? c.sdr_id))];
-      const { data: leads, error: e2 } = await supabase
-        .from("qs_leads")
-        .select("id, full_name, phone, bitrix_id, status, segment, owner_id, cadence_id, updated_at, created_at")
-        .in("owner_id", donos)
-        .order("created_at", { ascending: false })
-        .limit(4000);
-      if (e2) throw e2;
+      const leads = await fetchAllRows<LeadDaCarteira>((de, ate) =>
+        supabase
+          .from("qs_leads")
+          .select("id, full_name, phone, bitrix_id, status, segment, owner_id, cadence_id, updated_at, created_at")
+          .in("owner_id", donos)
+          .order("created_at", { ascending: false })
+          .order("id")
+          .range(de, ate)
+      );
 
-      const [{ data: usuarios }, { data: cads }, { data: abertas }] = await Promise.all([
+      const [{ data: usuarios }, { data: cads }, abertas] = await Promise.all([
         supabase.from("qs_users").select("id, name"),
         supabase.from("qs_cadences").select("id, name").neq("status", "congelada").order("name"),
-        supabase.from("qs_tasks").select("lead_id").in("status", ["pendente", "atrasada"]).limit(5000),
+        fetchAllRows<{ lead_id: string }>((de, ate) =>
+          supabase.from("qs_tasks").select("lead_id").in("status", ["pendente", "atrasada"]).order("id").range(de, ate)
+        ),
       ]);
 
       const nomeDe = new Map((usuarios ?? []).map((u: { id: string; name: string }) => [u.id, u.name]));
@@ -337,7 +355,9 @@ export default function CarteiraPage({ onOpenLead }: Props) {
     if (alvos.length === 0) return;
     setProgresso({ feitos: 0, total: alvos.length });
     const r = await reiniciarEmLote(
-      alvos.map((i) => ({ id: i.leadId!, nome: i.nome })),
+      // Cada lead vai pro DONO dele (25/09): o gestor que dispara o lote não
+      // pode virar dono das atividades da carteira do SDR.
+      alvos.map((i) => ({ id: i.leadId!, nome: i.nome, donoId: i.donoId ?? null })),
       cadenceId,
       currentUser?.id ?? null,
       (feitos, total) => setProgresso({ feitos, total })

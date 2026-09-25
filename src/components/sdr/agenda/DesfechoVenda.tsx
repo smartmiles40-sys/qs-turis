@@ -118,7 +118,7 @@ export default function DesfechoVenda({ tipo, busy = false, pedirSal = true, onV
       </p>
 
       <label className="block">
-        <span className="text-xs font-semibold text-gray-600">Valor da venda</span>
+        <span className="text-xs font-semibold text-gray-600">Valor da proposta</span>
         <div className="mt-1 flex items-center gap-1.5">
           <span className="text-sm text-gray-500">R$</span>
           <input

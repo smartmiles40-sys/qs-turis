@@ -149,6 +149,9 @@ export async function sweepCadenceEndings(): Promise<SweepResult> {
     }
 
     const now = Date.now();
+    // Motivo "Fim de cadência" (0093). Sem a migration, fica sem motivo como antes.
+    const { data: motivoRow } = await supabase.from("qs_loss_reasons").select("id").eq("label", "Fim de cadência").maybeSingle();
+    const motivoFimDeCadencia = (motivoRow as { id: string } | null)?.id ?? null;
     for (const lead of done) {
       const rule = ruleById.get(lead.cadence_id);
       if (!rule) continue;
@@ -203,7 +206,8 @@ export async function sweepCadenceEndings(): Promise<SweepResult> {
         if (days < rule.auto_loss_days) continue; // ainda dentro do prazo
         const { data: updated } = await supabase
           .from("qs_leads")
-          .update({ status: "perdido" }) // closed_at é gravado pelo trigger 0012
+          // Com motivo (25/09): 526 perdas automáticas de setembro sem motivo.
+          .update({ status: "perdido", ...(motivoFimDeCadencia ? { loss_reason_id: motivoFimDeCadencia } : {}) }) // closed_at: trigger 0012
           .eq("id", lead.id)
           .in("status", ["nao_iniciado", "em_prospeccao"]) // guarda de corrida
           .select("id");
