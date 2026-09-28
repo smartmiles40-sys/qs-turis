@@ -218,8 +218,8 @@ export async function graph(path, { method = 'GET', body, token, timeoutMs = 12_
 }
 
 /** TODOS os modelos, com status — é o que o admin precisa ver (não só os aprovados). */
-export async function listarModelos() {
-  const cr = await credenciaisDaMeta();
+export async function listarModelos(phoneId = null) {
+  const cr = await credenciaisDaMeta(phoneId);
   if (!cr) return { erro: 'sem-caixa-oficial' };
   if (!cr.waba) return { erro: 'sem-waba-id' };
   const d = await graph(`/${cr.waba}/message_templates?limit=200`, { token: cr.token });
@@ -349,8 +349,8 @@ export function validarModelo({ nome, categoria, corpo }) {
  * Vale 30 dias. Quem chama guarda o id e a data — e re-sobe antes de vencer,
  * porque id vencido a Meta recusa com a mensagem mais inútil possível.
  */
-export async function subirMidiaPorUrl(url) {
-  const cr = await credenciaisDaMeta();
+export async function subirMidiaPorUrl(url, phoneId = null) {
+  const cr = await credenciaisDaMeta(phoneId);
   if (!cr) return { erro: 'sem-caixa-oficial' };
   if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
 
@@ -393,8 +393,8 @@ export async function subirMidiaPorUrl(url) {
  * ORDEM, então a ordenação numérica aqui não é estética: fora de ordem, o
  * cliente recebe as variáveis trocadas de lugar.
  */
-export async function enviarTemplate({ para, nome, idioma = 'pt_BR', params = {}, midia = null, formatoMidia = 'VIDEO' }) {
-  const cr = await credenciaisDaMeta();
+export async function enviarTemplate({ para, nome, idioma = 'pt_BR', params = {}, midia = null, formatoMidia = 'VIDEO', phoneId = null }) {
+  const cr = await credenciaisDaMeta(phoneId);
   if (!cr) return { erro: 'sem-caixa-oficial' };
   if (!cr.phoneId) return { erro: 'sem-phone-number-id' };
 
@@ -454,8 +454,8 @@ export async function enviarTemplate({ para, nome, idioma = 'pt_BR', params = {}
 // aprovado (`enviarTemplate`). Quem chama confere a janela antes.
 
 /** Um POST em /{phone}/messages. Devolve { wamid } ou { erro, detalhe, codigo }. */
-async function mandar(para, conteudo, { responderA = null } = {}) {
-  const cr = await credenciaisDaMeta();
+async function mandar(para, conteudo, { responderA = null, phoneId = null } = {}) {
+  const cr = await credenciaisDaMeta(phoneId);
   if (!cr) return { erro: 'sem-caixa-oficial' };
   const numero = foneMeta(para);
   if (!numero) return { erro: 'telefone-invalido' };
@@ -479,16 +479,16 @@ async function mandar(para, conteudo, { responderA = null } = {}) {
 }
 
 /** Texto livre (dentro da janela de 24h). `responderA` = wamid da mensagem citada. */
-export function enviarTexto({ para, texto, responderA = null }) {
-  return mandar(para, { type: 'text', text: { body: String(texto), preview_url: true } }, { responderA });
+export function enviarTexto({ para, texto, responderA = null, phoneId = null }) {
+  return mandar(para, { type: 'text', text: { body: String(texto), preview_url: true } }, { responderA, phoneId });
 }
 
 /**
  * Sobe bytes pra Meta (o arquivo que o SDR anexou) e devolve o `media_id`.
  * Irmã da `subirMidiaPorUrl`, pra quando o arquivo já está na memória.
  */
-export async function subirMidiaBytes(bytes, mime, nomeArquivo = 'arquivo') {
-  const cr = await credenciaisDaMeta();
+export async function subirMidiaBytes(bytes, mime, nomeArquivo = 'arquivo', phoneId = null) {
+  const cr = await credenciaisDaMeta(phoneId);
   if (!cr) return { erro: 'sem-caixa-oficial' };
   const tipo = String(mime || 'application/octet-stream').split(';')[0].trim();
   const form = new FormData();
@@ -512,17 +512,17 @@ export async function subirMidiaBytes(bytes, mime, nomeArquivo = 'arquivo') {
  * Arquivo: `tipo` image | video | audio | document | sticker. Legenda não
  * existe em áudio nem figurinha (a Meta recusa); nome do arquivo só em documento.
  */
-export function enviarMidia({ para, tipo, mediaId, legenda = null, nomeArquivo = null, responderA = null }) {
+export function enviarMidia({ para, tipo, mediaId, legenda = null, nomeArquivo = null, responderA = null, phoneId = null }) {
   const t = ['image', 'video', 'audio', 'document', 'sticker'].includes(tipo) ? tipo : 'document';
   const corpo = { id: String(mediaId) };
   if (legenda && t !== 'audio' && t !== 'sticker') corpo.caption = String(legenda);
   if (nomeArquivo && t === 'document') corpo.filename = String(nomeArquivo);
-  return mandar(para, { type: t, [t]: corpo }, { responderA });
+  return mandar(para, { type: t, [t]: corpo }, { responderA, phoneId });
 }
 
 /** Reação a uma mensagem (emoji vazio tira a reação). */
-export function enviarReacao({ para, wamid, emoji }) {
-  return mandar(para, { type: 'reaction', reaction: { message_id: String(wamid), emoji: String(emoji ?? '') } });
+export function enviarReacao({ para, wamid, emoji, phoneId = null }) {
+  return mandar(para, { type: 'reaction', reaction: { message_id: String(wamid), emoji: String(emoji ?? '') } }, { phoneId });
 }
 
 /**
@@ -530,8 +530,8 @@ export function enviarReacao({ para, wamid, emoji }) {
  * {{buracos}}, variáveis em ordem, se precisa de mídia). Antes vinham do
  * Chatwoot, que sincronizava os modelos da caixa oficial; agora vêm da Meta.
  */
-export async function modelosAprovados() {
-  const r = await listarModelos().catch((e) => ({ erro: e?.message }));
+export async function modelosAprovados(phoneId = null) {
+  const r = await listarModelos(phoneId).catch((e) => ({ erro: e?.message }));
   if (r?.erro || !Array.isArray(r?.modelos)) return [];
   return r.modelos
     .filter((m) => String(m.status).toUpperCase() === 'APPROVED' && m.corpo)

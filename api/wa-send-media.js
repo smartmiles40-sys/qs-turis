@@ -22,7 +22,7 @@ import {
   assertCanAccessLead, getSupabaseUserId, completeWhatsAppTask, assinarComoUsuario,
 } from './_wa.js';
 import { subirMidiaBytes, enviarMidia } from './_meta.js';
-import { janelaAberta, registrarSaida } from './_waSaida.js';
+import { janelaAberta, registrarSaida, numeroDoEnvio } from './_waSaida.js';
 import { guardarMidia, rotuloDaMidia } from './_waMidia.js';
 import { pediuParaParar } from './_waOptout.js';
 import { webmParaOggBytes, ehWebm } from './_opusRemux.js';
@@ -126,10 +126,13 @@ export default async function handler(req, res) {
   if (await pediuParaParar(leadId).catch(() => false)) {
     return res.status(409).json({ error: 'Este cliente pediu para não receber mais mensagens.', motivo: 'optout' });
   }
+  // Por qual número sai (Coexistence, 28/09) — a mesma regra do texto.
+  const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null });
+
   // Arquivo é mensagem livre: só dentro da janela de 24h.
-  if (!(await janelaAberta(leadId))) {
+  if (!(await janelaAberta(leadId, phoneId))) {
     return res.status(409).json({
-      error: 'O cliente não fala com a gente há mais de 24h. Pelo número oficial só sai MODELO aprovado.',
+      error: 'O cliente não fala com a gente há mais de 24h. Por este número só sai MODELO aprovado.',
       motivo: 'fora-da-janela-24h',
     });
   }
@@ -156,12 +159,12 @@ export default async function handler(req, res) {
   const legenda = (tipo === 'audio' || tipo === 'sticker') ? null : await assinarComoUsuario(caption, auth.user);
 
   try {
-    const up = await subirMidiaBytes(bytes, mimeFinal, fileName);
+    const up = await subirMidiaBytes(bytes, mimeFinal, fileName, phoneId);
     if (up.erro) {
       console.warn(`[wa-send-media] upload recusado (${up.erro}): ${up.detalhe || ''}`);
       return res.status(502).json({ error: up.detalhe || 'A Meta não aceitou o arquivo.', motivo: up.erro });
     }
-    const r = await enviarMidia({ para: telefone, tipo, mediaId: up.id, legenda, nomeArquivo: fileName });
+    const r = await enviarMidia({ para: telefone, tipo, mediaId: up.id, legenda, nomeArquivo: fileName, phoneId });
     if (r.erro) {
       console.warn(`[wa-send-media] a Meta recusou (${r.erro}${r.codigo ? ' ' + r.codigo : ''}): ${r.detalhe || ''}`);
       if (r.codigo === 131047) {
@@ -179,6 +182,7 @@ export default async function handler(req, res) {
       texto: legenda || (url ? '' : rotuloDaMidia(bolha)),
       anexos: url ? [{ type: bolha, url }] : [],
       remetente: auth.user?.name || null,
+      phoneId,
     });
 
     let tarefa = null;

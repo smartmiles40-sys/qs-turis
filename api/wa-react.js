@@ -23,6 +23,7 @@
 import { assertCanAccessLead, getSupabaseUserId, signatureName, nomeCurto } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 import { enviarReacao } from './_meta.js';
+import { numeroDoEnvio } from './_waSaida.js';
 
 function safeParse(s) {
   try { return JSON.parse(s); } catch { return {}; }
@@ -96,7 +97,10 @@ export default async function handler(req, res) {
     if (!wamid) {
       motivo = 'mensagem-sem-id-do-whatsapp';
     } else {
-      const r = await enviarReacao({ para: auth.lead?.phone, wamid, emoji });
+      // Reação sai pelo número da conversa — mensagem de um número não aceita
+      // reação vinda de outro.
+      const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null });
+      const r = await enviarReacao({ para: auth.lead?.phone, wamid, emoji, phoneId });
       if (r.erro) {
         console.warn(`[wa-react] a Meta recusou a reação (${r.erro}${r.codigo ? ' ' + r.codigo : ''}): ${r.detalhe || ''}`);
         motivo = 'meta-recusou';

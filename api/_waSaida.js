@@ -37,15 +37,96 @@ export async function caixaOficial() {
   return v;
 }
 
+// ── QUAL NÚMERO ENVIA (28/09/2026, Coexistence: um número por SDR) ─────────────
+
+let cacheNumeros = null;
+
+/** Os números conectados, com dono e marca. 60 s de cache por execução. */
+async function numerosConectados() {
+  if (cacheNumeros && Date.now() - cacheNumeros.em < 60_000) return cacheNumeros.v;
+  let v = [];
+  try {
+    v = await rest('qs_wa_numeros_meta?select=phone_number_id,user_id,cw_inbox_id,status,segredo_id&status=eq.conectado') || [];
+  } catch (e) {
+    console.warn('[wa-saida] não li os números conectados:', e?.message);
+  }
+  cacheNumeros = { v, em: Date.now() };
+  return v;
+}
+
+/** A marca (cw_inbox_id) de um número; sem número, a do oficial. */
+export async function caixaDoNumero(phoneId) {
+  if (!phoneId) return caixaOficial();
+  const n = (await numerosConectados()).find((x) => x.phone_number_id === String(phoneId));
+  return n?.cw_inbox_id ?? null;
+}
+
+/** O SDR dono de um número (null = número compartilhado). */
+async function donoDoNumero(phoneId) {
+  if (!phoneId) return null;
+  const n = (await numerosConectados()).find((x) => x.phone_number_id === String(phoneId));
+  return n?.user_id ?? null;
+}
+
+/**
+ * POR QUAL NÚMERO sai a mensagem deste lead. Devolve o phone_number_id, ou
+ * null = o número oficial (padrão).
+ *
+ *   1. A CONVERSA EM ANDAMENTO continua no mesmo número: o da última mensagem
+ *      com o lead nos últimos 30 dias — desde que seja o oficial, o de quem
+ *      envia ou o do dono do lead. Trocar de número no meio da conversa faz o
+ *      cliente receber de um número desconhecido e fecha a janela de 24h.
+ *   2. Conversa nova: o número de QUEM ENVIA, se for um SDR conectado.
+ *   3. Senão, o número do DONO DO LEAD (gestor/closer escrevendo no lead dele).
+ *   4. Senão, o oficial.
+ *
+ * Número de SDR só conta com token guardado (segredo_id) — sem ele não há
+ * como enviar. Os automáticos (boas-vindas, Glória) NÃO passam por aqui: usam
+ * modelos que só existem na conta oficial.
+ */
+export async function numeroDoEnvio({ leadId, userId = null, ownerId = null }) {
+  let caixaDaConversa = null;
+  try {
+    const desde = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const r = await rest(
+      `qs_wa_messages?select=cw_inbox_id&lead_id=eq.${encodeURIComponent(leadId)}` +
+      `&cw_inbox_id=not.is.null&sent_at=gte.${encodeURIComponent(desde)}&order=sent_at.desc&limit=1`
+    );
+    caixaDaConversa = r?.[0]?.cw_inbox_id ?? null;
+  } catch (e) {
+    console.warn('[wa-saida] não li a última conversa (segue a regra do dono):', e?.message);
+  }
+  return escolherNumero({ numeros: await numerosConectados(), caixaDaConversa, userId, ownerId });
+}
+
+/** A regra de numeroDoEnvio, sem banco (testável). */
+export function escolherNumero({ numeros, caixaDaConversa, userId = null, ownerId = null }) {
+  // Número de SDR só conta com token guardado; o oficial pode vir da Vercel
+  // (sem segredo_id) e continua valendo como "a conversa está no oficial".
+  const nums = (numeros || []).filter((n) => !n.user_id || n.segredo_id);
+  const pessoal = (uid) => (uid ? nums.find((n) => n.user_id === uid) : null);
+  const pode = (n) => n && (!n.user_id || n.user_id === userId || n.user_id === ownerId);
+
+  if (caixaDaConversa != null) {
+    const n = nums.find((x) => x.cw_inbox_id === caixaDaConversa);
+    if (pode(n)) return n.user_id ? n.phone_number_id : null;
+  }
+  const meu = pessoal(userId);
+  if (meu) return meu.phone_number_id;
+  const doDono = pessoal(ownerId);
+  if (doDono) return doDono.phone_number_id;
+  return null;
+}
+
 /**
  * O cliente escreveu pelo número oficial nas últimas 24h? Só assim texto livre
  * é entregue; fora disso a Meta recusa (às vezes calada). Conta no NOSSO banco.
  * Sem conseguir olhar, deixa passar — a própria Meta responde e o erro volta.
  */
-export async function janelaAberta(leadId) {
+export async function janelaAberta(leadId, phoneId = null) {
   const desde = new Date(Date.now() - 24 * 3600_000).toISOString();
   try {
-    const caixa = await caixaOficial();
+    const caixa = await caixaDoNumero(phoneId);
     const filtro = caixa != null ? `&cw_inbox_id=eq.${Number(caixa)}` : '';
     const r = await rest(
       `qs_wa_messages?select=id&lead_id=eq.${encodeURIComponent(leadId)}` +
@@ -65,6 +146,7 @@ export async function janelaAberta(leadId) {
  */
 export async function registrarSaida({
   leadId, wamid, texto = '', anexos = [], remetente = null, respondendoA = null, trechoCitado = null,
+  phoneId = null,
 }) {
   if (!leadId || !wamid) return false;
   try {
@@ -72,7 +154,7 @@ export async function registrarSaida({
       method: 'POST',
       body: {
         p_lead: leadId,
-        p_linha: null,
+        p_linha: await donoDoNumero(phoneId),
         p_source: String(wamid),
         p_direction: 'out',
         p_content: String(texto || ''),
@@ -82,7 +164,7 @@ export async function registrarSaida({
         p_status: 'sent',
         p_reply_to: respondendoA,
         p_reply_prev: trechoCitado,
-        p_inbox: await caixaOficial(),
+        p_inbox: await caixaDoNumero(phoneId),
       },
     });
     return novo === true;
@@ -96,12 +178,12 @@ export async function registrarSaida({
  * Acha o modelo aprovado pelo nome, confere as variáveis e devolve o texto
  * preenchido (é o que vira a bolha no QS). O corpo NUNCA vem do navegador.
  */
-export async function resolverModeloMeta(modelo) {
+export async function resolverModeloMeta(modelo, phoneId = null) {
   const nome = String(modelo?.nome || '').trim();
   if (!nome) return { error: 'modelo-sem-nome' };
   const params = (modelo?.params && typeof modelo.params === 'object') ? modelo.params : {};
 
-  const lista = await modelosAprovados();
+  const lista = await modelosAprovados(phoneId);
   const t = lista.find((m) => m.nome === nome && (!modelo.idioma || m.idioma === modelo.idioma));
   if (!t) return { error: 'modelo-nao-encontrado' };
 

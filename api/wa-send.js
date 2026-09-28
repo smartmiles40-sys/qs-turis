@@ -18,7 +18,7 @@ import {
 } from './_wa.js';
 import { enviarTexto, enviarTemplate, subirMidiaPorUrl } from './_meta.js';
 import {
-  janelaAberta, registrarSaida, resolverModeloMeta, mensagemCitada,
+  janelaAberta, registrarSaida, resolverModeloMeta, mensagemCitada, numeroDoEnvio,
 } from './_waSaida.js';
 import { pediuParaParar } from './_waOptout.js';
 
@@ -72,13 +72,17 @@ export default async function handler(req, res) {
     });
   }
 
+  // Por qual número sai (Coexistence, 28/09): a conversa em andamento, senão o
+  // número do SDR que envia / dono do lead, senão o oficial.
+  const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null });
+
   try {
     let r;
     let textoDaBolha;
     let citada = { wamid: null, trecho: null };
 
     if (modelo) {
-      const m = await resolverModeloMeta(modelo);
+      const m = await resolverModeloMeta(modelo, phoneId);
       if (m.error) {
         const msg = m.error === 'modelo-variavel-vazia'
           ? `Preencha a variável {{${m.variavel}}} do modelo.`
@@ -87,26 +91,26 @@ export default async function handler(req, res) {
       }
       let midia = null;
       if (m.midia?.url) {
-        const up = await subirMidiaPorUrl(m.midia.url);
+        const up = await subirMidiaPorUrl(m.midia.url, phoneId);
         midia = up.id ? { id: up.id } : { url: m.midia.url };
       }
       r = await enviarTemplate({
         para: String(toE164BR(telefone) || '').replace(/\D/g, ''),
-        nome: m.nome, idioma: m.idioma, params: m.params, midia, formatoMidia: m.formatoMidia || 'VIDEO',
+        nome: m.nome, idioma: m.idioma, params: m.params, midia, formatoMidia: m.formatoMidia || 'VIDEO', phoneId,
       });
       // Modelo NÃO leva assinatura: o texto tem que sair idêntico ao aprovado.
       textoDaBolha = m.texto;
     } else {
-      if (!(await janelaAberta(leadId))) {
+      if (!(await janelaAberta(leadId, phoneId))) {
         return res.status(409).json({
-          error: 'O cliente não fala com a gente há mais de 24h. Pelo número oficial, ' +
+          error: 'O cliente não fala com a gente há mais de 24h. Por este número, ' +
                  'a Meta só entrega MODELO aprovado — use um modelo para reabrir a conversa.',
           motivo: 'fora-da-janela-24h',
         });
       }
       citada = await mensagemCitada(leadId, respondendoA);
       textoDaBolha = await assinarComoUsuario(text, auth.user);
-      r = await enviarTexto({ para: telefone, texto: textoDaBolha, responderA: citada.wamid });
+      r = await enviarTexto({ para: telefone, texto: textoDaBolha, responderA: citada.wamid, phoneId });
     }
 
     if (r.erro) {
@@ -127,7 +131,7 @@ export default async function handler(req, res) {
     // ⚠️ DAQUI PRA BAIXO A MENSAGEM JÁ SAIU PRO CLIENTE: nada pode virar erro.
     await registrarSaida({
       leadId, wamid: r.wamid, texto: textoDaBolha, remetente: auth.user?.name || null,
-      respondendoA: citada.wamid, trechoCitado: citada.trecho,
+      respondendoA: citada.wamid, trechoCitado: citada.trecho, phoneId,
     });
 
     let tarefa = null;
@@ -136,7 +140,7 @@ export default async function handler(req, res) {
     } catch (e) {
       console.warn('[wa-send] não consegui concluir a atividade:', e?.message);
     }
-    return res.status(200).json({ ok: true, wamid: r.wamid, tarefaConcluida: tarefa });
+    return res.status(200).json({ ok: true, wamid: r.wamid, tarefaConcluida: tarefa, numero: phoneId || 'oficial' });
   } catch (e) {
     console.error('[wa-send]', e?.message);
     return res.status(502).json({ error: 'Não consegui enviar a mensagem. Tente de novo.' });
