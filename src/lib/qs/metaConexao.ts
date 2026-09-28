@@ -132,8 +132,8 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
         config_id: o.configId,
         response_type: "code",
         override_default_response_type: true,
-        // Embedded Signup v4 (o v2/v3, com setup + sessionInfoVersion, sai em
-        // 15/10/2026 e abria o cadastro comum). Na Coexistence o fluxo é
+        // Embedded Signup v4 (o formato antigo, com `setup` e sem `version`,
+        // sai em 15/10/2026 e abria o cadastro comum). Na Coexistence o fluxo é
         // acionado ao digitar um número que já está no app WhatsApp Business:
         // a Meta mostra QR em vez de SMS.
         // Idêntico ao link que o configurador da Meta gera pro app (28/09):
