@@ -17,7 +17,7 @@ import {
   listMessages, markThreadRead, sendWaMessage, sendWaMedia, subscribeToMessages,
   listCanned, preencherCanned, comprimirImagem, getThreadAvatar,
   reagirMensagem, salvarFigurinha, enviarFigurinha, apagarMensagem,
-  listWaModelos, sendWaTemplate, janelaFechaEm, humanizarJanela, salvarTranscricao,
+  listWaModelosDoLead, sendWaTemplate, janelaFechaEm, humanizarJanela, salvarTranscricao,
   type WaMessage, type CannedResponse, type Figurinha, type WaReacao, type WaModelo,
 } from "@/lib/qs/waInbox";
 import WaMenuContexto, { IconeMenu, PATHS, useToqueLongo, type ItemMenu, type PosMenu } from "./WaMenuContexto";
@@ -438,7 +438,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   };
 
   useEffect(() => { listCanned().then(setCanned); }, []);
-  useEffect(() => { listWaModelos().then(setModelos); }, []);
+  useEffect(() => { listWaModelosDoLead(leadId).then(setModelos); }, [leadId]);
   useEffect(() => { void loadSignatureName(currentUser).then(setAssinatura); }, [currentUser]);
 
   // Carga inicial.

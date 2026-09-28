@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  carregarPainelMeta, conectarPelaMeta, desconectarNumeroMeta, registrarNumeroMeta, salvarConfigId,
+  carregarPainelMeta, conectarPelaMeta, copiarModelosDoOficial, desconectarNumeroMeta, registrarNumeroMeta, salvarConfigId,
   type NumeroMeta, type PainelMeta,
 } from "@/lib/qs/metaConexao";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
@@ -113,6 +113,23 @@ export default function ConexaoMeta() {
     else notifyError(r.error || "A Meta recusou.");
   }
 
+  async function copiarModelos(n: NumeroMeta) {
+    setOcupado(true);
+    try {
+      const r = await copiarModelosDoOficial(n.phoneId);
+      if (r.mesmaConta) { notifySuccess("Este número usa a mesma conta do oficial — os modelos já são os mesmos."); return; }
+      const midia = (r.pulados || []).filter((p) => p.motivo !== "já existe");
+      notifySuccess(`${r.criados?.length || 0} modelo(s) enviados pra aprovação da Meta nesta conta.`);
+      if (midia.length) notifyError(`Com mídia no topo, criar à mão nesta conta: ${midia.map((p) => p.nome).join(", ")}.`);
+      if (r.erros?.length) notifyError(`A Meta recusou: ${r.erros.map((e) => `${e.nome} (${e.detalhe})`).join(" · ")}`);
+      await carregar();
+    } catch (e) {
+      notifyError(e instanceof Error ? e.message : "Não consegui copiar os modelos.");
+    } finally {
+      setOcupado(false);
+    }
+  }
+
   async function registrar(n: NumeroMeta) {
     const pin = window.prompt("Crie um PIN de 6 números para este número (anote — é a verificação em duas etapas dele):") || "";
     if (!pin) return;
@@ -209,6 +226,19 @@ export default function ConexaoMeta() {
                   <button disabled={ocupado} onClick={() => void registrar(n)}
                     className="ml-2 rounded-md px-2 py-1 font-medium text-white" style={{ background: "#B54708" }}>
                     Registrar com PIN
+                  </button>
+                </div>
+              )}
+              {n.donoId && ligado && (
+                <div className="p-2 rounded-lg text-[12px] flex items-center justify-between gap-2" style={{ background: "#F4F6FA", color: "#334155" }}>
+                  <span>
+                    {n.modelos?.erro ? "Modelos: não consegui ler a conta."
+                      : n.modelos ? <>Modelos nesta conta: <b>{n.modelos.aprovados}</b> aprovados · <b>{n.modelos.pendentes}</b> em análise{n.modelos.recusados ? <> · <b>{n.modelos.recusados}</b> recusados</> : null}</>
+                      : "Modelos: —"}
+                  </span>
+                  <button disabled={ocupado} onClick={() => void copiarModelos(n)}
+                    className="shrink-0 rounded-md px-2 py-1 font-medium border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40">
+                    Copiar modelos do oficial
                   </button>
                 </div>
               )}

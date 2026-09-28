@@ -291,6 +291,80 @@ export async function excluirModelo(nome) {
   }
 }
 
+// ─── MODELOS POR WABA (Coexistence, 28/09/2026) ──────────────────────────────
+//
+// Na Coexistence a WABA é 1:1 com o número: cada SDR conectado ganha uma conta
+// própria, e modelo aprovado no oficial NÃO existe na conta dele. Estas duas
+// funções mantêm as contas dos SDRs com os mesmos modelos do oficial.
+
+/** Quantos modelos a WABA do número tem, por status. */
+export async function contarModelos(phoneId) {
+  const cr = await credenciaisDaMeta(phoneId);
+  if (!cr?.waba) return null;
+  try {
+    const d = await graph(`/${cr.waba}/message_templates?fields=status&limit=250`, { token: cr.token, timeoutMs: 8000 });
+    const c = { aprovados: 0, pendentes: 0, recusados: 0, total: 0, waba: cr.waba };
+    for (const t of d?.data || []) {
+      const s = String(t.status || '').toUpperCase();
+      c.total++;
+      if (s === 'APPROVED') c.aprovados++;
+      else if (s === 'PENDING' || s === 'IN_APPEAL') c.pendentes++;
+      else if (s === 'REJECTED' || s === 'DISABLED' || s === 'PAUSED') c.recusados++;
+    }
+    return c;
+  } catch (e) {
+    return { erro: e?.message };
+  }
+}
+
+/**
+ * Copia os modelos APROVADOS do número oficial pra WABA de outro número. Cada
+ * um vai pra análise da Meta de novo (PENDING). O que já existe no destino
+ * (mesmo nome e idioma) é pulado — rodar duas vezes não duplica nada.
+ *
+ * Não copia modelo com imagem/vídeo/documento no topo: a Meta exige subir o
+ * arquivo de exemplo de novo em cada conta (header_handle), e o handle do
+ * oficial não vale na outra. Esses voltam em `pulados`, com o motivo.
+ */
+export async function copiarModelosDoOficial(destinoPhoneId) {
+  const origem = await credenciaisDaMeta();
+  const destino = await credenciaisDaMeta(destinoPhoneId);
+  if (!origem?.waba) return { erro: 'sem-waba-do-oficial' };
+  if (!destino?.waba) return { erro: 'sem-waba-do-destino' };
+  if (origem.waba === destino.waba) return { ok: true, mesmaConta: true, criados: [], pulados: [], erros: [] };
+
+  const campos = 'name,language,category,status,components';
+  const [daOrigem, doDestino] = await Promise.all([
+    graph(`/${origem.waba}/message_templates?fields=${campos}&limit=250`, { token: origem.token, timeoutMs: 15_000 }),
+    graph(`/${destino.waba}/message_templates?fields=name,language&limit=250`, { token: destino.token, timeoutMs: 15_000 }),
+  ]);
+  const jaTem = new Set((doDestino?.data || []).map((t) => `${t.name}|${t.language}`));
+  const criados = [], pulados = [], erros = [];
+
+  for (const t of daOrigem?.data || []) {
+    if (String(t.status).toUpperCase() !== 'APPROVED') continue;
+    if (jaTem.has(`${t.name}|${t.language}`)) { pulados.push({ nome: t.name, motivo: 'já existe' }); continue; }
+    const comps = Array.isArray(t.components) ? t.components : [];
+    const header = comps.find((c) => String(c.type).toUpperCase() === 'HEADER');
+    if (header && String(header.format || 'TEXT').toUpperCase() !== 'TEXT') {
+      pulados.push({ nome: t.name, motivo: `tem ${String(header.format).toLowerCase()} no topo — criar à mão nesta conta` });
+      continue;
+    }
+    try {
+      await graph(`/${destino.waba}/message_templates`, {
+        method: 'POST',
+        token: destino.token,
+        timeoutMs: 15_000,
+        body: { name: t.name, language: t.language, category: t.category, components: comps },
+      });
+      criados.push(t.name);
+    } catch (e) {
+      erros.push({ nome: t.name, detalhe: e?.message });
+    }
+  }
+  return { ok: true, criados, pulados, erros };
+}
+
 /** Devolve a explicação do problema, ou null quando está tudo certo. */
 export function validarModelo({ nome, categoria, corpo }) {
   const n = String(nome || '').trim();

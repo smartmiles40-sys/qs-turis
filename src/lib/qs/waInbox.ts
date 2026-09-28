@@ -177,6 +177,23 @@ export async function listWaModelos(): Promise<WaModelo[]> {
   return cfg.modelos;
 }
 
+/**
+ * Os modelos DESTA conversa (Coexistence, 28/09): cada número de SDR tem a
+ * própria conta na Meta, com os próprios modelos. O servidor aplica a mesma
+ * regra do envio pra saber por qual número a conversa sai. Falhou? Cai nos
+ * modelos do oficial, que é o comportamento de antes.
+ */
+export async function listWaModelosDoLead(leadId: string): Promise<WaModelo[]> {
+  try {
+    const res = await fetch(`/api/wa-config?modelos_lead=${encodeURIComponent(leadId)}`, { headers: await authHeaders() });
+    if (!res.ok) return listWaModelos();
+    const d = await res.json();
+    return Array.isArray(d?.modelos) ? d.modelos : [];
+  } catch {
+    return listWaModelos();
+  }
+}
+
 // ── Portal de modelos (admin) ───────────────────────────────────────────────
 // Aqui é a visão de QUEM ADMINISTRA: todos os modelos, inclusive em análise e
 // reprovados — ao contrário de listWaModelos, que só entrega o que dá pra enviar.

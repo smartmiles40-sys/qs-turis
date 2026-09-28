@@ -15,12 +15,12 @@
 // portal de modelos, as respostas prontas (admin) e as ligações pela Meta.
 // -----------------------------------------------------------------------------
 
-import { getSupabaseUserId } from './_wa.js';
+import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
 import { listarModelos, criarModelo, excluirModelo,
          lerConfigChamadas, ativarChamadas, pedirPermissaoDeLigacao,
          diagnosticoChamadas, iniciarLigacao, encerrarLigacao,
-         credenciaisDaMeta, modelosAprovados, apontarWebhookProQs } from './_meta.js';
-import { caixaOficial } from './_waSaida.js';
+         credenciaisDaMeta, modelosAprovados, apontarWebhookProQs, copiarModelosDoOficial } from './_meta.js';
+import { caixaOficial, numeroDoEnvio } from './_waSaida.js';
 import { conectarNumero, desconectarNumero, listarConexoes, salvarConfigCadastro, registrarNumero } from './_metaConexao.js';
 import { rest } from './_supabaseAdmin.js';
 import { diagAutorizado, diagnosticoMeta } from './_metaDiag.js';
@@ -385,6 +385,14 @@ export default async function handler(req, res) {
       console.log(`[wa-config] número desconectado pelo painel: ${body.phoneId}`);
       return res.status(200).json(r);
     }
+    // Coexistence: copia os modelos aprovados do oficial pra conta (WABA) do
+    // número do SDR. Repetir não duplica — o que já existe é pulado.
+    if (body.acao === 'meta-copiar-modelos') {
+      const r = await copiarModelosDoOficial(String(body.phoneId || ''));
+      if (r.erro) return res.status(400).json({ error: r.erro });
+      console.log(`[wa-config] modelos copiados pra ${body.phoneId}: ${r.criados?.length || 0} criados`);
+      return res.status(200).json(r);
+    }
     if (body.acao === 'meta-cadastro-salvar') {
       const r = await salvarConfigCadastro({ configId: body.configId });
       if (r.erro) return res.status(400).json({ error: r.erro });
@@ -410,6 +418,19 @@ export default async function handler(req, res) {
   }
 
   // O painel de conexão: números, saúde da entrada e a configuração do botão.
+  // Os modelos DA CONVERSA: cada número de SDR tem a própria conta na
+  // Coexistence, com os próprios modelos. A lista tem que ser a do número por
+  // onde esta conversa sai (a mesma regra do envio).
+  if (req.query?.modelos_lead) {
+    const leadId = String(req.query.modelos_lead);
+    const auth = await assertCanAccessLead(userId, leadId).catch(() => null);
+    if (!auth?.ok) return res.status(403).json({ error: 'Sem acesso a este lead' });
+    const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null });
+    const modelos = await modelosAprovados(phoneId);
+    res.setHeader('Cache-Control', 'private, max-age=120');
+    return res.status(200).json({ modelos, numero: phoneId || 'oficial' });
+  }
+
   if (req.query?.conexoes != null) {
     if (!(await ehAdmin(userId))) return res.status(403).json({ error: 'Só administrador ou gestor.' });
     res.setHeader('Cache-Control', 'no-store');

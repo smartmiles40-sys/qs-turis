@@ -20,7 +20,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
-import { graph, credenciaisDaMeta, limparCacheMeta, apontarWebhookProQs, garantirNumeroDaVercel } from './_meta.js';
+import { graph, credenciaisDaMeta, limparCacheMeta, apontarWebhookProQs, garantirNumeroDaVercel, copiarModelosDoOficial, contarModelos } from './_meta.js';
 import { saudeDaCaixaOficial } from './_waSaude.js';
 
 const GRAPH = 'https://graph.facebook.com/v23.0';
@@ -141,6 +141,19 @@ export async function conectarNumero({ code, wabaId, phoneId, modo, pin, userId,
   const w = await apontarWebhookProQs(urlBase).catch((e) => ({ erro: e?.message }));
   if (w?.erro) avisos.push(`Webhook: ${w.detalhe || w.erro}`);
 
+  // (7) Coexistence: a WABA é 1:1 com o número — nasce sem modelo nenhum.
+  // Copia os aprovados do oficial (vão pra análise da Meta de novo). Falha
+  // aqui NÃO desfaz a conexão: o botão do cartão repete a cópia.
+  if (m === 'coexistencia') {
+    const c = await copiarModelosDoOficial(String(phoneId)).catch((e) => ({ erro: e?.message }));
+    if (c?.erro) avisos.push(`Modelos: não copiei do oficial (${c.erro}). Use "Copiar modelos do oficial" no cartão.`);
+    else if (!c?.mesmaConta) {
+      avisos.push(`Modelos: ${c.criados.length} enviados pra aprovação da Meta nesta conta` +
+        (c.pulados.filter((p) => p.motivo !== 'já existe').length ? `, ${c.pulados.filter((p) => p.motivo !== 'já existe').length} com mídia no topo precisam ser criados à mão` : '') +
+        (c.erros.length ? `, ${c.erros.length} recusados na hora` : '') + '.');
+    }
+  }
+
   return {
     ok: true,
     numero: info?.display_phone_number || null,
@@ -208,6 +221,12 @@ export async function listarConexoes() {
         metaErro = e.message;
       }
     }
+    // Modelos da conta deste número — só pra número de SDR (conta própria na
+    // Coexistence). O oficial já mostra os dele na tela de modelos.
+    const modelos = (n.user_id && temToken && n.status === 'conectado')
+      ? await contarModelos(n.phone_number_id).catch(() => null)
+      : null;
+
     // Última mensagem de cliente que entrou por este número.
     let ultimaEntrada = null;
     try {
@@ -235,6 +254,7 @@ export async function listarConexoes() {
       statusMeta: meta?.status || null,
       metaErro,
       ultimaEntrada,
+      modelos,
     };
   }));
 

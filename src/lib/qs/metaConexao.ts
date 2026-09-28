@@ -27,6 +27,8 @@ export interface NumeroMeta {
   statusMeta: string | null;
   metaErro: string | null;
   ultimaEntrada: string | null;
+  /** Só número de SDR (conta própria na Coexistence): modelos da conta dele. */
+  modelos?: { aprovados: number; pendentes: number; recusados: number; total: number; erro?: string } | null;
 }
 
 export interface PainelMeta {
@@ -52,6 +54,9 @@ export async function carregarPainelMeta(): Promise<PainelMeta> {
 
 export const salvarConfigId = (configId: string) => post({ acao: "meta-cadastro-salvar", configId });
 export const desconectarNumeroMeta = (phoneId: string) => post({ acao: "meta-desconectar", phoneId });
+export const copiarModelosDoOficial = (phoneId: string) => post({ acao: "meta-copiar-modelos", phoneId }) as Promise<{
+  criados?: string[]; pulados?: { nome: string; motivo: string }[]; erros?: { nome: string; detalhe: string }[]; mesmaConta?: boolean;
+}>;
 export const registrarNumeroMeta = (phoneId: string, pin: string) => post({ acao: "meta-registrar", phoneId, pin });
 
 // ── O SDK da Meta ────────────────────────────────────────────────────────────
