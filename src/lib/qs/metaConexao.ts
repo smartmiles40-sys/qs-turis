@@ -111,9 +111,9 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
       if (d?.type !== "WA_EMBEDDED_SIGNUP") return;
       // FINISH = cadastro comum; FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING = conclusão
       // na Coexistence (app WhatsApp Business do celular). Os dois trazem os ids.
-      const ev = String(d.event || "");
-      if (ev === "FINISH" || ev === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" || ev.startsWith("FINISH")) sessao = d.data || {};
-      else if (ev === "CANCEL") cancelou = d.data?.current_step || "cancelado";
+      const evento = String(d.event || "");
+      if (evento === "FINISH" || evento === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" || evento.startsWith("FINISH")) sessao = d.data || {};
+      else if (evento === "CANCEL") cancelou = d.data?.current_step || "cancelado";
     } catch { /* outra mensagem qualquer */ }
   };
   window.addEventListener("message", ouvir);
