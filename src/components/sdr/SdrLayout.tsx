@@ -165,6 +165,7 @@ const MENU: (MenuGroup | MenuItem)[] = [
     items: [
       { id: "dashboard", label: "Visão Geral", description: "O funil de cada SDR: onde o lead se perde" },
       { id: "analises", label: "Análises & Metas", description: "Entrada, FUP, contatos, reunião, detalhamento e metas" },
+      { id: "monitor-leads", label: "Distribuição de leads", description: "Quantos leads cada SDR recebeu — fim de semana, live e fonte" },
     ],
   },
   { id: "configuracoes", label: "Configurações" },

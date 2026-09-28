@@ -12,6 +12,7 @@
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import {
   fetchLista, fetchMonitor, intervaloDo, listaEmCsv, PERIODOS, ROTULO_CANAL,
   type Canal, type LeadDistribuido, type LinhaSdr, type Monitor, type PeriodoId,
@@ -95,6 +96,11 @@ function Equilibrio({ sdrs, contagem }: { sdrs: LinhaSdr[]; contagem: Contagem }
 }
 
 export default function MonitorLeadsPage({ onOpenLead }: Props) {
+  // SDR (0097): vê os NÚMEROS do time todo — a transparência é o ponto —, mas
+  // a lista lead a lead só dos leads que ele recebeu (o banco também garante).
+  const { currentUser } = useQsAuth();
+  const gestor = currentUser ? canSeeAllData(currentUser.role) : false;
+  const eu = currentUser?.id ?? null;
   const [periodo, setPeriodo] = useState<PeriodoId | "custom">("fds");
   const [intervalo, setIntervalo] = useState(() => intervaloDo("fds"));
   const [contagem, setContagem] = useState<Contagem>("novos");
@@ -210,6 +216,7 @@ export default function MonitorLeadsPage({ onOpenLead }: Props) {
           <h1 className="text-xl font-extrabold text-gray-900">Monitor de leads</h1>
           <p className="text-[12.5px] text-gray-500 mt-0.5">
             Quem <b>recebeu</b> cada lead quando ele chegou — não muda quando o lead vira reunião e vai pro closer.
+            {!gestor && " Você vê os números de todo o time; a lista, só dos seus leads."}
           </p>
         </div>
         <div className="flex rounded-lg border overflow-hidden text-[12.5px] font-semibold" style={{ borderColor: LINHA }}>
@@ -281,6 +288,8 @@ export default function MonitorLeadsPage({ onOpenLead }: Props) {
                 {sdrs.map((s) => {
                   const nome = s.nome ?? "Sem dono";
                   const base = { sdr: s.sdr_id, canal: null, soFds: false };
+                  const podeAbrir = gestor || (!!eu && s.sdr_id === eu);
+                  const A = (f: Filtro, soNovos = false) => (podeAbrir ? () => abrirLista(f, soNovos) : undefined);
                   const pctParcela = totalGeral[contagem === "novos" ? "novos" : "total"]
                     ? Math.round((pick(s) / totalGeral[contagem === "novos" ? "novos" : "total"]) * 100) : 0;
                   return (
@@ -297,16 +306,16 @@ export default function MonitorLeadsPage({ onOpenLead }: Props) {
                           <span className="text-[11.5px] text-gray-500 w-9 text-right" style={NUM}>{pctParcela}%</span>
                         </div>
                       </td>
-                      <td className="px-2"><Num forte v={s.total} onClick={() => abrirLista({ ...base, rotulo: `${nome} · todos` })} /></td>
-                      <td className="px-2"><Num v={s.novos} onClick={() => abrirLista({ ...base, rotulo: `${nome} · novos` }, true)} /></td>
-                      <td className="px-2"><Num v={s.retornos} onClick={() => abrirLista({ ...base, rotulo: `${nome} · todos` })} /></td>
+                      <td className="px-2"><Num forte v={s.total} onClick={A({ ...base, rotulo: `${nome} · todos` })} /></td>
+                      <td className="px-2"><Num v={s.novos} onClick={A({ ...base, rotulo: `${nome} · novos` }, true)} /></td>
+                      <td className="px-2"><Num v={s.retornos} onClick={A({ ...base, rotulo: `${nome} · todos` })} /></td>
                       <td className="px-2"><Num v={s.semana} /></td>
-                      <td className="px-2"><Num v={s.sabado} onClick={() => abrirLista({ ...base, soFds: true, rotulo: `${nome} · fim de semana` })} /></td>
-                      <td className="px-2"><Num v={s.domingo} onClick={() => abrirLista({ ...base, soFds: true, rotulo: `${nome} · fim de semana` })} /></td>
-                      <td className="px-2"><Num v={s.live} onClick={() => abrirLista({ ...base, canal: "live", rotulo: `${nome} · live` })} /></td>
-                      <td className="px-2"><Num v={s.trafego} onClick={() => abrirLista({ ...base, canal: "trafego", rotulo: `${nome} · tráfego` })} /></td>
-                      <td className="px-2"><Num v={s.organico} onClick={() => abrirLista({ ...base, canal: "organico", rotulo: `${nome} · orgânico` })} /></td>
-                      <td className="px-4"><Num v={s.outros} onClick={() => abrirLista({ ...base, canal: "outros", rotulo: `${nome} · outros` })} /></td>
+                      <td className="px-2"><Num v={s.sabado} onClick={A({ ...base, soFds: true, rotulo: `${nome} · fim de semana` })} /></td>
+                      <td className="px-2"><Num v={s.domingo} onClick={A({ ...base, soFds: true, rotulo: `${nome} · fim de semana` })} /></td>
+                      <td className="px-2"><Num v={s.live} onClick={A({ ...base, canal: "live", rotulo: `${nome} · live` })} /></td>
+                      <td className="px-2"><Num v={s.trafego} onClick={A({ ...base, canal: "trafego", rotulo: `${nome} · tráfego` })} /></td>
+                      <td className="px-2"><Num v={s.organico} onClick={A({ ...base, canal: "organico", rotulo: `${nome} · orgânico` })} /></td>
+                      <td className="px-4"><Num v={s.outros} onClick={A({ ...base, canal: "outros", rotulo: `${nome} · outros` })} /></td>
                     </tr>
                   );
                 })}
@@ -314,7 +323,7 @@ export default function MonitorLeadsPage({ onOpenLead }: Props) {
                   <tr className="border-t text-right bg-gray-50/60 font-semibold" style={{ borderColor: LINHA }}>
                     <td className="text-left px-4 py-2.5 text-gray-700">Total</td>
                     <td />
-                    <td className="px-2"><Num forte v={totalGeral.total} onClick={() => abrirLista({ sdr: null, canal: null, soFds: false, rotulo: "Todos" })} /></td>
+                    <td className="px-2"><Num forte v={totalGeral.total} onClick={gestor ? () => abrirLista({ sdr: null, canal: null, soFds: false, rotulo: "Todos" }) : undefined} /></td>
                     <td className="px-2" style={NUM}>{totalGeral.novos}</td>
                     <td className="px-2" style={NUM}>{totalGeral.retornos}</td>
                     <td className="px-2" style={NUM}>{totalGeral.semana}</td>
@@ -446,9 +455,9 @@ export default function MonitorLeadsPage({ onOpenLead }: Props) {
                   </label>
                 )}
                 {!filtro && (
-                  <button type="button" onClick={() => abrirLista({ sdr: null, canal: null, soFds: false, rotulo: "Todos" })}
+                  <button type="button" onClick={() => abrirLista(gestor ? { sdr: null, canal: null, soFds: false, rotulo: "Todos" } : { sdr: eu, canal: null, soFds: false, rotulo: "Meus leads" })}
                           className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold border bg-white hover:bg-gray-50" style={{ borderColor: LINHA }}>
-                    Ver todos
+                    {gestor ? "Ver todos" : "Ver os meus"}
                   </button>
                 )}
                 {listaVisivel.length > 0 && (

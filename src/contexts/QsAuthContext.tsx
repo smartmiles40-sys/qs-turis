@@ -80,7 +80,9 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   // "minha-agenda" entrou pro SDR em 01/09: ele precisa ver as reunioes que
   // ELE agendou e que o closer ainda nao deu desfecho. Sem isso, quem marcou a
   // reuniao e a unica pessoa sem como saber se ela virou alguma coisa.
-  sdr: ["painel", "minha-agenda", "whatsapp", "cobertura", "leads", "reunioes", "dashboard", "lead-detail"],
+  // "monitor-leads" (28/09): o SDR acompanha a distribuição — números do time
+  // todo, lista só dos leads dele (0097).
+  sdr: ["painel", "minha-agenda", "whatsapp", "cobertura", "leads", "reunioes", "dashboard", "monitor-leads", "lead-detail"],
   // O Painel entrou pro closer junto com a atividade de DESFECHO: sem ele, a
   // cobrança nasceria numa fila que o closer não enxerga.
   closer: ["minha-agenda", "painel", "whatsapp", "leads", "reunioes", "dashboard", "lead-detail"],
