@@ -20,7 +20,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
-import { graph, credenciaisDaMeta, limparCacheMeta, apontarWebhookProQs, garantirNumeroDaVercel, copiarModelosDoOficial, contarModelos } from './_meta.js';
+import { graph, credenciaisDaMeta, limparCacheMeta, apontarWebhookProQs, garantirNumeroDaVercel, copiarModelosDoOficial, contarModelos, descobrirWaba } from './_meta.js';
 import { saudeDaCaixaOficial } from './_waSaude.js';
 
 const GRAPH = 'https://graph.facebook.com/v23.0';
@@ -66,18 +66,78 @@ async function trocarCodigo(code) {
 }
 
 /**
+ * O número de uma conta, quando a janela não disse qual. Na Coexistence a
+ * conta é 1:1 com o número; com mais de um, fica o que ainda não está no QS.
+ */
+async function numeroDaConta(wabaId, token) {
+  let lista = [];
+  try {
+    const d = await graph(`/${wabaId}/phone_numbers?fields=id,display_phone_number,verified_name,platform_type,status`, { token });
+    lista = Array.isArray(d?.data) ? d.data : [];
+  } catch (e) {
+    return { erro: `Não consegui ler os números da conta na Meta: ${e.message}` };
+  }
+  if (!lista.length) return { erro: 'A conta conectada não tem número. Conecte de novo e digite o número do SDR na janela.' };
+  if (lista.length === 1) return { phoneId: String(lista[0].id) };
+  const noQs = new Set((await rest('qs_wa_numeros_meta?select=phone_number_id').catch(() => [])).map((r) => r.phone_number_id));
+  const novos = lista.filter((n) => !noQs.has(String(n.id)));
+  if (novos.length === 1) return { phoneId: String(novos[0].id) };
+  return { erro: `A conta tem ${lista.length} números (${lista.map((n) => n.display_phone_number).join(', ')}) e não sei qual foi escolhido. Conecte de novo até o fim da janela.` };
+}
+
+/**
+ * Coexistence — o SDR desligou a integração pelo celular, ou religou
+ * (campo `account_update` do webhook; entry.id = a WABA). Offboarded = o
+ * número sai do QS (status desconectado, fora do envio); reconnected = volta.
+ * Só mexe em número de COEXISTENCE: o oficial nunca é derrubado por aqui.
+ */
+export async function eventoDaConta(wabaId, value) {
+  const ev = String(value?.event || '').toUpperCase();
+  const saiu = ev === 'ACCOUNT_OFFBOARDED' || ev === 'PARTNER_REMOVED';
+  const voltou = ev === 'ACCOUNT_RECONNECTED';
+  if (!saiu && !voltou) return null;
+  const linhas = await rest(`qs_wa_numeros_meta?select=phone_number_id,numero,user_id&modo=eq.coexistencia&waba_id=eq.${encodeURIComponent(String(wabaId))}`).catch(() => []);
+  const fone = String(value?.phone_number || value?.waba_info?.phone_number || '').replace(/\D/g, '');
+  const alvos = (linhas || []).filter((l) => !fone || String(l.numero || '').replace(/\D/g, '').endsWith(fone.slice(-8)));
+  for (const l of alvos.length ? alvos : (linhas || [])) {
+    await rest(`qs_wa_numeros_meta?phone_number_id=eq.${encodeURIComponent(l.phone_number_id)}`, {
+      method: 'PATCH', prefer: 'return=minimal',
+      body: saiu
+        ? { status: 'desconectado', ultimo_erro: `Desligado pelo celular/Meta (${ev}) em ${new Date().toISOString()}`, atualizado_em: new Date().toISOString() }
+        : { status: 'conectado', ultimo_erro: null, atualizado_em: new Date().toISOString() },
+    });
+    console.log(`[meta-conexao] ${ev}: ${l.phone_number_id} (${l.numero || 's/ número'}) → ${saiu ? 'desconectado' : 'conectado'}`);
+  }
+  limparCacheMeta();
+  return { evento: ev, numeros: (alvos.length ? alvos : linhas || []).length };
+}
+
+/**
  * Conecta (ou reconecta) um número.
  *   modo 'cloud'        → número na Cloud API; `pin` (6 dígitos) registra o número
  *   modo 'coexistencia' → WhatsApp Business do celular; `userId` = o SDR dono
  */
 export async function conectarNumero({ code, wabaId, phoneId, modo, pin, userId, rotulo, por, urlBase }) {
   const m = modo === 'coexistencia' ? 'coexistencia' : 'cloud';
-  if (!code || !wabaId || !phoneId) return { erro: 'A janela da Meta não devolveu o número. Conecte de novo até o fim.' };
-  if (!/^\d+$/.test(String(wabaId)) || !/^\d+$/.test(String(phoneId))) return { erro: 'Ids inválidos.' };
+  if (!code) return { erro: 'A janela da Meta não devolveu o código. Conecte de novo até o fim.' };
+  if ((wabaId && !/^\d+$/.test(String(wabaId))) || (phoneId && !/^\d+$/.test(String(phoneId)))) return { erro: 'Ids inválidos.' };
 
   const t = await trocarCodigo(code);
   if (t.erro) return t;
   const token = t.token;
+
+  // Embedded Signup v4 / Coexistence (28/09/2026): o evento de conclusão
+  // (FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING) pode vir sem o phone_number_id —
+  // e às vezes sem evento nenhum. O token trocado enxerga a conta: descobre.
+  if (!wabaId) {
+    wabaId = await descobrirWaba(token);
+    if (!wabaId) return { erro: 'Conectado na Meta, mas não descobri a conta (WABA). Conecte de novo até o fim da janela.' };
+  }
+  if (!phoneId) {
+    const achado = await numeroDaConta(String(wabaId), token);
+    if (achado.erro) return achado;
+    phoneId = achado.phoneId;
+  }
 
   // (2) O número existe e este token enxerga ele?
   let info;

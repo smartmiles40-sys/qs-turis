@@ -76,9 +76,9 @@ function carregarSdk(appId: string): Promise<Fb> {
   if (sdk) return sdk;
   sdk = new Promise<Fb>((resolve, reject) => {
     window.fbAsyncInit = () => {
-      // v23.0: na v20.0 a Meta ignorava o featureType da Coexistence e abria o
-      // cadastro comum ("criar novo número"), sem "conectar o app existente".
-      window.FB!.init({ appId, autoLogAppEvents: true, xfbml: false, version: "v23.0" });
+      // v26.0 = o que o configurador da Meta gera pro app 1702747864137149
+      // (28/09/2026). Com v20.0 a Meta ignorava a Coexistence.
+      window.FB!.init({ appId, autoLogAppEvents: true, xfbml: false, version: "v26.0" });
       resolve(window.FB!);
     };
     const s = document.createElement("script");
@@ -114,6 +114,9 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
       if (!/(^|\.)facebook\.com$/.test(new URL(ev.origin).hostname)) return;
       const d = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data;
       if (d?.type !== "WA_EMBEDDED_SIGNUP") return;
+      // Diagnóstico: todo evento do cadastro vai pro console (F12). É o que diz
+      // em que passo a janela parou quando a conexão não completa.
+      console.info("[meta-conexao] WA_EMBEDDED_SIGNUP", d.event, d.data);
       // FINISH = cadastro comum; FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING = conclusão
       // na Coexistence (app WhatsApp Business do celular). Os dois trazem os ids.
       const evento = String(d.event || "");
@@ -129,12 +132,13 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
         config_id: o.configId,
         response_type: "code",
         override_default_response_type: true,
-        // featureType no PRIMEIRO nível de extras (não dentro de setup): é o
-        // que faz a janela oferecer "conectar o app WhatsApp Business existente".
+        // Embedded Signup v4 (o v2/v3, com setup + sessionInfoVersion, sai em
+        // 15/10/2026 e abria o cadastro comum). Na Coexistence o fluxo é
+        // acionado ao digitar um número que já está no app WhatsApp Business:
+        // a Meta mostra QR em vez de SMS.
         extras: {
-          setup: {},
+          version: "v4",
           ...(o.modo === "coexistencia" ? { featureType: "whatsapp_business_app_onboarding" } : {}),
-          sessionInfoVersion: "3",
         },
       });
     });
@@ -142,12 +146,12 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
     for (let i = 0; i < 15 && !sessao && !cancelou; i++) await new Promise((r) => setTimeout(r, 200));
 
     if (!code || cancelou) throw new Error("A conexão foi cancelada na janela da Meta.");
+    // Na conclusão da Coexistence (FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING) o
+    // phone_number_id pode não vir — o servidor descobre pela conta com o
+    // token trocado. Sem o evento nenhum, ele descobre até a conta.
     const s = sessao as { phone_number_id?: string; waba_id?: string } | null;
-    if (!s?.phone_number_id || !s?.waba_id) {
-      throw new Error("A Meta não informou qual número foi escolhido. Conecte de novo e vá até o fim da janela.");
-    }
     const r = await post({
-      acao: "meta-conectar", code, wabaId: s.waba_id, phoneId: s.phone_number_id,
+      acao: "meta-conectar", code, wabaId: s?.waba_id || null, phoneId: s?.phone_number_id || null,
       modo: o.modo, pin: o.pin || null, userId: o.userId || null,
     });
     return { numero: (r.numero as string) || null, avisos: (r.avisos as string[]) || [] };

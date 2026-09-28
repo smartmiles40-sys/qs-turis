@@ -57,6 +57,7 @@ import crypto from 'node:crypto';
 import { insert, rest } from './_supabaseAdmin.js';
 import { findLeadByPhone } from './_wa.js';
 import { processarMensagensDaMeta } from './_metaEntrada.js';
+import { eventoDaConta } from './_metaConexao.js';
 import {
   gravarPermissao, lerRespostaDePermissao, permissaoPorLigacaoDoCliente,
   moverParaCadenciaDePermissao,
@@ -228,12 +229,19 @@ export default async function handler(req, res) {
   // As mensagens em si (0084): até 21/09 eram descartadas aqui — ver
   // _metaEntrada.js. Ecos e histórico só existem com Coexistence.
   const mensagensMeta = [];
+  // Coexistence: offboarded/reconnected chegam no campo account_update.
+  const eventosDeConta = [];
   for (const entry of Array.isArray(body?.entry) ? body.entry : []) {
     for (const ch of Array.isArray(entry?.changes) ? entry.changes : []) {
       // ── CAMPO `messages`: só a resposta de permissão nos interessa ─────────
       // Tudo o mais (texto, áudio, status de entrega) é assunto do wa-webhook,
       // que recebe pelo Chatwoot. Gravar aqui também duplicaria a conversa.
       if (ch?.field) camposVistos.push(ch.field);
+      if (ch?.field === 'account_update') {
+        console.log(`[wa-calls] account_update da conta ${entry?.id}: ${JSON.stringify(ch.value || {}).slice(0, 400)}`);
+        eventosDeConta.push({ wabaId: entry?.id, value: ch.value || {} });
+        continue;
+      }
       if (ch?.field === 'smb_message_echoes' || ch?.field === 'history') {
         mensagensMeta.push(ch);
         continue;
@@ -288,6 +296,11 @@ export default async function handler(req, res) {
   // Antes de tudo e fora de qualquer early-return: é o que o time mais precisa
   // ver (o cliente respondeu). Nunca derruba o resto — permissão e ligação
   // continuam sendo tratadas abaixo mesmo se isto falhar.
+  for (const e of eventosDeConta) {
+    try { await eventoDaConta(e.wabaId, e.value); }
+    catch (err) { console.error('[wa-calls] account_update falhou:', err?.message); }
+  }
+
   let mensagens = null;
   if (mensagensMeta.length) {
     try {

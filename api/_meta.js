@@ -49,7 +49,7 @@ const cache = new Map();
  * Com uma conta só — o nosso caso — é ela. Com mais de uma, não chuta: devolve
  * null e a tela pede a variável.
  */
-async function descobrirWaba(token) {
+export async function descobrirWaba(token) {
   try {
     const r = await fetch(
       `${GRAPH}/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`
