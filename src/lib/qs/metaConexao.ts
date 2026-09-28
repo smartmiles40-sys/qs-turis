@@ -136,9 +136,14 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
         // 15/10/2026 e abria o cadastro comum). Na Coexistence o fluxo é
         // acionado ao digitar um número que já está no app WhatsApp Business:
         // a Meta mostra QR em vez de SMS.
+        // Idêntico ao link que o configurador da Meta gera pro app (28/09):
+        // featureType + sessionInfoVersion "3" + version "v4". O
+        // sessionInfoVersion é o que faz a janela devolver waba/número por
+        // postMessage.
         extras: {
-          version: "v4",
           ...(o.modo === "coexistencia" ? { featureType: "whatsapp_business_app_onboarding" } : {}),
+          sessionInfoVersion: "3",
+          version: "v4",
         },
       });
     });
