@@ -346,6 +346,15 @@ export function sameDay(a: Date, b: Date): boolean {
  * porque numa ferramenta interna ver "14h — ocupado com Fulano" vale mais do que
  * o horário simplesmente sumir da grade.
  */
+/**
+ * Os status que OCUPAM o horário do closer (28/09, 0096). É a MESMA lista da
+ * trava do banco (qs_meetings_closer_no_overlap) e do servidor (api/_agenda.js).
+ * Antes a grade olhava só "agendada": reunião confirmada aparecia livre (e o
+ * banco recusava ao marcar), e desistência/no-show ficavam presas no banco.
+ * Desistência, no-show, arquivada, cancelada e reagendada LIBERAM o horário.
+ */
+export const STATUS_QUE_OCUPA: readonly string[] = ["agendada", "confirmada", "realizada"];
+
 export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions = {}): Slot[] {
   const { closerId } = input;
   const now = opts.now ?? new Date();
@@ -363,7 +372,7 @@ export function computeDaySlots(input: SlotInput, day: Date, opts: SlotOptions =
   // Reuniões do closer que TOCAM o dia (uma de 23:30 invade o dia seguinte).
   const dayMeetings = input.meetings.filter((m) => {
     if (m.closer_id !== closerId) return false;
-    if (m.status !== "agendada") return false;
+    if (!STATUS_QUE_OCUPA.includes(m.status)) return false;
     if (opts.ignoreMeetingId && m.id === opts.ignoreMeetingId) return false;
     const s = new Date(m.scheduled_at).getTime();
     const e = s + (m.duration_min ?? 30) * 60_000;
@@ -475,7 +484,7 @@ export function isSlotBookable(
   }
 
   const conflito = input.meetings.find((m) => {
-    if (m.closer_id !== input.closerId || m.status !== "agendada") return false;
+    if (m.closer_id !== input.closerId || !STATUS_QUE_OCUPA.includes(m.status)) return false;
     if (opts.ignoreMeetingId && m.id === opts.ignoreMeetingId) return false;
     const ms = new Date(m.scheduled_at).getTime();
     const me = ms + (m.duration_min ?? 30) * 60_000;

@@ -326,7 +326,11 @@ async function ocupacao(de, ate, closers = null) {
       //
       // A lista aqui é a MESMA da constraint, de propósito. Se um dia divergir,
       // volta o horário-fantasma.
-      'qs_meetings?select=closer_id,scheduled_at,ends_at,duration_min&status=not.in.(cancelada,reagendada)' +
+      //
+      // 28/09 (0096): a lista virou "o que OCUPA", não "o que libera" —
+      // desistência (o cliente desistiu ANTES da reunião) prendia o horário.
+      // Mesma lista em closerAgenda.ts (STATUS_QUE_OCUPA) e na 0096.
+      'qs_meetings?select=closer_id,scheduled_at,ends_at,duration_min&status=in.(agendada,confirmada,realizada)' +
       `&scheduled_at=gte.${de.toISOString()}&scheduled_at=lt.${ate.toISOString()}`
     ).catch(() => []),
     rest(
