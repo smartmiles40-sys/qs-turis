@@ -735,24 +735,43 @@ export async function apontarWebhookProQs(urlBase) {
   } catch (e) {
     return { erro: 'meta-recusou', etapa: 'subscribed_apps', detalhe: e?.message, codigo: e?.metaCode };
   }
-  try {
-    const callback = `${String(urlBase).replace(/\/+$/, '')}/api/wa-calls`;
-    const j = await graph(`/${appId}/subscriptions`, {
-      method: 'POST',
-      token: `${appId}|${appSecret}`,
-      timeoutMs: 20_000,
-      body: {
-        object: 'whatsapp_business_account',
-        callback_url: callback,
-        verify_token: verify,
-        fields: 'messages,calls',
-        include_values: true,
-      },
-    });
-    out.webhook = j?.success === true;
-    out.callbackUrl = callback;
-  } catch (e) {
-    return { ...out, erro: 'meta-recusou', etapa: 'subscriptions', detalhe: e?.message, codigo: e?.metaCode };
+  // Os campos SUBSTITUEM a lista inteira do app — então vai tudo junto. Os três
+  // `smb_*`/`history` são da Coexistence (28/09, permissão aprovada): sem eles o
+  // que o SDR manda pelo celular e o histórico do app nunca chegam no QS
+  // (_metaEntrada já grava os dois). Se a Meta recusar algum campo, cai pra
+  // lista mínima em vez de deixar o número sem webhook.
+  const callback = `${String(urlBase).replace(/\/+$/, '')}/api/wa-calls`;
+  const listas = [
+    'messages,calls,smb_message_echoes,smb_app_state_sync,history,account_update,message_template_status_update,phone_number_quality_update',
+    'messages,calls',
+  ];
+  let ultimoErro = null;
+  for (const fields of listas) {
+    try {
+      const j = await graph(`/${appId}/subscriptions`, {
+        method: 'POST',
+        token: `${appId}|${appSecret}`,
+        timeoutMs: 20_000,
+        body: {
+          object: 'whatsapp_business_account',
+          callback_url: callback,
+          verify_token: verify,
+          fields,
+          include_values: true,
+        },
+      });
+      out.webhook = j?.success === true;
+      out.callbackUrl = callback;
+      out.campos = fields.split(',');
+      ultimoErro = null;
+      break;
+    } catch (e) {
+      ultimoErro = e;
+      console.warn(`[meta] subscriptions recusou "${fields}":`, e?.message);
+    }
+  }
+  if (ultimoErro) {
+    return { ...out, erro: 'meta-recusou', etapa: 'subscriptions', detalhe: ultimoErro?.message, codigo: ultimoErro?.metaCode };
   }
   return { ok: true, ...out };
 }
