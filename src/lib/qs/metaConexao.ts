@@ -71,7 +71,9 @@ function carregarSdk(appId: string): Promise<Fb> {
   if (sdk) return sdk;
   sdk = new Promise<Fb>((resolve, reject) => {
     window.fbAsyncInit = () => {
-      window.FB!.init({ appId, autoLogAppEvents: true, xfbml: false, version: "v20.0" });
+      // v23.0: na v20.0 a Meta ignorava o featureType da Coexistence e abria o
+      // cadastro comum ("criar novo número"), sem "conectar o app existente".
+      window.FB!.init({ appId, autoLogAppEvents: true, xfbml: false, version: "v23.0" });
       resolve(window.FB!);
     };
     const s = document.createElement("script");
@@ -107,8 +109,11 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
       if (!/(^|\.)facebook\.com$/.test(new URL(ev.origin).hostname)) return;
       const d = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data;
       if (d?.type !== "WA_EMBEDDED_SIGNUP") return;
-      if (String(d.event || "").startsWith("FINISH")) sessao = d.data || {};
-      else if (d.event === "CANCEL") cancelou = d.data?.current_step || "cancelado";
+      // FINISH = cadastro comum; FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING = conclusão
+      // na Coexistence (app WhatsApp Business do celular). Os dois trazem os ids.
+      const ev = String(d.event || "");
+      if (ev === "FINISH" || ev === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" || ev.startsWith("FINISH")) sessao = d.data || {};
+      else if (ev === "CANCEL") cancelou = d.data?.current_step || "cancelado";
     } catch { /* outra mensagem qualquer */ }
   };
   window.addEventListener("message", ouvir);
@@ -119,10 +124,12 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
         config_id: o.configId,
         response_type: "code",
         override_default_response_type: true,
+        // featureType no PRIMEIRO nível de extras (não dentro de setup): é o
+        // que faz a janela oferecer "conectar o app WhatsApp Business existente".
         extras: {
           setup: {},
-          sessionInfoVersion: "3",
           ...(o.modo === "coexistencia" ? { featureType: "whatsapp_business_app_onboarding" } : {}),
+          sessionInfoVersion: "3",
         },
       });
     });

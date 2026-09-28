@@ -39,7 +39,7 @@ export async function diagnosticoMeta() {
 
   // O token: de quem é, se expira, quais permissões e quais contas enxerga.
   out.token = await tenta(async () => {
-    const r = await fetch(`https://graph.facebook.com/v20.0/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`);
+    const r = await fetch(`https://graph.facebook.com/v23.0/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`);
     const d = (await r.json())?.data || {};
     return {
       app: d.app_id || null, tipo: d.type || null, valido: d.is_valid ?? null,

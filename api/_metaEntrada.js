@@ -30,7 +30,7 @@ import { transcrever, transcricaoConfigurada } from './_transcrever.js';
 import { guardarMidia, rotuloDaMidia, leadDoTelefone } from './_waMidia.js';
 import { avisarGloria } from './_gloria.js';
 
-const GRAPH = 'https://graph.facebook.com/v20.0';
+const GRAPH = 'https://graph.facebook.com/v23.0';
 
 // ── De quem é o número ──────────────────────────────────────────────────────
 

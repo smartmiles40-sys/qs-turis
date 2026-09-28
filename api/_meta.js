@@ -20,7 +20,7 @@
 import { toE164BR } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 
-const GRAPH = 'https://graph.facebook.com/v20.0';
+const GRAPH = 'https://graph.facebook.com/v23.0';
 
 /**
  * O NÚMERO COMO A META QUER: só dígitos, COM DDI.

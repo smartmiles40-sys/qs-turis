@@ -23,7 +23,7 @@ import { rest } from './_supabaseAdmin.js';
 import { graph, credenciaisDaMeta, limparCacheMeta, apontarWebhookProQs, garantirNumeroDaVercel } from './_meta.js';
 import { saudeDaCaixaOficial } from './_waSaude.js';
 
-const GRAPH = 'https://graph.facebook.com/v20.0';
+const GRAPH = 'https://graph.facebook.com/v23.0';
 const CHAVE_CFG = 'meta_cadastro';
 
 export async function lerConfigCadastro() {
