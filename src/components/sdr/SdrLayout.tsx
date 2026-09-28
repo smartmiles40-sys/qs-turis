@@ -66,6 +66,7 @@ import TasksPanel from "./tasks/TasksPanel";
 const SdrDashboard = lazyPagina(() => import("./dashboard/SdrDashboard"));
 const AnalisesPage = lazyPagina(() => import("./dashboard/AnalisesPage"));
 const MonitorLeadsPage = lazyPagina(() => import("./dashboard/MonitorLeadsPage"));
+const VisaoGeralFunil = lazyPagina(() => import("./dashboard/VisaoGeralFunil"));
 const LeadsPage = lazyPagina(() => import("./leads/LeadsPage"));
 const LeadDetailPage = lazyPagina(() => import("./leads/LeadDetailPage"));
 const CadencesPage = lazyPagina(() => import("./cadences/CadencesPage"));
@@ -162,9 +163,8 @@ const MENU: (MenuGroup | MenuItem)[] = [
     id: "desempenho",
     label: "Desempenho",
     items: [
-      { id: "dashboard", label: "Visão Geral", description: "Indicadores, metas e reuniões por dia" },
-      { id: "analises", label: "Análises & Metas", description: "Saúde da cadência, FUP, análises avançadas e metas" },
-      { id: "monitor-leads", label: "Monitor de leads", description: "Quantos leads cada SDR recebeu — fim de semana, live e closers" },
+      { id: "dashboard", label: "Visão Geral", description: "O funil de cada SDR: onde o lead se perde" },
+      { id: "analises", label: "Análises & Metas", description: "Entrada, FUP, contatos, reunião, detalhamento e metas" },
     ],
   },
   { id: "configuracoes", label: "Configurações" },
@@ -749,12 +749,13 @@ export default function SdrLayout() {
         )}
         {activeNav === "dashboard" && (
           <PageErrorBoundary pageName="Visão Geral">
-            <SdrDashboard />
+            {/* Funil (0095) pra gestor e SDR; o closer segue na tela anterior até ganhar a dele. */}
+            {userRole === "closer" ? <SdrDashboard /> : <VisaoGeralFunil onIrParaPainel={() => navigate("painel")} />}
           </PageErrorBoundary>
         )}
         {activeNav === "analises" && (
           <PageErrorBoundary pageName="Análises & Metas">
-            <AnalisesPage />
+            <AnalisesPage onOpenLead={openLeadDetail} />
           </PageErrorBoundary>
         )}
         {activeNav === "monitor-leads" && (

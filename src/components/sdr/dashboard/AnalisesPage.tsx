@@ -1,56 +1,55 @@
 // src/components/sdr/dashboard/AnalisesPage.tsx
 // -----------------------------------------------------------------------------
-// "Análises & Metas" — uma única aba de Desempenho que reúne o que antes eram
-// QUATRO itens de menu separados (Saúde da Cadência, Análises de FUP, Análises
-// Avançadas e Metas). O menu ficou enxuto (Desempenho = Visão Geral + esta);
-// aqui um seletor de sub-aba troca o painel. Cada painel guarda seus próprios
-// filtros/estado — só mudamos ONDE eles moram, não a lógica interna.
+// "Análises & Metas" — as abas seguem o CAMINHO DO LEAD (Bruno, 28/09/2026):
+// Entrada → FUP/cadência → Contatos → Reunião e fonte → Detalhamento → Metas.
+//
+// Antes eram 4 painéis soltos, sem ordem. A Visão Geral virou o funil
+// (VisaoGeralFunil); o que ela mostrava antes (canal, horários, motivos de
+// perda, fontes) mora agora em "Detalhamento", pra nada se perder. Cada painel
+// ainda guarda os próprios filtros — a unificação num filtro só é o passo
+// seguinte.
 // -----------------------------------------------------------------------------
 
 import { useState } from "react";
 import CadenceHealthPanel from "./CadenceHealthPanel";
 import FupAnalyticsPanel from "./FupAnalyticsPanel";
 import AdvancedAnalyticsPanel from "./AdvancedAnalyticsPanel";
+import MonitorLeadsPage from "./MonitorLeadsPage";
+import SdrDashboard from "./SdrDashboard";
 import GoalsPage from "../goals/GoalsPage";
 
-type SubTab = "saude" | "fup" | "avancadas" | "metas";
+type SubTab = "entrada" | "saude" | "fup" | "avancadas" | "detalhe" | "metas";
 
 const TABS: { id: SubTab; label: string; desc: string }[] = [
-  { id: "saude", label: "Saúde da Cadência", desc: "FUP por etapa, atrasadas e backlog (foto de agora)." },
-  { id: "fup", label: "Análises de FUP", desc: "Desfechos por SDR, conversão por tentativa e aderência." },
-  { id: "avancadas", label: "Análises Avançadas", desc: "Telefonia, show-rate, speed-to-lead, funil e R$ por fonte." },
+  { id: "entrada", label: "1 · Entrada", desc: "Quantos leads cada SDR recebeu: fim de semana, live, fonte e closers." },
+  { id: "saude", label: "2 · FUP e cadência", desc: "FUP por etapa, atrasadas e backlog (foto de agora)." },
+  { id: "fup", label: "3 · Contatos", desc: "Desfechos por SDR, conversão por tentativa, aderência e por que se pula." },
+  { id: "avancadas", label: "4 · Reunião e fonte", desc: "Telefonia, show-rate, velocidade do 1º contato, funil e R$ por fonte." },
+  { id: "detalhe", label: "Detalhamento", desc: "Canal, melhores horários, motivos de perda e conversão por fonte (a Visão Geral anterior)." },
   { id: "metas", label: "Metas", desc: "Planejamento diário e mensal de cada SDR e da equipe." },
 ];
 
-export default function AnalisesPage() {
-  const [tab, setTab] = useState<SubTab>("saude");
+export default function AnalisesPage({ onOpenLead }: { onOpenLead: (leadId: string) => void }) {
+  const [tab, setTab] = useState<SubTab>("entrada");
   const active = TABS.find((t) => t.id === tab);
 
   return (
     <div className="space-y-5" style={{ fontFamily: "inherit" }}>
-      {/* Header */}
       <div>
-        <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 3v18h18" />
-            <rect x="7" y="10" width="3" height="7" />
-            <rect x="12" y="6" width="3" height="11" />
-            <rect x="17" y="13" width="3" height="4" />
-          </svg>
-          Análises &amp; Metas
-        </h1>
+        <h1 className="text-[26px] font-extrabold tracking-tight text-gray-900">Análises &amp; Metas</h1>
         <p className="text-sm text-gray-500 mt-0.5">{active?.desc}</p>
       </div>
 
-      {/* Sub-abas */}
-      <div className="flex flex-wrap gap-1 gap-y-2 border-b border-gray-100 pb-3">
+      <div className="flex flex-wrap gap-1.5 gap-y-2 border-b border-gray-100 pb-3" role="tablist">
         {TABS.map((t) => {
           const isActive = tab === t.id;
           return (
             <button
               key={t.id}
+              role="tab"
+              aria-selected={isActive}
               onClick={() => setTab(t.id)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+              className={`rounded-full px-4 h-9 text-[13px] font-semibold transition-colors ${
                 isActive
                   ? "bg-[#0147FF] text-white"
                   : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
@@ -62,11 +61,12 @@ export default function AnalisesPage() {
         })}
       </div>
 
-      {/* Painel ativo — cada um mantém seus próprios filtros/estado */}
       <div>
+        {tab === "entrada" && <MonitorLeadsPage onOpenLead={onOpenLead} />}
         {tab === "saude" && <CadenceHealthPanel />}
         {tab === "fup" && <FupAnalyticsPanel />}
         {tab === "avancadas" && <AdvancedAnalyticsPanel />}
+        {tab === "detalhe" && <SdrDashboard />}
         {tab === "metas" && <GoalsPage />}
       </div>
     </div>

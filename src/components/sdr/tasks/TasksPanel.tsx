@@ -39,6 +39,7 @@ import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEnded
 import { logCallEnded, type CallProvider } from "@/lib/qs/callLog";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, nextWorkMoment, clampToWorkWindow, scheduleWeekdays, isWithinHours, workdaysBetween, type WorkHours } from "@/lib/workHours";
 import type { SdrUser } from "../types";
+import RelogioPrimeiroContato, { type LeadEsperando } from "./RelogioPrimeiroContato";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -2283,6 +2284,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // fila de hoje conta como "em FUP" (ninguém some da conta).
   const fupTasks = counterBase;
 
+  // Relógio do 1º contato (0095): leads que chegaram nas últimas 24h e ainda
+  // não tiveram nenhuma atividade concluída — o mais antigo primeiro.
+  const esperandoPrimeiroContato = useMemo<LeadEsperando[]>(() => {
+    const limite = Date.now() - 24 * 3_600_000;
+    const porLead = new Map<string, LeadEsperando>();
+    for (const t of counterBase) {
+      const lead = leadsMap.get(t.lead_id);
+      if (!lead?.arrived_at || contactedLeadIds.has(lead.id) || porLead.has(lead.id)) continue;
+      if (new Date(lead.arrived_at).getTime() < limite) continue;
+      porLead.set(lead.id, { taskId: t.id, nome: lead.full_name || lead.first_name || "Lead", chegouEm: lead.arrived_at });
+    }
+    return [...porLead.values()].sort((a, b) => a.chegouEm.localeCompare(b.chegouEm));
+  }, [counterBase, leadsMap, contactedLeadIds]);
+
   // Quantas atividades tem por CANAL na fila de hoje (WhatsApp: 200, Ligação: 200…).
   // Vem de counterBase (número real, já escopado por papel), então bate com o
   // "N em FUP". Ordem fixa; só entram canais com pelo menos 1 pendente.
@@ -3994,6 +4009,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           FILTERS SECTION
           ══════════════════════════════════════════════════════════════════════ */}
       <div className="shrink-0 px-4 md:px-6 pt-4 pb-1" style={{ background: "var(--bg)" }}>
+        <RelogioPrimeiroContato esperando={esperandoPrimeiroContato} onAtender={selectActive} />
         <div className="qsx-page flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-baseline gap-2.5 flex-wrap">
             <span className="text-[16px] font-extrabold" style={{ color: "var(--ink)", letterSpacing: "-.1px" }}>Fila de hoje</span>
