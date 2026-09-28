@@ -76,7 +76,7 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   // menu, mas ficou de fora desta lista — ou seja, existia só pro admin, e quem
   // precisa acompanhar o que a IA está fazendo com a carteira é justamente a
   // coordenação. Ninguém notou porque o Bruno entra como admin.
-  gestor: ["minha-agenda", "painel", "whatsapp", "cobertura", "atendimento-ia", "leads", "cadencias", "reunioes", "dashboard", "analises", "lead-detail", "cadencia-criar", "cadencia-editar"],
+  gestor: ["minha-agenda", "painel", "whatsapp", "cobertura", "atendimento-ia", "leads", "cadencias", "reunioes", "dashboard", "analises", "monitor-leads", "lead-detail", "cadencia-criar", "cadencia-editar"],
   // "minha-agenda" entrou pro SDR em 01/09: ele precisa ver as reunioes que
   // ELE agendou e que o closer ainda nao deu desfecho. Sem isso, quem marcou a
   // reuniao e a unica pessoa sem como saber se ela virou alguma coisa.
@@ -87,7 +87,7 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   // Espectador: enxerga o funil inteiro pra medir campanha. Fica de fora o
   // Painel e o WhatsApp (telas de EXECUÇÃO — quem não executa não atende) e as
   // Configurações (que só existem pra mudar coisa).
-  marketing: ["leads", "lead-detail", "cobertura", "cadencias", "reunioes", "dashboard", "analises"],
+  marketing: ["leads", "lead-detail", "cobertura", "cadencias", "reunioes", "dashboard", "analises", "monitor-leads"],
 };
 
 /**

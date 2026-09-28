@@ -65,6 +65,7 @@ import TasksPanel from "./tasks/TasksPanel";
 // clique na tela dava "Failed to fetch dynamically imported module".
 const SdrDashboard = lazyPagina(() => import("./dashboard/SdrDashboard"));
 const AnalisesPage = lazyPagina(() => import("./dashboard/AnalisesPage"));
+const MonitorLeadsPage = lazyPagina(() => import("./dashboard/MonitorLeadsPage"));
 const LeadsPage = lazyPagina(() => import("./leads/LeadsPage"));
 const LeadDetailPage = lazyPagina(() => import("./leads/LeadDetailPage"));
 const CadencesPage = lazyPagina(() => import("./cadences/CadencesPage"));
@@ -107,6 +108,7 @@ export type SdrNav =
   | "cadencia-editar"
   | "dashboard"
   | "analises"
+  | "monitor-leads"
   | "reunioes"
   | "declaracao"
   | "historicos"
@@ -162,6 +164,7 @@ const MENU: (MenuGroup | MenuItem)[] = [
     items: [
       { id: "dashboard", label: "Visão Geral", description: "Indicadores, metas e reuniões por dia" },
       { id: "analises", label: "Análises & Metas", description: "Saúde da cadência, FUP, análises avançadas e metas" },
+      { id: "monitor-leads", label: "Monitor de leads", description: "Quantos leads cada SDR recebeu — fim de semana, live e closers" },
     ],
   },
   { id: "configuracoes", label: "Configurações" },
@@ -752,6 +755,11 @@ export default function SdrLayout() {
         {activeNav === "analises" && (
           <PageErrorBoundary pageName="Análises & Metas">
             <AnalisesPage />
+          </PageErrorBoundary>
+        )}
+        {activeNav === "monitor-leads" && (
+          <PageErrorBoundary pageName="Monitor de leads">
+            <MonitorLeadsPage onOpenLead={openLeadDetail} />
           </PageErrorBoundary>
         )}
         {activeNav === "cobertura" && (
