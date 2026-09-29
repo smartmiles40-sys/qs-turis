@@ -336,7 +336,13 @@ export default async function handler(req, res) {
 
     // MODELO POR SDR (29/09): `phone` (GET) / `phoneId` (POST) escolhe a conta
     // da Meta. Sem ele, é o oficial — o comportamento de sempre.
-    const phoneModelo = String((req.method === 'GET' ? req.query?.phone : body.phoneId) || '').trim() || null;
+    // SÓ nas ações de modelo: todo POST passa por este bloco, e o meta-conectar
+    // também manda `phoneId` — de um número que AINDA não está no QS. Checar
+    // ali devolvia "Número não encontrado" e travou a conexão da Yanca (29/09).
+    const ehAcaoDeModelo = req.method === 'GET' || body.acao === 'criar' || body.acao === 'excluir';
+    const phoneModelo = ehAcaoDeModelo
+      ? String((req.method === 'GET' ? req.query?.phone : body.phoneId) || '').trim() || null
+      : null;
     if (phoneModelo) {
       const n = (await rest(`qs_wa_numeros_meta?select=status&phone_number_id=eq.${encodeURIComponent(phoneModelo)}&limit=1`))?.[0];
       if (!n) return res.status(404).json({ error: 'Número não encontrado no QS.' });
