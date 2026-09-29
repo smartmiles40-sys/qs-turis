@@ -264,7 +264,12 @@ export async function listarConexoes() {
   const nomes = new Map((users || []).map((u) => [u.id, u.name]));
   const envPhone = String(process.env.META_PHONE_NUMBER_ID || '').trim();
 
-  const numeros = await Promise.all((linhas || []).map(async (n) => {
+  // Oficial DESLIGADO não aparece mais (Bruno, 29/09: tirar o 4863-6051, banido,
+  // e o 92633-2597 do QS). Fica no banco pelo histórico das conversas e pra
+  // numeroPadrao() saber que não deve usá-lo. Número de SDR desconectado continua
+  // aparecendo — é por ele que se vê que precisa reconectar.
+  const visiveis = (linhas || []).filter((n) => n.user_id || n.status !== 'desconectado');
+  const numeros = await Promise.all(visiveis.map(async (n) => {
     const temToken = Boolean(n.segredo_id) || (n.phone_number_id === envPhone && Boolean(process.env.META_CALLS_TOKEN || process.env.META_WA_TOKEN));
     let meta = null;
     let metaErro = null;

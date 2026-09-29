@@ -52,6 +52,10 @@ export default function ModelosMeta() {
   const [criando, setCriando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [form, setForm] = useState<NovoModelo>(VAZIO);
+  // Existe número oficial ligado? Desde 29/09 pode não existir (o time fala só
+  // pelos números próprios) — aí a tela abre direto no primeiro SDR.
+  const [temOficial, setTemOficial] = useState(true);
+  const [pronto, setPronto] = useState(false);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -61,15 +65,20 @@ export default function ModelosMeta() {
     setCarregando(false);
   }, [phoneId]);
 
-  useEffect(() => { void carregar(); }, [carregar]);
+  useEffect(() => { if (pronto) void carregar(); }, [carregar, pronto]);
 
   useEffect(() => {
     carregarPainelMeta()
       .then((p) => {
-        setNumeros(p.numeros.filter((n) => n.status === "conectado" && ehDeSdr(n)));
+        const deSdr = p.numeros.filter((n) => n.status === "conectado" && ehDeSdr(n));
+        const oficial = p.numeros.some((n) => !n.donoId && n.status === "conectado");
+        setNumeros(deSdr);
         setSdrs(p.sdrs);
+        setTemOficial(oficial);
+        if (!oficial && deSdr[0]) setPhoneId(deSdr[0].phoneId);
       })
-      .catch(() => { /* sem o painel, fica só o oficial — como era antes */ });
+      .catch(() => { /* sem o painel, fica só o oficial — como era antes */ })
+      .finally(() => setPronto(true));
   }, []);
 
   const atual = numeros.find((n) => n.phoneId === phoneId) ?? null;
@@ -126,12 +135,14 @@ export default function ModelosMeta() {
       <div>
         <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Mensagens de</p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
-          <button
-            onClick={() => trocarNumero("")}
-            className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${phoneId === "" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
-          >
-            Número oficial
-          </button>
+          {temOficial && (
+            <button
+              onClick={() => trocarNumero("")}
+              className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${phoneId === "" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+            >
+              Número oficial
+            </button>
+          )}
           {numeros.map((n) => (
             <button
               key={n.phoneId}
