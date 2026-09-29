@@ -334,21 +334,30 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Só administrador ou gestor gerencia os modelos.' });
     }
 
+    // MODELO POR SDR (29/09): `phone` (GET) / `phoneId` (POST) escolhe a conta
+    // da Meta. Sem ele, é o oficial — o comportamento de sempre.
+    const phoneModelo = String((req.method === 'GET' ? req.query?.phone : body.phoneId) || '').trim() || null;
+    if (phoneModelo) {
+      const n = (await rest(`qs_wa_numeros_meta?select=status&phone_number_id=eq.${encodeURIComponent(phoneModelo)}&limit=1`))?.[0];
+      if (!n) return res.status(404).json({ error: 'Número não encontrado no QS.' });
+      if (n.status !== 'conectado') return res.status(400).json({ error: 'Este número está desconectado — conecte de novo em Configurações → WhatsApp (Meta).' });
+    }
+
     if (req.method === 'GET') {
-      const r = await listarModelos();
+      const r = await listarModelos(phoneModelo);
       if (r.erro) return res.status(503).json({ error: textoDeConfig(r.erro) || 'Não consegui ler os modelos na Meta.', motivo: r.erro });
       return res.status(200).json({ modelos: r.modelos });
     }
 
     if (body.acao === 'excluir') {
-      const r = await excluirModelo(String(body.nome || ''));
+      const r = await excluirModelo(String(body.nome || ''), phoneModelo);
       if (r.erro) return res.status(faltaConfig(r.erro) ? 503 : 400).json({ error: r.mensagem || textoDeConfig(r.erro) || 'Não consegui excluir.' });
       return res.status(200).json({ ok: true });
     }
     if (body.acao === 'criar') {
       const r = await criarModelo({
         nome: body.nome, categoria: body.categoria, idioma: body.idioma,
-        corpo: body.corpo, cabecalho: body.cabecalho, rodape: body.rodape,
+        corpo: body.corpo, cabecalho: body.cabecalho, rodape: body.rodape, phoneId: phoneModelo,
       });
       if (r.erro) return res.status(faltaConfig(r.erro) ? 503 : 400).json({ error: r.mensagem || textoDeConfig(r.erro) || 'Não consegui criar o modelo.' });
       return res.status(200).json({ ok: true, id: r.id, status: r.status });

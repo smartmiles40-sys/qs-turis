@@ -208,9 +208,11 @@ export interface WaModeloAdmin extends WaModelo {
   cabecalhoMidia?: string | null;
 }
 
-export async function listarModelosAdmin(): Promise<{ modelos: WaModeloAdmin[]; error?: string }> {
+/** `phoneId` = número de um SDR (conta própria na Meta); sem ele, o oficial. */
+export async function listarModelosAdmin(phoneId?: string | null): Promise<{ modelos: WaModeloAdmin[]; error?: string }> {
   try {
-    const res = await fetch("/api/wa-config?modelos=todos", { headers: await authHeaders() });
+    const q = phoneId ? `&phone=${encodeURIComponent(phoneId)}` : "";
+    const res = await fetch(`/api/wa-config?modelos=todos${q}`, { headers: await authHeaders() });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return { modelos: [], error: d?.error || "Não consegui carregar os modelos." };
     return { modelos: Array.isArray(d?.modelos) ? d.modelos : [] };
@@ -228,12 +230,12 @@ export interface NovoModelo {
   rodape?: string;
 }
 
-export async function criarModeloNaMeta(m: NovoModelo): Promise<{ ok: boolean; status?: string; error?: string }> {
+export async function criarModeloNaMeta(m: NovoModelo, phoneId?: string | null): Promise<{ ok: boolean; status?: string; error?: string }> {
   try {
     const res = await fetch("/api/wa-config", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ acao: "criar", ...m }),
+      body: JSON.stringify({ acao: "criar", ...m, phoneId: phoneId || undefined }),
     });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: d?.error || "Não consegui enviar o modelo." };
@@ -243,12 +245,12 @@ export async function criarModeloNaMeta(m: NovoModelo): Promise<{ ok: boolean; s
   }
 }
 
-export async function excluirModeloNaMeta(nome: string): Promise<{ ok: boolean; error?: string }> {
+export async function excluirModeloNaMeta(nome: string, phoneId?: string | null): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch("/api/wa-config", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ acao: "excluir", nome }),
+      body: JSON.stringify({ acao: "excluir", nome, phoneId: phoneId || undefined }),
     });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: d?.error || "Não consegui excluir." };

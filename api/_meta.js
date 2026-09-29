@@ -254,8 +254,9 @@ export async function listarModelos(phoneId = null) {
  *  • corpo não pode começar nem terminar com variável;
  *  • categoria MARKETING | UTILITY (AUTHENTICATION tem regra própria).
  */
-export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, rodape }) {
-  const cr = await credenciaisDaMeta();
+export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, rodape, phoneId = null }) {
+  // phoneId = número de SDR (29/09): o modelo vai pra análise na conta DELE.
+  const cr = await credenciaisDaMeta(phoneId);
   if (!cr) return { erro: 'sem-caixa-oficial' };
   if (!cr.waba) return { erro: 'sem-waba-id' };
 
@@ -279,8 +280,8 @@ export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, r
   }
 }
 
-export async function excluirModelo(nome) {
-  const cr = await credenciaisDaMeta();
+export async function excluirModelo(nome, phoneId = null) {
+  const cr = await credenciaisDaMeta(phoneId);
   if (!cr) return { erro: 'sem-caixa-oficial' };
   if (!cr.waba) return { erro: 'sem-waba-id' };
   try {
