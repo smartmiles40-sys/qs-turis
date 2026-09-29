@@ -243,6 +243,26 @@ async function gloriaOuveMeta() {
   return v;
 }
 
+/**
+ * Reação que o SDR fez NO CELULAR (eco, 29/09/2026). Mesma gravação da reação
+ * pelo QS: autor = o dono do número, uma reação por autor (trocar o emoji
+ * substitui, emoji vazio tira). Antes o eco de reação era descartado.
+ */
+async function reacaoDoSdr(m, numero) {
+  const alvo = m?.reaction?.message_id;
+  if (!alvo || !numero?.user_id) return false;
+  const rows = await rest(
+    `qs_wa_messages?select=id&or=${encodeURIComponent(`(source_id.eq."${alvo}",source_id.eq."WAID:${alvo}")`)}&limit=1`
+  ).catch(() => null);
+  if (!rows?.[0]?.id) return false;
+  const nome = String((await nomeDoUsuario(numero.user_id)) || 'SDR').split(' ')[0];
+  await rest('rpc/qs_wa_react', {
+    method: 'POST',
+    body: { p_msg: rows[0].id, p_autor: numero.user_id, p_nome: nome, p_emoji: String(m.reaction.emoji ?? '') },
+  }).catch((e) => console.warn('[meta-entrada] reação do SDR:', e?.message));
+  return true;
+}
+
 async function reacaoDoCliente(m, nomeCliente) {
   const alvo = m?.reaction?.message_id;
   if (!alvo) return false;
@@ -291,8 +311,12 @@ export async function processarMensagensDaMeta(changes) {
 
       if (ch.field === 'smb_message_echoes') {
         for (const m of value.message_echoes || []) {
+          if (m.type === 'reaction') { if (await reacaoDoSdr(m, numero)) conta.reacoes++; continue; }
           const r = await gravarUma({ numero, m, direcao: 'out', telefoneCliente: String(m.to || ''), nomeCliente: null, aoVivo: true });
           if (r.novo) conta.ecos++;
+          // O que o celular faz e o QS ainda não entende (editar, apagar…) fica
+          // anotado no log, pra saber o que falta espelhar.
+          if (r.ignorada === 'sem-conteudo') console.log(`[meta-entrada] eco ignorado, tipo=${m.type}`);
         }
       }
 
