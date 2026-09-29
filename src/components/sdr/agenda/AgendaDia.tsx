@@ -36,7 +36,7 @@ import {
   semDesfecho,
   chaveDoEspecialista,
 } from "@/lib/qs/closerAgenda";
-import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, temDesfecho, reagendarReuniao, gerarSalaMeet, avisarBitrixDaSala, deleteMeeting, type DesfechoCompleto } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, sweepOutcomeTasks, temDesfecho, desfechoDaOportunidadeFutura, reagendarReuniao, gerarSalaMeet, avisarBitrixDaSala, deleteMeeting, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
 import BriefingDoLead from "./BriefingDoLead";
 import { getSetting } from "@/lib/qsSettings";
@@ -1211,6 +1211,12 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
                   leadName={reuniao.lead_name || reuniao.lead?.full_name || "Cliente"}
                   meetingId={reuniao.id}
                   onFechar={() => setOportunidade(false)}
+                  // Registrar a oportunidade É o desfecho: sem isto a reunião
+                  // ficava "agendada" e trancava a agenda do closer (29/09).
+                  onSalvo={() => {
+                    const s = desfechoDaOportunidadeFutura(reuniao);
+                    if (s) onStatus(s);
+                  }}
                 />
               )}
             </>

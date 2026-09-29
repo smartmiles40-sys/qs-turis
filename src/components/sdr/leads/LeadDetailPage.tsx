@@ -17,6 +17,7 @@ import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import ScheduleMeetingModal from "@/components/sdr/agenda/ScheduleMeetingModal";
 import MeetingDetailModal from "@/components/sdr/agenda/MeetingDetailModal";
+import { setMeetingStatus, desfechoDaOportunidadeFutura } from "@/lib/qs/meetings";
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
 import OportunidadeFuturaModal, { FaixaOportunidadeFutura } from "@/components/sdr/leads/OportunidadeFuturaModal";
 import type {
@@ -301,6 +302,23 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     }
     setMeetings((data as Meeting[]) ?? []);
   }, [leadId]);
+
+  // Oportunidade futura registrada pela ficha (29/09): a reunião do lead que
+  // ficou sem desfecho recebe um — senão continua trancando a agenda do closer.
+  const fecharReunioesDaOportunidade = useCallback(async () => {
+    const { data } = await supabase
+      .from("qs_meetings")
+      .select("*, lead:qs_leads(*)")
+      .eq("lead_id", leadId)
+      .in("status", ["agendada", "confirmada"]);
+    for (const m of (data as Meeting[]) ?? []) {
+      const s = desfechoDaOportunidadeFutura(m);
+      if (!s) continue;
+      const r = await setMeetingStatus(m, s, m.lead?.bitrix_id);
+      if (!r.ok) notifyError(`A oportunidade foi registrada, mas a reunião ficou sem desfecho: ${r.error}`);
+    }
+    void reloadMeetings();
+  }, [leadId, reloadMeetings]);
 
   useEffect(() => {
     async function loadAll() {
@@ -1440,7 +1458,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           leadId={lead.id}
           leadName={lead.full_name || "Cliente"}
           onFechar={() => setMostrarOportunidade(false)}
-          onSalvo={() => { setVersaoOportunidade((v) => v + 1); void reloadTasks(); }}
+          onSalvo={() => { setVersaoOportunidade((v) => v + 1); void reloadTasks(); void fecharReunioesDaOportunidade(); }}
         />
       )}
 

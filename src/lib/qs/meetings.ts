@@ -1124,6 +1124,24 @@ export async function setMeetingStatus(
   return r;
 }
 
+/**
+ * O DESFECHO DA OPORTUNIDADE FUTURA (Bruno, 29/09/2026).
+ *
+ * O closer registrava "oportunidade futura" e a reunião ficava "agendada": sem
+ * desfecho, ela seguia trancando a agenda dele no dia seguinte
+ * (bloqueioDesfecho.ts). Agora registrar a oportunidade fecha a reunião —
+ * esta função diz COM QUAL status (null = já tem desfecho, não mexe):
+ *   • já começou → REALIZADA (a conversa aconteceu; o cliente só pediu tempo);
+ *   • ainda vai acontecer → CANCELADA (libera o horário e o evento do Google).
+ * Sem SAL e sem valor: não há venda, e o SAL continua podendo ser marcado depois.
+ * Gravar DEPOIS de registrar a oportunidade — o card já está em "Oportunidade
+ * futura", e o bitrix-sync não puxa card dessa coluna pra trás.
+ */
+export function desfechoDaOportunidadeFutura(meeting: Pick<Meeting, "status" | "scheduled_at">): MeetingStatus | null {
+  if (meeting.status !== "agendada" && meeting.status !== "confirmada") return null;
+  return new Date(meeting.scheduled_at).getTime() <= Date.now() ? "realizada" : "cancelada";
+}
+
 async function gravarStatusDaReuniao(
   meeting: Meeting,
   status: MeetingStatus,

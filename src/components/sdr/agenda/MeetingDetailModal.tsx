@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { setMeetingStatus, setMeetingSal, deleteMeeting, gerarSalaMeet, avisarBitrixDaSala, reenviarDesfechoAoBitrix, temDesfecho, type DesfechoCompleto } from "@/lib/qs/meetings";
+import { setMeetingStatus, setMeetingSal, deleteMeeting, gerarSalaMeet, avisarBitrixDaSala, reenviarDesfechoAoBitrix, temDesfecho, desfechoDaOportunidadeFutura, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
 import { perguntarMotivoDesistencia } from "@/lib/qs/motivoDesistencia";
 import BriefingDoLead from "./BriefingDoLead";
@@ -463,6 +463,18 @@ export default function MeetingDetailModal({
                   leadName={meeting.lead_name ?? meeting.lead?.full_name ?? "Cliente"}
                   meetingId={meeting.id}
                   onFechar={() => setOportunidade(false)}
+                  // Registrar a oportunidade É o desfecho: sem isto a reunião
+                  // ficava "agendada" e trancava a agenda do closer (29/09).
+                  // Direto no setMeetingStatus: o mudarStatus perguntaria
+                  // "Cancelar a reunião?" quando ela ainda nem aconteceu.
+                  onSalvo={() => void (async () => {
+                    const s = desfechoDaOportunidadeFutura(meeting);
+                    if (!s) return;
+                    const res = await setMeetingStatus(meeting, s, meeting.lead?.bitrix_id);
+                    if (!res.ok) { notifyError(`A oportunidade foi registrada, mas a reunião ficou sem desfecho: ${res.error}`); return; }
+                    onChanged();
+                    onClose();
+                  })()}
                 />
               )}
             </>)}
