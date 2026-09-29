@@ -15,6 +15,8 @@
 // Body (JSON): { nome, telefone, email, origem, expedicao, fila? }
 //          ou { clique: true, origem } — botão sem formulário (pacotes/portal)
 // Resposta:    { ok, numero, sdr_nome, fallback }
+//   fallback=true → `numero` é o chip de um SDR sorteado (_numeroReserva.js),
+//   NUNCA o 1935 (Bruno, 29/09/2026).
 //
 // ── ESTA ROTA É PÚBLICA, E ISSO É DE PROPÓSITO ──────────────────────────────
 // Ela roda no navegador do visitante, então não pode carregar segredo nenhum
@@ -30,6 +32,7 @@
 import { createHash } from 'node:crypto';
 import { rest } from './_supabaseAdmin.js';
 import { normPhone } from './_leads.js';
+import { numeroReserva, numeroValido } from './_numeroReserva.js';
 
 // Última linha de defesa se qs_settings.lp_origins sumir ou vier corrompido.
 // Não é a fonte da verdade — a tabela é. Está aqui pra uma LP não parar de
@@ -169,7 +172,7 @@ export default async function handler(req, res) {
   // robô de formulário preenche. Responde 200 com o fallback pra não ensinar o
   // robô qual campo o entregou — e, principalmente, NÃO gira a roda.
   if (texto(body.site, 200)) {
-    return responder(res, process.env.WHATSAPP_FALLBACK || null, null, true);
+    return responder(res, await numeroReserva(), null, true);
   }
 
   const nome      = texto(body.nome, 120);
@@ -178,8 +181,6 @@ export default async function handler(req, res) {
   const origem    = texto(body.origem, 80);
   const expedicao = texto(body.expedicao, 80);
   const fila      = texto(body.fila, 40) || 'forms';
-
-  const fallback = process.env.WHATSAPP_FALLBACK || null;
 
   // CLIQUE SEM FORMULÁRIO (23/09/2026): pacotes e portal só têm o botão de
   // WhatsApp — não há telefone, logo não há bilhete. Mesmo assim a pessoa entra
@@ -207,9 +208,9 @@ export default async function handler(req, res) {
       });
       if (ok === false) {
         console.warn('[lead] teto por IP atingido');
-        // Clique em botão NUNCA pode morrer: quem estourou o teto vai pro número
-        // de emergência, sem girar a roda.
-        if (clique) return responder(res, fallback, null, true);
+        // Clique em botão NUNCA pode morrer: quem estourou o teto vai pro chip
+        // de um SDR (numeroReserva), sem girar a roda.
+        if (clique) return responder(res, await numeroReserva(), null, true);
         return res.status(429).json({ ok: false, error: 'Muitos envios. Tente de novo em alguns minutos.' });
       }
     }
@@ -241,18 +242,20 @@ export default async function handler(req, res) {
     const r = Array.isArray(linhas) ? linhas[0] : linhas;
 
     // Zero linhas = ninguém no rodízio (nenhum SDR ativo com número ativo).
-    // Não é erro do banco: é o sinal combinado pra cair no fallback.
-    if (!r || !r.numero) {
-      console.warn('[lead] sem SDR no rodízio — caindo no WHATSAPP_FALLBACK');
-      return responder(res, fallback, null, true);
+    // Número proibido (o 1935 cadastrado como chip) conta como zero linhas.
+    const numero = r && numeroValido(r.numero);
+    if (!numero) {
+      console.warn('[lead] sem SDR válido no rodízio — caindo no chip reserva');
+      return responder(res, await numeroReserva(), null, true);
     }
 
-    return responder(res, r.numero, r.sdr_nome || null, false);
+    return responder(res, numero, r.sdr_nome || null, false);
   } catch (err) {
     // Detalhe completo só no log da Vercel; pro navegador vai o fallback. A
     // pessoa é redirecionada de qualquer jeito — lead pago não morre na porta
     // por causa de um timeout do Postgres.
     console.error('[lead]', err?.code || '', err?.message || err, err?.details || '');
+    const fallback = await numeroReserva();
     if (!fallback) {
       // Sem fallback configurado não há o que devolver. 503 (e não 500) porque
       // é indisponibilidade temporária: a LP pode tentar de novo.
