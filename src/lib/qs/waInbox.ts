@@ -515,6 +515,17 @@ export async function exportarConversaTxt(leadId: string, titulo: string, phone?
 export async function markThreadRead(leadId: string): Promise<void> {
   const { error } = await supabase.rpc("qs_wa_mark_read", { p_lead: leadId });
   if (error) console.warn("[wa] markThreadRead:", error.message);
+  // Espelho no WhatsApp (29/09): o cliente vê o visto azul, como se o SDR
+  // tivesse aberto no celular. Sem esperar e sem avisar se falhar — é detalhe.
+  void (async () => {
+    try {
+      await fetch("/api/wa-react", {
+        method: "POST",
+        headers: await authHeaders(),
+        body: JSON.stringify({ leadId, acao: "lida" }),
+      });
+    } catch { /* sem rede: fica só no QS */ }
+  })();
 }
 
 /**

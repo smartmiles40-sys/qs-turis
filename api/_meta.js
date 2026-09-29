@@ -595,6 +595,26 @@ export function enviarMidia({ para, tipo, mediaId, legenda = null, nomeArquivo =
   return mandar(para, { type: t, [t]: corpo }, { responderA, phoneId });
 }
 
+/**
+ * Marca como LIDA uma mensagem que o cliente mandou (29/09/2026): o cliente vê
+ * o visto azul. A Meta marca também todas as anteriores da conversa. Tem que
+ * sair pelo MESMO número que recebeu a mensagem.
+ */
+export async function marcarComoLida({ wamid, phoneId }) {
+  const cr = await credenciaisDaMeta(phoneId);
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  try {
+    await graph(`/${cr.phoneId}/messages`, {
+      method: 'POST',
+      token: cr.token,
+      body: { messaging_product: 'whatsapp', status: 'read', message_id: String(wamid) },
+    });
+    return { ok: true };
+  } catch (e) {
+    return { erro: 'meta-recusou', detalhe: e?.message, codigo: e?.metaCode };
+  }
+}
+
 /** Reação a uma mensagem (emoji vazio tira a reação). */
 export function enviarReacao({ para, wamid, emoji, phoneId = null }) {
   return mandar(para, { type: 'reaction', reaction: { message_id: String(wamid), emoji: String(emoji ?? '') } }, { phoneId });
