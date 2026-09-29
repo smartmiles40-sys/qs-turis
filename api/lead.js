@@ -52,7 +52,7 @@ const RPC_TIMEOUT_MS = 3500;     // acima disso a pessoa está esperando demais:
 let cacheCfg = { em: 0, origens: null, teto: null };
 const CACHE_MS = 60_000;
 
-async function lerConfig() {
+export async function lerConfig() {
   if (cacheCfg.origens && Date.now() - cacheCfg.em < CACHE_MS) return cacheCfg;
   try {
     const rows = await rest('qs_settings?select=key,value&key=in.(lp_origins,lp_rate_limit)', { timeoutMs: 2500 });
@@ -82,7 +82,7 @@ async function lerConfig() {
  * não. Existe porque cada LP isolada ganha um subdomínio novo (lps9, stfv9…),
  * e esquecer de cadastrar um fazia o botão cair no número de emergência calado.
  */
-function origemPermitida(origin, permitidas) {
+export function origemPermitida(origin, permitidas) {
   if (!origin) return false;
   let o;
   try { o = new URL(origin); } catch { return false; }
@@ -94,7 +94,7 @@ function origemPermitida(origin, permitidas) {
   });
 }
 
-function aplicarCors(res, origin, permitido) {
+export function aplicarCors(res, origin, permitido) {
   if (permitido) res.setHeader('Access-Control-Allow-Origin', origin);
   // Sem Vary: Origin, um CDN/proxy no meio serviria pra LP B o cabeçalho que
   // liberava a LP A. Junto com o no-store abaixo, fecha o assunto de cache.
@@ -110,7 +110,7 @@ function aplicarCors(res, origin, permitido) {
  * (já existe e é server-side); sem sal, uma tabela de hashes de IPv4 é
  * reversível por força bruta em minutos.
  */
-function chaveIp(req) {
+export function chaveIp(req) {
   const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
   const ip = xff || req.socket?.remoteAddress || '';
   if (!ip) return '';
@@ -123,7 +123,7 @@ function chaveIp(req) {
  * Casar com control char é o objetivo aqui — é assim que um \n ou um \0 vindo do
  * formulário para de entrar no banco e de sujar linha de log.
  */
-function texto(v, max) {
+export function texto(v, max) {
   if (v == null) return null;
   // eslint-disable-next-line no-control-regex
   const s = String(v).replace(/[\x00-\x1F\x7F]/g, " ").trim();
