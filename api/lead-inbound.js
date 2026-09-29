@@ -35,6 +35,8 @@ import { createInboundLead, moverLeadParaCadencia } from './_leads.js';
 import { alcancarCardAdotado } from './_agenda.js';
 import { segredoConfere, rest } from './_supabaseAdmin.js';
 import { entregarAGloria } from './_gloriaEntrada.js';
+import { conferirDuplicado, marcarComoDuplicado } from './_porteiroWhatsApp.js';
+import { findLeadByPhone } from './_wa.js';
 import { dispararPrimeiroContato, lerConfig, gatilhoDe, pularPorSerLp } from './_primeiroContato.js';
 
 // UUID v4 (formato geral de UUID). cadence_id/owner_id inválidos antes iam
@@ -140,6 +142,34 @@ export default async function handler(req, res) {
       });
     }
     body.cadence_id = destino;
+  }
+
+  // ── PORTEIRO DO 1935 ──────────────────────────────────────────────────
+  // Negócio aberto pela linha do WhatsApp 1935 (ChatApp/WhatCRM) para quem JÁ
+  // tem negócio aberto ou ganho: vira "perdido — duplicado" no Bitrix e NÃO
+  // nasce card no QS. Ver _porteiroWhatsApp.js. Qualquer falha aqui deixa
+  // passar — duplicado se desfaz, lead perdido não.
+  if (body.bitrix_id && !duplicar && !mover) {
+    try {
+      const v = await conferirDuplicado(String(body.bitrix_id).trim(), { phone: body.phone });
+      if (v.duplicado) {
+        const aplicado = await marcarComoDuplicado(v);
+        const existente = body.phone ? await findLeadByPhone(body.phone).catch(() => null) : null;
+        console.log(`[lead-inbound] porteiro: negócio ${body.bitrix_id} é duplicado de #${v.original.ID} — sem card novo`);
+        return res.status(200).json({
+          success: true,
+          duplicado: true,
+          original_bitrix_id: v.original.ID,
+          movido_pra_perdido: aplicado.movido,
+          // O n8n usa `deduped` pra não repetir a nota de origem.
+          deduped: true,
+          lead_id: existente?.id ?? null,
+          owner_id: existente?.owner_id ?? null,
+        });
+      }
+    } catch (e) {
+      console.warn('[lead-inbound] porteiro falhou (segue o fluxo normal):', e?.message || e);
+    }
   }
 
   try {
