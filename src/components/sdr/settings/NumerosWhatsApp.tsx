@@ -322,9 +322,9 @@ export default function NumerosWhatsApp() {
 
       {painel.sdrs.every((s) => s.status !== "ativo") && (
         <div className="p-3 rounded-lg text-sm" style={{ background: "#FEF0C7", color: "#B54708" }}>
-          <strong>Nenhum SDR com número ativo.</strong> Enquanto isso, quem preencher um formulário
-          é mandado pro número de emergência (a variável WHATSAPP_FALLBACK) — nenhum lead fica sem
-          destino, mas todos caem no mesmo lugar.
+          <strong>Nenhum SDR com número ativo.</strong> Enquanto isso, quem clicar no WhatsApp das
+          páginas vê "tente de novo em alguns segundos" — o 1935 não recebe mais lead das páginas.
+          Ative o número de pelo menos um SDR.
         </div>
       )}
 
