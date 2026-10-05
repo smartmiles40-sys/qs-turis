@@ -239,7 +239,7 @@ export function horarioValidoSdr(inicio, cfg, agora = new Date()) {
  *   • sem dono, ou dono sem horário nenhum -> o SDR livre com MENOS ligações
  *     marcadas daqui pra frente (rodízio por carga, empate pelo nome).
  */
-export async function escolherSdr({ inicio, telefone, agora = new Date() }) {
+export async function escolherSdr({ inicio, telefone, fonte = null, agora = new Date() }) {
   const cfg = await lerConfigSdr();
   const sdrs = await sdrsAtivos();
   if (!sdrs.length) return null;
@@ -256,10 +256,38 @@ export async function escolherSdr({ inicio, telefone, agora = new Date() }) {
     if (donoTemHorario) return null;
   }
 
+  const livres = sdrs.filter((s) => livre(ocupado, s.id, ini, fim));
+  if (livres.length <= 1) return livres[0] || null;
+
+  // Entre os livres, a MESMA conta do gatilho dos leads (0099): quem recebeu
+  // menos leads novos hoje deste canal, depois no total. Antes era "quem tem
+  // menos ligações marcadas daqui pra frente", que não sabia dos leads que
+  // cada um já tinha recebido — e era uma das rodas que desalinhava a divisão.
+  try {
+    const escolhido = await rest('rpc/qs_sdr_equilibrado', {
+      method: 'POST',
+      body: { p_pool: livres.map((s) => s.id), p_canal: canalDaFonte(fonte) },
+      timeoutMs: 3000,
+    });
+    const id = Array.isArray(escolhido) ? escolhido[0] : escolhido;
+    const achado = livres.find((s) => s.id === String(id || ''));
+    if (achado) return achado;
+  } catch (e) {
+    console.warn('[ligacao-sdr] conta do equilíbrio indisponível (segue pela carga):', e?.message);
+  }
+
   const carga = (id) => ocupado.filter((o) => o.sdr_id === id).length;
-  return sdrs
-    .filter((s) => livre(ocupado, s.id, ini, fim))
-    .sort((a, b) => carga(a.id) - carga(b.id))[0] || null;
+  return livres.sort((a, b) => carga(a.id) - carga(b.id))[0] || null;
+}
+
+/** Mesma regra de `qs_canal_da_fonte` (0094) — o canal sai da Fonte. */
+function canalDaFonte(fonte) {
+  const f = String(fonte || '').trim().toLowerCase();
+  if (!f) return 'sem_fonte';
+  if (f.includes('live')) return 'live';
+  if (f.includes('tráfego') || f.includes('trafego')) return 'trafego';
+  if (f.includes('orgânico') || f.includes('organico')) return 'organico';
+  return 'outros';
 }
 
 /** A pessoa já tem ligação marcada daqui pra frente? */

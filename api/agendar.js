@@ -436,7 +436,7 @@ async function marcar(req, res, { cfg, regras, teto, maxDias }) {
     // ANTES de criar lead: se ninguém está livre nesse horário, não faz sentido
     // ter criado um lead pra depois dizer "não deu". O horário pode ter sido
     // preenchido entre o carregamento da página e o clique.
-    const closer = await escolherCloserLivre({ inicio, duracaoMin: regras.duracaoMin, agora });
+    const closer = await escolherCloserLivre({ inicio, duracaoMin: regras.duracaoMin, agora, regras, maxDias });
     if (!closer) {
       return res.status(409).json({
         ok: false,
@@ -692,7 +692,7 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null }) {
     if (jaTem) return res.status(200).json(jaTem);
 
     // 1) Quem liga — ANTES de criar lead, pelo mesmo motivo da reunião.
-    const sdr = await escolherSdr({ inicio, telefone, agora });
+    const sdr = await escolherSdr({ inicio, telefone, fonte: origemLp, agora });
     if (!sdr) {
       return res.status(409).json({
         ok: false, motivo: 'horario_ocupado',

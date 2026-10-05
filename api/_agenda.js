@@ -138,6 +138,40 @@ export async function closersAtivos() {
 }
 
 /**
+ * CLOSER DE RESERVA (Bruno, 05/10): o John é supervisor e tem um usuário de
+ * closer pra poder atender, mas NÃO entra no rodízio do agendamento direto. Ele
+ * só recebe quando a agenda dos outros closers está literalmente lotada — nenhum
+ * horário livre na janela inteira que a página oferece.
+ *
+ * Quem é reserva mora em `qs_settings.agenda_closers_reserva` (lista de ids):
+ * trocar o supervisor, ou pôr mais alguém de reserva, é editar a lista, sem
+ * deploy. Leitura falhou = ninguém é reserva (todo mundo no rodízio, como era).
+ */
+async function idsDeReserva() {
+  try {
+    const rows = await rest('qs_settings?select=value&key=eq.agenda_closers_reserva&limit=1');
+    const v = rows?.[0]?.value;
+    const lista = Array.isArray(v) ? v : Array.isArray(v?.ids) ? v.ids : [];
+    return new Set(lista.map(String));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Os closers ativos separados em titulares (rodízio) e reservas. Se TODOS
+ * estiverem marcados como reserva, viram titulares — agenda sem ninguém seria
+ * pior do que ignorar a marcação.
+ */
+export async function closersPorPrioridade() {
+  const [todos, reserva] = await Promise.all([closersAtivos(), idsDeReserva()]);
+  const titulares = todos.filter((c) => !reserva.has(c.id));
+  const reservas = todos.filter((c) => reserva.has(c.id));
+  if (!titulares.length) return { todos, titulares: reservas, reservas: [] };
+  return { todos, titulares, reservas };
+}
+
+/**
  * De quem é a vez.
  *
  * ALTERNÂNCIA FIXA (decisão do Bruno, 25/08): um agendamento pra cada, na
@@ -466,11 +500,24 @@ export function depoisDoPrazo(regras, ano, mes, dia) {
  */
 export async function gradePublica({ agora = new Date(), regras = null, maxDias = null } = {}) {
   const r = comRegras(regras);
-  const closers = await closersAtivos();
-  if (!closers.length) return { ok: false, motivo: 'sem_closer', dias: [] };
+  const { todos, titulares, reservas } = await closersPorPrioridade();
+  if (!todos.length) return { ok: false, motivo: 'sem_closer', dias: [] };
 
   const ate = new Date(agora.getTime() + (r.diasAFrente + 1) * 86_400_000);
-  const ocupado = await ocupacao(agora, ate, closers);
+  const ocupado = await ocupacao(agora, ate, todos);
+
+  // Titulares primeiro. A reserva só aparece se eles não têm NENHUM horário na
+  // janela inteira — misturar as duas agendas no mesmo dia daria reunião pro
+  // supervisor enquanto um closer ainda tem hora livre.
+  const dosTitulares = montarGrade(titulares, ocupado, r, agora, maxDias);
+  if (dosTitulares.length || !reservas.length) {
+    return { ok: dosTitulares.length > 0, motivo: dosTitulares.length ? null : 'sem_horario', dias: dosTitulares, reserva: false };
+  }
+  const daReserva = montarGrade(reservas, ocupado, r, agora, maxDias);
+  return { ok: daReserva.length > 0, motivo: daReserva.length ? null : 'sem_horario', dias: daReserva, reserva: true };
+}
+
+function montarGrade(closers, ocupado, r, agora, maxDias) {
   const cedoDemais = agora.getTime() + r.antecedenciaMin * 60_000;
   const hoje = emSP(agora);
 
@@ -506,7 +553,7 @@ export async function gradePublica({ agora = new Date(), regras = null, maxDias 
     });
   }
 
-  return { ok: dias.length > 0, motivo: dias.length ? null : 'sem_horario', dias };
+  return dias;
 }
 
 /**
@@ -519,18 +566,27 @@ export async function gradePublica({ agora = new Date(), regras = null, maxDias 
  *
  * Devolve null quando ninguém está livre — o horário foi preenchido entre a
  * hora em que a página carregou e o clique.
+ *
+ * A RESERVA (o supervisor) só entra se nenhum titular está livre neste horário
+ * E os titulares não têm mais horário nenhum na grade — a mesma regra da
+ * `gradePublica`. Titular ainda com hora livre em outro momento = 409, e a
+ * pessoa escolhe outro horário com um closer.
  */
-export async function escolherCloserLivre({ inicio, duracaoMin = DURACAO_MIN, agora = new Date() }) {
-  const closers = await closersAtivos();
-  if (!closers.length) return null;
+export async function escolherCloserLivre({ inicio, duracaoMin = DURACAO_MIN, agora = new Date(), regras = null, maxDias = null }) {
+  const { todos, titulares, reservas } = await closersPorPrioridade();
+  if (!todos.length) return null;
 
   const fim = new Date(inicio.getTime() + duracaoMin * 60_000);
-  const janelas = await ocupacao(new Date(inicio.getTime() - 3_600_000), new Date(fim.getTime() + 3_600_000), closers);
-  const daVez = await deQuemEAVez(closers);
-  const ordem = [daVez, ...closers.filter((c) => c.id !== daVez?.id)].filter(Boolean);
+  const janelas = await ocupacao(new Date(inicio.getTime() - 3_600_000), new Date(fim.getTime() + 3_600_000), todos);
+  const daVez = await deQuemEAVez(titulares);
+  const ordem = [daVez, ...titulares.filter((c) => c.id !== daVez?.id)].filter(Boolean);
 
-  void agora;
-  return ordem.find((c) => estaLivre(janelas, c.id, inicio.getTime(), fim.getTime())) || null;
+  const titular = ordem.find((c) => estaLivre(janelas, c.id, inicio.getTime(), fim.getTime()));
+  if (titular || !reservas.length) return titular || null;
+
+  const grade = await gradePublica({ agora, regras: regras || { duracaoMin }, maxDias });
+  if (!grade.reserva) return null;
+  return reservas.find((c) => estaLivre(janelas, c.id, inicio.getTime(), fim.getTime())) || null;
 }
 
 /**
@@ -543,13 +599,23 @@ export async function escolherCloserLivre({ inicio, duracaoMin = DURACAO_MIN, ag
  * meio do caminho.
  */
 export async function duasOpcoes({ periodo = null, dia = null, agora = new Date() } = {}) {
-  const closers = await closersAtivos();
-  if (!closers.length) return { ok: false, motivo: 'sem_closer', opcoes: [] };
+  const { todos, titulares, reservas } = await closersPorPrioridade();
+  if (!todos.length) return { ok: false, motivo: 'sem_closer', opcoes: [] };
 
-  const janelas = await ocupacao(agora, new Date(agora.getTime() + (DIAS_A_FRENTE + 1) * 86_400_000), closers);
-  const daVez = await deQuemEAVez(closers);
+  const janelas = await ocupacao(agora, new Date(agora.getTime() + (DIAS_A_FRENTE + 1) * 86_400_000), todos);
+  const daVez = await deQuemEAVez(titulares);
   // O da vez primeiro; os outros são a rede de segurança de quando ele está cheio.
-  const ordem = [daVez, ...closers.filter((c) => c.id !== daVez?.id)].filter(Boolean);
+  const ordem = [daVez, ...titulares.filter((c) => c.id !== daVez?.id)].filter(Boolean);
+
+  // A reserva (supervisor) só entra quando os titulares não têm horário NENHUM
+  // nos próximos dias — não basta estarem cheios no período que a pessoa pediu.
+  if (reservas.length) {
+    let titularTemHorario = false;
+    for (const c of titulares) {
+      if ((await horariosLivres({ closerId: c.id, limite: 1, agora, janelas })).length) { titularTemHorario = true; break; }
+    }
+    if (!titularTemHorario) ordem.push(...reservas);
+  }
 
   for (const closer of ordem) {
     const livres = await horariosLivres({ closerId: closer.id, periodo, dia, limite: 2, agora, janelas });
@@ -1125,7 +1191,9 @@ export async function marcarReuniao({ lead, opcao, email = null, titulo = null, 
     }
   }
 
-  await anotarAVez(closer.id);
+  // A reserva não mexe na vez: se anotasse o supervisor como último, a roda dos
+  // titulares recomeçaria do primeiro da lista em vez de seguir a ordem.
+  if (!(await idsDeReserva()).has(closer.id)) await anotarAVez(closer.id);
 
   return {
     ok: true,
