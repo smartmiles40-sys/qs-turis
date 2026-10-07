@@ -21,7 +21,7 @@ import { carregarRespostasDoFormulario } from "@/lib/qs/formulario";
 import { confirmar } from "@/lib/qs/confirmar";
 import { criarEvento } from "@/lib/qs/agendaMeet";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, fetchNoteCountsByLead, fetchContactedLeadIds, fetchLossReasons, type CadenceScriptRow, type ContactBreakdownRow } from "@/lib/qs/queries";
+import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityCountOnDay, fetchActivityGoals, fetchMeetingCounts, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, fetchNoteCountsByLead, fetchContactedLeadIds, fetchLossReasons, type CadenceScriptRow, type ContactBreakdownRow, type DayActivityCount } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { useWhatsAppApp } from "@/lib/qs/waApp";
@@ -247,6 +247,11 @@ function getSlaAlert(
 const MAX_CONTACT_ATTEMPTS = 5;
 const DAILY_GOAL = 350; // Will come from qs_goals later
 const MONTHLY_GOAL = 7350;
+
+// "AAAA-MM-DD" no fuso local (o toISOString cairia no dia seguinte depois das 21h).
+function toYmdLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 // Canais que são LIGAÇÃO (recebem o bloco de classificação ao concluir).
 const CALL_CHANNELS: ChannelType[] = ["ligacao", "ligacao_whatsapp"];
@@ -597,6 +602,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     refreshCounts();
     fetchActivityGoals(countsScope).then(setGoalTargets);
   }, [countsScope, refreshCounts]);
+
+  // "Feitas em…": quantas atividades o SDR concluiu num dia passado. Abre no
+  // dia anterior (pula domingo); o seletor deixa conferir qualquer outro dia.
+  const [pastDay, setPastDay] = useState<string>(() => {
+    const d = new Date(); d.setDate(d.getDate() - 1);
+    if (d.getDay() === 0) d.setDate(d.getDate() - 1);
+    return toYmdLocal(d);
+  });
+  const [pastDayCount, setPastDayCount] = useState<DayActivityCount | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setPastDayCount(null);
+    fetchActivityCountOnDay(pastDay, countsScope).then((c) => { if (alive) setPastDayCount(c); });
+    return () => { alive = false; };
+  }, [pastDay, countsScope]);
 
   // ── Lookup maps ────────────────────────────────────────────────────
   const leadsMap = useMemo(() => new Map(leads.map(l => [l.id, l])), [leads]);
@@ -3589,6 +3609,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         .qsx-pace .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--line); flex: none; }
         /* Métrica "plain" (sem barra), p/ contagens simples como Reuniões */
         .qsx-metric-plain { justify-content: center; min-width: 150px; }
+        .qsx-dayinput { font: inherit; font-size: 12px; font-weight: 700; color: var(--ink2); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 2px 6px; }
+        .qsx-daysub { font-size: 11.5px; font-weight: 600; color: var(--ink3); margin-left: 16px; }
         /* Ligações e mensagens por usuário */
         .qsx-cm { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); }
         .qsx-cm-title { font-size: 10.5px; font-weight: 800; letter-spacing: .9px; text-transform: uppercase; color: var(--ink3); margin-bottom: 10px; }
@@ -3966,6 +3988,28 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   <span className="qsx-mlab">Reuniões do mês</span>
                   <span className="qsx-mnums">{meetingCounts.month}</span>
                 </div>
+              </div>
+              {/* Atividades feitas num dia passado (padrão: ontem) */}
+              <div
+                className="qsx-metric qsx-metric-plain"
+                title={pastDayCount ? `${pastDayCount.ligacoes} ligações · ${pastDayCount.mensagens} mensagens · ${pastDayCount.leads} leads trabalhados` : undefined}
+              >
+                <div className="qsx-mtop">
+                  <span className="qsx-mdot" style={{ background: "var(--ink3)" }} />
+                  <span className="qsx-mlab">Feitas em</span>
+                  <input
+                    type="date"
+                    className="qsx-dayinput"
+                    value={pastDay}
+                    max={toYmdLocal(new Date())}
+                    onChange={(e) => { if (e.target.value) setPastDay(e.target.value); }}
+                    aria-label="Dia para conferir as atividades feitas"
+                  />
+                  <span className="qsx-mnums">{pastDayCount ? pastDayCount.total : "…"}</span>
+                </div>
+                {pastDayCount && pastDayCount.total > 0 && (
+                  <div className="qsx-daysub">{pastDayCount.ligacoes} lig. · {pastDayCount.mensagens} msg. · {pastDayCount.leads} leads</div>
+                )}
               </div>
             </div>
             <div className="qsx-pace">

@@ -367,6 +367,38 @@ export async function fetchContactBreakdownToday(ownerId?: string | null): Promi
   }
 }
 
+// ── Atividades feitas num DIA escolhido (padrão: ontem) ──────────────────────
+// Pedido do Bruno (2026-10-07): o SDR precisa conseguir conferir quantas
+// atividades fez no dia anterior (ou em qualquer dia) sem pedir pro gestor.
+// Mesmo critério do placar: status concluida + completed_at dentro do dia local.
+export interface DayActivityCount { total: number; ligacoes: number; mensagens: number; leads: number; }
+
+export async function fetchActivityCountOnDay(ymd: string, ownerId?: string | null): Promise<DayActivityCount> {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dayStart = new Date(y, m - 1, d);
+  const dayEnd = new Date(y, m - 1, d + 1);
+  try {
+    const rows = await fetchAllRows<{ lead_id: string | null; channel_type: string | null }>((f, t) => {
+      let q = supabase.from("qs_tasks").select("lead_id, channel_type")
+        .eq("status", "concluida")
+        .gte("completed_at", dayStart.toISOString()).lt("completed_at", dayEnd.toISOString())
+        .order("id");
+      if (ownerId) q = q.eq("owner_id", ownerId);
+      return q.range(f, t);
+    });
+    let ligacoes = 0, mensagens = 0;
+    for (const r of rows) {
+      const ch = r.channel_type ?? "";
+      if (CONTACT_CALL_CHANNELS.has(ch)) ligacoes++;
+      else if (CONTACT_MSG_CHANNELS.has(ch)) mensagens++;
+    }
+    return { total: rows.length, ligacoes, mensagens, leads: new Set(rows.map((r) => r.lead_id)).size };
+  } catch (err) {
+    console.warn("[QS] fetchActivityCountOnDay failed:", err);
+    return { total: 0, ligacoes: 0, mensagens: 0, leads: 0 };
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TASKS
 // ═══════════════════════════════════════════════════════════════════════════════
