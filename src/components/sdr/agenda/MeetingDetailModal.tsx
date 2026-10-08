@@ -112,6 +112,17 @@ export default function MeetingDetailModal({
     })();
   }, [meeting]);
 
+  // O modal fica SEMPRE montado (meeting=null só esconde), então o passo do
+  // desfecho sobrevivia de uma reunião pra outra: depois de um no-show, a
+  // próxima reunião aberta já vinha no formulário "Cliente não compareceu" e o
+  // Confirmar gravava no-show de novo (07/10: 6 reuniões do Bruno Matheus).
+  // Trocar de reunião — ou fechar — volta pro começo.
+  useEffect(() => {
+    setFechando(null);
+    setOportunidade(false);
+    setPedindoMotivo(false);
+  }, [meeting?.id]);
+
   // Agenda trancada (Bruno, 21/09): closer com reunião de dia anterior sem
   // desfecho não abre as outras. As atrasadas abrem normal — é por elas que
   // ele destrava. Vale pra quem chega aqui pela Minha Agenda ou pelo mês.

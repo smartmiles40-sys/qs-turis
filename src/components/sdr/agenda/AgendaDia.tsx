@@ -974,6 +974,9 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
       {/* ── Painel de detalhe ──────────────────────────────────────────────── */}
       {selecionada && (
         <PainelReuniao
+          // key: trocar de reunião remonta o painel — senão o formulário de
+          // desfecho aberto numa reunião aparecia já aberto na outra (07/10).
+          key={selecionada.id}
           reuniao={selecionada}
           coluna={colunas.find((c) => c.key === chaveDoEspecialista(selecionada))}
           agora={agora}
