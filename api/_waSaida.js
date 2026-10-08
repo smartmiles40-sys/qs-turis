@@ -80,11 +80,16 @@ async function donoDoNumero(phoneId) {
  *   3. Senão, o número do DONO DO LEAD (gestor/closer escrevendo no lead dele).
  *   4. Senão, o oficial.
  *
+ * CLOSER (08/10/2026): fala SEMPRE pelo número do time (o padrão, hoje o
+ * 1935 por Coexistence) — ou pelo próprio, se tiver um. Nunca pelo chip do
+ * SDR que passou o lead: o cliente agendou com o closer e a conversa dele é
+ * no número do time.
+ *
  * Número de SDR só conta com token guardado (segredo_id) — sem ele não há
  * como enviar. Os automáticos (boas-vindas, Glória) NÃO passam por aqui: usam
  * modelos que só existem na conta oficial.
  */
-export async function numeroDoEnvio({ leadId, userId = null, ownerId = null }) {
+export async function numeroDoEnvio({ leadId, userId = null, ownerId = null, papel = null }) {
   let caixaDaConversa = null;
   try {
     const desde = new Date(Date.now() - 30 * 86_400_000).toISOString();
@@ -96,15 +101,16 @@ export async function numeroDoEnvio({ leadId, userId = null, ownerId = null }) {
   } catch (e) {
     console.warn('[wa-saida] não li a última conversa (segue a regra do dono):', e?.message);
   }
-  return escolherNumero({ numeros: await numerosConectados(), caixaDaConversa, userId, ownerId });
+  return escolherNumero({ numeros: await numerosConectados(), caixaDaConversa, userId, ownerId, papel });
 }
 
 /** A regra de numeroDoEnvio, sem banco (testável). */
-export function escolherNumero({ numeros, caixaDaConversa, userId = null, ownerId = null }) {
+export function escolherNumero({ numeros, caixaDaConversa, userId = null, ownerId = null, papel = null }) {
   // Número de SDR só conta com token guardado; o oficial pode vir da Vercel
   // (sem segredo_id) e continua valendo como "a conversa está no oficial".
   const nums = (numeros || []).filter((n) => !n.user_id || n.segredo_id);
   const pessoal = (uid) => (uid ? nums.find((n) => n.user_id === uid) : null);
+  if (papel === 'closer') return pessoal(userId)?.phone_number_id ?? null;
   const pode = (n) => n && (!n.user_id || n.user_id === userId || n.user_id === ownerId);
 
   if (caixaDaConversa != null) {

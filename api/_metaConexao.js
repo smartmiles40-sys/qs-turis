@@ -113,12 +113,18 @@ export async function eventoDaConta(wabaId, value) {
 }
 
 /**
- * Conecta (ou reconecta) um número.
- *   modo 'cloud'        → número na Cloud API; `pin` (6 dígitos) registra o número
- *   modo 'coexistencia' → WhatsApp Business do celular; `userId` = o SDR dono
+ * Conecta (ou reconecta) um número — SÓ por Coexistence (Bruno, 08/10/2026:
+ * "todos vão estar conectados no QS via COEX"). O número continua no WhatsApp
+ * Business do celular. `userId` = o dono (SDR/closer); sem dono = o número do
+ * TIME, que vira o padrão (é por ele que os closers falam).
+ *
+ * O cadastro de "número só da API" (Cloud, com PIN) saiu: com um número que
+ * está no celular ele quebra na janela da Meta (HTTP 500) e, quando passa,
+ * tira o WhatsApp do aparelho.
  */
-export async function conectarNumero({ code, wabaId, phoneId, modo, pin, userId, rotulo, por, urlBase }) {
-  const m = modo === 'coexistencia' ? 'coexistencia' : 'cloud';
+export async function conectarNumero({ code, wabaId, phoneId, modo, userId, rotulo, por, urlBase }) {
+  if (modo && modo !== 'coexistencia') return { erro: 'O QS conecta números só por Coexistência (WhatsApp Business no celular + QS).' };
+  const m = 'coexistencia';
   if (!code) return { erro: 'A janela da Meta não devolveu o código. Conecte de novo até o fim.' };
   if ((wabaId && !/^\d+$/.test(String(wabaId))) || (phoneId && !/^\d+$/.test(String(phoneId)))) return { erro: 'Ids inválidos.' };
 
@@ -157,26 +163,13 @@ export async function conectarNumero({ code, wabaId, phoneId, modo, pin, userId,
     return { erro: `A Meta não deixou assinar o app na conta: ${e.message}` };
   }
 
-  // (4) Registro (Cloud) ou sincronização (Coexistência).
+  // (4) Sincronização da Coexistência (contatos + histórico do celular).
   const avisos = [];
-  if (m === 'cloud') {
-    const p = String(pin || '').trim();
-    if (p) {
-      if (!/^\d{6}$/.test(p)) return { erro: 'O PIN tem 6 números.' };
-      try {
-        await graph(`/${phoneId}/register`, { method: 'POST', token, body: { messaging_product: 'whatsapp', pin: p } });
-      } catch (e) {
-        // Número que já estava registrado responde erro — e está tudo bem.
-        avisos.push(`Registro: ${e.message}`);
-      }
-    }
-  } else {
-    for (const tipo of ['smb_app_state_sync', 'history']) {
-      try {
-        await graph(`/${phoneId}/smb_app_data`, { method: 'POST', token, body: { messaging_product: 'whatsapp', sync_type: tipo } });
-      } catch (e) {
-        avisos.push(`Sincronização (${tipo}): ${e.message}`);
-      }
+  for (const tipo of ['smb_app_state_sync', 'history']) {
+    try {
+      await graph(`/${phoneId}/smb_app_data`, { method: 'POST', token, body: { messaging_product: 'whatsapp', sync_type: tipo } });
+    } catch (e) {
+      avisos.push(`Sincronização (${tipo}): ${e.message}`);
     }
   }
 

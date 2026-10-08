@@ -4,10 +4,11 @@
 // (Bruno, 23/09/2026). Conecta número clicando num botão (a janela é da própria
 // Meta), mostra se cada número está saudável e se as mensagens estão chegando.
 //
-// Dois tipos de conexão:
-//   • número OFICIAL (Cloud API) — o número do time todo;
-//   • WhatsApp Business de um SDR (Coexistência) — o chip continua no celular
-//     dele e as conversas também aparecem no QS. Sem QR, sem Evolution.
+// Conexão SÓ por Coexistência (Bruno, 08/10/2026): o número continua no
+// WhatsApp Business do celular e as conversas também aparecem no QS. Cada
+// número tem um dono (SDR/closer) ou é o NÚMERO DO TIME — o padrão, por onde
+// os closers falam (o 1935). O cadastro de "número só da API" saiu: com número
+// que está no celular a janela da Meta quebrava com HTTP 500.
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
@@ -49,7 +50,9 @@ const MOTIVO_ENTRADA: Record<string, string> = {
   "sem-pulso": "O QS ainda não recebeu nenhum sinal da Meta.",
 };
 
-interface Pedido { modo: "cloud" | "coexistencia"; userId: string; pin: string }
+/** userId: "" = ainda não escolheu · TIME = número do time (sem dono). */
+const TIME = "__time__";
+interface Pedido { userId: string }
 
 export default function ConexaoMeta() {
   const [painel, setPainel] = useState<PainelMeta | null>(null);
@@ -86,13 +89,12 @@ export default function ConexaoMeta() {
 
   async function conectar(p: Pedido) {
     if (!painel?.cadastro.appId || !painel.cadastro.configId) return;
-    if (p.modo === "coexistencia" && !p.userId) { notifyError("Escolha de qual SDR é o número."); return; }
-    if (p.pin && !/^\d{6}$/.test(p.pin)) { notifyError("O PIN tem 6 números."); return; }
+    if (!p.userId) { notifyError("Escolha de quem é o número."); return; }
     setOcupado(true);
     try {
       const r = await conectarPelaMeta({
         appId: painel.cadastro.appId, configId: painel.cadastro.configId,
-        modo: p.modo, pin: p.pin || undefined, userId: p.userId || null,
+        userId: p.userId === TIME ? null : p.userId,
       });
       notifySuccess(`Conectado: ${r.numero || "número"}.`);
       if (r.avisos.length) notifyError(`Conectado, com avisos: ${r.avisos.join(" · ")}`);
@@ -215,7 +217,7 @@ export default function ConexaoMeta() {
                 </span>
               </div>
               <div className="text-[12px] text-gray-600">
-                {MODO[n.modo]}{n.dono ? ` · de ${n.dono}` : ""}
+                {MODO[n.modo]}{n.dono ? ` · de ${n.dono}` : n.modo === "coexistencia" ? " · número do time (closers)" : ""}
               </div>
               {q && <div className="text-[12px] font-medium" style={{ color: q.cor }}>● {q.txt}</div>}
               {n.limite && <div className="text-[12px] text-gray-600">Limite: {LIMITE[n.limite] || n.limite}</div>}
@@ -245,7 +247,7 @@ export default function ConexaoMeta() {
               <div className="text-[11px] text-gray-400">Última mensagem de cliente: {quando(n.ultimaEntrada)}</div>
               <div className="flex gap-2 pt-1">
                 <button disabled={!pronto || ocupado}
-                  onClick={() => setPedido({ modo: n.modo === "coexistencia" ? "coexistencia" : "cloud", userId: n.donoId || "", pin: "" })}
+                  onClick={() => setPedido({ userId: n.donoId || TIME })}
                   className="flex-1 px-3 py-2 text-sm rounded-lg font-medium text-white disabled:opacity-40"
                   style={{ background: AZUL }}>
                   {ligado ? "Reconectar" : "Conectar"}
@@ -273,13 +275,9 @@ export default function ConexaoMeta() {
       )}
 
       <div className="flex flex-wrap gap-2">
-        <button disabled={!pronto || ocupado} onClick={() => setPedido({ modo: "cloud", userId: "", pin: "" })}
+        <button disabled={!pronto || ocupado} onClick={() => setPedido({ userId: "" })}
           className="px-4 py-2 text-sm rounded-lg font-medium text-white disabled:opacity-40" style={{ background: AZUL }}>
-          + Conectar número oficial
-        </button>
-        <button disabled={!pronto || ocupado} onClick={() => setPedido({ modo: "coexistencia", userId: "", pin: "" })}
-          className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-800 disabled:opacity-40">
-          + Conectar WhatsApp Business de um SDR
+          + Conectar WhatsApp Business
         </button>
       </div>
 
@@ -314,33 +312,22 @@ export default function ConexaoMeta() {
       {pedido && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => !ocupado && setPedido(null)}>
           <div className="bg-white rounded-xl max-w-md w-full p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <h4 className="text-base font-bold text-gray-900">
-              {pedido.modo === "cloud" ? "Conectar o número oficial" : "Conectar o WhatsApp Business de um SDR"}
-            </h4>
-            {pedido.modo === "cloud" ? (
-              <>
-                <p className="text-sm text-gray-600">
-                  Vai abrir a janela da Meta: entre com o Facebook de quem administra a empresa, escolha a
-                  empresa e o número. Se for um número NOVO na Cloud API, crie um PIN de 6 números
-                  (é a senha de verificação em duas etapas dele). Número que já funciona: deixe em branco.
-                </p>
-                <input value={pedido.pin} maxLength={6} inputMode="numeric" placeholder="PIN (opcional)"
-                  onChange={(e) => setPedido({ ...pedido, pin: e.target.value.replace(/\D/g, "") })}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 font-mono" />
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-gray-600">
-                  O chip precisa estar no app <strong>WhatsApp Business</strong> (não no WhatsApp comum), no
-                  celular do SDR. A Meta vai mostrar um QR para ler NO APP WhatsApp Business — o número continua
-                  no celular e as conversas passam a aparecer também no QS.
-                </p>
-                <select value={pedido.userId} onChange={(e) => setPedido({ ...pedido, userId: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200">
-                  <option value="">De quem é o número?</option>
-                  {painel.sdrs.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
-                </select>
-              </>
+            <h4 className="text-base font-bold text-gray-900">Conectar um WhatsApp Business</h4>
+            <p className="text-sm text-gray-600">
+              O número precisa estar no app <strong>WhatsApp Business</strong> (não no WhatsApp comum). Na
+              janela da Meta, digite o número: ela mostra um QR para ler NO APP WhatsApp Business do celular
+              dele. O número continua no celular e as conversas passam a aparecer também no QS.
+            </p>
+            <select value={pedido.userId} onChange={(e) => setPedido({ userId: e.target.value })}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200">
+              <option value="">De quem é o número?</option>
+              <option value={TIME}>Número do time — closers (padrão)</option>
+              {painel.sdrs.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
+            </select>
+            {pedido.userId === TIME && (
+              <p className="text-[12px] text-gray-500">
+                Vira o número padrão do QS: os closers falam por ele, e também quem ainda não tem número próprio.
+              </p>
             )}
             <div className="flex gap-2 justify-end pt-2">
               <button disabled={ocupado} onClick={() => setPedido(null)}

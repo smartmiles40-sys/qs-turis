@@ -74,7 +74,7 @@ export default async function handler(req, res) {
 
   // Por qual número sai (Coexistence, 28/09): a conversa em andamento, senão o
   // número do SDR que envia / dono do lead, senão o oficial.
-  const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null });
+  const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null, papel: auth.user?.role ?? null });
 
   try {
     let r;

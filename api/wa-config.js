@@ -378,7 +378,7 @@ export default async function handler(req, res) {
       const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
       const r = await conectarNumero({
         code: String(body.code || ''), wabaId: String(body.wabaId || ''), phoneId: String(body.phoneId || ''),
-        modo: body.modo, pin: body.pin, userId: body.userId || null, rotulo: body.rotulo || null,
+        modo: body.modo, userId: body.userId || null, rotulo: body.rotulo || null,
         por: userId, urlBase: `https://${host}`,
       });
       if (r.erro) {
@@ -440,7 +440,7 @@ export default async function handler(req, res) {
     const leadId = String(req.query.modelos_lead);
     const auth = await assertCanAccessLead(userId, leadId).catch(() => null);
     if (!auth?.ok) return res.status(403).json({ error: 'Sem acesso a este lead' });
-    const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null });
+    const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null, papel: auth.user?.role ?? null });
     const modelos = await modelosAprovados(phoneId);
     res.setHeader('Cache-Control', 'private, max-age=120');
     return res.status(200).json({ modelos, numero: phoneId || 'oficial' });

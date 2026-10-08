@@ -95,8 +95,7 @@ function carregarSdk(appId: string): Promise<Fb> {
 export interface OpcoesConexao {
   appId: string;
   configId: string;
-  modo: "cloud" | "coexistencia";
-  pin?: string;
+  /** Dono do número; null = número do TIME (o padrão, por onde falam os closers). */
   userId?: string | null;
 }
 
@@ -141,7 +140,9 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
         // sessionInfoVersion é o que faz a janela devolver waba/número por
         // postMessage.
         extras: {
-          ...(o.modo === "coexistencia" ? { featureType: "whatsapp_business_app_onboarding" } : {}),
+          // Só Coexistence (08/10/2026): sem o featureType a Meta abre o cadastro
+          // de número novo, que quebra (HTTP 500) com número que está no celular.
+          featureType: "whatsapp_business_app_onboarding",
           sessionInfoVersion: "3",
           version: "v4",
         },
@@ -157,7 +158,7 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
     const s = sessao as { phone_number_id?: string; waba_id?: string } | null;
     const r = await post({
       acao: "meta-conectar", code, wabaId: s?.waba_id || null, phoneId: s?.phone_number_id || null,
-      modo: o.modo, pin: o.pin || null, userId: o.userId || null,
+      modo: "coexistencia", userId: o.userId || null,
     });
     return { numero: (r.numero as string) || null, avisos: (r.avisos as string[]) || [] };
   } finally {

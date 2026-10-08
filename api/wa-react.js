@@ -139,7 +139,7 @@ export default async function handler(req, res) {
     } else {
       // Reação sai pelo número da conversa — mensagem de um número não aceita
       // reação vinda de outro.
-      const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null });
+      const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null, papel: auth.user?.role ?? null });
       const r = await enviarReacao({ para: auth.lead?.phone, wamid, emoji, phoneId });
       if (r.erro) {
         console.warn(`[wa-react] a Meta recusou a reação (${r.erro}${r.codigo ? ' ' + r.codigo : ''}): ${r.detalhe || ''}`);

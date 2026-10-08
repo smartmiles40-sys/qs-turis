@@ -127,7 +127,7 @@ export default async function handler(req, res) {
     return res.status(409).json({ error: 'Este cliente pediu para não receber mais mensagens.', motivo: 'optout' });
   }
   // Por qual número sai (Coexistence, 28/09) — a mesma regra do texto.
-  const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null });
+  const phoneId = await numeroDoEnvio({ leadId, userId, ownerId: auth.lead?.owner_id ?? null, papel: auth.user?.role ?? null });
 
   // Arquivo é mensagem livre: só dentro da janela de 24h.
   if (!(await janelaAberta(leadId, phoneId))) {
