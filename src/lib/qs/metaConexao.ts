@@ -21,6 +21,8 @@ export interface NumeroMeta {
   origem: "painel" | "vercel" | null;
   dono: string | null;
   donoId: string | null;
+  /** comercial | relacionamento (0101): o do Relacionamento atende o pós-venda. */
+  setor?: "comercial" | "relacionamento";
   conectadoEm: string | null;
   qualidade: "GREEN" | "YELLOW" | "RED" | string | null;
   limite: string | null;
@@ -97,6 +99,8 @@ export interface OpcoesConexao {
   configId: string;
   /** Dono do número; null = número do TIME (o padrão, por onde falam os closers). */
   userId?: string | null;
+  /** "relacionamento" = número do pós-venda (sem dono, caixa própria). */
+  setor?: "comercial" | "relacionamento";
 }
 
 /**
@@ -158,7 +162,7 @@ export async function conectarPelaMeta(o: OpcoesConexao): Promise<{ numero: stri
     const s = sessao as { phone_number_id?: string; waba_id?: string } | null;
     const r = await post({
       acao: "meta-conectar", code, wabaId: s?.waba_id || null, phoneId: s?.phone_number_id || null,
-      modo: "coexistencia", userId: o.userId || null,
+      modo: "coexistencia", userId: o.userId || null, setor: o.setor || "comercial",
     });
     return { numero: (r.numero as string) || null, avisos: (r.avisos as string[]) || [] };
   } finally {

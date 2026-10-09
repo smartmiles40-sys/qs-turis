@@ -38,8 +38,10 @@ function selo(status: string) {
   return { texto: s || "—", cor: "#475569", fundo: "#F1F5F9" };
 }
 
-/** Número de SDR (conta própria); o oficial não tem dono. */
-const ehDeSdr = (n: NumeroMeta) => !!n.donoId && n.modo !== "env";
+/** Número de SDR (conta própria); o oficial não tem dono. O do Relacionamento
+ *  (0101) também tem conta própria e entra na lista. */
+const ehDeSdr = (n: NumeroMeta) => (!!n.donoId || n.setor === "relacionamento") && n.modo !== "env";
+const nomeDoNumero = (n: NumeroMeta) => (n.setor === "relacionamento" ? "Relacionamento" : n.dono || n.nome || "SDR");
 
 export default function ModelosMeta() {
   // "" = número oficial. Senão, o phone_number_id do número do SDR.
@@ -71,7 +73,7 @@ export default function ModelosMeta() {
     carregarPainelMeta()
       .then((p) => {
         const deSdr = p.numeros.filter((n) => n.status === "conectado" && ehDeSdr(n));
-        const oficial = p.numeros.some((n) => !n.donoId && n.status === "conectado");
+        const oficial = p.numeros.some((n) => !n.donoId && n.setor !== "relacionamento" && n.status === "conectado");
         setNumeros(deSdr);
         setSdrs(p.sdrs);
         setTemOficial(oficial);
@@ -82,7 +84,7 @@ export default function ModelosMeta() {
   }, []);
 
   const atual = numeros.find((n) => n.phoneId === phoneId) ?? null;
-  const primeiroNome = (atual?.dono || "").trim().split(/\s+/)[0] || "";
+  const primeiroNome = (atual?.setor === "relacionamento" ? "" : atual?.dono || "").trim().split(/\s+/)[0] || "";
   // SDR sem número conectado aparece, mas ainda não dá pra escrever pra ele.
   const semNumero = sdrs.filter((s) => !numeros.some((n) => n.donoId === s.id));
 
@@ -97,7 +99,7 @@ export default function ModelosMeta() {
     const r = await criarModeloNaMeta({ ...form, nome: form.nome.trim().toLowerCase().replace(/\s+/g, "_") }, phoneId || null);
     setSalvando(false);
     if (!r.ok) { notifyError(r.error || "Não consegui enviar."); return; }
-    notifySuccess(`Modelo enviado para análise da Meta${atual ? ` no número de ${atual.dono}` : ""}. O status aparece aqui quando ela responder.`);
+    notifySuccess(`Modelo enviado para análise da Meta${atual ? ` no número de ${nomeDoNumero(atual)}` : ""}. O status aparece aqui quando ela responder.`);
     setForm(VAZIO);
     setCriando(false);
     void carregar();
@@ -149,7 +151,7 @@ export default function ModelosMeta() {
               onClick={() => trocarNumero(n.phoneId)}
               className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${phoneId === n.phoneId ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
             >
-              {n.dono || n.nome || "SDR"}
+              {nomeDoNumero(n)}
               {n.numero && <span className="ml-1.5 text-[11px] font-normal text-gray-400">{n.numero}</span>}
             </button>
           ))}
@@ -165,7 +167,9 @@ export default function ModelosMeta() {
         </div>
         <p className="mt-1.5 text-[11px] text-gray-400">
           {atual
-            ? `Mensagens da conta de ${atual.dono}. Aprovadas, aparecem só nas conversas que saem pelo número dele(a).`
+            ? atual.setor === "relacionamento"
+              ? "Mensagens do número do Relacionamento. Aprovadas, aparecem na área de Relacionamento (cliente que não escreve há mais de 24h)."
+              : `Mensagens da conta de ${atual.dono}. Aprovadas, aparecem só nas conversas que saem pelo número dele(a).`
             : "Mensagens do número oficial. Para escrever a mensagem de um SDR, escolha o nome dele acima."}
         </p>
       </div>
@@ -179,7 +183,7 @@ export default function ModelosMeta() {
           onClick={() => setCriando(true)}
           className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
         >
-          {atual ? `Nova mensagem para ${atual.dono}` : "Novo modelo"}
+          {atual ? `Nova mensagem para ${nomeDoNumero(atual)}` : "Novo modelo"}
         </button>
       )}
 

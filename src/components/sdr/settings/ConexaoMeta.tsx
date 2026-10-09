@@ -52,6 +52,8 @@ const MOTIVO_ENTRADA: Record<string, string> = {
 
 /** userId: "" = ainda não escolheu · TIME = número do time (sem dono). */
 const TIME = "__time__";
+/** Número do Relacionamento (0101): do time do pós-venda, caixa própria. */
+const REL = "__relacionamento__";
 interface Pedido { userId: string }
 
 export default function ConexaoMeta() {
@@ -94,7 +96,8 @@ export default function ConexaoMeta() {
     try {
       const r = await conectarPelaMeta({
         appId: painel.cadastro.appId, configId: painel.cadastro.configId,
-        userId: p.userId === TIME ? null : p.userId,
+        userId: p.userId === TIME || p.userId === REL ? null : p.userId,
+        setor: p.userId === REL ? "relacionamento" : "comercial",
       });
       notifySuccess(`Conectado: ${r.numero || "número"}.`);
       if (r.avisos.length) notifyError(`Conectado, com avisos: ${r.avisos.join(" · ")}`);
@@ -217,7 +220,7 @@ export default function ConexaoMeta() {
                 </span>
               </div>
               <div className="text-[12px] text-gray-600">
-                {MODO[n.modo]}{n.dono ? ` · de ${n.dono}` : n.modo === "coexistencia" ? " · número do time (closers)" : ""}
+                {MODO[n.modo]}{n.setor === "relacionamento" ? " · Relacionamento (pós-venda)" : n.dono ? ` · de ${n.dono}` : n.modo === "coexistencia" ? " · número do time (closers)" : ""}
               </div>
               {q && <div className="text-[12px] font-medium" style={{ color: q.cor }}>● {q.txt}</div>}
               {n.limite && <div className="text-[12px] text-gray-600">Limite: {LIMITE[n.limite] || n.limite}</div>}
@@ -247,7 +250,7 @@ export default function ConexaoMeta() {
               <div className="text-[11px] text-gray-400">Última mensagem de cliente: {quando(n.ultimaEntrada)}</div>
               <div className="flex gap-2 pt-1">
                 <button disabled={!pronto || ocupado}
-                  onClick={() => setPedido({ userId: n.donoId || TIME })}
+                  onClick={() => setPedido({ userId: n.setor === "relacionamento" ? REL : n.donoId || TIME })}
                   className="flex-1 px-3 py-2 text-sm rounded-lg font-medium text-white disabled:opacity-40"
                   style={{ background: AZUL }}>
                   {ligado ? "Reconectar" : "Conectar"}
@@ -322,8 +325,15 @@ export default function ConexaoMeta() {
               className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200">
               <option value="">De quem é o número?</option>
               <option value={TIME}>Número do time — closers (padrão)</option>
+              <option value={REL}>Número do Relacionamento (pós-venda)</option>
               {painel.sdrs.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
             </select>
+            {pedido.userId === REL && (
+              <p className="text-[12px] text-gray-500">
+                As conversas deste número vão para a área de <b>Relacionamento</b> (não viram lead do Comercial).
+                Depois de conectar, crie os modelos dele em Modelos da Meta → "Mensagens de".
+              </p>
+            )}
             {pedido.userId === TIME && (
               <p className="text-[12px] text-gray-500">
                 Vira o número padrão do QS: os closers falam por ele, e também quem ainda não tem número próprio.

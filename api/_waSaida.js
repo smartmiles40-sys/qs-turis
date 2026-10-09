@@ -46,7 +46,9 @@ async function numerosConectados() {
   if (cacheNumeros && Date.now() - cacheNumeros.em < 60_000) return cacheNumeros.v;
   let v = [];
   try {
-    v = await rest('qs_wa_numeros_meta?select=phone_number_id,user_id,cw_inbox_id,status,segredo_id&status=eq.conectado') || [];
+    // Só os do Comercial: o número do Relacionamento (0101) não tem dono e
+    // seria lido aqui como "o oficial".
+    v = await rest('qs_wa_numeros_meta?select=phone_number_id,user_id,cw_inbox_id,status,segredo_id&status=eq.conectado&setor=eq.comercial') || [];
   } catch (e) {
     console.warn('[wa-saida] não li os números conectados:', e?.message);
   }

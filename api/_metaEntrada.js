@@ -29,6 +29,7 @@ import { ehPedidoDeParada, registrarOptout } from './_waOptout.js';
 import { transcrever, transcricaoConfigurada } from './_transcrever.js';
 import { guardarMidia, rotuloDaMidia, leadDoTelefone } from './_waMidia.js';
 import { avisarGloria } from './_gloria.js';
+import { processarRelacionamento } from './_relEntrada.js';
 
 const GRAPH = 'https://graph.facebook.com/v23.0';
 
@@ -41,7 +42,7 @@ async function numeroDaMeta(phoneNumberId) {
   if (hit && Date.now() - hit.em < 5 * 60_000) return hit.v;
   let v = null;
   try {
-    const r = await rest(`qs_wa_numeros_meta?select=phone_number_id,user_id,rotulo,cw_inbox_id&phone_number_id=eq.${encodeURIComponent(k)}&limit=1`);
+    const r = await rest(`qs_wa_numeros_meta?select=phone_number_id,user_id,rotulo,cw_inbox_id,setor&phone_number_id=eq.${encodeURIComponent(k)}&limit=1`);
     v = r?.[0] || null;
   } catch (e) {
     console.warn('[meta-entrada] não li qs_wa_numeros_meta:', e?.message);
@@ -104,7 +105,7 @@ export function lerMensagemMeta(m) {
 }
 
 /** Baixa a mídia da Meta (id → URL assinada → bytes) e guarda no QS. */
-async function baixarMidiaMeta(midia, leadId, phoneId = null) {
+export async function baixarMidiaMeta(midia, leadId, phoneId = null) {
   if (!midia?.id) return [];
   try {
     const cred = await credenciaisDaMeta(phoneId);
@@ -290,6 +291,20 @@ export async function processarMensagensDaMeta(changes) {
     const value = ch?.value || {};
     const numero = await numeroDaMeta(value?.metadata?.phone_number_id);
     const nomes = new Map((value.contacts || []).map((c) => [String(c.wa_id), c.profile?.name || null]));
+
+    // Número do RELACIONAMENTO (0101): o pós-venda tem caixa própria. Desvia
+    // aqui, antes de qualquer coisa do Comercial — mensagem de cliente que já
+    // comprou nunca pode nascer como lead.
+    if (numero?.setor === 'relacionamento') {
+      try {
+        const r = await processarRelacionamento(ch, numero, nomes);
+        conta.recebidas += r.recebidas; conta.ecos += r.ecos; conta.historico += r.historico; conta.recibos += r.recibos;
+      } catch (e) {
+        conta.erros++;
+        console.error(`[meta-entrada] relacionamento ${ch.field}:`, e?.message);
+      }
+      continue;
+    }
 
     try {
       if (ch.field === 'messages') {

@@ -119,7 +119,9 @@ async function numeroPadrao() {
   // desde 23/09/2026, quando o 4863-6051 da Vercel foi banido pela Meta.
   try {
     const r = await rest(
-      'qs_wa_numeros_meta?select=phone_number_id&status=eq.conectado&user_id=is.null' +
+      // setor=comercial (0101): o número do Relacionamento também não tem dono,
+      // mas NUNCA pode virar o padrão do Comercial.
+      'qs_wa_numeros_meta?select=phone_number_id&status=eq.conectado&user_id=is.null&setor=eq.comercial' +
       '&segredo_id=not.is.null&order=conectado_em.desc&limit=1'
     );
     if (r?.[0]?.phone_number_id) return r[0].phone_number_id;

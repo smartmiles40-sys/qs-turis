@@ -379,6 +379,7 @@ export default async function handler(req, res) {
       const r = await conectarNumero({
         code: String(body.code || ''), wabaId: String(body.wabaId || ''), phoneId: String(body.phoneId || ''),
         modo: body.modo, userId: body.userId || null, rotulo: body.rotulo || null,
+        setor: body.setor === 'relacionamento' ? 'relacionamento' : 'comercial',
         por: userId, urlBase: `https://${host}`,
       });
       if (r.erro) {

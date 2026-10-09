@@ -19,8 +19,15 @@ import { Avatar, REL_CSS } from "./ui";
 import ClientesPage from "./clientes/ClientesPage";
 import ClienteFicha from "./clientes/ClienteFicha";
 import DuplicadosPage from "./clientes/DuplicadosPage";
+import AtendimentoPage from "./atendimento/AtendimentoPage";
+import PrazoPage from "./atendimento/PrazoPage";
+import ConfigPage from "./config/ConfigPage";
+import { contarEsperando } from "./lib/whatsapp";
 
-type Rota = { tela: "inicio" } | { tela: "clientes" } | { tela: "duplicados" } | { tela: "ficha"; id: string };
+type Rota =
+  | { tela: "inicio" } | { tela: "clientes" } | { tela: "duplicados" } | { tela: "ficha"; id: string }
+  | { tela: "atendimento"; id?: string } | { tela: "prazo" } | { tela: "config" };
+type TelaMenu = "inicio" | "atendimento" | "clientes" | "duplicados" | "prazo" | "config";
 
 function lerRota(): Rota {
   const h = window.location.hash.replace(/^#\/?/, "");
@@ -29,11 +36,16 @@ function lerRota(): Rota {
   if (tela === "clientes") return { tela: "clientes" };
   if (tela === "duplicados") return { tela: "duplicados" };
   if (tela === "cliente" && id) return { tela: "ficha", id };
+  if (tela === "atendimento") return id ? { tela: "atendimento", id } : { tela: "atendimento" };
+  if (tela === "prazo") return { tela: "prazo" };
+  if (tela === "config") return { tela: "config" };
   return { tela: "inicio" };
 }
 
 function hashDe(r: Rota) {
-  return r.tela === "ficha" ? `#rel/cliente/${r.id}` : r.tela === "inicio" ? "#rel" : `#rel/${r.tela}`;
+  if (r.tela === "ficha") return `#rel/cliente/${r.id}`;
+  if (r.tela === "atendimento" && r.id) return `#rel/atendimento/${r.id}`;
+  return r.tela === "inicio" ? "#rel" : `#rel/${r.tela}`;
 }
 
 /** Sai do endereço do Relacionamento (ao trocar de área ou sair). */
@@ -46,6 +58,9 @@ const ICONES: Record<string, ReactNode> = {
   inicio: <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   clientes: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
   duplicados: <><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>,
+  atendimento: <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />,
+  prazo: <><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>,
+  config: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></>,
 };
 
 function Icone({ nome }: { nome: string }) {
@@ -53,18 +68,18 @@ function Icone({ nome }: { nome: string }) {
 }
 
 // ── Tela inicial ──
-function Inicio({ resumo, nome, ir }: { resumo: Resumo | null; nome: string; ir: (r: Rota) => void }) {
+function Inicio({ resumo, fila, nome, ir }: { resumo: Resumo | null; fila: { esperando: number; foraDoPrazo: number } | null; nome: string; ir: (r: Rota) => void }) {
   const cartoes: { rotulo: string; valor: number | undefined; dica: string; rota?: Rota; tom?: "aviso" }[] = [
+    { rotulo: "Esperando resposta", valor: fila?.esperando, dica: fila?.foraDoPrazo ? `${fila.foraDoPrazo} fora do prazo` : "no WhatsApp", rota: { tela: "atendimento" }, tom: fila?.foraDoPrazo ? "aviso" : undefined },
     { rotulo: "Clientes", valor: resumo?.clientes, dica: "fichas ativas", rota: { tela: "clientes" } },
-    { rotulo: "Em família", valor: resumo?.emFamilia, dica: "ligados a um titular", rota: { tela: "clientes" } },
     { rotulo: "Duplicados", valor: resumo?.duplicados, dica: "para revisar", rota: { tela: "duplicados" }, tom: resumo?.duplicados ? "aviso" : undefined },
     { rotulo: "Passaportes", valor: resumo?.passaportesVencendo, dica: "vencem em até 6 meses", tom: resumo?.passaportesVencendo ? "aviso" : undefined },
   ];
   const fases = [
-    ["2", "WhatsApp e SLA", "Atendimento pelo número oficial, fila com prazo de resposta."],
     ["3", "Jornada da viagem", "A venda no Bitrix cria a viagem; documentos por link."],
     ["4", "Disparos", "Mensagens prontas para datas especiais, só com modelo aprovado."],
     ["5", "Pós-viagem e recompra", "Pesquisa de satisfação e oportunidade nova pro Comercial."],
+    ["6", "Operacional", "A operação das viagens no mesmo sistema."],
   ];
   const hora = new Date().getHours();
   const saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
@@ -117,6 +132,7 @@ export default function RelApp() {
   const { isDark, toggleTheme } = useTheme();
   const [rota, setRota] = useState<Rota>(lerRota);
   const [resumo, setResumo] = useState<Resumo | null>(null);
+  const [fila, setFila] = useState<{ esperando: number; foraDoPrazo: number } | null>(null);
   const [menuAberto, setMenuAberto] = useState(false);
   const [trocandoSenha, setTrocandoSenha] = useState(false);
 
@@ -135,6 +151,12 @@ export default function RelApp() {
 
   const atualizarResumo = useCallback(() => {
     carregarResumo().then(setResumo).catch(() => undefined);
+    contarEsperando().then(setFila).catch(() => undefined);
+  }, []);
+  // A bolinha de "esperando" no menu se atualiza sozinha.
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.hidden) contarEsperando().then(setFila).catch(() => undefined); }, 30_000);
+    return () => clearInterval(t);
   }, []);
   // Recarrega os números ao voltar pro início ou pra lista (depois de criar/juntar).
   useEffect(() => { atualizarResumo(); }, [rota.tela, atualizarResumo]);
@@ -142,12 +164,15 @@ export default function RelApp() {
   if (!currentUser) return null;
   const temComercial = setoresDe(currentUser).includes("comercial");
   const abrir = (id: string) => ir({ tela: "ficha", id });
-  const ativo = rota.tela === "ficha" ? "clientes" : rota.tela;
+  const ativo: TelaMenu = rota.tela === "ficha" ? "clientes" : rota.tela;
 
-  const itens: { id: "inicio" | "clientes" | "duplicados"; rotulo: string; badge?: number }[] = [
+  const itens: { id: TelaMenu; rotulo: string; badge?: number; alerta?: boolean }[] = [
     { id: "inicio", rotulo: "Início" },
+    { id: "atendimento", rotulo: "Atendimento", badge: fila?.esperando || undefined, alerta: !!fila?.foraDoPrazo },
     { id: "clientes", rotulo: "Clientes" },
     { id: "duplicados", rotulo: "Duplicados", badge: resumo?.duplicados || undefined },
+    { id: "prazo", rotulo: "Prazo de resposta" },
+    { id: "config", rotulo: "Configurações" },
   ];
 
   const menu = (
@@ -172,7 +197,7 @@ export default function RelApp() {
               >
                 <Icone nome={it.id} />
                 <span className="flex-1 text-left">{it.rotulo}</span>
-                {it.badge ? <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--warn-bg)", color: "var(--warn-ink)" }}>{it.badge}</span> : null}
+                {it.badge ? <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full" style={it.alerta ? { background: "var(--err-bg)", color: "var(--err-ink)" } : { background: "var(--warn-bg)", color: "var(--warn-ink)" }}>{it.badge}</span> : null}
               </button>
             </li>
           );
@@ -236,10 +261,20 @@ export default function RelApp() {
 
       <main className="lg:pl-60">
         <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
-          {rota.tela === "inicio" && <Inicio resumo={resumo} nome={currentUser.name} ir={ir} />}
+          {rota.tela === "inicio" && <Inicio resumo={resumo} fila={fila} nome={currentUser.name} ir={ir} />}
+          {rota.tela === "atendimento" && (
+            <AtendimentoPage
+              conversaId={rota.id ?? null}
+              abrir={(id) => ir(id ? { tela: "atendimento", id } : { tela: "atendimento" })}
+              onAbrirCliente={abrir}
+              onMudou={atualizarResumo}
+            />
+          )}
+          {rota.tela === "prazo" && <PrazoPage />}
+          {rota.tela === "config" && <ConfigPage />}
           {rota.tela === "clientes" && <ClientesPage onAbrir={abrir} />}
           {rota.tela === "duplicados" && <DuplicadosPage onAbrir={abrir} onMudou={atualizarResumo} />}
-          {rota.tela === "ficha" && <ClienteFicha key={rota.id} id={rota.id} onAbrir={abrir} onVoltar={() => ir({ tela: "clientes" })} />}
+          {rota.tela === "ficha" && <ClienteFicha key={rota.id} id={rota.id} onAbrir={abrir} onVoltar={() => ir({ tela: "clientes" })} onAbrirConversa={(cid) => ir({ tela: "atendimento", id: cid })} />}
         </div>
       </main>
 

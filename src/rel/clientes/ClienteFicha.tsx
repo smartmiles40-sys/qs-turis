@@ -11,6 +11,8 @@ import {
 } from "../lib/clientes";
 import { Aviso, Avatar, Botao, Etiqueta } from "../ui";
 import ClienteForm from "./ClienteForm";
+import ModeloModal from "../atendimento/ModeloModal";
+import { conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
 
 // Nomes amigáveis dos campos, pro histórico ler como gente.
 const CAMPOS: Record<string, string> = {
@@ -53,7 +55,9 @@ function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; c
   );
 }
 
-export default function ClienteFicha({ id, onAbrir, onVoltar }: { id: string; onAbrir: (id: string) => void; onVoltar: () => void }) {
+export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa }: {
+  id: string; onAbrir: (id: string) => void; onVoltar: () => void; onAbrirConversa: (conversaId: string) => void;
+}) {
   const [c, setC] = useState<Cliente | null>(null);
   const [titular, setTitular] = useState<Cliente | null>(null);
   const [familia, setFamilia] = useState<Cliente[]>([]);
@@ -62,6 +66,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar }: { id: string; on
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState(false);
   const [novoFamiliar, setNovoFamiliar] = useState(false);
+  const [conversas, setConversas] = useState<Conversa[]>([]);
+  const [mandarModelo, setMandarModelo] = useState(false);
 
   const carregar = useCallback(async () => {
     try {
@@ -70,6 +76,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar }: { id: string; on
       setC(cli);
       setErro(null);
       const idTitular = cli.titular_id ?? cli.id;
+      conversasDoCliente(cli.id).then(setConversas).catch(() => setConversas([]));
       const [tit, fam, hist] = await Promise.all([
         cli.titular_id ? carregarCliente(cli.titular_id) : Promise.resolve(null),
         carregarFamilia(idTitular),
@@ -196,6 +203,33 @@ export default function ClienteFicha({ id, onAbrir, onVoltar }: { id: string; on
         </Secao>
       )}
 
+      {/* WhatsApp do Relacionamento (Fase 2) */}
+      <Secao
+        titulo="WhatsApp"
+        acao={!c.mesclado_em_id && c.telefone ? (
+          conversas.some((x) => x.janela_aberta)
+            ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirConversa(conversas.find((x) => x.janela_aberta)!.id)}>Abrir conversa</Botao>
+            : <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setMandarModelo(true)}>Mandar mensagem</Botao>
+        ) : undefined}
+      >
+        {!c.telefone ? (
+          <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Sem telefone na ficha.</p>
+        ) : conversas.length === 0 ? (
+          <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Nenhuma conversa ainda pelo WhatsApp do Relacionamento.</p>
+        ) : conversas.map((cv) => (
+          <button key={cv.id} onClick={() => onAbrirConversa(cv.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
+            <span className="flex-1 min-w-0">
+              <span className="block text-[13px] truncate" style={{ color: "var(--ink)" }}>{cv.ultima_mensagem || "—"}</span>
+              <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>
+                {horaCurta(cv.atualizado_em)} · {cv.estado === "resolvida" ? "resolvida" : cv.aguardando_desde ? `esperando há ${duracao(cv.minutos_esperando)}` : "em andamento"}
+                {cv.atendente_nome ? ` · ${cv.atendente_nome.split(" ")[0]}` : ""}
+              </span>
+            </span>
+            {cv.nao_lidas > 0 && <Etiqueta tom="rel">{cv.nao_lidas}</Etiqueta>}
+          </button>
+        ))}
+      </Secao>
+
       {/* Próximas fases: deixam claro onde as coisas vão aparecer */}
       <Secao titulo="Viagens e documentos">
         <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>
@@ -225,6 +259,13 @@ export default function ClienteFicha({ id, onAbrir, onVoltar }: { id: string; on
         onFechar={() => setEditando(false)}
         onSalvo={() => { setEditando(false); void carregar(); }}
         onAbrirFicha={(x) => { setEditando(false); onAbrir(x); }}
+      />
+      <ModeloModal
+        aberto={mandarModelo}
+        alvo={{ clienteId: c.id }}
+        nomeCliente={c.nome}
+        onFechar={() => setMandarModelo(false)}
+        onEnviado={(cid) => { setMandarModelo(false); if (cid) onAbrirConversa(cid); else void carregar(); }}
       />
       <ClienteForm
         aberto={novoFamiliar}

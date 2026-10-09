@@ -58,6 +58,9 @@
     "api/wa-config.js": {
       "maxDuration": 60
     },
+    "api/rel-wa.js": {
+      "maxDuration": 30
+    },
     "api/*.js": {
       "maxDuration": 10
     }
