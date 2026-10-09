@@ -1,6 +1,8 @@
 // src/components/sdr/types.ts
 
-export type UserRole = "admin" | "gestor" | "sdr" | "closer" | "marketing";
+export type UserRole = "admin" | "gestor" | "sdr" | "closer" | "marketing" | "relacionamento";
+/** As áreas do QS. Cada uma é uma porta no login (0100). */
+export type Setor = "comercial" | "relacionamento";
 export type LeadStatus = "nao_iniciado" | "em_prospeccao" | "ganho" | "perdido";
 export type LeadSource = "manual" | "api" | "integracao" | "importacao";
 export type ChannelType = "pesquisa" | "email" | "ligacao" | "ligacao_whatsapp" | "whatsapp" | "linkedin" | "instagram" | "tiktok" | "youtube";
@@ -41,6 +43,8 @@ export interface SdrUser {
   role: UserRole;
   is_active: boolean;
   whatsapp_number?: string | null;
+  /** Áreas que a pessoa pode abrir (0100). Admin tem as duas sempre. */
+  setores?: Setor[] | null;
   created_at: string;
 }
 

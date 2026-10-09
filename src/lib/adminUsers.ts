@@ -5,7 +5,7 @@
 // Envia o access_token da sessão atual para o servidor validar que é um admin.
 // -----------------------------------------------------------------------------
 import { supabase } from "./supabase";
-import type { UserRole } from "@/components/sdr/types";
+import type { UserRole, Setor } from "@/components/sdr/types";
 
 export interface AdminUserInput {
   id?: string;
@@ -13,6 +13,7 @@ export interface AdminUserInput {
   email?: string;
   password?: string;
   role?: UserRole;
+  setores?: Setor[];
   whatsapp_number?: string | null;
   is_active?: boolean;
 }

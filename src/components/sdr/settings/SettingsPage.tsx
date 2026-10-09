@@ -21,6 +21,7 @@ import type {
   LossReason,
   SdrUser,
   UserRole,
+  Setor,
 } from "../types";
 
 // ── Label Maps ──────────────────────────────────────────────────────────────
@@ -31,6 +32,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   sdr: "Qualificador",
   closer: "Closer",
   marketing: "Marketing (espectador)",
+  relacionamento: "Relacionamento",
 };
 
 const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
@@ -39,6 +41,7 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
   sdr: "bg-green-50 text-green-700",
   closer: "bg-amber-50 text-amber-700",
   marketing: "bg-gray-100 text-gray-600",
+  relacionamento: "bg-teal-50 text-teal-700",
 };
 
 
@@ -354,7 +357,10 @@ function UsuariosSection() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState<SdrUser | null>(null);
-  const [form, setForm] = useState({ name: "", email: "", role: "sdr" as UserRole, password: "", whatsapp_number: "" });
+  // `relacionamento`: a pessoa do Comercial também entra pela porta do
+  // Relacionamento (0100). Admin tem as duas sempre; o papel "Relacionamento"
+  // tem só a dele — pros dois a caixinha nem aparece.
+  const [form, setForm] = useState({ name: "", email: "", role: "sdr" as UserRole, password: "", whatsapp_number: "", relacionamento: false });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -369,14 +375,14 @@ function UsuariosSection() {
 
   function openAdd() {
     setEditUser(null);
-    setForm({ name: "", email: "", role: "sdr", password: "", whatsapp_number: "" });
+    setForm({ name: "", email: "", role: "sdr", password: "", whatsapp_number: "", relacionamento: false });
     setSaveError(null);
     setShowModal(true);
   }
 
   function openEdit(u: SdrUser) {
     setEditUser(u);
-    setForm({ name: u.name, email: u.email, role: u.role, password: "", whatsapp_number: u.whatsapp_number ?? "" });
+    setForm({ name: u.name, email: u.email, role: u.role, password: "", whatsapp_number: u.whatsapp_number ?? "", relacionamento: !!u.setores?.includes("relacionamento") });
     setSaveError(null);
     setShowModal(true);
   }
@@ -396,6 +402,7 @@ function UsuariosSection() {
     }
     setSaving(true);
     setSaveError(null);
+    const setores: Setor[] = form.relacionamento ? ["comercial", "relacionamento"] : ["comercial"];
     try {
       const res = editUser
         ? await updateQsAuthUser({
@@ -403,6 +410,7 @@ function UsuariosSection() {
             name: form.name,
             email: form.email,
             role: form.role,
+            setores,
             whatsapp_number: form.whatsapp_number.trim() || null,
             ...(form.password ? { password: form.password } : {}),
           })
@@ -410,6 +418,7 @@ function UsuariosSection() {
             name: form.name,
             email: form.email,
             role: form.role,
+            setores,
             whatsapp_number: form.whatsapp_number.trim() || null,
             password: form.password,
           });
@@ -579,10 +588,27 @@ function UsuariosSection() {
                   {/* Espectador: vê tudo, não executa nada. A trava real está no
                       banco (gatilho da 0036), não neste select. */}
                   <option value="marketing">Marketing (só visualiza)</option>
+                  {/* Só a área de Relacionamento (pós-venda). Não entra no
+                      Comercial nem recebe lead na distribuição. */}
+                  <option value="relacionamento">Relacionamento (pós-venda)</option>
                   <option value="admin">Admin</option>
                 </select>
                 {editUser && editUser.id === currentUser?.id && (
                   <p className="text-[10px] text-gray-400 mt-1">Você não pode alterar o próprio papel — peça a outro administrador.</p>
+                )}
+                {form.role !== "admin" && form.role !== "relacionamento" && (
+                  <label className="flex items-start gap-2 mt-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.relacionamento}
+                      onChange={(e) => setForm(p => ({ ...p, relacionamento: e.target.checked }))}
+                      className="mt-0.5"
+                    />
+                    <span className="text-xs text-gray-600 leading-snug">
+                      Também acessa o <b>Relacionamento</b>
+                      <span className="block text-[10px] text-gray-400">Poderá entrar pelas duas portas do login.</span>
+                    </span>
+                  </label>
                 )}
               </div>
               <div>

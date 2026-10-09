@@ -1,14 +1,58 @@
 // src/components/sdr/auth/LoginPage.tsx
 import { useState, type FormEvent } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
+import type { Setor } from "@/components/sdr/types";
+
+// ── As duas portas do QS (09/10/2026) ───────────────────────────────────────
+// Um sistema, um banco, uma porta por setor. A pessoa escolhe por onde entra;
+// se a conta dela não é daquele setor, o login recusa com a frase certa (em vez
+// de abrir uma tela vazia). A cor da porta acompanha a área inteira.
+const PORTAS: Record<Setor, { titulo: string; sub: string; cor: string; corSoft: string }> = {
+  comercial: {
+    titulo: "Comercial",
+    sub: "Leads, atividades e reuniões",
+    cor: "#0147FF",
+    corSoft: "rgba(1, 71, 255, 0.08)",
+  },
+  relacionamento: {
+    titulo: "Relacionamento",
+    sub: "Clientes, viagens e pós-venda",
+    cor: "#0E7C6A",
+    corSoft: "rgba(14, 124, 106, 0.09)",
+  },
+};
+
+function lerUltimaPorta(): Setor {
+  try { return localStorage.getItem("qs_area") === "relacionamento" ? "relacionamento" : "comercial"; }
+  catch { return "comercial"; }
+}
+
+function IconeComercial() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  );
+}
+
+function IconeRelacionamento() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
+  );
+}
 
 export default function LoginPage() {
   const { login, sessionNotice } = useQsAuth();
+  const [porta, setPorta] = useState<Setor>(lerUltimaPorta);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const p = PORTAS[porta];
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -20,12 +64,15 @@ export default function LoginPage() {
     }
 
     setLoading(true);
-    const result = await login(email, password);
+    const result = await login(email, password, porta);
     if (result === "bad_credentials") {
       setError("E-mail ou senha incorretos. Verifique suas credenciais.");
     } else if (result === "profile_error") {
       // Auth OK, mas o perfil não carregou (rede) — NÃO é conta desativada.
       setError("Não foi possível carregar seu perfil agora. Verifique sua conexão e tente de novo.");
+    } else if (result === "sem_acesso") {
+      const outra = porta === "comercial" ? "Relacionamento" : "Comercial";
+      setError(`Sua conta não tem acesso ao ${p.titulo}. Tente entrar pelo ${outra} ou fale com a gestão.`);
     }
     // result === "inactive": conta desativada — o aviso vem pelo sessionNotice.
     setLoading(false);
@@ -33,31 +80,64 @@ export default function LoginPage() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-4"
+      className="min-h-screen flex items-center justify-center px-4 py-10"
       style={{ background: "var(--bg)", fontFamily: "inherit" }}
     >
-      <div className="w-full max-w-sm">
+      <div className="w-full max-w-md">
         {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
+        <div className="flex flex-col items-center mb-7">
           <div
-            className="flex items-center justify-center w-14 h-14 rounded-2xl text-white font-bold text-xl mb-4"
-            style={{ background: "#0147FF" }}
+            className="flex items-center justify-center w-14 h-14 rounded-2xl text-white font-bold text-xl mb-4 transition-colors duration-300"
+            style={{ background: p.cor }}
           >
             QS
           </div>
-          <h1 className="text-lg font-bold text-gray-900">
-            QS
-          </h1>
-          <p className="text-[10px] text-gray-400 font-medium mb-1">by STFV</p>
-          <p className="text-sm text-gray-500">
-            Faça login para acessar o sistema
-          </p>
+          <h1 className="text-lg font-bold" style={{ color: "var(--ink)" }}>QS</h1>
+          <p className="text-[10px] font-medium mb-1" style={{ color: "var(--ink3)" }}>by STFV</p>
+          <p className="text-sm" style={{ color: "var(--ink2)" }}>Por onde você vai entrar?</p>
+        </div>
+
+        {/* As duas portas */}
+        <div role="radiogroup" aria-label="Área do sistema" className="grid grid-cols-2 gap-3 mb-4">
+          {(Object.keys(PORTAS) as Setor[]).map((s) => {
+            const item = PORTAS[s];
+            const ativo = porta === s;
+            return (
+              <button
+                key={s}
+                type="button"
+                role="radio"
+                aria-checked={ativo}
+                onClick={() => { setPorta(s); setError(""); }}
+                className="text-left rounded-xl p-4 border-2 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                style={{
+                  background: ativo ? item.corSoft : "var(--card)",
+                  borderColor: ativo ? item.cor : "var(--line)",
+                  boxShadow: ativo ? "none" : "0 1px 2px rgba(16,24,40,0.04)",
+                }}
+              >
+                <span
+                  className="flex items-center justify-center w-9 h-9 rounded-lg mb-3 transition-colors"
+                  style={{ background: ativo ? item.cor : "var(--card2)", color: ativo ? "#fff" : "var(--ink3)" }}
+                >
+                  {s === "comercial" ? <IconeComercial /> : <IconeRelacionamento />}
+                </span>
+                <span className="block text-sm font-bold" style={{ color: ativo ? item.cor : "var(--ink)" }}>
+                  {item.titulo}
+                </span>
+                <span className="block text-[11px] leading-snug mt-0.5" style={{ color: "var(--ink3)" }}>
+                  {item.sub}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Card */}
         <form
           onSubmit={handleSubmit}
-          className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4"
+          className="rounded-xl shadow-sm border p-6 space-y-4"
+          style={{ background: "var(--card)", borderColor: "var(--line)" }}
         >
           {/* Erro do formulário tem prioridade; sem erro, mostra o aviso de
               sessão encerrada (ex.: conta desativada pelo administrador). */}
@@ -83,7 +163,7 @@ export default function LoginPage() {
 
           {/* Email */}
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
+            <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--ink2)" }}>
               E-mail
             </label>
             <input
@@ -93,13 +173,14 @@ export default function LoginPage() {
               placeholder="seu@email.com"
               autoComplete="email"
               autoFocus
-              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] transition-colors"
+              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 transition-colors"
+              style={{ ["--tw-ring-color" as string]: p.corSoft }}
             />
           </div>
 
           {/* Password */}
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
+            <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--ink2)" }}>
               Senha
             </label>
             <div className="relative">
@@ -109,7 +190,8 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Digite sua senha"
                 autoComplete="current-password"
-                className="w-full pl-3 pr-10 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] transition-colors"
+                className="w-full pl-3 pr-10 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 transition-colors"
+                style={{ ["--tw-ring-color" as string]: p.corSoft }}
               />
               {/* Olho: alterna mostrar/ocultar a senha */}
               <button
@@ -139,13 +221,13 @@ export default function LoginPage() {
             type="submit"
             disabled={loading}
             className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
-            style={{ background: "#0147FF" }}
+            style={{ background: p.cor }}
           >
-            {loading ? "Entrando..." : "Entrar"}
+            {loading ? "Entrando..." : `Entrar no ${p.titulo}`}
           </button>
         </form>
 
-        <p className="text-center text-[11px] text-gray-400 mt-6">
+        <p className="text-center text-[11px] mt-6" style={{ color: "var(--ink3)" }}>
           Grupo Inovvatur &middot; QS v1.0
         </p>
       </div>

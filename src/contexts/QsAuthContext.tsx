@@ -1,7 +1,7 @@
 // src/contexts/QsAuthContext.tsx
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
-import type { SdrUser, UserRole } from "@/components/sdr/types";
+import type { SdrUser, UserRole, Setor } from "@/components/sdr/types";
 
 /**
  * Resultado do login:
@@ -12,7 +12,9 @@ import type { SdrUser, UserRole } from "@/components/sdr/types";
  *  - "profile_error"   auth OK, mas o perfil não carregou agora (rede oscilou).
  *                      Falha TRANSITÓRIA — não é "conta desativada"; tente de novo.
  */
-export type LoginResult = "ok" | "bad_credentials" | "inactive" | "profile_error";
+export type LoginResult = "ok" | "bad_credentials" | "inactive" | "profile_error" | "sem_acesso";
+// "sem_acesso": senha certa, mas a pessoa não tem a área escolhida no login
+// (ex.: SDR tentando entrar pela porta do Relacionamento).
 
 interface QsAuthContextType {
   currentUser: SdrUser | null;
@@ -31,7 +33,11 @@ interface QsAuthContextType {
    * app saber dizer "não consegui falar com o servidor".
    */
   bootFalhou: boolean;
-  login: (email: string, password: string) => Promise<LoginResult>;
+  /** Área aberta agora (Comercial ou Relacionamento). */
+  area: Setor;
+  /** Troca de área sem sair — só funciona pra quem tem as duas. */
+  trocarArea: (s: Setor) => void;
+  login: (email: string, password: string, area?: Setor) => Promise<LoginResult>;
   logout: () => void;
 }
 
@@ -60,6 +66,8 @@ const QsAuthContext = createContext<QsAuthContextType>({
   isAuthenticated: false,
   sessionNotice: null,
   bootFalhou: false,
+  area: "comercial",
+  trocarArea: () => {},
   login: async () => "bad_credentials",
   logout: () => {},
 });
@@ -90,7 +98,30 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   // Painel e o WhatsApp (telas de EXECUÇÃO — quem não executa não atende) e as
   // Configurações (que só existem pra mudar coisa).
   marketing: ["leads", "lead-detail", "cobertura", "cadencias", "reunioes", "dashboard", "analises", "monitor-leads"],
+  // Relacionamento não tem tela no Comercial: trabalha na área própria (0100).
+  relacionamento: [],
 };
+
+// ── Áreas (setores) ─────────────────────────────────────────────────────────
+// Decisão de 09/10/2026: um sistema só, com uma porta por setor no login.
+// O banco acerta os setores pelo papel (gatilho da 0100); a regra se repete
+// aqui pra tela não depender de a coluna já ter vindo no perfil carregado.
+export function setoresDe(user: Pick<SdrUser, "role" | "setores"> | null | undefined): Setor[] {
+  if (!user) return [];
+  if (user.role === "admin") return ["comercial", "relacionamento"];
+  if (user.role === "relacionamento") return ["relacionamento"];
+  const s: Setor[] = user.setores?.length ? user.setores : ["comercial"];
+  return s.includes("comercial") ? s : ["comercial", ...s];
+}
+
+const CHAVE_AREA = "qs_area";
+function areaGuardada(): Setor {
+  try { return localStorage.getItem(CHAVE_AREA) === "relacionamento" ? "relacionamento" : "comercial"; }
+  catch { return "comercial"; }
+}
+function guardarArea(s: Setor) {
+  try { localStorage.setItem(CHAVE_AREA, s); } catch { /* aba anônima: só não lembra */ }
+}
 
 /**
  * A ORDEM do grupo Execução, por papel (Bruno, 01/09).
@@ -156,6 +187,18 @@ export function QsAuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [bootFalhou, setBootFalhou] = useState(false);
+  const [areaEscolhida, setAreaEscolhida] = useState<Setor>(areaGuardada);
+
+  // A área guardada pode não valer mais (o admin tirou o setor da pessoa).
+  // Nesse caso abre a primeira que ela tem, em vez de uma tela vazia.
+  const permitidas = setoresDe(currentUser);
+  const area: Setor = permitidas.length && !permitidas.includes(areaEscolhida) ? permitidas[0] : areaEscolhida;
+
+  function trocarArea(s: Setor) {
+    if (!setoresDe(currentUser).includes(s)) return;
+    setAreaEscolhida(s);
+    guardarArea(s);
+  }
 
   // Resultado do carregamento do perfil — DISTINGUE "sem perfil" (conta
   // desativada/removida → derruba a sessão) de "erro de rede/servidor"
@@ -293,7 +336,7 @@ export function QsAuthProvider({ children }: { children: ReactNode }) {
     };
   }, [currentUser]);
 
-  async function login(email: string, password: string): Promise<LoginResult> {
+  async function login(email: string, password: string, areaPedida: Setor = "comercial"): Promise<LoginResult> {
     setSessionNotice(null); // tentativa nova limpa o aviso anterior
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.toLowerCase().trim(),
@@ -302,7 +345,18 @@ export function QsAuthProvider({ children }: { children: ReactNode }) {
     if (error || !data.user) return "bad_credentials";
 
     const res = await loadProfileResilient(data.user.id, 2);
-    if (res.status === "ok") { setCurrentUser(res.profile); return "ok"; }
+    if (res.status === "ok") {
+      // Porta errada: a senha está certa, mas a pessoa não é desse setor.
+      // Encerra a sessão — senão ela ficaria logada numa área que não é dela.
+      if (!setoresDe(res.profile).includes(areaPedida)) {
+        await supabase.auth.signOut();
+        return "sem_acesso";
+      }
+      setAreaEscolhida(areaPedida);
+      guardarArea(areaPedida);
+      setCurrentUser(res.profile);
+      return "ok";
+    }
     if (res.status === "no_profile") {
       // Senha correta, mas perfil desativado/removido → avisa o motivo real
       // (antes caía no genérico "e-mail ou senha incorretos").
@@ -329,6 +383,8 @@ export function QsAuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!currentUser,
         sessionNotice,
         bootFalhou,
+        area,
+        trocarArea,
         login,
         logout,
       }}

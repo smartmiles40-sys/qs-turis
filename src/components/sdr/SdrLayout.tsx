@@ -1,6 +1,6 @@
 // src/components/sdr/SdrLayout.tsx — QS (Qualificação System)
 import { useState, useRef, useEffect, Component, Suspense, type ReactNode } from "react";
-import { useQsAuth, canAccessNav, telaInicial, ORDEM_EXECUCAO } from "@/contexts/QsAuthContext";
+import { useQsAuth, canAccessNav, telaInicial, ORDEM_EXECUCAO, setoresDe } from "@/contexts/QsAuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { lazyPagina } from "@/lib/qs/lazyPagina";
 
@@ -250,7 +250,9 @@ function NavDropdown({
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function SdrLayout() {
-  const { currentUser, logout } = useQsAuth();
+  const { currentUser, logout, trocarArea } = useQsAuth();
+  // Quem tem as duas áreas (admin, ou alguém liberado nas duas) troca daqui.
+  const temRelacionamento = setoresDe(currentUser).includes("relacionamento");
   const { isDark, toggleTheme } = useTheme();
   // A tela de entrada depende do papel: o closer cai na agenda dele, não na
   // fila do SDR. Só vale na PRIMEIRA renderização — depois quem manda é a
@@ -564,6 +566,18 @@ export default function SdrLayout() {
                   </svg>
                   Configurar telefone
                 </button>
+                {temRelacionamento && (
+                  <button
+                    onClick={() => { setShowUserMenu(false); trocarArea("relacionamento"); }}
+                    className="w-full text-left px-4 py-2.5 text-[13px] font-semibold hover:bg-gray-50 transition-colors flex items-center gap-2"
+                    style={{ color: "#0E7C6A" }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                    </svg>
+                    Ir para o Relacionamento
+                  </button>
+                )}
                 <div className="my-1 border-t border-gray-100" />
                 <button
                   onClick={() => {
@@ -686,6 +700,15 @@ export default function SdrLayout() {
                     Telefone
                   </button>
                 </div>
+                {temRelacionamento && (
+                  <button
+                    onClick={() => { setMobileNavOpen(false); trocarArea("relacionamento"); }}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 mb-2 rounded-lg text-[13px] font-semibold text-white transition-colors"
+                    style={{ background: "#0E7C6A" }}
+                  >
+                    Ir para o Relacionamento
+                  </button>
+                )}
                 <button
                   onClick={() => { setMobileNavOpen(false); logout(); }}
                   className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-semibold text-red-600 bg-red-50 active:bg-red-100 transition-colors"

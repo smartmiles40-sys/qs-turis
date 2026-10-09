@@ -20,7 +20,16 @@ import { rest } from './_supabaseAdmin.js';
 // Vocabulário fechado de papéis. Sem isto, o endpoint aceita qualquer string
 // e grava um papel que o app não conhece — o usuário loga e não vê tela nenhuma
 // (o CHECK do banco barra, mas com erro cru; aqui a recusa é clara).
-const PAPEIS = new Set(['admin', 'gestor', 'sdr', 'closer', 'marketing']);
+const PAPEIS = new Set(['admin', 'gestor', 'sdr', 'closer', 'marketing', 'relacionamento']);
+
+// Áreas do QS (0100). O banco ainda acerta pelo papel (admin = as duas,
+// relacionamento = só a dele); aqui só filtra o que não é setor conhecido.
+const SETORES = new Set(['comercial', 'relacionamento']);
+function setoresValidos(v) {
+  if (!Array.isArray(v)) return undefined;
+  const s = [...new Set(v.filter((x) => SETORES.has(x)))];
+  return s.length ? s : undefined;
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function idValido(v) {
@@ -112,6 +121,8 @@ export default async function handler(req, res) {
       };
       // só inclui whatsapp_number se veio preenchido (a coluna pode ainda não existir)
       if (user.whatsapp_number) profileBody.whatsapp_number = user.whatsapp_number;
+      const setoresNovos = setoresValidos(user.setores);
+      if (setoresNovos) profileBody.setores = setoresNovos;
       let profile;
       try {
         profile = await rest('qs_users', {
@@ -154,6 +165,8 @@ export default async function handler(req, res) {
       for (const k of ['name', 'role', 'whatsapp_number', 'is_active']) {
         if (user[k] !== undefined) fields[k] = user[k];
       }
+      const setoresEditados = setoresValidos(user.setores);
+      if (setoresEditados) fields.setores = setoresEditados;
       if (Object.keys(fields).length) {
         await rest(`qs_users?id=eq.${user.id}`, { method: 'PATCH', body: fields, prefer: 'return=minimal' });
       }

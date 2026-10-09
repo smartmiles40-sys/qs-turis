@@ -1,9 +1,13 @@
-import { Component, type ReactNode } from "react";
+import { Component, Suspense, lazy, type ReactNode } from "react";
 import SdrLayout from "@/components/sdr/SdrLayout";
 import LoginPage from "@/components/sdr/auth/LoginPage";
 import { QsAuthProvider, useQsAuth } from "@/contexts/QsAuthContext";
 import { ChatAppDockProvider } from "@/contexts/ChatAppDockContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+
+// A área de Relacionamento é um app à parte (src/rel). Carrega só quando alguém
+// entra por ela: quem é do Comercial não baixa nada do Relacionamento.
+const RelApp = lazy(() => import("@/rel/RelApp"));
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -27,7 +31,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 function AppContent() {
-  const { isAuthenticated, loading, bootFalhou } = useQsAuth();
+  const { isAuthenticated, loading, bootFalhou, area } = useQsAuth();
 
   // ── O SERVIDOR NÃO RESPONDEU ──────────────────────────────────────────────
   // Em 20/08 o gateway do Supabase ficou inalcançável da rede do escritório por
@@ -81,6 +85,14 @@ function AppContent() {
 
   if (!isAuthenticated) {
     return <LoginPage />;
+  }
+
+  if (area === "relacionamento") {
+    return (
+      <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
+        <RelApp />
+      </Suspense>
+    );
   }
 
   return (
