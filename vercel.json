@@ -61,6 +61,18 @@
     "api/rel-wa.js": {
       "maxDuration": 30
     },
+    "api/rel-viagens.js": {
+      "maxDuration": 60
+    },
+    "api/rel-disparos.js": {
+      "maxDuration": 60
+    },
+    "api/rel-docs.js": {
+      "maxDuration": 30
+    },
+    "api/rel-recompra.js": {
+      "maxDuration": 30
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -73,6 +85,14 @@
     {
       "path": "/api/oportunidade-futura",
       "schedule": "5 * * * *"
+    },
+    {
+      "path": "/api/rel-viagens",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/rel-disparos",
+      "schedule": "0 13 * * *"
     }
   ],
   "headers": [
@@ -117,6 +137,16 @@
           "value": "frame-ancestors 'self' https://setuforeuvouviagens.com.br https://*.setuforeuvouviagens.com.br https://stfv-forms-geral.vercel.app"
         }
       ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/documentos/:token",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/pesquisa/:token",
+      "destination": "/index.html"
     }
   ]
 }

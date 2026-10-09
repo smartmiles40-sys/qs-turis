@@ -20,6 +20,7 @@ import {
 import { buscarClientes, formatarTelefone, type Cliente } from "../lib/clientes";
 import { Aviso, Avatar, Botao, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import ModeloModal from "./ModeloModal";
+import ChamadoModal from "../chamados/ChamadoModal";
 
 const FILTROS: { id: Filtro; rotulo: string }[] = [
   { id: "esperando", rotulo: "Esperando" },
@@ -209,6 +210,7 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
   const [verRespostas, setVerRespostas] = useState(false);
   const [modelo, setModelo] = useState(false);
   const [ligar, setLigar] = useState(false);
+  const [chamado, setChamado] = useState(false);
   const fimRef = useRef<HTMLDivElement>(null);
   const arquivoRef = useRef<HTMLInputElement>(null);
   const qtdAnterior = useRef(0);
@@ -295,6 +297,7 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5">
+          <Botao variante="fantasma" onClick={() => setChamado(true)} title="Pedido que não se resolve na hora (trocar voo, 2ª via…)">Abrir chamado</Botao>
           {!minha && (
             <Botao onClick={() => acao(() => assumirConversa(c.id, meuId))}>
               {c.atendente_id ? `Assumir (era de ${c.atendente_nome?.split(" ")[0] ?? "outro"})` : "Assumir"}
@@ -378,6 +381,12 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
         nomeCliente={c.cliente_nome || c.nome_contato}
         onFechar={() => setModelo(false)}
         onEnviado={() => { setModelo(false); void recarregar(); onMudou(); }}
+      />
+      <ChamadoModal
+        aberto={chamado}
+        inicial={{ clienteId: c.cliente_id ?? undefined, conversaId: c.id, assunto: "" }}
+        onFechar={() => setChamado(false)}
+        onSalvo={() => setChamado(false)}
       />
       <LigarFicha aberto={ligar} conversa={c} onFechar={() => setLigar(false)} onLigado={() => { setLigar(false); void recarregar(); onMudou(); }} />
     </div>

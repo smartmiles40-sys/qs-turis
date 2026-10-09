@@ -19,6 +19,7 @@ import { rest } from './_supabaseAdmin.js';
 import { enviarTexto } from './_meta.js';
 import { lerMensagemMeta, baixarMidiaMeta } from './_metaEntrada.js';
 import { rotuloDaMidia } from './_waMidia.js';
+import { ehPedidoDeParada } from './_waOptout.js';
 
 const STATUS_OK = new Set(['sent', 'delivered', 'read', 'failed']);
 
@@ -90,6 +91,29 @@ async function talvezAvisarForaDoHorario({ phoneId, telefone, conversaId }) {
   }
 }
 
+// ── "PARAR" (Fase 4, 0105) ──────────────────────────────────────────────────
+// Cliente que pede pra sair não recebe mais DISPARO (campanha nem automação).
+// Fica gravado na conversa (sempre) e na ficha ligada a ela (se houver) — a
+// conversa cobre quem ainda não tem ficha; quando a ficha for criada com o
+// mesmo telefone, o disparo confere as duas. Atendimento normal continua: se o
+// cliente escrever de novo, o time responde.
+async function registrarOptoutRel(conversaId) {
+  try {
+    const agora = new Date().toISOString();
+    const c = (await rest(`rel_wa_conversas?select=cliente_id,optout_em&id=eq.${encodeURIComponent(conversaId)}&limit=1`))?.[0];
+    if (!c) return;
+    if (!c.optout_em) {
+      await rest(`rel_wa_conversas?id=eq.${encodeURIComponent(conversaId)}`, { method: 'PATCH', prefer: 'return=minimal', body: { optout_em: agora } });
+    }
+    if (c.cliente_id) {
+      await rest(`rel_clientes?id=eq.${encodeURIComponent(c.cliente_id)}&optout_em=is.null`, { method: 'PATCH', prefer: 'return=minimal', body: { optout_em: agora } });
+    }
+    console.log(`[rel-entrada] conversa ${conversaId} pediu para não receber disparos`);
+  } catch (e) {
+    console.warn('[rel-entrada] optout não gravado:', e?.message);
+  }
+}
+
 // ── O webhook ───────────────────────────────────────────────────────────────
 
 /**
@@ -124,6 +148,8 @@ export async function processarRelacionamento(ch, numero, nomes) {
       const r = await uma(m, { direcao: 'in', origem: 'cliente', telefone, nome: nomes.get(telefone) || null, baixar: true });
       if (r?.nova) {
         conta.recebidas++;
+        // "PARAR" antes de qualquer resposta automática.
+        if (r.conversa && ehPedidoDeParada(lerMensagemMeta(m)?.texto || '')) await registrarOptoutRel(r.conversa);
         if (r.conversa) await talvezAvisarForaDoHorario({ phoneId, telefone, conversaId: r.conversa });
       }
     }

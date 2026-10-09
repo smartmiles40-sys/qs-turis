@@ -9,6 +9,23 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 // entra por ela: quem é do Comercial não baixa nada do Relacionamento.
 const RelApp = lazy(() => import("@/rel/RelApp"));
 
+// Páginas PÚBLICAS do Relacionamento (sem login): o cliente manda documentos
+// e responde a pesquisa pós-viagem por um link com token. Abrem antes de
+// qualquer coisa de autenticação — quem recebe o link nunca vê o login do QS.
+const DocumentosPublico = lazy(() => import("@/rel/publico/DocumentosPublico"));
+const PesquisaPublica = lazy(() => import("@/rel/publico/PesquisaPublica"));
+
+function paginaPublica(): ReactNode | null {
+  const m = window.location.pathname.match(/^\/(documentos|pesquisa)\/([0-9a-f]{64})\/?$/i);
+  if (!m) return null;
+  const token = m[2].toLowerCase();
+  return (
+    <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
+      {m[1].toLowerCase() === "documentos" ? <DocumentosPublico token={token} /> : <PesquisaPublica token={token} />}
+    </Suspense>
+  );
+}
+
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
   static getDerivedStateFromError(error: Error) { return { error }; }
@@ -103,6 +120,8 @@ function AppContent() {
 }
 
 export default function App() {
+  const publica = paginaPublica();
+  if (publica) return <ErrorBoundary>{publica}</ErrorBoundary>;
   return (
     <ErrorBoundary>
       <ThemeProvider>

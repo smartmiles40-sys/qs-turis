@@ -16,11 +16,11 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
-import { getSupabaseUserId } from './_wa.js';
 import { enviarTexto, enviarTemplate, enviarMidia, subirMidiaBytes, marcarComoLida, modelosAprovados } from './_meta.js';
 import { resolverModeloMeta } from './_waSaida.js';
 import { guardarMidia } from './_waMidia.js';
 import { gravarRel } from './_relEntrada.js';
+import { quemChama, numeroDoRelacionamento } from './_relWa.js';
 
 const MAX_TEXTO = 4000;
 const MAX_BYTES = 3 * 1024 * 1024; // a Vercel aceita ~4,5 MB de corpo; base64 infla 33%
@@ -41,24 +41,7 @@ const ERRO_MODELO = {
 
 function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
 
-/** Quem chama: precisa estar ativo e ter o setor Relacionamento (ou ser admin). */
-async function quemChama(req) {
-  const id = await getSupabaseUserId(req.headers['authorization']);
-  if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const u = (await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
-  if (!u?.is_active) return null;
-  const ok = u.role === 'admin' || (Array.isArray(u.setores) && u.setores.includes('relacionamento'));
-  return ok ? u : null;
-}
-
-/** O número do Relacionamento (o mais recente conectado). */
-async function numeroDoRelacionamento() {
-  const r = await rest(
-    'qs_wa_numeros_meta?select=phone_number_id,numero,nome_verificado,status,segredo_id' +
-    '&setor=eq.relacionamento&order=conectado_em.desc.nullslast&limit=1'
-  ).catch(() => null);
-  return r?.[0] || null;
-}
+// quemChama e numeroDoRelacionamento moram em _relWa.js (comuns com rel-disparos).
 
 async function lerAssinatura() {
   const r = await rest('rel_config?select=valor&chave=eq.assinatura&limit=1').catch(() => null);

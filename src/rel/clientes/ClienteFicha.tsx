@@ -12,6 +12,11 @@ import {
 import { Aviso, Avatar, Botao, Etiqueta } from "../ui";
 import ClienteForm from "./ClienteForm";
 import ModeloModal from "../atendimento/ModeloModal";
+import ViagensDoCliente from "../viagens/ViagensDoCliente";
+import DocumentosDoCliente from "../viagens/DocumentosDoCliente";
+import ChamadosDoCliente from "../chamados/ChamadosDoCliente";
+import ChamadoModal from "../chamados/ChamadoModal";
+import RecompraBotao from "../pos/RecompraBotao";
 import { conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
 
 // Nomes amigáveis dos campos, pro histórico ler como gente.
@@ -55,8 +60,9 @@ function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; c
   );
 }
 
-export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa }: {
+export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, onAbrirViagem }: {
   id: string; onAbrir: (id: string) => void; onVoltar: () => void; onAbrirConversa: (conversaId: string) => void;
+  onAbrirViagem: (viagemId: string) => void;
 }) {
   const [c, setC] = useState<Cliente | null>(null);
   const [titular, setTitular] = useState<Cliente | null>(null);
@@ -68,6 +74,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa }:
   const [novoFamiliar, setNovoFamiliar] = useState(false);
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [mandarModelo, setMandarModelo] = useState(false);
+  const [novoChamado, setNovoChamado] = useState(false);
+  const [versaoChamados, setVersaoChamados] = useState(0);
 
   const carregar = useCallback(async () => {
     try {
@@ -132,7 +140,13 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa }:
             {c.lgpd_consentimento_em ? <Etiqueta tom="rel">LGPD ok</Etiqueta> : <Etiqueta tom="aviso">Sem consentimento LGPD</Etiqueta>}
           </div>
         </div>
-        {!c.mesclado_em_id && <Botao onClick={() => setEditando(true)}>Editar</Botao>}
+        {!c.mesclado_em_id && (
+          <div className="flex flex-wrap gap-1.5">
+            <RecompraBotao clienteId={c.id} compacto />
+            <Botao onClick={() => setNovoChamado(true)}>Abrir chamado</Botao>
+            <Botao onClick={() => setEditando(true)}>Editar</Botao>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -231,11 +245,9 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa }:
       </Secao>
 
       {/* Próximas fases: deixam claro onde as coisas vão aparecer */}
-      <Secao titulo="Viagens e documentos">
-        <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>
-          Chega na Fase 3: as viagens deste cliente (criadas a partir da venda no Bitrix) e os documentos enviados por link.
-        </p>
-      </Secao>
+      <ViagensDoCliente clienteId={c.id} onAbrirViagem={onAbrirViagem} />
+      <DocumentosDoCliente clienteId={c.id} />
+      <ChamadosDoCliente key={versaoChamados} clienteId={c.id} />
 
       <Secao titulo="Histórico da ficha">
         {historico.length === 0 ? (
@@ -259,6 +271,12 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa }:
         onFechar={() => setEditando(false)}
         onSalvo={() => { setEditando(false); void carregar(); }}
         onAbrirFicha={(x) => { setEditando(false); onAbrir(x); }}
+      />
+      <ChamadoModal
+        aberto={novoChamado}
+        inicial={{ clienteId: c.id }}
+        onFechar={() => setNovoChamado(false)}
+        onSalvo={() => { setNovoChamado(false); setVersaoChamados((v) => v + 1); }}
       />
       <ModeloModal
         aberto={mandarModelo}
