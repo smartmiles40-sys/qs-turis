@@ -24,6 +24,7 @@ import {
 } from "../lib/whatsapp";
 import { buscarClientes, formatarTelefone, type Cliente } from "../lib/clientes";
 import { Aviso, Avatar, Botao, Entrada, Etiqueta, Modal, Vazio } from "../ui";
+import BotaoWhatsApp from "../whatsapp/BotaoWhatsApp";
 import ModeloModal from "./ModeloModal";
 import ChamadoModal from "../chamados/ChamadoModal";
 import ChamadoDetalhe from "../chamados/ChamadoDetalhe";
@@ -456,7 +457,7 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente, onAbrirViagem, o
 
 export type VisaoAtendimento = "conversas" | "chamados";
 
-export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onAbrirViagem, onMudou, visao: visaoFora, onTrocarVisao }: {
+export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onAbrirViagem, onMudou, visao: visaoFora, onTrocarVisao, onAbrirWhatsApp }: {
   conversaId: string | null;
   abrir: (id: string | null) => void;
   onAbrirCliente: (id: string) => void;
@@ -465,6 +466,8 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
   /** Visão controlada por quem chama (ex.: rota #rel/chamados). Sem isso, a página lembra sozinha. */
   visao?: VisaoAtendimento;
   onTrocarVisao?: (v: VisaoAtendimento) => void;
+  /** Tela de conexão do número (botão à vista no topo — Bruno, 13/10). */
+  onAbrirWhatsApp?: () => void;
 }) {
   const { currentUser } = useQsAuth();
   const [visaoLocal, setVisaoLocal] = useState<VisaoAtendimento>(() => (localStorage.getItem("rel_atend_visao") as VisaoAtendimento) || "conversas");
@@ -512,6 +515,7 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
           {v === "conversas" && filtro === "esperando" && esperando > 0 && <Etiqueta tom="aviso">{esperando}</Etiqueta>}
         </button>
       ))}
+      {onAbrirWhatsApp && <div className="ml-auto self-center"><BotaoWhatsApp abrir={onAbrirWhatsApp} /></div>}
     </div>
   );
 
