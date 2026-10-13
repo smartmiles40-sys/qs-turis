@@ -227,6 +227,8 @@ async function funis() {
     }
     if (venda.size) lista.push({ id: c.id, nome: c.nome, venda, cancela, posVenda });
   }
+  // Pós-venda por último: os cards dele se ligam às viagens que os funis de venda já criaram.
+  lista.sort((a, b) => Number(!!a.posVenda) - Number(!!b.posVenda));
   cacheFunis = { v: lista, em: Date.now() };
   return lista;
 }
