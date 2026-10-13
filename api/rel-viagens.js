@@ -219,8 +219,10 @@ async function funis() {
     // "Vendas Realizadas" (funil antigo): o funil INTEIRO é de venda — a etapa
     // "Vendas Operações" tinha 57 vendas que ficavam de fora (conferido com o
     // sistema de Expedições em 13/10). Toda etapa que não é de falha conta.
-    // Operações também (Bruno, 13/10: "lá é quase só venda de relacionamento, e alguns clientes novos").
-    const funilSoDeVenda = /vendas?\s+realizadas?|opera[cç][aãoõ]/i.test(c.nome);
+    const funilSoDeVenda = /vendas?\s+realizadas?/i.test(c.nome);
+    // Operações (Bruno, 13/10): a ÚNICA etapa que é venda é "Venda realizada" —
+    // "Negócio ganho" ali é o fim da operação, não uma venda.
+    const ehOperacoes = /opera[cç][aãoõ]/i.test(c.nome);
     for (const e of etapas || []) {
       const sem = e?.EXTRA?.SEMANTICS || e?.SEMANTICS || null;
       const nome = String(e?.NAME || '');
@@ -228,6 +230,7 @@ async function funis() {
       const falha = sem === 'failure' || sem === 'F' || sid.endsWith(':LOSE');
       if (posVenda) { if (!falha) venda.add(sid); continue; }   // pós-venda nunca cancela viagem
       if (funilSoDeVenda) { if (!falha) venda.add(sid); else if (NOME_CANCELA.test(nome) || sid.endsWith(':LOSE')) cancela.add(sid); continue; }
+      if (ehOperacoes) { if (/venda\s+realizada/i.test(nome)) venda.add(sid); continue; }   // Operações nunca cancela viagem
       if (sem === 'success' || sem === 'S' || NOME_VENDA.test(nome)) venda.add(sid);
       else if (sid.endsWith(':LOSE') || ((sem === 'failure' || sem === 'F') && NOME_CANCELA.test(nome))) cancela.add(sid);
     }
