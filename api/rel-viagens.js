@@ -105,7 +105,9 @@ const texto = (v) => (vazio(v) ? null : String(Array.isArray(v) ? v[0] : v).trim
 /** "2026-11-09T03:00:00+03:00" → "2026-11-09" (o Bitrix guarda a data no fuso dele). */
 const data = (v) => {
   const t = texto(v);
-  return t && /^\d{4}-\d{2}-\d{2}/.test(t) ? t.slice(0, 10) : null;
+  const d = t && /^\d{4}-\d{2}-\d{2}/.test(t) ? t.slice(0, 10) : null;
+  // Campo de data zerado no Bitrix volta como 1970-01-01 (época) — é vazio, não data. (13/10)
+  return d && d.slice(0, 4) !== '1970' ? d : null;
 };
 const numero = (v) => {
   const n = Number(String(v ?? '').replace(',', '.'));
@@ -363,8 +365,10 @@ function camposDaViagem(deal, mapa) {
   else if (tipoVenda.includes('hosped')) tipo = 'hospedagem';
 
   const destino = texto(deal[F.destino]);
-  const embarque = data(deal[F.ida]);
-  let retorno = data(deal[F.volta]);
+  // Viagem antes de 2015 não existe na agência: é digitação errada no Bitrix.
+  const dataViagem = (v) => { const d = data(v); return d && d >= '2015-01-01' ? d : null; };
+  const embarque = dataViagem(deal[F.ida]);
+  let retorno = dataViagem(deal[F.volta]);
   if (retorno && embarque && retorno < embarque) retorno = null; // data trocada no Bitrix: não trava a gravação
   // Em "Em emissão" o card ainda não tem destino nem datas e o título é o
   // genérico "Negociação #id" — melhor dizer o que foi vendido.
