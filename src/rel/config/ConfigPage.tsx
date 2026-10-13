@@ -14,6 +14,7 @@ import {
   type ConfigRel, type NumeroRel, type Resposta,
 } from "../lib/whatsapp";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
+import BotaoWhatsApp from "../whatsapp/BotaoWhatsApp";
 import CategoriasConfig from "./CategoriasConfig";
 
 const DIAS = [
@@ -33,7 +34,8 @@ function Bloco({ titulo, sub, children }: { titulo: string; sub?: string; childr
   );
 }
 
-export default function ConfigPage() {
+/** A conexão do WhatsApp mora aqui (Bruno, 13/10: "tira do Início, deixa a primeira tela clean"). */
+export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () => void } = {}) {
   const { currentUser } = useQsAuth();
   const pode = currentUser?.role === "admin" || (currentUser?.role === "gestor" && setoresDe(currentUser).includes("relacionamento"));
   const [cfg, setCfg] = useState<ConfigRel | null>(null);
@@ -98,7 +100,7 @@ export default function ConfigPage() {
         </p>
       </div>
 
-      <Bloco titulo="Número de WhatsApp" sub="O número por onde o Relacionamento atende.">
+      <Bloco titulo="WhatsApp" sub="O número por onde o Relacionamento atende: conectar (COEX), saúde do número, histórico do celular e modelos de mensagem.">
         {numero === null ? (
           <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Verificando…</p>
         ) : numero.conectado ? (
@@ -107,9 +109,18 @@ export default function ConfigPage() {
           </p>
         ) : (
           <Aviso>
-            Nenhum número conectado. O admin ou a gestora do Relacionamento conecta em <b>Atendimento → WhatsApp (conexão)</b>
-            (botão verde "Conectar WhatsApp" no Início). O número precisa estar no app WhatsApp Business do celular.
+            Nenhum número conectado. O número precisa estar no app WhatsApp Business do celular.
           </Aviso>
+        )}
+        {onAbrirWhatsApp && (
+          <div className="mt-3">
+            <BotaoWhatsApp abrir={onAbrirWhatsApp} />
+            {numero?.conectado && (
+              <button onClick={onAbrirWhatsApp} className="ml-2 text-[13px] font-semibold underline" style={{ color: "var(--rel-ink)" }}>
+                Gerenciar número e modelos
+              </button>
+            )}
+          </div>
         )}
       </Bloco>
 

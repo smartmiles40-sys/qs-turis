@@ -38,7 +38,6 @@ import PesquisasPage from "./pos/PesquisasPage";
 import RecompraPage from "./pos/RecompraPage";
 import KpisPage from "./kpis/KpisPage";
 import WhatsAppPage from "./whatsapp/WhatsAppPage";
-import BotaoWhatsApp, { useWhatsAppConectado } from "./whatsapp/BotaoWhatsApp";
 import EquipePage from "./equipe/EquipePage";
 import { podeGerirRelacionamento } from "./equipe/permissao";
 
@@ -130,29 +129,14 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: Resumo | null; cont: Conta
   ];
   const hora = new Date().getHours();
   const saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
-  const waOk = useWhatsAppConectado();
   const cor = (t?: "aviso" | "erro") => (t === "erro" ? { bg: "var(--err-bg)", line: "var(--err-line)", ink: "var(--err-ink)" } : t === "aviso" ? { bg: "var(--warn-bg)", line: "var(--warn-line)", ink: "var(--warn-ink)" } : null);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>{saudacao}, {nome.split(" ")[0]}</h1>
-          <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Relacionamento · cuidar de quem já comprou com a gente.</p>
-        </div>
-        <BotaoWhatsApp abrir={() => ir({ tela: "whatsapp" })} />
+      <div>
+        <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>{saudacao}, {nome.split(" ")[0]}</h1>
+        <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Relacionamento · cuidar de quem já comprou com a gente.</p>
       </div>
-      {waOk === false && (
-        <button onClick={() => ir({ tela: "whatsapp" })} className="rel-card w-full p-4 flex items-center gap-4 text-left transition-shadow hover:shadow-md"
-          style={{ borderColor: "#25D366" }}>
-          <span className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-white text-lg font-bold" style={{ background: "#25D366" }} aria-hidden="true">!</span>
-          <span className="min-w-0">
-            <span className="block text-sm font-bold" style={{ color: "var(--ink)" }}>O WhatsApp do Relacionamento ainda não está conectado</span>
-            <span className="block text-[13px]" style={{ color: "var(--ink2)" }}>Sem ele, as conversas dos clientes não chegam no Atendimento. Clique pra conectar pela Meta (COEX) — o número continua no celular.</span>
-          </span>
-          <span className="ml-auto shrink-0 text-[13px] font-bold" style={{ color: "#128C4A" }}>Conectar →</span>
-        </button>
-      )}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cartoes.map((c) => {
           const k = cor(c.tom);
@@ -280,13 +264,12 @@ export default function RelApp() {
   const abrirConversa = (id: string) => ir({ tela: "atendimento", id });
 
   // A tela de detalhe acende o item da lista dela.
-  const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela;
+  const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
 
   const grupos: Grupo[] = [
     { id: "atendimento", rotulo: "Atendimento", icone: "atendimento", itens: [
       { id: "atendimento", rotulo: "Conversas", badge: cont?.esperando || undefined, alerta: !!cont?.foraDoPrazo },
       { id: "chamados", rotulo: "Chamados", badge: cont?.chamadosVencidos || undefined, alerta: true },
-      { id: "whatsapp", rotulo: "WhatsApp (conexão)" },
     ] },
     { id: "kpis", rotulo: "KPIs", icone: "kpis", itens: [
       { id: "kpis", rotulo: "Indicadores" },
@@ -469,7 +452,6 @@ export default function RelApp() {
               abrir={(id) => ir(id ? { tela: "atendimento", id } : { tela: "atendimento" })}
               onAbrirCliente={abrirCliente}
               onAbrirViagem={abrirViagem}
-              onAbrirWhatsApp={() => ir({ tela: "whatsapp" })}
               onTrocarVisao={(v) => ir(v === "chamados" ? { tela: "chamados" } : { tela: "atendimento" })}
               onMudou={atualizar}
             />
@@ -479,7 +461,6 @@ export default function RelApp() {
             <AtendimentoPage
               visao="chamados"
               conversaId={null}
-              onAbrirWhatsApp={() => ir({ tela: "whatsapp" })}
               abrir={(id) => ir(id ? { tela: "atendimento", id } : { tela: "atendimento" })}
               onAbrirCliente={abrirCliente}
               onAbrirViagem={abrirViagem}
@@ -505,7 +486,7 @@ export default function RelApp() {
           {rota.tela === "automacoes" && <AutomacoesPage />}
           {rota.tela === "pesquisas" && <PesquisasPage onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} />}
           {rota.tela === "recompra" && <RecompraPage onAbrirCliente={abrirCliente} />}
-          {rota.tela === "config" && <ConfigPage />}
+          {rota.tela === "config" && <ConfigPage onAbrirWhatsApp={() => ir({ tela: "whatsapp" })} />}
           {rota.tela === "equipe" && <EquipePage />}
         </div>
       </main>
