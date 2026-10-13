@@ -216,12 +216,17 @@ async function funis() {
     const etapas = await bx('crm.status.list', { filter: { ENTITY_ID: `DEAL_STAGE_${c.id}` } }, 12_000);
     const venda = new Set(), cancela = new Set();
     const posVenda = POS_VENDA.test(c.nome);
+    // "Vendas Realizadas" (funil antigo): o funil INTEIRO é de venda — a etapa
+    // "Vendas Operações" tinha 57 vendas que ficavam de fora (conferido com o
+    // sistema de Expedições em 13/10). Toda etapa que não é de falha conta.
+    const funilSoDeVenda = /vendas?\s+realizadas?/i.test(c.nome);
     for (const e of etapas || []) {
       const sem = e?.EXTRA?.SEMANTICS || e?.SEMANTICS || null;
       const nome = String(e?.NAME || '');
       const sid = String(e?.STATUS_ID || '');
       const falha = sem === 'failure' || sem === 'F' || sid.endsWith(':LOSE');
       if (posVenda) { if (!falha) venda.add(sid); continue; }   // pós-venda nunca cancela viagem
+      if (funilSoDeVenda) { if (!falha) venda.add(sid); else if (NOME_CANCELA.test(nome) || sid.endsWith(':LOSE')) cancela.add(sid); continue; }
       if (sem === 'success' || sem === 'S' || NOME_VENDA.test(nome)) venda.add(sid);
       else if (sid.endsWith(':LOSE') || ((sem === 'failure' || sem === 'F') && NOME_CANCELA.test(nome))) cancela.add(sid);
     }
