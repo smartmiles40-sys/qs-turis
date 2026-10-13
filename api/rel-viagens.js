@@ -52,7 +52,7 @@ const ETAPAS_CANCELA = new Set(['UC_NV92A7', 'LOSE']);
 const FUNIS_EXTRAS = [/comercial/i, /relacionamento/i, /opera[cç][aãoõ]/i, /vendas?\s+realizadas?/i];
 // Funis de lead (ainda não compraram) nunca viram cliente do Relacionamento.
 const FUNIS_FORA = /pr[eé].?venda|live|tecnologia|marketing|recrut|teste/i;
-const NOME_VENDA = /venda\s+realizada|ganh[oa]|em\s+emiss/i;
+const NOME_VENDA = /vendas?\s+realizadas?|ganh[oa]|em\s+emiss/i;
 const NOME_CANCELA = /desist|perdid|cancel/i;
 
 // Campos do negócio (Comercial 1). Mapeados em 09/10/2026 por crm.deal.fields.
