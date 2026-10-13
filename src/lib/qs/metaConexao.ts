@@ -61,6 +61,13 @@ export const copiarModelosDoOficial = (phoneId: string) => post({ acao: "meta-co
 }>;
 export const registrarNumeroMeta = (phoneId: string, pin: string) => post({ acao: "meta-registrar", phoneId, pin });
 
+/** Pede de novo o histórico do celular (Coexistência) e devolve o que a Meta respondeu. */
+export interface RespostaHistorico {
+  pedido: Record<string, { ok: boolean; erro?: string; codigo?: number | null }>;
+  webhook: { inscrito?: boolean; campos?: string[]; temHistory?: boolean; erro?: string } | null;
+}
+export const pedirHistoricoMeta = (phoneId: string) => post({ acao: "meta-pedir-historico", phoneId }) as unknown as Promise<RespostaHistorico>;
+
 // ── O SDK da Meta ────────────────────────────────────────────────────────────
 
 interface FbLoginResposta { authResponse?: { code?: string } | null }

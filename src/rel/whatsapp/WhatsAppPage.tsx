@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useQsAuth, setoresDe } from "@/contexts/QsAuthContext";
 import {
-  carregarPainelMeta, conectarPelaMeta, copiarModelosDoOficial, desconectarNumeroMeta, registrarNumeroMeta, salvarConfigId,
+  carregarPainelMeta, conectarPelaMeta, pedirHistoricoMeta, copiarModelosDoOficial, desconectarNumeroMeta, registrarNumeroMeta, salvarConfigId,
   type NumeroMeta, type PainelMeta,
 } from "@/lib/qs/metaConexao";
 import { apontarWebhookDaMeta, criarModeloNaMeta, excluirModeloNaMeta, listarModelosAdmin, type WaModeloAdmin } from "@/lib/qs/waInbox";
@@ -175,6 +175,17 @@ export default function WhatsAppPage() {
                 if (!/^\d{6}$/.test(pin)) { setAviso({ tom: "erro", texto: "O PIN tem 6 números." }); return; }
                 void rodar(async () => { await registrarNumeroMeta(n.phoneId, pin); return "Número registrado na Cloud API."; });
               }}
+              onHistorico={() => void rodar(async () => {
+                const r = await pedirHistoricoMeta(n.phoneId);
+                const h = r.pedido?.history;
+                const partes: string[] = [];
+                partes.push(h?.ok
+                  ? "A Meta aceitou o pedido do histórico. As conversas dos últimos 6 meses chegam aos poucos (minutos a horas)."
+                  : `A Meta recusou o pedido do histórico: ${h?.erro || "sem detalhe"}.`);
+                if (r.webhook && !r.webhook.erro && !r.webhook.temHistory) partes.push("ATENÇÃO: o app da Meta não está inscrito no campo \"history\" do webhook — use \"Apontar o webhook da Meta\" ou inscreva o campo no painel de desenvolvedor.");
+                if (r.webhook?.temHistory) partes.push("Webhook inscrito no histórico: ok.");
+                return partes.join(" ");
+              })}
               onDesconectar={() => {
                 if (!window.confirm(`Desconectar ${n.numero || n.phoneId} do QS? O Relacionamento para de enviar e receber por este número (o celular continua funcionando).`)) return;
                 void rodar(async () => { await desconectarNumeroMeta(n.phoneId); return "Número desconectado do QS."; });
@@ -242,9 +253,9 @@ function Cabecalho() {
   );
 }
 
-function CartaoNumero({ n, ocupado, pronto, onReconectar, onRegistrar, onDesconectar }: {
+function CartaoNumero({ n, ocupado, pronto, onReconectar, onRegistrar, onDesconectar, onHistorico }: {
   n: NumeroMeta; ocupado: boolean; pronto: boolean;
-  onReconectar: () => void; onRegistrar: () => void; onDesconectar: () => void;
+  onReconectar: () => void; onRegistrar: () => void; onDesconectar: () => void; onHistorico: () => void;
 }) {
   const ligado = n.status === "conectado";
   const q = n.qualidade ? QUALIDADE[n.qualidade] : null;
@@ -271,8 +282,14 @@ function CartaoNumero({ n, ocupado, pronto, onReconectar, onRegistrar, onDescone
       )}
       <div className="flex flex-wrap gap-2">
         <Botao variante={ligado ? "secundario" : "primario"} disabled={!pronto || ocupado} onClick={onReconectar}>{ligado ? "Reconectar" : "Conectar"}</Botao>
+        {ligado && <Botao disabled={ocupado} onClick={onHistorico} title="A Meta só aceita nas primeiras 24 h depois da conexão">Pedir histórico do celular de novo</Botao>}
         {ligado && <Botao variante="perigo" disabled={ocupado} onClick={onDesconectar}>Desconectar</Botao>}
       </div>
+      {ligado && (
+        <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
+          Histórico do celular: a Meta só manda se, ao ler o QR, foi aceito <b>compartilhar o histórico</b>, e só nas primeiras 24 h depois da conexão (até 6 meses, sem grupos, sem fotos/áudios antigos).
+        </p>
+      )}
     </div>
   );
 }

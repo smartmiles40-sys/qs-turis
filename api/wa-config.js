@@ -21,7 +21,7 @@ import { listarModelos, criarModelo, excluirModelo,
          diagnosticoChamadas, iniciarLigacao, encerrarLigacao,
          credenciaisDaMeta, modelosAprovados, apontarWebhookProQs, copiarModelosDoOficial } from './_meta.js';
 import { caixaOficial, numeroDoEnvio } from './_waSaida.js';
-import { conectarNumero, desconectarNumero, listarConexoes, salvarConfigCadastro, registrarNumero } from './_metaConexao.js';
+import { pedirHistorico, conectarNumero, desconectarNumero, listarConexoes, salvarConfigCadastro, registrarNumero } from './_metaConexao.js';
 import { rest } from './_supabaseAdmin.js';
 import { diagAutorizado, diagnosticoMeta } from './_metaDiag.js';
 import { sincronizarPermissao, gravarPermissao, lerPermissaoLocal, permissaoVale } from './_permissaoLigacao.js';
@@ -407,6 +407,13 @@ export default async function handler(req, res) {
       const r = await copiarModelosDoOficial(String(body.phoneId || ''));
       if (r.erro) return res.status(400).json({ error: r.erro });
       console.log(`[wa-config] modelos copiados pra ${body.phoneId}: ${r.criados?.length || 0} criados`);
+      return res.status(200).json(r);
+    }
+    // Histórico do celular (Coexistência): pede de novo e mostra o que a Meta respondeu.
+    if (body.acao === 'meta-pedir-historico') {
+      const r = await pedirHistorico(String(body.phoneId || ''));
+      if (r.erro) return res.status(400).json({ error: r.erro });
+      console.log(`[wa-config] pedir histórico ${body.phoneId}: ${JSON.stringify(r).slice(0, 600)}`);
       return res.status(200).json(r);
     }
     if (body.acao === 'meta-cadastro-salvar') {

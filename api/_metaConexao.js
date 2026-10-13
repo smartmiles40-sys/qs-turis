@@ -338,3 +338,42 @@ export async function listarConexoes() {
     sdrs: (users || []).filter((u) => u.role === 'sdr' || u.role === 'closer').map((u) => ({ id: u.id, nome: u.name })),
   };
 }
+
+// ── Histórico do celular (Coexistência): pedir de novo + diagnóstico ─────────
+// Bruno, 13/10/2026: conectou o número do Relacionamento e a Meta não mandou o
+// histórico. O pedido feito na conexão não deixava rastro. Aqui ele é refeito
+// e a tela vê exatamente o que a Meta respondeu, e se o app está inscrito no
+// campo "history" do webhook (sem isso a Meta manda pra lugar nenhum).
+// Regras da Meta: só nas primeiras 24 h após a conexão, só se no celular foi
+// aceito compartilhar o histórico, até 6 meses, sem grupos.
+export async function pedirHistorico(phoneId) {
+  const alvo = String(phoneId || '').trim();
+  if (!alvo) return { erro: 'Número não informado.' };
+  const cr = await credenciaisDaMeta(alvo);
+  if (!cr?.token) return { erro: 'Sem o token deste número — reconecte pela janela da Meta.' };
+  const out = { pedido: {}, webhook: null };
+
+  for (const tipo of ['history', 'smb_app_state_sync']) {
+    try {
+      const r = await graph(`/${alvo}/smb_app_data`, { method: 'POST', token: cr.token, body: { messaging_product: 'whatsapp', sync_type: tipo } });
+      out.pedido[tipo] = { ok: true, resposta: r };
+    } catch (e) {
+      out.pedido[tipo] = { ok: false, erro: e.message, codigo: e.metaCode || null };
+    }
+  }
+
+  // O app está inscrito no campo "history"? (token do app = id|segredo)
+  const appId = String(process.env.META_CALLS_APP_ID || '').trim();
+  const secret = String(process.env.META_CALLS_APP_SECRET || '').trim();
+  if (appId && secret) {
+    try {
+      const s = await graph(`/${appId}/subscriptions`, { token: `${appId}|${secret}` });
+      const wa = (s?.data || []).find((x) => x.object === 'whatsapp_business_account');
+      const campos = (wa?.fields || []).map((f) => f.name || f);
+      out.webhook = { inscrito: !!wa, campos, temHistory: campos.includes('history'), callback: wa?.callback_url || null };
+    } catch (e) {
+      out.webhook = { erro: e.message };
+    }
+  }
+  return out;
+}
