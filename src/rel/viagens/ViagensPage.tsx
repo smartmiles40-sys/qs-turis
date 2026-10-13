@@ -6,6 +6,10 @@
 //
 // "Próximas" vem em ordem de embarque: é a fila de trabalho do pós-venda.
 // Agrupar por expedição junta o grupo inteiro (ex.: Japão e China G2).
+//
+// 13/10: três visões no topo — PAINEL (mapa + quadro de partidas), CALENDÁRIO
+// (embarques, voltas, trechos e check-ins) e a LISTA de sempre. A visão
+// escolhida fica guardada no navegador.
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -15,6 +19,19 @@ import {
 import { buscarClientes, type Cliente } from "../lib/clientes";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import { TOM_FASE } from "./ViagensDoCliente";
+import PainelViagens from "./PainelViagens";
+import CalendarioViagens from "./CalendarioViagens";
+
+type Visao = "painel" | "calendario" | "lista";
+const VISOES: { id: Visao; rotulo: string }[] = [
+  { id: "painel", rotulo: "Painel" },
+  { id: "calendario", rotulo: "Calendário" },
+  { id: "lista", rotulo: "Lista" },
+];
+const CHAVE_VISAO = "rel_viagens_visao";
+function visaoSalva(): Visao {
+  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "lista" ? v : "painel"; } catch { return "painel"; }
+}
 
 const FILTROS: { id: FiltroViagens; rotulo: string }[] = [
   { id: "proximas", rotulo: "Próximas" },
@@ -145,7 +162,9 @@ function NovaViagem({ aberto, onFechar, onCriada }: { aberto: boolean; onFechar:
 function Linha({ v, onAbrir, onAbrirCliente }: { v: Viagem; onAbrir: () => void; onAbrirCliente: (id: string) => void }) {
   return (
     <li style={{ borderTop: "1px solid var(--line2)" }}>
-      <div className="rel-linha flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={onAbrir}>
+      <div className="rel-linha flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={onAbrir}
+        role="link" tabIndex={0} aria-label={`Abrir viagem ${v.titulo}`}
+        onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onAbrir(); } }}>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate" style={{ color: "var(--ink)" }}>{v.titulo}</p>
           <p className="text-[12px] truncate" style={{ color: "var(--ink3)" }}>
@@ -169,6 +188,8 @@ function Linha({ v, onAbrir, onAbrirCliente }: { v: Viagem; onAbrir: () => void;
 // ── Página ──────────────────────────────────────────────────────────────────
 
 export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrirViagem: (id: string) => void; onAbrirCliente: (id: string) => void }) {
+  const [visao, setVisaoState] = useState<Visao>(visaoSalva);
+  const setVisao = (v: Visao) => { setVisaoState(v); try { localStorage.setItem(CHAVE_VISAO, v); } catch { /* sem localStorage */ } };
   const [filtro, setFiltro] = useState<FiltroViagens>("proximas");
   const [busca, setBusca] = useState("");
   const [lista, setLista] = useState<Viagem[] | null>(null);
@@ -179,6 +200,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
   const [versao, setVersao] = useState(0);
 
   useEffect(() => {
+    if (visao !== "lista") return;
     let vivo = true;
     setLista(null);
     const t = setTimeout(() => {
@@ -187,7 +209,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
         .catch((e) => { if (vivo) { setErro(e instanceof Error ? e.message : "Não carregou."); setLista([]); } });
     }, busca ? 300 : 0);
     return () => { vivo = false; clearTimeout(t); };
-  }, [filtro, busca, versao]);
+  }, [filtro, busca, versao, visao]);
 
   async function sincronizar() {
     setSync({ ocupado: true, msg: "Buscando vendas no Bitrix… (pode levar até 1 minuto)", erro: false });
@@ -212,13 +234,13 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
   }, [lista, agrupar]);
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className={visao === "lista" ? "max-w-5xl mx-auto" : "max-w-6xl mx-auto"}>
       <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Viagens</h1>
           <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Toda venda do Bitrix vira viagem aqui, com a jornada do cliente até a volta.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Botao onClick={sincronizar} disabled={sync.ocupado}>{sync.ocupado ? "Sincronizando…" : "Sincronizar com o Bitrix"}</Botao>
           <Botao variante="primario" onClick={() => setNova(true)}>+ Nova viagem</Botao>
         </div>
@@ -226,11 +248,25 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
 
       {sync.msg && <div className="mb-3"><Aviso tom={sync.erro ? "erro" : "ok"}>{sync.msg}</Aviso></div>}
 
+      <div className="flex gap-1 mb-4 border-b" style={{ borderColor: "var(--line)" }} role="tablist" aria-label="Visão das viagens">
+        {VISOES.map((x) => (
+          <button key={x.id} role="tab" aria-selected={visao === x.id} onClick={() => setVisao(x.id)}
+            className="px-4 py-2.5 text-[13px] font-semibold -mb-px"
+            style={visao === x.id ? { color: "var(--rel-ink)", borderBottom: "2px solid var(--rel)" } : { color: "var(--ink2)", borderBottom: "2px solid transparent" }}>
+            {x.rotulo}
+          </button>
+        ))}
+      </div>
+
+      {visao === "painel" && <PainelViagens key={versao} onAbrirViagem={onAbrirViagem} />}
+      {visao === "calendario" && <CalendarioViagens key={versao} onAbrirViagem={onAbrirViagem} />}
+      {visao === "lista" && <>
+
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <div className="flex gap-1 rel-card p-1 overflow-x-auto">
+        <div className="flex gap-1 rel-card p-1 overflow-x-auto" role="group" aria-label="Filtrar viagens">
           {FILTROS.map((f) => (
-            <button key={f.id} onClick={() => setFiltro(f.id)} className="px-3 py-1.5 rounded-lg text-[12px] font-semibold whitespace-nowrap"
-              style={filtro === f.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)" } : { color: "var(--ink3)" }}>
+            <button key={f.id} onClick={() => setFiltro(f.id)} aria-pressed={filtro === f.id} className="rel-linha px-3 py-2 rounded-lg text-[12.5px] font-semibold whitespace-nowrap"
+              style={filtro === f.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)" } : { color: "var(--ink2)" }}>
               {f.rotulo}
             </button>
           ))}
@@ -240,7 +276,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
         </label>
       </div>
       <div className="mb-4">
-        <Entrada value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por viagem, destino, expedição, cliente ou nº do Bitrix" />
+        <Entrada value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar viagens" placeholder="Buscar por viagem, destino, expedição, cliente ou nº do Bitrix" />
       </div>
 
       {erro && <div className="mb-3"><Aviso tom="erro">{erro}</Aviso></div>}
@@ -274,6 +310,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
       {lista && lista.length >= 500 && (
         <p className="text-[12px] mt-2" style={{ color: "var(--ink3)" }}>Mostrando as 500 primeiras — use a busca.</p>
       )}
+      </>}
 
       <NovaViagem aberto={nova} onFechar={() => setNova(false)} onCriada={(id) => { setNova(false); onAbrirViagem(id); }} />
     </div>

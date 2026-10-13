@@ -20,6 +20,24 @@ html.dark {
   --rel-ink: #3CCFB3;
   --rel-soft: rgba(43, 192, 166, .14);
 }
+/* Texto terciário com contraste AA (4,5:1) — o --ink3 do app (#8B95A4 / #6E7889)
+   dá ~3:1 e é usado aqui em datas, dicas e contadores. Só vale enquanto a área
+   de Relacionamento está aberta (este CSS só existe dentro dela). */
+:root { --ink3: #646E7F; }
+html.dark { --ink3: #8792A3; }
+/* Foco de teclado visível em tudo que é clicável (WCAG 2.4.7). */
+:is(button, a, summary, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--rel-ink);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 .rel-input {
   width: 100%;
   padding: 9px 12px;
@@ -28,10 +46,10 @@ html.dark {
   background: var(--card);
   color: var(--ink);
   font-size: 14px;
-  transition: border-color .15s, box-shadow .15s;
+  transition: border-color .15s cubic-bezier(.25,1,.5,1), box-shadow .15s cubic-bezier(.25,1,.5,1);
 }
 .rel-input::placeholder { color: var(--ink3); }
-.rel-input:focus { outline: none; border-color: var(--rel); box-shadow: 0 0 0 3px var(--rel-soft); }
+.rel-input:focus, .rel-input:focus-visible { outline: none; border-color: var(--rel); box-shadow: 0 0 0 3px rgba(14, 124, 106, .28); }
 .rel-input[aria-invalid="true"] { border-color: var(--red); }
 .rel-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
 .rel-linha:hover { background: var(--card2); }

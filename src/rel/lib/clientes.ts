@@ -277,3 +277,197 @@ export async function carregarResumo(): Promise<Resumo> {
     semConsentimento: l.count ?? 0,
   };
 }
+
+// ── KPIs da carteira (migration 0106) ───────────────────────────────────────
+// A view rel_cliente_metricas calcula tudo por cliente no banco: quantas
+// viagens, quanto gastou, categoria, dias sem contato e o que falta no
+// cadastro. A tela só soma.
+
+export type CategoriaId = "bronze" | "silver" | "black" | "green" | "sem_categoria";
+
+export interface Metrica {
+  id: string;
+  nome: string;
+  titular_id: string | null;
+  criado_em: string;
+  viagens_compradas: number;
+  viagens_realizadas: number;
+  expedicoes: number;
+  pacotes: number;
+  valor_total: number;
+  primeira_viagem: string | null;
+  ultima_viagem: string | null;
+  ultimo_retorno: string | null;
+  proximo_embarque: string | null;
+  ultimo_contato_em: string | null;
+  dias_sem_contato: number | null;
+  categoria: CategoriaId;
+  meta_contato_dias: number;
+  faltando: string[];
+  cadastro_completo: boolean;
+}
+
+export interface Nivel { id: Exclude<CategoriaId, "sem_categoria">; nome: string; min_viagens: number; min_valor: number; cor: string }
+export interface RegrasCategorias {
+  criterio: "viagens" | "valor" | "viagens_ou_valor";
+  contar: "compradas" | "realizadas";
+  niveis: Nivel[];
+}
+export type MetasContato = Record<CategoriaId, number>;
+
+export const SEM_CATEGORIA = { id: "sem_categoria" as const, nome: "Sem categoria", cor: "#C9CED6" };
+
+export const REGRAS_PADRAO: RegrasCategorias = {
+  criterio: "viagens",
+  contar: "compradas",
+  niveis: [
+    { id: "bronze", nome: "Bronze", min_viagens: 1, min_valor: 0, cor: "#B0743C" },
+    { id: "silver", nome: "Silver", min_viagens: 2, min_valor: 30000, cor: "#9AA3AE" },
+    { id: "black", nome: "Black", min_viagens: 3, min_valor: 60000, cor: "#1F2328" },
+    { id: "green", nome: "Green", min_viagens: 5, min_valor: 100000, cor: "#0E7C6A" },
+  ],
+};
+export const METAS_PADRAO: MetasContato = { sem_categoria: 120, bronze: 90, silver: 60, black: 45, green: 30 };
+
+/** Nome legível do que falta no cadastro. */
+export const CAMPOS_CADASTRO: Record<string, string> = {
+  cpf: "CPF", nascimento: "Nascimento", telefone: "Telefone", email: "E-mail",
+  passaporte: "Nº do passaporte", passaporte_validade: "Validade do passaporte", doc_passaporte: "Foto do passaporte",
+};
+
+export function moeda(v: number | null | undefined): string {
+  return (v ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+}
+
+/** Explica a regra de um nível em uma frase ("Green = 5+ viagens"). */
+export function regraDoNivel(n: Nivel, r: RegrasCategorias): string {
+  const v = `${n.min_viagens}+ viage${n.min_viagens === 1 ? "m" : "ns"}${r.contar === "realizadas" ? " já feitas" : ""}`;
+  const d = `${moeda(n.min_valor)}+ gastos`;
+  if (r.criterio === "valor") return d;
+  if (r.criterio === "viagens_ou_valor" && n.min_valor > 0) return `${v} ou ${d}`;
+  return v;
+}
+
+/** Todas as métricas (pagina de 1000 em 1000 — o PostgREST corta em silêncio). */
+export async function carregarMetricas(): Promise<Metrica[]> {
+  const todas: Metrica[] = [];
+  for (let de = 0; ; de += 1000) {
+    const { data, error } = await supabase.from("rel_cliente_metricas").select("*").order("id").range(de, de + 999);
+    if (error) throw error;
+    todas.push(...((data ?? []) as Metrica[]));
+    if (!data || data.length < 1000) break;
+  }
+  return todas.map((m) => ({ ...m, valor_total: Number(m.valor_total) || 0, faltando: m.faltando ?? [] }));
+}
+
+export async function metricaDoCliente(id: string): Promise<Metrica | null> {
+  const { data, error } = await supabase.from("rel_cliente_metricas").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  const m = data as Metrica;
+  return { ...m, valor_total: Number(m.valor_total) || 0, faltando: m.faltando ?? [] };
+}
+
+export async function carregarRegras(): Promise<{ regras: RegrasCategorias; metas: MetasContato }> {
+  // Sem engolir erro: se a leitura falhar, quem chama NÃO pode salvar o padrão por cima da config real.
+  const { data, error } = await supabase.from("rel_config").select("chave, valor").in("chave", ["categorias", "contato_meta_dias"]);
+  if (error) throw new Error(error.message);
+  const m = Object.fromEntries((data ?? []).map((x: { chave: string; valor: unknown }) => [x.chave, x.valor]));
+  const r = (m.categorias ?? {}) as Partial<RegrasCategorias>;
+  return {
+    regras: { ...REGRAS_PADRAO, ...r, niveis: r.niveis?.length ? r.niveis : REGRAS_PADRAO.niveis },
+    metas: { ...METAS_PADRAO, ...((m.contato_meta_dias ?? {}) as Partial<MetasContato>) },
+  };
+}
+
+async function gravarConfig(chave: string, valor: unknown) {
+  const { data, error } = await supabase.from("rel_config")
+    .update({ valor, atualizado_em: new Date().toISOString() }).eq("chave", chave).select("chave");
+  if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error("Sem permissão para mudar esta configuração.");
+}
+
+export async function salvarRegras(regras: RegrasCategorias, metas: MetasContato) {
+  await gravarConfig("categorias", regras);
+  await gravarConfig("contato_meta_dias", metas);
+}
+
+// ── Contatos registrados à mão ──────────────────────────────────────────────
+
+export type CanalContato = "ligacao" | "whatsapp" | "email" | "presencial" | "instagram" | "outro";
+export const CANAIS_CONTATO: Record<CanalContato, string> = {
+  ligacao: "Ligação", whatsapp: "WhatsApp (outro número)", email: "E-mail", presencial: "Presencial", instagram: "Instagram", outro: "Outro",
+};
+export interface Contato { id: string; cliente_id: string; canal: CanalContato; resumo: string | null; feito_em: string; autor_id: string | null }
+
+export async function listarContatos(clienteId: string): Promise<Contato[]> {
+  const { data } = await supabase.from("rel_contatos").select("*").eq("cliente_id", clienteId).order("feito_em", { ascending: false }).limit(30);
+  return (data ?? []) as Contato[];
+}
+
+export async function registrarContato(clienteId: string, canal: CanalContato, resumo: string, feitoEm?: string) {
+  const { error } = await supabase.from("rel_contatos").insert({
+    cliente_id: clienteId, canal, resumo: resumo.trim() || null, feito_em: feitoEm || new Date().toISOString(),
+  });
+  if (error) throw new Error(error.message);
+}
+
+// ── Arquivos e imagens da ficha ─────────────────────────────────────────────
+// Mesmo bucket privado dos documentos (rel-documentos). Imagem = tipo 'foto';
+// qualquer outro arquivo solto = 'outro'. Passaporte, visto etc. continuam na
+// seção Documentos.
+
+export interface Arquivo {
+  id: string; cliente_id: string; tipo: "foto" | "outro"; descricao: string | null;
+  arquivo_path: string; arquivo_nome: string | null; mime: string | null; tamanho: number | null; enviado_em: string;
+}
+
+export async function listarArquivos(clienteId: string): Promise<Arquivo[]> {
+  const { data, error } = await supabase.from("rel_documentos")
+    .select("id, cliente_id, tipo, descricao, arquivo_path, arquivo_nome, mime, tamanho, enviado_em")
+    .eq("cliente_id", clienteId).in("tipo", ["foto", "outro"])
+    // só o que o time subiu solto na ficha; o que veio por pedido/viagem é "Documento"
+    .eq("enviado_por", "time").is("pedido_id", null).is("viagem_id", null)
+    .order("enviado_em", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as Arquivo[];
+}
+
+export async function subirArquivo(clienteId: string, arquivo: File, descricao?: string) {
+  if (arquivo.size > 20 * 1024 * 1024) throw new Error(`${arquivo.name}: maior que 20 MB.`);
+  const tipo = arquivo.type.startsWith("image/") ? "foto" : "outro";
+  const ext = (arquivo.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "bin";
+  const path = `${clienteId}/${Date.now()}-${tipo}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const up = await supabase.storage.from("rel-documentos").upload(path, arquivo, { contentType: arquivo.type || undefined, upsert: false });
+  if (up.error) throw new Error(`${arquivo.name}: não subiu (${up.error.message}).`);
+  const { error } = await supabase.from("rel_documentos").insert({
+    cliente_id: clienteId, tipo, arquivo_path: path, arquivo_nome: arquivo.name.slice(0, 160),
+    mime: arquivo.type || null, tamanho: arquivo.size, descricao: descricao?.trim() || null, enviado_por: "time", status: "aprovado",
+  });
+  if (error) {
+    await supabase.storage.from("rel-documentos").remove([path]); // não deixa arquivo órfão
+    throw new Error(error.message);
+  }
+}
+
+/** Link novo, gerado na hora do clique (1 min). Com `baixarComo`, o navegador baixa em vez de abrir. */
+export async function linkNaHora(path: string, baixarComo?: string): Promise<string> {
+  const { data, error } = await supabase.storage.from("rel-documentos")
+    .createSignedUrl(path, 60, baixarComo ? { download: baixarComo } : undefined);
+  if (error || !data?.signedUrl) throw new Error(error?.message || "Não consegui gerar o link do arquivo.");
+  return data.signedUrl;
+}
+
+/** Links assinados (10 min) de vários arquivos de uma vez — pras miniaturas. */
+export async function linksAssinados(paths: string[]): Promise<Record<string, string>> {
+  if (!paths.length) return {};
+  const { data } = await supabase.storage.from("rel-documentos").createSignedUrls(paths, 600);
+  return Object.fromEntries((data ?? []).filter((d) => d.signedUrl && d.path).map((d) => [d.path as string, d.signedUrl as string]));
+}
+
+export async function apagarArquivo(a: Arquivo) {
+  const { error } = await supabase.from("rel_documentos").delete().eq("id", a.id);
+  if (error) throw new Error(error.message);
+  const rm = await supabase.storage.from("rel-documentos").remove([a.arquivo_path]);
+  if (rm.error) throw new Error(`O registro saiu, mas o arquivo ficou no armazenamento (${rm.error.message}).`);
+}

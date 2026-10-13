@@ -5,11 +5,12 @@ import { useCallback, useEffect, useState } from "react";
 import { PRIORIDADES, STATUS_CHAMADO, chamadosDoCliente, situacaoDoPrazo, type Chamado } from "../lib/pos";
 import { Botao, Etiqueta } from "../ui";
 import ChamadoModal from "./ChamadoModal";
+import ChamadoDetalhe from "./ChamadoDetalhe";
 
 export default function ChamadosDoCliente({ clienteId, onAbrirChamado }: { clienteId: string; onAbrirChamado?: (c: Chamado) => void }) {
   const [lista, setLista] = useState<Chamado[]>([]);
   const [novo, setNovo] = useState(false);
-  const [editando, setEditando] = useState<Chamado | null>(null);
+  const [vendo, setVendo] = useState<string | null>(null);
 
   const carregar = useCallback(() => {
     chamadosDoCliente(clienteId).then((l) =>
@@ -33,7 +34,7 @@ export default function ChamadosDoCliente({ clienteId, onAbrirChamado }: { clien
             return (
               <li key={c.id}>
                 <button
-                  onClick={() => (onAbrirChamado ? onAbrirChamado(c) : setEditando(c))}
+                  onClick={() => (onAbrirChamado ? onAbrirChamado(c) : setVendo(c.id))}
                   className="rel-linha w-full text-left p-2 -mx-2 rounded-lg"
                 >
                   <span className="block text-[13px]" style={{ color: c.status === "resolvido" ? "var(--ink3)" : "var(--ink)" }}>
@@ -51,12 +52,13 @@ export default function ChamadosDoCliente({ clienteId, onAbrirChamado }: { clien
         </ul>
       )}
       <ChamadoModal
-        aberto={novo || !!editando}
-        chamado={editando}
+        aberto={novo}
         inicial={{ clienteId }}
-        onFechar={() => { setNovo(false); setEditando(null); }}
-        onSalvo={() => { setNovo(false); setEditando(null); carregar(); }}
+        onFechar={() => setNovo(false)}
+        onSalvo={() => { setNovo(false); carregar(); }}
       />
+      {/* Clicar no chamado abre a evolução do protocolo (mesmo detalhe do kanban). */}
+      <ChamadoDetalhe id={vendo} onFechar={() => setVendo(null)} onMudou={carregar} />
     </section>
   );
 }

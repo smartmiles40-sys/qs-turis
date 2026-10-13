@@ -26,7 +26,7 @@ const MAX_ARQUIVOS_POR_PEDIDO = 20;
 const MIME_OK = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif', 'application/pdf': 'pdf',
 };
-const TIPOS = new Set(['passaporte', 'rg_cnh', 'visto', 'vacina', 'seguro', 'voucher', 'contrato', 'comprovante', 'outro']);
+const TIPOS = new Set(['passaporte', 'rg_cnh', 'visto', 'vacina', 'seguro', 'voucher', 'contrato', 'comprovante', 'foto', 'outro']);
 const TOKEN = /^[0-9a-f]{64}$/;
 
 function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }

@@ -73,6 +73,9 @@
     "api/rel-recompra.js": {
       "maxDuration": 30
     },
+    "api/rel-docs-ia.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -93,6 +96,10 @@
     {
       "path": "/api/rel-disparos",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/rel-docs-ia",
+      "schedule": "15 */2 * * *"
     }
   ],
   "headers": [

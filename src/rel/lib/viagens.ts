@@ -81,7 +81,7 @@ export interface Tarefa {
   feita_por: string | null;
 }
 
-export type TipoDocumento = "passaporte" | "rg_cnh" | "visto" | "vacina" | "seguro" | "voucher" | "contrato" | "comprovante" | "outro";
+export type TipoDocumento = "passaporte" | "rg_cnh" | "visto" | "vacina" | "seguro" | "voucher" | "contrato" | "comprovante" | "foto" | "outro";
 
 export const TIPOS_DOC: Record<TipoDocumento, string> = {
   passaporte: "Passaporte",
@@ -92,6 +92,7 @@ export const TIPOS_DOC: Record<TipoDocumento, string> = {
   voucher: "Voucher / bilhete",
   contrato: "Contrato",
   comprovante: "Comprovante de pagamento",
+  foto: "Foto / imagem",
   outro: "Outro",
 };
 
@@ -298,6 +299,8 @@ export async function listarDocumentos(filtro: { clienteId?: string; viagemId?: 
   let q = supabase.from("rel_documentos").select("*").order("enviado_em", { ascending: false });
   if (filtro.clienteId) q = q.eq("cliente_id", filtro.clienteId);
   if (filtro.viagemId) q = q.eq("viagem_id", filtro.viagemId);
+  // Fora daqui: "Arquivos e fotos" da ficha (foto/outro que o time subiu solto, sem pedido nem viagem).
+  q = q.or("tipo.not.in.(foto,outro),enviado_por.neq.time,pedido_id.not.is.null,viagem_id.not.is.null");
   const { data, error } = await q;
   if (error) throw error;
   return (data ?? []) as Documento[];
@@ -428,3 +431,140 @@ export async function enviarPeloLink(token: string, tipo: TipoDocumento, arquivo
 }
 
 export const concluirPeloLink = (token: string) => apiDocs("POST", token, { acao: "concluir" });
+
+// ── Trechos (voos, trens, transfers) e check-in — migration 0106 ───────────
+
+export type TipoTrecho = "voo_internacional" | "voo_interno" | "trem" | "transfer" | "hospedagem" | "passeio" | "outro";
+
+export const TIPOS_TRECHO: Record<TipoTrecho, string> = {
+  voo_internacional: "Voo internacional",
+  voo_interno: "Voo interno",
+  trem: "Trem",
+  transfer: "Transfer",
+  hospedagem: "Hospedagem",
+  passeio: "Passeio",
+  outro: "Outro",
+};
+
+export interface Trecho {
+  id: string;
+  viagem_id: string;
+  tipo: TipoTrecho;
+  descricao: string | null;
+  origem: string | null;
+  destino: string | null;
+  partida_em: string;
+  chegada_em: string | null;
+  companhia: string | null;
+  numero: string | null;
+  localizador: string | null;
+  checkin_abre_em: string | null;
+  checkin_feito_em: string | null;
+  checkin_feito_por: string | null;
+  // da view rel_trechos_v
+  checkin_em: string | null;
+  viagem_tipo: TipoViagem;
+  viagem_titulo: string;
+  viagem_destino: string | null;
+  expedicao: string | null;
+  viagem_status: "ativa" | "cancelada";
+}
+
+/** "Hoje" no fuso do time (São Paulo), em AAAA-MM-DD — igual ao rel_hoje() do banco. */
+export const hojeSP = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+
+/** Expedição ou pacote — "aereo", "hospedagem" e "outro" contam como pacote (é o que não é expedição). */
+export const grupoTipo = (t: TipoViagem): "expedicao" | "pacote" => (t === "expedicao" ? "expedicao" : "pacote");
+
+export type TrechoInput = Partial<Pick<Trecho,
+  "tipo" | "descricao" | "origem" | "destino" | "partida_em" | "chegada_em" | "companhia" | "numero" | "localizador" | "checkin_abre_em">>;
+
+export async function listarTrechos(viagemId: string): Promise<Trecho[]> {
+  const { data, error } = await supabase.from("rel_trechos_v").select("*").eq("viagem_id", viagemId).order("partida_em");
+  if (error) throw error;
+  return (data ?? []) as Trecho[];
+}
+
+/** Trechos de viagens ativas com partida OU check-in dentro do período (ISO). */
+export async function listarTrechosPeriodo(de: string, ate: string): Promise<Trecho[]> {
+  const { data, error } = await supabase.from("rel_trechos_v").select("*")
+    .eq("viagem_status", "ativa")
+    .or(`and(partida_em.gte.${de},partida_em.lt.${ate}),and(checkin_em.gte.${de},checkin_em.lt.${ate})`)
+    .order("partida_em").limit(1000);
+  if (error) throw error;
+  return (data ?? []) as Trecho[];
+}
+
+/** Próximos trechos (a partir de agora) — alimenta os cards do painel. */
+export async function proximosTrechos(limite = 200): Promise<Trecho[]> {
+  const agora = new Date(Date.now() - 6 * 3600_000).toISOString();
+  const { data, error } = await supabase.from("rel_trechos_v").select("*")
+    .eq("viagem_status", "ativa").gte("partida_em", agora).order("partida_em").limit(limite);
+  if (error) throw error;
+  return (data ?? []) as Trecho[];
+}
+
+export async function criarTrecho(viagemId: string, t: TrechoInput & { partida_em: string }) {
+  const { error } = await supabase.from("rel_viagem_trechos").insert({ ...t, viagem_id: viagemId });
+  if (error) throw new Error(/chegada_em/.test(error.message) ? "A chegada não pode ser antes da partida." : error.message);
+}
+
+export async function salvarTrecho(id: string, t: TrechoInput) {
+  const { error } = await supabase.from("rel_viagem_trechos").update(t).eq("id", id);
+  if (error) throw new Error(/chegada_em/.test(error.message) ? "A chegada não pode ser antes da partida." : error.message);
+}
+
+export async function apagarTrecho(id: string) {
+  const { error } = await supabase.from("rel_viagem_trechos").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function marcarCheckin(id: string, feito: boolean, userId: string) {
+  const { error } = await supabase.from("rel_viagem_trechos")
+    .update(feito ? { checkin_feito_em: new Date().toISOString(), checkin_feito_por: userId || null } : { checkin_feito_em: null, checkin_feito_por: null })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+// ── Revisão da viagem ("tudo conferido") ────────────────────────────────────
+
+export interface Revisao { id: string; revisado_em: string | null; revisado_por: string | null; revisao_obs: string | null }
+
+/** A view rel_viagens_v é anterior à 0106; a revisão vem direto da tabela. */
+export async function revisoesDe(ids: string[]): Promise<Map<string, Revisao>> {
+  const m = new Map<string, Revisao>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase.from("rel_viagens").select("id, revisado_em, revisado_por, revisao_obs").in("id", ids.slice(i, i + 200));
+    if (error) throw error;
+    for (const r of (data ?? []) as Revisao[]) m.set(r.id, r);
+  }
+  return m;
+}
+
+export async function marcarRevisada(id: string, revisada: boolean, userId: string, obs?: string | null) {
+  const { error } = await supabase.from("rel_viagens")
+    .update(revisada
+      ? { revisado_em: new Date().toISOString(), revisado_por: userId || null, revisao_obs: obs?.trim() || null }
+      : { revisado_em: null, revisado_por: null, revisao_obs: null })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+/** Viagens ativas que ainda não voltaram (antes do embarque, sem data ou em viagem). */
+export async function viagensEmAndamento(): Promise<Viagem[]> {
+  const { data, error } = await supabase.from("rel_viagens_v").select("*")
+    .in("fase", ["antes", "em_viagem", "sem_data"])
+    .order("data_embarque", { ascending: true, nullsFirst: false }).limit(1000);
+  if (error) throw error;
+  return (data ?? []) as Viagem[];
+}
+
+/** Viagens ativas que tocam o período [de, ate) — embarque ou volta dentro dele (datas AAAA-MM-DD). */
+export async function viagensNoPeriodo(de: string, ate: string): Promise<Viagem[]> {
+  const { data, error } = await supabase.from("rel_viagens_v").select("*")
+    .neq("status", "cancelada")
+    .or(`and(data_embarque.gte.${de},data_embarque.lt.${ate}),and(data_retorno.gte.${de},data_retorno.lt.${ate})`)
+    .order("data_embarque").limit(1000);
+  if (error) throw error;
+  return (data ?? []) as Viagem[];
+}

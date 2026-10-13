@@ -16,6 +16,10 @@ import {
   type Documento, type PedidoDocs, type TipoDocumento,
 } from "../lib/viagens";
 import { conversasDoCliente, enviarTexto } from "../lib/whatsapp";
+import {
+  ROTULO_CAMPO, aplicarSugestao, conferirDocumento, conferirPendentes, conferivel, precisaConferir,
+  type DocumentoIa, type IaSugestao,
+} from "../lib/docsIa";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 
 export interface Pessoa { id: string; nome: string }
@@ -139,6 +143,58 @@ export function PedirDocumentosModal({ aberto, pessoas, viagemId, onFechar, onCr
   );
 }
 
+// ── Selo da IA ──────────────────────────────────────────────────────────────
+
+const SELO_IA = {
+  ok: { tom: "rel", texto: "Conferido pela IA ✓" },
+  divergente: { tom: "erro", texto: "Divergente ⚠" },
+  ilegivel: { tom: "aviso", texto: "Ilegível" },
+  erro: { tom: "aviso", texto: "IA: erro" },
+  pendente: { tom: "neutro", texto: "IA: na fila" },
+} as const;
+
+function SeloIa({ d, onAplicar }: { d: DocumentoIa; onAplicar: (s: IaSugestao) => void }) {
+  const [aberto, setAberto] = useState(false);
+  if (!conferivel(d)) return null;
+  if (!d.ia_status || precisaConferir(d)) {
+    return <Etiqueta>{d.ia_em ? "IA: arquivo novo, conferir" : "IA: não conferido"}</Etiqueta>;
+  }
+  const r = d.ia_resultado;
+  const s = SELO_IA[d.ia_status];
+  const temDetalhe = !!r && (r.divergencias.length > 0 || r.alertas.length > 0 || r.sugestoes.length > 0 || d.ia_status !== "ok");
+  return (
+    <span className="inline-flex flex-col gap-1 w-full">
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <Etiqueta tom={s.tom}>{s.texto}</Etiqueta>
+        {r && r.alertas.length > 0 && d.ia_status === "ok" && <Etiqueta tom="aviso">{r.alertas.length} alerta{r.alertas.length > 1 ? "s" : ""}</Etiqueta>}
+        {temDetalhe && (
+          <button className="text-[11px] underline" style={{ color: "var(--ink3)" }} onClick={() => setAberto((x) => !x)}>
+            {aberto ? "esconder" : "ver o que a IA viu"}
+          </button>
+        )}
+      </span>
+      {aberto && r && (
+        <span className="block rounded-lg p-2 text-[12px] space-y-1" style={{ background: "var(--card)", border: "1px solid var(--line)", color: "var(--ink2)" }}>
+          <span className="block font-semibold" style={{ color: "var(--ink)" }}>{r.resumo}</span>
+          {r.divergencias.map((x, i) => (
+            <span key={i} className="block" style={{ color: "var(--err-ink)" }}>
+              ⚠ {ROTULO_CAMPO[x.campo] || x.campo}: ficha <b>{x.cadastro || "—"}</b> × documento <b>{x.documento || "—"}</b>
+            </span>
+          ))}
+          {r.alertas.map((a, i) => <span key={i} className="block" style={{ color: "var(--warn-ink)" }}>• {a}</span>)}
+          {r.sugestoes.map((x) => (
+            <span key={x.alvo + x.campo} className="flex flex-wrap items-center gap-2">
+              <span>{x.rotulo} lido no documento: <b>{x.campo.includes("validade") || x.campo === "nascimento" ? x.valor.split("-").reverse().join("/") : x.valor}</b> (a ficha está vazia)</span>
+              <button className="text-[11px] font-semibold underline" style={{ color: "var(--rel-ink)" }} onClick={() => onAplicar(x)}>Usar no cadastro</button>
+            </span>
+          ))}
+          {d.ia_em && <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>Conferido em {new Date(d.ia_em).toLocaleString("pt-BR")}</span>}
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ── O painel ────────────────────────────────────────────────────────────────
 
 export default function DocumentosPainel({ pessoas, viagemId, clienteId }: {
@@ -156,6 +212,8 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId }: {
   const [subir, setSubir] = useState(false);
   const [recusando, setRecusando] = useState<Documento | null>(null);
   const [motivo, setMotivo] = useState("");
+  const [iaOcupado, setIaOcupado] = useState<string | null>(null); // id do doc, ou "lote"
+  const [iaAviso, setIaAviso] = useState<string | null>(null);
 
   // Formulário de envio pelo time
   const [quem, setQuem] = useState("");
@@ -206,6 +264,27 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId }: {
     finally { setEnviando(false); if (arquivoRef.current) arquivoRef.current.value = ""; }
   }
 
+  async function conferirUm(d: Documento) {
+    setIaOcupado(d.id); setErro(null); setIaAviso(null);
+    try { await conferirDocumento(d.id); await carregar(); }
+    catch (e) { setErro(e instanceof Error ? e.message : "A IA não conferiu."); }
+    finally { setIaOcupado(null); }
+  }
+
+  async function conferirTodos() {
+    setIaOcupado("lote"); setErro(null); setIaAviso(null);
+    try {
+      const r = await conferirPendentes(clienteId ? { clienteId } : { viagemId });
+      setIaAviso(r.conferidos === 0
+        ? "Nada pendente: todos os documentos já foram conferidos."
+        : `Conferidos ${r.conferidos}: ${r.ok} ok, ${r.divergentes} divergente(s), ${r.ilegiveis} ilegível(is), ${r.erros} com erro.${r.restam > 0 ? ` Faltam ${r.restam} — clique de novo.` : ""}${r.aviso ? ` ${r.aviso}` : ""}`);
+      await carregar();
+    } catch (e) { setErro(e instanceof Error ? e.message : "A IA não conferiu."); }
+    finally { setIaOcupado(null); }
+  }
+
+  const docsIa = (docs ?? []) as DocumentoIa[];
+  const pendentesIa = docsIa.filter(precisaConferir).length;
   const vencendo = dataVencendo(docs);
   const pendentes = pedidos.filter((p) => !p.concluido_em && new Date(p.expira_em) > new Date());
 
@@ -214,7 +293,13 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId }: {
       <div className="flex flex-wrap gap-2">
         <Botao variante="primario" onClick={() => setPedir(true)} disabled={!pessoas.length}>Pedir documentos ao cliente</Botao>
         <Botao onClick={() => setSubir(true)} disabled={!pessoas.length}>Enviar arquivo</Botao>
+        {pendentesIa > 0 && (
+          <Botao onClick={() => void conferirTodos()} disabled={!!iaOcupado} title="A IA lê cada documento e compara com a ficha do cliente">
+            {iaOcupado === "lote" ? "Conferindo…" : `Conferir ${pendentesIa} pendente${pendentesIa > 1 ? "s" : ""} com IA`}
+          </Botao>
+        )}
       </div>
+      {iaAviso && <Aviso tom="ok">{iaAviso}</Aviso>}
 
       {pendentes.length > 0 && (
         <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
@@ -238,7 +323,7 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId }: {
         <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Nenhum documento ainda.</p>
       ) : (
         <ul className="space-y-1.5">
-          {docs.map((d) => (
+          {docsIa.map((d) => (
             <li key={d.id} className="flex flex-wrap items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--card2)", border: "1px solid var(--line)" }}>
               <span className="flex-1 min-w-[180px]">
                 <span className="flex flex-wrap items-center gap-1.5">
@@ -251,6 +336,7 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId }: {
                   {d.arquivo_nome} {d.tamanho ? `· ${tamanhoLegivel(d.tamanho)}` : ""} · {new Date(d.enviado_em).toLocaleDateString("pt-BR")}
                   {d.status === "recusado" && d.motivo_recusa ? ` · motivo: ${d.motivo_recusa}` : ""}
                 </span>
+                <span className="block mt-1"><SeloIa d={d} onAplicar={(s) => void acao(() => aplicarSugestao(d, s))} /></span>
               </span>
               <label className="flex items-center gap-1 text-[12px]" style={{ color: "var(--ink3)" }} title="Validade do documento">
                 validade
@@ -263,6 +349,11 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId }: {
                 />
               </label>
               <Botao variante="fantasma" onClick={() => void abrir(d)}>Abrir</Botao>
+              {conferivel(d) && d.status !== "recusado" && (
+                <Botao variante="fantasma" disabled={!!iaOcupado} onClick={() => void conferirUm(d)} title="A IA lê o documento e compara com a ficha">
+                  {iaOcupado === d.id ? "Conferindo…" : d.ia_em ? "Conferir de novo" : "Conferir com IA"}
+                </Botao>
+              )}
               {d.status !== "aprovado" && <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => void acao(() => revisarDocumento(d.id, "aprovado", currentUser?.id ?? ""))}>Aprovar</Botao>}
               {d.status !== "recusado" && <Botao variante="fantasma" onClick={() => { setRecusando(d); setMotivo(""); }}>Recusar</Botao>}
               <Botao variante="fantasma" title="Apagar" onClick={() => { if (window.confirm(`Apagar ${TIPOS_DOC[d.tipo]} (${d.arquivo_nome})? Não dá para desfazer.`)) void acao(() => apagarDocumento(d)); }}>×</Botao>

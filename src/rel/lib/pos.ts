@@ -241,6 +241,9 @@ export const STATUS_CHAMADO: Record<StatusChamado, string> = {
   resolvido: "Resolvido",
 };
 
+/** Assuntos do chamado — agrupam os KPIs ("por assunto"). */
+export const CATEGORIAS_CHAMADO = ["Documento", "Aéreo", "Hospedagem", "Pagamento", "Roteiro", "Reclamação", "Cancelamento", "Outro"] as const;
+
 export interface Chamado {
   id: string;
   numero: number;
@@ -258,12 +261,14 @@ export interface Chamado {
   atualizado_em: string;
   resolvido_em: string | null;
   resolucao: string | null;
+  /** Assunto agrupável (Documento, Aéreo…) — 0106. */
+  categoria?: string | null;
   cliente?: { nome: string } | null;
   viagem?: { titulo: string } | null;
   responsavel?: { name: string } | null;
 }
 
-export type ChamadoInput = Partial<Pick<Chamado, "cliente_id" | "viagem_id" | "conversa_id" | "descricao" | "prazo" | "responsavel_id" | "resolucao">> & {
+export type ChamadoInput = Partial<Pick<Chamado, "cliente_id" | "viagem_id" | "conversa_id" | "descricao" | "prazo" | "responsavel_id" | "resolucao" | "categoria">> & {
   assunto: string; prioridade: Prioridade; status?: StatusChamado;
 };
 
@@ -300,9 +305,10 @@ export async function salvarChamado(c: ChamadoInput, id?: string): Promise<Chama
     conversa_id: c.conversa_id || null,
     responsavel_id: c.responsavel_id || null,
   };
+  if (c.categoria !== undefined) corpo.categoria = c.categoria || null;
   if (c.status) {
     corpo.status = c.status;
-    corpo.resolvido_em = c.status === "resolvido" ? new Date().toISOString() : null;
+    // resolvido_em é do banco (gatilho da 0107): editar um chamado já resolvido não muda a data.
     if (c.status === "resolvido") corpo.resolucao = c.resolucao?.trim() || null;
   }
   const res = id
@@ -314,7 +320,7 @@ export async function salvarChamado(c: ChamadoInput, id?: string): Promise<Chama
 
 export async function resolverChamado(id: string, resolucao: string) {
   const { error } = await supabase.from("rel_chamados")
-    .update({ status: "resolvido", resolvido_em: new Date().toISOString(), resolucao: resolucao.trim() || null }).eq("id", id);
+    .update({ status: "resolvido", resolucao: resolucao.trim() || null }).eq("id", id);
   if (error) throw new Error(error.message);
 }
 

@@ -9,6 +9,11 @@
 // modelo quando a janela de 24h fechou), ligar à ficha e resolver.
 //
 // Atualiza sozinho (a cada poucos segundos) enquanto a aba está aberta.
+//
+// Sprint 13/10: no topo, duas visões — "Conversas" (o WhatsApp) e "Chamados"
+// (o kanban dos protocolos). De dentro da conversa dá pra abrir um chamado já
+// ligado a ela, e os chamados abertos dela aparecem logo abaixo do cabeçalho.
+// O "Prazo de resposta" saiu daqui e foi pra aba de KPIs.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
@@ -21,6 +26,10 @@ import { buscarClientes, formatarTelefone, type Cliente } from "../lib/clientes"
 import { Aviso, Avatar, Botao, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import ModeloModal from "./ModeloModal";
 import ChamadoModal from "../chamados/ChamadoModal";
+import ChamadoDetalhe from "../chamados/ChamadoDetalhe";
+import ChamadosPage from "../chamados/ChamadosPage";
+import { assuntoSugerido, chamadosDaConversa, type ChamadoK } from "../lib/chamados";
+import { STATUS_CHAMADO, situacaoDoPrazo } from "../lib/pos";
 
 const FILTROS: { id: Filtro; rotulo: string }[] = [
   { id: "esperando", rotulo: "Esperando" },
@@ -63,21 +72,31 @@ function Lista({ filtro, setFiltro, busca, setBusca, conversas, selecionada, abr
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="p-3 space-y-2.5 border-b" style={{ borderColor: "var(--line)" }}>
-        <div className="flex gap-1 overflow-x-auto">
+        <div className="flex gap-1 overflow-x-auto" role="group" aria-label="Filtrar conversas">
           {FILTROS.map((f) => (
             <button
               key={f.id}
               onClick={() => setFiltro(f.id)}
-              className="px-2.5 py-1.5 rounded-lg text-[12px] font-semibold whitespace-nowrap"
-              style={filtro === f.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)" } : { color: "var(--ink3)" }}
+              aria-pressed={filtro === f.id}
+              className="rel-linha px-2.5 py-2 rounded-lg text-[12.5px] font-semibold whitespace-nowrap"
+              style={filtro === f.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)" } : { color: "var(--ink2)" }}
             >
               {f.rotulo}
             </button>
           ))}
         </div>
-        <Entrada value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar nome, telefone ou mensagem" style={{ padding: "7px 10px", fontSize: 13 }} />
+        <Entrada value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar nome, telefone ou mensagem" aria-label="Buscar conversas" style={{ padding: "8px 10px", fontSize: 13 }} />
       </div>
-      <ul className="flex-1 overflow-y-auto min-h-0">
+      <ul className="flex-1 overflow-y-auto min-h-0" aria-busy={carregando && conversas.length === 0}>
+        {conversas.length === 0 && carregando && [0, 1, 2, 3].map((i) => (
+          <li key={`esq${i}`} className="px-3 py-3 flex gap-2.5" aria-hidden style={{ borderBottom: "1px solid var(--line2)" }}>
+            <span className="w-9 h-9 rounded-full animate-pulse flex-shrink-0" style={{ background: "var(--card2)" }} />
+            <span className="flex-1 space-y-1.5 pt-0.5">
+              <span className="block h-3 w-2/5 rounded animate-pulse" style={{ background: "var(--card2)" }} />
+              <span className="block h-3 w-4/5 rounded animate-pulse" style={{ background: "var(--card2)" }} />
+            </span>
+          </li>
+        ))}
         {conversas.length === 0 && !carregando && (
           <li className="p-6 text-center text-[13px]" style={{ color: "var(--ink3)" }}>
             {filtro === "esperando" ? "Ninguém esperando resposta. 🎉" : "Nenhuma conversa aqui."}
@@ -90,7 +109,8 @@ function Lista({ filtro, setFiltro, busca, setBusca, conversas, selecionada, abr
               <button
                 onClick={() => abrir(c.id)}
                 className="rel-linha w-full text-left px-3 py-2.5 flex gap-2.5 items-start"
-                style={{ background: sel ? "var(--rel-soft)" : undefined, borderBottom: "1px solid var(--line2)" }}
+                aria-current={sel ? "true" : undefined}
+                style={{ background: sel ? "var(--rel-soft)" : undefined, borderBottom: "1px solid var(--line2)", boxShadow: sel ? "inset 3px 0 0 var(--rel)" : undefined }}
               >
                 <Avatar nome={nomeDa(c)} tamanho={36} />
                 <span className="flex-1 min-w-0">
@@ -198,8 +218,9 @@ function LigarFicha({ aberto, conversa, onFechar, onLigado }: { aberto: boolean;
 
 // ── Conversa ────────────────────────────────────────────────────────────────
 
-function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
+function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente, onAbrirViagem, onAbrirConversa }: {
   id: string; meuId: string; onVoltar: () => void; onMudou: () => void; onAbrirCliente: (id: string) => void;
+  onAbrirViagem?: (id: string) => void; onAbrirConversa: (id: string) => void;
 }) {
   const [c, setC] = useState<Conversa | null>(null);
   const [msgs, setMsgs] = useState<Mensagem[]>([]);
@@ -211,6 +232,8 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
   const [modelo, setModelo] = useState(false);
   const [ligar, setLigar] = useState(false);
   const [chamado, setChamado] = useState(false);
+  const [chamados, setChamados] = useState<ChamadoK[]>([]);
+  const [verChamado, setVerChamado] = useState<string | null>(null);
   const fimRef = useRef<HTMLDivElement>(null);
   const arquivoRef = useRef<HTMLInputElement>(null);
   const qtdAnterior = useRef(0);
@@ -231,6 +254,8 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   useEffect(() => { listarRespostas().then(setRespostas); }, []);
+  const carregarChamados = useCallback(() => { chamadosDaConversa(id).then(setChamados).catch(() => setChamados([])); }, [id]);
+  useEffect(() => { setChamados([]); carregarChamados(); }, [carregarChamados]);
   useRepetir(() => { void recarregar(); }, 5000);
 
   // Desce pro fim quando chega mensagem nova.
@@ -242,7 +267,11 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
     }
   }, [msgs.length, c?.nao_lidas, id]);
 
-  if (!c) return <div className="flex-1 flex items-center justify-center text-[13px]" style={{ color: "var(--ink3)" }}>{erro || "Carregando…"}</div>;
+  if (!c) return (
+    <div className="flex-1 flex items-center justify-center p-6 text-[13px]" style={{ color: "var(--ink3)" }} aria-live="polite">
+      {erro ? <Aviso tom="erro">{erro}</Aviso> : "Carregando a conversa…"}
+    </div>
+  );
 
   async function acao(fn: () => Promise<unknown>) {
     setErro(null);
@@ -277,13 +306,15 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
   }
 
   const minha = c.atendente_id === meuId;
+  // Assunto sugerido: a última coisa que o CLIENTE escreveu.
+  const ultimaDoCliente = [...msgs].reverse().find((m) => m.direcao !== "out" && m.texto)?.texto;
   const nome = nomeDa(c);
 
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Cabeçalho */}
       <div className="flex flex-wrap items-center gap-2 px-3 sm:px-4 py-2.5 border-b" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
-        <button onClick={onVoltar} className="lg:hidden p-1 -ml-1" aria-label="Voltar" style={{ color: "var(--ink2)" }}>
+        <button onClick={onVoltar} className="lg:hidden w-10 h-10 -ml-2 inline-flex items-center justify-center rounded-lg" aria-label="Voltar para a fila" style={{ color: "var(--ink2)" }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
         </button>
         <Avatar nome={nome} tamanho={34} />
@@ -297,7 +328,7 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <Botao variante="fantasma" onClick={() => setChamado(true)} title="Pedido que não se resolve na hora (trocar voo, 2ª via…)">Abrir chamado</Botao>
+          <Botao onClick={() => setChamado(true)} title="Pedido que não se resolve na hora (trocar voo, 2ª via…)" style={{ color: "var(--rel-ink)" }}>+ Abrir chamado</Botao>
           {!minha && (
             <Botao onClick={() => acao(() => assumirConversa(c.id, meuId))}>
               {c.atendente_id ? `Assumir (era de ${c.atendente_nome?.split(" ")[0] ?? "outro"})` : "Assumir"}
@@ -308,6 +339,23 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
             : <Botao onClick={() => acao(() => reabrirConversa(c.id))}>Reabrir</Botao>}
         </div>
       </div>
+
+      {chamados.length > 0 && (
+        <div className="px-3 sm:px-4 py-1.5 flex flex-wrap items-center gap-1.5 border-b" style={{ borderColor: "var(--line)", background: "var(--card2)" }}>
+          <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Chamados abertos</span>
+          {chamados.map((ch) => {
+            const p = situacaoDoPrazo(ch.prazo, ch.status);
+            return (
+              <button key={ch.id} onClick={() => setVerChamado(ch.id)} className="rel-card rel-linha px-2 py-1 text-[12px] flex items-center gap-1.5 max-w-[320px]"
+                style={p.tom === "erro" ? { borderColor: "var(--err-line)" } : undefined} title={ch.proximo_passo ? `Próximo passo: ${ch.proximo_passo}` : undefined}>
+                <b style={{ color: "var(--ink3)" }}>#{ch.numero}</b>
+                <span className="truncate" style={{ color: "var(--ink)" }}>{ch.assunto}</span>
+                <span style={{ color: p.tom === "erro" ? "var(--err-ink)" : "var(--ink3)" }}>· {STATUS_CHAMADO[ch.status].split(" ")[0]}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {c.aguardando_desde && (
         <div className="px-4 py-1.5 text-[12px] flex items-center gap-2" style={{ background: c.minutos_esperando > c.meta_min ? "var(--err-bg)" : "var(--warn-bg)", color: c.minutos_esperando > c.meta_min ? "var(--err-ink)" : "var(--warn-ink)" }}>
@@ -352,10 +400,12 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
               </div>
             )}
             <div className="flex items-end gap-1.5">
-              <button title="Respostas prontas" onClick={() => setVerRespostas((v) => !v)} className="p-2 rounded-lg" style={{ color: verRespostas ? "var(--rel-ink)" : "var(--ink3)" }}>
+              <button title="Respostas prontas" aria-label="Respostas prontas" aria-expanded={verRespostas} onClick={() => setVerRespostas((v) => !v)}
+                className="rel-linha w-10 h-10 inline-flex items-center justify-center rounded-lg flex-shrink-0" style={{ color: verRespostas ? "var(--rel-ink)" : "var(--ink2)", background: verRespostas ? "var(--rel-soft)" : undefined }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
               </button>
-              <button title="Anexar arquivo (JPG, PNG, PDF, MP4 — até 3 MB)" onClick={() => arquivoRef.current?.click()} className="p-2 rounded-lg" style={{ color: "var(--ink3)" }}>
+              <button title="Anexar arquivo (JPG, PNG, PDF, MP4 — até 3 MB)" aria-label="Anexar arquivo" disabled={enviando} onClick={() => arquivoRef.current?.click()}
+                className="rel-linha w-10 h-10 inline-flex items-center justify-center rounded-lg flex-shrink-0 disabled:opacity-50" style={{ color: "var(--ink2)" }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
               </button>
               <input ref={arquivoRef} type="file" hidden accept="image/jpeg,image/png,application/pdf,video/mp4,audio/mpeg,audio/ogg" onChange={(e) => void anexar(e.target.files?.[0])} />
@@ -365,6 +415,7 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void enviar(); } }}
                 rows={Math.min(5, Math.max(1, texto.split("\n").length))}
                 placeholder="Escreva… (Enter envia, Shift+Enter pula linha)"
+                aria-label="Mensagem"
                 className="rel-input flex-1 resize-none"
               />
               <Botao variante="primario" onClick={() => void enviar()} disabled={enviando || !texto.trim()}>
@@ -384,9 +435,17 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
       />
       <ChamadoModal
         aberto={chamado}
-        inicial={{ clienteId: c.cliente_id ?? undefined, conversaId: c.id, assunto: "" }}
+        inicial={{ clienteId: c.cliente_id ?? undefined, conversaId: c.id, assunto: assuntoSugerido(ultimaDoCliente) }}
         onFechar={() => setChamado(false)}
-        onSalvo={() => setChamado(false)}
+        onSalvo={() => { setChamado(false); carregarChamados(); }}
+      />
+      <ChamadoDetalhe
+        id={verChamado}
+        onFechar={() => setVerChamado(null)}
+        onMudou={carregarChamados}
+        onAbrirCliente={onAbrirCliente}
+        onAbrirViagem={onAbrirViagem}
+        onAbrirConversa={onAbrirConversa}
       />
       <LigarFicha aberto={ligar} conversa={c} onFechar={() => setLigar(false)} onLigado={() => { setLigar(false); void recarregar(); onMudou(); }} />
     </div>
@@ -395,13 +454,28 @@ function Painel({ id, meuId, onVoltar, onMudou, onAbrirCliente }: {
 
 // ── Página ──────────────────────────────────────────────────────────────────
 
-export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onMudou }: {
+export type VisaoAtendimento = "conversas" | "chamados";
+
+export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onAbrirViagem, onMudou, visao: visaoFora, onTrocarVisao }: {
   conversaId: string | null;
   abrir: (id: string | null) => void;
   onAbrirCliente: (id: string) => void;
+  onAbrirViagem?: (id: string) => void;
   onMudou: () => void;
+  /** Visão controlada por quem chama (ex.: rota #rel/chamados). Sem isso, a página lembra sozinha. */
+  visao?: VisaoAtendimento;
+  onTrocarVisao?: (v: VisaoAtendimento) => void;
 }) {
   const { currentUser } = useQsAuth();
+  const [visaoLocal, setVisaoLocal] = useState<VisaoAtendimento>(() => (localStorage.getItem("rel_atend_visao") as VisaoAtendimento) || "conversas");
+  // Conversa aberta pelo endereço sempre mostra as conversas.
+  const visao: VisaoAtendimento = conversaId ? "conversas" : visaoFora ?? visaoLocal;
+  function trocarVisao(v: VisaoAtendimento) {
+    localStorage.setItem("rel_atend_visao", v);
+    setVisaoLocal(v);
+    if (v === "chamados" && conversaId) abrir(null);
+    onTrocarVisao?.(v);
+  }
   const [filtro, setFiltro] = useState<Filtro>("esperando");
   const [busca, setBusca] = useState("");
   const [conversas, setConversas] = useState<Conversa[]>([]);
@@ -424,17 +498,46 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onM
   useEffect(() => { statusDoNumero().then(setNumero).catch(() => setNumero(null)); }, []);
 
   const mudou = () => { void carregar(); onMudou(); };
+  const esperando = conversas.filter((c) => c.aguardando_desde).length;
+
+  const abas = (
+    <div className="flex items-end gap-1 px-3 sm:px-4 h-11 border-b" style={{ borderColor: "var(--line)", background: "var(--card)" }} role="tablist" aria-label="Atendimento">
+      {([["conversas", "Conversas"], ["chamados", "Chamados"]] as [VisaoAtendimento, string][]).map(([v, r]) => (
+        <button key={v} onClick={() => trocarVisao(v)} role="tab" aria-selected={visao === v}
+          className="h-11 px-3 text-[13px] font-semibold flex items-center gap-1.5 -mb-px transition-colors"
+          style={visao === v
+            ? { color: "var(--rel-ink)", borderBottom: "2px solid var(--rel)" }
+            : { color: "var(--ink2)", borderBottom: "2px solid transparent" }}>
+          {r}
+          {v === "conversas" && filtro === "esperando" && esperando > 0 && <Etiqueta tom="aviso">{esperando}</Etiqueta>}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (visao === "chamados") {
+    return (
+      <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8">
+        {abas}
+        <div className="px-4 sm:px-6 lg:px-8 py-5">
+          <ChamadosPage embutido onAbrirCliente={onAbrirCliente} onAbrirViagem={onAbrirViagem}
+            onAbrirConversa={(id) => { trocarVisao("conversas"); abrir(id); }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8">
+      {abas}
       {numero && !numero.conectado && (
         <div className="px-4 py-2 text-[13px]" style={{ background: "var(--warn-bg)", color: "var(--warn-ink)" }}>
           O número de WhatsApp do Relacionamento ainda não está conectado. O admin conecta no Comercial em
           <b> Configurações → WhatsApp (Meta) → Conectar → "Número do Relacionamento"</b>.
         </div>
       )}
-      {/* Altura da tela inteira (no celular, menos a barra do topo de 56px). */}
-      <div className="flex h-[calc(100dvh-56px)] lg:h-[100dvh]">
+      {/* Altura da tela inteira (no celular, menos a barra do topo de 56px), menos as abas (44px). */}
+      <div className="flex h-[calc(100dvh-100px)] lg:h-[calc(100dvh-44px)]">
         <aside
           className={`${conversaId ? "hidden lg:flex" : "flex"} flex-col w-full lg:w-[340px] lg:flex-shrink-0 border-r min-h-0`}
           style={{ borderColor: "var(--line)", background: "var(--card)" }}
@@ -446,7 +549,8 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onM
         </aside>
         <section className={`${conversaId ? "flex" : "hidden lg:flex"} flex-1 flex-col min-w-0 min-h-0`}>
           {conversaId ? (
-            <Painel id={conversaId} meuId={meuId} onVoltar={() => abrir(null)} onMudou={mudou} onAbrirCliente={onAbrirCliente} />
+            <Painel id={conversaId} meuId={meuId} onVoltar={() => abrir(null)} onMudou={mudou} onAbrirCliente={onAbrirCliente}
+              onAbrirViagem={onAbrirViagem} onAbrirConversa={(id) => abrir(id)} />
           ) : (
             <div className="flex-1 flex items-center justify-center">
               <Vazio titulo="Escolha uma conversa" texto="Comece por quem está esperando há mais tempo — é o que conta no prazo de resposta." />

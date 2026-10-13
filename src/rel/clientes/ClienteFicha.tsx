@@ -7,12 +7,17 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   PARENTESCOS, carregarCliente, carregarFamilia, carregarHistorico, formatarCpf, formatarData,
-  formatarTelefone, idade, mesesParaVencer, type Auditoria, type Cliente,
+  formatarTelefone, idade, mesesParaVencer, CANAIS_CONTATO, CAMPOS_CADASTRO, REGRAS_PADRAO, carregarRegras,
+  listarContatos, metricaDoCliente, moeda, type Auditoria, type Cliente, type Contato, type Metrica, type RegrasCategorias,
 } from "../lib/clientes";
+import ViagensComAGente from "./ViagensComAGente";
+import ArquivosDoCliente from "./ArquivosDoCliente";
+import ContatoModal from "./ContatoModal";
+import CategoriaChip from "./CategoriaChip";
+import { categoriasDe } from "./KpisClientes";
 import { Aviso, Avatar, Botao, Etiqueta } from "../ui";
 import ClienteForm from "./ClienteForm";
 import ModeloModal from "../atendimento/ModeloModal";
-import ViagensDoCliente from "../viagens/ViagensDoCliente";
 import DocumentosDoCliente from "../viagens/DocumentosDoCliente";
 import ChamadosDoCliente from "../chamados/ChamadosDoCliente";
 import ChamadoModal from "../chamados/ChamadoModal";
@@ -76,6 +81,11 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [mandarModelo, setMandarModelo] = useState(false);
   const [novoChamado, setNovoChamado] = useState(false);
   const [versaoChamados, setVersaoChamados] = useState(0);
+  const [metrica, setMetrica] = useState<Metrica | null>(null);
+  const [erroMetrica, setErroMetrica] = useState<string | null>(null);
+  const [regras, setRegras] = useState<RegrasCategorias>(REGRAS_PADRAO);
+  const [contatos, setContatos] = useState<Contato[]>([]);
+  const [novoContato, setNovoContato] = useState(false);
 
   const carregar = useCallback(async () => {
     try {
@@ -85,6 +95,10 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       setErro(null);
       const idTitular = cli.titular_id ?? cli.id;
       conversasDoCliente(cli.id).then(setConversas).catch(() => setConversas([]));
+      setErroMetrica(null);
+      metricaDoCliente(cli.id).then(setMetrica)
+        .catch((e) => { setMetrica(null); setErroMetrica(e instanceof Error ? e.message : "erro desconhecido"); });
+      listarContatos(cli.id).then(setContatos).catch(() => setContatos([]));
       const [tit, fam, hist] = await Promise.all([
         cli.titular_id ? carregarCliente(cli.titular_id) : Promise.resolve(null),
         carregarFamilia(idTitular),
@@ -100,6 +114,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
 
   useEffect(() => { setC(null); void carregar(); }, [carregar]);
 
+  useEffect(() => { carregarRegras().then((r) => setRegras(r.regras)).catch(() => undefined); }, []);
+
   useEffect(() => {
     supabase.from("qs_users").select("id, name").then(({ data }) => {
       setUsuarios(Object.fromEntries((data ?? []).map((u: { id: string; name: string }) => [u.id, u.name])));
@@ -107,7 +123,20 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   }, []);
 
   if (erro) return <div className="max-w-3xl mx-auto"><Aviso tom="erro">{erro}</Aviso></div>;
-  if (!c) return <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando ficha…</p>;
+  if (!c) return (
+    <div className="max-w-3xl mx-auto space-y-4" aria-busy="true" aria-label="Carregando a ficha">
+      <div className="rel-card p-5 flex items-center gap-4">
+        <span className="w-[52px] h-[52px] rounded-full animate-pulse" style={{ background: "var(--card2)" }} />
+        <span className="flex-1 space-y-2">
+          <span className="block h-4 w-1/2 rounded animate-pulse" style={{ background: "var(--card2)" }} />
+          <span className="block h-3 w-1/3 rounded animate-pulse" style={{ background: "var(--card2)" }} />
+        </span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="rel-card h-40 animate-pulse" /><div className="rel-card h-40 animate-pulse" />
+      </div>
+    </div>
+  );
 
   const meses = mesesParaVencer(c.passaporte_validade);
   const anos = idade(c.nascimento);
@@ -116,7 +145,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <button onClick={onVoltar} className="inline-flex items-center gap-1 text-[13px] font-semibold" style={{ color: "var(--ink3)" }}>
+      <button onClick={onVoltar} className="inline-flex items-center gap-1 text-[13px] font-semibold py-2 pr-2 -my-1" style={{ color: "var(--ink2)" }}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
         Clientes
       </button>
@@ -134,6 +163,13 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-bold leading-tight" style={{ color: "var(--ink)" }}>{c.nome}</h1>
           <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {metrica && <CategoriaChip categoria={metrica.categoria} cats={categoriasDe(regras)} />}
+            {metrica && (
+              <Etiqueta tom={metrica.dias_sem_contato == null || metrica.dias_sem_contato > metrica.meta_contato_dias ? "aviso" : "rel"}>
+                {metrica.dias_sem_contato == null ? "nunca teve contato" : metrica.dias_sem_contato === 0 ? "contato hoje" : `${metrica.dias_sem_contato} dias sem contato`}
+              </Etiqueta>
+            )}
+            {metrica && metrica.valor_total > 0 && <Etiqueta>LTV {moeda(metrica.valor_total)}</Etiqueta>}
             {anos !== null && <Etiqueta>{anos} anos</Etiqueta>}
             {c.titular_id && titular && <Etiqueta tom="rel">{PARENTESCOS[c.parentesco ?? "outro"]} de {titular.nome.split(" ")[0]}</Etiqueta>}
             {ehTitular && familia.length > 0 && <Etiqueta tom="rel">Titular · {familia.length} familiar{familia.length > 1 ? "es" : ""}</Etiqueta>}
@@ -143,11 +179,20 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         {!c.mesclado_em_id && (
           <div className="flex flex-wrap gap-1.5">
             <RecompraBotao clienteId={c.id} compacto />
+            <Botao onClick={() => setNovoContato(true)}>Registrar contato</Botao>
             <Botao onClick={() => setNovoChamado(true)}>Abrir chamado</Botao>
             <Botao onClick={() => setEditando(true)}>Editar</Botao>
           </div>
         )}
       </div>
+
+      {erroMetrica && <div className="mb-4"><Aviso tom="erro">Categoria, LTV e cadastro não carregaram ({erroMetrica}).</Aviso></div>}
+      {metrica && !metrica.cadastro_completo && !c.mesclado_em_id && (
+        <Aviso>
+          <b>Cadastro incompleto.</b> Falta: {metrica.faltando.map((x) => CAMPOS_CADASTRO[x] ?? x).join(", ")}.{" "}
+          <button className="underline font-semibold" onClick={() => setEditando(true)}>Completar</button>
+        </Aviso>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Secao titulo="Documentos">
@@ -245,8 +290,29 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       </Secao>
 
       {/* Próximas fases: deixam claro onde as coisas vão aparecer */}
-      <ViagensDoCliente clienteId={c.id} onAbrirViagem={onAbrirViagem} />
+      <ViagensComAGente clienteId={c.id} onAbrirViagem={onAbrirViagem} />
       <DocumentosDoCliente clienteId={c.id} />
+      <ArquivosDoCliente clienteId={c.id} bloqueado={!!c.mesclado_em_id} />
+
+      <Secao titulo="Contatos registrados" acao={!c.mesclado_em_id ? (
+        <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setNovoContato(true)}>+ Registrar</Botao>
+      ) : undefined}>
+        {contatos.length === 0 ? (
+          <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>
+            Nenhum contato registrado à mão. Conversa pelo WhatsApp do Relacionamento e chamado já contam sozinhos.
+          </p>
+        ) : (
+          <ol className="space-y-1.5 py-1">
+            {contatos.map((k) => (
+              <li key={k.id} className="text-[13px]" style={{ color: "var(--ink)" }}>
+                <b>{CANAIS_CONTATO[k.canal]}</b>
+                <span style={{ color: "var(--ink3)" }}> · {new Date(k.feito_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}{k.autor_id && usuarios[k.autor_id] ? ` · ${usuarios[k.autor_id].split(" ")[0]}` : ""}</span>
+                {k.resumo && <span className="block text-[12px]" style={{ color: "var(--ink2)" }}>{k.resumo}</span>}
+              </li>
+            ))}
+          </ol>
+        )}
+      </Secao>
       <ChamadosDoCliente key={versaoChamados} clienteId={c.id} />
 
       <Secao titulo="Histórico da ficha">
@@ -271,6 +337,13 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         onFechar={() => setEditando(false)}
         onSalvo={() => { setEditando(false); void carregar(); }}
         onAbrirFicha={(x) => { setEditando(false); onAbrir(x); }}
+      />
+      <ContatoModal
+        aberto={novoContato}
+        clienteId={c.id}
+        nome={c.nome}
+        onFechar={() => setNovoContato(false)}
+        onSalvo={() => { setNovoContato(false); void carregar(); }}
       />
       <ChamadoModal
         aberto={novoChamado}

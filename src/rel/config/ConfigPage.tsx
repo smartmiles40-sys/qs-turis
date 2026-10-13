@@ -14,6 +14,7 @@ import {
   type ConfigRel, type NumeroRel, type Resposta,
 } from "../lib/whatsapp";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
+import CategoriasConfig from "./CategoriasConfig";
 
 const DIAS = [
   { n: 1, r: "Seg" }, { n: 2, r: "Ter" }, { n: 3, r: "Qua" }, { n: 4, r: "Qui" },
@@ -180,6 +181,10 @@ export default function ConfigPage() {
           </div>
         )}
       </fieldset>
+
+      <Bloco titulo="Categorias de cliente" sub="Bronze, Silver, Black e Green: quantas viagens (ou quanto gasto) cada uma pede, e de quantos em quantos dias o time deve falar com o cliente.">
+        <CategoriasConfig pode={pode} />
+      </Bloco>
 
       <Bloco titulo="Respostas prontas" sub='Textos que o time usa sempre. Escreva {nome} onde vai o primeiro nome do cliente.'>
         <ul className="space-y-1.5">

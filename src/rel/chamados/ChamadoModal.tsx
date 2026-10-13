@@ -12,7 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { buscarClientes, carregarCliente, type Cliente } from "../lib/clientes";
 import {
-  PRIORIDADES, STATUS_CHAMADO, deInputLocal, equipeRelacionamento, paraInputLocal, salvarChamado,
+  CATEGORIAS_CHAMADO, PRIORIDADES, STATUS_CHAMADO, deInputLocal, equipeRelacionamento, paraInputLocal, salvarChamado,
   type Chamado, type Prioridade, type StatusChamado,
 } from "../lib/pos";
 import { Aviso, Botao, Campo, Entrada, Modal } from "../ui";
@@ -31,6 +31,7 @@ export default function ChamadoModal({ aberto, onFechar, onSalvo, chamado, inici
   const { currentUser } = useQsAuth();
   const [assunto, setAssunto] = useState("");
   const [descricao, setDescricao] = useState("");
+  const [categoria, setCategoria] = useState("");
   const [prioridade, setPrioridade] = useState<Prioridade>("normal");
   const [prazo, setPrazo] = useState("");
   const [prazoManual, setPrazoManual] = useState(false);
@@ -53,6 +54,7 @@ export default function ChamadoModal({ aberto, onFechar, onSalvo, chamado, inici
     setBusca("");
     setAssunto(chamado?.assunto ?? inicial?.assunto ?? "");
     setDescricao(chamado?.descricao ?? "");
+    setCategoria(chamado?.categoria ?? "");
     const p = chamado?.prioridade ?? "normal";
     setPrioridade(p);
     setPrazo(paraInputLocal(chamado?.prazo ?? prazoPela(p)));
@@ -101,7 +103,7 @@ export default function ChamadoModal({ aberto, onFechar, onSalvo, chamado, inici
     setErro(null);
     try {
       const salvo = await salvarChamado({
-        assunto, descricao, prioridade, prazo: deInputLocal(prazo),
+        assunto, descricao, categoria: categoria || null, prioridade, prazo: deInputLocal(prazo),
         cliente_id: cliente?.id ?? null, viagem_id: viagemId || null,
         conversa_id: chamado?.conversa_id ?? inicial?.conversaId ?? null,
         responsavel_id: responsavel || null, status, resolucao,
@@ -130,6 +132,13 @@ export default function ChamadoModal({ aberto, onFechar, onSalvo, chamado, inici
       <div className="space-y-4">
         <Campo rotulo="Assunto *">
           <Entrada value={assunto} onChange={(e) => setAssunto(e.target.value)} maxLength={140} placeholder="Ex.: Trocar a data do voo de volta" autoFocus={!chamado} />
+        </Campo>
+        <Campo rotulo="Assunto do chamado" dica="Agrupa os chamados nos KPIs.">
+          <select className="rel-input" value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+            <option value="">Escolha…</option>
+            {CATEGORIAS_CHAMADO.map((k) => <option key={k} value={k}>{k}</option>)}
+            {categoria && !(CATEGORIAS_CHAMADO as readonly string[]).includes(categoria) && <option value={categoria}>{categoria}</option>}
+          </select>
         </Campo>
         <Campo rotulo="Detalhes">
           <textarea className="rel-input" rows={3} value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="O que o cliente pediu, o que já foi feito…" />

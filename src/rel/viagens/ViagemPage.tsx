@@ -18,6 +18,7 @@ import { buscarClientes, formatarTelefone, mesesParaVencer, type Cliente } from 
 import { conversasDoCliente, type Conversa } from "../lib/whatsapp";
 import { Aviso, Avatar, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 import DocumentosPainel from "./DocumentosPainel";
+import { RevisaoViagem, TrechosViagem } from "./TrechosViagem";
 import { TOM_FASE } from "./ViagensDoCliente";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
@@ -299,6 +300,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               <span className="text-[13px]" style={{ color: "var(--ink2)" }}>{quandoEmbarca(v)}</span>
               {v.tarefas_atrasadas > 0 && <Etiqueta tom="erro">{v.tarefas_atrasadas} tarefa{v.tarefas_atrasadas > 1 ? "s" : ""} atrasada{v.tarefas_atrasadas > 1 ? "s" : ""}</Etiqueta>}
             </div>
+            {ativa && <div className="mt-3"><RevisaoViagem viagemId={v.id} equipe={equipe} /></div>}
           </div>
           <div className="flex flex-wrap gap-1.5">
             {v.bitrix_deal_id && (
@@ -390,6 +392,10 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
             );
           })}
         </ul>
+      </Secao>
+
+      <Secao titulo="Trechos (voos, trens, transfers)">
+        <TrechosViagem viagemId={v.id} ativa={ativa} />
       </Secao>
 
       <Secao titulo="Jornada do cliente">
