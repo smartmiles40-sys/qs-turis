@@ -351,7 +351,9 @@ function camposDaViagem(deal, mapa) {
   const tituloCard = texto(deal.TITLE);
   const generico = !tituloCard || /^negocia[cç][aã]o\s*#?\d*$/i.test(tituloCard);
   const rotuloVenda = rotulo(mapa, F.tipoVenda, deal[F.tipoVenda]);
-  const titulo = expedicao || destino || (generico ? `${rotuloVenda || 'Venda'} — #${deal.ID}` : tituloCard);
+  const reserva = `${rotuloVenda || 'Venda'} — #${deal.ID}`;
+  const bom = (t) => (t && t.trim().length >= 2 ? t.trim() : null); // o banco exige 2+ letras
+  const titulo = bom(expedicao) || bom(destino) || (generico ? reserva : bom(tituloCard)) || reserva;
   return {
     titulo: titulo.slice(0, 200),
     destino,
@@ -620,7 +622,7 @@ export async function sincronizar() {
   // ── Histórico: os funis de venda desde o PRIMEIRO negócio, um pedaço por rodada ──
   // Cada funil é marcado em h.prontos quando termina; funil novo (ou a mudança
   // pra cópia completa dos dados, versão 2) faz o histórico voltar a rodar.
-  const VERSAO_HISTORICO = 2;
+  const VERSAO_HISTORICO = 3; // 3: refaz o que falhou por título curto (13/10)
   if (h.versao !== VERSAO_HISTORICO) Object.assign(h, { versao: VERSAO_HISTORICO, prontos: [], atual: null, ultimo_id: 0, idx: 0, feito: false, contagem: {} });
   h.prontos = h.prontos || [];
   // Pronto = funil + etapas de venda: se aparecer etapa nova no funil, ele roda de novo.
