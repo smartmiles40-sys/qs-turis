@@ -219,7 +219,8 @@ async function funis() {
     // "Vendas Realizadas" (funil antigo): o funil INTEIRO é de venda — a etapa
     // "Vendas Operações" tinha 57 vendas que ficavam de fora (conferido com o
     // sistema de Expedições em 13/10). Toda etapa que não é de falha conta.
-    const funilSoDeVenda = /vendas?\s+realizadas?/i.test(c.nome);
+    // Operações também (Bruno, 13/10: "lá é quase só venda de relacionamento, e alguns clientes novos").
+    const funilSoDeVenda = /vendas?\s+realizadas?|opera[cç][aãoõ]/i.test(c.nome);
     for (const e of etapas || []) {
       const sem = e?.EXTRA?.SEMANTICS || e?.SEMANTICS || null;
       const nome = String(e?.NAME || '');
