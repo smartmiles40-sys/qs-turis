@@ -81,7 +81,7 @@ export interface Tarefa {
   feita_por: string | null;
 }
 
-export type TipoDocumento = "passaporte" | "rg_cnh" | "visto" | "vacina" | "seguro" | "voucher" | "contrato" | "comprovante" | "foto" | "outro";
+export type TipoDocumento = "passaporte" | "rg_cnh" | "visto" | "vacina" | "seguro" | "voucher" | "bilhete" | "contrato" | "comprovante" | "foto" | "outro";
 
 export const TIPOS_DOC: Record<TipoDocumento, string> = {
   passaporte: "Passaporte",
@@ -89,7 +89,8 @@ export const TIPOS_DOC: Record<TipoDocumento, string> = {
   visto: "Visto",
   vacina: "Comprovante de vacina",
   seguro: "Seguro viagem",
-  voucher: "Voucher / bilhete",
+  voucher: "Voucher (hotel, passeio)",
+  bilhete: "Bilhete aéreo / passagem",
   contrato: "Contrato",
   comprovante: "Comprovante de pagamento",
   foto: "Foto / imagem",

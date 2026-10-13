@@ -42,14 +42,20 @@
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { bx, bitrixConfigurado } from './_bitrixLead.js';
 import { getSupabaseUserId } from './_wa.js';
+import { baixarArquivos, enfileirarArquivos } from './_relBitrixArquivos.js';
 
 const ORCAMENTO_MS = 50_000;
 const ETAPAS_VENDA = new Set(['WON', 'UC_70BW8E']);
 const ETAPAS_CANCELA = new Set(['UC_NV92A7', 'LOSE']);
 
+// "Processo Pós Venda - Viagem" (Bruno, 13/10): TODO cliente que comprou passa
+// por ele, e os bilhetes dos voos estão nos cards. Ali qualquer etapa que não
+// seja de falha conta — e o card quase sempre é a mesma viagem da venda.
+const POS_VENDA = /p[oó]s.?venda/i;
+
 // Funis extras, achados pelo nome (Comercial 1 é sempre a categoria 0).
 // "Vendas Realizadas" (funil antigo, fev–abr/2026) entrou a pedido do Bruno.
-const FUNIS_EXTRAS = [/comercial/i, /relacionamento/i, /opera[cç][aãoõ]/i, /vendas?\s+realizadas?/i];
+const FUNIS_EXTRAS = [/comercial/i, /relacionamento/i, /opera[cç][aãoõ]/i, /vendas?\s+realizadas?/i, POS_VENDA];
 // Funis de lead (ainda não compraram) nunca viram cliente do Relacionamento.
 const FUNIS_FORA = /pr[eé].?venda|live|tecnologia|marketing|recrut|teste/i;
 const NOME_VENDA = /vendas?\s+realizadas?|ganh[oa]|em\s+emiss/i;
@@ -209,14 +215,17 @@ async function funis() {
     if (c.id === '0' || !FUNIS_EXTRAS.some((r) => r.test(c.nome)) || FUNIS_FORA.test(c.nome)) continue;
     const etapas = await bx('crm.status.list', { filter: { ENTITY_ID: `DEAL_STAGE_${c.id}` } }, 12_000);
     const venda = new Set(), cancela = new Set();
+    const posVenda = POS_VENDA.test(c.nome);
     for (const e of etapas || []) {
       const sem = e?.EXTRA?.SEMANTICS || e?.SEMANTICS || null;
       const nome = String(e?.NAME || '');
       const sid = String(e?.STATUS_ID || '');
+      const falha = sem === 'failure' || sem === 'F' || sid.endsWith(':LOSE');
+      if (posVenda) { if (!falha) venda.add(sid); continue; }   // pós-venda nunca cancela viagem
       if (sem === 'success' || sem === 'S' || NOME_VENDA.test(nome)) venda.add(sid);
       else if (sid.endsWith(':LOSE') || ((sem === 'failure' || sem === 'F') && NOME_CANCELA.test(nome))) cancela.add(sid);
     }
-    if (venda.size) lista.push({ id: c.id, nome: c.nome, venda, cancela });
+    if (venda.size) lista.push({ id: c.id, nome: c.nome, venda, cancela, posVenda });
   }
   cacheFunis = { v: lista, em: Date.now() };
   return lista;
@@ -384,16 +393,26 @@ async function viagemLigada(dealId) {
 }
 
 /** Viagem ativa do cliente (titular ou passageiro) com o mesmo embarque e o mesmo lugar. */
-async function mesmaViagemDoCliente(clienteId, novos) {
-  if (!clienteId || !novos.data_embarque) return null;
-  const cols = 'id,destino,expedicao';
-  const titular = (await rest(`rel_viagens?select=${cols}&cliente_id=eq.${clienteId}&data_embarque=eq.${novos.data_embarque}&status=eq.ativa&limit=10`)) || [];
+async function mesmaViagemDoCliente(clienteId, novos, { frouxo = false } = {}) {
+  if (!clienteId || (!novos.data_embarque && !frouxo)) return null;
+  const cols = 'id,destino,expedicao,data_embarque';
+  const filtroData = !frouxo ? `&data_embarque=eq.${novos.data_embarque}` : '';
+  const titular = (await rest(`rel_viagens?select=${cols}&cliente_id=eq.${clienteId}${filtroData}&status=eq.ativa&limit=50`)) || [];
   const pass = (await rest(`rel_viagem_passageiros?select=viagem_id&cliente_id=eq.${clienteId}&limit=200`)) || [];
   const ids = [...new Set(pass.map((p) => p.viagem_id))].filter((x) => !titular.some((t) => t.id === x));
   const comoPassageiro = ids.length
-    ? (await rest(`rel_viagens?select=${cols}&id=in.(${ids.join(',')})&data_embarque=eq.${novos.data_embarque}&status=eq.ativa`)) || []
+    ? (await rest(`rel_viagens?select=${cols}&id=in.(${ids.join(',')})${filtroData}&status=eq.ativa`)) || []
     : [];
-  return [...titular, ...comoPassageiro].find((v) => mesmoLugar(v, novos)) || null;
+  const todas = [...titular, ...comoPassageiro];
+  if (!frouxo) return todas.find((v) => mesmoLugar(v, novos)) || null;
+  // Pós-venda: o card pode vir sem data ou com a data um pouco diferente.
+  const ms = (d) => (d ? new Date(d).getTime() : 0);
+  const perto = (a, b) => !a || !b || Math.abs(ms(a) - ms(b)) <= 7 * 86_400_000;
+  const casam = todas.filter((v) => mesmoLugar(v, novos) && perto(v.data_embarque, novos.data_embarque));
+  if (casam.length) return casam.sort((a, b) => Math.abs(ms(a.data_embarque) - ms(novos.data_embarque)) - Math.abs(ms(b.data_embarque) - ms(novos.data_embarque)))[0];
+  // Card sem destino e sem data, e o cliente tem UMA viagem só: é ela.
+  if (!novos.destino && !novos.expedicao && !novos.data_embarque && todas.length === 1) return todas[0];
+  return null;
 }
 
 /** ID pai válido = número, ≠ 0, ≠ o próprio negócio. */
@@ -407,6 +426,15 @@ function idPai(deal) {
  * `profundidade` evita laço (pai que aponta pro filho).
  */
 async function importarDeal(deal, ctx, profundidade = 0) {
+  const r = await importarDealCore(deal, ctx, profundidade);
+  // Arquivos do card (bilhetes, vouchers...) vão pra fila de download (0110).
+  if (r?.viagemId || r?.clienteId) {
+    try { ctx.conta.arquivos += await enfileirarArquivos(deal, ctx.mapa.__defs, r); }
+    catch (e) { console.warn(`[rel-viagens] arquivos do negócio ${deal.ID}:`, e?.message); }
+  }
+}
+
+async function importarDealCore(deal, ctx, profundidade = 0) {
   const id = String(deal.ID);
   const conta = ctx.conta;
 
@@ -419,9 +447,9 @@ async function importarDeal(deal, ctx, profundidade = 0) {
     }
     // Negócio só LIGADO a uma viagem de outro funil: desfaz a ligação, a viagem segue.
     if (!v) await rest(`rel_viagem_deals?bitrix_deal_id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', prefer: 'return=minimal' });
-    return;
+    return null;
   }
-  if (!ctx.qualquerEtapa && !ehVenda(deal, ctx.funis)) return;
+  if (!ctx.qualquerEtapa && !ehVenda(deal, ctx.funis)) return null;
   const funil = funilDe(deal, ctx.funis);
 
   const contato = await contatoDoBitrix(deal.CONTACT_ID, ctx.contatos);
@@ -455,7 +483,7 @@ async function importarDeal(deal, ctx, profundidade = 0) {
           if (e?.status !== 409) throw e;
         }
       }
-      return;
+      return { viagemId: vPai.id, clienteId };
     }
     // Pai não é venda nem existe: segue como viagem própria.
   }
@@ -465,22 +493,27 @@ async function importarDeal(deal, ctx, profundidade = 0) {
   const atual = await viagemDoDeal(id);
   if (!atual) {
     // Já ligado a uma viagem de outro funil: quem manda nos dados é o negócio principal.
-    if (await viagemLigada(id)) return;
-    const mesma = await mesmaViagemDoCliente(clienteId, novos);
+    const ligada = await viagemLigada(id);
+    const mesma = ligada || await mesmaViagemDoCliente(clienteId, novos, { frouxo: !!funil?.posVenda });
     if (mesma) {
+      // Fica ligado, e a cópia dos campos do card (os voos, no pós-venda) fica guardada na ligação.
       await rest('rel_viagem_deals?on_conflict=bitrix_deal_id', {
         method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
-        body: { bitrix_deal_id: id, viagem_id: mesma.id, funil: funil?.nome || null, motivo: 'mesmo cliente, embarque e destino' },
+        body: {
+          bitrix_deal_id: id, viagem_id: mesma.id, funil: funil?.nome || null,
+          motivo: funil?.posVenda ? 'card do pós-venda da mesma viagem' : 'mesmo cliente, embarque e destino',
+          bitrix_dados: novos.bitrix_dados, bitrix_lido_em: new Date().toISOString(),
+        },
       });
-      conta.ligados++;
-      return;
+      if (!ligada) conta.ligados++;
+      return { viagemId: mesma.id, clienteId };
     }
-    await rest('rel_viagens', {
-      method: 'POST', prefer: 'return=minimal',
+    const criada = await rest('rel_viagens', {
+      method: 'POST', prefer: 'return=representation',
       body: { ...novos, cliente_id: clienteId, bitrix_deal_id: id, origem: 'bitrix', status: 'ativa', bitrix_lido_em: new Date().toISOString() },
     });
     conta.criados++;
-    return;
+    return { viagemId: criada?.[0]?.id || null, clienteId };
   }
   // Atualiza só o que veio preenchido e mudou; reativa se tinha cancelado.
   const patch = {};
@@ -500,6 +533,7 @@ async function importarDeal(deal, ctx, profundidade = 0) {
     await rest(`rel_viagens?id=eq.${atual.id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' });
     conta.atualizados++;
   }
+  return { viagemId: atual.id, clienteId: atual.cliente_id || clienteId };
 }
 
 // ── A rodada ────────────────────────────────────────────────────────────────
@@ -547,7 +581,7 @@ async function pagina(filtro, ordem, start) {
 
 export async function sincronizar() {
   const inicio = Date.now();
-  const conta = { lidos: 0, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, ligados: 0, erros: 0, completo: true };
+  const conta = { lidos: 0, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, ligados: 0, arquivos: 0, baixados: 0, erros: 0, completo: true };
   const ctx = { conta, contatos: new Map(), mapa: await rotulos(), funis: await funis(), qualquerEtapa: false };
   const cursor = await lerCursor();
   const acabouTempo = () => Date.now() - inicio > ORCAMENTO_MS;
@@ -622,16 +656,18 @@ export async function sincronizar() {
   // ── Histórico: os funis de venda desde o PRIMEIRO negócio, um pedaço por rodada ──
   // Cada funil é marcado em h.prontos quando termina; funil novo (ou a mudança
   // pra cópia completa dos dados, versão 2) faz o histórico voltar a rodar.
-  const VERSAO_HISTORICO = 3; // 3: refaz o que falhou por título curto (13/10)
+  const VERSAO_HISTORICO = 4; // 3: título curto · 4: arquivos dos cards (bilhetes) — 13/10
   if (h.versao !== VERSAO_HISTORICO) Object.assign(h, { versao: VERSAO_HISTORICO, prontos: [], atual: null, ultimo_id: 0, idx: 0, feito: false, contagem: {} });
   h.prontos = h.prontos || [];
   // Pronto = funil + etapas de venda: se aparecer etapa nova no funil, ele roda de novo.
   const marca = (f) => `${f.id}:${[...f.venda].sort().join("|")}`;
   const faltam = () => ctx.funis.filter((f) => !h.prontos.includes(marca(f)));
   if (faltam().length) h.feito = false;
+  // O histórico para aos 35 s: o resto da rodada é dos arquivos dos cards.
+  const acabouHist = () => Date.now() - inicio > ORCAMENTO_MS - 15_000;
   if (!h.feito) {
     const fs = ctx.funis;
-    while (faltam().length && !acabouTempo()) {
+    while (faltam().length && !acabouHist()) {
       const f = faltam()[0];
       if (h.atual !== marca(f)) { h.atual = marca(f); h.ultimo_id = 0; }
       const { lista } = await pagina({ CATEGORY_ID: Number(f.id), STAGE_ID: [...f.venda], '>ID': h.ultimo_id }, { ID: 'ASC' }, 0);
@@ -640,7 +676,7 @@ export async function sincronizar() {
       for (const d of lista) {
         await processar(d);
         h.ultimo_id = Math.max(h.ultimo_id, Number(d.ID));
-        if (acabouTempo()) break;
+        if (acabouHist()) break;
       }
     }
     h.funis = fs.map((f) => `${f.id}=${f.nome} [${[...f.venda].join(',')}]`);
@@ -650,12 +686,19 @@ export async function sincronizar() {
       conta.completo = false;
       conta.historico = `${faltam()[0].nome}: até o negócio #${h.ultimo_id}`;
     }
-    h.contagem = Object.fromEntries(['lidos', 'criados', 'atualizados', 'passageiros', 'ligados', 'erros']
+    h.contagem = Object.fromEntries(['lidos', 'criados', 'atualizados', 'passageiros', 'ligados', 'arquivos', 'baixados', 'erros']
       .map((k) => [k, (h.contagem?.[k] || 0) + (conta[k] || 0)]));
     novoCursor.historico = h;
   }
 
   await gravarCursor(novoCursor);
+
+  // Arquivos dos cards (bilhetes...): com o tempo que sobrar da rodada.
+  try {
+    const b = await baixarArquivos(() => Date.now() - inicio < ORCAMENTO_MS - 8_000);
+    conta.baixados = b.baixados;
+    if (b.falhas) conta.arquivos_falhas = b.falhas;
+  } catch (e) { console.warn('[rel-viagens] baixar arquivos:', e?.message); }
   return conta;
 }
 
@@ -710,7 +753,7 @@ export default async function handler(req, res) {
       let deal = null;
       try { deal = await bx('crm.deal.get', { id: dealId }); } catch { /* segue */ }
       if (!deal) return res.status(404).json({ error: `Negócio ${dealId} não encontrado no Bitrix.` });
-      const conta = { lidos: 1, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, ligados: 0, erros: 0, completo: true };
+      const conta = { lidos: 1, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, ligados: 0, arquivos: 0, baixados: 0, erros: 0, completo: true };
       await importarDeal(deal, { conta, contatos: new Map(), mapa: await rotulos(), funis: await funis(), qualquerEtapa: true });
       const v = (await viagemDoDeal(idPai(deal) || dealId)) || (await viagemLigada(dealId));
       return res.status(200).json({ ...conta, viagemId: v?.id || null });
