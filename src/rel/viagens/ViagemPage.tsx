@@ -18,6 +18,7 @@ import { buscarClientes, formatarTelefone, mesesParaVencer, type Cliente } from 
 import { conversasDoCliente, type Conversa } from "../lib/whatsapp";
 import { Aviso, Avatar, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 import DocumentosPainel from "./DocumentosPainel";
+import RevisaoIaViagem from "./RevisaoIaViagem";
 import { RevisaoViagem, TrechosViagem } from "./TrechosViagem";
 import { TOM_FASE } from "./ViagensDoCliente";
 
@@ -239,6 +240,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   id: string; onVoltar: () => void; onAbrirCliente: (id: string) => void; onAbrirConversa: (conversaId: string) => void;
 }) {
   const [v, setV] = useState<Viagem | null>(null);
+  // a revisão da IA grava trechos: muda a chave pra lista de trechos recarregar
+  const [versaoTrechos, setVersaoTrechos] = useState(0);
   const [pass, setPass] = useState<Passageiro[]>([]);
   const [equipe, setEquipe] = useState<{ id: string; name: string }[]>([]);
   const [conversa, setConversa] = useState<Conversa | null>(null);
@@ -394,8 +397,10 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
         </ul>
       </Secao>
 
+      <RevisaoIaViagem viagemId={v.id} onRevisado={() => setVersaoTrechos((n) => n + 1)} />
+
       <Secao titulo="Trechos (voos, trens, transfers)">
-        <TrechosViagem viagemId={v.id} ativa={ativa} />
+        <TrechosViagem key={versaoTrechos} viagemId={v.id} ativa={ativa} />
       </Secao>
 
       <Secao titulo="Jornada do cliente">

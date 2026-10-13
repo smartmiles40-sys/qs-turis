@@ -18,9 +18,15 @@ export interface AdminUserInput {
   is_active?: boolean;
 }
 
-type AdminResult = { success: boolean; error?: string; user?: unknown };
+type AdminResult = { success: boolean; error?: string; user?: unknown; equipe?: MembroEquipe[] };
 
-async function callAdmin(action: "create" | "update" | "delete", user: AdminUserInput): Promise<AdminResult> {
+/** Pessoa do time do Relacionamento (listar_equipe — 13/10/2026). */
+export interface MembroEquipe {
+  id: string; name: string; email: string | null; role: UserRole; setores: Setor[] | null;
+  is_active: boolean; whatsapp_number: string | null; ultimo_acesso: string | null; so_relacionamento: boolean;
+}
+
+async function callAdmin(action: "create" | "update" | "delete" | "listar_equipe", user: AdminUserInput): Promise<AdminResult> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) {
     return { success: false, error: "Sessão expirada. Faça login novamente para gerenciar usuários." };
@@ -36,3 +42,5 @@ async function callAdmin(action: "create" | "update" | "delete", user: AdminUser
 export const createQsAuthUser = (u: AdminUserInput) => callAdmin("create", u);
 export const updateQsAuthUser = (u: AdminUserInput) => callAdmin("update", u);
 export const deleteQsAuthUser = (id: string) => callAdmin("delete", { id });
+/** Time do Relacionamento (admin ou gestora do Relacionamento). */
+export const listarEquipeRel = () => callAdmin("listar_equipe", {});

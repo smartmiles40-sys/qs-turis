@@ -125,6 +125,8 @@ export function TrechosViagem({ viagemId, ativa }: { viagemId: string; ativa: bo
                   <p className="text-[14px] font-semibold" style={{ color: "var(--ink)" }}>
                     {TIPOS_TRECHO[t.tipo]}{t.numero ? ` ${t.numero}` : ""}
                     {(t.origem || t.destino) && <span className="font-normal" style={{ color: "var(--ink2)" }}> · {[t.origem, t.destino].filter(Boolean).join(" → ")}</span>}
+                    {t.fonte === "ia" && <span className="ml-2 align-middle"><Etiqueta tom="rel">lido pela IA</Etiqueta></span>}
+                    {t.fonte === "expedicoes" && <span className="ml-2 align-middle"><Etiqueta>do sistema de Expedições</Etiqueta></span>}
                   </p>
                   <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
                     {dataHora(t.partida_em)}{t.chegada_em ? ` até ${dataHora(t.chegada_em)}` : ""}

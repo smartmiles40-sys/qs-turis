@@ -39,17 +39,19 @@ import RecompraPage from "./pos/RecompraPage";
 import KpisPage from "./kpis/KpisPage";
 import WhatsAppPage from "./whatsapp/WhatsAppPage";
 import BotaoWhatsApp, { useWhatsAppConectado } from "./whatsapp/BotaoWhatsApp";
+import EquipePage from "./equipe/EquipePage";
+import { podeGerirRelacionamento } from "./equipe/permissao";
 
 type Rota =
   | { tela: "inicio" }
-  | { tela: "atendimento"; id?: string } | { tela: "chamados" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" }
+  | { tela: "atendimento"; id?: string } | { tela: "chamados" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" }
   | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
   | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
   | { tela: "config" };
 type Tela = Rota["tela"];
 
-const SIMPLES: Tela[] = ["inicio", "chamados", "prazo", "kpis", "whatsapp", "clientes", "duplicados", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
+const SIMPLES: Tela[] = ["inicio", "chamados", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
 
 function lerRota(): Rota {
   const h = window.location.hash.replace(/^#\/?/, "");
@@ -79,6 +81,7 @@ const ICONES: Record<string, ReactNode> = {
   inicio: <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   atendimento: <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />,
   clientes: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
+  equipe: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6" /><path d="M22 11h-6" /></>,
   kpis: <><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></>,
   viagens: <><path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" /></>,
   pos: <><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" /></>,
@@ -302,6 +305,10 @@ export default function RelApp() {
       { id: "pesquisas", rotulo: "Pesquisas" },
       { id: "recompra", rotulo: "Recompra" },
     ] },
+    // Time (13/10): a gestora do Relacionamento cadastra e cuida do time.
+    ...(podeGerirRelacionamento(currentUser) ? [{ id: "time", rotulo: "Time", icone: "equipe", itens: [
+      { id: "equipe" as Tela, rotulo: "Funcionários" },
+    ] }] : []),
   ];
 
   function alternar(g: string, valor?: boolean) {
@@ -499,6 +506,7 @@ export default function RelApp() {
           {rota.tela === "pesquisas" && <PesquisasPage onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} />}
           {rota.tela === "recompra" && <RecompraPage onAbrirCliente={abrirCliente} />}
           {rota.tela === "config" && <ConfigPage />}
+          {rota.tela === "equipe" && <EquipePage />}
         </div>
       </main>
 

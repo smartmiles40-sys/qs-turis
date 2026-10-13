@@ -107,8 +107,8 @@ export default function ConfigPage() {
           </p>
         ) : (
           <Aviso>
-            Nenhum número conectado. O admin conecta no <b>Comercial → Configurações → WhatsApp (Meta) → + Conectar WhatsApp Business</b>,
-            escolhendo <b>"Número do Relacionamento (pós-venda)"</b>. O número precisa estar no app WhatsApp Business do celular.
+            Nenhum número conectado. O admin ou a gestora do Relacionamento conecta em <b>Atendimento → WhatsApp (conexão)</b>
+            (botão verde "Conectar WhatsApp" no Início). O número precisa estar no app WhatsApp Business do celular.
           </Aviso>
         )}
       </Bloco>

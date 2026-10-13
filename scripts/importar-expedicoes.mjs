@@ -314,7 +314,7 @@ for (const p of pax) {
       let chegada = quando(vo.chegada, e.data_embarque);
       if (chegada && chegada < partida) chegada = null;
       return {
-        viagem_id: v.id, ref_externa: `exp-voo:${vo.id}`,
+        viagem_id: v.id, ref_externa: `exp-voo:${vo.id}`, fonte: 'expedicoes',
         tipo: /intern/i.test(vo.trecho || '') ? 'voo_interno' : 'voo_internacional',
         descricao: vo.trecho || null, origem: vo.origem || null, destino: vo.destino || null,
         partida_em: partida, chegada_em: chegada, companhia: vo.companhia || null, numero: vo.numero_voo || null,

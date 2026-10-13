@@ -50,6 +50,8 @@ export default function WhatsAppPage() {
   const { currentUser } = useQsAuth();
   const pode = currentUser?.role === "admin" || (currentUser?.role === "gestor" && setoresDe(currentUser).includes("relacionamento"));
   const ehAdmin = currentUser?.role === "admin";
+  // Apontar o webhook: o servidor (wa-config) já aceita gestor; a gestora do Rel também resolve.
+  const podeWebhook = pode;
 
   const [painel, setPainel] = useState<PainelMeta | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -134,7 +136,7 @@ export default function WhatsAppPage() {
           : (
             <Aviso>
               <span className="font-semibold">A Meta não está entregando as mensagens ao QS.</span>{" "}
-              {ehAdmin && (
+              {podeWebhook && (
                 <Botao className="ml-2" disabled={ocupado} onClick={() => void rodar(async () => {
                   const r = await apontarWebhookDaMeta();
                   if (!r.ok) throw new Error(r.error || "A Meta recusou.");

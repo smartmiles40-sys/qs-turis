@@ -290,7 +290,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       </Secao>
 
       {/* Próximas fases: deixam claro onde as coisas vão aparecer */}
-      <ViagensComAGente clienteId={c.id} onAbrirViagem={onAbrirViagem} />
+      <ViagensComAGente clienteId={c.id} onAbrirViagem={onAbrirViagem} metrica={metrica} cats={categoriasDe(regras)} />
       <DocumentosDoCliente clienteId={c.id} />
       <ArquivosDoCliente clienteId={c.id} bloqueado={!!c.mesclado_em_id} />
 

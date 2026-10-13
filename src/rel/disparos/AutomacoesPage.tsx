@@ -13,6 +13,7 @@ import {
 } from "../lib/disparos";
 import { formatarTelefone } from "../lib/clientes";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "../ui";
+import { podeGerirRelacionamento } from "../equipe/permissao";
 import ModeloEVariaveis, { mapaCompleto, useModelos } from "./ModeloEVariaveis";
 
 type Rascunho = { id?: string; nome: string; gatilho: Gatilho; dias: number; modelo_nome: string; modelo_idioma: string; params: MapaVariaveis };
@@ -151,7 +152,8 @@ function QuemRecebe({ automacao, onFechar }: { automacao: Automacao | null; onFe
 
 export default function AutomacoesPage() {
   const { currentUser } = useQsAuth();
-  const podeRodar = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  // admin ou gestor(a) do Relacionamento (o servidor confere de novo)
+  const podeRodar = podeGerirRelacionamento(currentUser);
   const [lista, setLista] = useState<Automacao[] | null>(null);
   const [editando, setEditando] = useState<Rascunho | null>(null);
   const [vendo, setVendo] = useState<Automacao | null>(null);

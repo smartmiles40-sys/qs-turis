@@ -460,6 +460,8 @@ export interface Trecho {
   numero: string | null;
   localizador: string | null;
   checkin_abre_em: string | null;
+  /** De onde veio o trecho (0115): manual, expedicoes, bitrix ou ia. */
+  fonte?: "manual" | "expedicoes" | "bitrix" | "ia";
   checkin_feito_em: string | null;
   checkin_feito_por: string | null;
   // da view rel_trechos_v

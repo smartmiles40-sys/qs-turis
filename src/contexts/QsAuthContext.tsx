@@ -110,6 +110,9 @@ export function setoresDe(user: Pick<SdrUser, "role" | "setores"> | null | undef
   if (!user) return [];
   if (user.role === "admin") return ["comercial", "relacionamento"];
   if (user.role === "relacionamento") return ["relacionamento"];
+  // Gestor(a) do Relacionamento (13/10/2026): gestor só com o setor Relacionamento
+  // fica só nele — não ganha o Comercial por tabela.
+  if (user.role === "gestor" && user.setores?.length && user.setores.includes("relacionamento") && !user.setores.includes("comercial")) return ["relacionamento"];
   const s: Setor[] = user.setores?.length ? user.setores : ["comercial"];
   return s.includes("comercial") ? s : ["comercial", ...s];
 }

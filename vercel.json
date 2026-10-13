@@ -76,6 +76,9 @@
     "api/rel-docs-ia.js": {
       "maxDuration": 60
     },
+    "api/rel-viagem-ia.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -104,6 +107,10 @@
     {
       "path": "/api/rel-docs-ia",
       "schedule": "15 */2 * * *"
+    },
+    {
+      "path": "/api/rel-viagem-ia",
+      "schedule": "20 */3 * * *"
     }
   ],
   "headers": [

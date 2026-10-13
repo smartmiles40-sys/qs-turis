@@ -6,7 +6,13 @@
 // Só um ADMIN autenticado pode chamar: o front envia o access_token da sessão,
 // que é verificado aqui; depois conferimos que o perfil dele tem role='admin'.
 //
-// Body (JSON): { access_token, action: 'create'|'update'|'delete', user: {...} }
+// GESTORA DO RELACIONAMENTO (13/10/2026, Bruno: "a Tainara poder adicionar
+// outros funcionários"): gestor ativo com setores = só ['relacionamento'] também
+// chama, mas PRESO ao time do Relacionamento — só cria/edita gente que fica com
+// setores ['relacionamento'] e papel 'relacionamento' (atendente) ou 'gestor';
+// nunca mexe em admin nem em quem tem o Comercial; não exclui (desativa).
+//
+// Body (JSON): { access_token, action: 'create'|'update'|'delete'|'listar_equipe', user: {...} }
 // -----------------------------------------------------------------------------
 import { rest } from './_supabaseAdmin.js';
 
@@ -88,14 +94,42 @@ export default async function handler(req, res) {
   const callerId = await verifyCaller(access_token);
   if (!callerId || !idValido(callerId)) return res.status(401).json({ success: false, error: 'Sessão inválida' });
 
-  // 2) Autorização: precisa ser admin
+  // 2) Autorização: admin, ou gestora do Relacionamento (escopo travado abaixo)
+  let caller;
   try {
-    const rows = await rest(`qs_users?select=role&id=eq.${callerId}&limit=1`);
-    if (!rows || !rows[0] || rows[0].role !== 'admin') {
-      return res.status(403).json({ success: false, error: 'Apenas administradores' });
-    }
+    const rows = await rest(`qs_users?select=role,setores,is_active&id=eq.${callerId}&limit=1`);
+    caller = rows?.[0] || null;
   } catch {
     return res.status(500).json({ success: false, error: 'Falha ao validar permissão' });
+  }
+  const ehAdmin = caller?.role === 'admin' && caller?.is_active !== false;
+  const ehGestorRel = !ehAdmin && ehGestoraDoRelacionamento(caller);
+  if (!ehAdmin && !ehGestorRel) {
+    return res.status(403).json({ success: false, error: 'Apenas administradores' });
+  }
+
+  // Lista do time do Relacionamento, com o último acesso (vem da conta de auth).
+  if (action === 'listar_equipe') {
+    try {
+      const time = await rest('qs_users?select=id,name,email,role,setores,is_active,whatsapp_number&role=neq.admin&setores=cs.{relacionamento}&order=name.asc');
+      const lista = await Promise.all((time || []).map(async (u) => {
+        let ultimo = null;
+        try { ultimo = (await authAdmin(`/${u.id}`, { method: 'GET' }))?.last_sign_in_at || null; } catch { /* sem conta de auth */ }
+        return { ...u, ultimo_acesso: ultimo, so_relacionamento: soRelacionamento(u) };
+      }));
+      return res.status(200).json({ success: true, equipe: lista });
+    } catch (err) {
+      console.error('[admin-user] listar_equipe', err?.message);
+      return res.status(500).json({ success: false, error: 'Não consegui listar o time.' });
+    }
+  }
+
+  // Trava da gestora: confere o pedido ANTES de qualquer escrita.
+  if (ehGestorRel) {
+    const recusa = await recusaDaGestora({ action, user, callerId, caller });
+    if (recusa) return res.status(403).json({ success: false, error: recusa });
+    // o resultado é sempre "só Relacionamento"
+    if (user && (action === 'create' || user.role !== undefined || user.setores !== undefined)) user.setores = ['relacionamento'];
   }
 
   try {
@@ -153,8 +187,8 @@ export default async function handler(req, res) {
         if (user.is_active === false) {
           return res.status(400).json({ success: false, error: 'Você não pode desativar a própria conta' });
         }
-        if (user.role !== undefined && user.role !== 'admin') {
-          return res.status(400).json({ success: false, error: 'Você não pode remover o próprio papel de admin' });
+        if (user.role !== undefined && user.role !== caller.role) {
+          return res.status(400).json({ success: false, error: ehAdmin ? 'Você não pode remover o próprio papel de admin' : 'Você não pode mudar o próprio papel' });
         }
       }
       // atualiza o perfil
@@ -204,6 +238,43 @@ export default async function handler(req, res) {
     console.error('[admin-user]', err?.status || '', err?.message || err);
     return res.status(err?.status || 500).json({ success: false, error: err?.message || 'Falha na operação' });
   }
+}
+
+/** Gestor(a) ativo(a) cujo único setor é o Relacionamento. */
+function ehGestoraDoRelacionamento(u) {
+  return !!u && u.is_active !== false && u.role === 'gestor' && soRelacionamento(u);
+}
+function soRelacionamento(u) {
+  const s = Array.isArray(u?.setores) ? u.setores : [];
+  return s.includes('relacionamento') && !s.includes('comercial');
+}
+
+/**
+ * O que a gestora do Relacionamento NÃO pode fazer. Devolve a frase da recusa,
+ * ou null se pode. Alvo = só gente do time do Relacionamento (sem Comercial,
+ * nunca admin); papel final = atendente ('relacionamento') ou 'gestor'.
+ */
+async function recusaDaGestora({ action, user, callerId }) {
+  const PAPEIS_DELA = new Set(['relacionamento', 'gestor']);
+  if (action === 'delete') return 'Pra tirar alguém do time, desative a conta (só o admin exclui).';
+  if (action === 'create') {
+    if (!PAPEIS_DELA.has(user?.role || 'relacionamento')) return 'Você só cadastra atendente ou gestor(a) do Relacionamento.';
+    if (!user.role) user.role = 'relacionamento';
+    return null;
+  }
+  if (action === 'update') {
+    if (!idValido(user?.id)) return null; // o fluxo abaixo responde 400
+    if (user.role !== undefined && !PAPEIS_DELA.has(user.role)) return 'Você só dá o papel de atendente ou gestor(a) do Relacionamento.';
+    if (Array.isArray(user.setores) && user.setores.includes('comercial')) return 'Você não dá acesso ao Comercial.';
+    if (user.id === callerId) return null;
+    const alvo = (await rest(`qs_users?select=role,setores&id=eq.${user.id}&limit=1`))?.[0];
+    if (!alvo) return 'Usuário não encontrado.';
+    if (alvo.role === 'admin' || !PAPEIS_DELA.has(alvo.role) || !soRelacionamento(alvo)) {
+      return 'Esse usuário não é do time do Relacionamento — só o admin mexe nele.';
+    }
+    return null;
+  }
+  return 'Ação inválida.';
 }
 
 function safeJson(s) {
