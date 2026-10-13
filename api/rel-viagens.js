@@ -25,6 +25,18 @@
 // O cursor fica em rel_config.bitrix_sync. A primeira rodada é um "backfill":
 // vendas com Data de Ida a partir de 30 dias atrás OU vendidas desde 01/06/2026.
 // Cada rodada tem ~50 s; o que não couber continua na próxima.
+//
+// FUNIS (13/10/2026, Bruno): venda é venda em 3 funis — Comercial 1 (categoria
+// 0), Comercial 2 – Relacionamento e Operações. Os funis extras são achados pelo
+// NOME no Bitrix, e a etapa de venda de cada um é a de sucesso (semântica S) ou
+// a que se chama "Venda realizada"/"Ganho"/"Em emissão".
+//
+// HISTÓRICO: depois do backfill, o cursor.historico percorre os 3 funis desde o
+// PRIMEIRO negócio (ID crescente), um pedaço por rodada, até acabar.
+//
+// MESMA VIAGEM EM DOIS FUNIS: se o cliente já tem viagem ativa com a mesma data
+// de embarque e o mesmo destino/expedição, o negócio novo não cria outra — fica
+// ligado à existente em rel_viagem_deals (0108) pra conferência.
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
@@ -34,6 +46,11 @@ import { getSupabaseUserId } from './_wa.js';
 const ORCAMENTO_MS = 50_000;
 const ETAPAS_VENDA = new Set(['WON', 'UC_70BW8E']);
 const ETAPAS_CANCELA = new Set(['UC_NV92A7', 'LOSE']);
+
+// Funis extras, achados pelo nome (Comercial 1 é sempre a categoria 0).
+const FUNIS_EXTRAS = [/comercial\s*2|relacionamento/i, /opera[cç][aãoõ]/i];
+const NOME_VENDA = /venda\s+realizada|ganh[oa]|em\s+emiss/i;
+const NOME_CANCELA = /desist|perdid|cancel/i;
 
 // Campos do negócio (Comercial 1). Mapeados em 09/10/2026 por crm.deal.fields.
 const F = {
@@ -128,6 +145,51 @@ function rotulo(mapa, campo, valor) {
   const id = texto(valor);
   if (!id) return null;
   return mapa[campo]?.get(id) || null;
+}
+
+// ── Funis que contam como venda ─────────────────────────────────────────────
+
+let cacheFunis = null;
+async function listarCategorias() {
+  try {
+    const r = await bx('crm.category.list', { entityTypeId: 2 }, 12_000);
+    const lista = r?.categories || [];
+    if (lista.length) return lista.map((c) => ({ id: String(c.id), nome: String(c.name || '') }));
+  } catch { /* cai no método antigo */ }
+  const r = await bx('crm.dealcategory.list', {}, 12_000);
+  return (r || []).map((c) => ({ id: String(c.ID), nome: String(c.NAME || '') }));
+}
+async function funis() {
+  if (cacheFunis && Date.now() - cacheFunis.em < 30 * 60_000) return cacheFunis.v;
+  const lista = [{ id: '0', nome: 'Comercial 1', venda: new Set(ETAPAS_VENDA), cancela: new Set(ETAPAS_CANCELA) }];
+  for (const c of await listarCategorias()) {
+    if (c.id === '0' || !FUNIS_EXTRAS.some((r) => r.test(c.nome)) || /pr[eé].?venda/i.test(c.nome)) continue;
+    const etapas = await bx('crm.status.list', { filter: { ENTITY_ID: `DEAL_STAGE_${c.id}` } }, 12_000);
+    const venda = new Set(), cancela = new Set();
+    for (const e of etapas || []) {
+      const sem = e?.EXTRA?.SEMANTICS || e?.SEMANTICS || null;
+      const nome = String(e?.NAME || '');
+      const sid = String(e?.STATUS_ID || '');
+      if (sem === 'success' || sem === 'S' || NOME_VENDA.test(nome)) venda.add(sid);
+      else if (sid.endsWith(':LOSE') || ((sem === 'failure' || sem === 'F') && NOME_CANCELA.test(nome))) cancela.add(sid);
+    }
+    if (venda.size) lista.push({ id: c.id, nome: c.nome, venda, cancela });
+  }
+  cacheFunis = { v: lista, em: Date.now() };
+  return lista;
+}
+const funilDe = (deal, fs) => fs.find((f) => f.id === String(deal?.CATEGORY_ID ?? '0'));
+const ehVenda = (deal, fs) => !!funilDe(deal, fs)?.venda.has(String(deal?.STAGE_ID));
+const ehCancela = (deal, fs) => !!funilDe(deal, fs)?.cancela.has(String(deal?.STAGE_ID));
+
+/** Pra comparar destino/expedição: sem acento, minúsculo, só letras e números. */
+const chaveLugar = (v) => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function mesmoLugar(a, b) {
+  const ea = chaveLugar(a.expedicao), eb = chaveLugar(b.expedicao);
+  if (ea && eb) return ea === eb;
+  const da = chaveLugar(a.destino || a.expedicao), db = chaveLugar(b.destino || b.expedicao);
+  if (!da || !db) return true; // um lado sem destino: mesma pessoa, mesmo dia de embarque — é a mesma viagem
+  return da === db || da.includes(db) || db.includes(da);
 }
 
 // ── Cliente (ficha única) ───────────────────────────────────────────────────
@@ -259,6 +321,28 @@ async function viagemDoDeal(dealId) {
   return r?.[0] || null;
 }
 
+/** Negócio de outro funil que foi ligado a uma viagem existente (0108). */
+async function viagemLigada(dealId) {
+  const r = await rest(`rel_viagem_deals?select=viagem_id&bitrix_deal_id=eq.${encodeURIComponent(dealId)}&limit=1`);
+  const vid = r?.[0]?.viagem_id;
+  if (!vid) return null;
+  const v = await rest(`rel_viagens?select=id,status,cliente_id&id=eq.${vid}&limit=1`);
+  return v?.[0] || null;
+}
+
+/** Viagem ativa do cliente (titular ou passageiro) com o mesmo embarque e o mesmo lugar. */
+async function mesmaViagemDoCliente(clienteId, novos) {
+  if (!clienteId || !novos.data_embarque) return null;
+  const cols = 'id,destino,expedicao';
+  const titular = (await rest(`rel_viagens?select=${cols}&cliente_id=eq.${clienteId}&data_embarque=eq.${novos.data_embarque}&status=eq.ativa&limit=10`)) || [];
+  const pass = (await rest(`rel_viagem_passageiros?select=viagem_id&cliente_id=eq.${clienteId}&limit=200`)) || [];
+  const ids = [...new Set(pass.map((p) => p.viagem_id))].filter((x) => !titular.some((t) => t.id === x));
+  const comoPassageiro = ids.length
+    ? (await rest(`rel_viagens?select=${cols}&id=in.(${ids.join(',')})&data_embarque=eq.${novos.data_embarque}&status=eq.ativa`)) || []
+    : [];
+  return [...titular, ...comoPassageiro].find((v) => mesmoLugar(v, novos)) || null;
+}
+
 /** ID pai válido = número, ≠ 0, ≠ o próprio negócio. */
 function idPai(deal) {
   const p = soDigitos(deal?.[F.idPai]);
@@ -274,15 +358,18 @@ async function importarDeal(deal, ctx, profundidade = 0) {
   const conta = ctx.conta;
 
   // ── Cancelamento ──
-  if (ETAPAS_CANCELA.has(deal.STAGE_ID)) {
+  if (ehCancela(deal, ctx.funis)) {
     const v = await viagemDoDeal(id);
     if (v && v.status !== 'cancelada') {
       await rest(`rel_viagens?id=eq.${v.id}`, { method: 'PATCH', body: { status: 'cancelada' }, prefer: 'return=minimal' });
       conta.cancelados++;
     }
+    // Negócio só LIGADO a uma viagem de outro funil: desfaz a ligação, a viagem segue.
+    if (!v) await rest(`rel_viagem_deals?bitrix_deal_id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', prefer: 'return=minimal' });
     return;
   }
-  if (!ctx.qualquerEtapa && !ETAPAS_VENDA.has(deal.STAGE_ID)) return;
+  if (!ctx.qualquerEtapa && !ehVenda(deal, ctx.funis)) return;
+  const funil = funilDe(deal, ctx.funis);
 
   const contato = await contatoDoBitrix(deal.CONTACT_ID, ctx.contatos);
   const clienteId = await garantirCliente(dadosDaPessoa(deal, contato));
@@ -290,13 +377,13 @@ async function importarDeal(deal, ctx, profundidade = 0) {
   // ── Acompanhante: entra como passageiro na viagem do pai ──
   const pai = idPai(deal);
   if (pai && profundidade < 2) {
-    let vPai = await viagemDoDeal(pai);
+    let vPai = (await viagemDoDeal(pai)) || (await viagemLigada(pai));
     if (!vPai) {
       let dealPai = null;
       try { dealPai = await bx('crm.deal.get', { id: pai }); } catch { /* pai não existe */ }
-      if (dealPai && (ETAPAS_VENDA.has(dealPai.STAGE_ID) || ctx.qualquerEtapa)) {
+      if (dealPai && (ehVenda(dealPai, ctx.funis) || ctx.qualquerEtapa)) {
         await importarDeal(dealPai, { ...ctx, qualquerEtapa: true }, profundidade + 1);
-        vPai = await viagemDoDeal(pai);
+        vPai = (await viagemDoDeal(pai)) || (await viagemLigada(pai));
       }
     }
     if (vPai) {
@@ -319,9 +406,20 @@ async function importarDeal(deal, ctx, profundidade = 0) {
   }
 
   // ── Viagem própria ──
-  const novos = camposDaViagem(deal, ctx.mapa);
+  const novos = { ...camposDaViagem(deal, ctx.mapa), bitrix_funil: funil?.nome || null };
   const atual = await viagemDoDeal(id);
   if (!atual) {
+    // Já ligado a uma viagem de outro funil: quem manda nos dados é o negócio principal.
+    if (await viagemLigada(id)) return;
+    const mesma = await mesmaViagemDoCliente(clienteId, novos);
+    if (mesma) {
+      await rest('rel_viagem_deals?on_conflict=bitrix_deal_id', {
+        method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
+        body: { bitrix_deal_id: id, viagem_id: mesma.id, funil: funil?.nome || null, motivo: 'mesmo cliente, embarque e destino' },
+      });
+      conta.ligados++;
+      return;
+    }
     await rest('rel_viagens', {
       method: 'POST', prefer: 'return=minimal',
       body: { ...novos, cliente_id: clienteId, bitrix_deal_id: id, origem: 'bitrix', status: 'ativa' },
@@ -393,8 +491,8 @@ async function pagina(filtro, ordem, start) {
 
 export async function sincronizar() {
   const inicio = Date.now();
-  const conta = { lidos: 0, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, erros: 0, completo: true };
-  const ctx = { conta, contatos: new Map(), mapa: await rotulos(), qualquerEtapa: false };
+  const conta = { lidos: 0, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, ligados: 0, erros: 0, completo: true };
+  const ctx = { conta, contatos: new Map(), mapa: await rotulos(), funis: await funis(), qualquerEtapa: false };
   const cursor = await lerCursor();
   const acabouTempo = () => Date.now() - inicio > ORCAMENTO_MS;
 
@@ -437,27 +535,60 @@ export async function sincronizar() {
     return conta;
   }
 
-  // ── Rodadas normais: tudo do Comercial 1 mexido desde o cursor ──
+  // ── Rodadas normais: tudo dos funis de venda mexido desde o cursor ──
   // Sem filtro de etapa: é assim que a desistência/perda aparece. Ordenado por
-  // data de modificação, o cursor avança até o último processado.
+  // data de modificação, o cursor avança até o último processado. Enquanto o
+  // histórico não termina, isto fica com metade do tempo da rodada.
+  const h = cursor.historico || { idx: 0, ultimo_id: 0, inicio: new Date(inicio).toISOString() };
+  const limiteDelta = () => (h.feito ? acabouTempo() : Date.now() - inicio > ORCAMENTO_MS / 2);
+  const categorias = ctx.funis.map((f) => Number(f.id));
   let ultimo = cursor.ultimo || new Date(inicio - 86_400_000).toISOString();
   let start = 0;
   const desde = ultimo;
   for (;;) {
-    if (acabouTempo()) { conta.completo = false; break; }
+    if (limiteDelta()) { conta.completo = false; break; }
     // ">=": negócio com o mesmo horário do último processado não se perde
     // (processar de novo é inofensivo — tudo aqui é idempotente).
-    const { lista, next } = await pagina({ CATEGORY_ID: 0, '>=DATE_MODIFY': desde }, { DATE_MODIFY: 'ASC', ID: 'ASC' }, start);
-    await precarregarContatos(lista.filter((d) => ETAPAS_VENDA.has(d.STAGE_ID)), ctx.contatos);
+    const { lista, next } = await pagina({ CATEGORY_ID: categorias, '>=DATE_MODIFY': desde }, { DATE_MODIFY: 'ASC', ID: 'ASC' }, start);
+    await precarregarContatos(lista.filter((d) => ehVenda(d, ctx.funis)), ctx.contatos);
+    let parou = false;
     for (const d of lista) {
-      if (ETAPAS_VENDA.has(d.STAGE_ID) || ETAPAS_CANCELA.has(d.STAGE_ID)) await processar(d);
+      if (ehVenda(d, ctx.funis) || ehCancela(d, ctx.funis)) await processar(d);
       if (d.DATE_MODIFY) ultimo = d.DATE_MODIFY;
-      if (acabouTempo()) { conta.completo = false; break; }
+      if (limiteDelta()) { parou = true; break; }
     }
-    if (!conta.completo || next == null || !lista.length) break;
+    if (parou) { conta.completo = false; break; }
+    if (next == null || !lista.length) break;
     start = next;
   }
-  await gravarCursor({ ...cursor, ultimo });
+  const novoCursor = { ...cursor, ultimo };
+
+  // ── Histórico: os funis de venda desde o PRIMEIRO negócio, um pedaço por rodada ──
+  if (!h.feito) {
+    const fs = ctx.funis;
+    while (h.idx < fs.length && !acabouTempo()) {
+      const f = fs[h.idx];
+      const { lista } = await pagina({ CATEGORY_ID: Number(f.id), STAGE_ID: [...f.venda], '>ID': h.ultimo_id }, { ID: 'ASC' }, 0);
+      if (!lista.length) { h.idx++; h.ultimo_id = 0; continue; }
+      await precarregarContatos(lista, ctx.contatos);
+      for (const d of lista) {
+        await processar(d);
+        h.ultimo_id = Math.max(h.ultimo_id, Number(d.ID));
+        if (acabouTempo()) break;
+      }
+    }
+    h.funis = fs.map((f) => `${f.id}=${f.nome} [${[...f.venda].join(',')}]`);
+    if (h.idx >= fs.length) { h.feito = true; h.fim = new Date().toISOString(); }
+    else {
+      conta.completo = false;
+      conta.historico = `${fs[h.idx].nome}: até o negócio #${h.ultimo_id}`;
+    }
+    h.contagem = Object.fromEntries(['lidos', 'criados', 'atualizados', 'passageiros', 'ligados', 'erros']
+      .map((k) => [k, (h.contagem?.[k] || 0) + (conta[k] || 0)]));
+    novoCursor.historico = h;
+  }
+
+  await gravarCursor(novoCursor);
   return conta;
 }
 
@@ -512,9 +643,9 @@ export default async function handler(req, res) {
       let deal = null;
       try { deal = await bx('crm.deal.get', { id: dealId }); } catch { /* segue */ }
       if (!deal) return res.status(404).json({ error: `Negócio ${dealId} não encontrado no Bitrix.` });
-      const conta = { lidos: 1, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, erros: 0, completo: true };
-      await importarDeal(deal, { conta, contatos: new Map(), mapa: await rotulos(), qualquerEtapa: true });
-      const v = await viagemDoDeal(idPai(deal) || dealId);
+      const conta = { lidos: 1, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, ligados: 0, erros: 0, completo: true };
+      await importarDeal(deal, { conta, contatos: new Map(), mapa: await rotulos(), funis: await funis(), qualquerEtapa: true });
+      const v = (await viagemDoDeal(idPai(deal) || dealId)) || (await viagemLigada(dealId));
       return res.status(200).json({ ...conta, viagemId: v?.id || null });
     }
     return res.status(400).json({ error: 'Ação inválida.' });
