@@ -623,15 +623,17 @@ export async function sincronizar() {
   const VERSAO_HISTORICO = 2;
   if (h.versao !== VERSAO_HISTORICO) Object.assign(h, { versao: VERSAO_HISTORICO, prontos: [], atual: null, ultimo_id: 0, idx: 0, feito: false, contagem: {} });
   h.prontos = h.prontos || [];
-  const faltam = () => ctx.funis.filter((f) => !h.prontos.includes(f.id));
+  // Pronto = funil + etapas de venda: se aparecer etapa nova no funil, ele roda de novo.
+  const marca = (f) => `${f.id}:${[...f.venda].sort().join("|")}`;
+  const faltam = () => ctx.funis.filter((f) => !h.prontos.includes(marca(f)));
   if (faltam().length) h.feito = false;
   if (!h.feito) {
     const fs = ctx.funis;
     while (faltam().length && !acabouTempo()) {
       const f = faltam()[0];
-      if (h.atual !== f.id) { h.atual = f.id; h.ultimo_id = 0; }
+      if (h.atual !== marca(f)) { h.atual = marca(f); h.ultimo_id = 0; }
       const { lista } = await pagina({ CATEGORY_ID: Number(f.id), STAGE_ID: [...f.venda], '>ID': h.ultimo_id }, { ID: 'ASC' }, 0);
-      if (!lista.length) { h.prontos.push(f.id); h.atual = null; h.ultimo_id = 0; continue; }
+      if (!lista.length) { h.prontos.push(marca(f)); h.atual = null; h.ultimo_id = 0; continue; }
       await precarregarContatos(lista, ctx.contatos);
       for (const d of lista) {
         await processar(d);
