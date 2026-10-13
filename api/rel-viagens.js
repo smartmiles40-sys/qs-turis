@@ -48,7 +48,10 @@ const ETAPAS_VENDA = new Set(['WON', 'UC_70BW8E']);
 const ETAPAS_CANCELA = new Set(['UC_NV92A7', 'LOSE']);
 
 // Funis extras, achados pelo nome (Comercial 1 é sempre a categoria 0).
-const FUNIS_EXTRAS = [/comercial\s*2|relacionamento/i, /opera[cç][aãoõ]/i];
+// "Vendas Realizadas" (funil antigo, fev–abr/2026) entrou a pedido do Bruno.
+const FUNIS_EXTRAS = [/comercial/i, /relacionamento/i, /opera[cç][aãoõ]/i, /vendas?\s+realizadas?/i];
+// Funis de lead (ainda não compraram) nunca viram cliente do Relacionamento.
+const FUNIS_FORA = /pr[eé].?venda|live|tecnologia|marketing|recrut|teste/i;
 const NOME_VENDA = /venda\s+realizada|ganh[oa]|em\s+emiss/i;
 const NOME_CANCELA = /desist|perdid|cancel/i;
 
@@ -82,7 +85,11 @@ const C = {
   vencPassaporte: 'UF_CRM_1752523126895',
 };
 
-const SELECT_DEAL = ['ID', 'TITLE', 'STAGE_ID', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', 'OPPORTUNITY', 'CONTACT_ID', 'DATE_MODIFY', ...Object.values(F)];
+// Todos os campos (0109): a viagem guarda a cópia completa do negócio.
+const SELECT_DEAL = ['*', 'UF_*'];
+
+/** JSON com as chaves em ordem — pra comparar a cópia sem regravar à toa. */
+const estavel = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v));
 
 // ── Pequenas utilidades ─────────────────────────────────────────────────────
 
@@ -138,8 +145,44 @@ async function rotulos() {
   for (const [k, def] of Object.entries(campos || {})) {
     if (Array.isArray(def?.items)) v[k] = new Map(def.items.map((i) => [String(i.ID), String(i.VALUE)]));
   }
+  v.__defs = campos || {};
   cacheCampos = { v, em: Date.now() };
   return v;
+}
+
+let cacheCamposContato = null;
+async function camposDoContato() {
+  if (cacheCamposContato && Date.now() - cacheCamposContato.em < 30 * 60_000) return cacheCamposContato.v;
+  let v = {};
+  try { v = (await bx('crm.contact.fields', {}, 12_000)) || {}; } catch (e) { console.warn('[rel-viagens] campos do contato:', e?.message); }
+  cacheCamposContato = { v, em: Date.now() };
+  return v;
+}
+
+/**
+ * Cópia de TODOS os campos preenchidos (0109): chave = nome do campo no Bitrix
+ * (com o código entre colchetes), valor = o que está lá — opção de lista vira
+ * o texto da opção. Telefones/e-mails viram lista de valores.
+ */
+const CAMPOS_TECNICOS = new Set(['ID', 'ORIGIN_ID', 'ORIGINATOR_ID', 'LEAD_ID', 'IS_RECURRING', 'IS_RETURN_CUSTOMER', 'IS_REPEATED_APPROACH', 'IS_MANUAL_OPPORTUNITY', 'MOVED_BY_ID', 'MOVED_TIME', 'LAST_ACTIVITY_BY', 'LAST_ACTIVITY_TIME', 'LAST_COMMUNICATION_TIME', 'PROBABILITY', 'TAX_VALUE', 'IS_NEW', 'HAS_PHONE', 'HAS_EMAIL', 'HAS_IMOL', 'EXPORT', 'IMS', 'WEB', 'FACE_ID', 'PHOTO']);
+function dadosCompletos(obj, defs) {
+  if (!obj) return null;
+  const out = {};
+  for (const [k, bruto] of Object.entries(obj)) {
+    if (CAMPOS_TECNICOS.has(k) || vazio(bruto) || bruto === '0' || bruto === 'N' && !k.startsWith('UF_')) continue;
+    const def = defs?.[k];
+    const nome = String(def?.formLabel || def?.listLabel || def?.title || k).trim();
+    let valor = bruto;
+    if (Array.isArray(bruto) && bruto.length && typeof bruto[0] === 'object' && bruto[0] && 'VALUE' in bruto[0]) {
+      valor = bruto.map((x) => x.VALUE).filter(Boolean);           // PHONE / EMAIL
+    } else if (Array.isArray(def?.items)) {
+      const mapa = new Map(def.items.map((i) => [String(i.ID), String(i.VALUE)]));
+      valor = Array.isArray(bruto) ? bruto.map((x) => mapa.get(String(x)) || x) : (mapa.get(String(bruto)) || bruto);
+    }
+    if (vazio(valor)) continue;
+    out[nome === k ? k : `${nome} [${k}]`] = valor;
+  }
+  return out;
 }
 function rotulo(mapa, campo, valor) {
   const id = texto(valor);
@@ -163,7 +206,7 @@ async function funis() {
   if (cacheFunis && Date.now() - cacheFunis.em < 30 * 60_000) return cacheFunis.v;
   const lista = [{ id: '0', nome: 'Comercial 1', venda: new Set(ETAPAS_VENDA), cancela: new Set(ETAPAS_CANCELA) }];
   for (const c of await listarCategorias()) {
-    if (c.id === '0' || !FUNIS_EXTRAS.some((r) => r.test(c.nome)) || /pr[eé].?venda/i.test(c.nome)) continue;
+    if (c.id === '0' || !FUNIS_EXTRAS.some((r) => r.test(c.nome)) || FUNIS_FORA.test(c.nome)) continue;
     const etapas = await bx('crm.status.list', { filter: { ENTITY_ID: `DEAL_STAGE_${c.id}` } }, 12_000);
     const venda = new Set(), cancela = new Set();
     for (const e of etapas || []) {
@@ -244,6 +287,13 @@ async function garantirCliente(p) {
     for (const k of ['telefone', 'email', 'cpf', 'nascimento', 'passaporte', 'passaporte_validade', 'bitrix_contato_id']) {
       if (vazio(atual[k]) && !vazio(p[k])) patch[k] = p[k];
     }
+    // Cópia completa do contato só na ficha que É desse contato (não na do parente que divide o telefone).
+    const doContato = p.bitrix_dados && p.bitrix_contato_id
+      && (atual.bitrix_contato_id === p.bitrix_contato_id || patch.bitrix_contato_id === p.bitrix_contato_id);
+    if (doContato && estavel(atual.bitrix_dados) !== estavel(p.bitrix_dados)) {
+      patch.bitrix_dados = p.bitrix_dados;
+      patch.bitrix_lido_em = new Date().toISOString();
+    }
     if (Object.keys(patch).length) {
       try {
         await rest(`rel_clientes?id=eq.${atual.id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' });
@@ -260,6 +310,7 @@ async function garantirCliente(p) {
     nome: p.nome || (p.telefone ? `Cliente ${p.telefone.slice(-4)}` : 'Cliente do Bitrix'),
     telefone: p.telefone, email: p.email, cpf: p.cpf, nascimento: p.nascimento,
     passaporte: p.passaporte, passaporte_validade: p.passaporte_validade, bitrix_contato_id: p.bitrix_contato_id,
+    bitrix_dados: p.bitrix_dados || null, bitrix_lido_em: p.bitrix_dados ? new Date().toISOString() : null,
     observacoes: 'Ficha criada a partir da venda no Bitrix.',
   };
   try {
@@ -317,7 +368,7 @@ function camposDaViagem(deal, mapa) {
 }
 
 async function viagemDoDeal(dealId) {
-  const r = await rest(`rel_viagens?select=id,status,cliente_id,titulo,destino,expedicao,tipo,data_venda,data_embarque,data_retorno,valor,qtd_passageiros,observacoes,necessidades&bitrix_deal_id=eq.${encodeURIComponent(dealId)}&limit=1`);
+  const r = await rest(`rel_viagens?select=id,status,cliente_id,titulo,destino,expedicao,tipo,data_venda,data_embarque,data_retorno,valor,qtd_passageiros,observacoes,necessidades,bitrix_funil,bitrix_dados&bitrix_deal_id=eq.${encodeURIComponent(dealId)}&limit=1`);
   return r?.[0] || null;
 }
 
@@ -372,7 +423,9 @@ async function importarDeal(deal, ctx, profundidade = 0) {
   const funil = funilDe(deal, ctx.funis);
 
   const contato = await contatoDoBitrix(deal.CONTACT_ID, ctx.contatos);
-  const clienteId = await garantirCliente(dadosDaPessoa(deal, contato));
+  const pessoa = dadosDaPessoa(deal, contato);
+  pessoa.bitrix_dados = contato ? dadosCompletos(contato, await camposDoContato()) : null;
+  const clienteId = await garantirCliente(pessoa);
 
   // ── Acompanhante: entra como passageiro na viagem do pai ──
   const pai = idPai(deal);
@@ -406,7 +459,7 @@ async function importarDeal(deal, ctx, profundidade = 0) {
   }
 
   // ── Viagem própria ──
-  const novos = { ...camposDaViagem(deal, ctx.mapa), bitrix_funil: funil?.nome || null };
+  const novos = { ...camposDaViagem(deal, ctx.mapa), bitrix_funil: funil?.nome || null, bitrix_dados: dadosCompletos(deal, ctx.mapa.__defs) };
   const atual = await viagemDoDeal(id);
   if (!atual) {
     // Já ligado a uma viagem de outro funil: quem manda nos dados é o negócio principal.
@@ -422,7 +475,7 @@ async function importarDeal(deal, ctx, profundidade = 0) {
     }
     await rest('rel_viagens', {
       method: 'POST', prefer: 'return=minimal',
-      body: { ...novos, cliente_id: clienteId, bitrix_deal_id: id, origem: 'bitrix', status: 'ativa' },
+      body: { ...novos, cliente_id: clienteId, bitrix_deal_id: id, origem: 'bitrix', status: 'ativa', bitrix_lido_em: new Date().toISOString() },
     });
     conta.criados++;
     return;
@@ -436,6 +489,7 @@ async function importarDeal(deal, ctx, profundidade = 0) {
   for (const [k, v] of Object.entries(novos)) {
     if (v == null) continue;
     if (k === 'titulo' && !tituloNosso) continue;
+    if (k === 'bitrix_dados') { if (estavel(atual.bitrix_dados) !== estavel(v)) { patch.bitrix_dados = v; patch.bitrix_lido_em = new Date().toISOString(); } continue; }
     if (String(atual[k] ?? '') !== String(v)) patch[k] = v;
   }
   if (!atual.cliente_id && clienteId) patch.cliente_id = clienteId;
@@ -564,12 +618,20 @@ export async function sincronizar() {
   const novoCursor = { ...cursor, ultimo };
 
   // ── Histórico: os funis de venda desde o PRIMEIRO negócio, um pedaço por rodada ──
+  // Cada funil é marcado em h.prontos quando termina; funil novo (ou a mudança
+  // pra cópia completa dos dados, versão 2) faz o histórico voltar a rodar.
+  const VERSAO_HISTORICO = 2;
+  if (h.versao !== VERSAO_HISTORICO) Object.assign(h, { versao: VERSAO_HISTORICO, prontos: [], atual: null, ultimo_id: 0, idx: 0, feito: false, contagem: {} });
+  h.prontos = h.prontos || [];
+  const faltam = () => ctx.funis.filter((f) => !h.prontos.includes(f.id));
+  if (faltam().length) h.feito = false;
   if (!h.feito) {
     const fs = ctx.funis;
-    while (h.idx < fs.length && !acabouTempo()) {
-      const f = fs[h.idx];
+    while (faltam().length && !acabouTempo()) {
+      const f = faltam()[0];
+      if (h.atual !== f.id) { h.atual = f.id; h.ultimo_id = 0; }
       const { lista } = await pagina({ CATEGORY_ID: Number(f.id), STAGE_ID: [...f.venda], '>ID': h.ultimo_id }, { ID: 'ASC' }, 0);
-      if (!lista.length) { h.idx++; h.ultimo_id = 0; continue; }
+      if (!lista.length) { h.prontos.push(f.id); h.atual = null; h.ultimo_id = 0; continue; }
       await precarregarContatos(lista, ctx.contatos);
       for (const d of lista) {
         await processar(d);
@@ -578,10 +640,11 @@ export async function sincronizar() {
       }
     }
     h.funis = fs.map((f) => `${f.id}=${f.nome} [${[...f.venda].join(',')}]`);
-    if (h.idx >= fs.length) { h.feito = true; h.fim = new Date().toISOString(); }
+    if (!h.todos_funis) h.todos_funis = (await listarCategorias().catch(() => [])).map((c) => `${c.id}=${c.nome}`);
+    if (!faltam().length) { h.feito = true; h.fim = new Date().toISOString(); }
     else {
       conta.completo = false;
-      conta.historico = `${fs[h.idx].nome}: até o negócio #${h.ultimo_id}`;
+      conta.historico = `${faltam()[0].nome}: até o negócio #${h.ultimo_id}`;
     }
     h.contagem = Object.fromEntries(['lidos', 'criados', 'atualizados', 'passageiros', 'ligados', 'erros']
       .map((k) => [k, (h.contagem?.[k] || 0) + (conta[k] || 0)]));
