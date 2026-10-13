@@ -181,7 +181,9 @@ export default function WhatsAppPage() {
                 const partes: string[] = [];
                 partes.push(h?.ok
                   ? "A Meta aceitou o pedido do histórico. As conversas dos últimos 6 meses chegam aos poucos (minutos a horas)."
-                  : `A Meta recusou o pedido do histórico: ${h?.erro || "sem detalhe"}.`);
+                  : h?.codigo === 4
+                    ? "O histórico já foi pedido na hora da conexão — a Meta só aceita esse pedido UMA vez (por isso o erro #4). Se nada chegou, o compartilhamento não foi aceito no celular: pra tentar de novo, desconecte o número e conecte outra vez, aceitando \"compartilhar histórico\" na leitura do QR."
+                    : `A Meta recusou o pedido do histórico: ${h?.erro || "sem detalhe"}.`);
                 if (r.webhook && !r.webhook.erro && !r.webhook.temHistory) partes.push("ATENÇÃO: o app da Meta não está inscrito no campo \"history\" do webhook — use \"Apontar o webhook da Meta\" ou inscreva o campo no painel de desenvolvedor.");
                 if (r.webhook?.temHistory) partes.push("Webhook inscrito no histórico: ok.");
                 return partes.join(" ");
