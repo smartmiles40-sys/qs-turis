@@ -157,6 +157,16 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         </Aviso>
       )}
 
+      {c.arquivado_em && (
+        <Aviso>
+          Ficha arquivada — não conta como cliente{c.arquivado_motivo ? <> ({c.arquivado_motivo})</> : null}. Ela não aparece na lista nem nos KPIs.{" "}
+          <button className="underline font-semibold" onClick={async () => {
+            const { error } = await supabase.from("rel_clientes").update({ arquivado_em: null, arquivado_motivo: null }).eq("id", c.id);
+            if (error) alert(`Não consegui desarquivar: ${error.message}`); else window.location.reload();
+          }}>Desarquivar</button>
+        </Aviso>
+      )}
+
       {/* Cabeçalho */}
       <div className="rel-card p-4 sm:p-5 flex flex-wrap items-center gap-4">
         <Avatar nome={c.nome} tamanho={52} />

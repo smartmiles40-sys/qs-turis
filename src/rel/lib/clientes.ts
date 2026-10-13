@@ -36,6 +36,9 @@ export interface Cliente {
   observacoes: string | null;
   lgpd_consentimento_em: string | null;
   mesclado_em_id: string | null;
+  /** 0119: não é cliente (fica fora das listas e dos KPIs; dá pra desarquivar). */
+  arquivado_em?: string | null;
+  arquivado_motivo?: string | null;
   criado_por: string | null;
   criado_em: string;
   atualizado_por: string | null;
@@ -162,7 +165,8 @@ export function mensagemDeErro(e: { message?: string; code?: string } | null | u
 const limparBusca = (t: string) => t.replace(/[,()*%\\:"']/g, " ").trim();
 
 export async function buscarClientes(termo: string, limite = 100): Promise<Cliente[]> {
-  let q = supabase.from("rel_clientes").select("*").is("mesclado_em_id", null).order("nome").limit(limite);
+  // arquivado (0119: não é cliente — empresa, teste, funcionário) não aparece na lista
+  let q = supabase.from("rel_clientes").select("*").is("mesclado_em_id", null).is("arquivado_em", null).order("nome").limit(limite);
   const t = limparBusca(termo);
   if (t) {
     const d = soDigitos(t);
@@ -259,7 +263,7 @@ export interface Resumo {
 }
 
 export async function carregarResumo(): Promise<Resumo> {
-  const vivos = () => supabase.from("rel_clientes").select("id", { count: "exact", head: true }).is("mesclado_em_id", null);
+  const vivos = () => supabase.from("rel_clientes").select("id", { count: "exact", head: true }).is("mesclado_em_id", null).is("arquivado_em", null);
   const daqui6 = new Date();
   daqui6.setMonth(daqui6.getMonth() + 6);
   const [c, f, d, p, l] = await Promise.all([
