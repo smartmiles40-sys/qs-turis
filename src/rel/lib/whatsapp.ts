@@ -73,7 +73,7 @@ export interface NumeroRel { conectado: boolean; numero: string | null; nome: st
 export type Filtro = "esperando" | "minhas" | "abertas" | "resolvidas" | "todas";
 
 export async function listarConversas(filtro: Filtro, meuId: string, busca = ""): Promise<Conversa[]> {
-  let q = supabase.from("rel_wa_fila").select("*").limit(200);
+  let q = supabase.from("rel_wa_fila").select("*").limit(500);
   if (filtro === "esperando") q = q.not("aguardando_desde", "is", null).order("aguardando_desde", { ascending: true });
   else if (filtro === "minhas") q = q.eq("atendente_id", meuId).neq("estado", "resolvida").order("atualizado_em", { ascending: false });
   else if (filtro === "abertas") q = q.neq("estado", "resolvida").order("atualizado_em", { ascending: false });

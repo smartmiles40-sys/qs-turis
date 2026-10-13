@@ -32,12 +32,10 @@ import ChamadosPage from "../chamados/ChamadosPage";
 import { assuntoSugerido, chamadosDaConversa, type ChamadoK } from "../lib/chamados";
 import { STATUS_CHAMADO, situacaoDoPrazo } from "../lib/pos";
 
-const FILTROS: { id: Filtro; rotulo: string }[] = [
-  { id: "esperando", rotulo: "Esperando" },
-  { id: "minhas", rotulo: "Minhas" },
-  { id: "abertas", rotulo: "Em andamento" },
-  { id: "resolvidas", rotulo: "Resolvidas" },
-];
+// UMA lista só (Bruno, 13/10/2026: "sem Esperando e Minhas — tudo numa aba só,
+// fica melhor pra responder"). Igual ao WhatsApp: a conversa mais recente em
+// cima; quem está esperando resposta continua com o relógio do prazo.
+const FILTRO_UNICO: Filtro = "todas";
 
 /** Enquanto a aba está visível, roda `fn` a cada `ms`. */
 function useRepetir(fn: () => void, ms: number) {
@@ -66,26 +64,13 @@ function Relogio({ c }: { c: Conversa }) {
 
 // ── Lista ───────────────────────────────────────────────────────────────────
 
-function Lista({ filtro, setFiltro, busca, setBusca, conversas, selecionada, abrir, carregando }: {
-  filtro: Filtro; setFiltro: (f: Filtro) => void; busca: string; setBusca: (s: string) => void;
+function Lista({ busca, setBusca, conversas, selecionada, abrir, carregando }: {
+  busca: string; setBusca: (s: string) => void;
   conversas: Conversa[]; selecionada: string | null; abrir: (id: string) => void; carregando: boolean;
 }) {
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="p-3 space-y-2.5 border-b" style={{ borderColor: "var(--line)" }}>
-        <div className="flex gap-1 overflow-x-auto" role="group" aria-label="Filtrar conversas">
-          {FILTROS.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setFiltro(f.id)}
-              aria-pressed={filtro === f.id}
-              className="rel-linha px-2.5 py-2 rounded-lg text-[12.5px] font-semibold whitespace-nowrap"
-              style={filtro === f.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)" } : { color: "var(--ink2)" }}
-            >
-              {f.rotulo}
-            </button>
-          ))}
-        </div>
         <Entrada value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar nome, telefone ou mensagem" aria-label="Buscar conversas" style={{ padding: "8px 10px", fontSize: 13 }} />
       </div>
       <ul className="flex-1 overflow-y-auto min-h-0" aria-busy={carregando && conversas.length === 0}>
@@ -100,7 +85,7 @@ function Lista({ filtro, setFiltro, busca, setBusca, conversas, selecionada, abr
         ))}
         {conversas.length === 0 && !carregando && (
           <li className="p-6 text-center text-[13px]" style={{ color: "var(--ink3)" }}>
-            {filtro === "esperando" ? "Ninguém esperando resposta. 🎉" : "Nenhuma conversa aqui."}
+            {busca ? "Nenhuma conversa com essa busca." : "Nenhuma conversa ainda."}
           </li>
         )}
         {conversas.map((c) => {
@@ -479,7 +464,7 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
     if (v === "chamados" && conversaId) abrir(null);
     onTrocarVisao?.(v);
   }
-  const [filtro, setFiltro] = useState<Filtro>("esperando");
+  const filtro = FILTRO_UNICO;
   const [busca, setBusca] = useState("");
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -512,7 +497,7 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
             ? { color: "var(--rel-ink)", borderBottom: "2px solid var(--rel)" }
             : { color: "var(--ink2)", borderBottom: "2px solid transparent" }}>
           {r}
-          {v === "conversas" && filtro === "esperando" && esperando > 0 && <Etiqueta tom="aviso">{esperando}</Etiqueta>}
+          {v === "conversas" && esperando > 0 && <Etiqueta tom="aviso">{esperando}</Etiqueta>}
         </button>
       ))}
       {onAbrirWhatsApp && <div className="ml-auto self-center"><BotaoWhatsApp abrir={onAbrirWhatsApp} /></div>}
@@ -547,7 +532,7 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
           style={{ borderColor: "var(--line)", background: "var(--card)" }}
         >
           <Lista
-            filtro={filtro} setFiltro={setFiltro} busca={busca} setBusca={setBusca}
+            busca={busca} setBusca={setBusca}
             conversas={conversas} selecionada={conversaId} abrir={(id) => abrir(id)} carregando={carregando}
           />
         </aside>
