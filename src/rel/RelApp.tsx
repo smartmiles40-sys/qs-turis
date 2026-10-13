@@ -37,17 +37,18 @@ import AutomacoesPage from "./disparos/AutomacoesPage";
 import PesquisasPage from "./pos/PesquisasPage";
 import RecompraPage from "./pos/RecompraPage";
 import KpisPage from "./kpis/KpisPage";
+import WhatsAppPage from "./whatsapp/WhatsAppPage";
 
 type Rota =
   | { tela: "inicio" }
-  | { tela: "atendimento"; id?: string } | { tela: "chamados" } | { tela: "prazo" } | { tela: "kpis" }
+  | { tela: "atendimento"; id?: string } | { tela: "chamados" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" }
   | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
   | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
   | { tela: "config" };
 type Tela = Rota["tela"];
 
-const SIMPLES: Tela[] = ["inicio", "chamados", "prazo", "kpis", "clientes", "duplicados", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
+const SIMPLES: Tela[] = ["inicio", "chamados", "prazo", "kpis", "whatsapp", "clientes", "duplicados", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
 
 function lerRota(): Rota {
   const h = window.location.hash.replace(/^#\/?/, "");
@@ -266,6 +267,7 @@ export default function RelApp() {
     { id: "atendimento", rotulo: "Atendimento", icone: "atendimento", itens: [
       { id: "atendimento", rotulo: "Conversas", badge: cont?.esperando || undefined, alerta: !!cont?.foraDoPrazo },
       { id: "chamados", rotulo: "Chamados", badge: cont?.chamadosVencidos || undefined, alerta: true },
+      { id: "whatsapp", rotulo: "WhatsApp (conexão)" },
     ] },
     { id: "kpis", rotulo: "KPIs", icone: "kpis", itens: [
       { id: "kpis", rotulo: "Indicadores" },
@@ -462,6 +464,7 @@ export default function RelApp() {
           )}
           {/* Prazo de resposta saiu do Atendimento e virou parte dos KPIs; link antigo cai lá */}
           {(rota.tela === "kpis" || rota.tela === "prazo") && <KpisPage />}
+          {rota.tela === "whatsapp" && <WhatsAppPage />}
           {rota.tela === "clientes" && <ClientesPage onAbrir={abrirCliente} />}
           {rota.tela === "duplicados" && <DuplicadosPage onAbrir={abrirCliente} onMudou={atualizar} />}
           {rota.tela === "ficha" && (

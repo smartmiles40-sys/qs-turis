@@ -52,8 +52,8 @@ const MOTIVO_ENTRADA: Record<string, string> = {
 
 /** userId: "" = ainda não escolheu · TIME = número do time (sem dono). */
 const TIME = "__time__";
-/** Número do Relacionamento (0101): do time do pós-venda, caixa própria. */
-const REL = "__relacionamento__";
+// O número do RELACIONAMENTO saiu desta tela (13/10/2026, Bruno: "são áreas
+// diferentes"): ele é conectado e cuidado em Relacionamento → WhatsApp.
 interface Pedido { userId: string }
 
 export default function ConexaoMeta() {
@@ -96,8 +96,8 @@ export default function ConexaoMeta() {
     try {
       const r = await conectarPelaMeta({
         appId: painel.cadastro.appId, configId: painel.cadastro.configId,
-        userId: p.userId === TIME || p.userId === REL ? null : p.userId,
-        setor: p.userId === REL ? "relacionamento" : "comercial",
+        userId: p.userId === TIME ? null : p.userId,
+        setor: "comercial",
       });
       notifySuccess(`Conectado: ${r.numero || "número"}.`);
       if (r.avisos.length) notifyError(`Conectado, com avisos: ${r.avisos.join(" · ")}`);
@@ -204,7 +204,7 @@ export default function ConexaoMeta() {
 
       {/* ── Números ──────────────────────────────────────────────────────── */}
       <section className="grid gap-3 sm:grid-cols-2">
-        {painel.numeros.map((n) => {
+        {painel.numeros.filter((n) => n.setor !== "relacionamento").map((n) => {
           const q = n.qualidade ? QUALIDADE[n.qualidade] : null;
           const ligado = n.status === "conectado";
           return (
@@ -250,7 +250,7 @@ export default function ConexaoMeta() {
               <div className="text-[11px] text-gray-400">Última mensagem de cliente: {quando(n.ultimaEntrada)}</div>
               <div className="flex gap-2 pt-1">
                 <button disabled={!pronto || ocupado}
-                  onClick={() => setPedido({ userId: n.setor === "relacionamento" ? REL : n.donoId || TIME })}
+                  onClick={() => setPedido({ userId: n.donoId || TIME })}
                   className="flex-1 px-3 py-2 text-sm rounded-lg font-medium text-white disabled:opacity-40"
                   style={{ background: AZUL }}>
                   {ligado ? "Reconectar" : "Conectar"}
@@ -275,6 +275,12 @@ export default function ConexaoMeta() {
             : "colar o ID da configuração da Meta no quadro \"Configuração do botão\", aqui embaixo"}.
           {" "}É um passo feito uma vez só.
         </div>
+      )}
+
+      {painel.numeros.some((n) => n.setor === "relacionamento") && (
+        <p className="text-[12px] text-gray-500">
+          O número do Relacionamento (pós-venda) é cuidado na área de Relacionamento → WhatsApp (conexão).
+        </p>
       )}
 
       <div className="flex flex-wrap gap-2">
@@ -325,15 +331,8 @@ export default function ConexaoMeta() {
               className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200">
               <option value="">De quem é o número?</option>
               <option value={TIME}>Número do time — closers (padrão)</option>
-              <option value={REL}>Número do Relacionamento (pós-venda)</option>
               {painel.sdrs.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
             </select>
-            {pedido.userId === REL && (
-              <p className="text-[12px] text-gray-500">
-                As conversas deste número vão para a área de <b>Relacionamento</b> (não viram lead do Comercial).
-                Depois de conectar, crie os modelos dele em Modelos da Meta → "Mensagens de".
-              </p>
-            )}
             {pedido.userId === TIME && (
               <p className="text-[12px] text-gray-500">
                 Vira o número padrão do QS: os closers falam por ele, e também quem ainda não tem número próprio.

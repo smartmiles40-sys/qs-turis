@@ -267,7 +267,12 @@ export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, r
 
   const components = [];
   if (cabecalho?.trim()) components.push({ type: 'HEADER', format: 'TEXT', text: cabecalho.trim() });
-  components.push({ type: 'BODY', text: corpo.trim() });
+  // A Meta recusa modelo com {{1}}, {{2}}… sem um exemplo de cada (13/10/2026).
+  const vars = [...new Set((corpo.match(/\{\{\s*(\d+)\s*\}\}/g) || []).map((v) => Number(v.replace(/\D/g, ''))))].sort((a, b) => a - b);
+  const EXEMPLOS = ['Maria', 'Japão', '15/11', 'Se Tu For, Eu Vou!', '09:30', 'Tóquio', '7', 'Ana'];
+  const corpoBloco = { type: 'BODY', text: corpo.trim() };
+  if (vars.length) corpoBloco.example = { body_text: [vars.map((n, i) => EXEMPLOS[i] || `exemplo ${n}`)] };
+  components.push(corpoBloco);
   if (rodape?.trim()) components.push({ type: 'FOOTER', text: rodape.trim() });
 
   try {

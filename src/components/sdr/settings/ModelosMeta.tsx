@@ -38,9 +38,9 @@ function selo(status: string) {
   return { texto: s || "—", cor: "#475569", fundo: "#F1F5F9" };
 }
 
-/** Número de SDR (conta própria); o oficial não tem dono. O do Relacionamento
- *  (0101) também tem conta própria e entra na lista. */
-const ehDeSdr = (n: NumeroMeta) => (!!n.donoId || n.setor === "relacionamento") && n.modo !== "env";
+/** Número de SDR (conta própria); o oficial não tem dono. Os modelos do número
+ *  do Relacionamento ficam na área de Relacionamento → WhatsApp (13/10/2026). */
+const ehDeSdr = (n: NumeroMeta) => !!n.donoId && n.setor !== "relacionamento" && n.modo !== "env";
 const nomeDoNumero = (n: NumeroMeta) => (n.setor === "relacionamento" ? "Relacionamento" : n.dono || n.nome || "SDR");
 
 export default function ModelosMeta() {
