@@ -94,6 +94,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/rel-viagens?arquivos=1",
+      "schedule": "2-59/5 * * * *"
+    },
+    {
       "path": "/api/rel-disparos",
       "schedule": "0 13 * * *"
     },

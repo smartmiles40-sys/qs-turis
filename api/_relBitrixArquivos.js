@@ -101,11 +101,11 @@ async function marcar(fileId, patch) {
 }
 
 /** Baixa pendentes enquanto houver tempo. Devolve quantos viraram documento. */
-export async function baixarArquivos(temTempo) {
+export async function baixarArquivos(temTempo, lote = 15) {
   const base = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '');
   const chave = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!base || !chave) return { baixados: 0, falhas: 0 };
-  const fila = await rest(`rel_bitrix_arquivos?select=*&status=in.(pendente,erro)&tentativas=lt.${MAX_TENTATIVAS}&cliente_id=not.is.null&order=criado_em.asc&limit=15`).catch(() => []);
+  const fila = await rest(`rel_bitrix_arquivos?select=*&status=in.(pendente,erro)&tentativas=lt.${MAX_TENTATIVAS}&cliente_id=not.is.null&order=criado_em.asc&limit=${lote}`).catch(() => []);
   const cache = new Map();
   let baixados = 0, falhas = 0;
   for (const a of fila || []) {

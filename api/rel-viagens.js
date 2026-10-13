@@ -725,6 +725,13 @@ export default async function handler(req, res) {
     const segredo = String(process.env.CRON_SECRET || '').trim();
     const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!segredo || !segredoConfere(veio, segredo)) return res.status(401).json({ error: 'Não autorizado' });
+    // ?arquivos=1: rodada SÓ de download dos anexos dos cards (fila da 0110), 50 s inteiros.
+    if (req.query?.arquivos) {
+      const t0 = Date.now();
+      const b = await baixarArquivos(() => Date.now() - t0 < ORCAMENTO_MS - 8_000, 40);
+      console.log(`[rel-viagens] cron arquivos: ${JSON.stringify(b)}`);
+      return res.status(200).json(b);
+    }
     try {
       const r = await sincronizar();
       console.log(`[rel-viagens] cron: ${JSON.stringify(r)}`);
