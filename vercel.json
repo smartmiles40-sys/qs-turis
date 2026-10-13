@@ -94,7 +94,7 @@
     },
     {
       "path": "/api/rel-viagens",
-      "schedule": "*/30 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/rel-viagens?arquivos=1",
