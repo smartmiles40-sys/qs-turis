@@ -8,6 +8,9 @@
 //   Chamados          → abertos, vencidos, tempo de resolução, por assunto
 //   Pesquisa (NPS)    → nota de quem voltou de viagem
 //   Carteira          → os 4 blocos da aba Clientes
+//   Receita & expansão→ MRR estimado, a embarcar, recompra/complemento (13/10)
+//   Atendimento       → TME e TMA do WhatsApp (13/10, função 0120)
+//   NPS ganhou o bloco de avaliações do Google (13/10)
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
@@ -18,12 +21,17 @@ import {
 } from "../lib/clientes";
 import { PRIORIDADES, STATUS_CHAMADO, calcularNps, listarPesquisas, type Pesquisa, type Prioridade, type StatusChamado } from "../lib/pos";
 import { Aviso, Vazio } from "../ui";
+import KpisReceita from "./KpisReceita";
+import KpisAtendimento from "./KpisAtendimento";
+import KpisGoogle from "./KpisGoogle";
 
-type Aba = "prazo" | "chamados" | "nps" | "carteira";
+type Aba = "receita" | "atendimento" | "prazo" | "chamados" | "nps" | "carteira";
 const ABAS: { id: Aba; rotulo: string }[] = [
+  { id: "receita", rotulo: "Receita & expansão" },
+  { id: "atendimento", rotulo: "Atendimento (TME/TMA)" },
   { id: "prazo", rotulo: "Prazo de resposta" },
   { id: "chamados", rotulo: "Chamados" },
-  { id: "nps", rotulo: "Pesquisa (NPS)" },
+  { id: "nps", rotulo: "NPS & Google" },
   { id: "carteira", rotulo: "Carteira" },
 ];
 const PERIODOS = [{ d: 30, r: "30 dias" }, { d: 90, r: "90 dias" }, { d: 365, r: "12 meses" }];
@@ -216,6 +224,7 @@ function KpisNps() {
   if (!lista) return <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>;
   return (
     <div className="space-y-4">
+      <KpisGoogle />
       <div className="flex justify-end"><Periodo dias={dias} onMudar={setDias} /></div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Numero rotulo="NPS" valor={r.nps == null ? "—" : String(r.nps)} dica="% promotores − % detratores" tom={r.nps == null ? undefined : r.nps >= 50 ? "bom" : r.nps < 0 ? "ruim" : undefined} />
@@ -259,12 +268,12 @@ function KpisCarteira() {
 }
 
 export default function KpisPage() {
-  const [aba, setAba] = useState<Aba>("prazo");
+  const [aba, setAba] = useState<Aba>("receita");
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-4">
         <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>KPIs</h1>
-        <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Como o Relacionamento está indo — prazo, chamados, satisfação e carteira.</p>
+        <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Como o Relacionamento está indo — receita, atendimento, prazo, chamados, satisfação e carteira.</p>
       </div>
       <div className="flex gap-1 mb-4 border-b overflow-x-auto" style={{ borderColor: "var(--line)" }} role="tablist" aria-label="KPIs">
         {ABAS.map((a) => (
@@ -274,6 +283,8 @@ export default function KpisPage() {
           </button>
         ))}
       </div>
+      {aba === "receita" && <KpisReceita />}
+      {aba === "atendimento" && <KpisAtendimento />}
       {aba === "prazo" && <PrazoPage />}
       {aba === "chamados" && <KpisChamados />}
       {aba === "nps" && <KpisNps />}

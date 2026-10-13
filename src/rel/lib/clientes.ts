@@ -309,6 +309,11 @@ export interface Metrica {
   meta_contato_dias: number;
   faltando: string[];
   cadastro_completo: boolean;
+  /** 0117: aéreo/hotel/seguro avulsos (somam no LTV, não contam como viagem). */
+  compras_avulsas?: number;
+  /** 0120: já voltou (realizadas) por tipo — vazio se a migration ainda não foi aplicada. */
+  expedicoes_realizadas?: number;
+  pacotes_realizados?: number;
 }
 
 export interface Nivel { id: Exclude<CategoriaId, "sem_categoria">; nome: string; min_viagens: number; min_valor: number; cor: string }

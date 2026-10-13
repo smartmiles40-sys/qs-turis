@@ -2,15 +2,60 @@
 // Lista de clientes com busca por nome, CPF, telefone, e-mail ou passaporte.
 // No topo, os 4 KPIs da carteira (categoria, LTV, contato, cadastro) — clicar
 // num deles filtra a lista.
+//
+// Expedições × Pacotes (Bruno, 13/10/2026: "às vezes temos que ver quantas
+// expedições ou pacotes o cliente fez"): cada linha mostra os números dele,
+// a lista ordena por eles e tem filtros rápidos (2+ expedições, só pacote,
+// expedição e pacote, nunca viajou).
 import { useEffect, useMemo, useState } from "react";
 import {
-  CAMPOS_CADASTRO, METAS_PADRAO, REGRAS_PADRAO, buscarClientes, carregarMetricas, carregarRegras, formatarCpf,
+  CAMPOS_CADASTRO, METAS_PADRAO, REGRAS_PADRAO, buscarClientes, moeda, carregarMetricas, carregarRegras, formatarCpf,
   formatarTelefone, mesesParaVencer, type Cliente, type Metrica, type MetasContato, type RegrasCategorias,
 } from "../lib/clientes";
 import KpisClientes, { categoriasDe, diasParado, foraDaMeta, type FiltroKpi } from "./KpisClientes";
 import CategoriaChip from "./CategoriaChip";
 import { Aviso, Avatar, Botao, Entrada, Etiqueta, Vazio } from "../ui";
 import ClienteForm from "./ClienteForm";
+
+type Rapido = "exp2" | "so_pacote" | "exp_e_pacote" | "so_avulsa";
+const RAPIDOS: { id: Rapido; rotulo: string; teste: (m: Metrica) => boolean }[] = [
+  { id: "exp2", rotulo: "2+ expedições", teste: (m) => m.expedicoes >= 2 },
+  { id: "so_pacote", rotulo: "Só pacote", teste: (m) => m.pacotes > 0 && m.expedicoes === 0 },
+  { id: "exp_e_pacote", rotulo: "Expedição e pacote", teste: (m) => m.expedicoes > 0 && m.pacotes > 0 },
+  { id: "so_avulsa", rotulo: "Nunca viajou (só avulsas)", teste: (m) => m.viagens_compradas === 0 && (m.compras_avulsas ?? 0) > 0 },
+];
+type Ordem = "nome" | "expedicoes" | "pacotes" | "ltv" | "avulsas";
+const ORDENS: { id: Ordem; rotulo: string }[] = [
+  { id: "nome", rotulo: "Nome" }, { id: "expedicoes", rotulo: "Mais expedições" }, { id: "pacotes", rotulo: "Mais pacotes" },
+  { id: "ltv", rotulo: "Maior LTV" }, { id: "avulsas", rotulo: "Mais compras avulsas" },
+];
+
+/** "3 (2 feitas)" — realizadas só aparecem se a 0120 já estiver no banco. */
+function contagem(total: number, feitas: number | undefined) {
+  return feitas == null || feitas === total ? String(total) : `${total} (${feitas} feita${feitas === 1 ? "" : "s"})`;
+}
+
+function NumerosViagem({ m }: { m: Metrica }) {
+  const chip = (rotulo: string, valor: string, forma: "circulo" | "losango" | "quadrado", ativo: boolean) => (
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] tabular-nums whitespace-nowrap"
+      style={{ background: ativo ? "var(--rel-soft)" : "var(--card2)", color: ativo ? "var(--rel-ink)" : "var(--ink3)" }} title={rotulo}>
+      <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true">
+        {forma === "circulo" ? <circle cx="5" cy="5" r="4" fill="currentColor" />
+          : forma === "losango" ? <rect x="2" y="2" width="6" height="6" transform="rotate(45 5 5)" fill="currentColor" />
+            : <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />}
+      </svg>
+      <span className="sr-only">{rotulo}: </span>{valor}
+    </span>
+  );
+  return (
+    <span className="flex items-center gap-1 flex-wrap justify-end">
+      {chip("Expedições", contagem(m.expedicoes, m.expedicoes_realizadas), "circulo", m.expedicoes > 0)}
+      {chip("Pacotes", contagem(m.pacotes, m.pacotes_realizados), "losango", m.pacotes > 0)}
+      {(m.compras_avulsas ?? 0) > 0 && chip("Compras avulsas", String(m.compras_avulsas), "quadrado", false)}
+      <span className="text-[11px] tabular-nums px-1" style={{ color: "var(--ink2)" }} title="LTV (valor gasto como titular)">{moeda(m.valor_total)}</span>
+    </span>
+  );
+}
 
 export default function ClientesPage({ onAbrir }: { onAbrir: (id: string) => void }) {
   const [termo, setTermo] = useState("");
@@ -22,6 +67,8 @@ export default function ClientesPage({ onAbrir }: { onAbrir: (id: string) => voi
   const [regras, setRegras] = useState<RegrasCategorias>(REGRAS_PADRAO);
   const [metas, setMetas] = useState<MetasContato>(METAS_PADRAO);
   const [filtro, setFiltro] = useState<FiltroKpi | null>(null);
+  const [rapido, setRapido] = useState<Rapido | null>(null);
+  const [ordem, setOrdem] = useState<Ordem>("nome");
   const [erroKpi, setErroKpi] = useState<string | null>(null);
 
   useEffect(() => {
@@ -35,22 +82,34 @@ export default function ClientesPage({ onAbrir }: { onAbrir: (id: string) => voi
   const porId = useMemo(() => new Map(metricas.map((m) => [m.id, m])), [metricas]);
 
   // Lista filtrada pelos KPIs (vem das métricas, não da busca no banco)
+  // Modo "lista das métricas": filtro dos KPIs, filtro rápido ou ordenação por número.
+  const modoMetricas = Boolean(filtro || rapido || ordem !== "nome");
   const filtrados = useMemo(() => {
-    if (!filtro) return [];
+    if (!modoMetricas) return [];
     const t = termo.trim().toLowerCase();
-    let l = metricas.filter((m) =>
-      filtro.tipo === "categoria" ? m.categoria === filtro.categoria
+    let l = metricas.filter((m) => !filtro ? true
+      : filtro.tipo === "categoria" ? m.categoria === filtro.categoria
         : filtro.tipo === "sem_contato" ? foraDaMeta(m)
           : m.viagens_compradas > 0 && (filtro.campo ? m.faltando.includes(filtro.campo) : !m.cadastro_completo));
+    const r = RAPIDOS.find((x) => x.id === rapido);
+    if (r) l = l.filter(r.teste);
     if (t) l = l.filter((m) => m.nome.toLowerCase().includes(t));
-    if (filtro.tipo === "sem_contato") return l.sort((a, b) => diasParado(b) / b.meta_contato_dias - diasParado(a) / a.meta_contato_dias);
-    if (filtro.tipo === "incompletos") return l.sort((a, b) => b.faltando.length - a.faltando.length || a.nome.localeCompare(b.nome));
-    return l.sort((a, b) => b.valor_total - a.valor_total);
-  }, [filtro, metricas, termo]);
+    const porNome = (a: Metrica, b: Metrica) => a.nome.localeCompare(b.nome);
+    if (ordem === "expedicoes") return l.sort((a, b) => b.expedicoes - a.expedicoes || b.valor_total - a.valor_total);
+    if (ordem === "pacotes") return l.sort((a, b) => b.pacotes - a.pacotes || b.valor_total - a.valor_total);
+    if (ordem === "ltv") return l.sort((a, b) => b.valor_total - a.valor_total);
+    if (ordem === "avulsas") return l.sort((a, b) => (b.compras_avulsas ?? 0) - (a.compras_avulsas ?? 0) || porNome(a, b));
+    if (filtro?.tipo === "sem_contato") return l.sort((a, b) => diasParado(b) / b.meta_contato_dias - diasParado(a) / a.meta_contato_dias);
+    if (filtro?.tipo === "incompletos") return l.sort((a, b) => b.faltando.length - a.faltando.length || porNome(a, b));
+    if (filtro) return l.sort((a, b) => b.valor_total - a.valor_total);
+    return l.sort(porNome);
+  }, [modoMetricas, filtro, rapido, ordem, metricas, termo]);
 
-  const rotuloFiltro = !filtro ? "" : filtro.tipo === "categoria" ? `Categoria: ${cats.find((c) => c.id === filtro.categoria)?.nome}`
+  const rotuloRapido = RAPIDOS.find((x) => x.id === rapido)?.rotulo;
+  const rotuloKpi = !filtro ? "" : filtro.tipo === "categoria" ? `Categoria: ${cats.find((c) => c.id === filtro.categoria)?.nome}`
     : filtro.tipo === "sem_contato" ? "Fora da meta de contato"
       : filtro.campo ? `Falta ${CAMPOS_CADASTRO[filtro.campo] ?? filtro.campo}` : "Cadastro incompleto";
+  const rotuloFiltro = [rotuloKpi, rotuloRapido, ordem !== "nome" ? ORDENS.find((o) => o.id === ordem)?.rotulo : ""].filter(Boolean).join(" · ");
 
   useEffect(() => {
     let vivo = true;
@@ -95,14 +154,32 @@ export default function ClientesPage({ onAbrir }: { onAbrir: (id: string) => voi
         />
       </div>
 
-      {filtro && (
-        <div className="flex items-center gap-2 mb-2" aria-live="polite">
-          <span className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{rotuloFiltro} · {filtrados.length}</span>
-          <button onClick={() => setFiltro(null)} className="text-[12px] font-semibold underline px-1 py-1" style={{ color: "var(--rel-ink)" }}>limpar filtro</button>
+      {metricas.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+          {RAPIDOS.map((r) => (
+            <button key={r.id} onClick={() => setRapido(rapido === r.id ? null : r.id)} aria-pressed={rapido === r.id}
+              className="px-2.5 py-1.5 rounded-full text-[12px] font-semibold border"
+              style={rapido === r.id ? { background: "var(--rel)", color: "#fff", borderColor: "var(--rel)" } : { background: "var(--card)", color: "var(--ink2)", borderColor: "var(--line)" }}>
+              {r.rotulo} <span className="tabular-nums opacity-80">{metricas.filter(r.teste).length}</span>
+            </button>
+          ))}
+          <label className="ml-auto inline-flex items-center gap-1.5 text-[12px]" style={{ color: "var(--ink2)" }}>
+            Ordenar
+            <select className="rel-input" style={{ padding: "6px 8px", fontSize: 12.5, width: "auto" }} value={ordem} onChange={(e) => setOrdem(e.target.value as Ordem)}>
+              {ORDENS.map((o) => <option key={o.id} value={o.id}>{o.rotulo}</option>)}
+            </select>
+          </label>
         </div>
       )}
 
-      {filtro ? (
+      {modoMetricas && (
+        <div className="flex items-center gap-2 mb-2" aria-live="polite">
+          <span className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{rotuloFiltro} · {filtrados.length}</span>
+          <button onClick={() => { setFiltro(null); setRapido(null); setOrdem("nome"); }} className="text-[12px] font-semibold underline px-1 py-1" style={{ color: "var(--rel-ink)" }}>limpar filtros</button>
+        </div>
+      )}
+
+      {modoMetricas ? (
         <div className="rel-card overflow-hidden">
           {filtrados.length === 0 ? (
             <Vazio titulo="Ninguém aqui" texto="Nenhum cliente bate com esse filtro." />
@@ -115,13 +192,14 @@ export default function ClientesPage({ onAbrir }: { onAbrir: (id: string) => voi
                     <span className="flex-1 min-w-0">
                       <span className="block text-sm font-semibold truncate" style={{ color: "var(--ink)" }}>{m.nome}</span>
                       <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>
-                        {filtro.tipo === "incompletos"
+                        {filtro?.tipo === "incompletos"
                           ? `Falta: ${m.faltando.map((x) => CAMPOS_CADASTRO[x] ?? x).join(", ")}`
-                          : filtro.tipo === "sem_contato"
+                          : filtro?.tipo === "sem_contato"
                             ? `${m.dias_sem_contato == null ? "Nunca teve contato" : `${m.dias_sem_contato} dias sem contato`} · meta ${m.meta_contato_dias} dias`
                             : `${m.viagens_compradas} viage${m.viagens_compradas === 1 ? "m" : "ns"} · ${m.valor_total.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}`}
                       </span>
                     </span>
+                    <span className="hidden sm:flex"><NumerosViagem m={m} /></span>
                     <CategoriaChip categoria={m.categoria} cats={cats} />
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink3)" strokeWidth="2" strokeLinecap="round"><polyline points="9 18 15 12 9 6" /></svg>
                   </button>
@@ -172,6 +250,7 @@ export default function ClientesPage({ onAbrir }: { onAbrir: (id: string) => voi
                       </span>
                     </span>
                     <span className="hidden sm:flex items-center gap-1.5 flex-shrink-0">
+                      {porId.get(c.id) && <NumerosViagem m={porId.get(c.id)!} />}
                       {porId.get(c.id) && <CategoriaChip categoria={porId.get(c.id)!.categoria} cats={cats} />}
                       {c.titular_id && <Etiqueta tom="rel">Família</Etiqueta>}
                       {meses !== null && meses < 0 && <Etiqueta tom="erro">Passaporte vencido</Etiqueta>}
@@ -187,7 +266,7 @@ export default function ClientesPage({ onAbrir }: { onAbrir: (id: string) => voi
         )}
       </div>
       )}
-      {!filtro && lista.length >= 100 && (
+      {!modoMetricas && lista.length >= 100 && (
         <p className="text-[12px] mt-2" style={{ color: "var(--ink3)" }}>Mostrando os 100 primeiros em ordem alfabética — use a busca para achar alguém.</p>
       )}
 
