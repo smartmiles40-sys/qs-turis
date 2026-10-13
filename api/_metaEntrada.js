@@ -120,7 +120,8 @@ export async function baixarMidiaMeta(midia, leadId, phoneId = null) {
     const bytes = Buffer.from(await bin.arrayBuffer());
     const mime = String(info.mime_type || midia.mime || '').split(';')[0].trim();
     const url = await guardarMidia(bytes, mime, { leadId, nomeArquivo: midia.nomeArquivo });
-    return url ? [{ type: midia.tipo, url }] : [];
+    // nome e tamanho: o Atendimento do Relacionamento mostra no cartão do documento (13/10)
+    return url ? [{ type: midia.tipo, url, ...(midia.nomeArquivo ? { nome: midia.nomeArquivo } : {}), tamanho: bytes.length }] : [];
   } catch (e) {
     console.warn('[meta-entrada] mídia não baixada:', e?.message);
     return [];

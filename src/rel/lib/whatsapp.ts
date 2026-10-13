@@ -29,6 +29,9 @@ export interface Conversa {
   minutos_esperando: number;
   meta_min: number;
   janela_aberta: boolean;
+  /** "Não conta no prazo" (0113): grupo, fornecedor, equipe… — fora do SLA. */
+  sem_sla?: boolean;
+  sem_sla_motivo?: string | null;
 }
 
 export interface Anexo { type: "image" | "video" | "audio" | "file"; url: string; nome?: string }
@@ -112,7 +115,7 @@ export async function carregarMensagens(conversaId: string): Promise<Mensagem[]>
 }
 
 export async function contarEsperando(): Promise<{ esperando: number; foraDoPrazo: number }> {
-  const { data } = await supabase.from("rel_wa_fila").select("minutos_esperando, meta_min").not("aguardando_desde", "is", null);
+  const { data } = await supabase.from("rel_wa_fila").select("minutos_esperando, meta_min").not("aguardando_desde", "is", null).eq("sem_sla", false);
   const l = (data ?? []) as { minutos_esperando: number; meta_min: number }[];
   return { esperando: l.length, foraDoPrazo: l.filter((x) => x.minutos_esperando > x.meta_min).length };
 }
@@ -130,6 +133,25 @@ export const passarConversa = (id: string, userId: string | null) => mudar(id, {
 export const resolverConversa = (id: string) => mudar(id, { estado: "resolvida", aguardando_desde: null, nao_lidas: 0 });
 export const reabrirConversa = (id: string) => mudar(id, { estado: "aguardando_cliente" });
 export const ligarAoCliente = (id: string, clienteId: string | null) => mudar(id, { cliente_id: clienteId });
+
+// ── "Não conta no prazo" (0113) ─────────────────────────────────────────────
+// Grupos, fornecedores, equipe interna… não entram no prazo de resposta. Marcar
+// também apaga as medições antigas da conversa (o banco faz) — os KPIs ficam
+// limpos. Grupo de WhatsApp já nasce marcado.
+
+export const MOTIVOS_SEM_SLA: Record<string, string> = {
+  grupo: "Grupo",
+  fornecedor: "Fornecedor",
+  equipe: "Equipe interna",
+  teste: "Teste",
+  pessoal: "Pessoal",
+  outro: "Outro",
+};
+
+export async function marcarSemSla(id: string, sem: boolean, motivo?: string) {
+  const { error } = await supabase.rpc("rel_conversa_sem_sla", { p_conversa: id, p_sem: sem, p_motivo: motivo ?? null });
+  if (error) throw new Error(error.message);
+}
 
 // ── Envio (servidor) ────────────────────────────────────────────────────────
 
