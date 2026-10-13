@@ -254,6 +254,9 @@ async function acharOuCriarViagem(p, e, fichaId) {
     return alvo;
   }
   // Viagem daqui que já veio desta expedição pro mesmo titular de família (acompanhante)? → passageiro nela
+  // Expedição que ainda vai acontecer e o cliente tem venda sem data que não deu pra casar: pode ser a mesma.
+  const suspeita = futura ? semData.length : 0;
+  if (suspeita) conta.conferir_possivel_repetida = (conta.conferir_possivel_repetida || 0) + 1;
   const body = {
     titulo: (e.nome + (g?.nome ? ` — ${g.nome}` : '')).slice(0, 200), destino: e.destino || null, expedicao: e.nome,
     tipo: e.tipo === 'pacote' ? 'pacote' : 'expedicao', data_embarque: embarque || null,
@@ -261,7 +264,8 @@ async function acharOuCriarViagem(p, e, fichaId) {
     valor: Number(p.valor_contratado_brl) > 0 ? Number(p.valor_contratado_brl) : null, qtd_passageiros: 1,
     cliente_id: fichaId, origem: 'expedicoes', status: 'ativa', expedicoes_id: e.id,
     bitrix_deal_id: deal && !viagemPorDeal.has(deal) ? deal : null,
-    observacoes: [p.observacoes, p.status_reserva === 'Pré-reserva' ? 'Pré-reserva no sistema de Expedições.' : null].filter(Boolean).join('\n') || null,
+    observacoes: [p.observacoes, p.status_reserva === 'Pré-reserva' ? 'Pré-reserva no sistema de Expedições.' : null,
+      suspeita ? `CONFERIR: possível viagem repetida — o cliente já tem ${suspeita} venda(s) sem data vinda(s) do Bitrix.` : null].filter(Boolean).join('\n') || null,
   };
   if (SIMULAR) {
     if (process.env.DIAG) { const k = e.nome; diag[k] = diag[k] || { criar: 0, cliente_tem_viagens: 0, ex: null }; diag[k].criar++; if (minhas.length) { diag[k].cliente_tem_viagens++; diag[k].ex = diag[k].ex || minhas.map((m) => `${m.expedicao || m.destino || m.titulo} ${m.data_embarque}`).join(' | ').slice(0, 160); } }
