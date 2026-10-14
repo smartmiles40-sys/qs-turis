@@ -13,6 +13,7 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { supabase } from "@/lib/supabase";
 import { Aviso, Botao, Entrada, Etiqueta, Modal } from "../../rel/ui";
 import ModeloModal from "../../rel/atendimento/ModeloModal";
+import NovoAtendimento from "./NovoAtendimento";
 import { carregarCliente, formatarCpf, formatarTelefone, moeda, type Cliente } from "../../rel/lib/clientes";
 import { periodo, viagensDoCliente, type Viagem } from "../../rel/lib/viagens";
 import {
@@ -61,8 +62,10 @@ const ROTULO_EVENTO: Record<EventoFin["tipo"], string> = {
   criado: "Enviado ao Financeiro", status: "Status", responsavel: "Assumiu", nota: "Nota", conversa: "WhatsApp", devolvido: "Conversa devolvida",
 };
 
-export function AtendimentoDetalhe({ id, onFechar, onMudou, onAbrirConversa }: {
+export function AtendimentoDetalhe({ id, onFechar, onMudou, onAbrirConversa, chamarAoAbrir = false }: {
   id: string | null; onFechar: () => void; onMudou: () => void; onAbrirConversa: (id: string) => void;
+  /** Veio do "+ Novo atendimento": já abre a escolha do modelo. */
+  chamarAoAbrir?: boolean;
 }) {
   const { currentUser } = useQsAuth();
   const meuId = currentUser?.id ?? "";
@@ -95,6 +98,11 @@ export function AtendimentoDetalhe({ id, onFechar, onMudou, onAbrirConversa }: {
     } catch (e) { setErro(e instanceof Error ? e.message : "Não carregou."); }
   }, [id]);
   useEffect(() => { setAt(null); setEventos([]); setNota(""); setErro(null); setResolvendo(false); void carregar(); }, [carregar]);
+  // "+ Novo atendimento" → cai direto no modelo (1x por atendimento).
+  const [jaChamou, setJaChamou] = useState<string | null>(null);
+  useEffect(() => {
+    if (chamarAoAbrir && at && at.id === id && jaChamou !== at.id && !at.conversa_id && at.telefone) { setJaChamou(at.id); setModelo(true); }
+  }, [chamarAoAbrir, at, id, jaChamou]);
 
   async function rodar(fn: () => Promise<unknown>) {
     setOcupado(true); setErro(null);
@@ -254,6 +262,8 @@ export default function AtendimentosPage({ onAbrirConversa, abrirId, onAbrirId }
   const [busca, setBusca] = useState("");
   const [so, setSo] = useState<"todos" | "meus" | "sem_dono">("todos");
   const [aberto, setAbertoLocal] = useState<string | null>(null);
+  const [novo, setNovo] = useState(false);
+  const [chamar, setChamar] = useState<string | null>(null);
   const atual = abrirId !== undefined ? abrirId : aberto;
   const abrir = (id: string | null) => { if (onAbrirId) onAbrirId(id); else setAbertoLocal(id); };
 
@@ -289,6 +299,7 @@ export default function AtendimentosPage({ onAbrirConversa, abrirId, onAbrirId }
             ))}
           </div>
           <div className="w-64"><Entrada value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Nome, telefone ou #número" /></div>
+          <Botao variante="primario" onClick={() => setNovo(true)}>+ Novo atendimento</Botao>
         </div>
       </div>
 
@@ -309,7 +320,8 @@ export default function AtendimentosPage({ onAbrirConversa, abrirId, onAbrirId }
         })}
       </div>
 
-      <AtendimentoDetalhe id={atual} onFechar={() => abrir(null)} onMudou={() => void carregar()}
+      <NovoAtendimento aberto={novo} onFechar={() => setNovo(false)} onCriado={(id) => { setNovo(false); void carregar(); setChamar(id); abrir(id); }} />
+      <AtendimentoDetalhe id={atual} chamarAoAbrir={!!atual && chamar === atual} onFechar={() => { setChamar(null); abrir(null); }} onMudou={() => void carregar()}
         onAbrirConversa={(id) => { abrir(null); onAbrirConversa(id); }} />
     </div>
   );

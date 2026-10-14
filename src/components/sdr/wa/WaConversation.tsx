@@ -1178,6 +1178,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
           }>
             <WaModelos
               modelos={modelos}
+              leadId={leadId}
               leadName={leadName}
               enviando={sending}
               onEnviar={(m, valores) => void enviarModelo(m, valores)}

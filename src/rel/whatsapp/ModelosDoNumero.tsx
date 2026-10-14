@@ -38,6 +38,8 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
   const [salvando, setSalvando] = useState(false);
   const [erroForm, setErroForm] = useState<string | null>(null);
   const [confirmar, setConfirmar] = useState<string | null>(null);
+  // 14/10: exemplo de cada {{n}} — a Meta usa pra aprovar e recusa quando não combina com o texto.
+  const [exemplos, setExemplos] = useState<Record<string, string>>({});
 
   const carregar = useCallback(async () => {
     const r = await listarModelosAdmin(n.phoneId);
@@ -50,13 +52,17 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
     const nome = form.nome.trim().toLowerCase().replace(/\s+/g, "_");
     if (!NOME_OK.test(nome)) { setErroForm("Nome só com letras minúsculas, números e _ (ex.: lembrete_embarque)."); return; }
     if (form.corpo.trim().length < 5) { setErroForm("Escreva o texto da mensagem."); return; }
+    if (numeros.some((v) => !exemploDe(v).trim())) { setErroForm("Preencha o exemplo de cada campo — a Meta usa pra aprovar."); return; }
     setSalvando(true);
     setErroForm(null);
-    const r = await criarModeloNaMeta({ nome, categoria: form.categoria, idioma: "pt_BR", corpo: form.corpo.trim(), rodape: form.rodape.trim() || undefined }, n.phoneId);
+    const maior = numeros.length ? Math.max(...numeros.map(Number)) : 0;
+    const listaEx = Array.from({ length: maior }, (_, i) => exemploDe(String(i + 1)).trim());
+    const r = await criarModeloNaMeta({ nome, categoria: form.categoria, idioma: "pt_BR", corpo: form.corpo.trim(), rodape: form.rodape.trim() || undefined, exemplos: listaEx }, n.phoneId);
     setSalvando(false);
     if (!r.ok) { setErroForm(r.error || "A Meta recusou."); return; }
     setNovo(false);
     setForm({ nome: "", categoria: "UTILITY", corpo: "", rodape: "" });
+    setExemplos({});
     await carregar();
   }
 
@@ -68,7 +74,8 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
   }
 
   // Variáveis {{1}}, {{2}}… que aparecem no texto, pra lembrar do exemplo.
-  const variaveis = Array.from(new Set(form.corpo.match(/\{\{\d+\}\}/g) || []));
+  const numeros = [...new Set([...form.corpo.matchAll(/{{\s*(\d+)\s*}}/g)].map((m) => m[1]))].sort((x, y) => Number(x) - Number(y));
+  const exemploDe = (v: string) => exemplos[v] ?? (v === "1" ? "Maria" : "");
 
   return (
     <section className="rel-card p-5 space-y-3">
@@ -137,10 +144,18 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
           <Campo rotulo="Texto" dica={'Ex.: "Olá {{1}}! Faltam 7 dias pro seu embarque para {{2}}. Qualquer dúvida, é só chamar aqui."'}>
             <textarea className="rel-input w-full" rows={5} value={form.corpo} onChange={(e) => setForm({ ...form, corpo: e.target.value })} />
           </Campo>
-          {variaveis.length > 0 && (
-            <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
-              Campos que mudam: {variaveis.join(", ")} — quem envia preenche na hora (ex.: {"{{1}}"} = nome do cliente, {"{{2}}"} = destino).
-            </p>
+          {numeros.length > 0 && (
+            <div className="rel-card p-3 space-y-2">
+              <p className="text-[12px] font-semibold" style={{ color: "var(--ink2)" }}>Exemplo de cada campo</p>
+              <p className="text-[12px]" style={{ color: "var(--ink3)" }}>A Meta usa pra aprovar — tem que combinar com o texto (ex.: {"{{1}}"} = Maria, {"{{2}}"} = Japão). Quem envia preenche o valor de verdade na hora.</p>
+              {numeros.map((v) => (
+                <div key={v} className="flex items-center gap-2">
+                  <code className="text-[12px] px-1.5 py-1 rounded" style={{ background: "var(--line2)", color: "var(--ink2)" }}>{`{{${v}}}`}</code>
+                  <Entrada value={exemploDe(v)} onChange={(e) => setExemplos((p) => ({ ...p, [v]: e.target.value }))}
+                    aria-label={`Exemplo de {{${v}}}`} placeholder="Exemplo (obrigatório)" />
+                </div>
+              ))}
+            </div>
           )}
           <Campo rotulo="Rodapé (opcional)">
             <Entrada value={form.rodape} onChange={(e) => setForm({ ...form, rodape: e.target.value })} placeholder="Se Tu For, Eu Vou! Viagens" />

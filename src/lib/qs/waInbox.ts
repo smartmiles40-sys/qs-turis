@@ -140,6 +140,8 @@ export interface WaModelo {
   rodape: string | null;
   /** Chaves dos {{buracos}} do corpo, na ordem em que aparecem. */
   variaveis: string[];
+  /** Exemplo de cada variável, na ordem (o que foi pra Meta aprovar). */
+  exemplos?: string[];
 }
 
 interface WaConfigBruta {
@@ -228,6 +230,8 @@ export interface NovoModelo {
   corpo: string;
   cabecalho?: string;
   rodape?: string;
+  /** Exemplo de cada {{n}}, na ordem — a Meta usa pra aprovar (14/10). */
+  exemplos?: string[];
 }
 
 export async function criarModeloNaMeta(m: NovoModelo, phoneId?: string | null): Promise<{ ok: boolean; status?: string; error?: string }> {

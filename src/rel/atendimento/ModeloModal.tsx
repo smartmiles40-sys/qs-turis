@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { enviarModelo, enviarModeloParaTelefone, listarModelos, type Modelo } from "../lib/whatsapp";
 import { Aviso, Botao, Campo, Entrada, Modal } from "../ui";
+import { carregarCampos, rotuloDoCampo, trechoDaVariavel, variaveisVazias, type CamposDoModelo } from "../../lib/qs/modeloCampos";
 
 export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnviado }: {
   aberto: boolean;
@@ -16,6 +17,7 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
   const [modelos, setModelos] = useState<Modelo[] | null>(null);
   const [escolhido, setEscolhido] = useState<Modelo | null>(null);
   const [params, setParams] = useState<Record<string, string>>({});
+  const [campos, setCampos] = useState<CamposDoModelo | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
@@ -37,14 +39,18 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
     const primeiro = (nomeCliente || "").trim().split(/\s+/)[0] || "";
     const vars = [...new Set([...m.corpo.matchAll(/{{\s*([^}]+?)\s*}}/g)].map((x) => x[1]))];
     setParams(Object.fromEntries(vars.map((v) => [v, v === "1" ? primeiro : ""])));
+    setCampos(null);
+    // O que é cada {{n}} (qs_wa_modelo_campos) — só pra mostrar o rótulo.
+    void carregarCampos(m.nome).then((c) => setCampos(c)).catch(() => null);
   }
+
+  const vazias = variaveisVazias(variaveis, params);
 
   const previa = escolhido?.corpo.replace(/{{\s*([^}]+?)\s*}}/g, (_, k) => params[k] || `[${k}]`) ?? "";
 
   async function enviar() {
     if (!escolhido) return;
-    const vazia = variaveis.find((v) => !String(params[v] || "").trim());
-    if (vazia) { setErro(`Preencha a variável {{${vazia}}}.`); return; }
+    if (vazias.length) { setErro(`Preencha ${vazias.map((v) => `{{${v}}}`).join(", ")} antes de enviar.`); return; }
     setEnviando(true);
     setErro(null);
     try {
@@ -66,7 +72,7 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
       rodape={escolhido ? (
         <>
           <Botao variante="fantasma" onClick={() => setEscolhido(null)}>Voltar</Botao>
-          <Botao variante="primario" onClick={enviar} disabled={enviando}>{enviando ? "Enviando…" : "Enviar"}</Botao>
+          <Botao variante="primario" onClick={enviar} disabled={enviando || vazias.length > 0}>{enviando ? "Enviando…" : "Enviar"}</Botao>
         </>
       ) : undefined}
     >
@@ -90,11 +96,26 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
         </div>
       ) : (
         <div className="space-y-3">
-          {variaveis.map((v) => (
-            <Campo key={v} rotulo={`Variável {{${v}}}`} dica={v === "1" ? "Normalmente o primeiro nome do cliente." : undefined}>
-              <Entrada value={params[v] || ""} onChange={(e) => setParams((p) => ({ ...p, [v]: e.target.value }))} />
-            </Campo>
-          ))}
+          {variaveis.length > 0 && (
+            <p className="text-[12.5px]" style={{ color: "var(--ink2)" }}>
+              Este modelo tem {variaveis.length === 1 ? "1 campo" : `${variaveis.length} campos`} pra completar. Todos são obrigatórios — o botão Enviar só libera com tudo preenchido.
+            </p>
+          )}
+          {variaveis.map((v) => {
+            const rotulo = rotuloDoCampo(campos?.[v]) ?? (v === "1" ? "Primeiro nome do cliente" : null);
+            // A Meta guarda os exemplos na ordem {{1}}, {{2}}…
+            const exemplo = /^d+$/.test(v) ? escolhido.exemplos?.[Number(v) - 1] : undefined;
+            const vazio = vazias.includes(v);
+            return (
+              <Campo key={v} rotulo={`{{${v}}}${rotulo ? ` · ${rotulo}` : ""}`}
+                dica={`No texto: “${trechoDaVariavel(escolhido.corpo, v)}”${exemplo ? ` · Ex.: ${exemplo}` : ""}`}>
+                <Entrada value={params[v] || ""} onChange={(e) => setParams((p) => ({ ...p, [v]: e.target.value }))}
+                  placeholder={exemplo ? `Ex.: ${exemplo}` : "Obrigatório"} aria-invalid={vazio}
+                  style={vazio ? { borderColor: "var(--warn-ink)" } : undefined} />
+              </Campo>
+            );
+          })}
+          {vazias.length > 0 && <Aviso>Falta preencher {vazias.map((v) => `{{${v}}}`).join(", ")}.</Aviso>}
           <div>
             <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Como o cliente vai ler</p>
             <div className="rounded-2xl px-3 py-2 text-[14px] whitespace-pre-wrap" style={{ background: "var(--wa-soft)", color: "var(--wa-ink)" }}>{previa}</div>

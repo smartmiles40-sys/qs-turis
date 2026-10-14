@@ -72,6 +72,8 @@ export interface Modelo {
   corpo: string;
   variaveis: string[];
   precisaMidia?: boolean;
+  /** Exemplo de cada variável, na ordem (o que foi pra Meta aprovar). */
+  exemplos?: string[];
   categoria?: string;
 }
 

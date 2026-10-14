@@ -227,7 +227,8 @@ export async function listarModelos(phoneId = null) {
   const d = await graph(`/${cr.waba}/message_templates?limit=200`, { token: cr.token });
   const modelos = (d?.data || []).map((t) => {
     const comp = Array.isArray(t.components) ? t.components : [];
-    const corpo = comp.find((c) => String(c.type).toUpperCase() === 'BODY')?.text || '';
+    const corpoComp = comp.find((c) => String(c.type).toUpperCase() === 'BODY');
+    const corpo = corpoComp?.text || '';
     const header = comp.find((c) => String(c.type).toUpperCase() === 'HEADER');
     return {
       id: t.id,
@@ -241,6 +242,9 @@ export async function listarModelos(phoneId = null) {
       cabecalhoMidia: header && header.format !== 'TEXT' ? header.format : null,
       rodape: comp.find((c) => String(c.type).toUpperCase() === 'FOOTER')?.text || null,
       variaveis: [...corpo.matchAll(/{{\s*([^}]+?)\s*}}/g)].map((m) => m[1]),
+      // O exemplo que foi pra Meta aprovar ({{1}} → "Maria"): a tela de envio
+      // mostra ele pra pessoa saber o que vai em cada campo.
+      exemplos: (Array.isArray(corpoComp?.example?.body_text?.[0]) ? corpoComp.example.body_text[0] : []).map(String),
     };
   });
   return { modelos };
@@ -256,7 +260,7 @@ export async function listarModelos(phoneId = null) {
  *  • corpo não pode começar nem terminar com variável;
  *  • categoria MARKETING | UTILITY (AUTHENTICATION tem regra própria).
  */
-export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, rodape, phoneId = null }) {
+export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, rodape, exemplos = null, phoneId = null }) {
   // phoneId = número de SDR (29/09): o modelo vai pra análise na conta DELE.
   const cr = await credenciaisDaMeta(phoneId);
   if (!cr) return { erro: 'sem-caixa-oficial' };
@@ -271,7 +275,11 @@ export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, r
   const vars = [...new Set((corpo.match(/\{\{\s*(\d+)\s*\}\}/g) || []).map((v) => Number(v.replace(/\D/g, ''))))].sort((a, b) => a - b);
   const EXEMPLOS = ['Maria', 'Japão', '15/11', 'Se Tu For, Eu Vou!', '09:30', 'Tóquio', '7', 'Ana'];
   const corpoBloco = { type: 'BODY', text: corpo.trim() };
-  if (vars.length) corpoBloco.example = { body_text: [vars.map((n, i) => EXEMPLOS[i] || `exemplo ${n}`)] };
+  // exemplos (14/10): quem cria diz o exemplo de cada variável — o revisor da
+  // Meta recusa quando o exemplo não combina com o texto ({{2}} = nome do SDR
+  // com exemplo "Japão"). Sem exemplo, cai nos padrões.
+  const ex = (n, i) => String((Array.isArray(exemplos) ? exemplos[n - 1] : exemplos?.[n]) ?? '').trim() || EXEMPLOS[i] || `exemplo ${n}`;
+  if (vars.length) corpoBloco.example = { body_text: [vars.map(ex)] };
   components.push(corpoBloco);
   if (rodape?.trim()) components.push({ type: 'FOOTER', text: rodape.trim() });
 
@@ -647,6 +655,7 @@ export async function modelosAprovados(phoneId = null) {
       corpo: m.corpo,
       rodape: m.rodape || null,
       variaveis: m.variaveis || [],
+      exemplos: m.exemplos || [],
     }));
 }
 

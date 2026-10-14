@@ -7,13 +7,23 @@
 //
 // O texto que sai é SEMPRE o aprovado na Meta (o servidor resolve o corpo);
 // aqui só se escolhe o modelo e se preenchem os buracos.
+//
+// 14/10 (0130): o QS sabe o que é cada {{n}} (qs_wa_modelo_campos) e já
+// preenche nome do lead, seu nome, destino (pela Fonte) e os dados da reunião.
+// Tudo continua editável; ao lado de cada campo aparece o que ele é.
 // -----------------------------------------------------------------------------
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { previewModelo, type WaModelo } from "../../../lib/qs/waInbox";
+import {
+  TIPOS_CAMPO, carregarCampos, contextoDoLead, rotuloDoCampo, trechoDaVariavel, valorDoCampo, variaveisVazias,
+  type CamposDoModelo, type ContextoDoLead,
+} from "../../../lib/qs/modeloCampos";
 
 interface Props {
   modelos: WaModelo[];
+  /** Lead da conversa — pra preencher destino e reunião (0130). */
+  leadId?: string | null;
   /** Nome do lead — pré-preenche variáveis que pedem nome (nome/name/1). */
   leadName?: string | null;
   enviando: boolean;
@@ -31,9 +41,13 @@ function valorInicial(chave: string, indice: number, leadName?: string | null) {
   return "";
 }
 
-export default function WaModelos({ modelos, leadName, enviando, onEnviar, onClose }: Props) {
+export default function WaModelos({ modelos, leadId, leadName, enviando, onEnviar, onClose }: Props) {
   const [escolhido, setEscolhido] = useState<WaModelo | null>(null);
   const [valores, setValores] = useState<Record<string, string>>({});
+  const [campos, setCampos] = useState<CamposDoModelo | null>(null);
+  const ctxRef = useRef<Promise<ContextoDoLead | null> | null>(null);
+  // O que o QS sabe do lead: carrega 1x quando o painel abre.
+  useEffect(() => { ctxRef.current = leadId ? contextoDoLead(leadId, leadName).catch(() => null) : Promise.resolve(null); }, [leadId, leadName]);
 
   // Escolher NUNCA envia direto — mostra o texto e espera a confirmação. Os
   // modelos aprovados hoje são de texto fixo (sem variáveis), então sem esta
@@ -42,7 +56,18 @@ export default function WaModelos({ modelos, leadName, enviando, onEnviar, onClo
     const iniciais: Record<string, string> = {};
     m.variaveis.forEach((v, i) => { iniciais[v] = valorInicial(v, i, leadName); });
     setValores(iniciais);
+    setCampos(null);
     setEscolhido(m);
+    // Preenche o que der, sem apagar o que a pessoa já digitou.
+    void Promise.all([carregarCampos(m.nome).catch(() => null), ctxRef.current ?? Promise.resolve(null)]).then(([cs, ctx]) => {
+      if (!cs) return;
+      setCampos(cs);
+      setValores((prev) => {
+        const n = { ...prev };
+        for (const v of m.variaveis) { const sug = valorDoCampo(cs[v], ctx, m.nome); if (sug && !String(n[v] || "").trim()) n[v] = sug; }
+        return n;
+      });
+    });
   };
 
   const completo = useMemo(
@@ -107,26 +132,45 @@ export default function WaModelos({ modelos, leadName, enviando, onEnviar, onClo
 
       {escolhido && (
         <div className="px-3 pb-3 grid gap-2">
-          {escolhido.variaveis.map((v) => (
-            <label key={v} className="grid gap-1">
-              <span className="text-[11px] font-semibold" style={{ color: "var(--ink3)" }}>
-                {/^\d+$/.test(v) ? `Campo {{${v}}}` : v}
-              </span>
-              <input
-                value={valores[v] ?? ""}
-                onChange={(e) => setValores((prev) => ({ ...prev, [v]: e.target.value }))}
-                className="rounded-lg px-2.5 py-1.5 text-[13px] outline-none"
-                style={{ border: "1px solid var(--line)", background: "var(--card2)", color: "var(--ink)" }}
-              />
-            </label>
-          ))}
+          {[...new Set(escolhido.variaveis)].map((v) => {
+            const rotulo = rotuloDoCampo(campos?.[v]);
+            // A Meta guarda os exemplos na ordem {{1}}, {{2}}…
+            const exemplo = /^\d+$/.test(v) ? escolhido.exemplos?.[Number(v) - 1] : undefined;
+            const vazio = !valores[v]?.trim();
+            return (
+              <label key={v} className="grid gap-0.5">
+                <span className="text-[11px] font-semibold" style={{ color: "var(--ink2)" }}>
+                  {/^\d+$/.test(v) ? `Campo {{${v}}}` : v}
+                  {rotulo && <span style={{ color: "var(--ink)" }}>{" · "}{rotulo}</span>}
+                  {rotulo && campos?.[v] && campos[v] in TIPOS_CAMPO && vazio ? <span className="font-normal" style={{ color: "var(--ink3)" }}> (não achei — digite)</span> : null}
+                </span>
+                {/* Onde a variável entra no texto — diz o que vai ali mesmo sem rótulo. */}
+                <span className="text-[11px]" style={{ color: "var(--ink3)" }}>
+                  “{trechoDaVariavel(escolhido.corpo, v)}”{exemplo ? ` · Ex.: ${exemplo}` : ""}
+                </span>
+                <input
+                  value={valores[v] ?? ""}
+                  onChange={(e) => setValores((prev) => ({ ...prev, [v]: e.target.value }))}
+                  placeholder={exemplo ? `Ex.: ${exemplo}` : "Obrigatório"}
+                  aria-invalid={vazio}
+                  className="rounded-lg px-2.5 py-1.5 text-[13px] outline-none"
+                  style={{ border: `1px solid ${vazio ? "var(--wa-warn-line, #E5A33B)" : "var(--line)"}`, background: "var(--card2)", color: "var(--ink)" }}
+                />
+              </label>
+            );
+          })}
           {/* O SDR vê EXATAMENTE o que o cliente vai receber antes de enviar. */}
           <div className="rounded-xl px-3 py-2 text-[12px] whitespace-pre-line"
                style={{ background: "var(--card2)", border: "1px dashed var(--line)", color: "var(--ink2)" }}>
             {previewModelo(escolhido, valores)}
           </div>
+          {!completo && (
+            <p className="text-[11.5px] font-semibold" style={{ color: "var(--ink2)" }}>
+              Preencha {variaveisVazias([...new Set(escolhido.variaveis)], valores).map((v) => `{{${v}}}`).join(", ")} pra poder enviar.
+            </p>
+          )}
           <button
-            onClick={() => onEnviar(escolhido, valores)}
+            onClick={() => { if (completo) onEnviar(escolhido, valores); }}
             disabled={!completo || enviando}
             className="wa-send h-9 rounded-xl text-white text-[13px] font-semibold disabled:opacity-50"
           >

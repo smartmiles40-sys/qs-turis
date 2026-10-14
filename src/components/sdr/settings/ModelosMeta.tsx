@@ -18,7 +18,8 @@
 // só na conversa que sai por aquele número.
 // -----------------------------------------------------------------------------
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { EXEMPLO_DO_TIPO, TIPOS_CAMPO, salvarCampos, type TipoCampo } from "@/lib/qs/modeloCampos";
 import {
   listarModelosAdmin, criarModeloNaMeta, excluirModeloNaMeta,
   type WaModeloAdmin, type NovoModelo,
@@ -54,6 +55,13 @@ export default function ModelosMeta() {
   const [criando, setCriando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [form, setForm] = useState<NovoModelo>(VAZIO);
+  // 14/10: exemplo (pra Meta aprovar) e tipo (pra o QS preencher no envio) de cada {{n}}.
+  const [exemplos, setExemplos] = useState<Record<string, string>>({});
+  const [tipos, setTipos] = useState<Record<string, TipoCampo>>({});
+  const vars = useMemo(() => [...new Set([...form.corpo.matchAll(/{{\s*(\d+)\s*}}/g)].map((m) => m[1]))].sort((x, y) => Number(x) - Number(y)), [form.corpo]);
+  const tipoDe = (v: string): TipoCampo => tipos[v] ?? (v === "1" ? "nome_lead" : "livre");
+  const exemploDe = (v: string) => exemplos[v] ?? EXEMPLO_DO_TIPO[tipoDe(v)];
+  const faltaExemplo = vars.some((v) => !exemploDe(v).trim());
   // Existe número oficial ligado? Desde 29/09 pode não existir (o time fala só
   // pelos números próprios) — aí a tela abre direto no primeiro SDR.
   const [temOficial, setTemOficial] = useState(true);
@@ -95,10 +103,20 @@ export default function ModelosMeta() {
   }
 
   async function enviar() {
+    if (faltaExemplo) { notifyError("Preencha o exemplo de cada campo — a Meta usa pra aprovar."); return; }
     setSalvando(true);
-    const r = await criarModeloNaMeta({ ...form, nome: form.nome.trim().toLowerCase().replace(/\s+/g, "_") }, phoneId || null);
+    const nome = form.nome.trim().toLowerCase().replace(/\s+/g, "_");
+    const maior = vars.length ? Math.max(...vars.map(Number)) : 0;
+    const listaEx = Array.from({ length: maior }, (_, i) => exemploDe(String(i + 1)).trim());
+    const r = await criarModeloNaMeta({ ...form, nome, exemplos: listaEx }, phoneId || null);
     setSalvando(false);
     if (!r.ok) { notifyError(r.error || "Não consegui enviar."); return; }
+    // O que é cada campo — o QS preenche sozinho quando o SDR for enviar.
+    if (vars.length) {
+      await salvarCampos(nome, Object.fromEntries(vars.map((v) => [v, tipoDe(v)])))
+        .catch((e) => notifyError(e instanceof Error ? e.message : "Não salvei o tipo dos campos."));
+    }
+    setExemplos({}); setTipos({});
     notifySuccess(`Modelo enviado para análise da Meta${atual ? ` no número de ${nomeDoNumero(atual)}` : ""}. O status aparece aqui quando ela responder.`);
     setForm(VAZIO);
     setCriando(false);
@@ -120,7 +138,7 @@ export default function ModelosMeta() {
   }
 
   // Prévia do que o cliente lê: as variáveis viram exemplo, como no WhatsApp.
-  const previa = form.corpo.replace(/{{\s*(\d+)\s*}}/g, (_, n) => (n === "1" ? "Maria" : `[campo ${n}]`));
+  const previa = form.corpo.replace(/{{\s*(\d+)\s*}}/g, (_, n) => exemploDe(n) || `[campo ${n}]`);
 
   return (
     <div className="space-y-5">
@@ -233,6 +251,33 @@ export default function ModelosMeta() {
             </span>
           </label>
 
+          {vars.length > 0 && (
+            <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-600">Campos da mensagem</p>
+              <p className="text-[11px] text-gray-400">
+                O <b>exemplo</b> vai pra Meta aprovar — tem que combinar com o texto. O <b>tipo</b> diz ao QS o que
+                preencher sozinho quando o SDR for enviar.
+              </p>
+              {vars.map((v) => (
+                <div key={v} className="grid gap-2 sm:grid-cols-[70px_1fr_1fr] items-center">
+                  <code className="text-xs bg-gray-100 rounded px-1.5 py-1 text-center">{`{{${v}}}`}</code>
+                  <select value={tipoDe(v)} aria-label={`Tipo do campo ${v}`}
+                    onChange={(e) => {
+                      const t = e.target.value as TipoCampo;
+                      setTipos((p) => ({ ...p, [v]: t }));
+                      if (exemplos[v] === undefined) setExemplos((p) => ({ ...p, [v]: EXEMPLO_DO_TIPO[t] }));
+                    }}
+                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm outline-none focus:border-blue-400">
+                    {(Object.keys(TIPOS_CAMPO) as TipoCampo[]).map((t) => <option key={t} value={t}>{TIPOS_CAMPO[t]}</option>)}
+                  </select>
+                  <input value={exemploDe(v)} onChange={(e) => setExemplos((p) => ({ ...p, [v]: e.target.value }))}
+                    aria-label={`Exemplo do campo ${v}`} placeholder="Exemplo (obrigatório)"
+                    className={`rounded-lg border px-2 py-1.5 text-sm outline-none focus:border-blue-400 ${exemploDe(v).trim() ? "border-gray-300" : "border-red-300"}`} />
+                </div>
+              ))}
+            </div>
+          )}
+
           <label className="block">
             <span className="text-xs font-semibold text-gray-600">Rodapé (opcional)</span>
             <input
@@ -253,7 +298,7 @@ export default function ModelosMeta() {
 
           <div className="flex gap-2 pt-1">
             <button
-              onClick={() => { setCriando(false); setForm(VAZIO); }}
+              onClick={() => { setCriando(false); setForm(VAZIO); setExemplos({}); setTipos({}); }}
               disabled={salvando}
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
             >
@@ -261,7 +306,7 @@ export default function ModelosMeta() {
             </button>
             <button
               onClick={() => void enviar()}
-              disabled={salvando || !form.nome.trim() || !form.corpo.trim()}
+              disabled={salvando || !form.nome.trim() || !form.corpo.trim() || faltaExemplo}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {salvando ? "Enviando…" : "Enviar para aprovação"}

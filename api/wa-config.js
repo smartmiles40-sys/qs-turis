@@ -363,7 +363,9 @@ export default async function handler(req, res) {
     if (body.acao === 'criar') {
       const r = await criarModelo({
         nome: body.nome, categoria: body.categoria, idioma: body.idioma,
-        corpo: body.corpo, cabecalho: body.cabecalho, rodape: body.rodape, phoneId: phoneModelo,
+        corpo: body.corpo, cabecalho: body.cabecalho, rodape: body.rodape,
+        exemplos: Array.isArray(body.exemplos) ? body.exemplos.map((x) => String(x ?? '').slice(0, 200)) : null,
+        phoneId: phoneModelo,
       });
       if (r.erro) return res.status(faltaConfig(r.erro) ? 503 : 400).json({ error: r.mensagem || textoDeConfig(r.erro) || 'Não consegui criar o modelo.' });
       return res.status(200).json({ ok: true, id: r.id, status: r.status });
