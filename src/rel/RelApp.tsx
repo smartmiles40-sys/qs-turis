@@ -16,8 +16,9 @@
 // "voltar" do navegador funciona e dá pra mandar o link de uma tela pra
 // alguém do time.
 // -----------------------------------------------------------------------------
+import TrocarArea from "@/components/TrocarArea";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { useQsAuth, setoresDe } from "@/contexts/QsAuthContext";
+import { useQsAuth } from "@/contexts/QsAuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
 import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
@@ -41,7 +42,7 @@ import WhatsAppPage from "./whatsapp/WhatsAppPage";
 import EquipePage from "./equipe/EquipePage";
 import ModelosPage from "./modelos/ModelosPage";
 import AgendaPage from "./agenda/AgendaPage";
-import { podeGerirRelacionamento } from "./equipe/permissao";
+import { podeGerirTime } from "./equipe/permissao";
 
 type Rota =
   | { tela: "inicio" }
@@ -219,7 +220,7 @@ function gruposGuardados(): Record<string, boolean> {
 }
 
 export default function RelApp() {
-  const { currentUser, logout, trocarArea } = useQsAuth();
+  const { currentUser, logout } = useQsAuth();
   const { isDark, toggleTheme } = useTheme();
   const [rota, setRota] = useState<Rota>(lerRota);
   const [resumo, setResumo] = useState<Resumo | null>(null);
@@ -262,7 +263,6 @@ export default function RelApp() {
   useEffect(() => { atualizar(); }, [rota.tela, atualizar]);
 
   if (!currentUser) return null;
-  const temComercial = setoresDe(currentUser).includes("comercial");
   const abrirCliente = (id: string) => ir({ tela: "ficha", id });
   const abrirViagem = (id: string) => ir({ tela: "viagem", id });
   const abrirConversa = (id: string) => ir({ tela: "atendimento", id });
@@ -299,7 +299,7 @@ export default function RelApp() {
       { id: "recompra", rotulo: "Recompra" },
     ] },
     // Time (13/10): a gestora do Relacionamento cadastra e cuida do time.
-    ...(podeGerirRelacionamento(currentUser) ? [{ id: "time", rotulo: "Time", icone: "equipe", itens: [
+    ...(podeGerirTime(currentUser, "relacionamento") ? [{ id: "time", rotulo: "Time", icone: "equipe", itens: [
       { id: "equipe" as Tela, rotulo: "Funcionários" },
     ] }] : []),
   ];
@@ -383,15 +383,8 @@ export default function RelApp() {
       </div>
 
       <div className="p-3 space-y-1 border-t" style={{ borderColor: "var(--line)" }}>
-        {temComercial && (
-          <button
-            onClick={() => { limparHash(); trocarArea("comercial"); }}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold text-white"
-            style={{ background: "#0147FF" }}
-          >
-            Ir para o Comercial
-          </button>
-        )}
+        {/* Outras áreas que a pessoa tem (Comercial, Financeiro, Operações). */}
+        <TrocarArea atual="relacionamento" variante="bloco" onAntes={limparHash} />
         <div className="flex items-center gap-2.5 px-1 pt-2">
           <Avatar nome={currentUser.name} tamanho={30} />
           <span className="flex-1 min-w-0">

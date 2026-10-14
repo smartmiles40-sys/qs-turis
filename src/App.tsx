@@ -8,6 +8,10 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 // A área de Relacionamento é um app à parte (src/rel). Carrega só quando alguém
 // entra por ela: quem é do Comercial não baixa nada do Relacionamento.
 const RelApp = lazy(() => import("@/rel/RelApp"));
+// Financeiro e Operações (0126, 14/10/2026): mesmo esquema — cada área só baixa
+// quando alguém entra por ela.
+const FinApp = lazy(() => import("@/fin/FinApp"));
+const OpsApp = lazy(() => import("@/ops/OpsApp"));
 
 // Páginas PÚBLICAS do Relacionamento (sem login): o cliente manda documentos
 // e responde a pesquisa pós-viagem por um link com token. Abrem antes de
@@ -104,10 +108,10 @@ function AppContent() {
     return <LoginPage />;
   }
 
-  if (area === "relacionamento") {
+  if (area === "relacionamento" || area === "financeiro" || area === "operacional") {
     return (
       <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
-        <RelApp />
+        {area === "relacionamento" ? <RelApp /> : area === "financeiro" ? <FinApp /> : <OpsApp />}
       </Suspense>
     );
   }

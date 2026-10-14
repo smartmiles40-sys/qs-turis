@@ -17,6 +17,22 @@ export async function quemChama(req) {
   return ok ? u : null;
 }
 
+/**
+ * Quem ATENDE pelo número do Relacionamento (14/10): o Relacionamento todo e,
+ * desde a 0127, o Financeiro — que fala pelo mesmo número, mas só nas conversas
+ * que estão com ele (`soFinanceiro` = true → a rota confere o setor da conversa).
+ */
+export async function quemAtende(req) {
+  const id = await getSupabaseUserId(req.headers['authorization']);
+  if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const u = (await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
+  if (!u?.is_active) return null;
+  const s = Array.isArray(u.setores) ? u.setores : [];
+  if (u.role === 'admin' || s.includes('relacionamento')) return { ...u, soFinanceiro: false };
+  if (s.includes('financeiro')) return { ...u, soFinanceiro: true };
+  return null;
+}
+
 /** O número do Relacionamento (o mais recente conectado). */
 export async function numeroDoRelacionamento() {
   const r = await rest(

@@ -1,9 +1,9 @@
 // src/components/sdr/auth/LoginPage.tsx
 import { useState, type FormEvent } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
-import type { Setor } from "@/components/sdr/types";
+import { SETORES, type Setor } from "@/components/sdr/types";
 
-// ── As duas portas do QS (09/10/2026) ───────────────────────────────────────
+// ── As portas do QS (09/10/2026; Financeiro e Operações em 14/10) ───────────────────────────────────────
 // Um sistema, um banco, uma porta por setor. A pessoa escolhe por onde entra;
 // se a conta dela não é daquele setor, o login recusa com a frase certa (em vez
 // de abrir uma tela vazia). A cor da porta acompanha a área inteira.
@@ -20,10 +20,23 @@ const PORTAS: Record<Setor, { titulo: string; sub: string; cor: string; corSoft:
     cor: "#0E7C6A",
     corSoft: "rgba(14, 124, 106, 0.09)",
   },
+  // Índigo e âmbar escuros: texto branco em cima passa no contraste AA.
+  financeiro: {
+    titulo: "Financeiro",
+    sub: "Recebimentos, pagamentos e status",
+    cor: "#3730A3",
+    corSoft: "rgba(55, 48, 163, 0.09)",
+  },
+  operacional: {
+    titulo: "Operações",
+    sub: "Expedições, fornecedores e embarques",
+    cor: "#B45309",
+    corSoft: "rgba(180, 83, 9, 0.10)",
+  },
 };
 
 function lerUltimaPorta(): Setor {
-  try { return localStorage.getItem("qs_area") === "relacionamento" ? "relacionamento" : "comercial"; }
+  try { const v = localStorage.getItem("qs_area") as Setor | null; return v && SETORES.includes(v) ? v : "comercial"; }
   catch { return "comercial"; }
 }
 
@@ -42,6 +55,29 @@ function IconeRelacionamento() {
     </svg>
   );
 }
+
+function IconeFinanceiro() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /><line x1="6" y1="15" x2="10" y2="15" />
+    </svg>
+  );
+}
+
+function IconeOperacoes() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
+    </svg>
+  );
+}
+
+const ICONE_PORTA: Record<Setor, () => JSX.Element> = {
+  comercial: IconeComercial,
+  relacionamento: IconeRelacionamento,
+  financeiro: IconeFinanceiro,
+  operacional: IconeOperacoes,
+};
 
 export default function LoginPage() {
   const { login, sessionNotice } = useQsAuth();
@@ -71,8 +107,7 @@ export default function LoginPage() {
       // Auth OK, mas o perfil não carregou (rede) — NÃO é conta desativada.
       setError("Não foi possível carregar seu perfil agora. Verifique sua conexão e tente de novo.");
     } else if (result === "sem_acesso") {
-      const outra = porta === "comercial" ? "Relacionamento" : "Comercial";
-      setError(`Sua conta não tem acesso ao ${p.titulo}. Tente entrar pelo ${outra} ou fale com a gestão.`);
+      setError(`Sua conta não tem acesso a ${p.titulo}. Tente entrar pela porta da sua área ou fale com a gestão.`);
     }
     // result === "inactive": conta desativada — o aviso vem pelo sessionNotice.
     setLoading(false);
@@ -97,10 +132,11 @@ export default function LoginPage() {
           <p className="text-sm" style={{ color: "var(--ink2)" }}>Por onde você vai entrar?</p>
         </div>
 
-        {/* As duas portas */}
+        {/* As portas (uma por área) */}
         <div role="radiogroup" aria-label="Área do sistema" className="grid grid-cols-2 gap-3 mb-4">
-          {(Object.keys(PORTAS) as Setor[]).map((s) => {
+          {SETORES.map((s) => {
             const item = PORTAS[s];
+            const Icone = ICONE_PORTA[s];
             const ativo = porta === s;
             return (
               <button
@@ -120,7 +156,7 @@ export default function LoginPage() {
                   className="flex items-center justify-center w-9 h-9 rounded-lg mb-3 transition-colors"
                   style={{ background: ativo ? item.cor : "var(--card2)", color: ativo ? "#fff" : "var(--ink3)" }}
                 >
-                  {s === "comercial" ? <IconeComercial /> : <IconeRelacionamento />}
+                  <Icone />
                 </span>
                 <span className="block text-sm font-bold" style={{ color: ativo ? item.cor : "var(--ink)" }}>
                   {item.titulo}
@@ -223,7 +259,7 @@ export default function LoginPage() {
             className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
             style={{ background: p.cor }}
           >
-            {loading ? "Entrando..." : `Entrar no ${p.titulo}`}
+            {loading ? "Entrando..." : `Entrar em ${p.titulo}`}
           </button>
         </form>
 

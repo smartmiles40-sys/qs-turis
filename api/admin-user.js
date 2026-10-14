@@ -12,7 +12,14 @@
 // setores ['relacionamento'] e papel 'relacionamento' (atendente) ou 'gestor';
 // nunca mexe em admin nem em quem tem o Comercial; não exclui (desativa).
 //
-// Body (JSON): { access_token, action: 'create'|'update'|'delete'|'listar_equipe', user: {...} }
+// 14/10/2026 (0126): a mesma regra vale pro gestor do FINANCEIRO e de OPERAÇÕES.
+// "Gestor de área" = gestor ativo SEM o Comercial; as áreas dele são os setores
+// que ele tem. Ele só cadastra/edita gente da área dele (papel = o da área, ou
+// gestor), e a pessoa fica só com aquela área.
+//
+// Body (JSON): { access_token, action: 'create'|'update'|'delete'|'listar_equipe', user: {...}, setor? }
+//   setor: de qual área — padrão: a primeira do gestor (admin: 'relacionamento',
+//   que é o que a tela de Equipe do Rel sempre pediu).
 // -----------------------------------------------------------------------------
 import { rest } from './_supabaseAdmin.js';
 
@@ -26,11 +33,14 @@ import { rest } from './_supabaseAdmin.js';
 // Vocabulário fechado de papéis. Sem isto, o endpoint aceita qualquer string
 // e grava um papel que o app não conhece — o usuário loga e não vê tela nenhuma
 // (o CHECK do banco barra, mas com erro cru; aqui a recusa é clara).
-const PAPEIS = new Set(['admin', 'gestor', 'sdr', 'closer', 'marketing', 'relacionamento']);
+const PAPEIS = new Set(['admin', 'gestor', 'sdr', 'closer', 'marketing', 'relacionamento', 'financeiro', 'operacional']);
 
-// Áreas do QS (0100). O banco ainda acerta pelo papel (admin = as duas,
-// relacionamento = só a dele); aqui só filtra o que não é setor conhecido.
-const SETORES = new Set(['comercial', 'relacionamento']);
+// Áreas do QS (0100 / 0126). O banco ainda acerta pelo papel (admin = todas,
+// papel de área = só a dele); aqui só filtra o que não é setor conhecido.
+const SETORES = new Set(['comercial', 'relacionamento', 'financeiro', 'operacional']);
+// Áreas que têm "gestor de área" (tudo menos o Comercial) — o papel do atendente
+// tem o MESMO nome da área.
+const AREAS = new Set(['relacionamento', 'financeiro', 'operacional']);
 function setoresValidos(v) {
   if (!Array.isArray(v)) return undefined;
   const s = [...new Set(v.filter((x) => SETORES.has(x)))];
@@ -89,6 +99,7 @@ export default async function handler(req, res) {
 
   const body = typeof req.body === 'string' ? safeJson(req.body) : req.body || {};
   const { access_token, action, user } = body;
+  const setorPedido = AREAS.has(body.setor) ? body.setor : null;
 
   // 1) Autenticação do chamador
   const callerId = await verifyCaller(access_token);
@@ -103,19 +114,26 @@ export default async function handler(req, res) {
     return res.status(500).json({ success: false, error: 'Falha ao validar permissão' });
   }
   const ehAdmin = caller?.role === 'admin' && caller?.is_active !== false;
-  const ehGestorRel = !ehAdmin && ehGestoraDoRelacionamento(caller);
-  if (!ehAdmin && !ehGestorRel) {
+  const areasDoGestor = ehAdmin ? [] : areasDeGestor(caller);
+  const ehGestorArea = areasDoGestor.length > 0;
+  if (!ehAdmin && !ehGestorArea) {
     return res.status(403).json({ success: false, error: 'Apenas administradores' });
   }
+  if (!ehAdmin && setorPedido && !areasDoGestor.includes(setorPedido)) {
+    return res.status(403).json({ success: false, error: 'Essa área não é sua.' });
+  }
+  // A área em jogo: a pedida, senão a primeira do gestor; admin sem pedido =
+  // Relacionamento (o que a tela de Equipe do Rel sempre listou).
+  const area = setorPedido || (ehAdmin ? 'relacionamento' : areasDoGestor[0]);
 
-  // Lista do time do Relacionamento, com o último acesso (vem da conta de auth).
+  // Lista do time da área, com o último acesso (vem da conta de auth).
   if (action === 'listar_equipe') {
     try {
-      const time = await rest('qs_users?select=id,name,email,role,setores,is_active,whatsapp_number,cargo_id&role=neq.admin&setores=cs.{relacionamento}&order=name.asc');
+      const time = await rest(`qs_users?select=id,name,email,role,setores,is_active,whatsapp_number,cargo_id&role=neq.admin&setores=cs.{${area}}&order=name.asc`);
       const lista = await Promise.all((time || []).map(async (u) => {
         let ultimo = null;
         try { ultimo = (await authAdmin(`/${u.id}`, { method: 'GET' }))?.last_sign_in_at || null; } catch { /* sem conta de auth */ }
-        return { ...u, ultimo_acesso: ultimo, so_relacionamento: soRelacionamento(u) };
+        return { ...u, ultimo_acesso: ultimo, so_relacionamento: soRelacionamento(u), so_area: soDaArea(u, area) };
       }));
       return res.status(200).json({ success: true, equipe: lista });
     } catch (err) {
@@ -124,12 +142,12 @@ export default async function handler(req, res) {
     }
   }
 
-  // Trava da gestora: confere o pedido ANTES de qualquer escrita.
-  if (ehGestorRel) {
-    const recusa = await recusaDaGestora({ action, user, callerId, caller });
+  // Trava do gestor de área: confere o pedido ANTES de qualquer escrita.
+  if (ehGestorArea) {
+    const recusa = await recusaDoGestorDeArea({ action, user, callerId, area });
     if (recusa) return res.status(403).json({ success: false, error: recusa });
-    // o resultado é sempre "só Relacionamento"
-    if (user && (action === 'create' || user.role !== undefined || user.setores !== undefined)) user.setores = ['relacionamento'];
+    // o resultado é sempre "só a área dele"
+    if (user && (action === 'create' || user.role !== undefined || user.setores !== undefined)) user.setores = [area];
   }
 
   // Cargo (0122): tem que existir, estar ativo e — pra gestora — ser do
@@ -147,8 +165,11 @@ export default async function handler(req, res) {
       if (!idValido(user.cargo_id)) return res.status(400).json({ success: false, error: 'Cargo inválido' });
       const cg = (await rest(`qs_cargos?select=setor,ativo&id=eq.${user.cargo_id}&limit=1`).catch(() => null))?.[0];
       if (!cg || !cg.ativo) return res.status(400).json({ success: false, error: 'Cargo não encontrado ou desativado' });
-      if (ehGestorRel && !['relacionamento', 'financeiro'].includes(cg.setor)) {
-        return res.status(403).json({ success: false, error: 'A gestora só atribui cargos do Relacionamento ou do Financeiro' });
+      // Gestor de área: cargos das áreas dele (a gestora do Rel também dá os
+      // do Financeiro, regra da 0122).
+      const alcada = new Set([...areasDoGestor, ...(areasDoGestor.includes('relacionamento') ? ['financeiro'] : [])]);
+      if (ehGestorArea && !alcada.has(cg.setor)) {
+        return res.status(403).json({ success: false, error: 'Você só atribui cargos da sua área.' });
       }
     }
   }
@@ -262,37 +283,50 @@ export default async function handler(req, res) {
   }
 }
 
-/** Gestor(a) ativo(a) cujo único setor é o Relacionamento. */
-function ehGestoraDoRelacionamento(u) {
-  return !!u && u.is_active !== false && u.role === 'gestor' && soRelacionamento(u);
+const NOME_AREA = { relacionamento: 'Relacionamento', financeiro: 'Financeiro', operacional: 'Operações' };
+
+/**
+ * Áreas que um gestor gerencia: gestor ativo SEM o Comercial → as áreas dele
+ * (13/10 a gestora do Rel; 14/10 Financeiro e Operações). Senão, nenhuma.
+ */
+function areasDeGestor(u) {
+  if (!u || u.is_active === false || u.role !== 'gestor') return [];
+  const s = Array.isArray(u.setores) ? u.setores : [];
+  if (s.includes('comercial')) return [];
+  return s.filter((x) => AREAS.has(x));
 }
 function soRelacionamento(u) {
+  return soDaArea(u, 'relacionamento');
+}
+/** A pessoa é SÓ desta área (sem o Comercial e sem outra área). */
+function soDaArea(u, area) {
   const s = Array.isArray(u?.setores) ? u.setores : [];
-  return s.includes('relacionamento') && !s.includes('comercial');
+  return s.length === 1 && s[0] === area;
 }
 
 /**
- * O que a gestora do Relacionamento NÃO pode fazer. Devolve a frase da recusa,
- * ou null se pode. Alvo = só gente do time do Relacionamento (sem Comercial,
- * nunca admin); papel final = atendente ('relacionamento') ou 'gestor'.
+ * O que o gestor de área NÃO pode fazer. Devolve a frase da recusa, ou null se
+ * pode. Alvo = só gente daquela área (sem Comercial, nunca admin); papel final =
+ * atendente da área (papel com o nome dela) ou 'gestor'.
  */
-async function recusaDaGestora({ action, user, callerId }) {
-  const PAPEIS_DELA = new Set(['relacionamento', 'gestor']);
+async function recusaDoGestorDeArea({ action, user, callerId, area }) {
+  const PAPEIS_DELA = new Set([area, 'gestor']);
+  const nome = NOME_AREA[area] || area;
   if (action === 'delete') return 'Pra tirar alguém do time, desative a conta (só o admin exclui).';
   if (action === 'create') {
-    if (!PAPEIS_DELA.has(user?.role || 'relacionamento')) return 'Você só cadastra atendente ou gestor(a) do Relacionamento.';
-    if (!user.role) user.role = 'relacionamento';
+    if (!PAPEIS_DELA.has(user?.role || area)) return `Você só cadastra atendente ou gestor(a) do ${nome}.`;
+    if (!user.role) user.role = area;
     return null;
   }
   if (action === 'update') {
     if (!idValido(user?.id)) return null; // o fluxo abaixo responde 400
-    if (user.role !== undefined && !PAPEIS_DELA.has(user.role)) return 'Você só dá o papel de atendente ou gestor(a) do Relacionamento.';
-    if (Array.isArray(user.setores) && user.setores.includes('comercial')) return 'Você não dá acesso ao Comercial.';
+    if (user.role !== undefined && !PAPEIS_DELA.has(user.role)) return `Você só dá o papel de atendente ou gestor(a) do ${nome}.`;
+    if (Array.isArray(user.setores) && user.setores.some((x) => x !== area)) return 'Você só dá acesso à sua área.';
     if (user.id === callerId) return null;
     const alvo = (await rest(`qs_users?select=role,setores&id=eq.${user.id}&limit=1`))?.[0];
     if (!alvo) return 'Usuário não encontrado.';
-    if (alvo.role === 'admin' || !PAPEIS_DELA.has(alvo.role) || !soRelacionamento(alvo)) {
-      return 'Esse usuário não é do time do Relacionamento — só o admin mexe nele.';
+    if (alvo.role === 'admin' || !PAPEIS_DELA.has(alvo.role) || !soDaArea(alvo, area)) {
+      return `Esse usuário não é do time do ${nome} — só o admin mexe nele.`;
     }
     return null;
   }

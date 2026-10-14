@@ -25,7 +25,7 @@ import { enviarTexto, enviarTemplate, enviarMidia, subirMidiaBytes, marcarComoLi
 import { resolverModeloMeta } from './_waSaida.js';
 import { guardarMidia } from './_waMidia.js';
 import { gravarRel } from './_relEntrada.js';
-import { quemChama, numeroDoRelacionamento } from './_relWa.js';
+import { quemAtende, numeroDoRelacionamento } from './_relWa.js';
 
 const MAX_TEXTO = 4000;
 const MAX_BYTES = 3 * 1024 * 1024; // a Vercel aceita ~4,5 MB de corpo; base64 infla 33%
@@ -113,9 +113,9 @@ const ROTULOS_SEM_ARQUIVO = new Set(['📷 imagem', '🎤 áudio', '🎬 vídeo'
 async function destino({ conversaId, clienteId, telefone }, numero) {
   if (conversaId) {
     if (!UUID.test(conversaId)) return { erro: 'Conversa inválida.' };
-    const c = (await rest(`rel_wa_conversas?select=id,telefone,phone_number_id,ultima_entrada_em&id=eq.${conversaId}&limit=1`))?.[0];
+    const c = (await rest(`rel_wa_conversas?select=id,telefone,phone_number_id,ultima_entrada_em,setor&id=eq.${conversaId}&limit=1`))?.[0];
     if (!c) return { erro: 'Conversa não encontrada.' };
-    return { telefone: c.telefone, phoneId: c.phone_number_id, ultimaEntrada: c.ultima_entrada_em, conversaId: c.id };
+    return { telefone: c.telefone, phoneId: c.phone_number_id, ultimaEntrada: c.ultima_entrada_em, conversaId: c.id, setor: c.setor };
   }
   if (clienteId) {
     if (!UUID.test(clienteId)) return { erro: 'Cliente inválido.' };
@@ -123,18 +123,18 @@ async function destino({ conversaId, clienteId, telefone }, numero) {
     if (!cl) return { erro: 'Ficha não encontrada.' };
     if (!cl.telefone) return { erro: 'Esta ficha não tem telefone.' };
     const c = (await rest(
-      `rel_wa_conversas?select=id,ultima_entrada_em&telefone=eq.${cl.telefone}&phone_number_id=eq.${encodeURIComponent(numero.phone_number_id)}&limit=1`
+      `rel_wa_conversas?select=id,ultima_entrada_em,setor&telefone=eq.${cl.telefone}&phone_number_id=eq.${encodeURIComponent(numero.phone_number_id)}&limit=1`
     ))?.[0];
-    return { telefone: cl.telefone, phoneId: numero.phone_number_id, ultimaEntrada: c?.ultima_entrada_em || null, conversaId: c?.id || null };
+    return { telefone: cl.telefone, phoneId: numero.phone_number_id, ultimaEntrada: c?.ultima_entrada_em || null, conversaId: c?.id || null, setor: c ? c.setor : null };
   }
   if (telefone) {
     const fone = normalizarTelefone(telefone);
     if (!fone) return { erro: 'Telefone inválido. Use DDD + número (ou +DDI).' };
     const c = (await rest(
-      `rel_wa_conversas?select=id,telefone,ultima_entrada_em&telefone=in.(${variantesBr(fone).join(',')})&phone_number_id=eq.${encodeURIComponent(numero.phone_number_id)}&order=ultima_entrada_em.desc.nullslast&limit=1`
+      `rel_wa_conversas?select=id,telefone,ultima_entrada_em,setor&telefone=in.(${variantesBr(fone).join(',')})&phone_number_id=eq.${encodeURIComponent(numero.phone_number_id)}&order=ultima_entrada_em.desc.nullslast&limit=1`
     ))?.[0];
     // Já existe conversa (com ou sem o 9): usa o telefone dela, senão nasce outra.
-    return { telefone: c?.telefone || fone, phoneId: numero.phone_number_id, ultimaEntrada: c?.ultima_entrada_em || null, conversaId: c?.id || null };
+    return { telefone: c?.telefone || fone, phoneId: numero.phone_number_id, ultimaEntrada: c?.ultima_entrada_em || null, conversaId: c?.id || null, setor: c ? c.setor : null };
   }
   return { erro: 'Informe a conversa.' };
 }
@@ -143,7 +143,7 @@ const janelaAberta = (ultimaEntrada) =>
   Boolean(ultimaEntrada) && Date.now() - new Date(ultimaEntrada).getTime() < 24 * 3600_000;
 
 export default async function handler(req, res) {
-  const u = await quemChama(req);
+  const u = await quemAtende(req);
   if (!u) return res.status(401).json({ error: 'Sem acesso ao Relacionamento.' });
 
   const numero = await numeroDoRelacionamento();
@@ -210,8 +210,13 @@ export default async function handler(req, res) {
     const msgId = String(body.mensagemId || '');
     const alvos = (Array.isArray(body.conversaIds) ? body.conversaIds : []).map(String).filter((x) => UUID.test(x)).slice(0, 5);
     if (!UUID.test(msgId) || !alvos.length) return res.status(400).json({ error: 'Escolha a mensagem e pra quem encaminhar.' });
-    const m = (await rest(`rel_wa_mensagens?select=texto,anexos&id=eq.${msgId}&limit=1`).catch(() => null))?.[0];
+    const m = (await rest(`rel_wa_mensagens?select=texto,anexos,conversa_id&id=eq.${msgId}&limit=1`).catch(() => null))?.[0];
     if (!m) return res.status(404).json({ error: 'Mensagem não encontrada.' });
+    // Quem é só do Financeiro só encaminha o que é de conversa dele.
+    if (u.soFinanceiro) {
+      const origem = (await rest(`rel_wa_conversas?select=setor&id=eq.${m.conversa_id}&limit=1`).catch(() => null))?.[0];
+      if (origem?.setor !== 'financeiro') return res.status(403).json({ error: 'Essa mensagem é de uma conversa do Relacionamento.' });
+    }
     const semAnexo = !(Array.isArray(m.anexos) && m.anexos.length);
     if (semAnexo && ROTULOS_SEM_ARQUIVO.has(String(m.texto || '').trim())) {
       return res.status(400).json({ error: 'O arquivo dessa mensagem não foi guardado no QS — não dá pra encaminhar.' });
@@ -220,6 +225,7 @@ export default async function handler(req, res) {
     for (const cid of alvos) {
       const a = await destino({ conversaId: cid }, numero).catch((e) => ({ erro: e?.message }));
       if (a.erro) { resultado.push({ conversaId: cid, ok: false, erro: a.erro }); continue; }
+      if (u.soFinanceiro && a.setor !== 'financeiro') { resultado.push({ conversaId: cid, ok: false, erro: 'conversa não está com o Financeiro' }); continue; }
       if (!janelaAberta(a.ultimaEntrada)) { resultado.push({ conversaId: cid, ok: false, erro: 'janela de 24h fechada' }); continue; }
       const gravarAqui = (extra) => gravarRel({ phoneId: a.phoneId, telefone: a.telefone, direcao: 'out', origem: 'qs', autorId: u.id, autorNome: u.name, status: 'sent', ...extra });
       try {
@@ -260,6 +266,11 @@ export default async function handler(req, res) {
   }, numero)
     .catch((e) => ({ erro: e?.message || 'Falha ao ler a conversa.' }));
   if (alvo.erro) return res.status(404).json({ error: alvo.erro });
+  // Quem é só do Financeiro: só nas conversas que estão com o Financeiro. Ficha
+  // (clienteId) não — o 1º contato de um lead/cliente sai pelo telefone (0127).
+  if (u.soFinanceiro && (body.clienteId || (alvo.conversaId && alvo.setor !== 'financeiro'))) {
+    return res.status(403).json({ error: 'Esse cliente já conversa com o Relacionamento. Peça pra eles enviarem a conversa ao Financeiro (botão 💰 na conversa).' });
+  }
 
   const primeiroNome = String(u.name || '').trim().split(/\s+/)[0] || 'Relacionamento';
   // Assinatura = o NOME COMPLETO cadastrado na tela Equipe (Bruno, 14/10: "se

@@ -27,6 +27,10 @@
 //   • todos os emojis com busca em português, figurinhas, atalhos de teclado
 //     do WhatsApp Web (./atalhos), respostas prontas pelo "/" e bloco de notas
 //     particular na lateral.
+//
+// 14/10 (0127): a MESMA tela atende o Financeiro (prop `setor`). O Financeiro
+// fala pelo número do Relacionamento, mas só vê as conversas que foram
+// enviadas a ele; o Relacionamento ganha "Enviar ao Financeiro" e vê o status.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
@@ -56,6 +60,10 @@ import BlocoDeNotas from "./BlocoDeNotas";
 import MenuContexto, { ICO, posicaoDoEvento, type ItemMenu, type PosicaoMenu } from "./MenuContexto";
 import { AtalhosModal, atalhoDoEvento, envolver, marcaDoEvento, type AcaoAtalho } from "./atalhos";
 import { EncaminharModal, EtiquetasModal, ListasModal, NovaConversaModal } from "./Organizar";
+import { EnviarFinanceiroModal, StatusNoFinanceiro } from "../../fin/EnviarFinanceiro";
+import { devolverConversa } from "../../fin/lib/atendimentos";
+
+export type SetorAtendimento = "relacionamento" | "financeiro";
 
 // UMA lista só (Bruno, 13/10/2026: "sem Esperando e Minhas — tudo numa aba só,
 // fica melhor pra responder"). Igual ao WhatsApp: a conversa mais recente em
@@ -123,18 +131,20 @@ const ESTRELA = <svg width="13" height="13" viewBox="0 0 24 24" fill="currentCol
 
 // ── Lista ───────────────────────────────────────────────────────────────────
 
-type Chip = "tudo" | "nao_lidas" | "favoritas" | "esperando" | `lista:${string}` | `etq:${string}`;
+type Chip = "tudo" | "nao_lidas" | "favoritas" | "esperando" | "no_fin" | `lista:${string}` | `etq:${string}`;
 
-function Lista({ busca, setBusca, buscaRef, conversas, selecionada, abrir, carregando, chip, setChip, listas, etiquetas, arquivadas, verArquivadas, setVerArquivadas, onMenu, onNova, onNotas, notasAbertas, onAtalhos, onListas }: {
+function Lista({ setor, busca, setBusca, buscaRef, conversas, selecionada, abrir, carregando, chip, setChip, listas, etiquetas, arquivadas, verArquivadas, setVerArquivadas, onMenu, onNova, onNotas, notasAbertas, onAtalhos, onListas }: {
+  setor: SetorAtendimento;
   busca: string; setBusca: (s: string) => void; buscaRef: React.RefObject<HTMLInputElement>;
   conversas: Conversa[]; selecionada: string | null; abrir: (id: string) => void; carregando: boolean;
   chip: Chip; setChip: (c: Chip) => void; listas: Lista[]; etiquetas: Map<string, Etiqueta>;
   arquivadas: Conversa[]; verArquivadas: boolean; setVerArquivadas: (v: boolean) => void;
   onMenu: (c: Conversa, pos: PosicaoMenu) => void;
-  onNova: () => void; onNotas: () => void; notasAbertas: boolean; onAtalhos: () => void; onListas: () => void;
+  onNova: (() => void) | null; onNotas: () => void; notasAbertas: boolean; onAtalhos: () => void; onListas: () => void;
 }) {
   const chips: [Chip, ReactNode][] = [
     ["tudo", "Tudo"], ["nao_lidas", "Não lidas"], ["favoritas", "Favoritas"], ["esperando", "Esperando"],
+    ...(setor === "relacionamento" ? [["no_fin", "💰 No Financeiro"] as [Chip, ReactNode]] : []),
     ...listas.map((l) => [`lista:${l.id}`, l.nome] as [Chip, ReactNode]),
     ...[...etiquetas.values()].map((e) => [`etq:${e.id}`, <><span className="w-2.5 h-2.5 rounded-full" style={{ background: e.cor }} aria-hidden />{e.nome}</>] as [Chip, ReactNode]),
   ];
@@ -145,9 +155,11 @@ function Lista({ busca, setBusca, buscaRef, conversas, selecionada, abrir, carre
       <div className="flex items-center justify-between pl-4 pr-2 h-[52px] flex-shrink-0">
         <span className="text-[19px] font-bold" style={{ color: "var(--wa-txt)" }}>{verArquivadas ? "Arquivadas" : "Conversas"}</span>
         <span className="flex items-center gap-0.5">
-          <Icone rotulo="Nova conversa (Ctrl+Alt+N)" onClick={onNova}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z" /><line x1="12" y1="8" x2="12" y2="15" /><line x1="8.5" y1="11.5" x2="15.5" y2="11.5" /></svg>
-          </Icone>
+          {onNova && (
+            <Icone rotulo="Nova conversa (Ctrl+Alt+N)" onClick={onNova}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z" /><line x1="12" y1="8" x2="12" y2="15" /><line x1="8.5" y1="11.5" x2="15.5" y2="11.5" /></svg>
+            </Icone>
+          )}
           <Icone rotulo="Bloco de notas — só você vê (Ctrl+Alt+B)" onClick={onNotas} ativo={notasAbertas}>{ICO.nota}</Icone>
           <Icone rotulo="Listas de conversas" onClick={onListas}>{ICO.lista}</Icone>
           <Icone rotulo="Atalhos do teclado (Ctrl+/)" onClick={onAtalhos}>
@@ -234,7 +246,7 @@ function Lista({ busca, setBusca, buscaRef, conversas, selecionada, abrir, carre
                       <span className="w-5" aria-hidden />
                     </span>
                   </span>
-                  {(c.sem_sla || c.aguardando_desde || !c.cliente_id || c.atendente_nome || etqs.length > 0) && (
+                  {(c.sem_sla || c.aguardando_desde || !c.cliente_id || c.atendente_nome || etqs.length > 0 || c.setor === "financeiro") && (
                     <span className="flex flex-wrap items-center gap-1 mt-1">
                       <Relogio c={c} />
                       {etqs.slice(0, 3).map((e) => (
@@ -243,6 +255,7 @@ function Lista({ busca, setBusca, buscaRef, conversas, selecionada, abrir, carre
                         </span>
                       ))}
                       {etqs.length > 3 && <span className="text-[11px]" style={{ color: "var(--wa-meta)" }}>+{etqs.length - 3}</span>}
+                      {setor === "relacionamento" && c.setor === "financeiro" && <EtiquetaUi tom="aviso">💰 com o Financeiro</EtiquetaUi>}
                       {c.sem_sla && <EtiquetaUi>fora do prazo · {motivoDe(c)}</EtiquetaUi>}
                       {!c.cliente_id && <EtiquetaUi>sem ficha</EtiquetaUi>}
                       {c.atendente_nome && <span className="text-[11.5px]" style={{ color: "var(--wa-meta)" }}>· {c.atendente_nome.split(" ")[0]}</span>}
@@ -463,7 +476,9 @@ function Icone({ rotulo, onClick, ativo, children }: { rotulo: string; onClick: 
 
 // ── Conversa ────────────────────────────────────────────────────────────────
 
-function Painel({ id, meuId, meuNome, conversas, onVoltar, onMudou, onAbrirCliente, onAbrirViagem, onAbrirConversa, onMenuConversa, onLigarFicha, onNotaGuardada, avisar }: {
+function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar, onMudou, onAbrirCliente, onAbrirViagem, onAbrirConversa, onMenuConversa, onLigarFicha, onNotaGuardada, onEnviarFin, avisar }: {
+  setor: SetorAtendimento; extraCabecalho?: (c: Conversa, recarregar: () => void) => ReactNode;
+  onEnviarFin: (c: Conversa) => void;
   id: string; meuId: string; meuNome: string; conversas: Conversa[];
   onVoltar: () => void; onMudou: () => void; onAbrirCliente: (id: string) => void;
   onAbrirViagem?: (id: string) => void; onAbrirConversa: (id: string) => void;
@@ -499,6 +514,8 @@ function Painel({ id, meuId, meuNome, conversas, onVoltar, onMudou, onAbrirClien
   const [sugIdx, setSugIdx] = useState(0);
   const [slashOff, setSlashOff] = useState(false);
   const [piscando, setPiscando] = useState<string | null>(null);
+  const [devolvendo, setDevolvendo] = useState(false);
+  const [sinalFin, setSinalFin] = useState(0);
   const fimRef = useRef<HTMLDivElement>(null);
   const arquivoRef = useRef<HTMLInputElement>(null);
   const campoRef = useRef<HTMLTextAreaElement>(null);
@@ -732,6 +749,7 @@ function Painel({ id, meuId, meuNome, conversas, onVoltar, onMudou, onAbrirClien
   }
 
   const minha = c.atendente_id === meuId;
+  const ehRel = setor === "relacionamento";
   // Assunto sugerido: a última coisa que o CLIENTE escreveu.
   const ultimaDoCliente = [...msgs].reverse().find((m) => m.direcao !== "out" && m.texto)?.texto;
   const indiceDaFoto = (url: string) => Math.max(0, fotos.findIndex((f) => f.url === url));
@@ -745,7 +763,7 @@ function Painel({ id, meuId, meuNome, conversas, onVoltar, onMudou, onAbrirClien
         <button onClick={onVoltar} className="lg:hidden wa-icone w-10 h-10 inline-flex items-center justify-center" aria-label="Voltar para a lista">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
         </button>
-        <button className="flex items-center gap-3 min-w-0 flex-1 text-left" onClick={() => (c.cliente_id ? onAbrirCliente(c.cliente_id) : onLigarFicha(c))}
+        <button className="flex items-center gap-3 min-w-0 flex-1 text-left" onClick={() => { if (!ehRel) return; if (c.cliente_id) onAbrirCliente(c.cliente_id); else onLigarFicha(c); }}
           title={c.cliente_id ? "Abrir a ficha do cliente (Ctrl+Alt+P)" : "Ligar a uma ficha"}>
           <AvatarWa nome={nome} tamanho={40} />
           <span className="min-w-0">
@@ -761,18 +779,31 @@ function Painel({ id, meuId, meuNome, conversas, onVoltar, onMudou, onAbrirClien
           <Icone rotulo="Pesquisar na conversa (Ctrl+Alt+Shift+F)" onClick={() => { setBuscaAberta((v) => !v); requestAnimationFrame(() => buscaMsgRef.current?.focus()); }} ativo={buscaAberta}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.6" y2="16.6" /></svg>
           </Icone>
-          <Icone rotulo="Abrir chamado (pedido que não se resolve na hora)" onClick={() => setChamado(assuntoSugerido(ultimaDoCliente))}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
-          </Icone>
+          {ehRel && c.setor !== "financeiro" && (
+            <Icone rotulo="Enviar ao Financeiro (o Financeiro passa a responder esta conversa)" onClick={() => onEnviarFin(c)}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+            </Icone>
+          )}
+          {ehRel && (
+            <Icone rotulo="Abrir chamado (pedido que não se resolve na hora)" onClick={() => setChamado(assuntoSugerido(ultimaDoCliente))}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+            </Icone>
+          )}
           {!minha && (
             <Icone rotulo={c.atendente_id ? `Assumir (era de ${c.atendente_nome?.split(" ")[0] ?? "outro"})` : "Assumir a conversa"} onClick={() => void acao(() => assumirConversa(c.id, meuId))}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="19" y1="8" x2="19" y2="14" /><line x1="22" y1="11" x2="16" y2="11" /></svg>
             </Icone>
           )}
-          <Icone rotulo={c.sem_sla ? `Fora do prazo (${motivoDe(c)}) — clique pra voltar a contar` : "Não conta no prazo (grupo, fornecedor, equipe…)"} ativo={c.sem_sla}
-            onClick={() => (c.sem_sla ? void acao(() => marcarSemSla(c.id, false)) : setForaPrazo(true))}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2" /><path d="M9 2h6" />{!c.sem_sla && <line x1="3" y1="3" x2="21" y2="21" />}</svg>
-          </Icone>
+          {ehRel && (
+            <Icone rotulo={c.sem_sla ? `Fora do prazo (${motivoDe(c)}) — clique pra voltar a contar` : "Não conta no prazo (grupo, fornecedor, equipe…)"} ativo={c.sem_sla}
+              onClick={() => (c.sem_sla ? void acao(() => marcarSemSla(c.id, false)) : setForaPrazo(true))}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2" /><path d="M9 2h6" />{!c.sem_sla && <line x1="3" y1="3" x2="21" y2="21" />}</svg>
+            </Icone>
+          )}
+          {!ehRel && c.setor === "financeiro" && (
+            <button onClick={() => setDevolvendo(true)} className="ml-1 h-9 px-3 rounded-full text-[13px] font-semibold border" style={{ borderColor: "var(--wa-line)", color: "var(--wa-txt)" }}
+              title="A conversa volta pra fila do Relacionamento">Devolver ao Rel.</button>
+          )}
           <Icone rotulo="Mais opções da conversa" onClick={(e) => onMenuConversa(c, posicaoDoEvento(e))}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" /></svg>
           </Icone>
@@ -782,6 +813,16 @@ function Painel({ id, meuId, meuNome, conversas, onVoltar, onMudou, onAbrirClien
         </div>
       </div>
 
+      {(c.setor === "financeiro" || sinalFin > 0) && (
+        <div className="px-3 sm:px-4 py-1.5 flex-shrink-0" style={{ background: "var(--wa-head)", borderBottom: "1px solid var(--wa-line)" }}>
+          {extraCabecalho ? extraCabecalho(c, () => { setSinalFin((n) => n + 1); void recarregar(); onMudou(); }) : (
+            <span className="flex flex-wrap items-center gap-2 text-[12.5px]" style={{ color: "var(--wa-meta)" }}>
+              {c.setor === "financeiro" && <b style={{ color: "var(--warn-ink)" }}>Esta conversa está com o Financeiro.</b>}
+              <StatusNoFinanceiro alvo={{ conversaId: c.id }} recarregar={sinalFin} compacto />
+            </span>
+          )}
+        </div>
+      )}
       {buscaAberta && (
         <div className="px-3 sm:px-4 py-2 flex items-center gap-2 flex-shrink-0 wa-cab" style={{ borderBottom: "1px solid var(--wa-line)" }}>
           <input ref={buscaMsgRef} value={buscaMsg} onChange={(e) => setBuscaMsg(e.target.value)} placeholder="Pesquisar mensagens…" aria-label="Pesquisar nesta conversa"
@@ -1024,6 +1065,16 @@ function Painel({ id, meuId, meuNome, conversas, onVoltar, onMudou, onAbrirClien
         onAbrirConversa={onAbrirConversa}
       />
       <ForaDoPrazo aberto={foraPrazo} conversa={c} onFechar={() => setForaPrazo(false)} onFeito={() => { setForaPrazo(false); void recarregar(); onMudou(); }} />
+      <Modal aberto={devolvendo} titulo="Devolver a conversa ao Relacionamento" onFechar={() => setDevolvendo(false)}
+        rodape={<><Botao onClick={() => setDevolvendo(false)}>Cancelar</Botao><Botao variante="primario" onClick={() => {
+          setDevolvendo(false);
+          void devolverConversa(c.id).then(() => { avisar("Conversa devolvida ao Relacionamento."); onMudou(); onVoltar(); })
+            .catch((e) => setErro(e instanceof Error ? e.message : "Não devolveu."));
+        }}>Devolver</Botao></>}>
+        <p className="text-[14px]" style={{ color: "var(--ink2)" }}>
+          A conversa volta pra fila do Relacionamento. O atendimento no Financeiro continua com o status que está — mude pra <b>Resolvido</b> na fila do Financeiro quando terminar.
+        </p>
+      </Modal>
     </div>
   );
 }
@@ -1032,7 +1083,11 @@ function Painel({ id, meuId, meuNome, conversas, onVoltar, onMudou, onAbrirClien
 
 export type VisaoAtendimento = "conversas" | "chamados";
 
-export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onAbrirViagem, onMudou, visao: visaoFora, onTrocarVisao, onAbrirWhatsApp }: {
+export default function AtendimentoPage({ setor = "relacionamento", extraCabecalho, conversaId, abrir, onAbrirCliente, onAbrirViagem, onMudou, visao: visaoFora, onTrocarVisao, onAbrirWhatsApp }: {
+  /** Quem está atendendo (0127). No Financeiro: só as conversas dele, sem Chamados. */
+  setor?: SetorAtendimento;
+  /** Faixa embaixo do cabeçalho da conversa (o Financeiro põe o status do atendimento). */
+  extraCabecalho?: (c: Conversa, recarregar: () => void) => ReactNode;
   conversaId: string | null;
   abrir: (id: string | null) => void;
   onAbrirCliente: (id: string) => void;
@@ -1047,7 +1102,7 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
   const { currentUser } = useQsAuth();
   const [visaoLocal, setVisaoLocal] = useState<VisaoAtendimento>(() => (localStorage.getItem("rel_atend_visao") as VisaoAtendimento) || "conversas");
   // Conversa aberta pelo endereço sempre mostra as conversas.
-  const visao: VisaoAtendimento = conversaId ? "conversas" : visaoFora ?? visaoLocal;
+  const visao: VisaoAtendimento = conversaId || setor === "financeiro" ? "conversas" : visaoFora ?? visaoLocal;
   function trocarVisao(v: VisaoAtendimento) {
     localStorage.setItem("rel_atend_visao", v);
     setVisaoLocal(v);
@@ -1074,15 +1129,16 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
   const [notas, setNotas] = useState(() => localStorage.getItem("rel_notas_abertas") === "1");
   const [sinalNotas, setSinalNotas] = useState(0);
   const [aviso, setAviso] = useState<string | null>(null);
+  const [enviandoFin, setEnviandoFin] = useState<Conversa | null>(null);
   const buscaRef = useRef<HTMLInputElement>(null);
   const meuId = currentUser?.id ?? "";
   const meuNome = currentUser?.name ?? "";
 
   const carregar = useCallback(async () => {
-    try { setConversas(await listarConversas(filtro, meuId, busca)); }
+    try { setConversas(await listarConversas(filtro, meuId, busca, setor === "financeiro" ? "financeiro" : undefined)); }
     catch { /* mantém a lista anterior; tenta de novo no próximo ciclo */ }
     finally { setCarregando(false); }
-  }, [filtro, meuId, busca]);
+  }, [filtro, meuId, busca, setor]);
   const carregarOrganizacao = useCallback(() => {
     listarEtiquetas().then(setEtiquetas).catch(() => undefined);
     listarListas().then(setListas).catch(() => undefined);
@@ -1099,13 +1155,18 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
   useEffect(() => { if (!aviso) return; const t = setTimeout(() => setAviso(null), 3200); return () => clearTimeout(t); }, [aviso]);
 
   const mudou = () => { void carregar(); onMudou(); };
-  const esperando = conversas.filter((c) => c.aguardando_desde && !c.arquivada).length;
+  const esperando = conversas.filter((c) => c.aguardando_desde && !c.arquivada && (setor === "financeiro" || c.setor !== "financeiro")).length;
   const mapaEtq = useMemo(() => new Map(etiquetas.map((e) => [e.id, e])), [etiquetas]);
 
   // O que aparece na lista: arquivadas à parte, chip do topo, fixadas em cima.
   const arquivadas = useMemo(() => conversas.filter((c) => c.arquivada), [conversas]);
   const visiveis = useMemo(() => {
     const base = conversas.filter((c) => (verArquivadas ? c.arquivada : !c.arquivada)).filter((c) => {
+      // No Relacionamento, o que está com o Financeiro só aparece no chip dele.
+      if (setor === "relacionamento" && !verArquivadas) {
+        if (chip === "no_fin") return c.setor === "financeiro";
+        if (c.setor === "financeiro") return false;
+      }
       if (verArquivadas || chip === "tudo") return true;
       if (chip === "nao_lidas") return naoLida(c);
       if (chip === "favoritas") return c.favorita;
@@ -1115,7 +1176,7 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
       return true;
     });
     return [...base].sort((a, b) => (b.fixada_em || "").localeCompare(a.fixada_em || ""));
-  }, [conversas, verArquivadas, chip]);
+  }, [conversas, verArquivadas, chip, setor]);
   // Chip de uma lista/etiqueta que foi apagada volta pro "Tudo".
   useEffect(() => {
     if (chip.startsWith("lista:") && !listas.some((l) => `lista:${l.id}` === chip)) setChip("tudo");
@@ -1154,13 +1215,17 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
         onClick: () => { if (nl) { void pref(c, { marcada_nao_lida: false }); void marcarLida(c.id).then(() => carregar()); } else void pref(c, { marcada_nao_lida: true }); } },
       { rotulo: c.favorita ? "Tirar dos favoritos" : "Adicionar aos favoritos", icone: ICO.estrela, onClick: () => void pref(c, { favorita: !c.favorita }) },
       { tipo: "separador" },
+      ...(setor === "relacionamento" && c.setor !== "financeiro" ? [{ rotulo: "Enviar ao Financeiro…", icone: <span aria-hidden>💰</span>, onClick: () => setEnviandoFin(c) } as ItemMenu] : []),
       { rotulo: "Etiquetar…", icone: ICO.etiqueta, onClick: () => setEtiquetando(c) },
       { rotulo: "Adicionar a uma lista…", icone: ICO.lista, onClick: () => setListando({ c }) },
       { tipo: "separador" },
-      c.cliente_id
-        ? { rotulo: "Abrir a ficha do cliente", icone: ICO.ficha, atalho: "Ctrl+Alt+P", onClick: () => onAbrirCliente(c.cliente_id!) }
-        : { rotulo: "Salvar contato (criar ficha)", icone: ICO.contato, onClick: () => setSalvandoContato(c) },
-      ...(!c.cliente_id ? [{ rotulo: "Ligar a uma ficha que já existe", icone: ICO.ficha, onClick: () => setLigando(c) } as ItemMenu] : []),
+      // Ficha: o Financeiro só lê (não cria nem liga ficha).
+      ...(setor === "financeiro" ? [] : [
+        c.cliente_id
+          ? { rotulo: "Abrir a ficha do cliente", icone: ICO.ficha, atalho: "Ctrl+Alt+P", onClick: () => onAbrirCliente(c.cliente_id!) }
+          : { rotulo: "Salvar contato (criar ficha)", icone: ICO.contato, onClick: () => setSalvandoContato(c) },
+        ...(!c.cliente_id ? [{ rotulo: "Ligar a uma ficha que já existe", icone: ICO.ficha, onClick: () => setLigando(c) }] : []),
+      ] as ItemMenu[]),
       c.estado !== "resolvida"
         ? { rotulo: "Resolver conversa", icone: ICO.resolver, atalho: "Ctrl+Alt+Shift+R", onClick: () => { void resolverConversa(c.id).then(mudou).catch((e) => setAviso(e instanceof Error ? e.message : "Falhou.")); } }
         : { rotulo: "Reabrir conversa", icone: ICO.resolver, onClick: () => { void reabrirConversa(c.id).then(mudou).catch((e) => setAviso(e instanceof Error ? e.message : "Falhou.")); } },
@@ -1180,7 +1245,7 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
     e.stopPropagation();
     const atual = conversas.find((c) => c.id === conversaId) || null;
     switch (a) {
-      case "nova": setNova(true); break;
+      case "nova": if (setor === "relacionamento") setNova(true); break;
       case "buscar": setVerArquivadas(false); buscaRef.current?.focus(); buscaRef.current?.select(); break;
       case "ajuda": setVerAtalhos(true); break;
       case "notas": setNotas((v) => !v); break;
@@ -1206,7 +1271,7 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
 
   const conversaAtual = conversas.find((c) => c.id === conversaId) || null;
 
-  const abas = (
+  const abas = setor === "financeiro" ? null : (
     <div className="flex items-end gap-1 px-3 sm:px-4 h-11 border-b" style={{ borderColor: "var(--line)", background: "var(--card)" }} role="tablist" aria-label="Atendimento">
       {([["conversas", "Conversas"], ["chamados", "Chamados"]] as [VisaoAtendimento, string][]).map(([v, r]) => (
         <button key={v} onClick={() => trocarVisao(v)} role="tab" aria-selected={visao === v}
@@ -1246,24 +1311,24 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
         </div>
       )}
       {/* Altura da tela inteira (no celular, menos a barra do topo de 56px), menos as abas (44px). */}
-      <div className="flex h-[calc(100dvh-100px)] lg:h-[calc(100dvh-44px)] relative">
+      <div className={`flex relative ${abas ? "h-[calc(100dvh-100px)] lg:h-[calc(100dvh-44px)]" : "h-[calc(100dvh-56px)] lg:h-[100dvh]"}`}>
         <aside
           className={`${conversaId ? "hidden lg:flex" : "flex"} flex-col w-full lg:w-[380px] xl:w-[420px] lg:flex-shrink-0 border-r min-h-0 wa-lista`}
           style={{ borderColor: "var(--wa-line)" }}
         >
-          <Lista
+          <Lista setor={setor}
             busca={busca} setBusca={setBusca} buscaRef={buscaRef}
             conversas={visiveis} selecionada={conversaId} abrir={abrirConversa} carregando={carregando}
             chip={chip} setChip={setChip} listas={listas} etiquetas={mapaEtq}
             arquivadas={arquivadas} verArquivadas={verArquivadas} setVerArquivadas={setVerArquivadas}
             onMenu={(c, pos) => setMenuConv({ c, pos })}
-            onNova={() => setNova(true)} onNotas={() => setNotas((v) => !v)} notasAbertas={notas}
+            onNova={setor === "relacionamento" ? () => setNova(true) : null} onNotas={() => setNotas((v) => !v)} notasAbertas={notas}
             onAtalhos={() => setVerAtalhos(true)} onListas={() => setListando({ c: null })}
           />
         </aside>
         <section className={`${conversaId ? "flex" : "hidden lg:flex"} flex-1 flex-col min-w-0 min-h-0`}>
           {conversaId ? (
-            <Painel key={conversaId} id={conversaId} meuId={meuId} meuNome={meuNome} conversas={conversas}
+            <Painel key={conversaId} setor={setor} extraCabecalho={extraCabecalho} onEnviarFin={setEnviandoFin} id={conversaId} meuId={meuId} meuNome={meuNome} conversas={conversas}
               onVoltar={() => abrir(null)} onMudou={mudou} onAbrirCliente={onAbrirCliente}
               onAbrirViagem={onAbrirViagem} onAbrirConversa={(id) => abrirConversa(id)}
               onMenuConversa={(c, pos) => setMenuConv({ c, pos })} onLigarFicha={setLigando}
@@ -1273,7 +1338,7 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
               <span className="w-20 h-20 rounded-full inline-flex items-center justify-center mb-5" style={{ background: "var(--wa-green)", color: "#fff" }} aria-hidden>
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M17.5 14.4c-.3-.1-1.7-.8-2-.9-.3-.1-.5-.1-.7.1-.2.3-.8.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6l.4-.5c.1-.2.2-.3.3-.5.1-.2 0-.4 0-.5l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.1 4.9 4.3 2.4 1 2.9.8 3.4.7.5-.1 1.7-.7 1.9-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3zM12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2z" /></svg>
               </span>
-              <h2 className="text-[22px] font-light" style={{ color: "var(--wa-txt)" }}>WhatsApp do Relacionamento</h2>
+              <h2 className="text-[22px] font-light" style={{ color: "var(--wa-txt)" }}>{setor === "financeiro" ? "WhatsApp do Financeiro" : "WhatsApp do Relacionamento"}</h2>
               <p className="text-[14px] mt-2 max-w-md" style={{ color: "var(--wa-meta)" }}>
                 Escolha uma conversa na lista. Quem está esperando resposta tem o relógio do prazo — comece por eles.
                 O número continua no celular: o que o time responder por lá também aparece aqui.
@@ -1322,6 +1387,11 @@ export default function AtendimentoPage({ conversaId, abrir, onAbrirCliente, onA
         onFechar={() => setModeloPara(null)}
         onEnviado={(id) => { setModeloPara(null); setAviso("Modelo enviado. Quando a pessoa responder, a conversa libera."); void carregar().then(() => { if (id) abrirConversa(id); }); }} />
       <AtalhosModal aberto={verAtalhos} onFechar={() => setVerAtalhos(false)} />
+      <EnviarFinanceiroModal aberto={!!enviandoFin} origem="relacionamento"
+        alvo={{ conversaId: enviandoFin?.id ?? null, clienteId: enviandoFin?.cliente_id ?? null }}
+        nome={enviandoFin ? nomeDa(enviandoFin) : null}
+        onFechar={() => setEnviandoFin(null)}
+        onEnviado={() => { setEnviandoFin(null); setAviso("Enviado ao Financeiro. A conversa agora está com eles."); mudou(); if (conversaId) abrir(null); }} />
     </div>
   );
 }

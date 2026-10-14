@@ -41,6 +41,9 @@ export interface Conversa {
   // Do time (0121).
   etiquetas?: string[];
   listas?: string[];
+  /** Com quem está a conversa (0127): o Financeiro fala pelo mesmo número. */
+  setor?: "relacionamento" | "financeiro";
+  setor_desde?: string | null;
 }
 
 export interface Anexo { type: "image" | "video" | "audio" | "file"; url: string; nome?: string }
@@ -87,8 +90,9 @@ export interface NumeroRel { conectado: boolean; numero: string | null; nome: st
 
 export type Filtro = "esperando" | "minhas" | "abertas" | "resolvidas" | "todas";
 
-export async function listarConversas(filtro: Filtro, meuId: string, busca = ""): Promise<Conversa[]> {
+export async function listarConversas(filtro: Filtro, meuId: string, busca = "", setor?: "relacionamento" | "financeiro"): Promise<Conversa[]> {
   let q = supabase.from("rel_wa_fila").select("*").limit(500);
+  if (setor) q = q.eq("setor", setor);
   if (filtro === "esperando") q = q.not("aguardando_desde", "is", null).order("aguardando_desde", { ascending: true });
   else if (filtro === "minhas") q = q.eq("atendente_id", meuId).neq("estado", "resolvida").order("atualizado_em", { ascending: false });
   else if (filtro === "abertas") q = q.neq("estado", "resolvida").order("atualizado_em", { ascending: false });
@@ -127,7 +131,7 @@ export async function carregarMensagens(conversaId: string): Promise<Mensagem[]>
 }
 
 export async function contarEsperando(): Promise<{ esperando: number; foraDoPrazo: number }> {
-  const { data } = await supabase.from("rel_wa_fila").select("minutos_esperando, meta_min").not("aguardando_desde", "is", null).eq("sem_sla", false);
+  const { data } = await supabase.from("rel_wa_fila").select("minutos_esperando, meta_min").not("aguardando_desde", "is", null).eq("sem_sla", false).eq("setor", "relacionamento");
   const l = (data ?? []) as { minutos_esperando: number; meta_min: number }[];
   return { esperando: l.length, foraDoPrazo: l.filter((x) => x.minutos_esperando > x.meta_min).length };
 }

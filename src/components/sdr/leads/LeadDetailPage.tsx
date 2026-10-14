@@ -20,6 +20,7 @@ import MeetingDetailModal from "@/components/sdr/agenda/MeetingDetailModal";
 import { setMeetingStatus, desfechoDaOportunidadeFutura } from "@/lib/qs/meetings";
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
 import OportunidadeFuturaModal, { FaixaOportunidadeFutura } from "@/components/sdr/leads/OportunidadeFuturaModal";
+import { ComCoresDoRel, EnviarFinanceiroModal, StatusNoFinanceiro } from "@/fin/EnviarFinanceiro";
 import type {
   Lead,
   LeadStatus,
@@ -202,6 +203,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // Oportunidade futura (0083): o modal e um contador que faz a faixa reler.
   const [mostrarOportunidade, setMostrarOportunidade] = useState(false);
   const [versaoOportunidade, setVersaoOportunidade] = useState(0);
+  // Financeiro (0127, 14/10): o SDR/closer manda o cliente e acompanha o status.
+  const [enviarFin, setEnviarFin] = useState(false);
+  const [sinalFin, setSinalFin] = useState(0);
   const [selectedCloser, setSelectedCloser] = useState("");
   const [handoverSuccess, setHandoverSuccess] = useState(false);
   const [showReEngagement, setShowReEngagement] = useState(false);
@@ -1567,6 +1571,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             {lead.segment && (
               <p className="text-[13px] font-semibold text-gray-600 mt-0.5">Fonte/Produto: <span className="text-gray-800">{lead.segment}</span></p>
             )}
+            <ComCoresDoRel>
+              <div className="mt-1"><StatusNoFinanceiro alvo={{ leadId: lead.id }} recarregar={sinalFin} compacto /></div>
+            </ComCoresDoRel>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -1579,6 +1586,13 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
               <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
             Editar
+          </button>
+          <button
+            onClick={() => setEnviarFin(true)}
+            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            title="O Financeiro fala com o cliente pelo WhatsApp e resolve a dúvida; você acompanha o status aqui"
+          >
+            💰 Enviar ao Financeiro
           </button>
           <button
             onClick={() => setShowHandoverModal(true)}
@@ -2083,6 +2097,12 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           </div>
         </div>
       )}
+
+      <ComCoresDoRel>
+        <EnviarFinanceiroModal aberto={enviarFin} origem="comercial" alvo={{ leadId: lead.id, telefone: lead.phone }}
+          nome={lead.full_name || null} onFechar={() => setEnviarFin(false)}
+          onEnviado={() => { setEnviarFin(false); setSinalFin((n) => n + 1); notifySuccess("Enviado ao Financeiro."); }} />
+      </ComCoresDoRel>
 
       {/* WhatsApp Modal (Task 3) */}
       <WhatsAppModal

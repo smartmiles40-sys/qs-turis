@@ -22,14 +22,19 @@ export interface AdminUserInput {
 
 type AdminResult = { success: boolean; error?: string; user?: unknown; equipe?: MembroEquipe[] };
 
-/** Pessoa do time do Relacionamento (listar_equipe — 13/10/2026). */
+/** Pessoa do time de uma área (listar_equipe — 13/10/2026; Fin/Ops 14/10). */
 export interface MembroEquipe {
   id: string; name: string; email: string | null; role: UserRole; setores: Setor[] | null;
   is_active: boolean; whatsapp_number: string | null; ultimo_acesso: string | null; so_relacionamento: boolean;
+  /** Só desta área (sem Comercial nem outra área) — o gestor da área pode mexer. */
+  so_area?: boolean;
   cargo_id?: string | null;
 }
 
-async function callAdmin(action: "create" | "update" | "delete" | "listar_equipe", user: AdminUserInput): Promise<AdminResult> {
+/** Áreas que têm time próprio (gestor de área). */
+export type AreaComTime = "relacionamento" | "financeiro" | "operacional";
+
+async function callAdmin(action: "create" | "update" | "delete" | "listar_equipe", user: AdminUserInput, setor?: AreaComTime): Promise<AdminResult> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) {
     return { success: false, error: "Sessão expirada. Faça login novamente para gerenciar usuários." };
@@ -37,13 +42,15 @@ async function callAdmin(action: "create" | "update" | "delete" | "listar_equipe
   const res = await fetch("/api/admin-user", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ access_token: session.access_token, action, user }),
+    body: JSON.stringify({ access_token: session.access_token, action, user, ...(setor ? { setor } : {}) }),
   });
   return (await res.json()) as AdminResult;
 }
 
-export const createQsAuthUser = (u: AdminUserInput) => callAdmin("create", u);
-export const updateQsAuthUser = (u: AdminUserInput) => callAdmin("update", u);
+export const createQsAuthUser = (u: AdminUserInput, setor?: AreaComTime) => callAdmin("create", u, setor);
+export const updateQsAuthUser = (u: AdminUserInput, setor?: AreaComTime) => callAdmin("update", u, setor);
 export const deleteQsAuthUser = (id: string) => callAdmin("delete", { id });
+/** Time de uma área (admin ou gestor(a) da área). Padrão: Relacionamento. */
+export const listarEquipe = (setor: AreaComTime = "relacionamento") => callAdmin("listar_equipe", {}, setor);
 /** Time do Relacionamento (admin ou gestora do Relacionamento). */
-export const listarEquipeRel = () => callAdmin("listar_equipe", {});
+export const listarEquipeRel = () => listarEquipe("relacionamento");

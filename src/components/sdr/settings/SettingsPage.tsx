@@ -17,6 +17,7 @@ import LigacaoWhatsApp from "./LigacaoWhatsApp";
 import ConexaoMeta from "./ConexaoMeta";
 import NumerosWhatsApp from "./NumerosWhatsApp";
 import { WA_SIGNATURE_MAP_KEY, WA_SIGNATURE_ENABLED_KEY, nomeCurto } from "@/lib/qs/waSignature";
+import { NOME_SETOR, SETORES } from "../types";
 import type {
   LossReason,
   SdrUser,
@@ -33,6 +34,8 @@ const ROLE_LABELS: Record<UserRole, string> = {
   closer: "Closer",
   marketing: "Marketing (espectador)",
   relacionamento: "Relacionamento",
+  financeiro: "Financeiro",
+  operacional: "Operações",
 };
 
 const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
@@ -42,7 +45,14 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
   closer: "bg-amber-50 text-amber-700",
   marketing: "bg-gray-100 text-gray-600",
   relacionamento: "bg-teal-50 text-teal-700",
+  financeiro: "bg-indigo-50 text-indigo-700",
+  operacional: "bg-orange-50 text-orange-800",
 };
+
+/** Papéis que ficam presos à própria área (0100 / 0126): sem caixinhas de setor. */
+const PAPEL_DE_AREA: UserRole[] = ["relacionamento", "financeiro", "operacional"];
+/** Áreas além do Comercial que dá pra liberar. */
+const OUTRAS_AREAS: Setor[] = ["relacionamento", "financeiro", "operacional"];
 
 
 
@@ -357,10 +367,11 @@ function UsuariosSection() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState<SdrUser | null>(null);
-  // `relacionamento`: a pessoa do Comercial também entra pela porta do
-  // Relacionamento (0100). Admin tem as duas sempre; o papel "Relacionamento"
-  // tem só a dele — pros dois a caixinha nem aparece.
-  const [form, setForm] = useState({ name: "", email: "", role: "sdr" as UserRole, password: "", whatsapp_number: "", relacionamento: false });
+  // `areas`: por quais portas do login a pessoa entra (0100 / 0126). Admin tem
+  // todas sempre; os papéis de área (Relacionamento, Financeiro, Operações) têm
+  // só a deles — pra esses as caixinhas nem aparecem. SDR/closer/marketing são
+  // sempre do Comercial; gestor pode ser só de outra área (ex.: gestora do Rel).
+  const [form, setForm] = useState({ name: "", email: "", role: "sdr" as UserRole, password: "", whatsapp_number: "", areas: ["comercial"] as Setor[] });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -375,14 +386,14 @@ function UsuariosSection() {
 
   function openAdd() {
     setEditUser(null);
-    setForm({ name: "", email: "", role: "sdr", password: "", whatsapp_number: "", relacionamento: false });
+    setForm({ name: "", email: "", role: "sdr", password: "", whatsapp_number: "", areas: ["comercial"] });
     setSaveError(null);
     setShowModal(true);
   }
 
   function openEdit(u: SdrUser) {
     setEditUser(u);
-    setForm({ name: u.name, email: u.email, role: u.role, password: "", whatsapp_number: u.whatsapp_number ?? "", relacionamento: !!u.setores?.includes("relacionamento") });
+    setForm({ name: u.name, email: u.email, role: u.role, password: "", whatsapp_number: u.whatsapp_number ?? "", areas: (u.setores?.length ? u.setores : ["comercial"]) as Setor[] });
     setSaveError(null);
     setShowModal(true);
   }
@@ -402,7 +413,11 @@ function UsuariosSection() {
     }
     setSaving(true);
     setSaveError(null);
-    const setores: Setor[] = form.relacionamento ? ["comercial", "relacionamento"] : ["comercial"];
+    const escolhidas = SETORES.filter((x) => form.areas.includes(x));
+    const setores: Setor[] = form.role === "admin" ? [...SETORES]
+      : PAPEL_DE_AREA.includes(form.role) ? [form.role as Setor]
+      : form.role === "gestor" ? (escolhidas.length ? escolhidas : ["comercial"])
+      : SETORES.filter((x) => x === "comercial" || escolhidas.includes(x));
     try {
       const res = editUser
         ? await updateQsAuthUser({
@@ -578,7 +593,7 @@ function UsuariosSection() {
                 <label className="text-xs font-medium text-gray-500 block mb-1">Papel</label>
                 <select
                   value={form.role}
-                  onChange={(e) => setForm(p => ({ ...p, role: e.target.value as UserRole }))}
+                  onChange={(e) => { const role = e.target.value as UserRole; setForm(p => ({ ...p, role, areas: ["sdr", "closer", "marketing"].includes(role) && ["relacionamento", "financeiro", "operacional"].includes(p.role) ? ["comercial"] : p.areas })); }}
                   disabled={!!editUser && editUser.id === currentUser?.id}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-blue-400 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
@@ -591,24 +606,33 @@ function UsuariosSection() {
                   {/* Só a área de Relacionamento (pós-venda). Não entra no
                       Comercial nem recebe lead na distribuição. */}
                   <option value="relacionamento">Relacionamento (pós-venda)</option>
+                  {/* Financeiro e Operações (0126): só a área deles, igual ao Relacionamento. */}
+                  <option value="financeiro">Financeiro</option>
+                  <option value="operacional">Operações</option>
                   <option value="admin">Admin</option>
                 </select>
                 {editUser && editUser.id === currentUser?.id && (
                   <p className="text-[10px] text-gray-400 mt-1">Você não pode alterar o próprio papel — peça a outro administrador.</p>
                 )}
-                {form.role !== "admin" && form.role !== "relacionamento" && (
-                  <label className="flex items-start gap-2 mt-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={form.relacionamento}
-                      onChange={(e) => setForm(p => ({ ...p, relacionamento: e.target.checked }))}
-                      className="mt-0.5"
-                    />
-                    <span className="text-xs text-gray-600 leading-snug">
-                      Também acessa o <b>Relacionamento</b>
-                      <span className="block text-[10px] text-gray-400">Poderá entrar pelas duas portas do login.</span>
-                    </span>
-                  </label>
+                {form.role !== "admin" && !PAPEL_DE_AREA.includes(form.role) && (
+                  <fieldset className="mt-2.5">
+                    <legend className="text-xs text-gray-600 mb-1">
+                      {form.role === "gestor" ? "Áreas que gerencia" : "Também acessa"}
+                      <span className="block text-[10px] text-gray-400">Cada área é uma porta no login.</span>
+                    </legend>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                      {(form.role === "gestor" ? SETORES : OUTRAS_AREAS).map((a) => (
+                        <label key={a} className="flex items-center gap-1.5 cursor-pointer text-xs text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={form.areas.includes(a)}
+                            onChange={(e) => setForm(p => ({ ...p, areas: e.target.checked ? [...p.areas, a] : p.areas.filter((x) => x !== a) }))}
+                          />
+                          {NOME_SETOR[a]}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
                 )}
               </div>
               <div>

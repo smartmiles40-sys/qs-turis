@@ -1,8 +1,19 @@
 // src/components/sdr/types.ts
 
-export type UserRole = "admin" | "gestor" | "sdr" | "closer" | "marketing" | "relacionamento";
-/** As áreas do QS. Cada uma é uma porta no login (0100). */
-export type Setor = "comercial" | "relacionamento";
+export type UserRole = "admin" | "gestor" | "sdr" | "closer" | "marketing" | "relacionamento" | "financeiro" | "operacional";
+/** As áreas do QS. Cada uma é uma porta no login (0100; Financeiro e Operações na 0126). */
+export type Setor = "comercial" | "relacionamento" | "financeiro" | "operacional";
+
+/** Todas as áreas, na ordem das portas do login. */
+export const SETORES: Setor[] = ["comercial", "relacionamento", "financeiro", "operacional"];
+
+/** Nome da área pra tela. */
+export const NOME_SETOR: Record<Setor, string> = {
+  comercial: "Comercial",
+  relacionamento: "Relacionamento",
+  financeiro: "Financeiro",
+  operacional: "Operações",
+};
 export type LeadStatus = "nao_iniciado" | "em_prospeccao" | "ganho" | "perdido";
 export type LeadSource = "manual" | "api" | "integracao" | "importacao";
 export type ChannelType = "pesquisa" | "email" | "ligacao" | "ligacao_whatsapp" | "whatsapp" | "linkedin" | "instagram" | "tiktok" | "youtube";

@@ -22,6 +22,7 @@ import DocumentosDoCliente from "../viagens/DocumentosDoCliente";
 import ChamadosDoCliente from "../chamados/ChamadosDoCliente";
 import ChamadoModal from "../chamados/ChamadoModal";
 import RecompraBotao from "../pos/RecompraBotao";
+import { EnviarFinanceiroModal, StatusNoFinanceiro } from "../../fin/EnviarFinanceiro";
 import { conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
 
 // Nomes amigáveis dos campos, pro histórico ler como gente.
@@ -80,6 +81,9 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [mandarModelo, setMandarModelo] = useState(false);
   const [novoChamado, setNovoChamado] = useState(false);
+  // Financeiro (0127): mandar o cliente pra lá e acompanhar o status.
+  const [enviarFin, setEnviarFin] = useState(false);
+  const [sinalFin, setSinalFin] = useState(0);
   const [versaoChamados, setVersaoChamados] = useState(0);
   const [metrica, setMetrica] = useState<Metrica | null>(null);
   const [erroMetrica, setErroMetrica] = useState<string | null>(null);
@@ -191,10 +195,13 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
             <RecompraBotao clienteId={c.id} compacto />
             <Botao onClick={() => setNovoContato(true)}>Registrar contato</Botao>
             <Botao onClick={() => setNovoChamado(true)}>Abrir chamado</Botao>
+            <Botao onClick={() => setEnviarFin(true)}>💰 Enviar ao Financeiro</Botao>
             <Botao onClick={() => setEditando(true)}>Editar</Botao>
           </div>
         )}
       </div>
+
+      <div className="mt-3"><StatusNoFinanceiro alvo={{ clienteId: c.id }} recarregar={sinalFin} /></div>
 
       {erroMetrica && <div className="mb-4"><Aviso tom="erro">Categoria, LTV e cadastro não carregaram ({erroMetrica}).</Aviso></div>}
       {metrica && !metrica.cadastro_completo && !c.mesclado_em_id && (
@@ -355,6 +362,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         onFechar={() => setNovoContato(false)}
         onSalvo={() => { setNovoContato(false); void carregar(); }}
       />
+      <EnviarFinanceiroModal aberto={enviarFin} origem="relacionamento" alvo={{ clienteId: c.id, telefone: c.telefone }} nome={c.nome}
+        onFechar={() => setEnviarFin(false)} onEnviado={() => { setEnviarFin(false); setSinalFin((n) => n + 1); }} />
       <ChamadoModal
         aberto={novoChamado}
         inicial={{ clienteId: c.id }}

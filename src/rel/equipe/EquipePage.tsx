@@ -14,16 +14,49 @@
 // Só gestor(a)/admin vê esta tela. E ganhou CARGOS (0122): o nome da função de
 // cada um, com permissões guardadas pro futuro (o Financeiro vai dar o status
 // das atividades no QS).
+//
+// 14/10 (0126): a MESMA tela serve o time do Financeiro e de Operações — a prop
+// `area` troca textos, papel do atendente, cargos e o que o gestor da área pode.
+// Sem a prop, é o Relacionamento (como sempre foi).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
-import { createQsAuthUser, listarEquipeRel, updateQsAuthUser, type MembroEquipe } from "@/lib/adminUsers";
+import { createQsAuthUser, listarEquipe, updateQsAuthUser, type AreaComTime, type MembroEquipe } from "@/lib/adminUsers";
 import { Aviso, Avatar, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "../ui";
-import { podeGerirRelacionamento } from "./permissao";
+import { podeGerirTime } from "./permissao";
 import { listarCargos, PERMISSOES, salvarCargo, SETORES_CARGO, type Cargo, type SetorCargo } from "./cargos";
 
-type Papel = "relacionamento" | "gestor";
-const PAPEL: Record<string, string> = { relacionamento: "Atendente", gestor: "Gestor(a)" };
+/** Papel na área: o atendente (papel com o nome da área) ou gestor. */
+type Papel = AreaComTime | "gestor";
+const PAPEL: Record<string, string> = { relacionamento: "Atendente", financeiro: "Analista", operacional: "Operador(a)", gestor: "Gestor(a)" };
+
+/** O que muda de uma área pra outra. */
+const AREA: Record<AreaComTime, { nome: string; titulo: string; sub: string; vazio: string; dicaPapel: string; assina: boolean }> = {
+  relacionamento: {
+    nome: "Relacionamento", titulo: "Time do Relacionamento",
+    sub: "Quem atende o pós-venda, o cargo, a assinatura no WhatsApp e o último acesso.",
+    vazio: "Adicione quem atende o pós-venda.",
+    dicaPapel: "Atendente: atende, cuida das fichas e viagens. Gestor(a): também configura o Relacionamento e cuida do time.",
+    assina: true,
+  },
+  financeiro: {
+    nome: "Financeiro", titulo: "Time do Financeiro",
+    sub: "Quem trabalha no Financeiro, o cargo e o último acesso.",
+    vazio: "Adicione quem trabalha no Financeiro.",
+    dicaPapel: "Analista: trabalha nas telas do Financeiro. Gestor(a): também configura o Financeiro e cuida do time.",
+    assina: false,
+  },
+  operacional: {
+    nome: "Operações", titulo: "Time de Operações",
+    sub: "Quem trabalha em Operações, o cargo e o último acesso.",
+    vazio: "Adicione quem trabalha em Operações.",
+    dicaPapel: "Operador(a): trabalha nas telas de Operações. Gestor(a): também configura Operações e cuida do time.",
+    assina: false,
+  },
+};
+
+/** Cargos que o gestor da área dá: os da área (a gestora do Rel também dá os do Financeiro, 0122). */
+const alcadaDe = (area: AreaComTime): SetorCargo[] => (area === "relacionamento" ? ["relacionamento", "financeiro"] : [area]);
 
 /** Senha provisória legível (sem 0/O/1/l), 10 caracteres. */
 function senhaProvisoria() {
@@ -39,14 +72,16 @@ function quando(iso: string | null) {
 }
 
 interface Form { id?: string; name: string; email: string; papel: Papel; senha: string; whatsapp: string; cargo_id: string; /** Cargo de quando abriu (só manda cargo_id se mudou). */ cargo_antes?: string }
-const VAZIO: Form = { name: "", email: "", papel: "relacionamento", senha: "", whatsapp: "", cargo_id: "" };
+
 
 /** Como o nome sai no topo da mensagem do WhatsApp (igual ao servidor). */
 const assinaturaDe = (nome: string) => `*${nome.trim().replace(/\s+/g, " ") || "Nome"}:*`;
 
-export default function EquipePage() {
+export default function EquipePage({ area = "relacionamento" }: { area?: AreaComTime } = {}) {
   const { currentUser } = useQsAuth();
-  const pode = podeGerirRelacionamento(currentUser);
+  const info = AREA[area];
+  const vazio: Form = { name: "", email: "", papel: area, senha: "", whatsapp: "", cargo_id: "" };
+  const pode = podeGerirTime(currentUser, area);
   const ehAdmin = currentUser?.role === "admin";
 
   const [equipe, setEquipe] = useState<MembroEquipe[] | null>(null);
@@ -62,21 +97,21 @@ export default function EquipePage() {
 
   const carregar = useCallback(async () => {
     try {
-      const r = await listarEquipeRel();
+      const r = await listarEquipe(area);
       if (!r.success) throw new Error(r.error || "Não consegui carregar o time.");
       setEquipe(r.equipe ?? []);
       setErro(null);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Não consegui carregar o time.");
     }
-  }, []);
+  }, [area]);
   useEffect(() => { if (pode) { void carregar(); carregarCargos(); } }, [pode, carregar, carregarCargos]);
 
   if (!pode) {
     return (
       <div className="max-w-3xl">
-        <Cabecalho />
-        <Aviso>Só o admin ou a gestora do Relacionamento vê e cuida do time.</Aviso>
+        <Cabecalho titulo={info.titulo} sub={info.sub} />
+        <Aviso>Só o admin ou a gestão do {info.nome} vê e cuida do time.</Aviso>
       </div>
     );
   }
@@ -89,10 +124,10 @@ export default function EquipePage() {
     if (!form.id && form.senha.length < 8) { setErroForm("A senha provisória precisa de 8+ caracteres."); return; }
     setSalvando(true); setErroForm(null);
     const mudouCargo = !form.id || (form.cargo_id || "") !== (form.cargo_antes || "");
-    const base = { name: nome, email, role: form.papel, setores: ["relacionamento" as const], whatsapp_number: form.whatsapp.trim() || null, ...(mudouCargo ? { cargo_id: form.cargo_id || null } : {}) };
+    const base = { name: nome, email, role: form.papel, setores: [area], whatsapp_number: form.whatsapp.trim() || null, ...(mudouCargo ? { cargo_id: form.cargo_id || null } : {}) };
     const r = form.id
-      ? await updateQsAuthUser({ id: form.id, ...base })
-      : await createQsAuthUser({ ...base, password: form.senha, is_active: true });
+      ? await updateQsAuthUser({ id: form.id, ...base }, area)
+      : await createQsAuthUser({ ...base, password: form.senha, is_active: true }, area);
     setSalvando(false);
     if (!r.success) { setErroForm(r.error || "Não consegui salvar."); return; }
     if (!form.id) setSenhaNova({ nome, email, senha: form.senha });
@@ -104,7 +139,7 @@ export default function EquipePage() {
   async function alternarAtivo(m: MembroEquipe) {
     const ativar = !m.is_active;
     if (!ativar && !window.confirm(`Desativar ${m.name}? A pessoa não consegue mais entrar no QS (dá pra reativar depois).`)) return;
-    const r = await updateQsAuthUser({ id: m.id, is_active: ativar });
+    const r = await updateQsAuthUser({ id: m.id, is_active: ativar }, area);
     setAviso(r.success ? { tom: "ok", texto: `${m.name} ${ativar ? "reativado(a)" : "desativado(a)"}.` } : { tom: "erro", texto: r.error || "Não consegui." });
     await carregar();
   }
@@ -112,21 +147,22 @@ export default function EquipePage() {
   async function redefinirSenha(m: MembroEquipe) {
     if (!window.confirm(`Gerar uma senha provisória nova pra ${m.name}? A senha atual deixa de funcionar.`)) return;
     const senha = senhaProvisoria();
-    const r = await updateQsAuthUser({ id: m.id, password: senha });
+    const r = await updateQsAuthUser({ id: m.id, password: senha }, area);
     if (!r.success) { setAviso({ tom: "erro", texto: r.error || "Não consegui trocar a senha." }); return; }
     setSenhaNova({ nome: m.name, email: m.email || "", senha });
   }
 
-  const podeMexer = (m: MembroEquipe) => ehAdmin || m.so_relacionamento;
+  const soDaArea = (m: MembroEquipe) => m.so_area ?? (area === "relacionamento" ? m.so_relacionamento : false);
+  const podeMexer = (m: MembroEquipe) => ehAdmin || soDaArea(m);
   const nomeDoCargo = (id?: string | null) => cargos.find((c) => c.id === id)?.nome;
-  // Cargos que dá pra dar: ativos; a gestora só os do Relacionamento e do Financeiro.
-  const cargosDisponiveis = cargos.filter((c) => c.ativo && (ehAdmin || c.setor === "relacionamento" || c.setor === "financeiro"));
+  // Cargos que dá pra dar: ativos; o gestor da área só os da alçada dele.
+  const cargosDisponiveis = cargos.filter((c) => c.ativo && (ehAdmin || alcadaDe(area).includes(c.setor)));
 
   return (
     <div className="max-w-4xl space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <Cabecalho />
-        {aba === "time" && <Botao variante="primario" onClick={() => { setErroForm(null); setForm({ ...VAZIO, senha: senhaProvisoria() }); }}>+ Adicionar funcionário</Botao>}
+        <Cabecalho titulo={info.titulo} sub={info.sub} />
+        {aba === "time" && <Botao variante="primario" onClick={() => { setErroForm(null); setForm({ ...vazio, senha: senhaProvisoria() }); }}>+ Adicionar funcionário</Botao>}
       </div>
 
       <div className="flex gap-1 border-b" style={{ borderColor: "var(--line)" }} role="tablist" aria-label="Equipe">
@@ -137,7 +173,7 @@ export default function EquipePage() {
         ))}
       </div>
 
-      {aba === "cargos" ? <CargosSecao cargos={cargos} ehAdmin={ehAdmin} onMudou={carregarCargos} /> : <>
+      {aba === "cargos" ? <CargosSecao cargos={cargos} ehAdmin={ehAdmin} area={area} onMudou={carregarCargos} /> : <>
 
       {aviso && <Aviso tom={aviso.tom}>{aviso.texto}</Aviso>}
       {erro && <Aviso tom="erro">{erro} <Botao className="ml-2" onClick={() => void carregar()}>Tentar de novo</Botao></Aviso>}
@@ -145,7 +181,7 @@ export default function EquipePage() {
       {equipe === null && !erro ? (
         <div className="rel-card h-40 animate-pulse" aria-busy="true" />
       ) : equipe && equipe.length === 0 ? (
-        <div className="rel-card p-6"><Vazio titulo="Ninguém no time ainda" texto="Adicione quem atende o pós-venda." /></div>
+        <div className="rel-card p-6"><Vazio titulo="Ninguém no time ainda" texto={info.vazio} /></div>
       ) : equipe && (
         <ul className="rel-card divide-y" style={{ borderColor: "var(--line)" }}>
           {equipe.map((m) => (
@@ -156,20 +192,22 @@ export default function EquipePage() {
                   <span className="font-semibold" style={{ color: "var(--ink)" }}>{m.name}</span>
                   <Etiqueta tom={m.role === "gestor" ? "rel" : "neutro"}>{PAPEL[m.role] || m.role}</Etiqueta>
                   {!m.is_active && <Etiqueta tom="erro">Desativado</Etiqueta>}
-                  {!m.so_relacionamento && <Etiqueta>Também no Comercial</Etiqueta>}
+                  {!soDaArea(m) && <Etiqueta>Também em outra área</Etiqueta>}
                   {m.id === currentUser?.id && <Etiqueta>Você</Etiqueta>}
                   {nomeDoCargo(m.cargo_id) && <Etiqueta tom="neutro">{nomeDoCargo(m.cargo_id)}</Etiqueta>}
                 </div>
                 <div className="text-[12px] mt-0.5" style={{ color: "var(--ink3)" }}>
                   {m.email || "sem e-mail"} · último acesso: {quando(m.ultimo_acesso)}
                 </div>
-                <div className="text-[12px] mt-0.5" style={{ color: "var(--ink3)" }}>
-                  Assina no WhatsApp como <b style={{ color: "var(--ink2)" }}>{assinaturaDe(m.name)}</b>
-                </div>
+                {info.assina && (
+                  <div className="text-[12px] mt-0.5" style={{ color: "var(--ink3)" }}>
+                    Assina no WhatsApp como <b style={{ color: "var(--ink2)" }}>{assinaturaDe(m.name)}</b>
+                  </div>
+                )}
               </div>
               {podeMexer(m) ? (
                 <div className="flex flex-wrap gap-2">
-                  <Botao onClick={() => { setErroForm(null); setForm({ id: m.id, name: m.name, email: m.email || "", papel: (m.role === "gestor" ? "gestor" : "relacionamento"), senha: "", whatsapp: m.whatsapp_number || "", cargo_id: m.cargo_id || "", cargo_antes: m.cargo_id || "" }); }}>Editar</Botao>
+                  <Botao onClick={() => { setErroForm(null); setForm({ id: m.id, name: m.name, email: m.email || "", papel: (m.role === "gestor" ? "gestor" : area), senha: "", whatsapp: m.whatsapp_number || "", cargo_id: m.cargo_id || "", cargo_antes: m.cargo_id || "" }); }}>Editar</Botao>
                   <Botao onClick={() => void redefinirSenha(m)}>Nova senha</Botao>
                   {m.id !== currentUser?.id && (
                     <Botao variante={m.is_active ? "perigo" : "secundario"} onClick={() => void alternarAtivo(m)}>{m.is_active ? "Desativar" : "Reativar"}</Botao>
@@ -191,18 +229,20 @@ export default function EquipePage() {
         </>}>
         {form && (
           <div className="space-y-3">
-            <Campo rotulo="Nome" dica="É a assinatura das mensagens no WhatsApp: sai em negrito no topo de tudo que a pessoa mandar.">
+            <Campo rotulo="Nome" dica={info.assina ? "É a assinatura das mensagens no WhatsApp: sai em negrito no topo de tudo que a pessoa mandar." : undefined}>
               <Entrada value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
             </Campo>
-            <div className="rounded-lg px-3 py-2 text-[13px]" style={{ background: "var(--rel-soft)", color: "var(--ink2)" }}>
-              Como sai no WhatsApp: <b style={{ color: "var(--ink)" }}>{assinaturaDe(form.name)}</b>
-            </div>
+            {info.assina && (
+              <div className="rounded-lg px-3 py-2 text-[13px]" style={{ background: "var(--rel-soft)", color: "var(--ink2)" }}>
+                Como sai no WhatsApp: <b style={{ color: "var(--ink)" }}>{assinaturaDe(form.name)}</b>
+              </div>
+            )}
             <Campo rotulo="E-mail (é o login)"><Entrada type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Campo>
-            <Campo rotulo="Papel" dica="Atendente: atende, cuida das fichas e viagens. Gestor(a): também configura o Relacionamento e cuida do time.">
+            <Campo rotulo="Papel" dica={info.dicaPapel}>
               <select className="rel-input w-full" value={form.papel} disabled={form.id === currentUser?.id}
                 onChange={(e) => setForm({ ...form, papel: e.target.value as Papel })}>
-                <option value="relacionamento">Atendente</option>
-                <option value="gestor">Gestor(a) do Relacionamento</option>
+                <option value={area}>{PAPEL[area]}</option>
+                <option value="gestor">Gestor(a) do {info.nome}</option>
               </select>
             </Campo>
             <Campo rotulo="Cargo" dica="O nome da função. Crie novos na aba Cargos.">
@@ -233,9 +273,9 @@ export default function EquipePage() {
           <div className="space-y-3 text-sm" style={{ color: "var(--ink2)" }}>
             <p>Mande pra <b>{senhaNova.nome}</b> (a senha não aparece de novo):</p>
             <pre className="rel-card p-3 text-[13px] whitespace-pre-wrap font-mono" style={{ color: "var(--ink)" }}>
-{`Endereço: ${window.location.origin}\nLogin: ${senhaNova.email}\nSenha provisória: ${senhaNova.senha}\nNa entrada, escolha a porta "Relacionamento".`}
+{`Endereço: ${window.location.origin}\nLogin: ${senhaNova.email}\nSenha provisória: ${senhaNova.senha}\nNa entrada, escolha a porta "${info.nome}".`}
             </pre>
-            <Botao onClick={() => void navigator.clipboard.writeText(`Endereço: ${window.location.origin}\nLogin: ${senhaNova.email}\nSenha provisória: ${senhaNova.senha}\nNa entrada, escolha a porta "Relacionamento".`)}>Copiar</Botao>
+            <Botao onClick={() => void navigator.clipboard.writeText(`Endereço: ${window.location.origin}\nLogin: ${senhaNova.email}\nSenha provisória: ${senhaNova.senha}\nNa entrada, escolha a porta "${info.nome}".`)}>Copiar</Botao>
           </div>
         )}
       </Modal>
@@ -247,13 +287,13 @@ export default function EquipePage() {
 
 interface FormCargo { id?: string; nome: string; setor: SetorCargo; descricao: string; permissoes: string[] }
 
-function CargosSecao({ cargos, ehAdmin, onMudou }: { cargos: Cargo[]; ehAdmin: boolean; onMudou: () => void }) {
+function CargosSecao({ cargos, ehAdmin, area, onMudou }: { cargos: Cargo[]; ehAdmin: boolean; area: AreaComTime; onMudou: () => void }) {
   const [form, setForm] = useState<FormCargo | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<{ tom: "ok" | "erro"; texto: string } | null>(null);
-  // A gestora mexe só nos setores dela; o banco confere de novo.
-  const setoresQuePode: SetorCargo[] = ehAdmin ? ["relacionamento", "financeiro", "comercial", "operacional"] : ["relacionamento", "financeiro"];
+  // O gestor mexe só nos setores da alçada dele; o banco confere de novo.
+  const setoresQuePode: SetorCargo[] = ehAdmin ? [area, ...(["relacionamento", "financeiro", "comercial", "operacional"] as SetorCargo[]).filter((x) => x !== area)] : alcadaDe(area);
   const podeMexer = (c: Cargo) => setoresQuePode.includes(c.setor);
 
   async function salvar() {
@@ -288,7 +328,7 @@ function CargosSecao({ cargos, ehAdmin, onMudou }: { cargos: Cargo[]; ehAdmin: b
           O cargo é o nome da função de cada pessoa. O que libera o acesso continua sendo o papel (atendente ou gestor).
           As permissões ficam guardadas pro futuro — ainda não travam nada.
         </p>
-        <Botao variante="primario" onClick={() => { setErro(null); setForm({ nome: "", setor: "relacionamento", descricao: "", permissoes: [] }); }}>+ Novo cargo</Botao>
+        <Botao variante="primario" onClick={() => { setErro(null); setForm({ nome: "", setor: area, descricao: "", permissoes: [] }); }}>+ Novo cargo</Botao>
       </div>
       {aviso && <Aviso tom={aviso.tom}>{aviso.texto}</Aviso>}
       {porSetor.length === 0 && <div className="rel-card p-6"><Vazio titulo="Nenhum cargo ainda" texto="Crie o primeiro no botão acima." /></div>}
@@ -352,11 +392,11 @@ function CargosSecao({ cargos, ehAdmin, onMudou }: { cargos: Cargo[]; ehAdmin: b
   );
 }
 
-function Cabecalho() {
+function Cabecalho({ titulo, sub }: { titulo: string; sub: string }) {
   return (
     <header>
-      <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Time do Relacionamento</h1>
-      <p className="text-sm mt-1" style={{ color: "var(--ink2)" }}>Quem atende o pós-venda, o cargo, a assinatura no WhatsApp e o último acesso.</p>
+      <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>{titulo}</h1>
+      <p className="text-sm mt-1" style={{ color: "var(--ink2)" }}>{sub}</p>
     </header>
   );
 }

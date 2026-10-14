@@ -1,7 +1,7 @@
 // src/contexts/QsAuthContext.tsx
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
-import type { SdrUser, UserRole, Setor } from "@/components/sdr/types";
+import { SETORES, type SdrUser, type UserRole, type Setor } from "@/components/sdr/types";
 
 /**
  * Resultado do login:
@@ -98,8 +98,11 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   // Painel e o WhatsApp (telas de EXECUÇÃO — quem não executa não atende) e as
   // Configurações (que só existem pra mudar coisa).
   marketing: ["leads", "lead-detail", "cobertura", "cadencias", "reunioes", "dashboard", "analises", "monitor-leads"],
-  // Relacionamento não tem tela no Comercial: trabalha na área própria (0100).
+  // Relacionamento, Financeiro e Operações não têm tela no Comercial: cada um
+  // trabalha na área própria (0100, 0126).
   relacionamento: [],
+  financeiro: [],
+  operacional: [],
 };
 
 // ── Áreas (setores) ─────────────────────────────────────────────────────────
@@ -108,18 +111,20 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
 // aqui pra tela não depender de a coluna já ter vindo no perfil carregado.
 export function setoresDe(user: Pick<SdrUser, "role" | "setores"> | null | undefined): Setor[] {
   if (!user) return [];
-  if (user.role === "admin") return ["comercial", "relacionamento"];
-  if (user.role === "relacionamento") return ["relacionamento"];
-  // Gestor(a) do Relacionamento (13/10/2026): gestor só com o setor Relacionamento
-  // fica só nele — não ganha o Comercial por tabela.
-  if (user.role === "gestor" && user.setores?.length && user.setores.includes("relacionamento") && !user.setores.includes("comercial")) return ["relacionamento"];
-  const s: Setor[] = user.setores?.length ? user.setores : ["comercial"];
-  return s.includes("comercial") ? s : ["comercial", ...s];
+  if (user.role === "admin") return [...SETORES];
+  // Atendente de uma área fica só nela (0100 / 0126).
+  if (user.role === "relacionamento" || user.role === "financeiro" || user.role === "operacional") return [user.role];
+  const validos = (user.setores ?? []).filter((x): x is Setor => (SETORES as string[]).includes(x));
+  // Gestor fica com as áreas escolhidas (13/10: a gestora do Rel não ganha o
+  // Comercial por tabela). Sem nenhuma, é do Comercial.
+  if (user.role === "gestor") return validos.length ? SETORES.filter((x) => validos.includes(x)) : ["comercial"];
+  // SDR, closer, marketing: sempre do Comercial.
+  return SETORES.filter((x) => x === "comercial" || validos.includes(x));
 }
 
 const CHAVE_AREA = "qs_area";
 function areaGuardada(): Setor {
-  try { return localStorage.getItem(CHAVE_AREA) === "relacionamento" ? "relacionamento" : "comercial"; }
+  try { const v = localStorage.getItem(CHAVE_AREA) as Setor | null; return v && SETORES.includes(v) ? v : "comercial"; }
   catch { return "comercial"; }
 }
 function guardarArea(s: Setor) {
