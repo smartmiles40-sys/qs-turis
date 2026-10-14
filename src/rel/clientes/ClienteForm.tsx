@@ -21,6 +21,8 @@ interface Props {
   cliente?: Cliente | null;
   /** Já abre ligado a este titular (botão "adicionar à família"). */
   titular?: Cliente | null;
+  /** Ficha nova já preenchida ("Salvar contato" da conversa do WhatsApp, 14/10). */
+  inicial?: { nome?: string | null; telefone?: string | null };
   onFechar: () => void;
   onSalvo: (c: Cliente) => void;
   onAbrirFicha: (id: string) => void;
@@ -32,12 +34,12 @@ type Form = {
   titular: Pick<Cliente, "id" | "nome"> | null; parentesco: Parentesco | ""; consentiu: boolean;
 };
 
-function formDe(c?: Cliente | null, titular?: Cliente | null): Form {
+function formDe(c?: Cliente | null, titular?: Cliente | null, inicial?: Props["inicial"]): Form {
   return {
-    nome: c?.nome ?? "",
+    nome: c?.nome ?? inicial?.nome ?? "",
     cpf: c?.cpf ? formatarCpf(c.cpf) : "",
     nascimento: c?.nascimento ?? "",
-    telefone: c?.telefone ? formatarTelefone(c.telefone) : "",
+    telefone: c?.telefone ? formatarTelefone(c.telefone) : inicial?.telefone ? formatarTelefone(inicial.telefone) : "",
     email: c?.email ?? "",
     passaporte: c?.passaporte ?? "",
     passaporte_validade: c?.passaporte_validade ?? "",
@@ -49,8 +51,8 @@ function formDe(c?: Cliente | null, titular?: Cliente | null): Form {
   };
 }
 
-export default function ClienteForm({ aberto, cliente, titular, onFechar, onSalvo, onAbrirFicha }: Props) {
-  const [f, setF] = useState<Form>(() => formDe(cliente, titular));
+export default function ClienteForm({ aberto, cliente, titular, inicial, onFechar, onSalvo, onAbrirFicha }: Props) {
+  const [f, setF] = useState<Form>(() => formDe(cliente, titular, inicial));
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [parecidos, setParecidos] = useState<Parecido[]>([]);
@@ -61,7 +63,7 @@ export default function ClienteForm({ aberto, cliente, titular, onFechar, onSalv
   // Reabre limpo (ou com a ficha certa) a cada abertura.
   useEffect(() => {
     if (!aberto) return;
-    setF(formDe(cliente, titular));
+    setF(formDe(cliente, titular, inicial));
     setErro(null);
     setParecidos([]);
     setBuscaTitular("");
@@ -72,6 +74,7 @@ export default function ClienteForm({ aberto, cliente, titular, onFechar, onSalv
         .then((t) => t && setF((p) => ({ ...p, titular: { id: t.id, nome: t.nome } })))
         .catch(() => undefined);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aberto, cliente, titular]);
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));

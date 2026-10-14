@@ -126,6 +126,16 @@ export async function processarRelacionamento(ch, numero, nomes) {
   const phoneId = numero.phone_number_id;
   const pasta = (fone) => `rel-${String(fone).replace(/\D/g, '')}`;
 
+  // Reação (14/10): fica na bolha reagida. Emoji vazio = tirou a reação.
+  async function reacao(m, de, nome) {
+    const alvo = m?.reaction?.message_id;
+    if (!alvo) return;
+    await rest('rpc/rel_wa_reagir', {
+      method: 'POST',
+      body: { p_wamid: String(alvo), p_de: de, p_nome: nome, p_emoji: String(m.reaction.emoji ?? '') },
+    }).catch((e) => console.warn('[rel-entrada] reação não gravada:', e?.message));
+  }
+
   async function uma(m, { direcao, origem, telefone, nome, baixar }) {
     const lida = lerMensagemMeta(m);
     if (!lida?.id || !telefone) {
@@ -145,6 +155,7 @@ export async function processarRelacionamento(ch, numero, nomes) {
   if (ch.field === 'messages') {
     for (const m of value.messages || []) {
       const telefone = String(m.from || '');
+      if (m.type === 'reaction') { await reacao(m, 'cliente', (nomes.get(telefone) || 'Cliente').split(' ')[0]); continue; }
       const r = await uma(m, { direcao: 'in', origem: 'cliente', telefone, nome: nomes.get(telefone) || null, baixar: true });
       if (r?.nova) {
         conta.recebidas++;
@@ -164,6 +175,7 @@ export async function processarRelacionamento(ch, numero, nomes) {
 
   if (ch.field === 'smb_message_echoes') {
     for (const m of value.message_echoes || []) {
+      if (m.type === 'reaction') { await reacao(m, 'celular', 'Celular'); continue; }
       const r = await uma(m, { direcao: 'out', origem: 'celular', telefone: String(m.to || ''), nome: null, baixar: true });
       if (r?.nova) conta.ecos++;
     }

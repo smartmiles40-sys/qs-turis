@@ -39,18 +39,20 @@ import RecompraPage from "./pos/RecompraPage";
 import KpisPage from "./kpis/KpisPage";
 import WhatsAppPage from "./whatsapp/WhatsAppPage";
 import EquipePage from "./equipe/EquipePage";
+import ModelosPage from "./modelos/ModelosPage";
+import AgendaPage from "./agenda/AgendaPage";
 import { podeGerirRelacionamento } from "./equipe/permissao";
 
 type Rota =
   | { tela: "inicio" }
-  | { tela: "atendimento"; id?: string } | { tela: "chamados" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
+  | { tela: "atendimento"; id?: string } | { tela: "chamados" } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" }
   | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
   | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
   | { tela: "config" };
 type Tela = Rota["tela"];
 
-const SIMPLES: Tela[] = ["inicio", "chamados", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
+const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
 
 function lerRota(): Rota {
   const h = window.location.hash.replace(/^#\/?/, "");
@@ -79,7 +81,9 @@ function limparHash() {
 const ICONES: Record<string, ReactNode> = {
   inicio: <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   atendimento: <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />,
+  modelos: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></>,
   clientes: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
+  agenda: <><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></>,
   equipe: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6" /><path d="M22 11h-6" /></>,
   kpis: <><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></>,
   viagens: <><path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" /></>,
@@ -270,6 +274,12 @@ export default function RelApp() {
     { id: "atendimento", rotulo: "Atendimento", icone: "atendimento", itens: [
       { id: "atendimento", rotulo: "Conversas", badge: cont?.esperando || undefined, alerta: !!cont?.foraDoPrazo },
       { id: "chamados", rotulo: "Chamados", badge: cont?.chamadosVencidos || undefined, alerta: true },
+      // Modelos (14/10): respostas prontas + modelos da Meta — a gestora padroniza.
+      { id: "modelos", rotulo: "Modelos de mensagem" },
+    ] },
+    // Agenda (14/10): cada pessoa tem a sua + o panorama do time.
+    { id: "agenda", rotulo: "Agenda", icone: "agenda", itens: [
+      { id: "agenda", rotulo: "Agenda do time" },
     ] },
     { id: "kpis", rotulo: "KPIs", icone: "kpis", itens: [
       { id: "kpis", rotulo: "Indicadores" },
@@ -488,6 +498,8 @@ export default function RelApp() {
           {rota.tela === "recompra" && <RecompraPage onAbrirCliente={abrirCliente} />}
           {rota.tela === "config" && <ConfigPage onAbrirWhatsApp={() => ir({ tela: "whatsapp" })} />}
           {rota.tela === "equipe" && <EquipePage />}
+          {rota.tela === "modelos" && <ModelosPage />}
+          {rota.tela === "agenda" && <AgendaPage onAbrirCliente={(id) => ir({ tela: "ficha", id })} onAbrirViagem={(id) => ir({ tela: "viagem", id })} onAbrirConversa={(id) => ir({ tela: "atendimento", id })} />}
         </div>
       </main>
 

@@ -111,7 +111,7 @@ export default async function handler(req, res) {
   // Lista do time do Relacionamento, com o último acesso (vem da conta de auth).
   if (action === 'listar_equipe') {
     try {
-      const time = await rest('qs_users?select=id,name,email,role,setores,is_active,whatsapp_number&role=neq.admin&setores=cs.{relacionamento}&order=name.asc');
+      const time = await rest('qs_users?select=id,name,email,role,setores,is_active,whatsapp_number,cargo_id&role=neq.admin&setores=cs.{relacionamento}&order=name.asc');
       const lista = await Promise.all((time || []).map(async (u) => {
         let ultimo = null;
         try { ultimo = (await authAdmin(`/${u.id}`, { method: 'GET' }))?.last_sign_in_at || null; } catch { /* sem conta de auth */ }
@@ -130,6 +130,27 @@ export default async function handler(req, res) {
     if (recusa) return res.status(403).json({ success: false, error: recusa });
     // o resultado é sempre "só Relacionamento"
     if (user && (action === 'create' || user.role !== undefined || user.setores !== undefined)) user.setores = ['relacionamento'];
+  }
+
+  // Cargo (0122): tem que existir, estar ativo e — pra gestora — ser do
+  // Relacionamento ou do Financeiro. null/'' tira o cargo.
+  // Só valida quando o cargo MUDA: editar o nome de quem tem um cargo que foi
+  // desativado (ou que o admin deu, fora da alçada da gestora) não pode travar.
+  let cargoAtual;
+  if (user && user.cargo_id && action === 'update' && idValido(user?.id)) {
+    cargoAtual = (await rest(`qs_users?select=cargo_id&id=eq.${user.id}&limit=1`).catch(() => null))?.[0]?.cargo_id ?? null;
+  }
+  if (user && user.cargo_id !== undefined && (action === 'create' || action === 'update')) {
+    if (!user.cargo_id) user.cargo_id = null;
+    else if (action === 'update' && cargoAtual === user.cargo_id) { /* não mudou: não revalida */ }
+    else {
+      if (!idValido(user.cargo_id)) return res.status(400).json({ success: false, error: 'Cargo inválido' });
+      const cg = (await rest(`qs_cargos?select=setor,ativo&id=eq.${user.cargo_id}&limit=1`).catch(() => null))?.[0];
+      if (!cg || !cg.ativo) return res.status(400).json({ success: false, error: 'Cargo não encontrado ou desativado' });
+      if (ehGestorRel && !['relacionamento', 'financeiro'].includes(cg.setor)) {
+        return res.status(403).json({ success: false, error: 'A gestora só atribui cargos do Relacionamento ou do Financeiro' });
+      }
+    }
   }
 
   try {
@@ -155,6 +176,7 @@ export default async function handler(req, res) {
       };
       // só inclui whatsapp_number se veio preenchido (a coluna pode ainda não existir)
       if (user.whatsapp_number) profileBody.whatsapp_number = user.whatsapp_number;
+      if (user.cargo_id) profileBody.cargo_id = user.cargo_id;
       const setoresNovos = setoresValidos(user.setores);
       if (setoresNovos) profileBody.setores = setoresNovos;
       let profile;
@@ -196,7 +218,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, error: 'Papel inválido' });
       }
       const fields = {};
-      for (const k of ['name', 'role', 'whatsapp_number', 'is_active']) {
+      for (const k of ['name', 'role', 'whatsapp_number', 'is_active', 'cargo_id']) {
         if (user[k] !== undefined) fields[k] = user[k];
       }
       const setoresEditados = setoresValidos(user.setores);

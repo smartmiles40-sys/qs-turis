@@ -16,6 +16,8 @@ export interface AdminUserInput {
   setores?: Setor[];
   whatsapp_number?: string | null;
   is_active?: boolean;
+  /** Cargo (0122) — nome da função; null tira. */
+  cargo_id?: string | null;
 }
 
 type AdminResult = { success: boolean; error?: string; user?: unknown; equipe?: MembroEquipe[] };
@@ -24,6 +26,7 @@ type AdminResult = { success: boolean; error?: string; user?: unknown; equipe?: 
 export interface MembroEquipe {
   id: string; name: string; email: string | null; role: UserRole; setores: Setor[] | null;
   is_active: boolean; whatsapp_number: string | null; ultimo_acesso: string | null; so_relacionamento: boolean;
+  cargo_id?: string | null;
 }
 
 async function callAdmin(action: "create" | "update" | "delete" | "listar_equipe", user: AdminUserInput): Promise<AdminResult> {

@@ -2,12 +2,13 @@
 // Mandar um MODELO aprovado pela Meta — o único jeito de falar com quem não
 // escreve há mais de 24h (e de puxar conversa com um cliente pela ficha).
 import { useEffect, useMemo, useState } from "react";
-import { enviarModelo, listarModelos, type Modelo } from "../lib/whatsapp";
+import { enviarModelo, enviarModeloParaTelefone, listarModelos, type Modelo } from "../lib/whatsapp";
 import { Aviso, Botao, Campo, Entrada, Modal } from "../ui";
 
 export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnviado }: {
   aberto: boolean;
-  alvo: { conversaId?: string; clienteId?: string };
+  /** telefone = Nova conversa com um número que ainda não escreveu (14/10). */
+  alvo: { conversaId?: string; clienteId?: string; telefone?: string };
   nomeCliente: string | null;
   onFechar: () => void;
   onEnviado: (conversaId?: string) => void;
@@ -47,7 +48,8 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
     setEnviando(true);
     setErro(null);
     try {
-      const r = await enviarModelo(alvo, { nome: escolhido.nome, idioma: escolhido.idioma, params });
+      const modelo = { nome: escolhido.nome, idioma: escolhido.idioma, params };
+      const r = alvo.telefone ? await enviarModeloParaTelefone(alvo.telefone, modelo) : await enviarModelo(alvo, modelo);
       onEnviado(r?.conversaId);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Não enviou.");
@@ -75,8 +77,8 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
           {erro && <Aviso tom="erro">{erro}</Aviso>}
           {modelos.length === 0 && !erro && (
             <Aviso>
-              Ainda não há modelo aprovado no número do Relacionamento. O admin cria em
-              <b> Comercial → Configurações → Modelos da Meta → "Mensagens de: Relacionamento"</b> — a Meta aprova em minutos ou horas.
+              Ainda não há modelo aprovado no número do Relacionamento. A gestora cria em
+              <b> Atendimento → Modelos → Modelos da Meta</b> — a Meta aprova em minutos ou horas.
             </Aviso>
           )}
           {modelos.filter((m) => !m.precisaMidia).map((m) => (

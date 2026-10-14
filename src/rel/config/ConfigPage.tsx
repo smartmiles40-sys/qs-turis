@@ -2,18 +2,19 @@
 // -----------------------------------------------------------------------------
 // Configurações do Relacionamento: o número de WhatsApp, horário de atendimento
 // (é ele que define os "minutos úteis" do prazo), feriados, o prazo, a mensagem
-// automática de fora do horário, a assinatura e as respostas prontas.
+// automática de fora do horário e a assinatura. As respostas prontas moram
+// na tela Modelos de mensagem (14/10) — aqui fica só o atalho pra lá.
 //
 // Mudar a configuração: admin ou gestor com acesso ao Relacionamento (o banco
-// confere — rel_pode_configurar). Respostas prontas: qualquer um do time.
+// confere — rel_pode_configurar).
 // -----------------------------------------------------------------------------
 import { useEffect, useState, type ReactNode } from "react";
 import { useQsAuth, setoresDe } from "@/contexts/QsAuthContext";
 import {
-  apagarResposta, carregarConfig, listarRespostas, salvarConfig, salvarResposta, statusDoNumero,
-  type ConfigRel, type NumeroRel, type Resposta,
+  carregarConfig, salvarConfig, statusDoNumero,
+  type ConfigRel, type NumeroRel,
 } from "../lib/whatsapp";
-import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
+import { Aviso, Botao, Campo, Entrada, Etiqueta } from "../ui";
 import BotaoWhatsApp from "../whatsapp/BotaoWhatsApp";
 import CategoriasConfig from "./CategoriasConfig";
 import GoogleConfig from "./GoogleConfig";
@@ -41,16 +42,13 @@ export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () =
   const pode = currentUser?.role === "admin" || (currentUser?.role === "gestor" && setoresDe(currentUser).includes("relacionamento"));
   const [cfg, setCfg] = useState<ConfigRel | null>(null);
   const [numero, setNumero] = useState<NumeroRel | null>(null);
-  const [respostas, setRespostas] = useState<Resposta[]>([]);
   const [msg, setMsg] = useState<{ tom: "ok" | "erro"; t: string } | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [novoFeriado, setNovoFeriado] = useState("");
-  const [editResp, setEditResp] = useState<{ id?: string; titulo: string; texto: string } | null>(null);
 
   useEffect(() => {
     carregarConfig().then(setCfg);
     statusDoNumero().then(setNumero).catch(() => setNumero(null));
-    listarRespostas().then(setRespostas);
   }, []);
 
   if (!cfg) return <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>;
@@ -77,18 +75,6 @@ export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () =
     }
   }
 
-  async function guardarResposta() {
-    if (!editResp) return;
-    if (!editResp.titulo.trim() || !editResp.texto.trim()) return;
-    try {
-      await salvarResposta({ ...editResp, titulo: editResp.titulo.trim(), texto: editResp.texto.trim() });
-      setEditResp(null);
-      setRespostas(await listarRespostas());
-    } catch (e) {
-      setMsg({ tom: "erro", t: e instanceof Error ? e.message : "Não salvou a resposta." });
-    }
-  }
-
   const h = cfg.horario;
   const feriados = [...(h.feriados ?? [])].sort();
 
@@ -97,7 +83,7 @@ export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () =
       <div>
         <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Configurações</h1>
         <p className="text-[13px]" style={{ color: "var(--ink3)" }}>
-          {pode ? "Horário, prazo e mensagens do Relacionamento." : "Só admin ou gestor do Relacionamento muda o horário e o prazo. Respostas prontas qualquer um cria."}
+          {pode ? "Horário, prazo e mensagens do Relacionamento." : "Só admin ou gestor do Relacionamento muda o horário e o prazo."}
         </p>
       </div>
 
@@ -179,10 +165,10 @@ export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () =
             onChange={(e) => set("fora_horario", { ...cfg.fora_horario, texto: e.target.value })} />
         </Bloco>
 
-        <Bloco titulo="Assinatura" sub='A mensagem enviada pela tela sai com o nome de quem escreveu na primeira linha (ex.: "*Ana:*").'>
+        <Bloco titulo="Assinatura" sub='A mensagem enviada pela tela sai com o nome cadastrado na tela Equipe na primeira linha (ex.: "*Tainara Vasconcelos:*").'>
           <label className="flex items-center gap-2 text-[13px] cursor-pointer" style={{ color: "var(--ink)" }}>
             <input type="checkbox" checked={cfg.assinatura.ativo} onChange={(e) => set("assinatura", { ativo: e.target.checked })} />
-            Assinar as mensagens com o primeiro nome
+            Assinar as mensagens com o nome cadastrado
           </label>
         </Bloco>
 
@@ -202,39 +188,9 @@ export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () =
         <GoogleConfig pode={pode} />
       </Bloco>
 
-      <Bloco titulo="Respostas prontas" sub='Textos que o time usa sempre. Escreva {nome} onde vai o primeiro nome do cliente.'>
-        <ul className="space-y-1.5">
-          {respostas.length === 0 && <li className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhuma ainda.</li>}
-          {respostas.map((r) => (
-            <li key={r.id} className="flex items-start gap-2 p-2.5 rounded-lg" style={{ background: "var(--card2)", border: "1px solid var(--line)" }}>
-              <span className="flex-1 min-w-0">
-                <span className="block text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{r.titulo}</span>
-                <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>{r.texto}</span>
-              </span>
-              <Botao variante="fantasma" onClick={() => setEditResp(r)}>Editar</Botao>
-              <Botao variante="fantasma" onClick={async () => { await apagarResposta(r.id); setRespostas(await listarRespostas()); }}>Apagar</Botao>
-            </li>
-          ))}
-        </ul>
-        <Botao onClick={() => setEditResp({ titulo: "", texto: "" })}>+ Nova resposta</Botao>
+      <Bloco titulo="Respostas prontas e modelos" sub="Mudaram de lugar: agora ficam em Atendimento → Modelos de mensagem, com atalho (/atalho), categoria e os modelos da Meta.">
+        <Botao onClick={() => { window.location.hash = "#rel/modelos"; }}>Abrir Modelos de mensagem</Botao>
       </Bloco>
-
-      <Modal
-        aberto={!!editResp}
-        titulo={editResp?.id ? "Editar resposta" : "Nova resposta pronta"}
-        onFechar={() => setEditResp(null)}
-        rodape={<><Botao variante="fantasma" onClick={() => setEditResp(null)}>Cancelar</Botao><Botao variante="primario" onClick={guardarResposta}>Salvar</Botao></>}
-      >
-        {editResp && (
-          <div className="space-y-3">
-            <Campo rotulo="Título (só o time vê)"><Entrada value={editResp.titulo} maxLength={60} onChange={(e) => setEditResp({ ...editResp, titulo: e.target.value })} placeholder="Ex.: Documentos da viagem" /></Campo>
-            <Campo rotulo="Texto">
-              <textarea className="rel-input" rows={5} value={editResp.texto} onChange={(e) => setEditResp({ ...editResp, texto: e.target.value })}
-                placeholder="Oi {nome}! Tudo certo com sua viagem? …" />
-            </Campo>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 }

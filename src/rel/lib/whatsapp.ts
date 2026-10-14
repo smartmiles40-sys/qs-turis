@@ -32,6 +32,15 @@ export interface Conversa {
   /** "Não conta no prazo" (0113): grupo, fornecedor, equipe… — fora do SLA. */
   sem_sla?: boolean;
   sem_sla_motivo?: string | null;
+  // Da pessoa logada (0121) — cada um organiza a sua lista.
+  fixada_em?: string | null;
+  favorita?: boolean;
+  arquivada?: boolean;
+  silenciada?: boolean;
+  marcada_nao_lida?: boolean;
+  // Do time (0121).
+  etiquetas?: string[];
+  listas?: string[];
 }
 
 export interface Anexo { type: "image" | "video" | "audio" | "file"; url: string; nome?: string }
@@ -49,6 +58,9 @@ export interface Mensagem {
   status: "sent" | "delivered" | "read" | "failed" | null;
   respondendo_a: string | null;
   enviada_em: string;
+  /** de = 'cliente' | 'celular' | id de quem reagiu no QS. */
+  reacoes?: { de: string; nome: string | null; emoji: string; em?: string }[];
+  fixada_em?: string | null;
 }
 
 export interface Modelo {
@@ -60,7 +72,7 @@ export interface Modelo {
   categoria?: string;
 }
 
-export interface Resposta { id: string; titulo: string; texto: string }
+export interface Resposta { id: string; titulo: string; texto: string; atalho?: string | null; categoria?: string | null }
 
 export interface ConfigRel {
   horario: { dias: number[]; inicio: string; fim: string; feriados?: string[] };
@@ -178,6 +190,120 @@ export const enviarTexto = (conversaId: string, texto: string, respondendoA?: st
 export const enviarModelo = (alvo: { conversaId?: string; clienteId?: string }, modelo: { nome: string; idioma: string; params: Record<string, string> }) =>
   api<{ conversaId?: string }>("POST", { acao: "modelo", ...alvo, modelo });
 export const marcarLida = (conversaId: string) => api("POST", { acao: "lida", conversaId }).catch(() => undefined);
+/** Começa conversa com um número que ainda não escreveu (só modelo aprovado). */
+export const enviarModeloParaTelefone = (telefone: string, modelo: { nome: string; idioma: string; params: Record<string, string> }) =>
+  api<{ conversaId?: string }>("POST", { acao: "modelo", telefone, modelo });
+export const reagir = (conversaId: string, mensagemId: string, emoji: string) => api("POST", { acao: "reacao", conversaId, mensagemId, emoji });
+export const encaminhar = (mensagemId: string, conversaIds: string[]) =>
+  api<{ ok: boolean; resultado: { conversaId: string; ok: boolean; erro?: string }[] }>("POST", { acao: "encaminhar", mensagemId, conversaIds });
+export const enviarFigurinha = (conversaId: string, f: { figurinhaId?: string; url?: string }) => api("POST", { acao: "figurinha", conversaId, ...f });
+
+// ── Figurinhas do time (0121) ───────────────────────────────────────────────
+
+export interface Figurinha { id: string; url: string; animada: boolean; criado_por: string | null; criado_em: string }
+
+export async function listarFigurinhas(): Promise<Figurinha[]> {
+  const { data, error } = await supabase.from("rel_wa_figurinhas").select("*").order("criado_em", { ascending: false }).limit(500);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Figurinha[];
+}
+/** Guarda na biblioteca: um WEBP novo (base64) ou uma figurinha que chegou (url do QS). */
+export const salvarFigurinha = (f: { dataBase64?: string; url?: string; animada?: boolean }) =>
+  api<{ figurinha: Figurinha | null }>("POST", { acao: "figurinha-salvar", ...f });
+export async function apagarFigurinha(id: string) {
+  const { error } = await supabase.from("rel_wa_figurinhas").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+// ── Organização da lista (0121) ─────────────────────────────────────────────
+// Fixar/favoritar/arquivar/silenciar/não lida: cada pessoa tem a sua.
+
+export type PrefConversa = Partial<Pick<Conversa, "fixada_em" | "favorita" | "arquivada" | "silenciada" | "marcada_nao_lida">>;
+
+export async function mudarPreferencia(conversaId: string, userId: string, campos: PrefConversa) {
+  const { error } = await supabase.from("rel_wa_conversa_usuario")
+    .upsert({ conversa_id: conversaId, user_id: userId, ...campos, atualizado_em: new Date().toISOString() }, { onConflict: "conversa_id,user_id" });
+  if (error) throw new Error(error.message);
+}
+
+/** Quantas conversas EU fixei (direto no banco — a lista da tela pode estar filtrada). */
+export async function contarFixadas(userId: string): Promise<number> {
+  const { count } = await supabase.from("rel_wa_conversa_usuario").select("conversa_id", { count: "exact", head: true })
+    .eq("user_id", userId).not("fixada_em", "is", null).eq("arquivada", false);
+  return count ?? 0;
+}
+
+export interface Etiqueta { id: string; nome: string; cor: string }
+export interface Lista { id: string; nome: string }
+
+export const CORES_ETIQUETA = ["#00A884", "#53BDEB", "#FFBC38", "#FF5C8A", "#A78BFA", "#F97316", "#64748B", "#EF4444"];
+
+export async function listarEtiquetas(): Promise<Etiqueta[]> {
+  const { data } = await supabase.from("rel_wa_etiquetas").select("id, nome, cor").order("nome");
+  return (data ?? []) as Etiqueta[];
+}
+export async function criarEtiqueta(nome: string, cor: string): Promise<Etiqueta> {
+  const { data, error } = await supabase.from("rel_wa_etiquetas").insert({ nome: nome.trim(), cor }).select("id, nome, cor").single();
+  if (error) throw new Error(error.code === "23505" ? "Já existe uma etiqueta com esse nome." : error.message);
+  return data as Etiqueta;
+}
+export async function apagarEtiqueta(id: string) {
+  const { error } = await supabase.from("rel_wa_etiquetas").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+export async function etiquetarConversa(conversaId: string, etiquetaId: string, por: boolean) {
+  const r = por
+    ? await supabase.from("rel_wa_conversa_etiquetas").upsert({ conversa_id: conversaId, etiqueta_id: etiquetaId }, { onConflict: "conversa_id,etiqueta_id" })
+    : await supabase.from("rel_wa_conversa_etiquetas").delete().eq("conversa_id", conversaId).eq("etiqueta_id", etiquetaId);
+  if (r.error) throw new Error(r.error.message);
+}
+
+export async function listarListas(): Promise<Lista[]> {
+  const { data } = await supabase.from("rel_wa_listas").select("id, nome").order("nome");
+  return (data ?? []) as Lista[];
+}
+export async function criarLista(nome: string): Promise<Lista> {
+  const { data, error } = await supabase.from("rel_wa_listas").insert({ nome: nome.trim() }).select("id, nome").single();
+  if (error) throw new Error(error.code === "23505" ? "Já existe uma lista com esse nome." : error.message);
+  return data as Lista;
+}
+export async function apagarLista(id: string) {
+  const { error } = await supabase.from("rel_wa_listas").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+export async function porNaLista(conversaId: string, listaId: string, por: boolean) {
+  const r = por
+    ? await supabase.from("rel_wa_lista_conversas").upsert({ conversa_id: conversaId, lista_id: listaId }, { onConflict: "lista_id,conversa_id" })
+    : await supabase.from("rel_wa_lista_conversas").delete().eq("conversa_id", conversaId).eq("lista_id", listaId);
+  if (r.error) throw new Error(r.error.message);
+}
+
+// ── Mensagem: fixar (time) e favoritar (cada um) ────────────────────────────
+
+export async function fixarMensagem(mensagemId: string, fixar: boolean) {
+  const { error } = await supabase.rpc("rel_wa_fixar_mensagem", { p_msg: mensagemId, p_fixar: fixar });
+  if (error) throw new Error(error.message);
+}
+/** Ids das mensagens que EU marquei com estrela (a RLS só devolve as minhas). */
+export async function minhasFavoritas(): Promise<Set<string>> {
+  const { data } = await supabase.from("rel_wa_mensagem_favoritas").select("mensagem_id").limit(2000);
+  return new Set(((data ?? []) as { mensagem_id: string }[]).map((r) => r.mensagem_id));
+}
+/** As mensagens com estrela, com a conversa — pro painel "Favoritas". */
+export async function mensagensFavoritas(): Promise<(Mensagem & { favoritada_em: string })[]> {
+  const { data, error } = await supabase.from("rel_wa_mensagem_favoritas")
+    .select("criado_em, rel_wa_mensagens(*)").order("criado_em", { ascending: false }).limit(300);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as unknown as { criado_em: string; rel_wa_mensagens: Mensagem | null }[])
+    .filter((r) => r.rel_wa_mensagens)
+    .map((r) => ({ ...(r.rel_wa_mensagens as Mensagem), favoritada_em: r.criado_em }));
+}
+export async function favoritarMensagem(mensagemId: string, por: boolean) {
+  const r = por
+    ? await supabase.from("rel_wa_mensagem_favoritas").upsert({ mensagem_id: mensagemId }, { onConflict: "mensagem_id,user_id" })
+    : await supabase.from("rel_wa_mensagem_favoritas").delete().eq("mensagem_id", mensagemId);
+  if (r.error) throw new Error(r.error.message);
+}
 
 export async function enviarArquivo(conversaId: string, arquivo: File, legenda?: string) {
   if (arquivo.size > 3 * 1024 * 1024) throw new Error("Arquivo maior que 3 MB.");
@@ -193,23 +319,93 @@ export async function enviarArquivo(conversaId: string, arquivo: File, legenda?:
 // ── Respostas prontas ───────────────────────────────────────────────────────
 
 export async function listarRespostas(): Promise<Resposta[]> {
-  const { data } = await supabase.from("rel_wa_respostas").select("id, titulo, texto").order("titulo");
+  const { data } = await supabase.from("rel_wa_respostas").select("id, titulo, texto, atalho, categoria").order("titulo");
   return (data ?? []) as Resposta[];
 }
-export async function salvarResposta(r: { id?: string; titulo: string; texto: string }) {
+export async function salvarResposta(r: { id?: string; titulo: string; texto: string; atalho?: string | null; categoria?: string | null }) {
+  const campos = {
+    titulo: r.titulo, texto: r.texto,
+    atalho: r.atalho?.trim().replace(/^\//, "").toLowerCase() || null,
+    categoria: r.categoria?.trim() || null,
+  };
   const res = r.id
-    ? await supabase.from("rel_wa_respostas").update({ titulo: r.titulo, texto: r.texto }).eq("id", r.id)
-    : await supabase.from("rel_wa_respostas").insert({ titulo: r.titulo, texto: r.texto });
-  if (res.error) throw new Error(res.error.message);
+    ? await supabase.from("rel_wa_respostas").update(campos).eq("id", r.id).select("id")
+    : await supabase.from("rel_wa_respostas").insert(campos);
+  // UPDATE barrado pela RLS não dá erro: só não muda nenhuma linha.
+  if (r.id && !res.error && !(res.data as unknown[] | null)?.length) throw new Error("Sem permissão pra mudar isso.");
+  if (res.error) {
+    if (res.error.code === "23505") throw new Error("Já existe uma resposta com esse atalho.");
+    if (res.error.message.includes("row-level")) throw new Error("Só a gestora ou o admin do Relacionamento cria e muda as respostas prontas.");
+    throw new Error(res.error.message);
+  }
 }
 export async function apagarResposta(id: string) {
   const { error } = await supabase.from("rel_wa_respostas").delete().eq("id", id);
   if (error) throw new Error(error.message);
 }
 
-/** {nome} na resposta pronta vira o primeiro nome do cliente. */
-export const preencherResposta = (texto: string, nome: string | null) =>
-  texto.replace(/\{nome\}/gi, (nome || "").trim().split(/\s+/)[0] || "");
+/**
+ * Variáveis da resposta pronta: {nome} = primeiro nome do cliente,
+ * {nome_completo}, {atendente} = primeiro nome de quem está logado,
+ * {saudacao} = Bom dia/Boa tarde/Boa noite.
+ */
+export function preencherResposta(texto: string, nome: string | null, atendente?: string | null) {
+  const h = new Date().getHours();
+  const saudacao = h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite";
+  return texto
+    .replace(/\{nome_completo\}/gi, (nome || "").trim())
+    .replace(/\{nome\}/gi, (nome || "").trim().split(/\s+/)[0] || "")
+    .replace(/\{atendente\}/gi, (atendente || "").trim().split(/\s+/)[0] || "")
+    .replace(/\{saudacao\}/gi, saudacao);
+}
+
+// ── Bloco de notas particular (0121) — só o dono lê ─────────────────────────
+
+export interface Nota {
+  id: string;
+  titulo: string;
+  texto: string;
+  cor: string | null;
+  fixada: boolean;
+  conversa_id: string | null;
+  cliente_id: string | null;
+  mensagem_id: string | null;
+  /** Cópia da mensagem guardada. */
+  mensagem: { texto: string; de: string; quando: string; anexos?: Anexo[] } | null;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export async function listarNotas(): Promise<Nota[]> {
+  const { data, error } = await supabase.from("rel_notas").select("*")
+    .order("fixada", { ascending: false }).order("atualizado_em", { ascending: false }).limit(500);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Nota[];
+}
+export async function salvarNota(n: Partial<Nota>): Promise<Nota> {
+  const { id, criado_em, atualizado_em, ...campos } = n;
+  void criado_em; void atualizado_em;
+  const r = id
+    ? await supabase.from("rel_notas").update(campos).eq("id", id).select("*").single()
+    : await supabase.from("rel_notas").insert(campos).select("*").single();
+  if (r.error) throw new Error(r.error.message);
+  return r.data as Nota;
+}
+export async function apagarNota(id: string) {
+  const { error } = await supabase.from("rel_notas").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+/** "Guardar no bloco de notas" a partir de uma mensagem da conversa. */
+export function guardarMensagemNasNotas(m: Mensagem, conversa: { id: string; cliente_id: string | null }, de: string) {
+  return salvarNota({
+    titulo: `Mensagem de ${de}`,
+    texto: "",
+    conversa_id: conversa.id,
+    cliente_id: conversa.cliente_id,
+    mensagem_id: m.id,
+    mensagem: { texto: m.texto || "", de, quando: m.enviada_em, anexos: m.anexos || [] },
+  });
+}
 
 // ── Configuração ────────────────────────────────────────────────────────────
 
