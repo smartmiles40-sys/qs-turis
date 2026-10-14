@@ -1044,6 +1044,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
         onFeito={(t) => { setEncaminhando(null); avisar(t); onMudou(); }} />
       {foto !== null && fotos.length > 0 && <Visualizador fotos={fotos} indice={Math.min(foto, fotos.length - 1)} onFechar={() => setFoto(null)} onTrocar={setFoto} />}
       <ModeloModal
+        area={ehRel ? "relacionamento" : "financeiro"}
         aberto={modelo}
         alvo={{ conversaId: c.id }}
         nomeCliente={c.cliente_nome || c.nome_contato}

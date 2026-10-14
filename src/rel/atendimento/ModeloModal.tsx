@@ -6,8 +6,13 @@ import { enviarModelo, enviarModeloParaTelefone, listarModelos, type Modelo } fr
 import { Aviso, Botao, Campo, Entrada, Modal } from "../ui";
 import { carregarCampos, rotuloDoCampo, trechoDaVariavel, variaveisVazias, type CamposDoModelo } from "../../lib/qs/modeloCampos";
 
-export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnviado }: {
+/** Modelos com nome "fin_…" são do Financeiro: só aparecem pra ele (Bruno, 14/10). */
+export const ehModeloDoFinanceiro = (nome: string) => nome.startsWith("fin_");
+
+export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnviado, area = "relacionamento" }: {
   aberto: boolean;
+  /** Quem está mandando: o Financeiro vê só os "fin_…"; o Relacionamento, os outros. */
+  area?: "relacionamento" | "financeiro";
   /** telefone = Nova conversa com um número que ainda não escreveu (14/10). */
   alvo: { conversaId?: string; clienteId?: string; telefone?: string };
   nomeCliente: string | null;
@@ -46,6 +51,8 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
 
   const vazias = variaveisVazias(variaveis, params);
 
+  const visiveis = (modelos ?? []).filter((m) => !m.precisaMidia && ehModeloDoFinanceiro(m.nome) === (area === "financeiro"));
+
   const previa = escolhido?.corpo.replace(/{{\s*([^}]+?)\s*}}/g, (_, k) => params[k] || `[${k}]`) ?? "";
 
   async function enviar() {
@@ -81,13 +88,13 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
       ) : !escolhido ? (
         <div className="space-y-2">
           {erro && <Aviso tom="erro">{erro}</Aviso>}
-          {modelos.length === 0 && !erro && (
+          {visiveis.length === 0 && !erro && (
             <Aviso>
-              Ainda não há modelo aprovado no número do Relacionamento. A gestora cria em
-              <b> Atendimento → Modelos → Modelos da Meta</b> — a Meta aprova em minutos ou horas.
+              {area === "financeiro" ? "Ainda não há modelo do Financeiro aprovado (nome começando com fin_)." : "Ainda não há modelo aprovado no número do Relacionamento."}
+              {" "}A gestora cria em <b>Atendimento → Modelos → Modelos da Meta</b> — a Meta aprova em minutos ou horas.
             </Aviso>
           )}
-          {modelos.filter((m) => !m.precisaMidia).map((m) => (
+          {visiveis.map((m) => (
             <button key={`${m.nome}-${m.idioma}`} onClick={() => escolher(m)} className="rel-card rel-linha w-full text-left p-3">
               <span className="block text-[13px] font-bold" style={{ color: "var(--ink)" }}>{m.nome}</span>
               <span className="block text-[12px] mt-0.5 line-clamp-2" style={{ color: "var(--ink3)" }}>{m.corpo}</span>

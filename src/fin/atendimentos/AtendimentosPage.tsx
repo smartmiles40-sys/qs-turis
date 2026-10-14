@@ -203,7 +203,7 @@ export function AtendimentoDetalhe({ id, onFechar, onMudou, onAbrirConversa, cha
         </div>
       )}
       {at && (
-        <ModeloModal aberto={modelo} alvo={{ telefone: at.telefone ?? undefined }} nomeCliente={at.nome}
+        <ModeloModal area="financeiro" aberto={modelo} alvo={{ telefone: at.telefone ?? undefined }} nomeCliente={at.nome}
           onFechar={() => setModelo(false)}
           onEnviado={(conversaId) => {
             setModelo(false);
