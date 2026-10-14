@@ -21,16 +21,18 @@ import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import { TOM_FASE } from "./ViagensDoCliente";
 import PainelViagens from "./PainelViagens";
 import CalendarioViagens from "./CalendarioViagens";
+import ConferirRepetidas from "./ConferirRepetidas";
 
-type Visao = "painel" | "calendario" | "lista";
+type Visao = "painel" | "calendario" | "lista" | "repetidas";
 const VISOES: { id: Visao; rotulo: string }[] = [
   { id: "painel", rotulo: "Painel" },
   { id: "calendario", rotulo: "Calendário" },
   { id: "lista", rotulo: "Lista" },
+  { id: "repetidas", rotulo: "Conferir repetidas" },
 ];
 const CHAVE_VISAO = "rel_viagens_visao";
 function visaoSalva(): Visao {
-  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "lista" ? v : "painel"; } catch { return "painel"; }
+  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "lista" || v === "repetidas" ? v : "painel"; } catch { return "painel"; }
 }
 
 const FILTROS: { id: FiltroViagens; rotulo: string }[] = [
@@ -260,6 +262,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
 
       {visao === "painel" && <PainelViagens key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "calendario" && <CalendarioViagens key={versao} onAbrirViagem={onAbrirViagem} />}
+      {visao === "repetidas" && <ConferirRepetidas key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "lista" && <>
 
       <div className="flex flex-wrap items-center gap-2 mb-3">

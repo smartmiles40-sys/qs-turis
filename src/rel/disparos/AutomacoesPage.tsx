@@ -14,6 +14,7 @@ import {
 import { formatarTelefone } from "../lib/clientes";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import { podeGerirRelacionamento } from "../equipe/permissao";
+import { usePode } from "../equipe/usePode";
 import ModeloEVariaveis, { mapaCompleto, useModelos } from "./ModeloEVariaveis";
 
 type Rascunho = { id?: string; nome: string; gatilho: Gatilho; dias: number; modelo_nome: string; modelo_idioma: string; params: MapaVariaveis };
@@ -154,6 +155,8 @@ export default function AutomacoesPage() {
   const { currentUser } = useQsAuth();
   // admin ou gestor(a) do Relacionamento (o servidor confere de novo)
   const podeRodar = podeGerirRelacionamento(currentUser);
+  // Criar/mudar automação: conforme o cargo (0135); o banco confere.
+  const podeEditar = usePode("relacionamento.disparos") !== false;
   const [lista, setLista] = useState<Automacao[] | null>(null);
   const [editando, setEditando] = useState<Rascunho | null>(null);
   const [vendo, setVendo] = useState<Automacao | null>(null);
@@ -195,7 +198,7 @@ export default function AutomacoesPage() {
         </div>
         <div className="flex gap-2">
           {podeRodar && <Botao disabled={rodando} onClick={rodarAgora}>{rodando ? "Rodando…" : "Rodar agora"}</Botao>}
-          <Botao variante="primario" onClick={() => setEditando(vazio())}>+ Nova automação</Botao>
+          {podeEditar && <Botao variante="primario" onClick={() => setEditando(vazio())}>+ Nova automação</Botao>}
         </div>
       </div>
 

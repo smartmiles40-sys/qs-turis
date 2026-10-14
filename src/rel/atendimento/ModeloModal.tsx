@@ -4,7 +4,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { enviarModelo, enviarModeloParaTelefone, listarModelos, type Modelo } from "../lib/whatsapp";
 import { Aviso, Botao, Campo, Entrada, Modal } from "../ui";
-import { carregarCampos, rotuloDoCampo, trechoDaVariavel, variaveisVazias, type CamposDoModelo } from "../../lib/qs/modeloCampos";
+import {
+  ACEITA_DO_TOPO, ROTULO_DO_TOPO, carregarCampos, problemaDoArquivoDoTopo, rotuloDoCampo, trechoDaVariavel, variaveisVazias,
+  type CamposDoModelo,
+} from "../../lib/qs/modeloCampos";
 
 /** Modelos com nome "fin_…" são do Financeiro: só aparecem pra ele (Bruno, 14/10). */
 export const ehModeloDoFinanceiro = (nome: string) => nome.startsWith("fin_");
@@ -23,6 +26,8 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
   const [escolhido, setEscolhido] = useState<Modelo | null>(null);
   const [params, setParams] = useState<Record<string, string>>({});
   const [campos, setCampos] = useState<CamposDoModelo | null>(null);
+  // Topo com imagem/vídeo/PDF (14/10): o arquivo é obrigatório, como as variáveis.
+  const [arquivo, setArquivo] = useState<File | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
@@ -45,24 +50,29 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
     const vars = [...new Set([...m.corpo.matchAll(/{{\s*([^}]+?)\s*}}/g)].map((x) => x[1]))];
     setParams(Object.fromEntries(vars.map((v) => [v, v === "1" ? primeiro : ""])));
     setCampos(null);
+    setArquivo(null);
     // O que é cada {{n}} (qs_wa_modelo_campos) — só pra mostrar o rótulo.
     void carregarCampos(m.nome).then((c) => setCampos(c)).catch(() => null);
   }
 
   const vazias = variaveisVazias(variaveis, params);
+  const problemaArquivo = escolhido?.precisaMidia ? problemaDoArquivoDoTopo(escolhido.headerFormato, arquivo) : null;
+  const falta = vazias.length > 0 || !!problemaArquivo;
 
-  const visiveis = (modelos ?? []).filter((m) => !m.precisaMidia && ehModeloDoFinanceiro(m.nome) === (area === "financeiro"));
+  const visiveis = (modelos ?? []).filter((m) => ehModeloDoFinanceiro(m.nome) === (area === "financeiro"));
 
   const previa = escolhido?.corpo.replace(/{{\s*([^}]+?)\s*}}/g, (_, k) => params[k] || `[${k}]`) ?? "";
 
   async function enviar() {
     if (!escolhido) return;
     if (vazias.length) { setErro(`Preencha ${vazias.map((v) => `{{${v}}}`).join(", ")} antes de enviar.`); return; }
+    if (problemaArquivo) { setErro(problemaArquivo); return; }
     setEnviando(true);
     setErro(null);
     try {
       const modelo = { nome: escolhido.nome, idioma: escolhido.idioma, params };
-      const r = alvo.telefone ? await enviarModeloParaTelefone(alvo.telefone, modelo) : await enviarModelo(alvo, modelo);
+      const anexo = escolhido.precisaMidia ? arquivo : null;
+      const r = alvo.telefone ? await enviarModeloParaTelefone(alvo.telefone, modelo, anexo) : await enviarModelo(alvo, modelo, anexo);
       onEnviado(r?.conversaId);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Não enviou.");
@@ -79,7 +89,7 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
       rodape={escolhido ? (
         <>
           <Botao variante="fantasma" onClick={() => setEscolhido(null)}>Voltar</Botao>
-          <Botao variante="primario" onClick={enviar} disabled={enviando || vazias.length > 0}>{enviando ? "Enviando…" : "Enviar"}</Botao>
+          <Botao variante="primario" onClick={enviar} disabled={enviando || falta}>{enviando ? "Enviando…" : "Enviar"}</Botao>
         </>
       ) : undefined}
     >
@@ -96,13 +106,25 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
           )}
           {visiveis.map((m) => (
             <button key={`${m.nome}-${m.idioma}`} onClick={() => escolher(m)} className="rel-card rel-linha w-full text-left p-3">
-              <span className="block text-[13px] font-bold" style={{ color: "var(--ink)" }}>{m.nome}</span>
+              <span className="block text-[13px] font-bold" style={{ color: "var(--ink)" }}>
+                {m.nome}
+                {m.precisaMidia && <span className="font-normal text-[11.5px]" style={{ color: "var(--ink3)" }}> · 📎 {ROTULO_DO_TOPO[m.headerFormato || ""] ?? "mídia"} no topo</span>}
+              </span>
               <span className="block text-[12px] mt-0.5 line-clamp-2" style={{ color: "var(--ink3)" }}>{m.corpo}</span>
             </button>
           ))}
         </div>
       ) : (
         <div className="space-y-3">
+          {escolhido.precisaMidia && (
+            <Campo rotulo={`Topo · ${ROTULO_DO_TOPO[escolhido.headerFormato || ""] ?? "arquivo"} (obrigatório)`}
+              dica={arquivo ? `${arquivo.name} · ${(arquivo.size / 1024 / 1024).toFixed(1)} MB` : "Até 3 MB. Vai no topo da mensagem, acima do texto."}>
+              <input type="file" accept={ACEITA_DO_TOPO[escolhido.headerFormato || ""] || undefined}
+                onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
+                className="block w-full text-[13px]" style={{ color: "var(--ink2)" }} />
+            </Campo>
+          )}
+          {escolhido.precisaMidia && arquivo && problemaArquivo && <Aviso tom="erro">{problemaArquivo}</Aviso>}
           {variaveis.length > 0 && (
             <p className="text-[12.5px]" style={{ color: "var(--ink2)" }}>
               Este modelo tem {variaveis.length === 1 ? "1 campo" : `${variaveis.length} campos`} pra completar. Todos são obrigatórios — o botão Enviar só libera com tudo preenchido.
@@ -111,7 +133,7 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
           {variaveis.map((v) => {
             const rotulo = rotuloDoCampo(campos?.[v]) ?? (v === "1" ? "Primeiro nome do cliente" : null);
             // A Meta guarda os exemplos na ordem {{1}}, {{2}}…
-            const exemplo = /^d+$/.test(v) ? escolhido.exemplos?.[Number(v) - 1] : undefined;
+            const exemplo = /^\d+$/.test(v) ? escolhido.exemplos?.[Number(v) - 1] : undefined;
             const vazio = vazias.includes(v);
             return (
               <Campo key={v} rotulo={`{{${v}}}${rotulo ? ` · ${rotulo}` : ""}`}
@@ -122,6 +144,7 @@ export default function ModeloModal({ aberto, alvo, nomeCliente, onFechar, onEnv
               </Campo>
             );
           })}
+          {escolhido.precisaMidia && !arquivo && <Aviso>Falta escolher o arquivo do topo.</Aviso>}
           {vazias.length > 0 && <Aviso>Falta preencher {vazias.map((v) => `{{${v}}}`).join(", ")}.</Aviso>}
           <div>
             <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Como o cliente vai ler</p>

@@ -7,6 +7,7 @@
 // Meta, confere a janela de 24h e assina com o nome de quem está logado.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
+import { arquivoParaBase64 } from "@/lib/qs/modeloCampos";
 
 export type EstadoConversa = "aberta" | "aguardando_cliente" | "resolvida";
 
@@ -72,6 +73,8 @@ export interface Modelo {
   corpo: string;
   variaveis: string[];
   precisaMidia?: boolean;
+  /** IMAGE | VIDEO | DOCUMENT | TEXT — o que vai no topo. */
+  headerFormato?: string;
   /** Exemplo de cada variável, na ordem (o que foi pra Meta aprovar). */
   exemplos?: string[];
   categoria?: string;
@@ -193,12 +196,18 @@ export const statusDoNumero = () => api<NumeroRel>("GET", { numero: 1 });
 export const listarModelos = () => api<{ modelos: Modelo[] }>("GET", { modelos: 1 }).then((r) => r.modelos || []);
 export const enviarTexto = (conversaId: string, texto: string, respondendoA?: string | null) =>
   api("POST", { acao: "texto", conversaId, texto, respondendoA: respondendoA || null });
-export const enviarModelo = (alvo: { conversaId?: string; clienteId?: string }, modelo: { nome: string; idioma: string; params: Record<string, string> }) =>
-  api<{ conversaId?: string }>("POST", { acao: "modelo", ...alvo, modelo });
+/** Arquivo do topo do modelo (imagem/vídeo/PDF) → o formato que o rel-wa espera. */
+async function anexoDoTopo(arquivo?: File | null) {
+  if (!arquivo) return {};
+  if (arquivo.size > 3 * 1024 * 1024) throw new Error("O arquivo do topo passa de 3 MB.");
+  return { arquivo: { fileName: arquivo.name, mimeType: arquivo.type, dataBase64: await arquivoParaBase64(arquivo) } };
+}
+export const enviarModelo = async (alvo: { conversaId?: string; clienteId?: string }, modelo: { nome: string; idioma: string; params: Record<string, string> }, arquivo?: File | null) =>
+  api<{ conversaId?: string }>("POST", { acao: "modelo", ...alvo, modelo, ...(await anexoDoTopo(arquivo)) });
 export const marcarLida = (conversaId: string) => api("POST", { acao: "lida", conversaId }).catch(() => undefined);
 /** Começa conversa com um número que ainda não escreveu (só modelo aprovado). */
-export const enviarModeloParaTelefone = (telefone: string, modelo: { nome: string; idioma: string; params: Record<string, string> }) =>
-  api<{ conversaId?: string }>("POST", { acao: "modelo", telefone, modelo });
+export const enviarModeloParaTelefone = async (telefone: string, modelo: { nome: string; idioma: string; params: Record<string, string> }, arquivo?: File | null) =>
+  api<{ conversaId?: string }>("POST", { acao: "modelo", telefone, modelo, ...(await anexoDoTopo(arquivo)) });
 export const reagir = (conversaId: string, mensagemId: string, emoji: string) => api("POST", { acao: "reacao", conversaId, mensagemId, emoji });
 export const encaminhar = (mensagemId: string, conversaIds: string[]) =>
   api<{ ok: boolean; resultado: { conversaId: string; ok: boolean; erro?: string }[] }>("POST", { acao: "encaminhar", mensagemId, conversaIds });

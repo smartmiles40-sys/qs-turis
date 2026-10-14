@@ -16,18 +16,20 @@
 import {
   assertCanAccessLead, getSupabaseUserId, completeWhatsAppTask, assinarComoUsuario, toE164BR,
 } from './_wa.js';
-import { enviarTexto, enviarTemplate, subirMidiaPorUrl } from './_meta.js';
+import { enviarTexto, enviarTemplate, subirMidiaPorUrl, subirMidiaBytes, conferirArquivoDoTopo } from './_meta.js';
 import {
   janelaAberta, registrarSaida, resolverModeloMeta, mensagemCitada, numeroDoEnvio,
 } from './_waSaida.js';
 import { pediuParaParar } from './_waOptout.js';
 
 const MAX_LEN = 4000;
+// Arquivo do topo do modelo: a Vercel aceita ~4,5 MB de corpo e base64 infla 1/3.
+const MAX_ARQUIVO = 3 * 1024 * 1024;
 
 const ERRO_MODELO = {
   'modelo-nao-encontrado': 'Esse modelo não está aprovado na Meta (ou foi removido).',
   'modelo-variavel-vazia': 'Preencha todas as variáveis do modelo.',
-  'modelo-precisa-de-midia': 'Esse modelo tem imagem/vídeo no topo — ele só pode ser enviado pela tela de disparo.',
+  'modelo-precisa-de-midia': 'Esse modelo tem imagem, vídeo ou documento no topo — escolha o arquivo antes de enviar.',
   'modelo-sem-nome': 'Modelo inválido.',
 };
 
@@ -82,7 +84,22 @@ export default async function handler(req, res) {
     let citada = { wamid: null, trecho: null };
 
     if (modelo) {
-      const m = await resolverModeloMeta(modelo, phoneId);
+      // Topo com mídia (14/10): arquivo em `arquivo` (base64, ≤3 MB) — o
+      // servidor sobe; do navegador só passa LINK (tela de disparo), nunca id.
+      const arq = body.arquivo && typeof body.arquivo === 'object' ? body.arquivo : null;
+      const pedido = { ...modelo, midia: modelo.midia?.url ? { url: String(modelo.midia.url) } : null };
+      let bytes = null;
+      let mimeArq = '';
+      let nomeArq = '';
+      if (arq) {
+        bytes = Buffer.from(String(arq.dataBase64 || ''), 'base64');
+        mimeArq = String(arq.mimeType || '').split(';')[0].trim().toLowerCase();
+        nomeArq = String(arq.fileName || 'arquivo').slice(0, 120);
+        if (!bytes.length) return res.status(400).json({ error: 'Arquivo do topo vazio.' });
+        if (bytes.length > MAX_ARQUIVO) return res.status(413).json({ error: 'O arquivo do topo passa de 3 MB.' });
+        pedido.midia = { id: 'pendente', nome: nomeArq };
+      }
+      const m = await resolverModeloMeta(pedido, phoneId);
       if (m.error) {
         const msg = m.error === 'modelo-variavel-vazia'
           ? `Preencha a variável {{${m.variavel}}} do modelo.`
@@ -90,7 +107,13 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: msg, motivo: m.error });
       }
       let midia = null;
-      if (m.midia?.url) {
+      if (m.midia && arq) {
+        const ruim = conferirArquivoDoTopo(m.formatoMidia, mimeArq);
+        if (ruim) return res.status(400).json({ error: ruim });
+        const up = await subirMidiaBytes(bytes, mimeArq, nomeArq, phoneId);
+        if (!up?.id) return res.status(502).json({ error: `A Meta não aceitou o arquivo do topo${up?.detalhe ? `: ${up.detalhe}` : '.'}` });
+        midia = { id: up.id, nome: nomeArq };
+      } else if (m.midia?.url) {
         const up = await subirMidiaPorUrl(m.midia.url, phoneId);
         midia = up.id ? { id: up.id } : { url: m.midia.url };
       }

@@ -50,6 +50,38 @@ export function trechoDaVariavel(corpo: string, chave: string): string {
   return `${antes.length === 40 ? "…" : ""}${antes.trimStart()}____${depois.trimEnd()}${depois.length === 30 ? "…" : ""}`;
 }
 
+// ── Mídia no topo do modelo (14/10) ─────────────────────────────────────────
+/** O que o seletor de arquivo aceita, por tipo de topo (o que a Meta aceita). */
+export const ACEITA_DO_TOPO: Record<string, string> = {
+  IMAGE: "image/jpeg,image/png",
+  VIDEO: "video/mp4",
+  DOCUMENT: "application/pdf",
+};
+export const ROTULO_DO_TOPO: Record<string, string> = { IMAGE: "imagem", VIDEO: "vídeo", DOCUMENT: "documento (PDF)" };
+/** Teto do servidor pro arquivo do topo: 3 MB. */
+export const MAX_ARQUIVO_DO_TOPO = 3 * 1024 * 1024;
+
+/** O arquivo serve pro topo? Devolve o problema em texto, ou null. */
+export function problemaDoArquivoDoTopo(formato: string | undefined, arquivo: File | null): string | null {
+  if (!arquivo) return `Escolha o arquivo (${ROTULO_DO_TOPO[formato || ""] ?? "mídia"}) do topo.`;
+  if (arquivo.size > MAX_ARQUIVO_DO_TOPO) return "O arquivo passa de 3 MB.";
+  const aceitos = (ACEITA_DO_TOPO[formato || ""] || "").split(",");
+  if (aceitos[0] && !aceitos.includes(arquivo.type)) {
+    return { IMAGE: "Use uma imagem JPG ou PNG.", VIDEO: "Use um vídeo MP4.", DOCUMENT: "Use um PDF." }[formato || ""] ?? "Tipo de arquivo não aceito.";
+  }
+  return null;
+}
+
+/** File → base64 (sem o "data:...;base64,"). */
+export function arquivoParaBase64(arquivo: Blob): Promise<string> {
+  return new Promise((ok, falha) => {
+    const fr = new FileReader();
+    fr.onload = () => { const s = String(fr.result || ""); ok(s.slice(s.indexOf(",") + 1)); };
+    fr.onerror = () => falha(new Error("Não consegui ler o arquivo."));
+    fr.readAsDataURL(arquivo);
+  });
+}
+
 /** As variáveis que ainda estão vazias, na ordem do texto. */
 export function variaveisVazias(variaveis: string[], valores: Record<string, string>): string[] {
   return variaveis.filter((v) => !String(valores[v] ?? "").trim());

@@ -43,6 +43,7 @@ import EquipePage from "./equipe/EquipePage";
 import ModelosPage from "./modelos/ModelosPage";
 import AgendaPage from "./agenda/AgendaPage";
 import { podeGerirTime } from "./equipe/permissao";
+import { usePode } from "./equipe/usePode";
 
 type Rota =
   | { tela: "inicio" }
@@ -221,6 +222,8 @@ function gruposGuardados(): Record<string, boolean> {
 
 export default function RelApp() {
   const { currentUser, logout } = useQsAuth();
+  // KPIs: some do menu pra quem o cargo não deixa ver (0135).
+  const verKpis = usePode("relacionamento.kpis") !== false;
   const { isDark, toggleTheme } = useTheme();
   const [rota, setRota] = useState<Rota>(lerRota);
   const [resumo, setResumo] = useState<Resumo | null>(null);
@@ -281,9 +284,9 @@ export default function RelApp() {
     { id: "agenda", rotulo: "Agenda", icone: "agenda", itens: [
       { id: "agenda", rotulo: "Agenda do time" },
     ] },
-    { id: "kpis", rotulo: "KPIs", icone: "kpis", itens: [
+    ...(verKpis ? [{ id: "kpis", rotulo: "KPIs", icone: "kpis", itens: [
       { id: "kpis", rotulo: "Indicadores" },
-    ] },
+    ] } as Grupo] : []),
     { id: "clientes", rotulo: "Clientes", icone: "clientes", itens: [
       { id: "clientes", rotulo: "Fichas" },
       { id: "duplicados", rotulo: "Duplicados", badge: cont?.duplicados || undefined },
@@ -472,7 +475,7 @@ export default function RelApp() {
             />
           )}
           {/* Prazo de resposta saiu do Atendimento e virou parte dos KPIs; link antigo cai lá */}
-          {(rota.tela === "kpis" || rota.tela === "prazo") && <KpisPage />}
+          {(rota.tela === "kpis" || rota.tela === "prazo") && (verKpis ? <KpisPage /> : <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Seu cargo não vê os KPIs.</p>)}
           {rota.tela === "whatsapp" && <WhatsAppPage />}
           {rota.tela === "clientes" && <ClientesPage onAbrir={abrirCliente} />}
           {rota.tela === "duplicados" && <DuplicadosPage onAbrir={abrirCliente} onMudou={atualizar} />}

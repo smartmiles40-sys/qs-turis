@@ -13,6 +13,7 @@ import {
   type Cliente, type DuplicadoSugerido,
 } from "../lib/clientes";
 import { Aviso, Avatar, Botao, Etiqueta, Modal, Vazio } from "../ui";
+import { usePode } from "../equipe/usePode";
 
 function Resumo({ c }: { c: Cliente | undefined }) {
   if (!c) return null;
@@ -43,6 +44,8 @@ function Resumo({ c }: { c: Cliente | undefined }) {
 }
 
 export default function DuplicadosPage({ onAbrir, onMudou }: { onAbrir: (id: string) => void; onMudou: () => void }) {
+  // Juntar fichas: conforme o cargo (0135); o banco confere.
+  const podeJuntar = usePode("relacionamento.juntar_clientes") !== false;
   const [pares, setPares] = useState<DuplicadoSugerido[]>([]);
   const [fichas, setFichas] = useState<Record<string, Cliente>>({});
   const [carregando, setCarregando] = useState(true);
@@ -126,7 +129,7 @@ export default function DuplicadosPage({ onAbrir, onMudou }: { onAbrir: (id: str
                 <Resumo c={fichas[par.b_id]} />
               </div>
               <div className="flex flex-wrap gap-2 mt-4 pt-3" style={{ borderTop: "1px solid var(--line2)" }}>
-                <Botao variante="primario" disabled={ocupado} onClick={() => setJuntando({ par, manter: par.a_id })}>Juntar…</Botao>
+                {podeJuntar && <Botao variante="primario" disabled={ocupado} onClick={() => setJuntando({ par, manter: par.a_id })}>Juntar…</Botao>}
                 <Botao disabled={ocupado} onClick={() => descartar(par)}>Não é a mesma pessoa</Botao>
                 <span className="flex-1" />
                 <Botao variante="fantasma" onClick={() => onAbrir(par.a_id)}>Abrir 1ª</Botao>

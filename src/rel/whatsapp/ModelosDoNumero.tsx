@@ -11,7 +11,11 @@
 import { useCallback, useEffect, useState } from "react";
 import type { NumeroMeta } from "@/lib/qs/metaConexao";
 import { criarModeloNaMeta, excluirModeloNaMeta, listarModelosAdmin, type WaModeloAdmin } from "@/lib/qs/waInbox";
+import { ACEITA_DO_TOPO, ROTULO_DO_TOPO, arquivoParaBase64, problemaDoArquivoDoTopo } from "@/lib/qs/modeloCampos";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
+
+/** O que vai no topo do modelo (14/10): nada, um título de texto ou um arquivo. */
+type Topo = "nenhum" | "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
 
 const STATUS_MODELO: Record<string, { txt: string; tom: "rel" | "aviso" | "erro" | "neutro" }> = {
   APPROVED: { txt: "Aprovado", tom: "rel" },
@@ -40,6 +44,10 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
   const [confirmar, setConfirmar] = useState<string | null>(null);
   // 14/10: exemplo de cada {{n}} — a Meta usa pra aprovar e recusa quando não combina com o texto.
   const [exemplos, setExemplos] = useState<Record<string, string>>({});
+  const [topo, setTopo] = useState<Topo>("nenhum");
+  const [titulo, setTitulo] = useState("");
+  // Arquivo de EXEMPLO do topo — o revisor da Meta vê; no envio vai o de verdade.
+  const [arquivoTopo, setArquivoTopo] = useState<File | null>(null);
 
   const carregar = useCallback(async () => {
     const r = await listarModelosAdmin(n.phoneId);
@@ -53,16 +61,32 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
     if (!NOME_OK.test(nome)) { setErroForm("Nome só com letras minúsculas, números e _ (ex.: lembrete_embarque)."); return; }
     if (form.corpo.trim().length < 5) { setErroForm("Escreva o texto da mensagem."); return; }
     if (numeros.some((v) => !exemploDe(v).trim())) { setErroForm("Preencha o exemplo de cada campo — a Meta usa pra aprovar."); return; }
+    if (topo === "TEXT" && !titulo.trim()) { setErroForm("Escreva o título do topo (ou escolha Topo: nenhum)."); return; }
+    if (topo === "TEXT" && /{{/.test(titulo)) { setErroForm("O título do topo não aceita campos {{n}} por aqui — escreva um texto fixo."); return; }
+    const ehArquivo = topo === "IMAGE" || topo === "VIDEO" || topo === "DOCUMENT";
+    if (ehArquivo) {
+      const p = problemaDoArquivoDoTopo(topo, arquivoTopo);
+      if (p) { setErroForm(p); return; }
+    }
     setSalvando(true);
     setErroForm(null);
     const maior = numeros.length ? Math.max(...numeros.map(Number)) : 0;
     const listaEx = Array.from({ length: maior }, (_, i) => exemploDe(String(i + 1)).trim());
-    const r = await criarModeloNaMeta({ nome, categoria: form.categoria, idioma: "pt_BR", corpo: form.corpo.trim(), rodape: form.rodape.trim() || undefined, exemplos: listaEx }, n.phoneId);
+    let midia: { formato: "IMAGE" | "VIDEO" | "DOCUMENT"; base64: string; mime: string; nome: string } | undefined;
+    if (ehArquivo && arquivoTopo) {
+      try { midia = { formato: topo, base64: await arquivoParaBase64(arquivoTopo), mime: arquivoTopo.type, nome: arquivoTopo.name }; }
+      catch (e) { setSalvando(false); setErroForm(e instanceof Error ? e.message : "Não consegui ler o arquivo."); return; }
+    }
+    const r = await criarModeloNaMeta({
+      nome, categoria: form.categoria, idioma: "pt_BR", corpo: form.corpo.trim(), rodape: form.rodape.trim() || undefined, exemplos: listaEx,
+      cabecalho: topo === "TEXT" ? titulo.trim() : undefined, midia,
+    }, n.phoneId);
     setSalvando(false);
     if (!r.ok) { setErroForm(r.error || "A Meta recusou."); return; }
     setNovo(false);
     setForm({ nome: "", categoria: "UTILITY", corpo: "", rodape: "" });
     setExemplos({});
+    setTopo("nenhum"); setTitulo(""); setArquivoTopo(null);
     await carregar();
   }
 
@@ -107,6 +131,7 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
                       <span className="font-mono text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{m.nome}</span>
                       <Etiqueta tom={s.tom}>{s.txt}</Etiqueta>
                       <Etiqueta>{m.categoria === "MARKETING" ? "Marketing" : m.categoria === "UTILITY" ? "Utilidade" : m.categoria}</Etiqueta>
+                      {m.cabecalhoMidia && <Etiqueta>📎 {ROTULO_DO_TOPO[m.cabecalhoMidia.toUpperCase()] ?? m.cabecalhoMidia.toLowerCase()} no topo</Etiqueta>}
                     </div>
                     <p className="text-[13px] mt-1 whitespace-pre-wrap" style={{ color: "var(--ink2)" }}>{m.corpo}</p>
                     {m.motivo && <p className="text-[12px] mt-1" style={{ color: "var(--err-ink)" }}>Motivo da Meta: {m.motivo}</p>}
@@ -141,6 +166,27 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
               <option value="MARKETING">Marketing — oferta ou data especial</option>
             </select>
           </Campo>
+          <Campo rotulo="Topo da mensagem (opcional)" dica="Imagem, vídeo ou PDF aparecem acima do texto. Na hora de enviar, quem manda escolhe o arquivo de verdade.">
+            <select className="rel-input w-full" value={topo} onChange={(e) => { setTopo(e.target.value as Topo); setArquivoTopo(null); }}>
+              <option value="nenhum">Nenhum</option>
+              <option value="TEXT">Título (texto)</option>
+              <option value="IMAGE">Imagem (JPG ou PNG)</option>
+              <option value="VIDEO">Vídeo (MP4)</option>
+              <option value="DOCUMENT">Documento (PDF)</option>
+            </select>
+          </Campo>
+          {topo === "TEXT" && (
+            <Campo rotulo="Título do topo" dica="Até 60 caracteres, sem emoji.">
+              <Entrada value={titulo} maxLength={60} onChange={(e) => setTitulo(e.target.value)} placeholder="Sua viagem está chegando" />
+            </Campo>
+          )}
+          {(topo === "IMAGE" || topo === "VIDEO" || topo === "DOCUMENT") && (
+            <Campo rotulo={`Arquivo de exemplo (${ROTULO_DO_TOPO[topo]}, até 3 MB)`}
+              dica={arquivoTopo ? `${arquivoTopo.name} · ${(arquivoTopo.size / 1024 / 1024).toFixed(1)} MB` : "A Meta olha esse arquivo pra aprovar — use um parecido com o que vai mandar de verdade."}>
+              <input type="file" accept={ACEITA_DO_TOPO[topo]} onChange={(e) => setArquivoTopo(e.target.files?.[0] ?? null)}
+                className="block w-full text-[13px]" style={{ color: "var(--ink2)" }} />
+            </Campo>
+          )}
           <Campo rotulo="Texto" dica={'Ex.: "Olá {{1}}! Faltam 7 dias pro seu embarque para {{2}}. Qualquer dúvida, é só chamar aqui."'}>
             <textarea className="rel-input w-full" rows={5} value={form.corpo} onChange={(e) => setForm({ ...form, corpo: e.target.value })} />
           </Campo>

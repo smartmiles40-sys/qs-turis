@@ -361,10 +361,25 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
     if (body.acao === 'criar') {
+      // Topo com imagem/vídeo/documento (14/10): o arquivo de EXEMPLO vem em
+      // base64. Até 3 MB — o corpo da Vercel para em ~4,5 MB e base64 engorda 1/3.
+      let midia = null;
+      if (body.midia && typeof body.midia === 'object') {
+        const bytes = Buffer.from(String(body.midia.base64 || ''), 'base64');
+        if (!bytes.length) return res.status(400).json({ error: 'Escolha o arquivo de exemplo do topo.' });
+        if (bytes.length > 3 * 1024 * 1024) return res.status(413).json({ error: 'O arquivo de exemplo passa de 3 MB.' });
+        midia = {
+          formato: String(body.midia.formato || '').toUpperCase(),
+          mime: String(body.midia.mime || ''),
+          nomeArquivo: String(body.midia.nome || 'exemplo').slice(0, 120),
+          bytes,
+        };
+      }
       const r = await criarModelo({
         nome: body.nome, categoria: body.categoria, idioma: body.idioma,
         corpo: body.corpo, cabecalho: body.cabecalho, rodape: body.rodape,
         exemplos: Array.isArray(body.exemplos) ? body.exemplos.map((x) => String(x ?? '').slice(0, 200)) : null,
+        midia,
         phoneId: phoneModelo,
       });
       if (r.erro) return res.status(faltaConfig(r.erro) ? 503 : 400).json({ error: r.mensagem || textoDeConfig(r.erro) || 'Não consegui criar o modelo.' });

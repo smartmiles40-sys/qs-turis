@@ -21,7 +21,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
-import { enviarTexto, enviarTemplate, enviarMidia, subirMidiaBytes, marcarComoLida, modelosAprovados, enviarReacao } from './_meta.js';
+import { enviarTexto, enviarTemplate, enviarMidia, subirMidiaBytes, marcarComoLida, modelosAprovados, enviarReacao, conferirArquivoDoTopo } from './_meta.js';
 import { resolverModeloMeta } from './_waSaida.js';
 import { guardarMidia } from './_waMidia.js';
 import { gravarRel } from './_relEntrada.js';
@@ -40,7 +40,7 @@ const TIPOS_ARQUIVO = {
 const ERRO_MODELO = {
   'modelo-nao-encontrado': 'Esse modelo não está aprovado na Meta para o número do Relacionamento.',
   'modelo-variavel-vazia': 'Preencha todas as variáveis do modelo.',
-  'modelo-precisa-de-midia': 'Esse modelo tem imagem ou vídeo no topo — ainda não dá pra mandar por aqui.',
+  'modelo-precisa-de-midia': 'Esse modelo tem imagem, vídeo ou documento no topo — escolha o arquivo antes de enviar.',
   'modelo-sem-nome': 'Modelo inválido.',
 };
 
@@ -319,14 +319,45 @@ export default async function handler(req, res) {
 
   // ── Modelo aprovado (funciona com a janela fechada) ──
   if (acao === 'modelo') {
-    const m = await resolverModeloMeta(body.modelo || {}, alvo.phoneId);
+    // Topo com mídia (14/10): o arquivo vem em `arquivo` (base64, ≤3 MB) e o
+    // SERVIDOR sobe na Meta — nada de id/link vindo do navegador.
+    const pedido = { ...(body.modelo || {}), midia: null };
+    const arq = body.arquivo && typeof body.arquivo === 'object' ? body.arquivo : null;
+    let bytes = null;
+    let mimeArq = '';
+    let nomeArq = '';
+    if (arq) {
+      bytes = Buffer.from(String(arq.dataBase64 || ''), 'base64');
+      mimeArq = String(arq.mimeType || '').split(';')[0].trim().toLowerCase();
+      nomeArq = String(arq.fileName || 'arquivo').slice(0, 120);
+      if (!bytes.length) return res.status(400).json({ error: 'Arquivo do topo vazio.' });
+      if (bytes.length > MAX_BYTES) return res.status(413).json({ error: 'O arquivo do topo passa de 3 MB.' });
+      // Marca provisória: confere variáveis e o tipo do topo ANTES de subir o arquivo.
+      pedido.midia = { id: 'pendente', nome: nomeArq };
+    }
+    const m = await resolverModeloMeta(pedido, alvo.phoneId);
     if (m.error) return res.status(400).json({ error: ERRO_MODELO[m.error] || 'Modelo inválido.', variavel: m.variavel });
-    const env = await enviarTemplate({ para: alvo.telefone, nome: m.nome, idioma: m.idioma, params: m.params, phoneId: alvo.phoneId });
+    let anexos = [];
+    if (m.midia) {
+      const ruim = conferirArquivoDoTopo(m.formatoMidia, mimeArq);
+      if (ruim) return res.status(400).json({ error: ruim });
+      const up = await subirMidiaBytes(bytes, mimeArq, nomeArq, alvo.phoneId);
+      if (!up?.id) return res.status(502).json({ error: `A Meta não aceitou o arquivo do topo${up?.detalhe ? `: ${up.detalhe}` : '.'}` });
+      m.midia = { id: up.id, nome: nomeArq };
+      // Cópia no nosso bucket pra bolha mostrar o arquivo (falhar aqui não impede o envio).
+      const url = await guardarMidia(bytes, mimeArq, { leadId: `rel-${alvo.telefone}`, nomeArquivo: nomeArq }).catch(() => null);
+      const tipoBolha = { IMAGE: 'image', VIDEO: 'video' }[m.formatoMidia] || 'file';
+      if (url) anexos = [{ type: tipoBolha, url, nome: nomeArq }];
+    }
+    const env = await enviarTemplate({
+      para: alvo.telefone, nome: m.nome, idioma: m.idioma, params: m.params,
+      midia: m.midia, formatoMidia: m.formatoMidia || 'IMAGE', phoneId: alvo.phoneId,
+    });
     if (!env?.wamid) {
       console.warn('[rel-wa] modelo recusado:', env?.erro, env?.detalhe);
       return res.status(502).json({ error: `A Meta não aceitou o modelo${env?.detalhe ? `: ${env.detalhe}` : '.'}` });
     }
-    const g = await gravar({ wamid: env.wamid, texto: m.texto });
+    const g = await gravar({ wamid: env.wamid, texto: m.texto, ...(anexos.length ? { anexos } : {}) });
     return res.status(200).json({ ok: true, wamid: env.wamid, conversaId: g.conversa || alvo.conversaId });
   }
 

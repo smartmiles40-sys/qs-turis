@@ -780,11 +780,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
     return () => clearInterval(t);
   }, []);
 
-  const enviarModelo = useCallback(async (m: WaModelo, valores: Record<string, string>) => {
+  const enviarModelo = useCallback(async (m: WaModelo, valores: Record<string, string>, arquivo?: File | null) => {
     if (sending) return;
     setSending(true);
     setErro(null);
-    const r = await sendWaTemplate(leadId, m, valores);
+    const r = await sendWaTemplate(leadId, m, valores, arquivo);
     setSending(false);
     if (!r.ok) { setErro(r.error || "Não consegui enviar o modelo."); return; }
     setMostrarModelos(false);
@@ -1181,7 +1181,7 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               leadId={leadId}
               leadName={leadName}
               enviando={sending}
-              onEnviar={(m, valores) => void enviarModelo(m, valores)}
+              onEnviar={(m, valores, arquivo) => void enviarModelo(m, valores, arquivo)}
               onClose={() => setMostrarModelos(false)}
             />
           </Suspense>

@@ -16,6 +16,8 @@ import {
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 
 const dataHora = (iso: string | null) => (iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "");
+// Trecho do Pós-Venda do Bitrix (0134b) só tem o DIA — a hora (00:00) é de mentira.
+const soData = (iso: string) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "America/Sao_Paulo" });
 
 /** ISO (com fuso) → valor do <input type="datetime-local"> no horário do navegador. */
 function paraInput(iso: string | null): string {
@@ -127,9 +129,10 @@ export function TrechosViagem({ viagemId, ativa }: { viagemId: string; ativa: bo
                     {(t.origem || t.destino) && <span className="font-normal" style={{ color: "var(--ink2)" }}> · {[t.origem, t.destino].filter(Boolean).join(" → ")}</span>}
                     {t.fonte === "ia" && <span className="ml-2 align-middle"><Etiqueta tom="rel">lido pela IA</Etiqueta></span>}
                     {t.fonte === "expedicoes" && <span className="ml-2 align-middle"><Etiqueta>do sistema de Expedições</Etiqueta></span>}
+                    {t.fonte === "bitrix" && <span className="ml-2 align-middle"><Etiqueta tom="aviso">do Pós-Venda · horário a confirmar</Etiqueta></span>}
                   </p>
                   <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
-                    {dataHora(t.partida_em)}{t.chegada_em ? ` até ${dataHora(t.chegada_em)}` : ""}
+                    {t.fonte === "bitrix" ? soData(t.partida_em) : dataHora(t.partida_em)}{t.chegada_em ? ` até ${dataHora(t.chegada_em)}` : ""}
                     {t.companhia ? ` · ${t.companhia}` : ""}{t.localizador ? ` · localizador ${t.localizador}` : ""}
                     {t.descricao ? ` · ${t.descricao}` : ""}
                   </p>

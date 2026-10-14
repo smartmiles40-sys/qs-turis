@@ -16,7 +16,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { previewModelo, type WaModelo } from "../../../lib/qs/waInbox";
 import {
-  TIPOS_CAMPO, carregarCampos, contextoDoLead, rotuloDoCampo, trechoDaVariavel, valorDoCampo, variaveisVazias,
+  ACEITA_DO_TOPO, ROTULO_DO_TOPO, TIPOS_CAMPO, carregarCampos, contextoDoLead, problemaDoArquivoDoTopo, rotuloDoCampo,
+  trechoDaVariavel, valorDoCampo, variaveisVazias,
   type CamposDoModelo, type ContextoDoLead,
 } from "../../../lib/qs/modeloCampos";
 
@@ -27,7 +28,8 @@ interface Props {
   /** Nome do lead — pré-preenche variáveis que pedem nome (nome/name/1). */
   leadName?: string | null;
   enviando: boolean;
-  onEnviar: (modelo: WaModelo, valores: Record<string, string>) => void;
+  /** `arquivo` = o do topo, quando o modelo tem imagem/vídeo/PDF (14/10). */
+  onEnviar: (modelo: WaModelo, valores: Record<string, string>, arquivo?: File | null) => void;
   onClose: () => void;
 }
 
@@ -45,6 +47,8 @@ export default function WaModelos({ modelos, leadId, leadName, enviando, onEnvia
   const [escolhido, setEscolhido] = useState<WaModelo | null>(null);
   const [valores, setValores] = useState<Record<string, string>>({});
   const [campos, setCampos] = useState<CamposDoModelo | null>(null);
+  // Topo com imagem/vídeo/PDF (14/10): obrigatório, como as variáveis.
+  const [arquivo, setArquivo] = useState<File | null>(null);
   const ctxRef = useRef<Promise<ContextoDoLead | null> | null>(null);
   // O que o QS sabe do lead: carrega 1x quando o painel abre.
   useEffect(() => { ctxRef.current = leadId ? contextoDoLead(leadId, leadName).catch(() => null) : Promise.resolve(null); }, [leadId, leadName]);
@@ -57,6 +61,7 @@ export default function WaModelos({ modelos, leadId, leadName, enviando, onEnvia
     m.variaveis.forEach((v, i) => { iniciais[v] = valorInicial(v, i, leadName); });
     setValores(iniciais);
     setCampos(null);
+    setArquivo(null);
     setEscolhido(m);
     // Preenche o que der, sem apagar o que a pessoa já digitou.
     void Promise.all([carregarCampos(m.nome).catch(() => null), ctxRef.current ?? Promise.resolve(null)]).then(([cs, ctx]) => {
@@ -70,9 +75,10 @@ export default function WaModelos({ modelos, leadId, leadName, enviando, onEnvia
     });
   };
 
+  const problemaArquivo = escolhido?.precisaMidia ? problemaDoArquivoDoTopo(escolhido.headerFormato, arquivo) : null;
   const completo = useMemo(
-    () => !!escolhido && escolhido.variaveis.every((v) => valores[v]?.trim()),
-    [escolhido, valores]
+    () => !!escolhido && escolhido.variaveis.every((v) => valores[v]?.trim()) && !problemaArquivo,
+    [escolhido, valores, problemaArquivo]
   );
 
   return (
@@ -116,6 +122,11 @@ export default function WaModelos({ modelos, leadId, leadName, enviando, onEnvia
                       style={{ background: "var(--wa-ok-bg)", color: "var(--wa-ok-ink)" }}>
                   {m.categoria || "aprovado"}
                 </span>
+                {m.precisaMidia && (
+                  <span className="text-[10px]" style={{ color: "var(--ink3)" }}>
+                    📎 {ROTULO_DO_TOPO[m.headerFormato || ""] ?? "mídia"} no topo
+                  </span>
+                )}
                 {m.variaveis.length > 0 && (
                   <span className="text-[10px]" style={{ color: "var(--ink3)" }}>
                     {m.variaveis.length} campo{m.variaveis.length > 1 ? "s" : ""}
@@ -132,6 +143,17 @@ export default function WaModelos({ modelos, leadId, leadName, enviando, onEnvia
 
       {escolhido && (
         <div className="px-3 pb-3 grid gap-2">
+          {escolhido.precisaMidia && (
+            <label className="grid gap-0.5">
+              <span className="text-[11px] font-semibold" style={{ color: "var(--ink2)" }}>
+                Topo · {ROTULO_DO_TOPO[escolhido.headerFormato || ""] ?? "arquivo"} (obrigatório, até 3 MB)
+              </span>
+              <input type="file" accept={ACEITA_DO_TOPO[escolhido.headerFormato || ""] || undefined}
+                     onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
+                     className="text-[12px]" style={{ color: "var(--ink2)" }} />
+              {arquivo && problemaArquivo && <span className="text-[11px] font-semibold" style={{ color: "var(--wa-err-ink, #B42318)" }}>{problemaArquivo}</span>}
+            </label>
+          )}
           {[...new Set(escolhido.variaveis)].map((v) => {
             const rotulo = rotuloDoCampo(campos?.[v]);
             // A Meta guarda os exemplos na ordem {{1}}, {{2}}…
@@ -166,11 +188,13 @@ export default function WaModelos({ modelos, leadId, leadName, enviando, onEnvia
           </div>
           {!completo && (
             <p className="text-[11.5px] font-semibold" style={{ color: "var(--ink2)" }}>
-              Preencha {variaveisVazias([...new Set(escolhido.variaveis)], valores).map((v) => `{{${v}}}`).join(", ")} pra poder enviar.
+              {variaveisVazias([...new Set(escolhido.variaveis)], valores).length > 0
+                ? <>Preencha {variaveisVazias([...new Set(escolhido.variaveis)], valores).map((v) => `{{${v}}}`).join(", ")} pra poder enviar.</>
+                : <>{problemaArquivo}</>}
             </p>
           )}
           <button
-            onClick={() => { if (completo) onEnviar(escolhido, valores); }}
+            onClick={() => { if (completo) onEnviar(escolhido, valores, escolhido.precisaMidia ? arquivo : null); }}
             disabled={!completo || enviando}
             className="wa-send h-9 rounded-xl text-white text-[13px] font-semibold disabled:opacity-50"
           >

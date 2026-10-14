@@ -307,6 +307,12 @@ export default async function handler(req, res) {
   if (!u) return res.status(401).json({ error: 'Sem acesso ao Relacionamento.' });
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const acao = String(body.acao || '');
+  // Disparar/pausar/retomar exige a permissão do cargo (0135/0136) — a tela
+  // esconde o botão, mas quem barra de verdade é aqui (a rota usa service_role).
+  if (['preparar', 'enviar_lote', 'pausar', 'retomar', 'rodar_automacoes'].includes(acao)) {
+    const pode = await rest('rpc/qs_pode_de', { method: 'POST', body: { p_user: u.id, p: 'relacionamento.disparos' } }).catch(() => null);
+    if (pode !== true) return res.status(403).json({ error: 'Seu cargo não permite fazer disparos.' });
+  }
 
   try {
     if (acao === 'publico') {

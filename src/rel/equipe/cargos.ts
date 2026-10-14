@@ -1,10 +1,9 @@
 // src/rel/equipe/cargos.ts
 // -----------------------------------------------------------------------------
 // CARGOS (0122, 14/10/2026). O papel técnico (admin/gestor/atendente) é o que
-// libera acesso; o cargo é o NOME da função de cada um e guarda uma lista de
-// permissões pronta pro futuro (o Financeiro vai dar o status das atividades
-// dentro do QS). Por enquanto as permissões ficam só registradas — NÃO travam
-// nada; quando a função existir, é ela que vai conferir esta lista.
+// libera o acesso à ÁREA; o cargo é o NOME da função e as permissões dentro
+// dela (0135: o banco confere com qs_pode — ver usePode.ts). O Financeiro
+// vai dar o status das atividades por aqui.
 //
 // Ler: qualquer um logado. Criar/editar: admin, ou a gestora do
 // Relacionamento nos setores relacionamento e financeiro (o banco confere).
@@ -20,13 +19,32 @@ export const SETORES_CARGO: Record<SetorCargo, string> = {
   operacional: "Operacional",
 };
 
-/** Permissões previstas. Ainda não travam nada — ficam prontas pro futuro. */
-export const PERMISSOES: { chave: string; rotulo: string; setor: SetorCargo }[] = [
-  { chave: "financeiro.status_atividades", rotulo: "Dar o status financeiro das atividades", setor: "financeiro" },
-  { chave: "financeiro.ver_valores", rotulo: "Ver valores e pagamentos das viagens", setor: "financeiro" },
-  { chave: "relacionamento.disparos", rotulo: "Mandar campanhas e automações", setor: "relacionamento" },
-  { chave: "relacionamento.modelos", rotulo: "Criar modelos e respostas prontas", setor: "relacionamento" },
+export type Permissao =
+  | "relacionamento.modelos" | "relacionamento.disparos" | "relacionamento.juntar_clientes" | "relacionamento.editar_viagens"
+  | "relacionamento.agenda_time" | "relacionamento.kpis" | "relacionamento.conferir_documentos"
+  | "financeiro.status_atividades" | "financeiro.ver_valores" | "financeiro.modelos";
+
+/**
+ * As permissões que o cargo marca — VALEM desde a 0135 (qs_pode no banco).
+ * Admin e gestor(a) da área podem tudo; sem cargo = `padrao` (o de hoje).
+ * Mesma lista de qs_permissoes_padrao() no banco: mudou aqui, muda lá.
+ */
+export const PERMISSOES: { chave: Permissao; rotulo: string; setor: SetorCargo; padrao: boolean }[] = [
+  { chave: "relacionamento.modelos", rotulo: "Criar e editar respostas prontas", setor: "relacionamento", padrao: false },
+  { chave: "relacionamento.disparos", rotulo: "Criar campanhas e automações", setor: "relacionamento", padrao: true },
+  { chave: "relacionamento.juntar_clientes", rotulo: "Juntar fichas duplicadas", setor: "relacionamento", padrao: true },
+  { chave: "relacionamento.editar_viagens", rotulo: "Criar e editar viagens", setor: "relacionamento", padrao: true },
+  { chave: "relacionamento.agenda_time", rotulo: "Marcar compromissos na agenda dos outros", setor: "relacionamento", padrao: false },
+  { chave: "relacionamento.kpis", rotulo: "Ver os KPIs", setor: "relacionamento", padrao: true },
+  { chave: "relacionamento.conferir_documentos", rotulo: "Conferir documentos dos clientes", setor: "relacionamento", padrao: true },
+  { chave: "financeiro.status_atividades", rotulo: "Mudar o status dos atendimentos", setor: "financeiro", padrao: true },
+  { chave: "financeiro.ver_valores", rotulo: "Ver valores das viagens", setor: "financeiro", padrao: true },
+  { chave: "financeiro.modelos", rotulo: "Criar e editar respostas prontas do Financeiro", setor: "financeiro", padrao: false },
 ];
+
+/** O que um cargo novo já nasce marcado: o padrão de hoje do setor. */
+export const permissoesPadrao = (setor: SetorCargo): string[] =>
+  PERMISSOES.filter((p) => p.padrao && p.setor === setor).map((p) => p.chave);
 
 export interface Cargo {
   id: string;

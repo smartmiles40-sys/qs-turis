@@ -19,7 +19,9 @@
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { EXEMPLO_DO_TIPO, TIPOS_CAMPO, salvarCampos, type TipoCampo } from "@/lib/qs/modeloCampos";
+import {
+  ACEITA_DO_TOPO, EXEMPLO_DO_TIPO, ROTULO_DO_TOPO, TIPOS_CAMPO, arquivoParaBase64, problemaDoArquivoDoTopo, salvarCampos, type TipoCampo,
+} from "@/lib/qs/modeloCampos";
 import {
   listarModelosAdmin, criarModeloNaMeta, excluirModeloNaMeta,
   type WaModeloAdmin, type NovoModelo,
@@ -27,6 +29,9 @@ import {
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { confirmar } from "@/lib/qs/confirmar";
 import { carregarPainelMeta, type NumeroMeta } from "@/lib/qs/metaConexao";
+
+/** O que vai no topo do modelo (14/10): nada, um título de texto ou um arquivo. */
+type Topo = "nenhum" | "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
 
 const VAZIO: NovoModelo = { nome: "", categoria: "UTILITY", idioma: "pt_BR", corpo: "", cabecalho: "", rodape: "" };
 
@@ -58,6 +63,11 @@ export default function ModelosMeta() {
   // 14/10: exemplo (pra Meta aprovar) e tipo (pra o QS preencher no envio) de cada {{n}}.
   const [exemplos, setExemplos] = useState<Record<string, string>>({});
   const [tipos, setTipos] = useState<Record<string, TipoCampo>>({});
+  const [topo, setTopo] = useState<Topo>("nenhum");
+  // Arquivo de EXEMPLO do topo — o revisor da Meta vê; no envio vai o de verdade.
+  const [arquivoTopo, setArquivoTopo] = useState<File | null>(null);
+  const ehArquivo = topo === "IMAGE" || topo === "VIDEO" || topo === "DOCUMENT";
+  const problemaTopo = ehArquivo ? problemaDoArquivoDoTopo(topo, arquivoTopo) : null;
   const vars = useMemo(() => [...new Set([...form.corpo.matchAll(/{{\s*(\d+)\s*}}/g)].map((m) => m[1]))].sort((x, y) => Number(x) - Number(y)), [form.corpo]);
   const tipoDe = (v: string): TipoCampo => tipos[v] ?? (v === "1" ? "nome_lead" : "livre");
   const exemploDe = (v: string) => exemplos[v] ?? EXEMPLO_DO_TIPO[tipoDe(v)];
@@ -100,15 +110,25 @@ export default function ModelosMeta() {
     setPhoneId(id);
     setCriando(false);
     setForm(VAZIO);
+    setTopo("nenhum");
+    setArquivoTopo(null);
   }
 
   async function enviar() {
     if (faltaExemplo) { notifyError("Preencha o exemplo de cada campo — a Meta usa pra aprovar."); return; }
+    if (problemaTopo) { notifyError(problemaTopo); return; }
+    if (topo === "TEXT" && !form.cabecalho?.trim()) { notifyError("Escreva o título do topo (ou escolha Topo: nenhum)."); return; }
+    if (topo === "TEXT" && /{{/.test(form.cabecalho || "")) { notifyError("O título do topo não aceita campos {{n}} por aqui — escreva um texto fixo."); return; }
     setSalvando(true);
     const nome = form.nome.trim().toLowerCase().replace(/\s+/g, "_");
     const maior = vars.length ? Math.max(...vars.map(Number)) : 0;
     const listaEx = Array.from({ length: maior }, (_, i) => exemploDe(String(i + 1)).trim());
-    const r = await criarModeloNaMeta({ ...form, nome, exemplos: listaEx }, phoneId || null);
+    let midia: NovoModelo["midia"];
+    if (ehArquivo && arquivoTopo) {
+      try { midia = { formato: topo, base64: await arquivoParaBase64(arquivoTopo), mime: arquivoTopo.type, nome: arquivoTopo.name }; }
+      catch (e) { setSalvando(false); notifyError(e instanceof Error ? e.message : "Não consegui ler o arquivo."); return; }
+    }
+    const r = await criarModeloNaMeta({ ...form, cabecalho: topo === "TEXT" ? form.cabecalho : "", midia, nome, exemplos: listaEx }, phoneId || null);
     setSalvando(false);
     if (!r.ok) { notifyError(r.error || "Não consegui enviar."); return; }
     // O que é cada campo — o QS preenche sozinho quando o SDR for enviar.
@@ -116,7 +136,7 @@ export default function ModelosMeta() {
       await salvarCampos(nome, Object.fromEntries(vars.map((v) => [v, tipoDe(v)])))
         .catch((e) => notifyError(e instanceof Error ? e.message : "Não salvei o tipo dos campos."));
     }
-    setExemplos({}); setTipos({});
+    setExemplos({}); setTipos({}); setTopo("nenhum"); setArquivoTopo(null);
     notifySuccess(`Modelo enviado para análise da Meta${atual ? ` no número de ${nomeDoNumero(atual)}` : ""}. O status aparece aqui quando ela responder.`);
     setForm(VAZIO);
     setCriando(false);
@@ -234,6 +254,40 @@ export default function ModelosMeta() {
             </label>
           </div>
 
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="text-xs font-semibold text-gray-600">Topo (opcional)</span>
+              <select value={topo} onChange={(e) => { setTopo(e.target.value as Topo); setArquivoTopo(null); }}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-400">
+                <option value="nenhum">Nenhum</option>
+                <option value="TEXT">Título (texto)</option>
+                <option value="IMAGE">Imagem (JPG ou PNG)</option>
+                <option value="VIDEO">Vídeo (MP4)</option>
+                <option value="DOCUMENT">Documento (PDF)</option>
+              </select>
+              <span className="text-[11px] text-gray-400">Imagem, vídeo ou PDF aparecem acima do texto; no envio o SDR escolhe o arquivo de verdade.</span>
+            </label>
+            {topo === "TEXT" && (
+              <label className="block">
+                <span className="text-xs font-semibold text-gray-600">Título do topo</span>
+                <input value={form.cabecalho ?? ""} maxLength={60} onChange={(e) => setForm({ ...form, cabecalho: e.target.value })}
+                  placeholder="Sua viagem dos sonhos"
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-400" />
+                <span className="text-[11px] text-gray-400">Até 60 caracteres, sem emoji.</span>
+              </label>
+            )}
+            {ehArquivo && (
+              <label className="block">
+                <span className="text-xs font-semibold text-gray-600">Arquivo de exemplo ({ROTULO_DO_TOPO[topo]}, até 3 MB)</span>
+                <input type="file" accept={ACEITA_DO_TOPO[topo]} onChange={(e) => setArquivoTopo(e.target.files?.[0] ?? null)}
+                  className="mt-1 block w-full text-sm text-gray-600" />
+                <span className={`text-[11px] ${arquivoTopo && problemaTopo ? "text-red-600" : "text-gray-400"}`}>
+                  {arquivoTopo ? (problemaTopo ?? `${arquivoTopo.name} · ${(arquivoTopo.size / 1024 / 1024).toFixed(1)} MB`) : "A Meta olha esse arquivo pra aprovar."}
+                </span>
+              </label>
+            )}
+          </div>
+
           <label className="block">
             <span className="text-xs font-semibold text-gray-600">Mensagem</span>
             <textarea
@@ -298,7 +352,7 @@ export default function ModelosMeta() {
 
           <div className="flex gap-2 pt-1">
             <button
-              onClick={() => { setCriando(false); setForm(VAZIO); setExemplos({}); setTipos({}); }}
+              onClick={() => { setCriando(false); setForm(VAZIO); setExemplos({}); setTipos({}); setTopo("nenhum"); setArquivoTopo(null); }}
               disabled={salvando}
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
             >
@@ -306,7 +360,7 @@ export default function ModelosMeta() {
             </button>
             <button
               onClick={() => void enviar()}
-              disabled={salvando || !form.nome.trim() || !form.corpo.trim() || faltaExemplo}
+              disabled={salvando || !form.nome.trim() || !form.corpo.trim() || faltaExemplo || !!problemaTopo}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {salvando ? "Enviando…" : "Enviar para aprovação"}
@@ -344,7 +398,7 @@ export default function ModelosMeta() {
                     )}
                     {m.cabecalhoMidia && (
                       <p className="mt-1.5 text-xs text-amber-700">
-                        Tem {m.cabecalhoMidia.toLowerCase()} no topo — o atendimento do QS ainda não envia esse tipo.
+                        📎 {ROTULO_DO_TOPO[m.cabecalhoMidia.toUpperCase()] ?? m.cabecalhoMidia.toLowerCase()} no topo — no envio, o atendente escolhe o arquivo.
                       </p>
                     )}
                   </div>

@@ -260,7 +260,66 @@ export async function listarModelos(phoneId = null) {
  *  • corpo não pode começar nem terminar com variável;
  *  • categoria MARKETING | UTILITY (AUTHENTICATION tem regra própria).
  */
-export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, rodape, exemplos = null, phoneId = null }) {
+// ─── MÍDIA NO TOPO DO MODELO (14/10/2026) ────────────────────────────────────
+//
+// Modelo com imagem/vídeo/documento no topo precisa, NA CRIAÇÃO, de um arquivo
+// de exemplo — e a Meta não aceita link nem o id de /media: só um "handle" da
+// Resumable Upload API, que é do APLICATIVO (META_CALLS_APP_ID), não do número.
+// No ENVIO, o arquivo de verdade vai como parâmetro do header (id de /media).
+
+/** Que arquivo cada tipo de topo aceita (o que a Meta aceita no modelo). */
+export const MIME_DO_TOPO = {
+  IMAGE: ['image/jpeg', 'image/png'],
+  VIDEO: ['video/mp4'],
+  DOCUMENT: ['application/pdf'],
+};
+
+/** O arquivo combina com o topo do modelo? Devolve o problema em texto, ou null. */
+export function conferirArquivoDoTopo(formato, mime) {
+  const f = String(formato || '').toUpperCase();
+  const aceitos = MIME_DO_TOPO[f];
+  if (!aceitos) return 'Este modelo não tem mídia no topo.';
+  const m = String(mime || '').split(';')[0].trim().toLowerCase();
+  if (!aceitos.includes(m)) {
+    return { IMAGE: 'O topo deste modelo é IMAGEM: use JPG ou PNG.', VIDEO: 'O topo deste modelo é VÍDEO: use MP4.', DOCUMENT: 'O topo deste modelo é DOCUMENTO: use PDF.' }[f];
+  }
+  return null;
+}
+
+/** Sobe o arquivo de EXEMPLO e devolve o handle (`h`) que vai em header_handle. */
+export async function subirExemploDoTopo(bytes, mime, nomeArquivo = 'exemplo', phoneId = null) {
+  const appId = String(process.env.META_CALLS_APP_ID || '').trim();
+  if (!appId) return { erro: 'sem-app-id', mensagem: 'Falta META_CALLS_APP_ID na Vercel — sem ele a Meta não recebe o arquivo de exemplo.' };
+  const cr = await credenciaisDaMeta(phoneId);
+  if (!cr) return { erro: 'sem-caixa-oficial' };
+  const tipo = String(mime || '').split(';')[0].trim();
+  try {
+    const q = `file_name=${encodeURIComponent(nomeArquivo)}&file_length=${bytes.length}&file_type=${encodeURIComponent(tipo)}` +
+      `&access_token=${encodeURIComponent(cr.token)}`;
+    const r1 = await fetch(`${GRAPH}/${appId}/uploads?${q}`, { method: 'POST' });
+    const j1 = await r1.json().catch(() => null);
+    if (j1?.error) return { erro: 'meta-recusou', mensagem: `A Meta não abriu o envio do exemplo: ${j1.error.message}` };
+    if (!j1?.id) return { erro: 'meta-recusou', mensagem: 'A Meta não devolveu a sessão de envio do exemplo.' };
+    const r2 = await fetch(`${GRAPH}/${j1.id}`, {
+      method: 'POST',
+      headers: { Authorization: `OAuth ${cr.token}`, file_offset: '0' },
+      body: bytes,
+    });
+    const j2 = await r2.json().catch(() => null);
+    if (j2?.error) return { erro: 'meta-recusou', mensagem: `A Meta não aceitou o arquivo de exemplo: ${j2.error.message}` };
+    if (!j2?.h) return { erro: 'meta-recusou', mensagem: 'A Meta não devolveu o código do arquivo de exemplo.' };
+    return { handle: String(j2.h) };
+  } catch (e) {
+    return { erro: 'falha-no-upload', mensagem: `Falhou o envio do exemplo: ${e?.message || 'sem resposta'}` };
+  }
+}
+
+/**
+ * `midia` (14/10) = topo com arquivo: { formato: 'IMAGE'|'VIDEO'|'DOCUMENT',
+ * bytes, mime, nomeArquivo } — o arquivo é o EXEMPLO que o revisor da Meta vê.
+ * Com `midia`, o `cabecalho` de texto é ignorado (o topo é um só).
+ */
+export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, rodape, exemplos = null, midia = null, phoneId = null }) {
   // phoneId = número de SDR (29/09): o modelo vai pra análise na conta DELE.
   const cr = await credenciaisDaMeta(phoneId);
   if (!cr) return { erro: 'sem-caixa-oficial' };
@@ -270,7 +329,13 @@ export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, r
   if (problema) return { erro: 'invalido', mensagem: problema };
 
   const components = [];
-  if (cabecalho?.trim()) components.push({ type: 'HEADER', format: 'TEXT', text: cabecalho.trim() });
+  if (midia) {
+    const ruim = conferirArquivoDoTopo(midia.formato, midia.mime);
+    if (ruim) return { erro: 'invalido', mensagem: ruim };
+    const up = await subirExemploDoTopo(midia.bytes, midia.mime, midia.nomeArquivo || 'exemplo', phoneId);
+    if (!up.handle) return { erro: up.erro || 'meta-recusou', mensagem: up.mensagem };
+    components.push({ type: 'HEADER', format: String(midia.formato).toUpperCase(), example: { header_handle: [up.handle] } });
+  } else if (cabecalho?.trim()) components.push({ type: 'HEADER', format: 'TEXT', text: cabecalho.trim() });
   // A Meta recusa modelo com {{1}}, {{2}}… sem um exemplo de cada (13/10/2026).
   const vars = [...new Set((corpo.match(/\{\{\s*(\d+)\s*\}\}/g) || []).map((v) => Number(v.replace(/\D/g, ''))))].sort((a, b) => a - b);
   const EXEMPLOS = ['Maria', 'Japão', '15/11', 'Se Tu For, Eu Vou!', '09:30', 'Tóquio', '7', 'Ana'];
@@ -494,7 +559,14 @@ export async function enviarTemplate({ para, nome, idioma = 'pt_BR', params = {}
     const tipo = String(formatoMidia || 'VIDEO').toLowerCase(); // video | image | document
     components.push({
       type: 'header',
-      parameters: [{ type: tipo, [tipo]: midia.id ? { id: midia.id } : { link: midia.url } }],
+      parameters: [{
+        type: tipo,
+        [tipo]: {
+          ...(midia.id ? { id: midia.id } : { link: midia.url }),
+          // Documento sem nome chega como "arquivo sem título" no celular.
+          ...(tipo === 'document' && midia.nome ? { filename: String(midia.nome) } : {}),
+        },
+      }],
     });
   }
 

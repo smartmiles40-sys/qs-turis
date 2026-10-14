@@ -14,6 +14,7 @@ import { supabase } from "@/lib/supabase";
 import { Aviso, Botao, Entrada, Etiqueta, Modal } from "../../rel/ui";
 import ModeloModal from "../../rel/atendimento/ModeloModal";
 import NovoAtendimento from "./NovoAtendimento";
+import { usePode } from "../../rel/equipe/usePode";
 import { carregarCliente, formatarCpf, formatarTelefone, moeda, type Cliente } from "../../rel/lib/clientes";
 import { periodo, viagensDoCliente, type Viagem } from "../../rel/lib/viagens";
 import {
@@ -79,6 +80,9 @@ export function AtendimentoDetalhe({ id, onFechar, onMudou, onAbrirConversa, cha
   const [modelo, setModelo] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  // Cargo (0135): mudar status e ver valores. Sem cargo = pode (padrão de hoje).
+  const podeStatus = usePode("financeiro.status_atividades") !== false;
+  const verValores = usePode("financeiro.ver_valores") !== false;
   // A conversa ligada ainda está com o Financeiro? (Se voltou pro Rel, a RLS esconde.)
   const [convComFin, setConvComFin] = useState(false);
 
@@ -135,11 +139,11 @@ export function AtendimentoDetalhe({ id, onFechar, onMudou, onAbrirConversa, cha
             {at.conversa_id && convComFin && <Botao variante={meu ? "primario" : "secundario"} onClick={() => onAbrirConversa(at.conversa_id!)}>💬 Abrir conversa</Botao>}
             {at.conversa_id && !convComFin && <span className="text-[12.5px] self-center" style={{ color: "var(--ink3)" }}>A conversa está com o Relacionamento — peça pra eles enviarem de novo (💰 na conversa).</span>}
             {!at.conversa_id && at.telefone && aberto && <Botao variante={meu ? "primario" : "secundario"} onClick={() => setModelo(true)}>💬 Chamar no WhatsApp</Botao>}
-            {aberto && at.status !== "aguardando_cliente" && <Botao disabled={ocupado} onClick={() => void rodar(() => mudarAtendimento(at.id, { status: "aguardando_cliente" }))}>Aguardando cliente</Botao>}
-            {aberto && at.status === "aguardando_cliente" && <Botao disabled={ocupado} onClick={() => void rodar(() => mudarAtendimento(at.id, { status: "em_atendimento" }))}>Voltar pra em atendimento</Botao>}
-            {aberto && <Botao disabled={ocupado} onClick={() => { setResolvendo(true); setResolucao(""); }}>✓ Resolver</Botao>}
-            {!aberto && <Botao disabled={ocupado} onClick={() => void rodar(() => mudarAtendimento(at.id, { status: "em_atendimento" }))}>Reabrir</Botao>}
-            {aberto && <Botao variante="fantasma" disabled={ocupado} onClick={() => void rodar(() => mudarAtendimento(at.id, { status: "cancelado", resolucao: "Cancelado pelo Financeiro" }))}>Cancelar</Botao>}
+            {podeStatus && aberto && at.status !== "aguardando_cliente" && <Botao disabled={ocupado} onClick={() => void rodar(() => mudarAtendimento(at.id, { status: "aguardando_cliente" }))}>Aguardando cliente</Botao>}
+            {podeStatus && aberto && at.status === "aguardando_cliente" && <Botao disabled={ocupado} onClick={() => void rodar(() => mudarAtendimento(at.id, { status: "em_atendimento" }))}>Voltar pra em atendimento</Botao>}
+            {podeStatus && aberto && <Botao disabled={ocupado} onClick={() => { setResolvendo(true); setResolucao(""); }}>✓ Resolver</Botao>}
+            {podeStatus && !aberto && <Botao disabled={ocupado} onClick={() => void rodar(() => mudarAtendimento(at.id, { status: "em_atendimento" }))}>Reabrir</Botao>}
+            {podeStatus && aberto && <Botao variante="fantasma" disabled={ocupado} onClick={() => void rodar(() => mudarAtendimento(at.id, { status: "cancelado", resolucao: "Cancelado pelo Financeiro" }))}>Cancelar</Botao>}
           </div>
           {resolvendo && (
             <div className="rel-card p-3 space-y-2">
@@ -174,7 +178,7 @@ export function AtendimentoDetalhe({ id, onFechar, onMudou, onAbrirConversa, cha
                         <span className="block truncate font-semibold" style={{ color: v.status === "cancelada" ? "var(--ink3)" : "var(--ink)", textDecoration: v.status === "cancelada" ? "line-through" : undefined }}>{v.titulo}</span>
                         <span className="block" style={{ color: "var(--ink3)" }}>{periodo(v)}</span>
                       </span>
-                      <span className="font-semibold flex-shrink-0">{v.valor ? moeda(v.valor) : "—"}</span>
+                      {verValores && <span className="font-semibold flex-shrink-0">{v.valor ? moeda(v.valor) : "—"}</span>}
                     </div>
                   ))}
                 </div>

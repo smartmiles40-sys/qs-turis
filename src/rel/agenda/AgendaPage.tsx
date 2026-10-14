@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ME } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { podeGerirRelacionamento } from "../equipe/permissao";
+import { usePode } from "../equipe/usePode";
 import {
   DIA_MS, TIPOS_EVENTO, diaIso, duracaoCurta, horaCurtaBR, inicioDaSemana, inicioDoDia, inicioDoMes,
   comHora, fmtSP, listarEmbarques, listarEventos, listarTime, mesmoDia, minutosNoPeriodo, somarDias, somarMeses, sp,
@@ -97,7 +98,9 @@ export default function AgendaPage({ onAbrirCliente, onAbrirViagem, onAbrirConve
 }) {
   const { currentUser } = useQsAuth();
   const meuId = currentUser?.id ?? "";
-  const gestor = podeGerirRelacionamento(currentUser);
+  // A agenda dos outros: gestora, ou quem o cargo libera (0135).
+  const agendaTime = usePode("relacionamento.agenda_time");
+  const gestor = podeGerirRelacionamento(currentUser) || agendaTime === true;
   const estreito = useEstreito();
 
   const [visao, setVisao] = useState<Visao>(() => (localStorage.getItem("rel_agenda_visao") as Visao) || "minha");

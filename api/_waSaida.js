@@ -195,8 +195,11 @@ export async function resolverModeloMeta(modelo, phoneId = null) {
   const t = lista.find((m) => m.nome === nome && (!modelo.idioma || m.idioma === modelo.idioma));
   if (!t) return { error: 'modelo-nao-encontrado' };
 
+  // Mídia do topo: link (tela de disparo) ou id de /media que o SERVIDOR acabou
+  // de subir (rel-wa/wa-send, 14/10) — quem chama nunca repassa id do navegador.
   const midiaUrl = String(modelo?.midia?.url || '').trim();
-  if (t.precisaMidia && !midiaUrl) return { error: 'modelo-precisa-de-midia', formato: t.headerFormato };
+  const midiaId = String(modelo?.midia?.id || '').trim();
+  if (t.precisaMidia && !midiaUrl && !midiaId) return { error: 'modelo-precisa-de-midia', formato: t.headerFormato };
 
   let faltando = null;
   const texto = t.corpo.replace(/{{\s*([^}]+?)\s*}}/g, (_, chave) => {
@@ -211,7 +214,9 @@ export async function resolverModeloMeta(modelo, phoneId = null) {
     idioma: t.idioma,
     texto,
     params: Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v).trim()])),
-    midia: t.precisaMidia ? { url: midiaUrl } : null,
+    midia: t.precisaMidia
+      ? { ...(midiaId ? { id: midiaId } : { url: midiaUrl }), ...(modelo?.midia?.nome ? { nome: String(modelo.midia.nome).slice(0, 120) } : {}) }
+      : null,
     formatoMidia: t.precisaMidia ? t.headerFormato : null,
   };
 }

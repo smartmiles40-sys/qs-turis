@@ -142,6 +142,10 @@ export interface WaModelo {
   variaveis: string[];
   /** Exemplo de cada variável, na ordem (o que foi pra Meta aprovar). */
   exemplos?: string[];
+  /** Topo com imagem/vídeo/documento: o envio pede o arquivo (14/10). */
+  precisaMidia?: boolean;
+  /** IMAGE | VIDEO | DOCUMENT | TEXT */
+  headerFormato?: string;
 }
 
 interface WaConfigBruta {
@@ -232,6 +236,8 @@ export interface NovoModelo {
   rodape?: string;
   /** Exemplo de cada {{n}}, na ordem — a Meta usa pra aprovar (14/10). */
   exemplos?: string[];
+  /** Topo com arquivo: o EXEMPLO que o revisor da Meta vê (≤3 MB). Substitui o cabeçalho de texto. */
+  midia?: { formato: "IMAGE" | "VIDEO" | "DOCUMENT"; base64: string; mime: string; nome: string };
 }
 
 export async function criarModeloNaMeta(m: NovoModelo, phoneId?: string | null): Promise<{ ok: boolean; status?: string; error?: string }> {
@@ -590,15 +596,22 @@ export async function sendWaMessage(
 export async function sendWaTemplate(
   leadId: string,
   modelo: WaModelo,
-  valores: Record<string, string>
+  valores: Record<string, string>,
+  /** Arquivo do topo, quando o modelo tem imagem/vídeo/documento (14/10). */
+  arquivo?: File | null
 ): Promise<WaSendResult> {
   try {
+    if (arquivo && arquivo.size > MAX_MEDIA_BYTES) return { ok: false, error: "O arquivo do topo passa de 3 MB." };
+    const anexo = arquivo
+      ? { fileName: arquivo.name, mimeType: arquivo.type, dataBase64: await blobParaBase64(arquivo) }
+      : undefined;
     const res = await fetch("/api/wa-send", {
       method: "POST",
       headers: await authHeaders(),
       body: JSON.stringify({
         leadId,
         modelo: { nome: modelo.nome, idioma: modelo.idioma, params: valores },
+        ...(anexo ? { arquivo: anexo } : {}),
       }),
     });
     const data = await res.json().catch(() => ({}));

@@ -24,7 +24,8 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { createQsAuthUser, listarEquipe, updateQsAuthUser, type AreaComTime, type MembroEquipe } from "@/lib/adminUsers";
 import { Aviso, Avatar, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import { podeGerirTime } from "./permissao";
-import { listarCargos, PERMISSOES, salvarCargo, SETORES_CARGO, type Cargo, type SetorCargo } from "./cargos";
+import { listarCargos, PERMISSOES, permissoesPadrao, salvarCargo, SETORES_CARGO, type Cargo, type SetorCargo } from "./cargos";
+import { esquecerPermissoes } from "./usePode";
 
 /** Papel na área: o atendente (papel com o nome da área) ou gestor. */
 type Papel = AreaComTime | "gestor";
@@ -302,6 +303,7 @@ function CargosSecao({ cargos, ehAdmin, area, onMudou }: { cargos: Cargo[]; ehAd
     setSalvando(true); setErro(null);
     try {
       await salvarCargo({ id: form.id, nome: form.nome, setor: form.setor, descricao: form.descricao, permissoes: form.permissoes });
+      esquecerPermissoes();
       setAviso({ tom: "ok", texto: `Cargo "${form.nome.trim()}" salvo.` });
       setForm(null);
       onMudou();
@@ -328,7 +330,7 @@ function CargosSecao({ cargos, ehAdmin, area, onMudou }: { cargos: Cargo[]; ehAd
           O cargo é o nome da função de cada pessoa. O que libera o acesso continua sendo o papel (atendente ou gestor).
           As permissões ficam guardadas pro futuro — ainda não travam nada.
         </p>
-        <Botao variante="primario" onClick={() => { setErro(null); setForm({ nome: "", setor: area, descricao: "", permissoes: [] }); }}>+ Novo cargo</Botao>
+        <Botao variante="primario" onClick={() => { setErro(null); setForm({ nome: "", setor: area, descricao: "", permissoes: permissoesPadrao(area as SetorCargo) }); }}>+ Novo cargo</Botao>
       </div>
       {aviso && <Aviso tom={aviso.tom}>{aviso.texto}</Aviso>}
       {porSetor.length === 0 && <div className="rel-card p-6"><Vazio titulo="Nenhum cargo ainda" texto="Crie o primeiro no botão acima." /></div>}
@@ -367,15 +369,18 @@ function CargosSecao({ cargos, ehAdmin, area, onMudou }: { cargos: Cargo[]; ehAd
           <div className="space-y-3">
             <Campo rotulo="Nome do cargo"><Entrada value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex.: Analista financeiro" autoFocus /></Campo>
             <Campo rotulo="Setor">
-              <select className="rel-input w-full" value={form.setor} onChange={(e) => setForm({ ...form, setor: e.target.value as SetorCargo })}>
+              <select className="rel-input w-full" value={form.setor} onChange={(e) => { const s = e.target.value as SetorCargo; setForm({ ...form, setor: s, permissoes: form.id ? form.permissoes : permissoesPadrao(s) }); }}>
                 {setoresQuePode.map((s) => <option key={s} value={s}>{SETORES_CARGO[s]}</option>)}
               </select>
             </Campo>
             <Campo rotulo="Descrição (opcional)"><Entrada value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="O que essa pessoa faz" /></Campo>
             <fieldset>
-              <legend className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Permissões (preparadas pro futuro — ainda não travam nada)</legend>
+              <legend className="text-xs font-semibold mb-1" style={{ color: "var(--ink2)" }}>O que quem tem este cargo pode fazer</legend>
+              <p className="text-[12px] mb-2" style={{ color: "var(--ink3)" }}>
+                Vale na hora. Gestor(a) e admin podem tudo, com ou sem cargo. Quem não tem cargo segue o padrão (marcado num cargo novo).
+              </p>
               <div className="space-y-1.5">
-                {PERMISSOES.map((p) => (
+                {PERMISSOES.filter((p) => p.setor === form.setor || form.permissoes.includes(p.chave)).map((p) => (
                   <label key={p.chave} className="flex items-center gap-2 text-[13px] cursor-pointer" style={{ color: "var(--ink)" }}>
                     <input type="checkbox" checked={form.permissoes.includes(p.chave)}
                       onChange={(e) => setForm({ ...form, permissoes: e.target.checked ? [...form.permissoes, p.chave] : form.permissoes.filter((x) => x !== p.chave) })} />

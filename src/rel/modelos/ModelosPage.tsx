@@ -23,6 +23,7 @@ import {
   type Modelo, type NumeroRel, type Resposta,
 } from "../lib/whatsapp";
 import { podeGerirRelacionamento } from "../equipe/permissao";
+import { usePode } from "../equipe/usePode";
 import { TextoWa, WA_CSS } from "../atendimento/waUi";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 import ModelosDoNumero from "../whatsapp/ModelosDoNumero";
@@ -216,7 +217,7 @@ function AbaRespostas({ pode, atendente }: { pode: boolean; atendente: string })
       <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>
         Valem só <b>dentro das 24h</b> depois da última mensagem do cliente. No Atendimento, digite <b className="font-mono">/</b> no campo (ou <b className="font-mono">/atalho</b>) ou clique no raio ⚡.
       </p>
-      {!pode && <Aviso>Só a gestora ou o admin cria e muda — peça pra Tainara.</Aviso>}
+      {!pode && <Aviso>Só a gestora, o admin ou quem o cargo libera cria e muda — peça pra Tainara.</Aviso>}
       {erro && <Aviso tom="erro">{erro}</Aviso>}
 
       {lista === null ? <div className="rel-card h-32 animate-pulse" /> : grupos.length === 0 ? (
@@ -342,6 +343,8 @@ function AbaMeta({ pode }: { pode: boolean }) {
 export default function ModelosPage() {
   const { currentUser } = useQsAuth();
   const pode = podeGerirRelacionamento(currentUser);
+  // Respostas prontas: a gestora, ou quem o cargo libera (0135). Modelos da Meta seguem só gestora/admin.
+  const podeRespostas = usePode("relacionamento.modelos") === true || pode;
   const [aba, setAba] = useState<Aba>(() => (localStorage.getItem("rel_modelos_aba") as Aba) || "respostas");
   function trocar(a: Aba) { localStorage.setItem("rel_modelos_aba", a); setAba(a); }
 
@@ -363,7 +366,7 @@ export default function ModelosPage() {
           </button>
         ))}
       </div>
-      {aba === "respostas" ? <AbaRespostas pode={pode} atendente={currentUser?.name || ""} /> : <AbaMeta pode={pode} />}
+      {aba === "respostas" ? <AbaRespostas pode={podeRespostas} atendente={currentUser?.name || ""} /> : <AbaMeta pode={pode} />}
     </div>
   );
 }

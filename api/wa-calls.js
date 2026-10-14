@@ -80,15 +80,21 @@ export const config = { api: { bodyParser: false } };
  *
  * Contar antes de julgar é o que separa as três. Ver a 0086.
  *
- * NUNCA lança e NUNCA é esperado: o webhook tem que responder rápido, e um
- * contador de telemetria não pode ser motivo de retentativa da Meta.
+ * NUNCA lança, e espera NO MÁXIMO 1,5s: o webhook tem que responder rápido, e
+ * um contador de telemetria não pode ser motivo de retentativa da Meta.
+ *
+ * 14/10/2026: antes era "dispara e esquece". Na Vercel a função CONGELA assim
+ * que a resposta sai, então o pedido ao banco ficava parado e só acordava na
+ * próxima batida — já estourado ("PostgREST não respondeu em 10000ms" dezenas
+ * de vezes por dia, sem o banco estar lento). Agora é esperado antes de responder.
  */
 function pulso(resultado) {
-  rest('rpc/qs_wa_meta_pulso', {
+  const gravar = rest('rpc/qs_wa_meta_pulso', {
     method: 'POST',
     body: { p_resultado: resultado },
     prefer: 'return=minimal',
   }).catch((e) => console.warn('[wa-calls] pulso nao gravado:', e?.message));
+  return Promise.race([gravar, new Promise((ok) => setTimeout(ok, 1500))]);
 }
 
 /** Lê o corpo cru. Teto de 1 MB: SDP é texto, e o que passar disso não é nosso. */
@@ -140,14 +146,14 @@ export default async function handler(req, res) {
       // caminho silencioso que devolve 200 é indistinguível, no log, de "não
       // chegou nada". Uma linha aqui separa as duas coisas.
       console.log('[wa-calls] handshake aceito');
-      pulso('handshake');
+      await pulso('handshake');
       res.setHeader('Content-Type', 'text/plain');
       return res.status(200).send(String(q['hub.challenge'] ?? ''));
     }
     // 403 é o que a Meta espera quando o token não bate — e o log diz qual dos
     // dois lados está faltando, que é a única dúvida real nessa hora.
     console.warn(`[wa-calls] handshake recusado (token no servidor: ${token ? 'sim' : 'NAO'})`);
-    pulso('handshake-recusado');
+    await pulso('handshake-recusado');
     return res.status(403).send('forbidden');
   }
 
@@ -159,7 +165,7 @@ export default async function handler(req, res) {
   const segredo = String(process.env.META_CALLS_APP_SECRET || '').trim();
   if (!segredo) {
     console.error('[wa-calls] META_CALLS_APP_SECRET ausente — rota desligada');
-    pulso('sem-app-secret');
+    await pulso('sem-app-secret');
     return res.status(503).json({ error: 'Webhook de chamadas nao configurado' });
   }
 
@@ -168,7 +174,7 @@ export default async function handler(req, res) {
     raw = await corpoCru(req);
   } catch (e) {
     console.warn('[wa-calls] corpo ilegivel:', e?.message);
-    pulso('corpo-invalido');
+    await pulso('corpo-invalido');
     return res.status(400).json({ error: 'corpo invalido' });
   }
 
@@ -199,7 +205,7 @@ export default async function handler(req, res) {
       `[wa-calls] assinatura nao confere — motivo: ${conf.motivo}, corpo: ${raw.length}b de ${deOnde}, ` +
       `esperado ${String(conf.hexEsperado || '').slice(0, 12)}…, recebido ${String(conf.hexRecebido || '').slice(0, 12)}…`
     );
-    pulso('assinatura-invalida');
+    await pulso('assinatura-invalida');
     return res.status(401).json({ error: 'assinatura invalida' });
   }
   if (deOnde !== 'stream') console.warn(`[wa-calls] assinatura OK, mas o corpo veio do ${deOnde}`);
@@ -208,7 +214,7 @@ export default async function handler(req, res) {
   try {
     body = JSON.parse(raw.toString('utf8'));
   } catch {
-    pulso('json-invalido');
+    await pulso('json-invalido');
     return res.status(400).json({ error: 'json invalido' });
   }
 
@@ -302,6 +308,7 @@ export default async function handler(req, res) {
   }
 
   let mensagens = null;
+  let pulsoPendente = null;
   if (mensagensMeta.length) {
     try {
       mensagens = await processarMensagensDaMeta(mensagensMeta);
@@ -310,16 +317,18 @@ export default async function handler(req, res) {
       // O pulso distingue "a Meta entregou e nós GRAVAMOS" de "a Meta entregou
       // e nós ignoramos por formato" — as duas responderiam 200 e, sem isto,
       // seriam a mesma linha no log.
-      pulso(soma ? 'gravado' : 'ignorado');
+      await pulso(soma ? 'gravado' : 'ignorado');
     } catch (e) {
       console.error('[wa-calls] mensagens da Meta falharam:', e?.message);
-      pulso('erro-ao-gravar');
+      await pulso('erro-ao-gravar');
     }
   } else if (camposVistos.length) {
     // Chegou evento que não é mensagem (calls, statuses): também é sinal de
     // vida da Meta, e é ele que impede o vigia de gritar num dia em que só
     // houve ligação e nenhuma conversa.
-    pulso('recibo');
+    // Começa já, mas só é ESPERADO na hora de responder: uma ligação chegando
+    // não pode ficar 1,5s atrás de um contador.
+    pulsoPendente = pulso('recibo');
   }
 
   // ── "PODE ME LIGAR" — o evento que a fila inteira estava esperando ────────
@@ -351,6 +360,7 @@ export default async function handler(req, res) {
   if (!eventos.length) {
     if (permissoesGravadas) {
       console.log(`[wa-calls] ${permissoesGravadas} permissao(oes) — campos: ${camposVistos.join(', ') || 'nenhum'}`);
+      await pulsoPendente;
       return res.status(200).json({ ok: true, gravados: 0, permissoes: permissoesGravadas });
     }
 
@@ -365,6 +375,7 @@ export default async function handler(req, res) {
     // `messages` sem resposta de permissão é o caso NORMAL e esperado — quem
     // cuida de conversa é o wa-webhook. Sai calado.
     if (camposVistos.length && camposVistos.every((c) => ['messages', 'smb_message_echoes', 'history'].includes(c))) {
+      await pulsoPendente;
       return res.status(200).json({ ok: true, gravados: 0, mensagens });
     }
 
@@ -374,6 +385,7 @@ export default async function handler(req, res) {
     try {
       await insert('qs_wa_calls', { payload: body, evento: 'desconhecido' }, { returning: false });
     } catch (e) { console.warn('[wa-calls] evento desconhecido nao gravado:', e?.message); }
+    await pulsoPendente;
     return res.status(200).json({ ok: true, gravados: 0, motivo: 'sem-evento-de-chamada' });
   }
 
@@ -423,5 +435,6 @@ export default async function handler(req, res) {
   console.log(`[wa-calls] ${gravados} evento(s) [${camposVistos.join(', ')}]: ${eventos.map((e) => e.evento || '?').join(', ')}`);
   // 200 sempre que a assinatura conferiu: webhook que recebe erro entra em
   // retentativa e a Meta pode suspender a inscrição. O que falhou está no log.
+  await pulsoPendente;
   return res.status(200).json({ ok: true, gravados });
 }

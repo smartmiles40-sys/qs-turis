@@ -442,6 +442,13 @@ function idPai(deal) {
  */
 async function importarDeal(deal, ctx, profundidade = 0) {
   const r = await importarDealCore(deal, ctx, profundidade);
+  // Card do Pós-Venda: as datas de ida/volta/voo interno viram trechos (0134b).
+  // A função não duplica (ref por dia) e pula o dia que já tem voo do Expedições.
+  if (r?.viagemId && funilDe(deal, ctx.funis)?.posVenda) {
+    try {
+      ctx.conta.trechos += Number(await rest('rpc/rel_trechos_do_posvenda', { method: 'POST', body: { p_viagem: r.viagemId } }) || 0);
+    } catch (e) { console.warn(`[rel-viagens] trechos do pós-venda ${deal.ID}:`, e?.message); }
+  }
   // Arquivos do card (bilhetes, vouchers...) vão pra fila de download (0110).
   if (r?.viagemId || r?.clienteId) {
     try { ctx.conta.arquivos += await enfileirarArquivos(deal, ctx.mapa.__defs, r); }
@@ -596,7 +603,7 @@ async function pagina(filtro, ordem, start) {
 
 export async function sincronizar() {
   const inicio = Date.now();
-  const conta = { lidos: 0, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, ligados: 0, arquivos: 0, baixados: 0, erros: 0, completo: true };
+  const conta = { lidos: 0, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, ligados: 0, trechos: 0, arquivos: 0, baixados: 0, erros: 0, completo: true };
   const ctx = { conta, contatos: new Map(), mapa: await rotulos(), funis: await funis(), qualquerEtapa: false };
   const cursor = await lerCursor();
   const acabouTempo = () => Date.now() - inicio > ORCAMENTO_MS;
@@ -775,7 +782,7 @@ export default async function handler(req, res) {
       let deal = null;
       try { deal = await bx('crm.deal.get', { id: dealId }); } catch { /* segue */ }
       if (!deal) return res.status(404).json({ error: `Negócio ${dealId} não encontrado no Bitrix.` });
-      const conta = { lidos: 1, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, ligados: 0, arquivos: 0, baixados: 0, erros: 0, completo: true };
+      const conta = { lidos: 1, criados: 0, atualizados: 0, cancelados: 0, passageiros: 0, ligados: 0, trechos: 0, arquivos: 0, baixados: 0, erros: 0, completo: true };
       await importarDeal(deal, { conta, contatos: new Map(), mapa: await rotulos(), funis: await funis(), qualquerEtapa: true });
       const v = (await viagemDoDeal(idPai(deal) || dealId)) || (await viagemLigada(dealId));
       return res.status(200).json({ ...conta, viagemId: v?.id || null });

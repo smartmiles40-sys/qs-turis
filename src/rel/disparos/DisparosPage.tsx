@@ -16,6 +16,7 @@ import {
 import { formatarTelefone } from "../lib/clientes";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import ModeloEVariaveis, { mapaCompleto, useModelos } from "./ModeloEVariaveis";
+import { usePode } from "../equipe/usePode";
 
 const STATUS: Record<Campanha["status"], { rotulo: string; tom: "neutro" | "rel" | "aviso" | "erro" }> = {
   rascunho: { rotulo: "rascunho", tom: "neutro" },
@@ -233,6 +234,8 @@ function ListaEnvios({ campanha, onFechar }: { campanha: Campanha | null; onFech
 // ── Página ──────────────────────────────────────────────────────────────────
 
 export default function DisparosPage() {
+  // Criar campanha: conforme o cargo (0135); o banco confere.
+  const podeCampanha = usePode("relacionamento.disparos") !== false;
   const [lista, setLista] = useState<Campanha[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [nova, setNova] = useState(false);
@@ -284,7 +287,7 @@ export default function DisparosPage() {
           <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Disparos</h1>
           <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Mensagem em massa pelo WhatsApp do Relacionamento, sempre com modelo aprovado pela Meta.</p>
         </div>
-        <Botao variante="primario" onClick={() => setNova(true)}>+ Nova campanha</Botao>
+        {podeCampanha && <Botao variante="primario" onClick={() => setNova(true)}>+ Nova campanha</Botao>}
       </div>
 
       <Aviso>Só modelo aprovado. Quem pediu pra parar não recebe. Marketing em excesso derruba a qualidade do número.</Aviso>

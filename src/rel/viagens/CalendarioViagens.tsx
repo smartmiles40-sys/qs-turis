@@ -88,7 +88,8 @@ function montarEventos(viagens: Viagem[], trechos: Trecho[]): Evento[] {
     // trecho igual (mesmo voo, mesma hora) de várias viagens do grupo → um item só
     const id = `${t.tipo}|${t.numero || rota}|${t.partida_em}|${t.expedicao || t.viagem_id}`;
     juntar({
-      chave: `trecho|${id}`, dia: diaDe(t.partida_em), hora: horaDe(t.partida_em), especie: "trecho", tipo,
+      // Trecho do Pós-Venda (Bitrix) só tem o dia: sem hora no calendário.
+      chave: `trecho|${id}`, dia: diaDe(t.partida_em), hora: t.fonte === "bitrix" ? undefined : horaDe(t.partida_em), especie: "trecho", tipo,
       titulo: `${TIPOS_TRECHO[t.tipo]}${t.numero ? ` ${t.numero}` : ""}`, detalhe: [rota, quem].filter(Boolean).join(" · "),
     }, { id: t.viagem_id, nome });
     if (t.checkin_em) {
