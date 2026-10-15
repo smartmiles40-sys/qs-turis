@@ -136,6 +136,8 @@ for (const x of todas) {
     if (alt.endsWith('@s.whatsapp.net')) fone = alt.split('@')[0].split(':')[0];
     else { conta.pessoaSemTelefone++; continue; }
   } else { conta.ignorada++; continue; }
+  // "0@s.whatsapp.net" e afins são do próprio WhatsApp, não de cliente.
+  if (!/^d{10,15}$/.test(fone)) { conta.ignorada++; continue; }
   if (quando >= CORTE) { conta.pessoaDepoisDoCorte++; continue; }
   if (!SECO) {
     await rest('rpc/rel_wa_ingest', {
