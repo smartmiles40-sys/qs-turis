@@ -180,6 +180,17 @@ async function webhook(req, res) {
       for (const d of itens) r.push(await gravarMensagem(d));
       return res.status(200).json({ ok: true, r });
     }
+    // Queda/volta da ligação: fica registrada pra medir se ela aguenta (0138).
+    if (evento === 'connection.update') {
+      const estado = String(body.data?.state || '');
+      if (estado && estado !== 'connecting') {
+        await rest('rel_wa_grupos_conexao', {
+          method: 'POST', prefer: 'return=minimal',
+          body: { estado, motivo: body.data?.statusReason != null ? String(body.data.statusReason) : null },
+        });
+      }
+      return res.status(200).json({ ok: true });
+    }
     if (evento === 'groups.upsert' || evento === 'groups.update') {
       await atualizarGrupos(body.data);
       return res.status(200).json({ ok: true });
