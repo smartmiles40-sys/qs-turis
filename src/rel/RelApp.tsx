@@ -29,6 +29,7 @@ import ClientesPage from "./clientes/ClientesPage";
 import ClienteFicha from "./clientes/ClienteFicha";
 import DuplicadosPage from "./clientes/DuplicadosPage";
 import AtendimentoPage from "./atendimento/AtendimentoPage";
+import GruposPage from "./atendimento/GruposPage";
 import ConfigPage from "./config/ConfigPage";
 import ViagensPage from "./viagens/ViagensPage";
 import ViagemPage from "./viagens/ViagemPage";
@@ -47,7 +48,7 @@ import { usePode } from "./equipe/usePode";
 
 type Rota =
   | { tela: "inicio" }
-  | { tela: "atendimento"; id?: string } | { tela: "chamados" } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
+  | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" }
   | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
   | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
@@ -63,6 +64,7 @@ function lerRota(): Rota {
   if (tela === "cliente" && id) return { tela: "ficha", id };
   if (tela === "viagem" && id) return { tela: "viagem", id };
   if (tela === "atendimento") return id ? { tela: "atendimento", id } : { tela: "atendimento" };
+  if (tela === "grupos") return id ? { tela: "grupos", id: decodeURIComponent(id) } : { tela: "grupos" };
   if ((SIMPLES as string[]).includes(tela)) return { tela } as Rota;
   return { tela: "inicio" };
 }
@@ -71,6 +73,7 @@ function hashDe(r: Rota) {
   if (r.tela === "ficha") return `#rel/cliente/${r.id}`;
   if (r.tela === "viagem") return `#rel/viagem/${r.id}`;
   if (r.tela === "atendimento" && r.id) return `#rel/atendimento/${r.id}`;
+  if (r.tela === "grupos" && r.id) return `#rel/grupos/${encodeURIComponent(r.id)}`;
   return r.tela === "inicio" ? "#rel" : `#rel/${r.tela}`;
 }
 
@@ -276,6 +279,8 @@ export default function RelApp() {
   const grupos: Grupo[] = [
     { id: "atendimento", rotulo: "Atendimento", icone: "atendimento", itens: [
       { id: "atendimento", rotulo: "Conversas", badge: cont?.esperando || undefined, alerta: !!cont?.foraDoPrazo },
+      // Grupos (15/10): chegam por uma ligação só de grupos (Evolution) — 0137.
+      { id: "grupos", rotulo: "Grupos" },
       { id: "chamados", rotulo: "Chamados", badge: cont?.chamadosVencidos || undefined, alerta: true },
       // Modelos (14/10): respostas prontas + modelos da Meta — a gestora padroniza.
       { id: "modelos", rotulo: "Modelos de mensagem" },
@@ -461,6 +466,9 @@ export default function RelApp() {
               onTrocarVisao={(v) => ir(v === "chamados" ? { tela: "chamados" } : { tela: "atendimento" })}
               onMudou={atualizar}
             />
+          )}
+          {rota.tela === "grupos" && (
+            <GruposPage grupoJid={rota.id ?? null} abrir={(jid) => ir(jid ? { tela: "grupos", id: jid } : { tela: "grupos" })} />
           )}
           {/* Chamados é a visão kanban DENTRO do Atendimento (13/10) */}
           {rota.tela === "chamados" && (
