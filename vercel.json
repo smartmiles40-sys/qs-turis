@@ -110,7 +110,7 @@
     },
     {
       "path": "/api/rel-viagem-ia",
-      "schedule": "20 */3 * * *"
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [

@@ -20,7 +20,6 @@ import { Aviso } from "../ui";
 import MapaMundi, { COR_EXP, COR_PAC, MarcaTipo, type PontoMapa } from "./MapaMundi";
 import { lugaresDe } from "./destinos";
 import { conferirViagens, contar, type Analise } from "../lib/problemas";
-import CentralProblemas from "./CentralProblemas";
 
 type Filtro = "todos" | "expedicao" | "pacote";
 type Situacao = "em_viagem" | "embarcando" | "checkin" | "revisada" | "pendente";
@@ -423,9 +422,6 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
           {" "}· {pontos.length} destino{pontos.length === 1 ? "" : "s"}
         </p>
       </div>
-
-      {/* Primeiro o que pode dar errado (15/10): nada pode passar. */}
-      <CentralProblemas viagens={viagens} analises={analises} filtro={filtro} onAbrirViagem={onAbrirViagem} />
 
       {/* Tela cheia (15/10): mapa à esquerda, cards à direita — tudo numa olhada. */}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)] gap-4 items-start">

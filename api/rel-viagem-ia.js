@@ -42,11 +42,15 @@ import { rest } from './_supabaseAdmin.js';
 import { quemChama } from './_relWa.js';
 
 const BUCKET = 'rel-documentos';
-const TIPOS_DOC = ['bilhete', 'seguro', 'voucher', 'contrato', 'comprovante', 'outro'];
+// Comprovante de pagamento não tem voo nem hotel (2 mil arquivos do Bitrix) — fica fora.
+const TIPOS_DOC = ['bilhete', 'seguro', 'voucher', 'contrato', 'outro'];
+// Prints que o time sobe no card (checagem da IA, confirmação do cliente, Sherpa, resumo do WhatsApp)
+// não são documento de viagem: a IA não perde tempo com eles.
+const SEM_PRINTS = 'or=(descricao.is.null,and(descricao.not.ilike.*print*,descricao.not.ilike.*checagem*,descricao.not.ilike.*confirma*,descricao.not.ilike.*comprovante*))';
 const MIME_IMAGEM = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const MAX_BYTES = 15 * 1024 * 1024;
 const MAX_DOCS = 12;             // documentos lidos por viagem
-const EM_PARALELO = 3;
+const EM_PARALELO = 4;
 const ORCAMENTO_MS = 50_000;     // maxDuration 60s
 const MIN_PRA_COMECAR_MS = 14_000;
 const VIAGENS_POR_LOTE = 3;
@@ -492,7 +496,7 @@ async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS) {
 
   const [pass, docs, ligados, trechosAntes] = await Promise.all([
     rest(`rel_viagem_passageiros?select=cliente_id,rel_clientes(nome,passaporte,passaporte_validade)&viagem_id=eq.${viagemId}`),
-    rest(`rel_documentos?select=id,tipo,descricao,arquivo_path,arquivo_nome,mime,tamanho,enviado_em,status&viagem_id=eq.${viagemId}&tipo=in.(${TIPOS_DOC.join(',')})&status=neq.recusado&order=enviado_em.desc&limit=${MAX_DOCS}`),
+    rest(`rel_documentos?select=id,tipo,descricao,arquivo_path,arquivo_nome,mime,tamanho,enviado_em,status&viagem_id=eq.${viagemId}&tipo=in.(${TIPOS_DOC.join(',')})&status=neq.recusado&${SEM_PRINTS}&order=enviado_em.desc&limit=${MAX_DOCS}`),
     rest(`rel_viagem_deals?select=bitrix_deal_id,funil,bitrix_dados&viagem_id=eq.${viagemId}`).catch(() => []),
     rest(`rel_viagem_trechos?select=*&viagem_id=eq.${viagemId}&order=partida_em.asc`),
   ]);
@@ -580,8 +584,29 @@ async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS) {
 }
 
 /** Viagens que embarcam nos próximos 90 dias com documento novo desde a última revisão. */
+/**
+ * Fila da IA (15/10 — Bruno: "carregar todos os arquivos, ter todos os dados"):
+ *   1. quem nunca foi lido e tem arquivo: em viagem e próximos embarques primeiro,
+ *      depois sem data, depois as já concluídas (das mais recentes pra trás);
+ *   2. quem ganhou arquivo novo depois da última leitura (até 90 dias).
+ */
 async function candidatas() {
   const hoje = hojeSP(), ate = somaDias(hoje, 90);
+  const nunca = await rest(
+    `rel_viagens?select=id,data_embarque,data_retorno,rel_documentos!inner(id)` +
+    `&status=eq.ativa&ia_revisao_em=is.null` +
+    `&rel_documentos.tipo=in.(${TIPOS_DOC.join(',')})&rel_documentos.status=neq.recusado` +
+    `&rel_documentos.limit=1&limit=3000`
+  ).catch(() => []);
+  const peso = (v) => {
+    const fim = v.data_retorno || v.data_embarque;
+    if (fim && fim >= hoje) return `0|${v.data_embarque || ''}`;             // em viagem / vai viajar
+    if (!v.data_embarque) return '1|';                                         // sem data
+    return `2|${String(99999999 - Number(String(v.data_embarque).replace(/-/g, '')))}`; // concluída: recente primeiro
+  };
+  const primeiro = (nunca || []).sort((a, b) => peso(a).localeCompare(peso(b))).map((v) => v.id);
+  if (primeiro.length) return primeiro;
+
   const docs = await rest(
     `rel_documentos?select=viagem_id,enviado_em,rel_viagens!inner(id,status,data_embarque,ia_revisao_em)` +
     `&viagem_id=not.is.null&tipo=in.(${TIPOS_DOC.join(',')})&status=neq.recusado` +

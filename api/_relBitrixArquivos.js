@@ -30,7 +30,9 @@ export function tipoPeloRotulo(rotulo) {
   if (/voucher|hotel|hosped/.test(r)) return 'voucher';
   if (/seguro/.test(r)) return 'seguro';
   if (/passaporte/.test(r)) return 'passaporte';
-  if (/visto|eta\b|evisa/.test(r)) return 'visto';
+  // print/checagem/confirmação que o time sobe no card não é documento de viagem
+  if (/\bprint\b|checagem|confirmacao explicita|revisao da i\.?a/.test(r)) return 'outro';
+  if (/\bvisto\b|\beta\b|\be-?visa\b/.test(r)) return 'visto'; // "revisao" contém "evisa": por isso a borda de palavra
   if (/vacina/.test(r)) return 'vacina';
   if (/contrato/.test(r)) return 'contrato';
   if (/comprovante|pagamento|recibo|nota fiscal|\bnf\b|pix|boleto/.test(r)) return 'comprovante';
