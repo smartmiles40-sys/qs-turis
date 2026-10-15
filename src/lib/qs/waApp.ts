@@ -14,8 +14,9 @@
 // derrubaria o inbox de quem está trabalhando bem pelo número oficial.
 //
 // A configuração mora em qs_settings.wa_modo_app e é editável em
-// Configurações → Atendimento. O PADRÃO (sem linha no banco) já é "SDR no
-// aparelho": quando a API voltar, é um clique pra desligar — não um deploy.
+// Configurações → Atendimento. Desde 15/10/2026 o PADRÃO (sem linha no banco)
+// é DESLIGADO: cada SDR tem o próprio número conectado ao QS (Coexistência) e
+// envia 100% por dentro do QS. Ligar de novo é só pra emergência.
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
@@ -39,12 +40,12 @@ export interface WaModoApp {
 }
 
 /**
- * O padrão vale quando não existe linha em qs_settings — e ele já é o mundo de
- * hoje, de propósito: a API caiu antes de alguém poder configurar nada, e o
- * SDR não pode ficar sem caminho pro cliente esperando um admin abrir a tela.
+ * O padrão vale quando não existe linha em qs_settings. Foi "ligado" de 03/09
+ * a 15/10 e, como ninguém gravou a chave, continuou mandando os SDRs pro wa.me
+ * mesmo depois de os números deles entrarem no QS.
  */
 export const WA_MODO_APP_PADRAO: WaModoApp = {
-  ativo: true,
+  ativo: false,
   papeis: ["sdr"],
   usuarios: [],
   excecoes: [],
@@ -69,8 +70,7 @@ export function normalizarModoApp(bruto: unknown): WaModoApp {
 
 export async function getWaModoApp(): Promise<WaModoApp> {
   const bruto = await getSetting<unknown>(WA_MODO_APP_KEY);
-  // Sem linha no banco = padrão. Erro de leitura também cai aqui, e cair no
-  // aparelho é o lado seguro: o wa.me funciona mesmo com o QS meio quebrado.
+  // Sem linha no banco = padrão (envio pelo QS). Erro de leitura também cai aqui.
   if (bruto == null) return WA_MODO_APP_PADRAO;
   return normalizarModoApp(bruto);
 }
@@ -143,9 +143,7 @@ export function abrirConversaNoApp(alvo: AlvoNoApp, assinatura = ""): string | n
  * O hook que as telas usam. Devolve se o usuário está no modo aparelho e a
  * função de abrir — com a assinatura dele já carregada.
  *
- * Enquanto a config não chega do banco, vale o PADRÃO (SDR no aparelho). É o
- * lado certo pra errar: mandar o SDR pro app quando não precisava custa um
- * clique; deixá-lo num inbox que não envia custa o lead.
+ * Enquanto a config não chega do banco, vale o PADRÃO (envio pelo QS).
  */
 export function useWhatsAppApp() {
   const { currentUser } = useQsAuth();
