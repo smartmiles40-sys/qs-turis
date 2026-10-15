@@ -13,12 +13,14 @@
 // -----------------------------------------------------------------------------
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
-  grupoTipo, horaDoLugar, hojeSP, proximosTrechos, revisoesDe, trechosDasViagens, viagensEmAndamento, TIPOS_TRECHO,
+  grupoTipo, horaDoLugar, hojeSP, proximosTrechos, revisoesDe, viagensEmAndamento, TIPOS_TRECHO,
   type Revisao, type Trecho, type Viagem,
 } from "../lib/viagens";
 import { Aviso } from "../ui";
 import MapaMundi, { COR_EXP, COR_PAC, MarcaTipo, type PontoMapa } from "./MapaMundi";
 import { lugaresDe } from "./destinos";
+import { conferirViagens, contar, type Analise } from "../lib/problemas";
+import CentralProblemas from "./CentralProblemas";
 
 type Filtro = "todos" | "expedicao" | "pacote";
 type Situacao = "em_viagem" | "embarcando" | "checkin" | "revisada" | "pendente";
@@ -202,7 +204,7 @@ const SITUACAO_PAC: Record<SituacaoPac, { texto: string; cor: string }> = {
   volta: { texto: "VIAGEM DE VOLTA", cor: "#FF8A65" },
 };
 
-interface LinhaPac { v: Viagem; voo: Trecho | null; situacao: SituacaoPac }
+interface LinhaPac { v: Viagem; voo: Trecho | null; situacao: SituacaoPac; alertas: { alta: number; media: number } }
 
 function situacaoPac(v: Viagem, revisada: boolean): SituacaoPac {
   const hoje = hojeISO();
@@ -237,11 +239,12 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                 <th className="px-2 py-2 font-semibold">IDA</th>
                 <th className="px-2 py-2 font-semibold">LOCALIZADOR</th>
                 <th className="px-2 py-2 font-semibold text-right">PAX</th>
+                <th className="px-2 py-2 font-semibold text-center">ALERTAS</th>
                 <th className="px-4 py-2 font-semibold text-right">SITUAÇÃO</th>
               </tr>
             </thead>
             <tbody>
-              {lista.map(({ v, voo, situacao }, i) => {
+              {lista.map(({ v, voo, situacao, alertas }, i) => {
                 const s = SITUACAO_PAC[situacao];
                 const atraso = Math.min(i, 12) * 0.06;
                 const de = voo ? (voo.origem_codigo || voo.origem || "—") : "—";
@@ -258,6 +261,11 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                     <td className="px-2 py-2 whitespace-nowrap" style={{ color: "#FFD54F" }}><Flap texto={ida} atraso={atraso} /></td>
                     <td className="px-2 py-2 whitespace-nowrap tracking-wider" style={{ color: voo?.localizador ? "#F2F2F2" : "#5C6A71" }}>{voo?.localizador ? <Flap texto={voo.localizador} atraso={atraso} /> : "——"}</td>
                     <td className="px-2 py-2 text-right tabular-nums" style={{ color: "#FFD54F" }}>{String(pax(v)).padStart(2, "0")}</td>
+                    <td className="px-2 py-2 text-center whitespace-nowrap font-bold" aria-label={`${alertas.alta} urgentes, ${alertas.media} pra conferir`}>
+                      {alertas.alta > 0 && <span className="inline-block px-1.5 rounded mr-1" style={{ background: "#DC2626", color: "#fff" }}>⚠ {alertas.alta}</span>}
+                      {alertas.media > 0 && <span className="inline-block px-1.5 rounded" style={{ background: "rgba(245,158,11,.25)", color: "#FBBF24" }}>{alertas.media}</span>}
+                      {!alertas.alta && !alertas.media && <span style={{ color: "#5BE3B0" }}>✓</span>}
+                    </td>
                     <td className="px-4 py-2 text-right whitespace-nowrap font-bold"><Flap texto={s.texto} atraso={atraso + 0.1} cor={s.cor} /></td>
                   </tr>
                 );
@@ -307,6 +315,7 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
   const [rev, setRev] = useState<Map<string, Revisao>>(new Map());
   const [trechos, setTrechos] = useState<Trecho[]>([]);
   const [voosPac, setVoosPac] = useState<Map<string, Trecho>>(new Map());
+  const [analises, setAnalises] = useState<Map<string, Analise> | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   // Falha parcial (trechos ou revisões): o painel abre, mas avisa — senão
   // "nenhum voo" ou "tudo PENDENTE" pareceria verdade.
@@ -321,13 +330,13 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
         const [vs, ts] = await Promise.all([viagensEmAndamento(), proximosTrechos().catch(() => { falhas.push("os voos e trechos"); return [] as Trecho[]; })]);
         const [rv, tp] = await Promise.all([
           revisoesDe(vs.map((v) => v.id)).catch(() => { falhas.push("as revisões"); return new Map<string, Revisao>(); }),
-          trechosDasViagens(vs.filter((v) => grupoTipo(v.tipo) === "pacote").map((v) => v.id)).catch(() => { falhas.push("os voos dos pacotes"); return [] as Trecho[]; }),
+          // o conferente roda em todas: dá os riscos E os trechos (o voo de ida de cada pacote)
+          conferirViagens(vs).catch(() => { falhas.push("a conferência de riscos"); return new Map<string, Analise>(); }),
         ]);
-        // o voo de ida de cada pacote = o primeiro voo (internacional ou interno)
         const vp = new Map<string, Trecho>();
-        for (const t of tp) if ((t.tipo === "voo_internacional" || t.tipo === "voo_interno") && !vp.has(t.viagem_id)) vp.set(t.viagem_id, t);
+        for (const a of tp.values()) for (const t of a.trechos) if ((t.tipo === "voo_internacional" || t.tipo === "voo_interno") && !vp.has(t.viagem_id)) vp.set(t.viagem_id, t);
         if (!vivo) return;
-        setViagens(vs); setTrechos(ts); setRev(rv); setVoosPac(vp); setErro(null);
+        setViagens(vs); setTrechos(ts); setRev(rv); setVoosPac(vp); setAnalises(tp); setErro(null);
         setAviso(falhas.length ? `Não consegui carregar ${falhas.join(" e ")} — os números abaixo podem estar incompletos.` : null);
       } catch (e) {
         if (vivo) { setErro(e instanceof Error ? e.message : "Não carregou o painel."); setViagens([]); }
@@ -361,9 +370,9 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
   const partidasExp = partidas.filter((p) => p.tipo === "expedicao");
   const linhasPac = useMemo<LinhaPac[]>(() => (viagens ?? [])
     .filter((v) => grupoTipo(v.tipo) === "pacote")
-    .map((v) => ({ v, voo: voosPac.get(v.id) ?? null, situacao: situacaoPac(v, !!rev.get(v.id)?.revisado_em) }))
+    .map((v) => { const c = contar(analises?.get(v.id)?.problemas ?? []); return { v, voo: voosPac.get(v.id) ?? null, situacao: situacaoPac(v, !!rev.get(v.id)?.revisado_em), alertas: { alta: c.alta, media: c.media } }; })
     .sort((a, b) => (a.voo?.partida_em ?? a.v.data_embarque ?? "9999").localeCompare(b.voo?.partida_em ?? b.v.data_embarque ?? "9999")),
-  [viagens, voosPac, rev]);
+  [viagens, voosPac, rev, analises]);
 
   const hoje = hojeISO();
   const proxEmbarque = (t: "expedicao" | "pacote") => partidas.find((p) => p.tipo === t && p.data && p.data >= hoje && p.situacao !== "em_viagem");
@@ -414,6 +423,9 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
           {" "}· {pontos.length} destino{pontos.length === 1 ? "" : "s"}
         </p>
       </div>
+
+      {/* Primeiro o que pode dar errado (15/10): nada pode passar. */}
+      <CentralProblemas viagens={viagens} analises={analises} filtro={filtro} onAbrirViagem={onAbrirViagem} />
 
       {/* Tela cheia (15/10): mapa à esquerda, cards à direita — tudo numa olhada. */}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)] gap-4 items-start">

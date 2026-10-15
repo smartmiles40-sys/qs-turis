@@ -36,7 +36,7 @@ const ICONE: Record<TipoTrecho, ReactNode> = {
   outro: <><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 2" /></>,
 };
 
-function Icone({ tipo, tamanho = 34 }: { tipo: TipoTrecho; tamanho?: number }) {
+export function Icone({ tipo, tamanho = 34 }: { tipo: TipoTrecho; tamanho?: number }) {
   const cor = COR_DO_TIPO[tipo];
   return (
     <span className="rounded-full flex items-center justify-center flex-shrink-0" style={{ width: tamanho, height: tamanho, background: `${cor}1A`, color: cor }} aria-hidden="true">
@@ -56,7 +56,7 @@ function hora(t: Trecho, qual: "partida" | "chegada") {
   return horaDoLugar(iso, qual === "partida" ? t.partida_fuso : (t.chegada_fuso || t.partida_fuso), true);
 }
 
-function titulo(t: Trecho): string {
+export function titulo(t: Trecho): string {
   const de = t.origem_codigo || t.origem;
   const para = t.destino_codigo || t.destino;
   if (t.tipo === "hospedagem") return t.descricao || t.destino || t.origem || "Hotel";
@@ -204,7 +204,7 @@ function AgoraEProximo({ trechos }: { trechos: Trecho[] }) {
   );
 }
 
-export default function RoteiroViagem({ viagemId, ativa, versao = 0 }: { viagemId: string; ativa: boolean; versao?: number }) {
+export default function RoteiroViagem({ viagemId, ativa, versao = 0, onMudou }: { viagemId: string; ativa: boolean; versao?: number; onMudou?: () => void }) {
   const [lista, setLista] = useState<Trecho[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState<Trecho | null | undefined>(undefined); // undefined = fechado; null = novo
@@ -234,7 +234,7 @@ export default function RoteiroViagem({ viagemId, ativa, versao = 0 }: { viagemI
                   {g.titulo}<span className="font-semibold" style={{ color: "var(--ink3)" }}>{doGrupo.length}</span>
                 </h3>
                 <ul className="space-y-2">
-                  {doGrupo.map((t) => <CartaoTrecho key={t.id} t={t} ativa={ativa} onEditar={() => setEditando(t)} onMudou={carregar} />)}
+                  {doGrupo.map((t) => <CartaoTrecho key={t.id} t={t} ativa={ativa} onEditar={() => setEditando(t)} onMudou={() => { carregar(); onMudou?.(); }} />)}
                 </ul>
               </section>
             );
@@ -244,7 +244,7 @@ export default function RoteiroViagem({ viagemId, ativa, versao = 0 }: { viagemI
       {ativa && <div className="mt-3"><Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setEditando(null)}>+ Trecho</Botao></div>}
       {erro && <div className="mt-2"><Aviso tom="erro">{erro}</Aviso></div>}
       <EditarTrecho aberto={editando !== undefined} viagemId={viagemId} trecho={editando ?? null}
-        onFechar={() => setEditando(undefined)} onSalvo={() => { setEditando(undefined); carregar(); }} />
+        onFechar={() => setEditando(undefined)} onSalvo={() => { setEditando(undefined); carregar(); onMudou?.(); }} />
     </div>
   );
 }

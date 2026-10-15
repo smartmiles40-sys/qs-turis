@@ -23,6 +23,9 @@ import { RevisaoViagem } from "./TrechosViagem";
 import RoteiroViagem from "./RoteiroViagem";
 import ArquivosViagem from "./ArquivosViagem";
 import ConformidadeViagem, { RequisitosEntrada } from "./ConformidadeViagem";
+import AlertasViagem, { CSS_PISCA } from "./AlertasViagem";
+import LinhaDoTempo from "./LinhaDoTempo";
+import { conferirViagens, type Analise } from "../lib/problemas";
 import { TOM_FASE } from "./ViagensDoCliente";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
@@ -258,6 +261,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState(false);
   const [addPass, setAddPass] = useState(false);
+  // o conferente (lib/problemas.ts): riscos + os trechos que a linha do tempo desenha
+  const [analise, setAnalise] = useState<Analise | null>(null);
+  const [aba, setAba] = useState<"dia" | "tipo">("dia");
 
   const carregar = useCallback(async () => {
     try {
@@ -277,6 +283,20 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   }, [id]);
   useEffect(() => { setV(null); void carregar(); }, [carregar]);
   useEffect(() => { listarEquipeRel().then(setEquipe).catch(() => setEquipe([])); }, []);
+  const chaveConf = v ? `${v.id}|${v.data_embarque}|${v.data_retorno}|${v.status}|${v.tipo}|${pass.length}|${versao}` : "";
+  useEffect(() => {
+    if (!v) return;
+    let vivo = true;
+    conferirViagens([v]).then((m) => { if (vivo) setAnalise(m.get(v.id) ?? { problemas: [], trechos: [] }); }).catch(() => { if (vivo) setAnalise({ problemas: [], trechos: [] }); });
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chaveConf]);
+  // alerta clicado → mostra a linha do tempo pra ele achar o trecho
+  useEffect(() => {
+    const ir = () => setAba("dia");
+    window.addEventListener("rel-ir-trecho", ir);
+    return () => window.removeEventListener("rel-ir-trecho", ir);
+  }, []);
 
   const pessoas = useMemo(() => pass.filter((p) => p.cliente).map((p) => ({ id: p.cliente_id, nome: p.cliente!.nome })), [pass]);
 
@@ -290,6 +310,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
   const ativa = v.status === "ativa";
   const revisou = () => { setVersao((n) => n + 1); void carregar(); };
+  const mudouTrecho = () => setVersao((n) => n + 1);
   const retornoMaisSeis = (() => {
     const base = v.data_retorno || v.data_embarque;
     if (!base) return null;
@@ -301,6 +322,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
   return (
     <div className="w-full space-y-4">
+      <style>{CSS_PISCA}</style>
       <button onClick={onVoltar} className="inline-flex items-center gap-1 text-[13px] font-semibold" style={{ color: "var(--ink3)" }}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
         Viagens
@@ -353,6 +375,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
       </div>
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
+
+      {/* O que pode dar errado — sempre à vista, logo abaixo do topo */}
+      <AlertasViagem problemas={analise?.problemas ?? null} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-[minmax(300px,1fr)_minmax(0,1.6fr)_minmax(320px,1.1fr)] gap-4 items-start">
         {/* Esquerda — a venda e as pessoas */}
@@ -430,8 +455,19 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
         {/* Meio — o roteiro */}
         <div className="min-w-0">
-          <Secao titulo="Voos, trens, transfers e hotéis">
-            <RoteiroViagem viagemId={v.id} ativa={ativa} versao={versao} />
+          <Secao titulo="Roteiro" acao={
+            <div className="flex gap-1 p-0.5 rounded-lg" style={{ background: "var(--card2)" }} role="tablist" aria-label="Ver o roteiro">
+              {([["dia", "Dia a dia"], ["tipo", "Por tipo"]] as const).map(([id, r]) => (
+                <button key={id} role="tab" aria-selected={aba === id} onClick={() => setAba(id)} className="px-3 py-1.5 rounded-md text-[12.5px] font-semibold"
+                  style={aba === id ? { background: "var(--card)", color: "var(--rel-ink)", boxShadow: "0 1px 2px rgba(0,0,0,.08)" } : { color: "var(--ink2)" }}>{r}</button>
+              ))}
+            </div>
+          }>
+            {aba === "dia"
+              ? (analise
+                ? <LinhaDoTempo viagemId={v.id} trechos={analise.trechos} problemas={analise.problemas} dataIda={v.data_embarque} dataVolta={v.data_retorno} ativa={ativa} onMudou={mudouTrecho} />
+                : <div className="h-40 rounded-xl animate-pulse" style={{ background: "var(--card2)" }} />)
+              : <RoteiroViagem viagemId={v.id} ativa={ativa} versao={versao} onMudou={mudouTrecho} />}
           </Secao>
         </div>
 

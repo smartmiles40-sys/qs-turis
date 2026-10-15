@@ -462,6 +462,8 @@ export interface Trecho {
   checkin_abre_em: string | null;
   /** De onde veio o trecho (0115): manual, expedicoes, bitrix ou ia. */
   fonte?: "manual" | "expedicoes" | "bitrix" | "ia";
+  /** Documento de onde a IA tirou o trecho (0115) — passeio sem ele = sem voucher. */
+  documento_id?: string | null;
   checkin_feito_em: string | null;
   checkin_feito_por: string | null;
   // Tudo que está no bilhete/voucher (0139) — a IA preenche; dá pra editar à mão.
