@@ -96,7 +96,8 @@ const STR = { type: ['string', 'null'] };
 const SEGMENTO = {
   type: 'object', additionalProperties: false,
   required: ['categoria', 'origem', 'origem_codigo', 'origem_pais', 'destino', 'destino_codigo', 'destino_pais',
-    'partida_local', 'partida_fuso', 'chegada_local', 'chegada_fuso', 'companhia', 'numero', 'classe', 'bagagem', 'nome_local'],
+    'partida_local', 'partida_fuso', 'chegada_local', 'chegada_fuso', 'companhia', 'numero', 'classe', 'bagagem', 'nome_local',
+    'terminal_partida', 'terminal_chegada', 'assento', 'numero_bilhete', 'passageiros', 'ponto_encontro', 'contato', 'endereco', 'observacao'],
   properties: {
     categoria: { type: 'string', enum: ['voo_internacional', 'voo_interno', 'transfer', 'trem', 'hospedagem', 'passeio'] },
     origem: { ...STR, description: 'cidade de origem (hotel: cidade do hotel)' },
@@ -111,6 +112,15 @@ const SEGMENTO = {
     numero: { ...STR, description: 'nº do voo ou trem, ex.: LA8084' },
     classe: STR, bagagem: STR,
     nome_local: { ...STR, description: 'nome do hotel, do passeio ou do ponto do transfer' },
+    terminal_partida: { ...STR, description: 'terminal/portão de embarque, se impresso' },
+    terminal_chegada: STR,
+    assento: STR,
+    numero_bilhete: { ...STR, description: 'nº do e-ticket / bilhete (ex.: 957-2412345678)' },
+    passageiros: { type: 'array', items: { type: 'string' }, description: 'passageiros DESTE trecho, se o documento separa' },
+    ponto_encontro: { ...STR, description: 'transfer/passeio: onde o motorista/guia encontra (ex.: saguão do hotel, portão B)' },
+    contato: { ...STR, description: 'telefone/WhatsApp do motorista, fornecedor, hotel ou guia' },
+    endereco: { ...STR, description: 'endereço do hotel ou do passeio' },
+    observacao: { ...STR, description: 'outra informação útil deste trecho, curta (ex.: café incluso, 15 min de tolerância)' },
   },
 };
 const ESQUEMA = {
@@ -146,6 +156,8 @@ const INSTRUCAO =
   'são do MESMO país e voo_internacional quando são de países diferentes. Transfer = deslocamento terrestre ' +
   '(aeroporto↔hotel, cidade↔cidade de carro/van/ônibus). Hotel = segmento hospedagem (partida=check-in, ' +
   'chegada=check-out). Datas e horas no horário LOCAL do lugar, formato AAAA-MM-DDTHH:MM, com o fuso se souber. ' +
+  'Transfer e passeio: partida_local = HORA DA BUSCA/encontro. Copie tudo que estiver impresso: terminal, assento, ' +
+  'nº do e-ticket, bagagem, classe, ponto de encontro, telefone de contato, endereço do hotel. ' +
   'Se não for um documento de viagem ou estiver ilegível, legivel=false.';
 
 async function chamarIa(conteudo, prazo) {
@@ -307,6 +319,11 @@ function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
         partida_em: p.iso, chegada_em: c.iso && c.iso >= p.iso ? c.iso : null,
         companhia: s.companhia || null, numero: s.numero || null, nome_local: s.nome_local || null,
         classe: s.classe || null, bagagem: s.bagagem || null,
+        partida_fuso: p.chutado ? null : s.partida_fuso, chegada_fuso: c.chutado ? null : (s.chegada_fuso || s.partida_fuso),
+        terminal_partida: s.terminal_partida || null, terminal_chegada: s.terminal_chegada || null,
+        assento: s.assento || null, numero_bilhete: s.numero_bilhete || null,
+        passageiros: (s.passageiros && s.passageiros.length ? s.passageiros : L.passageiros || []).filter(Boolean),
+        ponto_encontro: s.ponto_encontro || null, contato: s.contato || null, endereco: s.endereco || null, observacoes: s.observacao || null,
         localizador: L.localizador || null,
         confianca: l.fonte === 'bitrix' ? 0.6 : (L.passageiros?.length ? 0.9 : 0.75),
       });
@@ -317,7 +334,7 @@ function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
   const unicos = [];
   for (const s of segmentos.sort((a, b) => a.partida_em.localeCompare(b.partida_em))) {
     const igual = unicos.find((u) => mesmoTrecho(u, s));
-    if (igual) { for (const k of ['companhia', 'numero', 'chegada_em', 'localizador', 'nome_local']) igual[k] = igual[k] || s[k]; igual.confianca = Math.max(igual.confianca, s.confianca); }
+    if (igual) { for (const k of ['companhia', 'numero', 'chegada_em', 'localizador', 'nome_local', ...CAMPOS_EXTRA]) igual[k] = igual[k] || s[k]; igual.confianca = Math.max(igual.confianca, s.confianca); }
     else unicos.push({ ...s });
   }
 
@@ -355,8 +372,65 @@ function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
     `(${['voo_internacional', 'voo_interno', 'transfer', 'trem', 'hospedagem', 'passeio'].map((k) => [k, unicos.filter((s) => s.categoria === k).length]).filter(([, n]) => n).map(([k, n]) => `${n} ${k.replace('_', ' ')}`).join(', ') || 'nenhum'})`,
     graves ? `· ${graves} ponto(s) pra conferir` : status === 'incompleta' ? `· faltam ${!temBilhete ? 'bilhetes aéreos' : 'datas da viagem'}` : '· tudo bate com a viagem',
   ].join(' ');
-  return { segmentos: unicos, divergencias, avisos, passageiros_cobertos: cob, status, resumo };
+  return { segmentos: unicos, divergencias, avisos, passageiros_cobertos: cob, status, resumo, internacional, temBilhete, temSeguro };
 }
+
+/**
+ * QUANTO DA VENDA BATE (Bruno, 15/10): só documentação, passagens e roteiro.
+ * Cada item é uma conferência sim/não; a porcentagem é itens ok ÷ itens.
+ * Item que não se aplica (ex.: passaporte em viagem nacional) não entra.
+ */
+function conformidade({ viagem, passageiros, r }) {
+  const itens = [];
+  const add = (area, texto, ok) => itens.push({ area, texto, ok: Boolean(ok) });
+  const volta = viagem.data_retorno || viagem.data_embarque;
+  const seisMeses = volta ? (() => { const d = new Date(`${volta}T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() + 6); return d.toISOString().slice(0, 10); })() : null;
+  const cob = new Map(r.passageiros_cobertos.map((c) => [c.cliente_id, c]));
+  const graveDeDoc = r.divergencias.some((d) => d.gravidade === 'alta' && d.documento_id);
+
+  // Documentação
+  for (const p of passageiros) {
+    if (r.internacional) {
+      add('documentacao', `${p.nome}: passaporte cadastrado`, p.passaporte);
+      if (p.passaporte_validade && seisMeses) add('documentacao', `${p.nome}: passaporte vale 6 meses depois da volta`, p.passaporte_validade >= seisMeses);
+      add('documentacao', `${p.nome}: no seguro viagem`, cob.get(p.cliente_id)?.seguro);
+    }
+  }
+  if (r.internacional && !passageiros.length) add('documentacao', 'Passageiros com ficha na viagem', false);
+
+  // Passagens
+  const voos = r.segmentos.filter((x) => x.categoria.startsWith('voo'));
+  for (const p of passageiros) add('passagens', `${p.nome}: bilhete aéreo no nome`, cob.get(p.cliente_id)?.bilhete);
+  add('passagens', 'Os documentos são desta viagem (nomes e datas)', r.temBilhete && !graveDeDoc);
+  const perto = (a, b) => a && b && Math.abs(new Date(`${a}T12:00:00Z`) - new Date(`${b}T12:00:00Z`)) <= 86400_000;
+  if (viagem.data_embarque) add('passagens', 'Primeiro voo bate com a data de ida', voos.length && perto(diaDe(voos[0].partida_em), viagem.data_embarque));
+  if (viagem.data_retorno && viagem.data_retorno !== viagem.data_embarque) {
+    add('passagens', 'Último voo bate com a data de volta', voos.length > 1 && perto(diaDe(voos[voos.length - 1].partida_em), viagem.data_retorno));
+  }
+
+  // Roteiro
+  add('roteiro', 'Os trechos chegam ao destino vendido', r.segmentos.length && !r.divergencias.some((d) => /Nenhum trecho lido chega/.test(d.texto)));
+  for (let i = 0; i + 1 < voos.length; i++) {
+    const a = voos[i], b = voos[i + 1];
+    if (a.chegada_em && diaDe(b.partida_em) <= somaDias(diaDe(a.chegada_em), 1)) {
+      add('roteiro', `Conexão ${a.numero || a.destino || ''} → ${b.numero || b.origem || ''} dá tempo`, new Date(b.partida_em) - new Date(a.chegada_em) >= 45 * 60_000);
+    }
+  }
+  const datasFora = r.divergencias.filter((d) => /fora da viagem/.test(d.texto)).length;
+  add('roteiro', 'Datas dos documentos dentro da viagem', r.segmentos.length && !datasFora);
+
+  const areas = {};
+  for (const a of ['documentacao', 'passagens', 'roteiro']) {
+    const daArea = itens.filter((i) => i.area === a);
+    areas[a] = { ok: daArea.filter((i) => i.ok).length, total: daArea.length };
+  }
+  const ok = itens.filter((i) => i.ok).length;
+  return { pct: itens.length ? Math.round((ok / itens.length) * 100) : 0, ok, total: itens.length, areas, itens };
+}
+
+// Colunas da 0139 que a IA preenche (o resto do trecho já existia).
+const CAMPOS_EXTRA = ['origem_codigo', 'destino_codigo', 'partida_fuso', 'chegada_fuso', 'terminal_partida', 'terminal_chegada',
+  'classe', 'bagagem', 'assento', 'numero_bilhete', 'passageiros', 'ponto_encontro', 'contato', 'endereco', 'observacoes'];
 
 function diaDe(iso) { return String(iso || '').slice(0, 10); }
 function mesmoTrecho(a, b) {
@@ -381,21 +455,22 @@ async function aplicarTrechos(viagemId, segmentos, existentes) {
     ));
     if (igual && igual.fonte !== 'ia') {
       const patch = {};
-      for (const [k, v] of [['companhia', s.companhia], ['numero', s.numero], ['localizador', s.localizador], ['chegada_em', s.chegada_em], ['origem', s.origem], ['destino', s.destino]]) {
-        if (!igual[k] && v) patch[k] = v;
+      for (const [k, v] of [['companhia', s.companhia], ['numero', s.numero], ['localizador', s.localizador], ['chegada_em', s.chegada_em], ['origem', s.origem], ['destino', s.destino], ...CAMPOS_EXTRA.map((c) => [c, s[c]])]) {
+        if ((!igual[k] || (Array.isArray(igual[k]) && !igual[k].length)) && v && (!Array.isArray(v) || v.length)) patch[k] = v;
       }
       if (Object.keys(patch).length) { await rest(`rel_viagem_trechos?id=eq.${igual.id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' }); conta.completados++; }
       continue;
     }
     const ref = 'ia:' + crypto.createHash('sha1').update([tipo, alnum(s.numero), diaDe(s.partida_em), alnum(s.origem_codigo || s.origem)].join('|')).digest('hex').slice(0, 16);
     refs.add(ref);
-    const descricao = [s.nome_local, s.classe && `classe ${s.classe}`, s.bagagem && `bagagem: ${s.bagagem}`].filter(Boolean).join(' · ') || null;
+    const descricao = s.nome_local || null;
     await rest('rel_viagem_trechos?on_conflict=viagem_id,ref_externa', {
       method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
       body: {
         viagem_id: viagemId, ref_externa: ref, fonte: 'ia', tipo, descricao,
         origem: s.origem, destino: s.destino, partida_em: s.partida_em, chegada_em: s.chegada_em,
         companhia: s.companhia, numero: s.numero, localizador: s.localizador,
+        ...Object.fromEntries(CAMPOS_EXTRA.map((c) => [c, s[c] ?? (c === 'passageiros' ? [] : null)])),
         ia_confianca: s.confianca, documento_id: s.documento_id || null,
       },
     });
@@ -416,15 +491,15 @@ async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS) {
   if (!viagem) throw Object.assign(new Error('Viagem não encontrada.'), { status: 404 });
 
   const [pass, docs, ligados, trechosAntes] = await Promise.all([
-    rest(`rel_viagem_passageiros?select=cliente_id,rel_clientes(nome)&viagem_id=eq.${viagemId}`),
+    rest(`rel_viagem_passageiros?select=cliente_id,rel_clientes(nome,passaporte,passaporte_validade)&viagem_id=eq.${viagemId}`),
     rest(`rel_documentos?select=id,tipo,descricao,arquivo_path,arquivo_nome,mime,tamanho,enviado_em,status&viagem_id=eq.${viagemId}&tipo=in.(${TIPOS_DOC.join(',')})&status=neq.recusado&order=enviado_em.desc&limit=${MAX_DOCS}`),
     rest(`rel_viagem_deals?select=bitrix_deal_id,funil,bitrix_dados&viagem_id=eq.${viagemId}`).catch(() => []),
     rest(`rel_viagem_trechos?select=*&viagem_id=eq.${viagemId}&order=partida_em.asc`),
   ]);
-  const passageiros = (pass || []).map((p) => ({ cliente_id: p.cliente_id, nome: p.rel_clientes?.nome || '' }));
+  const passageiros = (pass || []).map((p) => ({ cliente_id: p.cliente_id, nome: p.rel_clientes?.nome || '', passaporte: p.rel_clientes?.passaporte || null, passaporte_validade: p.rel_clientes?.passaporte_validade || null }));
 
   // reaproveita leitura de documento que não mudou
-  const cache = new Map(((viagem.ia_revisao?.documentos) || []).filter((d) => d.lido && !d.erro).map((d) => [d.documento_id || d.fonte, d]));
+  const cache = new Map((((viagem.ia_revisao?.versao || 1) >= 2 && viagem.ia_revisao?.documentos) || []).filter((d) => d.lido && !d.erro).map((d) => [d.documento_id || d.fonte, d]));
   const leituras = [];
   const fila = [];
   for (const d of docs || []) {
@@ -485,7 +560,8 @@ async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS) {
   const semNada = !(docs || []).length && !txt;
 
   const ia_revisao = {
-    versao: 1,
+    versao: 2,
+    conformidade: conformidade({ viagem, passageiros, r }),
     documentos: leituras.map((l) => ({ fonte: l.fonte, documento_id: l.documento_id, arquivo_nome: l.arquivo_nome, tipo_cadastro: l.tipo_cadastro, hash: l.hash, lido: l.lido, lido_em: l.lido_em, erro: l.erro })),
     segmentos: r.segmentos,
     divergencias: r.divergencias,

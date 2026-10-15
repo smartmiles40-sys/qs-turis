@@ -28,9 +28,15 @@ function paraInput(iso: string | null): string {
 }
 const doInput = (v: string) => (v ? new Date(v).toISOString() : null);
 
-const VAZIO = { tipo: "voo_internacional" as TipoTrecho, descricao: "", origem: "", destino: "", partida: "", chegada: "", companhia: "", numero: "", localizador: "", checkin: "" };
+const VAZIO = {
+  tipo: "voo_internacional" as TipoTrecho, descricao: "", origem: "", destino: "", partida: "", chegada: "", companhia: "", numero: "", localizador: "", checkin: "",
+  // 0139 — o que está no bilhete/voucher
+  partida_fuso: "", chegada_fuso: "", terminal_partida: "", terminal_chegada: "", classe: "", bagagem: "", assento: "", numero_bilhete: "",
+  passageiros: "", ponto_encontro: "", contato: "", endereco: "", observacoes: "",
+};
+const FUSO = /^[+-]\d{2}:\d{2}$/;
 
-function EditarTrecho({ aberto, viagemId, trecho, onFechar, onSalvo }: {
+export function EditarTrecho({ aberto, viagemId, trecho, onFechar, onSalvo }: {
   aberto: boolean; viagemId: string; trecho: Trecho | null; onFechar: () => void; onSalvo: () => void;
 }) {
   const [f, setF] = useState(VAZIO);
@@ -44,16 +50,26 @@ function EditarTrecho({ aberto, viagemId, trecho, onFechar, onSalvo }: {
       tipo: trecho.tipo, descricao: trecho.descricao ?? "", origem: trecho.origem ?? "", destino: trecho.destino ?? "",
       partida: paraInput(trecho.partida_em), chegada: paraInput(trecho.chegada_em), companhia: trecho.companhia ?? "",
       numero: trecho.numero ?? "", localizador: trecho.localizador ?? "", checkin: paraInput(trecho.checkin_abre_em),
+      partida_fuso: trecho.partida_fuso ?? "", chegada_fuso: trecho.chegada_fuso ?? "", terminal_partida: trecho.terminal_partida ?? "",
+      terminal_chegada: trecho.terminal_chegada ?? "", classe: trecho.classe ?? "", bagagem: trecho.bagagem ?? "", assento: trecho.assento ?? "",
+      numero_bilhete: trecho.numero_bilhete ?? "", passageiros: (trecho.passageiros ?? []).join(", "), ponto_encontro: trecho.ponto_encontro ?? "",
+      contato: trecho.contato ?? "", endereco: trecho.endereco ?? "", observacoes: trecho.observacoes ?? "",
     } : VAZIO);
   }, [aberto, trecho]);
 
   async function salvar() {
     if (!f.partida) { setErro("Informe a data e a hora da partida."); return; }
     if (f.chegada && f.chegada < f.partida) { setErro("A chegada não pode ser antes da partida."); return; }
+    if ((f.partida_fuso && !FUSO.test(f.partida_fuso.trim())) || (f.chegada_fuso && !FUSO.test(f.chegada_fuso.trim()))) { setErro("Fuso no formato +09:00 ou -03:00."); return; }
+    const txt = (v: string) => v.trim() || null;
     const dados: TrechoInput & { partida_em: string } = {
       tipo: f.tipo, descricao: f.descricao.trim() || null, origem: f.origem.trim() || null, destino: f.destino.trim() || null,
       partida_em: doInput(f.partida)!, chegada_em: doInput(f.chegada), companhia: f.companhia.trim() || null,
       numero: f.numero.trim().toUpperCase() || null, localizador: f.localizador.trim().toUpperCase() || null, checkin_abre_em: doInput(f.checkin),
+      partida_fuso: txt(f.partida_fuso), chegada_fuso: txt(f.chegada_fuso), terminal_partida: txt(f.terminal_partida), terminal_chegada: txt(f.terminal_chegada),
+      classe: txt(f.classe), bagagem: txt(f.bagagem), assento: txt(f.assento), numero_bilhete: txt(f.numero_bilhete),
+      passageiros: f.passageiros.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean),
+      ponto_encontro: txt(f.ponto_encontro), contato: txt(f.contato), endereco: txt(f.endereco), observacoes: txt(f.observacoes),
     };
     setOcupado(true); setErro(null);
     try {
@@ -64,6 +80,9 @@ function EditarTrecho({ aberto, viagemId, trecho, onFechar, onSalvo }: {
   }
 
   const ehVoo = f.tipo === "voo_internacional" || f.tipo === "voo_interno";
+  const ehBusca = f.tipo === "transfer" || f.tipo === "passeio";
+  const ehHotel = f.tipo === "hospedagem";
+  const set = (k: keyof typeof VAZIO) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   return (
     <Modal aberto={aberto} titulo={trecho ? "Editar trecho" : "Novo trecho"} onFechar={onFechar} largura={600}
       rodape={<><Botao variante="fantasma" onClick={onFechar}>Cancelar</Botao><Botao variante="primario" onClick={salvar} disabled={ocupado}>{ocupado ? "Salvando…" : "Salvar"}</Botao></>}>
@@ -77,15 +96,37 @@ function EditarTrecho({ aberto, viagemId, trecho, onFechar, onSalvo }: {
           <Campo rotulo={ehVoo ? "Companhia aérea" : "Empresa"}><Entrada value={f.companhia} onChange={(e) => setF({ ...f, companhia: e.target.value })} placeholder={ehVoo ? "Ex.: LATAM" : ""} /></Campo>
           <Campo rotulo="Saindo de"><Entrada value={f.origem} onChange={(e) => setF({ ...f, origem: e.target.value })} placeholder={ehVoo ? "Ex.: GRU" : ""} /></Campo>
           <Campo rotulo="Chegando em"><Entrada value={f.destino} onChange={(e) => setF({ ...f, destino: e.target.value })} placeholder={ehVoo ? "Ex.: NRT" : ""} /></Campo>
-          <Campo rotulo="Partida * (horário de Brasília)" dica="Converta a hora local do bilhete para o horário de Brasília."><Entrada type="datetime-local" value={f.partida} onChange={(e) => setF({ ...f, partida: e.target.value })} /></Campo>
-          <Campo rotulo="Chegada (horário de Brasília)"><Entrada type="datetime-local" value={f.chegada} onChange={(e) => setF({ ...f, chegada: e.target.value })} /></Campo>
+          <Campo rotulo={`${ehBusca ? "Hora da busca" : ehHotel ? "Check-in" : "Partida"} * (horário de Brasília)`} dica="Converta a hora local do bilhete para o horário de Brasília."><Entrada type="datetime-local" value={f.partida} onChange={(e) => setF({ ...f, partida: e.target.value })} /></Campo>
+          <Campo rotulo={`${ehHotel ? "Check-out" : "Chegada"} (horário de Brasília)`}><Entrada type="datetime-local" value={f.chegada} onChange={(e) => setF({ ...f, chegada: e.target.value })} /></Campo>
+          <Campo rotulo="Fuso do lugar da partida" dica="Ex.: +09:00 (Japão). Assim a tela mostra a hora local, a do bilhete."><Entrada value={f.partida_fuso} onChange={set("partida_fuso")} placeholder="-03:00" /></Campo>
+          <Campo rotulo="Fuso do lugar da chegada"><Entrada value={f.chegada_fuso} onChange={set("chegada_fuso")} placeholder="+09:00" /></Campo>
           <Campo rotulo={ehVoo ? "Nº do voo" : "Número / código"}><Entrada value={f.numero} onChange={(e) => setF({ ...f, numero: e.target.value })} placeholder={ehVoo ? "Ex.: LA8070" : ""} /></Campo>
           <Campo rotulo="Localizador"><Entrada value={f.localizador} onChange={(e) => setF({ ...f, localizador: e.target.value })} placeholder="Ex.: ABC123" /></Campo>
         </div>
         <Campo rotulo="Check-in abre em (horário de Brasília)" dica={ehVoo ? "Vazio = 48h antes da partida (o padrão das companhias)." : f.tipo === "trem" ? "Vazio = 24h antes da partida." : "Vazio = sem check-in."}>
           <Entrada type="datetime-local" value={f.checkin} onChange={(e) => setF({ ...f, checkin: e.target.value })} />
         </Campo>
-        <Campo rotulo="Observação"><Entrada value={f.descricao} onChange={(e) => setF({ ...f, descricao: e.target.value })} placeholder="Ex.: bagagem de 23 kg incluída" /></Campo>
+        {ehVoo && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <Campo rotulo="Terminal de embarque"><Entrada value={f.terminal_partida} onChange={set("terminal_partida")} placeholder="T3" /></Campo>
+            <Campo rotulo="Terminal de chegada"><Entrada value={f.terminal_chegada} onChange={set("terminal_chegada")} /></Campo>
+            <Campo rotulo="Classe"><Entrada value={f.classe} onChange={set("classe")} placeholder="Econômica" /></Campo>
+            <Campo rotulo="Bagagem"><Entrada value={f.bagagem} onChange={set("bagagem")} placeholder="1 x 23 kg" /></Campo>
+            <Campo rotulo="Assento"><Entrada value={f.assento} onChange={set("assento")} placeholder="32A" /></Campo>
+            <Campo rotulo="Nº do e-ticket"><Entrada value={f.numero_bilhete} onChange={set("numero_bilhete")} placeholder="957-…" /></Campo>
+          </div>
+        )}
+        {(ehBusca || ehHotel || f.tipo === "trem" || f.tipo === "outro") && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {!ehHotel && <Campo rotulo="Ponto de encontro" dica={ehBusca ? "Onde o motorista/guia espera (ex.: saguão do hotel, portão B)." : undefined}><Entrada value={f.ponto_encontro} onChange={set("ponto_encontro")} /></Campo>}
+            <Campo rotulo="Contato (motorista, fornecedor, hotel)"><Entrada value={f.contato} onChange={set("contato")} placeholder="+81 90 …" /></Campo>
+            {(ehHotel || f.tipo === "passeio") && <Campo rotulo="Endereço"><Entrada value={f.endereco} onChange={set("endereco")} /></Campo>}
+            {f.tipo === "trem" && <Campo rotulo="Assento / carro"><Entrada value={f.assento} onChange={set("assento")} /></Campo>}
+          </div>
+        )}
+        <Campo rotulo={ehHotel ? "Nome do hotel" : ehBusca ? "Nome / empresa / ponto" : "Descrição curta"}><Entrada value={f.descricao} onChange={(e) => setF({ ...f, descricao: e.target.value })} /></Campo>
+        <Campo rotulo="Passageiros deste trecho" dica="Separe por vírgula. Vazio = todos da viagem."><Entrada value={f.passageiros} onChange={set("passageiros")} /></Campo>
+        <Campo rotulo="Observações"><textarea className="rel-input" rows={2} value={f.observacoes} onChange={set("observacoes")} placeholder="Ex.: café da manhã incluso · motorista espera 15 min" /></Campo>
         {erro && <Aviso tom="erro">{erro}</Aviso>}
       </div>
     </Modal>

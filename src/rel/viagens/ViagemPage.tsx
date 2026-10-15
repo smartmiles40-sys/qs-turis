@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
   FASES, TIPOS_VIAGEM, adicionarPassageiro, apagarTarefa, carregarViagem, criarTarefa, dataBR, linkBitrix,
-  listarEquipeRel, listarPassageiros, listarTarefas, marcarTarefa, quandoEmbarca, removerPassageiro, salvarViagem,
+  listarEquipeRel, listarPassageiros, listarTarefas, marcarTarefa, quandoEmbarca, removerPassageiro, resumoDaVenda, salvarViagem,
   type Passageiro, type Tarefa, type TipoViagem, type Viagem, type ViagemInput,
 } from "../lib/viagens";
 import { buscarClientes, formatarTelefone, mesesParaVencer, type Cliente } from "../lib/clientes";
@@ -19,7 +19,10 @@ import { conversasDoCliente, type Conversa } from "../lib/whatsapp";
 import { Aviso, Avatar, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 import DocumentosPainel from "./DocumentosPainel";
 import RevisaoIaViagem from "./RevisaoIaViagem";
-import { RevisaoViagem, TrechosViagem } from "./TrechosViagem";
+import { RevisaoViagem } from "./TrechosViagem";
+import RoteiroViagem from "./RoteiroViagem";
+import ArquivosViagem from "./ArquivosViagem";
+import ConformidadeViagem, { RequisitosEntrada } from "./ConformidadeViagem";
 import { TOM_FASE } from "./ViagensDoCliente";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
@@ -235,16 +238,23 @@ function Jornada({ viagemId, ativa, recarregarViagem }: { viagemId: string; ativ
 }
 
 // ── Página ──────────────────────────────────────────────────────────────────
+// 15/10 (Bruno): ocupa a TELA TODA e dá pra entender tudo numa olhada.
+//   topo  — quem comprou, Bitrix, editar, o % que bate e "marcar como revisada"
+//   esq.  — dados da venda, quem viaja, recado do Comercial
+//   meio  — roteiro: voo principal, internos, trens, transfers, hotéis
+//   dir.  — revisão da IA, requisitos de entrada, jornada de revisão
+//   baixo — todos os arquivos, visuais
 
 export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConversa }: {
   id: string; onVoltar: () => void; onAbrirCliente: (id: string) => void; onAbrirConversa: (conversaId: string) => void;
 }) {
   const [v, setV] = useState<Viagem | null>(null);
-  // a revisão da IA grava trechos: muda a chave pra lista de trechos recarregar
-  const [versaoTrechos, setVersaoTrechos] = useState(0);
+  // a revisão da IA grava trechos e o %: muda a versão pra roteiro/arquivos/% recarregarem
+  const [versao, setVersao] = useState(0);
   const [pass, setPass] = useState<Passageiro[]>([]);
   const [equipe, setEquipe] = useState<{ id: string; name: string }[]>([]);
   const [conversa, setConversa] = useState<Conversa | null>(null);
+  const [venda, setVenda] = useState<{ closer: string | null; de: string | null; para: string | null }>({ closer: null, de: null, para: null });
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState(false);
   const [addPass, setAddPass] = useState(false);
@@ -254,12 +264,14 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
       const viagem = await carregarViagem(id);
       if (!viagem) { setErro("Viagem não encontrada."); return; }
       setV(viagem);
-      const [ps, conv] = await Promise.all([
+      const [ps, conv, rv] = await Promise.all([
         listarPassageiros(id),
         viagem.cliente_id ? conversasDoCliente(viagem.cliente_id).catch(() => []) : Promise.resolve([]),
+        resumoDaVenda(id).catch(() => ({ closer: null, de: null, para: null })),
       ]);
       setPass(ps);
       setConversa(conv[0] ?? null);
+      setVenda(rv);
       setErro(null);
     } catch (e) { setErro(e instanceof Error ? e.message : "Não abriu a viagem."); }
   }, [id]);
@@ -277,6 +289,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   }
 
   const ativa = v.status === "ativa";
+  const revisou = () => { setVersao((n) => n + 1); void carregar(); };
   const retornoMaisSeis = (() => {
     const base = v.data_retorno || v.data_embarque;
     if (!base) return null;
@@ -284,9 +297,10 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
     d.setMonth(d.getMonth() + 6);
     return d.toISOString().slice(0, 10);
   })();
+  const comprador = pass.find((p) => p.cliente_id === v.cliente_id)?.cliente?.nome || v.cliente_nome;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-4">
+    <div className="w-full space-y-4">
       <button onClick={onVoltar} className="inline-flex items-center gap-1 text-[13px] font-semibold" style={{ color: "var(--ink3)" }}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
         Viagens
@@ -294,121 +308,151 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
       {/* Cabeçalho */}
       <div className="rel-card p-4 sm:p-5">
-        <div className="flex flex-wrap items-start gap-3">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-bold leading-tight" style={{ color: "var(--ink)" }}>{v.titulo}</h1>
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_420px] gap-4 items-start">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold leading-tight" style={{ color: "var(--ink)" }}>{v.titulo}</h1>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               <Etiqueta tom={TOM_FASE[v.fase]}>{FASES[v.fase]}</Etiqueta>
               <Etiqueta>{TIPOS_VIAGEM[v.tipo]}</Etiqueta>
               <span className="text-[13px]" style={{ color: "var(--ink2)" }}>{quandoEmbarca(v)}</span>
               {v.tarefas_atrasadas > 0 && <Etiqueta tom="erro">{v.tarefas_atrasadas} tarefa{v.tarefas_atrasadas > 1 ? "s" : ""} atrasada{v.tarefas_atrasadas > 1 ? "s" : ""}</Etiqueta>}
+              {!ativa && <Etiqueta tom="erro">Cancelada</Etiqueta>}
             </div>
-            {ativa && <div className="mt-3"><RevisaoViagem viagemId={v.id} equipe={equipe} /></div>}
+            <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Responsável da compra</dt>
+                <dd className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>
+                  {v.cliente_id && comprador ? <button className="underline-offset-2 hover:underline" onClick={() => onAbrirCliente(v.cliente_id!)}>{comprador}</button> : "sem cliente"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Ida × volta</dt>
+                <dd className="text-[15px] font-semibold tabular-nums" style={{ color: "var(--ink)" }}>{dataBR(v.data_embarque) || "—"} <span style={{ color: "var(--ink3)" }}>×</span> {dataBR(v.data_retorno) || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>De → para</dt>
+                <dd className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>{venda.de || "—"} → {venda.para || v.destino || "—"}</dd>
+              </div>
+            </dl>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              {v.bitrix_deal_id && (
+                <a href={linkBitrix(v.bitrix_deal_id)} target="_blank" rel="noreferrer"
+                  className="inline-flex items-center px-3.5 py-2 rounded-lg text-[13px] font-semibold"
+                  style={{ background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" }}>
+                  Card no Bitrix #{v.bitrix_deal_id}
+                </a>
+              )}
+              <Botao onClick={() => setEditando(true)}>Editar</Botao>
+              {/* "Cancelar viagem" saiu daqui (Bruno, 15/10). Cancelada no Bitrix, cancela sozinha; reativar continua. */}
+              {!ativa && <Botao onClick={() => void acao(() => salvarViagem(v.id, { status: "ativa" }))}>Reativar</Botao>}
+              {ativa && <RevisaoViagem viagemId={v.id} equipe={equipe} />}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {v.bitrix_deal_id && (
-              <a href={linkBitrix(v.bitrix_deal_id)} target="_blank" rel="noreferrer"
-                className="inline-flex items-center px-3.5 py-2 rounded-lg text-[13px] font-semibold"
-                style={{ background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" }}>
-                Card no Bitrix #{v.bitrix_deal_id}
-              </a>
-            )}
-            <Botao onClick={() => setEditando(true)}>Editar</Botao>
-            {ativa
-              ? <Botao variante="perigo" onClick={() => { if (window.confirm("Cancelar esta viagem? As tarefas pendentes da jornada saem da lista.")) void acao(() => salvarViagem(v.id, { status: "cancelada" })); }}>Cancelar viagem</Botao>
-              : <Botao onClick={() => void acao(() => salvarViagem(v.id, { status: "ativa" }))}>Reativar</Botao>}
-          </div>
+          <ConformidadeViagem viagemId={v.id} versao={versao} onRevisado={revisou} />
         </div>
       </div>
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Secao titulo="Dados da venda">
-          <dl>
-            <Linha rotulo="Período">{v.data_embarque ? (v.data_retorno && v.data_retorno !== v.data_embarque ? `${dataBR(v.data_embarque)} a ${dataBR(v.data_retorno)}` : dataBR(v.data_embarque)) : ""}</Linha>
-            <Linha rotulo="Destino">{v.destino}</Linha>
-            <Linha rotulo="Expedição">{v.expedicao}</Linha>
-            <Linha rotulo="Valor">{moeda(v.valor)}</Linha>
-            <Linha rotulo="Vendida em">{dataBR(v.data_venda)}</Linha>
-            <Linha rotulo="Passageiros">{v.qtd_passageiros ? `${v.qtd_passageiros} vendido(s) · ${v.passageiros} com ficha` : `${v.passageiros} com ficha`}</Linha>
-            <Linha rotulo="Responsável">
-              <select className="rel-input" style={{ padding: "5px 8px", fontSize: 13, width: "auto", minWidth: 180 }}
-                value={v.responsavel_id ?? ""}
-                onChange={(e) => void acao(() => salvarViagem(v.id, { responsavel_id: e.target.value || null }))}>
-                <option value="">ninguém</option>
-                {equipe.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-            </Linha>
-          </dl>
-        </Secao>
+      <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-[minmax(300px,1fr)_minmax(0,1.6fr)_minmax(320px,1.1fr)] gap-4 items-start">
+        {/* Esquerda — a venda e as pessoas */}
+        <div className="space-y-4 min-w-0">
+          <Secao titulo="Dados da venda">
+            <dl>
+              <Linha rotulo="Ida × volta">{v.data_embarque ? `${dataBR(v.data_embarque)} × ${dataBR(v.data_retorno) || "—"}` : ""}</Linha>
+              <Linha rotulo="De → para">{venda.de || venda.para || v.destino ? `${venda.de || "—"} → ${venda.para || v.destino || "—"}` : ""}</Linha>
+              <Linha rotulo="Venda">{[dataBR(v.data_venda), venda.closer && `por ${venda.closer}`].filter(Boolean).join(" ")}</Linha>
+              <Linha rotulo="Passageiros">{v.qtd_passageiros ? `${v.qtd_passageiros} vendido(s) · ${v.passageiros} com ficha` : `${v.passageiros} com ficha`}</Linha>
+              {v.expedicao && <Linha rotulo="Expedição">{v.expedicao}</Linha>}
+              <Linha rotulo="Valor">{moeda(v.valor)}</Linha>
+              <Linha rotulo="Cuida no Rel.">
+                <select className="rel-input" style={{ padding: "5px 8px", fontSize: 13, width: "auto", minWidth: 160 }}
+                  value={v.responsavel_id ?? ""}
+                  onChange={(e) => void acao(() => salvarViagem(v.id, { responsavel_id: e.target.value || null }))}>
+                  <option value="">ninguém</option>
+                  {equipe.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </Linha>
+            </dl>
+          </Secao>
 
-        <Secao titulo="Do Comercial para o Relacionamento">
-          {v.observacoes || v.necessidades ? (
-            <div className="space-y-2">
-              {v.observacoes && <p className="text-[14px] whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{v.observacoes}</p>}
-              {v.necessidades && (
-                <Aviso><b>Necessidade especial:</b> {v.necessidades}</Aviso>
-              )}
-            </div>
-          ) : (
-            <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhuma observação. No Bitrix é o campo "Observações finais para o time de relacionamento".</p>
-          )}
-          {v.cliente_id && (
-            <div className="mt-3 pt-3 flex flex-wrap gap-2" style={{ borderTop: "1px solid var(--line2)" }}>
-              {conversa
-                ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirConversa(conversa.id)}>Abrir conversa no WhatsApp</Botao>
-                : <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirCliente(v.cliente_id!)}>Falar com o cliente (ficha)</Botao>}
-            </div>
-          )}
-        </Secao>
+          <Secao titulo="Quem viaja" acao={ativa ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setAddPass(true)}>+ Passageiro</Botao> : undefined}>
+            {pass.length === 0 && <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhum passageiro com ficha.</p>}
+            <ul>
+              {pass.map((p) => {
+                const c = p.cliente;
+                if (!c) return null;
+                const meses = mesesParaVencer(c.passaporte_validade);
+                const passaporteCurto = !!(c.passaporte_validade && retornoMaisSeis && c.passaporte_validade < retornoMaisSeis);
+                return (
+                  <li key={p.id} className="flex flex-wrap items-center gap-3 py-2" style={{ borderTop: "1px solid var(--line2)" }}>
+                    <Avatar nome={c.nome} tamanho={32} />
+                    <button onClick={() => onAbrirCliente(c.id)} className="flex-1 min-w-0 text-left">
+                      <span className="block text-[14px] font-semibold truncate" style={{ color: "var(--ink)" }}>
+                        {c.nome}{c.id === v.cliente_id ? <span className="font-normal" style={{ color: "var(--ink3)" }}> · comprou</span> : null}
+                      </span>
+                      <span className="block text-[12px]" style={{ color: "var(--ink3)" }}>
+                        {formatarTelefone(c.telefone) || "sem telefone"}
+                        {c.passaporte ? ` · passaporte ${c.passaporte}` : " · sem passaporte"}
+                        {c.passaporte_validade ? ` até ${dataBR(c.passaporte_validade)}` : ""}
+                      </span>
+                    </button>
+                    {passaporteCurto && <Etiqueta tom="erro">passaporte vence antes de 6 meses da volta</Etiqueta>}
+                    {!passaporteCurto && meses !== null && meses < 0 && <Etiqueta tom="erro">passaporte vencido</Etiqueta>}
+                    {p.bitrix_deal_id && <Etiqueta>card #{p.bitrix_deal_id}</Etiqueta>}
+                    {c.id !== v.cliente_id && ativa && (
+                      <Botao variante="fantasma" title="Tirar da viagem" onClick={() => { if (window.confirm(`Tirar ${c.nome} desta viagem?`)) void acao(() => removerPassageiro(p.id)); }}>×</Botao>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </Secao>
+
+          <Secao titulo="Do Comercial para o Relacionamento">
+            {v.observacoes || v.necessidades ? (
+              <div className="space-y-2">
+                {v.observacoes && <p className="text-[14px] whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{v.observacoes}</p>}
+                {v.necessidades && <Aviso><b>Necessidade especial:</b> {v.necessidades}</Aviso>}
+              </div>
+            ) : (
+              <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhuma observação. No Bitrix é o campo "Observações finais para o time de relacionamento".</p>
+            )}
+            {v.cliente_id && (
+              <div className="mt-3 pt-3 flex flex-wrap gap-2" style={{ borderTop: "1px solid var(--line2)" }}>
+                {conversa
+                  ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirConversa(conversa.id)}>Abrir conversa no WhatsApp</Botao>
+                  : <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirCliente(v.cliente_id!)}>Falar com o cliente (ficha)</Botao>}
+              </div>
+            )}
+          </Secao>
+        </div>
+
+        {/* Meio — o roteiro */}
+        <div className="min-w-0">
+          <Secao titulo="Voos, trens, transfers e hotéis">
+            <RoteiroViagem viagemId={v.id} ativa={ativa} versao={versao} />
+          </Secao>
+        </div>
+
+        {/* Direita — revisão e o que falta */}
+        <div className="space-y-4 min-w-0 lg:col-span-2 2xl:col-span-1">
+          <RevisaoIaViagem key={versao} viagemId={v.id} onRevisado={revisou} />
+          <Secao titulo="Requisitos de entrada">
+            <RequisitosEntrada destino={venda.para || v.destino} />
+          </Secao>
+          <Secao titulo="Jornada de revisão">
+            <Jornada viagemId={v.id} ativa={ativa} recarregarViagem={() => void carregar()} />
+          </Secao>
+        </div>
       </div>
 
-      <Secao titulo="Quem viaja" acao={ativa ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setAddPass(true)}>+ Passageiro</Botao> : undefined}>
-        {pass.length === 0 && <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhum passageiro com ficha.</p>}
-        <ul>
-          {pass.map((p) => {
-            const c = p.cliente;
-            if (!c) return null;
-            const meses = mesesParaVencer(c.passaporte_validade);
-            const passaporteCurto = !!(c.passaporte_validade && retornoMaisSeis && c.passaporte_validade < retornoMaisSeis);
-            return (
-              <li key={p.id} className="flex flex-wrap items-center gap-3 py-2" style={{ borderTop: "1px solid var(--line2)" }}>
-                <Avatar nome={c.nome} tamanho={32} />
-                <button onClick={() => onAbrirCliente(c.id)} className="flex-1 min-w-0 text-left">
-                  <span className="block text-[14px] font-semibold truncate" style={{ color: "var(--ink)" }}>
-                    {c.nome}{c.id === v.cliente_id ? <span className="font-normal" style={{ color: "var(--ink3)" }}> · comprou</span> : null}
-                  </span>
-                  <span className="block text-[12px]" style={{ color: "var(--ink3)" }}>
-                    {formatarTelefone(c.telefone) || "sem telefone"}
-                    {c.passaporte ? ` · passaporte ${c.passaporte}` : " · sem passaporte"}
-                    {c.passaporte_validade ? ` até ${dataBR(c.passaporte_validade)}` : ""}
-                  </span>
-                </button>
-                {passaporteCurto && <Etiqueta tom="erro">passaporte vence antes de 6 meses da volta</Etiqueta>}
-                {!passaporteCurto && meses !== null && meses < 0 && <Etiqueta tom="erro">passaporte vencido</Etiqueta>}
-                {p.bitrix_deal_id && <Etiqueta>card #{p.bitrix_deal_id}</Etiqueta>}
-                {c.id !== v.cliente_id && ativa && (
-                  <Botao variante="fantasma" title="Tirar da viagem" onClick={() => { if (window.confirm(`Tirar ${c.nome} desta viagem?`)) void acao(() => removerPassageiro(p.id)); }}>×</Botao>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </Secao>
-
-      <RevisaoIaViagem viagemId={v.id} onRevisado={() => setVersaoTrechos((n) => n + 1)} />
-
-      <Secao titulo="Trechos (voos, trens, transfers)">
-        <TrechosViagem key={versaoTrechos} viagemId={v.id} ativa={ativa} />
-      </Secao>
-
-      <Secao titulo="Jornada do cliente">
-        <Jornada viagemId={v.id} ativa={ativa} recarregarViagem={() => void carregar()} />
-      </Secao>
-
-      <Secao titulo="Documentos">
-        <DocumentosPainel pessoas={pessoas} viagemId={v.id} />
+      <Secao titulo="Arquivos da viagem">
+        <ArquivosViagem viagemId={v.id} pessoas={pessoas} versao={versao} />
+        <details className="mt-4 pt-3" style={{ borderTop: "1px solid var(--line2)" }}>
+          <summary className="cursor-pointer text-[13px] font-semibold" style={{ color: "var(--rel-ink)" }}>Gerenciar documentos (enviar, aprovar, pedir ao cliente)</summary>
+          <div className="mt-3"><DocumentosPainel pessoas={pessoas} viagemId={v.id} /></div>
+        </details>
       </Secao>
 
       <EditarViagem aberto={editando} v={v} onFechar={() => setEditando(false)} onSalvo={() => { setEditando(false); void carregar(); }} />

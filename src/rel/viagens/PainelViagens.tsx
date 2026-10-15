@@ -13,7 +13,7 @@
 // -----------------------------------------------------------------------------
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
-  grupoTipo, hojeSP, proximosTrechos, revisoesDe, viagensEmAndamento, TIPOS_TRECHO,
+  grupoTipo, horaDoLugar, hojeSP, proximosTrechos, revisoesDe, trechosDasViagens, viagensEmAndamento, TIPOS_TRECHO,
   type Revisao, type Trecho, type Viagem,
 } from "../lib/viagens";
 import { Aviso } from "../ui";
@@ -190,6 +190,91 @@ function Quadro({ titulo, cor, partidas, onAbrirViagem }: { titulo: string; cor:
   );
 }
 
+// ── Quadro dos PACOTES (Bruno, 15/10) ───────────────────────────────────────
+// Pacote é onde mais tem o que cruzar: cada linha é uma venda, com o voo de ida
+// (de onde, pra onde, hora local e localizador) e a situação da checagem.
+
+type SituacaoPac = "pendente" | "revisado" | "ida" | "volta";
+const SITUACAO_PAC: Record<SituacaoPac, { texto: string; cor: string }> = {
+  pendente: { texto: "PENDENTE CHECAGEM", cor: "#FFFFFF" },
+  revisado: { texto: "REVISADO ✓", cor: "#5BE3B0" },
+  ida: { texto: "VIAGEM DE IDA", cor: "#7CC4FF" },
+  volta: { texto: "VIAGEM DE VOLTA", cor: "#FF8A65" },
+};
+
+interface LinhaPac { v: Viagem; voo: Trecho | null; situacao: SituacaoPac }
+
+function situacaoPac(v: Viagem, revisada: boolean): SituacaoPac {
+  const hoje = hojeISO();
+  if (v.data_retorno && v.data_retorno === hoje && (v.fase === "em_viagem" || v.data_embarque !== hoje)) return "volta";
+  if (v.fase === "em_viagem" || v.data_embarque === hoje) return "ida";
+  return revisada ? "revisado" : "pendente";
+}
+
+function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirViagem: (id: string) => void }) {
+  const [todas, setTodas] = useState(false);
+  const lista = todas ? linhas : linhas.slice(0, 12);
+  const mono = { fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace" };
+  return (
+    <section className="rel-quadro rounded-2xl overflow-hidden" aria-label="Quadro de partidas — Pacotes" style={{ background: "#0B0F12", border: "1px solid #1C2328", boxShadow: "inset 0 1px 0 rgba(255,255,255,.04)" }}>
+      <div className="flex items-center justify-between px-4 py-2.5" style={{ background: "#11171B", borderBottom: "1px solid #1C2328" }}>
+        <h3 className="text-[13px] font-bold tracking-[.18em] uppercase flex items-center gap-2" style={{ color: COR_PAC, ...mono }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z" /></svg>
+          Partidas · Pacotes
+        </h3>
+        <span className="text-[11px]" style={{ color: "#8A979E", ...mono }}>{linhas.length} venda{linhas.length === 1 ? "" : "s"}</span>
+      </div>
+      {linhas.length === 0 ? (
+        <p className="px-4 py-6 text-[13px]" style={{ color: "#8A979E", ...mono }}>NENHUMA SAÍDA PROGRAMADA</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px]" style={{ ...mono, color: "#F2F2F2", minWidth: 900 }}>
+            <thead>
+              <tr className="text-left text-[10.5px] tracking-[.14em]" style={{ color: "#7D8A91" }}>
+                <th className="px-4 py-2 font-semibold">RESPONSÁVEL DA COMPRA</th>
+                <th className="px-2 py-2 font-semibold">DE</th>
+                <th className="px-2 py-2 font-semibold">PARA</th>
+                <th className="px-2 py-2 font-semibold">IDA</th>
+                <th className="px-2 py-2 font-semibold">LOCALIZADOR</th>
+                <th className="px-2 py-2 font-semibold text-right">PAX</th>
+                <th className="px-4 py-2 font-semibold text-right">SITUAÇÃO</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lista.map(({ v, voo, situacao }, i) => {
+                const s = SITUACAO_PAC[situacao];
+                const atraso = Math.min(i, 12) * 0.06;
+                const de = voo ? (voo.origem_codigo || voo.origem || "—") : "—";
+                const para = voo ? (voo.destino_codigo || voo.destino || v.destino || "—") : (v.destino || v.titulo);
+                const ida = voo ? horaDoLugar(voo.partida_em, voo.partida_fuso).texto : dataBoard(v.data_embarque);
+                const abrir = () => onAbrirViagem(v.id);
+                return (
+                  <tr key={v.id} className="rel-quadro-linha cursor-pointer" style={{ borderTop: "1px solid #182026" }} onClick={abrir}
+                    tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } }}
+                    aria-label={`${v.cliente_nome || v.titulo}, de ${de} para ${para}, ida ${ida}, ${pax(v)} passageiros, ${s.texto.replace(" ✓", "")}`}>
+                    <td className="px-4 py-2 uppercase max-w-[240px] truncate"><Flap texto={(v.cliente_nome || v.titulo).slice(0, 28)} atraso={atraso} /></td>
+                    <td className="px-2 py-2 uppercase max-w-[140px] truncate" style={{ color: "#B9C4C9" }}><Flap texto={de.slice(0, 16)} atraso={atraso} /></td>
+                    <td className="px-2 py-2 uppercase max-w-[160px] truncate"><Flap texto={para.slice(0, 18)} atraso={atraso} /></td>
+                    <td className="px-2 py-2 whitespace-nowrap" style={{ color: "#FFD54F" }}><Flap texto={ida} atraso={atraso} /></td>
+                    <td className="px-2 py-2 whitespace-nowrap tracking-wider" style={{ color: voo?.localizador ? "#F2F2F2" : "#5C6A71" }}>{voo?.localizador ? <Flap texto={voo.localizador} atraso={atraso} /> : "——"}</td>
+                    <td className="px-2 py-2 text-right tabular-nums" style={{ color: "#FFD54F" }}>{String(pax(v)).padStart(2, "0")}</td>
+                    <td className="px-4 py-2 text-right whitespace-nowrap font-bold"><Flap texto={s.texto} atraso={atraso + 0.1} cor={s.cor} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {linhas.length > 12 && (
+        <button onClick={() => setTodas((x) => !x)} className="rel-quadro-linha w-full py-3 text-[11.5px] tracking-[.12em] font-semibold" style={{ color: "#B9C4C9", borderTop: "1px solid #182026", ...mono }}>
+          {todas ? "MOSTRAR MENOS" : `VER TODAS AS ${linhas.length} VENDAS`}
+        </button>
+      )}
+    </section>
+  );
+}
+
 // ── Cards ───────────────────────────────────────────────────────────────────
 
 function Card({ titulo, children, rodape }: { titulo: string; children: React.ReactNode; rodape?: React.ReactNode }) {
@@ -221,6 +306,7 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
   const [viagens, setViagens] = useState<Viagem[] | null>(null);
   const [rev, setRev] = useState<Map<string, Revisao>>(new Map());
   const [trechos, setTrechos] = useState<Trecho[]>([]);
+  const [voosPac, setVoosPac] = useState<Map<string, Trecho>>(new Map());
   const [erro, setErro] = useState<string | null>(null);
   // Falha parcial (trechos ou revisões): o painel abre, mas avisa — senão
   // "nenhum voo" ou "tudo PENDENTE" pareceria verdade.
@@ -233,9 +319,15 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
       try {
         const falhas: string[] = [];
         const [vs, ts] = await Promise.all([viagensEmAndamento(), proximosTrechos().catch(() => { falhas.push("os voos e trechos"); return [] as Trecho[]; })]);
-        const rv = await revisoesDe(vs.map((v) => v.id)).catch(() => { falhas.push("as revisões"); return new Map<string, Revisao>(); });
+        const [rv, tp] = await Promise.all([
+          revisoesDe(vs.map((v) => v.id)).catch(() => { falhas.push("as revisões"); return new Map<string, Revisao>(); }),
+          trechosDasViagens(vs.filter((v) => grupoTipo(v.tipo) === "pacote").map((v) => v.id)).catch(() => { falhas.push("os voos dos pacotes"); return [] as Trecho[]; }),
+        ]);
+        // o voo de ida de cada pacote = o primeiro voo (internacional ou interno)
+        const vp = new Map<string, Trecho>();
+        for (const t of tp) if ((t.tipo === "voo_internacional" || t.tipo === "voo_interno") && !vp.has(t.viagem_id)) vp.set(t.viagem_id, t);
         if (!vivo) return;
-        setViagens(vs); setTrechos(ts); setRev(rv); setErro(null);
+        setViagens(vs); setTrechos(ts); setRev(rv); setVoosPac(vp); setErro(null);
         setAviso(falhas.length ? `Não consegui carregar ${falhas.join(" e ")} — os números abaixo podem estar incompletos.` : null);
       } catch (e) {
         if (vivo) { setErro(e instanceof Error ? e.message : "Não carregou o painel."); setViagens([]); }
@@ -267,7 +359,11 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
 
   const partidas = useMemo(() => montarPartidas(viagens ?? [], rev, trechos), [viagens, rev, trechos]);
   const partidasExp = partidas.filter((p) => p.tipo === "expedicao");
-  const partidasPac = partidas.filter((p) => p.tipo === "pacote");
+  const linhasPac = useMemo<LinhaPac[]>(() => (viagens ?? [])
+    .filter((v) => grupoTipo(v.tipo) === "pacote")
+    .map((v) => ({ v, voo: voosPac.get(v.id) ?? null, situacao: situacaoPac(v, !!rev.get(v.id)?.revisado_em) }))
+    .sort((a, b) => (a.voo?.partida_em ?? a.v.data_embarque ?? "9999").localeCompare(b.voo?.partida_em ?? b.v.data_embarque ?? "9999")),
+  [viagens, voosPac, rev]);
 
   const hoje = hojeISO();
   const proxEmbarque = (t: "expedicao" | "pacote") => partidas.find((p) => p.tipo === t && p.data && p.data >= hoje && p.situacao !== "em_viagem");
@@ -305,7 +401,7 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1 rel-card p-1" role="group" aria-label="Mostrar">
-          {([["todos", "Todos"], ["expedicao", "Expedições"], ["pacote", "Pacotes"]] as [Filtro, string][]).map(([id, r]) => (
+          {([["todos", "Todos"], ["pacote", "Pacotes"], ["expedicao", "Expedições"]] as [Filtro, string][]).map(([id, r]) => (
             <button key={id} onClick={() => setFiltro(id)} aria-pressed={filtro === id} className="rel-linha inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12.5px] font-semibold"
               style={filtro === id ? { background: "var(--rel-soft)", color: "var(--rel-ink)" } : { color: "var(--ink2)" }}>
               {id !== "todos" && <MarcaTipo tipo={id} tamanho={8} />}{r}
@@ -319,6 +415,9 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
         </p>
       </div>
 
+      {/* Tela cheia (15/10): mapa à esquerda, cards à direita — tudo numa olhada. */}
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)] gap-4 items-start">
+        <div className="space-y-3 min-w-0">
       <MapaMundi pontos={pontos} />
 
       {semLugar.length > 0 && (
@@ -333,13 +432,14 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
         </details>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3 content-start">
         <Card titulo="Próximo embarque">
-          {vale("expedicao") && (() => { const p = proxEmbarque("expedicao"); return (
-            <LinhaCard cor={COR_EXP} rotulo="Expedição" valor={p ? `${dataBoard(p.data)} · ${diasAte(p.data)}` : "nenhum"} sub={p ? `${p.grupo || p.destino} · ${p.passageiros} pax` : undefined}
-              onClick={p ? () => onAbrirViagem(p.viagens[0].id) : undefined} />); })()}
           {vale("pacote") && (() => { const p = proxEmbarque("pacote"); return (
             <LinhaCard cor={COR_PAC} rotulo="Pacote" valor={p ? `${dataBoard(p.data)} · ${diasAte(p.data)}` : "nenhum"} sub={p ? `${p.destino} · ${p.passageiros} pax` : undefined}
+              onClick={p ? () => onAbrirViagem(p.viagens[0].id) : undefined} />); })()}
+          {vale("expedicao") && (() => { const p = proxEmbarque("expedicao"); return (
+            <LinhaCard cor={COR_EXP} rotulo="Expedição" valor={p ? `${dataBoard(p.data)} · ${diasAte(p.data)}` : "nenhum"} sub={p ? `${p.grupo || p.destino} · ${p.passageiros} pax` : undefined}
               onClick={p ? () => onAbrirViagem(p.viagens[0].id) : undefined} />); })()}
         </Card>
         <Card titulo="Próximo voo interno" rodape={trechos.length === 0 ? "Cadastre os voos em cada viagem (seção Trechos)." : undefined}>
@@ -360,13 +460,15 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
           ) : <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhum check-in pendente.</p>}
         </Card>
         <Card titulo="Viagens revisadas">
-          {vale("expedicao") && <Barra cor={COR_EXP} rotulo="Expedições" {...revExp} />}
           {vale("pacote") && <Barra cor={COR_PAC} rotulo="Pacotes" {...revPac} />}
+          {vale("expedicao") && <Barra cor={COR_EXP} rotulo="Expedições" {...revExp} />}
         </Card>
+        </div>
       </div>
 
+      {/* Pacotes primeiro (Bruno, 15/10): é onde o Relacionamento mais cruza informação. */}
+      {vale("pacote") && <QuadroPacotes linhas={linhasPac} onAbrirViagem={onAbrirViagem} />}
       {vale("expedicao") && <Quadro titulo="Expedições" cor={COR_EXP} partidas={partidasExp} onAbrirViagem={onAbrirViagem} />}
-      {vale("pacote") && <Quadro titulo="Pacotes" cor={COR_PAC} partidas={partidasPac} onAbrirViagem={onAbrirViagem} />}
     </div>
   );
 }

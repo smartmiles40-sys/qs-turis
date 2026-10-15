@@ -236,7 +236,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
   }, [lista, agrupar]);
 
   return (
-    <div className={visao === "lista" ? "max-w-5xl mx-auto" : "max-w-6xl mx-auto"}>
+    <div className={visao === "lista" ? "max-w-5xl mx-auto" : "w-full"}>
       <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Viagens</h1>

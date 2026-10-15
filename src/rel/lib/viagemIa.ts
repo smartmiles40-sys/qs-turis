@@ -45,8 +45,21 @@ export interface LeituraIa {
   } | null;
 }
 
+export type AreaConformidade = "documentacao" | "passagens" | "roteiro";
+export const AREAS_CONFORMIDADE: Record<AreaConformidade, string> = { documentacao: "Documentação", passagens: "Passagens", roteiro: "Roteiro" };
+
+/** Quanto da venda bate (0139/v2): itens sim/não de documentação, passagens e roteiro. */
+export interface Conformidade {
+  pct: number;
+  ok: number;
+  total: number;
+  areas: Record<AreaConformidade, { ok: number; total: number }>;
+  itens: { area: AreaConformidade; texto: string; ok: boolean }[];
+}
+
 export interface RevisaoIa {
   versao: number;
+  conformidade?: Conformidade;
   documentos: LeituraIa[];
   segmentos: SegmentoIa[];
   divergencias: { gravidade: "alta" | "media" | "baixa"; texto: string; documento_id: string | null }[];

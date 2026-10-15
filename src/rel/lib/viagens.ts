@@ -464,6 +464,24 @@ export interface Trecho {
   fonte?: "manual" | "expedicoes" | "bitrix" | "ia";
   checkin_feito_em: string | null;
   checkin_feito_por: string | null;
+  // Tudo que está no bilhete/voucher (0139) — a IA preenche; dá pra editar à mão.
+  origem_codigo?: string | null;
+  destino_codigo?: string | null;
+  /** Fuso do lugar (ex.: +09:00): mostra a hora LOCAL, a do bilhete. */
+  partida_fuso?: string | null;
+  chegada_fuso?: string | null;
+  terminal_partida?: string | null;
+  terminal_chegada?: string | null;
+  classe?: string | null;
+  bagagem?: string | null;
+  assento?: string | null;
+  numero_bilhete?: string | null;
+  passageiros?: string[];
+  /** Transfer/passeio: onde encontrar o motorista/guia. A hora da busca é a partida. */
+  ponto_encontro?: string | null;
+  contato?: string | null;
+  endereco?: string | null;
+  observacoes?: string | null;
   // da view rel_trechos_v
   checkin_em: string | null;
   viagem_tipo: TipoViagem;
@@ -480,7 +498,47 @@ export const hojeSP = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Americ
 export const grupoTipo = (t: TipoViagem): "expedicao" | "pacote" => (t === "expedicao" ? "expedicao" : "pacote");
 
 export type TrechoInput = Partial<Pick<Trecho,
-  "tipo" | "descricao" | "origem" | "destino" | "partida_em" | "chegada_em" | "companhia" | "numero" | "localizador" | "checkin_abre_em">>;
+  "tipo" | "descricao" | "origem" | "destino" | "partida_em" | "chegada_em" | "companhia" | "numero" | "localizador" | "checkin_abre_em"
+  | "origem_codigo" | "destino_codigo" | "partida_fuso" | "chegada_fuso" | "terminal_partida" | "terminal_chegada" | "classe" | "bagagem"
+  | "assento" | "numero_bilhete" | "passageiros" | "ponto_encontro" | "contato" | "endereco" | "observacoes">>;
+
+/** Trechos de várias viagens (quadro de partidas: o voo de ida de cada pacote). */
+export async function trechosDasViagens(ids: string[]): Promise<Trecho[]> {
+  const out: Trecho[] = [];
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data, error } = await supabase.from("rel_trechos_v").select("*").in("viagem_id", ids.slice(i, i + 150)).order("partida_em");
+    if (error) throw error;
+    out.push(...((data ?? []) as Trecho[]));
+  }
+  return out;
+}
+
+/** Hora LOCAL do lugar (a do bilhete) quando o fuso é conhecido; senão, a de Brasília. */
+export function horaDoLugar(iso: string | null | undefined, fuso?: string | null, comAno = false): { texto: string; local: boolean } {
+  if (!iso) return { texto: "", local: false };
+  const d = new Date(iso);
+  const m = /^([+-])(\d{2}):(\d{2})$/.exec(String(fuso || ""));
+  const p = (n: number) => String(n).padStart(2, "0");
+  if (m) {
+    const min = (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3]));
+    const l = new Date(d.getTime() + min * 60_000);
+    return { texto: `${p(l.getUTCDate())}/${p(l.getUTCMonth() + 1)}${comAno ? `/${String(l.getUTCFullYear()).slice(2)}` : ""} ${p(l.getUTCHours())}:${p(l.getUTCMinutes())}`, local: true };
+  }
+  return { texto: d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", ...(comAno ? { year: "2-digit" } : {}), hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }), local: false };
+}
+
+/** Quem vendeu e de onde/para onde, como está no card da venda no Bitrix. */
+export async function resumoDaVenda(viagemId: string): Promise<{ closer: string | null; de: string | null; para: string | null }> {
+  const { data } = await supabase.from("rel_viagens").select("bitrix_dados").eq("id", viagemId).maybeSingle();
+  const b = (data?.bitrix_dados ?? {}) as Record<string, unknown>;
+  const campo = (rotulo: string) => {
+    const k = Object.keys(b).find((x) => x.startsWith(rotulo));
+    const v = k ? b[k] : null;
+    const t = Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v);
+    return t.trim() && t.trim() !== "-" ? t.trim() : null;
+  };
+  return { closer: campo("Vendedor ["), de: campo("Origem ["), para: campo("Destino [") };
+}
 
 export async function listarTrechos(viagemId: string): Promise<Trecho[]> {
   const { data, error } = await supabase.from("rel_trechos_v").select("*").eq("viagem_id", viagemId).order("partida_em");
