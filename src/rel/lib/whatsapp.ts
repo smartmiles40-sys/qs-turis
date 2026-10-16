@@ -51,6 +51,8 @@ export interface Anexo { type: "image" | "video" | "audio" | "file"; url: string
 
 export interface Mensagem {
   id: string;
+  /** áudio transcrito no navegador (0142) */
+  transcricao?: string | null;
   conversa_id: string;
   wamid: string;
   direcao: "in" | "out";
@@ -190,6 +192,12 @@ async function api<T = Record<string, unknown>>(metodo: "GET" | "POST", corpoOuQ
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error((j as { error?: string }).error || `Falhou (${r.status}).`);
   return j as T;
+}
+
+/** Grava a transcrição de um áudio (0142) — conversa ou grupo. */
+export async function salvarTranscricao(onde: "conversa" | "grupo", id: string, texto: string) {
+  const { error } = await supabase.rpc("rel_wa_salvar_transcricao", { p_onde: onde, p_id: id, p_texto: texto });
+  if (error) console.warn("[transcrição]", error.message);
 }
 
 export const statusDoNumero = () => api<NumeroRel>("GET", { numero: 1 });

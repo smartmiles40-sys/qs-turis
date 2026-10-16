@@ -45,7 +45,11 @@ async function prepararAudio(leadId: string, messageId: string): Promise<Float32
     { headers: await authHeaders() }
   );
   if (!resposta.ok) throw new Error('não consegui baixar o áudio');
-  const bruto = await resposta.arrayBuffer();
+  return paraWhisper(await resposta.arrayBuffer());
+}
+
+/** Os bytes de um áudio → Float32Array mono 16 kHz (o que o Whisper espera). */
+async function paraWhisper(bruto: ArrayBuffer): Promise<Float32Array> {
   if (!bruto.byteLength) throw new Error('o áudio veio vazio');
 
   // Confere que veio ÁUDIO mesmo. Se o servidor devolver texto/JSON por engano,
@@ -109,6 +113,34 @@ async function prepararAudio(leadId: string, messageId: string): Promise<Float32
  * Transcreve o áudio da URL. `onProgresso` recebe o andamento do download do
  * modelo na PRIMEIRA vez (depois disso ele vem do cache e nem é chamado).
  */
+/**
+ * Transcreve um áudio de URL PÚBLICA (bucket wa-midia do Relacionamento, que já
+ * libera CORS) — mesmo motor do transcreverLocalmente, sem passar pelo servidor.
+ */
+export async function transcreverDaUrl(url: string, onProgresso?: (pct: number) => void): Promise<{ texto?: string; error?: string }> {
+  try {
+    aoBaixar = onProgresso ?? null;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('não consegui baixar o áudio');
+    const audio = await paraWhisper(await r.arrayBuffer());
+    if (!audio.length) return { error: 'Este áudio está vazio.' };
+    const id = String(proximoId++);
+    const w = obterWorker();
+    const texto = await new Promise<string>((resolve, reject) => {
+      pendentes.set(id, { ok: resolve, erro: (e) => reject(new Error(e)) });
+      w.postMessage({ tipo: 'transcrever', id, audio }, [audio.buffer]);
+    });
+    return { texto: texto.trim() };
+  } catch (e) {
+    const m = String((e as Error)?.message || e);
+    console.warn('[transcrição local]', m);
+    if (/decode|Unable to decode|EncodingError/i.test(m)) return { error: 'Não consegui abrir este formato de áudio.' };
+    return { error: 'Não consegui transcrever este áudio.' };
+  } finally {
+    aoBaixar = null;
+  }
+}
+
 export async function transcreverLocalmente(
   leadId: string,
   messageId: string,

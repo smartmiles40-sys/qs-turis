@@ -9,9 +9,9 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AvatarWa, MidiaDaMensagem, TextoWa, Visualizador, WA_CSS, corDoNome, horaDaLista, rotuloDoDia } from "./waUi";
-import type { Anexo } from "../lib/whatsapp";
+import { salvarTranscricao, type Anexo } from "../lib/whatsapp";
 import {
-  enviarNoGrupo, estadoDosGrupos, listarGrupos, mensagensDoGrupo, sincronizarGrupos,
+  enviarNoGrupo, estadoDosGrupos, listarGrupos, marcarGrupoLido, mensagensDoGrupo, sincronizarGrupos,
   type Grupo, type MensagemGrupo,
 } from "../lib/grupos";
 
@@ -68,6 +68,11 @@ export default function GruposPage({ grupoJid, abrir }: { grupoJid: string | nul
     return q ? grupos.filter((g) => nomeDoGrupo(g).toLowerCase().includes(q)) : grupos;
   }, [grupos, busca]);
   const aberto = grupos.find((g) => g.jid === grupoJid) || null;
+  // abriu o grupo = leu (zera a bolinha e o @)
+  useEffect(() => {
+    if (!aberto || (!(aberto.nao_lidas ?? 0) && !aberto.mencionado_em)) return;
+    void marcarGrupoLido(aberto.jid).then(() => setGrupos((l) => l.map((g) => (g.jid === aberto.jid ? { ...g, nao_lidas: 0, mencionado_em: null } : g))));
+  }, [aberto]);
 
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8 wa">
@@ -106,9 +111,14 @@ export default function GruposPage({ grupoJid, abrir }: { grupoJid: string | nul
                 <span className="flex-1 min-w-0 border-b pb-2.5 -mb-2.5" style={{ borderColor: "var(--wa-line)" }}>
                   <span className="flex items-baseline gap-2">
                     <span className="flex-1 truncate text-[16px]" style={{ color: "var(--wa-txt)" }}>{nomeDoGrupo(g)}</span>
-                    <span className="text-[12px] flex-shrink-0" style={{ color: "var(--wa-meta)" }}>{horaDaLista(g.ultima_msg_em)}</span>
+                    <span className="text-[12px] flex-shrink-0" style={{ color: (g.nao_lidas ?? 0) > 0 ? "var(--wa-green)" : "var(--wa-meta)", fontWeight: (g.nao_lidas ?? 0) > 0 ? 600 : 400 }}>{horaDaLista(g.ultima_msg_em)}</span>
                   </span>
-                  <span className="block truncate text-[14px]" style={{ color: "var(--wa-meta)" }}>{g.ultima_msg || (g.participantes ? `${g.participantes} participantes` : "")}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="flex-1 min-w-0 truncate text-[14px]" style={{ color: (g.nao_lidas ?? 0) > 0 ? "var(--wa-txt)" : "var(--wa-meta)" }}>{g.ultima_msg || (g.participantes ? `${g.participantes} participantes` : "")}</span>
+                    {/* igual ao WhatsApp: @ quando marcaram o número, bolinha verde com as não lidas */}
+                    {g.mencionado_em && <span className="w-5 h-5 rounded-full flex-shrink-0 inline-flex items-center justify-center text-[12px] font-bold" style={{ background: "var(--wa-green)", color: "#fff" }} title="Marcaram o número neste grupo" aria-label="Marcaram o número neste grupo">@</span>}
+                    {(g.nao_lidas ?? 0) > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full flex-shrink-0 inline-flex items-center justify-center text-[11.5px] font-bold tabular-nums" style={{ background: "var(--wa-green)", color: "#fff" }} aria-label={`${g.nao_lidas} não lidas`}>{g.nao_lidas! > 99 ? "99+" : g.nao_lidas}</span>}
+                  </span>
                 </span>
               </button>
             ))}
@@ -203,7 +213,7 @@ function Conversa({ grupo, onVoltar, onMudou }: { grupo: Grupo; onVoltar: () => 
                   {anexo && (
                     <MidiaDaMensagem a={anexo} texto={m.texto} minha={m.de_mim} nome={autorDe(m)}
                       onAbrirFoto={(url) => setFoto(Math.max(0, fotos.findIndex((f) => f.url === url)))}
-                      hora={hora(m.criado_em)} />
+                      hora={hora(m.criado_em)} transcricao={m.transcricao} onTranscrito={(t) => void salvarTranscricao("grupo", m.id, t)} />
                   )}
                   {m.texto && <TextoWa texto={m.texto} />}
                   <span className="wa-hora">{hora(m.criado_em)}</span>

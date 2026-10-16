@@ -16,6 +16,10 @@ export interface Grupo {
   ultima_msg_em: string | null;
   ultima_msg: string | null;
   saiu_em: string | null;
+  /** 0142: mensagens dos outros desde a última vez que alguém do time abriu/respondeu */
+  nao_lidas?: number;
+  /** 0142: alguém marcou o número com @ */
+  mencionado_em?: string | null;
 }
 
 export interface MensagemGrupo {
@@ -31,12 +35,13 @@ export interface MensagemGrupo {
   anexo_nome: string | null;
   enviado_por: string | null;
   criado_em: string;
+  transcricao?: string | null;
 }
 
 export async function listarGrupos(): Promise<Grupo[]> {
   const { data, error } = await supabase
     .from("rel_wa_grupos")
-    .select("jid,nome,descricao,participantes,ultima_msg_em,ultima_msg,saiu_em")
+    .select("jid,nome,descricao,participantes,ultima_msg_em,ultima_msg,saiu_em,nao_lidas,mencionado_em")
     .is("saiu_em", null)
     .order("ultima_msg_em", { ascending: false, nullsFirst: false })
     .limit(500);
@@ -69,6 +74,18 @@ async function api<T = Record<string, unknown>>(metodo: "GET" | "POST", corpoOuQ
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error((j as { error?: string }).error || `Falhou (${r.status}).`);
   return j as T;
+}
+
+/** Abriu o grupo: zera não lidas e o @ (0142). */
+export async function marcarGrupoLido(jid: string) {
+  await supabase.rpc("rel_wa_grupo_lido", { p_jid: jid });
+}
+
+/** Pro menu da esquerda: quantos grupos têm mensagem nova e se alguém marcou o número. */
+export async function contarGruposNovos(): Promise<{ grupos: number; mencoes: number }> {
+  const { data } = await supabase.from("rel_wa_grupos").select("nao_lidas,mencionado_em").gt("nao_lidas", 0).is("saiu_em", null).limit(1000);
+  const l = (data ?? []) as { nao_lidas: number; mencionado_em: string | null }[];
+  return { grupos: l.length, mencoes: l.filter((x) => x.mencionado_em).length };
 }
 
 export const estadoDosGrupos = () => api<{ conectado: boolean; estado: string; erro?: string }>("GET", { estado: 1 });

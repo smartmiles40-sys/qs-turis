@@ -38,7 +38,7 @@ import {
   assumirConversa, carregarConversa, carregarMensagens, duracao, enviarArquivo, enviarFigurinha, enviarTexto,
   favoritarMensagem, fixarMensagem, guardarMensagemNasNotas, ligarAoCliente, listarConversas, listarEtiquetas, listarListas,
   listarRespostas, marcarLida, marcarSemSla, minhasFavoritas, mudarPreferencia, MOTIVOS_SEM_SLA, preencherResposta, reabrirConversa,
-  contarFixadas, reagir, resolverConversa, salvarFigurinha, statusDoNumero,
+  contarFixadas, reagir, resolverConversa, salvarFigurinha, salvarTranscricao, statusDoNumero,
   type Conversa, type Etiqueta, type Filtro, type Lista, type Mensagem, type NumeroRel, type PrefConversa, type Resposta,
 } from "../lib/whatsapp";
 import { buscarClientes, formatarTelefone, type Cliente } from "../lib/clientes";
@@ -364,7 +364,8 @@ function Bolha({ m, primeira, nomeCliente, citada, favorita, meuId, onAbrirFoto,
           )}
           {anexos.map((a, i) => (
             <div key={i} className={i ? "mt-1" : ""}>
-              <MidiaDaMensagem a={a} texto={texto} minha={minha} nome={minha ? (m.autor_nome || "Equipe") : nomeCliente} onAbrirFoto={onAbrirFoto} hora={hora} />
+              <MidiaDaMensagem a={a} texto={texto} minha={minha} nome={minha ? (m.autor_nome || "Equipe") : nomeCliente} onAbrirFoto={onAbrirFoto} hora={hora}
+                transcricao={m.transcricao} onTranscrito={(t) => void salvarTranscricao("conversa", m.id, t)} />
             </div>
           ))}
           {semArquivo && <SemArquivo texto={texto} historico={m.origem === "historico"} />}

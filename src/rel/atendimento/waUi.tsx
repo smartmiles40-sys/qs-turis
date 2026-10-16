@@ -14,6 +14,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Anexo, Mensagem } from "../lib/whatsapp";
 
 export const WA_CSS = `
+.wa { font-family: "Segoe UI", "Helvetica Neue", Helvetica, "Lucida Grande", Arial, Ubuntu, Cantarell, "Fira Sans", sans-serif, "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji"; -webkit-font-smoothing: antialiased; }
 .wa {
   --wa-bg: #EFEAE2; --wa-in: #FFFFFF; --wa-out: #D9FDD3; --wa-txt: #111B21; --wa-meta: #667781;
   --wa-head: #F0F2F5; --wa-list: #FFFFFF; --wa-hover: #F5F6F6; --wa-sel: #F0F2F5; --wa-line: #E9EDEF;
@@ -183,8 +184,13 @@ function CartaoDocumento({ a }: { a: Anexo }) {
 const mmss = (s: number) => (Number.isFinite(s) && s > 0 ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` : "0:00");
 
 /** Player compacto estilo nota de voz. */
+/** Velocidade do áudio igual ao WhatsApp: 1x → 1,5x → 2x (lembra a última escolhida). */
+const VELOCIDADES = [1, 1.5, 2] as const;
+let velocidadeGuardada = 1;
+
 export function PlayerAudio({ url, minha, nome }: { url: string; minha: boolean; nome: string }) {
   const ref = useRef<HTMLAudioElement>(null);
+  const [vel, setVel] = useState<number>(velocidadeGuardada);
   const [tocando, setTocando] = useState(false);
   const [pos, setPos] = useState(0);
   const [dur, setDur] = useState(0);
@@ -192,13 +198,26 @@ export function PlayerAudio({ url, minha, nome }: { url: string; minha: boolean;
   function alternar() {
     const a = ref.current;
     if (!a) return;
-    if (a.paused) { document.querySelectorAll("audio").forEach((x) => x !== a && x.pause()); void a.play().catch(() => setErro(true)); }
+    if (a.paused) { document.querySelectorAll("audio").forEach((x) => x !== a && x.pause()); a.playbackRate = vel; void a.play().catch(() => setErro(true)); }
     else a.pause();
+  }
+  function trocarVelocidade() {
+    const i = VELOCIDADES.indexOf(vel as 1 | 1.5 | 2);
+    const nova = VELOCIDADES[(i + 1) % VELOCIDADES.length];
+    velocidadeGuardada = nova;
+    setVel(nova);
+    if (ref.current) ref.current.playbackRate = nova;
   }
   if (erro) return <a href={url} target="_blank" rel="noreferrer" className="underline text-[13px]">🎤 Abrir áudio</a>;
   return (
     <div className="wa-audio flex items-center gap-2.5 w-[260px] max-w-full py-1">
-      <AvatarWa nome={nome} tamanho={40} />
+      {/* igual ao WhatsApp: tocando (ou fora do 1x), a foto vira o botão de velocidade */}
+      {tocando || vel !== 1
+        ? <button type="button" onClick={trocarVelocidade} aria-label={`Velocidade ${vel}x — trocar`} title="Velocidade do áudio"
+            className="w-10 h-10 flex-shrink-0 inline-flex items-center justify-center">
+            <span className="px-2 py-0.5 rounded-full text-[12.5px] font-bold tabular-nums" style={{ background: "rgba(84,101,111,.85)", color: "#fff" }}>{String(vel).replace(".", ",")}x</span>
+          </button>
+        : <AvatarWa nome={nome} tamanho={40} />}
       <button type="button" onClick={alternar} aria-label={tocando ? "Pausar áudio" : "Tocar áudio"} className="w-9 h-9 inline-flex items-center justify-center flex-shrink-0" style={{ color: minha ? "var(--wa-meta)" : "var(--wa-meta)" }}>
         {tocando
           ? <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
@@ -212,8 +231,43 @@ export function PlayerAudio({ url, minha, nome }: { url: string; minha: boolean;
       </span>
       <audio ref={ref} src={url} preload="metadata"
         onLoadedMetadata={(e) => setDur(e.currentTarget.duration)} onDurationChange={(e) => setDur(e.currentTarget.duration)}
-        onTimeUpdate={(e) => setPos(e.currentTarget.currentTime)} onPlay={() => setTocando(true)} onPause={() => setTocando(false)}
+        onTimeUpdate={(e) => setPos(e.currentTarget.currentTime)} onPlay={(e) => { e.currentTarget.playbackRate = vel; setTocando(true); }} onPause={() => setTocando(false)}
         onEnded={() => { setTocando(false); setPos(0); }} onError={() => setErro(true)} />
+    </div>
+  );
+}
+
+/**
+ * Áudio + TRANSCRIÇÃO (16/10). A transcrição roda no navegador (Whisper local,
+ * sem API paga) e fica gravada pra todo mundo via `onTranscrito`.
+ */
+export function AudioComTranscricao({ url, minha, nome, transcricao, onTranscrito }: {
+  url: string; minha: boolean; nome: string; transcricao?: string | null; onTranscrito?: (texto: string) => void;
+}) {
+  const [texto, setTexto] = useState<string | null>(transcricao ?? null);
+  const [estado, setEstado] = useState<"parado" | "rodando" | "erro">("parado");
+  const [pct, setPct] = useState<number | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  useEffect(() => { setTexto(transcricao ?? null); }, [transcricao]);
+  async function transcrever() {
+    setEstado("rodando"); setErro(null);
+    const { transcreverDaUrl } = await import("@/lib/qs/transcricaoLocal");
+    const r = await transcreverDaUrl(url, (p) => setPct(p));
+    setPct(null);
+    if (r.texto != null) { setTexto(r.texto || "(áudio sem fala)"); setEstado("parado"); onTranscrito?.(r.texto || "(áudio sem fala)"); }
+    else { setEstado("erro"); setErro(r.error || "Não consegui transcrever."); }
+  }
+  return (
+    <div>
+      <PlayerAudio url={url} minha={minha} nome={nome} />
+      {texto ? (
+        <p className="text-[13px] italic mt-1 px-1 whitespace-pre-wrap" style={{ color: "var(--wa-txt)", borderLeft: "2px solid var(--wa-green)", paddingLeft: 8 }}>{texto}</p>
+      ) : (
+        <button type="button" onClick={() => void transcrever()} disabled={estado === "rodando"} className="text-[12px] font-semibold mt-0.5 px-1 disabled:opacity-70" style={{ color: "var(--wa-green-ink)" }}>
+          {estado === "rodando" ? (pct !== null && pct < 100 ? `preparando o computador para transcrever… ${pct}% (só na 1ª vez)` : "transcrevendo…") : "Transcrever"}
+        </button>
+      )}
+      {erro && <p className="text-[11.5px] px-1" style={{ color: "#DC2626" }}>{erro}</p>}
     </div>
   );
 }
@@ -293,8 +347,9 @@ export function Visualizador({ fotos, indice, onFechar, onTrocar }: { fotos: Fot
 
 export const EMOJIS = "😀 😂 😊 😍 🥰 😘 😉 😎 🤩 🥳 😅 🙏 👍 👏 🙌 💪 👋 🤝 ❤️ 💚 💙 ✨ 🎉 🔥 ✅ ☑️ ✈️ 🌍 🗺️ 🧳 🏖️ 🏔️ 🛂 📄 📸 📍 ⏰ 📅 💬 😢 😮 🤔 😴 🙂".split(" ");
 
-export function MidiaDaMensagem({ a, texto, minha, nome, onAbrirFoto, hora }: {
+export function MidiaDaMensagem({ a, texto, minha, nome, onAbrirFoto, hora, transcricao, onTranscrito }: {
   a: Anexo; texto: string; minha: boolean; nome: string; onAbrirFoto: (url: string) => void; hora: ReactNode;
+  transcricao?: string | null; onTranscrito?: (texto: string) => void;
 }) {
   const [quebrou, setQuebrou] = useState(false);
   if (a.type === "image") {
@@ -313,6 +368,6 @@ export function MidiaDaMensagem({ a, texto, minha, nome, onAbrirFoto, hora }: {
       </span>
     );
   }
-  if (a.type === "audio") return <PlayerAudio url={a.url} minha={minha} nome={nome} />;
+  if (a.type === "audio") return <AudioComTranscricao url={a.url} minha={minha} nome={nome} transcricao={transcricao} onTranscrito={onTranscrito} />;
   return <CartaoDocumento a={a} />;
 }

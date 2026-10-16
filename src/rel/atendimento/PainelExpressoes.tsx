@@ -22,7 +22,10 @@ import { apagarFigurinha, listarFigurinhas, salvarFigurinha, type Figurinha } fr
 
 export const EMOJI_FONT_CSS = `
 @import url("https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap");
-.wa-emoji { font-family: "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif; }
+/* Letras e NÚMEROS na fonte do WhatsApp Web; a de emoji vem DEPOIS (16/10). Antes a
+   Noto Color Emoji vinha na frente e desenhava 0–9, # e * do jeito dela — os
+   números ficavam "estranhos". Agora ela só pega o que a fonte de texto não tem. */
+.wa-emoji { font-family: "Segoe UI", "Helvetica Neue", Helvetica, "Lucida Grande", Arial, Ubuntu, Cantarell, "Fira Sans", sans-serif, "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji"; }
 .wa-expr-sec { content-visibility: auto; contain-intrinsic-size: auto 400px; }
 .wa-expr-btn:focus-visible { outline: 2px solid var(--wa-green); outline-offset: -2px; }
 `;

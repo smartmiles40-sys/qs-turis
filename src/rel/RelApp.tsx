@@ -30,6 +30,7 @@ import ClienteFicha from "./clientes/ClienteFicha";
 import DuplicadosPage from "./clientes/DuplicadosPage";
 import AtendimentoPage from "./atendimento/AtendimentoPage";
 import GruposPage from "./atendimento/GruposPage";
+import { contarGruposNovos } from "./lib/grupos";
 import ConfigPage from "./config/ConfigPage";
 import ViagensPage from "./viagens/ViagensPage";
 import EsteiraPage from "./viagens/EsteiraPage";
@@ -106,6 +107,8 @@ function Icone({ nome, tamanho = 18 }: { nome: string; tamanho?: number }) {
 interface Contadores {
   esperando: number; foraDoPrazo: number; duplicados: number;
   alertasAltos: number; chamadosVencidos: number;
+  /** 0142: grupos com mensagem nova e quantos marcaram o número */
+  gruposNovos?: number; gruposMencao?: number;
 }
 
 async function contarAlertasEChamados(): Promise<{ alertasAltos: number; chamadosVencidos: number }> {
@@ -254,11 +257,13 @@ export default function RelApp() {
       carregarResumo().catch(() => null),
       contarEsperando().catch(() => null),
       contarAlertasEChamados().catch(() => null),
-    ]).then(([r, f, ac]) => {
+      contarGruposNovos().catch(() => null),
+    ]).then(([r, f, ac, g]) => {
       if (r) setResumo(r);
       setCont({
         esperando: f?.esperando ?? 0, foraDoPrazo: f?.foraDoPrazo ?? 0, duplicados: r?.duplicados ?? 0,
         alertasAltos: ac?.alertasAltos ?? 0, chamadosVencidos: ac?.chamadosVencidos ?? 0,
+        gruposNovos: g?.grupos ?? 0, gruposMencao: g?.mencoes ?? 0,
       });
     });
   }, []);
@@ -281,7 +286,8 @@ export default function RelApp() {
     { id: "atendimento", rotulo: "Atendimento", icone: "atendimento", itens: [
       { id: "atendimento", rotulo: "Conversas", badge: cont?.esperando || undefined, alerta: !!cont?.foraDoPrazo },
       // Grupos (15/10): chegam por uma ligação só de grupos (Evolution) — 0137.
-      { id: "grupos", rotulo: "Grupos" },
+      // mensagem nova em grupo aparece aqui também; vermelho quando marcaram o número com @
+      { id: "grupos", rotulo: cont?.gruposMencao ? "Grupos  @" : "Grupos", badge: cont?.gruposNovos || undefined, alerta: !!cont?.gruposMencao },
       { id: "chamados", rotulo: "Chamados", badge: cont?.chamadosVencidos || undefined, alerta: true },
       // Modelos (14/10): respostas prontas + modelos da Meta — a gestora padroniza.
       { id: "modelos", rotulo: "Modelos de mensagem" },

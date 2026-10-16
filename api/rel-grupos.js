@@ -117,6 +117,38 @@ async function garantirGrupo(jid, nome) {
   });
 }
 
+/** Quem a mensagem marcou com @ (contextInfo.mentionedJid de qualquer tipo de mensagem). */
+function mencoesDe(m) {
+  const out = new Set();
+  const visitar = (o, prof = 0) => {
+    if (!o || typeof o !== 'object' || prof > 4) return;
+    if (Array.isArray(o.mentionedJid)) o.mentionedJid.forEach((j) => out.add(String(j)));
+    for (const v of Object.values(o)) if (v && typeof v === 'object') visitar(v, prof + 1);
+  };
+  visitar(m);
+  return out;
+}
+
+/**
+ * Os ids do PRÓPRIO número nos grupos: o telefone e os códigos @lid. O @lid não
+ * vem em lugar nenhum de graça — a gente aprende quando o número manda mensagem
+ * num grupo (key.participant da mensagem fromMe) e guarda em rel_config.
+ */
+let cacheMeus = null;
+async function meusIds(key) {
+  if (!cacheMeus) {
+    const r = (await rest("rel_config?select=valor&chave=eq.rel_grupos_meus_ids&limit=1").catch(() => null))?.[0]?.valor;
+    cacheMeus = new Set(Array.isArray(r) ? r : []);
+    cacheMeus.add(`${String(process.env.REL_GRUPOS_NUMERO || '5511980124183')}@s.whatsapp.net`);
+  }
+  const novo = key?.fromMe ? [key.participant, key.participantAlt].filter((x) => x && !cacheMeus.has(x)) : [];
+  if (novo.length) {
+    novo.forEach((x) => cacheMeus.add(x));
+    await rest('rel_config?on_conflict=chave', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: { chave: 'rel_grupos_meus_ids', valor: [...cacheMeus] } }).catch(() => null);
+  }
+  return cacheMeus;
+}
+
 async function gravarMensagem(d) {
   const key = d?.key || {};
   const jid = key.remoteJid;
@@ -143,9 +175,15 @@ async function gravarMensagem(d) {
     },
   });
   const previa = (texto || ROTULO[c.tipo] || '').slice(0, 140);
-  await rest(`rel_wa_grupos?jid=eq.${encodeURIComponent(jid)}&or=(ultima_msg_em.is.null,ultima_msg_em.lte.${encodeURIComponent(quando)})`, {
-    method: 'PATCH', prefer: 'return=minimal',
-    body: { ultima_msg_em: quando, ultima_msg: previa, atualizado_em: new Date().toISOString() },
+  // não lidas + "@" (0142): mensagem nossa zera; dos outros soma e vê se marcou o número
+  const meus = await meusIds(key);
+  const marcados = [...mencoesDe(d.message)];
+  const digitos = [...meus].map((x) => x.split('@')[0]);
+  const mencionou = !key.fromMe && (marcados.some((m) => meus.has(m) || digitos.includes(m.split('@')[0]))
+    || digitos.some((n) => n && texto.includes(`@${n}`)));
+  await rest('rpc/rel_wa_grupo_nova_msg', {
+    method: 'POST',
+    body: { p_jid: jid, p_quando: quando, p_previa: previa, p_de_mim: Boolean(key.fromMe), p_mencionou: mencionou },
   });
   return 'gravada';
 }
@@ -271,9 +309,10 @@ export default async function handler(req, res) {
         method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
         body: { grupo_jid: jid, msg_id: msgId, de_mim: true, tipo: 'texto', texto: final, enviado_por: u.id, criado_em: new Date().toISOString() },
       }).catch(() => null);
-      await rest(`rel_wa_grupos?jid=eq.${encodeURIComponent(jid)}`, {
-        method: 'PATCH', prefer: 'return=minimal',
-        body: { ultima_msg_em: new Date().toISOString(), ultima_msg: final.slice(0, 140) },
+      // respondeu pelo QS = leu (zera não lidas e o @)
+      await rest('rpc/rel_wa_grupo_nova_msg', {
+        method: 'POST',
+        body: { p_jid: jid, p_quando: new Date().toISOString(), p_previa: final.slice(0, 140), p_de_mim: true, p_mencionou: false },
       }).catch(() => null);
     }
     return res.status(200).json({ ok: true });
