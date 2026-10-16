@@ -36,6 +36,15 @@ export interface MensagemGrupo {
   enviado_por: string | null;
   criado_em: string;
   transcricao?: string | null;
+  // 0144 — igual ao WhatsApp
+  reacoes?: { de: string; nome: string | null; emoji: string }[];
+  responde_a?: string | null;
+  citado_texto?: string | null;
+  citado_autor?: string | null;
+  mencoes?: string[];
+  editada_em?: string | null;
+  apagada_em?: string | null;
+  autor_participante?: string | null;
 }
 
 export async function listarGrupos(): Promise<Grupo[]> {
@@ -119,4 +128,47 @@ export async function enviarFotoNoGrupo(jid: string, arquivo: File, legenda: str
 
 export const estadoDosGrupos = () => api<{ conectado: boolean; estado: string; erro?: string }>("GET", { estado: 1 });
 export const sincronizarGrupos = () => api<{ grupos: number }>("POST", { acao: "sincronizar" });
-export const enviarNoGrupo = (jid: string, texto: string) => api("POST", { acao: "texto", jid, texto });
+export const enviarNoGrupo = (jid: string, texto: string, extra: { respondendoA?: string | null; mencoes?: string[] } = {}) =>
+  api("POST", { acao: "texto", jid, texto, respondendoA: extra.respondendoA || null, mencoes: extra.mencoes || [] });
+
+async function base64De(b: Blob): Promise<string> {
+  return new Promise<string>((ok, erro) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).split(",")[1] || "");
+    r.onerror = () => erro(new Error("Não li o arquivo."));
+    r.readAsDataURL(b);
+  });
+}
+/** Foto, vídeo, documento ou arquivo de áudio no grupo (0144). */
+export async function enviarMidiaNoGrupo(jid: string, arquivo: File, legenda: string) {
+  return api("POST", { acao: "midia", jid, dataBase64: await base64De(arquivo), mimeType: arquivo.type || "application/octet-stream", fileName: arquivo.name, legenda });
+}
+/** Áudio gravado (mensagem de voz). */
+export async function enviarVozNoGrupo(jid: string, audio: Blob) {
+  return api("POST", { acao: "voz", jid, dataBase64: await base64De(audio), mimeType: audio.type });
+}
+export const enviarFigurinhaNoGrupo = (jid: string, figurinhaId: string) => api("POST", { acao: "figurinha", jid, figurinhaId });
+export const reagirNoGrupo = (msgId: string, emoji: string) => api("POST", { acao: "reacao", msgId, emoji });
+export const apagarNoGrupo = (msgId: string) => api("POST", { acao: "apagar", msgId });
+export const editarNoGrupo = (msgId: string, texto: string) => api("POST", { acao: "editar", msgId, texto });
+
+export interface Participante { telefone: string; nome: string; admin: string | null }
+/** Quem está no grupo, com o nome da ficha (ou o que a pessoa usa no WhatsApp). */
+export async function participantesDoGrupo(jid: string): Promise<Participante[]> {
+  const { data } = await supabase.from("rel_wa_grupo_participantes").select("telefone, admin").eq("grupo_jid", jid).not("telefone", "is", null).limit(1100);
+  const lista = (data ?? []) as { telefone: string; admin: string | null }[];
+  if (!lista.length) return [];
+  const tels = lista.map((x) => x.telefone);
+  const nomes = new Map<string, string>();
+  for (let i = 0; i < tels.length; i += 200) {
+    const { data: fichas } = await supabase.from("rel_clientes").select("nome, telefone").in("telefone", tels.slice(i, i + 200)).is("mesclado_em_id", null);
+    for (const f of (fichas ?? []) as { nome: string; telefone: string }[]) nomes.set(f.telefone, f.nome);
+  }
+  const { data: msgs } = await supabase.from("rel_wa_grupo_mensagens").select("autor_jid, autor_nome").eq("grupo_jid", jid).not("autor_nome", "is", null).limit(1000);
+  for (const m of (msgs ?? []) as { autor_jid: string | null; autor_nome: string }[]) {
+    const t = String(m.autor_jid || "").split("@")[0];
+    if (t && !nomes.has(t)) nomes.set(t, m.autor_nome);
+  }
+  return lista.map((x) => ({ telefone: x.telefone, admin: x.admin, nome: nomes.get(x.telefone) || `+${x.telefone}` }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+}
