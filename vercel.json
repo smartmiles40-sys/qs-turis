@@ -79,11 +79,11 @@
     "api/rel-viagem-ia.js": {
       "maxDuration": 60
     },
-    "api/*.js": {
-      "maxDuration": 10
-    },
     "api/rel-bitrix-comentarios.js": {
       "maxDuration": 60
+    },
+    "api/*.js": {
+      "maxDuration": 10
     }
   },
   "crons": [
