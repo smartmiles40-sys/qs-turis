@@ -18,7 +18,7 @@ export const ROTULO_SITUACAO = { feita: "feita", atrasada: "atrasada", a_fazer: 
 
 export function quandoTexto(e: EstadoEtapa): string {
   if (e.situacao === "feita") return e.registro?.concluida_em ? `feita ${new Date(e.registro.concluida_em).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}` : "feita";
-  if (e.situacao === "nao_se_aplica") return "vendida depois";
+  if (e.situacao === "nao_se_aplica") return e.id === "passagem" ? "antes da esteira" : "vendida depois";
   if (e.situacao === "aguardando") return e.abre ? `abre ${dataBR(e.abre).slice(0, 5)}` : "sem data";
   const d = diasAte(e.prazo);
   if (d === null) return "sem data";

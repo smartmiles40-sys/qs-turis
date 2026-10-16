@@ -72,6 +72,9 @@ export type SituacaoEtapa = "feita" | "nao_se_aplica" | "aguardando" | "a_fazer"
 
 export interface EstadoEtapa { id: EtapaId; abre: string | null; prazo: string | null; situacao: SituacaoEtapa; registro: RegistroEtapa | null }
 
+/** Dia em que a esteira começou a valer. */
+export const INICIO_ESTEIRA = "2026-10-16";
+
 const soma = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 export const diasAte = (d: string | null, hoje = hojeSP()) => (d ? Math.round((new Date(`${d}T12:00:00Z`).getTime() - new Date(`${hoje}T12:00:00Z`).getTime()) / 86400_000) : null);
 
@@ -81,7 +84,8 @@ function janelas(v: Pick<Viagem, "data_venda" | "data_embarque" | "data_retorno"
   const base = venda || ida;
   const dX = (n: number) => ({ abre: ida ? soma(ida, -n) : null, prazo: ida ? soma(ida, -n + (n >= 7 ? 2 : 1)) : null, aplica: !ida || !venda || venda <= soma(ida, -n) });
   return {
-    passagem: { abre: base, prazo: base ? soma(base, 2) : null, aplica: true },
+    // a esteira começou em 16/10/2026: venda anterior não teve a reunião registrada (a revisão continua valendo)
+    passagem: { abre: base, prazo: base ? soma(base, 2) : null, aplica: !venda || venda >= INICIO_ESTEIRA },
     revisao: { abre: base, prazo: base ? soma(base, 5) : null, aplica: true },
     d30: dX(30),
     d7: dX(7),
