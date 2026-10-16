@@ -95,8 +95,31 @@ function mesmoLugar(a, b) {
 const ms = (d) => (d ? new Date(d).getTime() : NaN);
 const perto = (a, b, dias = 7) => Number.isFinite(ms(a)) && Number.isFinite(ms(b)) && Math.abs(ms(a) - ms(b)) <= dias * 86_400_000;
 
-/** "22/08 01:20" | "19/09/2026 01:05" | "29/09/2026 17:35h" → ISO -03:00 (ano da expedição). */
-function quando(txt, embarque) {
+// Fuso de cada aeroporto: a hora do sistema de Expedições é a LOCAL do bilhete.
+// Até 16/10/2026 tudo era gravado como -03:00 — voo saindo de Dubai às 09:05
+// virava 09:05 de Brasília (7h de erro). Corrigido no banco (rel_config.fix_fuso_expedicoes).
+const ZONA = {
+  GRU: 'America/Sao_Paulo', CGH: 'America/Sao_Paulo', GIG: 'America/Sao_Paulo', FOR: 'America/Fortaleza', NAT: 'America/Fortaleza', REC: 'America/Recife', SSA: 'America/Bahia',
+  BSB: 'America/Sao_Paulo', POA: 'America/Sao_Paulo', CNF: 'America/Sao_Paulo', VCP: 'America/Sao_Paulo', FLN: 'America/Sao_Paulo', CWB: 'America/Sao_Paulo', BEL: 'America/Belem', MAO: 'America/Manaus',
+  DXB: 'Asia/Dubai', CAI: 'Africa/Cairo', ASW: 'Africa/Cairo', LXR: 'Africa/Cairo', PEK: 'Asia/Shanghai', PKX: 'Asia/Shanghai', PVG: 'Asia/Shanghai', SHA: 'Asia/Shanghai',
+  HND: 'Asia/Tokyo', NRT: 'Asia/Tokyo', KIX: 'Asia/Tokyo', ITM: 'Asia/Tokyo', FCO: 'Europe/Rome', DOH: 'Asia/Qatar', BKK: 'Asia/Bangkok', DMK: 'Asia/Bangkok', CNX: 'Asia/Bangkok', HKT: 'Asia/Bangkok',
+  LHR: 'Europe/London', LGW: 'Europe/London', KEF: 'Atlantic/Reykjavik', CUZ: 'America/Lima', LIM: 'America/Lima', JFK: 'America/New_York', EWR: 'America/New_York', MIA: 'America/New_York',
+  BOG: 'America/Bogota', FRA: 'Europe/Berlin', MUC: 'Europe/Berlin', LIS: 'Europe/Lisbon', OPO: 'Europe/Lisbon', MAD: 'Europe/Madrid', BCN: 'Europe/Madrid', CDG: 'Europe/Paris', ORY: 'Europe/Paris',
+  IST: 'Europe/Istanbul', ATH: 'Europe/Athens', ICN: 'Asia/Seoul', SCL: 'America/Santiago', EZE: 'America/Argentina/Buenos_Aires', AEP: 'America/Argentina/Buenos_Aires',
+  ZRH: 'Europe/Zurich', AMS: 'Europe/Amsterdam', LAX: 'America/Los_Angeles', PTY: 'America/Panama',
+};
+const iataDe = (lugar) => (String(lugar || '').match(/(([A-Z]{3}))/) || String(lugar || '').match(/^([A-Z]{3})$/) || [])[1] || null;
+/** Fuso (+04:00) de uma zona naquela data/hora local. */
+function fusoDe(zona, localIso) {
+  if (!zona) return '-03:00';
+  const guess = new Date(`${localIso}Z`);
+  const parte = new Intl.DateTimeFormat('en-US', { timeZone: zona, timeZoneName: 'longOffset' }).formatToParts(guess).find((x) => x.type === 'timeZoneName')?.value || 'GMT-03:00';
+  const m = parte.match(/GMT([+-]d{2}):?(d{2})?/);
+  return m ? `${m[1]}:${m[2] || '00'}` : '+00:00';
+}
+
+/** "22/08 01:20" | "19/09/2026 01:05" | "29/09/2026 17:35h" → ISO no fuso do aeroporto (ano da expedição). */
+function quando(txt, embarque, lugar = null) {
   const m = String(txt || '').match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\D+(\d{1,2})[:h](\d{2})/);
   if (!m) return null;
   const [, d, mo, a, h, mi] = m;
@@ -108,7 +131,8 @@ function quando(txt, embarque) {
   }
   if (!ano) return null;
   const p = (n) => String(n).padStart(2, '0');
-  return `${ano}-${p(mo)}-${p(d)}T${p(h)}:${p(mi)}:00-03:00`;
+  const local = `${ano}-${p(mo)}-${p(d)}T${p(h)}:${p(mi)}:00`;
+  return `${local}${fusoDe(ZONA[iataDe(lugar)], local)}`;
 }
 
 // ── QS: estado atual em memória (poucos milhares de linhas) ─────────────────
@@ -313,15 +337,15 @@ for (const p of pax) {
     }
     // voos → trechos
     const linhas = voosDoPax(p).map((vo) => {
-      const partida = quando(vo.partida, e.data_embarque);
+      const partida = quando(vo.partida, e.data_embarque, vo.origem);
       if (!partida) return null;
-      let chegada = quando(vo.chegada, e.data_embarque);
-      if (chegada && chegada < partida) chegada = null;
+      let chegada = quando(vo.chegada, e.data_embarque, vo.destino);
+      if (chegada && new Date(chegada) < new Date(partida)) chegada = null;
       return {
         viagem_id: v.id, ref_externa: `exp-voo:${vo.id}`, fonte: 'expedicoes',
         tipo: /intern/i.test(vo.trecho || '') ? 'voo_interno' : 'voo_internacional',
         descricao: vo.trecho || null, origem: vo.origem || null, destino: vo.destino || null,
-        partida_em: partida, chegada_em: chegada, companhia: vo.companhia || null, numero: vo.numero_voo || null,
+        partida_em: partida, chegada_em: chegada, partida_fuso: partida.slice(-6), chegada_fuso: chegada ? chegada.slice(-6) : null, companhia: vo.companhia || null, numero: vo.numero_voo || null,
         localizador: vo.localizador || p.localizador || null,
       };
     }).filter(Boolean);
