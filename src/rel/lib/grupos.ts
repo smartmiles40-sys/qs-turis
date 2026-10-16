@@ -164,10 +164,19 @@ export async function participantesDoGrupo(jid: string): Promise<Participante[]>
     const { data: fichas } = await supabase.from("rel_clientes").select("nome, telefone").in("telefone", tels.slice(i, i + 200)).is("mesclado_em_id", null);
     for (const f of (fichas ?? []) as { nome: string; telefone: string }[]) nomes.set(f.telefone, f.nome);
   }
-  const { data: msgs } = await supabase.from("rel_wa_grupo_mensagens").select("autor_jid, autor_nome").eq("grupo_jid", jid).not("autor_nome", "is", null).limit(1000);
-  for (const m of (msgs ?? []) as { autor_jid: string | null; autor_nome: string }[]) {
-    const t = String(m.autor_jid || "").split("@")[0];
-    if (t && !nomes.has(t)) nomes.set(t, m.autor_nome);
+  // sem ficha: o nome salvo na conversa do Relacionamento e, por último, o nome que a pessoa usa no WhatsApp (em qualquer grupo)
+  const semNome = tels.filter((t) => !nomes.has(t));
+  for (let i = 0; i < semNome.length; i += 200) {
+    const lote = semNome.slice(i, i + 200);
+    const { data: convs } = await supabase.from("rel_wa_conversas").select("telefone, nome_contato").in("telefone", lote).not("nome_contato", "is", null);
+    for (const c of (convs ?? []) as { telefone: string; nome_contato: string }[]) if (!nomes.has(c.telefone)) nomes.set(c.telefone, c.nome_contato);
+    const jids = lote.filter((t) => !nomes.has(t)).map((t) => `${t}@s.whatsapp.net`);
+    if (!jids.length) continue;
+    const { data: msgs } = await supabase.from("rel_wa_grupo_mensagens").select("autor_jid, autor_nome").in("autor_jid", jids).not("autor_nome", "is", null).limit(2000);
+    for (const m of (msgs ?? []) as { autor_jid: string; autor_nome: string }[]) {
+      const t = m.autor_jid.split("@")[0];
+      if (!nomes.has(t)) nomes.set(t, m.autor_nome);
+    }
   }
   return lista.map((x) => ({ telefone: x.telefone, admin: x.admin, nome: nomes.get(x.telefone) || `+${x.telefone}` }))
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
