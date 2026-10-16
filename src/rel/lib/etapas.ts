@@ -68,12 +68,18 @@ export interface RegistroEtapa {
   obs: string | null;
 }
 
-export type SituacaoEtapa = "feita" | "nao_se_aplica" | "aguardando" | "a_fazer" | "atrasada";
+export type SituacaoEtapa = "feita" | "zerada" | "nao_se_aplica" | "aguardando" | "a_fazer" | "atrasada";
 
 export interface EstadoEtapa { id: EtapaId; abre: string | null; prazo: string | null; situacao: SituacaoEtapa; registro: RegistroEtapa | null }
 
 /** Dia em que a esteira começou a valer. */
 export const INICIO_ESTEIRA = "2026-10-16";
+/**
+ * Zerada (Bruno, 16/10): "zerar todas as atrasadas pra checar daqui pra frente".
+ * Etapa que VENCEU antes deste dia e não foi feita conta como zerada — não
+ * aparece como atrasada nem trava a esteira. Dá pra fazer mesmo assim no card.
+ */
+export const ZERADAS_ATE = "2026-10-16";
 
 const soma = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 export const diasAte = (d: string | null, hoje = hojeSP()) => (d ? Math.round((new Date(`${d}T12:00:00Z`).getTime() - new Date(`${hoje}T12:00:00Z`).getTime()) / 86400_000) : null);
@@ -85,8 +91,9 @@ function janelas(v: Pick<Viagem, "data_venda" | "data_embarque" | "data_retorno"
   const dX = (n: number) => ({ abre: ida ? soma(ida, -n) : null, prazo: ida ? soma(ida, -n + (n >= 7 ? 2 : 1)) : null, aplica: !ida || !venda || venda <= soma(ida, -n) });
   return {
     // a esteira começou em 16/10/2026: venda anterior não teve a reunião registrada (a revisão continua valendo)
-    passagem: { abre: base, prazo: base ? soma(base, 2) : null, aplica: !venda || venda >= INICIO_ESTEIRA },
-    revisao: { abre: base, prazo: base ? soma(base, 5) : null, aplica: true },
+    passagem: { abre: base, prazo: base ? soma(base, 2) : null, aplica: !!venda && venda >= INICIO_ESTEIRA },
+    // sem data de venda = cadastro antigo: a revisão fica de fora (as checagens D-x cobrem)
+    revisao: { abre: base, prazo: base ? soma(base, 5) : null, aplica: !!venda },
     d30: dX(30),
     d7: dX(7),
     d3: { abre: ida ? soma(ida, -3) : null, prazo: ida ? soma(ida, -2) : null, aplica: true },
@@ -106,12 +113,13 @@ export function estadoDaEsteira(v: Pick<Viagem, "data_venda" | "data_embarque" |
     let situacao: SituacaoEtapa;
     if (r?.concluida_em) situacao = "feita";
     else if (!aplica) situacao = "nao_se_aplica";
+    else if (prazo && prazo < ZERADAS_ATE) situacao = "zerada";
     else if (abre && abre > hoje) situacao = "aguardando";
     else if (prazo && prazo < hoje) situacao = "atrasada";
     else situacao = "a_fazer";
     return { id: e.id, abre, prazo, situacao, registro: r };
   });
-  const atual = etapas.find((e) => e.situacao !== "feita" && e.situacao !== "nao_se_aplica") ?? null;
+  const atual = etapas.find((e) => e.situacao !== "feita" && e.situacao !== "nao_se_aplica" && e.situacao !== "zerada") ?? null;
   return { etapas, atual };
 }
 

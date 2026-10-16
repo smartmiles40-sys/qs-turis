@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
-  FASES, TIPOS_VIAGEM, adicionarPassageiro, apagarTarefa, carregarViagem, criarTarefa, dataBR, linkBitrix,
+  FASES, TIPOS_VIAGEM, adicionarPassageiro, grupoTipo, apagarTarefa, carregarViagem, criarTarefa, dataBR, linkBitrix,
   listarEquipeRel, listarPassageiros, listarTarefas, marcarTarefa, quandoEmbarca, removerPassageiro, resumoDaVenda, salvarViagem,
   type Passageiro, type Tarefa, type TipoViagem, type Viagem, type ViagemInput,
 } from "../lib/viagens";
@@ -376,8 +376,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
 
-      {/* A esteira do Relacionamento (16/10): em que etapa a viagem está */}
-      {ativa && <EtapasViagem viagem={v} trechos={analise?.trechos ?? []} equipe={equipe} onMudou={revisou} />}
+      {/* A esteira do Relacionamento (16/10): em que etapa a viagem está — só pacote */}
+      {ativa && grupoTipo(v.tipo) === "pacote" && <EtapasViagem viagem={v} trechos={analise?.trechos ?? []} equipe={equipe} onMudou={revisou} />}
 
       {/* O que pode dar errado — sempre à vista, logo abaixo do topo */}
       <AlertasViagem problemas={analise?.problemas ?? null} />

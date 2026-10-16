@@ -13,11 +13,12 @@ import { TIPOS_TRECHO, dataBR, marcarCheckin, type Trecho, type Viagem } from ".
 import { horaLocal, diaBR, diaLocal } from "../lib/problemas";
 import { Aviso, Botao, Campo, Entrada, Modal } from "../ui";
 
-export const COR_SITUACAO = { feita: "#16A34A", atrasada: "#DC2626", a_fazer: "#D97706", aguardando: "#94A3B8", nao_se_aplica: "#CBD5E1" } as const;
-export const ROTULO_SITUACAO = { feita: "feita", atrasada: "atrasada", a_fazer: "a fazer", aguardando: "ainda não abriu", nao_se_aplica: "não se aplica" } as const;
+export const COR_SITUACAO = { feita: "#16A34A", atrasada: "#DC2626", a_fazer: "#D97706", aguardando: "#94A3B8", nao_se_aplica: "#CBD5E1", zerada: "#CBD5E1" } as const;
+export const ROTULO_SITUACAO = { feita: "feita", atrasada: "atrasada", a_fazer: "a fazer", aguardando: "ainda não abriu", nao_se_aplica: "não se aplica", zerada: "zerada (antes da esteira)" } as const;
 
 export function quandoTexto(e: EstadoEtapa): string {
   if (e.situacao === "feita") return e.registro?.concluida_em ? `feita ${new Date(e.registro.concluida_em).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}` : "feita";
+  if (e.situacao === "zerada") return "zerada";
   if (e.situacao === "nao_se_aplica") return e.id === "passagem" ? "antes da esteira" : "vendida depois";
   if (e.situacao === "aguardando") return e.abre ? `abre ${dataBR(e.abre).slice(0, 5)}` : "sem data";
   const d = diasAte(e.prazo);
@@ -168,7 +169,7 @@ export default function EtapasViagem({ viagem, trechos, equipe, onMudou }: {
           return (
             <li key={e.id}>
               <button onClick={() => setAberta(e.id)} className="w-full text-left rounded-lg px-2 py-2 h-full transition-colors"
-                style={{ border: `${ehAtual ? 2 : 1}px solid ${ehAtual ? cor : "var(--line)"}`, background: e.situacao === "feita" ? "rgba(22,163,74,.08)" : ehAtual ? `${cor}14` : "var(--card)", opacity: e.situacao === "nao_se_aplica" ? 0.55 : 1 }}
+                style={{ border: `${ehAtual ? 2 : 1}px solid ${ehAtual ? cor : "var(--line)"}`, background: e.situacao === "feita" ? "rgba(22,163,74,.08)" : ehAtual ? `${cor}14` : "var(--card)", opacity: e.situacao === "nao_se_aplica" || e.situacao === "zerada" ? 0.55 : 1 }}
                 aria-label={`${ETAPAS[i].nome}: ${ROTULO_SITUACAO[e.situacao]}`}>
                 <span className="flex items-center gap-1.5">
                   <span className="w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0" style={{ background: cor }}>{e.situacao === "feita" ? "✓" : i + 1}</span>
