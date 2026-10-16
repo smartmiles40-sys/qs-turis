@@ -81,6 +81,9 @@
     },
     "api/*.js": {
       "maxDuration": 10
+    },
+    "api/rel-bitrix-comentarios.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
@@ -111,6 +114,10 @@
     {
       "path": "/api/rel-viagem-ia",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/rel-bitrix-comentarios",
+      "schedule": "*/3 * * * *"
     }
   ],
   "headers": [
