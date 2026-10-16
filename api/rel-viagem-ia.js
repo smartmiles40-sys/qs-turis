@@ -384,7 +384,7 @@ function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
  * Cada item é uma conferência sim/não; a porcentagem é itens ok ÷ itens.
  * Item que não se aplica (ex.: passaporte em viagem nacional) não entra.
  */
-function conformidade({ viagem, passageiros, r }) {
+function conformidade({ viagem, passageiros, r, trechosAntes = [] }) {
   const itens = [];
   const add = (area, texto, ok) => itens.push({ area, texto, ok: Boolean(ok) });
   const volta = viagem.data_retorno || viagem.data_embarque;
@@ -402,10 +402,17 @@ function conformidade({ viagem, passageiros, r }) {
   }
   if (r.internacional && !passageiros.length) add('documentacao', 'Passageiros com ficha na viagem', false);
 
-  // Passagens
-  const voos = r.segmentos.filter((x) => x.categoria.startsWith('voo'));
-  for (const p of passageiros) add('passagens', `${p.nome}: bilhete aéreo no nome`, cob.get(p.cliente_id)?.bilhete);
-  add('passagens', 'Os documentos são desta viagem (nomes e datas)', r.temBilhete && !graveDeDoc);
+  // Passagens — voo do grupo (sistema de Expedições) ou cadastrado à mão também vale
+  const voosConfiaveis = trechosAntes.filter((t) => (t.fonte === 'expedicoes' || t.fonte === 'manual') && String(t.tipo).startsWith('voo'))
+    .map((t) => ({ categoria: t.tipo, partida_em: t.partida_em, chegada_em: t.chegada_em, numero: t.numero, origem: t.origem, destino: t.destino }));
+  const voos = [...r.segmentos.filter((x) => x.categoria.startsWith('voo')), ...voosConfiaveis]
+    .sort((a, b) => String(a.partida_em).localeCompare(String(b.partida_em)));
+  if (!r.temBilhete && voosConfiaveis.length) {
+    add('passagens', 'Voos cadastrados (sistema de Expedições ou à mão)', true);
+  } else {
+    for (const p of passageiros) add('passagens', `${p.nome}: bilhete aéreo no nome`, cob.get(p.cliente_id)?.bilhete);
+    add('passagens', 'Os documentos são desta viagem (nomes e datas)', r.temBilhete && !graveDeDoc);
+  }
   const perto = (a, b) => a && b && Math.abs(new Date(`${a}T12:00:00Z`) - new Date(`${b}T12:00:00Z`)) <= 86400_000;
   if (viagem.data_embarque) add('passagens', 'Primeiro voo bate com a data de ida', voos.length && perto(diaDe(voos[0].partida_em), viagem.data_embarque));
   if (viagem.data_retorno && viagem.data_retorno !== viagem.data_embarque) {
@@ -490,7 +497,13 @@ async function aplicarTrechos(viagemId, segmentos, existentes) {
 
 // ── Revisar uma viagem ──────────────────────────────────────────────────────
 
-async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS) {
+/**
+ * `prontas` (16/10): leituras feitas FORA daqui — o Claude lendo os arquivos à
+ * mão, sem gastar OpenAI. Map de documento_id (ou 'bitrix') → objeto no mesmo
+ * formato do ESQUEMA. Com `prontas`, nada é mandado pra OpenAI: o que não veio
+ * lido fica de fora e o resto do caminho (cruzar, trechos, %) é o mesmo.
+ */
+export async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS, prontas = null, modelo = null) {
   const viagem = (await rest(`rel_viagens?select=id,titulo,destino,expedicao,tipo,status,data_embarque,data_retorno,bitrix_dados,ia_revisao&id=eq.${viagemId}&limit=1`))?.[0];
   if (!viagem) throw Object.assign(new Error('Viagem não encontrada.'), { status: 404 });
 
@@ -507,6 +520,11 @@ async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS) {
   const leituras = [];
   const fila = [];
   for (const d of docs || []) {
+    if (prontas) {
+      if (prontas.has(d.id)) leituras.push({ fonte: 'documento', documento_id: d.id, arquivo_nome: d.arquivo_nome, tipo_cadastro: d.tipo, lido: prontas.get(d.id), lido_em: new Date().toISOString() });
+      else { const c = cache.get(d.id); if (c) leituras.push(c); }
+      continue;
+    }
     const c = cache.get(d.id);
     if (c && c.lido_em && new Date(c.lido_em) >= new Date(d.enviado_em)) leituras.push(c);
     else fila.push(d);
@@ -516,7 +534,9 @@ async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS) {
   const txt = textoDoBitrix([{ rotulo: 'venda', dados: viagem.bitrix_dados }, ...(ligados || []).map((l) => ({ rotulo: l.funil || `card ${l.bitrix_deal_id}`, dados: l.bitrix_dados }))]);
   const hashTxt = txt ? crypto.createHash('sha1').update(txt).digest('hex').slice(0, 12) : null;
   let tarefaBitrix = null;
-  if (txt) {
+  if (txt && prontas) {
+    if (prontas.has('bitrix')) leituras.push({ fonte: 'bitrix', documento_id: null, arquivo_nome: 'Campos do Bitrix', tipo_cadastro: 'bitrix', hash: hashTxt, lido: prontas.get('bitrix'), lido_em: new Date().toISOString() });
+  } else if (txt) {
     const c = cache.get('bitrix');
     if (c && c.hash === hashTxt) leituras.push(c);
     else tarefaBitrix = txt;
@@ -565,7 +585,7 @@ async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS) {
 
   const ia_revisao = {
     versao: 2,
-    conformidade: conformidade({ viagem, passageiros, r }),
+    conformidade: conformidade({ viagem, passageiros, r, trechosAntes: trechosAntes || [] }),
     documentos: leituras.map((l) => ({ fonte: l.fonte, documento_id: l.documento_id, arquivo_nome: l.arquivo_nome, tipo_cadastro: l.tipo_cadastro, hash: l.hash, lido: l.lido, lido_em: l.lido_em, erro: l.erro })),
     segmentos: r.segmentos,
     divergencias: r.divergencias,
@@ -573,7 +593,7 @@ async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS) {
     passageiros_cobertos: r.passageiros_cobertos,
     trechos,
     resumo: semNada ? 'A viagem não tem bilhete, seguro nem voucher anexado — nada pra revisar ainda.' : r.resumo,
-    modelo: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    modelo: modelo || process.env.OPENAI_MODEL || 'gpt-4o-mini',
   };
   await rest(`rel_viagens?id=eq.${viagemId}`, {
     method: 'PATCH', prefer: 'return=minimal',
