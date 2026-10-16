@@ -57,6 +57,7 @@ import {
 } from "./waUi";
 import PainelExpressoes, { EMOJI_FONT_CSS, EmojiPicker } from "./PainelExpressoes";
 import BlocoDeNotas from "./BlocoDeNotas";
+import EditorFoto from "./EditorFoto";
 import MenuContexto, { ICO, posicaoDoEvento, type ItemMenu, type PosicaoMenu } from "./MenuContexto";
 import { AtalhosModal, atalhoDoEvento, envolver, marcaDoEvento, type AcaoAtalho } from "./atalhos";
 import { EncaminharModal, EtiquetasModal, ListasModal, NovaConversaModal } from "./Organizar";
@@ -500,6 +501,8 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   const [verChamado, setVerChamado] = useState<string | null>(null);
   const [foraPrazo, setForaPrazo] = useState(false);
   const [arquivo, setArquivo] = useState<File | null>(null);
+  // editor de foto antes de enviar (16/10): recortar, girar, desenhar, emoji, texto
+  const [editandoFoto, setEditandoFoto] = useState(false);
   const [previaUrl, setPreviaUrl] = useState<string | null>(null);
   const [legenda, setLegenda] = useState("");
   const [foto, setFoto] = useState<number | null>(null);
@@ -534,7 +537,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   }, [id]);
 
   useEffect(() => {
-    setC(null); setMsgs([]); setTexto(""); setErro(null); setArquivo(null); setLegenda(""); setFoto(null); qtdAnterior.current = 0;
+    setC(null); setMsgs([]); setTexto(""); setErro(null); setArquivo(null); setEditandoFoto(false); setLegenda(""); setFoto(null); qtdAnterior.current = 0;
     setRespondendo(null); setExpressoes(null); setBuscaAberta(false); setBuscaMsg(""); setFixadaIdx(0);
     void recarregar().then(() => { void marcarLida(id).then(onMudou); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -924,13 +927,23 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
           // Prévia do anexo antes de enviar (igual ao WhatsApp).
           <div className="rounded-xl p-3 space-y-2" style={{ background: "var(--wa-list)" }}>
             <div className="flex items-center gap-3">
-              {previaUrl && arquivo.type.startsWith("image/") && <img src={previaUrl} alt="Prévia" className="w-20 h-20 rounded-lg object-cover" />}
+              {previaUrl && arquivo.type.startsWith("image/") && (
+                <button type="button" onClick={() => setEditandoFoto(true)} className="relative flex-shrink-0 rounded-lg overflow-hidden" title="Editar foto" aria-label="Editar foto">
+                  <img src={previaUrl} alt="Prévia" className="w-20 h-20 object-cover" />
+                  <span className="absolute inset-x-0 bottom-0 text-[10.5px] font-semibold py-0.5 text-center" style={{ background: "rgba(0,0,0,.55)", color: "#fff" }}>✏️ editar</span>
+                </button>
+              )}
               {previaUrl && arquivo.type.startsWith("video/") && <video src={previaUrl} className="w-28 h-20 rounded-lg object-cover bg-black" muted />}
               {!previaUrl && <span className="w-14 h-16 rounded-md flex items-center justify-center text-[22px]" style={{ background: "var(--wa-head)" }} aria-hidden>{arquivo.type.startsWith("audio/") ? "🎤" : "📄"}</span>}
               <span className="flex-1 min-w-0">
                 <span className="block truncate text-[14px] font-semibold" style={{ color: "var(--wa-txt)" }}>{arquivo.name}</span>
                 <span className="block text-[12px]" style={{ color: "var(--wa-meta)" }}>{(arquivo.size / 1024 / 1024).toFixed(arquivo.size > 1048576 ? 1 : 2)} MB</span>
               </span>
+              {arquivo.type.startsWith("image/") && (
+                <button onClick={() => setEditandoFoto(true)} className="h-9 px-3 rounded-full text-[13px] font-semibold inline-flex items-center gap-1.5 wa-verde" aria-label="Editar foto">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>Editar
+                </button>
+              )}
               <button onClick={() => { setArquivo(null); setLegenda(""); }} className="wa-icone w-9 h-9 inline-flex items-center justify-center" aria-label="Cancelar anexo">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </button>
@@ -1044,6 +1057,10 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
       <EncaminharModal mensagem={encaminhando} conversas={conversas} onFechar={() => setEncaminhando(null)}
         onFeito={(t) => { setEncaminhando(null); avisar(t); onMudou(); }} />
       {foto !== null && fotos.length > 0 && <Visualizador fotos={fotos} indice={Math.min(foto, fotos.length - 1)} onFechar={() => setFoto(null)} onTrocar={setFoto} />}
+      {editandoFoto && arquivo && arquivo.type.startsWith("image/") && (
+        <EditorFoto arquivo={arquivo} onCancelar={() => setEditandoFoto(false)}
+          onPronto={(f) => { setEditandoFoto(false); setArquivo(f); }} />
+      )}
       <ModeloModal
         area={ehRel ? "relacionamento" : "financeiro"}
         aberto={modelo}
