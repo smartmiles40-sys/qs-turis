@@ -58,6 +58,7 @@ import {
 import PainelExpressoes, { EMOJI_FONT_CSS, EmojiPicker } from "./PainelExpressoes";
 import BlocoDeNotas from "./BlocoDeNotas";
 import EditorFoto from "./EditorFoto";
+import DadosContato from "./DadosContato";
 import MenuContexto, { ICO, posicaoDoEvento, type ItemMenu, type PosicaoMenu } from "./MenuContexto";
 import { AtalhosModal, atalhoDoEvento, envolver, marcaDoEvento, type AcaoAtalho } from "./atalhos";
 import { EncaminharModal, EtiquetasModal, ListasModal, NovaConversaModal } from "./Organizar";
@@ -503,6 +504,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   const [arquivo, setArquivo] = useState<File | null>(null);
   // editor de foto antes de enviar (16/10): recortar, girar, desenhar, emoji, texto
   const [editandoFoto, setEditandoFoto] = useState(false);
+  const [dadosContato, setDadosContato] = useState(false);
   const [previaUrl, setPreviaUrl] = useState<string | null>(null);
   const [legenda, setLegenda] = useState("");
   const [foto, setFoto] = useState<number | null>(null);
@@ -537,7 +539,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   }, [id]);
 
   useEffect(() => {
-    setC(null); setMsgs([]); setTexto(""); setErro(null); setArquivo(null); setEditandoFoto(false); setLegenda(""); setFoto(null); qtdAnterior.current = 0;
+    setC(null); setMsgs([]); setTexto(""); setErro(null); setArquivo(null); setEditandoFoto(false); setDadosContato(false); setLegenda(""); setFoto(null); qtdAnterior.current = 0;
     setRespondendo(null); setExpressoes(null); setBuscaAberta(false); setBuscaMsg(""); setFixadaIdx(0);
     void recarregar().then(() => { void marcarLida(id).then(onMudou); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -658,6 +660,8 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
     setErro(null);
     setArquivo(f);
     setLegenda(texto.trim());
+    // foto: abre o editor direto, como no WhatsApp (16/10)
+    if (/^image\/(jpeg|png|webp)$/.test(f.type)) setEditandoFoto(true);
   }
 
   async function enviarAnexo() {
@@ -767,14 +771,15 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
         <button onClick={onVoltar} className="lg:hidden wa-icone w-10 h-10 inline-flex items-center justify-center" aria-label="Voltar para a lista">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
         </button>
-        <button className="flex items-center gap-3 min-w-0 flex-1 text-left" onClick={() => { if (!ehRel) return; if (c.cliente_id) onAbrirCliente(c.cliente_id); else onLigarFicha(c); }}
-          title={c.cliente_id ? "Abrir a ficha do cliente (Ctrl+Alt+P)" : "Ligar a uma ficha"}>
+        {/* igual ao WhatsApp (16/10): o nome abre os dados do contato e os grupos em comum */}
+        <button className="flex items-center gap-3 min-w-0 flex-1 text-left" onClick={() => setDadosContato(true)}
+          title="Dados do contato e grupos em comum">
           <AvatarWa nome={nome} tamanho={40} />
           <span className="min-w-0">
             <span className="block text-[16px] truncate" style={{ color: "var(--wa-txt)" }}>{nome}</span>
             <span className="block text-[12.5px] truncate" style={{ color: "var(--wa-meta)" }}>
               {formatarTelefone(c.telefone)}
-              {c.cliente_id ? " · abrir ficha" : <span style={{ color: "var(--warn-ink)", fontWeight: 600 }}> · ligar à ficha</span>}
+              {c.cliente_id ? " · dados do contato" : <span style={{ color: "var(--warn-ink)", fontWeight: 600 }}> · ligar à ficha</span>}
               {c.atendente_nome && ` · com ${c.atendente_nome.split(" ")[0]}`}
             </span>
           </span>
@@ -1057,6 +1062,11 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
       <EncaminharModal mensagem={encaminhando} conversas={conversas} onFechar={() => setEncaminhando(null)}
         onFeito={(t) => { setEncaminhando(null); avisar(t); onMudou(); }} />
       {foto !== null && fotos.length > 0 && <Visualizador fotos={fotos} indice={Math.min(foto, fotos.length - 1)} onFechar={() => setFoto(null)} onTrocar={setFoto} />}
+      {dadosContato && (
+        <DadosContato nome={nome} telefone={c.telefone} temFicha={!!c.cliente_id} podeVerGrupos={ehRel}
+          onFechar={() => setDadosContato(false)}
+          onFicha={() => { setDadosContato(false); if (!ehRel) return; if (c.cliente_id) onAbrirCliente(c.cliente_id); else onLigarFicha(c); }} />
+      )}
       {editandoFoto && arquivo && arquivo.type.startsWith("image/") && (
         <EditorFoto arquivo={arquivo} onCancelar={() => setEditandoFoto(false)}
           onPronto={(f) => { setEditandoFoto(false); setArquivo(f); }} />

@@ -10,8 +10,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AvatarWa, MidiaDaMensagem, TextoWa, Visualizador, WA_CSS, corDoNome, horaDaLista, rotuloDoDia } from "./waUi";
 import { salvarTranscricao, type Anexo } from "../lib/whatsapp";
+import EditorFoto from "./EditorFoto";
 import {
-  enviarNoGrupo, estadoDosGrupos, listarGrupos, marcarGrupoLido, mensagensDoGrupo, sincronizarGrupos,
+  enviarFotoNoGrupo, enviarNoGrupo, estadoDosGrupos, listarGrupos, marcarGrupoLido, mensagensDoGrupo, sincronizarGrupos,
   type Grupo, type MensagemGrupo,
 } from "../lib/grupos";
 
@@ -142,6 +143,31 @@ export default function GruposPage({ grupoJid, abrir }: { grupoJid: string | nul
 function Conversa({ grupo, onVoltar, onMudou }: { grupo: Grupo; onVoltar: () => void; onMudou: () => void }) {
   const [msgs, setMsgs] = useState<MensagemGrupo[]>([]);
   const [texto, setTexto] = useState("");
+  // foto no grupo (16/10): escolhe → editor → legenda → envia
+  const [fotoNova, setFotoNova] = useState<File | null>(null);
+  const [editando, setEditando] = useState(false);
+  const [legendaFoto, setLegendaFoto] = useState("");
+  const [previaFoto, setPreviaFoto] = useState<string | null>(null);
+  const arquivoRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!fotoNova) { setPreviaFoto(null); return; }
+    const u = URL.createObjectURL(fotoNova); setPreviaFoto(u);
+    return () => URL.revokeObjectURL(u);
+  }, [fotoNova]);
+  function escolherFoto(f: File | undefined) {
+    if (arquivoRef.current) arquivoRef.current.value = "";
+    if (!f) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { setErro("Só foto (JPG, PNG ou WEBP)."); return; }
+    if (f.size > 3 * 1024 * 1024) { setErro("Foto maior que 3 MB."); return; }
+    setErro(null); setFotoNova(f); setLegendaFoto(texto.trim()); setEditando(true);
+  }
+  async function enviarFoto() {
+    if (!fotoNova || enviando) return;
+    setEnviando(true); setErro(null);
+    try { await enviarFotoNoGrupo(grupo.jid, fotoNova, legendaFoto.trim()); setFotoNova(null); setLegendaFoto(""); setTexto(""); await carregar(); onMudou(); }
+    catch (e) { setErro((e as Error).message); }
+    setEnviando(false);
+  }
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [foto, setFoto] = useState<number | null>(null);
@@ -227,7 +253,34 @@ function Conversa({ grupo, onVoltar, onMudou }: { grupo: Grupo; onVoltar: () => 
 
       <footer className="wa-cab px-3 py-2.5">
         {erro && <p className="text-[12.5px] mb-1.5" style={{ color: "var(--red)" }}>{erro}</p>}
+        {fotoNova ? (
+          <div className="rounded-xl p-3 space-y-2" style={{ background: "var(--wa-list)" }}>
+            <div className="flex items-center gap-3">
+              {previaFoto && (
+                <button type="button" onClick={() => setEditando(true)} className="relative flex-shrink-0 rounded-lg overflow-hidden" aria-label="Editar foto">
+                  <img src={previaFoto} alt="Prévia" className="w-20 h-20 object-cover" />
+                  <span className="absolute inset-x-0 bottom-0 text-[10.5px] font-semibold py-0.5 text-center" style={{ background: "rgba(0,0,0,.55)", color: "#fff" }}>✏️ editar</span>
+                </button>
+              )}
+              <span className="flex-1 min-w-0 text-[13.5px] truncate" style={{ color: "var(--wa-txt)" }}>{fotoNova.name}</span>
+              <button onClick={() => setFotoNova(null)} className="wa-icone w-9 h-9 inline-flex items-center justify-center" aria-label="Cancelar foto">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+            </div>
+            <div className="flex items-end gap-2">
+              <input value={legendaFoto} onChange={(e) => setLegendaFoto(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void enviarFoto(); } }}
+                placeholder="Adicione uma legenda…" aria-label="Legenda da foto" className="wa-campo flex-1 h-10 px-3 text-[14px]" style={{ background: "var(--wa-head)" }} />
+              <button onClick={() => void enviarFoto()} disabled={enviando} aria-label="Enviar foto no grupo" className="w-11 h-11 rounded-full inline-flex items-center justify-center wa-verde flex-shrink-0 disabled:opacity-60">
+                {enviando ? "…" : <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z" /></svg>}
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="flex items-end gap-2">
+          <button type="button" onClick={() => arquivoRef.current?.click()} className="wa-icone w-11 h-11 inline-flex items-center justify-center flex-shrink-0" aria-label="Mandar foto no grupo" title="Mandar foto">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
+          </button>
+          <input ref={arquivoRef} type="file" hidden accept="image/jpeg,image/png,image/webp" onChange={(e) => escolherFoto(e.target.files?.[0])} />
           <textarea className="wa-campo flex-1 px-3 py-2.5 text-[15px] resize-none max-h-40" rows={1} placeholder="Mensagem para o grupo"
             value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Mensagem para o grupo"
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void enviar(); } }} />
@@ -236,6 +289,8 @@ function Conversa({ grupo, onVoltar, onMudou }: { grupo: Grupo; onVoltar: () => 
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z" /></svg>
           </button>
         </div>
+        )}
+        {editando && fotoNova && <EditorFoto arquivo={fotoNova} onCancelar={() => setEditando(false)} onPronto={(f) => { setEditando(false); setFotoNova(f); }} />}
         <p className="text-[11.5px] mt-1" style={{ color: "var(--wa-meta)" }}>Sai assinado com o seu nome, como nas conversas.</p>
       </footer>
 

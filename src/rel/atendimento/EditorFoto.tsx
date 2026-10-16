@@ -11,7 +11,9 @@
 // Saída: um File JPEG com no máximo 2560 px e até 3 MB (limite da Meta aqui).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent } from "react";
-import { EmojiPicker } from "./PainelExpressoes";
+import { createPortal } from "react-dom";
+import { EmojiPicker, EMOJI_FONT_CSS } from "./PainelExpressoes";
+import { WA_CSS } from "./waUi";
 
 type Ferramenta = "mover" | "desenhar" | "recortar";
 interface Traco { cor: string; esp: number; pts: { x: number; y: number }[] }
@@ -243,7 +245,8 @@ export default function EditorFoto({ arquivo, onPronto, onCancelar }: { arquivo:
       style={ativo ? { background: "#00A884", color: "#fff" } : { background: "rgba(255,255,255,.12)", color: "#fff" }}>{children}</button>
   );
 
-  return (
+  // portal: direto no <body>, pra nenhum bloco da página conseguir prender/cortar o editor
+  return createPortal(
     <div className="fixed inset-0 z-[80] flex flex-col" style={{ background: "#0B141A" }} role="dialog" aria-modal="true" aria-label="Editar foto">
       {/* barra de cima: ferramentas */}
       <div className="flex flex-wrap items-center gap-2 px-3 py-2.5" style={{ background: "#111B21" }}>
@@ -316,6 +319,8 @@ export default function EditorFoto({ arquivo, onPronto, onCancelar }: { arquivo:
           {salvando ? "Preparando…" : "Concluir"}
         </button>
       </div>
-    </div>
+      <style>{WA_CSS + EMOJI_FONT_CSS}</style>
+    </div>,
+    document.body,
   );
 }

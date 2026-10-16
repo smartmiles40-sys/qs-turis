@@ -82,6 +82,9 @@
     "api/rel-bitrix-comentarios.js": {
       "maxDuration": 60
     },
+    "api/rel-grupos.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -118,6 +121,10 @@
     {
       "path": "/api/rel-bitrix-comentarios",
       "schedule": "*/3 * * * *"
+    },
+    {
+      "path": "/api/rel-grupos?cron=1",
+      "schedule": "7 */6 * * *"
     }
   ],
   "headers": [

@@ -88,6 +88,35 @@ export async function contarGruposNovos(): Promise<{ grupos: number; mencoes: nu
   return { grupos: l.length, mencoes: l.filter((x) => x.mencionado_em).length };
 }
 
+/** Celular BR com e sem o nono dígito (o WhatsApp às vezes guarda sem). */
+function variantes(tel: string): string[] {
+  const d = tel.replace(/\D/g, "");
+  if (/^55\d{2}9\d{8}$/.test(d)) return [d, d.slice(0, 4) + d.slice(5)];
+  if (/^55\d{2}[6-9]\d{7}$/.test(d)) return [d, `${d.slice(0, 4)}9${d.slice(4)}`];
+  return [d];
+}
+
+/** Grupos em que esta pessoa está junto com o número do Relacionamento (0143). */
+export async function gruposEmComum(telefone: string): Promise<(Grupo & { admin: string | null })[]> {
+  const { data: part, error } = await supabase.from("rel_wa_grupo_participantes").select("grupo_jid, admin").in("telefone", variantes(telefone));
+  if (error || !part?.length) return [];
+  const admin = new Map((part as { grupo_jid: string; admin: string | null }[]).map((x) => [x.grupo_jid, x.admin]));
+  const { data } = await supabase.from("rel_wa_grupos").select("jid,nome,descricao,participantes,ultima_msg_em,ultima_msg,saiu_em,nao_lidas,mencionado_em")
+    .in("jid", [...admin.keys()]).is("saiu_em", null).order("ultima_msg_em", { ascending: false, nullsFirst: false });
+  return ((data ?? []) as Grupo[]).map((g) => ({ ...g, admin: admin.get(g.jid) ?? null }));
+}
+
+/** Foto no grupo (com legenda), assinada com o nome de quem manda. */
+export async function enviarFotoNoGrupo(jid: string, arquivo: File, legenda: string) {
+  const dataBase64 = await new Promise<string>((ok, erro) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).split(",")[1] || "");
+    r.onerror = () => erro(new Error("Não li a foto."));
+    r.readAsDataURL(arquivo);
+  });
+  return api("POST", { acao: "imagem", jid, dataBase64, mimeType: arquivo.type, fileName: arquivo.name, legenda });
+}
+
 export const estadoDosGrupos = () => api<{ conectado: boolean; estado: string; erro?: string }>("GET", { estado: 1 });
 export const sincronizarGrupos = () => api<{ grupos: number }>("POST", { acao: "sincronizar" });
 export const enviarNoGrupo = (jid: string, texto: string) => api("POST", { acao: "texto", jid, texto });

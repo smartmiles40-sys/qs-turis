@@ -233,6 +233,21 @@ async function webhook(req, res) {
       await atualizarGrupos(body.data);
       return res.status(200).json({ ok: true });
     }
+    // entrou/saiu gente do grupo (0143)
+    if (evento === 'group.participants.update' || evento === 'group-participants.update') {
+      const d = body.data || {};
+      const jid = String(d.id || d.groupJid || '');
+      if (ehGrupo(jid)) {
+        const lista = Array.isArray(d.participants) ? d.participants : [];
+        if (d.action === 'remove') {
+          for (const p of lista) await rest(`rel_wa_grupo_participantes?grupo_jid=eq.${encodeURIComponent(jid)}&participante=eq.${encodeURIComponent(String(p?.id || p))}`, { method: 'DELETE', prefer: 'return=minimal' }).catch(() => null);
+        } else if (d.action === 'add' || d.action === 'promote' || d.action === 'demote') {
+          await garantirGrupo(jid);
+          await gravarParticipantes(jid, lista.map((p) => (typeof p === 'object' ? { ...p, admin: d.action === 'promote' ? 'admin' : d.action === 'demote' ? null : p.admin } : p)), new Date().toISOString());
+        }
+      }
+      return res.status(200).json({ ok: true });
+    }
     return res.status(200).json({ ok: true, ignorado: evento });
   } catch (e) {
     console.error('[rel-grupos] webhook:', e?.message);
@@ -240,10 +255,70 @@ async function webhook(req, res) {
   }
 }
 
+// ── Sincronizar: lista de grupos + participantes (0143) ─────────────────────
+
+/** "5511…@s.whatsapp.net" → "5511…"; @lid → null. */
+const telDe = (j) => (String(j || '').endsWith('@s.whatsapp.net') ? String(j).split('@')[0].split(':')[0] : null);
+
+async function gravarParticipantes(grupoJid, participantes, marca) {
+  const linhas = (participantes || []).map((p) => {
+    const id = String(p?.id || p || '');
+    return { grupo_jid: grupoJid, participante: id, telefone: telDe(p?.phoneNumber) || telDe(p?.jid) || telDe(id), admin: p?.admin || null, atualizado_em: marca };
+  }).filter((l) => l.participante);
+  for (let i = 0; i < linhas.length; i += 500) {
+    await rest('rel_wa_grupo_participantes?on_conflict=grupo_jid,participante', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: linhas.slice(i, i + 500) });
+  }
+  return linhas.length;
+}
+
+/** Puxa todos os grupos (com participantes) da Evolution e acerta o banco. */
+export async function sincronizarGrupos() {
+  const lista = await evo(`/group/fetchAllGroups/${encodeURIComponent(INSTANCIA())}?getParticipants=true`, { timeoutMs: 45000 });
+  const grupos = (Array.isArray(lista) ? lista : []).filter((g) => ehGrupo(g?.id));
+  await atualizarGrupos(grupos);
+  // Grupo que sumiu da lista = o número saiu. Volta se reaparecer.
+  const ids = new Set(grupos.map((g) => g.id));
+  const nossos = (await rest('rel_wa_grupos?select=jid,saiu_em').catch(() => [])) || [];
+  const agora = new Date().toISOString();
+  for (const g of nossos) {
+    const esta = ids.has(g.jid);
+    if (!esta && !g.saiu_em) await rest(`rel_wa_grupos?jid=eq.${encodeURIComponent(g.jid)}`, { method: 'PATCH', prefer: 'return=minimal', body: { saiu_em: agora } });
+    if (esta && g.saiu_em) await rest(`rel_wa_grupos?jid=eq.${encodeURIComponent(g.jid)}`, { method: 'PATCH', prefer: 'return=minimal', body: { saiu_em: null } });
+  }
+  // participantes: grava os de agora e apaga quem não está mais (marca de tempo desta rodada)
+  let participantes = 0;
+  for (const g of grupos) {
+    if (!Array.isArray(g.participants)) continue;
+    participantes += await gravarParticipantes(g.id, g.participants, agora);
+    await rest(`rel_wa_grupo_participantes?grupo_jid=eq.${encodeURIComponent(g.id)}&atualizado_em=lt.${encodeURIComponent(agora)}`, { method: 'DELETE', prefer: 'return=minimal' }).catch(() => null);
+  }
+  return { grupos: grupos.length, participantes };
+}
+
+/** Foto no grupo — também só aceita grupo já conhecido. */
+async function enviarImagemNoGrupo(jid, base64, mime, caption, fileName) {
+  if (!ehGrupo(jid)) throw new Error('Destino não é grupo — envio bloqueado.');
+  const g = (await rest(`rel_wa_grupos?select=jid,saiu_em&jid=eq.${encodeURIComponent(jid)}&limit=1`))?.[0];
+  if (!g) throw new Error('Grupo desconhecido — envio bloqueado.');
+  if (g.saiu_em) throw new Error('O número não está mais nesse grupo.');
+  return evo(`/message/sendMedia/${encodeURIComponent(INSTANCIA())}`, {
+    method: 'POST', timeoutMs: 30000,
+    body: { number: jid, mediatype: 'image', mimetype: mime, caption, media: base64, fileName },
+  });
+}
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
   if (req.method === 'POST' && req.query?.secret !== undefined) return webhook(req, res);
+
+  if (req.method === 'GET' && req.query?.cron) {
+    const segredo = String(process.env.CRON_SECRET || '').trim();
+    const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    if (!segredo || veio !== segredo) return res.status(401).json({ error: 'Não autorizado' });
+    try { const r = await sincronizarGrupos(); console.log(`[rel-grupos] cron: ${JSON.stringify(r)}`); return res.status(200).json(r); }
+    catch (e) { console.error('[rel-grupos] cron:', e?.message); return res.status(502).json({ error: 'Evolution não respondeu' }); }
+  }
 
   const u = await quemChama(req); // Relacionamento ou admin — o Financeiro não usa grupos
   if (!u) return res.status(401).json({ error: 'Sem acesso ao Relacionamento.' });
@@ -269,24 +344,37 @@ export default async function handler(req, res) {
   const acao = String(body.acao || '');
 
   if (acao === 'sincronizar') {
-    let lista;
     try {
-      lista = await evo(`/group/fetchAllGroups/${encodeURIComponent(INSTANCIA())}?getParticipants=false`, { timeoutMs: 40000 });
+      const r = await sincronizarGrupos();
+      return res.status(200).json({ ok: true, ...r });
     } catch {
       return res.status(502).json({ error: 'A Evolution não respondeu. A ligação dos grupos está de pé?' });
     }
-    const grupos = (Array.isArray(lista) ? lista : []).filter((g) => ehGrupo(g?.id));
-    await atualizarGrupos(grupos);
-    // Grupo que sumiu da lista = o número saiu. Volta se reaparecer.
-    const ids = new Set(grupos.map((g) => g.id));
-    const nossos = (await rest('rel_wa_grupos?select=jid,saiu_em').catch(() => [])) || [];
-    const agora = new Date().toISOString();
-    for (const g of nossos) {
-      const esta = ids.has(g.jid);
-      if (!esta && !g.saiu_em) await rest(`rel_wa_grupos?jid=eq.${encodeURIComponent(g.jid)}`, { method: 'PATCH', prefer: 'return=minimal', body: { saiu_em: agora } });
-      if (esta && g.saiu_em) await rest(`rel_wa_grupos?jid=eq.${encodeURIComponent(g.jid)}`, { method: 'PATCH', prefer: 'return=minimal', body: { saiu_em: null } });
+  }
+
+  if (acao === 'imagem') {
+    const jid = String(body.jid || '');
+    if (!ehGrupo(jid)) return res.status(400).json({ error: 'Só dá pra mandar em grupo.' });
+    const mime = String(body.mimeType || '').toLowerCase();
+    if (!/^image\/(jpeg|png|webp)$/.test(mime)) return res.status(400).json({ error: 'Só foto (JPG, PNG ou WEBP).' });
+    const bytes = Buffer.from(String(body.dataBase64 || ''), 'base64');
+    if (!bytes.length || bytes.length > 3 * 1024 * 1024) return res.status(400).json({ error: 'Foto vazia ou maior que 3 MB.' });
+    const legenda = String(body.legenda || '').trim().slice(0, 1000);
+    const nome = String(u.name || '').trim().replace(/\s+/g, ' ') || 'Relacionamento';
+    const caption = legenda ? `*${nome}:*\n${legenda}` : `*${nome}*`;
+    let r;
+    try { r = await enviarImagemNoGrupo(jid, bytes.toString('base64'), mime, caption, String(body.fileName || 'foto.jpg')); }
+    catch (e) { return res.status(502).json({ error: String(e?.message || 'Não enviou.').slice(0, 200) }); }
+    const url = await guardarMidia(bytes, mime, { leadId: 'rel-grupos', nomeArquivo: String(body.fileName || 'foto.jpg') }).catch(() => null);
+    const msgId = r?.key?.id;
+    if (msgId) {
+      await rest('rel_wa_grupo_mensagens?on_conflict=msg_id', {
+        method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
+        body: { grupo_jid: jid, msg_id: msgId, de_mim: true, tipo: 'imagem', texto: caption, anexo_url: url, enviado_por: u.id, criado_em: new Date().toISOString() },
+      }).catch(() => null);
+      await rest('rpc/rel_wa_grupo_nova_msg', { method: 'POST', body: { p_jid: jid, p_quando: new Date().toISOString(), p_previa: '📷 foto', p_de_mim: true, p_mencionou: false } }).catch(() => null);
     }
-    return res.status(200).json({ ok: true, grupos: grupos.length });
+    return res.status(200).json({ ok: true });
   }
 
   if (acao === 'texto') {
