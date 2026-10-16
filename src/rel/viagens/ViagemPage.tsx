@@ -19,12 +19,12 @@ import { conversasDoCliente, type Conversa } from "../lib/whatsapp";
 import { Aviso, Avatar, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 import DocumentosPainel from "./DocumentosPainel";
 import RevisaoIaViagem from "./RevisaoIaViagem";
-import { RevisaoViagem } from "./TrechosViagem";
 import RoteiroViagem from "./RoteiroViagem";
 import ArquivosViagem from "./ArquivosViagem";
 import ConformidadeViagem, { RequisitosEntrada } from "./ConformidadeViagem";
 import AlertasViagem, { CSS_PISCA } from "./AlertasViagem";
 import LinhaDoTempo from "./LinhaDoTempo";
+import EtapasViagem from "./EtapasViagem";
 import { conferirViagens, type Analise } from "../lib/problemas";
 import { TOM_FASE } from "./ViagensDoCliente";
 
@@ -367,7 +367,6 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               <Botao onClick={() => setEditando(true)}>Editar</Botao>
               {/* "Cancelar viagem" saiu daqui (Bruno, 15/10). Cancelada no Bitrix, cancela sozinha; reativar continua. */}
               {!ativa && <Botao onClick={() => void acao(() => salvarViagem(v.id, { status: "ativa" }))}>Reativar</Botao>}
-              {ativa && <RevisaoViagem viagemId={v.id} equipe={equipe} />}
             </div>
           </div>
           <ConformidadeViagem viagemId={v.id} versao={versao} onRevisado={revisou} />
@@ -375,6 +374,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
       </div>
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
+
+      {/* A esteira do Relacionamento (16/10): em que etapa a viagem está */}
+      {ativa && <EtapasViagem viagem={v} trechos={analise?.trechos ?? []} equipe={equipe} onMudou={revisou} />}
 
       {/* O que pode dar errado — sempre à vista, logo abaixo do topo */}
       <AlertasViagem problemas={analise?.problemas ?? null} />
@@ -477,7 +479,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
           <Secao titulo="Requisitos de entrada">
             <RequisitosEntrada destino={venda.para || v.destino} />
           </Secao>
-          <Secao titulo="Jornada de revisão">
+          <Secao titulo="Outras tarefas">
             <Jornada viagemId={v.id} ativa={ativa} recarregarViagem={() => void carregar()} />
           </Secao>
         </div>

@@ -32,6 +32,7 @@ import AtendimentoPage from "./atendimento/AtendimentoPage";
 import GruposPage from "./atendimento/GruposPage";
 import ConfigPage from "./config/ConfigPage";
 import ViagensPage from "./viagens/ViagensPage";
+import EsteiraPage from "./viagens/EsteiraPage";
 import ViagemPage from "./viagens/ViagemPage";
 import AlertasPage from "./viagens/AlertasPage";
 import DisparosPage from "./disparos/DisparosPage";
@@ -50,12 +51,12 @@ type Rota =
   | { tela: "inicio" }
   | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" }
-  | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
+  | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
   | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
   | { tela: "config" };
 type Tela = Rota["tela"];
 
-const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
+const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "esteira", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
 
 function lerRota(): Rota {
   const h = window.location.hash.replace(/^#\/?/, "");
@@ -297,6 +298,8 @@ export default function RelApp() {
       { id: "duplicados", rotulo: "Duplicados", badge: cont?.duplicados || undefined },
     ] },
     { id: "viagens", rotulo: "Viagens", icone: "viagens", itens: [
+      // Esteira (16/10): o processo do time, etapa por etapa — a tela de trabalho.
+      { id: "esteira", rotulo: "Esteira (hoje)" },
       { id: "viagens", rotulo: "Viagens" },
       { id: "alertas", rotulo: "Alertas", badge: cont?.alertasAltos || undefined, alerta: true },
     ] },
@@ -491,6 +494,7 @@ export default function RelApp() {
             <ClienteFicha key={rota.id} id={rota.id} onAbrir={abrirCliente} onVoltar={() => ir({ tela: "clientes" })}
               onAbrirConversa={abrirConversa} onAbrirViagem={abrirViagem} />
           )}
+          {rota.tela === "esteira" && <EsteiraPage onAbrirViagem={abrirViagem} />}
           {rota.tela === "viagens" && <ViagensPage onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
           {rota.tela === "viagem" && (
             <ViagemPage key={rota.id} id={rota.id} onVoltar={() => ir({ tela: "viagens" })} onAbrirCliente={abrirCliente} onAbrirConversa={abrirConversa} />
