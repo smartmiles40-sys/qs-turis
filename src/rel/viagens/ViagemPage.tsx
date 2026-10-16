@@ -25,6 +25,7 @@ import ConformidadeViagem, { RequisitosEntrada } from "./ConformidadeViagem";
 import AlertasViagem, { CSS_PISCA } from "./AlertasViagem";
 import LinhaDoTempo from "./LinhaDoTempo";
 import EtapasViagem from "./EtapasViagem";
+import ComentariosBitrix from "./ComentariosBitrix";
 import { conferirViagens, type Analise } from "../lib/problemas";
 import { TOM_FASE } from "./ViagensDoCliente";
 
@@ -476,6 +477,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
         {/* Direita — revisão e o que falta */}
         <div className="space-y-4 min-w-0 lg:col-span-2 2xl:col-span-1">
           <RevisaoIaViagem key={versao} viagemId={v.id} onRevisado={revisou} />
+          <Secao titulo="Comentários do Bitrix">
+            <ComentariosBitrix viagemId={v.id} clientes={pessoas.map((p) => p.id)} />
+          </Secao>
           <Secao titulo="Requisitos de entrada">
             <RequisitosEntrada destino={venda.para || v.destino} />
           </Secao>
