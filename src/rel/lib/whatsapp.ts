@@ -391,8 +391,25 @@ export async function favoritarMensagem(mensagemId: string, por: boolean) {
   if (r.error) throw new Error(r.error.message);
 }
 
+/** Limite da Meta por tipo de arquivo, em MB (imagem 5, vídeo/áudio 16, documento 100). */
+export function limiteArquivoMB(mime: string): number {
+  if (mime.startsWith("image/")) return 5;
+  if (mime.startsWith("video/") || mime.startsWith("audio/")) return 16;
+  return 100;
+}
+
 export async function enviarArquivo(conversaId: string, arquivo: File, legenda?: string) {
-  if (arquivo.size > 3 * 1024 * 1024) throw new Error("Arquivo maior que 3 MB.");
+  const limite = limiteArquivoMB(arquivo.type);
+  if (arquivo.size > limite * 1024 * 1024) throw new Error(`Arquivo maior que ${limite} MB (limite da Meta pra esse tipo).`);
+  // Acima de 3 MB não cabe no corpo da Vercel: sobe direto no storage e manda só a URL (0146j).
+  if (arquivo.size > 3 * 1024 * 1024) {
+    const nomeLimpo = arquivo.name.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w.-]+/g, "_").slice(-80);
+    const caminho = `rel-envio/${crypto.randomUUID()}/${nomeLimpo || "arquivo"}`;
+    const up = await supabase.storage.from("wa-midia").upload(caminho, arquivo, { contentType: arquivo.type, upsert: false });
+    if (up.error) throw new Error(`Não consegui subir o arquivo: ${up.error.message}`);
+    const url = supabase.storage.from("wa-midia").getPublicUrl(caminho).data.publicUrl;
+    return api("POST", { acao: "arquivo", conversaId, fileName: arquivo.name, mimeType: arquivo.type, url, legenda: legenda || "" });
+  }
   const base64 = await new Promise<string>((ok, falha) => {
     const fr = new FileReader();
     fr.onload = () => ok(String(fr.result).split(",")[1] || "");

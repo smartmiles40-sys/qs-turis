@@ -31,7 +31,7 @@ function Numero({ rotulo, valor, dica, tom }: { rotulo: string; valor: string; d
 }
 
 export default function PrazoPage() {
-  const [dias, setDias] = useState(7);
+  const [dias, setDias] = useState(30);
   const [linhas, setLinhas] = useState<LinhaSla[] | null>(null);
   const [agora, setAgora] = useState<{ esperando: number; foraDoPrazo: number } | null>(null);
   const [nomes, setNomes] = useState<Record<string, string>>({});

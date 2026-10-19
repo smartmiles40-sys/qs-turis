@@ -329,7 +329,7 @@ export async function equipeRelacionamento(): Promise<{ id: string; name: string
   const { data } = await supabase.from("qs_users").select("id, name, role, setores, is_active").eq("is_active", true).order("name");
   return ((data ?? []) as { id: string; name: string; role: string; setores: string[] | null }[])
     .filter((u) => u.role === "admin" || u.role === "relacionamento" || (u.setores ?? []).includes("relacionamento"))
-    .map((u) => ({ id: u.id, name: u.name }));
+    .map((u) => ({ id: u.id, name: u.name.replace(/\s*\|.*$/, "") })); // "Mariane | Relacionamento" é a assinatura do WhatsApp, não o nome
 }
 
 /** O prazo como o time lê: vencido, vence hoje, ou a data. */

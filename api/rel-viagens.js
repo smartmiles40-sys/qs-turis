@@ -121,6 +121,17 @@ function telefoneNormal(v) {
   return d.length >= 10 && d.length <= 15 ? d : null;
 }
 
+/** O mesmo celular com e sem o 9º dígito (55 + DDD + 8 ou 9 dígitos). */
+function variantesBr(d) {
+  if (/^55\d{2}9\d{8}$/.test(d)) return [d, d.slice(0, 4) + d.slice(5)];
+  if (/^55\d{2}[6-9]\d{7}$/.test(d)) return [d, `${d.slice(0, 4)}9${d.slice(4)}`];
+  return [d];
+}
+
+// Contatos da gestão de milhas ("[SM] Gestão - Pablo", "Gestão - Angelica"):
+// não são clientes de viagem e inflavam a carteira (Bruno, 19/10).
+const CONTATO_GESTAO = /^\s*(\[\s*sm\s*\]|gest[aã]o\s*-)/i;
+
 function cpfValido(v) {
   const d = soDigitos(v);
   if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return null;
@@ -300,7 +311,8 @@ async function garantirCliente(p) {
   let atual = null;
   if (p.cpf) atual = await procurar(`cpf=eq.${p.cpf}`);
   if (!atual && p.bitrix_contato_id) atual = await procurar(`bitrix_contato_id=eq.${encodeURIComponent(p.bitrix_contato_id)}`);
-  if (!atual && p.telefone) atual = await procurar(`telefone=eq.${p.telefone}`);
+  // Com e sem o 9º dígito: (85) 9667-9277 e (85) 99667-9277 são a mesma pessoa.
+  if (!atual && p.telefone) atual = await procurar(`telefone=in.(${variantesBr(p.telefone).join(',')})`);
 
   if (atual) {
     // Só completa o que falta. Os campos únicos (CPF, passaporte, Bitrix) podem
@@ -351,6 +363,18 @@ async function garantirCliente(p) {
 
 // ── Viagem ──────────────────────────────────────────────────────────────────
 
+/** 'Preencher formulário de CRM "Lista de espera - Expedição Turquia 2027"' → "Turquia 2027". */
+function destinoDoFormulario(t) {
+  const m = String(t).match(/["“”']([^"“”']+)["“”']/);
+  let s = (m ? m[1] : String(t).replace(/^.*formul[aá]rio de crm\s*/i, '')).replace(/[[\]]/g, ' ');
+  s = s.replace(/\s+-\s+(org[aâ]nico|tr[aá]fego|pago|live|bio|site|ads?|meta|google|instagram|whats?app)\b.*$/i, '')
+    .replace(/^\s*(lista de espera|solicita[cç][aã]o de cota[cç][aã]o|cota[cç][aã]o|contato|agenda)\s*[-–:]?\s*/i, '')
+    .replace(/^\s*(expedi[cç][aã]o|pacote)\s+/i, '')
+    .replace(/\s+/g, ' ').trim();
+  // Sobrou só o tipo do formulário ("Solicitação de cotação"): não diz destino nenhum.
+  return s.length >= 2 && !/^(solicita|cota[cç]|contato|formul)/i.test(s) ? s : null;
+}
+
 function camposDaViagem(deal, mapa) {
   const nomeExp = rotulo(mapa, F.nomeExpedicao, deal[F.nomeExpedicao]);
   const expedicao = (nomeExp && !/n[aã]o se aplica/i.test(nomeExp) ? nomeExp : null)
@@ -372,7 +396,11 @@ function camposDaViagem(deal, mapa) {
   if (retorno && embarque && retorno < embarque) retorno = null; // data trocada no Bitrix: não trava a gravação
   // Em "Em emissão" o card ainda não tem destino nem datas e o título é o
   // genérico "Negociação #id" — melhor dizer o que foi vendido.
-  const tituloCard = texto(deal.TITLE);
+  let tituloCard = texto(deal.TITLE);
+  // Card que nasceu de formulário: 'Preencher formulário de CRM "[Japão 2027] - Orgânico"'.
+  // O que interessa é o nome do formulário, sem o "[ ]", a origem e o "Lista de espera".
+  const doForm = tituloCard && /formul[aá]rio de crm/i.test(tituloCard);
+  if (doForm) tituloCard = destinoDoFormulario(tituloCard);
   const generico = !tituloCard || /^negocia[cç][aã]o\s*#?\d*$/i.test(tituloCard);
   const rotuloVenda = rotulo(mapa, F.tipoVenda, deal[F.tipoVenda]);
   const reserva = `${rotuloVenda || 'Venda'} — #${deal.ID}`;
@@ -380,7 +408,7 @@ function camposDaViagem(deal, mapa) {
   const titulo = bom(expedicao) || bom(destino) || (generico ? reserva : bom(tituloCard)) || reserva;
   return {
     titulo: titulo.slice(0, 200),
-    destino,
+    destino: destino || (doForm && !expedicao ? tituloCard : null),
     expedicao,
     tipo,
     data_venda: data(deal[F.dataVenda]),
@@ -476,6 +504,7 @@ async function importarDealCore(deal, ctx, profundidade = 0) {
 
   const contato = await contatoDoBitrix(deal.CONTACT_ID, ctx.contatos);
   const pessoa = dadosDaPessoa(deal, contato);
+  if (CONTATO_GESTAO.test(pessoa.nome || '') || CONTATO_GESTAO.test(texto(deal.TITLE) || '')) return null;
   pessoa.bitrix_dados = contato ? dadosCompletos(contato, await camposDoContato()) : null;
   const clienteId = await garantirCliente(pessoa);
 

@@ -235,7 +235,7 @@ export async function listarEquipeRel(): Promise<{ id: string; name: string }[]>
   const { data } = await supabase.from("qs_users").select("id, name, role, setores, is_active").eq("is_active", true).order("name");
   return ((data ?? []) as { id: string; name: string; role: string; setores: string[] | null }[])
     .filter((u) => u.role === "admin" || u.role === "relacionamento" || (u.setores ?? []).includes("relacionamento"))
-    .map((u) => ({ id: u.id, name: u.name }));
+    .map((u) => ({ id: u.id, name: u.name.replace(/\s*\|.*$/, "") })); // "Mariane | Relacionamento" é a assinatura do WhatsApp, não o nome
 }
 
 // ── Passageiros ─────────────────────────────────────────────────────────────
@@ -373,7 +373,7 @@ export async function listarPedidosDocs(filtro: { clienteId?: string; viagemId?:
 // ── Alertas ─────────────────────────────────────────────────────────────────
 
 export async function listarAlertas(): Promise<Alerta[]> {
-  const { data, error } = await supabase.from("rel_alertas").select("*").order("data", { ascending: true }).limit(500);
+  const { data, error } = await supabase.from("rel_alertas").select("*").order("data", { ascending: true }).limit(5000);
   if (error) throw error;
   return (data ?? []) as Alerta[];
 }

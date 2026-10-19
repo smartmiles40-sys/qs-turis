@@ -104,7 +104,7 @@ export function EtapaModal({ viagem, estado, trechos, equipe, onFechar, onSalvo 
                   <input type="checkbox" className="w-4 h-4" style={{ accentColor: "var(--rel)" }} checked={!!t.checkin_feito_em}
                     onChange={async (e) => { try { await marcarCheckin(t.id, e.target.checked, currentUser?.id ?? ""); setVoos((l) => l.map((x) => x.id === t.id ? { ...x, checkin_feito_em: e.target.checked ? new Date().toISOString() : null } : x)); } catch (er) { setErro(er instanceof Error ? er.message : "Falhou."); } }} />
                   <span className="flex-1"><b>{[t.companhia, t.numero].filter(Boolean).join(" ") || TIPOS_TRECHO[t.tipo]}</b> {[t.origem_codigo || t.origem, t.destino_codigo || t.destino].filter(Boolean).join(" → ")}</span>
-                  <span className="tabular-nums" style={{ color: "var(--ink3)" }}>{diaBR(diaLocal(t.partida_em, t.partida_fuso))} {horaLocal(t.partida_em, t.partida_fuso)}</span>
+                  <span className="tabular-nums" style={{ color: "var(--ink3)" }}>{diaBR(diaLocal(t.partida_em, t.partida_fuso))} {t.fonte === "bitrix" ? "· horário a confirmar" : horaLocal(t.partida_em, t.partida_fuso)}</span>
                   {t.localizador && <span className="font-mono text-[12px]">{t.localizador}</span>}
                 </li>
               ))}

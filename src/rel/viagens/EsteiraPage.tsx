@@ -94,10 +94,19 @@ function Quadro({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void }
 
 // ── EM VIAGEM ───────────────────────────────────────────────────────────────
 
+/** Último dia da viagem pelos VOOS (a volta do Bitrix às vezes é a do grupo e o cliente estendeu). */
+function voltaPelosTrechos(it: Item): string | null {
+  const dias = it.trechos.filter((t) => t.tipo !== "hospedagem").map((t) => diaLocal(t.chegada_em || t.partida_em, t.chegada_em ? t.chegada_fuso : t.partida_fuso)).filter((d): d is string => !!d);
+  return dias.length ? dias.sort().pop()! : null;
+}
+/** Viajando agora: entre a ida e a volta, ou ainda com voo de volta pela frente. */
+const estaViajando = (it: Item) => it.v.fase === "em_viagem"
+  || (it.v.fase === "concluida" && it.trechos.some((t) => t.tipo !== "hospedagem" && new Date(t.partida_em).getTime() > Date.now()));
+
 function EmViagem({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void }) {
   const hoje = hojeSP();
   const agora = Date.now();
-  const lista = itens.filter((it) => it.v.fase === "em_viagem").sort((a, b) => String(a.v.data_retorno).localeCompare(String(b.v.data_retorno)));
+  const lista = itens.filter(estaViajando).sort((a, b) => String(a.v.data_retorno).localeCompare(String(b.v.data_retorno)));
   if (!lista.length) return <p className="rel-card p-4 text-[13px]" style={{ color: "var(--ink3)" }}>Ninguém viajando agora.</p>;
   return (
     <div className="rel-card overflow-x-auto">
@@ -116,7 +125,10 @@ function EmViagem({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void
             const chegou = ts.filter((t) => t.tipo !== "hospedagem" && new Date(t.chegada_em || t.partida_em).getTime() <= agora).pop();
             const emCurso = ts.find((t) => t.tipo !== "hospedagem" && new Date(t.partida_em).getTime() <= agora && t.chegada_em && new Date(t.chegada_em).getTime() > agora);
             const prox = ts.find((t) => t.tipo !== "hospedagem" && new Date(t.partida_em).getTime() > agora);
-            const total = it.v.data_embarque && it.v.data_retorno ? (diasAte(it.v.data_retorno, it.v.data_embarque) ?? 0) + 1 : null;
+            const pelosVoos = voltaPelosTrechos(it);
+            const volta = [it.v.data_retorno, pelosVoos].filter((d): d is string => !!d).sort().pop() ?? null;
+            const voltaDiverge = !!(pelosVoos && it.v.data_retorno && pelosVoos > it.v.data_retorno);
+            const total = it.v.data_embarque && volta ? (diasAte(volta, it.v.data_embarque) ?? 0) + 1 : null;
             const dia = it.v.data_embarque ? -(diasAte(it.v.data_embarque) ?? 0) + 1 : null;
             const onde = emCurso ? `em trânsito: ${TIPOS_TRECHO[emCurso.tipo]} ${[emCurso.origem_codigo || emCurso.origem, emCurso.destino_codigo || emCurso.destino].filter(Boolean).join(" → ")}`
               : hotel ? (hotel.destino || hotel.origem || hotel.descricao || "hotel")
@@ -127,13 +139,14 @@ function EmViagem({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void
               <tr key={it.v.id} className="rel-linha cursor-pointer" style={{ borderTop: "1px solid var(--line2)" }} onClick={() => abrir(it.v.id)}>
                 <td className="px-3 py-2.5">
                   <span className="flex items-center gap-1.5 font-bold" style={{ color: "var(--ink)" }}><MarcaTipo tipo={grupoTipo(it.v.tipo)} tamanho={8} />{nomeDe(it.v)}</span>
-                  <span className="block text-[12px]" style={{ color: "var(--ink3)" }}>{it.v.destino || it.v.titulo} · volta {diaBR(it.v.data_retorno)}</span>
+                  <span className="block text-[12px]" style={{ color: "var(--ink3)" }}>{it.v.destino || it.v.titulo} · volta {diaBR(volta)}</span>
+                  {voltaDiverge && <span className="block text-[11.5px] font-bold" style={{ color: "#B45309" }}>Bitrix diz volta {diaBR(it.v.data_retorno)} — os voos são até {diaBR(pelosVoos)}</span>}
                 </td>
                 <td className="px-2 py-2.5 tabular-nums font-semibold" style={{ color: "var(--ink)" }}>{dia && total ? `${dia} de ${total}` : "—"}</td>
                 <td className="px-2 py-2.5" style={{ color: "var(--ink)" }}>{onde}</td>
                 <td className="px-2 py-2.5" style={{ color: hotel ? "var(--ink)" : "var(--ink3)" }}>{hotel ? (hotel.descricao || hotel.destino) : "—"}</td>
                 <td className="px-2 py-2.5">
-                  {prox ? <><b style={{ color: "var(--ink)" }}>{diaBR(diaLocal(prox.partida_em, prox.partida_fuso))} {horaLocal(prox.partida_em, prox.partida_fuso)}</b> <span style={{ color: "var(--ink2)" }}>{TIPOS_TRECHO[prox.tipo]} {[prox.companhia, prox.numero].filter(Boolean).join(" ")} {[prox.origem_codigo || prox.origem, prox.destino_codigo || prox.destino].filter(Boolean).join(" → ")}</span></> : <span style={{ color: "var(--ink3)" }}>—</span>}
+                  {prox ? <><b style={{ color: "var(--ink)" }}>{diaBR(diaLocal(prox.partida_em, prox.partida_fuso))} {prox.fonte === "bitrix" ? "· horário a confirmar" : horaLocal(prox.partida_em, prox.partida_fuso)}</b> <span style={{ color: "var(--ink2)" }}>{TIPOS_TRECHO[prox.tipo]} {[prox.companhia, prox.numero].filter(Boolean).join(" ")} {[prox.origem_codigo || prox.origem, prox.destino_codigo || prox.destino].filter(Boolean).join(" → ")}</span></> : <span style={{ color: "var(--ink3)" }}>—</span>}
                   {checkinPendente && <span className="block text-[11.5px] font-bold" style={{ color: "#DC2626" }}>check-in aberto e não feito</span>}
                 </td>
                 <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
@@ -164,7 +177,7 @@ export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: str
       const vs = (await viagensDaEsteira()).filter((v) => grupoTipo(v.tipo) === "pacote");
       const hoje = hojeSP();
       // trechos só de quem embarca em até 3 dias ou está viajando (check-in e "em viagem")
-      const perto = vs.filter((v) => v.fase === "em_viagem" || (v.data_embarque && v.data_embarque <= somaDias(hoje, 3))).map((v) => v.id);
+      const perto = vs.filter((v) => v.fase === "em_viagem" || v.fase === "concluida" || (v.data_embarque && v.data_embarque <= somaDias(hoje, 3))).map((v) => v.id);
       const [regs, ts] = await Promise.all([etapasDe(vs.map((v) => v.id)), trechosDasViagens(perto)]);
       const trechos = new Map<string, Trecho[]>();
       for (const t of ts) trechos.set(t.viagem_id, [...(trechos.get(t.viagem_id) ?? []), t]);
@@ -183,7 +196,7 @@ export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: str
   }, [dados, busca]);
 
   const semData = dados ? dados.vs.filter((v) => !v.data_embarque).length : 0;
-  const nViagem = itens.filter((it) => it.v.fase === "em_viagem").length;
+  const nViagem = itens.filter(estaViajando).length;
   const nAtrasadas = itens.filter((it) => it.atual?.situacao === "atrasada").length;
 
   return (

@@ -22,6 +22,7 @@ import { lugaresDe } from "./destinos";
 import { conferirViagens, contar, type Analise } from "../lib/problemas";
 
 type Filtro = "todos" | "expedicao" | "pacote";
+const SEM_DESTINO = "\u0000sem-destino";
 type Situacao = "em_viagem" | "embarcando" | "checkin" | "revisada" | "pendente";
 
 interface Partida {
@@ -346,14 +347,19 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
 
   const vale = (t: "expedicao" | "pacote") => filtro === "todos" || filtro === t;
 
-  const { pontos, semLugar } = useMemo(() => {
+  const { pontos, semLugar, semDestino } = useMemo(() => {
     const m = new Map<string, PontoMapa>();
     const sem = new Map<string, number>();
     for (const v of viagens ?? []) {
       const tipo = grupoTipo(v.tipo);
       if (!vale(tipo)) continue;
-      const lugares = lugaresDe(v.destino).length ? lugaresDe(v.destino) : lugaresDe(v.expedicao);
-      if (!lugares.length) { const k = v.destino || v.expedicao || v.titulo; sem.set(k, (sem.get(k) ?? 0) + pax(v)); continue; }
+      // destino → expedição → título ("Antonia Exp Tailandia" só tem o lugar no título)
+      const lugares = [v.destino, v.expedicao, v.titulo].map((t) => lugaresDe(t)).find((x) => x.length) ?? [];
+      if (!lugares.length) {
+        // Sem texto de lugar nenhum ("-", ".", "Venda — #49991"): conta à parte, não é apelido faltando.
+        const k = [v.destino, v.expedicao].find((t) => t && /[a-z]{3}/i.test(t)) || SEM_DESTINO;
+        sem.set(k, (sem.get(k) ?? 0) + pax(v)); continue;
+      }
       for (const l of lugares) {
         const k = `${l.id}|${tipo}`;
         const p = m.get(k) ?? { lugar: l, tipo, passageiros: 0, viagens: 0, proximoEmbarque: null };
@@ -362,7 +368,9 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
         m.set(k, p);
       }
     }
-    return { pontos: [...m.values()], semLugar: [...sem.entries()].sort((a, b) => b[1] - a[1]) };
+    const semDestino = sem.get(SEM_DESTINO) ?? 0;
+    sem.delete(SEM_DESTINO);
+    return { pontos: [...m.values()], semLugar: [...sem.entries()].sort((a, b) => b[1] - a[1]), semDestino };
   }, [viagens, filtro]);
 
   const partidas = useMemo(() => montarPartidas(viagens ?? [], rev, trechos), [viagens, rev, trechos]);
@@ -430,7 +438,7 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
 
       {semLugar.length > 0 && (
         <details className="rel-card px-4 py-2.5 text-[12.5px]" style={{ color: "var(--ink2)" }}>
-          <summary className="cursor-pointer font-semibold">{semLugar.length} destino{semLugar.length === 1 ? "" : "s"} sem lugar no mapa</summary>
+          <summary className="cursor-pointer font-semibold">{semLugar.length} destino{semLugar.length === 1 ? "" : "s"} sem lugar no mapa{semDestino ? ` · ${semDestino} passageiro${semDestino === 1 ? "" : "s"} sem destino informado no Bitrix` : ""}</summary>
           <p className="mt-1.5 text-[12px]" style={{ color: "var(--ink3)" }}>O texto do destino não foi reconhecido. Ajuste o destino na viagem (ex.: "Japão", "Madri") ou peça pra incluir o apelido.</p>
           <ul className="mt-1.5 flex flex-wrap gap-1.5">
             {semLugar.map(([nome, n]) => (
@@ -453,7 +461,7 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
         <Card titulo="Próximo voo interno" rodape={trechos.length === 0 ? "Cadastre os voos em cada viagem (seção Trechos)." : undefined}>
           {proxVooInterno ? (
             <LinhaCard cor={grupoTipo(proxVooInterno.viagem_tipo) === "expedicao" ? COR_EXP : COR_PAC} rotulo={grupoTipo(proxVooInterno.viagem_tipo) === "expedicao" ? "Expedição" : "Pacote"}
-              valor={dataHora(proxVooInterno.partida_em)}
+              valor={proxVooInterno.fonte === "bitrix" ? `${new Date(proxVooInterno.partida_em).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} · horário a confirmar` : dataHora(proxVooInterno.partida_em)}
               sub={`${[proxVooInterno.origem, proxVooInterno.destino].filter(Boolean).join(" → ") || TIPOS_TRECHO.voo_interno} · ${proxVooInterno.expedicao || proxVooInterno.viagem_titulo}`}
               onClick={() => onAbrirViagem(proxVooInterno.viagem_id)} />
           ) : <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhum voo interno cadastrado.</p>}
@@ -461,8 +469,11 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
         <Card titulo="Próximo check-in" rodape={trechos.length === 0 ? "Check-in abre 48h antes de cada voo cadastrado." : undefined}>
           {proxCheckin ? (
             <LinhaCard cor={grupoTipo(proxCheckin.viagem_tipo) === "expedicao" ? COR_EXP : COR_PAC}
-              rotulo={`${grupoTipo(proxCheckin.viagem_tipo) === "expedicao" ? "Expedição" : "Pacote"} · ${new Date(proxCheckin.checkin_em!).getTime() <= agora ? "aberto agora" : "abre em"}`}
-              valor={dataHora(proxCheckin.checkin_em!)}
+              /* Aberto: a data que importa é a do VOO (a de abertura já passou e confundia — "18/10, aberto agora" no dia 19). */
+              rotulo={`${grupoTipo(proxCheckin.viagem_tipo) === "expedicao" ? "Expedição" : "Pacote"} · ${new Date(proxCheckin.checkin_em!).getTime() <= agora ? `check-in aberto desde ${dataHora(proxCheckin.checkin_em!)} · voo em` : "check-in abre em"}`}
+              valor={new Date(proxCheckin.checkin_em!).getTime() > agora ? dataHora(proxCheckin.checkin_em!)
+                : proxCheckin.fonte === "bitrix" ? `${new Date(proxCheckin.partida_em).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} · horário a confirmar`
+                : dataHora(proxCheckin.partida_em)}
               sub={`${TIPOS_TRECHO[proxCheckin.tipo]}${proxCheckin.numero ? ` ${proxCheckin.numero}` : ""} · ${proxCheckin.expedicao || proxCheckin.viagem_titulo}`}
               onClick={() => onAbrirViagem(proxCheckin.viagem_id)} />
           ) : <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhum check-in pendente.</p>}

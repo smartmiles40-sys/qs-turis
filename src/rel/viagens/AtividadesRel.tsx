@@ -149,12 +149,12 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou }: {
                 <li key={t.id} className="rel-card px-3 py-2.5 flex flex-wrap sm:flex-nowrap items-center gap-3" style={{ borderLeft: `4px solid ${aberto ? "#DC2626" : "#B45309"}` }}>
                   <span className="w-[112px] flex-shrink-0">
                     <span className="block text-[11px] font-extrabold uppercase tracking-wide" style={{ color: "#B45309" }}>Check-in</span>
-                    <span className="block text-[11.5px] font-semibold" style={{ color: aberto ? "#DC2626" : "#B45309" }}>{aberto ? "aberto agora" : `abre ${horaLocal(t.checkin_em, null)}`}</span>
+                    <span className="block text-[11.5px] font-semibold" style={{ color: aberto ? "#DC2626" : "#B45309" }}>{t.fonte === "bitrix" ? "horário a confirmar" : aberto ? "aberto agora" : `abre ${horaLocal(t.checkin_em, null)}`}</span>
                   </span>
                   <button onClick={() => abrirViagem(it.v.id)} className="min-w-0 flex-1 text-left">
-                    <span className="block text-[14px] font-bold truncate" style={{ color: "var(--ink)" }}>{nomeDe(it.v)} · {[t.companhia, t.numero].filter(Boolean).join(" ")}</span>
+                    <span className="block text-[14px] font-bold truncate" style={{ color: "var(--ink)" }}>{nomeDe(it.v)} · {[t.companhia, t.numero].filter(Boolean).join(" ") || "voo sem número"}</span>
                     <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>
-                      {[t.origem_codigo || t.origem, t.destino_codigo || t.destino].filter(Boolean).join(" → ")} · voo {diaBR(diaLocal(t.partida_em, t.partida_fuso))} {horaLocal(t.partida_em, t.partida_fuso)}{t.localizador ? ` · loc. ${t.localizador}` : ""}
+                      {[t.origem_codigo || t.origem, t.destino_codigo || t.destino].filter(Boolean).join(" → ")} · voo {diaBR(diaLocal(t.partida_em, t.partida_fuso))} {t.fonte === "bitrix" ? "(horário a confirmar)" : horaLocal(t.partida_em, t.partida_fuso)}{t.localizador ? ` · loc. ${t.localizador}` : ""}
                     </span>
                   </button>
                   <Botao variante="primario" onClick={async () => { await marcarCheckin(t.id, true, currentUser?.id ?? "").catch(() => null); onMudou(); }}>Check-in feito</Botao>

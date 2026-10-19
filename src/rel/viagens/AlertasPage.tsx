@@ -2,7 +2,7 @@
 // -----------------------------------------------------------------------------
 // ALERTAS — o que precisa de atenção, numa lista só (view rel_alertas, 0103):
 // passaporte que vence antes de 6 meses da volta, expedição sem passaporte na
-// ficha, tarefa da jornada atrasada, link de documentos parado, chamado
+// ficha, etapa da Esteira atrasada (0146), link de documentos parado, chamado
 // vencido, aniversário chegando e embarque na semana.
 //
 // Não guarda nada: a lista é recalculada a cada abertura. Resolveu a causa
@@ -15,7 +15,7 @@ import { Aviso, Etiqueta, Vazio } from "../ui";
 const TIPOS: Record<Alerta["tipo"], { rotulo: string; dica: string }> = {
   passaporte: { rotulo: "Passaporte vencendo", dica: "Vence antes de 6 meses depois da volta." },
   sem_passaporte: { rotulo: "Sem passaporte", dica: "Expedição em até 6 meses e nenhum passaporte na ficha." },
-  tarefa: { rotulo: "Tarefas atrasadas", dica: "Da jornada do cliente." },
+  tarefa: { rotulo: "Esteira atrasada", dica: "Etapa do pacote que passou do prazo — o mesmo número da Esteira." },
   documentos: { rotulo: "Documentos parados", dica: "Link mandado há mais de 7 dias e nada recebido." },
   chamado: { rotulo: "Chamados vencidos", dica: "Passaram do prazo e não foram resolvidos." },
   embarque: { rotulo: "Embarques na semana", dica: "Conferir se está tudo pronto." },

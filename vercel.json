@@ -59,7 +59,7 @@
       "maxDuration": 60
     },
     "api/rel-wa.js": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "api/rel-viagens.js": {
       "maxDuration": 60

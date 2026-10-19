@@ -33,6 +33,8 @@ import { quemAtende, numeroDoRelacionamento } from './_relWa.js';
 
 const MAX_TEXTO = 4000;
 const MAX_BYTES = 3 * 1024 * 1024; // a Vercel aceita ~4,5 MB de corpo; base64 infla 33%
+// Arquivo que o navegador já subiu no bucket (wa-midia/rel-envio/, 0146j): vale o limite da Meta, em MB.
+const LIMITE_META = { image: 5, video: 16, audio: 16, document: 100 };
 
 const TIPOS_ARQUIVO = {
   'image/jpeg': 'image', 'image/png': 'image',
@@ -126,10 +128,12 @@ async function destino({ conversaId, clienteId, telefone }, numero) {
     const cl = (await rest(`rel_clientes?select=id,telefone&id=eq.${clienteId}&mesclado_em_id=is.null&limit=1`))?.[0];
     if (!cl) return { erro: 'Ficha não encontrada.' };
     if (!cl.telefone) return { erro: 'Esta ficha não tem telefone.' };
+    // A ficha pode ter o número com o 9 e o WhatsApp sem (ou o contrário): acha
+    // a conversa pelas duas formas e escreve no número que o WhatsApp usa.
     const c = (await rest(
-      `rel_wa_conversas?select=id,ultima_entrada_em,setor&telefone=eq.${cl.telefone}&phone_number_id=eq.${encodeURIComponent(numero.phone_number_id)}&limit=1`
+      `rel_wa_conversas?select=id,telefone,ultima_entrada_em,setor&telefone=in.(${variantesBr(cl.telefone).join(',')})&phone_number_id=eq.${encodeURIComponent(numero.phone_number_id)}&order=ultima_entrada_em.desc.nullslast&limit=1`
     ))?.[0];
-    return { telefone: cl.telefone, phoneId: numero.phone_number_id, ultimaEntrada: c?.ultima_entrada_em || null, conversaId: c?.id || null, setor: c ? c.setor : null };
+    return { telefone: c?.telefone || cl.telefone, phoneId: numero.phone_number_id, ultimaEntrada: c?.ultima_entrada_em || null, conversaId: c?.id || null, setor: c ? c.setor : null };
   }
   if (telefone) {
     const fone = normalizarTelefone(telefone);
@@ -397,9 +401,20 @@ export default async function handler(req, res) {
     const mime = String(body.mimeType || '').split(';')[0].trim().toLowerCase();
     const tipo = TIPOS_ARQUIVO[mime];
     if (!tipo) return res.status(400).json({ error: 'Tipo de arquivo não aceito (use JPG, PNG, PDF, MP4 ou áudio MP3/OGG).' });
-    const bytes = Buffer.from(String(body.dataBase64 || ''), 'base64');
+    let bytes, urlGuardada = null;
+    if (body.url) {
+      // Subiu direto no bucket: só a pasta rel-envio/ do nosso storage.
+      if (!/\/wa-midia\/rel-envio\//.test(String(body.url))) return res.status(400).json({ error: 'Arquivo de fora do QS.' });
+      const limite = LIMITE_META[tipo];
+      const b = await baixarNosso(body.url, limite * 1024 * 1024);
+      if (b.erro === 'Arquivo grande demais.') return res.status(413).json({ error: `Arquivo maior que ${limite} MB (limite da Meta pra esse tipo).` });
+      if (b.erro) return res.status(400).json({ error: b.erro });
+      bytes = b.bytes; urlGuardada = String(body.url);
+    } else {
+      bytes = Buffer.from(String(body.dataBase64 || ''), 'base64');
+      if (bytes.length > MAX_BYTES) return res.status(413).json({ error: 'Arquivo maior que 3 MB.' });
+    }
     if (!bytes.length) return res.status(400).json({ error: 'Arquivo vazio.' });
-    if (bytes.length > MAX_BYTES) return res.status(413).json({ error: 'Arquivo maior que 3 MB.' });
     const nome = String(body.fileName || 'arquivo').slice(0, 120);
     const legenda = String(body.legenda || '').trim().slice(0, 1000) || null;
 
@@ -409,7 +424,7 @@ export default async function handler(req, res) {
     if (!env?.wamid) return res.status(502).json({ error: `A Meta não enviou o arquivo${env?.detalhe ? `: ${env.detalhe}` : '.'}` });
 
     // Cópia no nosso bucket pra bolha mostrar o arquivo.
-    const url = await guardarMidia(bytes, mime, { leadId: `rel-${alvo.telefone}`, nomeArquivo: nome }).catch(() => null);
+    const url = urlGuardada || await guardarMidia(bytes, mime, { leadId: `rel-${alvo.telefone}`, nomeArquivo: nome }).catch(() => null);
     const tipoBolha = { image: 'image', video: 'video', audio: 'audio' }[tipo] || 'file';
     await gravar({ wamid: env.wamid, texto: legenda || '', anexos: url ? [{ type: tipoBolha, url, nome }] : [] });
     return res.status(200).json({ ok: true, wamid: env.wamid });

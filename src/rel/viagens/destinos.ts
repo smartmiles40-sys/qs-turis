@@ -92,6 +92,39 @@ const LUGARES: Record<string, Lugar> = {
   lencois: L("lencois", "Lençóis Maranhenses", -2.48, -43.13),
   bonito: L("bonito", "Bonito", -21.13, -56.49),
   pantanal: L("pantanal", "Pantanal", -16.6, -56.7),
+  // 19/10: o que faltava na lista "sem lugar no mapa"
+  eua: L("eua", "Estados Unidos", 38.9, -77.04),
+  miami: L("miami", "Miami", 25.76, -80.19),
+  detroit: L("detroit", "Detroit", 42.33, -83.05),
+  phoenix: L("phoenix", "Phoenix", 33.45, -112.07),
+  europa: L("europa", "Europa", 50.11, 8.68),
+  amsterda: L("amsterda", "Amsterdã", 52.37, 4.9),
+  veneza: L("veneza", "Veneza", 45.44, 12.32),
+  ibiza: L("ibiza", "Ibiza", 38.91, 1.43),
+  budapeste: L("budapeste", "Budapeste", 47.5, 19.04),
+  edimburgo: L("edimburgo", "Edimburgo", 55.95, -3.19),
+  caboverde: L("caboverde", "Cabo Verde", 14.93, -23.51),
+  curacao: L("curacao", "Curaçao", 12.12, -68.88),
+  puntacana: L("puntacana", "Punta Cana", 18.58, -68.4),
+  sanandres: L("sanandres", "San Andrés", 12.58, -81.7),
+  assuncao: L("assuncao", "Assunção", -25.26, -57.58),
+  montevideu: L("montevideu", "Montevidéu", -34.9, -56.16),
+  doha: L("doha", "Doha", 25.29, 51.53),
+  hongkong: L("hongkong", "Hong Kong", 22.32, 114.17),
+  assua: L("assua", "Assuã / Abu Simbel", 24.09, 32.9),
+  belem: L("belem", "Belém", -1.46, -48.5),
+  saoluis: L("saoluis", "São Luís", -2.53, -44.3),
+  jericoacoara: L("jericoacoara", "Jericoacoara", -2.79, -40.51),
+  ilheus: L("ilheus", "Ilhéus", -14.79, -39.05),
+  brasilia: L("brasilia", "Brasília", -15.79, -47.88),
+  bh: L("bh", "Belo Horizonte", -19.92, -43.94),
+  curitiba: L("curitiba", "Curitiba", -25.43, -49.27),
+  florianopolis: L("florianopolis", "Florianópolis", -27.6, -48.55),
+  portoalegre: L("portoalegre", "Porto Alegre", -30.03, -51.23),
+  goiania: L("goiania", "Goiânia", -16.69, -49.26),
+  campogrande: L("campogrande", "Campo Grande", -20.44, -54.65),
+  navegantes: L("navegantes", "Navegantes", -26.9, -48.65),
+  chapeco: L("chapeco", "Chapecó", -27.1, -52.62),
 };
 
 // Apelido (já sem acento, minúsculo) → lugar. Erros de digitação que já
@@ -137,7 +170,42 @@ const APELIDOS: Record<string, string> = {
   pelotas: "pelotas", petropolis: "petropolis", caruaru: "caruaru",
   salvador: "salvador", recife: "recife", maceio: "maceio", noronha: "noronha", gramado: "gramado",
   "foz do iguacu": "foz", jalapao: "jalapao", lencois: "lencois", bonito: "bonito", pantanal: "pantanal",
+  // 19/10
+  "estados unidos": "eua", eua: "eua", usa: "eua", miami: "miami", detroit: "detroit", phoenix: "phoenix",
+  europa: "europa", eurotrip: "europa", amsterdam: "amsterda", amsterda: "amsterda", veneza: "veneza", ibiza: "ibiza",
+  budapeste: "budapeste", edimburgo: "edimburgo", escocia: "edimburgo",
+  "cabo verde": "caboverde", curacao: "curacao", "punta cana": "puntacana", "republica dominicana": "puntacana",
+  "san andres": "sanandres", assuncao: "assuncao", paraguai: "assuncao", montevideu: "montevideu", uruguai: "montevideu",
+  doha: "doha", catar: "doha", "hong kong": "hongkong", "abu simbel": "assua", "vila nubia": "assua", assua: "assua",
+  "bueno aires": "argentina", "rio de janeino": "rio", "santos dumont": "rio", johanesburgo: "joanesburgo",
+  "machu pichu": "machupicchu", belem: "belem", "sao luis": "saoluis", barreirinhas: "lencois", atins: "lencois",
+  jericoacoara: "jericoacoara", jeri: "jericoacoara", ilheus: "ilheus", brasilia: "brasilia", "belo horizonte": "bh",
+  curitiba: "curitiba", florianopolis: "florianopolis", floripa: "florianopolis", "porto alegre": "portoalegre",
+  goiania: "goiania", "campo grande": "campogrande", chapeco: "chapeco", hanoi: "vietna", "da nang": "vietna",
+  sydney: "australia", auckland: "novazelandia",
 };
+
+// Código de aeroporto (IATA). Só vale quando o texto é SÓ código ("JFK - LGA",
+// "BSB / POA", "DAD x HAN"): "for", "rec", "bel"… são palavras comuns também
+// ("Se Tu For, Eu Vou" não é Fortaleza).
+const IATA: Record<string, string> = {
+  gru: "saopaulo", cgh: "saopaulo", vcp: "campinas", gig: "rio", sdu: "rio", bsb: "brasilia", cnf: "bh", plu: "bh",
+  ssa: "salvador", rec: "recife", for: "fortaleza", nat: "natal", mcz: "maceio", fen: "noronha", bel: "belem",
+  slz: "saoluis", jdo: "fortaleza", ios: "ilheus", vix: "vitoria", vdc: "vitoriaconquista", cwb: "curitiba", fln: "florianopolis",
+  poa: "portoalegre", gyn: "goiania", cgr: "campogrande", nvt: "navegantes", xap: "chapeco", igu: "foz", man: "amazonia",
+  bps: "salvador", "sp": "saopaulo",
+  jfk: "novayork", lga: "novayork", ewr: "novayork", mia: "miami", mco: "orlando", dtw: "detroit", phx: "phoenix",
+  yyz: "toronto", cun: "cancun", mex: "mexico", puj: "puntacana", cur: "curacao", adz: "sanandres", ctg: "cartagena", bog: "colombia",
+  scl: "chile", eze: "argentina", aep: "argentina", asu: "assuncao", mvd: "montevideu", lim: "peru", cuz: "peru",
+  lis: "portugal", opo: "portugal", mad: "espanha", bcn: "barcelona", ibz: "ibiza", cdg: "paris", ory: "paris", lhr: "londres", lgw: "londres",
+  edi: "edimburgo", ams: "amsterda", fco: "italia", mxp: "milao", lin: "milao", vce: "veneza", flr: "toscana", nap: "amalfi",
+  bud: "budapeste", ist: "turquia", saw: "turquia", ath: "grecia", kef: "islandia", cai: "egito", asw: "assua",
+  dxb: "dubai", auh: "dubai", doh: "doha", jnb: "joanesburgo", cpt: "cidadedocabo", rak: "marrocos", cmn: "marrocos",
+  hnd: "japao", nrt: "japao", kix: "japao", pek: "china", pvg: "china", pkx: "china", hkg: "hongkong", bkk: "tailandia", hkt: "tailandia",
+  icn: "coreia", han: "vietna", sgn: "vietna", dad: "vietna", dps: "bali", mle: "maldivas", del: "india",
+  syd: "australia", akl: "novazelandia", sid: "caboverde", rai: "caboverde",
+};
+const SO_CODIGOS = /^(\s*[a-z]{2,3}\s*([-/x>]|\s)?)+$/;
 
 const CHAVES = Object.keys(APELIDOS).sort((a, b) => b.length - a.length);
 
@@ -153,8 +221,17 @@ export function lugaresDe(texto: string | null | undefined): Lugar[] {
   const ja = cache.get(chave);
   if (ja) return ja;
   // "Itália dos Sonhos: Milão, Toscana e Roma. Incluso: aéreo Gru/Mil..." → só o começo
-  let t = normalizar(chave.split(/[:.]/)[0]);
+  const cru = chave.split(/[:.]/)[0];
+  let t = normalizar(cru);
   const achados = new Map<string, Lugar>();
+  // Só códigos de aeroporto ("JFK - LGA", "HND/JFK")?
+  if (SO_CODIGOS.test(cru.toLowerCase().replace(/[–—]/g, "-"))) {
+    for (const c of t.trim().split(" ")) {
+      const lugar = LUGARES[IATA[c]];
+      if (lugar) achados.set(lugar.id, lugar);
+    }
+    if (achados.size) { const r = [...achados.values()]; cache.set(chave, r); return r; }
+  }
   for (const k of CHAVES) {
     const alvo = ` ${k} `;
     if (t.includes(alvo)) {

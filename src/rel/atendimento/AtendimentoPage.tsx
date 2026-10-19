@@ -38,7 +38,7 @@ import {
   assumirConversa, carregarConversa, carregarMensagens, duracao, enviarArquivo, enviarFigurinha, enviarTexto,
   favoritarMensagem, fixarMensagem, guardarMensagemNasNotas, ligarAoCliente, listarConversas, listarEtiquetas, listarListas,
   listarRespostas, marcarLida, marcarSemSla, minhasFavoritas, mudarPreferencia, MOTIVOS_SEM_SLA, preencherResposta, reabrirConversa,
-  contarFixadas, reagir, salvarFigurinha, salvarTranscricao, statusDoNumero,
+  contarFixadas, limiteArquivoMB, reagir, salvarFigurinha, salvarTranscricao, statusDoNumero,
   type Conversa, type Etiqueta, type Filtro, type Lista, type Mensagem, type NumeroRel, type PrefConversa, type Resposta,
 } from "../lib/whatsapp";
 import { buscarClientes, formatarTelefone, type Cliente } from "../lib/clientes";
@@ -201,7 +201,8 @@ function Lista({ setor, todas, busca, setBusca, buscaRef, conversas, selecionada
         </button>
       )}
       {!verArquivadas && (
-        <div className="px-3 pb-2 flex gap-1.5 overflow-x-auto flex-shrink-0" role="toolbar" aria-label="Filtros" style={{ scrollbarWidth: "none", borderBottom: "1px solid var(--wa-line)" }}>
+        // Quebra em linhas (antes rolava de lado sem barra e o último chip aparecia cortado: "No Fin…").
+        <div className="px-3 pb-2 flex flex-wrap gap-1.5 flex-shrink-0" role="toolbar" aria-label="Filtros" style={{ borderBottom: "1px solid var(--wa-line)" }}>
           {chips.map(([k, r]) => (
             <button key={k} className="wa-chipf" aria-pressed={chip === k} onClick={() => setChip(chip === k && k !== "tudo" ? "tudo" : k)}>{r}</button>
           ))}
@@ -686,7 +687,8 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   function escolherArquivo(f: File | undefined) {
     if (arquivoRef.current) arquivoRef.current.value = "";
     if (!f) return;
-    if (f.size > 3 * 1024 * 1024) { setErro("Arquivo maior que 3 MB — a Meta não aceita por aqui."); return; }
+    const limite = limiteArquivoMB(f.type);
+    if (f.size > limite * 1024 * 1024) { setErro(`Arquivo maior que ${limite} MB — limite da Meta pra esse tipo.`); return; }
     setErro(null);
     setArquivo(f);
     setLegenda(texto.trim());
@@ -1060,7 +1062,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
               <Icone rotulo="Respostas prontas (ou digite /)" onClick={() => { setVerRespostas((v) => !v); setExpressoes(null); }} ativo={verRespostas}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
               </Icone>
-              <Icone rotulo="Anexar foto, vídeo, áudio ou documento (até 3 MB)" onClick={() => arquivoRef.current?.click()}>
+              <Icone rotulo="Anexar foto, vídeo, áudio ou documento (foto até 5 MB, vídeo/áudio 16 MB, documento 100 MB)" onClick={() => arquivoRef.current?.click()}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
               </Icone>
               <input ref={arquivoRef} type="file" hidden accept="image/jpeg,image/png,application/pdf,video/mp4,audio/mpeg,audio/ogg" onChange={(e) => escolherArquivo(e.target.files?.[0])} />

@@ -161,7 +161,7 @@ export default function KpisAtendimento() {
                 <tbody>
                   {dados.por_atendente.slice().sort((a, b) => (b.tme_n + b.tma_n) - (a.tme_n + a.tma_n)).map((a) => (
                     <tr key={a.atendente_id ?? "sem"} style={{ borderTop: "1px solid var(--line2)", color: "var(--ink)" }}>
-                      <td className="py-1.5">{a.nome ?? (a.atendente_id ? "—" : "Pelo celular / sem atendente")}</td>
+                      <td className="py-1.5">{a.nome ?? (a.atendente_id ? "—" : <span title="Respondido no celular numa conversa que ninguém assumiu no QS. Assuma a conversa (painel à direita) e a resposta pelo celular passa a contar pra você.">Pelo celular · ninguém assumiu</span>)}</td>
                       <td className="text-right tabular-nums">{minutos(a.tme_media)}</td>
                       <td className="text-right tabular-nums">{a.tme_n}</td>
                       <td className="text-right tabular-nums">{minutos(a.tma_media)}</td>

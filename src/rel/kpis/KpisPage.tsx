@@ -100,7 +100,7 @@ interface LinhaChamado {
 const horas = (h: number | null) => (h == null ? "—" : h < 24 ? `${Math.round(h)}h` : `${(h / 24).toFixed(1).replace(".", ",")}d`);
 
 function KpisChamados() {
-  const [dias, setDias] = useState(90);
+  const [dias, setDias] = useState(30);
   const [linhas, setLinhas] = useState<LinhaChamado[] | null>(null);
   const [nomes, setNomes] = useState<Record<string, string>>({});
   const [erro, setErro] = useState<string | null>(null);
@@ -200,7 +200,7 @@ function KpisChamados() {
 
 // ── NPS ─────────────────────────────────────────────────────────────────────
 function KpisNps() {
-  const [dias, setDias] = useState(90);
+  const [dias, setDias] = useState(30);
   const [lista, setLista] = useState<Pesquisa[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   useEffect(() => {

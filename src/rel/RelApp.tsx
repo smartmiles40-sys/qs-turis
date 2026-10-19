@@ -136,7 +136,7 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: Resumo | null; cont: Conta
 
   const cartoes: { rotulo: string; valor: number | undefined; dica: string; rota: Rota; tom?: "aviso" | "erro" }[] = [
     { rotulo: "Esperando resposta", valor: cont?.esperando, dica: cont?.foraDoPrazo ? `${cont.foraDoPrazo} fora do prazo` : "no WhatsApp", rota: { tela: "atendimento" }, tom: cont?.foraDoPrazo ? "erro" : undefined },
-    { rotulo: "Alertas importantes", valor: cont?.alertasAltos, dica: "passaporte, tarefas atrasadas…", rota: { tela: "alertas" }, tom: cont?.alertasAltos ? "aviso" : undefined },
+    { rotulo: "Alertas importantes", valor: cont?.alertasAltos, dica: "passaporte vencendo, esteira atrasada…", rota: { tela: "alertas" }, tom: cont?.alertasAltos ? "aviso" : undefined },
     { rotulo: "Chamados vencidos", valor: cont?.chamadosVencidos, dica: "passaram do prazo", rota: { tela: "chamados" }, tom: cont?.chamadosVencidos ? "erro" : undefined },
     { rotulo: "Clientes", valor: resumo?.clientes, dica: resumo?.duplicados ? `${resumo.duplicados} possíveis duplicados` : "fichas ativas", rota: { tela: "clientes" } },
   ];

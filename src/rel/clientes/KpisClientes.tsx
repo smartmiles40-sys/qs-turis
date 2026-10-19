@@ -170,10 +170,11 @@ export default function KpisClientes({ metricas, regras, metas, filtro, onFiltro
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
       {/* 1 ── Categorias */}
       <Bloco titulo="Carteira por categoria" sub="Clique numa fatia para ver só aquela categoria.">
-        <div className="flex items-center gap-3">
+        {/* Quebra a lista pra baixo da rosca quando o bloco é estreito (antes: "Br…", "Se…"). */}
+        <div className="flex flex-wrap items-center gap-3">
           <Rosca fatias={porCat} ativa={ativaCat}
             onClicar={(c) => onFiltro(ativaCat === c ? null : { tipo: "categoria", categoria: c })} />
-          <ul className="flex-1 min-w-0 space-y-1">
+          <ul className="flex-1 min-w-[160px] space-y-1">
             {porCat.map(({ cat, n }) => {
               const nivel = regras.niveis.find((x) => x.id === cat.id);
               return (
@@ -184,7 +185,7 @@ export default function KpisClientes({ metricas, regras, metas, filtro, onFiltro
                     style={{ opacity: ativaCat && ativaCat !== cat.id ? 0.55 : 1, background: ativaCat === cat.id ? "var(--rel-soft)" : undefined }}>
                     <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: cat.cor, boxShadow: ANEL }} aria-hidden />
                     <span className="flex-1 min-w-0">
-                      <span className="block text-[12px] font-semibold truncate" style={{ color: "var(--ink)" }}>{cat.nome}</span>
+                      <span className="block text-[12px] font-semibold leading-tight break-words" style={{ color: "var(--ink)" }}>{cat.nome}</span>
                       <span className="block text-[11px] truncate" style={{ color: "var(--ink3)" }}>
                         {nivel ? regraDoNivel(nivel, regras) : "sem viagem ainda"}
                       </span>
@@ -237,7 +238,7 @@ export default function KpisClientes({ metricas, regras, metas, filtro, onFiltro
           {contato.linhas.map((x) => (
             <li key={x.cat.id} className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--ink2)" }}>
               <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: x.cat.cor, boxShadow: ANEL }} aria-hidden />
-              <span className="flex-1 truncate">{x.cat.nome}</span>
+              <span className="flex-1 min-w-0 leading-tight break-words">{x.cat.nome}</span>
               <span className="tabular-nums" title="média de dias sem contato / meta">{x.mediaDias ?? "—"}d / {x.meta}d</span>
               <b className="tabular-nums w-9 text-right" style={{ color: pct(x.dentro, x.n) >= 80 ? "var(--rel-ink)" : "var(--err-ink)" }}>{pct(x.dentro, x.n)}%</b>
             </li>
