@@ -36,6 +36,12 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
   podeEditar?: boolean;
 }) {
   const [modelos, setModelos] = useState<WaModeloAdmin[] | null>(null);
+  // O número é dividido com o Financeiro (19/10): os modelos fin_ ficam escondidos aqui
+  // (eles têm a tela própria no Financeiro). Lista só de fin_ = é a tela do Financeiro.
+  const [verFin, setVerFin] = useState(false);
+  const nFin = (modelos ?? []).filter((m) => m.nome.startsWith("fin_")).length;
+  const soFin = nFin > 0 && nFin === (modelos ?? []).length;
+  const visiveis = (modelos ?? []).filter((m) => soFin || verFin || !m.nome.startsWith("fin_"));
   const [erro, setErro] = useState<string | null>(null);
   const [novo, setNovo] = useState(false);
   const [form, setForm] = useState({ nome: "", categoria: "UTILITY" as "UTILITY" | "MARKETING", corpo: "", rodape: "" });
@@ -118,10 +124,15 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
         )}
       </div>
       {erro && <Aviso tom="erro">{erro}</Aviso>}
+      {!soFin && nFin > 0 && (
+        <button onClick={() => setVerFin(!verFin)} aria-pressed={verFin} className="text-[12px] font-semibold underline" style={{ color: "var(--ink2)" }}>
+          {verFin ? "Esconder" : "Mostrar"} os {nFin} modelo{nFin > 1 ? "s" : ""} do Financeiro (fin_)
+        </button>
+      )}
       {modelos === null ? <div className="h-16 rounded-lg animate-pulse" style={{ background: "var(--line)" }} /> :
-        modelos.length === 0 ? <p className="text-sm" style={{ color: "var(--ink3)" }}>Nenhum modelo nesta conta ainda.</p> : (
+        visiveis.length === 0 ? <p className="text-sm" style={{ color: "var(--ink3)" }}>Nenhum modelo nesta conta ainda.</p> : (
           <ul className="divide-y" style={{ borderColor: "var(--line)" }}>
-            {modelos.map((m) => {
+            {visiveis.map((m) => {
               const s = STATUS_MODELO[m.status] || { txt: m.status, tom: "neutro" as const };
               const chave = m.id || m.nome;
               return (

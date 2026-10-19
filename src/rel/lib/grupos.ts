@@ -7,6 +7,7 @@
 // (/api/rel-grupos), que só aceita endereço de grupo já conhecido.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
+import { limiteArquivoMB, subirParaEnvio } from "./whatsapp";
 
 export interface Grupo {
   jid: string;
@@ -141,6 +142,13 @@ async function base64De(b: Blob): Promise<string> {
 }
 /** Foto, vídeo, documento ou arquivo de áudio no grupo (0144). */
 export async function enviarMidiaNoGrupo(jid: string, arquivo: File, legenda: string) {
+  const limite = limiteArquivoMB(arquivo.type);
+  if (arquivo.size > limite * 1024 * 1024) throw new Error(`Arquivo maior que ${limite} MB.`);
+  // Acima de 3 MB: sobe no storage e a Evolution baixa pela URL.
+  if (arquivo.size > 3 * 1024 * 1024) {
+    const url = await subirParaEnvio(arquivo);
+    return api("POST", { acao: "midia", jid, url, mimeType: arquivo.type || "application/octet-stream", fileName: arquivo.name, legenda });
+  }
   return api("POST", { acao: "midia", jid, dataBase64: await base64De(arquivo), mimeType: arquivo.type || "application/octet-stream", fileName: arquivo.name, legenda });
 }
 /** Áudio gravado (mensagem de voz). */

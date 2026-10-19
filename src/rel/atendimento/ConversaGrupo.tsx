@@ -12,7 +12,7 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as RKeyboardEvent } from "react";
 import { AvatarWa, MidiaDaMensagem, TextoWa, Visualizador, corDoNome, rotuloDoDia } from "./waUi";
-import { salvarFigurinha, salvarTranscricao, type Anexo } from "../lib/whatsapp";
+import { limiteArquivoMB, salvarFigurinha, salvarTranscricao, type Anexo } from "../lib/whatsapp";
 import {
   apagarNoGrupo, editarNoGrupo, enviarFigurinhaNoGrupo, enviarMidiaNoGrupo, enviarNoGrupo, enviarVozNoGrupo, mensagensDoGrupo,
   participantesDoGrupo, reagirNoGrupo, type Grupo, type MensagemGrupo, type Participante,
@@ -171,7 +171,8 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou }: { grupo: Gru
     if (ref) ref.value = "";
     setAnexoMenu(false);
     if (!f) return;
-    if (f.size > 3 * 1024 * 1024) { setErro("Arquivo maior que 3 MB."); return; }
+    const limite = limiteArquivoMB(f.type);
+    if (f.size > limite * 1024 * 1024) { setErro(`Arquivo maior que ${limite} MB.`); return; }
     setErro(null); setArquivo(f); setLegenda(texto.trim());
     if (/^image\/(jpeg|png|webp)$/.test(f.type)) setEditandoFoto(true);
   }

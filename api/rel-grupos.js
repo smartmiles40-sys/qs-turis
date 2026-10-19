@@ -362,7 +362,8 @@ export async function sincronizarGrupos() {
 async function enviarImagemNoGrupo(jid, base64, mime, caption, fileName, mediatype = 'image') {
   await grupoLiberado(jid);
   return evo(`/message/sendMedia/${encodeURIComponent(INSTANCIA())}`, {
-    method: 'POST', timeoutMs: 30000,
+    // `base64` pode ser a URL do arquivo no nosso storage (a Evolution aceita os dois)
+    method: 'POST', timeoutMs: /^https:/.test(base64) ? 55000 : 30000,
     body: { number: jid, mediatype, mimetype: mime, ...(caption ? { caption } : {}), media: base64, fileName },
   });
 }
@@ -418,15 +419,19 @@ export default async function handler(req, res) {
     const mime = String(body.mimeType || '').toLowerCase().split(';')[0];
     const mediatype = /^image\/(jpeg|png|webp)$/.test(mime) ? 'image' : mime === 'video/mp4' ? 'video' : /^audio\//.test(mime) ? 'audio' : 'document';
     if (acao === 'imagem' && mediatype !== 'image') return res.status(400).json({ error: 'Só foto (JPG, PNG ou WEBP).' });
-    const bytes = Buffer.from(String(body.dataBase64 || ''), 'base64');
-    if (!bytes.length || bytes.length > 3 * 1024 * 1024) return res.status(400).json({ error: 'Foto vazia ou maior que 3 MB.' });
+    // Arquivo grande (19/10): o navegador já subiu em wa-midia/rel-envio/ e manda a URL —
+    // a Evolution baixa de lá (o corpo da Vercel não passa de ~4,5 MB).
+    const urlSubida = body.url ? String(body.url) : null;
+    if (urlSubida && !/^https:\/\/[^/]+\/storage\/v1\/object\/public\/wa-midia\/rel-envio\//.test(urlSubida)) return res.status(400).json({ error: 'Arquivo de fora do QS.' });
+    const bytes = urlSubida ? null : Buffer.from(String(body.dataBase64 || ''), 'base64');
+    if (bytes && (!bytes.length || bytes.length > 3 * 1024 * 1024)) return res.status(400).json({ error: 'Arquivo vazio ou maior que 3 MB.' });
     const legenda = String(body.legenda || '').trim().slice(0, 1000);
     const nome = String(u.name || '').trim().replace(/\s+/g, ' ') || 'Relacionamento';
     const caption = legenda ? `*${nome}:*\n${legenda}` : `*${nome}*`;
     let r;
-    try { r = await enviarImagemNoGrupo(jid, bytes.toString('base64'), mime, mediatype === 'audio' ? '' : caption, String(body.fileName || 'arquivo'), mediatype); }
+    try { r = await enviarImagemNoGrupo(jid, urlSubida || bytes.toString('base64'), mime, mediatype === 'audio' ? '' : caption, String(body.fileName || 'arquivo'), mediatype); }
     catch (e) { return res.status(502).json({ error: String(e?.message || 'Não enviou.').slice(0, 200) }); }
-    const url = await guardarMidia(bytes, mime, { leadId: 'rel-grupos', nomeArquivo: String(body.fileName || 'foto.jpg') }).catch(() => null);
+    const url = urlSubida || await guardarMidia(bytes, mime, { leadId: 'rel-grupos', nomeArquivo: String(body.fileName || 'foto.jpg') }).catch(() => null);
     const msgId = r?.key?.id;
     if (msgId) {
       await rest('rel_wa_grupo_mensagens?on_conflict=msg_id', {

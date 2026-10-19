@@ -125,6 +125,14 @@ const LUGARES: Record<string, Lugar> = {
   campogrande: L("campogrande", "Campo Grande", -20.44, -54.65),
   navegantes: L("navegantes", "Navegantes", -26.9, -48.65),
   chapeco: L("chapeco", "Chapecó", -27.1, -52.62),
+  teresina: L("teresina", "Teresina", -5.09, -42.8),
+  joaopessoa: L("joaopessoa", "João Pessoa", -7.12, -34.86),
+  aracaju: L("aracaju", "Aracaju", -10.91, -37.07),
+  cuiaba: L("cuiaba", "Cuiabá", -15.6, -56.1),
+  portoseguro: L("portoseguro", "Porto Seguro", -16.45, -39.06),
+  macapa: L("macapa", "Macapá", 0.03, -51.07),
+  boston: L("boston", "Boston", 42.36, -71.06),
+  houston: L("houston", "Houston", 29.76, -95.37),
 };
 
 // Apelido (já sem acento, minúsculo) → lugar. Erros de digitação que já
@@ -183,6 +191,7 @@ const APELIDOS: Record<string, string> = {
   curitiba: "curitiba", florianopolis: "florianopolis", floripa: "florianopolis", "porto alegre": "portoalegre",
   goiania: "goiania", "campo grande": "campogrande", chapeco: "chapeco", hanoi: "vietna", "da nang": "vietna",
   sydney: "australia", auckland: "novazelandia",
+  ventimiglia: "italia", macapa: "macapa", boston: "boston", houston: "houston", teresina: "teresina", "joao pessoa": "joaopessoa", aracaju: "aracaju", cuiaba: "cuiaba", "porto seguro": "portoseguro",
 };
 
 // Código de aeroporto (IATA). Só vale quando o texto é SÓ código ("JFK - LGA",
@@ -193,7 +202,7 @@ const IATA: Record<string, string> = {
   ssa: "salvador", rec: "recife", for: "fortaleza", nat: "natal", mcz: "maceio", fen: "noronha", bel: "belem",
   slz: "saoluis", jdo: "fortaleza", ios: "ilheus", vix: "vitoria", vdc: "vitoriaconquista", cwb: "curitiba", fln: "florianopolis",
   poa: "portoalegre", gyn: "goiania", cgr: "campogrande", nvt: "navegantes", xap: "chapeco", igu: "foz", man: "amazonia",
-  bps: "salvador", "sp": "saopaulo",
+  bps: "portoseguro", "sp": "saopaulo",
   jfk: "novayork", lga: "novayork", ewr: "novayork", mia: "miami", mco: "orlando", dtw: "detroit", phx: "phoenix",
   yyz: "toronto", cun: "cancun", mex: "mexico", puj: "puntacana", cur: "curacao", adz: "sanandres", ctg: "cartagena", bog: "colombia",
   scl: "chile", eze: "argentina", aep: "argentina", asu: "assuncao", mvd: "montevideu", lim: "peru", cuz: "peru",
@@ -204,6 +213,7 @@ const IATA: Record<string, string> = {
   hnd: "japao", nrt: "japao", kix: "japao", pek: "china", pvg: "china", pkx: "china", hkg: "hongkong", bkk: "tailandia", hkt: "tailandia",
   icn: "coreia", han: "vietna", sgn: "vietna", dad: "vietna", dps: "bali", mle: "maldivas", del: "india",
   syd: "australia", akl: "novazelandia", sid: "caboverde", rai: "caboverde",
+  the: "teresina", jpa: "joaopessoa", aju: "aracaju", cgb: "cuiaba", mao: "amazonia", mcp: "macapa", bos: "boston", iah: "houston",
 };
 const SO_CODIGOS = /^(\s*[a-z]{2,3}\s*([-/x>]|\s)?)+$/;
 
@@ -231,6 +241,11 @@ export function lugaresDe(texto: string | null | undefined): Lugar[] {
       if (lugar) achados.set(lugar.id, lugar);
     }
     if (achados.size) { const r = [...achados.values()]; cache.set(chave, r); return r; }
+  }
+  // Destino tirado do voo (0147): "Pinto Martins Fortaleza (FOR)" — o código entre parênteses vale.
+  for (const m of cru.matchAll(/\(([A-Za-z]{3})\)/g)) {
+    const lugar = LUGARES[IATA[m[1].toLowerCase()]];
+    if (lugar) achados.set(lugar.id, lugar);
   }
   for (const k of CHAVES) {
     const alvo = ` ${k} `;

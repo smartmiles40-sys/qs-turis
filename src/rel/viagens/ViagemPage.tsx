@@ -25,6 +25,7 @@ import ConformidadeViagem, { RequisitosEntrada } from "./ConformidadeViagem";
 import AlertasViagem, { CSS_PISCA } from "./AlertasViagem";
 import LinhaDoTempo from "./LinhaDoTempo";
 import EtapasViagem from "./EtapasViagem";
+import { RevisaoViagem } from "./TrechosViagem";
 import ComentariosBitrix from "./ComentariosBitrix";
 import { conferirViagens, type Analise } from "../lib/problemas";
 import { TOM_FASE } from "./ViagensDoCliente";
@@ -378,6 +379,13 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
       {/* A esteira do Relacionamento (16/10): em que etapa a viagem está — só pacote */}
       {ativa && grupoTipo(v.tipo) === "pacote" && <EtapasViagem viagem={v} trechos={analise?.trechos ?? []} equipe={equipe} onMudou={revisou} />}
+      {/* Expedição não tem esteira — sem isto ela nunca podia ser marcada como revisada ("0 de 564", 19/10) */}
+      {ativa && grupoTipo(v.tipo) === "expedicao" && (
+        <section className="rel-card p-4 flex flex-wrap items-center justify-between gap-3">
+          <span className="text-[13px]" style={{ color: "var(--ink2)" }}><b style={{ color: "var(--ink)" }}>Revisão</b> · passageiros, documentos, voos e reservas conferidos</span>
+          <RevisaoViagem viagemId={v.id} equipe={equipe} />
+        </section>
+      )}
 
       {/* O que pode dar errado — sempre à vista, logo abaixo do topo */}
       <AlertasViagem problemas={analise?.problemas ?? null} />
