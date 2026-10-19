@@ -122,7 +122,8 @@ function EmViagem({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void
             const ts = it.trechos;
             const { hotelDaNoite } = mapaDasNoites(ts);
             const hotel = hotelDaNoite.get(hoje);
-            const chegou = ts.filter((t) => t.tipo !== "hospedagem" && new Date(t.chegada_em || t.partida_em).getTime() <= agora).pop();
+            // a "volta" do Pós-Venda (Bitrix) é só a data, não um lugar — não diz onde a pessoa está
+            const chegou = ts.filter((t) => t.tipo !== "hospedagem" && t.fonte !== "bitrix" && new Date(t.chegada_em || t.partida_em).getTime() <= agora).pop();
             const emCurso = ts.find((t) => t.tipo !== "hospedagem" && new Date(t.partida_em).getTime() <= agora && t.chegada_em && new Date(t.chegada_em).getTime() > agora);
             const prox = ts.find((t) => t.tipo !== "hospedagem" && new Date(t.partida_em).getTime() > agora);
             const pelosVoos = voltaPelosTrechos(it);
