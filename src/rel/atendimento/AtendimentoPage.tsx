@@ -572,7 +572,8 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   useEffect(() => {
     setC(null); setMsgs([]); setTexto(""); setErro(null); setArquivo(null); setEditandoFoto(false); setDadosContato(false); setLegenda(""); setFoto(null); qtdAnterior.current = 0;
     setRespondendo(null); setExpressoes(null); setBuscaAberta(false); setBuscaMsg(""); setFixadaIdx(0);
-    void recarregar().then(() => { void marcarLida(id).then(onMudou); });
+    // Abrir NÃO marca como lida (19/10): só responder ou mudar o status (ver tratou()).
+    void recarregar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   useEffect(() => { listarRespostas().then(setRespostas); minhasFavoritas().then(setFavoritas).catch(() => undefined); }, []);
@@ -600,7 +601,6 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   useEffect(() => {
     if (msgs.length !== qtdAnterior.current) {
       if (!buscaAberta) fimRef.current?.scrollIntoView({ block: "end" });
-      if (qtdAnterior.current && c?.nao_lidas) void marcarLida(id);
       qtdAnterior.current = msgs.length;
     }
   }, [msgs.length, c?.nao_lidas, id, buscaAberta]);
@@ -661,9 +661,15 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
     if (a === "resolver") { if (c.estado !== "resolvida") setConcluindo(true); else void acao(() => reabrirConversa(c.id)); }
   };
 
+  /** Alguém tratou a conversa (respondeu ou mudou o status): aí sim vira lida — pra todo mundo. */
+  async function tratou() {
+    await marcarLida(id);
+    if (c?.marcada_nao_lida) await mudarPreferencia(id, meuId, { marcada_nao_lida: false }).catch(() => undefined);
+  }
+
   async function acao(fn: () => Promise<unknown>) {
     setErro(null);
-    try { await fn(); await recarregar(); onMudou(); }
+    try { await fn(); await tratou(); await recarregar(); onMudou(); }
     catch (e) { setErro(e instanceof Error ? e.message : "Falhou."); }
   }
 
@@ -675,6 +681,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
     try {
       await enviarTexto(c!.id, t, respondendo?.id);
       setTexto(""); setRespondendo(null);
+      await tratou();
       await recarregar();
       onMudou();
     } catch (e) {
@@ -703,7 +710,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
     try {
       await enviarArquivo(c!.id, arquivo, legenda.trim());
       setArquivo(null); setLegenda(""); setTexto("");
-      await recarregar(); onMudou();
+      await tratou(); await recarregar(); onMudou();
     } catch (e) { setErro(e instanceof Error ? e.message : "Arquivo não enviado."); }
     finally { setEnviando(false); }
   }
@@ -1096,7 +1103,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
         </aside>
       )}
       <ConcluirModal conversa={concluindo ? c : null} onFechar={() => setConcluindo(false)}
-        onFeito={(pesquisa) => { setConcluindo(false); void recarregar(); onMudou(); avisar(pesquisa ? "Atendimento concluído. Pedimos a nota de 1 a 5 ao cliente." : "Atendimento concluído."); }} />
+        onFeito={(pesquisa) => { setConcluindo(false); void tratou().then(recarregar); onMudou(); avisar(pesquisa ? "Atendimento concluído. Pedimos a nota de 1 a 5 ao cliente." : "Atendimento concluído."); }} />
 
       <MenuContexto pos={menuMsg?.pos ?? null} itens={menuMsg ? itensDaMensagem(menuMsg.m) : []} onFechar={() => setMenuMsg(null)} rotulo="Opções da mensagem" />
       {reagirMais && (
@@ -1141,7 +1148,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
         onAbrirViagem={onAbrirViagem}
         onAbrirConversa={onAbrirConversa}
       />
-      <ForaDoPrazo aberto={foraPrazo} conversa={c} onFechar={() => setForaPrazo(false)} onFeito={() => { setForaPrazo(false); void recarregar(); onMudou(); }} />
+      <ForaDoPrazo aberto={foraPrazo} conversa={c} onFechar={() => setForaPrazo(false)} onFeito={() => { setForaPrazo(false); void tratou().then(recarregar); onMudou(); }} />
       <Modal aberto={devolvendo} titulo="Devolver a conversa ao Relacionamento" onFechar={() => setDevolvendo(false)}
         rodape={<><Botao onClick={() => setDevolvendo(false)}>Cancelar</Botao><Botao variante="primario" onClick={() => {
           setDevolvendo(false);
@@ -1276,11 +1283,8 @@ export default function AtendimentoPage({ setor = "relacionamento", extraCabecal
     void carregar();
   }
 
+  // Abrir não tira o "não lida" (nem o marcado à mão) — só responder ou mudar o status.
   function abrirConversa(id: string | null) {
-    if (id) {
-      const c = conversas.find((x) => x.id === id);
-      if (c?.marcada_nao_lida) void pref(c, { marcada_nao_lida: false });
-    }
     abrir(id);
   }
 
