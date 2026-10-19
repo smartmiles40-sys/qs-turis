@@ -8,8 +8,83 @@
 //         resposta nossa, numa sequência de mensagens com menos de 1 h entre elas.
 // -----------------------------------------------------------------------------
 import { useEffect, useState } from "react";
-import { carregarAtendimento, minutos, type KpiAtendimento } from "../lib/kpis";
+import { carregarAtendimento, carregarAtendimentos, minutos, type KpiAtendimento, type KpiAtendimentos } from "../lib/kpis";
+import { rotuloMotivo } from "../lib/whatsapp";
 import { Aviso, Vazio } from "../ui";
+
+// ── Atendimentos por pessoa (0145, 19/10) ───────────────────────────────────
+// Cada atendimento abre quando o cliente escreve e fecha no Concluir. Daqui sai
+// o SLA de cada pessoa: 1ª resposta, % no prazo, tempo de solução, reabertos,
+// nota da pesquisa e o que cada uma tem pendente agora.
+function Atendimentos({ dias }: { dias: number }) {
+  const [d, setD] = useState<KpiAtendimentos | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  useEffect(() => {
+    let atual = true;
+    setD(null); setErro(null);
+    carregarAtendimentos(dias).then((x) => { if (atual) setD(x); })
+      .catch((e) => { if (atual) setErro(e instanceof Error ? e.message : "Falhou."); });
+    return () => { atual = false; };
+  }, [dias]);
+
+  if (erro) return <Aviso tom="erro">Os atendimentos não carregaram ({erro}).</Aviso>;
+  if (!d) return <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="rel-card h-24 animate-pulse" />)}</div>;
+  const motivos = Object.entries(d.motivos).sort((a, b) => b[1] - a[1]);
+  const pct = (v: number | null) => (v == null ? "—" : `${Math.round(v)}%`);
+  return (
+    <section className="space-y-3">
+      <h2 className="text-[13px] font-bold uppercase tracking-wide" style={{ color: "var(--ink2)" }}>Atendimentos (abre quando o cliente escreve, fecha no Concluir)</h2>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Cartao rotulo="Pendentes agora" valor={String(d.pendentes)} dica={`${d.pendentes_sem_resposta} ainda sem resposta · meta: zero`} />
+        <Cartao rotulo="1ª resposta (média)" valor={minutos(d.resp_media)} dica={`${pct(d.resp_no_prazo)} no prazo · mediana ${minutos(d.resp_mediana)}`} />
+        <Cartao rotulo="Tempo de solução (média)" valor={minutos(d.sol_media)} dica={`mediana ${minutos(d.sol_mediana)} · ${d.sol_n} resolvidos`} />
+        <Cartao rotulo="Concluídos" valor={String(d.concluidos)} dica={`${d.concluidos_auto} sozinhos · ${d.reabertos} reabertos${d.csat_n ? ` · nota ${String(d.csat_media).replace(".", ",")}/5` : ""}`} />
+      </div>
+      <div className="rel-card p-4 space-y-2">
+        <div className="overflow-x-auto -mx-4 px-4">
+          <table className="w-full text-[13px] min-w-[640px]">
+            <thead>
+              <tr className="text-[11px] text-left" style={{ color: "var(--ink2)" }}>
+                <th className="py-1 font-semibold">Pessoa</th>
+                <th className="text-right font-semibold">Pendentes</th>
+                <th className="text-right font-semibold">1ª resposta</th>
+                <th className="text-right font-semibold">No prazo</th>
+                <th className="text-right font-semibold">Solução</th>
+                <th className="text-right font-semibold">Concluídos</th>
+                <th className="text-right font-semibold">Reabertos</th>
+                <th className="text-right font-semibold">Nota</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.por_atendente.slice().sort((a, b) => (b.concluidos + b.pendentes) - (a.concluidos + a.pendentes)).map((p) => (
+                <tr key={p.id ?? "sem"} style={{ borderTop: "1px solid var(--line2)", color: "var(--ink)" }}>
+                  <td className="py-1.5">{p.nome ?? (p.id ? "—" : "Sem responsável")}</td>
+                  <td className="text-right tabular-nums" style={p.pendentes ? { color: "var(--warn-ink)", fontWeight: 700 } : undefined}>{p.pendentes}</td>
+                  <td className="text-right tabular-nums">{minutos(p.resp_media)}</td>
+                  <td className="text-right tabular-nums" style={p.resp_no_prazo != null && p.resp_no_prazo < 80 ? { color: "var(--err-ink)" } : undefined}>{pct(p.resp_no_prazo)}</td>
+                  <td className="text-right tabular-nums">{minutos(p.sol_media)}</td>
+                  <td className="text-right tabular-nums">{p.concluidos}{p.concluidos_auto ? <span style={{ color: "var(--ink3)" }}> +{p.concluidos_auto}</span> : null}</td>
+                  <td className="text-right tabular-nums">{p.reabertos}</td>
+                  <td className="text-right tabular-nums">{p.csat_n ? `${String(p.csat_media).replace(".", ",")} (${p.csat_n})` : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {motivos.length > 0 && (
+          <p className="text-[12.5px]" style={{ color: "var(--ink2)" }}>
+            <b>Por que concluíram:</b> {motivos.map(([m, n]) => `${rotuloMotivo(m)} ${n}`).join(" · ")}
+          </p>
+        )}
+        <p className="text-[12px] leading-relaxed" style={{ color: "var(--ink3)" }}>
+          Tempos só no horário de atendimento. <b>1ª resposta</b> conta pra quem respondeu; <b>solução</b>, <b>concluídos</b> e <b>nota</b>
+          contam pro responsável do atendimento (quem assumiu ou respondeu por último — resposta pelo celular vai pra ele).
+          "+N" = concluídos sozinhos (cliente não respondeu). Atendimentos que já estavam abertos antes de 19/10 não entram nas médias de tempo.
+        </p>
+      </div>
+    </section>
+  );
+}
 
 const PERIODOS = [{ d: 7, r: "7 dias" }, { d: 30, r: "30 dias" }, { d: 90, r: "90 dias" }];
 
@@ -50,6 +125,9 @@ export default function KpisAtendimento() {
         </div>
       </div>
 
+      <Atendimentos dias={dias} />
+
+      <h2 className="text-[13px] font-bold uppercase tracking-wide pt-2" style={{ color: "var(--ink2)" }}>TME e TMA (pelas mensagens)</h2>
       {erro ? <Aviso tom="erro">{erro}</Aviso> : !dados ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="rel-card h-24 animate-pulse" />)}</div>
       ) : dados.tme.n === 0 && dados.tma.n === 0 ? (

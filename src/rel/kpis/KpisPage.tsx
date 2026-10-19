@@ -28,7 +28,7 @@ import KpisGoogle from "./KpisGoogle";
 type Aba = "receita" | "atendimento" | "prazo" | "chamados" | "nps" | "carteira";
 const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "receita", rotulo: "Receita & expansão" },
-  { id: "atendimento", rotulo: "Atendimento (TME/TMA)" },
+  { id: "atendimento", rotulo: "Atendimento (SLA por pessoa)" },
   { id: "prazo", rotulo: "Prazo de resposta" },
   { id: "chamados", rotulo: "Chamados" },
   { id: "nps", rotulo: "NPS & Google" },

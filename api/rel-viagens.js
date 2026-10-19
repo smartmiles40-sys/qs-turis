@@ -752,6 +752,11 @@ export default async function handler(req, res) {
       console.log(`[rel-viagens] cron arquivos: ${JSON.stringify(b)}`);
       return res.status(200).json(b);
     }
+    // Atendimentos do WhatsApp (0145): conclui sozinho quem não responde há X dias úteis.
+    try {
+      const n = await rest('rpc/rel_wa_autoconcluir', { method: 'POST', body: {} });
+      if (n) console.log(`[rel-viagens] atendimentos concluídos sozinhos: ${n}`);
+    } catch (e) { console.warn('[rel-viagens] autoconcluir falhou:', e?.message); }
     try {
       const r = await sincronizar();
       console.log(`[rel-viagens] cron: ${JSON.stringify(r)}`);

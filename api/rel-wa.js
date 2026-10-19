@@ -7,7 +7,11 @@
 //   POST { acao: 'texto',   conversaId, texto, respondendoA? }
 //   POST { acao: 'modelo',  conversaId | clienteId, modelo: { nome, idioma, params } }
 //   POST { acao: 'arquivo', conversaId, fileName, mimeType, dataBase64, legenda? }
-//   POST { acao: 'lida',    conversaId }   → visto azul pro cliente
+//   POST { acao: 'lida',    conversaId }   → só zera as não lidas (19/10, Bruno:
+//        o cliente só vê o visto azul quando alguém RESPONDE — o visto sai
+//        junto com texto, arquivo, figurinha e modelo)
+//   POST { acao: 'avaliacao', conversaId, atendimentoId } → pesquisa de 1 a 5
+//        depois de concluir (0145; só se ligada nas Configurações)
 //   POST { acao: 'figurinha', conversaId, figurinhaId | url }   (14/10)
 //   POST { acao: 'figurinha-salvar', dataBase64 | url, animada? } → biblioteca do time
 //   POST { acao: 'reacao',  conversaId, mensagemId, emoji }  (emoji '' tira)
@@ -283,13 +287,37 @@ export default async function handler(req, res) {
     autorId: u.id, autorNome: u.name, status: 'sent', ...extra,
   });
 
-  // ── Visto azul ──
-  if (acao === 'lida') {
-    if (!alvo.conversaId) return res.status(200).json({ ok: true });
+  // ── Visto azul: só quando alguém responde (Bruno, 19/10) ──
+  async function vistoAzul() {
+    if (!alvo.conversaId) return;
     const ult = (await rest(
       `rel_wa_mensagens?select=wamid&conversa_id=eq.${alvo.conversaId}&direcao=eq.in&order=enviada_em.desc&limit=1`
     ).catch(() => null))?.[0];
     if (ult?.wamid) await marcarComoLida({ wamid: ult.wamid, phoneId: alvo.phoneId }).catch(() => null);
+  }
+  if (['texto', 'arquivo', 'figurinha', 'modelo'].includes(acao)) await vistoAzul();
+
+  // ── Pesquisa de 1 a 5 depois de concluir (0145) ──
+  if (acao === 'avaliacao') {
+    const aid = String(body.atendimentoId || '');
+    if (!alvo.conversaId || !/^[0-9a-f-]{36}$/i.test(aid)) return res.status(400).json({ error: 'Pedido inválido.' });
+    const cfg = (await rest('rel_config?select=valor&chave=eq.atendimento&limit=1').catch(() => null))?.[0]?.valor || {};
+    if (!cfg.csat_ativo || !String(cfg.csat_texto || '').trim()) return res.status(200).json({ ok: false, motivo: 'desligada' });
+    if (!janelaAberta(alvo.ultimaEntrada)) return res.status(200).json({ ok: false, motivo: 'janela-fechada' });
+    const at = (await rest(`rel_wa_atendimentos?select=id,concluido_em,csat_pedido_em&id=eq.${aid}&conversa_id=eq.${alvo.conversaId}&limit=1`).catch(() => null))?.[0];
+    if (!at?.concluido_em || at.csat_pedido_em) return res.status(200).json({ ok: false, motivo: 'ja-pedida' });
+    const texto = String(cfg.csat_texto).trim();
+    const env = await enviarTexto({ para: alvo.telefone, texto, phoneId: alvo.phoneId });
+    if (!env?.wamid) return res.status(502).json({ error: 'A Meta não aceitou a pesquisa.' });
+    // 'automatica': não muda o estado da conversa nem conta como resposta.
+    await gravar({ wamid: env.wamid, texto, origem: 'automatica' });
+    await rest(`rel_wa_atendimentos?id=eq.${aid}`, { method: 'PATCH', prefer: 'return=minimal', body: { csat_pedido_em: new Date().toISOString() } }).catch(() => null);
+    return res.status(200).json({ ok: true });
+  }
+
+  // ── Abriu a conversa: só zera as não lidas (o cliente NÃO vê o visto) ──
+  if (acao === 'lida') {
+    if (!alvo.conversaId) return res.status(200).json({ ok: true });
     await rest(`rel_wa_conversas?id=eq.${alvo.conversaId}`, { method: 'PATCH', prefer: 'return=minimal', body: { nao_lidas: 0 } }).catch(() => null);
     return res.status(200).json({ ok: true });
   }

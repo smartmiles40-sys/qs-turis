@@ -45,6 +45,34 @@ export interface Conversa {
   /** Com quem está a conversa (0127): o Financeiro fala pelo mesmo número. */
   setor?: "relacionamento" | "financeiro";
   setor_desde?: string | null;
+  /** Atendimento aberto agora (0145) — nasce quando o cliente escreve, fecha no Concluir. */
+  atend_id?: string | null;
+  atend_aberto_em?: string | null;
+  atend_primeira_resposta_em?: string | null;
+  atend_min_primeira_resposta?: number | null;
+  atend_reaberturas?: number | null;
+}
+
+/** Um atendimento da conversa (0145). Tempos em minutos úteis. */
+export interface Atendimento {
+  id: string;
+  conversa_id: string;
+  origem: "cliente" | "importado";
+  aberto_em: string;
+  atendente_id: string | null;
+  meta_min: number;
+  primeira_resposta_em: string | null;
+  primeira_resposta_por: string | null;
+  min_primeira_resposta: number | null;
+  concluido_em: string | null;
+  concluido_por: string | null;
+  motivo: MotivoConclusao | null;
+  nota: string | null;
+  automatico: boolean;
+  min_solucao: number | null;
+  reaberturas: number;
+  csat_nota: number | null;
+  csat_pedido_em: string | null;
 }
 
 export interface Anexo { type: "image" | "video" | "audio" | "file"; url: string; nome?: string }
@@ -89,6 +117,8 @@ export interface ConfigRel {
   sla: { resposta_min: number };
   fora_horario: { ativo: boolean; texto: string };
   assinatura: { ativo: boolean };
+  /** Atendimentos (0145): reabertura, conclusão automática e pesquisa de 1 a 5. */
+  atendimento: { reabrir_horas: number; autoconcluir_ativo: boolean; autoconcluir_dias_uteis: number; csat_ativo: boolean; csat_texto: string };
 }
 
 export interface NumeroRel { conectado: boolean; numero: string | null; nome: string | null; status: string | null }
@@ -152,10 +182,43 @@ async function mudar(id: string, campos: Record<string, unknown>) {
 
 export const assumirConversa = (id: string, userId: string) => mudar(id, { atendente_id: userId });
 export const passarConversa = (id: string, userId: string | null) => mudar(id, { atendente_id: userId });
-/** Resolver encerra a espera SEM contar como resposta (ex.: o cliente só agradeceu). */
-export const resolverConversa = (id: string) => mudar(id, { estado: "resolvida", aguardando_desde: null, nao_lidas: 0 });
-export const reabrirConversa = (id: string) => mudar(id, { estado: "aguardando_cliente" });
 export const ligarAoCliente = (id: string, clienteId: string | null) => mudar(id, { cliente_id: clienteId });
+
+// ── Concluir / Reabrir (0145) ───────────────────────────────────────────────
+// Concluir fecha o atendimento com um motivo (obrigatório) e mede o tempo de
+// solução; o cliente escrevendo de novo dentro da janela reabre o mesmo.
+
+export type MotivoConclusao = "resolvido" | "so_agradeceu" | "sem_retorno" | "encaminhado" | "engano" | "outro";
+export const MOTIVOS_CONCLUSAO: { id: MotivoConclusao; rotulo: string; dica: string }[] = [
+  { id: "resolvido", rotulo: "Resolvido", dica: "o pedido do cliente foi atendido" },
+  { id: "so_agradeceu", rotulo: "Só agradeceu / sem pedido", dica: "conversa sem nada a fazer" },
+  { id: "sem_retorno", rotulo: "Cliente não respondeu", dica: "esperamos e ele sumiu" },
+  { id: "encaminhado", rotulo: "Encaminhado", dica: "virou chamado, foi pro Financeiro ou outra área" },
+  { id: "engano", rotulo: "Engano / spam", dica: "número errado, propaganda" },
+  { id: "outro", rotulo: "Outro", dica: "escreva o motivo" },
+];
+export const rotuloMotivo = (m: string | null | undefined) => MOTIVOS_CONCLUSAO.find((x) => x.id === m)?.rotulo ?? "—";
+
+export async function concluirConversa(id: string, motivo: MotivoConclusao, nota?: string) {
+  const { data, error } = await supabase.rpc("rel_wa_concluir", { p_conversa: id, p_motivo: motivo, p_nota: nota?.trim() || null });
+  if (error) throw new Error(error.message);
+  const r = (data ?? {}) as { atendimento: string | null; pedir_nota: boolean };
+  // Pesquisa de 1 a 5 (Configurações): sai pelo servidor; se falhar, a conclusão vale igual.
+  if (r.pedir_nota && r.atendimento) await api("POST", { acao: "avaliacao", conversaId: id, atendimentoId: r.atendimento }).catch(() => undefined);
+  return r;
+}
+
+export async function reabrirConversa(id: string) {
+  const { error } = await supabase.rpc("rel_wa_reabrir", { p_conversa: id });
+  if (error) throw new Error(error.message);
+}
+
+export async function atendimentosDaConversa(conversaId: string): Promise<Atendimento[]> {
+  const { data, error } = await supabase.from("rel_wa_atendimentos").select("*")
+    .eq("conversa_id", conversaId).order("aberto_em", { ascending: false }).limit(30);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Atendimento[];
+}
 
 // ── "Não conta no prazo" (0113) ─────────────────────────────────────────────
 // Grupos, fornecedores, equipe interna… não entram no prazo de resposta. Marcar
@@ -440,6 +503,7 @@ export async function carregarConfig(): Promise<ConfigRel> {
     sla: { resposta_min: 30, ...(m.sla as object) },
     fora_horario: { ativo: false, texto: "", ...(m.fora_horario as object) },
     assinatura: { ativo: true, ...(m.assinatura as object) },
+    atendimento: { reabrir_horas: 24, autoconcluir_ativo: true, autoconcluir_dias_uteis: 3, csat_ativo: false, csat_texto: "", ...(m.atendimento as object) },
   };
 }
 

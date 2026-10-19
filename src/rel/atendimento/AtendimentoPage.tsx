@@ -38,7 +38,7 @@ import {
   assumirConversa, carregarConversa, carregarMensagens, duracao, enviarArquivo, enviarFigurinha, enviarTexto,
   favoritarMensagem, fixarMensagem, guardarMensagemNasNotas, ligarAoCliente, listarConversas, listarEtiquetas, listarListas,
   listarRespostas, marcarLida, marcarSemSla, minhasFavoritas, mudarPreferencia, MOTIVOS_SEM_SLA, preencherResposta, reabrirConversa,
-  contarFixadas, reagir, resolverConversa, salvarFigurinha, salvarTranscricao, statusDoNumero,
+  contarFixadas, reagir, salvarFigurinha, salvarTranscricao, statusDoNumero,
   type Conversa, type Etiqueta, type Filtro, type Lista, type Mensagem, type NumeroRel, type PrefConversa, type Resposta,
 } from "../lib/whatsapp";
 import { buscarClientes, formatarTelefone, type Cliente } from "../lib/clientes";
@@ -59,6 +59,7 @@ import PainelExpressoes, { EMOJI_FONT_CSS, EmojiPicker } from "./PainelExpressoe
 import BlocoDeNotas from "./BlocoDeNotas";
 import EditorFoto from "./EditorFoto";
 import DadosContato from "./DadosContato";
+import PainelAtendimento, { ConcluirModal } from "./PainelAtendimento";
 import MenuContexto, { ICO, posicaoDoEvento, type ItemMenu, type PosicaoMenu } from "./MenuContexto";
 import { AtalhosModal, atalhoDoEvento, envolver, marcaDoEvento, type AcaoAtalho } from "./atalhos";
 import { EncaminharModal, EtiquetasModal, ListasModal, NovaConversaModal } from "./Organizar";
@@ -133,10 +134,16 @@ const ESTRELA = <svg width="13" height="13" viewBox="0 0 24 24" fill="currentCol
 
 // ── Lista ───────────────────────────────────────────────────────────────────
 
-type Chip = "tudo" | "nao_lidas" | "favoritas" | "esperando" | "no_fin" | `lista:${string}` | `etq:${string}`;
+type Chip = "tudo" | "nao_lidas" | "favoritas" | "esperando" | "pendentes" | "concluidas" | "no_fin" | `lista:${string}` | `etq:${string}`;
 
-function Lista({ setor, busca, setBusca, buscaRef, conversas, selecionada, abrir, carregando, chip, setChip, listas, etiquetas, arquivadas, verArquivadas, setVerArquivadas, onMenu, onNova, onNotas, notasAbertas, onAtalhos, onListas }: {
+/** Pendente = atendimento não concluído (0145). "Não conta no prazo" fica fora. */
+const pendente = (c: Conversa) => c.estado !== "resolvida" && !c.sem_sla;
+const foraDoPrazo = (c: Conversa) => !!c.aguardando_desde && !c.sem_sla && c.minutos_esperando > c.meta_min;
+
+function Lista({ setor, todas, busca, setBusca, buscaRef, conversas, selecionada, abrir, carregando, chip, setChip, listas, etiquetas, arquivadas, verArquivadas, setVerArquivadas, onMenu, onNova, onNotas, notasAbertas, onAtalhos, onListas }: {
   setor: SetorAtendimento;
+  /** A lista inteira (sem o chip) — pros contadores. */
+  todas: Conversa[];
   busca: string; setBusca: (s: string) => void; buscaRef: React.RefObject<HTMLInputElement>;
   conversas: Conversa[]; selecionada: string | null; abrir: (id: string) => void; carregando: boolean;
   chip: Chip; setChip: (c: Chip) => void; listas: Lista[]; etiquetas: Map<string, Etiqueta>;
@@ -144,8 +151,12 @@ function Lista({ setor, busca, setBusca, buscaRef, conversas, selecionada, abrir
   onMenu: (c: Conversa, pos: PosicaoMenu) => void;
   onNova: (() => void) | null; onNotas: () => void; notasAbertas: boolean; onAtalhos: () => void; onListas: () => void;
 }) {
+  const doSetor = todas.filter((c) => !c.arquivada && (setor === "financeiro" || c.setor !== "financeiro"));
+  const nPend = doSetor.filter(pendente).length;
+  const atrasadas = doSetor.filter(foraDoPrazo);
   const chips: [Chip, ReactNode][] = [
-    ["tudo", "Tudo"], ["nao_lidas", "Não lidas"], ["favoritas", "Favoritas"], ["esperando", "Esperando"],
+    ["tudo", "Tudo"], ["pendentes", <>Pendentes{nPend > 0 && <b>{nPend}</b>}</>], ["esperando", "Esperando"], ["nao_lidas", "Não lidas"],
+    ["concluidas", "Concluídas"], ["favoritas", "Favoritas"],
     ...(setor === "relacionamento" ? [["no_fin", "💰 No Financeiro"] as [Chip, ReactNode]] : []),
     ...listas.map((l) => [`lista:${l.id}`, l.nome] as [Chip, ReactNode]),
     ...[...etiquetas.values()].map((e) => [`etq:${e.id}`, <><span className="w-2.5 h-2.5 rounded-full" style={{ background: e.cor }} aria-hidden />{e.nome}</>] as [Chip, ReactNode]),
@@ -177,6 +188,18 @@ function Lista({ setor, busca, setBusca, buscaRef, conversas, selecionada, abrir
             className="wa-campo flex-1 min-w-0 bg-transparent text-[14px]" style={{ background: "transparent" }} />
         </label>
       </div>
+      {/* Alerta pro time todo: quem está esperando além do prazo (0145). */}
+      {!verArquivadas && atrasadas.length > 0 && (
+        <button onClick={() => setChip("esperando")} className="mx-3 mb-2 px-3 py-2 rounded-lg text-left text-[13px] flex items-center gap-2 flex-shrink-0"
+          style={{ background: "var(--err-bg)", color: "var(--err-ink)" }}>
+          <span aria-hidden>⏱</span>
+          <span className="flex-1 min-w-0">
+            <b>{atrasadas.length} {atrasadas.length === 1 ? "cliente esperando" : "clientes esperando"} além do prazo</b>
+            <span className="block truncate text-[12px]">{atrasadas.slice(0, 3).map((c) => `${nomeDa(c).split(" ")[0]}${c.atendente_nome ? ` (${c.atendente_nome.split(" ")[0]})` : ""}`).join(" · ")}{atrasadas.length > 3 ? " …" : ""}</span>
+          </span>
+          <span className="text-[12px] font-semibold underline">ver</span>
+        </button>
+      )}
       {!verArquivadas && (
         <div className="px-3 pb-2 flex gap-1.5 overflow-x-auto flex-shrink-0" role="toolbar" aria-label="Filtros" style={{ scrollbarWidth: "none", borderBottom: "1px solid var(--wa-line)" }}>
           {chips.map(([k, r]) => (
@@ -522,6 +545,13 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   const [piscando, setPiscando] = useState<string | null>(null);
   const [devolvendo, setDevolvendo] = useState(false);
   const [sinalFin, setSinalFin] = useState(0);
+  const [concluindo, setConcluindo] = useState(false);
+  // Painel do atendimento: aberto por padrão em tela larga; cada pessoa escolhe.
+  const [lateral, setLateral] = useState(() => {
+    try { const v = localStorage.getItem("rel_painel_atend"); if (v) return v === "1"; } catch { /* sem storage */ }
+    return window.innerWidth >= 1280;
+  });
+  const mudarLateral = (v: boolean) => { setLateral(v); try { localStorage.setItem("rel_painel_atend", v ? "1" : "0"); } catch { /* sem storage */ } };
   const fimRef = useRef<HTMLDivElement>(null);
   const arquivoRef = useRef<HTMLInputElement>(null);
   const campoRef = useRef<HTMLTextAreaElement>(null);
@@ -627,7 +657,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
     if (a === "figurinhas") setExpressoes((x) => (x === "figurinha" ? null : "figurinha"));
     if (a === "buscarNaConversa") { setBuscaAberta(true); requestAnimationFrame(() => buscaMsgRef.current?.focus()); }
     if (a === "ficha") { if (c.cliente_id) onAbrirCliente(c.cliente_id); else onLigarFicha(c); }
-    if (a === "resolver") void acao(() => (c.estado !== "resolvida" ? resolverConversa(c.id) : reabrirConversa(c.id)));
+    if (a === "resolver") { if (c.estado !== "resolvida") setConcluindo(true); else void acao(() => reabrirConversa(c.id)); }
   };
 
   async function acao(fn: () => Promise<unknown>) {
@@ -765,7 +795,8 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   const porCategoria = respostas.reduce((m, r) => { const k = r.categoria || "Geral"; m.set(k, [...(m.get(k) || []), r]); return m; }, new Map<string, Resposta[]>());
 
   return (
-    <div className="flex flex-col h-full min-h-0 wa">
+    <div className="flex h-full min-h-0 wa relative">
+    <div className="flex flex-col flex-1 min-w-0 min-h-0">
       {/* Cabeçalho */}
       <div className="wa-cab flex items-center gap-2 px-2 sm:px-4 h-[60px] flex-shrink-0" style={{ borderBottom: "1px solid var(--wa-line)" }}>
         <button onClick={onVoltar} className="lg:hidden wa-icone w-10 h-10 inline-flex items-center justify-center" aria-label="Voltar para a lista">
@@ -816,9 +847,12 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
           <Icone rotulo="Mais opções da conversa" onClick={(e) => onMenuConversa(c, posicaoDoEvento(e))}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" /></svg>
           </Icone>
+          <Icone rotulo={lateral ? "Esconder o painel do atendimento" : "Painel do atendimento (quem atende, tempos, histórico)"} onClick={() => mudarLateral(!lateral)} ativo={lateral}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" /></svg>
+          </Icone>
           {c.estado !== "resolvida"
-            ? <button onClick={() => void acao(() => resolverConversa(c.id))} className="ml-1 h-9 px-3 rounded-full text-[13px] font-semibold wa-verde" title="Resolver (Ctrl+Alt+Shift+R)">Resolver</button>
-            : <button onClick={() => void acao(() => reabrirConversa(c.id))} className="ml-1 h-9 px-3 rounded-full text-[13px] font-semibold border" style={{ borderColor: "var(--wa-line)", color: "var(--wa-txt)" }}>Reabrir</button>}
+            ? <button onClick={() => setConcluindo(true)} className="ml-1 h-9 px-3 rounded-full text-[13px] font-semibold wa-verde" title="Concluir o atendimento (Ctrl+Alt+Shift+R)">Concluir</button>
+            : <button onClick={() => void acao(() => reabrirConversa(c.id))} className="ml-1 h-9 px-3 rounded-full text-[13px] font-semibold border" style={{ borderColor: "var(--wa-line)", color: "var(--wa-txt)" }} title="Reabrir o atendimento (Ctrl+Alt+Shift+R)">Reabrir</button>}
         </div>
       </div>
 
@@ -1049,6 +1083,18 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
           </>
         )}
       </div>
+      </div>
+
+      {/* Painel do atendimento à direita (0145): todo mundo vê quem atende e os tempos. */}
+      {lateral && (
+        <aside className="absolute inset-y-0 right-0 z-20 w-full sm:w-[320px] shadow-2xl xl:static xl:shadow-none xl:flex-shrink-0 border-l min-h-0"
+          style={{ borderColor: "var(--wa-line)" }}>
+          <PainelAtendimento c={c} meuId={meuId} onConcluir={() => setConcluindo(true)} onFechar={() => mudarLateral(false)}
+            onMudou={() => { void recarregar(); onMudou(); }} />
+        </aside>
+      )}
+      <ConcluirModal conversa={concluindo ? c : null} onFechar={() => setConcluindo(false)}
+        onFeito={(pesquisa) => { setConcluindo(false); void recarregar(); onMudou(); avisar(pesquisa ? "Atendimento concluído. Pedimos a nota de 1 a 5 ao cliente." : "Atendimento concluído."); }} />
 
       <MenuContexto pos={menuMsg?.pos ?? null} itens={menuMsg ? itensDaMensagem(menuMsg.m) : []} onFechar={() => setMenuMsg(null)} rotulo="Opções da mensagem" />
       {reagirMais && (
@@ -1159,6 +1205,7 @@ export default function AtendimentoPage({ setor = "relacionamento", extraCabecal
   const [sinalNotas, setSinalNotas] = useState(0);
   const [aviso, setAviso] = useState<string | null>(null);
   const [enviandoFin, setEnviandoFin] = useState<Conversa | null>(null);
+  const [concluindoConv, setConcluindoConv] = useState<Conversa | null>(null);
   const buscaRef = useRef<HTMLInputElement>(null);
   const meuId = currentUser?.id ?? "";
   const meuNome = currentUser?.name ?? "";
@@ -1200,6 +1247,8 @@ export default function AtendimentoPage({ setor = "relacionamento", extraCabecal
       if (chip === "nao_lidas") return naoLida(c);
       if (chip === "favoritas") return c.favorita;
       if (chip === "esperando") return !!c.aguardando_desde;
+      if (chip === "pendentes") return pendente(c);
+      if (chip === "concluidas") return c.estado === "resolvida";
       if (chip.startsWith("lista:")) return (c.listas || []).includes(chip.slice(6));
       if (chip.startsWith("etq:")) return (c.etiquetas || []).includes(chip.slice(4));
       return true;
@@ -1256,8 +1305,8 @@ export default function AtendimentoPage({ setor = "relacionamento", extraCabecal
         ...(!c.cliente_id ? [{ rotulo: "Ligar a uma ficha que já existe", icone: ICO.ficha, onClick: () => setLigando(c) }] : []),
       ] as ItemMenu[]),
       c.estado !== "resolvida"
-        ? { rotulo: "Resolver conversa", icone: ICO.resolver, atalho: "Ctrl+Alt+Shift+R", onClick: () => { void resolverConversa(c.id).then(mudou).catch((e) => setAviso(e instanceof Error ? e.message : "Falhou.")); } }
-        : { rotulo: "Reabrir conversa", icone: ICO.resolver, onClick: () => { void reabrirConversa(c.id).then(mudou).catch((e) => setAviso(e instanceof Error ? e.message : "Falhou.")); } },
+        ? { rotulo: "Concluir atendimento…", icone: ICO.resolver, atalho: "Ctrl+Alt+Shift+R", onClick: () => setConcluindoConv(c) }
+        : { rotulo: "Reabrir atendimento", icone: ICO.resolver, onClick: () => { void reabrirConversa(c.id).then(mudou).catch((e) => setAviso(e instanceof Error ? e.message : "Falhou.")); } },
     ];
   }
 
@@ -1345,7 +1394,7 @@ export default function AtendimentoPage({ setor = "relacionamento", extraCabecal
           className={`${conversaId ? "hidden lg:flex" : "flex"} flex-col w-full lg:w-[380px] xl:w-[420px] lg:flex-shrink-0 border-r min-h-0 wa-lista`}
           style={{ borderColor: "var(--wa-line)" }}
         >
-          <Lista setor={setor}
+          <Lista setor={setor} todas={conversas}
             busca={busca} setBusca={setBusca} buscaRef={buscaRef}
             conversas={visiveis} selecionada={conversaId} abrir={abrirConversa} carregando={carregando}
             chip={chip} setChip={setChip} listas={listas} etiquetas={mapaEtq}
@@ -1416,6 +1465,8 @@ export default function AtendimentoPage({ setor = "relacionamento", extraCabecal
         onFechar={() => setModeloPara(null)}
         onEnviado={(id) => { setModeloPara(null); setAviso("Modelo enviado. Quando a pessoa responder, a conversa libera."); void carregar().then(() => { if (id) abrirConversa(id); }); }} />
       <AtalhosModal aberto={verAtalhos} onFechar={() => setVerAtalhos(false)} />
+      <ConcluirModal conversa={concluindoConv} onFechar={() => setConcluindoConv(null)}
+        onFeito={(pesquisa) => { setConcluindoConv(null); mudou(); setAviso(pesquisa ? "Atendimento concluído. Pedimos a nota de 1 a 5 ao cliente." : "Atendimento concluído."); }} />
       <EnviarFinanceiroModal aberto={!!enviandoFin} origem="relacionamento"
         alvo={{ conversaId: enviandoFin?.id ?? null, clienteId: enviandoFin?.cliente_id ?? null }}
         nome={enviandoFin ? nomeDa(enviandoFin) : null}

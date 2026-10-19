@@ -37,7 +37,7 @@ export const ATALHOS: Def[] = [
   d("figurinhas", "Ctrl+Alt+S", "Painel de figurinhas", ["KeyS"], ["s"]),
   d("ficha", "Ctrl+Alt+P", "Abrir a ficha do cliente", ["KeyP"], ["p"]),
   d("notas", "Ctrl+Alt+B", "Bloco de notas", ["KeyB"], ["b"], true),
-  d("resolver", "Ctrl+Alt+Shift+R", "Resolver / reabrir conversa", ["KeyR"], ["r"], true),
+  d("resolver", "Ctrl+Alt+Shift+R", "Concluir / reabrir atendimento", ["KeyR"], ["r"], true),
   d("ajuda", "Ctrl+/", "Lista de atalhos", ["Slash", "IntlRo", "NumpadDivide"], ["/"]),
 ];
 

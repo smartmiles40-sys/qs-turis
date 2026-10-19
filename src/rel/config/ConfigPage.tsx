@@ -60,6 +60,8 @@ export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () =
     if (cfg.horario.inicio >= cfg.horario.fim) { setMsg({ tom: "erro", t: "O fim do expediente tem que ser depois do início." }); return; }
     if (!cfg.horario.dias.length) { setMsg({ tom: "erro", t: "Escolha ao menos um dia de atendimento." }); return; }
     if (!(cfg.sla.resposta_min >= 1)) { setMsg({ tom: "erro", t: "O prazo precisa ser de pelo menos 1 minuto." }); return; }
+    if (!(cfg.atendimento.reabrir_horas >= 1) || !(cfg.atendimento.autoconcluir_dias_uteis >= 1)) { setMsg({ tom: "erro", t: "Reabrir e concluir sozinho precisam de pelo menos 1." }); return; }
+    if (cfg.atendimento.csat_ativo && !cfg.atendimento.csat_texto.trim()) { setMsg({ tom: "erro", t: "Escreva a pergunta da pesquisa." }); return; }
     setSalvando(true);
     setMsg(null);
     try {
@@ -67,6 +69,7 @@ export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () =
       await salvarConfig("sla", cfg.sla);
       await salvarConfig("fora_horario", cfg.fora_horario);
       await salvarConfig("assinatura", cfg.assinatura);
+      await salvarConfig("atendimento", cfg.atendimento);
       setMsg({ tom: "ok", t: "Configuração salva." });
     } catch (e) {
       setMsg({ tom: "erro", t: e instanceof Error ? e.message : "Não salvou." });
@@ -154,6 +157,32 @@ export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () =
               onChange={(e) => set("sla", { resposta_min: Number(e.target.value) })} />
             <span className="text-[13px]" style={{ color: "var(--ink2)" }}>minutos úteis</span>
           </div>
+        </Bloco>
+
+        <Bloco titulo="Concluir atendimentos" sub="Todo atendimento termina no botão Concluir (com motivo). Assim nada fica pendente e dá pra medir o tempo de solução de cada pessoa.">
+          <div className="flex flex-wrap items-center gap-2 text-[13px]" style={{ color: "var(--ink2)" }}>
+            Se o cliente escrever até
+            <Entrada type="number" min={1} max={168} value={cfg.atendimento.reabrir_horas} style={{ width: 80 }}
+              onChange={(e) => set("atendimento", { ...cfg.atendimento, reabrir_horas: Number(e.target.value) })} />
+            horas depois de concluído, o atendimento <b>reabre</b> (conta como reaberto). Depois disso, vira um atendimento novo.
+          </div>
+          <label className="flex flex-wrap items-center gap-2 text-[13px] cursor-pointer" style={{ color: "var(--ink)" }}>
+            <input type="checkbox" checked={cfg.atendimento.autoconcluir_ativo}
+              onChange={(e) => set("atendimento", { ...cfg.atendimento, autoconcluir_ativo: e.target.checked })} />
+            Concluir sozinho quando o cliente não responde há
+            <Entrada type="number" min={1} max={30} value={cfg.atendimento.autoconcluir_dias_uteis} style={{ width: 70 }}
+              onChange={(e) => set("atendimento", { ...cfg.atendimento, autoconcluir_dias_uteis: Number(e.target.value) })} />
+            dias úteis (motivo "Cliente não respondeu")
+          </label>
+        </Bloco>
+
+        <Bloco titulo="Pesquisa de satisfação (1 a 5)" sub="Ao concluir, o cliente recebe esta pergunta. A nota que ele responder fica no atendimento e aparece nos KPIs por pessoa — e não reabre a conversa. Só vai se o cliente escreveu nas últimas 24h (regra da Meta).">
+          <label className="flex items-center gap-2 text-[13px] cursor-pointer" style={{ color: "var(--ink)" }}>
+            <input type="checkbox" checked={cfg.atendimento.csat_ativo} onChange={(e) => set("atendimento", { ...cfg.atendimento, csat_ativo: e.target.checked })} />
+            Ligada
+          </label>
+          <textarea className="rel-input" rows={3} value={cfg.atendimento.csat_texto}
+            onChange={(e) => set("atendimento", { ...cfg.atendimento, csat_texto: e.target.value })} />
         </Bloco>
 
         <Bloco titulo="Mensagem fora do horário" sub="Enviada sozinha quando o cliente escreve fora do horário — no máximo uma a cada 12h por conversa. Não conta como resposta no prazo.">

@@ -165,6 +165,29 @@ export async function carregarAtendimento(dias: number): Promise<KpiAtendimento>
   return data as KpiAtendimento;
 }
 
+// ── Atendimentos: abrir → concluir, por pessoa (0145) ───────────────────────
+export interface KpiPessoa {
+  id: string | null; nome: string | null;
+  concluidos: number; concluidos_auto: number; pendentes: number;
+  resp_n: number; resp_media: number | null; resp_no_prazo: number | null;
+  sol_media: number | null; reabertos: number; csat_media: number | null; csat_n: number;
+}
+export interface KpiAtendimentos {
+  abertos: number; concluidos: number; concluidos_auto: number; pendentes: number; pendentes_sem_resposta: number;
+  resp_n: number; resp_media: number | null; resp_mediana: number | null; resp_no_prazo: number | null;
+  sol_n: number; sol_media: number | null; sol_mediana: number | null;
+  reabertos: number; csat_media: number | null; csat_n: number;
+  motivos: Record<string, number>; por_atendente: KpiPessoa[];
+}
+
+export async function carregarAtendimentos(dias: number): Promise<KpiAtendimentos> {
+  const ate = new Date();
+  const de = new Date(ate.getTime() - dias * 86_400_000);
+  const { data, error } = await supabase.rpc("rel_kpi_atendimentos", { p_de: de.toISOString(), p_ate: ate.toISOString() });
+  if (error) throw new Error(error.message);
+  return data as KpiAtendimentos;
+}
+
 export function minutos(m: number | null | undefined): string {
   if (m == null) return "—";
   if (m < 1) return "<1 min";
