@@ -16,6 +16,7 @@
 // feito pra integração.
 // -----------------------------------------------------------------------------
 
+import { createHash } from 'node:crypto';
 import { rest } from './_supabaseAdmin.js';
 import { bx } from './_bitrixLead.js';
 
@@ -131,6 +132,20 @@ export async function baixarArquivos(temTempo, lote = 15) {
         continue;
       }
       const nome = nomeDoCabecalho(r.headers.get('content-disposition')) || `${a.rotulo || 'arquivo'}-${a.file_id}`;
+      // Card copiado no Bitrix = mesmo arquivo com file_id novo (0155). Se a
+      // viagem já tem esse arquivo (hash, ou nome + bytes), reaproveita.
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
+      if (a.viagem_id) {
+        const v = encodeURIComponent(a.viagem_id);
+        const ja = await rest(
+          `rel_documentos?select=id&viagem_id=eq.${v}&copia_de=is.null` +
+          `&or=(sha256.eq.${sha256},and(arquivo_nome.eq.${encodeURIComponent(`"${nome.replace(/"/g, '')}"`)},tamanho.eq.${bytes.length}))&limit=1`,
+        ).catch(() => []);
+        if (ja?.[0]?.id) {
+          await marcar(a.file_id, { status: 'ok', erro: 'cópia de arquivo que a viagem já tem', tentativas: a.tentativas + 1, documento_id: ja[0].id, baixado_em: new Date().toISOString() });
+          continue;
+        }
+      }
       const caminho = `${a.cliente_id}/bitrix-${a.deal_id}-${a.file_id}-${nomeSeguro(nome)}`;
       const up = await fetch(`${base}/storage/v1/object/${BUCKET}/${caminho}`, {
         method: 'POST',
@@ -144,7 +159,7 @@ export async function baixarArquivos(temTempo, lote = 15) {
           cliente_id: a.cliente_id, viagem_id: a.viagem_id, tipo: a.tipo,
           descricao: `${a.rotulo} (Bitrix, negócio #${a.deal_id})`,
           arquivo_path: caminho, arquivo_nome: nome, mime, tamanho: bytes.length,
-          status: 'recebido', enviado_por: 'time', bitrix_arquivo_id: a.file_id,
+          status: 'recebido', enviado_por: 'time', bitrix_arquivo_id: a.file_id, sha256,
         },
       });
       await marcar(a.file_id, { status: 'ok', erro: null, tentativas: a.tentativas + 1, documento_id: doc?.[0]?.id || null, baixado_em: new Date().toISOString() });

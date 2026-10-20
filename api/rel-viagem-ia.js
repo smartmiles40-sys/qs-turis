@@ -248,12 +248,23 @@ function categoriaConfirmada(s) {
 function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
   const divergencias = [];
   const avisos = [];
-  const add = (gravidade, texto, documento_id = null) => divergencias.push({ gravidade, texto, documento_id });
+  // O mesmo achado uma vez só: o Bitrix copia os arquivos quando o card é
+  // copiado, e cada cópia virava um alerta igual (Bruno, 20/10).
+  const vistos = new Set();
+  const add = (gravidade, texto, documento_id = null) => {
+    if (vistos.has(texto)) return;
+    vistos.add(texto);
+    divergencias.push({ gravidade, texto, documento_id });
+  };
   const temDatas = Boolean(viagem.data_embarque);
   const ini = temDatas ? somaDias(viagem.data_embarque, -2) : null;
   const fim = temDatas ? somaDias(viagem.data_retorno || viagem.data_embarque, 2) : null;
   const dentro = (d) => !temDatas || !d || (d >= ini && d <= fim);
   const nomesViagem = passageiros.map((p) => p.nome).filter(Boolean);
+  // Venda pra mais gente do que está na ficha: um nome "estranho" sem data
+  // fora da viagem é o passageiro que falta cadastrar, não doc de outra viagem.
+  const faltaCadastrar = Number(viagem.qtd_passageiros || 0) > nomesViagem.length;
+  const semFicha = [];
   const lugarViagem = lugarNorm(`${viagem.destino || ''} ${viagem.expedicao || ''} ${viagem.titulo || ''}`);
   const palavrasViagem = lugarViagem.split(' ').filter((w) => w.length > 3 && !/^(20\d\d|grupo|expedicao|viagem|pacote)$/.test(w));
 
@@ -278,7 +289,9 @@ function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
     if (L.seguro?.vigencia_inicio) datas.push(L.seguro.vigencia_inicio);
     const foraDaJanela = datas.filter((d) => !dentro(d));
 
-    if (l.fonte !== 'bitrix' && nomesDoc.length && nomesViagem.length && !reconhecidos.length
+    const passageiroNovo = faltaCadastrar && l.fonte !== 'bitrix' && estranhos.length > 0 && !foraDaJanela.length;
+    if (passageiroNovo) for (const n of estranhos) if (!semFicha.some((x) => mesmaPessoa(x, n))) semFicha.push(n);
+    if (!passageiroNovo && l.fonte !== 'bitrix' && nomesDoc.length && nomesViagem.length && !reconhecidos.length
       && (datas.length === 0 || foraDaJanela.length === datas.length)) {
       add('alta', `${rotDoc} parece ser de OUTRA viagem: nenhum passageiro bate${datas.length ? ` e as datas (${[...new Set(datas)].map(BR).join(', ')}) estão fora desta viagem` : ''}.`, l.documento_id);
       continue; // não usa os trechos de um documento de outra viagem
@@ -289,7 +302,7 @@ function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
       add('media', `${rotDoc}: ${foraDaJanela.length} data(s) fora da viagem (${[...new Set(foraDaJanela)].map(BR).join(', ')}).`, l.documento_id);
     }
     if (L.localizador) localizadores.add(alnum(L.localizador));
-    for (const n of estranhos) add('media', `${rotDoc}: "${n}" não é passageiro desta viagem no QS.`, l.documento_id);
+    if (!passageiroNovo) for (const n of estranhos) add('media', `${rotDoc}: "${n}" não é passageiro desta viagem no QS.`, l.documento_id);
 
     // quem está coberto
     for (const p of cobertura.values()) {
@@ -356,6 +369,10 @@ function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
   const voos = unicos.filter((s) => s.categoria.startsWith('voo'));
   if (!temDatas && voos.length) {
     avisos.push(`A viagem está sem data no QS. Pelos bilhetes: embarque ${BR(voos[0].partida_em)} e último voo ${BR(voos[voos.length - 1].partida_em)}.`);
+  }
+
+  for (const n of semFicha) {
+    add('media', `Cadastrar passageiro: "${n}" aparece nos documentos e a venda é pra ${viagem.qtd_passageiros} pessoas, mas não está na ficha desta viagem.`);
   }
 
   // cobertura
@@ -504,12 +521,12 @@ async function aplicarTrechos(viagemId, segmentos, existentes) {
  * lido fica de fora e o resto do caminho (cruzar, trechos, %) é o mesmo.
  */
 export async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS, prontas = null, modelo = null) {
-  const viagem = (await rest(`rel_viagens?select=id,titulo,destino,expedicao,tipo,status,data_embarque,data_retorno,bitrix_dados,ia_revisao&id=eq.${viagemId}&limit=1`))?.[0];
+  const viagem = (await rest(`rel_viagens?select=id,titulo,destino,expedicao,tipo,status,data_embarque,data_retorno,qtd_passageiros,bitrix_dados,ia_revisao&id=eq.${viagemId}&limit=1`))?.[0];
   if (!viagem) throw Object.assign(new Error('Viagem não encontrada.'), { status: 404 });
 
   const [pass, docs, ligados, trechosAntes] = await Promise.all([
     rest(`rel_viagem_passageiros?select=cliente_id,rel_clientes(nome,passaporte,passaporte_validade)&viagem_id=eq.${viagemId}`),
-    rest(`rel_documentos?select=id,tipo,descricao,arquivo_path,arquivo_nome,mime,tamanho,enviado_em,status&viagem_id=eq.${viagemId}&tipo=in.(${TIPOS_DOC.join(',')})&status=neq.recusado&${SEM_PRINTS}&order=enviado_em.desc&limit=${MAX_DOCS}`),
+    rest(`rel_documentos?select=id,tipo,descricao,arquivo_path,arquivo_nome,mime,tamanho,enviado_em,status&viagem_id=eq.${viagemId}&tipo=in.(${TIPOS_DOC.join(',')})&status=neq.recusado&copia_de=is.null&${SEM_PRINTS}&order=enviado_em.desc&limit=${MAX_DOCS}`),
     rest(`rel_viagem_deals?select=bitrix_deal_id,funil,bitrix_dados&viagem_id=eq.${viagemId}`).catch(() => []),
     rest(`rel_viagem_trechos?select=*&viagem_id=eq.${viagemId}&order=partida_em.asc`),
   ]);
@@ -615,7 +632,7 @@ async function candidatas() {
   const nunca = await rest(
     `rel_viagens?select=id,data_embarque,data_retorno,rel_documentos!inner(id)` +
     `&status=eq.ativa&ia_revisao_em=is.null` +
-    `&rel_documentos.tipo=in.(${TIPOS_DOC.join(',')})&rel_documentos.status=neq.recusado` +
+    `&rel_documentos.tipo=in.(${TIPOS_DOC.join(',')})&rel_documentos.status=neq.recusado&rel_documentos.copia_de=is.null` +
     `&rel_documentos.limit=1&limit=3000`
   ).catch(() => []);
   const peso = (v) => {
@@ -629,7 +646,7 @@ async function candidatas() {
 
   const docs = await rest(
     `rel_documentos?select=viagem_id,enviado_em,rel_viagens!inner(id,status,data_embarque,ia_revisao_em)` +
-    `&viagem_id=not.is.null&tipo=in.(${TIPOS_DOC.join(',')})&status=neq.recusado` +
+    `&viagem_id=not.is.null&tipo=in.(${TIPOS_DOC.join(',')})&status=neq.recusado&copia_de=is.null` +
     `&rel_viagens.status=eq.ativa&rel_viagens.data_embarque=gte.${hoje}&rel_viagens.data_embarque=lte.${ate}` +
     `&order=enviado_em.desc&limit=1000`
   ).catch(() => []);

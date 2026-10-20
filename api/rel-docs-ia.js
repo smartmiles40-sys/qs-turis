@@ -297,7 +297,7 @@ async function conferir(docId, prazo = Date.now() + ORCAMENTO_MS) {
  * Os dois primeiros filtram no banco (não pegam "300 quaisquer").
  */
 async function pendentes({ clienteId, viagemId } = {}) {
-  const base = `rel_documentos?select=id,enviado_em,ia_em,ia_status,repetir:ia_resultado->>repetir,tentativas:ia_resultado->>tentativas&tipo=in.(${TIPOS_IA.join(',')})&status=neq.recusado`;
+  const base = `rel_documentos?select=id,enviado_em,ia_em,ia_status,repetir:ia_resultado->>repetir,tentativas:ia_resultado->>tentativas&tipo=in.(${TIPOS_IA.join(',')})&status=neq.recusado&copia_de=is.null`;
   let filtro = '';
   if (clienteId && /^[0-9a-f-]{36}$/i.test(clienteId)) filtro += `&cliente_id=eq.${clienteId}`;
   if (viagemId && /^[0-9a-f-]{36}$/i.test(viagemId)) filtro += `&viagem_id=eq.${viagemId}`;
