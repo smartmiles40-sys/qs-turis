@@ -30,6 +30,7 @@ import { temEsteira } from "../lib/etapas";
 import { RevisaoViagem } from "./TrechosViagem";
 import { conferirViagens, type Analise } from "../lib/problemas";
 import { TOM_FASE } from "./ViagensDoCliente";
+import { BotaoPedirOutroSetor, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
   return (
@@ -263,6 +264,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const [venda, setVenda] = useState<{ closer: string | null; de: string | null; para: string | null }>({ closer: null, de: null, para: null });
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState(false);
+  const [sinalPedidos, setSinalPedidos] = useState(0);
   const [addPass, setAddPass] = useState(false);
   // o conferente (lib/problemas.ts): riscos + os trechos que a linha do tempo desenha
   const [analise, setAnalise] = useState<Analise | null>(null);
@@ -368,6 +370,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
                 </a>
               )}
               <Botao onClick={() => setEditando(true)}>Editar</Botao>
+              {/* Central de Solicitações (0149): ex. pedir emissão/alteração pra Operações */}
+              <BotaoPedirOutroSetor deSetor="relacionamento" onCriada={() => setSinalPedidos((n) => n + 1)}
+                alvo={{ viagemId: v.id, clienteId: v.cliente_id, sobre: [comprador, v.expedicao || v.titulo].filter(Boolean).join(" · ") }} />
               {/* "Cancelar viagem" saiu daqui (Bruno, 15/10). Cancelada no Bitrix, cancela sozinha; reativar continua. */}
               {!ativa && <Botao onClick={() => void acao(() => salvarViagem(v.id, { status: "ativa" }))}>Reativar</Botao>}
             </div>
@@ -375,6 +380,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
           <ConformidadeViagem viagemId={v.id} versao={versao} onRevisado={revisou} />
         </div>
       </div>
+
+      <PedidosSobre alvo={{ viagemId: v.id }} recarregar={sinalPedidos} links={{ onAbrirCliente, onAbrirConversa }} />
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
 

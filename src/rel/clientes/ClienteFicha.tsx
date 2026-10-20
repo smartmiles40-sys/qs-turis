@@ -23,6 +23,7 @@ import ChamadosDoCliente from "../chamados/ChamadosDoCliente";
 import ChamadoModal from "../chamados/ChamadoModal";
 import RecompraBotao from "../pos/RecompraBotao";
 import { EnviarFinanceiroModal, StatusNoFinanceiro } from "../../fin/EnviarFinanceiro";
+import { BotaoPedirOutroSetor, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
 import { conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
 
 // Nomes amigáveis dos campos, pro histórico ler como gente.
@@ -83,6 +84,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [novoChamado, setNovoChamado] = useState(false);
   // Financeiro (0127): mandar o cliente pra lá e acompanhar o status.
   const [enviarFin, setEnviarFin] = useState(false);
+  const [sinalPedidos, setSinalPedidos] = useState(0);
   const [sinalFin, setSinalFin] = useState(0);
   const [versaoChamados, setVersaoChamados] = useState(0);
   const [metrica, setMetrica] = useState<Metrica | null>(null);
@@ -196,12 +198,14 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
             <Botao onClick={() => setNovoContato(true)}>Registrar contato</Botao>
             <Botao onClick={() => setNovoChamado(true)}>Abrir chamado</Botao>
             <Botao onClick={() => setEnviarFin(true)}>💰 Enviar ao Financeiro</Botao>
+            <BotaoPedirOutroSetor deSetor="relacionamento" alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
             <Botao onClick={() => setEditando(true)}>Editar</Botao>
           </div>
         )}
       </div>
 
       <div className="mt-3"><StatusNoFinanceiro alvo={{ clienteId: c.id }} recarregar={sinalFin} /></div>
+      <div className="mt-3"><PedidosSobre alvo={{ clienteId: c.id }} recarregar={sinalPedidos} links={{ onAbrirViagem, onAbrirConversa }} /></div>
 
       {erroMetrica && <div className="mb-4"><Aviso tom="erro">Categoria, LTV e cadastro não carregaram ({erroMetrica}).</Aviso></div>}
       {metrica && !metrica.cadastro_completo && !c.mesclado_em_id && (

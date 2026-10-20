@@ -47,10 +47,12 @@ import ModelosPage from "./modelos/ModelosPage";
 import AgendaPage from "./agenda/AgendaPage";
 import { podeGerirTime } from "./equipe/permissao";
 import { usePode } from "./equipe/usePode";
+import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
+import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 
 type Rota =
   | { tela: "inicio" }
-  | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
+  | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "solicitacoes"; id?: string } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" }
   | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
   | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
@@ -67,6 +69,7 @@ function lerRota(): Rota {
   if (tela === "viagem" && id) return { tela: "viagem", id };
   if (tela === "atendimento") return id ? { tela: "atendimento", id } : { tela: "atendimento" };
   if (tela === "grupos") return id ? { tela: "grupos", id: decodeURIComponent(id) } : { tela: "grupos" };
+  if (tela === "solicitacoes") return id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" };
   if ((SIMPLES as string[]).includes(tela)) return { tela } as Rota;
   return { tela: "inicio" };
 }
@@ -76,6 +79,7 @@ function hashDe(r: Rota) {
   if (r.tela === "viagem") return `#rel/viagem/${r.id}`;
   if (r.tela === "atendimento" && r.id) return `#rel/atendimento/${r.id}`;
   if (r.tela === "grupos" && r.id) return `#rel/grupos/${encodeURIComponent(r.id)}`;
+  if (r.tela === "solicitacoes" && r.id) return `#rel/solicitacoes/${r.id}`;
   return r.tela === "inicio" ? "#rel" : `#rel/${r.tela}`;
 }
 
@@ -96,6 +100,8 @@ const ICONES: Record<string, ReactNode> = {
   viagens: <><path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" /></>,
   pos: <><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" /></>,
   config: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></>,
+  // Central de Solicitações (0149): caixa de entrada
+  pedidos: <><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></>,
   seta: <polyline points="6 9 12 15 18 9" />,
 };
 
@@ -231,6 +237,7 @@ export default function RelApp() {
   const { currentUser, logout } = useQsAuth();
   // KPIs: some do menu pra quem o cargo não deixa ver (0135).
   const verKpis = usePode("relacionamento.kpis") !== false;
+  const [central, recontarCentral] = useContagemSolicitacoes("relacionamento");
   const { isDark, toggleTheme } = useTheme();
   const [rota, setRota] = useState<Rota>(lerRota);
   const [resumo, setResumo] = useState<Resumo | null>(null);
@@ -291,6 +298,10 @@ export default function RelApp() {
       { id: "chamados", rotulo: "Chamados", badge: cont?.chamadosVencidos || undefined, alerta: true },
       // Modelos (14/10): respostas prontas + modelos da Meta — a gestora padroniza.
       { id: "modelos", rotulo: "Modelos de mensagem" },
+    ] },
+    // Central de Solicitações (20/10, 0149): pedidos entre setores, com dono e prazo.
+    { id: "demandas", rotulo: "Demandas", icone: "pedidos", itens: [
+      { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
     ] },
     // Agenda (14/10): cada pessoa tem a sua + o panorama do time.
     { id: "agenda", rotulo: "Agenda", icone: "agenda", itens: [
@@ -475,6 +486,11 @@ export default function RelApp() {
               onTrocarVisao={(v) => ir(v === "chamados" ? { tela: "chamados" } : { tela: "atendimento" })}
               onMudou={atualizar}
             />
+          )}
+          {rota.tela === "solicitacoes" && (
+            <SolicitacoesPage setor="relacionamento" abrirId={rota.id ?? null} onMudou={recontarCentral}
+              onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })}
+              links={{ onAbrirViagem: abrirViagem, onAbrirCliente: abrirCliente, onAbrirConversa: abrirConversa }} />
           )}
           {rota.tela === "grupos" && (
             <GruposPage grupoJid={rota.id ?? null} abrir={(jid) => ir(jid ? { tela: "grupos", id: jid } : { tela: "grupos" })} />

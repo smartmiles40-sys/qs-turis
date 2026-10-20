@@ -25,12 +25,15 @@ import { FIN_CSS } from "./ui";
 import AtendimentosPage, { FaixaDoAtendimento } from "./atendimentos/AtendimentosPage";
 import AtendimentoPage from "@/rel/atendimento/AtendimentoPage";
 import { supabase } from "@/lib/supabase";
+import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
+import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 
 const PREFIXO = "fin";
 /** As telas do Financeiro. */
 // 14/10: atendimentos (a fila de quem foi mandado ao Financeiro) e conversas
 // (o WhatsApp do Relacionamento, só as conversas que estão com o Financeiro).
-const TELAS = ["inicio", "atendimentos", "conversas", "equipe"] as const;
+// 20/10: solicitacoes (Central de Solicitações entre setores, 0149).
+const TELAS = ["inicio", "atendimentos", "conversas", "solicitacoes", "equipe"] as const;
 type Tela = (typeof TELAS)[number];
 interface Rota { tela: Tela; id?: string }
 
@@ -43,6 +46,7 @@ export default function FinApp() {
   const { currentUser } = useQsAuth();
   const [rota, setRota] = useState<Rota>(lerRota);
   const [cont, setCont] = useState<{ novos: number; esperando: number }>({ novos: 0, esperando: 0 });
+  const [central, recontarCentral] = useContagemSolicitacoes("financeiro");
 
   // Bolinhas do menu: atendimentos sem dono e conversas esperando resposta.
   const contar = useCallback(async () => {
@@ -78,6 +82,9 @@ export default function FinApp() {
       { id: "atendimentos", rotulo: "Atendimentos", badge: cont.novos || undefined, alerta: true },
       { id: "conversas", rotulo: "Conversas (WhatsApp)", badge: cont.esperando || undefined },
     ] },
+    { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
+      { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
+    ] },
     // Time: só gestor(a) do Financeiro e admin cadastram e cuidam do time.
     ...(gestor ? [{ id: "time", rotulo: "Time", icone: ICONES_AREA.equipe, itens: [{ id: "equipe", rotulo: "Funcionários" }] }] : []),
   ];
@@ -103,6 +110,10 @@ export default function FinApp() {
           extraCabecalho={(c, recarregar) => (
             <FaixaDoAtendimento conversaId={c.id} onAbrir={(id) => ir({ tela: "atendimentos", id })} onMudou={() => { recarregar(); void contar(); }} />
           )} />
+      )}
+      {rota.tela === "solicitacoes" && (
+        <SolicitacoesPage setor="financeiro" abrirId={rota.id ?? null} onMudou={recontarCentral}
+          onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })} />
       )}
       {rota.tela === "equipe" && <EquipePage area="financeiro" />}
     </CascaDeArea>

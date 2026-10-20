@@ -21,6 +21,8 @@ import { setMeetingStatus, desfechoDaOportunidadeFutura } from "@/lib/qs/meeting
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
 import OportunidadeFuturaModal, { FaixaOportunidadeFutura } from "@/components/sdr/leads/OportunidadeFuturaModal";
 import { ComCoresDoRel, EnviarFinanceiroModal, StatusNoFinanceiro } from "@/fin/EnviarFinanceiro";
+import { ComCoresDaCentral, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
+import NovaSolicitacao from "@/solicitacoes/NovaSolicitacao";
 import type {
   Lead,
   LeadStatus,
@@ -206,6 +208,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // Financeiro (0127, 14/10): o SDR/closer manda o cliente e acompanha o status.
   const [enviarFin, setEnviarFin] = useState(false);
   const [sinalFin, setSinalFin] = useState(0);
+  // Central de Solicitações (0149): pedir ao Relacionamento/Operações/Financeiro.
+  const [pedirSetor, setPedirSetor] = useState(false);
+  const [sinalPedidos, setSinalPedidos] = useState(0);
   const [selectedCloser, setSelectedCloser] = useState("");
   const [handoverSuccess, setHandoverSuccess] = useState(false);
   const [showReEngagement, setShowReEngagement] = useState(false);
@@ -1574,6 +1579,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             <ComCoresDoRel>
               <div className="mt-1"><StatusNoFinanceiro alvo={{ leadId: lead.id }} recarregar={sinalFin} compacto /></div>
             </ComCoresDoRel>
+            <ComCoresDaCentral>
+              <div className="mt-2"><PedidosSobre alvo={{ leadId: lead.id }} recarregar={sinalPedidos} /></div>
+            </ComCoresDaCentral>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -1593,6 +1601,13 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             title="O Financeiro fala com o cliente pelo WhatsApp e resolve a dúvida; você acompanha o status aqui"
           >
             💰 Enviar ao Financeiro
+          </button>
+          <button
+            onClick={() => setPedirSetor(true)}
+            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            title="Vira um pedido com dono e prazo na fila do outro setor; você acompanha aqui"
+          >
+            ↗ Pedir a outro setor
           </button>
           <button
             onClick={() => setShowHandoverModal(true)}
@@ -2097,6 +2112,13 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           </div>
         </div>
       )}
+
+      <ComCoresDaCentral>
+        <NovaSolicitacao aberto={pedirSetor} deSetor="comercial" paraInicial="operacional"
+          alvo={{ leadId: lead.id, sobre: lead.full_name || [lead.first_name, lead.last_name].filter(Boolean).join(" ") || null }}
+          onFechar={() => setPedirSetor(false)}
+          onCriada={() => { setPedirSetor(false); setSinalPedidos((n) => n + 1); notifySuccess("Pedido enviado — acompanhe aqui no lead ou em Solicitações."); }} />
+      </ComCoresDaCentral>
 
       <ComCoresDoRel>
         <EnviarFinanceiroModal aberto={enviarFin} origem="comercial" alvo={{ leadId: lead.id, telefone: lead.phone }}

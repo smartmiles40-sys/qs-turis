@@ -84,6 +84,7 @@ const CarteiraPage = lazyPagina(() => import("./carteira/CarteiraPage"));
 const MinhaAgendaPage = lazyPagina(() => import("./agenda/MinhaAgendaPage"));
 const WaPage = lazyPagina(() => import("./wa/WaPage"));
 const PipelineIAPage = lazyPagina(() => import("./gloria/PipelineIAPage"));
+const SolicitacoesPage = lazyPagina(() => import("@/solicitacoes/SolicitacoesPage"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import QsWaDock from "./wa/QsWaDock";
 import ErroDeParte from "./ErroDeParte";
@@ -98,6 +99,8 @@ import TelefoneOnboarding from "@/components/sdr/telefone/TelefoneOnboarding";
 import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
 import LigacaoOficialWidget from "@/components/sdr/telefone/LigacaoOficialWidget";
 import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
+import { ComCoresDaCentral } from "@/solicitacoes/PedirOutroSetor";
+import { useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 
 export type SdrNav =
   | "minha-agenda"
@@ -116,6 +119,7 @@ export type SdrNav =
   | "historicos"
   | "cobertura"
   | "atendimento-ia"
+  | "solicitacoes"
   | "configuracoes";
 
 // ── Dropdown Menu ────────────────────────────────────────────────────────────
@@ -124,6 +128,9 @@ interface MenuItem {
   id: SdrNav;
   label: string;
   description?: string;
+  /** Bolinha com número (Central de Solicitações). */
+  badge?: number;
+  alerta?: boolean;
 }
 
 interface MenuGroup {
@@ -149,6 +156,8 @@ const MENU: (MenuGroup | MenuItem)[] = [
       // mudanca que e de rotulo. O que o usuario ve e o label.
       { id: "cobertura", label: "Carteira de Leads", description: "Seus clientes — quem já é seu continua seu" },
       { id: "atendimento-ia", label: "Atendimento IA", description: "O pipeline da Glória: quem ela está atendendo agora" },
+      // Central de Solicitações (20/10, 0149): pedidos entre setores com dono e prazo.
+      { id: "solicitacoes", label: "Solicitações", description: "Pedir e receber de Relacionamento, Operações e Financeiro" },
     ],
   },
   {
@@ -186,6 +195,14 @@ function ChevronDown() {
 
 // ── Dropdown Component ───────────────────────────────────────────────────────
 
+function BolinhaMenu({ n, alerta }: { n?: number; alerta?: boolean }) {
+  if (!n) return null;
+  return (
+    <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10.5px] font-bold leading-none"
+      style={alerta ? { background: "#FEE2E2", color: "#B91C1C" } : { background: "#FEF3C7", color: "#92400E" }}>{n}</span>
+  );
+}
+
 function NavDropdown({
   group,
   activeNav,
@@ -207,6 +224,8 @@ function NavDropdown({
   }, []);
 
   const isActive = group.items.some((i) => i.id === activeNav);
+  const soma = group.items.reduce((t, i) => t + (i.badge ?? 0), 0);
+  const algumAlerta = group.items.some((i) => i.alerta && i.badge);
 
   return (
     <div ref={ref} className="relative">
@@ -220,6 +239,7 @@ function NavDropdown({
         }}
       >
         {group.label}
+        <BolinhaMenu n={soma} alerta={algumAlerta} />
         <ChevronDown />
       </button>
       {open && (
@@ -236,7 +256,7 @@ function NavDropdown({
               }}
               className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex flex-col gap-0.5"
             >
-              <span className="text-[13px] font-semibold text-gray-900">{item.label}</span>
+              <span className="text-[13px] font-semibold text-gray-900">{item.label}<BolinhaMenu n={item.badge} alerta={item.alerta} /></span>
               {item.description && (
                 <span className="text-[11px] text-gray-400">{item.description}</span>
               )}
@@ -284,6 +304,8 @@ export default function SdrLayout() {
   }
 
   const userRole = currentUser?.role ?? "sdr";
+  const [central, recontarCentral] = useContagemSolicitacoes("comercial");
+  const [solicitacaoAberta, setSolicitacaoAberta] = useState<string | null>(null);
   const userInitials = currentUser
     ? currentUser.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
     : "QS";
@@ -343,7 +365,8 @@ export default function SdrLayout() {
   // Filter menu items based on role
   const filteredMenu = MENU.map((item) => {
     if (isGroup(item)) {
-      const filteredItems = item.items.filter((sub) => canAccessNav(userRole, sub.id));
+      const filteredItems = item.items.filter((sub) => canAccessNav(userRole, sub.id))
+        .map((sub) => sub.id === "solicitacoes" ? { ...sub, badge: central.novas + central.novidades || undefined, alerta: central.atrasadas > 0 } : sub);
       if (filteredItems.length === 0) return null;
       // A ORDEM DE EXECUÇÃO MUDA POR PAPEL (Bruno, 01/09). A primeira tela da
       // lista é onde a pessoa volta o dia inteiro: pro closer é a agenda, pro
@@ -642,7 +665,7 @@ export default function SdrLayout() {
                             className="w-full text-left px-4 py-3 flex flex-col gap-0.5 active:bg-gray-50 transition-colors"
                             style={{ background: active ? "var(--accent-soft)" : "transparent", borderLeft: active ? "3px solid var(--accent)" : "3px solid transparent" }}
                           >
-                            <span className="text-[14px] font-semibold" style={{ color: active ? "var(--accent)" : "var(--ink)" }}>{item.label}</span>
+                            <span className="text-[14px] font-semibold" style={{ color: active ? "var(--accent)" : "var(--ink)" }}>{item.label}<BolinhaMenu n={item.badge} alerta={item.alerta} /></span>
                             {item.description && <span className="text-[11px] text-gray-400">{item.description}</span>}
                           </button>
                         );
@@ -792,6 +815,16 @@ export default function SdrLayout() {
         {activeNav === "reunioes" && (
           <PageErrorBoundary pageName="Reuniões">
             <MeetingsPage onOpenLead={openLeadDetail} />
+          </PageErrorBoundary>
+        )}
+        {activeNav === "solicitacoes" && (
+          <PageErrorBoundary pageName="Solicitações">
+            <ComCoresDaCentral>
+              <div className="px-4 sm:px-6 py-6">
+                <SolicitacoesPage setor="comercial" abrirId={solicitacaoAberta} onAbrirId={setSolicitacaoAberta}
+                  onMudou={recontarCentral} links={{ onAbrirLead: openLeadDetail }} />
+              </div>
+            </ComCoresDaCentral>
           </PageErrorBoundary>
         )}
         {activeNav === "configuracoes" && (

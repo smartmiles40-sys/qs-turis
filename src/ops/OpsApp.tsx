@@ -1,18 +1,24 @@
 // src/ops/OpsApp.tsx
 // -----------------------------------------------------------------------------
-// ÁREA OPERAÇÕES (0126, 14/10/2026). Só a casca por enquanto: porta própria no
-// login, cor âmbar, endereço #ops/<tela>. As telas são a Fase 6 do roadmap do
-// QS — a base vai ser o sistema de Expedições (voos, passageiros, fornecedores).
+// ÁREA OPERAÇÕES (0126, 14/10/2026). Porta própria no login, cor âmbar,
+// endereço #ops/<tela>. O resto das telas é a Fase 6 do roadmap do QS — a base
+// vai ser o sistema de Expedições (voos, passageiros, fornecedores).
+//
+// 20/10 (0149): a CENTRAL DE SOLICITAÇÕES é a casa de Operações — o Início abre
+// direto nela ("Operações vai ficar 100% no QS, ainda mais na questão de
+// demandas" — Bruno). #ops/solicitacoes/<id> abre um pedido.
 //
 // Pra pôr uma tela: mesmo jeito do src/fin/FinApp.tsx (TELAS → grupo → render).
 // Banco: ops_tem_acesso() / ops_pode_configurar() nas policies (0126).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
-import CascaDeArea, { EmConstrucao, ICONES_AREA, hashDaArea, lerHashDaArea, type GrupoDoMenu } from "@/area/CascaDeArea";
+import CascaDeArea, { ICONES_AREA, hashDaArea, lerHashDaArea, type GrupoDoMenu } from "@/area/CascaDeArea";
 import EquipePage from "@/rel/equipe/EquipePage";
 import { podeGerirTime } from "@/rel/equipe/permissao";
 import { REL_CSS } from "@/rel/ui";
+import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
+import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 
 /** Cor de Operações: âmbar escuro (#B45309 com texto branco = 5:1, WCAG AA). */
 const OPS_CSS = `${REL_CSS}
@@ -22,7 +28,7 @@ html.dark { --rel-ink: #FDBA74; --rel-soft: rgba(251, 146, 60, .15); }
 `;
 
 const PREFIXO = "ops";
-const TELAS = ["inicio", "equipe"] as const;
+const TELAS = ["inicio", "solicitacoes", "equipe"] as const;
 type Tela = (typeof TELAS)[number];
 interface Rota { tela: Tela; id?: string }
 
@@ -34,6 +40,7 @@ function lerRota(): Rota {
 export default function OpsApp() {
   const { currentUser } = useQsAuth();
   const [rota, setRota] = useState<Rota>(lerRota);
+  const [central, recontar] = useContagemSolicitacoes("operacional");
 
   useEffect(() => {
     const onHash = () => setRota(lerRota());
@@ -49,18 +56,18 @@ export default function OpsApp() {
 
   if (!currentUser) return null;
   const grupos: GrupoDoMenu[] = [
+    { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
+      { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
+    ] },
     ...(podeGerirTime(currentUser, "operacional") ? [{ id: "time", rotulo: "Time", icone: ICONES_AREA.equipe, itens: [{ id: "equipe", rotulo: "Funcionários" }] }] : []),
   ];
 
   return (
     <CascaDeArea setor="operacional" nome="Operações" subtitulo="expedições e embarques" css={OPS_CSS}
-      grupos={grupos} ativo={rota.tela} onIr={(t) => ir({ tela: t as Tela })} chaveMenu="qs_ops_menu_aberto">
-      {rota.tela === "inicio" && (
-        <EmConstrucao
-          titulo="Operações"
-          texto="Em construção — Fase 6 do roadmap do QS. A base vai ser o sistema de Expedições."
-          itens={["Expedições e pacotes em andamento", "Voos e passageiros de cada saída", "Fornecedores e pagamentos da operação", "Checklist de embarque"]}
-        />
+      grupos={grupos} ativo={rota.tela === "inicio" ? "solicitacoes" : rota.tela} onIr={(t) => ir({ tela: t as Tela })} chaveMenu="qs_ops_menu_aberto">
+      {(rota.tela === "inicio" || rota.tela === "solicitacoes") && (
+        <SolicitacoesPage setor="operacional" abrirId={rota.id ?? null} onMudou={recontar}
+          onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })} />
       )}
       {rota.tela === "equipe" && <EquipePage area="operacional" />}
     </CascaDeArea>
