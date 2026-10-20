@@ -5,6 +5,13 @@
 // ONDE ELE DORME — o hotel daquela noite, "noite no avião" ou, em vermelho,
 // "SEM HOSPEDAGEM". Os riscos do conferente aparecem colados no trecho que
 // causa o problema, então nada fica escondido numa lista.
+//
+// 20/10 (Bruno: "o roteiro fica errado, não fica compatível com as datas do voo
+// de ida e volta, e fica vários dias livres"): os dias vão do 1º ao último VOO
+// REAL (mesma regra do próximo voo, 0152: o ida/volta genérico do Bitrix não
+// conta quando há voo de verdade, e voo de outra edição — fora de 10 dias antes
+// do embarque / 60 depois da volta — fica de fora). O que cair fora das datas
+// vai pra um bloco recolhido no fim. Dias livres seguidos viram UMA linha.
 // -----------------------------------------------------------------------------
 import { useMemo, useState } from "react";
 import { TIPOS_TRECHO, type Trecho } from "../lib/viagens";
@@ -18,6 +25,25 @@ const somaDias = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`
 const ordemNivel: Record<Nivel, number> = { alta: 0, media: 1, info: 2 };
 
 interface Evento { chave: string; t: Trecho; quando: number; hora: string; tipo: "inicio" | "checkout" }
+/** Um dia com coisa acontecendo, ou uma corrida de dias livres seguidos (mesma noite). */
+type Bloco = { livre: false; d: string; n: number } | { livre: true; de: string; ate: string; n: number; qtd: number; hotel?: Trecho; voando: boolean };
+
+const ehDeslocamento = (t: Trecho) => t.tipo === "voo_internacional" || t.tipo === "voo_interno";
+
+/**
+ * Os trechos que valem pro roteiro. Ida/volta genérico do Bitrix sai quando há
+ * voo real; voo muito longe das datas da venda (outra edição) sai também.
+ */
+function trechosValidos(trechos: Trecho[], dataIda: string | null, dataVolta: string | null): Trecho[] {
+  const temReal = trechos.some((t) => ehDeslocamento(t) && t.fonte !== "bitrix");
+  let lista = temReal ? trechos.filter((t) => !(ehDeslocamento(t) && t.fonte === "bitrix")) : trechos;
+  if (dataIda) {
+    const de = somaDias(dataIda, -10), ate = somaDias(dataVolta ?? dataIda, 60);
+    const dentro = lista.filter((t) => { const d = diaLocal(t.partida_em, t.partida_fuso); return !d || (d >= de && d <= ate); });
+    if (dentro.some(ehDeslocamento) || !lista.some(ehDeslocamento)) lista = dentro;
+  }
+  return lista;
+}
 
 function pior(ps: Problema[]): Nivel | null {
   return ps.length ? ps.reduce<Nivel>((a, p) => (ordemNivel[p.nivel] < ordemNivel[a] ? p.nivel : a), "info") : null;
@@ -27,12 +53,13 @@ export default function LinhaDoTempo({ viagemId, trechos, problemas, dataIda, da
   viagemId: string; trechos: Trecho[]; problemas: Problema[]; dataIda: string | null; dataVolta: string | null; ativa: boolean; onMudou: () => void;
 }) {
   const [editando, setEditando] = useState<Trecho | null | undefined>(undefined);
-  const { hotelDaNoite, semHotel } = useMemo(() => mapaDasNoites(trechos), [trechos]);
 
-  const { dias, porDia, noAviao } = useMemo(() => {
+  const validos = useMemo(() => trechosValidos(trechos, dataIda, dataVolta), [trechos, dataIda, dataVolta]);
+
+  const { dias, porDia, noAviao, fora } = useMemo(() => {
     const eventos: (Evento & { dia: string })[] = [];
     const noAviao = new Set<string>();
-    for (const t of trechos) {
+    for (const t of validos) {
       const soDia = t.fonte === "bitrix";
       const d = soDia ? diaLocal(t.partida_em) : diaLocal(t.partida_em, t.partida_fuso);
       if (!d) continue;
@@ -47,13 +74,31 @@ export default function LinhaDoTempo({ viagemId, trechos, problemas, dataIda, da
         for (let x = d; x < c; x = somaDias(x, 1)) noAviao.add(x);
       }
     }
-    const todosDias = eventos.map((e) => e.dia).concat([dataIda, dataVolta].filter(Boolean) as string[]).sort();
+    // Começo e fim: os voos (ida → pouso da volta). Sem voo, as datas da venda; sem nada, os trechos.
+    const voos = validos.filter(ehDeslocamento);
+    let ini: string | undefined, fim: string | undefined;
+    if (voos.length) {
+      const partidas = voos.map((t) => diaLocal(t.partida_em, t.fonte === "bitrix" ? null : t.partida_fuso)).filter(Boolean) as string[];
+      const chegadas = voos.map((t) => diaLocal(t.chegada_em ?? t.partida_em, t.fonte === "bitrix" ? null : (t.chegada_fuso || t.partida_fuso))).filter(Boolean) as string[];
+      ini = partidas.sort()[0]; fim = [...partidas, ...chegadas].sort().pop();
+    } else if (dataIda) { ini = dataIda; fim = dataVolta ?? dataIda; }
+    else { const ds = eventos.map((e) => e.dia).sort(); ini = ds[0]; fim = ds[ds.length - 1]; }
     const dias: string[] = [];
-    if (todosDias.length) for (let d = todosDias[0]; d <= todosDias[todosDias.length - 1] && dias.length < 120; d = somaDias(d, 1)) dias.push(d);
+    if (ini && fim) for (let d = ini; d <= fim && dias.length < 120; d = somaDias(d, 1)) dias.push(d);
     const porDia = new Map<string, Evento[]>();
-    for (const e of eventos.sort((a, b) => a.quando - b.quando)) porDia.set(e.dia, [...(porDia.get(e.dia) ?? []), e]);
-    return { dias, porDia, noAviao };
-  }, [trechos, dataIda, dataVolta]);
+    const fora: Evento[] = [];
+    for (const e of eventos.sort((a, b) => a.quando - b.quando)) {
+      if (ini && fim && (e.dia < ini || e.dia > fim)) { fora.push(e); continue; }
+      porDia.set(e.dia, [...(porDia.get(e.dia) ?? []), e]);
+    }
+    // o que o filtro tirou (voo de outra edição / genérico do Bitrix) também vai pro "fora"
+    const usados = new Set(validos.map((t) => t.id));
+    for (const t of trechos) if (!usados.has(t.id)) fora.push({ chave: `${t.id}-x`, t, quando: new Date(t.partida_em).getTime(), hora: "", tipo: "inicio" });
+    return { dias, porDia, noAviao, fora };
+  }, [validos, trechos, dataIda, dataVolta]);
+
+  const { hotelDaNoite, semHotel } = useMemo(() => mapaDasNoites(validos), [validos]);
+  const [verFora, setVerFora] = useState(false);
 
   const doTrecho = useMemo(() => {
     const m = new Map<string, Problema[]>();
@@ -67,6 +112,19 @@ export default function LinhaDoTempo({ viagemId, trechos, problemas, dataIda, da
     return m;
   }, [problemas]);
 
+  const blocos = useMemo(() => {
+    const out: Bloco[] = [];
+    dias.forEach((d, i) => {
+      const hotel = hotelDaNoite.get(d);
+      const voando = noAviao.has(d);
+      const livre = !(porDia.get(d)?.length) && !semHotel.has(d) && !(soltosDoDia.get(d)?.length);
+      const ult = out[out.length - 1];
+      if (livre && ult?.livre && ult.hotel?.id === hotel?.id && ult.voando === voando) { ult.ate = d; ult.qtd += 1; return; }
+      out.push(livre ? { livre: true, de: d, ate: d, n: i + 1, qtd: 1, hotel, voando } : { livre: false, d, n: i + 1 });
+    });
+    return out;
+  }, [dias, porDia, hotelDaNoite, semHotel, noAviao, soltosDoDia]);
+
   if (!trechos.length) {
     return <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhum trecho ainda. Anexe bilhetes e vouchers e clique em "Revisar com IA", ou cadastre à mão na aba "Por tipo".</p>;
   }
@@ -74,32 +132,43 @@ export default function LinhaDoTempo({ viagemId, trechos, problemas, dataIda, da
   return (
     <div>
       <ol className="relative">
-        {dias.map((d, i) => {
+        {blocos.map((b) => {
+          if (b.livre) {
+            const dt0 = new Date(`${b.de}T12:00:00Z`);
+            return (
+              <li key={b.de} className="relative pl-5 pb-2" style={{ borderLeft: "2px dashed var(--line)", marginLeft: 6 }}>
+                <span className="absolute -left-[5px] top-1.5 w-2 h-2 rounded-full" style={{ background: "var(--line)", boxShadow: "0 0 0 3px var(--card)" }} aria-hidden />
+                <p className="text-[12px] flex flex-wrap items-baseline gap-x-1.5" style={{ color: "var(--ink3)" }}>
+                  <span className="font-bold uppercase tracking-wide">{b.qtd === 1 ? `${SEMANA[dt0.getUTCDay()]} ${diaBR(b.de)}` : `${diaBR(b.de)} – ${diaBR(b.ate)}`}</span>
+                  <span>· {b.qtd === 1 ? `dia livre (dia ${b.n})` : `${b.qtd} dias livres (dias ${b.n}–${b.n + b.qtd - 1})`}</span>
+                  {b.hotel ? <span>· 🌙 <b style={{ color: "var(--ink2)" }}>{titulo(b.hotel)}</b></span> : b.voando ? <span>· ✈ noite no avião/trem</span> : null}
+                </p>
+              </li>
+            );
+          }
+          const { d } = b, i = b.n - 1;
           const evs = porDia.get(d) ?? [];
           const hotel = hotelDaNoite.get(d);
           const semCama = semHotel.has(d);
           const voando = noAviao.has(d);
           const soltos = soltosDoDia.get(d) ?? [];
           const dt = new Date(`${d}T12:00:00Z`);
-          const fora = (dataIda && d < dataIda) || (dataVolta && d > dataVolta);
-          const vazio = !evs.length && !hotel && !semCama && !voando && !soltos.length;
+          const foraDaVenda = (dataIda && d < dataIda) || (dataVolta && d > dataVolta);
           return (
-            <li key={d} className="relative pl-5 pb-3" style={{ borderLeft: `2px solid ${semCama ? NIVEL.alta.cor : "var(--line)"}`, marginLeft: 6 }}>
+            <li key={d} className="relative pl-5 pb-2.5" style={{ borderLeft: `2px solid ${semCama ? NIVEL.alta.cor : "var(--line)"}`, marginLeft: 6 }}>
               <span className="absolute -left-[7px] top-1 w-3 h-3 rounded-full" style={{ background: evs.length ? "var(--rel)" : "var(--line)", boxShadow: "0 0 0 3px var(--card)" }} aria-hidden />
-              <h3 className="flex flex-wrap items-baseline gap-2 mb-1.5">
-                <span className="text-[13px] font-extrabold uppercase tracking-wide" style={{ color: fora ? "var(--ink3)" : "var(--ink)" }}>
+              <h3 className="flex flex-wrap items-baseline gap-2 mb-1">
+                <span className="text-[13px] font-extrabold uppercase tracking-wide" style={{ color: foraDaVenda ? "var(--ink3)" : "var(--ink)" }}>
                   {SEMANA[dt.getUTCDay()]} {diaBR(d)}
                 </span>
-                <span className="text-[11px] font-semibold" style={{ color: "var(--ink3)" }}>dia {i + 1}{fora ? " · fora das datas da venda" : ""}</span>
+                <span className="text-[11px] font-semibold" style={{ color: "var(--ink3)" }}>dia {i + 1}{foraDaVenda ? " · fora das datas da venda" : ""}</span>
               </h3>
 
               {soltos.map((p, k) => (
                 <p key={k} className="text-[12.5px] font-semibold mb-1 px-2 py-1 rounded" style={{ background: NIVEL[p.nivel].fundo, color: NIVEL[p.nivel].cor }}>{p.titulo}</p>
               ))}
 
-              {vazio && <p className="text-[12px] italic mb-1" style={{ color: "var(--ink3)" }}>dia livre</p>}
-
-              <ul className="space-y-1.5">
+              <ul className="space-y-1">
                 {evs.map((e) => {
                   const t = e.t;
                   const ps = (doTrecho.get(t.id) ?? []).filter((p) => e.tipo === "inicio" || p.categoria === "hotel");
@@ -155,6 +224,27 @@ export default function LinhaDoTempo({ viagemId, trechos, problemas, dataIda, da
           );
         })}
       </ol>
+      {fora.length > 0 && (
+        <div className="mt-2 rounded-lg px-3 py-2" style={{ border: "1px dashed var(--line)" }}>
+          <button type="button" onClick={() => setVerFora((v) => !v)} aria-expanded={verFora} className="text-[12.5px] font-semibold" style={{ color: "var(--ink3)" }}>
+            {verFora ? "▾" : "▸"} Fora das datas dos voos ({fora.length}) <span className="font-normal">— de outra edição ou genérico do Bitrix</span>
+          </button>
+          {verFora && (
+            <ul className="mt-1.5 space-y-1">
+              {fora.map((e) => (
+                <li key={e.chave} className="flex items-center gap-2 text-[12.5px]" style={{ color: "var(--ink2)" }}>
+                  <Icone tipo={e.t.tipo} tamanho={20} />
+                  <span className="min-w-0 flex-1 truncate">
+                    <b className="tabular-nums">{diaBR(diaLocal(e.tipo === "checkout" ? e.t.chegada_em! : e.t.partida_em, e.t.partida_fuso))}</b>
+                    {" · "}{e.tipo === "checkout" ? "Check-out" : TIPOS_TRECHO[e.t.tipo]} · {titulo(e.t)}{e.t.fonte === "bitrix" ? " (Bitrix)" : ""}
+                  </span>
+                  {ativa && e.tipo !== "checkout" && <Botao variante="fantasma" onClick={() => setEditando(e.t)} aria-label={`Editar ${titulo(e.t)}`}>Editar</Botao>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <p className="text-[11px] mt-1" style={{ color: "var(--ink3)" }}>Horários na hora local de cada lugar (quando o fuso é conhecido); sem fuso, horário de Brasília.</p>
       <EditarTrecho aberto={editando !== undefined} viagemId={viagemId} trecho={editando ?? null}
         onFechar={() => setEditando(undefined)} onSalvo={() => { setEditando(undefined); onMudou(); }} />
