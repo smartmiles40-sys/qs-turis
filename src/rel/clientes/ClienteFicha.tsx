@@ -8,7 +8,7 @@ import { supabase } from "@/lib/supabase";
 import {
   PARENTESCOS, carregarCliente, carregarFamilia, carregarHistorico, formatarCpf, formatarData,
   formatarTelefone, idade, mesesParaVencer, CANAIS_CONTATO, CAMPOS_CADASTRO, REGRAS_PADRAO, carregarRegras,
-  listarContatos, metricaDoCliente, moeda, type Auditoria, type Cliente, type Contato, type Metrica, type RegrasCategorias,
+  listarContatos, metricaDoCliente, moeda, carregarLigacoes, completude, type LigacoesCliente, type Auditoria, type Cliente, type Contato, type Metrica, type RegrasCategorias,
 } from "../lib/clientes";
 import ViagensComAGente from "./ViagensComAGente";
 import ArquivosDoCliente from "./ArquivosDoCliente";
@@ -17,6 +17,7 @@ import CategoriaChip from "./CategoriaChip";
 import { categoriasDe } from "./KpisClientes";
 import { Aviso, Avatar, Botao, Etiqueta } from "../ui";
 import ClienteForm from "./ClienteForm";
+import LigacoesDoCliente from "./LigacoesDoCliente";
 import ModeloModal from "../atendimento/ModeloModal";
 import DocumentosDoCliente from "../viagens/DocumentosDoCliente";
 import ChamadosDoCliente from "../chamados/ChamadosDoCliente";
@@ -92,6 +93,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [regras, setRegras] = useState<RegrasCategorias>(REGRAS_PADRAO);
   const [contatos, setContatos] = useState<Contato[]>([]);
   const [novoContato, setNovoContato] = useState(false);
+  // 0151: o que mais está ligado a esta pessoa (lead, grupos, Financeiro…).
+  const [ligacoes, setLigacoes] = useState<LigacoesCliente | null>(null);
 
   const carregar = useCallback(async () => {
     try {
@@ -105,6 +108,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       metricaDoCliente(cli.id).then(setMetrica)
         .catch((e) => { setMetrica(null); setErroMetrica(e instanceof Error ? e.message : "erro desconhecido"); });
       listarContatos(cli.id).then(setContatos).catch(() => setContatos([]));
+      carregarLigacoes(cli.id).then(setLigacoes).catch(() => setLigacoes(null));
       const [tit, fam, hist] = await Promise.all([
         cli.titular_id ? carregarCliente(cli.titular_id) : Promise.resolve(null),
         carregarFamilia(idTitular),
@@ -148,6 +152,11 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const anos = idade(c.nascimento);
   const ehTitular = !c.titular_id;
   const fone = c.telefone ?? "";
+  // Completude: os campos da ficha + a foto do passaporte (vem da métrica).
+  const comp = completude(c);
+  const semFoto = metrica?.faltando.includes("doc_passaporte") ?? false;
+  const faltando = [...comp.faltando, ...(semFoto ? [CAMPOS_CADASTRO.doc_passaporte] : [])];
+  const pct = Math.round(((7 - faltando.length) / 7) * 100);
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -208,11 +217,19 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       <div className="mt-3"><HistoricoDeSolicitacoes clienteId={c.id} recarregar={sinalPedidos} links={{ onAbrirViagem, onAbrirConversa, onAbrirCliente: onAbrir }} /></div>
 
       {erroMetrica && <div className="mb-4"><Aviso tom="erro">Categoria, LTV e cadastro não carregaram ({erroMetrica}).</Aviso></div>}
-      {metrica && !metrica.cadastro_completo && !c.mesclado_em_id && (
-        <Aviso>
-          <b>Cadastro incompleto.</b> Falta: {metrica.faltando.map((x) => CAMPOS_CADASTRO[x] ?? x).join(", ")}.{" "}
-          <button className="underline font-semibold" onClick={() => setEditando(true)}>Completar</button>
-        </Aviso>
+      {!c.mesclado_em_id && (
+        <div className="rel-card px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2" aria-label="Cadastro">
+          <span className="text-[13px] font-bold" style={{ color: pct === 100 ? "var(--rel-ink)" : "var(--ink)" }}>Cadastro {pct}% completo</span>
+          <span className="h-1.5 w-28 rounded-full overflow-hidden" style={{ background: "var(--card2)" }} aria-hidden>
+            <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: pct >= 70 ? "var(--rel)" : "#E0A100" }} />
+          </span>
+          {faltando.length > 0 ? (
+            <>
+              <span className="text-[12.5px] flex-1 min-w-[180px]" style={{ color: "var(--ink3)" }}>Falta: {faltando.join(", ")}</span>
+              <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setEditando(true)}>Completar</Botao>
+            </>
+          ) : <span className="text-[12.5px]" style={{ color: "var(--ink3)" }}>tudo que a viagem pede está aqui</span>}
+        </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -292,7 +309,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
             : <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setMandarModelo(true)}>Mandar mensagem</Botao>
         ) : undefined}
       >
-        {!c.telefone ? (
+        {!c.telefone && conversas.length === 0 ? (
           <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Sem telefone na ficha.</p>
         ) : conversas.length === 0 ? (
           <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Nenhuma conversa ainda pelo WhatsApp do Relacionamento.</p>
@@ -311,6 +328,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       </Secao>
 
       {/* Próximas fases: deixam claro onde as coisas vão aparecer */}
+      {ligacoes && <LigacoesDoCliente l={ligacoes} />}
       <ViagensComAGente clienteId={c.id} onAbrirViagem={onAbrirViagem} metrica={metrica} cats={categoriasDe(regras)} />
       <DocumentosDoCliente clienteId={c.id} />
       <ArquivosDoCliente clienteId={c.id} bloqueado={!!c.mesclado_em_id} />

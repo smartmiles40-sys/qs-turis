@@ -28,6 +28,7 @@ import { Avatar, Etiqueta, REL_CSS } from "./ui";
 import ClientesPage from "./clientes/ClientesPage";
 import ClienteFicha from "./clientes/ClienteFicha";
 import DuplicadosPage from "./clientes/DuplicadosPage";
+import ArrumarCadastrosPage from "./clientes/ArrumarCadastrosPage";
 import AtendimentoPage from "./atendimento/AtendimentoPage";
 import GruposPage from "./atendimento/GruposPage";
 import { contarGruposNovos } from "./lib/grupos";
@@ -53,13 +54,13 @@ import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useCon
 type Rota =
   | { tela: "inicio" }
   | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "solicitacoes"; id?: string } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
-  | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" }
+  | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" } | { tela: "cadastros" }
   | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
   | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
   | { tela: "config" };
 type Tela = Rota["tela"];
 
-const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "esteira", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
+const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "cadastros", "esteira", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
 
 function lerRota(): Rota {
   const h = window.location.hash.replace(/^#\/?/, "");
@@ -313,6 +314,8 @@ export default function RelApp() {
     { id: "clientes", rotulo: "Clientes", icone: "clientes", itens: [
       { id: "clientes", rotulo: "Fichas" },
       { id: "duplicados", rotulo: "Duplicados", badge: cont?.duplicados || undefined },
+      // 0151: o que o cruzamento da base não decidiu sozinho.
+      { id: "cadastros", rotulo: "Arrumar cadastros" },
     ] },
     { id: "viagens", rotulo: "Viagens", icone: "viagens", itens: [
       // Esteira (16/10): o processo do time, etapa por etapa — a tela de trabalho.
@@ -512,6 +515,7 @@ export default function RelApp() {
           {rota.tela === "whatsapp" && <WhatsAppPage />}
           {rota.tela === "clientes" && <ClientesPage onAbrir={abrirCliente} />}
           {rota.tela === "duplicados" && <DuplicadosPage onAbrir={abrirCliente} onMudou={atualizar} />}
+          {rota.tela === "cadastros" && <ArrumarCadastrosPage onAbrir={abrirCliente} onAbrirViagem={abrirViagem} onAbrirConversa={abrirConversa} onMudou={atualizar} />}
           {rota.tela === "ficha" && (
             <ClienteFicha key={rota.id} id={rota.id} onAbrir={abrirCliente} onVoltar={() => ir({ tela: "clientes" })}
               onAbrirConversa={abrirConversa} onAbrirViagem={abrirViagem} />

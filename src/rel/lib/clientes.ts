@@ -480,3 +480,81 @@ export async function apagarArquivo(a: Arquivo) {
   const rm = await supabase.storage.from("rel-documentos").remove([a.arquivo_path]);
   if (rm.error) throw new Error(`O registro saiu, mas o arquivo ficou no armazenamento (${rm.error.message}).`);
 }
+
+// ── Cruzar a base + Arrumar cadastros (migration 0151) ──────────────────────
+// O banco cruza sozinho só o que é seguro (rel_cruzar_base): completa campo
+// vazio e liga conversa/venda/atendimento quando UM cliente só bate. O resto
+// vira fila pro time (rel_fila_cadastros). Tudo fica em rel_cruzamentos.
+
+export interface ClienteMini { id: string; nome: string }
+
+export interface FilaCadastros {
+  parecidos: DuplicadoSugerido[];
+  cpf_divergente: { id: string; nome: string; cpf: string; cpf_venda: string; viagem_id: string; titulo: string | null }[];
+  viagens: { id: string; titulo: string | null; destino: string | null; data_embarque: string | null; data_venda: string | null; valor: number | null; bitrix_deal_id: string | null; status: string; sugestoes: ClienteMini[] }[];
+  conversas: { id: string; telefone: string; nome_contato: string | null; setor: string | null; atualizado_em: string; ultima_mensagem: string | null; sugestoes: ClienteMini[] }[];
+  financeiro: { id: string; numero: number; nome: string | null; telefone: string | null; motivo: string | null; status: string; criado_em: string }[];
+  incompletos_total: number;
+  incompletos_viajando: number;
+  incompletos: { id: string; nome: string; proximo_embarque: string | null; faltando: string[] }[];
+  ultima_rodada: { rodada: string; em: string; mudancas: number } | null;
+}
+
+export async function carregarFila(): Promise<FilaCadastros> {
+  const { data, error } = await supabase.rpc("rel_fila_cadastros");
+  if (error) throw new Error(error.message);
+  return data as FilaCadastros;
+}
+
+export interface ResultadoCruzamento {
+  rodada: string;
+  aplicado: boolean;
+  campos: Record<string, number>;
+  ligacoes: Record<string, number>;
+}
+
+export async function cruzarBase(aplicar = true): Promise<ResultadoCruzamento> {
+  const { data, error } = await supabase.rpc("rel_cruzar_base", { p_aplicar: aplicar });
+  if (error) throw new Error(error.message);
+  return data as ResultadoCruzamento;
+}
+
+export async function desfazerCruzamento(rodada: string): Promise<number> {
+  const { data, error } = await supabase.rpc("rel_desfazer_cruzamento", { p_rodada: rodada });
+  if (error) throw new Error(error.message);
+  return (data as number) ?? 0;
+}
+
+export type TipoVinculo = "conversa" | "viagem" | "financeiro" | "chamado";
+
+export async function vincularCadastro(tipo: TipoVinculo, id: string, clienteId: string) {
+  const { error } = await supabase.rpc("rel_vincular_cadastro", { p_tipo: tipo, p_id: id, p_cliente: clienteId });
+  if (error) throw new Error(error.message);
+}
+
+export interface LigacoesCliente {
+  leads: { id: string; nome: string; status: string | null; fonte: string | null; criado_em: string; fechado_em: string | null; dono: string | null; por: "venda" | "telefone" | "e-mail" }[];
+  grupos: { jid: string; nome: string | null; ultima_msg_em: string | null }[];
+  financeiro: { id: string; numero: number; motivo: string | null; status: string; criado_em: string }[];
+  passageiro_em: number;
+  comprador_em: number;
+  conversas: number;
+  cruzamentos: { campo: string; fonte: string; em: string }[];
+}
+
+export async function carregarLigacoes(clienteId: string): Promise<LigacoesCliente | null> {
+  const { data, error } = await supabase.rpc("rel_ligacoes_do_cliente", { p_cliente: clienteId });
+  if (error) throw new Error(error.message);
+  return (data ?? null) as LigacoesCliente | null;
+}
+
+/** Quanto do cadastro está preenchido (o que a viagem pede). */
+export const CAMPOS_COMPLETUDE: [keyof Cliente, string][] = [
+  ["telefone", "Telefone"], ["email", "E-mail"], ["cpf", "CPF"], ["nascimento", "Nascimento"],
+  ["passaporte", "Nº do passaporte"], ["passaporte_validade", "Validade do passaporte"],
+];
+
+export function completude(c: Cliente): { pct: number; faltando: string[] } {
+  const faltando = CAMPOS_COMPLETUDE.filter(([k]) => !c[k]).map(([, r]) => r);
+  return { pct: Math.round(((CAMPOS_COMPLETUDE.length - faltando.length) / CAMPOS_COMPLETUDE.length) * 100), faltando };
+}
