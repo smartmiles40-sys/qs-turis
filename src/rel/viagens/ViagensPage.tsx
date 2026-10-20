@@ -10,10 +10,17 @@
 // 13/10: três visões no topo — PAINEL (mapa + quadro de partidas), CALENDÁRIO
 // (embarques, voltas, trechos e check-ins) e a LISTA de sempre. A visão
 // escolhida fica guardada no navegador.
+//
+// 20/10 (Bruno: "fechamos grupos de 20 pessoas pras expedições; ao invés de
+// mostrar as pessoas, mostrar 1 grupo e quantas pessoas estão nele — ao abrir,
+// aí sim quem são"): na Lista, cada saída de expedição (mesmo lugar + mesma
+// data de embarque, como no quadro do Painel) é UMA linha com o total de
+// pessoas; clicando, abre a lista de passageiros. Busca e as filas de
+// arrumação (sem data / classificar) seguem pessoa por pessoa.
 // -----------------------------------------------------------------------------
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  FASES, SERVICOS, TIPOS_VIAGEM, criarViagem, importarDoBitrix, listarViagens, periodo, proximoVoo, quandoEmbarca, sincronizarBitrix,
+  FASES, SERVICOS, TIPOS_VIAGEM, criarViagem, grupoDe, importarDoBitrix, listarViagens, periodo, proximoVoo, quandoEmbarca, sincronizarBitrix,
   type FiltroViagens, type ResultadoSync, type TipoViagem, type Viagem,
 } from "../lib/viagens";
 import { buscarClientes, type Cliente } from "../lib/clientes";
@@ -25,6 +32,8 @@ import ConferirRepetidas from "./ConferirRepetidas";
 import ConferirVoos from "./ConferirVoos";
 import SeletorServico from "./SeletorServico";
 import { ProximoVooCurto } from "./ProximoVoo";
+import { COR_EXP, MarcaTipo } from "./MapaMundi";
+import { lugaresDe } from "./destinos";
 
 type Visao = "painel" | "calendario" | "lista" | "repetidas" | "voos";
 const VISOES: { id: Visao; rotulo: string }[] = [
@@ -198,6 +207,72 @@ function Linha({ v, onAbrir, onAbrirCliente, classificar, onMudou }: { v: Viagem
   );
 }
 
+// ── Grupo de expedição (uma saída) ──────────────────────────────────────────
+
+interface Grupo { chave: string; nome: string; vs: Viagem[]; pessoas: number }
+type ItemLista = { k: "viagem"; v: Viagem } | { k: "grupo"; g: Grupo };
+
+const pax = (v: Viagem) => Math.max(v.passageiros || 1, 1);
+
+/** Junta as expedições por saída (lugar + data de embarque), na ordem da lista. */
+function agruparExpedicoes(lista: Viagem[]): ItemLista[] {
+  const out: ItemLista[] = [];
+  const grupos = new Map<string, Grupo>();
+  for (const v of lista) {
+    if (grupoDe(v) !== "expedicao" || !v.data_embarque) { out.push({ k: "viagem", v }); continue; }
+    const lugar = [v.expedicao, v.destino, v.titulo].map((t) => lugaresDe(t)).find((x) => x.length)?.[0];
+    const chave = `${lugar?.id ?? (v.expedicao || v.titulo)}|${v.data_embarque}`;
+    let g = grupos.get(chave);
+    if (!g) { g = { chave, nome: lugar?.nome ?? v.expedicao ?? v.titulo, vs: [], pessoas: 0 }; grupos.set(chave, g); out.push({ k: "grupo", g }); }
+    g.vs.push(v);
+  }
+  for (const g of grupos.values()) {
+    // a mesma pessoa vinda do Bitrix e do sistema de Expedições conta uma vez
+    const porCliente = new Map<string, number>();
+    let soltos = 0;
+    for (const v of g.vs) { if (v.cliente_id) porCliente.set(v.cliente_id, Math.max(porCliente.get(v.cliente_id) ?? 0, pax(v))); else soltos += pax(v); }
+    g.pessoas = soltos + [...porCliente.values()].reduce((a, b) => a + b, 0);
+    // o nome de grupo mais usado na saída ("Islândia G1/ Fev 2027"), se tiver
+    const nomes = new Map<string, number>();
+    for (const v of g.vs) if (v.expedicao) nomes.set(v.expedicao, (nomes.get(v.expedicao) ?? 0) + 1);
+    const maisUsado = [...nomes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (maisUsado) g.nome = maisUsado;
+    g.vs.sort((a, b) => (a.cliente_nome ?? "").localeCompare(b.cliente_nome ?? "", "pt-BR"));
+  }
+  return out;
+}
+
+function LinhaGrupo({ g, aberto, onAlternar, children }: { g: Grupo; aberto: boolean; onAlternar: () => void; children: ReactNode }) {
+  const v0 = g.vs[0];
+  const atrasadas = g.vs.reduce((s, v) => s + v.tarefas_atrasadas, 0);
+  const fase = g.vs.some((v) => v.fase === "em_viagem") ? "em_viagem" : v0.fase;
+  const retorno = g.vs.map((v) => v.data_retorno).filter(Boolean).sort().pop() ?? v0.data_retorno;
+  return (
+    <li style={{ borderTop: "1px solid var(--line2)" }}>
+      <button type="button" onClick={onAlternar} aria-expanded={aberto}
+        className="rel-linha w-full text-left flex items-center gap-3 px-4 py-3">
+        <span className="text-[12px] w-3 flex-shrink-0" style={{ color: "var(--ink3)" }} aria-hidden>{aberto ? "▾" : "▸"}</span>
+        <MarcaTipo tipo="expedicao" tamanho={9} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold truncate" style={{ color: "var(--ink)" }}>{g.nome}</p>
+          <p className="text-[12px] truncate" style={{ color: "var(--ink3)" }}>
+            Expedição · {periodo({ data_embarque: v0.data_embarque, data_retorno: retorno })} · {quandoEmbarca({ ...v0, fase })}
+          </p>
+        </div>
+        <span className="flex items-center gap-2 flex-shrink-0">
+          {atrasadas > 0 && <span className="hidden sm:inline"><Etiqueta tom="erro">{atrasadas} atrasada{atrasadas > 1 ? "s" : ""}</Etiqueta></span>}
+          <span className="text-right leading-tight">
+            <b className="text-[15px] tabular-nums" style={{ color: "var(--ink)" }}>{g.pessoas}</b>
+            <span className="text-[12px]" style={{ color: "var(--ink2)" }}> pessoa{g.pessoas === 1 ? "" : "s"}</span>
+          </span>
+          <span className="hidden sm:inline"><Etiqueta tom={TOM_FASE[fase]}>{FASES[fase]}</Etiqueta></span>
+        </span>
+      </button>
+      {aberto && <ul className="ml-6 mb-2" style={{ borderLeft: `2px solid ${COR_EXP}` }}>{children}</ul>}
+    </li>
+  );
+}
+
 // ── Página ──────────────────────────────────────────────────────────────────
 
 export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrirViagem: (id: string) => void; onAbrirCliente: (id: string) => void }) {
@@ -209,7 +284,10 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
   const [busca, setBusca] = useState("");
   const [lista, setLista] = useState<Viagem[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-  const [agrupar, setAgrupar] = useState(false);
+  // expedição: uma linha por saída (o grupo), abre pra ver as pessoas
+  const [porGrupo, setPorGrupo] = useState(true);
+  const [abertos, setAbertos] = useState<Set<string>>(new Set());
+  const alternar = (k: string) => setAbertos((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const [sync, setSync] = useState<{ ocupado: boolean; msg: string | null; erro: boolean }>({ ocupado: false, msg: null, erro: false });
   const [nova, setNova] = useState(false);
   const [versao, setVersao] = useState(0);
@@ -237,16 +315,9 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
     }
   }
 
-  // Agrupado: por expedição (ou "Outras viagens"), na ordem da lista.
-  const grupos = useMemo(() => {
-    if (!lista || !agrupar) return null;
-    const m = new Map<string, Viagem[]>();
-    for (const v of lista) {
-      const k = v.expedicao || "Outras viagens";
-      m.set(k, [...(m.get(k) ?? []), v]);
-    }
-    return [...m.entries()].sort((a, b) => (a[0] === "Outras viagens" ? 1 : b[0] === "Outras viagens" ? -1 : 0));
-  }, [lista, agrupar]);
+  // Busca e filas de arrumação ficam pessoa por pessoa.
+  const agrupa = porGrupo && !busca.trim() && filtro !== "sem_data" && filtro !== "classificar";
+  const itens = useMemo(() => (lista ? (agrupa ? agruparExpedicoes(lista) : lista.map((v) => ({ k: "viagem" as const, v }))) : null), [lista, agrupa]);
 
   return (
     <div className={visao === "lista" ? "max-w-5xl mx-auto" : "w-full"}>
@@ -289,7 +360,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
           ))}
         </div>
         <label className="flex items-center gap-1.5 text-[12px] cursor-pointer" style={{ color: "var(--ink2)" }}>
-          <input type="checkbox" checked={agrupar} onChange={(e) => setAgrupar(e.target.checked)} /> Agrupar por expedição
+          <input type="checkbox" checked={porGrupo} onChange={(e) => setPorGrupo(e.target.checked)} /> Expedições por grupo
         </label>
       </div>
       <div className="mb-4">
@@ -309,21 +380,18 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
             texto={filtro === "proximas" && !busca ? "Clique em \"Sincronizar com o Bitrix\" para trazer as vendas — depois disso elas chegam sozinhas a cada 30 minutos." : undefined}
           />
         </div>
-      ) : grupos ? (
-        <div className="space-y-4">
-          {grupos.map(([nome, vs]) => (
-            <section key={nome} className="rel-card overflow-hidden">
-              <h2 className="px-4 py-2.5 text-[13px] font-bold flex justify-between" style={{ color: "var(--ink)", background: "var(--card2)" }}>
-                <span>{nome}</span>
-                <span style={{ color: "var(--ink3)" }}>{vs.reduce((s, v) => s + (v.passageiros || 1), 0)} passageiro(s)</span>
-              </h2>
-              <ul>{vs.map((v) => <Linha key={v.id} v={v} onAbrir={() => onAbrirViagem(v.id)} onAbrirCliente={onAbrirCliente} classificar={filtro === "classificar"} onMudou={() => setVersao((x) => x + 1)} />)}</ul>
-            </section>
-          ))}
-        </div>
       ) : (
         <div className="rel-card overflow-hidden">
-          <ul className="-mt-px">{lista.map((v) => <Linha key={v.id} v={v} onAbrir={() => onAbrirViagem(v.id)} onAbrirCliente={onAbrirCliente} classificar={filtro === "classificar"} onMudou={() => setVersao((x) => x + 1)} />)}</ul>
+          <ul className="-mt-px">
+            {itens!.map((it) => {
+              const linha = (v: Viagem) => <Linha key={v.id} v={v} onAbrir={() => onAbrirViagem(v.id)} onAbrirCliente={onAbrirCliente} classificar={filtro === "classificar"} onMudou={() => setVersao((x) => x + 1)} />;
+              return it.k === "viagem" ? linha(it.v) : (
+                <LinhaGrupo key={it.g.chave} g={it.g} aberto={abertos.has(it.g.chave)} onAlternar={() => alternar(it.g.chave)}>
+                  {it.g.vs.map(linha)}
+                </LinhaGrupo>
+              );
+            })}
+          </ul>
         </div>
       )}
       {lista && lista.length >= 500 && (
