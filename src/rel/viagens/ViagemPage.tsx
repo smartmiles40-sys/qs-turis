@@ -28,7 +28,6 @@ import EtapasViagem from "./EtapasViagem";
 import SeletorServico from "./SeletorServico";
 import { temEsteira } from "../lib/etapas";
 import { RevisaoViagem } from "./TrechosViagem";
-import ComentariosBitrix from "./ComentariosBitrix";
 import { conferirViagens, type Analise } from "../lib/problemas";
 import { TOM_FASE } from "./ViagensDoCliente";
 
@@ -487,9 +486,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
         {/* Direita — revisão e o que falta */}
         <div className="space-y-4 min-w-0 lg:col-span-2 2xl:col-span-1">
           <RevisaoIaViagem key={versao} viagemId={v.id} onRevisado={revisou} />
-          <Secao titulo="Comentários do Bitrix">
-            <ComentariosBitrix viagemId={v.id} clientes={pessoas.map((p) => p.id)} />
-          </Secao>
+          {/* "Comentários do Bitrix" saiu (Bruno, 20/10: poluía o card) — quem precisar abre o card no Bitrix. */}
           <Secao titulo="Requisitos de entrada">
             <RequisitosEntrada destino={venda.para || v.destino} />
           </Secao>
