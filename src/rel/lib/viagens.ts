@@ -58,6 +58,73 @@ export interface Viagem {
   tarefas_atrasadas: number;
   tarefas_pendentes: number;
   tarefas_total: number;
+  // 0148: o que foi vendido e quanto acompanhamento pede
+  servico: Servico | null;
+  acompanhamento: Acompanhamento;
+  servico_manual: Servico | null;
+}
+
+// ── Serviço vendido × acompanhamento (0148, Bruno 20/10) ───────────────────
+// Só vira "viagem" no painel o que precisa de acompanhamento. Seguro sozinho,
+// concierge e conta liminar ficam só na ficha do cliente.
+
+export type Servico = "expedicao" | "pacote" | "aereo" | "hospedagem" | "passeio" | "cruzeiro" | "seguro" | "concierge" | "conta_liminar" | "outro";
+export type Acompanhamento = "expedicao" | "completo" | "leve" | "nenhum" | "classificar";
+
+export const SERVICOS: Record<Servico, string> = {
+  pacote: "Pacote",
+  aereo: "Aéreo",
+  hospedagem: "Hotel",
+  passeio: "Passeio / transfer",
+  cruzeiro: "Cruzeiro",
+  expedicao: "Expedição",
+  seguro: "Seguro viagem",
+  concierge: "Concierge",
+  conta_liminar: "Conta liminar",
+  outro: "Outro (sem acompanhamento)",
+};
+
+/** Mesma regra do rel_acompanhamento() no banco — pra mostrar o efeito antes de salvar. */
+export function acompanhamentoDe(s: Servico | null): Acompanhamento {
+  if (s === "expedicao") return "expedicao";
+  if (s === "pacote" || s === "aereo" || s === "cruzeiro") return "completo";
+  if (s === "hospedagem" || s === "passeio") return "leve";
+  if (s) return "nenhum";
+  return "classificar";
+}
+
+export const ACOMPANHAMENTOS: Record<Acompanhamento, string> = {
+  expedicao: "Expedição",
+  completo: "Esteira completa",
+  leve: "Revisão + D-3",
+  nenhum: "Sem acompanhamento",
+  classificar: "Falta classificar",
+};
+
+/** O que entra no painel, na lista de próximas e no calendário. */
+export const COM_ACOMPANHAMENTO: Acompanhamento[] = ["expedicao", "completo", "leve"];
+
+/** O time diz o que foi vendido (null = volta pro que o Bitrix disse). */
+export async function classificarServico(id: string, servico: Servico | null, userId: string) {
+  const { error } = await supabase.from("rel_viagens")
+    .update({ servico_manual: servico, servico_por: servico ? userId || null : null, servico_em: servico ? new Date().toISOString() : null })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export interface PendenciasViagens { semData: number; classificar: number }
+
+/** As duas caixinhas do painel: o que falta pro time arrumar (não conta como viagem). */
+export async function pendenciasViagens(): Promise<PendenciasViagens> {
+  const [a, b] = await Promise.all([
+    supabase.from("rel_viagens_v").select("id", { count: "exact", head: true })
+      .eq("status", "ativa").eq("fase", "sem_data").in("acompanhamento", ["completo", "leve", "expedicao"]),
+    supabase.from("rel_viagens_v").select("id", { count: "exact", head: true })
+      .eq("status", "ativa").eq("acompanhamento", "classificar").in("fase", ["antes", "em_viagem", "sem_data"]),
+  ]);
+  if (a.error) throw a.error;
+  if (b.error) throw b.error;
+  return { semData: a.count ?? 0, classificar: b.count ?? 0 };
 }
 
 export interface Passageiro {
@@ -174,15 +241,19 @@ export function tamanhoLegivel(b: number | null | undefined): string {
 
 // ── Viagens ─────────────────────────────────────────────────────────────────
 
-export type FiltroViagens = "proximas" | "em_viagem" | "concluidas" | "canceladas" | "todas";
+export type FiltroViagens = "proximas" | "em_viagem" | "sem_data" | "classificar" | "concluidas" | "canceladas" | "todas";
 
 /** Tira o que quebraria o filtro `or=(...)` do PostgREST. */
 const limparBusca = (t: string) => t.replace(/[,()*%\\:"']/g, " ").trim();
 
 export async function listarViagens(filtro: FiltroViagens, busca = ""): Promise<Viagem[]> {
   let q = supabase.from("rel_viagens_v").select("*").limit(500);
-  if (filtro === "proximas") q = q.in("fase", ["antes", "sem_data"]).order("data_embarque", { ascending: true, nullsFirst: false });
-  else if (filtro === "em_viagem") q = q.eq("fase", "em_viagem").order("data_retorno", { ascending: true });
+  // Próximas / Em viagem: só o que vai acontecer e pede acompanhamento (0148).
+  // Sem data e sem classificação têm fila própria — não poluem a de trabalho.
+  if (filtro === "proximas") q = q.eq("status", "ativa").eq("fase", "antes").in("acompanhamento", COM_ACOMPANHAMENTO).order("data_embarque", { ascending: true });
+  else if (filtro === "em_viagem") q = q.eq("status", "ativa").eq("fase", "em_viagem").in("acompanhamento", COM_ACOMPANHAMENTO).order("data_retorno", { ascending: true });
+  else if (filtro === "sem_data") q = q.eq("status", "ativa").eq("fase", "sem_data").in("acompanhamento", COM_ACOMPANHAMENTO).order("criado_em", { ascending: false });
+  else if (filtro === "classificar") q = q.eq("status", "ativa").eq("acompanhamento", "classificar").in("fase", ["antes", "em_viagem", "sem_data"]).order("data_embarque", { ascending: true, nullsFirst: false });
   else if (filtro === "concluidas") q = q.eq("fase", "concluida").order("data_retorno", { ascending: false });
   else if (filtro === "canceladas") q = q.eq("fase", "cancelada").order("atualizado_em", { ascending: false });
   else q = q.order("data_embarque", { ascending: false, nullsFirst: false });
@@ -499,6 +570,10 @@ export const hojeSP = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Americ
 /** Expedição ou pacote — "aereo", "hospedagem" e "outro" contam como pacote (é o que não é expedição). */
 export const grupoTipo = (t: TipoViagem): "expedicao" | "pacote" => (t === "expedicao" ? "expedicao" : "pacote");
 
+/** Expedição ou pacote pelo SERVIÇO (0148): "Expedições 2027" marcada como "outro" no Bitrix vai pro quadro certo. */
+export const grupoDe = (v: Pick<Viagem, "tipo" | "servico">): "expedicao" | "pacote" =>
+  (v.servico ? (v.servico === "expedicao" ? "expedicao" : "pacote") : grupoTipo(v.tipo));
+
 export type TrechoInput = Partial<Pick<Trecho,
   "tipo" | "descricao" | "origem" | "destino" | "partida_em" | "chegada_em" | "companhia" | "numero" | "localizador" | "checkin_abre_em"
   | "origem_codigo" | "destino_codigo" | "partida_fuso" | "chegada_fuso" | "terminal_partida" | "terminal_chegada" | "classe" | "bagagem"
@@ -613,10 +688,13 @@ export async function marcarRevisada(id: string, revisada: boolean, userId: stri
   if (error) throw error;
 }
 
-/** Viagens ativas que ainda não voltaram (antes do embarque, sem data ou em viagem). */
+/**
+ * Viagens que VÃO acontecer ou estão acontecendo e pedem acompanhamento (0148).
+ * Sem data, já voltou, arquivada, seguro sozinho… ficam fora — o painel é só o futuro.
+ */
 export async function viagensEmAndamento(): Promise<Viagem[]> {
   const { data, error } = await supabase.from("rel_viagens_v").select("*")
-    .in("fase", ["antes", "em_viagem", "sem_data"])
+    .eq("status", "ativa").in("fase", ["antes", "em_viagem"]).in("acompanhamento", COM_ACOMPANHAMENTO)
     .order("data_embarque", { ascending: true, nullsFirst: false }).limit(1000);
   if (error) throw error;
   return (data ?? []) as Viagem[];
@@ -625,7 +703,7 @@ export async function viagensEmAndamento(): Promise<Viagem[]> {
 /** Viagens ativas que tocam o período [de, ate) — embarque ou volta dentro dele (datas AAAA-MM-DD). */
 export async function viagensNoPeriodo(de: string, ate: string): Promise<Viagem[]> {
   const { data, error } = await supabase.from("rel_viagens_v").select("*")
-    .neq("status", "cancelada")
+    .eq("status", "ativa").in("acompanhamento", COM_ACOMPANHAMENTO)
     .or(`and(data_embarque.gte.${de},data_embarque.lt.${ate}),and(data_retorno.gte.${de},data_retorno.lt.${ate})`)
     .order("data_embarque").limit(1000);
   if (error) throw error;

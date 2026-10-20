@@ -9,7 +9,7 @@
 // pax"), que abre a lista de clientes.
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
-import { grupoTipo, hojeSP, listarTrechosPeriodo, viagensNoPeriodo, TIPOS_TRECHO, type Trecho, type Viagem } from "../lib/viagens";
+import { grupoDe, grupoTipo, hojeSP, listarTrechosPeriodo, viagensNoPeriodo, TIPOS_TRECHO, type Trecho, type Viagem } from "../lib/viagens";
 import { Aviso, Botao } from "../ui";
 import { MarcaTipo } from "./MapaMundi";
 
@@ -66,7 +66,7 @@ function montarEventos(viagens: Viagem[], trechos: Trecho[]): Evento[] {
   // Embarque e volta: grupo de expedição (mesma expedição + mesma data) vira um item só.
   const grupos = new Map<string, number>();
   for (const v of viagens) {
-    const tipo = grupoTipo(v.tipo);
+    const tipo = grupoDe(v);
     const nome = v.cliente_nome || v.titulo;
     const grupo = tipo === "expedicao" && v.expedicao ? v.expedicao : null;
     for (const [especie, dia] of [["embarque", v.data_embarque], ["retorno", v.data_retorno]] as [Especie, string | null][]) {

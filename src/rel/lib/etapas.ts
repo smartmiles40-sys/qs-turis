@@ -81,6 +81,11 @@ export const INICIO_ESTEIRA = "2026-10-16";
  */
 export const ZERADAS_ATE = "2026-10-16";
 
+/** Acompanhamento "leve" (hotel, passeio/transfer sozinhos): só estas etapas. Aéreo é Esteira completa (Bruno, 20/10). */
+export const ETAPAS_LEVE: EtapaId[] = ["revisao", "d3"];
+/** Quem entra na Esteira. */
+export const temEsteira = (v: Pick<Viagem, "acompanhamento">) => v.acompanhamento === "completo" || v.acompanhamento === "leve";
+
 const soma = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 export const diasAte = (d: string | null, hoje = hojeSP()) => (d ? Math.round((new Date(`${d}T12:00:00Z`).getTime() - new Date(`${hoje}T12:00:00Z`).getTime()) / 86400_000) : null);
 
@@ -104,12 +109,14 @@ function janelas(v: Pick<Viagem, "data_venda" | "data_embarque" | "data_retorno"
 }
 
 /** O estado de todas as etapas de uma viagem + a etapa atual. */
-export function estadoDaEsteira(v: Pick<Viagem, "data_venda" | "data_embarque" | "data_retorno">, registros: RegistroEtapa[], hoje = hojeSP()): { etapas: EstadoEtapa[]; atual: EstadoEtapa | null } {
+export function estadoDaEsteira(v: Pick<Viagem, "data_venda" | "data_embarque" | "data_retorno"> & Partial<Pick<Viagem, "acompanhamento">>, registros: RegistroEtapa[], hoje = hojeSP()): { etapas: EstadoEtapa[]; atual: EstadoEtapa | null } {
   const j = janelas(v);
   const reg = new Map(registros.map((r) => [r.etapa, r]));
   const etapas = ETAPAS.map((e): EstadoEtapa => {
     const r = reg.get(e.id) ?? null;
-    const { abre, prazo, aplica } = j[e.id];
+    const { abre, prazo } = j[e.id];
+    // 0148: hotel/passeio sozinho ("leve") só tem Revisão e D-3. Igual à rel_esteira_atrasadas().
+    const aplica = j[e.id].aplica && (v.acompanhamento !== "leve" || ETAPAS_LEVE.includes(e.id));
     let situacao: SituacaoEtapa;
     if (r?.concluida_em) situacao = "feita";
     else if (!aplica) situacao = "nao_se_aplica";

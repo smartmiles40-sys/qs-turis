@@ -13,7 +13,7 @@
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import {
-  FASES, TIPOS_VIAGEM, criarViagem, importarDoBitrix, listarViagens, periodo, quandoEmbarca, sincronizarBitrix,
+  FASES, SERVICOS, TIPOS_VIAGEM, criarViagem, importarDoBitrix, listarViagens, periodo, quandoEmbarca, sincronizarBitrix,
   type FiltroViagens, type ResultadoSync, type TipoViagem, type Viagem,
 } from "../lib/viagens";
 import { buscarClientes, type Cliente } from "../lib/clientes";
@@ -22,6 +22,7 @@ import { TOM_FASE } from "./ViagensDoCliente";
 import PainelViagens from "./PainelViagens";
 import CalendarioViagens from "./CalendarioViagens";
 import ConferirRepetidas from "./ConferirRepetidas";
+import SeletorServico from "./SeletorServico";
 
 type Visao = "painel" | "calendario" | "lista" | "repetidas";
 const VISOES: { id: Visao; rotulo: string }[] = [
@@ -38,6 +39,9 @@ function visaoSalva(): Visao {
 const FILTROS: { id: FiltroViagens; rotulo: string }[] = [
   { id: "proximas", rotulo: "Próximas" },
   { id: "em_viagem", rotulo: "Em viagem" },
+  // 0148: o que falta pro time arrumar — fica fora de "Próximas" pra não poluir
+  { id: "sem_data", rotulo: "Precisa de data" },
+  { id: "classificar", rotulo: "Classificar" },
   { id: "concluidas", rotulo: "Concluídas" },
   { id: "canceladas", rotulo: "Canceladas" },
   { id: "todas", rotulo: "Todas" },
@@ -161,7 +165,7 @@ function NovaViagem({ aberto, onFechar, onCriada }: { aberto: boolean; onFechar:
 
 // ── Linha ───────────────────────────────────────────────────────────────────
 
-function Linha({ v, onAbrir, onAbrirCliente }: { v: Viagem; onAbrir: () => void; onAbrirCliente: (id: string) => void }) {
+function Linha({ v, onAbrir, onAbrirCliente, classificar, onMudou }: { v: Viagem; onAbrir: () => void; onAbrirCliente: (id: string) => void; classificar?: boolean; onMudou?: () => void }) {
   return (
     <li style={{ borderTop: "1px solid var(--line2)" }}>
       <div className="rel-linha flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={onAbrir}
@@ -179,9 +183,10 @@ function Linha({ v, onAbrir, onAbrirCliente }: { v: Viagem; onAbrir: () => void;
         <span className="hidden sm:flex items-center gap-1.5 flex-shrink-0">
           {v.tarefas_atrasadas > 0 && <Etiqueta tom="erro">{v.tarefas_atrasadas} atrasada{v.tarefas_atrasadas > 1 ? "s" : ""}</Etiqueta>}
           {v.tarefas_total > 0 && <span className="text-[11px] tabular-nums" style={{ color: "var(--ink3)" }}>{v.tarefas_total - v.tarefas_pendentes}/{v.tarefas_total}</span>}
-          <Etiqueta>{TIPOS_VIAGEM[v.tipo]}</Etiqueta>
+          {!classificar && <Etiqueta>{v.servico ? SERVICOS[v.servico] : TIPOS_VIAGEM[v.tipo]}</Etiqueta>}
           <Etiqueta tom={TOM_FASE[v.fase]}>{FASES[v.fase]}</Etiqueta>
         </span>
+        {classificar && onMudou && <SeletorServico v={v} onMudou={onMudou} compacto />}
       </div>
     </li>
   );
@@ -193,6 +198,8 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
   const [visao, setVisaoState] = useState<Visao>(visaoSalva);
   const setVisao = (v: Visao) => { setVisaoState(v); try { localStorage.setItem(CHAVE_VISAO, v); } catch { /* sem localStorage */ } };
   const [filtro, setFiltro] = useState<FiltroViagens>("proximas");
+  // o painel abre a lista já numa fila ("Precisa de data" / "Classificar")
+  const verFila = (f: FiltroViagens) => { setFiltro(f); setVisao("lista"); };
   const [busca, setBusca] = useState("");
   const [lista, setLista] = useState<Viagem[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -260,7 +267,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
         ))}
       </div>
 
-      {visao === "painel" && <PainelViagens key={versao} onAbrirViagem={onAbrirViagem} />}
+      {visao === "painel" && <PainelViagens key={versao} onAbrirViagem={onAbrirViagem} onVerFila={verFila} />}
       {visao === "calendario" && <CalendarioViagens key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "repetidas" && <ConferirRepetidas key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "lista" && <>
@@ -283,6 +290,8 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
       </div>
 
       {erro && <div className="mb-3"><Aviso tom="erro">{erro}</Aviso></div>}
+      {filtro === "sem_data" && <div className="mb-3"><Aviso tom="aviso">Vendas que pedem acompanhamento mas estão sem data de embarque no Bitrix. Preencha a ida (e a volta) no card do Bitrix — elas vão pro painel sozinhas na próxima sincronização.</Aviso></div>}
+      {filtro === "classificar" && <div className="mb-3"><Aviso tom="aviso">O Bitrix não diz o que foi vendido (Tipo de venda vazio ou "Outros"). Escolha ao lado de cada uma: pacote, aéreo e cruzeiro entram na Esteira completa; hotel e passeio só Revisão + D-3; seguro, concierge e outros ficam só na ficha do cliente.</Aviso></div>}
 
       {lista === null ? (
         <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>
@@ -301,13 +310,13 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
                 <span>{nome}</span>
                 <span style={{ color: "var(--ink3)" }}>{vs.reduce((s, v) => s + (v.passageiros || 1), 0)} passageiro(s)</span>
               </h2>
-              <ul>{vs.map((v) => <Linha key={v.id} v={v} onAbrir={() => onAbrirViagem(v.id)} onAbrirCliente={onAbrirCliente} />)}</ul>
+              <ul>{vs.map((v) => <Linha key={v.id} v={v} onAbrir={() => onAbrirViagem(v.id)} onAbrirCliente={onAbrirCliente} classificar={filtro === "classificar"} onMudou={() => setVersao((x) => x + 1)} />)}</ul>
             </section>
           ))}
         </div>
       ) : (
         <div className="rel-card overflow-hidden">
-          <ul className="-mt-px">{lista.map((v) => <Linha key={v.id} v={v} onAbrir={() => onAbrirViagem(v.id)} onAbrirCliente={onAbrirCliente} />)}</ul>
+          <ul className="-mt-px">{lista.map((v) => <Linha key={v.id} v={v} onAbrir={() => onAbrirViagem(v.id)} onAbrirCliente={onAbrirCliente} classificar={filtro === "classificar"} onMudou={() => setVersao((x) => x + 1)} />)}</ul>
         </div>
       )}
       {lista && lista.length >= 500 && (

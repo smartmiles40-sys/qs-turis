@@ -11,8 +11,8 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { ETAPAS, estadoDaEsteira, etapasDe, diasAte, type EstadoEtapa, type EtapaId, type RegistroEtapa } from "../lib/etapas";
-import { TIPOS_TRECHO, grupoTipo, hojeSP, listarEquipeRel, trechosDasViagens, type Trecho, type Viagem } from "../lib/viagens";
+import { ETAPAS, estadoDaEsteira, etapasDe, diasAte, temEsteira, type EstadoEtapa, type EtapaId, type RegistroEtapa } from "../lib/etapas";
+import { TIPOS_TRECHO, grupoDe, hojeSP, listarEquipeRel, trechosDasViagens, type Trecho, type Viagem } from "../lib/viagens";
 import { diaBR, diaLocal, horaLocal, mapaDasNoites } from "../lib/problemas";
 import { formatarTelefone } from "../lib/clientes";
 import { Aviso, Entrada } from "../ui";
@@ -68,7 +68,7 @@ function Quadro({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void }
                   return (
                     <li key={it.v.id}>
                       <button onClick={() => abrir(it.v.id)} className="w-full text-left rounded-lg px-2.5 py-2 hover:brightness-[.98]" style={{ background: "var(--card)", border: "1px solid var(--line)", borderLeft: `4px solid ${cor}` }}>
-                        <span className="flex items-center gap-1.5 text-[13px] font-bold truncate" style={{ color: "var(--ink)" }}><MarcaTipo tipo={grupoTipo(it.v.tipo)} tamanho={7} />{nomeDe(it.v)}</span>
+                        <span className="flex items-center gap-1.5 text-[13px] font-bold truncate" style={{ color: "var(--ink)" }}><MarcaTipo tipo={grupoDe(it.v)} tamanho={7} />{nomeDe(it.v)}</span>
                         <span className="block text-[11.5px] truncate" style={{ color: "var(--ink3)" }}>{it.v.destino || it.v.titulo}</span>
                         <span className="flex items-center justify-between mt-1 gap-1">
                           <span className="text-[11.5px] font-semibold tabular-nums" style={{ color: "var(--ink2)" }}>ida {it.v.data_embarque ? diaBR(it.v.data_embarque) : "—"}</span>
@@ -139,7 +139,7 @@ function EmViagem({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void
             return (
               <tr key={it.v.id} className="rel-linha cursor-pointer" style={{ borderTop: "1px solid var(--line2)" }} onClick={() => abrir(it.v.id)}>
                 <td className="px-3 py-2.5">
-                  <span className="flex items-center gap-1.5 font-bold" style={{ color: "var(--ink)" }}><MarcaTipo tipo={grupoTipo(it.v.tipo)} tamanho={8} />{nomeDe(it.v)}</span>
+                  <span className="flex items-center gap-1.5 font-bold" style={{ color: "var(--ink)" }}><MarcaTipo tipo={grupoDe(it.v)} tamanho={8} />{nomeDe(it.v)}</span>
                   <span className="block text-[12px]" style={{ color: "var(--ink3)" }}>{it.v.destino || it.v.titulo} · volta {diaBR(volta)}</span>
                   {voltaDiverge && <span className="block text-[11.5px] font-bold" style={{ color: "#B45309" }}>Bitrix diz volta {diaBR(it.v.data_retorno)} — os voos são até {diaBR(pelosVoos)}</span>}
                 </td>
@@ -175,7 +175,7 @@ export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: str
 
   const carregar = useCallback(async () => {
     try {
-      const vs = (await viagensDaEsteira()).filter((v) => grupoTipo(v.tipo) === "pacote");
+      const vs = (await viagensDaEsteira()).filter(temEsteira); // 0148: pacote, aéreo, cruzeiro (completo) + hotel/passeio (leve)
       const hoje = hojeSP();
       // trechos só de quem embarca em até 3 dias ou está viajando (check-in e "em viagem")
       const perto = vs.filter((v) => v.fase === "em_viagem" || v.fase === "concluida" || (v.data_embarque && v.data_embarque <= somaDias(hoje, 3))).map((v) => v.id);

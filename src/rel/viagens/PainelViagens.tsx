@@ -8,13 +8,20 @@
 // Sempre separando EXPEDIÇÃO de PACOTE: dois quadros, cores diferentes no
 // mapa e o filtro no topo vale pra tudo.
 //
-// Uma "partida" é uma saída: numa expedição, o grupo inteiro (mesma expedição
-// e mesma data de embarque) vira UMA linha, com a soma dos passageiros.
+// Uma "partida" é uma saída: numa expedição, o grupo inteiro (mesmo lugar e
+// mesma data de embarque) vira UMA linha, com a soma dos passageiros.
+//
+// 20/10 (0148, "está constando +431 viagens"): o painel é SÓ o que vai
+// acontecer e pede acompanhamento. Sem data e sem classificação viram duas
+// caixinhas que abrem a fila na Lista; seguro sozinho, concierge etc. ficam só
+// na ficha do cliente. Expedição agrupa pelo LUGAR (o Bitrix e o sistema de
+// Expedições escrevem o nome do grupo diferente) e a mesma pessoa vinda das
+// duas fontes conta uma vez só.
 // -----------------------------------------------------------------------------
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
-  grupoTipo, horaDoLugar, hojeSP, proximosTrechos, revisoesDe, viagensEmAndamento, TIPOS_TRECHO,
-  type Revisao, type Trecho, type Viagem,
+  SERVICOS, grupoDe, grupoTipo, horaDoLugar, hojeSP, pendenciasViagens, proximosTrechos, revisoesDe, viagensEmAndamento, TIPOS_TRECHO,
+  type FiltroViagens, type PendenciasViagens, type Revisao, type Trecho, type Viagem,
 } from "../lib/viagens";
 import { Aviso } from "../ui";
 import MapaMundi, { COR_EXP, COR_PAC, MarcaTipo, type PontoMapa } from "./MapaMundi";
@@ -68,19 +75,31 @@ function montarPartidas(viagens: Viagem[], rev: Map<string, Revisao>, trechos: T
   );
   const hoje = hojeISO();
   const m = new Map<string, Partida>();
+  const nomes = new Map<string, Map<string, number>>(); // saída → nome do grupo → vendas
   for (const v of viagens) {
-    const tipo = grupoTipo(v.tipo);
-    const grupo = v.expedicao || (tipo === "pacote" ? v.titulo : "");
-    const chave = tipo === "expedicao" && v.expedicao ? `exp|${v.expedicao}|${v.data_embarque ?? ""}` : `v|${v.id}`;
+    const tipo = grupoDe(v);
+    const lugar = tipo === "expedicao" ? [v.expedicao, v.destino, v.titulo].map((t) => lugaresDe(t)).find((x) => x.length)?.[0] : undefined;
+    const chave = tipo === "expedicao" ? `exp|${lugar?.id ?? (v.expedicao || v.id)}|${v.data_embarque ?? ""}` : `v|${v.id}`;
     const p = m.get(chave) ?? {
-      chave, tipo, data: v.data_embarque, destino: v.destino || v.titulo, grupo, passageiros: 0, viagens: [], revisadas: 0, situacao: "pendente" as Situacao,
+      chave, tipo, data: v.data_embarque, destino: (tipo === "expedicao" && lugar?.nome) || v.destino || v.titulo, grupo: "", passageiros: 0, viagens: [], revisadas: 0, situacao: "pendente" as Situacao,
     };
     p.viagens.push(v);
-    p.passageiros += pax(v);
     if (rev.get(v.id)?.revisado_em) p.revisadas += 1;
+    if (v.expedicao) { const n = nomes.get(chave) ?? new Map<string, number>(); n.set(v.expedicao, (n.get(v.expedicao) ?? 0) + 1); nomes.set(chave, n); }
     m.set(chave, p);
   }
   for (const p of m.values()) {
+    // mesma pessoa em duas vendas da saída (Bitrix + Expedições): conta uma vez só
+    const porCliente = new Map<string, number>();
+    let soltos = 0;
+    for (const v of p.viagens) {
+      if (v.cliente_id) porCliente.set(v.cliente_id, Math.max(porCliente.get(v.cliente_id) ?? 0, pax(v)));
+      else soltos += pax(v);
+    }
+    p.passageiros = soltos + [...porCliente.values()].reduce((a, b) => a + b, 0);
+    // o nome de grupo mais usado na saída ("Islândia G1/ Fev 2027")
+    const n = nomes.get(p.chave);
+    p.grupo = n ? [...n.entries()].sort((a, b) => b[1] - a[1])[0][0] : (p.tipo === "pacote" ? p.viagens[0].titulo : "");
     if (p.viagens.some((v) => v.fase === "em_viagem")) p.situacao = "em_viagem";
     else if (p.data === hoje) p.situacao = "embarcando";
     else if (p.viagens.some((v) => checkinAberto.has(v.id))) p.situacao = "checkin";
@@ -218,11 +237,11 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
   const lista = todas ? linhas : linhas.slice(0, 12);
   const mono = { fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace" };
   return (
-    <section className="rel-quadro rounded-2xl overflow-hidden" aria-label="Quadro de partidas — Pacotes" style={{ background: "#0B0F12", border: "1px solid #1C2328", boxShadow: "inset 0 1px 0 rgba(255,255,255,.04)" }}>
+    <section className="rel-quadro rounded-2xl overflow-hidden" aria-label="Quadro de partidas — Pacotes e serviços" style={{ background: "#0B0F12", border: "1px solid #1C2328", boxShadow: "inset 0 1px 0 rgba(255,255,255,.04)" }}>
       <div className="flex items-center justify-between px-4 py-2.5" style={{ background: "#11171B", borderBottom: "1px solid #1C2328" }}>
         <h3 className="text-[13px] font-bold tracking-[.18em] uppercase flex items-center gap-2" style={{ color: COR_PAC, ...mono }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z" /></svg>
-          Partidas · Pacotes
+          Partidas · Pacotes e serviços
         </h3>
         <span className="text-[11px]" style={{ color: "#8A979E", ...mono }}>{linhas.length} venda{linhas.length === 1 ? "" : "s"}</span>
       </div>
@@ -230,10 +249,11 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
         <p className="px-4 py-6 text-[13px]" style={{ color: "#8A979E", ...mono }}>NENHUMA SAÍDA PROGRAMADA</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px]" style={{ ...mono, color: "#F2F2F2", minWidth: 900 }}>
+          <table className="w-full text-[12.5px]" style={{ ...mono, color: "#F2F2F2", minWidth: 980 }}>
             <thead>
               <tr className="text-left text-[10.5px] tracking-[.14em]" style={{ color: "#7D8A91" }}>
                 <th className="px-4 py-2 font-semibold">RESPONSÁVEL DA COMPRA</th>
+                <th className="px-2 py-2 font-semibold">SERVIÇO</th>
                 <th className="px-2 py-2 font-semibold">DE</th>
                 <th className="px-2 py-2 font-semibold">PARA</th>
                 <th className="px-2 py-2 font-semibold">IDA</th>
@@ -254,8 +274,9 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                 return (
                   <tr key={v.id} className="rel-quadro-linha cursor-pointer" style={{ borderTop: "1px solid #182026" }} onClick={abrir}
                     tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } }}
-                    aria-label={`${v.cliente_nome || v.titulo}, de ${de} para ${para}, ida ${ida}, ${pax(v)} passageiros, ${s.texto.replace(" ✓", "")}`}>
+                    aria-label={`${v.cliente_nome || v.titulo}, ${v.servico ? SERVICOS[v.servico] : ""}, de ${de} para ${para}, ida ${ida}, ${pax(v)} passageiros, ${s.texto.replace(" ✓", "")}`}>
                     <td className="px-4 py-2 uppercase max-w-[240px] truncate"><Flap texto={(v.cliente_nome || v.titulo).slice(0, 28)} atraso={atraso} /></td>
+                    <td className="px-2 py-2 uppercase whitespace-nowrap text-[11px] font-bold" style={{ color: "#B9C4C9" }}>{v.servico ? SERVICOS[v.servico].split(" ")[0] : "—"}</td>
                     <td className="px-2 py-2 uppercase max-w-[140px] truncate" style={{ color: "#B9C4C9" }}><Flap texto={de.slice(0, 16)} atraso={atraso} /></td>
                     <td className="px-2 py-2 uppercase max-w-[160px] truncate"><Flap texto={para.slice(0, 18)} atraso={atraso} /></td>
                     <td className="px-2 py-2 whitespace-nowrap" style={{ color: "#FFD54F" }}><Flap texto={ida} atraso={atraso} /></td>
@@ -310,7 +331,9 @@ function LinhaCard({ cor, rotulo, valor, sub, onClick }: { cor: string; rotulo: 
 
 // ── Página ──────────────────────────────────────────────────────────────────
 
-export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: string) => void }) {
+export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirViagem: (id: string) => void; onVerFila?: (f: FiltroViagens) => void }) {
+  const [pend, setPend] = useState<PendenciasViagens | null>(null);
+  useEffect(() => { pendenciasViagens().then(setPend).catch(() => setPend(null)); }, []);
   const [viagens, setViagens] = useState<Viagem[] | null>(null);
   const [rev, setRev] = useState<Map<string, Revisao>>(new Map());
   const [trechos, setTrechos] = useState<Trecho[]>([]);
@@ -336,7 +359,9 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
         const vp = new Map<string, Trecho>();
         for (const a of tp.values()) for (const t of a.trechos) if ((t.tipo === "voo_internacional" || t.tipo === "voo_interno") && !vp.has(t.viagem_id)) vp.set(t.viagem_id, t);
         if (!vivo) return;
-        setViagens(vs); setTrechos(ts); setRev(rv); setVoosPac(vp); setAnalises(tp); setErro(null);
+        // só os trechos das viagens do painel (arquivada, seguro sozinho e sem classificação ficam fora)
+        const doPainel = new Set(vs.map((v) => v.id));
+        setViagens(vs); setTrechos(ts.filter((t) => doPainel.has(t.viagem_id))); setRev(rv); setVoosPac(vp); setAnalises(tp); setErro(null);
         setAviso(falhas.length ? `Não consegui carregar ${falhas.join(" e ")} — os números abaixo podem estar incompletos.` : null);
       } catch (e) {
         if (vivo) { setErro(e instanceof Error ? e.message : "Não carregou o painel."); setViagens([]); }
@@ -351,7 +376,7 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
     const m = new Map<string, PontoMapa>();
     const sem = new Map<string, number>();
     for (const v of viagens ?? []) {
-      const tipo = grupoTipo(v.tipo);
+      const tipo = grupoDe(v);
       if (!vale(tipo)) continue;
       // destino → expedição → título ("Antonia Exp Tailandia" só tem o lugar no título)
       const lugares = [v.destino, v.expedicao, v.titulo].map((t) => lugaresDe(t)).find((x) => x.length) ?? [];
@@ -376,7 +401,7 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
   const partidas = useMemo(() => montarPartidas(viagens ?? [], rev, trechos), [viagens, rev, trechos]);
   const partidasExp = partidas.filter((p) => p.tipo === "expedicao");
   const linhasPac = useMemo<LinhaPac[]>(() => (viagens ?? [])
-    .filter((v) => grupoTipo(v.tipo) === "pacote")
+    .filter((v) => grupoDe(v) === "pacote")
     .map((v) => { const c = contar(analises?.get(v.id)?.problemas ?? []); return { v, voo: voosPac.get(v.id) ?? null, situacao: situacaoPac(v, !!rev.get(v.id)?.revisado_em), alertas: { alta: c.alta, media: c.media } }; })
     .sort((a, b) => (a.voo?.partida_em ?? a.v.data_embarque ?? "9999").localeCompare(b.voo?.partida_em ?? b.v.data_embarque ?? "9999")),
   [viagens, voosPac, rev, analises]);
@@ -390,12 +415,12 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
     .filter((t) => t.checkin_em && !t.checkin_feito_em && new Date(t.partida_em).getTime() > agora)
     .sort((a, b) => a.checkin_em!.localeCompare(b.checkin_em!))[0];
   const contaRev = (t: "expedicao" | "pacote") => {
-    const vs = (viagens ?? []).filter((v) => grupoTipo(v.tipo) === t);
+    const vs = (viagens ?? []).filter((v) => grupoDe(v) === t);
     return { feitas: vs.filter((v) => rev.get(v.id)?.revisado_em).length, total: vs.length };
   };
   const revExp = contaRev("expedicao"), revPac = contaRev("pacote");
-  const emViagem = (viagens ?? []).filter((v) => v.fase === "em_viagem" && vale(grupoTipo(v.tipo))).reduce((s, v) => s + pax(v), 0);
-  const totalPax = (viagens ?? []).filter((v) => vale(grupoTipo(v.tipo))).reduce((s, v) => s + pax(v), 0);
+  const emViagem = (viagens ?? []).filter((v) => v.fase === "em_viagem" && vale(grupoDe(v))).reduce((s, v) => s + pax(v), 0);
+  const totalPax = (viagens ?? []).filter((v) => vale(grupoDe(v))).reduce((s, v) => s + pax(v), 0);
 
   if (viagens === null) return (
     <div className="space-y-4" aria-busy="true">
@@ -430,6 +455,13 @@ export default function PainelViagens({ onAbrirViagem }: { onAbrirViagem: (id: s
           {" "}· {pontos.length} destino{pontos.length === 1 ? "" : "s"}
         </p>
       </div>
+
+      {pend && (pend.semData > 0 || pend.classificar > 0) && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="O que falta arrumar (não conta como viagem)">
+          {pend.classificar > 0 && <Pendencia n={pend.classificar} titulo="para classificar" texto="o Bitrix não diz o que foi vendido" onClick={onVerFila ? () => onVerFila("classificar") : undefined} />}
+          {pend.semData > 0 && <Pendencia n={pend.semData} titulo="sem data de embarque" texto="preencher a ida no Bitrix" onClick={onVerFila ? () => onVerFila("sem_data") : undefined} />}
+        </div>
+      )}
 
       {/* Tela cheia (15/10): mapa à esquerda, cards à direita — tudo numa olhada. */}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)] gap-4 items-start">
@@ -503,5 +535,19 @@ function Barra({ cor, rotulo, feitas, total }: { cor: string; rotulo: string; fe
         <div className="h-full rounded-full" style={{ width: `${pct}%`, background: cor }} />
       </div>
     </div>
+  );
+}
+
+/** Caixinha do que falta arrumar — abre a fila na Lista. Não entra na conta das viagens. */
+function Pendencia({ n, titulo, texto, onClick }: { n: number; titulo: string; texto: string; onClick?: () => void }) {
+  return (
+    <button onClick={onClick} disabled={!onClick} className="rel-card rel-linha inline-flex items-center gap-2.5 px-3.5 py-2 text-left disabled:cursor-default"
+      style={{ borderColor: "rgba(217,119,6,.45)" }}>
+      <span className="text-[18px] font-bold tabular-nums" style={{ color: "#D97706" }}>{n}</span>
+      <span className="leading-tight">
+        <span className="block text-[12.5px] font-semibold" style={{ color: "var(--ink)" }}>{titulo}</span>
+        <span className="block text-[11.5px]" style={{ color: "var(--ink3)" }}>{texto}{onClick ? " · ver fila →" : ""}</span>
+      </span>
+    </button>
   );
 }

@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
-  FASES, TIPOS_VIAGEM, adicionarPassageiro, grupoTipo, apagarTarefa, carregarViagem, criarTarefa, dataBR, linkBitrix,
+  FASES, TIPOS_VIAGEM, adicionarPassageiro, grupoDe, apagarTarefa, carregarViagem, criarTarefa, dataBR, linkBitrix,
   listarEquipeRel, listarPassageiros, listarTarefas, marcarTarefa, quandoEmbarca, removerPassageiro, resumoDaVenda, salvarViagem,
   type Passageiro, type Tarefa, type TipoViagem, type Viagem, type ViagemInput,
 } from "../lib/viagens";
@@ -25,6 +25,8 @@ import ConformidadeViagem, { RequisitosEntrada } from "./ConformidadeViagem";
 import AlertasViagem, { CSS_PISCA } from "./AlertasViagem";
 import LinhaDoTempo from "./LinhaDoTempo";
 import EtapasViagem from "./EtapasViagem";
+import SeletorServico from "./SeletorServico";
+import { temEsteira } from "../lib/etapas";
 import { RevisaoViagem } from "./TrechosViagem";
 import ComentariosBitrix from "./ComentariosBitrix";
 import { conferirViagens, type Analise } from "../lib/problemas";
@@ -337,7 +339,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
             <h1 className="text-xl font-bold leading-tight" style={{ color: "var(--ink)" }}>{v.titulo}</h1>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               <Etiqueta tom={TOM_FASE[v.fase]}>{FASES[v.fase]}</Etiqueta>
-              <Etiqueta>{TIPOS_VIAGEM[v.tipo]}</Etiqueta>
+              <SeletorServico v={v} onMudou={revisou} />
               <span className="text-[13px]" style={{ color: "var(--ink2)" }}>{quandoEmbarca(v)}</span>
               {v.tarefas_atrasadas > 0 && <Etiqueta tom="erro">{v.tarefas_atrasadas} tarefa{v.tarefas_atrasadas > 1 ? "s" : ""} atrasada{v.tarefas_atrasadas > 1 ? "s" : ""}</Etiqueta>}
               {!ativa && <Etiqueta tom="erro">Cancelada</Etiqueta>}
@@ -377,10 +379,10 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
 
-      {/* A esteira do Relacionamento (16/10): em que etapa a viagem está — só pacote */}
-      {ativa && grupoTipo(v.tipo) === "pacote" && <EtapasViagem viagem={v} trechos={analise?.trechos ?? []} equipe={equipe} onMudou={revisou} />}
+      {/* A esteira do Relacionamento (16/10): pacote, aéreo e cruzeiro completos; hotel/passeio só Revisão + D-3 (0148) */}
+      {ativa && temEsteira(v) && <EtapasViagem viagem={v} trechos={analise?.trechos ?? []} equipe={equipe} onMudou={revisou} />}
       {/* Expedição não tem esteira — sem isto ela nunca podia ser marcada como revisada ("0 de 564", 19/10) */}
-      {ativa && grupoTipo(v.tipo) === "expedicao" && (
+      {ativa && grupoDe(v) === "expedicao" && (
         <section className="rel-card p-4 flex flex-wrap items-center justify-between gap-3">
           <span className="text-[13px]" style={{ color: "var(--ink2)" }}><b style={{ color: "var(--ink)" }}>Revisão</b> · passageiros, documentos, voos e reservas conferidos</span>
           <RevisaoViagem viagemId={v.id} equipe={equipe} />
