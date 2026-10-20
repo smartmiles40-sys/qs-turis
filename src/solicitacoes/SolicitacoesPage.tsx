@@ -50,7 +50,8 @@ function Cartao({ s, lado, meuId, onAbrir }: { s: Solicitacao; lado: "para" | "d
         <span className="truncate">{s.tipo_rotulo}</span>
       </span>
       <span className="block text-[14px] font-semibold leading-snug line-clamp-2" style={{ color: "var(--ink)" }}>{s.titulo}</span>
-      {s.sobre_nome && <span className="block text-[12.5px] truncate" style={{ color: "var(--ink2)" }}>{s.sobre_nome}</span>}
+      {s.sobre_nome ? <span className="block text-[12.5px] truncate" style={{ color: "var(--ink2)" }}>{s.sobre_nome}</span>
+        : <span className="block text-[12px] font-semibold" style={{ color: "var(--warn-ink)" }}>sem cliente amarrado</span>}
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">
         {s.prioridade !== "normal" && <span className="font-bold" style={{ color: s.prioridade === "urgente" ? "var(--err-ink)" : "var(--warn-ink)" }}>{PRIORIDADE_SOL[s.prioridade]}</span>}
         <span style={{ color: prazo.tom === "erro" ? "var(--err-ink)" : prazo.tom === "aviso" ? "var(--warn-ink)" : "var(--ink3)", fontWeight: prazo.tom === "neutro" ? 400 : 600 }}>{prazo.texto}</span>

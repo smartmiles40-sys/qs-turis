@@ -96,7 +96,7 @@ export interface Solicitacao {
 export interface EventoSol {
   id: number;
   solicitacao_id: string;
-  tipo: "criada" | "aceita" | "passada" | "status" | "comentario" | "prazo" | "concluida" | "confirmada" | "reaberta" | "recusada" | "cancelada";
+  tipo: "criada" | "aceita" | "passada" | "status" | "comentario" | "prazo" | "concluida" | "confirmada" | "reaberta" | "recusada" | "cancelada" | "vinculada";
   de: string | null;
   para: string | null;
   texto: string | null;
@@ -161,7 +161,7 @@ export async function buscar(setor: Setor, termo: string): Promise<Solicitacao[]
 }
 
 /** As solicitações sobre um cliente / viagem / lead (pra mostrar na ficha). */
-export async function solicitacoesDe(alvo: AlvoSol): Promise<Solicitacao[]> {
+export async function solicitacoesDe(alvo: AlvoSol, limite = 30): Promise<Solicitacao[]> {
   const f: string[] = [];
   if (alvo.viagemId) f.push(`viagem_id.eq.${alvo.viagemId}`);
   if (alvo.clienteId) f.push(`cliente_id.eq.${alvo.clienteId}`);
@@ -169,7 +169,7 @@ export async function solicitacoesDe(alvo: AlvoSol): Promise<Solicitacao[]> {
   if (alvo.conversaId) f.push(`conversa_id.eq.${alvo.conversaId}`);
   if (!f.length) return [];
   const { data, error } = await supabase.from("qs_solicitacoes_v").select("*").or(f.join(","))
-    .order("criado_em", { ascending: false }).limit(30);
+    .order("criado_em", { ascending: false }).limit(limite);
   if (error) throw new Error(error.message);
   return (data ?? []) as Solicitacao[];
 }
@@ -268,4 +268,38 @@ export function paraInputLocal(iso: string | null): string {
 export function deInputLocal(v: string): string | null {
   if (!v) return null;
   return new Date(`${v}:00-03:00`).toISOString();
+}
+
+// ── Cliente e venda do pedido (0150) ────────────────────────────────────────
+// Qualquer setor acha o cliente (Operações e Comercial não leem as fichas: a
+// busca devolve só nome, final do telefone e e-mail mascarado).
+
+export interface ClienteAchado { id: string; nome: string; telefone_fim: string | null; email_mascarado: string | null; vendas: number }
+export interface VendaDoCliente {
+  id: string; titulo: string; destino: string | null; data_embarque: string | null; servico: string | null;
+  fase: string; status: string; bitrix_deal_id: string | null; comprador: boolean;
+}
+
+export async function acharClientes(termo: string): Promise<ClienteAchado[]> {
+  const { data, error } = await supabase.rpc("qs_sol_buscar_clientes", { p_termo: termo });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ClienteAchado[];
+}
+
+export async function vendasDoCliente(clienteId: string): Promise<VendaDoCliente[]> {
+  const { data, error } = await supabase.rpc("qs_sol_vendas_do_cliente", { p_cliente: clienteId });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as VendaDoCliente[];
+}
+
+export async function vincular(id: string, clienteId: string, viagemId: string | null) {
+  const { error } = await supabase.rpc("qs_sol_vincular", { p_id: id, p_cliente: clienteId, p_viagem: viagemId });
+  if (error) throw new Error(error.message);
+}
+
+/** "Japão · embarca 19/09/2026 · Pacote" */
+export function textoVenda(v: VendaDoCliente): string {
+  const data = v.data_embarque ? `embarca ${v.data_embarque.split("-").reverse().join("/")}` : "sem data";
+  const passou = v.fase === "concluida" ? " (já foi)" : v.status !== "ativa" ? " (cancelada)" : "";
+  return `${v.titulo}${v.destino && v.destino !== v.titulo ? ` — ${v.destino}` : ""} · ${data}${passou}${v.bitrix_deal_id ? ` · #${v.bitrix_deal_id}` : ""}`;
 }

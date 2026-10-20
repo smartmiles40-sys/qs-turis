@@ -11,9 +11,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Etiqueta, Modal } from "@/rel/ui";
+import EscolherClienteVenda, { type Escolha } from "./EscolherClienteVenda";
 import {
   AGUARDANDO, COR_SETOR, NOME_SETOR, PRIORIDADE_SOL, STATUS_SOL, TOM_SOL, agir, carregarSolicitacao, deInputLocal, haQuanto, marcarVisto,
-  paraInputLocal, pessoasDoSetor, primeiroNome, textoPrazo,
+  paraInputLocal, pessoasDoSetor, primeiroNome, textoPrazo, vincular,
   type AcaoSol, type AguardandoQuem, type EventoSol, type Pessoa, type Setor, type Solicitacao,
 } from "./lib";
 
@@ -27,6 +28,7 @@ export interface LinksSol {
 const ROTULO_EVENTO: Record<EventoSol["tipo"], string> = {
   criada: "pediu", aceita: "aceitou", passada: "passou pra", status: "mudou o andamento", comentario: "comentou", prazo: "mudou o prazo",
   concluida: "concluiu", confirmada: "confirmou que resolveu", reaberta: "reabriu", recusada: "recusou", cancelada: "cancelou",
+  vinculada: "amarrou a",
 };
 
 function quando(iso: string) {
@@ -40,6 +42,7 @@ function Evento({ e }: { e: EventoSol }) {
   if (e.tipo === "status" && e.para?.startsWith("aguardando:")) extra = `: aguardando ${AGUARDANDO[e.para.split(":")[1] as AguardandoQuem] ?? ""}`;
   if (e.tipo === "status" && e.para === "em_andamento") extra = ": voltou pra em andamento";
   if (e.tipo === "prazo" && e.para) extra = ` pra ${quando(e.para)}`;
+  if (e.tipo === "vinculada" && e.para) extra = ` ${e.para}`;
   return (
     <li className="flex gap-2.5">
       <span className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0" aria-hidden
@@ -75,6 +78,8 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
   const [texto, setTexto] = useState("");
   const [pessoas, setPessoas] = useState<Pessoa[] | null>(null);
   const [mudandoPrazo, setMudandoPrazo] = useState(false);
+  const [amarrando, setAmarrando] = useState(false);
+  const [escolha, setEscolha] = useState<Escolha | null>(null);
   const [novoPrazo, setNovoPrazo] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -85,7 +90,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
     catch (e) { setErro(e instanceof Error ? e.message : "Não carregou."); }
   }, [id]);
   useEffect(() => {
-    setS(null); setEventos([]); setComentario(""); setPedindo(null); setPessoas(null); setMudandoPrazo(false); setErro(null);
+    setS(null); setEventos([]); setComentario(""); setPedindo(null); setPessoas(null); setMudandoPrazo(false); setAmarrando(false); setErro(null);
     if (id) { void carregar(); void marcarVisto(id).then(onMudou); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -104,6 +109,14 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
   const prazo = s ? textoPrazo(s) : null;
 
   const pedir = (p: Pedindo) => { setPedindo(p); setTexto(""); setErro(null); };
+
+  async function salvarAmarra() {
+    if (!s || !escolha) return;
+    setOcupado(true); setErro(null);
+    try { await vincular(s.id, escolha.clienteId, escolha.viagemId); setAmarrando(false); await carregar(); onMudou(); }
+    catch (e) { setErro(e instanceof Error ? e.message : "Não amarrou."); }
+    finally { setOcupado(false); }
+  }
 
   return (
     <Modal aberto={!!id} titulo={s ? `Solicitação #${s.numero}` : "Solicitação"} onFechar={onFechar} largura={680}>
@@ -134,18 +147,34 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
                 <button className="ml-2 underline text-[12px]" style={{ color: "var(--ink3)" }} onClick={() => { setMudandoPrazo(true); setNovoPrazo(paraInputLocal(s.prazo)); }}>mudar</button>
               )}
             </Linha>
-            {s.sobre_nome && (
-              <Linha rotulo="Sobre">
-                <span>{s.sobre_nome}</span>
-                <span className="ml-2 inline-flex gap-2 text-[12px]">
-                  {s.viagem_id && links?.onAbrirViagem && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirViagem?.(s.viagem_id!)}>abrir viagem</button>}
-                  {s.cliente_id && links?.onAbrirCliente && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirCliente?.(s.cliente_id!)}>abrir ficha</button>}
-                  {s.lead_id && links?.onAbrirLead && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirLead?.(s.lead_id!)}>abrir lead</button>}
-                  {s.conversa_id && links?.onAbrirConversa && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirConversa?.(s.conversa_id!)}>abrir conversa</button>}
-                </span>
-              </Linha>
-            )}
+            <Linha rotulo={s.viagem_id ? "Cliente · venda" : "Cliente"}>
+              {s.cliente_id || s.sobre_nome ? <span>{s.sobre_nome ?? "cliente"}</span> : <span style={{ color: "var(--warn-ink)" }}>sem cliente</span>}
+              {!s.viagem_id && s.cliente_id && <span style={{ color: "var(--ink3)" }}> · sem venda específica</span>}
+              <span className="ml-2 inline-flex flex-wrap gap-2 text-[12px]">
+                {s.viagem_id && links?.onAbrirViagem && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirViagem?.(s.viagem_id!)}>abrir venda</button>}
+                {s.cliente_id && links?.onAbrirCliente && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirCliente?.(s.cliente_id!)}>abrir ficha</button>}
+                {s.lead_id && links?.onAbrirLead && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirLead?.(s.lead_id!)}>abrir lead</button>}
+                {s.conversa_id && links?.onAbrirConversa && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirConversa?.(s.conversa_id!)}>abrir conversa</button>}
+                {(recebe || pediu) && !amarrando && (
+                  <button className="underline" style={{ color: s.cliente_id ? "var(--ink3)" : "var(--rel-ink)", fontWeight: s.cliente_id ? 400 : 600 }}
+                    onClick={() => { setAmarrando(true); setEscolha(s.cliente_id ? { clienteId: s.cliente_id, clienteNome: (s.sobre_nome ?? "").split(" · ")[0] || "Cliente", viagemId: s.viagem_id, vendaTexto: null } : null); }}>
+                    {s.cliente_id ? "trocar cliente/venda" : "amarrar cliente"}
+                  </button>
+                )}
+              </span>
+            </Linha>
           </dl>
+
+          {amarrando && (
+            <div className="rel-card p-3 space-y-2">
+              <p className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>De qual cliente e qual venda é esse pedido?</p>
+              <EscolherClienteVenda valor={escolha} onMudar={setEscolha} />
+              <div className="flex gap-2">
+                <Botao variante="primario" disabled={ocupado || !escolha} onClick={() => void salvarAmarra()}>{ocupado ? "Salvando…" : "Salvar"}</Botao>
+                <Botao variante="fantasma" onClick={() => setAmarrando(false)}>Cancelar</Botao>
+              </div>
+            </div>
+          )}
 
           {mudandoPrazo && (
             <div className="flex flex-wrap items-center gap-2">

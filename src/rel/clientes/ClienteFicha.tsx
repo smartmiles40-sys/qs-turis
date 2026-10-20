@@ -23,7 +23,7 @@ import ChamadosDoCliente from "../chamados/ChamadosDoCliente";
 import ChamadoModal from "../chamados/ChamadoModal";
 import RecompraBotao from "../pos/RecompraBotao";
 import { EnviarFinanceiroModal, StatusNoFinanceiro } from "../../fin/EnviarFinanceiro";
-import { BotaoPedirOutroSetor, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
+import { BotaoPedirOutroSetor, HistoricoDeSolicitacoes } from "@/solicitacoes/PedirOutroSetor";
 import { conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
 
 // Nomes amigáveis dos campos, pro histórico ler como gente.
@@ -205,7 +205,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       </div>
 
       <div className="mt-3"><StatusNoFinanceiro alvo={{ clienteId: c.id }} recarregar={sinalFin} /></div>
-      <div className="mt-3"><PedidosSobre alvo={{ clienteId: c.id }} recarregar={sinalPedidos} links={{ onAbrirViagem, onAbrirConversa }} /></div>
+      <div className="mt-3"><HistoricoDeSolicitacoes clienteId={c.id} recarregar={sinalPedidos} links={{ onAbrirViagem, onAbrirConversa, onAbrirCliente: onAbrir }} /></div>
 
       {erroMetrica && <div className="mb-4"><Aviso tom="erro">Categoria, LTV e cadastro não carregaram ({erroMetrica}).</Aviso></div>}
       {metrica && !metrica.cadastro_completo && !c.mesclado_em_id && (
