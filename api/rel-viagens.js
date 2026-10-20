@@ -422,7 +422,7 @@ function camposDaViagem(deal, mapa) {
 }
 
 async function viagemDoDeal(dealId) {
-  const r = await rest(`rel_viagens?select=id,status,cliente_id,titulo,destino,expedicao,tipo,data_venda,data_embarque,data_retorno,valor,qtd_passageiros,observacoes,necessidades,bitrix_funil,bitrix_dados&bitrix_deal_id=eq.${encodeURIComponent(dealId)}&limit=1`);
+  const r = await rest(`rel_viagens?select=id,status,cliente_id,titulo,destino,expedicao,tipo,data_venda,data_embarque,data_retorno,valor,qtd_passageiros,observacoes,necessidades,bitrix_funil,bitrix_dados,datas_travadas&bitrix_deal_id=eq.${encodeURIComponent(dealId)}&limit=1`);
   return r?.[0] || null;
 }
 
@@ -575,6 +575,8 @@ async function importarDealCore(deal, ctx, profundidade = 0) {
   for (const [k, v] of Object.entries(novos)) {
     if (v == null) continue;
     if (k === 'titulo' && !tituloNosso) continue;
+    // 0154: datas ajustadas pelos voos na tela de conferência ficam — o Bitrix não volta com as antigas
+    if ((k === 'data_embarque' || k === 'data_retorno') && atual.datas_travadas) continue;
     if (k === 'bitrix_dados') { if (estavel(atual.bitrix_dados) !== estavel(v)) { patch.bitrix_dados = v; patch.bitrix_lido_em = new Date().toISOString(); } continue; }
     if (String(atual[k] ?? '') !== String(v)) patch[k] = v;
   }

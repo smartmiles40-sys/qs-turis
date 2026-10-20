@@ -22,19 +22,22 @@ import { TOM_FASE } from "./ViagensDoCliente";
 import PainelViagens from "./PainelViagens";
 import CalendarioViagens from "./CalendarioViagens";
 import ConferirRepetidas from "./ConferirRepetidas";
+import ConferirVoos from "./ConferirVoos";
 import SeletorServico from "./SeletorServico";
 import { ProximoVooCurto } from "./ProximoVoo";
 
-type Visao = "painel" | "calendario" | "lista" | "repetidas";
+type Visao = "painel" | "calendario" | "lista" | "repetidas" | "voos";
 const VISOES: { id: Visao; rotulo: string }[] = [
   { id: "painel", rotulo: "Painel" },
   { id: "calendario", rotulo: "Calendário" },
   { id: "lista", rotulo: "Lista" },
   { id: "repetidas", rotulo: "Conferir repetidas" },
+  // 0154: voo que não bate com as datas da venda
+  { id: "voos", rotulo: "Conferir voos" },
 ];
 const CHAVE_VISAO = "rel_viagens_visao";
 function visaoSalva(): Visao {
-  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "lista" || v === "repetidas" ? v : "painel"; } catch { return "painel"; }
+  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "lista" || v === "repetidas" || v === "voos" ? v : "painel"; } catch { return "painel"; }
 }
 
 const FILTROS: { id: FiltroViagens; rotulo: string }[] = [
@@ -273,6 +276,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
       {visao === "painel" && <PainelViagens key={versao} onAbrirViagem={onAbrirViagem} onVerFila={verFila} />}
       {visao === "calendario" && <CalendarioViagens key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "repetidas" && <ConferirRepetidas key={versao} onAbrirViagem={onAbrirViagem} />}
+      {visao === "voos" && <ConferirVoos key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "lista" && <>
 
       <div className="flex flex-wrap items-center gap-2 mb-3">

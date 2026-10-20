@@ -32,6 +32,7 @@ import { RevisaoViagem } from "./TrechosViagem";
 import { conferirViagens, type Analise } from "../lib/problemas";
 import { TOM_FASE } from "./ViagensDoCliente";
 import { BotaoPedirOutroSetor, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
+import ConferirVoos from "./ConferirVoos";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
   return (
@@ -484,6 +485,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               ))}
             </div>
           }>
+            {ativa && <ConferirVoos key={versao} viagemId={v.id} onMudou={() => { mudouTrecho(); void carregar(); }} />}
             {aba === "dia"
               ? (analise
                 ? <LinhaDoTempo viagemId={v.id} trechos={analise.trechos} problemas={analise.problemas} dataIda={v.data_embarque} dataVolta={v.data_retorno} ativa={ativa} onMudou={mudouTrecho} />
