@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { ETAPAS, estadoDaEsteira, etapasDe, diasAte, temEsteira, type EstadoEtapa, type EtapaId, type RegistroEtapa } from "../lib/etapas";
-import { TIPOS_TRECHO, grupoDe, hojeSP, listarEquipeRel, trechosDasViagens, type Trecho, type Viagem } from "../lib/viagens";
+import { TIPOS_TRECHO, grupoDe, hojeSP, proximoVoo, listarEquipeRel, trechosDasViagens, type Trecho, type Viagem } from "../lib/viagens";
 import { diaBR, diaLocal, horaLocal, mapaDasNoites } from "../lib/problemas";
 import { formatarTelefone } from "../lib/clientes";
 import { Aviso, Entrada } from "../ui";
@@ -71,7 +71,10 @@ function Quadro({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void }
                         <span className="flex items-center gap-1.5 text-[13px] font-bold truncate" style={{ color: "var(--ink)" }}><MarcaTipo tipo={grupoDe(it.v)} tamanho={7} />{nomeDe(it.v)}</span>
                         <span className="block text-[11.5px] truncate" style={{ color: "var(--ink3)" }}>{it.v.destino || it.v.titulo}</span>
                         <span className="flex items-center justify-between mt-1 gap-1">
-                          <span className="text-[11.5px] font-semibold tabular-nums" style={{ color: "var(--ink2)" }}>ida {it.v.data_embarque ? diaBR(it.v.data_embarque) : "—"}</span>
+                          {/* já viajando: o que importa é o próximo voo (0152), não a ida que passou */}
+                          <span className="text-[11.5px] font-semibold tabular-nums" style={{ color: "var(--ink2)" }}>
+                            {it.v.fase === "em_viagem" && it.v.proximo_voo_em ? `✈ ${proximoVoo(it.v).quando}` : `ida ${it.v.data_embarque ? diaBR(it.v.data_embarque) : "—"}`}
+                          </span>
                           <Selo e={it.atual!} />
                         </span>
                         {it.etapas.some((x) => x.registro?.houve_alteracao) && <span className="block text-[10.5px] font-bold mt-0.5" style={{ color: "#DC2626" }}>⚠ teve alteração na reserva</span>}

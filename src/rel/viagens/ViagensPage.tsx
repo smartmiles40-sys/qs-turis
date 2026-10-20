@@ -13,7 +13,7 @@
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import {
-  FASES, SERVICOS, TIPOS_VIAGEM, criarViagem, importarDoBitrix, listarViagens, periodo, quandoEmbarca, sincronizarBitrix,
+  FASES, SERVICOS, TIPOS_VIAGEM, criarViagem, importarDoBitrix, listarViagens, periodo, proximoVoo, quandoEmbarca, sincronizarBitrix,
   type FiltroViagens, type ResultadoSync, type TipoViagem, type Viagem,
 } from "../lib/viagens";
 import { buscarClientes, type Cliente } from "../lib/clientes";
@@ -23,6 +23,7 @@ import PainelViagens from "./PainelViagens";
 import CalendarioViagens from "./CalendarioViagens";
 import ConferirRepetidas from "./ConferirRepetidas";
 import SeletorServico from "./SeletorServico";
+import { ProximoVooCurto } from "./ProximoVoo";
 
 type Visao = "painel" | "calendario" | "lista" | "repetidas";
 const VISOES: { id: Visao; rotulo: string }[] = [
@@ -178,8 +179,10 @@ function Linha({ v, onAbrir, onAbrirCliente, classificar, onMudou }: { v: Viagem
               <button className="underline" onClick={(e) => { e.stopPropagation(); onAbrirCliente(v.cliente_id!); }}>{v.cliente_nome}</button>
             ) : "sem cliente"}
             {v.passageiros > 1 ? ` + ${v.passageiros - 1}` : ""} · {periodo(v)} · {quandoEmbarca(v)}
+            {v.proximo_voo_em && <span className="sm:hidden"> · ✈ {proximoVoo(v).quando}</span>}
           </p>
         </div>
+        <ProximoVooCurto v={v} className="hidden sm:block flex-shrink-0 max-w-[230px]" />
         <span className="hidden sm:flex items-center gap-1.5 flex-shrink-0">
           {v.tarefas_atrasadas > 0 && <Etiqueta tom="erro">{v.tarefas_atrasadas} atrasada{v.tarefas_atrasadas > 1 ? "s" : ""}</Etiqueta>}
           {v.tarefas_total > 0 && <span className="text-[11px] tabular-nums" style={{ color: "var(--ink3)" }}>{v.tarefas_total - v.tarefas_pendentes}/{v.tarefas_total}</span>}

@@ -62,6 +62,15 @@ export interface Viagem {
   servico: Servico | null;
   acompanhamento: Acompanhamento;
   servico_manual: Servico | null;
+  // 0152: os voos — a "ida" anda com a viagem
+  voos_total?: number;
+  voos_feitos?: number;
+  proximo_voo_em?: string | null;
+  proximo_voo_fuso?: string | null;
+  proximo_voo_trecho?: string | null;
+  proximo_voo_numero?: string | null;
+  proximo_voo_sem_hora?: boolean | null;
+  ultimo_voo_em?: string | null;
 }
 
 // ── Serviço vendido × acompanhamento (0148, Bruno 20/10) ───────────────────
@@ -230,6 +239,30 @@ export function quandoEmbarca(v: Pick<Viagem, "fase" | "dias_para_embarque">): s
   return `embarca em ${v.dias_para_embarque} dias`;
 }
 
+/**
+ * O próximo voo da viagem (0152): "23/10 14:35 · LIS→FCO" + "voo 2 de 4".
+ * Hora LOCAL da partida (a do bilhete); voo do Bitrix só tem o dia. Sem voo
+ * futuro: "voos concluídos" (se tinha voos) ou "sem voos cadastrados".
+ */
+export function proximoVoo(v: Pick<Viagem, "voos_total" | "voos_feitos" | "proximo_voo_em" | "proximo_voo_fuso" | "proximo_voo_trecho" | "proximo_voo_numero" | "proximo_voo_sem_hora" | "ultimo_voo_em">):
+  { quando: string; trecho: string; ordem: string; situacao: "proximo" | "concluidos" | "sem_voos" } {
+  const total = v.voos_total ?? 0;
+  if (v.proximo_voo_em) {
+    const h = horaDoLugar(v.proximo_voo_em, v.proximo_voo_fuso);
+    const quando = v.proximo_voo_sem_hora
+      ? new Date(v.proximo_voo_em).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" })
+      : h.texto;
+    return {
+      quando,
+      trecho: [v.proximo_voo_trecho, v.proximo_voo_numero].filter(Boolean).join(" · "),
+      ordem: total > 1 ? `voo ${Math.min((v.voos_feitos ?? 0) + 1, total)} de ${total}` : "",
+      situacao: "proximo",
+    };
+  }
+  if (total > 0) return { quando: v.ultimo_voo_em ? new Date(v.ultimo_voo_em).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" }) : "", trecho: "", ordem: `${total} voo${total > 1 ? "s" : ""} feito${total > 1 ? "s" : ""}`, situacao: "concluidos" };
+  return { quando: "", trecho: "", ordem: "sem voos cadastrados", situacao: "sem_voos" };
+}
+
 export const linkBitrix = (dealId: string) => `https://agenciasetuforeuvou.bitrix24.com.br/crm/deal/details/${dealId}/`;
 export const linkDocumentos = (token: string) => `${window.location.origin}/documentos/${token}`;
 
@@ -261,7 +294,19 @@ export async function listarViagens(filtro: FiltroViagens, busca = ""): Promise<
   if (t) q = q.or(`titulo.ilike.*${t}*,destino.ilike.*${t}*,expedicao.ilike.*${t}*,cliente_nome.ilike.*${t}*,bitrix_deal_id.eq.${t.replace(/\D/g, "") || "0"}`);
   const { data, error } = await q;
   if (error) throw error;
-  return (data ?? []) as Viagem[];
+  const l = (data ?? []) as Viagem[];
+  // O que vai acontecer anda pelo PRÓXIMO VOO (0152): quem já está viajando e
+  // tem conexão amanhã sobe; sem voo cadastrado, vale a data de embarque.
+  return filtro === "proximas" || filtro === "em_viagem" || filtro === "classificar"
+    ? l.sort((x, y) => momentoDoProximo(x) - momentoDoProximo(y))
+    : l;
+}
+
+/** Quando a viagem "acontece" de novo: o próximo voo, senão o embarque (sem nada, por último). */
+export function momentoDoProximo(v: Pick<Viagem, "proximo_voo_em" | "data_embarque" | "data_retorno" | "fase">): number {
+  if (v.proximo_voo_em) return new Date(v.proximo_voo_em).getTime();
+  const d = v.fase === "em_viagem" ? v.data_retorno ?? v.data_embarque : v.data_embarque;
+  return d ? new Date(`${d}T12:00:00-03:00`).getTime() : Number.MAX_SAFE_INTEGER;
 }
 
 export async function carregarViagem(id: string): Promise<Viagem | null> {

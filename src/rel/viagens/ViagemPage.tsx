@@ -26,6 +26,7 @@ import AlertasViagem, { CSS_PISCA } from "./AlertasViagem";
 import LinhaDoTempo from "./LinhaDoTempo";
 import EtapasViagem from "./EtapasViagem";
 import SeletorServico from "./SeletorServico";
+import { ProximoVooDestaque } from "./ProximoVoo";
 import { temEsteira } from "../lib/etapas";
 import { RevisaoViagem } from "./TrechosViagem";
 import { conferirViagens, type Analise } from "../lib/problemas";
@@ -342,6 +343,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               <Etiqueta tom={TOM_FASE[v.fase]}>{FASES[v.fase]}</Etiqueta>
               <SeletorServico v={v} onMudou={revisou} />
               <span className="text-[13px]" style={{ color: "var(--ink2)" }}>{quandoEmbarca(v)}</span>
+              {ativa && <ProximoVooDestaque v={v} />}
               {v.tarefas_atrasadas > 0 && <Etiqueta tom="erro">{v.tarefas_atrasadas} tarefa{v.tarefas_atrasadas > 1 ? "s" : ""} atrasada{v.tarefas_atrasadas > 1 ? "s" : ""}</Etiqueta>}
               {!ativa && <Etiqueta tom="erro">Cancelada</Etiqueta>}
             </div>

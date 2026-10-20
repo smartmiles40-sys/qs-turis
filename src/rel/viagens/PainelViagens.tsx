@@ -20,7 +20,7 @@
 // -----------------------------------------------------------------------------
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
-  SERVICOS, grupoDe, grupoTipo, horaDoLugar, hojeSP, pendenciasViagens, proximosTrechos, revisoesDe, viagensEmAndamento, TIPOS_TRECHO,
+  SERVICOS, grupoDe, grupoTipo, horaDoLugar, hojeSP, momentoDoProximo, proximoVoo, pendenciasViagens, proximosTrechos, revisoesDe, viagensEmAndamento, TIPOS_TRECHO,
   type FiltroViagens, type PendenciasViagens, type Revisao, type Trecho, type Viagem,
 } from "../lib/viagens";
 import { Aviso } from "../ui";
@@ -42,6 +42,8 @@ interface Partida {
   viagens: Viagem[];
   revisadas: number;
   situacao: Situacao;
+  /** 0152: a venda com o voo mais próximo da saída (quem já viaja tem conexão / volta). */
+  proximo: Viagem | null;
 }
 
 const SITUACAO: Record<Situacao, { texto: string; cor: string }> = {
@@ -56,6 +58,8 @@ const SITUACAO: Record<Situacao, { texto: string; cor: string }> = {
 // mesmo "hoje" do banco (fase da viagem vem de rel_hoje(), fuso de São Paulo)
 const hojeISO = hojeSP;
 const pax = (v: Viagem) => Math.max(v.passageiros || 0, v.qtd_passageiros || 0, 1);
+/** Dia (AAAA-MM-DD) de um instante, em São Paulo — voo do Bitrix é 00:00 de lá. */
+const hojeDe = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" });
 const dataBoard = (d: string | null) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(2, 4)}` : "--/--/--");
 const dataHora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
@@ -81,9 +85,10 @@ function montarPartidas(viagens: Viagem[], rev: Map<string, Revisao>, trechos: T
     const lugar = tipo === "expedicao" ? [v.expedicao, v.destino, v.titulo].map((t) => lugaresDe(t)).find((x) => x.length)?.[0] : undefined;
     const chave = tipo === "expedicao" ? `exp|${lugar?.id ?? (v.expedicao || v.id)}|${v.data_embarque ?? ""}` : `v|${v.id}`;
     const p = m.get(chave) ?? {
-      chave, tipo, data: v.data_embarque, destino: (tipo === "expedicao" && lugar?.nome) || v.destino || v.titulo, grupo: "", passageiros: 0, viagens: [], revisadas: 0, situacao: "pendente" as Situacao,
+      chave, tipo, data: v.data_embarque, destino: (tipo === "expedicao" && lugar?.nome) || v.destino || v.titulo, grupo: "", passageiros: 0, viagens: [], revisadas: 0, situacao: "pendente" as Situacao, proximo: null,
     };
     p.viagens.push(v);
+    if (v.proximo_voo_em && (!p.proximo || v.proximo_voo_em < p.proximo.proximo_voo_em!)) p.proximo = v;
     if (rev.get(v.id)?.revisado_em) p.revisadas += 1;
     if (v.expedicao) { const n = nomes.get(chave) ?? new Map<string, number>(); n.set(v.expedicao, (n.get(v.expedicao) ?? 0) + 1); nomes.set(chave, n); }
     m.set(chave, p);
@@ -106,8 +111,16 @@ function montarPartidas(viagens: Viagem[], rev: Map<string, Revisao>, trechos: T
     else if (p.revisadas === p.viagens.length) p.situacao = "revisada";
     else p.situacao = "pendente";
   }
-  return [...m.values()].sort((a, b) => (a.data ?? "9999").localeCompare(b.data ?? "9999"));
+  // na ordem do que acontece primeiro: o próximo voo (senão a data de embarque)
+  const momento = (p: Partida) => Math.min(...p.viagens.map(momentoDoProximo));
+  return [...m.values()].sort((a, b) => momento(a) - momento(b));
 }
+
+/** Data do quadro: o próximo voo, com hora local ("✈ 23/10 14:35"); sem voo, a data de embarque. */
+const dataDoQuadro = (v: Viagem | null, data: string | null) => {
+  const p = v ? proximoVoo(v) : null;
+  return p?.situacao === "proximo" ? `✈ ${p.quando}` : dataBoard(data);
+};
 
 // ── Quadro de partidas ──────────────────────────────────────────────────────
 
@@ -153,7 +166,7 @@ function Quadro({ titulo, cor, partidas, onAbrirViagem }: { titulo: string; cor:
           <table className="w-full text-[12.5px]" style={{ ...mono, color: "#F2F2F2", minWidth: 640 }}>
             <thead>
               <tr className="text-left text-[10.5px] tracking-[.14em]" style={{ color: "#7D8A91" }}>
-                <th className="px-4 py-2 font-semibold">DATA</th>
+                <th className="px-4 py-2 font-semibold">PRÓXIMO VOO</th>
                 <th className="px-2 py-2 font-semibold">DESTINO</th>
                 <th className="px-2 py-2 font-semibold">GRUPO</th>
                 <th className="px-2 py-2 font-semibold">TIPO</th>
@@ -171,8 +184,8 @@ function Quadro({ titulo, cor, partidas, onAbrirViagem }: { titulo: string; cor:
                     <tr className="rel-quadro-linha cursor-pointer" style={{ borderTop: "1px solid #182026" }} onClick={abrir}
                       tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } }}
                       aria-expanded={p.viagens.length > 1 ? aberta === p.chave : undefined}
-                      aria-label={`${p.tipo === "expedicao" ? "Expedição" : "Pacote"} ${p.grupo || p.destino}, ${dataBoard(p.data)}, ${p.passageiros} passageiros, ${s.texto.replace(" ✓", "")}${p.viagens.length > 1 ? ` — ${p.viagens.length} vendas, abre a lista` : ""}`}>
-                      <td className="px-4 py-2 whitespace-nowrap" style={{ color: "#FFD54F" }}><Flap texto={dataBoard(p.data)} atraso={atraso} /></td>
+                      aria-label={`${p.tipo === "expedicao" ? "Expedição" : "Pacote"} ${p.grupo || p.destino}, ${dataDoQuadro(p.proximo, p.data)}, ${p.passageiros} passageiros, ${s.texto.replace(" ✓", "")}${p.viagens.length > 1 ? ` — ${p.viagens.length} vendas, abre a lista` : ""}`}>
+                      <td className="px-4 py-2 whitespace-nowrap" style={{ color: "#FFD54F" }}><Flap texto={dataDoQuadro(p.proximo, p.data)} atraso={atraso} /></td>
                       <td className="px-2 py-2 uppercase max-w-[200px] truncate"><Flap texto={p.destino.slice(0, 22)} atraso={atraso} /></td>
                       <td className="px-2 py-2 uppercase max-w-[220px] truncate" style={{ color: "#B9C4C9" }}>{p.grupo ? <Flap texto={p.grupo.slice(0, 26)} atraso={atraso} /> : "—"}</td>
                       <td className="px-2 py-2"><span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] font-bold" style={{ background: p.tipo === "expedicao" ? "rgba(60,207,179,.15)" : "rgba(245,185,66,.15)", color: p.tipo === "expedicao" ? COR_EXP : COR_PAC }}><MarcaTipo tipo={p.tipo} tamanho={7} />{p.tipo === "expedicao" ? "EXP" : "PAC"}</span></td>
@@ -256,7 +269,7 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                 <th className="px-2 py-2 font-semibold">SERVIÇO</th>
                 <th className="px-2 py-2 font-semibold">DE</th>
                 <th className="px-2 py-2 font-semibold">PARA</th>
-                <th className="px-2 py-2 font-semibold">IDA</th>
+                <th className="px-2 py-2 font-semibold">PRÓXIMO VOO</th>
                 <th className="px-2 py-2 font-semibold">LOCALIZADOR</th>
                 <th className="px-2 py-2 font-semibold text-right">PAX</th>
                 <th className="px-2 py-2 font-semibold text-center">ALERTAS</th>
@@ -269,12 +282,12 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                 const atraso = Math.min(i, 12) * 0.06;
                 const de = voo ? (voo.origem_codigo || voo.origem || "—") : "—";
                 const para = voo ? (voo.destino_codigo || voo.destino || v.destino || "—") : (v.destino || v.titulo);
-                const ida = voo ? horaDoLugar(voo.partida_em, voo.partida_fuso).texto : dataBoard(v.data_embarque);
+                const ida = voo ? (voo.fonte === "bitrix" ? dataBoard(hojeDe(voo.partida_em)) : horaDoLugar(voo.partida_em, voo.partida_fuso).texto) : dataBoard(v.data_embarque);
                 const abrir = () => onAbrirViagem(v.id);
                 return (
                   <tr key={v.id} className="rel-quadro-linha cursor-pointer" style={{ borderTop: "1px solid #182026" }} onClick={abrir}
                     tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } }}
-                    aria-label={`${v.cliente_nome || v.titulo}, ${v.servico ? SERVICOS[v.servico] : ""}, de ${de} para ${para}, ida ${ida}, ${pax(v)} passageiros, ${s.texto.replace(" ✓", "")}`}>
+                    aria-label={`${v.cliente_nome || v.titulo}, ${v.servico ? SERVICOS[v.servico] : ""}, de ${de} para ${para}, próximo voo ${ida}, ${pax(v)} passageiros, ${s.texto.replace(" ✓", "")}`}>
                     <td className="px-4 py-2 uppercase max-w-[240px] truncate"><Flap texto={(v.cliente_nome || v.titulo).slice(0, 28)} atraso={atraso} /></td>
                     <td className="px-2 py-2 uppercase whitespace-nowrap text-[11px] font-bold" style={{ color: "#B9C4C9" }}>{v.servico ? SERVICOS[v.servico].split(" ")[0] : "—"}</td>
                     <td className="px-2 py-2 uppercase max-w-[140px] truncate" style={{ color: "#B9C4C9" }}><Flap texto={de.slice(0, 16)} atraso={atraso} /></td>
@@ -356,8 +369,16 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
           // o conferente roda em todas: dá os riscos E os trechos (o voo de ida de cada pacote)
           conferirViagens(vs).catch(() => { falhas.push("a conferência de riscos"); return new Map<string, Analise>(); }),
         ]);
+        // o voo de cada pacote no quadro = o PRÓXIMO (0152), o mesmo que a view
+        // escolheu (proximo_voo_em); sem voo futuro, o 1º da viagem.
+        const proxDe = new Map(vs.map((v) => [v.id, v.proximo_voo_em ? new Date(v.proximo_voo_em).getTime() : null]));
         const vp = new Map<string, Trecho>();
-        for (const a of tp.values()) for (const t of a.trechos) if ((t.tipo === "voo_internacional" || t.tipo === "voo_interno") && !vp.has(t.viagem_id)) vp.set(t.viagem_id, t);
+        for (const a of tp.values()) for (const t of a.trechos) {
+          if (t.tipo !== "voo_internacional" && t.tipo !== "voo_interno") continue;
+          const alvo = proxDe.get(t.viagem_id);
+          if (alvo != null && new Date(t.partida_em).getTime() === alvo) vp.set(t.viagem_id, t);
+          else if (!vp.has(t.viagem_id)) vp.set(t.viagem_id, t);
+        }
         if (!vivo) return;
         // só os trechos das viagens do painel (arquivada, seguro sozinho e sem classificação ficam fora)
         const doPainel = new Set(vs.map((v) => v.id));
