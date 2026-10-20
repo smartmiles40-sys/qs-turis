@@ -34,7 +34,11 @@ export function ConcluirModal({ conversa, onFechar, onFeito }: {
   const [nota, setNota] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  useEffect(() => { if (conversa) { setMotivo(null); setNota(""); setErro(null); } }, [conversa]);
+  // Zera só quando abre (ou troca de conversa): a lista se atualiza sozinha e
+  // entrega um objeto novo a cada poucos segundos — depender dele apagava o
+  // motivo marcado (Bruno, 20/10).
+  const abertaId = conversa?.id ?? null;
+  useEffect(() => { if (abertaId) { setMotivo(null); setNota(""); setErro(null); } }, [abertaId]);
   if (!conversa) return null;
 
   // Última mensagem é do cliente e ninguém respondeu: avisa antes.
