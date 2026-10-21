@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Etiqueta, Modal } from "@/rel/ui";
 import EscolherClienteVenda, { type Escolha } from "./EscolherClienteVenda";
+import PropostasDaSolicitacao from "@/propostas/PropostasDaSolicitacao";
 import {
   AGUARDANDO, COR_SETOR, NOME_SETOR, PRIORIDADE_SOL, STATUS_SOL, TOM_SOL, agir, carregarSolicitacao, deInputLocal, haQuanto, marcarVisto,
   paraInputLocal, pessoasDoSetor, primeiroNome, textoPrazo, vincular,
@@ -23,6 +24,8 @@ export interface LinksSol {
   onAbrirCliente?: (id: string) => void;
   onAbrirLead?: (id: string) => void;
   onAbrirConversa?: (id: string) => void;
+  /** Propostas (0156): só nas áreas que têm a tela de Propostas. */
+  onAbrirProposta?: (id: string) => void;
 }
 
 const ROTULO_EVENTO: Record<EventoSol["tipo"], string> = {
@@ -164,6 +167,10 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
               </span>
             </Linha>
           </dl>
+
+          {links?.onAbrirProposta && (
+            <PropostasDaSolicitacao s={s} podeMontar={recebe && s.aberta} onAbrir={(pid) => { onFechar(); links.onAbrirProposta?.(pid); }} />
+          )}
 
           {amarrando && (
             <div className="rel-card p-3 space-y-2">

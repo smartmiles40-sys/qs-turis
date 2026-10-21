@@ -19,6 +19,8 @@ import { podeGerirTime } from "@/rel/equipe/permissao";
 import { REL_CSS } from "@/rel/ui";
 import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
+import PropostasPage from "@/propostas/PropostasPage";
+import { useAprovacoesNovas } from "@/propostas/lib";
 
 /** Cor de Operações: âmbar escuro (#B45309 com texto branco = 5:1, WCAG AA). */
 const OPS_CSS = `${REL_CSS}
@@ -28,7 +30,7 @@ html.dark { --rel-ink: #FDBA74; --rel-soft: rgba(251, 146, 60, .15); }
 `;
 
 const PREFIXO = "ops";
-const TELAS = ["inicio", "solicitacoes", "equipe"] as const;
+const TELAS = ["inicio", "solicitacoes", "propostas", "equipe"] as const;
 type Tela = (typeof TELAS)[number];
 interface Rota { tela: Tela; id?: string }
 
@@ -41,6 +43,7 @@ export default function OpsApp() {
   const { currentUser } = useQsAuth();
   const [rota, setRota] = useState<Rota>(lerRota);
   const [central, recontar] = useContagemSolicitacoes("operacional");
+  const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id);
 
   useEffect(() => {
     const onHash = () => setRota(lerRota());
@@ -58,6 +61,7 @@ export default function OpsApp() {
   const grupos: GrupoDoMenu[] = [
     { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
+      { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined },
     ] },
     ...(podeGerirTime(currentUser, "operacional") ? [{ id: "time", rotulo: "Time", icone: ICONES_AREA.equipe, itens: [{ id: "equipe", rotulo: "Funcionários" }] }] : []),
   ];
@@ -67,7 +71,12 @@ export default function OpsApp() {
       grupos={grupos} ativo={rota.tela === "inicio" ? "solicitacoes" : rota.tela} onIr={(t) => ir({ tela: t as Tela })} chaveMenu="qs_ops_menu_aberto">
       {(rota.tela === "inicio" || rota.tela === "solicitacoes") && (
         <SolicitacoesPage setor="operacional" abrirId={rota.id ?? null} onMudou={recontar}
-          onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })} />
+          onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })}
+          links={{ onAbrirProposta: (id) => ir({ tela: "propostas", id }) }} />
+      )}
+      {rota.tela === "propostas" && (
+        <PropostasPage setor="operacional" abrirId={rota.id ?? null} onMudou={recontarAprovacoes}
+          onAbrirId={(id) => ir(id ? { tela: "propostas", id } : { tela: "propostas" })} />
       )}
       {rota.tela === "equipe" && <EquipePage area="operacional" />}
     </CascaDeArea>

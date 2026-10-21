@@ -179,6 +179,10 @@
     {
       "source": "/pesquisa/:token",
       "destination": "/index.html"
+    },
+    {
+      "source": "/proposta/:token",
+      "destination": "/index.html"
     }
   ]
 }

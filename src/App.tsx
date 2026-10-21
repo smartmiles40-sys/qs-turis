@@ -18,14 +18,17 @@ const OpsApp = lazy(() => import("@/ops/OpsApp"));
 // qualquer coisa de autenticação — quem recebe o link nunca vê o login do QS.
 const DocumentosPublico = lazy(() => import("@/rel/publico/DocumentosPublico"));
 const PesquisaPublica = lazy(() => import("@/rel/publico/PesquisaPublica"));
+// Proposta de viagem pro cliente (0156, 21/10): link + PDF, escolhe a opção.
+const PropostaPublica = lazy(() => import("@/propostas/PropostaPublica"));
 
 function paginaPublica(): ReactNode | null {
-  const m = window.location.pathname.match(/^\/(documentos|pesquisa)\/([0-9a-f]{64})\/?$/i);
+  const m = window.location.pathname.match(/^\/(documentos|pesquisa|proposta)\/([0-9a-f]{64})\/?$/i);
   if (!m) return null;
   const token = m[2].toLowerCase();
+  const qual = m[1].toLowerCase();
   return (
     <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
-      {m[1].toLowerCase() === "documentos" ? <DocumentosPublico token={token} /> : <PesquisaPublica token={token} />}
+      {qual === "documentos" ? <DocumentosPublico token={token} /> : qual === "pesquisa" ? <PesquisaPublica token={token} /> : <PropostaPublica token={token} />}
     </Suspense>
   );
 }
