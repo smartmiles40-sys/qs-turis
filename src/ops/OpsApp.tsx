@@ -10,8 +10,11 @@
 //
 // Pra pôr uma tela: mesmo jeito do src/fin/FinApp.tsx (TELAS → grupo → render).
 // Banco: ops_tem_acesso() / ops_pode_configurar() nas policies (0126).
+//
+// 21/10: EXPEDIÇÕES — todas as telas internas do Sistema de Expedições vivem
+// aqui (src/expedicoes/, banco 0160–0162). Grupo "Expedições" no menu.
 // -----------------------------------------------------------------------------
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import CascaDeArea, { ICONES_AREA, hashDaArea, lerHashDaArea, type GrupoDoMenu } from "@/area/CascaDeArea";
 import EquipePage from "@/rel/equipe/EquipePage";
@@ -21,6 +24,11 @@ import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import PropostasPage from "@/propostas/PropostasPage";
 import { useAprovacoesNovas } from "@/propostas/lib";
+import { TELAS_EXP, type TelaExp } from "@/expedicoes/contexto";
+import { grupoExpedicoes } from "@/expedicoes/menu";
+import { useContagensExp } from "@/expedicoes/useContagensExp";
+
+const ExpedicoesArea = lazy(() => import("@/expedicoes/ExpedicoesArea"));
 
 /** Cor de Operações: âmbar escuro (#B45309 com texto branco = 5:1, WCAG AA). */
 const OPS_CSS = `${REL_CSS}
@@ -30,8 +38,9 @@ html.dark { --rel-ink: #FDBA74; --rel-soft: rgba(251, 146, 60, .15); }
 `;
 
 const PREFIXO = "ops";
-const TELAS = ["inicio", "solicitacoes", "propostas", "equipe"] as const;
+const TELAS = ["inicio", "solicitacoes", "propostas", "equipe", ...TELAS_EXP] as const;
 type Tela = (typeof TELAS)[number];
+const ehExp = (t: string): t is TelaExp => (TELAS_EXP as readonly string[]).includes(t);
 interface Rota { tela: Tela; id?: string }
 
 function lerRota(): Rota {
@@ -44,6 +53,7 @@ export default function OpsApp() {
   const [rota, setRota] = useState<Rota>(lerRota);
   const [central, recontar] = useContagemSolicitacoes("operacional");
   const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "operacional");
+  const contExp = useContagensExp();
 
   useEffect(() => {
     const onHash = () => setRota(lerRota());
@@ -63,6 +73,7 @@ export default function OpsApp() {
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
       { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined },
     ] },
+    grupoExpedicoes(contExp),
     ...(podeGerirTime(currentUser, "operacional") ? [{ id: "time", rotulo: "Time", icone: ICONES_AREA.equipe, itens: [{ id: "equipe", rotulo: "Funcionários" }] }] : []),
   ];
 
@@ -79,6 +90,11 @@ export default function OpsApp() {
           onAbrirId={(id) => ir(id ? { tela: "propostas", id } : { tela: "propostas" })} />
       )}
       {rota.tela === "equipe" && <EquipePage area="operacional" />}
+      {ehExp(rota.tela) && (
+        <Suspense fallback={null}>
+          <ExpedicoesArea tela={rota.tela} caminho={rota.id} ir={(tela, id) => ir({ tela, id })} />
+        </Suspense>
+      )}
     </CascaDeArea>
   );
 }

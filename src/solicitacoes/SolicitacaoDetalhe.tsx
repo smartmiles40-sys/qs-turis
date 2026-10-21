@@ -4,7 +4,7 @@
 // de cada lado e a conversa/histórico — a troca sobre o pedido fica AQUI, não
 // no WhatsApp pessoal.
 //
-//   quem RECEBE: Aceitar · Passar pra… · Aguardando… · Concluir · Recusar
+//   quem RECEBE: Assumir · Escolher quem faz / Passar pra outra pessoa… · Aguardando… · Concluir · Recusar
 //   quem PEDIU:  Confirmar ✔ · Reabrir ↺ · Cancelar
 //   todo mundo:  comentar
 //
@@ -39,7 +39,7 @@ export interface LinksSol {
 }
 
 const ROTULO_EVENTO: Record<EventoSol["tipo"], string> = {
-  criada: "pediu", aceita: "aceitou", passada: "passou pra", status: "mudou o andamento", comentario: "comentou", prazo: "mudou o prazo",
+  criada: "pediu", aceita: "assumiu o pedido", passada: "passou o pedido pra", status: "mudou o andamento", comentario: "comentou", prazo: "mudou o prazo",
   concluida: "concluiu", confirmada: "confirmou que resolveu", reaberta: "reabriu", recusada: "recusou", cancelada: "cancelou",
   vinculada: "amarrou a", ajuste: "pediu ajuste", ajustada: "enviou os ajustes", desfecho: "deu o desfecho",
 };
@@ -267,13 +267,13 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
             <div className="flex flex-wrap gap-2">
               {recebe && s.aberta && (s.responsavel_id !== meuId || (ehCotacao && s.status === "nova")) && (
                 <Botao variante="primario" disabled={ocupado} onClick={() => void rodar("aceitar")}>
-                  {ehCotacao && s.status === "nova" ? "Aprovar — começar a cotação" : s.responsavel_id ? "Pegar pra mim" : "Aceitar — é comigo"}
+                  {ehCotacao && s.status === "nova" ? "Aprovar — começar a cotação" : s.responsavel_id ? `Assumir no lugar de ${primeiroNome(s.responsavel_nome) || "quem está"}` : "Assumir — eu faço"}
                 </Botao>
               )}
               {recebe && s.aberta && !esperandoAjuste && (
                 <Botao disabled={ocupado} onClick={() => pedir({ acao: "ajuste", titulo: "O que está faltando?", dica: "Ex.: falta a idade das crianças; confirmar se o aéreo sai de Campinas.", obrigatorio: true, botao: "Pedir ajuste" })}>Pedir ajuste</Botao>
               )}
-              {recebe && s.aberta && <Botao disabled={ocupado} onClick={() => pessoasDoSetor(s.para_setor).then(setPessoas).catch(() => setPessoas([]))}>Passar pra…</Botao>}
+              {recebe && s.aberta && <Botao disabled={ocupado} onClick={() => pessoasDoSetor(s.para_setor).then(setPessoas).catch(() => setPessoas([]))}>{s.responsavel_id === meuId ? "Passar pra outra pessoa…" : "Escolher quem faz…"}</Botao>}
               {recebe && s.aberta && s.responsavel_id && (
                 <Botao variante={s.responsavel_id === meuId ? "primario" : "secundario"} disabled={ocupado}
                   onClick={() => pedir(ehCotacao
@@ -296,6 +296,13 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
               {pediu && faltaDesfecho && <Botao variante="primario" disabled={ocupado} onClick={() => { setErro(null); setDesfechando({ tipo: null, motivo: "", texto: "" }); }}>Dar o desfecho</Botao>}
               {pediu && s.status === "concluida" && !s.confirmado_em && !ehCotacao && <Botao variante="primario" disabled={ocupado} onClick={() => void rodar("confirmar")}>✔ Resolveu, obrigado</Botao>}
               {pediu && (s.status === "concluida" || s.status === "recusada") && <Botao disabled={ocupado} onClick={() => pedir({ acao: "reabrir", titulo: "O que ainda falta?", dica: "Volta pra fila de quem recebeu.", obrigatorio: true, botao: "Reabrir" })}>↺ Reabrir</Botao>}
+              {recebe && s.aberta && (
+                <p className="basis-full text-[12px] leading-snug" style={{ color: "var(--ink3)" }}>
+                  {s.responsavel_id === meuId
+                    ? <>Este pedido está <b>com você</b>: você responde por ele e pelo prazo. Se outra pessoa de {NOME_SETOR[s.para_setor]} for fazer, use <b>Passar pra outra pessoa</b> — o pedido sai do seu nome e vai pro dela.</>
+                    : <><b>Assumir</b>: o pedido fica no seu nome e você passa a responder por ele e pelo prazo{s.responsavel_id ? ` (sai do nome de ${primeiroNome(s.responsavel_nome) || "quem estava"})` : ""}. <b>Escolher quem faz</b>: você indica a pessoa de {NOME_SETOR[s.para_setor]} que vai fazer, e o pedido vai pro nome dela.</>}
+                </p>
+              )}
               {pediu && s.aberta && s.criado_por === meuId && <Botao variante="fantasma" disabled={ocupado} onClick={() => pedir({ acao: "cancelar", titulo: "Cancelar o pedido?", dica: "Motivo (opcional). Ex.: o cliente desistiu.", obrigatorio: false, botao: "Cancelar pedido", perigo: true })}>Cancelar pedido</Botao>}
             </div>
           )}
@@ -356,11 +363,12 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
 
           {pessoas !== null && (
             <div className="rel-card p-3 space-y-2">
-              <p className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>Passar pra quem de {NOME_SETOR[s.para_setor]}?</p>
+              <p className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>Quem de {NOME_SETOR[s.para_setor]} vai fazer este pedido?</p>
+              <p className="text-[12px]" style={{ color: "var(--ink3)" }}>O pedido vai pro nome da pessoa escolhida: ela vê na fila dela e passa a responder pelo prazo.{s.responsavel_id ? ` Hoje está com ${primeiroNome(s.responsavel_nome) || "alguém"}.` : ""}</p>
               {pessoas.length === 0 && <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Ninguém cadastrado nesse setor ainda.</p>}
               <div className="flex flex-wrap gap-1.5">
                 {pessoas.map((p) => (
-                  <Botao key={p.id} disabled={ocupado || p.id === s.responsavel_id} onClick={() => void rodar("passar", null, p.id)}>{p.name}</Botao>
+                  <Botao key={p.id} disabled={ocupado || p.id === s.responsavel_id} onClick={() => void rodar("passar", null, p.id)}>{p.name}{p.id === meuId ? " (eu)" : ""}{p.id === s.responsavel_id ? " · atual" : ""}</Botao>
                 ))}
               </div>
               <Botao variante="fantasma" onClick={() => setPessoas(null)}>Voltar</Botao>

@@ -1,0 +1,27 @@
+-- TROCA À NOITE · passo 3: religa os gatilhos e recria as FKs (rodar 02_fks.sql logo depois deste).
+alter table acesso_senhas enable trigger user;
+alter table arquivos enable trigger user;
+alter table checklist_itens enable trigger user;
+alter table compras_bitrix enable trigger user;
+alter table custos enable trigger user;
+alter table documentos enable trigger user;
+alter table expedicao_avisos enable trigger user;
+alter table expedicao_info enable trigger user;
+alter table expedicao_passeios enable trigger user;
+alter table expedicao_voos enable trigger user;
+alter table expedicoes enable trigger user;
+alter table extensoes enable trigger user;
+alter table fornecedores enable trigger user;
+alter table grupos_expedicao enable trigger user;
+alter table inscricoes_pendentes enable trigger user;
+alter table links_expedicao enable trigger user;
+alter table pagamentos enable trigger user;
+alter table passageiro_requisitos enable trigger user;
+alter table passageiros enable trigger user;
+alter table passeios_opcionais enable trigger user;
+alter table quartos enable trigger user;
+alter table requisitos_destino enable trigger user;
+alter table roteiro_dia_fotos enable trigger user;
+alter table roteiro_dias enable trigger user;
+alter table roteiro_lider_dias enable trigger user;
+alter table usuarios enable trigger user;

@@ -17,7 +17,7 @@
 // alguém do time.
 // -----------------------------------------------------------------------------
 import TrocarArea from "@/components/TrocarArea";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
@@ -52,6 +52,15 @@ import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import PropostasPage from "@/propostas/PropostasPage";
 import { useAprovacoesNovas } from "@/propostas/lib";
+import type { TelaExp } from "@/expedicoes/contexto";
+
+// Expedições (21/10): o Rel vê o módulo de Expedições do QS em modo só-leitura
+// (as policies já barram a escrita — is_readonly) e decide inscrições.
+// Telas com prefixo "exp-" pra não bater com as do Rel ("clientes", "passageiros").
+const ExpedicoesArea = lazy(() => import("@/expedicoes/ExpedicoesArea"));
+const REL_EXP = { "exp-expedicoes": "expedicoes", "exp-pacotes": "pacotes", "exp-passageiros": "passageiros", "exp-inscricoes": "inscricoes", "exp-avisos": "avisos" } as const satisfies Record<string, TelaExp>;
+type TelaRelExp = keyof typeof REL_EXP;
+const ehRelExp = (t: string): t is TelaRelExp => t in REL_EXP;
 
 type Rota =
   | { tela: "inicio" }
@@ -59,7 +68,7 @@ type Rota =
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" } | { tela: "cadastros" }
   | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
   | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
-  | { tela: "config" };
+  | { tela: "config" } | { tela: TelaRelExp; id?: string };
 type Tela = Rota["tela"];
 
 const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "cadastros", "esteira", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
@@ -74,6 +83,7 @@ function lerRota(): Rota {
   if (tela === "grupos") return id ? { tela: "grupos", id: decodeURIComponent(id) } : { tela: "grupos" };
   if (tela === "solicitacoes") return id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" };
   if (tela === "propostas") return id ? { tela: "propostas", id } : { tela: "propostas" };
+  if (ehRelExp(tela)) return id ? { tela, id: decodeURIComponent(id) } : { tela };
   if ((SIMPLES as string[]).includes(tela)) return { tela } as Rota;
   return { tela: "inicio" };
 }
@@ -85,6 +95,7 @@ function hashDe(r: Rota) {
   if (r.tela === "grupos" && r.id) return `#rel/grupos/${encodeURIComponent(r.id)}`;
   if (r.tela === "solicitacoes" && r.id) return `#rel/solicitacoes/${r.id}`;
   if (r.tela === "propostas" && r.id) return `#rel/propostas/${r.id}`;
+  if (ehRelExp(r.tela) && "id" in r && r.id) return `#rel/${r.tela}/${encodeURIComponent(r.id)}`;
   return r.tela === "inicio" ? "#rel" : `#rel/${r.tela}`;
 }
 
@@ -330,6 +341,13 @@ export default function RelApp() {
       { id: "viagens", rotulo: "Viagens" },
       { id: "alertas", rotulo: "Alertas", badge: cont?.alertasAltos || undefined, alerta: true },
     ] },
+    { id: "expedicoes", rotulo: "Expedições", icone: "viagens", itens: [
+      { id: "exp-expedicoes", rotulo: "Expedições" },
+      { id: "exp-pacotes", rotulo: "Pacotes" },
+      { id: "exp-passageiros", rotulo: "Clube de viajantes" },
+      { id: "exp-inscricoes", rotulo: "Inscrições" },
+      { id: "exp-avisos", rotulo: "Avisos" },
+    ] },
     { id: "pos", rotulo: "Pós-venda", icone: "pos", itens: [
       { id: "disparos", rotulo: "Disparos" },
       { id: "automacoes", rotulo: "Automações" },
@@ -543,6 +561,15 @@ export default function RelApp() {
           {rota.tela === "recompra" && <RecompraPage onAbrirCliente={abrirCliente} />}
           {rota.tela === "config" && <ConfigPage onAbrirWhatsApp={() => ir({ tela: "whatsapp" })} />}
           {rota.tela === "equipe" && <EquipePage />}
+          {ehRelExp(rota.tela) && (
+            <Suspense fallback={null}>
+              <ExpedicoesArea setorRelacionamento tela={REL_EXP[rota.tela]} caminho={"id" in rota ? rota.id : undefined}
+                ir={(tela, id) => {
+                  const rel = (Object.keys(REL_EXP) as TelaRelExp[]).find((k) => REL_EXP[k] === tela);
+                  if (rel) ir({ tela: rel, id });
+                }} />
+            </Suspense>
+          )}
           {rota.tela === "modelos" && <ModelosPage />}
           {rota.tela === "agenda" && <AgendaPage onAbrirCliente={(id) => ir({ tela: "ficha", id })} onAbrirViagem={(id) => ir({ tela: "viagem", id })} onAbrirConversa={(id) => ir({ tela: "atendimento", id })} />}
         </div>

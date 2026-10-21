@@ -18,9 +18,11 @@
 // gestor), e a pessoa fica só com aquela área.
 //
 // Body (JSON): { access_token, action: 'create'|'update'|'delete'|'listar_equipe', user: {...}, setor? }
+//   + Expedições (21/10): action 'exp_usuarios' / 'exp_inscricao_bitrix' — ver o fim do arquivo.
 //   setor: de qual área — padrão: a primeira do gestor (admin: 'relacionamento',
 //   que é o que a tela de Equipe do Rel sempre pediu).
 // -----------------------------------------------------------------------------
+import { randomBytes } from 'node:crypto';
 import { rest } from './_supabaseAdmin.js';
 
 // Todo id que entra em filtro do PostgREST PRECISA passar por aqui. Sem isto,
@@ -104,6 +106,11 @@ export default async function handler(req, res) {
   // 1) Autenticação do chamador
   const callerId = await verifyCaller(access_token);
   if (!callerId || !idValido(callerId)) return res.status(401).json({ success: false, error: 'Sessão inválida' });
+
+  // Expedições (21/10/2026): ações próprias, com a permissão DAS EXPEDIÇÕES
+  // (admin do app antigo também vale) — por isso vêm antes da trava do QS abaixo.
+  if (action === 'exp_usuarios') return expUsuarios(req, res, body, callerId);
+  if (action === 'exp_inscricao_bitrix') return expInscricaoBitrix(res, body, access_token);
 
   // 2) Autorização: admin, ou gestora do Relacionamento (escopo travado abaixo)
   let caller;
@@ -335,4 +342,187 @@ async function recusaDoGestorDeArea({ action, user, callerId, area }) {
 
 function safeJson(s) {
   try { return JSON.parse(s); } catch { return {}; }
+}
+
+// =============================================================================
+// EXPEDIÇÕES (21/10/2026) — telas que no app antigo usavam service role.
+// Tudo aqui é ADICIONAL: não mexe nas ações acima.
+//
+// action 'exp_usuarios' (tela Usuários das Expedições). Quem pode: admin das
+// Expedições = admin do QS OU papel 'admin' na tabela `usuarios` (app antigo) —
+// a mesma regra de exp_eh_admin() no banco.
+//   op 'resetar_senha' { usuario_id } → senha nova FORTE (no antigo era "Setur@"+4
+//      dígitos). A conta de login é a MESMA do QS: a senha nova vale nos dois.
+//      Quem é admin só das Expedições não reseta admin/gestor do QS (senão viraria
+//      dono do QS trocando a senha de um admin).
+//   op 'criar' { email, nome, papel } → login novo (auth) + perfil do QS + linha
+//      em `usuarios`. Papel nas Expedições: admin | operacional | relacionamento | leitura.
+//      No QS a pessoa entra em Operações (operacional) ou Relacionamento.
+//
+// action 'exp_inscricao_bitrix' { passageiro_id } → avisa o Bitrix (via n8n) que a
+//   inscrição foi aprovada — igual ao app antigo, melhor esforço. Precisa das envs
+//   EXP_N8N_BITRIX_OUTBOUND_URL e EXP_WEBHOOK_SECRET (as mesmas N8N_BITRIX_OUTBOUND_URL
+//   / WEBHOOK_SECRET do projeto antigo); sem elas responde enviado:false.
+// =============================================================================
+const EXP_PAPEIS = new Set(['admin', 'operacional', 'relacionamento', 'leitura']);
+const ALFA_SENHA = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+
+/** Senha forte e fácil de ditar: 3 blocos de 4 (ex.: Xk7p-Rm2q-Tz9w), ~69 bits. */
+function senhaForte() {
+  const n = ALFA_SENHA.length;
+  const lim = 256 - (256 % n);
+  let s = '';
+  while (s.length < 12) {
+    for (const b of randomBytes(32)) {
+      if (s.length >= 12) break;
+      if (b < lim) s += ALFA_SENHA[b % n];
+    }
+  }
+  return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8, 12)}`;
+}
+
+async function expUsuarios(req, res, body, callerId) {
+  const op = body.op;
+  let qsCaller, expCaller;
+  try {
+    qsCaller = (await rest(`qs_users?select=role,is_active&id=eq.${callerId}&limit=1`))?.[0] || null;
+    expCaller = (await rest(`usuarios?select=papel&id=eq.${callerId}&limit=1`))?.[0] || null;
+  } catch {
+    return res.status(500).json({ success: false, error: 'Falha ao validar permissão' });
+  }
+  const adminQs = qsCaller?.role === 'admin' && qsCaller?.is_active !== false;
+  const adminExp = adminQs || expCaller?.papel === 'admin';
+  if (!adminExp) return res.status(403).json({ success: false, error: 'Apenas admins das Expedições.' });
+
+  try {
+    if (op === 'resetar_senha') {
+      const alvoId = body.usuario_id;
+      if (!idValido(alvoId)) return res.status(400).json({ success: false, error: 'Usuário inválido' });
+      if (alvoId === callerId) return res.status(400).json({ success: false, error: 'Pra trocar a sua própria senha, use o seu perfil.' });
+      const alvo = (await rest(`usuarios?select=id,nome&id=eq.${alvoId}&limit=1`))?.[0];
+      if (!alvo) return res.status(404).json({ success: false, error: 'Usuário não encontrado nas Expedições.' });
+      const alvoQs = (await rest(`qs_users?select=role&id=eq.${alvoId}&limit=1`))?.[0];
+      if (!adminQs && alvoQs && ['admin', 'gestor'].includes(alvoQs.role)) {
+        return res.status(403).json({ success: false, error: 'Essa pessoa é admin/gestor no QS — só um admin do QS reseta a senha dela.' });
+      }
+      const senha = senhaForte();
+      try {
+        await authAdmin(`/${alvoId}`, { method: 'PUT', body: { password: senha } });
+      } catch (e) {
+        if (e?.status === 404) return res.status(404).json({ success: false, error: 'Essa pessoa ainda não tem login no QS — crie o login primeiro.' });
+        throw e;
+      }
+      await rest(`usuarios?id=eq.${alvoId}`, { method: 'PATCH', body: { senha_provisoria: true }, prefer: 'return=minimal' });
+      return res.status(200).json({ success: true, senha });
+    }
+
+    if (op === 'criar') {
+      const email = String(body.email || '').toLowerCase().trim();
+      const nome = String(body.nome || '').trim() || email.split('@')[0];
+      const papel = body.papel;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ success: false, error: 'E-mail inválido' });
+      if (!EXP_PAPEIS.has(papel)) return res.status(400).json({ success: false, error: 'Papel inválido' });
+      const emailQ = encodeURIComponent(email);
+      const jaQs = (await rest(`qs_users?select=id&email=ilike.${emailQ}&limit=1`))?.[0];
+      if (jaQs) return res.status(409).json({ success: false, error: 'Essa pessoa já tem login no QS — use "Dar acesso a quem já usa o QS".' });
+      const jaExp = (await rest(`usuarios?select=id&email=ilike.${emailQ}&limit=1`))?.[0];
+      if (jaExp) return res.status(409).json({ success: false, error: 'Já existe um usuário das Expedições com esse e-mail.' });
+
+      const setor = papel === 'relacionamento' ? 'relacionamento' : 'operacional';
+      const senha = senhaForte();
+      const authUser = await authAdmin('', { method: 'POST', body: { email, password: senha, email_confirm: true } });
+      try {
+        await rest('qs_users', { method: 'POST', prefer: 'return=minimal', body: { id: authUser.id, name: nome, email, role: setor, setores: [setor], is_active: true } });
+        await rest('usuarios', { method: 'POST', prefer: 'return=minimal', body: { id: authUser.id, email, nome, papel, senha_provisoria: true } });
+      } catch (e) {
+        // desfaz: sem isso sobrava login válido sem perfil
+        try { await rest(`qs_users?id=eq.${authUser.id}`, { method: 'DELETE', prefer: 'return=minimal' }); } catch { /* nada a desfazer */ }
+        try { await authAdmin(`/${authUser.id}`, { method: 'DELETE' }); } catch (r) { console.error('[admin-user] exp criar: rollback falhou', authUser.id, r?.message); }
+        throw e;
+      }
+      return res.status(200).json({ success: true, id: authUser.id, senha });
+    }
+
+    return res.status(400).json({ success: false, error: 'Operação inválida' });
+  } catch (err) {
+    console.error('[admin-user] exp_usuarios', op, err?.status || '', err?.message || err);
+    const st = Number(err?.status) >= 400 && Number(err?.status) < 600 ? Number(err.status) : 500;
+    return res.status(st).json({ success: false, error: err?.message || 'Falha na operação' });
+  }
+}
+
+async function expInscricaoBitrix(res, body, accessToken) {
+  const paxId = body.passageiro_id;
+  if (!idValido(paxId)) return res.status(400).json({ success: false, error: 'Passageiro inválido' });
+  const base = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+  // Permissão: a MESMA do banco (quem decide inscrições), perguntada com o token de quem chama.
+  try {
+    const r = await fetch(`${base}/rest/v1/rpc/exp_pode_decidir_inscricao`, {
+      method: 'POST',
+      headers: { apikey: SR(), Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (!r.ok || (await r.json()) !== true) return res.status(403).json({ success: false, error: 'Sem permissão para decidir inscrições.' });
+  } catch {
+    return res.status(500).json({ success: false, error: 'Falha ao validar permissão' });
+  }
+  const url = process.env.EXP_N8N_BITRIX_OUTBOUND_URL;
+  if (!url) return res.status(200).json({ success: true, enviado: false, motivo: 'EXP_N8N_BITRIX_OUTBOUND_URL não configurada' });
+  try {
+    const p = (await rest(`passageiros?select=*&id=eq.${paxId}&limit=1`))?.[0];
+    if (!p) return res.status(404).json({ success: false, error: 'Passageiro não encontrado' });
+    const exp = idValido(p.expedicao_id) ? (await rest(`expedicoes?select=codigo,nome&id=eq.${p.expedicao_id}&limit=1`))?.[0] : null;
+    // expedições anteriores (não canceladas) da pessoa pelo CPF, sem contar a atual
+    const cpf = String(p.cpf || '').replace(/\D/g, '');
+    let anteriores = 0;
+    if (cpf.length === 11) {
+      const fmt = `${cpf.slice(0, 3)}.${cpf.slice(3, 6)}.${cpf.slice(6, 9)}-${cpf.slice(9)}`;
+      const linhas = await rest(`passageiros?select=expedicao_id,status_reserva&cpf=in.(${cpf},${encodeURIComponent(`"${fmt}"`)})`);
+      anteriores = new Set((linhas || [])
+        .filter((l) => l.expedicao_id && l.expedicao_id !== p.expedicao_id && l.status_reserva !== 'Cancelado')
+        .map((l) => l.expedicao_id)).size;
+    }
+    let passaporte_arquivo_url = null;
+    let passaporte_arquivo_nome = null;
+    if (idValido(p.passaporte_arquivo_id)) {
+      const a = (await rest(`arquivos?select=storage_path,nome&id=eq.${p.passaporte_arquivo_id}&limit=1`))?.[0];
+      if (a?.storage_path) {
+        const caminho = a.storage_path.split('/').map(encodeURIComponent).join('/');
+        const s = await fetch(`${base}/storage/v1/object/sign/arquivos-expedicoes/${caminho}`, {
+          method: 'POST',
+          headers: { apikey: SR(), Authorization: `Bearer ${SR()}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expiresIn: 3600 }),
+        });
+        const sj = s.ok ? await s.json() : null;
+        if (sj?.signedURL) { passaporte_arquivo_url = `${base}/storage/v1${sj.signedURL}`; passaporte_arquivo_nome = a.nome; }
+      }
+    }
+    const payload = {
+      evento: 'inscricao_aprovada',
+      bitrix_deal_id: p.bitrix_deal_id, bitrix_contact_id: p.bitrix_contact_id,
+      expedicao_codigo: exp?.codigo ?? null, expedicao_nome: exp?.nome ?? null, expedicoes_anteriores: anteriores,
+      nome_completo: p.nome_completo, cpf: p.cpf, email: p.email, telefone: p.telefone, data_nascimento: p.data_nascimento,
+      passaporte: p.passaporte, validade_passaporte: p.validade_passaporte, status_reserva: p.status_reserva, observacoes: p.observacoes,
+      endereco: { cep: p.endereco_cep, rua: p.endereco_rua, numero: p.endereco_numero, complemento: p.endereco_complemento, bairro: p.endereco_bairro, cidade: p.endereco_cidade, estado: p.endereco_estado },
+      contato_emergencia_nome: p.contato_emergencia_nome, contato_emergencia_vinculo: p.contato_emergencia_vinculo, contato_emergencia_fone: p.contato_emergencia_fone,
+      pref_marcar_assento: p.pref_marcar_assento, pref_upgrade_classe: p.pref_upgrade_classe,
+      ja_viajou_internacional: p.ja_viajou_internacional, paises_visitados: p.paises_visitados,
+      saude: p.saude ?? null, passaporte_arquivo_url, passaporte_arquivo_nome,
+    };
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 7000);
+    let r;
+    try {
+      r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-webhook-secret': process.env.EXP_WEBHOOK_SECRET || '' },
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      });
+    } finally { clearTimeout(t); }
+    return res.status(200).json({ success: true, enviado: r.ok, motivo: r.ok ? undefined : `n8n status ${r.status}` });
+  } catch (err) {
+    console.error('[admin-user] exp_inscricao_bitrix', err?.message || err);
+    return res.status(200).json({ success: true, enviado: false, motivo: 'erro ao enviar' });
+  }
 }
