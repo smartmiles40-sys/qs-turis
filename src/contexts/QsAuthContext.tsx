@@ -84,22 +84,22 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   // menu, mas ficou de fora desta lista — ou seja, existia só pro admin, e quem
   // precisa acompanhar o que a IA está fazendo com a carteira é justamente a
   // coordenação. Ninguém notou porque o Bruno entra como admin.
-  gestor: ["minha-agenda", "painel", "whatsapp", "cobertura", "atendimento-ia", "leads", "cadencias", "reunioes", "dashboard", "analises", "monitor-leads", "lead-detail", "cadencia-criar", "cadencia-editar", "solicitacoes"],
+  gestor: ["minha-agenda", "painel", "whatsapp", "cobertura", "atendimento-ia", "leads", "cadencias", "reunioes", "dashboard", "analises", "monitor-leads", "lead-detail", "cadencia-criar", "cadencia-editar", "solicitacoes", "propostas"],
   // "minha-agenda" entrou pro SDR em 01/09: ele precisa ver as reunioes que
   // ELE agendou e que o closer ainda nao deu desfecho. Sem isso, quem marcou a
   // reuniao e a unica pessoa sem como saber se ela virou alguma coisa.
   // "monitor-leads" (28/09): o SDR acompanha a distribuição — números do time
   // todo, lista só dos leads dele (0097).
-  sdr: ["painel", "minha-agenda", "whatsapp", "cobertura", "leads", "reunioes", "dashboard", "monitor-leads", "lead-detail", "solicitacoes"],
+  sdr: ["painel", "minha-agenda", "whatsapp", "cobertura", "leads", "reunioes", "dashboard", "monitor-leads", "lead-detail", "solicitacoes", "propostas"],
   // O Painel entrou pro closer junto com a atividade de DESFECHO: sem ele, a
   // cobrança nasceria numa fila que o closer não enxerga.
-  closer: ["minha-agenda", "painel", "whatsapp", "leads", "reunioes", "dashboard", "lead-detail", "solicitacoes"],
+  closer: ["minha-agenda", "painel", "whatsapp", "leads", "reunioes", "dashboard", "lead-detail", "solicitacoes", "propostas"],
   // Espectador: enxerga o funil inteiro pra medir campanha. Fica de fora o
   // Painel e o WhatsApp (telas de EXECUÇÃO — quem não executa não atende) e as
   // Configurações (que só existem pra mudar coisa).
   marketing: ["leads", "lead-detail", "cobertura", "cadencias", "reunioes", "dashboard", "analises", "monitor-leads"],
   // "solicitacoes" (20/10, 0149): SDR, closer e gestor pedem e recebem pedidos
-  // dos outros setores pela Central.
+  // dos outros setores pela Central. "propostas" (0157): montam e enviam cotações.
   // Relacionamento, Financeiro e Operações não têm tela no Comercial: cada um
   // trabalha na área própria (0100, 0126).
   relacionamento: [],

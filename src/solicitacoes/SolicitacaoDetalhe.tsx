@@ -24,7 +24,8 @@ export interface LinksSol {
   onAbrirCliente?: (id: string) => void;
   onAbrirLead?: (id: string) => void;
   onAbrirConversa?: (id: string) => void;
-  /** Propostas (0156): só nas áreas que têm a tela de Propostas. */
+  /** Propostas (0156): o editor, nas áreas que têm a tela de Propostas. Sem isso, a
+   *  solicitação ainda mostra as propostas e quem pediu abre/envia por cima (0157). */
   onAbrirProposta?: (id: string) => void;
 }
 
@@ -168,9 +169,11 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
             </Linha>
           </dl>
 
-          {links?.onAbrirProposta && (
-            <PropostasDaSolicitacao s={s} podeMontar={recebe && s.aberta} onAbrir={(pid) => { onFechar(); links.onAbrirProposta?.(pid); }} />
-          )}
+          {/* Em toda solicitação (0157): quem pediu abre a proposta aqui mesmo pra enviar. */}
+          <PropostasDaSolicitacao s={s} podeMontar={recebe && s.aberta && !!links?.onAbrirProposta}
+            onAbrirEditor={links?.onAbrirProposta ? (pid) => { onFechar(); links.onAbrirProposta?.(pid); } : undefined}
+            onMudou={() => { void carregar(); onMudou(); }} />
+
 
           {amarrando && (
             <div className="rel-card p-3 space-y-2">

@@ -2,11 +2,15 @@
 // -----------------------------------------------------------------------------
 // Lista de propostas (0156) + abre o editor. Endereço: #<area>/propostas[/<id>|/nova].
 // Aprovação pelo link que quem montou ainda não viu fica em destaque no topo.
+//
+// 0157: cada time vê as SUAS + as que pediu pra outro time montar (essas abrem
+// no lado de quem envia — PropostaParaEnviar — via o editor).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Entrada, Etiqueta, Vazio } from "@/rel/ui";
 import PropostaEditor from "./PropostaEditor";
+import { NOME_SETOR } from "@/solicitacoes/lib";
 import { STATUS_PROPOSTA, TOM_PROPOSTA, dataBr, listarPropostas, type PropostaResumo, type StatusProposta } from "./lib";
 import type { Setor } from "@/components/sdr/types";
 
@@ -35,21 +39,24 @@ export default function PropostasPage({ setor, abrirId, onAbrirId, onMudou }: {
   const [busca, setBusca] = useState("");
   const [lista, setLista] = useState<PropostaResumo[]>([]);
   const [novas, setNovas] = useState<PropostaResumo[]>([]);
+  const [prontas, setProntas] = useState<PropostaResumo[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     try {
-      const [l, aprov] = await Promise.all([
-        listarPropostas({ status: filtro === "todas" ? undefined : filtro === "abertas" ? "abertas" : (filtro as StatusProposta), busca }),
-        listarPropostas({ status: "aprovada" }),
+      const [l, aprov, pr] = await Promise.all([
+        listarPropostas({ setor, status: filtro === "todas" ? undefined : filtro === "abertas" ? "abertas" : (filtro as StatusProposta), busca }),
+        listarPropostas({ setor, status: "aprovada" }),
+        listarPropostas({ setor, status: "pronta" }),
       ]);
       setLista(l);
-      setNovas(aprov.filter((x) => x.criado_por === currentUser?.id && !x.aprovacao_vista_em));
+      setNovas(aprov.filter((x) => (x.criado_por === currentUser?.id || x.enviada_por === currentUser?.id) && !x.aprovacao_vista_em));
+      setProntas(pr.filter((x) => x.de_outro_time && x.sol_de_setor === setor));
       setErro(null);
     } catch (e) { setErro(e instanceof Error ? e.message : "Não carregou."); }
     setCarregando(false);
-  }, [filtro, busca, currentUser?.id]);
+  }, [filtro, busca, currentUser?.id, setor]);
 
   useEffect(() => {
     if (abrirId) return;
@@ -77,6 +84,17 @@ export default function PropostasPage({ setor, abrirId, onAbrirId, onMudou }: {
           {novas.map((x) => (
             <button key={x.id} type="button" onClick={() => onAbrirId(x.id)} className="block text-left text-[13.5px] underline" style={{ color: "var(--ink)" }}>
               Nº {x.numero} · {x.cliente_nome || x.titulo || x.destino || "Proposta"} · há {haQuanto(x.aprovada_em!)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {prontas.length > 0 && (
+        <div className="rounded-xl p-3 space-y-1.5 border" style={{ borderColor: "var(--rel)" }}>
+          <p className="text-[13px] font-bold" style={{ color: "var(--rel-ink)" }}>📄 {prontas.length === 1 ? "Uma proposta pronta" : `${prontas.length} propostas prontas`} pra você conferir e enviar ao cliente</p>
+          {prontas.map((x) => (
+            <button key={x.id} type="button" onClick={() => onAbrirId(x.id)} className="block text-left text-[13.5px] underline" style={{ color: "var(--ink)" }}>
+              Nº {x.numero} · {x.cliente_nome || x.titulo || x.destino || "Proposta"} · montada por {NOME_SETOR[x.setor]}
             </button>
           ))}
         </div>
@@ -110,6 +128,7 @@ export default function PropostasPage({ setor, abrirId, onAbrirId, onMudou }: {
                       {x.cliente_nome || "Sem cliente"}{x.titulo || x.destino ? ` · ${x.titulo || x.destino}` : ""}
                     </span>
                     <span className="block text-[12.5px]" style={{ color: "var(--ink3)" }}>
+                      {x.setor !== setor ? `${NOME_SETOR[x.setor]} montou${x.sol_numero ? ` (pedido #${x.sol_numero})` : ""} · ` : ""}
                       {x.data_ida ? `Ida ${dataBr(x.data_ida)} · ` : ""}{x.criado_por_nome ? `${x.criado_por_nome.split(" ")[0]} · ` : ""}mexida há {haQuanto(x.atualizado_em)}
                       {x.status === "enviada" && (x.vista_em ? ` · 👀 cliente abriu ${x.visualizacoes}×` : " · cliente ainda não abriu")}
                     </span>

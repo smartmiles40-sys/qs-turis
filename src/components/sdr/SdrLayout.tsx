@@ -85,6 +85,7 @@ const MinhaAgendaPage = lazyPagina(() => import("./agenda/MinhaAgendaPage"));
 const WaPage = lazyPagina(() => import("./wa/WaPage"));
 const PipelineIAPage = lazyPagina(() => import("./gloria/PipelineIAPage"));
 const SolicitacoesPage = lazyPagina(() => import("@/solicitacoes/SolicitacoesPage"));
+const PropostasPage = lazyPagina(() => import("@/propostas/PropostasPage"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import QsWaDock from "./wa/QsWaDock";
 import ErroDeParte from "./ErroDeParte";
@@ -101,6 +102,7 @@ import LigacaoOficialWidget from "@/components/sdr/telefone/LigacaoOficialWidget
 import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 import { ComCoresDaCentral } from "@/solicitacoes/PedirOutroSetor";
 import { useContagemSolicitacoes } from "@/solicitacoes/useContagem";
+import { useAprovacoesNovas } from "@/propostas/lib";
 
 export type SdrNav =
   | "minha-agenda"
@@ -120,6 +122,7 @@ export type SdrNav =
   | "cobertura"
   | "atendimento-ia"
   | "solicitacoes"
+  | "propostas"
   | "configuracoes";
 
 // ── Dropdown Menu ────────────────────────────────────────────────────────────
@@ -158,6 +161,8 @@ const MENU: (MenuGroup | MenuItem)[] = [
       { id: "atendimento-ia", label: "Atendimento IA", description: "O pipeline da Glória: quem ela está atendendo agora" },
       // Central de Solicitações (20/10, 0149): pedidos entre setores com dono e prazo.
       { id: "solicitacoes", label: "Solicitações", description: "Pedir e receber de Relacionamento, Operações e Financeiro" },
+      // Propostas (0157): o Comercial monta as suas e envia as que pediu a Operações.
+      { id: "propostas", label: "Propostas", description: "Cotações com link e PDF pro cliente escolher a opção" },
     ],
   },
   {
@@ -306,6 +311,8 @@ export default function SdrLayout() {
   const userRole = currentUser?.role ?? "sdr";
   const [central, recontarCentral] = useContagemSolicitacoes("comercial");
   const [solicitacaoAberta, setSolicitacaoAberta] = useState<string | null>(null);
+  const [propostaAberta, setPropostaAberta] = useState<string | null>(null);
+  const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "comercial");
   const userInitials = currentUser
     ? currentUser.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
     : "QS";
@@ -366,7 +373,8 @@ export default function SdrLayout() {
   const filteredMenu = MENU.map((item) => {
     if (isGroup(item)) {
       const filteredItems = item.items.filter((sub) => canAccessNav(userRole, sub.id))
-        .map((sub) => sub.id === "solicitacoes" ? { ...sub, badge: central.novas + central.novidades || undefined, alerta: central.atrasadas > 0 } : sub);
+        .map((sub) => sub.id === "solicitacoes" ? { ...sub, badge: central.novas + central.novidades || undefined, alerta: central.atrasadas > 0 }
+          : sub.id === "propostas" ? { ...sub, badge: aprovacoes || undefined } : sub);
       if (filteredItems.length === 0) return null;
       // A ORDEM DE EXECUÇÃO MUDA POR PAPEL (Bruno, 01/09). A primeira tela da
       // lista é onde a pessoa volta o dia inteiro: pro closer é a agenda, pro
@@ -822,7 +830,16 @@ export default function SdrLayout() {
             <ComCoresDaCentral>
               <div className="px-4 sm:px-6 py-6">
                 <SolicitacoesPage setor="comercial" abrirId={solicitacaoAberta} onAbrirId={setSolicitacaoAberta}
-                  onMudou={recontarCentral} links={{ onAbrirLead: openLeadDetail }} />
+                  onMudou={recontarCentral} links={{ onAbrirLead: openLeadDetail, onAbrirProposta: (id) => { setPropostaAberta(id); setActiveNav("propostas"); } }} />
+              </div>
+            </ComCoresDaCentral>
+          </PageErrorBoundary>
+        )}
+        {activeNav === "propostas" && (
+          <PageErrorBoundary pageName="Propostas">
+            <ComCoresDaCentral>
+              <div className="px-4 sm:px-6 py-6">
+                <PropostasPage setor="comercial" abrirId={propostaAberta} onAbrirId={setPropostaAberta} onMudou={recontarAprovacoes} />
               </div>
             </ComCoresDaCentral>
           </PageErrorBoundary>

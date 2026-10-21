@@ -14,14 +14,14 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Setor } from "@/components/sdr/types";
 
-export type StatusProposta = "rascunho" | "enviada" | "aprovada" | "recusada" | "cancelada";
+export type StatusProposta = "rascunho" | "pronta" | "enviada" | "aprovada" | "recusada" | "cancelada";
 export type TipoItem = "aereo" | "hospedagem" | "transfer" | "trem" | "passeio" | "seguro" | "carro" | "cruzeiro" | "visto" | "pacote" | "outro";
 
 export const STATUS_PROPOSTA: Record<StatusProposta, string> = {
-  rascunho: "Rascunho", enviada: "Enviada", aprovada: "Aprovada", recusada: "Recusada", cancelada: "Cancelada",
+  rascunho: "Rascunho", pronta: "Pronta pra enviar", enviada: "Enviada", aprovada: "Aprovada", recusada: "Recusada", cancelada: "Cancelada",
 };
 export const TOM_PROPOSTA: Record<StatusProposta, "neutro" | "rel" | "aviso" | "erro"> = {
-  rascunho: "neutro", enviada: "aviso", aprovada: "rel", recusada: "erro", cancelada: "neutro",
+  rascunho: "neutro", pronta: "rel", enviada: "aviso", aprovada: "rel", recusada: "erro", cancelada: "neutro",
 };
 
 // ── Campos de cada tipo ─────────────────────────────────────────────────────
@@ -242,6 +242,14 @@ export interface Proposta {
   aprovada_em?: string | null;
   aprovada_nome?: string | null;
   aprovacao_vista_em?: string | null;
+  // 0157: pedido de outro time passa por quem pediu (pronta → abriu → enviou)
+  pronta_em?: string | null;
+  aberta_por?: string | null;
+  aberta_em?: string | null;
+  enviada_por?: string | null;
+  enviada_por_nome?: string | null;
+  /** A solicitação de onde veio (quem pediu e de que time). */
+  sol?: { numero: number; de_setor: Setor; para_setor: Setor; criado_por: string | null; criado_por_nome: string | null } | null;
   opcoes: OpcaoProposta[];
 }
 
@@ -336,13 +344,16 @@ export interface PropostaResumo {
   id: string; numero: number; status: StatusProposta; titulo: string; destino: string | null; cliente_nome: string | null;
   data_ida: string | null; atualizado_em: string; criado_por: string | null; criado_por_nome: string | null;
   vista_em: string | null; visualizacoes: number; aprovada_em: string | null; aprovacao_vista_em: string | null; solicitacao_id: string | null;
+  setor: Setor; enviada_por: string | null; pronta_em: string | null; aberta_em: string | null;
+  sol_numero: number | null; sol_de_setor: Setor | null; de_outro_time: boolean;
 }
 
-export async function listarPropostas(f: { status?: StatusProposta | "abertas"; busca?: string; solicitacaoId?: string; clienteId?: string } = {}): Promise<PropostaResumo[]> {
-  let q = supabase.from("qs_propostas")
-    .select("id, numero, status, titulo, destino, cliente_nome, data_ida, atualizado_em, criado_por, vista_em, visualizacoes, aprovada_em, aprovacao_vista_em, solicitacao_id")
+/** `setor`: as do time + as que o time PEDIU pra outro montar (0157). */
+export async function listarPropostas(f: { status?: StatusProposta | "abertas"; busca?: string; solicitacaoId?: string; clienteId?: string; setor?: Setor } = {}): Promise<PropostaResumo[]> {
+  let q = supabase.from("qs_propostas_v").select("*")
     .order("atualizado_em", { ascending: false }).limit(300);
-  if (f.status === "abertas") q = q.in("status", ["rascunho", "enviada"]);
+  if (f.setor) q = q.or(`setor.eq.${f.setor},sol_de_setor.eq.${f.setor}`);
+  if (f.status === "abertas") q = q.in("status", ["rascunho", "pronta", "enviada"]);
   else if (f.status) q = q.eq("status", f.status);
   if (f.solicitacaoId) q = q.eq("solicitacao_id", f.solicitacaoId);
   if (f.clienteId) q = q.eq("cliente_id", f.clienteId);
@@ -369,13 +380,18 @@ export async function carregarProposta(id: string): Promise<Proposta> {
     supabase.from("qs_proposta_itens").select("*").eq("proposta_id", id).order("ordem"),
   ]);
   if (error || !p) throw new Error(error?.message || "Proposta não encontrada.");
-  const nomes = await nomesDe([p.criado_por]);
+  const { data: sol } = p.solicitacao_id
+    ? await supabase.from("qs_solicitacoes").select("numero, de_setor, para_setor, criado_por").eq("id", p.solicitacao_id).maybeSingle()
+    : { data: null };
+  const nomes = await nomesDe([p.criado_por, p.enviada_por, sol?.criado_por ?? null]);
   const itens = (its ?? []) as Record<string, unknown>[];
   return {
     ...(p as Proposta),
     titulo: p.titulo ?? "", destino: p.destino ?? "", data_ida: p.data_ida ?? "", data_volta: p.data_volta ?? "",
     apresentacao: p.apresentacao ?? "", observacoes: p.observacoes ?? "", capa_url: p.capa_url ?? "", cliente_nome: p.cliente_nome ?? "",
     criado_por_nome: p.criado_por ? nomes.get(p.criado_por) ?? null : null,
+    enviada_por_nome: p.enviada_por ? nomes.get(p.enviada_por) ?? null : null,
+    sol: sol ? { ...(sol as Omit<NonNullable<Proposta["sol"]>, "criado_por_nome">), criado_por_nome: sol.criado_por ? nomes.get(sol.criado_por) ?? null : null } : null,
     opcoes: ((ops ?? []) as Record<string, unknown>[]).map((o) => ({
       id: o.id as string, k: o.id as string, titulo: (o.titulo as string) ?? "", descricao: (o.descricao as string) ?? "",
       recomendada: Boolean(o.recomendada), desconto: Number(o.desconto) || 0,
@@ -396,6 +412,12 @@ const ERROS: Record<string, string> = {
   "proposta-cancelada": "Essa proposta foi cancelada — duplique pra fazer uma nova.",
   "proposta-nao-encontrada": "Proposta não encontrada.",
   "opcao-invalida": "Escolha uma opção da proposta.",
+  "so-quem-monta": "Só o time que monta a proposta pode mudar isso.",
+  "quem-envia-e-quem-pediu": "Quem envia ao cliente é quem pediu a cotação.",
+  "ainda-nao-pronta": "A proposta ainda não foi liberada por quem está montando.",
+  "abra-antes": "A proposta mudou depois que você abriu — confira a versão nova antes de enviar.",
+  "diga-o-ajuste": "Escreva o que precisa mudar.",
+  "acao-invalida": "Não dá pra fazer isso com a proposta nesse andamento.",
 };
 const traduzir = (m: string) => ERROS[Object.keys(ERROS).find((k) => m.includes(k)) ?? ""] ?? m;
 
@@ -419,8 +441,9 @@ export async function salvarProposta(p: Proposta): Promise<string> {
   return data as string;
 }
 
-export async function mudarStatus(id: string, acao: "enviada" | "recusada" | "cancelada" | "rascunho" | "aprovada" | "visto", opcaoId?: string) {
-  const { error } = await supabase.rpc("qs_proposta_status", { p_id: id, p_acao: acao, p_opcao: opcaoId ?? null });
+export type AcaoProposta = "pronta" | "aberta" | "ajuste" | "enviada" | "recusada" | "cancelada" | "rascunho" | "aprovada" | "visto";
+export async function mudarStatus(id: string, acao: AcaoProposta, opcaoId?: string | null, texto?: string) {
+  const { error } = await supabase.rpc("qs_proposta_status", { p_id: id, p_acao: acao, p_opcao: opcaoId ?? null, p_texto: texto ?? null });
   if (error) throw new Error(traduzir(error.message));
 }
 
@@ -430,11 +453,28 @@ export async function duplicarProposta(id: string): Promise<string> {
   return data as string;
 }
 
-/** Aprovações pelo link que quem montou ainda não viu (bolinha no menu). */
-export async function contarAprovacoesNovas(userId: string): Promise<number> {
-  const { count } = await supabase.from("qs_propostas").select("id", { count: "exact", head: true })
-    .eq("criado_por", userId).not("aprovada_em", "is", null).is("aprovacao_vista_em", null);
-  return count ?? 0;
+/** Bolinha do menu: aprovações pelo link que eu (montei ou enviei) não vi + propostas
+ *  prontas que outro time montou a pedido do meu e esperam alguém abrir e enviar. */
+export async function contarAprovacoesNovas(userId: string, setor?: Setor): Promise<number> {
+  const [{ count: aprov }, prontas] = await Promise.all([
+    supabase.from("qs_propostas").select("id", { count: "exact", head: true })
+      .or(`criado_por.eq.${userId},enviada_por.eq.${userId}`).not("aprovada_em", "is", null).is("aprovacao_vista_em", null),
+    setor
+      ? supabase.from("qs_propostas_v").select("id", { count: "exact", head: true }).eq("status", "pronta").eq("sol_de_setor", setor).eq("de_outro_time", true)
+      : Promise.resolve({ count: 0 }),
+  ]);
+  return (aprov ?? 0) + (prontas.count ?? 0);
+}
+
+/** Mensagem pronta pro WhatsApp do cliente. */
+export function mensagemDaProposta(p: Pick<Proposta, "cliente_nome" | "destino" | "opcoes">, link: string): string {
+  const nome = p.cliente_nome.trim().split(/s+/)[0] || "";
+  const varias = p.opcoes.length > 1;
+  return `Olá${nome ? `, ${nome}` : ""}! Preparamos sua proposta de viagem${p.destino ? ` para ${p.destino}` : ""}${varias ? ` com ${p.opcoes.length} opções` : ""}. É só abrir o link pra ver todos os detalhes${varias ? " e escolher a sua preferida" : ""}:
+
+${link}
+
+Qualquer dúvida, estou por aqui!`;
 }
 
 // ── O que o cliente vê (mesma forma que api/proposta.js devolve) ────────────
@@ -468,7 +508,7 @@ export function paraVM(p: Proposta): PropostaVM {
     numero: p.numero ?? 0, status: p.status, titulo: p.titulo, destino: p.destino, data_ida: p.data_ida, data_volta: p.data_volta,
     adultos: p.adultos, criancas: p.criancas, bebes: p.bebes, apresentacao: p.apresentacao, observacoes: p.observacoes,
     esconder_precos: p.esconder_precos, capa_url: p.capa_url, cliente_nome: p.cliente_nome,
-    consultor: p.criado_por_nome ? { nome: p.criado_por_nome, whatsapp: null } : null,
+    consultor: (p.enviada_por_nome || p.criado_por_nome) ? { nome: (p.enviada_por_nome || p.criado_por_nome)!, whatsapp: null } : null,
     aprovada_opcao_id: p.aprovada_opcao_id ?? null, aprovada_em: p.aprovada_em ?? null,
     opcoes: p.opcoes.map((o) => ({
       id: o.id ?? o.k, titulo: o.titulo, descricao: o.descricao, recomendada: o.recomendada, desconto: o.desconto, pagamentos: o.pagamentos,
@@ -486,10 +526,10 @@ export function semInternos(d: Record<string, unknown>): Record<string, unknown>
   return c;
 }
 
-/** Bolinha do menu Propostas: aprovações pelo link que EU montei e ainda não vi (recontagem a cada 60s). */
-export function useAprovacoesNovas(userId: string | undefined): [number, () => void] {
+/** Bolinha do menu Propostas (ver contarAprovacoesNovas); reconta a cada 60s. */
+export function useAprovacoesNovas(userId: string | undefined, setor?: Setor): [number, () => void] {
   const [n, setN] = useState(0);
-  const contar = useCallback(() => { if (userId) contarAprovacoesNovas(userId).then(setN).catch(() => undefined); }, [userId]);
+  const contar = useCallback(() => { if (userId) contarAprovacoesNovas(userId, setor).then(setN).catch(() => undefined); }, [userId, setor]);
   useEffect(() => {
     contar();
     const t = setInterval(() => { if (!document.hidden) contar(); }, 60_000);

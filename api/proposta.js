@@ -14,6 +14,10 @@
 // ENVIADA e sem escolha anterior. Grava a opção + o nome que o cliente digitou,
 // acende a bolinha de quem montou (aprovacao_vista_em nulo) e, se a proposta
 // veio de uma solicitação, comenta lá.
+//
+// 0157: "pronta" (montada por outro time, esperando quem pediu abrir e enviar)
+// ainda não abre pro cliente. O consultor do link é quem ENVIOU (é quem fala
+// com o cliente); sem envio registrado, quem montou.
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
@@ -33,7 +37,7 @@ async function montarVM(p) {
   const [ops, its, users] = await Promise.all([
     rest(`qs_proposta_opcoes?select=id,ordem,titulo,descricao,recomendada,desconto,pagamentos&proposta_id=eq.${p.id}&order=ordem`),
     rest(`qs_proposta_itens?select=opcao_id,ordem,tipo,nome,descricao,data_inicio,data_fim,quantidade,valor_total,incluso,detalhes&proposta_id=eq.${p.id}&order=ordem`),
-    p.criado_por ? rest(`qs_users?select=name,whatsapp_number&id=eq.${p.criado_por}&limit=1`).catch(() => null) : null,
+    (p.enviada_por || p.criado_por) ? rest(`qs_users?select=name,whatsapp_number&id=eq.${p.enviada_por || p.criado_por}&limit=1`).catch(() => null) : null,
   ]);
   const u = users?.[0] || null;
   return {
@@ -72,8 +76,8 @@ export default async function handler(req, res) {
     console.error('[proposta] leitura:', e?.message);
     return res.status(503).json({ error: 'Não conseguimos abrir a proposta agora. Tente de novo em instantes.' });
   }
-  // Rascunho e cancelada não abrem pro cliente.
-  if (!p || p.status === 'rascunho' || p.status === 'cancelada') return res.status(404).json({ error: 'Proposta não encontrada.' });
+  // Rascunho, pronta (ainda com quem pediu) e cancelada não abrem pro cliente.
+  if (!p || p.status === 'rascunho' || p.status === 'pronta' || p.status === 'cancelada') return res.status(404).json({ error: 'Proposta não encontrada.' });
 
   if (req.method === 'GET') {
     if (String(req.query?.equipe || '') !== '1') {
@@ -122,6 +126,10 @@ export default async function handler(req, res) {
       method: 'POST', prefer: 'return=minimal',
       body: { solicitacao_id: p.solicitacao_id, tipo: 'comentario', autor_id: null, autor_nome: `${nome} (cliente, pelo link)`, texto: `✅ Escolheu ${qual} da proposta nº ${p.numero}.` },
     }).catch((e) => console.warn('[proposta] evento da solicitação:', e?.message));
+    // acende a bolinha de novidade dos dois lados (atualizado_por nulo = "não fui eu")
+    await rest(`qs_solicitacoes?id=eq.${p.solicitacao_id}`, {
+      method: 'PATCH', prefer: 'return=minimal', body: { atualizado_em: new Date().toISOString(), atualizado_por: null },
+    }).catch(() => null);
   }
   return res.status(200).json({ ok: true });
 }

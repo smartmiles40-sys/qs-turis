@@ -10,12 +10,15 @@
 // qualquer momento (nada obrigatório pra salvar).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
+import { NOME_SETOR } from "@/solicitacoes/lib";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
 import PropostaView from "./PropostaView";
+import EnviarAoCliente from "./EnviarAoCliente";
+import PropostaParaEnviar from "./PropostaParaEnviar";
 import {
   CONDICOES, FORMAS, ORDEM_TIPOS, STATUS_PROPOSTA, TIPOS, TOM_PROPOSTA, brl, carregarProposta, dataBr, duplicarOpcao, duplicarProposta,
-  itemVazio, linkDaProposta, mudarStatus, opcaoVazia, pagamentoVazio, paraVM, propostaVazia, salvarProposta, textoPagamento,
+  itemVazio, mudarStatus, opcaoVazia, pagamentoVazio, paraVM, propostaVazia, salvarProposta, textoPagamento,
   tituloDaProposta, totaisDaOpcao, trechoVazio,
   type CondicaoPag, type FormaPag, type ItemProposta, type OpcaoProposta, type Pagamento, type Proposta, type TipoItem, type Trecho,
 } from "./lib";
@@ -203,6 +206,7 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
   const [marcarAprov, setMarcarAprov] = useState(false);
   const [addTipo, setAddTipo] = useState(false);
   const [abrirDepois, setAbrirDepois] = useState<string | null>(null);
+  const [comoPediu, setComoPediu] = useState(false);
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -260,11 +264,16 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
   const totais = useMemo(() => (opcao ? totaisDaOpcao(opcao) : null), [opcao]);
 
   if (!p) return <p className="text-[14px]" style={{ color: "var(--ink3)" }}>{erro ?? "Carregando…"}</p>;
+  // 0157: quem não é do time que monta (pediu a cotação) abre o lado de quem envia.
+  const meusSetores = setoresDe(currentUser);
+  const monto = !p.id || meusSetores.includes(p.setor) || p.criado_por === currentUser?.id;
+  if (!monto || comoPediu) return <PropostaParaEnviar id={p.id!} onFechar={() => { if (monto) { setComoPediu(false); void carregar(); } else onVoltar(); }} />;
+  // Pedido de OUTRO time: quem monta libera ("pronta") e quem pediu abre e envia.
+  const outroTime = !!p.sol && p.sol.de_setor !== p.setor;
+  const quemPediu = p.sol ? `${p.sol.criado_por_nome?.split(" ")[0] ?? "quem pediu"} (${NOME_SETOR[p.sol.de_setor]})` : "";
+  const pedeTambem = !!p.sol && (meusSetores.includes(p.sol.de_setor) || p.sol.criado_por === currentUser?.id);
   const cancelada = p.status === "cancelada";
   const varias = p.opcoes.length > 1;
-  const link = p.token ? linkDaProposta(p.token) : null;
-  const primeiroNome = p.cliente_nome.trim().split(/\s+/)[0] || "";
-  const mensagem = `Olá${primeiroNome ? `, ${primeiroNome}` : ""}! Preparamos sua proposta de viagem${p.destino ? ` para ${p.destino}` : ""}${varias ? ` com ${p.opcoes.length} opções` : ""}. É só abrir o link pra ver todos os detalhes${varias ? " e escolher a sua preferida" : ""}:\n\n${link ?? ""}\n\nQualquer dúvida, estou por aqui!`;
 
   const voltar = () => { if (!sujo || window.confirm("Sair sem salvar as mudanças?")) onVoltar(); };
   const acao = async (fn: () => Promise<unknown>, ok?: string) => {
@@ -274,14 +283,18 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
   async function enviar() {
     const pid = sujo || !p!.id ? await salvar(false) : p!.id!;
     if (!pid) return;
-    if (p!.status === "rascunho") {
+    if (p!.status === "rascunho" && !outroTime) {
       try { await mudarStatus(pid, "enviada"); } catch (e) { setErro(e instanceof Error ? e.message : "Falhou."); return; }
     }
     setP(await carregarProposta(pid));
     setEnvio(true);
   }
   const fecharEnvio = () => { setEnvio(false); if (abrirDepois) { const x = abrirDepois; setAbrirDepois(null); onAbrir(x); } };
-  const copiar = (t: string, ok: string) => void navigator.clipboard?.writeText(t).then(() => setAviso(ok));
+  async function liberar() {
+    const pid = sujo ? await salvar(false) : p!.id!;
+    if (!pid) return;
+    await acao(() => mudarStatus(pid, "pronta"), `Pronta — ${quemPediu} recebeu o aviso na solicitação.`);
+  }
 
   function tirarOpcao(n: number) {
     if (!window.confirm(`Tirar a ${varias ? `Opção ${n + 1}` : "opção"} e todos os serviços dela?`)) return;
@@ -305,8 +318,10 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
       {p.id && (
         <div className="rel-card px-4 py-3 text-[13px] flex flex-wrap gap-x-5 gap-y-1" style={{ color: "var(--ink2)" }}>
           {p.criado_por_nome && <span>Montada por <b>{p.criado_por_nome}</b></span>}
-          {p.enviada_em && <span>Enviada {quando(p.enviada_em)}</span>}
-          {p.status !== "rascunho" && (p.vista_em
+          {p.sol && <span>Pedido #{p.sol.numero} de <b>{quemPediu}</b></span>}
+          {p.status === "pronta" && (p.aberta_em ? <span>👀 {quemPediu.split(" ")[0]} abriu {quando(p.aberta_em)}</span> : <span>Esperando {quemPediu.split(" ")[0]} abrir</span>)}
+          {p.enviada_em && <span>Enviada {quando(p.enviada_em)}{p.enviada_por_nome ? ` por ${p.enviada_por_nome.split(" ")[0]}` : ""}</span>}
+          {p.status !== "rascunho" && p.status !== "pronta" && (p.vista_em
             ? <span>👀 Cliente abriu {p.visualizacoes}× · última {quando(p.vista_ultima_em || p.vista_em)}</span>
             : <span>Cliente ainda não abriu o link</span>)}
           {p.aprovada_em && (
@@ -325,14 +340,18 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
       <div className="flex flex-wrap gap-2">
         <Botao variante="primario" onClick={() => void salvar(true)} disabled={salvando || cancelada}>{salvando ? "Salvando…" : "Salvar"}</Botao>
         <Botao onClick={() => setPrevia(true)}>Ver como o cliente vê</Botao>
-        {!cancelada && <Botao onClick={() => void enviar()} disabled={salvando}>{p.status === "rascunho" ? "Enviar ao cliente" : "Link e mensagem"}</Botao>}
-        {p.id && !cancelada && p.status !== "aprovada" && <Botao onClick={() => setMarcarAprov(true)}>Cliente aprovou (fora do link)</Botao>}
+        {!cancelada && outroTime && p.status === "rascunho" && <Botao onClick={() => void liberar()} disabled={salvando}>Pronta — avisar {quemPediu}</Botao>}
+        {!cancelada && outroTime && p.status === "pronta" && pedeTambem && <Botao onClick={() => setComoPediu(true)}>Abrir como quem pediu</Botao>}
+        {!cancelada && (!outroTime || !["rascunho", "pronta"].includes(p.status)) && <Botao onClick={() => void enviar()} disabled={salvando}>{p.status === "rascunho" ? "Enviar ao cliente" : "Link e mensagem"}</Botao>}
+        {p.id && !cancelada && p.status !== "aprovada" && (!outroTime || p.status === "enviada") && <Botao onClick={() => setMarcarAprov(true)}>Cliente aprovou (fora do link)</Botao>}
         {p.id && p.status === "enviada" && <Botao variante="fantasma" onClick={() => void acao(() => mudarStatus(p.id!, "recusada"), "Marcada como recusada.")}>Cliente recusou</Botao>}
-        {p.id && (p.status === "aprovada" || p.status === "recusada") && <Botao variante="fantasma" onClick={() => { if (window.confirm("Voltar pra rascunho? A aprovação é desfeita e o link para de abrir até enviar de novo.")) void acao(() => mudarStatus(p.id!, "rascunho"), "Voltou pra rascunho."); }}>Voltar pra rascunho</Botao>}
+        {p.id && (p.status === "aprovada" || p.status === "recusada" || p.status === "pronta") && <Botao variante="fantasma" onClick={() => { if (window.confirm("Voltar pra rascunho? A aprovação é desfeita e o link para de abrir até enviar de novo.")) void acao(() => mudarStatus(p.id!, "rascunho"), "Voltou pra rascunho."); }}>Voltar pra rascunho</Botao>}
         {p.id && <Botao variante="fantasma" onClick={() => void duplicarProposta(p.id!).then(onAbrir).catch((e) => setErro(e.message))}>Duplicar proposta</Botao>}
         {p.id && !cancelada && <Botao variante="fantasma" onClick={() => { if (window.confirm("Cancelar esta proposta? O link para de abrir pro cliente.")) void acao(() => mudarStatus(p.id!, "cancelada"), "Proposta cancelada."); }}>Cancelar proposta</Botao>}
       </div>
       {p.status === "aprovada" && <Aviso>Esta proposta já foi aprovada. Se mudar algo, o cliente vê a versão nova no mesmo link.</Aviso>}
+      {outroTime && p.status === "rascunho" && <Aviso>Quem envia ao cliente é {quemPediu}. Quando terminar, clique em <b>Pronta</b> — {quemPediu.split(" ")[0]} recebe o aviso na solicitação, abre e envia.</Aviso>}
+      {p.status === "pronta" && <Aviso>Liberada pra {quemPediu}. Se mudar algo e salvar, {quemPediu.split(" ")[0]} precisa abrir de novo antes de enviar.</Aviso>}
 
       {/* Dados da viagem */}
       <section className="rel-card p-4 space-y-3">
@@ -494,23 +513,7 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
       </Modal>
 
       {/* Enviar ao cliente */}
-      <Modal aberto={envio} titulo="Enviar ao cliente" onFechar={fecharEnvio} largura={520}>
-        {link ? (
-          <div className="space-y-3">
-            <Campo rotulo="Link da proposta">
-              <div className="flex gap-2"><Entrada readOnly value={link} onFocus={(e) => e.target.select()} /><Botao onClick={() => copiar(link, "Link copiado.")}>Copiar</Botao></div>
-            </Campo>
-            <Campo rotulo="Mensagem pronta (cole no WhatsApp do cliente)">
-              <textarea className={area} rows={7} readOnly value={mensagem} />
-            </Campo>
-            <div className="flex flex-wrap gap-2">
-              <Botao variante="primario" onClick={() => copiar(mensagem, "Mensagem copiada — cole na conversa do cliente.")}>Copiar mensagem</Botao>
-              <Botao onClick={() => window.open(`${link}?equipe=1`, "_blank", "noopener")}>Abrir o link</Botao>
-            </div>
-            <p className="text-[12px]" style={{ color: "var(--ink3)" }}>Quando o cliente abrir, aparece aqui. Se ele escolher uma opção pelo link, você recebe o aviso no menu Propostas.</p>
-          </div>
-        ) : <p className="text-[14px]">Salve a proposta primeiro.</p>}
-      </Modal>
+      <EnviarAoCliente p={p} aberto={envio} onFechar={fecharEnvio} onCopiado={setAviso} />
 
       {/* Cliente aprovou por fora */}
       <Modal aberto={marcarAprov} titulo="Qual opção o cliente aprovou?" onFechar={() => setMarcarAprov(false)} largura={440}>

@@ -50,10 +50,12 @@ import { podeGerirTime } from "./equipe/permissao";
 import { usePode } from "./equipe/usePode";
 import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
+import PropostasPage from "@/propostas/PropostasPage";
+import { useAprovacoesNovas } from "@/propostas/lib";
 
 type Rota =
   | { tela: "inicio" }
-  | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "solicitacoes"; id?: string } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
+  | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "solicitacoes"; id?: string } | { tela: "propostas"; id?: string } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" } | { tela: "cadastros" }
   | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
   | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
@@ -71,6 +73,7 @@ function lerRota(): Rota {
   if (tela === "atendimento") return id ? { tela: "atendimento", id } : { tela: "atendimento" };
   if (tela === "grupos") return id ? { tela: "grupos", id: decodeURIComponent(id) } : { tela: "grupos" };
   if (tela === "solicitacoes") return id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" };
+  if (tela === "propostas") return id ? { tela: "propostas", id } : { tela: "propostas" };
   if ((SIMPLES as string[]).includes(tela)) return { tela } as Rota;
   return { tela: "inicio" };
 }
@@ -81,6 +84,7 @@ function hashDe(r: Rota) {
   if (r.tela === "atendimento" && r.id) return `#rel/atendimento/${r.id}`;
   if (r.tela === "grupos" && r.id) return `#rel/grupos/${encodeURIComponent(r.id)}`;
   if (r.tela === "solicitacoes" && r.id) return `#rel/solicitacoes/${r.id}`;
+  if (r.tela === "propostas" && r.id) return `#rel/propostas/${r.id}`;
   return r.tela === "inicio" ? "#rel" : `#rel/${r.tela}`;
 }
 
@@ -239,6 +243,7 @@ export default function RelApp() {
   // KPIs: some do menu pra quem o cargo não deixa ver (0135).
   const verKpis = usePode("relacionamento.kpis") !== false;
   const [central, recontarCentral] = useContagemSolicitacoes("relacionamento");
+  const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "relacionamento");
   const { isDark, toggleTheme } = useTheme();
   const [rota, setRota] = useState<Rota>(lerRota);
   const [resumo, setResumo] = useState<Resumo | null>(null);
@@ -303,6 +308,8 @@ export default function RelApp() {
     // Central de Solicitações (20/10, 0149): pedidos entre setores, com dono e prazo.
     { id: "demandas", rotulo: "Demandas", icone: "pedidos", itens: [
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
+      // Propostas (0157): o Rel monta as suas (upgrade, seguro, recompra…) e envia as que pediu a Operações.
+      { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined },
     ] },
     // Agenda (14/10): cada pessoa tem a sua + o panorama do time.
     { id: "agenda", rotulo: "Agenda", icone: "agenda", itens: [
@@ -493,7 +500,11 @@ export default function RelApp() {
           {rota.tela === "solicitacoes" && (
             <SolicitacoesPage setor="relacionamento" abrirId={rota.id ?? null} onMudou={recontarCentral}
               onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })}
-              links={{ onAbrirViagem: abrirViagem, onAbrirCliente: abrirCliente, onAbrirConversa: abrirConversa }} />
+              links={{ onAbrirViagem: abrirViagem, onAbrirCliente: abrirCliente, onAbrirConversa: abrirConversa, onAbrirProposta: (id) => ir({ tela: "propostas", id }) }} />
+          )}
+          {rota.tela === "propostas" && (
+            <PropostasPage setor="relacionamento" abrirId={rota.id ?? null} onMudou={recontarAprovacoes}
+              onAbrirId={(id) => ir(id ? { tela: "propostas", id } : { tela: "propostas" })} />
           )}
           {rota.tela === "grupos" && (
             <GruposPage grupoJid={rota.id ?? null} abrir={(jid) => ir(jid ? { tela: "grupos", id: jid } : { tela: "grupos" })} abrirConversa={abrirConversa} />

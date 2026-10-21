@@ -43,7 +43,7 @@ export default function OpsApp() {
   const { currentUser } = useQsAuth();
   const [rota, setRota] = useState<Rota>(lerRota);
   const [central, recontar] = useContagemSolicitacoes("operacional");
-  const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id);
+  const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "operacional");
 
   useEffect(() => {
     const onHash = () => setRota(lerRota());
