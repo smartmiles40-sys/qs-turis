@@ -17,8 +17,10 @@ import {
 } from "../lib/clientes";
 import { Aviso, Botao, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import { usePode } from "../equipe/usePode";
+import FilaDivergencias from "@/clientes/FilaDivergencias";
+import { contarDivergencias } from "@/clientes/idasDetalhe";
 
-type Aba = "parecidos" | "conversas" | "viagens" | "financeiro" | "cpf" | "incompletos";
+type Aba = "parecidos" | "conversas" | "viagens" | "financeiro" | "cpf" | "incompletos" | "expedicoes";
 
 const NOME_CAMPO: Record<string, string> = {
   cpf: "CPF", email: "e-mail", telefone: "telefone", nascimento: "nascimento", passaporte: "passaporte",
@@ -87,6 +89,10 @@ export default function ArrumarCadastrosPage({ onAbrir, onAbrirViagem, onAbrirCo
   const [previa, setPrevia] = useState<ResultadoCruzamento | null>(null);
   const [juntando, setJuntando] = useState<{ par: DuplicadoSugerido; manter: string } | null>(null);
   const [verTodos, setVerTodos] = useState(false);
+  // 0172 (cadastro único): ficha × expedições. null = ainda não ativado.
+  const [nDivergencias, setNDivergencias] = useState<number | null>(null);
+  const contarDiv = useCallback(() => { contarDivergencias().then(setNDivergencias).catch(() => setNDivergencias(null)); }, []);
+  useEffect(() => { contarDiv(); }, [contarDiv]);
 
   const carregar = useCallback(async () => {
     try { setFila(await carregarFila()); setErro(null); }
@@ -123,6 +129,7 @@ export default function ArrumarCadastrosPage({ onAbrir, onAbrirViagem, onAbrirCo
     { id: "financeiro", rotulo: "Financeiro sem ficha", n: fila.financeiro.length },
     { id: "cpf", rotulo: "CPF diferente na venda", n: fila.cpf_divergente.length },
     { id: "incompletos", rotulo: "Faltando dados", n: fila.incompletos_total },
+    { id: "expedicoes", rotulo: "Ficha × Expedições", n: nDivergencias ?? 0 },
   ];
   const incompletos = verTodos ? fila.incompletos : fila.incompletos.filter((x) => x.proximo_embarque);
 
@@ -175,6 +182,10 @@ export default function ArrumarCadastrosPage({ onAbrir, onAbrirViagem, onAbrirCo
           </ul>
           </div>
         )
+      )}
+
+      {aba === "expedicoes" && (
+        <FilaDivergencias onAbrirCliente={onAbrir} onMudou={() => { contarDiv(); onMudou(); }} />
       )}
 
       {aba === "conversas" && (

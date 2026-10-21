@@ -1,6 +1,7 @@
 // src/expedicoes/paginas/_globais/PessoaGaveta.tsx
 // Perfil da pessoa no "Clube de viajantes" (app antigo: PassageirosGlobalTabela →
-// PessoaDrawer + SenhaExpedamigoPessoa). Abas Passageiro / Saúde / Expedições.
+// PessoaDrawer + SenhaExpedamigoPessoa). Abas Passageiro / Saúde / Expedições /
+// Cliente (a ficha do Relacionamento — cadastro único, 0172/0173).
 // Os dados pessoais valem pra TODAS as expedições da pessoa (gravados de uma vez
 // pela função exp_pessoa_propagar). Documentos (passaporte + Drive), perfil &
 // conexões, senha do ExpedAmigo (só admin) e excluir a pessoa da base.
@@ -14,6 +15,7 @@ import { mascaraCpf } from "../../lib/cpf";
 import type { PessoaAgregada } from "../../lib/pessoas";
 import type { ArquivoRow, StatusReserva } from "../../lib/database";
 import { idadeDe } from "./excel";
+import BlocoFichaCliente from "@/clientes/BlocoFichaCliente";
 import { SaudeCampos } from "./SaudeCampos";
 import {
   abrirArquivo, anexarPassaporte, estadoSenhaCpf, excluirPessoa, gerarNovaSenhaCpf, propagarPessoais, removerPassaporte, type EstadoSenha,
@@ -37,7 +39,8 @@ function formDe(p: PessoaAgregada): Form {
 }
 
 export function PessoaGaveta({ pessoa, arquivos, fotoUrl, onFechar, onMudou, abrirExp }: {
-  pessoa: PessoaAgregada;
+  /** cliente_id: a ficha pela qual o Clube agrupou (cadastro único). */
+  pessoa: PessoaAgregada & { cliente_id?: string | null };
   /** Arquivos de todas as linhas da pessoa. */
   arquivos: ArquivoRow[];
   fotoUrl?: string | null;
@@ -46,7 +49,7 @@ export function PessoaGaveta({ pessoa, arquivos, fotoUrl, onFechar, onMudou, abr
   abrirExp: (expedicaoId: string, passageiroId?: string) => void;
 }) {
   const { somenteLeitura, avisar } = useExp();
-  const [aba, setAba] = useState<"passageiro" | "saude" | "expedicoes">("passageiro");
+  const [aba, setAba] = useState<"passageiro" | "saude" | "expedicoes" | "cliente">("passageiro");
   const inicial = useMemo(() => formDe(pessoa), [pessoa]);
   const [form, setForm] = useState<Form>(inicial);
   const [erros, setErros] = useState<Partial<Record<CampoForm, string>>>({});
@@ -108,7 +111,7 @@ export function PessoaGaveta({ pessoa, arquivos, fotoUrl, onFechar, onMudou, abr
       </>}>
       <div className="flex flex-col sm:flex-row gap-3">
         <nav className="flex sm:flex-col gap-1 sm:w-32 flex-shrink-0 sm:self-start" aria-label="Seções do perfil">
-          {([["passageiro", "Passageiro"], ["saude", "Saúde"], ["expedicoes", `Expedições (${pessoa.totalExpedicoes})`]] as const).map(([id, rot]) => (
+          {([["passageiro", "Passageiro"], ["saude", "Saúde"], ["expedicoes", `Expedições (${pessoa.totalExpedicoes})`], ["cliente", "Cliente"]] as const).map(([id, rot]) => (
             <button key={id} onClick={() => setAba(id)} aria-current={aba === id ? "page" : undefined}
               className="text-left rounded-md px-2.5 py-1.5 text-[13px] font-semibold"
               style={aba === id ? { background: "var(--ink)", color: "var(--bg)" } : { color: "var(--ink2)" }}>{rot}</button>
@@ -201,6 +204,11 @@ export function PessoaGaveta({ pessoa, arquivos, fotoUrl, onFechar, onMudou, abr
 
           {aba === "expedicoes" && (
             <ListaExpedicoes pessoa={pessoa} abrirExp={abrirExp} />
+          )}
+
+          {aba === "cliente" && (
+            <BlocoFichaCliente passageiroIds={pessoa.idsPassageiros} clienteId={pessoa.cliente_id ?? null} somenteLeitura={somenteLeitura}
+              avisar={avisar} onMudou={onMudou} abrirIda={(i) => abrirExp(i.expedicao_id, i.id)} />
           )}
         </div>
       </div>

@@ -3,7 +3,7 @@
 // A ficha do cliente: documentos, contato, família e o histórico de mudanças.
 // É aqui que as próximas fases vão pendurar viagens, documentos e conversas.
 // -----------------------------------------------------------------------------
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   PARENTESCOS, carregarCliente, carregarFamilia, carregarHistorico, formatarCpf, formatarData,
@@ -19,7 +19,12 @@ import { Aviso, Avatar, Botao, Etiqueta } from "../ui";
 import ClienteForm from "./ClienteForm";
 import LigacoesDoCliente from "./LigacoesDoCliente";
 import ModeloModal from "../atendimento/ModeloModal";
-import DocumentosDoCliente from "../viagens/DocumentosDoCliente";
+import DocumentosPainel from "../viagens/DocumentosPainel";
+import ExpedicoesDaFicha, { type AbrirExpedicao, type EstadoIdas } from "./ExpedicoesDaFicha";
+import ArquivosDasExpedicoes from "./ArquivosDasExpedicoes";
+import FilaDivergencias from "@/clientes/FilaDivergencias";
+import { idasDaFicha } from "@/clientes/cadastroUnico";
+import { faltaCadastroUnico } from "@/clientes/idasDetalhe";
 import ChamadosDoCliente from "../chamados/ChamadosDoCliente";
 import ChamadoModal from "../chamados/ChamadoModal";
 import RecompraBotao from "../pos/RecompraBotao";
@@ -68,9 +73,11 @@ function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; c
   );
 }
 
-export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, onAbrirViagem }: {
+export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, onAbrirViagem, onAbrirExpedicao }: {
   id: string; onAbrir: (id: string) => void; onVoltar: () => void; onAbrirConversa: (conversaId: string) => void;
   onAbrirViagem: (viagemId: string) => void;
+  /** Cadastro único (0172): abre a expedição/passageiro no módulo de Expedições. */
+  onAbrirExpedicao?: AbrirExpedicao;
 }) {
   const [c, setC] = useState<Cliente | null>(null);
   const [titular, setTitular] = useState<Cliente | null>(null);
@@ -95,6 +102,10 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [novoContato, setNovoContato] = useState(false);
   // 0151: o que mais está ligado a esta pessoa (lead, grupos, Financeiro…).
   const [ligacoes, setLigacoes] = useState<LigacoesCliente | null>(null);
+  // 0172 (cadastro único): as idas da pessoa nas expedições, ao vivo. ativo=false = 0172 ainda não aplicada.
+  const [estadoIdas, setEstadoIdas] = useState<EstadoIdas | null>(null);
+  // cópias de 13/10 (rel_documentos) cujo arquivo original aparece em "Arquivos das expedições"
+  const [copiasEscondidas, setCopiasEscondidas] = useState<Set<string>>(new Set());
 
   const carregar = useCallback(async () => {
     try {
@@ -109,6 +120,11 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         .catch((e) => { setMetrica(null); setErroMetrica(e instanceof Error ? e.message : "erro desconhecido"); });
       listarContatos(cli.id).then(setContatos).catch(() => setContatos([]));
       carregarLigacoes(cli.id).then(setLigacoes).catch(() => setLigacoes(null));
+      idasDaFicha(cli.id)
+        .then((idas) => setEstadoIdas({ ativo: true, idas }))
+        .catch((e) => setEstadoIdas(faltaCadastroUnico(e)
+          ? { ativo: false, idas: [] }
+          : { ativo: true, idas: [], erro: e instanceof Error ? e.message : (e as { message?: string })?.message ?? "erro desconhecido" }));
       const [tit, fam, hist] = await Promise.all([
         cli.titular_id ? carregarCliente(cli.titular_id) : Promise.resolve(null),
         carregarFamilia(idTitular),
@@ -123,6 +139,9 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   }, [id]);
 
   useEffect(() => { setC(null); void carregar(); }, [carregar]);
+
+  // a seção Documentos recarrega quando "pessoas" muda: só muda se mudar nome/id
+  const pessoasDoc = useMemo(() => (c ? [{ id: c.id, nome: c.nome }] : []), [c?.id, c?.nome]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { carregarRegras().then((r) => setRegras(r.regras)).catch(() => undefined); }, []);
 
@@ -232,6 +251,13 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         </div>
       )}
 
+      {/* 0172: o que está diferente entre a ficha e as expedições (some quando não há nada) */}
+      {!c.mesclado_em_id && (
+        <FilaDivergencias clienteId={c.id} onAbrirCliente={onAbrir}
+          onAbrirPassageiro={onAbrirExpedicao ? (exp, tipo, pax) => onAbrirExpedicao(exp, tipo, pax) : undefined}
+          onMudou={() => void carregar()} />
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Secao titulo="Documentos">
           <dl>
@@ -329,8 +355,11 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
 
       {/* Próximas fases: deixam claro onde as coisas vão aparecer */}
       {ligacoes && <LigacoesDoCliente l={ligacoes} />}
-      <ViagensComAGente clienteId={c.id} onAbrirViagem={onAbrirViagem} metrica={metrica} cats={categoriasDe(regras)} />
-      <DocumentosDoCliente clienteId={c.id} />
+      <ExpedicoesDaFicha clienteId={c.id} estado={estadoIdas} onAbrirExpedicao={onAbrirExpedicao} />
+      <ViagensComAGente clienteId={c.id} onAbrirViagem={onAbrirViagem} metrica={metrica} cats={categoriasDe(regras)}
+        onAbrirExpedicao={onAbrirExpedicao ? (exp, tipo) => onAbrirExpedicao(exp, tipo) : undefined} />
+      <DocumentosPainel pessoas={pessoasDoc} clienteId={c.id} esconder={copiasEscondidas} />
+      {estadoIdas?.ativo && estadoIdas.idas.length > 0 && <ArquivosDasExpedicoes idas={estadoIdas.idas} onCopias={setCopiasEscondidas} />}
       <ArquivosDoCliente clienteId={c.id} bloqueado={!!c.mesclado_em_id} />
 
       <Secao titulo="Contatos registrados" acao={!c.mesclado_em_id ? (

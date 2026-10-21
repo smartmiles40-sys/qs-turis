@@ -197,15 +197,18 @@ function SeloIa({ d, onAplicar }: { d: DocumentoIa; onAplicar: (s: IaSugestao) =
 
 // ── O painel ────────────────────────────────────────────────────────────────
 
-export default function DocumentosPainel({ pessoas, viagemId, clienteId }: {
+export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconder }: {
   /** Quem pode ter documento aqui (passageiros da viagem ou o próprio cliente). */
   pessoas: Pessoa[];
   viagemId?: string | null;
   /** Na ficha: mostra os documentos do cliente de todas as viagens. */
   clienteId?: string;
+  /** Ids de documentos pra não mostrar (cadastro único: cópias de 13/10 de arquivo que a ficha já mostra da expedição). */
+  esconder?: ReadonlySet<string>;
 }) {
   const { currentUser } = useQsAuth();
-  const [docs, setDocs] = useState<Documento[] | null>(null);
+  const [docsTodos, setDocs] = useState<Documento[] | null>(null);
+  const docs = esconder?.size && docsTodos ? docsTodos.filter((x) => !esconder.has(x.id)) : docsTodos;
   const [pedidos, setPedidos] = useState<PedidoDocs[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   const [pedir, setPedir] = useState(false);
