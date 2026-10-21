@@ -34,7 +34,7 @@ async function ehAdmin(userId) {
 
 async function perfil(userId) {
   try {
-    const u = await rest(`qs_users?select=id,name,role,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
+    const u = await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
     return (Array.isArray(u) && u[0]) || null;
   } catch { return null; }
 }
@@ -325,6 +325,63 @@ export default async function handler(req, res) {
       }
       return res.status(200).json(r);
     }
+  }
+
+  // ── MODELOS DO FINANCEIRO (19/10) ─────────────────────────────────────────
+  // Bruno: "um lugar pro próprio funcionário subir as mensagens pra aprovar —
+  // só dentro da área do Financeiro". Quem é do Financeiro (ou admin) vê e manda
+  // pra aprovação da Meta só os modelos fin_*, sempre no número do
+  // Relacionamento (o Financeiro fala por ele). Excluir: só gestor(a) do
+  // Financeiro ou admin. Fica ANTES do portal, que é só de admin/gestor.
+  const areaFin = (req.method === 'GET' ? req.query?.area : body.area) === 'financeiro';
+  if (areaFin && (req.query?.modelos === 'todos' || body.acao === 'criar' || body.acao === 'excluir')) {
+    const eu = await perfil(userId);
+    const setores = Array.isArray(eu?.setores) ? eu.setores : [];
+    if (!eu || eu.is_active === false || !(eu.role === 'admin' || setores.includes('financeiro'))) {
+      return res.status(403).json({ error: 'Só quem é do Financeiro mexe nos modelos do Financeiro.' });
+    }
+    const num = (await rest('qs_wa_numeros_meta?select=phone_number_id,status&setor=eq.relacionamento&order=conectado_em.desc.nullslast&limit=1').catch(() => null))?.[0];
+    if (!num || num.status !== 'conectado') {
+      return res.status(409).json({ error: 'O número do Relacionamento não está conectado — peça ao admin.' });
+    }
+    const phone = num.phone_number_id;
+    const nome = String(body.nome || '').trim().toLowerCase();
+
+    if (req.method === 'GET') {
+      const r = await listarModelos(phone);
+      if (r.erro) return res.status(503).json({ error: textoDeConfig(r.erro) || 'Não consegui ler os modelos na Meta.', motivo: r.erro });
+      return res.status(200).json({ modelos: (r.modelos || []).filter((m) => String(m.nome || '').startsWith('fin_')) });
+    }
+    if (!/^fin_[a-z0-9_]+$/.test(nome)) {
+      return res.status(400).json({ error: 'O nome do modelo do Financeiro começa com fin_ (só minúsculas, números e _).' });
+    }
+    if (body.acao === 'excluir') {
+      if (!(eu.role === 'admin' || (eu.role === 'gestor' && setores.includes('financeiro')))) {
+        return res.status(403).json({ error: 'Só a gestão do Financeiro exclui modelo.' });
+      }
+      const r = await excluirModelo(nome, phone);
+      if (r.erro) return res.status(faltaConfig(r.erro) ? 503 : 400).json({ error: r.mensagem || textoDeConfig(r.erro) || 'Não consegui excluir.' });
+      console.log(`[wa-config] modelo do Financeiro excluído por ${eu.name || userId}: ${nome}`);
+      return res.status(200).json({ ok: true });
+    }
+    const r = await criarModelo({
+      nome, categoria: body.categoria, idioma: body.idioma || 'pt_BR',
+      corpo: body.corpo, cabecalho: body.cabecalho, rodape: body.rodape,
+      exemplos: Array.isArray(body.exemplos) ? body.exemplos.map((x) => String(x ?? '').slice(0, 200)) : null,
+      phoneId: phone,
+    });
+    if (r.erro) return res.status(faltaConfig(r.erro) ? 503 : 400).json({ error: r.mensagem || textoDeConfig(r.erro) || 'Não consegui criar o modelo.' });
+    // O que é cada {{n}} — a tela de envio mostra e exige o preenchimento (0131).
+    const campos = Object.fromEntries(Object.entries(body.campos && typeof body.campos === 'object' ? body.campos : {})
+      .filter(([k, v]) => /^\d+$/.test(k) && String(v || '').trim())
+      .map(([k, v]) => [k, String(v).trim().slice(0, 120)]));
+    if (Object.keys(campos).length) {
+      await rest('qs_wa_modelo_campos?on_conflict=nome', {
+        method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: { nome, campos },
+      }).catch((e) => console.warn('[wa-config] campos do modelo:', e?.message));
+    }
+    console.log(`[wa-config] modelo do Financeiro enviado por ${eu.name || userId}: ${nome} (${r.status})`);
+    return res.status(200).json({ ok: true, id: r.id, status: r.status });
   }
 
   // ── PORTAL DE MODELOS (só admin/gestor) ───────────────────────────────────

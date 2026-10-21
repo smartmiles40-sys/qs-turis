@@ -7,6 +7,9 @@
 // Fora da janela de 24h (ou na 1ª mensagem) a Meta só deixa enviar modelo
 // APROVADO. Os disparos e automações do Relacionamento usam estes.
 // Quem cria/exclui: admin ou gestor (o /api/wa-config confere de novo).
+// area="financeiro" (19/10): a tela Modelos do Financeiro — qualquer pessoa do
+// Financeiro manda pra aprovação, o nome sempre começa com fin_ e cada {{n}}
+// ganha o rótulo "o que é" (a tela de envio mostra). Excluir: só a gestão.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import type { NumeroMeta } from "@/lib/qs/metaConexao";
@@ -27,14 +30,17 @@ const STATUS_MODELO: Record<string, { txt: string; tom: "rel" | "aviso" | "erro"
 
 const NOME_OK = /^[a-z0-9_]{1,512}$/;
 
-export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, podeEditar = true }: {
+export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, podeEditar = true, podeExcluir = podeEditar, area }: {
   n: Pick<NumeroMeta, "phoneId" | "numero">;
   /** Botão "Copiar modelos do Comercial" (só na tela de conexão). */
   onCopiar?: () => void;
   ocupadoFora?: boolean;
   /** false = só lista (quem não é gestora/admin). */
   podeEditar?: boolean;
+  podeExcluir?: boolean;
+  area?: "financeiro";
 }) {
+  const prefixo = area === "financeiro" ? "fin_" : "";
   const [modelos, setModelos] = useState<WaModeloAdmin[] | null>(null);
   // O número é dividido com o Financeiro (19/10): os modelos fin_ ficam escondidos aqui
   // (eles têm a tela própria no Financeiro). Lista só de fin_ = é a tela do Financeiro.
@@ -50,23 +56,27 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
   const [confirmar, setConfirmar] = useState<string | null>(null);
   // 14/10: exemplo de cada {{n}} — a Meta usa pra aprovar e recusa quando não combina com o texto.
   const [exemplos, setExemplos] = useState<Record<string, string>>({});
+  // O que é cada {{n}} — só no Financeiro (vai pra qs_wa_modelo_campos).
+  const [rotulos, setRotulos] = useState<Record<string, string>>({});
   const [topo, setTopo] = useState<Topo>("nenhum");
   const [titulo, setTitulo] = useState("");
   // Arquivo de EXEMPLO do topo — o revisor da Meta vê; no envio vai o de verdade.
   const [arquivoTopo, setArquivoTopo] = useState<File | null>(null);
 
   const carregar = useCallback(async () => {
-    const r = await listarModelosAdmin(n.phoneId);
+    const r = await listarModelosAdmin(n.phoneId, area);
     setModelos(r.modelos);
     setErro(r.error || null);
-  }, [n.phoneId]);
+  }, [n.phoneId, area]);
   useEffect(() => { void carregar(); }, [carregar]);
 
   async function criar() {
-    const nome = form.nome.trim().toLowerCase().replace(/\s+/g, "_");
-    if (!NOME_OK.test(nome)) { setErroForm("Nome só com letras minúsculas, números e _ (ex.: lembrete_embarque)."); return; }
+    // No Financeiro o fin_ já vem fixo; se a pessoa digitou de novo, não duplica.
+    const nome = prefixo + form.nome.trim().toLowerCase().replace(/\s+/g, "_").replace(/^fin_/, prefixo ? "" : "fin_");
+    if (!NOME_OK.test(nome) || nome === prefixo) { setErroForm("Nome só com letras minúsculas, números e _ (ex.: lembrete_embarque)."); return; }
     if (form.corpo.trim().length < 5) { setErroForm("Escreva o texto da mensagem."); return; }
     if (numeros.some((v) => !exemploDe(v).trim())) { setErroForm("Preencha o exemplo de cada campo — a Meta usa pra aprovar."); return; }
+    if (area && numeros.some((v) => !rotuloDe(v).trim())) { setErroForm("Diga o que é cada campo (ex.: Primeiro nome do cliente) — quem envia vê isso."); return; }
     if (topo === "TEXT" && !titulo.trim()) { setErroForm("Escreva o título do topo (ou escolha Topo: nenhum)."); return; }
     if (topo === "TEXT" && /{{/.test(titulo)) { setErroForm("O título do topo não aceita campos {{n}} por aqui — escreva um texto fixo."); return; }
     const ehArquivo = topo === "IMAGE" || topo === "VIDEO" || topo === "DOCUMENT";
@@ -86,19 +96,21 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
     const r = await criarModeloNaMeta({
       nome, categoria: form.categoria, idioma: "pt_BR", corpo: form.corpo.trim(), rodape: form.rodape.trim() || undefined, exemplos: listaEx,
       cabecalho: topo === "TEXT" ? titulo.trim() : undefined, midia,
-    }, n.phoneId);
+      campos: area ? Object.fromEntries(numeros.map((v) => [v, rotuloDe(v).trim()])) : undefined,
+    }, n.phoneId, area);
     setSalvando(false);
     if (!r.ok) { setErroForm(r.error || "A Meta recusou."); return; }
     setNovo(false);
     setForm({ nome: "", categoria: "UTILITY", corpo: "", rodape: "" });
     setExemplos({});
+    setRotulos({});
     setTopo("nenhum"); setTitulo(""); setArquivoTopo(null);
     await carregar();
   }
 
   async function excluir(m: WaModeloAdmin) {
     setConfirmar(null);
-    const r = await excluirModeloNaMeta(m.nome, n.phoneId);
+    const r = await excluirModeloNaMeta(m.nome, n.phoneId, area);
     if (!r.ok) setErro(r.error || "Não consegui excluir.");
     await carregar();
   }
@@ -106,6 +118,7 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
   // Variáveis {{1}}, {{2}}… que aparecem no texto, pra lembrar do exemplo.
   const numeros = [...new Set([...form.corpo.matchAll(/{{\s*(\d+)\s*}}/g)].map((m) => m[1]))].sort((x, y) => Number(x) - Number(y));
   const exemploDe = (v: string) => exemplos[v] ?? (v === "1" ? "Maria" : "");
+  const rotuloDe = (v: string) => rotulos[v] ?? (v === "1" ? "Primeiro nome do cliente" : "");
 
   return (
     <section className="rel-card p-5 space-y-3">
@@ -147,7 +160,7 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
                     <p className="text-[13px] mt-1 whitespace-pre-wrap" style={{ color: "var(--ink2)" }}>{m.corpo}</p>
                     {m.motivo && <p className="text-[12px] mt-1" style={{ color: "var(--err-ink)" }}>Motivo da Meta: {m.motivo}</p>}
                   </div>
-                  {podeEditar && (confirmar === chave ? (
+                  {podeExcluir && (confirmar === chave ? (
                     <span className="flex items-center gap-1.5 flex-shrink-0">
                       <span className="text-[12px]" style={{ color: "var(--err-ink)" }}>Excluir? Disparos que usam param.</span>
                       <Botao variante="perigo" onClick={() => void excluir(m)}>Sim</Botao>
@@ -168,9 +181,19 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
           <Botao variante="primario" disabled={salvando} onClick={() => void criar()}>{salvando ? "Enviando…" : "Enviar pra aprovação da Meta"}</Botao>
         </>}>
         <div className="space-y-3">
-          <Campo rotulo="Nome (só minúsculas, números e _)" dica="Ex.: lembrete_embarque, feliz_aniversario">
-            <Entrada value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="lembrete_embarque" />
-          </Campo>
+          {prefixo ? (
+            <Campo rotulo="Nome (só minúsculas, números e _)" dica="Ex.: parcela_pendente — todo modelo do Financeiro começa com fin_.">
+              <div className="flex items-center rel-input w-full p-0 overflow-hidden">
+                <span className="pl-3 font-mono" style={{ color: "var(--ink3)" }}>{prefixo}</span>
+                <input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="parcela_pendente" aria-label="Nome do modelo"
+                  className="flex-1 min-w-0 bg-transparent px-0.5 py-2 font-mono text-[13px] outline-none" />
+              </div>
+            </Campo>
+          ) : (
+            <Campo rotulo="Nome (só minúsculas, números e _)" dica="Ex.: lembrete_embarque, feliz_aniversario">
+              <Entrada value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="lembrete_embarque" />
+            </Campo>
+          )}
           <Campo rotulo="Tipo" dica="Utilidade = aviso sobre a viagem que o cliente comprou (aprova mais fácil, custa menos). Marketing = oferta, convite, data especial (custa mais por mensagem).">
             <select className="rel-input w-full" value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value as "UTILITY" | "MARKETING" })}>
               <option value="UTILITY">Utilidade — aviso da viagem</option>
@@ -181,9 +204,11 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
             <select className="rel-input w-full" value={topo} onChange={(e) => { setTopo(e.target.value as Topo); setArquivoTopo(null); }}>
               <option value="nenhum">Nenhum</option>
               <option value="TEXT">Título (texto)</option>
-              <option value="IMAGE">Imagem (JPG ou PNG)</option>
-              <option value="VIDEO">Vídeo (MP4)</option>
-              <option value="DOCUMENT">Documento (PDF)</option>
+              {!area && <>
+                <option value="IMAGE">Imagem (JPG ou PNG)</option>
+                <option value="VIDEO">Vídeo (MP4)</option>
+                <option value="DOCUMENT">Documento (PDF)</option>
+              </>}
             </select>
           </Campo>
           {topo === "TEXT" && (
@@ -208,6 +233,10 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
               {numeros.map((v) => (
                 <div key={v} className="flex items-center gap-2">
                   <code className="text-[12px] px-1.5 py-1 rounded" style={{ background: "var(--line2)", color: "var(--ink2)" }}>{`{{${v}}}`}</code>
+                  {area && (
+                    <Entrada value={rotuloDe(v)} onChange={(e) => setRotulos((p) => ({ ...p, [v]: e.target.value }))}
+                      aria-label={`O que é {{${v}}}`} placeholder="O que é (ex.: Valor da parcela)" />
+                  )}
                   <Entrada value={exemploDe(v)} onChange={(e) => setExemplos((p) => ({ ...p, [v]: e.target.value }))}
                     aria-label={`Exemplo de {{${v}}}`} placeholder="Exemplo (obrigatório)" />
                 </div>

@@ -24,6 +24,7 @@ import { podeGerirTime } from "@/rel/equipe/permissao";
 import { FIN_CSS } from "./ui";
 import AtendimentosPage, { FaixaDoAtendimento } from "./atendimentos/AtendimentosPage";
 import AtendimentoPage from "@/rel/atendimento/AtendimentoPage";
+import ModelosPage from "./modelos/ModelosPage";
 import { supabase } from "@/lib/supabase";
 import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
@@ -33,7 +34,8 @@ const PREFIXO = "fin";
 // 14/10: atendimentos (a fila de quem foi mandado ao Financeiro) e conversas
 // (o WhatsApp do Relacionamento, só as conversas que estão com o Financeiro).
 // 20/10: solicitacoes (Central de Solicitações entre setores, 0149).
-const TELAS = ["inicio", "atendimentos", "conversas", "solicitacoes", "equipe"] as const;
+// 19/10: modelos (o próprio time manda os modelos fin_* pra aprovação da Meta).
+const TELAS = ["inicio", "atendimentos", "conversas", "solicitacoes", "modelos", "equipe"] as const;
 type Tela = (typeof TELAS)[number];
 interface Rota { tela: Tela; id?: string }
 
@@ -81,6 +83,7 @@ export default function FinApp() {
     { id: "atendimento", rotulo: "Atendimento", icone: ICONES_AREA.dinheiro, itens: [
       { id: "atendimentos", rotulo: "Atendimentos", badge: cont.novos || undefined, alerta: true },
       { id: "conversas", rotulo: "Conversas (WhatsApp)", badge: cont.esperando || undefined },
+      { id: "modelos", rotulo: "Modelos de mensagem" },
     ] },
     { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
@@ -111,6 +114,7 @@ export default function FinApp() {
             <FaixaDoAtendimento conversaId={c.id} onAbrir={(id) => ir({ tela: "atendimentos", id })} onMudou={() => { recarregar(); void contar(); }} />
           )} />
       )}
+      {rota.tela === "modelos" && <ModelosPage />}
       {rota.tela === "solicitacoes" && (
         <SolicitacoesPage setor="financeiro" abrirId={rota.id ?? null} onMudou={recontarCentral}
           onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })} />

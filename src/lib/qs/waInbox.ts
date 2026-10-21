@@ -215,9 +215,10 @@ export interface WaModeloAdmin extends WaModelo {
 }
 
 /** `phoneId` = número de um SDR (conta própria na Meta); sem ele, o oficial. */
-export async function listarModelosAdmin(phoneId?: string | null): Promise<{ modelos: WaModeloAdmin[]; error?: string }> {
+/** area "financeiro" (19/10): só os fin_* do número do Relacionamento — o servidor escolhe o número. */
+export async function listarModelosAdmin(phoneId?: string | null, area?: "financeiro"): Promise<{ modelos: WaModeloAdmin[]; error?: string }> {
   try {
-    const q = phoneId ? `&phone=${encodeURIComponent(phoneId)}` : "";
+    const q = (phoneId ? `&phone=${encodeURIComponent(phoneId)}` : "") + (area ? `&area=${area}` : "");
     const res = await fetch(`/api/wa-config?modelos=todos${q}`, { headers: await authHeaders() });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return { modelos: [], error: d?.error || "Não consegui carregar os modelos." };
@@ -238,14 +239,16 @@ export interface NovoModelo {
   exemplos?: string[];
   /** Topo com arquivo: o EXEMPLO que o revisor da Meta vê (≤3 MB). Substitui o cabeçalho de texto. */
   midia?: { formato: "IMAGE" | "VIDEO" | "DOCUMENT"; base64: string; mime: string; nome: string };
+  /** O que é cada {{n}} ("Primeiro nome do cliente") — só na área do Financeiro (19/10). */
+  campos?: Record<string, string>;
 }
 
-export async function criarModeloNaMeta(m: NovoModelo, phoneId?: string | null): Promise<{ ok: boolean; status?: string; error?: string }> {
+export async function criarModeloNaMeta(m: NovoModelo, phoneId?: string | null, area?: "financeiro"): Promise<{ ok: boolean; status?: string; error?: string }> {
   try {
     const res = await fetch("/api/wa-config", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ acao: "criar", ...m, phoneId: phoneId || undefined }),
+      body: JSON.stringify({ acao: "criar", ...m, phoneId: phoneId || undefined, area }),
     });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: d?.error || "Não consegui enviar o modelo." };
@@ -255,12 +258,12 @@ export async function criarModeloNaMeta(m: NovoModelo, phoneId?: string | null):
   }
 }
 
-export async function excluirModeloNaMeta(nome: string, phoneId?: string | null): Promise<{ ok: boolean; error?: string }> {
+export async function excluirModeloNaMeta(nome: string, phoneId?: string | null, area?: "financeiro"): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch("/api/wa-config", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ acao: "excluir", nome, phoneId: phoneId || undefined }),
+      body: JSON.stringify({ acao: "excluir", nome, phoneId: phoneId || undefined, area }),
     });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: d?.error || "Não consegui excluir." };
