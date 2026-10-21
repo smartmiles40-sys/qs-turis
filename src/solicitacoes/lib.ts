@@ -8,6 +8,9 @@
 //   nova → em andamento ⇄ aguardando → concluída → quem pediu confirma/reabre
 //                                     ↘ recusada (com motivo)
 //
+//   (cotação, 0158: Nova solicitação → Aguardando ajustes ⇄ Em cotação →
+//    Cotação entregue → quem pediu dá o desfecho no prazo — ver cotacao.ts)
+//
 // Ninguém aceitou em 2 horas úteis → acende pro gestor (sem_dono_atrasada).
 // Prazo vem do TIPO (horas úteis). Tudo que muda passa por RPC.
 // -----------------------------------------------------------------------------
@@ -19,7 +22,7 @@ export { NOME_SETOR, SETORES, type Setor };
 export type StatusSol = "nova" | "em_andamento" | "aguardando" | "concluida" | "recusada" | "cancelada";
 export type AguardandoQuem = "cliente" | "fornecedor" | "solicitante" | "outro_setor";
 export type PrioridadeSol = "normal" | "alta" | "urgente";
-export type AcaoSol = "comentar" | "aceitar" | "passar" | "aguardar" | "retomar" | "concluir" | "recusar" | "confirmar" | "reabrir" | "cancelar" | "prazo";
+export type AcaoSol = "comentar" | "aceitar" | "passar" | "aguardar" | "retomar" | "concluir" | "recusar" | "confirmar" | "reabrir" | "cancelar" | "prazo" | "ajuste" | "desfecho";
 
 export const STATUS_SOL: Record<StatusSol, string> = {
   nova: "Nova — ninguém pegou",
@@ -56,6 +59,9 @@ export interface TipoSol {
   prazo_horas: number;
   ordem: number;
   ativo: boolean;
+  /** 0158: 'cotacao' = formulário completo + etapas + desfecho. */
+  formulario?: "cotacao" | null;
+  desfecho_dias?: number | null;
 }
 
 export interface Solicitacao {
@@ -91,12 +97,23 @@ export interface Solicitacao {
   vencida: boolean;
   sem_dono_atrasada: boolean;
   novidade: boolean;
+  // 0158 — cotação
+  cotacao: boolean | null;
+  formulario: unknown;
+  desfecho: "fechou" | "nao_seguiu" | null;
+  desfecho_motivo: string | null;
+  desfecho_texto: string | null;
+  desfecho_em: string | null;
+  desfecho_prazo: string | null;
+  desfecho_por_nome: string | null;
+  falta_desfecho: boolean;
+  desfecho_atrasado: boolean;
 }
 
 export interface EventoSol {
   id: number;
   solicitacao_id: string;
-  tipo: "criada" | "aceita" | "passada" | "status" | "comentario" | "prazo" | "concluida" | "confirmada" | "reaberta" | "recusada" | "cancelada" | "vinculada";
+  tipo: "criada" | "aceita" | "passada" | "status" | "comentario" | "prazo" | "concluida" | "confirmada" | "reaberta" | "recusada" | "cancelada" | "vinculada" | "ajuste" | "ajustada" | "desfecho";
   de: string | null;
   para: string | null;
   texto: string | null;
@@ -190,23 +207,37 @@ export async function pessoasDoSetor(setor: Setor): Promise<Pessoa[]> {
   return ((data ?? []) as Pessoa[]).filter((p) => p.role === "admin" || (p.setores ?? []).includes(setor));
 }
 
-export interface Contagem { novas: number; atrasadas: number; comigo: number; novidades: number }
+export interface Contagem { novas: number; atrasadas: number; comigo: number; novidades: number; ajustes: number; desfechos: number }
 export async function contarSolicitacoes(setor: Setor): Promise<Contagem> {
   const { data, error } = await supabase.rpc("qs_sol_contagem", { p_setor: setor });
   if (error) throw new Error(error.message);
   const c = (data ?? {}) as Partial<Contagem>;
-  return { novas: c.novas ?? 0, atrasadas: c.atrasadas ?? 0, comigo: c.comigo ?? 0, novidades: c.novidades ?? 0 };
+  return { novas: c.novas ?? 0, atrasadas: c.atrasadas ?? 0, comigo: c.comigo ?? 0, novidades: c.novidades ?? 0, ajustes: c.ajustes ?? 0, desfechos: c.desfechos ?? 0 };
+}
+
+/** Cotações entregues de um setor, desde sempre (0158: "deve contabilizar todas"). */
+export interface Entregues { total: number; fechou: number; naoSeguiu: number; semDesfecho: number; atrasado: number }
+export async function contarEntregues(setor: Setor): Promise<Entregues> {
+  const base = () => supabase.from("qs_solicitacoes_v").select("id", { count: "exact", head: true })
+    .eq("para_setor", setor).eq("status", "concluida").eq("cotacao", true);
+  const [t, f, n, s, a] = await Promise.all([
+    base(), base().eq("desfecho", "fechou"), base().eq("desfecho", "nao_seguiu"), base().is("desfecho", null), base().eq("desfecho_atrasado", true),
+  ]);
+  const e = t.error ?? f.error ?? n.error ?? s.error ?? a.error;
+  if (e) throw new Error(e.message);
+  return { total: t.count ?? 0, fechou: f.count ?? 0, naoSeguiu: n.count ?? 0, semDesfecho: s.count ?? 0, atrasado: a.count ?? 0 };
 }
 
 // ── Escrita (RPC) ───────────────────────────────────────────────────────────
 
 export async function criarSolicitacao(p: {
   de: Setor; para: Setor; tipo: string; titulo: string; descricao: string; prioridade: PrioridadeSol; prazo?: string | null;
+  formulario?: object | null;
 } & AlvoSol): Promise<string> {
   const { data, error } = await supabase.rpc("qs_sol_criar", {
     p_de: p.de, p_para: p.para, p_tipo: p.tipo, p_titulo: p.titulo, p_descricao: p.descricao, p_prioridade: p.prioridade,
     p_prazo: p.prazo ?? null, p_cliente: p.clienteId ?? null, p_viagem: p.viagemId ?? null, p_lead: p.leadId ?? null,
-    p_conversa: p.conversaId ?? null, p_sobre: p.sobre ?? null,
+    p_conversa: p.conversaId ?? null, p_sobre: p.sobre ?? null, p_formulario: p.formulario ?? null,
   });
   if (error) throw new Error(error.message);
   return data as string;
@@ -214,6 +245,14 @@ export async function criarSolicitacao(p: {
 
 export async function agir(id: string, acao: AcaoSol, texto?: string | null, extra?: string | null) {
   const { error } = await supabase.rpc("qs_sol_acao", { p_id: id, p_acao: acao, p_texto: texto ?? null, p_extra: extra ?? null });
+  if (error) throw new Error(error.message);
+}
+
+/** Quem pediu corrige o pedido e devolve pra aprovação (0158, "Aguardando ajustes"). */
+export async function ajustarSolicitacao(id: string, p: { titulo: string; descricao: string; formulario?: object | null; prioridade: PrioridadeSol; texto?: string | null }) {
+  const { error } = await supabase.rpc("qs_sol_ajustar", {
+    p_id: id, p_titulo: p.titulo, p_descricao: p.descricao, p_formulario: p.formulario ?? null, p_prioridade: p.prioridade, p_texto: p.texto ?? null,
+  });
   if (error) throw new Error(error.message);
 }
 

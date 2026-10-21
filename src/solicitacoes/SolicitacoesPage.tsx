@@ -10,6 +10,11 @@
 //   Buscar      — histórico por número, cliente ou assunto
 //
 // Gestor/admin vê em vermelho o que ninguém pegou em 2h úteis e o que venceu.
+//
+// 0158 (Bruno 21/10): as colunas seguem as etapas da cotação — Nova solicitação
+// (esperando aprovação) · Aguardando ajustes · Em cotação · Cotação entregue
+// (com o total de sempre e os desfechos). Em "Pedidas", em cima: o que espera
+// o MEU ajuste e as cotações entregues que precisam do desfecho.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
@@ -17,9 +22,10 @@ import { Botao, Entrada, Etiqueta, Vazio } from "@/rel/ui";
 import NovaSolicitacao from "./NovaSolicitacao";
 import SolicitacaoDetalhe, { SetorChip, type LinksSol } from "./SolicitacaoDetalhe";
 import TiposPrazos from "./TiposPrazos";
+import { rotuloStatus, tomStatus } from "./cotacao";
 import {
-  AGUARDANDO, COR_SETOR, NOME_SETOR, PRIORIDADE_SOL, SIGLA, STATUS_CURTO, TOM_SOL, buscar, haQuanto, listarDoSetor, listarMinhas,
-  primeiroNome, textoPrazo, type Setor, type Solicitacao, type StatusSol,
+  AGUARDANDO, COR_SETOR, NOME_SETOR, PRIORIDADE_SOL, SIGLA, buscar, contarEntregues, haQuanto, listarDoSetor, listarMinhas,
+  primeiroNome, textoPrazo, type Entregues, type Setor, type Solicitacao,
 } from "./lib";
 
 type Aba = "recebidas" | "pedidas" | "buscar";
@@ -36,7 +42,7 @@ function ordenar(a: Solicitacao, b: Solicitacao) {
 function Cartao({ s, lado, meuId, onAbrir }: { s: Solicitacao; lado: "para" | "de"; meuId: string; onAbrir: () => void }) {
   const prazo = textoPrazo(s);
   const outro: Setor = lado === "para" ? s.de_setor : s.para_setor;
-  const alerta = s.aberta && (s.vencida || s.sem_dono_atrasada);
+  const alerta = (s.aberta && (s.vencida || s.sem_dono_atrasada)) || s.desfecho_atrasado;
   return (
     <button onClick={onAbrir} className="rel-card rel-linha w-full text-left p-3 space-y-1.5 relative"
       style={alerta ? { borderColor: "var(--err-line)", boxShadow: "inset 3px 0 0 var(--err-ink)" } : undefined}
@@ -59,19 +65,36 @@ function Cartao({ s, lado, meuId, onAbrir }: { s: Solicitacao; lado: "para" | "d
           · {s.responsavel_id ? (s.responsavel_id === meuId ? "com você" : `com ${primeiroNome(s.responsavel_nome)}`) : `ninguém pegou (pedido ${haQuanto(s.criado_em)})`}
         </span>
         {lado === "para" && s.criado_por_nome && <span style={{ color: "var(--ink3)" }}>· pediu {primeiroNome(s.criado_por_nome)}</span>}
-        {s.status === "aguardando" && s.aguardando_quem && <span style={{ color: "var(--ink2)" }}>· esperando {AGUARDANDO[s.aguardando_quem]}</span>}
+        {s.status === "aguardando" && s.aguardando_quem && <span style={{ color: s.aguardando_quem === "solicitante" ? "var(--warn-ink)" : "var(--ink2)", fontWeight: s.aguardando_quem === "solicitante" ? 600 : 400 }}>· {s.aguardando_quem === "solicitante" ? "esperando ajuste de quem pediu" : `esperando ${AGUARDANDO[s.aguardando_quem]}`}</span>}
+        {s.desfecho_atrasado && <span className="font-semibold" style={{ color: "var(--err-ink)" }}>· desfecho atrasado</span>}
+        {s.desfecho && <span style={{ color: s.desfecho === "fechou" ? "var(--rel-ink)" : "var(--ink3)", fontWeight: 600 }}>· {s.desfecho === "fechou" ? "fechou ✅" : "não seguiu"}</span>}
         {s.reaberturas > 0 && <span style={{ color: "var(--warn-ink)" }}>· reaberta</span>}
       </span>
     </button>
   );
 }
 
-const COLUNAS: { id: StatusSol | "fechadas"; rotulo: string; dica: string }[] = [
-  { id: "nova", rotulo: "Novas", dica: "ninguém pegou ainda" },
-  { id: "em_andamento", rotulo: "Em andamento", dica: "alguém está fazendo" },
-  { id: "aguardando", rotulo: "Aguardando", dica: "cliente, fornecedor ou quem pediu" },
+type Coluna = "nova" | "ajustes" | "andamento" | "fechadas";
+/** Em qual etapa o cartão está (0158). */
+function colunaDe(s: Solicitacao): Coluna {
+  if (!s.aberta) return "fechadas";
+  if (s.status === "nova") return "nova";
+  if (s.status === "aguardando" && s.aguardando_quem === "solicitante") return "ajustes";
+  return "andamento";
+}
+const COLUNAS: { id: Coluna; rotulo: string; dica: string }[] = [
+  { id: "nova", rotulo: "Novas", dica: "esperando alguém aprovar" },
+  { id: "ajustes", rotulo: "Aguardando ajustes", dica: "falta info de quem pediu" },
+  { id: "andamento", rotulo: "Em andamento", dica: "inclui esperando cliente/fornecedor" },
   { id: "fechadas", rotulo: "Concluídas", dica: "últimos 14 dias" },
 ];
+/** No Operações, os nomes das etapas da cotação (Bruno 21/10). */
+const COLUNAS_OPS: Record<Coluna, { rotulo: string; dica: string }> = {
+  nova: { rotulo: "Nova solicitação", dica: "esperando aprovação" },
+  ajustes: { rotulo: "Aguardando ajustes", dica: "falta info de quem pediu" },
+  andamento: { rotulo: "Em cotação", dica: "e demais pedidos em andamento" },
+  fechadas: { rotulo: "Cotação entregue", dica: "últimos 14 dias" },
+};
 
 export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onMudou }: {
   setor: Setor;
@@ -96,6 +119,7 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const [tipos, setTipos] = useState(false);
   const [aberta, setAberta] = useState<string | null>(abrirId ?? null);
   const [erro, setErro] = useState<string | null>(null);
+  const [entregues, setEntregues] = useState<Entregues | null>(null);
   useEffect(() => { if (abrirId !== undefined) setAberta(abrirId); }, [abrirId]);
 
   const carregar = useCallback(async () => {
@@ -105,6 +129,7 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
       // Pedidas = do setor + as que EU pedi estando em outra área (admin/gestor de várias áreas).
       const ids = new Set(p.map((x) => x.id));
       setPedidas([...p, ...m.filter((x) => !ids.has(x.id) && x.para_setor !== setor)]);
+      if (r.some((x) => x.cotacao) || setor === "operacional") contarEntregues(setor).then(setEntregues).catch(() => undefined);
       setErro(null);
     } catch (e) { setErro(e instanceof Error ? e.message : "Não carregou."); }
   }, [setor, meuId]);
@@ -120,9 +145,9 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const filtradas = useMemo(() => (recebidas ?? []).filter((s) =>
     filtro === "todas" ? true : filtro === "comigo" ? s.responsavel_id === meuId : !s.responsavel_id), [recebidas, filtro, meuId]);
   const porColuna = useMemo(() => {
-    const m: Record<string, Solicitacao[]> = { nova: [], em_andamento: [], aguardando: [], fechadas: [] };
-    for (const s of filtradas) (s.aberta ? m[s.status] : m.fechadas).push(s);
-    m.nova.sort(ordenar); m.em_andamento.sort(ordenar); m.aguardando.sort(ordenar);
+    const m: Record<Coluna, Solicitacao[]> = { nova: [], ajustes: [], andamento: [], fechadas: [] };
+    for (const s of filtradas) m[colunaDe(s)].push(s);
+    m.nova.sort(ordenar); m.ajustes.sort(ordenar); m.andamento.sort(ordenar);
     m.fechadas.sort((a, b) => (b.concluido_em ?? "").localeCompare(a.concluido_em ?? ""));
     return m;
   }, [filtradas]);
@@ -132,9 +157,12 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const novasN = (recebidas ?? []).filter((s) => s.status === "nova").length;
 
   const pedidasVisiveis = useMemo(() => (pedidas ?? []).filter((s) => !soMinhas || s.criado_por === meuId), [pedidas, soMinhas, meuId]);
-  const paraConfirmar = pedidasVisiveis.filter((s) => s.status === "concluida" && !s.confirmado_em && s.criado_por === meuId);
-  const abertasPedidas = pedidasVisiveis.filter((s) => s.aberta).sort(ordenar);
-  const fechadasPedidas = pedidasVisiveis.filter((s) => !s.aberta && !paraConfirmar.includes(s)).sort((a, b) => (b.concluido_em ?? "").localeCompare(a.concluido_em ?? ""));
+  const paraConfirmar = pedidasVisiveis.filter((s) => s.status === "concluida" && !s.confirmado_em && s.criado_por === meuId && !s.falta_desfecho);
+  const paraAjustar = pedidasVisiveis.filter((s) => s.status === "aguardando" && s.aguardando_quem === "solicitante").sort(ordenar);
+  const paraDesfecho = pedidasVisiveis.filter((s) => s.falta_desfecho && !s.desfecho)
+    .sort((a, b) => (a.desfecho_prazo ?? "").localeCompare(b.desfecho_prazo ?? ""));
+  const abertasPedidas = pedidasVisiveis.filter((s) => s.aberta && !paraAjustar.includes(s)).sort(ordenar);
+  const fechadasPedidas = pedidasVisiveis.filter((s) => !s.aberta && !paraConfirmar.includes(s) && !paraDesfecho.includes(s)).sort((a, b) => (b.concluido_em ?? "").localeCompare(a.concluido_em ?? ""));
   const novidadesPedidas = pedidasVisiveis.filter((s) => s.novidade && s.criado_por === meuId).length;
 
   async function fazerBusca() {
@@ -181,13 +209,22 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
             <div className="rel-card"><Vazio titulo={`Nenhuma solicitação pro ${NOME_SETOR[setor]}`} texto="Quando outro setor pedir alguma coisa, ela aparece aqui com prazo e quem pediu." /></div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 items-start">
-              {COLUNAS.map((c) => (
+              {COLUNAS.map((c0) => ({ ...c0, ...(setor === "operacional" ? COLUNAS_OPS[c0.id] : {}) })).map((c) => (
                 <section key={c.id} className="rounded-2xl p-2.5 space-y-2" style={{ background: "var(--card2)" }} aria-label={c.rotulo}>
                   <header className="flex items-baseline gap-2 px-1">
                     <h2 className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>{c.rotulo}</h2>
                     <span className="text-[12px] font-semibold" style={{ color: "var(--ink3)" }}>{porColuna[c.id].length}</span>
                     <span className="text-[11px] ml-auto" style={{ color: "var(--ink3)" }}>{c.dica}</span>
                   </header>
+                  {c.id === "fechadas" && entregues && entregues.total > 0 && (
+                    <div className="rounded-xl px-2.5 py-2 text-[12px] space-y-0.5" style={{ background: "var(--card)", color: "var(--ink2)" }}>
+                      <p><b style={{ color: "var(--ink)" }}>{entregues.total}</b> cotaç{entregues.total === 1 ? "ão entregue" : "ões entregues"} desde o início</p>
+                      <p>
+                        <span style={{ color: "var(--rel-ink)", fontWeight: 600 }}>{entregues.fechou} fecharam</span> · {entregues.naoSeguiu} não seguiram · {entregues.semDesfecho} sem desfecho
+                        {entregues.atrasado > 0 && <span style={{ color: "var(--err-ink)", fontWeight: 600 }}> ({entregues.atrasado} atrasado{entregues.atrasado > 1 ? "s" : ""})</span>}
+                      </p>
+                    </div>
+                  )}
                   {porColuna[c.id].map((s) => <Cartao key={s.id} s={s} lado="para" meuId={meuId} onAbrir={() => abrir(s.id)} />)}
                   {porColuna[c.id].length === 0 && <p className="text-[12px] px-1 py-3 text-center" style={{ color: "var(--ink3)" }}>—</p>}
                 </section>
@@ -206,6 +243,12 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
             <div className="rel-card"><Vazio titulo="Nada pedido ainda" texto="Use “+ Pedir a outro setor” — ou o botão “Pedir a outro setor” dentro da viagem, da ficha ou do lead." /></div>
           ) : (
             <div className="space-y-5">
+              {paraAjustar.length > 0 && (
+                <Lista titulo="Aguardando seus ajustes" dica="O outro setor precisa de mais informação. Abra e clique em “Enviar ajustes”." itens={paraAjustar} meuId={meuId} abrir={abrir} destaque />
+              )}
+              {paraDesfecho.length > 0 && (
+                <Lista titulo="Cotações entregues — dê o desfecho" dica="Conte se fechou ou por que não seguiu, até o prazo de cada uma." itens={paraDesfecho} meuId={meuId} abrir={abrir} destaque />
+              )}
               {paraConfirmar.length > 0 && (
                 <Lista titulo="Concluídas — confira e confirme" dica="Abra, veja o que foi feito e clique em “Resolveu” (ou reabra)." itens={paraConfirmar} meuId={meuId} abrir={abrir} destaque />
               )}
@@ -227,7 +270,7 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
               {achadas.map((s) => (
                 <div key={s.id} className="space-y-1">
                   <Cartao s={s} lado={s.para_setor === setor ? "para" : "de"} meuId={meuId} onAbrir={() => abrir(s.id)} />
-                  <span className="px-1"><Etiqueta tom={TOM_SOL[s.status]}>{STATUS_CURTO[s.status]}</Etiqueta></span>
+                  <span className="px-1"><Etiqueta tom={tomStatus(s)}>{rotuloStatus(s, true)}</Etiqueta></span>
                 </div>
               ))}
             </div>
@@ -264,7 +307,14 @@ function Lista({ titulo, dica, itens, meuId, abrir, destaque }: { titulo: string
           {itens.map((s) => (
             <div key={s.id} className="space-y-1">
               <Cartao s={s} lado="de" meuId={meuId} onAbrir={() => abrir(s.id)} />
-              <span className="px-1"><Etiqueta tom={TOM_SOL[s.status]}>{s.status === "aguardando" && s.aguardando_quem ? `Aguardando ${AGUARDANDO[s.aguardando_quem]}` : STATUS_CURTO[s.status]}</Etiqueta></span>
+              <span className="px-1">
+                <Etiqueta tom={tomStatus(s)}>{rotuloStatus(s)}</Etiqueta>
+                {s.falta_desfecho && s.desfecho_prazo && !s.desfecho && (
+                  <span className="ml-2 text-[11.5px]" style={{ color: s.desfecho_atrasado ? "var(--err-ink)" : "var(--ink3)", fontWeight: s.desfecho_atrasado ? 600 : 400 }}>
+                    desfecho {s.desfecho_atrasado ? "venceu" : "até"} {new Date(s.desfecho_prazo).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" })}
+                  </span>
+                )}
+              </span>
             </div>
           ))}
         </div>

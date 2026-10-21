@@ -7,12 +7,17 @@
 //
 // 0150 (Bruno 20/10): todo pedido amarra o CLIENTE (fica na ficha dele) e, se
 // tiver, a VENDA. Sem cliente só se marcar "não é de cliente".
+//
+// 0158 (Bruno 21/10): tipo com formulário de COTAÇÃO (Operações → Cotação)
+// troca "o que você precisa" pelo formulário completo (FormCotacao).
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import { Aviso, Botao, Campo, Entrada, Modal } from "@/rel/ui";
 import EscolherClienteVenda, { type Escolha } from "./EscolherClienteVenda";
+import FormCotacaoCampos, { EscolherPrioridade } from "./FormCotacao";
+import { cotacaoVazia, descricaoDaCotacao, faltaNaCotacao, tituloDaCotacao, type FormCotacao } from "./cotacao";
 import {
-  COR_SETOR, NOME_SETOR, PRIORIDADE_SOL, SETORES, criarSolicitacao, deInputLocal, listarTipos,
+  COR_SETOR, NOME_SETOR, SETORES, criarSolicitacao, deInputLocal, listarTipos,
   type AlvoSol, type PrioridadeSol, type Setor, type TipoSol,
 } from "./lib";
 
@@ -36,12 +41,14 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
   const [prazo, setPrazo] = useState("");
   const [escolha, setEscolha] = useState<Escolha | null>(null);
   const [semCliente, setSemCliente] = useState(false);
+  const [cot, setCot] = useState<FormCotacao>(() => cotacaoVazia());
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
     if (!aberto) return;
     setTitulo(""); setDescricao(""); setPrioridade("normal"); setOutroPrazo(false); setPrazo(""); setErro(null); setSemCliente(false);
+    setCot(cotacaoVazia(alvo?.sobre ? alvo.sobre.split(" · ")[0] : ""));
     setEscolha(alvo?.clienteId ? { clienteId: alvo.clienteId, clienteNome: (alvo.sobre ?? "").split(" · ")[0] || "Cliente", viagemId: alvo.viagemId ?? null, vendaTexto: null } : null);
     setPara(paraInicial && paraInicial !== deSetor ? paraInicial : destinos.includes("operacional") ? "operacional" : destinos[0]);
     listarTipos().then(setTipos).catch(() => setTipos([]));
@@ -51,16 +58,26 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
   const doSetor = useMemo(() => tipos.filter((t) => t.setor === para && t.ativo), [tipos, para]);
   useEffect(() => { setTipo(doSetor[0]?.id ?? ""); }, [doSetor]);
   const tipoSel = doSetor.find((t) => t.id === tipo);
+  const ehCotacao = tipoSel?.formulario === "cotacao";
+  // Passageiro vazio herda o nome do cliente escolhido.
+  useEffect(() => {
+    if (escolha?.clienteNome) setCot((c) => (c.passageiro.trim() ? c : { ...c, passageiro: escolha.clienteNome }));
+  }, [escolha?.clienteNome]);
 
   async function enviar() {
     if (!tipo) { setErro("Escolha o tipo do pedido."); return; }
-    if (!titulo.trim()) { setErro("Escreva em uma linha o que você precisa."); return; }
+    const falta = ehCotacao ? faltaNaCotacao(cot) : null;
+    if (falta) { setErro(falta); return; }
+    if (!ehCotacao && !titulo.trim()) { setErro("Escreva em uma linha o que você precisa."); return; }
     if (outroPrazo && !prazo) { setErro("Escolha o prazo (ou use o padrão)."); return; }
     if (!escolha && !semCliente && !alvo?.leadId) { setErro("Escolha o cliente do pedido (ou marque que não é de cliente)."); return; }
     setEnviando(true); setErro(null);
     try {
       const id = await criarSolicitacao({
-        de: deSetor, para, tipo, titulo: titulo.trim(), descricao: descricao.trim(), prioridade,
+        de: deSetor, para, tipo, prioridade,
+        titulo: ehCotacao ? tituloDaCotacao(cot) : titulo.trim(),
+        descricao: ehCotacao ? descricaoDaCotacao(cot) : descricao.trim(),
+        formulario: ehCotacao ? cot : null,
         prazo: outroPrazo ? deInputLocal(prazo) : null, ...(alvo ?? {}),
         clienteId: escolha?.clienteId ?? null,
         viagemId: escolha?.viagemId ?? null,
@@ -73,10 +90,11 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
   }
 
   return (
-    <Modal aberto={aberto} titulo="Pedir a outro setor" onFechar={onFechar} largura={560}
+    <Modal aberto={aberto} titulo={ehCotacao ? `Pedir cotação a ${NOME_SETOR[para]}` : "Pedir a outro setor"} onFechar={onFechar} largura={ehCotacao ? 720 : 560}
       rodape={<><Botao onClick={onFechar} disabled={enviando}>Cancelar</Botao><Botao variante="primario" onClick={() => void enviar()} disabled={enviando}>{enviando ? "Enviando…" : `Enviar pra ${NOME_SETOR[para]}`}</Botao></>}>
       <div className="space-y-4">
-        <Campo rotulo="Pra qual setor">
+        <div>
+          <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Pra qual setor</p>
           <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Setor que recebe">
             {destinos.map((s) => (
               <button key={s} type="button" role="radio" aria-checked={para === s} onClick={() => setPara(s)}
@@ -86,7 +104,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
               </button>
             ))}
           </div>
-        </Campo>
+        </div>
 
         <Campo rotulo="Tipo do pedido" dica={tipoSel ? `Prazo padrão: ${tipoSel.prazo_horas}h úteis (seg–sex, 9h–18h).` : undefined}>
           <select className="rel-input" value={tipo} onChange={(e) => setTipo(e.target.value)}>
@@ -112,6 +130,9 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
           )}
         </div>
 
+        {ehCotacao ? (
+          <FormCotacaoCampos f={cot} onMudar={setCot} prioridade={prioridade} onPrioridade={setPrioridade} />
+        ) : (<>
         <Campo rotulo="O que você precisa (uma linha)" dica="Ex.: cotar aéreo GRU–Lisboa 12/03 a 26/03 pra 2 adultos.">
           <Entrada value={titulo} onChange={(e) => setTitulo(e.target.value)} maxLength={160} autoFocus />
         </Campo>
@@ -119,17 +140,15 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
         <Campo rotulo="Detalhes (opcional)" dica="Tudo que o outro setor precisa pra não ter que te perguntar.">
           <textarea value={descricao} onChange={(e) => setDescricao(e.target.value)} rows={4} maxLength={4000} className="rel-input" />
         </Campo>
+        </>)}
 
         <div className="flex flex-wrap items-end gap-4">
-          <Campo rotulo="Prioridade">
-            <div className="flex gap-1.5" role="radiogroup" aria-label="Prioridade">
-              {(Object.entries(PRIORIDADE_SOL) as [PrioridadeSol, string][]).map(([k, r]) => (
-                <button key={k} type="button" role="radio" aria-checked={prioridade === k} onClick={() => setPrioridade(k)}
-                  className="rounded-full px-3 h-8 text-[12.5px] border"
-                  style={prioridade === k ? { background: k === "urgente" ? "var(--err-bg)" : "var(--rel-soft)", color: k === "urgente" ? "var(--err-ink)" : "var(--rel-ink)", borderColor: "transparent", fontWeight: 600 } : { borderColor: "var(--line)", color: "var(--ink2)" }}>{r}</button>
-              ))}
+          {!ehCotacao && (
+            <div>
+              <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Prioridade</p>
+              <EscolherPrioridade valor={prioridade} onMudar={setPrioridade} />
             </div>
-          </Campo>
+          )}
           <label className="flex items-center gap-2 text-[13px] pb-1.5" style={{ color: "var(--ink2)" }}>
             <input type="checkbox" checked={outroPrazo} onChange={(e) => setOutroPrazo(e.target.checked)} /> Preciso pra uma data certa
           </label>

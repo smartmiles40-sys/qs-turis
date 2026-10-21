@@ -11,7 +11,8 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Botao, Etiqueta } from "@/rel/ui";
 import NovaSolicitacao from "./NovaSolicitacao";
 import SolicitacaoDetalhe, { type LinksSol } from "./SolicitacaoDetalhe";
-import { AGUARDANDO, COR_SETOR, SIGLA, STATUS_CURTO, TOM_SOL, primeiroNome, solicitacoesDe, textoPrazo, type AlvoSol, type Setor, type Solicitacao } from "./lib";
+import { rotuloStatus, tomStatus } from "./cotacao";
+import { COR_SETOR, SIGLA, primeiroNome, solicitacoesDe, textoPrazo, type AlvoSol, type Setor, type Solicitacao } from "./lib";
 
 export function BotaoPedirOutroSetor({ deSetor, alvo, onCriada, children, className }: {
   deSetor: Setor; alvo: AlvoSol; onCriada?: () => void; children?: ReactNode; className?: string;
@@ -56,7 +57,7 @@ export function PedidosSobre({ alvo, recarregar = 0, links, titulo = "Pedidos a 
             <b style={{ color: "var(--ink)" }}>#{s.numero}</b>
             <span className="font-bold" style={{ color: COR_SETOR[s.para_setor] }}>{SIGLA[s.de_setor]}→{SIGLA[s.para_setor]}</span>
             <span className="truncate max-w-[260px]" style={{ color: "var(--ink)" }}>{s.titulo}</span>
-            <Etiqueta tom={TOM_SOL[s.status]}>{s.status === "aguardando" && s.aguardando_quem ? `Aguardando ${AGUARDANDO[s.aguardando_quem]}` : STATUS_CURTO[s.status]}</Etiqueta>
+            <Etiqueta tom={tomStatus(s)}>{rotuloStatus(s, true)}</Etiqueta>
             {s.responsavel_nome && <span>· com {primeiroNome(s.responsavel_nome)}</span>}
             {s.aberta && <span style={{ color: p.tom === "erro" ? "var(--err-ink)" : "var(--ink3)" }}>· {p.texto}</span>}
           </button>
@@ -103,7 +104,7 @@ export function HistoricoDeSolicitacoes({ clienteId, recarregar = 0, links }: { 
             {!s.aberta && s.resolucao && <span className="block truncate" style={{ color: "var(--ink3)" }}>{s.status === "recusada" ? "Recusada: " : "Feito: "}{s.resolucao}</span>}
           </span>
           <span className="flex flex-col items-end gap-0.5 whitespace-nowrap">
-            <Etiqueta tom={TOM_SOL[s.status]}>{s.status === "aguardando" && s.aguardando_quem ? `Aguardando ${AGUARDANDO[s.aguardando_quem]}` : STATUS_CURTO[s.status]}</Etiqueta>
+            <Etiqueta tom={tomStatus(s)}>{rotuloStatus(s)}</Etiqueta>
             <span className="text-[11px]" style={{ color: s.aberta && p.tom === "erro" ? "var(--err-ink)" : "var(--ink3)" }}>
               {s.aberta ? p.texto : new Date(s.concluido_em ?? s.criado_em).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}
             </span>
