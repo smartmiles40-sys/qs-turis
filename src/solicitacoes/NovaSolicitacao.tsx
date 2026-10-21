@@ -14,10 +14,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Aviso, Botao, Campo, Entrada, Modal } from "@/rel/ui";
 import EscolherClienteVenda, { type Escolha } from "./EscolherClienteVenda";
-import FormCotacaoCampos, { EscolherPrioridade } from "./FormCotacao";
+import FormCotacaoCampos, { EscolherPrioridade, textoHoras } from "./FormCotacao";
 import { cotacaoVazia, descricaoDaCotacao, faltaNaCotacao, tituloDaCotacao, type FormCotacao } from "./cotacao";
 import {
-  COR_SETOR, NOME_SETOR, SETORES, criarSolicitacao, deInputLocal, listarTipos,
+  COR_SETOR, NOME_SETOR, SETORES, horasDoTipo, criarSolicitacao, deInputLocal, listarTipos,
   type AlvoSol, type PrioridadeSol, type Setor, type TipoSol,
 } from "./lib";
 
@@ -59,6 +59,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
   useEffect(() => { setTipo(doSetor[0]?.id ?? ""); }, [doSetor]);
   const tipoSel = doSetor.find((t) => t.id === tipo);
   const ehCotacao = tipoSel?.formulario === "cotacao";
+  const horas = tipoSel ? horasDoTipo(tipoSel) : undefined;
   // Passageiro vazio herda o nome do cliente escolhido.
   useEffect(() => {
     if (escolha?.clienteNome) setCot((c) => (c.passageiro.trim() ? c : { ...c, passageiro: escolha.clienteNome }));
@@ -106,7 +107,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
           </div>
         </div>
 
-        <Campo rotulo="Tipo do pedido" dica={tipoSel ? `Prazo padrão: ${tipoSel.prazo_horas}h úteis (seg–sex, 9h–18h).` : undefined}>
+        <Campo rotulo="Tipo do pedido" dica={horas ? `Prazo: Normal ${textoHoras(horas.normal)} · Alta ${textoHoras(horas.alta)} · Urgente ${textoHoras(horas.urgente)} (seg–sex, 9h–18h).` : undefined}>
           <select className="rel-input" value={tipo} onChange={(e) => setTipo(e.target.value)}>
             {doSetor.map((t) => <option key={t.id} value={t.id}>{t.rotulo}</option>)}
           </select>
@@ -114,6 +115,9 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
 
         <div className="rel-card p-3 space-y-2">
           <p className="text-xs font-semibold" style={{ color: "var(--ink2)" }}>Cliente e venda <span style={{ color: "var(--ink3)", fontWeight: 400 }}>— o pedido fica na ficha do cliente</span></p>
+          {alvo?.conversaId && !alvo.clienteId && !alvo.leadId && !escolha && (
+            <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Esta conversa ainda não está ligada a uma ficha. Escolha o cliente abaixo pra o pedido ficar na ficha dele.</p>
+          )}
           {alvo?.leadId && !escolha && (
             <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Vai ligado ao lead <b style={{ color: "var(--ink2)" }}>{alvo.sobre}</b>. Se ele já é cliente, escolha abaixo pra ficar na ficha também.</p>
           )}
@@ -121,7 +125,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
             <p className="text-[13px]" style={{ color: "var(--ink2)" }}>Pedido interno, sem cliente. <button type="button" className="underline" onClick={() => setSemCliente(false)}>escolher cliente</button></p>
           ) : (
             <EscolherClienteVenda valor={escolha} onMudar={setEscolha} travarCliente={!!alvo?.clienteId}
-              buscaInicial={alvo?.leadId ? (alvo.sobre ?? "") : ""} />
+              buscaInicial={alvo?.leadId || (alvo?.conversaId && !alvo.clienteId) ? (alvo.sobre ?? "") : ""} />
           )}
           {!escolha && !semCliente && !alvo?.leadId && (
             <label className="flex items-center gap-2 text-[12.5px]" style={{ color: "var(--ink3)" }}>
@@ -131,7 +135,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
         </div>
 
         {ehCotacao ? (
-          <FormCotacaoCampos f={cot} onMudar={setCot} prioridade={prioridade} onPrioridade={setPrioridade} />
+          <FormCotacaoCampos f={cot} onMudar={setCot} prioridade={prioridade} onPrioridade={setPrioridade} horas={horas} />
         ) : (<>
         <Campo rotulo="O que você precisa (uma linha)" dica="Ex.: cotar aéreo GRU–Lisboa 12/03 a 26/03 pra 2 adultos.">
           <Entrada value={titulo} onChange={(e) => setTitulo(e.target.value)} maxLength={160} autoFocus />
@@ -146,7 +150,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
           {!ehCotacao && (
             <div>
               <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Prioridade</p>
-              <EscolherPrioridade valor={prioridade} onMudar={setPrioridade} />
+              <EscolherPrioridade valor={prioridade} onMudar={setPrioridade} horas={horas} />
             </div>
           )}
           <label className="flex items-center gap-2 text-[13px] pb-1.5" style={{ color: "var(--ink2)" }}>

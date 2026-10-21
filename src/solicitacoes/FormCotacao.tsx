@@ -11,16 +11,25 @@ import {
 } from "./cotacao";
 import { PRIORIDADE_SOL, type PrioridadeSol } from "./lib";
 
-export function EscolherPrioridade({ valor, onMudar }: { valor: PrioridadeSol; onMudar: (p: PrioridadeSol) => void }) {
+/** Prioridade (0159: com o prazo de cada uma, quando o tipo é conhecido). */
+export function EscolherPrioridade({ valor, onMudar, horas }: { valor: PrioridadeSol; onMudar: (p: PrioridadeSol) => void; horas?: Record<PrioridadeSol, number> }) {
   return (
-    <div className="flex gap-1.5" role="radiogroup" aria-label="Prioridade">
+    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Prioridade">
       {(Object.entries(PRIORIDADE_SOL) as [PrioridadeSol, string][]).map(([k, r]) => (
         <button key={k} type="button" role="radio" aria-checked={valor === k} onClick={() => onMudar(k)}
           className="rounded-full px-3 h-8 text-[12.5px] border"
-          style={valor === k ? { background: k === "urgente" ? "var(--err-bg)" : "var(--rel-soft)", color: k === "urgente" ? "var(--err-ink)" : "var(--rel-ink)", borderColor: "transparent", fontWeight: 600 } : { borderColor: "var(--line)", color: "var(--ink2)" }}>{r}</button>
+          style={valor === k ? { background: k === "urgente" ? "var(--err-bg)" : "var(--rel-soft)", color: k === "urgente" ? "var(--err-ink)" : "var(--rel-ink)", borderColor: "transparent", fontWeight: 600 } : { borderColor: "var(--line)", color: "var(--ink2)" }}>
+          {r}{horas && <span style={{ fontWeight: 400, opacity: 0.8 }}> · {textoHoras(horas[k])}</span>}
+        </button>
       ))}
     </div>
   );
+}
+
+/** "4h úteis", "1 dia útil", "2 dias úteis" (dia útil = 9h). */
+export function textoHoras(h: number): string {
+  if (h % 9 === 0) return h === 9 ? "1 dia útil" : `${h / 9} dias úteis`;
+  return `${h}h úteis`;
 }
 
 /** Botões de escolha (um ou vários). */
@@ -81,11 +90,13 @@ function Parte({ n, titulo, children }: { n: number; titulo: string; children: R
   );
 }
 
-export default function FormCotacaoCampos({ f, onMudar, prioridade, onPrioridade }: {
+export default function FormCotacaoCampos({ f, onMudar, prioridade, onPrioridade, horas }: {
   f: FormCotacao;
   onMudar: (f: FormCotacao) => void;
   prioridade: PrioridadeSol;
   onPrioridade: (p: PrioridadeSol) => void;
+  /** Prazo de cada prioridade do tipo (mostra junto do botão). */
+  horas?: Record<PrioridadeSol, number>;
 }) {
   const mudar = <K extends keyof FormCotacao>(k: K, v: FormCotacao[K]) => onMudar({ ...f, [k]: v });
   const b = blocos(f);
@@ -97,7 +108,7 @@ export default function FormCotacaoCampos({ f, onMudar, prioridade, onPrioridade
         <Campo rotulo="Nome do passageiro">
           <Entrada value={f.passageiro} onChange={(e) => mudar("passageiro", e.target.value)} maxLength={120} placeholder="Nome de quem viaja (o principal)" />
         </Campo>
-        <Grupo rotulo="Prioridade"><EscolherPrioridade valor={prioridade} onMudar={onPrioridade} /></Grupo>
+        <Grupo rotulo="Prioridade" dica={horas ? "O prazo do Operações sai da prioridade." : undefined}><EscolherPrioridade valor={prioridade} onMudar={onPrioridade} horas={horas} /></Grupo>
         <div>
           <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Número de viajantes</p>
           <div className="flex flex-wrap items-end gap-4">

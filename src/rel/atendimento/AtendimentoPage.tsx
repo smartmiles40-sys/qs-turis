@@ -65,6 +65,8 @@ import { AtalhosModal, atalhoDoEvento, envolver, marcaDoEvento, type AcaoAtalho 
 import { EncaminharModal, EtiquetasModal, ListasModal, NovaConversaModal } from "./Organizar";
 import { EnviarFinanceiroModal, StatusNoFinanceiro } from "../../fin/EnviarFinanceiro";
 import { devolverConversa } from "../../fin/lib/atendimentos";
+import NovaSolicitacao from "@/solicitacoes/NovaSolicitacao";
+import { PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
 
 export type SetorAtendimento = "relacionamento" | "financeiro";
 
@@ -522,6 +524,9 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   const [expressoes, setExpressoes] = useState<"emoji" | "figurinha" | null>(null);
   const [modelo, setModelo] = useState(false);
   const [chamado, setChamado] = useState<string | null>(null); // assunto
+  // Pedido a outro setor de dentro da conversa (Bruno 21/10): já sai amarrado ao cliente da conversa.
+  const [pedirSetor, setPedirSetor] = useState(false);
+  const [sinalPedidos, setSinalPedidos] = useState(0);
   const [chamados, setChamados] = useState<ChamadoK[]>([]);
   const [verChamado, setVerChamado] = useState<string | null>(null);
   const [foraPrazo, setForaPrazo] = useState(false);
@@ -838,6 +843,9 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
             </Icone>
           )}
+          <Icone rotulo={c.cliente_id ? "Pedir a outro setor (Operações, Financeiro…) — já vai amarrado a este cliente" : "Pedir a outro setor (Operações, Financeiro…)"} onClick={() => setPedirSetor(true)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17L17 7" /><polyline points="8 7 17 7 17 16" /><path d="M4 21h16" /></svg>
+          </Icone>
           {!minha && (
             <Icone rotulo={c.atendente_id ? `Assumir (era de ${c.atendente_nome?.split(" ")[0] ?? "outro"})` : "Assumir a conversa"} onClick={() => void acao(() => assumirConversa(c.id, meuId))}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="19" y1="8" x2="19" y2="14" /><line x1="22" y1="11" x2="16" y2="11" /></svg>
@@ -1099,9 +1107,21 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
         <aside className="absolute inset-y-0 right-0 z-20 w-full sm:w-[320px] shadow-2xl xl:static xl:shadow-none xl:flex-shrink-0 border-l min-h-0"
           style={{ borderColor: "var(--wa-line)" }}>
           <PainelAtendimento c={c} meuId={meuId} onConcluir={() => setConcluindo(true)} onFechar={() => mudarLateral(false)}
-            onMudou={() => { void recarregar(); onMudou(); }} />
+            onMudou={() => { void recarregar(); onMudou(); }}
+            extra={
+              <section className="px-4 py-3 space-y-2" style={{ borderBottom: "8px solid var(--wa-head)" }}>
+                <PedidosSobre alvo={{ conversaId: c.id, clienteId: c.cliente_id ?? null }} recarregar={sinalPedidos}
+                  links={{ onAbrirCliente, onAbrirViagem }} />
+                <button onClick={() => setPedirSetor(true)} className="h-8 px-3 rounded-full text-[13px] font-semibold border"
+                  style={{ borderColor: "var(--wa-line)", color: "var(--wa-txt)" }}>↗ Pedir a outro setor</button>
+              </section>
+            } />
         </aside>
       )}
+      <NovaSolicitacao aberto={pedirSetor} deSetor={setor}
+        alvo={{ conversaId: c.id, clienteId: c.cliente_id ?? null, sobre: nome }}
+        onFechar={() => setPedirSetor(false)}
+        onCriada={() => { setPedirSetor(false); setSinalPedidos((n) => n + 1); avisar("Pedido enviado. O andamento aparece no painel do atendimento (ícone à direita)."); }} />
       <ConcluirModal conversa={concluindo ? c : null} onFechar={() => setConcluindo(false)}
         onFeito={(pesquisa) => { setConcluindo(false); void tratou().then(recarregar); onMudou(); avisar(pesquisa ? "Atendimento concluído. Pedimos a nota de 1 a 5 ao cliente." : "Atendimento concluído."); }} />
 

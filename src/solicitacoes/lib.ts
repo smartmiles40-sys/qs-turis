@@ -45,6 +45,14 @@ export const AGUARDANDO: Record<AguardandoQuem, string> = {
   outro_setor: "outro setor",
 };
 export const PRIORIDADE_SOL: Record<PrioridadeSol, string> = { normal: "Normal", alta: "Alta", urgente: "Urgente" };
+/** Prazo (horas úteis) do tipo pra cada prioridade (0159) — igual ao qs_sol_horas do banco. */
+export function horasDoTipo(t: Pick<TipoSol, "prazo_horas" | "prazo_alta_horas" | "prazo_urgente_horas">): Record<PrioridadeSol, number> {
+  return {
+    normal: t.prazo_horas,
+    alta: t.prazo_alta_horas ?? Math.max(1, Math.ceil(t.prazo_horas / 2)),
+    urgente: t.prazo_urgente_horas ?? Math.max(1, Math.ceil(t.prazo_horas / 4)),
+  };
+}
 export const ABERTAS: StatusSol[] = ["nova", "em_andamento", "aguardando"];
 
 /** Sigla curta do setor pros cartões. */
@@ -56,7 +64,11 @@ export interface TipoSol {
   id: string;
   setor: Setor;
   rotulo: string;
+  /** Prazo da prioridade Normal (horas úteis). */
   prazo_horas: number;
+  /** 0159: prazos de Alta e Urgente. */
+  prazo_alta_horas?: number | null;
+  prazo_urgente_horas?: number | null;
   ordem: number;
   ativo: boolean;
   /** 0158: 'cotacao' = formulário completo + etapas + desfecho. */

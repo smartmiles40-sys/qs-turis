@@ -10,7 +10,7 @@
 //     tempo respondeu e resolveu, o motivo e a nota da pesquisa.
 // Tempos de resposta e solução contam só o horário de atendimento (úteis).
 // -----------------------------------------------------------------------------
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   MOTIVOS_CONCLUSAO, assumirConversa, atendimentosDaConversa, concluirConversa, duracao, passarConversa, reabrirConversa, rotuloMotivo,
@@ -86,8 +86,10 @@ export function ConcluirModal({ conversa, onFechar, onFeito }: {
 
 // ── Painel ──────────────────────────────────────────────────────────────────
 
-export default function PainelAtendimento({ c, meuId, onMudou, onConcluir, onFechar }: {
+export default function PainelAtendimento({ c, meuId, onMudou, onConcluir, onFechar, extra }: {
   c: Conversa; meuId: string; onMudou: () => void; onConcluir: () => void; onFechar: () => void;
+  /** Bloco extra no topo (pedidos a outros setores desta conversa). */
+  extra?: ReactNode;
 }) {
   const [historico, setHistorico] = useState<Atendimento[] | null>(null);
   const [equipe, setEquipe] = useState<{ id: string; name: string }[]>([]);
@@ -128,6 +130,7 @@ export default function PainelAtendimento({ c, meuId, onMudou, onConcluir, onFec
       </header>
 
       <div className="flex-1 overflow-y-auto min-h-0">
+        {extra}
         {/* Quem está atendendo */}
         <section className="px-4 py-4" style={{ borderBottom: "8px solid var(--wa-head)" }}>
           <h3 className="text-[12px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--wa-meta)" }}>Quem está atendendo</h3>
