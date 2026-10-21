@@ -51,8 +51,10 @@ export const TIPOS: Record<TipoItem, TipoInfo> = {
   aereo: {
     rotulo: "Aéreo", emoji: "✈️", datas: [null, null], exemploNome: "Voo São Paulo → Tóquio",
     campos: [
-      { chave: "bagagem_mao", rotulo: "Bagagem de mão", tipo: "texto", dica: "Ex.: 1 de 10 kg" },
-      { chave: "bagagem_despachada", rotulo: "Bagagem despachada", tipo: "texto", dica: "Ex.: 2 de 23 kg" },
+      // Bilhete (21/10): três caixas — vazio no item pessoal = "Incluso"; vazio/"Não" nas malas = "Não inclusa".
+      { chave: "item_pessoal", rotulo: "Item pessoal", tipo: "texto", dica: "Ex.: Até 10 kg (vazio = Incluso)" },
+      { chave: "bagagem_mao", rotulo: "Mala de mão", tipo: "texto", dica: "Ex.: Até 12 kg (vazio = Não inclusa)" },
+      { chave: "bagagem_despachada", rotulo: "Bagagem despachada", tipo: "texto", dica: "Ex.: 1 de 23 kg (vazio = Não inclusa)" },
       { chave: "localizador", rotulo: "Localizador (interno)", tipo: "texto" },
     ],
   },
