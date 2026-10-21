@@ -15,7 +15,7 @@ import { AvatarWa, MidiaDaMensagem, TextoWa, Visualizador, corDoNome, rotuloDoDi
 import { limiteArquivoMB, salvarFigurinha, salvarTranscricao, type Anexo } from "../lib/whatsapp";
 import {
   apagarNoGrupo, editarNoGrupo, enviarFigurinhaNoGrupo, enviarMidiaNoGrupo, enviarNoGrupo, enviarVozNoGrupo, mensagensDoGrupo,
-  participantesDoGrupo, reagirNoGrupo, type Grupo, type MensagemGrupo, type Participante,
+  participantesDoGrupo, reagirNoGrupo, telefoneDoAutor, type Grupo, type MensagemGrupo, type Participante,
 } from "../lib/grupos";
 import PainelExpressoes from "./PainelExpressoes";
 import MenuContexto, { ICO, posicaoDoEvento, type ItemMenu, type PosicaoMenu } from "./MenuContexto";
@@ -37,7 +37,11 @@ function useRepetir(fn: () => void, ms: number) {
   }, [ms]);
 }
 
-export default function ConversaGrupo({ grupo, onVoltar, onMudou }: { grupo: Grupo; onVoltar: () => void; onMudou: () => void }) {
+export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
+  grupo: Grupo; onVoltar: () => void; onMudou: () => void;
+  /** "Conversar no privado" (21/10): abre a conversa com a pessoa no número OFICIAL do Relacionamento — nunca pela ligação dos grupos. */
+  onPrivado?: (telefone: string, nome: string) => void;
+}) {
   const [msgs, setMsgs] = useState<MensagemGrupo[]>([]);
   const [part, setPart] = useState<Participante[]>([]);
   const [texto, setTexto] = useState("");
@@ -211,6 +215,12 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou }: { grupo: Gru
   const pararGravacao = (enviarAudio: boolean) => { if (!gravando) return; descartar.current = !enviarAudio; gravando.rec.stop(); };
 
   // ── menu da mensagem ──
+  async function chamarNoPrivado(m: MensagemGrupo) {
+    const tel = await telefoneDoAutor(m, grupo.jid).catch(() => null);
+    if (!tel) { setErro("Não achei o telefone dessa pessoa — atualize a lista de grupos e tente de novo."); return; }
+    onPrivado?.(tel, autorDe(m));
+  }
+
   function itensDaMensagem(m: MensagemGrupo): ItemMenu[] {
     const itens: ItemMenu[] = [];
     if (m.apagada_em) return [{ rotulo: "Mensagem apagada", desligado: true, onClick: () => {} }];
@@ -222,6 +232,7 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou }: { grupo: Gru
       const tel = String(m.autor_jid).split("@")[0];
       if (/^\d{10,15}$/.test(tel)) itens.push({ rotulo: `Marcar ${autorDe(m).split(" ")[0]} com @`, icone: ICO.responder, onClick: () => marcar({ telefone: tel, nome: autorDe(m), admin: null }) });
     }
+    if (!m.de_mim && onPrivado) itens.push({ rotulo: `Conversar no privado com ${autorDe(m).split(" ")[0]}`, icone: ICO.contato, onClick: () => void chamarNoPrivado(m) });
     if (m.tipo === "figurinha" && m.anexo_url) itens.push({ rotulo: "Salvar nas figurinhas do time", icone: ICO.figurinha, onClick: () => void salvarFigurinha({ url: m.anexo_url! }).then(() => setAviso("Figurinha salva.")).catch((e) => setErro(e instanceof Error ? e.message : "Não salvou.")) });
     if (m.de_mim) {
       itens.push({ tipo: "separador" });
@@ -271,7 +282,9 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou }: { grupo: Gru
                     className="absolute top-1 right-1 w-6 h-6 rounded-full opacity-0 group-hover:opacity-100 focus:opacity-100 inline-flex items-center justify-center" style={{ background: "var(--wa-chip)", color: "var(--wa-meta)" }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z" /></svg>
                   </button>
-                  {!m.de_mim && <p className="text-[12.8px] font-medium mb-0.5" style={{ color: corDoNome(autorDe(m)) }}>{autorDe(m)}</p>}
+                  {!m.de_mim && (onPrivado
+                    ? <button type="button" onClick={() => void chamarNoPrivado(m)} title="Conversar no privado" className="block text-left text-[12.8px] font-medium mb-0.5 hover:underline" style={{ color: corDoNome(autorDe(m)) }}>{autorDe(m)}</button>
+                    : <p className="text-[12.8px] font-medium mb-0.5" style={{ color: corDoNome(autorDe(m)) }}>{autorDe(m)}</p>)}
                   {m.apagada_em ? (
                     <p className="italic text-[13.5px] pr-12" style={{ color: "var(--wa-meta)" }}>🚫 {m.de_mim ? "Você apagou esta mensagem" : "Esta mensagem foi apagada"}</p>
                   ) : (

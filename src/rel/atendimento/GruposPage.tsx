@@ -10,7 +10,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ConversaGrupo from "./ConversaGrupo";
 import { AvatarWa, WA_CSS, horaDaLista } from "./waUi";
+import ModeloModal from "./ModeloModal";
+import { variantesBr } from "./Organizar";
 import { estadoDosGrupos, listarGrupos, marcarGrupoLido, sincronizarGrupos, type Grupo } from "../lib/grupos";
+import { supabase } from "@/lib/supabase";
 
 /** Enquanto a aba está visível, roda `fn` a cada `ms`. */
 function useRepetir(fn: () => void, ms: number) {
@@ -26,8 +29,24 @@ function useRepetir(fn: () => void, ms: number) {
 
 const nomeDoGrupo = (g: Grupo) => g.nome?.trim() || "Grupo sem nome";
 
-export default function GruposPage({ grupoJid, abrir }: { grupoJid: string | null; abrir: (jid: string | null) => void }) {
+export default function GruposPage({ grupoJid, abrir, abrirConversa }: {
+  grupoJid: string | null; abrir: (jid: string | null) => void;
+  /** Conversa no número oficial do Relacionamento (Atendimento). */
+  abrirConversa: (id: string) => void;
+}) {
   const [grupos, setGrupos] = useState<Grupo[]>([]);
+  const [modeloPara, setModeloPara] = useState<{ telefone: string; nome: string } | null>(null);
+
+  // "Conversar no privado" (21/10): já tem conversa no número do Relacionamento → abre;
+  // senão a Meta só deixa começar com modelo aprovado. Nada sai pela ligação dos grupos.
+  const chamarNoPrivado = async (telefone: string, nome: string) => {
+    const { data, error } = await supabase.from("rel_wa_conversas").select("id").in("telefone", variantesBr(telefone))
+      .order("atualizado_em", { ascending: false }).limit(1);
+    if (error) { setAviso("Não consegui procurar a conversa dessa pessoa. Tente de novo."); return; }
+    const id = (data?.[0] as { id: string } | undefined)?.id;
+    if (id) abrirConversa(id);
+    else setModeloPara({ telefone, nome });
+  };
   const [carregando, setCarregando] = useState(true);
   const [busca, setBusca] = useState("");
   const [estado, setEstado] = useState<{ conectado: boolean; estado: string } | null>(null);
@@ -119,7 +138,7 @@ export default function GruposPage({ grupoJid, abrir }: { grupoJid: string | nul
           </div>
         </aside>
         <section className={`${grupoJid ? "flex" : "hidden lg:flex"} flex-1 flex-col min-w-0 min-h-0`}>
-          {aberto ? <ConversaGrupo key={aberto.jid} grupo={aberto} onVoltar={() => abrir(null)} onMudou={carregar} />
+          {aberto ? <ConversaGrupo key={aberto.jid} grupo={aberto} onVoltar={() => abrir(null)} onMudou={carregar} onPrivado={(t, n) => void chamarNoPrivado(t, n)} />
             : (
               <div className="flex-1 flex items-center justify-center px-8 text-center wa-cab">
                 <p className="text-[14px] max-w-sm" style={{ color: "var(--wa-meta)" }}>
@@ -129,6 +148,9 @@ export default function GruposPage({ grupoJid, abrir }: { grupoJid: string | nul
             )}
         </section>
       </div>
+      <ModeloModal aberto={!!modeloPara} alvo={{ telefone: modeloPara?.telefone }} nomeCliente={modeloPara?.nome ?? null}
+        onFechar={() => setModeloPara(null)}
+        onEnviado={(id) => { setModeloPara(null); if (id) abrirConversa(id); else setAviso("Modelo enviado. Quando a pessoa responder, a conversa libera."); }} />
     </div>
   );
 }

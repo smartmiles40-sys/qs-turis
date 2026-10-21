@@ -160,6 +160,19 @@ export const reagirNoGrupo = (msgId: string, emoji: string) => api("POST", { aca
 export const apagarNoGrupo = (msgId: string) => api("POST", { acao: "apagar", msgId });
 export const editarNoGrupo = (msgId: string, texto: string) => api("POST", { acao: "editar", msgId, texto });
 
+/**
+ * Telefone de quem escreveu no grupo ("Conversar no privado", 21/10). O autor já
+ * vem como telefone@s.whatsapp.net; se vier só o @lid, a lista de participantes traduz.
+ */
+export async function telefoneDoAutor(m: Pick<MensagemGrupo, "autor_jid" | "autor_participante">, grupoJid: string): Promise<string | null> {
+  const [id, dominio] = String(m.autor_jid || "").split("@");
+  if (dominio === "s.whatsapp.net" && /^\d{10,15}$/.test(id)) return id;
+  const lid = [m.autor_jid, m.autor_participante].find((j) => String(j || "").endsWith("@lid"));
+  if (!lid) return null;
+  const { data } = await supabase.from("rel_wa_grupo_participantes").select("telefone").eq("grupo_jid", grupoJid).eq("participante", lid).not("telefone", "is", null).limit(1);
+  return (data?.[0] as { telefone: string } | undefined)?.telefone ?? null;
+}
+
 export interface Participante { telefone: string; nome: string; admin: string | null }
 /** Quem está no grupo, com o nome da ficha (ou o que a pessoa usa no WhatsApp). */
 export async function participantesDoGrupo(jid: string): Promise<Participante[]> {

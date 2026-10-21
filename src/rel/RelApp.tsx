@@ -496,7 +496,7 @@ export default function RelApp() {
               links={{ onAbrirViagem: abrirViagem, onAbrirCliente: abrirCliente, onAbrirConversa: abrirConversa }} />
           )}
           {rota.tela === "grupos" && (
-            <GruposPage grupoJid={rota.id ?? null} abrir={(jid) => ir(jid ? { tela: "grupos", id: jid } : { tela: "grupos" })} />
+            <GruposPage grupoJid={rota.id ?? null} abrir={(jid) => ir(jid ? { tela: "grupos", id: jid } : { tela: "grupos" })} abrirConversa={abrirConversa} />
           )}
           {/* Chamados é a visão kanban DENTRO do Atendimento (13/10) */}
           {rota.tela === "chamados" && (
