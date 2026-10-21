@@ -392,7 +392,7 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou }: { grupo: Gru
                   </div>
                 )}
                 <input ref={midiaRef} type="file" hidden accept="image/jpeg,image/png,image/webp,video/mp4" onChange={(e) => escolher(e.target.files?.[0], midiaRef.current)} />
-                <input ref={docRef} type="file" hidden accept="application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,audio/mpeg,audio/ogg,audio/mp4" onChange={(e) => escolher(e.target.files?.[0], docRef.current)} />
+                <input ref={docRef} type="file" hidden onChange={(e) => escolher(e.target.files?.[0], docRef.current)} />
               </div>
               <textarea ref={campoRef} className="wa-campo wa-emoji flex-1 px-3 py-2.5 text-[15px] resize-none max-h-40 min-h-[44px]" rows={1}
                 placeholder={editandoMsg ? "Edite a mensagem" : "Mensagem para o grupo (@ marca alguém)"} value={texto}

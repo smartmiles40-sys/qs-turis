@@ -114,7 +114,7 @@ export default function ArquivosDoCliente({ clienteId, bloqueado }: { clienteId:
             <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} disabled={subindo > 0} onClick={() => input.current?.click()}>
               {subindo > 0 ? `Subindo ${subindo}…` : "+ Adicionar"}
             </Botao>
-            <input ref={input} type="file" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" className="hidden"
+            <input ref={input} type="file" multiple className="hidden"
               onChange={(e) => { if (e.target.files) void subir(e.target.files); e.target.value = ""; }} />
           </>
         )}

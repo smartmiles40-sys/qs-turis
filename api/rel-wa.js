@@ -38,10 +38,44 @@ const LIMITE_META = { image: 5, video: 16, audio: 16, document: 100 };
 
 const TIPOS_ARQUIVO = {
   'image/jpeg': 'image', 'image/png': 'image',
-  'video/mp4': 'video',
-  'audio/ogg': 'audio', 'audio/mpeg': 'audio', 'audio/mp4': 'audio', 'audio/aac': 'audio',
+  'video/mp4': 'video', 'video/3gpp': 'video',
+  'audio/ogg': 'audio', 'audio/mpeg': 'audio', 'audio/mp4': 'audio', 'audio/aac': 'audio', 'audio/amr': 'audio', 'audio/opus': 'audio',
   'application/pdf': 'document',
+  // Office + texto: a Meta aceita como documento (21/10 — antes só PDF passava).
+  'application/msword': 'document',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'document',
+  'application/vnd.ms-excel': 'document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'document',
+  'application/vnd.ms-powerpoint': 'document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'document',
+  'text/plain': 'document',
+  'image/webp': 'document', // WEBP como imagem a Meta recusa; vai como arquivo
 };
+
+// O navegador às vezes manda o tipo vazio (Windows sem o Office instalado): deduz pela extensão.
+const MIME_DA_EXTENSAO = {
+  pdf: 'application/pdf', doc: 'application/msword', xls: 'application/vnd.ms-excel', ppt: 'application/vnd.ms-powerpoint',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', mp4: 'video/mp4', mp3: 'audio/mpeg', ogg: 'audio/ogg',
+};
+function mimeDoArquivo(mime, nome) {
+  const m = String(mime || '').split(';')[0].trim().toLowerCase();
+  if (m && m !== 'application/octet-stream') return m;
+  const ext = String(nome || '').match(/\.([a-z0-9]{1,5})$/i)?.[1]?.toLowerCase();
+  return MIME_DA_EXTENSAO[ext] || m || 'application/octet-stream';
+}
+
+/**
+ * Arquivo que a Meta não aceita (HTML, ZIP, RAR…, 21/10): fica no nosso bucket e
+ * o cliente recebe o nome + link que BAIXA o original com o nome certo.
+ */
+async function enviarComoLink({ alvo, url, nome, legenda }) {
+  const link = `${url}${url.includes('?') ? '&' : '?'}download=${encodeURIComponent(nome)}`;
+  const texto = `📎 *${nome}*${legenda ? `\n${legenda}` : ''}\n\nBaixe o arquivo aqui: ${link}`;
+  return enviarTexto({ para: alvo.telefone, texto, phoneId: alvo.phoneId });
+}
 
 const ERRO_MODELO = {
   'modelo-nao-encontrado': 'Esse modelo não está aprovado na Meta para o número do Relacionamento.',
@@ -244,10 +278,18 @@ export default async function handler(req, res) {
             if (b.erro) throw new Error(b.erro);
             // Figurinha = WEBP mandado sem legenda (foto WEBP comum vai como imagem não aceita → documento).
             const figurinha = b.mime === 'image/webp' && !String(m.texto || '').trim() && !conferirFigurinha(b.bytes);
-            const tipo = figurinha ? 'sticker' : (TIPOS_ARQUIVO[b.mime] || 'document');
-            const up = await subirMidiaBytes(b.bytes, b.mime || 'application/octet-stream', ax.nome || 'arquivo', a.phoneId);
-            if (!up?.id) throw new Error(up?.detalhe || 'a Meta não aceitou o arquivo');
+            const mimeAx = mimeDoArquivo(b.mime, ax.nome);
             const legenda = i === 0 && !figurinha ? (m.texto || null) : null;
+            if (!figurinha && !TIPOS_ARQUIVO[mimeAx]) {
+              // HTML, ZIP…: a Meta não aceita — vai o link do arquivo que já está no bucket.
+              const env = await enviarComoLink({ alvo: a, url: ax.url, nome: ax.nome || 'arquivo', legenda });
+              if (!env?.wamid) throw new Error(env?.detalhe || 'a Meta não enviou');
+              await gravarAqui({ wamid: env.wamid, texto: legenda || '', anexos: [ax] });
+              continue;
+            }
+            const tipo = figurinha ? 'sticker' : TIPOS_ARQUIVO[mimeAx];
+            const up = await subirMidiaBytes(b.bytes, mimeAx, ax.nome || 'arquivo', a.phoneId);
+            if (!up?.id) throw new Error(up?.detalhe || 'a Meta não aceitou o arquivo');
             const env = await enviarMidia({ para: a.telefone, tipo, mediaId: up.id, legenda, nomeArquivo: ax.nome || null, phoneId: a.phoneId });
             if (!env?.wamid) throw new Error(env?.detalhe || 'a Meta não enviou');
             await gravarAqui({ wamid: env.wamid, texto: legenda || '', anexos: [ax] });
@@ -398,14 +440,15 @@ export default async function handler(req, res) {
     if (!janelaAberta(alvo.ultimaEntrada)) {
       return res.status(409).json({ error: 'Fora da janela de 24h só dá pra mandar modelo. Mande um modelo e espere o cliente responder.', motivo: 'janela-fechada' });
     }
-    const mime = String(body.mimeType || '').split(';')[0].trim().toLowerCase();
-    const tipo = TIPOS_ARQUIVO[mime];
-    if (!tipo) return res.status(400).json({ error: 'Tipo de arquivo não aceito (use JPG, PNG, PDF, MP4 ou áudio MP3/OGG).' });
+    const nome = String(body.fileName || 'arquivo').slice(0, 120);
+    const mime = mimeDoArquivo(body.mimeType, nome);
+    // Tipo que a Meta não aceita vira link (enviarComoLink) — nenhum arquivo é recusado.
+    const tipo = TIPOS_ARQUIVO[mime] || 'link';
     let bytes, urlGuardada = null;
     if (body.url) {
       // Subiu direto no bucket: só a pasta rel-envio/ do nosso storage.
       if (!/\/wa-midia\/rel-envio\//.test(String(body.url))) return res.status(400).json({ error: 'Arquivo de fora do QS.' });
-      const limite = LIMITE_META[tipo];
+      const limite = LIMITE_META[tipo] || 100;
       const b = await baixarNosso(body.url, limite * 1024 * 1024);
       if (b.erro === 'Arquivo grande demais.') return res.status(413).json({ error: `Arquivo maior que ${limite} MB (limite da Meta pra esse tipo).` });
       if (b.erro) return res.status(400).json({ error: b.erro });
@@ -415,8 +458,16 @@ export default async function handler(req, res) {
       if (bytes.length > MAX_BYTES) return res.status(413).json({ error: 'Arquivo maior que 3 MB.' });
     }
     if (!bytes.length) return res.status(400).json({ error: 'Arquivo vazio.' });
-    const nome = String(body.fileName || 'arquivo').slice(0, 120);
     const legenda = String(body.legenda || '').trim().slice(0, 1000) || null;
+
+    if (tipo === 'link') {
+      const url = urlGuardada || await guardarMidia(bytes, mime, { leadId: `rel-${alvo.telefone}`, nomeArquivo: nome }).catch(() => null);
+      if (!url) return res.status(502).json({ error: 'Não consegui guardar o arquivo pra mandar o link.' });
+      const env = await enviarComoLink({ alvo, url, nome, legenda });
+      if (!env?.wamid) return res.status(502).json({ error: `A Meta não enviou o link do arquivo${env?.detalhe ? `: ${env.detalhe}` : '.'}` });
+      await gravar({ wamid: env.wamid, texto: legenda || '', anexos: [{ type: 'file', url, nome }] });
+      return res.status(200).json({ ok: true, wamid: env.wamid, comoLink: true });
+    }
 
     const up = await subirMidiaBytes(bytes, mime, nome, alvo.phoneId);
     if (!up?.id) return res.status(502).json({ error: `A Meta não aceitou o arquivo${up?.detalhe ? `: ${up.detalhe}` : '.'}` });
