@@ -12,6 +12,11 @@
 // Entregar cotação; quem pediu: Enviar ajustes (o formulário volta editável)
 // e, depois de entregue, o DESFECHO no prazo (fechou / negociando / não seguiu
 // + motivo).
+//
+// 0201 (pedidos de pagamento ao Financeiro): o resumo do pagamento + o quadro
+// "Pagamento no Financeiro" (link pra copiar, pago em, parcelas, arquivos) e,
+// pro Financeiro, os botões próprios (colar link · marcar pago · provisionar)
+// no lugar do "Concluir" genérico.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
@@ -19,6 +24,8 @@ import { Aviso, Botao, Etiqueta, Modal } from "@/rel/ui";
 import EscolherClienteVenda, { type Escolha } from "./EscolherClienteVenda";
 import PropostasDaSolicitacao from "@/propostas/PropostasDaSolicitacao";
 import FormCotacaoCampos, { VerCotacao } from "./FormCotacao";
+import FormPagamentoCampos, { PagamentoNoDetalhe, VerPagamento } from "./FormPagamento";
+import { TIPO_PAG_DO, descricaoDoPagamento, faltaNoPagamento, lerPagamento, paraBanco, rotuloPagamento, tituloDoPagamento, type FormPagamento } from "./pagamento";
 import {
   MOTIVOS_NAO_SEGUIU, NOME_MOTIVO, descricaoDaCotacao, faltaNaCotacao, lerCotacao, rotuloStatus, tituloDaCotacao, tomStatus, type FormCotacao,
 } from "./cotacao";
@@ -106,7 +113,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
   const [zapDeQuemPediu, setZapDeQuemPediu] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   // 0158
-  const [ajustando, setAjustando] = useState<{ f: FormCotacao | null; prioridade: PrioridadeSol; texto: string } | null>(null);
+  const [ajustando, setAjustando] = useState<{ f: FormCotacao | null; p?: FormPagamento | null; prioridade: PrioridadeSol; texto: string } | null>(null);
   const [desfechando, setDesfechando] = useState<{ tipo: "fechou" | "nao_seguiu" | null; motivo: string; texto: string } | null>(null);
 
   const carregar = useCallback(async () => {
@@ -143,6 +150,8 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
   const prazo = s ? textoPrazo(s) : null;
   const cot = s ? lerCotacao(s.formulario) : null;
   const ehCotacao = !!s?.cotacao;
+  const ehPagamento = !!s && !!TIPO_PAG_DO[s.tipo_id ?? ""];
+  const pag = ehPagamento && s ? lerPagamento(s.formulario) : null;
   const esperandoAjuste = !!s && s.status === "aguardando" && s.aguardando_quem === "solicitante";
   const ultimoAjuste = [...eventos].reverse().find((e) => e.tipo === "ajuste");
   const faltaDesfecho = !!s && s.falta_desfecho && !s.desfecho;
@@ -151,14 +160,17 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
 
   async function enviarAjustes() {
     if (!s || !ajustando) return;
-    const falta = ajustando.f ? faltaNaCotacao(ajustando.f) : null;
+    // Pagamento: a amarração não muda no ajuste (cliente/venda já está no pedido).
+    const falta = ajustando.f ? faltaNaCotacao(ajustando.f) : ajustando.p ? faltaNoPagamento(ajustando.p, !!(s.cliente_id || s.viagem_id || s.lead_id)) : null;
     if (falta) { setErro(falta); return; }
     if (!ajustando.f && !ajustando.texto.trim()) { setErro("Escreva o que você ajustou ou respondeu."); return; }
     setOcupado(true); setErro(null);
     try {
       await ajustarSolicitacao(s.id, ajustando.f
         ? { titulo: tituloDaCotacao(ajustando.f), descricao: descricaoDaCotacao(ajustando.f), formulario: ajustando.f, prioridade: ajustando.prioridade, texto: ajustando.texto }
-        : { titulo: s.titulo, descricao: s.descricao, prioridade: ajustando.prioridade, texto: ajustando.texto });
+        : ajustando.p
+          ? { titulo: tituloDoPagamento(ajustando.p), descricao: descricaoDoPagamento(ajustando.p), formulario: paraBanco(ajustando.p), prioridade: ajustando.prioridade, texto: ajustando.texto }
+          : { titulo: s.titulo, descricao: s.descricao, prioridade: ajustando.prioridade, texto: ajustando.texto });
       setAjustando(null); await carregar(); onMudou();
     } catch (e) { setErro(e instanceof Error ? e.message : "Não enviou."); }
     finally { setOcupado(false); }
@@ -173,7 +185,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
   }
 
   return (
-    <Modal aberto={!!id} titulo={s ? `${ehCotacao ? "Cotação" : "Solicitação"} #${s.numero}` : "Solicitação"} onFechar={onFechar} largura={ehCotacao ? 760 : 680}>
+    <Modal aberto={!!id} titulo={s ? `${ehCotacao ? "Cotação" : "Solicitação"} #${s.numero}` : "Solicitação"} onFechar={onFechar} largura={ehCotacao || ehPagamento ? 760 : 680}>
       {!s ? (
         erro ? <Aviso tom="erro">{erro}</Aviso> : <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>
       ) : (
@@ -181,7 +193,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
           {/* De → Para */}
           <div className="flex flex-wrap items-center gap-2 text-[12.5px]" style={{ color: "var(--ink2)" }}>
             <SetorChip s={s.de_setor} /> <span aria-hidden>→</span> <SetorChip s={s.para_setor} />
-            <Etiqueta tom={tomStatus(s)}>{rotuloStatus(s)}</Etiqueta>
+            <Etiqueta tom={tomStatus(s)}>{ehPagamento ? rotuloPagamento(s) : rotuloStatus(s)}</Etiqueta>
             {s.prioridade !== "normal" && <Etiqueta tom={s.prioridade === "urgente" ? "erro" : "aviso"}>{PRIORIDADE_SOL[s.prioridade]}</Etiqueta>}
             {s.sem_dono_atrasada && <Etiqueta tom="erro">Ninguém pegou há +2h úteis</Etiqueta>}
           </div>
@@ -189,7 +201,8 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
           <div>
             <p className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>{s.tipo_rotulo ?? "Pedido"}</p>
             <h3 className="text-[17px] font-bold leading-snug mt-0.5" style={{ color: "var(--ink)" }}>{s.titulo}</h3>
-            {cot ? <div className="mt-2.5"><VerCotacao f={cot} /></div>
+            {pag ? <div className="mt-2.5"><VerPagamento f={pag} /></div>
+              : cot && !ehPagamento ? <div className="mt-2.5"><VerCotacao f={cot} /></div>
               : s.descricao && <p className="text-[14px] whitespace-pre-wrap mt-2" style={{ color: "var(--ink2)" }}>{s.descricao}</p>}
           </div>
 
@@ -232,6 +245,10 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
               </span>
             </Linha>
           </dl>
+
+          {ehPagamento && (
+            <PagamentoNoDetalhe s={s} f={pag} financeiro={recebe && s.para_setor === "financeiro"} onMudou={() => { void carregar(); onMudou(); }} />
+          )}
 
           {/* Em toda solicitação (0157): quem pediu abre a proposta aqui mesmo pra enviar. */}
           <PropostasDaSolicitacao s={s} podeMontar={recebe && s.aberta && !!links?.onAbrirProposta}
@@ -289,7 +306,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
                 <Botao disabled={ocupado} onClick={() => pedir({ acao: "ajuste", titulo: "O que está faltando?", dica: "Ex.: falta a idade das crianças; confirmar se o aéreo sai de Campinas.", obrigatorio: true, botao: "Pedir ajuste" })}>Pedir ajuste</Botao>
               )}
               {recebe && s.aberta && <Botao disabled={ocupado} onClick={() => pessoasDoSetor(s.para_setor).then(setPessoas).catch(() => setPessoas([]))}>{s.responsavel_id === meuId ? "Passar pra outra pessoa…" : "Escolher quem faz…"}</Botao>}
-              {recebe && s.aberta && s.responsavel_id && (
+              {recebe && s.aberta && s.responsavel_id && !ehPagamento && (
                 <Botao variante={s.responsavel_id === meuId ? "primario" : "secundario"} disabled={ocupado}
                   onClick={() => pedir(ehCotacao
                     ? { acao: "concluir", titulo: "Como foi entregue a cotação?", dica: "Ex.: proposta nº 12 pronta aqui no QS com 2 opções.", obrigatorio: true, botao: "Entregar cotação" }
@@ -306,7 +323,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
               {recebe && s.aberta && <Botao variante="fantasma" disabled={ocupado} onClick={() => pedir({ acao: "recusar", titulo: "Por que não dá pra fazer?", dica: "Ex.: falta o passaporte; isso é com o Financeiro.", obrigatorio: true, botao: "Recusar", perigo: true })}>Recusar</Botao>}
 
               {pediu && esperandoAjuste && (
-                <Botao variante="primario" disabled={ocupado} onClick={() => { setErro(null); setAjustando({ f: cot ? { ...cot } : null, prioridade: s.prioridade, texto: "" }); }}>Enviar ajustes</Botao>
+                <Botao variante="primario" disabled={ocupado} onClick={() => { setErro(null); setAjustando({ f: cot && !ehPagamento ? { ...cot } : null, p: pag ? { ...pag } : null, prioridade: s.prioridade, texto: "" }); }}>Enviar ajustes</Botao>
               )}
               {pediu && faltaDesfecho && <Botao variante="primario" disabled={ocupado} onClick={() => { setErro(null); setDesfechando({ tipo: null, motivo: "", texto: "" }); }}>Dar o desfecho</Botao>}
               {pediu && s.status === "concluida" && !s.confirmado_em && !ehCotacao && <Botao variante="primario" disabled={ocupado} onClick={() => void rodar("confirmar")}>✔ Resolveu, obrigado</Botao>}
@@ -329,6 +346,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
                 <FormCotacaoCampos f={ajustando.f} onMudar={(f) => setAjustando({ ...ajustando, f })}
                   prioridade={ajustando.prioridade} onPrioridade={(p) => setAjustando({ ...ajustando, prioridade: p })} />
               )}
+              {ajustando.p && <FormPagamentoCampos f={ajustando.p} onMudar={(p) => setAjustando({ ...ajustando, p })} />}
               <textarea className="rel-input" rows={2} maxLength={2000} value={ajustando.texto} onChange={(e) => setAjustando({ ...ajustando, texto: e.target.value })}
                 placeholder={ajustando.f ? "Recado pro Operações (opcional). Ex.: as crianças têm 4 e 9 anos." : "O que você ajustou ou respondeu"} />
               <div className="flex gap-2">

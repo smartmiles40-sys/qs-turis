@@ -71,8 +71,9 @@ export interface TipoSol {
   prazo_urgente_horas?: number | null;
   ordem: number;
   ativo: boolean;
-  /** 0158: 'cotacao' = formulário completo + etapas + desfecho. */
-  formulario?: "cotacao" | null;
+  /** 0158: 'cotacao' = formulário completo + etapas + desfecho.
+   *  0201: 'pagamento' = pedido de pagamento ao Financeiro (pagamento.ts). */
+  formulario?: "cotacao" | "pagamento" | null;
   desfecho_dias?: number | null;
 }
 
