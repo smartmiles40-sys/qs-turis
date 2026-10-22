@@ -1122,8 +1122,10 @@ export async function fetchNoteCountsByLead(ownerId: string | null, leadIds?: st
   const counts = new Map<string, number>();
 
   // 22/10 (0195): com os ids da fila, conta SÓ esses leads — a visão agregava as
-  // 45 mil observações da base a cada minuto (1,26 s por SDR, medido). Sem a
-  // função no banco ainda, cai no caminho da visão logo abaixo.
+  // 45 mil observações da base a cada minuto (1,26 s por SDR, medido).
+  // A função já está no banco: se ela falhar (rede, timeout), o selo some até a
+  // próxima rodada — NÃO cai na visão inteira (3,2 s de média, era o que
+  // derrubava o banco quando todo mundo caía nela ao mesmo tempo).
   if (leadIds) {
     if (leadIds.length === 0) return counts;
     try {
@@ -1132,10 +1134,10 @@ export async function fetchNoteCountsByLead(ownerId: string | null, leadIds?: st
         if (error) throw error;
         for (const r of (data || []) as { lead_id: string; total: number }[]) counts.set(r.lead_id, r.total ?? 0);
       }
-      return counts;
     } catch {
       counts.clear();
     }
+    return counts;
   }
 
   // Paginado desde 13/08: a base cruzou 1.000 leads (1.398 medidos) e a visão

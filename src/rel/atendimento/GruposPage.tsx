@@ -15,15 +15,21 @@ import { variantesBr } from "./Organizar";
 import { estadoDosGrupos, listarGrupos, marcarGrupoLido, sincronizarGrupos, type Grupo } from "../lib/grupos";
 import { supabase } from "@/lib/supabase";
 
-/** Enquanto a aba está visível, roda `fn` a cada `ms`. */
-function useRepetir(fn: () => void, ms: number) {
+/** Enquanto a aba está visível, roda `fn` a cada `ms` (e ao voltar pra aba). Uma de cada vez:
+ *  se a anterior ainda não voltou (banco lento), pula esta volta em vez de empilhar (22/10). */
+function useRepetir(fn: () => unknown, ms: number) {
   const ref = useRef(fn);
   ref.current = fn;
   useEffect(() => {
-    const t = setInterval(() => { if (!document.hidden) ref.current(); }, ms);
-    const volta = () => { if (!document.hidden) ref.current(); };
-    document.addEventListener("visibilitychange", volta);
-    return () => { clearInterval(t); document.removeEventListener("visibilitychange", volta); };
+    let rodando = false;
+    const vez = () => {
+      if (document.hidden || rodando) return;
+      rodando = true;
+      void Promise.resolve().then(() => ref.current()).catch(() => undefined).finally(() => { rodando = false; });
+    };
+    const t = setInterval(vez, ms);
+    document.addEventListener("visibilitychange", vez);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", vez); };
   }, [ms]);
 }
 

@@ -16,20 +16,23 @@
 // Componentes de interface: importe de ./ui (já vêm na cor do Financeiro).
 // Banco: fin_tem_acesso() / fin_pode_configurar() nas policies (0126).
 // -----------------------------------------------------------------------------
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import CascaDeArea, { EmConstrucao, ICONES_AREA, hashDaArea, lerHashDaArea, type GrupoDoMenu } from "@/area/CascaDeArea";
-import EquipePage from "@/rel/equipe/EquipePage";
 import { podeGerirTime } from "@/rel/equipe/permissao";
 import { FIN_CSS } from "./ui";
 import AtendimentosPage, { FaixaDoAtendimento } from "./atendimentos/AtendimentosPage";
-import AtendimentoPage from "@/rel/atendimento/AtendimentoPage";
-import ModelosPage from "./modelos/ModelosPage";
-import ContasReceberPage from "./receber/ContasReceberPage";
-import PagamentosPage from "./pagamentos/PagamentosPage";
 import { supabase } from "@/lib/supabase";
-import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
+
+// Telas sob demanda (22/10, desempenho): a conversa do WhatsApp (a do Rel, com
+// emojis, editor de foto e modelos da Meta) e os Modelos só baixam quando abertas.
+const AtendimentoPage = lazy(() => import("@/rel/atendimento/AtendimentoPage"));
+const ModelosPage = lazy(() => import("./modelos/ModelosPage"));
+const ContasReceberPage = lazy(() => import("./receber/ContasReceberPage"));
+const SolicitacoesPage = lazy(() => import("@/solicitacoes/SolicitacoesPage"));
+const EquipePage = lazy(() => import("@/rel/equipe/EquipePage"));
+const PagamentosPage = lazy(() => import("./pagamentos/PagamentosPage"));
 
 const PREFIXO = "fin";
 /** As telas do Financeiro. */
@@ -110,6 +113,7 @@ export default function FinApp() {
     <CascaDeArea setor="financeiro" nome="Financeiro" subtitulo="recebimentos e pagamentos" css={FIN_CSS}
       grupos={grupos} ativo={rota.tela} onIr={(t) => ir({ tela: t as Tela })} chaveMenu="qs_fin_menu_aberto">
       {/* ── Telas ── */}
+      <Suspense fallback={<p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>}>
       {rota.tela === "inicio" && (
         <EmConstrucao
           titulo={`Olá, ${currentUser.name.split(" ")[0]}! Bem-vindo(a) ao Financeiro.`}
@@ -139,6 +143,7 @@ export default function FinApp() {
           onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })} />
       )}
       {rota.tela === "equipe" && <EquipePage area="financeiro" />}
+      </Suspense>
     </CascaDeArea>
   );
 }

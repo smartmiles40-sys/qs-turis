@@ -282,6 +282,27 @@ export async function carregarResumo(): Promise<Resumo> {
   };
 }
 
+/** Só o que o menu e o Início do Rel mostram (22/10, desempenho). */
+export type ResumoDoMenu = Pick<Resumo, "clientes" | "duplicados">;
+
+/**
+ * As 2 contagens que o menu do Rel usa — carregarResumo fazia 5 a cada 30 s e a
+ * tela só mostrava 2. Duplicados pela função rel_duplicados_contagem (0202:
+ * mesmo número da view, ~35 ms em vez de ~400 ms); antes da 0202 aplicada,
+ * conta pela view como sempre.
+ */
+export async function carregarResumoDoMenu(): Promise<ResumoDoMenu> {
+  const [c, d] = await Promise.all([
+    supabase.from("rel_clientes").select("id", { count: "exact", head: true }).is("mesclado_em_id", null).is("arquivado_em", null),
+    supabase.rpc("rel_duplicados_contagem").then(async (r) => {
+      if (!r.error && typeof r.data === "number") return r.data;
+      const v = await supabase.from("rel_duplicados_sugeridos").select("a_id", { count: "exact", head: true });
+      return v.count ?? 0;
+    }),
+  ]);
+  return { clientes: c.count ?? 0, duplicados: d };
+}
+
 // ── KPIs da carteira (migration 0106) ───────────────────────────────────────
 // A view rel_cliente_metricas calcula tudo por cliente no banco: quantas
 // viagens, quanto gastou, categoria, dias sem contato e o que falta no

@@ -17,44 +17,48 @@
 // alguém do time.
 // -----------------------------------------------------------------------------
 import TrocarArea from "@/components/TrocarArea";
-import { Suspense, lazy, useCallback, useEffect, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
 import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
-import { carregarResumo, type Resumo } from "./lib/clientes";
+import { carregarResumoDoMenu, type ResumoDoMenu } from "./lib/clientes";
 import { contarEsperando } from "./lib/whatsapp";
 import { COM_ACOMPANHAMENTO, hojeSP } from "./lib/viagens";
 import { Avatar, Etiqueta, REL_CSS } from "./ui";
-import ClientesPage from "./clientes/ClientesPage";
-import ClienteFicha from "./clientes/ClienteFicha";
-import DuplicadosPage from "./clientes/DuplicadosPage";
-import ArrumarCadastrosPage from "./clientes/ArrumarCadastrosPage";
-import AtendimentoPage from "./atendimento/AtendimentoPage";
-import GruposPage from "./atendimento/GruposPage";
 import { contarGruposNovos } from "./lib/grupos";
-import ConfigPage from "./config/ConfigPage";
-import ViagensPage from "./viagens/ViagensPage";
-import EsteiraPage from "./viagens/EsteiraPage";
-import ViagemPage from "./viagens/ViagemPage";
-import AlertasPage from "./viagens/AlertasPage";
-import DisparosPage from "./disparos/DisparosPage";
-import AutomacoesPage from "./disparos/AutomacoesPage";
-import PesquisasPage from "./pos/PesquisasPage";
-import RecompraPage from "./pos/RecompraPage";
-import KpisPage from "./kpis/KpisPage";
-import WhatsAppPage from "./whatsapp/WhatsAppPage";
-import EquipePage from "./equipe/EquipePage";
-import ModelosPage from "./modelos/ModelosPage";
-import AgendaPage from "./agenda/AgendaPage";
 import { podeGerirTime } from "./equipe/permissao";
 import { usePode } from "./equipe/usePode";
-import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
-import PropostasPage from "@/propostas/PropostasPage";
 import { useAprovacoesNovas } from "@/propostas/lib";
 import type { TelaExp } from "@/expedicoes/contexto";
 import SinoDeAvisos from "@/avisos/SinoDeAvisos";
+
+// Telas carregadas sob demanda (22/10, desempenho): o Rel abre só com o menu e
+// o Início; cada tela baixa o seu pedaço na primeira vez que é aberta (o
+// Atendimento, com emojis, editor de foto e modelos da Meta, é o maior).
+const ClientesPage = lazy(() => import("./clientes/ClientesPage"));
+const ClienteFicha = lazy(() => import("./clientes/ClienteFicha"));
+const DuplicadosPage = lazy(() => import("./clientes/DuplicadosPage"));
+const ArrumarCadastrosPage = lazy(() => import("./clientes/ArrumarCadastrosPage"));
+const AtendimentoPage = lazy(() => import("./atendimento/AtendimentoPage"));
+const GruposPage = lazy(() => import("./atendimento/GruposPage"));
+const ConfigPage = lazy(() => import("./config/ConfigPage"));
+const ViagensPage = lazy(() => import("./viagens/ViagensPage"));
+const EsteiraPage = lazy(() => import("./viagens/EsteiraPage"));
+const ViagemPage = lazy(() => import("./viagens/ViagemPage"));
+const AlertasPage = lazy(() => import("./viagens/AlertasPage"));
+const DisparosPage = lazy(() => import("./disparos/DisparosPage"));
+const AutomacoesPage = lazy(() => import("./disparos/AutomacoesPage"));
+const PesquisasPage = lazy(() => import("./pos/PesquisasPage"));
+const RecompraPage = lazy(() => import("./pos/RecompraPage"));
+const KpisPage = lazy(() => import("./kpis/KpisPage"));
+const WhatsAppPage = lazy(() => import("./whatsapp/WhatsAppPage"));
+const EquipePage = lazy(() => import("./equipe/EquipePage"));
+const ModelosPage = lazy(() => import("./modelos/ModelosPage"));
+const AgendaPage = lazy(() => import("./agenda/AgendaPage"));
+const SolicitacoesPage = lazy(() => import("@/solicitacoes/SolicitacoesPage"));
+const PropostasPage = lazy(() => import("@/propostas/PropostasPage"));
 
 // Expedições (21/10): o Rel vê o módulo de Expedições do QS em modo só-leitura
 // (as policies já barram a escrita — is_readonly) e decide inscrições.
@@ -157,7 +161,7 @@ async function contarAlertasEChamados(): Promise<{ alertasAltos: number; chamado
 // ── Tela inicial ──
 interface AlertaCurto { tipo: string; gravidade: string; titulo: string; detalhe: string; cliente_id: string | null; viagem_id: string | null }
 
-function Inicio({ resumo, cont, nome, ir }: { resumo: Resumo | null; cont: Contadores | null; nome: string; ir: (r: Rota) => void }) {
+function Inicio({ resumo, cont, nome, ir }: { resumo: ResumoDoMenu | null; cont: Contadores | null; nome: string; ir: (r: Rota) => void }) {
   const [alertas, setAlertas] = useState<AlertaCurto[] | null>(null);
   const [embarques, setEmbarques] = useState<{ id: string; titulo: string; data_embarque: string; passageiros: number }[]>([]);
   useEffect(() => {
@@ -291,7 +295,7 @@ export default function RelApp() {
   const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "relacionamento");
   const { isDark, toggleTheme } = useTheme();
   const [rota, setRota] = useState<Rota>(lerRota);
-  const [resumo, setResumo] = useState<Resumo | null>(null);
+  const [resumo, setResumo] = useState<ResumoDoMenu | null>(null);
   const [cont, setCont] = useState<Contadores | null>(null);
   const [menuAberto, setMenuAberto] = useState(false);
   const [trocandoSenha, setTrocandoSenha] = useState(false);
@@ -311,29 +315,60 @@ export default function RelApp() {
     window.scrollTo(0, 0);
   }, []);
 
+  // Uma contagem por vez: se pedirem outra no meio (onMudou de uma tela), roda
+  // UMA de novo no fim — nunca empilha.
+  const emCurso = useRef(false);
+  const deNovo = useRef(false);
+  const ultimaContagem = useRef(0);
   const atualizar = useCallback(() => {
-    void Promise.all([
-      carregarResumo().catch(() => null),
-      contarEsperando().catch(() => null),
-      contarAlertasEChamados().catch(() => null),
-      contarGruposNovos().catch(() => null),
-      eu ? contarDonos(eu).catch(() => null) : Promise.resolve(null),
-    ]).then(([r, f, ac, g, d]) => {
-      if (r) setResumo(r);
-      setCont({
-        esperando: f?.esperando ?? 0, foraDoPrazo: f?.foraDoPrazo ?? 0, duplicados: r?.duplicados ?? 0,
-        alertasAltos: ac?.alertasAltos ?? 0, chamadosVencidos: ac?.chamadosVencidos ?? 0,
-        gruposNovos: g?.grupos ?? 0, gruposMencao: g?.mencoes ?? 0,
-        minhasViagens: d?.minhasViagens ?? 0, semDono: d?.semDono ?? 0,
+    if (emCurso.current) { deNovo.current = true; return; }
+    const rodar = () => {
+      emCurso.current = true;
+      ultimaContagem.current = Date.now();
+      void Promise.all([
+        carregarResumoDoMenu().catch(() => null),
+        contarEsperando().catch(() => null),
+        contarAlertasEChamados().catch(() => null),
+        contarGruposNovos().catch(() => null),
+        eu ? contarDonos(eu).catch(() => null) : Promise.resolve(null),
+      ]).then(([r, f, ac, g, d]) => {
+        if (r) setResumo(r);
+        setCont({
+          esperando: f?.esperando ?? 0, foraDoPrazo: f?.foraDoPrazo ?? 0, duplicados: r?.duplicados ?? 0,
+          alertasAltos: ac?.alertasAltos ?? 0, chamadosVencidos: ac?.chamadosVencidos ?? 0,
+          gruposNovos: g?.grupos ?? 0, gruposMencao: g?.mencoes ?? 0,
+          minhasViagens: d?.minhasViagens ?? 0, semDono: d?.semDono ?? 0,
+        });
+      }).finally(() => {
+        if (deNovo.current) { deNovo.current = false; rodar(); } else emCurso.current = false;
       });
-    });
+    };
+    rodar();
   }, [eu]);
-  // As bolinhas do menu se atualizam sozinhas (e ao trocar de tela).
+  // O Atendimento avisa a cada mensagem enviada: aí só recontam as 2 bolinhas
+  // dele (esperando resposta e chamados vencidos), não o menu inteiro.
+  const recontarAtendimento = useCallback(() => {
+    void Promise.all([
+      contarEsperando(),
+      supabase.from("rel_chamados").select("id", { count: "exact", head: true }).neq("status", "resolvido").lt("prazo", new Date().toISOString()),
+    ]).then(([f, ch]) => setCont((c) => (c ? { ...c, esperando: f.esperando, foraDoPrazo: f.foraDoPrazo, chamadosVencidos: ch.count ?? c.chamadosVencidos } : c)))
+      .catch(() => undefined);
+  }, []);
+  // As bolinhas do menu se atualizam sozinhas — a cada 2 min, ao voltar pra aba
+  // e ao voltar pro Início (22/10, desempenho). Antes eram a cada 30 s E a cada
+  // troca de tela: ~1 s de banco por aba aberta. Quem muda algo numa tela
+  // (juntar duplicado, concluir atendimento…) chama onMudou → atualiza na hora.
   useEffect(() => {
-    const t = setInterval(() => { if (!document.hidden) atualizar(); }, 30_000);
-    return () => clearInterval(t);
+    atualizar();
+    const t = setInterval(() => { if (!document.hidden) atualizar(); }, 120_000);
+    const aoVoltar = () => { if (!document.hidden && Date.now() - ultimaContagem.current > 30_000) atualizar(); };
+    document.addEventListener("visibilitychange", aoVoltar);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", aoVoltar); };
   }, [atualizar]);
-  useEffect(() => { atualizar(); }, [rota.tela, atualizar]);
+  useEffect(() => {
+    // o Início mostra os números grandes: se estão com mais de 30 s, recontar
+    if (rota.tela === "inicio" && Date.now() - ultimaContagem.current > 30_000) atualizar();
+  }, [rota.tela, atualizar]);
 
   if (!currentUser) return null;
   const abrirCliente = (id: string) => ir({ tela: "ficha", id });
@@ -552,7 +587,9 @@ export default function RelApp() {
 
       <main className="lg:pl-60">
         <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
-          {rota.tela === "inicio" && <Inicio resumo={resumo} cont={cont} nome={currentUser.name} ir={ir} />}
+          {/* telas sob demanda: enquanto o pedaço da tela baixa, o mesmo "Carregando…" das listas */}
+          <Suspense fallback={<p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>}>
+          {rota.tela === "inicio" &&<Inicio resumo={resumo} cont={cont} nome={currentUser.name} ir={ir} />}
           {rota.tela === "atendimento" && (
             <AtendimentoPage
               visao="conversas"
@@ -561,7 +598,7 @@ export default function RelApp() {
               onAbrirCliente={abrirCliente}
               onAbrirViagem={abrirViagem}
               onTrocarVisao={(v) => ir(v === "chamados" ? { tela: "chamados" } : { tela: "atendimento" })}
-              onMudou={atualizar}
+              onMudou={recontarAtendimento}
             />
           )}
           {rota.tela === "solicitacoes" && (
@@ -585,7 +622,7 @@ export default function RelApp() {
               onAbrirCliente={abrirCliente}
               onAbrirViagem={abrirViagem}
               onTrocarVisao={(v) => ir(v === "chamados" ? { tela: "chamados" } : { tela: "atendimento" })}
-              onMudou={atualizar}
+              onMudou={recontarAtendimento}
             />
           )}
           {/* Prazo de resposta saiu do Atendimento e virou parte dos KPIs; link antigo cai lá */}
@@ -621,6 +658,7 @@ export default function RelApp() {
           )}
           {rota.tela === "modelos" && <ModelosPage />}
           {rota.tela === "agenda" && <AgendaPage onAbrirCliente={(id) => ir({ tela: "ficha", id })} onAbrirViagem={(id) => ir({ tela: "viagem", id })} onAbrirConversa={(id) => ir({ tela: "atendimento", id })} />}
+          </Suspense>
         </div>
       </main>
 
