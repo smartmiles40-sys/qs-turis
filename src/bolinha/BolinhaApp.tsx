@@ -18,7 +18,7 @@
 // aviso abre o QS no navegador em vez de trocar o endereço desta janela.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth } from "@/contexts/QsAuthContext";
 import { SETORES, type Setor, type SdrUser } from "@/components/sdr/types";
 import AvisosProvider, { useAvisos } from "@/avisos/AvisosProvider";
 import { abrirNoQS, desktop, rotas, type EstadoJanela, type MensagemChat } from "./lib";
