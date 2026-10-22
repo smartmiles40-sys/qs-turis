@@ -5,27 +5,32 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useExp } from "../contexto";
 import { Cartao, Carregando, Selo } from "../ui";
-import { lerTudo, listarPassageirosDe } from "../lib/banco";
-import { prontidaoDaExpedicao, type ProntidaoPassageiro } from "../lib/agregados";
+import { lerTudo, type PaxProntidao, type ReqProntidao } from "../lib/banco";
+import { prontidaoLeveDaExpedicao, type ProntidaoPassageiro } from "../lib/agregados";
 import { listPessoas, type PessoaAgregada } from "../lib/pessoas";
 import { construirPosicoesFidelidade, ehMarco } from "../lib/fidelidade";
 import { aniversarioNoMesDaExpedicao, daysUntil, formatDate } from "../lib/utils";
-import type { ChecklistItemRow, PassageiroRow } from "../lib/database";
+import type { ChecklistItemRow } from "../lib/database";
 import type { PropsAba } from "./ExpedicaoDetalhe";
+
+// 22/10 (leveza): esta aba só mostra contagens, nomes e datas — lê as colunas
+// leves dos passageiros (COLUNAS_PAX_PRONTIDAO cobre id, nome, status, nascimento)
+// e só 5 colunas do checklist, com passageiros e checklist saindo JUNTOS. A base
+// de pessoas (pra "Nª viagem") é a leitura guardada que as outras telas usam.
+type CkVisao = Pick<ChecklistItemRow, "id" | "prazo" | "status" | "tarefa" | "etapa">;
 
 export default function VisaoGeral({ exp }: PropsAba) {
   const { ir } = useExp();
   const pacote = exp.tipo === "pacote";
-  const [pax, setPax] = useState<PassageiroRow[] | null>(null);
-  const [checklist, setChecklist] = useState<ChecklistItemRow[]>([]);
-  const [pront, setPront] = useState<ProntidaoPassageiro[]>([]);
+  const [pax, setPax] = useState<PaxProntidao[] | null>(null);
+  const [checklist, setChecklist] = useState<CkVisao[]>([]);
+  const [pront, setPront] = useState<ProntidaoPassageiro<PaxProntidao, ReqProntidao>[]>([]);
   const [pessoas, setPessoas] = useState<PessoaAgregada[]>([]);
 
   const carregar = useCallback(async () => {
-    const p = await listarPassageirosDe([exp.id]);
-    const [ck, pr] = await Promise.all([
-      pacote ? Promise.resolve([] as ChecklistItemRow[]) : lerTudo<ChecklistItemRow>("checklist_itens", (q) => q.eq("expedicao_id", exp.id)),
-      prontidaoDaExpedicao(exp, p),
+    const [ck, { pax: p, pront: pr }] = await Promise.all([
+      pacote ? Promise.resolve([] as CkVisao[]) : lerTudo<CkVisao>("checklist_itens", (q) => q.eq("expedicao_id", exp.id), "id, prazo, status, tarefa, etapa"),
+      prontidaoLeveDaExpedicao(exp),
     ]);
     setPax(p); setChecklist(ck); setPront(pr);
     listPessoas().then(setPessoas).catch(() => setPessoas([]));
@@ -58,7 +63,7 @@ export default function VisaoGeral({ exp }: PropsAba) {
     const marcos = ativos.filter((p) => ehMarco(pos[p.id])).map((p) => ({ p, pos: pos[p.id] })).sort((a, b) => b.pos - a.pos);
     const aniversarios = ativos
       .map((p) => ({ p, a: aniversarioNoMesDaExpedicao(p.data_nascimento, exp.data_embarque, exp.data_retorno) }))
-      .filter((x): x is { p: PassageiroRow; a: NonNullable<typeof x.a> } => x.a != null)
+      .filter((x): x is { p: PaxProntidao; a: NonNullable<typeof x.a> } => x.a != null)
       .sort((x, y) => x.a.data.localeCompare(y.a.data));
     const estreantes = pessoas.length ? ativos.filter((p) => pos[p.id] === 1) : [];
     return { marcos, aniversarios, estreantes };

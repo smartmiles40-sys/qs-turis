@@ -15,6 +15,7 @@ import { aniversarioNaViagem, daysUntil, formatDate } from "../lib/utils";
 import { conferirAcompanhante } from "../lib/rooming/acompanhante";
 import { construirPosicoesFidelidade } from "../lib/fidelidade";
 import { chaveIdentidade, listPessoas, type PessoaAgregada } from "../lib/pessoas";
+import { esquecer } from "../lib/cache";
 import type { ExpedicaoComAgregados, PassageiroRow, StatusReserva, TipoPassageiro } from "../lib/database";
 import {
   alocarNoTrecho, ativarDivisao, atualizarPassageiro, capacidade, carregarAba, definirGrupoDoPax, preencheuFormulario, prontidaoDe,
@@ -55,16 +56,22 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
   const recarregar = useCallback(() => { void carregar(); onMudou(); }, [carregar, onMudou]);
   useEffect(() => { void carregar(); }, [carregar]);
   useEffect(() => { souAdmin().then(setAdmin).catch(() => setAdmin(false)); }, []);
-  const carregarPessoas = useCallback(() => { listPessoas().then(setPessoas).catch(() => setPessoas([])); }, []);
-  useEffect(() => { carregarPessoas(); }, [carregarPessoas]);
+  // Base de pessoas (só pra "Nª viagem"): leitura guardada que outras telas também
+  // usam. Ao abrir aproveita; depois de criar/importar/mover, derruba e lê fresco.
+  const carregarPessoas = useCallback((fresco = true) => {
+    if (fresco) esquecer("passageiros");
+    listPessoas().then(setPessoas).catch(() => setPessoas([]));
+  }, []);
+  useEffect(() => { carregarPessoas(false); }, [carregarPessoas]);
   useAoVivo([
     { tabela: "passageiros", filtro: `expedicao_id=eq.${exp.id}` },
     { tabela: "arquivos", filtro: `expedicao_id=eq.${exp.id}` },
     { tabela: "grupos_expedicao", filtro: `expedicao_id=eq.${exp.id}` },
     { tabela: "quartos", filtro: `expedicao_id=eq.${exp.id}` },
-    { tabela: "passageiro_requisitos" },
-    { tabela: "passageiro_quarto" },
   ], () => void carregar(), 400);
+  // Sem expedicao_id nessas duas (não dá pra filtrar no realtime): espera de 2 s,
+  // pra edição em OUTRA expedição não refazer a planilha inteira a cada clique.
+  useAoVivo([{ tabela: "passageiro_requisitos" }, { tabela: "passageiro_quarto" }], () => void carregar(), 2000);
 
   const pront = useMemo(() => (dados ? prontidaoDe(exp, dados.pax, dados.requisitos).resultado : new Map()), [dados, exp]);
   const posicoes = useMemo(() => (pessoas ? construirPosicoesFidelidade(pessoas, exp.id) : {}), [pessoas, exp.id]);

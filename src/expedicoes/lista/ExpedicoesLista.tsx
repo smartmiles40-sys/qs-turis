@@ -12,6 +12,7 @@ import { useExp } from "../contexto";
 import { Anel, BotaoExcluir, Busca, Carregando, CelulaEscolha, PilulaStatus, useAoVivo } from "../ui";
 import { supabase, listarExpedicoes, traduzirErro } from "../lib/banco";
 import { agregarExpedicoes } from "../lib/agregados";
+import { esquecer } from "../lib/cache";
 import { daysUntil, formatDate, formatPercent } from "../lib/utils";
 import { STATUS_EXPEDICAO } from "../lib/constants";
 import type { ExpedicaoComAgregados, StatusExpedicao } from "../lib/database";
@@ -38,11 +39,14 @@ export default function ExpedicoesLista({ tipo }: { tipo: "expedicao" | "pacote"
   const [nova, setNova] = useState(false);
   const [editando, setEditando] = useState<ExpedicaoComAgregados | null>(null);
 
-  const carregar = useCallback(async () => {
+  // A lista de expedições é a leitura guardada (lib/cache.ts): ao abrir aproveita a
+  // de outra tela; depois de salvar/reordenar/mudar status, derruba e lê fresco.
+  const carregar = useCallback(async (fresco = true) => {
+    if (fresco) esquecer("expedicoes");
     try { setLista(await agregarExpedicoes(await listarExpedicoes(tipo))); setErro(null); }
     catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar"); }
   }, [tipo]);
-  useEffect(() => { setLista(null); void carregar(); }, [carregar]);
+  useEffect(() => { setLista(null); void carregar(false); }, [carregar]);
   useAoVivo([{ tabela: "expedicoes" }], carregar, 300);
 
   // atalho "n" = nova

@@ -6,7 +6,8 @@
  * depois contato do Bitrix, e-mail e por fim o nome — para mostrar dados
  * pessoais únicos e em quantas expedições a pessoa já participou.
  */
-import { lerTudo } from "@/expedicoes/lib/banco";
+import { lerTudo, listarExpedicoes } from "@/expedicoes/lib/banco";
+import { lembrar } from "@/expedicoes/lib/cache";
 import type {
   PassageiroRow,
   ExpedicaoRow,
@@ -56,7 +57,7 @@ export type PessoaAgregada = {
 };
 
 /** Identidade da pessoa: CPF (só dígitos) → Bitrix → e-mail → nome. */
-export function chaveIdentidade(p: PassageiroRow): string {
+export function chaveIdentidade(p: Pick<PassageiroRow, "cpf" | "bitrix_contact_id" | "email" | "nome_completo">): string {
   const cpf = p.cpf?.replace(/\D/g, "");
   if (cpf && cpf.length >= 11) return `cpf:${cpf}`;
   if (p.bitrix_contact_id) return `bx:${p.bitrix_contact_id}`;
@@ -70,8 +71,8 @@ function maisRecente<T>(atual: T | null, novo: T | null): T | null {
 }
 
 function agregar(
-  passageiros: PassageiroRow[],
-  expedicoes: ExpedicaoRow[],
+  passageiros: PaxPessoa[],
+  expedicoes: Pick<ExpedicaoRow, "id" | "nome" | "destino" | "data_embarque">[],
 ): PessoaAgregada[] {
   const expById = new Map(expedicoes.map((e) => [e.id, e]));
   const ordenados = [...passageiros].sort((a, b) =>
@@ -160,7 +161,30 @@ function agregar(
   );
 }
 
+/**
+ * 22/10 (leveza): só as colunas que `agregar` lê (21 de 55 — conferido campo a
+ * campo acima; se `agregar` passar a ler outro campo, ACRESCENTE aqui e no Pick).
+ */
+const COLUNAS_PESSOA =
+  "id, expedicao_id, created_at, nome_completo, cpf, bitrix_contact_id, email, telefone, passaporte, validade_passaporte, passaporte_arquivo_id, "
+  + "data_nascimento, contato_emergencia_nome, contato_emergencia_fone, restricoes_alimentares, condicoes_medicas, saude, perfil_viajante, foto_arquivo_id, "
+  + "status_reserva, tipo";
+type PaxPessoa = Pick<PassageiroRow,
+  "id" | "expedicao_id" | "created_at" | "nome_completo" | "cpf" | "bitrix_contact_id" | "email" | "telefone" | "passaporte" | "validade_passaporte"
+  | "passaporte_arquivo_id" | "data_nascimento" | "contato_emergencia_nome" | "contato_emergencia_fone" | "restricoes_alimentares" | "condicoes_medicas"
+  | "saude" | "perfil_viajante" | "foto_arquivo_id" | "status_reserva" | "tipo">;
+
+/**
+ * Base inteira de pessoas. Guardada 60 s (lib/cache.ts): Início, Passageiros,
+ * a aba Passageiros e a Visão Geral (que só querem a "Nª viagem") dividem UMA
+ * leitura. Cai sozinha quando o realtime avisa mudança em passageiros/expedicoes;
+ * depois de salvar, a tela chama `esquecer("passageiros")`.
+ * Devolve cópia da lista; as pessoas em si são compartilhadas — não altere.
+ */
 export async function listPessoas(): Promise<PessoaAgregada[]> {
-  const [pax, exps] = await Promise.all([lerTudo<PassageiroRow>("passageiros"), lerTudo<ExpedicaoRow>("expedicoes")]);
-  return agregar(pax, exps);
+  const lista = await lembrar("pessoas", ["passageiros", "expedicoes"], async () => {
+    const [pax, exps] = await Promise.all([lerTudo<PaxPessoa>("passageiros", undefined, COLUNAS_PESSOA), listarExpedicoes()]);
+    return agregar(pax, exps);
+  });
+  return [...lista];
 }

@@ -9,10 +9,11 @@ import { Avatar } from "@/rel/ui";
 import { useExp } from "../contexto";
 import { Cartao, Carregando, Selo, useAoVivo, type Tom } from "../ui";
 import { listPessoas, type PessoaAgregada } from "../lib/pessoas";
+import { listarExpedicoes } from "../lib/banco";
 import { ehMarco, ordinalFem } from "../lib/fidelidade";
 import { aniversarioNaViagem, daysUntil, formatDate } from "../lib/utils";
 import {
-  carregarProntidaoAtivas, resumoProcessos, resumoProntidao,
+  EXP_ATIVA, carregarProntidaoAtivas, resumoProcessos, resumoProntidao,
   type ProntidaoAtivas, type ResumoProcessoExpedicao, type ResumoProntidaoExpedicao,
 } from "./_globais/prontidaoGlobal";
 
@@ -24,17 +25,32 @@ export default function Inicio() {
   const [pessoas, setPessoas] = useState<PessoaAgregada[]>([]);
   const [erro, setErro] = useState<string | null>(null);
 
-  const carregar = useCallback(async () => {
+  // 22/10 (leveza): prontidão (colunas leves, guardada 60 s) e prazos do checklist
+  // saem JUNTOS (antes um esperava o outro), e a base de pessoas vem da leitura
+  // guardada que as outras telas também usam. Realtime separado por pedaço: mudança
+  // no checklist só refaz os prazos; em requisitos só a prontidão; em passageiros
+  // a prontidão e as pessoas. Tabelas sem filtro → espera de 3 s (rajada = 1 recarga).
+  const carregarProntidao = useCallback(async () => {
     try {
-      const pront = await carregarProntidaoAtivas();
-      const resProc = await resumoProcessos(pront.expedicoes);
+      const [pront, resProc] = await Promise.all([
+        carregarProntidaoAtivas(),
+        listarExpedicoes("expedicao").then((l) => resumoProcessos(l.filter((e) => EXP_ATIVA(e.status)))),
+      ]);
       setDados({ pront, resPront: resumoProntidao(pront), resProc });
       setErro(null);
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar"); }
-    listPessoas().then(setPessoas).catch(() => setPessoas([]));
   }, []);
-  useEffect(() => { void carregar(); }, [carregar]);
-  useAoVivo([{ tabela: "expedicoes" }, { tabela: "passageiros" }, { tabela: "passageiro_requisitos" }, { tabela: "checklist_itens" }], carregar, 2000);
+  const carregarPrazos = useCallback(async () => {
+    try {
+      const resProc = await resumoProcessos((await listarExpedicoes("expedicao")).filter((e) => EXP_ATIVA(e.status)));
+      setDados((d) => (d ? { ...d, resProc } : d));
+    } catch { /* fica o último resumo; a próxima recarga tenta de novo */ }
+  }, []);
+  const carregarPessoas = useCallback(() => { listPessoas().then(setPessoas).catch(() => setPessoas([])); }, []);
+  useEffect(() => { void carregarProntidao(); carregarPessoas(); }, [carregarProntidao, carregarPessoas]);
+  useAoVivo([{ tabela: "expedicoes" }, { tabela: "passageiros" }], () => { void carregarProntidao(); carregarPessoas(); }, 3000);
+  useAoVivo([{ tabela: "passageiro_requisitos" }], carregarProntidao, 3000);
+  useAoVivo([{ tabela: "checklist_itens" }], carregarPrazos, 3000);
 
   const calc = useMemo(() => {
     if (!dados) return null;

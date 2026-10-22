@@ -4,12 +4,26 @@
 //  - avisos: mesma conta da página Avisos (exigência pendente dentro da janela, nas
 //    expedições em grupo ativas que ainda não embarcaram);
 //  - inscricoes: inscrições do formulário público com status 'pendente'.
-// Atualiza sozinho (realtime) e de meia em meia hora (a janela dos avisos anda com o dia).
 // Não depende do ExpProvider — pode ser usado no menu.
+//
+// 22/10 (leveza): este hook roda em TODA tela de Operações (até na Central de
+// Solicitações). Antes: baixava a linha inteira dos ~400 passageiros futuros
+// (~0,7 MB) + requisitos em fila, logo ao abrir, e refazia tudo 3 s depois de
+// QUALQUER edição em passageiros/requisitos/expedições de qualquer pessoa.
+// Agora:
+//  - a conta lê só as colunas da regra (carregarProntidaoAtivas leve) e a leitura
+//    é a MESMA da página Avisos (guardada 60 s);
+//  - a 1ª conta espera a tela abrir (3 s) pra não disputar rede com ela;
+//  - mudança em passageiros/requisitos/expedições só recalcula depois de 30 s de
+//    sossego (rajada de edição = uma conta); fora isso, de meia em meia hora
+//    (a janela dos avisos anda com o dia).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "./lib/banco";
 import { useAoVivo } from "./ui";
 import { calcularAlertas, carregarProntidaoAtivas } from "./paginas/_globais/prontidaoGlobal";
+
+const ESPERA_INICIAL_MS = 3000;
+const SOSSEGO_AVISOS_MS = 30_000;
 
 export function useContagensExp(): { avisos: number; inscricoes: number } {
   const [avisos, setAvisos] = useState(0);
@@ -30,12 +44,13 @@ export function useContagensExp(): { avisos: number; inscricoes: number } {
   }, []);
 
   useEffect(() => {
-    void contarAvisos(); void contarInscricoes();
+    void contarInscricoes();
+    const primeira = setTimeout(() => { void contarAvisos(); }, ESPERA_INICIAL_MS);
     const t = setInterval(() => { void contarAvisos(); void contarInscricoes(); }, 30 * 60 * 1000);
-    return () => clearInterval(t);
+    return () => { clearTimeout(primeira); clearInterval(t); };
   }, [contarAvisos, contarInscricoes]);
 
-  useAoVivo([{ tabela: "passageiros" }, { tabela: "passageiro_requisitos" }, { tabela: "expedicoes" }], contarAvisos, 3000);
+  useAoVivo([{ tabela: "passageiros" }, { tabela: "passageiro_requisitos" }, { tabela: "expedicoes" }], contarAvisos, SOSSEGO_AVISOS_MS);
   useAoVivo([{ tabela: "inscricoes_pendentes" }], contarInscricoes, 800);
 
   return { avisos, inscricoes };

@@ -8,6 +8,7 @@
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
 import type { ExpedicaoRow, PassageiroRow, PassageiroRequisitoRow, UsuarioRow } from "./database";
+import { lembrar } from "./cache";
 
 export { supabase };
 
@@ -26,14 +27,17 @@ export async function lerTudo<T>(tabela: string, filtro?: Filtro, colunas = "*",
   }
 }
 
-/** Mesma ideia, pra listas grandes de ids em `in (...)` (fatias de 200 pra URL não estourar). */
+/**
+ * Mesma ideia, pra listas grandes de ids em `in (...)` (fatias de 200 pra URL não estourar).
+ * 22/10: as fatias vão JUNTAS (antes uma esperava a outra terminar). Cada fatia
+ * continua paginando de 1000 em 1000 com ordem por id, e o resultado sai na ordem
+ * das fatias — o mesmo de antes.
+ */
 export async function lerPorIds<T>(tabela: string, coluna: string, ids: string[], colunas = "*"): Promise<T[]> {
-  const out: T[] = [];
-  for (let i = 0; i < ids.length; i += 200) {
-    const fatia = ids.slice(i, i + 200);
-    out.push(...(await lerTudo<T>(tabela, (q) => q.in(coluna, fatia), colunas)));
-  }
-  return out;
+  const fatias: string[][] = [];
+  for (let i = 0; i < ids.length; i += 200) fatias.push(ids.slice(i, i + 200));
+  const partes = await Promise.all(fatias.map((fatia) => lerTudo<T>(tabela, (q) => q.in(coluna, fatia), colunas)));
+  return partes.flat();
 }
 
 export function erroOuDados<T>(r: { data: T | null; error: { message: string } | null }): T {
@@ -50,26 +54,61 @@ export function traduzirErro(msg: string): string {
   return msg;
 }
 
+/**
+ * Expedições (tabela pequena, mas lida por quase toda tela). 22/10: UMA leitura,
+ * guardada 60 s (lib/cache.ts); o tipo é filtrado aqui, mantendo a ordem
+ * (ordem, data_embarque) que o banco devolvia com o filtro. Devolve CÓPIA da lista.
+ */
 export async function listarExpedicoes(tipo?: "expedicao" | "pacote"): Promise<ExpedicaoRow[]> {
-  let q = supabase.from("expedicoes").select("*").order("ordem", { ascending: true, nullsFirst: false }).order("data_embarque", { ascending: true });
-  if (tipo) q = q.eq("tipo", tipo);
-  return erroOuDados(await q) as ExpedicaoRow[];
+  const todas = await lembrar("expedicoes", ["expedicoes"], async () =>
+    erroOuDados(await supabase.from("expedicoes").select("*")
+      .order("ordem", { ascending: true, nullsFirst: false }).order("data_embarque", { ascending: true })) as ExpedicaoRow[]);
+  return tipo ? todas.filter((e) => e.tipo === tipo) : [...todas];
 }
 
 export async function lerExpedicao(id: string): Promise<ExpedicaoRow | null> {
   return erroOuDados(await supabase.from("expedicoes").select("*").eq("id", id).maybeSingle()) as ExpedicaoRow | null;
 }
 
+/** Usuários do sistema (responsáveis). Guardado 60 s — o ExpProvider e os agregados usam a MESMA leitura. */
 export async function listarUsuarios(): Promise<UsuarioRow[]> {
-  return erroOuDados(await supabase.from("usuarios").select("*").order("nome")) as UsuarioRow[];
+  const lista = await lembrar("usuarios", ["usuarios"], async () =>
+    erroOuDados(await supabase.from("usuarios").select("*").order("nome")) as UsuarioRow[]);
+  return [...lista];
 }
 
+/** Passageiros das expedições — linha inteira (as abas editam a linha toda). Pra só contar, use as colunas leves abaixo. */
 export async function listarPassageirosDe(expedicaoIds: string[]): Promise<PassageiroRow[]> {
   return lerPorIds<PassageiroRow>("passageiros", "expedicao_id", expedicaoIds);
 }
 
 export async function listarRequisitosDe(passageiroIds: string[]): Promise<PassageiroRequisitoRow[]> {
   return lerPorIds<PassageiroRequisitoRow>("passageiro_requisitos", "passageiro_id", passageiroIds);
+}
+
+// -----------------------------------------------------------------------------
+// LEITURA LEVE PRA PRONTIDÃO (22/10). `passageiros` tem 55 colunas; a conta de
+// prontidão/ocupação/avisos usa 12. Quem só CONTA (selo do menu, Início, Avisos,
+// lista e cabeçalho da expedição) lê só estas — conferido campo a campo contra
+// lib/prontidao/regras.ts (avaliarProntidao) e os consumidores. Se a regra passar
+// a ler outro campo, ACRESCENTE aqui e no Pick (o TypeScript acusa).
+// -----------------------------------------------------------------------------
+export const COLUNAS_PAX_PRONTIDAO =
+  "id, expedicao_id, nome_completo, tipo, status_reserva, cpf, data_nascimento, passaporte, validade_passaporte, passaporte_arquivo_id, contrato_assinado, created_at";
+export type PaxProntidao = Pick<PassageiroRow,
+  "id" | "expedicao_id" | "nome_completo" | "tipo" | "status_reserva" | "cpf" | "data_nascimento"
+  | "passaporte" | "validade_passaporte" | "passaporte_arquivo_id" | "contrato_assinado" | "created_at">;
+
+export const COLUNAS_REQ_PRONTIDAO = "id, passageiro_id, tipo, descricao, status, obrigatoriedade, bloqueia_embarque, validade, arquivo_id";
+export type ReqProntidao = Pick<PassageiroRequisitoRow,
+  "id" | "passageiro_id" | "tipo" | "descricao" | "status" | "obrigatoriedade" | "bloqueia_embarque" | "validade" | "arquivo_id">;
+
+export function lerPaxProntidao(expedicaoIds: string[]): Promise<PaxProntidao[]> {
+  return lerPorIds<PaxProntidao>("passageiros", "expedicao_id", expedicaoIds, COLUNAS_PAX_PRONTIDAO);
+}
+
+export function lerReqProntidao(passageiroIds: string[]): Promise<ReqProntidao[]> {
+  return lerPorIds<ReqProntidao>("passageiro_requisitos", "passageiro_id", passageiroIds, COLUNAS_REQ_PRONTIDAO);
 }
 
 /** Link assinado (5 min) pra abrir/baixar um arquivo do bucket das Expedições. */

@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Botao, Modal } from "@/rel/ui";
 import { supabase } from "./lib/banco";
+import { esquecer } from "./lib/cache";
 import { useExp } from "./contexto";
 
 export const COR_STATUS_EXP: Record<string, { fundo: string; texto: string }> = {
@@ -218,6 +219,8 @@ export function Cartao({ titulo, acao, children, className = "" }: { titulo?: Re
 /**
  * Realtime: chama `onMudar` (com espera de 400ms) quando qualquer tabela da lista muda.
  * Ex.: useAoVivo([{ tabela: "passageiros", filtro: `expedicao_id=eq.${id}` }], recarregar)
+ * Tabela SEM filtro (avisa de edição em qualquer expedição): use espera ≥ 2000ms,
+ * pra rajada de edições virar uma recarga só.
  */
 export function useAoVivo(assinaturas: { tabela: string; filtro?: string }[], onMudar: () => void, espera = 400) {
   const cb = useRef(onMudar);
@@ -225,10 +228,12 @@ export function useAoVivo(assinaturas: { tabela: string; filtro?: string }[], on
   const chave = assinaturas.map((a) => `${a.tabela}|${a.filtro ?? ""}`).join(",");
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
-    const disparar = () => { clearTimeout(t); t = setTimeout(() => cb.current(), espera); };
+    // 22/10: a mudança derruba NA HORA o que estava guardado dessa tabela (lib/cache.ts),
+    // pra recarga que vem depois da espera já ler do banco.
+    const disparar = (tabela: string) => { esquecer(tabela); clearTimeout(t); t = setTimeout(() => cb.current(), espera); };
     const canal = supabase.channel(`exp:${chave}:${Math.random().toString(36).slice(2, 8)}`);
     for (const a of assinaturas) {
-      canal.on("postgres_changes" as never, { event: "*", schema: "public", table: a.tabela, ...(a.filtro ? { filter: a.filtro } : {}) } as never, disparar);
+      canal.on("postgres_changes" as never, { event: "*", schema: "public", table: a.tabela, ...(a.filtro ? { filter: a.filtro } : {}) } as never, () => disparar(a.tabela));
     }
     canal.subscribe();
     return () => { clearTimeout(t); supabase.removeChannel(canal); };

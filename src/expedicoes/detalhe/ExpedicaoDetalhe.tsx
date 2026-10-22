@@ -51,12 +51,16 @@ export default function ExpedicaoDetalhe({ caminho }: { caminho: string }) {
     try { setExp(await expedicaoComAgregados(id)); } catch { setExp(null); }
   }, [id]);
   useEffect(() => { setExp(undefined); void carregar(); }, [carregar]);
+  // O cabeçalho só recarrega os NÚMEROS (expedicaoComAgregados lê colunas leves);
+  // cada aba cuida dos próprios dados. passageiro_requisitos não tem expedicao_id
+  // (não dá pra filtrar no realtime) → espera de 2,5 s, pra edição em outra
+  // expedição não ficar refazendo o cabeçalho a cada clique.
   useAoVivo([
     { tabela: "expedicoes", filtro: `id=eq.${id}` },
     { tabela: "passageiros", filtro: `expedicao_id=eq.${id}` },
     { tabela: "checklist_itens", filtro: `expedicao_id=eq.${id}` },
-    { tabela: "passageiro_requisitos" },
   ], carregar, 600);
+  useAoVivo([{ tabela: "passageiro_requisitos" }], carregar, 2500);
 
   const pacote = exp?.tipo === "pacote";
   const abas = useMemo(() => ABAS.filter((a) => !(pacote && OCULTAS_PACOTE.has(a.id))), [pacote]);

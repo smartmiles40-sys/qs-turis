@@ -23,25 +23,36 @@ export type DadosAba = {
   fotos: Record<string, string>;
 };
 
+/**
+ * 22/10 (leveza): cada leitura sai assim que tem o que precisa, em vez de esperar
+ * o "degrau" inteiro: requisitos partem quando chegam os passageiros (sem esperar
+ * quartos/arquivos), alocações quando chegam os quartos, e os arquivos de outra
+ * expedição referenciados pelos PASSAGEIROS (foto/passaporte) + os links das fotos
+ * correm em paralelo com os requisitos. Resultado igual ao de antes.
+ */
 export async function carregarAba(expId: string): Promise<DadosAba> {
-  const [pax, arquivos, quartos, grupos] = await Promise.all([
-    lerTudo<PassageiroRow>("passageiros", (q) => q.eq("expedicao_id", expId)),
-    lerTudo<ArquivoRow>("arquivos", (q) => q.eq("expedicao_id", expId)),
-    lerTudo<QuartoRow>("quartos", (q) => q.eq("expedicao_id", expId)),
-    lerTudo<GrupoExpedicaoRow>("grupos_expedicao", (q) => q.eq("expedicao_id", expId)),
-  ]);
-  const ids = pax.map((p) => p.id);
-  const [requisitos, alocacoes] = await Promise.all([
-    lerPorIds<PassageiroRequisitoRow>("passageiro_requisitos", "passageiro_id", ids),
-    lerPorIds<AlocacaoQuartoRow>("passageiro_quarto", "quarto_id", quartos.map((q) => q.id)),
-  ]);
+  const pPax = lerTudo<PassageiroRow>("passageiros", (q) => q.eq("expedicao_id", expId));
+  const pArquivos = lerTudo<ArquivoRow>("arquivos", (q) => q.eq("expedicao_id", expId));
+  const pQuartos = lerTudo<QuartoRow>("quartos", (q) => q.eq("expedicao_id", expId));
+  const pGrupos = lerTudo<GrupoExpedicaoRow>("grupos_expedicao", (q) => q.eq("expedicao_id", expId));
+  const pRequisitos = pPax.then((pax) => lerPorIds<PassageiroRequisitoRow>("passageiro_requisitos", "passageiro_id", pax.map((p) => p.id)));
+  const pAlocacoes = pQuartos.then((quartos) => lerPorIds<AlocacaoQuartoRow>("passageiro_quarto", "quarto_id", quartos.map((q) => q.id)));
   // Arquivos referenciados que moram em outra expedição (passaporte/foto propagam entre reservas).
-  const conhecidos = new Set(arquivos.map((a) => a.id));
-  const faltando = [...new Set(pax.flatMap((p) => [p.foto_arquivo_id, p.passaporte_arquivo_id]).concat(requisitos.map((r) => r.arquivo_id))
-    .filter((x): x is string => !!x && !conhecidos.has(x)))];
-  if (faltando.length) arquivos.push(...(await lerPorIds<ArquivoRow>("arquivos", "id", faltando)));
-  const fotos = await urlsAssinadas(arquivos.filter((a) => pax.some((p) => p.foto_arquivo_id === a.id)));
-  return { pax, requisitos, arquivos, quartos, alocacoes, grupos: grupos.sort((a, b) => a.ordem - b.ordem), fotos };
+  const faltandoEm = (ids: (string | null | undefined)[], conhecidos: Set<string>) =>
+    [...new Set(ids.filter((x): x is string => !!x && !conhecidos.has(x)))];
+  const pDosPax = Promise.all([pPax, pArquivos]).then(async ([pax, arquivos]) => {
+    const faltando = faltandoEm(pax.flatMap((p) => [p.foto_arquivo_id, p.passaporte_arquivo_id]), new Set(arquivos.map((a) => a.id)));
+    const extras = faltando.length ? await lerPorIds<ArquivoRow>("arquivos", "id", faltando) : [];
+    const fotos = await urlsAssinadas([...arquivos, ...extras].filter((a) => pax.some((p) => p.foto_arquivo_id === a.id)));
+    return { faltando, extras, fotos };
+  });
+  // Promise.all espera tudo e não deixa erro "solto" em nenhuma das promessas.
+  const [pax, arquivos, quartos, grupos, requisitos, alocacoes, dosPax] = await Promise.all([pPax, pArquivos, pQuartos, pGrupos, pRequisitos, pAlocacoes, pDosPax]);
+  const jaPedidos = new Set([...arquivos.map((a) => a.id), ...dosPax.faltando]);
+  const faltandoReq = faltandoEm(requisitos.map((r) => r.arquivo_id), jaPedidos);
+  const extrasReq = faltandoReq.length ? await lerPorIds<ArquivoRow>("arquivos", "id", faltandoReq) : [];
+  arquivos.push(...dosPax.extras, ...extrasReq);
+  return { pax, requisitos, arquivos, quartos, alocacoes, grupos: grupos.sort((a, b) => a.ordem - b.ordem), fotos: dosPax.fotos };
 }
 
 async function urlsAssinadas(arqs: ArquivoRow[]): Promise<Record<string, string>> {

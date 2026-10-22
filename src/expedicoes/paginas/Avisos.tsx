@@ -25,7 +25,9 @@ export default function Avisos() {
     catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar"); }
   }, []);
   useEffect(() => { void carregar(); }, [carregar]);
-  useAoVivo([{ tabela: "passageiros" }, { tabela: "passageiro_requisitos" }, { tabela: "expedicoes" }], carregar, 1500);
+  // Tabelas inteiras (avisos olham todas as expedições futuras): espera de 2 s pra
+  // rajada de edição virar uma recarga. A leitura é leve e é a mesma do selo do menu.
+  useAoVivo([{ tabela: "passageiros" }, { tabela: "passageiro_requisitos" }, { tabela: "expedicoes" }], carregar, 2000);
 
   const lista = alertas ?? [];
   const criticos = lista.filter((a) => a.severidade === "critico").length;

@@ -105,6 +105,16 @@ export type ResultadoProntidao = {
 
 type ExpedicaoLite = { data_embarque: string; data_retorno: string; status?: string };
 
+/**
+ * Só os campos que a regra lê (22/10): quem só conta a prontidão baixa estas
+ * colunas em vez da linha inteira (lib/banco.ts → COLUNAS_PAX/REQ_PRONTIDAO).
+ * Linha completa continua servindo (é um superconjunto).
+ */
+export type PaxRegra = Pick<PassageiroRow,
+  "id" | "tipo" | "cpf" | "data_nascimento" | "nome_completo" | "passaporte" | "validade_passaporte" | "passaporte_arquivo_id" | "contrato_assinado">;
+export type ReqRegra = Pick<PassageiroRequisitoRow,
+  "id" | "tipo" | "descricao" | "status" | "obrigatoriedade" | "bloqueia_embarque" | "validade" | "arquivo_id">;
+
 function addMonths(iso: string, months: number): Date {
   const d = parseISO(iso);
   d.setMonth(d.getMonth() + months);
@@ -132,7 +142,7 @@ function consolidar(checagens: ChecagemProntidao[]): {
 // --- Checagens derivadas de coluna --------------------------------------------
 
 function checarPassaporte(
-  p: PassageiroRow,
+  p: PaxRegra,
   exp: ExpedicaoLite,
   bloqueia: boolean,
 ): Semaforo {
@@ -145,19 +155,19 @@ function checarPassaporte(
   return "ok";
 }
 
-function checarContrato(p: PassageiroRow): Semaforo {
+function checarContrato(p: PaxRegra): Semaforo {
   // Contrato NÃO é obrigatório p/ prontidão: assinado = ok; senão neutro ("na"),
   // sem gerar atenção/bloqueio. A aba serve só pra anexar o contrato.
   return p.contrato_assinado ? "ok" : "na";
 }
 
-function checarDadosPessoais(p: PassageiroRow, bloqueia: boolean): Semaforo {
+function checarDadosPessoais(p: PaxRegra, bloqueia: boolean): Semaforo {
   const completo = Boolean(p.cpf && p.data_nascimento && p.nome_completo);
   if (completo) return "ok";
   return bloqueia ? "bloqueio" : "atencao";
 }
 
-function detalheColuna(tipo: TipoRequisito, p: PassageiroRow, sem: Semaforo): string {
+function detalheColuna(tipo: TipoRequisito, p: PaxRegra, sem: Semaforo): string {
   switch (tipo) {
     case "Passaporte":
       if (!p.passaporte || !p.validade_passaporte) return "Sem passaporte cadastrado";
@@ -178,7 +188,7 @@ function detalheColuna(tipo: TipoRequisito, p: PassageiroRow, sem: Semaforo): st
 // --- Checagens de instância ---------------------------------------------------
 
 function checarInstancia(
-  r: PassageiroRequisitoRow,
+  r: ReqRegra,
   exp: ExpedicaoLite,
 ): Semaforo {
   const validadeOk = !r.validade || !antesDe(r.validade, exp.data_retorno);
@@ -197,7 +207,7 @@ function checarInstancia(
  * só fica "ok" quando há um arquivo vinculado. Dispensado segue valendo como ok;
  * Reprovado/Vencido derrubam.
  */
-function checarDocumentoAnexo(r: PassageiroRequisitoRow): Semaforo {
+function checarDocumentoAnexo(r: ReqRegra): Semaforo {
   if (r.status === "Dispensado") return "ok";
   if (r.status === "Reprovado" || r.status === "Vencido") {
     return r.bloqueia_embarque ? "bloqueio" : "atencao";
@@ -206,7 +216,7 @@ function checarDocumentoAnexo(r: PassageiroRequisitoRow): Semaforo {
   return r.bloqueia_embarque ? "bloqueio" : "atencao";
 }
 
-function detalheAnexo(r: PassageiroRequisitoRow | undefined): string {
+function detalheAnexo(r: ReqRegra | undefined): string {
   if (!r) return "Falta anexar o documento";
   if (r.status === "Dispensado") return "Dispensado";
   if (r.status === "Reprovado") return "Documento reprovado — reenviar";
@@ -214,7 +224,7 @@ function detalheAnexo(r: PassageiroRequisitoRow | undefined): string {
   return "Falta anexar o documento";
 }
 
-function detalheInstancia(r: PassageiroRequisitoRow | undefined, sem: Semaforo): string {
+function detalheInstancia(r: ReqRegra | undefined, sem: Semaforo): string {
   if (!r) return "Ainda não iniciado";
   if (sem === "ok") return r.status + (r.validade ? ` (val. ${r.validade.slice(0, 10)})` : "");
   if (r.status === "Vencido") return `Vencido${r.validade ? ` em ${r.validade.slice(0, 10)}` : ""}`;
@@ -226,10 +236,10 @@ function detalheInstancia(r: PassageiroRequisitoRow | undefined, sem: Semaforo):
  * catálogo do destino, então a tabela do painel fica consistente entre pax.
  */
 export function avaliarProntidao(params: {
-  passageiro: PassageiroRow;
+  passageiro: PaxRegra;
   expedicao: ExpedicaoLite;
   destino: string;
-  requisitos: PassageiroRequisitoRow[];
+  requisitos: ReqRegra[];
 }): ResultadoProntidao {
   const { passageiro, expedicao, destino, requisitos } = params;
   const porTipo = new Map(requisitos.map((r) => [r.tipo, r]));

@@ -6,31 +6,43 @@
 // (o antigo cortava checklist_itens em 1000 linhas sem avisar).
 import { avaliarProntidao } from "../../lib/prontidao/regras";
 import { avaliarAlerta, regraDoTipo, type SeveridadeAlerta } from "../../lib/alertas/regras";
-import { lerPorIds, listarExpedicoes, listarPassageirosDe, listarRequisitosDe } from "../../lib/banco";
+import { lerPaxProntidao, lerPorIds, lerReqProntidao, listarExpedicoes, type PaxProntidao, type ReqProntidao } from "../../lib/banco";
+import { lembrar } from "../../lib/cache";
 import { daysUntil } from "../../lib/utils";
 import { faseAtualChecklist } from "../../lib/constants";
-import type { ProntidaoPassageiro } from "../../lib/agregados";
-import type { EtapaChecklist, ExpedicaoRow, PassageiroRequisitoRow, TipoRequisito } from "../../lib/database";
+import { agruparPorPax, type ProntidaoPassageiro } from "../../lib/agregados";
+import type { EtapaChecklist, ExpedicaoRow, TipoRequisito } from "../../lib/database";
 
 export const EXP_ATIVA = (s: string) => s !== "Concluída" && s !== "Cancelada";
 
-export type ProntidaoAtivas = { expedicoes: ExpedicaoRow[]; porExpedicao: Map<string, ProntidaoPassageiro[]> };
+export type ProntidaoAtivas = { expedicoes: ExpedicaoRow[]; porExpedicao: Map<string, ProntidaoPassageiro<PaxProntidao, ReqProntidao>[]> };
 
 /**
  * Expedições em grupo ativas (≠ Concluída/Cancelada) com a prontidão de cada
  * passageiro não cancelado. `soFuturas` = só as que ainda não embarcaram (é o que
  * os avisos usam — deixa a conta do menu mais leve).
+ *
+ * 22/10 (leveza): lê só as colunas que a regra usa (COLUNAS_*_PRONTIDAO — ~1/5 do
+ * peso da linha inteira) e guarda o resultado 60 s (lib/cache.ts), então o selo do
+ * menu e a página Avisos dividem a MESMA leitura. Cai sozinho quando o realtime
+ * avisa mudança em expedicoes/passageiros/passageiro_requisitos.
+ * Quem recebe NÃO deve alterar o resultado (é compartilhado).
  */
-export async function carregarProntidaoAtivas(opcoes: { soFuturas?: boolean } = {}): Promise<ProntidaoAtivas> {
-  let expedicoes = (await listarExpedicoes("expedicao")).filter((e) => EXP_ATIVA(e.status));
-  if (opcoes.soFuturas) expedicoes = expedicoes.filter((e) => { const d = daysUntil(e.data_embarque); return d != null && d >= 0; });
-  const porExpedicao = new Map<string, ProntidaoPassageiro[]>();
+export function carregarProntidaoAtivas(opcoes: { soFuturas?: boolean } = {}): Promise<ProntidaoAtivas> {
+  return lembrar(`prontidao-ativas:${opcoes.soFuturas ? "futuras" : "todas"}`, ["expedicoes", "passageiros", "passageiro_requisitos"], async () => {
+    let expedicoes = (await listarExpedicoes("expedicao")).filter((e) => EXP_ATIVA(e.status));
+    if (opcoes.soFuturas) expedicoes = expedicoes.filter((e) => { const d = daysUntil(e.data_embarque); return d != null && d >= 0; });
+    return prontidaoDe(expedicoes);
+  });
+}
+
+/** Prontidão (leve) de uma lista de expedições já lida. */
+export async function prontidaoDe(expedicoes: ExpedicaoRow[]): Promise<ProntidaoAtivas> {
+  const porExpedicao: ProntidaoAtivas["porExpedicao"] = new Map();
   if (expedicoes.length === 0) return { expedicoes, porExpedicao };
   const expById = new Map(expedicoes.map((e) => [e.id, e]));
-  const pax = (await listarPassageirosDe(expedicoes.map((e) => e.id))).filter((p) => p.status_reserva !== "Cancelado" && p.expedicao_id);
-  const reqs = await listarRequisitosDe(pax.map((p) => p.id));
-  const reqPorPax = new Map<string, PassageiroRequisitoRow[]>();
-  for (const r of reqs) { const a = reqPorPax.get(r.passageiro_id); if (a) a.push(r); else reqPorPax.set(r.passageiro_id, [r]); }
+  const pax = (await lerPaxProntidao(expedicoes.map((e) => e.id))).filter((p) => p.status_reserva !== "Cancelado" && p.expedicao_id);
+  const reqPorPax = agruparPorPax(await lerReqProntidao(pax.map((p) => p.id)));
   for (const passageiro of pax) {
     const exp = expById.get(passageiro.expedicao_id!);
     if (!exp) continue;

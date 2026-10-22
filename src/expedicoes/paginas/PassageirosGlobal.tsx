@@ -13,6 +13,7 @@ import { useExp } from "../contexto";
 import { Carregando, Gaveta, Selo, useAoVivo } from "../ui";
 import { lerPorIds, listarExpedicoes } from "../lib/banco";
 import { listPessoas, type PessoaAgregada } from "../lib/pessoas";
+import { esquecer } from "../lib/cache";
 import { nivelFidelidade } from "../lib/fidelidade";
 import { mascaraCpf } from "../lib/cpf";
 import { formatDate } from "../lib/utils";
@@ -55,14 +56,18 @@ export default function PassageirosGlobal() {
   const [importar, setImportar] = useState(false);
   const [exportando, setExportando] = useState(false);
 
-  const carregar = useCallback(async () => {
+  // Base e expedições vêm da leitura guardada (lib/cache.ts). Ao abrir, aproveita o
+  // que outra tela leu há pouco; qualquer outra recarga (depois de salvar, criar,
+  // importar) derruba antes pra ler fresco. O realtime já derruba sozinho.
+  const carregar = useCallback(async (fresco = true) => {
+    if (fresco) esquecer("passageiros");
     try {
       const [ps, exps] = await Promise.all([listPessoas(), listarExpedicoes()]);
       setPessoas(ps); setExpedicoes(exps); setErro(null);
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar"); }
   }, []);
-  useEffect(() => { void carregar(); }, [carregar]);
-  useAoVivo([{ tabela: "passageiros" }], carregar, 1500);
+  useEffect(() => { void carregar(false); }, [carregar]);
+  useAoVivo([{ tabela: "passageiros" }], carregar, 2000);
 
   // A pessoa aberta é procurada pela chave a cada recarga (pega os dados novos depois de salvar).
   const aberta = useMemo(() => (abertaChave ? pessoas?.find((p) => p.chave === abertaChave) ?? null : null), [pessoas, abertaChave]);
