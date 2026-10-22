@@ -54,6 +54,7 @@ import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useCon
 import PropostasPage from "@/propostas/PropostasPage";
 import { useAprovacoesNovas } from "@/propostas/lib";
 import type { TelaExp } from "@/expedicoes/contexto";
+import SinoDeAvisos from "@/avisos/SinoDeAvisos";
 
 // Expedições (21/10): o Rel vê o módulo de Expedições do QS em modo só-leitura
 // (as policies já barram a escrita — is_readonly) e decide inscrições.
@@ -412,10 +413,12 @@ export default function RelApp() {
     <nav className="flex flex-col h-full">
       <div className="flex items-center gap-2.5 px-4 h-16 flex-shrink-0">
         <span className="flex items-center justify-center w-9 h-9 rounded-xl text-white font-bold text-sm" style={{ background: "var(--rel)" }}>QS</span>
-        <span className="leading-tight">
+        <span className="leading-tight flex-1 min-w-0">
           <span className="block text-sm font-bold" style={{ color: "var(--ink)" }}>Relacionamento</span>
           <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>pós-venda</span>
         </span>
+        {/* Avisos (0196) — no celular o sino fica na barra do topo */}
+        <span className="hidden lg:block"><SinoDeAvisos /></span>
       </div>
 
       <div className="px-2.5 flex-1 overflow-y-auto space-y-0.5">
@@ -538,6 +541,7 @@ export default function RelApp() {
             <Bolinha n={cont.esperando} alerta={!!cont.foraDoPrazo} />
           </button>
         )}
+        <SinoDeAvisos />
       </header>
       {menuAberto && (
         <div className="lg:hidden fixed inset-0 z-40">

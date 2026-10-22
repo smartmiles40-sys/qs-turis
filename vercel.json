@@ -135,6 +135,10 @@
     {
       "path": "/api/expedicoes?acao=atualizar-status",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/avisos",
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [

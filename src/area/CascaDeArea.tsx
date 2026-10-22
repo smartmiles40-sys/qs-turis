@@ -18,6 +18,7 @@ import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 import TrocarArea from "@/components/TrocarArea";
 import type { Setor } from "@/components/sdr/types";
 import { Avatar } from "@/rel/ui";
+import SinoDeAvisos from "@/avisos/SinoDeAvisos";
 
 export interface ItemDoMenu { id: string; rotulo: string; badge?: number; alerta?: boolean }
 export interface GrupoDoMenu { id: string; rotulo: string; icone: ReactNode; itens: ItemDoMenu[] }
@@ -99,10 +100,12 @@ export default function CascaDeArea({
     <nav className="flex flex-col h-full" aria-label={`Menu do ${nome}`}>
       <div className="flex items-center gap-2.5 px-4 h-16 flex-shrink-0">
         <span className="flex items-center justify-center w-9 h-9 rounded-xl text-white font-bold text-sm" style={{ background: "var(--rel)" }}>QS</span>
-        <span className="leading-tight">
+        <span className="leading-tight flex-1 min-w-0">
           <span className="block text-sm font-bold" style={{ color: "var(--ink)" }}>{nome}</span>
           <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>{subtitulo}</span>
         </span>
+        {/* Avisos (0196) — no celular o sino fica na barra do topo */}
+        <span className="hidden lg:block"><SinoDeAvisos /></span>
       </div>
 
       <div className="px-2.5 flex-1 overflow-y-auto space-y-0.5">
@@ -191,6 +194,7 @@ export default function CascaDeArea({
         </button>
         <span className="flex items-center justify-center w-7 h-7 rounded-lg text-white font-bold text-[11px]" style={{ background: "var(--rel)" }}>QS</span>
         <span className="text-sm font-bold flex-1" style={{ color: "var(--ink)" }}>{nome}</span>
+        <SinoDeAvisos />
       </header>
       {menuAberto && (
         <div className="lg:hidden fixed inset-0 z-40">
