@@ -18,7 +18,7 @@ import { chaveIdentidade, listPessoas, type PessoaAgregada } from "../lib/pessoa
 import type { ExpedicaoComAgregados, PassageiroRow, StatusReserva, TipoPassageiro } from "../lib/database";
 import {
   alocarNoTrecho, ativarDivisao, atualizarPassageiro, capacidade, carregarAba, definirGrupoDoPax, preencheuFormulario, prontidaoDe,
-  removerDivisao, souAdmin, trechosDe, usaDivisao, type DadosAba,
+  removerDivisao, resumoSyncBitrix, sincronizarDoBitrix, souAdmin, trechosDe, usaDivisao, type DadosAba,
 } from "./dados";
 import { exportarPassageiros } from "./exportar";
 import { AdicionarExistente, ImportarPassageiros, NovoPassageiro } from "./Criar";
@@ -45,6 +45,7 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
   const [sort, setSort] = useState<{ col: Col; dir: 1 | -1 } | null>(null);
   const [criar, setCriar] = useState<"novo" | "existente" | "importar" | null>(null);
   const [exportando, setExportando] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
 
   const avisarRef = useRef(avisar);
   avisarRef.current = avisar;
@@ -314,6 +315,15 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
               onConfirmar={async () => { await removerDivisao(exp.id); void carregar(); }} />
           </span>
         ) : <Botao variante="fantasma" onClick={async () => { try { await ativarDivisao(exp.id); void carregar(); } catch (e) { avisar(e instanceof Error ? e.message : "Erro", "erro"); } }}>Adicionar divisão por grupos</Botao>)}
+        {!somenteLeitura && (
+          <Botao disabled={sincronizando} title="Puxa do Bitrix os negócios da coluna desta expedição e cria/atualiza os passageiros (só preenche o que está vazio)"
+            onClick={async () => {
+              setSincronizando(true);
+              try { const r = await sincronizarDoBitrix(exp.id); avisar(resumoSyncBitrix(r), r.erros?.length ? "erro" : undefined); void carregar(); }
+              catch (e) { avisar(e instanceof Error ? e.message : "Erro ao sincronizar", "erro"); }
+              finally { setSincronizando(false); }
+            }}>{sincronizando ? "Pedindo ao Bitrix…" : "↻ Atualizar do Bitrix"}</Botao>
+        )}
         <Botao disabled={exportando || !dados.pax.length} onClick={async () => {
           setExportando(true);
           try { await exportarPassageiros({ exp, pax: ordenados, quartos: dados.quartos, alocacoes: dados.alocacoes, grupos, prontidao: pront }); }

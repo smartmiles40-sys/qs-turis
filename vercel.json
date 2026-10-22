@@ -88,6 +88,9 @@
     "api/closer.js": {
       "maxDuration": 60
     },
+    "api/expedicoes.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -128,6 +131,10 @@
     {
       "path": "/api/rel-grupos?cron=1",
       "schedule": "7 */6 * * *"
+    },
+    {
+      "path": "/api/expedicoes?acao=atualizar-status",
+      "schedule": "0 3 * * *"
     }
   ],
   "headers": [

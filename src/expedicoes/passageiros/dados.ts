@@ -220,3 +220,45 @@ export async function marcarPasseio(paxId: string, passeioId: string, marcar: bo
   if (marcar) erroOuDados(await supabase.from("passeio_opcional_compras").upsert({ passageiro_id: paxId, passeio_opcional_id: passeioId }, { onConflict: "passageiro_id,passeio_opcional_id", ignoreDuplicates: true }));
   else erroOuDados(await supabase.from("passeio_opcional_compras").delete().eq("passageiro_id", paxId).eq("passeio_opcional_id", passeioId));
 }
+
+// ── Integrações (rota /api/expedicoes do QS) ────────────────────────────────
+
+/** POST /api/expedicoes?acao=… com o token da sessão. Devolve o JSON ou lança o erro em português. */
+export async function chamarRotaExpedicoes<T = Record<string, unknown>>(acao: string, corpo: Record<string, unknown> = {}): Promise<T> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Sessão expirada. Entre de novo.");
+  const res = await fetch(`/api/expedicoes?acao=${encodeURIComponent(acao)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify(corpo),
+  });
+  let json: (T & { ok?: boolean; error?: string }) | null = null;
+  try { json = await res.json(); } catch { /* resposta vazia */ }
+  if (!res.ok || !json?.ok) throw new Error(json?.error || `Falha (${res.status})`);
+  return json;
+}
+
+export type ResultadoSyncBitrix = {
+  coluna: string; negocios: number; criados: number; atualizados: number; limite?: boolean;
+  sem_grupo: { deal: string; nome: string }[]; erros: { deal: string; erro: string }[];
+};
+
+/**
+ * "Atualizar do Bitrix" (app antigo: bitrix-sync-actions.ts, que passava pelo n8n).
+ * Agora o servidor do QS fala direto com o Bitrix: puxa os negócios da coluna desta
+ * expedição e já devolve quantos passageiros criou/atualizou.
+ */
+export const sincronizarDoBitrix = (expId: string) =>
+  chamarRotaExpedicoes<ResultadoSyncBitrix>("sincronizar-bitrix", { expedicao_id: expId });
+
+/** Frase curta pro aviso da tela. */
+export function resumoSyncBitrix(r: ResultadoSyncBitrix): string {
+  const partes = [`${r.negocios} negócio(s) na coluna do Bitrix`, `${r.criados} novo(s)`, `${r.atualizados} conferido(s)`];
+  if (r.sem_grupo?.length) {
+    const nomes = r.sem_grupo.slice(0, 5).map((x) => x.nome || x.deal).join(", ");
+    partes.push(`${r.sem_grupo.length} sem grupo definido (a coluna é de mais de uma expedição — adicione pela tela): ${nomes}${r.sem_grupo.length > 5 ? "…" : ""}`);
+  }
+  if (r.erros?.length) partes.push(`${r.erros.length} com erro`);
+  if (r.limite) partes.push("parou em 500 negócios");
+  return partes.join(" · ");
+}
