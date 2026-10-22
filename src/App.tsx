@@ -1,4 +1,4 @@
-import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from "react";
+import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "react";
 import SdrLayout from "@/components/sdr/SdrLayout";
 import LoginPage from "@/components/sdr/auth/LoginPage";
 import { QsAuthProvider, setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
@@ -93,16 +93,24 @@ function AppContent() {
     return () => window.removeEventListener("hashchange", on);
   }, []);
   // Endereço de outra área da pessoa (link aberto pela Bolinha do QS): troca de área.
+  // Só ao ABRIR o QS e quando o endereço MUDA — nunca quando a pessoa troca de área
+  // pelo menu (o endereço antigo ainda está lá e a puxaria de volta).
+  const areaRef = useRef(area);
+  areaRef.current = area;
+  const trocarRef = useRef(trocarArea);
+  trocarRef.current = trocarArea;
+  const userIdHash = currentUser?.id ?? null;
   useEffect(() => {
     if (!currentUser) return;
     const on = () => {
       const alvo = areaDoHash();
-      if (alvo && alvo !== area && setoresDe(currentUser).includes(alvo)) trocarArea(alvo);
+      if (alvo && alvo !== areaRef.current && setoresDe(currentUser).includes(alvo)) trocarRef.current(alvo);
     };
     on();
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
-  }, [currentUser, area, trocarArea]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userIdHash]);
 
   // ── O SERVIDOR NÃO RESPONDEU ──────────────────────────────────────────────
   // Em 20/08 o gateway do Supabase ficou inalcançável da rede do escritório por
