@@ -91,6 +91,9 @@
     "api/expedicoes.js": {
       "maxDuration": 60
     },
+    "api/assistente.js": {
+      "maxDuration": 30
+    },
     "api/*.js": {
       "maxDuration": 10
     }

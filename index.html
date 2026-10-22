@@ -10,6 +10,12 @@
     <script>
       (function () {
         try {
+          // Bolinha do QS (app do computador, ?bolinha=1): fundo transparente e sempre clara.
+          if (/[?&]bolinha=1(&|$)/.test(location.search)) {
+            document.documentElement.classList.add("qs-bolinha");
+            document.documentElement.style.colorScheme = "light";
+            return;
+          }
           var t = localStorage.getItem("qs_theme");
           if (!t) t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
           if (t === "dark") document.documentElement.classList.add("dark");

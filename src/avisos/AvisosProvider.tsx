@@ -34,6 +34,8 @@ interface ValorAvisos {
   /** Permissão das notificações do Windows: "default" | "granted" | "denied" | "indisponivel". */
   permissao: NotificationPermission | "indisponivel";
   pedirPermissao: () => Promise<void>;
+  /** Sobe a cada aviso novo que chega (a Bolinha do QS pulsa com ele). */
+  pulso: number;
 }
 
 const Ctx = createContext<ValorAvisos | null>(null);
@@ -43,7 +45,13 @@ export function useAvisos(): ValorAvisos | null {
   return useContext(Ctx);
 }
 
-export default function AvisosProvider({ children }: { children: ReactNode }) {
+export default function AvisosProvider({ children, modoBolinha, abrirFora }: {
+  children: ReactNode;
+  /** Bolinha do QS (app do computador, ?bolinha=1): a própria janela é a bolinha — não desenha a flutuante. */
+  modoBolinha?: boolean;
+  /** Abre o link do aviso FORA desta janela (no QS do navegador) em vez de trocar o endereço aqui. */
+  abrirFora?: (link: string) => void;
+}) {
   const { currentUser, area, trocarArea } = useQsAuth();
   const userId = currentUser?.id ?? null;
   const [avisos, setAvisos] = useState<Aviso[]>([]);
@@ -59,6 +67,7 @@ export default function AvisosProvider({ children }: { children: ReactNode }) {
   const irPara = useCallback((a: Aviso) => {
     const link = a.link;
     if (!link || !link.startsWith("#")) return;
+    if (abrirFora) { abrirFora(link); return; }
     const outraArea = a.area && a.area !== area && currentUser && setoresDe(currentUser).includes(a.area);
     // Comercial: o closer (e a gestão dentro da Área do Closer) fica na mesma porta.
     if (outraArea && a.area) {
@@ -69,7 +78,7 @@ export default function AvisosProvider({ children }: { children: ReactNode }) {
     }
     if (window.location.hash === link) window.dispatchEvent(new HashChangeEvent("hashchange"));
     else window.location.hash = link;
-  }, [area, currentUser, trocarArea]);
+  }, [area, currentUser, trocarArea, abrirFora]);
 
   const marcar = useCallback((ids: number[]) => {
     if (!ids.length) return;
@@ -181,13 +190,13 @@ export default function AvisosProvider({ children }: { children: ReactNode }) {
   const total = avisos.length;
   const valor = useMemo<ValorAvisos>(() => ({
     avisos: avisos.slice(0, LIMITE), total: Math.min(total, LIMITE), maisQueLimite: total > LIMITE,
-    abrir, marcar, marcarTodos, prefs, mudarPrefs, permissao, pedirPermissao,
-  }), [avisos, total, abrir, marcar, marcarTodos, prefs, mudarPrefs, permissao, pedirPermissao]);
+    abrir, marcar, marcarTodos, prefs, mudarPrefs, permissao, pedirPermissao, pulso,
+  }), [avisos, total, abrir, marcar, marcarTodos, prefs, mudarPrefs, permissao, pedirPermissao, pulso]);
 
   return (
     <Ctx.Provider value={valor}>
       {children}
-      {userId && !prefs.semBolinha && <BolinhaFlutuante pulso={pulso} />}
+      {userId && !prefs.semBolinha && !modoBolinha && <BolinhaFlutuante pulso={pulso} />}
     </Ctx.Provider>
   );
 }
