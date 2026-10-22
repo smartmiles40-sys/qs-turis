@@ -10,8 +10,11 @@
 //   POST ?acao=atualizar-status   → alguém de Operações pela tela (token da sessão).
 //   POST ?acao=sincronizar-bitrix → botão "Atualizar do Bitrix" da aba Passageiros
 //                                   (token da sessão; só quem edita as Expedições).
-//                                   Chama o n8n (EXP_N8N_SYNC_URL) com o código da expedição;
-//                                   o n8n puxa os deals e devolve aqui em ?acao=sync-contato.
+//                                   O PRÓPRIO QS fala com o Bitrix (BITRIX_WEBHOOK_BASE): acha a
+//                                   coluna da expedição, lista os negócios e cria/atualiza os
+//                                   passageiros na hora. SEM n8n (pedido do Bruno, 22/10).
+// Webhooks de ENTRADA (compatibilidade: só servem se alguém de fora ainda chamar;
+// o QS não depende deles — header x-webhook-secret = EXP_WEBHOOK_SECRET):
 //   POST ?acao=expedicao-sync     → n8n (header x-webhook-secret = EXP_WEBHOOK_SECRET).
 //                                   Cria/atualiza a expedição vinda do Bitrix; nova ganha checklist.
 //   POST ?acao=sync-contato       → n8n: contato CRU do Bitrix + código + deal → passageiro.
@@ -31,12 +34,13 @@
 //
 // Envs: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET (já existem no QS) +
 //       EXP_WEBHOOK_SECRET (o mesmo segredo que o n8n já manda pro portal antigo),
-//       EXP_N8N_SYNC_URL + EXP_N8N_SYNC_SECRET (botão "Atualizar do Bitrix"),
+//       BITRIX_WEBHOOK_BASE (já existe no QS; botão "Atualizar do Bitrix"),
 //       EXP_PORTAL_URL (opcional: onde estão os portais /a/ e /amigo; padrão o app antigo).
 // -----------------------------------------------------------------------------
 import { createHmac, randomBytes } from 'node:crypto';
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { montarChecklistPadrao } from './_expChecklist.js';
+import { bitrixConfigurado } from './_bitrixLead.js';
 
 const PORTAL_PADRAO = 'https://sistema-expedicoes.vercel.app';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -109,27 +113,125 @@ async function atualizarStatus(res) {
 
 // ── Botão "Atualizar do Bitrix" ─────────────────────────────────────────────
 
+// Bruno (22/10): "não quero nada via n8n, quero tudo via código". O antigo
+// pedia ao n8n pra puxar os negócios da COLUNA da expedição no Bitrix; aqui o
+// próprio QS fala com o Bitrix (BITRIX_WEBHOOK_BASE, a mesma do resto do QS).
+//
+// Qual é a coluna? 1) expedicoes.bitrix_pipeline_id, se tiver uma etapa
+// ("C12:UC_ABC") ou um funil ("C12" / "12"); 2) senão, a etapa onde está a
+// MAIORIA dos negócios dos passageiros que já estão nesta expedição.
+// Negócio que já é passageiro (em qualquer expedição) só ganha o que está vazio;
+// negócio novo entra nesta expedição — a não ser que a coluna seja dividida com
+// outra expedição (G1/G2 na mesma coluna): aí não dá pra saber o grupo e ele
+// volta na lista "sem_grupo" pra alguém adicionar pela tela.
+
+const MAX_NEGOCIOS = 500;
+
+/** Lê todas as páginas de um .list do Bitrix (50 por página), até `max` linhas. */
+async function bxTudo(metodo, params, max = MAX_NEGOCIOS) {
+  const out = [];
+  let start = 0;
+  while (out.length < max) {
+    const r = await bxCru(metodo, { ...params, start });
+    out.push(...(r.result || []));
+    if (r.next == null) break;
+    start = r.next;
+  }
+  return out.slice(0, max);
+}
+
+/** Chamada do Bitrix que devolve também o `next` (paginação). */
+async function bxCru(metodo, params, timeoutMs = 15_000) {
+  const base = String(process.env.BITRIX_WEBHOOK_BASE || '').trim().replace(/\/+$/, '');
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${base}/${metodo}.json`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params), signal: ctrl.signal,
+    });
+    const j = await r.json().catch(() => null);
+    if (!j || j.error) throw new Error(`Bitrix: ${j?.error_description || j?.error || `resposta ${r.status}`}`);
+    return j;
+  } catch (e) {
+    if (e?.name === 'AbortError') throw new Error('O Bitrix não respondeu a tempo.');
+    throw e;
+  } finally { clearTimeout(t); }
+}
+
+/** bitrix_pipeline_id da expedição → filtro do crm.deal.list (ou null se não serve). */
+function filtroDaColuna(v) {
+  const s = String(v ?? '').trim();
+  if (/^C\d+:[A-Z0-9_]+$/i.test(s)) return { STAGE_ID: s.toUpperCase() };
+  const m = s.match(/^C?(\d+)$/i);
+  return m ? { CATEGORY_ID: Number(m[1]) } : null;
+}
+
 async function sincronizarBitrix(req, res) {
   const expId = req.body?.expedicao_id;
   if (!UUID.test(String(expId || ''))) return res.status(400).json({ ok: false, error: 'Expedição inválida.' });
-  const url = process.env.EXP_N8N_SYNC_URL;
-  if (!url) return res.status(503).json({ ok: false, error: 'Integração não configurada (falta EXP_N8N_SYNC_URL na Vercel).' });
-  const exp = (await rest(`expedicoes?select=codigo&id=eq.${expId}&limit=1`))?.[0];
+  if (!bitrixConfigurado()) return res.status(503).json({ ok: false, error: 'Integração com o Bitrix não configurada (falta BITRIX_WEBHOOK_BASE na Vercel).' });
+  const exp = (await rest(`expedicoes?select=id,codigo,bitrix_pipeline_id&id=eq.${expId}&limit=1`))?.[0];
   if (!exp?.codigo) return res.status(404).json({ ok: false, error: 'Expedição sem código.' });
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8000);
-  try {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-sync-secret': process.env.EXP_N8N_SYNC_SECRET || '' },
-      body: JSON.stringify({ expedicao_codigo: exp.codigo }),
-      signal: ctrl.signal,
-    });
-    if (!r.ok) return res.status(502).json({ ok: false, error: `O n8n respondeu ${r.status}.` });
-    return res.status(200).json({ ok: true });
-  } catch (e) {
-    return res.status(502).json({ ok: false, error: e?.name === 'AbortError' ? 'O n8n não respondeu a tempo.' : 'Falha ao contatar o n8n.' });
-  } finally { clearTimeout(t); }
+
+  // 1) Descobre a coluna.
+  let filtro = filtroDaColuna(exp.bitrix_pipeline_id);
+  if (!filtro) {
+    const meus = ((await rest(`passageiros?select=bitrix_deal_id&expedicao_id=eq.${exp.id}&bitrix_deal_id=not.is.null&limit=200`)) || [])
+      .map((p) => String(p.bitrix_deal_id).trim()).filter((id) => /^\d+$/.test(id));
+    if (!meus.length) {
+      return res.status(409).json({ ok: false, error: 'Ainda não sei qual coluna do Bitrix é desta expedição: nenhum passageiro dela tem negócio do Bitrix. Adicione um passageiro com o nº do negócio e tente de novo.' });
+    }
+    const conta = new Map();
+    for (let i = 0; i < meus.length; i += 50) {
+      const deals = await bxTudo('crm.deal.list', { filter: { ID: meus.slice(i, i + 50) }, select: ['ID', 'STAGE_ID'] }, 50);
+      for (const d of deals) if (d.STAGE_ID) conta.set(d.STAGE_ID, (conta.get(d.STAGE_ID) || 0) + 1);
+    }
+    const [etapa] = [...conta.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+    if (!etapa) return res.status(409).json({ ok: false, error: 'Os negócios desta expedição não foram achados no Bitrix.' });
+    filtro = { STAGE_ID: etapa };
+  }
+
+  // 2) Negócios da coluna.
+  const deals = await bxTudo('crm.deal.list', { filter: filtro, select: ['ID', 'CONTACT_ID', 'STAGE_ID'], order: { ID: 'ASC' } });
+  const comContato = deals.filter((d) => d.CONTACT_ID && String(d.CONTACT_ID) !== '0');
+
+  // A coluna é dividida com outra expedição? (deal desta coluna já é passageiro de outra)
+  const ids = comContato.map((d) => String(d.ID));
+  const jaSao = new Map();
+  for (let i = 0; i < ids.length; i += 100) {
+    const lote = (await rest(`passageiros?select=bitrix_deal_id,expedicao_id&bitrix_deal_id=in.(${ids.slice(i, i + 100).map(enc).join(',')})`)) || [];
+    for (const p of lote) jaSao.set(String(p.bitrix_deal_id), p.expedicao_id);
+  }
+  const colunaDividida = [...jaSao.values()].some((e) => e && e !== exp.id);
+
+  // 3) Contatos (50 por chamada) → passageiros.
+  const contatos = new Map();
+  const cids = [...new Set(comContato.map((d) => String(d.CONTACT_ID)))];
+  for (let i = 0; i < cids.length; i += 50) {
+    const lote = await bxTudo('crm.contact.list', { filter: { ID: cids.slice(i, i + 50) }, select: ['*', 'UF_*', 'PHONE', 'EMAIL'] }, 50);
+    for (const c of lote) contatos.set(String(c.ID), c);
+  }
+
+  let criados = 0, atualizados = 0;
+  const sem_grupo = [], erros = [];
+  for (const d of comContato) {
+    const dealId = String(d.ID);
+    const c = contatos.get(String(d.CONTACT_ID));
+    if (!c) { erros.push({ deal: dealId, erro: 'contato não encontrado' }); continue; }
+    if (!jaSao.has(dealId) && colunaDividida) { sem_grupo.push({ deal: dealId, nome: nomeDoContato(c) }); continue; }
+    try {
+      const { d: pax, erro } = passageiroDoContato(c, exp.codigo, dealId);
+      if (erro) { erros.push({ deal: dealId, erro }); continue; }
+      const r = await upsertPassageiro(pax);
+      if (r.body?.action === 'created') criados++; else if (r.body?.ok) atualizados++;
+      else erros.push({ deal: dealId, erro: r.body?.error || 'falhou' });
+    } catch (e) { erros.push({ deal: dealId, erro: e?.message || 'falhou' }); }
+  }
+  return res.status(200).json({
+    ok: true, coluna: filtro.STAGE_ID || `funil ${filtro.CATEGORY_ID}`,
+    negocios: deals.length, criados, atualizados, sem_grupo, erros, limite: deals.length >= MAX_NEGOCIOS,
+  });
 }
 
 // ── Expedição vinda do Bitrix ───────────────────────────────────────────────
@@ -285,20 +387,20 @@ function parseEndereco(raw) {
   return { cep: m ? m[1] : null, rua };
 }
 
-async function syncContato(req, res) {
-  const b = req.body || {};
-  const c = b.contato && typeof b.contato === 'object' ? b.contato : {};
-  const nome = [c.NAME, c.SECOND_NAME, c.LAST_NAME].filter(Boolean).map(String).join(' ').trim();
+const nomeDoContato = (c) => [c?.NAME, c?.SECOND_NAME, c?.LAST_NAME].filter(Boolean).map(String).join(' ').trim();
+
+/** Contato CRU do Bitrix (crm.contact.get/list) → passageiro (usado pelo botão e pelo webhook). */
+function passageiroDoContato(c, codigo, dealId) {
   // CPF: "CPF 2" (texto); se curto, o "CPF" numérico com zeros à esquerda.
   let cpf = soDig(c[F_CPF]);
   if (cpf.length < 11) { const alt = soDig(c[F_CPF_ALT]); if (alt) cpf = alt.padStart(11, '0'); }
   const email = multi(c.EMAIL);
-  const { d, erro } = lerPassageiro({
-    expedicao_codigo: b.expedicao_codigo,
-    bitrix_deal_id: b.bitrix_deal_id != null ? String(b.bitrix_deal_id) : '',
+  return lerPassageiro({
+    expedicao_codigo: codigo,
+    bitrix_deal_id: dealId != null ? String(dealId) : '',
     bitrix_contact_id: c.ID != null ? String(c.ID) : null,
     estagio_deal: 'WON',
-    nome_completo: nome || 'Sem nome',
+    nome_completo: nomeDoContato(c) || 'Sem nome',
     cpf: cpf || null,
     passaporte: c[F_PASS] || c[F_PASS_ALT] || null,
     validade_passaporte: toISO(c[F_VENC]),
@@ -306,6 +408,12 @@ async function syncContato(req, res) {
     email: email && emailValido(email) ? email : null,
     telefone: multi(c.PHONE),
   });
+}
+
+async function syncContato(req, res) {
+  const b = req.body || {};
+  const c = b.contato && typeof b.contato === 'object' ? b.contato : {};
+  const { d, erro } = passageiroDoContato(c, b.expedicao_codigo, b.bitrix_deal_id);
   if (erro) return res.status(400).json({ ok: false, error: erro });
   const end = parseEndereco(b.endereco);
   const r = await upsertPassageiro(d, { endereco_cep: end.cep, endereco_rua: end.rua });

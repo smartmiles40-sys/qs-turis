@@ -238,9 +238,27 @@ export async function chamarRotaExpedicoes<T = Record<string, unknown>>(acao: st
   return json;
 }
 
+export type ResultadoSyncBitrix = {
+  coluna: string; negocios: number; criados: number; atualizados: number; limite?: boolean;
+  sem_grupo: { deal: string; nome: string }[]; erros: { deal: string; erro: string }[];
+};
+
 /**
- * "Atualizar do Bitrix" (app antigo: bitrix-sync-actions.ts). Pede ao n8n pra puxar
- * os negócios da coluna desta expedição; os passageiros chegam em instantes
- * (o n8n devolve em /api/expedicoes?acao=sync-contato e a tabela atualiza sozinha).
+ * "Atualizar do Bitrix" (app antigo: bitrix-sync-actions.ts, que passava pelo n8n).
+ * Agora o servidor do QS fala direto com o Bitrix: puxa os negócios da coluna desta
+ * expedição e já devolve quantos passageiros criou/atualizou.
  */
-export const sincronizarDoBitrix = (expId: string) => chamarRotaExpedicoes("sincronizar-bitrix", { expedicao_id: expId });
+export const sincronizarDoBitrix = (expId: string) =>
+  chamarRotaExpedicoes<ResultadoSyncBitrix>("sincronizar-bitrix", { expedicao_id: expId });
+
+/** Frase curta pro aviso da tela. */
+export function resumoSyncBitrix(r: ResultadoSyncBitrix): string {
+  const partes = [`${r.negocios} negócio(s) na coluna do Bitrix`, `${r.criados} novo(s)`, `${r.atualizados} conferido(s)`];
+  if (r.sem_grupo?.length) {
+    const nomes = r.sem_grupo.slice(0, 5).map((x) => x.nome || x.deal).join(", ");
+    partes.push(`${r.sem_grupo.length} sem grupo definido (a coluna é de mais de uma expedição — adicione pela tela): ${nomes}${r.sem_grupo.length > 5 ? "…" : ""}`);
+  }
+  if (r.erros?.length) partes.push(`${r.erros.length} com erro`);
+  if (r.limite) partes.push("parou em 500 negócios");
+  return partes.join(" · ");
+}

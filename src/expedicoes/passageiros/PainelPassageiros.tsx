@@ -18,7 +18,7 @@ import { chaveIdentidade, listPessoas, type PessoaAgregada } from "../lib/pessoa
 import type { ExpedicaoComAgregados, PassageiroRow, StatusReserva, TipoPassageiro } from "../lib/database";
 import {
   alocarNoTrecho, ativarDivisao, atualizarPassageiro, capacidade, carregarAba, definirGrupoDoPax, preencheuFormulario, prontidaoDe,
-  removerDivisao, sincronizarDoBitrix, souAdmin, trechosDe, usaDivisao, type DadosAba,
+  removerDivisao, resumoSyncBitrix, sincronizarDoBitrix, souAdmin, trechosDe, usaDivisao, type DadosAba,
 } from "./dados";
 import { exportarPassageiros } from "./exportar";
 import { AdicionarExistente, ImportarPassageiros, NovoPassageiro } from "./Criar";
@@ -316,10 +316,10 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
           </span>
         ) : <Botao variante="fantasma" onClick={async () => { try { await ativarDivisao(exp.id); void carregar(); } catch (e) { avisar(e instanceof Error ? e.message : "Erro", "erro"); } }}>Adicionar divisão por grupos</Botao>)}
         {!somenteLeitura && (
-          <Botao disabled={sincronizando} title="Puxa do Bitrix (via n8n) os negócios desta expedição e cria/atualiza os passageiros"
+          <Botao disabled={sincronizando} title="Puxa do Bitrix os negócios da coluna desta expedição e cria/atualiza os passageiros (só preenche o que está vazio)"
             onClick={async () => {
               setSincronizando(true);
-              try { await sincronizarDoBitrix(exp.id); avisar("Sincronização iniciada — os passageiros vão aparecer/atualizar em instantes."); }
+              try { const r = await sincronizarDoBitrix(exp.id); avisar(resumoSyncBitrix(r), r.erros?.length ? "erro" : undefined); void carregar(); }
               catch (e) { avisar(e instanceof Error ? e.message : "Erro ao sincronizar", "erro"); }
               finally { setSincronizando(false); }
             }}>{sincronizando ? "Pedindo ao Bitrix…" : "↻ Atualizar do Bitrix"}</Botao>
