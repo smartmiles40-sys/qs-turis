@@ -137,6 +137,7 @@ export async function pendenciasViagens(): Promise<PendenciasViagens> {
   ]);
   if (a.error) throw a.error;
   if (b.error) throw b.error;
+  if (c.error) throw c.error;
   return { semData: a.count ?? 0, classificar: b.count ?? 0, semDono: c.count ?? 0 };
 }
 

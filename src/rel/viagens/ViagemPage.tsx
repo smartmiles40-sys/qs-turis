@@ -36,6 +36,7 @@ import ConferirVoos from "./ConferirVoos";
 import DonoViagem, { HistoricoViagem } from "./DonoViagem";
 import PreferenciasViagem from "./PreferenciasViagem";
 import { desarquivarViagens } from "../lib/operacao";
+import { podeGerirRelacionamento } from "../equipe/permissao";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
   return (
@@ -261,6 +262,9 @@ function Jornada({ viagemId, ativa, recarregarViagem }: { viagemId: string; ativ
 export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConversa }: {
   id: string; onVoltar: () => void; onAbrirCliente: (id: string) => void; onAbrirConversa: (conversaId: string) => void;
 }) {
+  const { currentUser } = useQsAuth();
+  // desarquivar (0184) é só a gestão — o banco recusa os outros, então nem mostra o botão
+  const gestor = podeGerirRelacionamento(currentUser);
   const [v, setV] = useState<Viagem | null>(null);
   // a revisão da IA grava trechos e o %: muda a versão pra roteiro/arquivos/% recarregarem
   const [versao, setVersao] = useState(0);
@@ -387,7 +391,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
                 alvo={{ viagemId: v.id, clienteId: v.cliente_id, sobre: [comprador, v.expedicao || v.titulo].filter(Boolean).join(" · ") }} />
               {/* "Cancelar viagem" saiu daqui (Bruno, 15/10). Cancelada no Bitrix, cancela sozinha; reativar continua. */}
               {/* arquivada (0184) volta pela função do banco: limpa o motivo e fica no histórico (só a gestão) */}
-              {!ativa && <Botao onClick={() => void acao(() => (v.status === "arquivada" ? desarquivarViagens({ ids: [v.id] }) : salvarViagem(v.id, { status: "ativa" })))}>{v.status === "arquivada" ? "Desarquivar" : "Reativar"}</Botao>}
+              {!ativa && (v.status !== "arquivada" || gestor) && <Botao onClick={() => void acao(() => (v.status === "arquivada" ? desarquivarViagens({ ids: [v.id] }) : salvarViagem(v.id, { status: "ativa" })))}>{v.status === "arquivada" ? "Desarquivar" : "Reativar"}</Botao>}
             </div>
           </div>
           <ConformidadeViagem viagemId={v.id} versao={versao} onRevisado={revisou} />

@@ -349,8 +349,8 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
         .catch((e) => { if (vivo) { setErro(e instanceof Error ? e.message : "Não carregou."); setLista([]); } });
     }, busca ? 300 : 0);
     return () => { vivo = false; clearTimeout(t); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtro, busca, versao, visao]);
+    // o usuário pode chegar depois da 1ª carga: sem ele, "Minhas" vinha vazia
+  }, [filtro, busca, versao, visao, currentUser?.id]);
 
   async function sincronizar() {
     setSync({ ocupado: true, msg: "Buscando vendas no Bitrix… (pode levar até 1 minuto)", erro: false });
