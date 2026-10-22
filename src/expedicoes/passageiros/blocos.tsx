@@ -216,15 +216,17 @@ export function LiberarExpedAmigo({ pax, onMudou }: { pax: PassageiroRow; onMudo
         <span className="flex-1" style={{ color: lib ? "#166534" : "var(--ink2)" }}>{lib ? "Liberado — aparece no portal do viajante" : "Não liberado — oculto no portal"}</span>
         <Botao onClick={async () => {
           const v = !lib; setLib(v);
-          try {
-            await atualizarLiberado(pax.id, v);
-            if (v && cpfOk) {
+          try { await atualizarLiberado(pax.id, v); }
+          catch (e) { setLib(!v); avisar(e instanceof Error ? e.message : "Erro", "erro"); return; }
+          // A liberação já foi gravada: se a senha falhar, avisa mas NÃO desfaz o "Liberado" na tela.
+          if (v && cpfOk) {
+            try {
               const s = await estadoSenhaCpf(pax.cpf as string);
               if (s.admin && !s.tem_hash && !s.senha_provisoria) await gerarNovaSenhaCpf(pax.cpf as string);
-            }
-            setRecarga((n) => n + 1);
-            onMudou();
-          } catch (e) { setLib(!v); avisar(e instanceof Error ? e.message : "Erro", "erro"); }
+            } catch (e) { avisar(`Liberado, mas a senha não foi gerada: ${e instanceof Error ? e.message : "erro"}`, "erro"); }
+          }
+          setRecarga((n) => n + 1);
+          onMudou();
         }}>{lib ? "Bloquear" : "Liberar ExpedAmigo"}</Botao>
       </div>
       {cpfOk ? <SenhaExpedamigo cpf={pax.cpf} recarga={recarga} />

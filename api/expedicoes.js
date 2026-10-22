@@ -22,7 +22,9 @@
 //   GET  ?acao=health             → "estou vivo" (sem dados).
 //
 // Diferenças de propósito em relação ao antigo (bugs que não foram copiados):
-//   - expedicao-sync NÃO zera pax_planejados/preço quando o Bitrix não manda;
+//   - expedicao-sync, numa expedição que já existe, SÓ PREENCHE O QUE ESTÁ VAZIO
+//     (nome/destino/datas/preço curados pelo time não são sobrescritos pelo Bitrix);
+//     NÃO zera pax_planejados/preço quando o Bitrix não manda;
 //     e o checklist da expedição nova é gerado de verdade (no antigo a RLS barrava).
 //   - os requisitos de prontidão do passageiro novo nascem sozinhos (trigger do banco, 0166).
 //   - nenhum valor vindo de fora entra cru num filtro do PostgREST (tudo encodeURIComponent).
@@ -150,12 +152,22 @@ async function expedicaoSync(req, res) {
   if (!vazio(b.pax_planejados) && Number.isInteger(pax) && pax >= 0) dados.pax_planejados = pax;
   if (!vazio(b.preco_venda_brl) && Number.isFinite(preco) && preco >= 0) dados.preco_venda_brl = preco;
 
-  const porPipeline = await rest(`expedicoes?select=id&bitrix_pipeline_id=eq.${enc(dados.bitrix_pipeline_id)}&limit=1`);
-  const existente = porPipeline?.[0] || (await rest(`expedicoes?select=id&codigo=eq.${enc(dados.codigo)}&limit=1`))?.[0];
+  const COLS_EXP = 'id,codigo,nome,destino,data_embarque,data_retorno,bitrix_pipeline_id,pax_planejados,preco_venda_brl';
+  const porPipeline = await rest(`expedicoes?select=${COLS_EXP}&bitrix_pipeline_id=eq.${enc(dados.bitrix_pipeline_id)}&limit=1`);
+  const existente = porPipeline?.[0] || (await rest(`expedicoes?select=${COLS_EXP}&codigo=eq.${enc(dados.codigo)}&limit=1`))?.[0];
 
   if (existente) {
-    await rest(`expedicoes?id=eq.${existente.id}`, { method: 'PATCH', body: dados, prefer: 'return=minimal' });
-    return res.status(200).json({ ok: true, expedicao_id: existente.id, action: 'updated' });
+    // Expedição que já existe: SÓ PREENCHE O QUE ESTÁ VAZIO (mesma regra do passageiro).
+    // O time de Operações cura nome ("— G1/G2"), destino, datas e preço no QS; o
+    // antigo sobrescrevia tudo com o que vinha do Bitrix. O código nunca muda aqui
+    // (é a chave que o n8n e o sync dos passageiros usam).
+    const patch = {};
+    for (const [k, v] of Object.entries(dados)) {
+      if (k === 'codigo') continue;
+      if (vazio(existente[k]) || (k === 'pax_planejados' && Number(existente[k]) === 0)) patch[k] = v;
+    }
+    if (Object.keys(patch).length) await rest(`expedicoes?id=eq.${existente.id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' });
+    return res.status(200).json({ ok: true, expedicao_id: existente.id, action: 'updated', campos: Object.keys(patch) });
   }
 
   const [nova] = await insert('expedicoes', [{ ...dados, status: 'Planejamento', tipo: 'expedicao' }]);
@@ -222,8 +234,11 @@ async function upsertPassageiro(d, extra = {}) {
     const [novo] = await insert('passageiros', [registro]);
     return { status: 200, body: { ok: true, passageiro_id: novo.id, action: 'created', nome: d.nome_completo } };
   } catch (e) {
-    // Corrida / CPF repetido na expedição: alguém já entrou → só preenche o vazio.
-    const conflito = await acharNaExpedicao();
+    // Corrida (o n8n manda o mesmo deal 2x ao mesmo tempo) / CPF repetido na
+    // expedição: alguém já entrou → só preenche o vazio.
+    const conflito = (!vazio(d.bitrix_deal_id)
+      && (await rest(`passageiros?select=${COLS}&bitrix_deal_id=eq.${enc(d.bitrix_deal_id)}&limit=1`))?.[0])
+      || await acharNaExpedicao();
     if (conflito) return atualizar(conflito);
     throw e;
   }
@@ -304,12 +319,14 @@ async function importarCompras(req, res) {
   const lista = Array.isArray(raw) ? raw : raw && typeof raw === 'object' && Array.isArray(raw.compras) ? raw.compras : raw ? [raw] : [];
   if (!lista.length) return res.status(400).json({ ok: false, error: 'Nenhuma compra no corpo.' });
   if (lista.length > 1000) return res.status(400).json({ ok: false, error: 'Máximo de 1000 compras por chamada.' });
-  const linhas = [];
+  // Por deal (o último vence): o mesmo deal 2x no lote fazia o upsert inteiro
+  // falhar ("ON CONFLICT ... cannot affect row a second time").
+  const porDeal = new Map();
   for (const c of lista) {
     if (!c || vazio(c.bitrix_deal_id)) return res.status(400).json({ ok: false, error: 'Toda compra precisa de bitrix_deal_id.' });
     const v = c.valor == null || c.valor === '' ? null : Number(String(c.valor).replace(',', '.'));
-    linhas.push({
-      bitrix_deal_id: String(c.bitrix_deal_id),
+    porDeal.set(String(c.bitrix_deal_id).trim(), {
+      bitrix_deal_id: String(c.bitrix_deal_id).trim(),
       bitrix_contact_id: c.bitrix_contact_id == null ? null : String(c.bitrix_contact_id),
       cpf: soDig(c.cpf) || null,
       nome_contato: texto(c.nome_contato), titulo: texto(c.titulo), produto: texto(c.produto),
@@ -318,6 +335,7 @@ async function importarCompras(req, res) {
       moeda: texto(c.moeda) || 'BRL', funil: texto(c.funil), etapa: texto(c.etapa),
     });
   }
+  const linhas = [...porDeal.values()];
   await rest('compras_bitrix?on_conflict=bitrix_deal_id', {
     method: 'POST', body: linhas, prefer: 'resolution=merge-duplicates,return=minimal',
   });
@@ -453,7 +471,7 @@ export default async function handler(req, res) {
 
     const fn = WEBHOOKS[acao];
     if (!fn) return res.status(404).json({ ok: false, error: 'Ação desconhecida' });
-    if (!webhookOk(req)) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    if (!webhookOk(req)) return res.status(401).json({ ok: false, error: 'Não autorizado' });
     return await fn(req, res);
   } catch (e) {
     console.error(`[expedicoes] ${acao} falhou:`, e?.message, e?.details ? JSON.stringify(e.details) : '');
