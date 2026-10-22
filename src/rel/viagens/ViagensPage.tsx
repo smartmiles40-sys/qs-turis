@@ -19,8 +19,9 @@
 // arrumação (sem data / classificar) seguem pessoa por pessoa.
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
-  FASES, SERVICOS, TIPOS_VIAGEM, criarViagem, grupoDe, importarDoBitrix, listarViagens, periodo, proximoVoo, quandoEmbarca, sincronizarBitrix,
+  FASES, SERVICOS, TIPOS_VIAGEM, criarViagem, dataBR, grupoDe, importarDoBitrix, listarEquipeRel, listarViagens, periodo, proximoVoo, quandoEmbarca, sincronizarBitrix,
   type FiltroViagens, type ResultadoSync, type TipoViagem, type Viagem,
 } from "../lib/viagens";
 import { buscarClientes, type Cliente } from "../lib/clientes";
@@ -34,6 +35,10 @@ import SeletorServico from "./SeletorServico";
 import { ProximoVooCurto } from "./ProximoVoo";
 import { COR_EXP, MarcaTipo } from "./MapaMundi";
 import { lugaresDe } from "./destinos";
+import DonoViagem from "./DonoViagem";
+import BarraLote from "./BarraLote";
+import { arquivamentosDe, sugeridaParaArquivar, type Arquivada } from "../lib/operacao";
+import { podeGerirRelacionamento } from "../equipe/permissao";
 
 type Visao = "painel" | "calendario" | "lista" | "repetidas" | "voos";
 const VISOES: { id: Visao; rotulo: string }[] = [
@@ -52,9 +57,13 @@ function visaoSalva(): Visao {
 const FILTROS: { id: FiltroViagens; rotulo: string }[] = [
   { id: "proximas", rotulo: "Próximas" },
   { id: "em_viagem", rotulo: "Em viagem" },
+  // 0184: o dono da viagem
+  { id: "minhas", rotulo: "Minhas" },
+  { id: "sem_dono", rotulo: "Sem dono" },
   // 0148: o que falta pro time arrumar — fica fora de "Próximas" pra não poluir
   { id: "sem_data", rotulo: "Precisa de data" },
   { id: "classificar", rotulo: "Classificar" },
+  { id: "arquivadas", rotulo: "Arquivadas" },
   { id: "concluidas", rotulo: "Concluídas" },
   { id: "canceladas", rotulo: "Canceladas" },
   { id: "todas", rotulo: "Todas" },
@@ -101,7 +110,7 @@ function NovaViagem({ aberto, onFechar, onCriada }: { aberto: boolean; onFechar:
         titulo: f.titulo.trim(), destino: f.destino.trim() || null, tipo: f.tipo,
         data_embarque: f.data_embarque || null, data_retorno: f.data_retorno || null,
         valor: f.valor ? Number(f.valor.replace(/\./g, "").replace(",", ".")) || null : null,
-        cliente_id: cliente?.id ?? null, data_venda: new Date().toISOString().slice(0, 10),
+        cliente_id: cliente?.id ?? null, data_venda: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date()),
       });
       onCriada(id);
     } catch (e) { setErro(e instanceof Error ? e.message : "Não criou."); }
@@ -178,12 +187,26 @@ function NovaViagem({ aberto, onFechar, onCriada }: { aberto: boolean; onFechar:
 
 // ── Linha ───────────────────────────────────────────────────────────────────
 
-function Linha({ v, onAbrir, onAbrirCliente, classificar, onMudou }: { v: Viagem; onAbrir: () => void; onAbrirCliente: (id: string) => void; classificar?: boolean; onMudou?: () => void }) {
+interface ExtrasLinha {
+  /** 0184: caixinha pra ação em lote */
+  marcada?: boolean; onMarcar?: (v: boolean) => void;
+  /** 0184: dono da viagem (com "Assumir") */
+  equipe?: { id: string; name: string }[];
+  /** fila Sem data: mostra quando foi vendida e se é sugerida pra arquivar */
+  mostrarVenda?: boolean;
+  arquivo?: Arquivada | null;
+}
+
+function Linha({ v, onAbrir, onAbrirCliente, classificar, onMudou, extras = {} }: { v: Viagem; onAbrir: () => void; onAbrirCliente: (id: string) => void; classificar?: boolean; onMudou?: () => void; extras?: ExtrasLinha }) {
   return (
     <li style={{ borderTop: "1px solid var(--line2)" }}>
       <div className="rel-linha flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={onAbrir}
         role="link" tabIndex={0} aria-label={`Abrir viagem ${v.titulo}`}
         onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onAbrir(); } }}>
+        {extras.onMarcar && (
+          <input type="checkbox" className="w-4 h-4 flex-shrink-0" style={{ accentColor: "var(--rel)" }} aria-label={`Marcar ${v.titulo}`}
+            checked={!!extras.marcada} onClick={(e) => e.stopPropagation()} onChange={(e) => extras.onMarcar!(e.target.checked)} />
+        )}
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate" style={{ color: "var(--ink)" }}>{v.titulo}</p>
           <p className="text-[12px] truncate" style={{ color: "var(--ink3)" }}>
@@ -193,7 +216,19 @@ function Linha({ v, onAbrir, onAbrirCliente, classificar, onMudou }: { v: Viagem
             {v.passageiros > 1 ? ` + ${v.passageiros - 1}` : ""} · {periodo(v)} · {quandoEmbarca(v)}
             {v.proximo_voo_em && <span className="sm:hidden"> · ✈ {proximoVoo(v).quando}</span>}
           </p>
+          {extras.mostrarVenda && (
+            <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
+              {v.data_venda ? `vendida em ${dataBR(v.data_venda)}` : "sem data de venda"}
+              {sugeridaParaArquivar(v) && <b style={{ color: "#B45309" }}> · sugerida pra arquivar</b>}
+            </p>
+          )}
+          {extras.arquivo && (
+            <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
+              arquivada{extras.arquivo.arquivado_em ? ` em ${new Date(extras.arquivo.arquivado_em).toLocaleDateString("pt-BR")}` : ""}{extras.arquivo.arquivado_motivo ? ` · “${extras.arquivo.arquivado_motivo}”` : ""}
+            </p>
+          )}
         </div>
+        {extras.equipe && onMudou && <span className="hidden md:inline-flex flex-shrink-0"><DonoViagem viagemId={v.id} responsavelId={v.responsavel_id} equipe={extras.equipe} onMudou={onMudou} compacto /></span>}
         <ProximoVooCurto v={v} className="hidden sm:block flex-shrink-0 max-w-[230px]" />
         <span className="hidden sm:flex items-center gap-1.5 flex-shrink-0">
           {v.tarefas_atrasadas > 0 && <Etiqueta tom="erro">{v.tarefas_atrasadas} atrasada{v.tarefas_atrasadas > 1 ? "s" : ""}</Etiqueta>}
@@ -276,6 +311,8 @@ function LinhaGrupo({ g, aberto, onAlternar, children }: { g: Grupo; aberto: boo
 // ── Página ──────────────────────────────────────────────────────────────────
 
 export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrirViagem: (id: string) => void; onAbrirCliente: (id: string) => void }) {
+  const { currentUser } = useQsAuth();
+  const gestor = podeGerirRelacionamento(currentUser);
   const [visao, setVisaoState] = useState<Visao>(visaoSalva);
   const setVisao = (v: Visao) => { setVisaoState(v); try { localStorage.setItem(CHAVE_VISAO, v); } catch { /* sem localStorage */ } };
   const [filtro, setFiltro] = useState<FiltroViagens>("proximas");
@@ -291,18 +328,29 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
   const [sync, setSync] = useState<{ ocupado: boolean; msg: string | null; erro: boolean }>({ ocupado: false, msg: null, erro: false });
   const [nova, setNova] = useState(false);
   const [versao, setVersao] = useState(0);
+  // 0184: dono + ações em lote
+  const [equipe, setEquipe] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { listarEquipeRel().then(setEquipe).catch(() => setEquipe([])); }, []);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  useEffect(() => { setSel(new Set()); }, [filtro, busca]);
+  const [arquivos, setArquivos] = useState<Map<string, Arquivada>>(new Map());
+  useEffect(() => {
+    if (filtro !== "arquivadas" || !lista?.length) { setArquivos(new Map()); return; }
+    arquivamentosDe(lista.map((v) => v.id)).then(setArquivos).catch(() => setArquivos(new Map()));
+  }, [filtro, lista]);
 
   useEffect(() => {
     if (visao !== "lista") return;
     let vivo = true;
     setLista(null);
     const t = setTimeout(() => {
-      listarViagens(filtro, busca)
+      listarViagens(filtro, busca, currentUser?.id ?? "")
         .then((l) => { if (vivo) { setLista(l); setErro(null); } })
         .catch((e) => { if (vivo) { setErro(e instanceof Error ? e.message : "Não carregou."); setLista([]); } });
     }, busca ? 300 : 0);
     return () => { vivo = false; clearTimeout(t); };
-  }, [filtro, busca, versao, visao]);
+    // o usuário pode chegar depois da 1ª carga: sem ele, "Minhas" vinha vazia
+  }, [filtro, busca, versao, visao, currentUser?.id]);
 
   async function sincronizar() {
     setSync({ ocupado: true, msg: "Buscando vendas no Bitrix… (pode levar até 1 minuto)", erro: false });
@@ -316,7 +364,10 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
   }
 
   // Busca e filas de arrumação ficam pessoa por pessoa.
-  const agrupa = porGrupo && !busca.trim() && filtro !== "sem_data" && filtro !== "classificar";
+  const agrupa = porGrupo && !busca.trim() && filtro !== "sem_data" && filtro !== "classificar" && filtro !== "arquivadas" && filtro !== "sem_dono";
+  // quem tem caixinha de marcar (ações em lote, ver BarraLote)
+  const comLote = filtro === "classificar" || (gestor && ["sem_data", "arquivadas", "sem_dono", "proximas", "em_viagem", "minhas"].includes(filtro));
+  const comDono = ["proximas", "em_viagem", "minhas", "sem_dono"].includes(filtro);
   const itens = useMemo(() => (lista ? (agrupa ? agruparExpedicoes(lista) : lista.map((v) => ({ k: "viagem" as const, v }))) : null), [lista, agrupa]);
 
   return (
@@ -368,8 +419,11 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
       </div>
 
       {erro && <div className="mb-3"><Aviso tom="erro">{erro}</Aviso></div>}
-      {filtro === "sem_data" && <div className="mb-3"><Aviso tom="aviso">Vendas que pedem acompanhamento mas estão sem data de embarque no Bitrix. Preencha a ida (e a volta) no card do Bitrix — elas vão pro painel sozinhas na próxima sincronização.</Aviso></div>}
-      {filtro === "classificar" && <div className="mb-3"><Aviso tom="aviso">O Bitrix não diz o que foi vendido (Tipo de venda vazio ou "Outros"). Escolha ao lado de cada uma: pacote, aéreo e cruzeiro entram na Esteira completa; hotel e passeio só Revisão + D-3; seguro, concierge e outros ficam só na ficha do cliente.</Aviso></div>}
+      {filtro === "sem_data" && <div className="mb-3"><Aviso tom="aviso">Vendas que pedem acompanhamento mas estão sem data de embarque no Bitrix. Preencha a ida (e a volta) no card do Bitrix — elas vão pro painel sozinhas na próxima sincronização.{gestor ? " Venda antiga que não vai acontecer: “Marcar as sugeridas” pega venda há mais de 12 meses ou sem data de venda — confira, escreva o motivo e arquive (dá pra desfazer)." : " Arquivar em lote é com a gestão."}</Aviso></div>}
+      {filtro === "classificar" && <div className="mb-3"><Aviso tom="aviso">O Bitrix não diz o que foi vendido (Tipo de venda vazio ou "Outros"). Escolha ao lado de cada uma — ou marque várias e escolha uma vez só na barra: pacote, aéreo e cruzeiro entram na Esteira completa; hotel e passeio só Revisão + D-3; seguro, concierge e outros ficam só na ficha do cliente.</Aviso></div>}
+      {filtro === "sem_dono" && <div className="mb-3"><Aviso tom="aviso">Pacotes, aéreos e hotéis que vão acontecer e ninguém do time cuida. Clique em <b>Assumir</b> nas suas{gestor ? " — ou marque várias e atribua de uma vez" : ""}.</Aviso></div>}
+      {filtro === "minhas" && <div className="mb-3"><Aviso tom="ok">As viagens que você cuida. As etapas de cada uma aparecem em <b>Minhas atividades</b>.</Aviso></div>}
+      {lista && <BarraLote key={filtro} filtro={filtro} lista={lista} sel={sel} setSel={setSel} gestor={gestor} equipe={equipe} onMudou={() => setVersao((x) => x + 1)} />}
 
       {lista === null ? (
         <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>
@@ -384,7 +438,14 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
         <div className="rel-card overflow-hidden">
           <ul className="-mt-px">
             {itens!.map((it) => {
-              const linha = (v: Viagem) => <Linha key={v.id} v={v} onAbrir={() => onAbrirViagem(v.id)} onAbrirCliente={onAbrirCliente} classificar={filtro === "classificar"} onMudou={() => setVersao((x) => x + 1)} />;
+              const linha = (v: Viagem) => <Linha key={v.id} v={v} onAbrir={() => onAbrirViagem(v.id)} onAbrirCliente={onAbrirCliente} classificar={filtro === "classificar"} onMudou={() => setVersao((x) => x + 1)}
+                extras={{
+                  marcada: sel.has(v.id),
+                  onMarcar: comLote ? (m) => setSel((s) => { const n = new Set(s); if (m) n.add(v.id); else n.delete(v.id); return n; }) : undefined,
+                  equipe: comDono ? equipe : undefined,
+                  mostrarVenda: filtro === "sem_data",
+                  arquivo: filtro === "arquivadas" ? arquivos.get(v.id) ?? null : null,
+                }} />;
               return it.k === "viagem" ? linha(it.v) : (
                 <LinhaGrupo key={it.g.chave} g={it.g} aberto={abertos.has(it.g.chave)} onAlternar={() => alternar(it.g.chave)}>
                   {it.g.vs.map(linha)}

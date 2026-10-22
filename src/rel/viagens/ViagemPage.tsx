@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
-  FASES, TIPOS_VIAGEM, adicionarPassageiro, grupoDe, apagarTarefa, carregarViagem, criarTarefa, dataBR, linkBitrix,
+  FASES, TIPOS_VIAGEM, adicionarPassageiro, grupoDe, hojeSP, apagarTarefa, carregarViagem, criarTarefa, dataBR, linkBitrix,
   listarEquipeRel, listarPassageiros, listarTarefas, marcarTarefa, quandoEmbarca, removerPassageiro, resumoDaVenda, salvarViagem,
   type Passageiro, type Tarefa, type TipoViagem, type Viagem, type ViagemInput,
 } from "../lib/viagens";
@@ -33,6 +33,10 @@ import { conferirViagens, type Analise } from "../lib/problemas";
 import { TOM_FASE } from "./ViagensDoCliente";
 import { BotaoPedirOutroSetor, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
 import ConferirVoos from "./ConferirVoos";
+import DonoViagem, { HistoricoViagem } from "./DonoViagem";
+import PreferenciasViagem from "./PreferenciasViagem";
+import { desarquivarViagens } from "../lib/operacao";
+import { podeGerirRelacionamento } from "../equipe/permissao";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
   return (
@@ -56,7 +60,8 @@ function Linha({ rotulo, children }: { rotulo: string; children: ReactNode }) {
 }
 
 const moeda = (n: number | null) => (n == null ? "" : n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }));
-const hoje = () => new Date().toISOString().slice(0, 10);
+// dia de São Paulo — o UTC marcava "atrasada" a partir das 21h (22/10)
+const hoje = () => hojeSP();
 
 // ── Editar ──────────────────────────────────────────────────────────────────
 
@@ -257,6 +262,9 @@ function Jornada({ viagemId, ativa, recarregarViagem }: { viagemId: string; ativ
 export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConversa }: {
   id: string; onVoltar: () => void; onAbrirCliente: (id: string) => void; onAbrirConversa: (conversaId: string) => void;
 }) {
+  const { currentUser } = useQsAuth();
+  // desarquivar (0184) é só a gestão — o banco recusa os outros, então nem mostra o botão
+  const gestor = podeGerirRelacionamento(currentUser);
   const [v, setV] = useState<Viagem | null>(null);
   // a revisão da IA grava trechos e o %: muda a versão pra roteiro/arquivos/% recarregarem
   const [versao, setVersao] = useState(0);
@@ -346,7 +354,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               <span className="text-[13px]" style={{ color: "var(--ink2)" }}>{quandoEmbarca(v)}</span>
               {ativa && <ProximoVooDestaque v={v} />}
               {v.tarefas_atrasadas > 0 && <Etiqueta tom="erro">{v.tarefas_atrasadas} tarefa{v.tarefas_atrasadas > 1 ? "s" : ""} atrasada{v.tarefas_atrasadas > 1 ? "s" : ""}</Etiqueta>}
-              {!ativa && <Etiqueta tom="erro">Cancelada</Etiqueta>}
+              {!ativa && <Etiqueta tom="erro">{v.status === "arquivada" ? "Arquivada" : "Cancelada"}</Etiqueta>}
             </div>
             <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
               <div>
@@ -363,6 +371,11 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
                 <dt className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>De → para</dt>
                 <dd className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>{venda.de || "—"} → {venda.para || v.destino || "—"}</dd>
               </div>
+              {/* 0184: o dono da viagem no topo — sem dono, ninguém sente que a viagem é sua */}
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Cuida no Relacionamento</dt>
+                <dd className="pt-0.5"><DonoViagem viagemId={v.id} responsavelId={v.responsavel_id} equipe={equipe} onMudou={revisou} /></dd>
+              </div>
             </dl>
             <div className="flex flex-wrap items-center gap-2 mt-3">
               {v.bitrix_deal_id && (
@@ -377,7 +390,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               <BotaoPedirOutroSetor deSetor="relacionamento" onCriada={() => setSinalPedidos((n) => n + 1)}
                 alvo={{ viagemId: v.id, clienteId: v.cliente_id, sobre: [comprador, v.expedicao || v.titulo].filter(Boolean).join(" · ") }} />
               {/* "Cancelar viagem" saiu daqui (Bruno, 15/10). Cancelada no Bitrix, cancela sozinha; reativar continua. */}
-              {!ativa && <Botao onClick={() => void acao(() => salvarViagem(v.id, { status: "ativa" }))}>Reativar</Botao>}
+              {/* arquivada (0184) volta pela função do banco: limpa o motivo e fica no histórico (só a gestão) */}
+              {!ativa && (v.status !== "arquivada" || gestor) && <Botao onClick={() => void acao(() => (v.status === "arquivada" ? desarquivarViagens({ ids: [v.id] }) : salvarViagem(v.id, { status: "ativa" })))}>{v.status === "arquivada" ? "Desarquivar" : "Reativar"}</Botao>}
             </div>
           </div>
           <ConformidadeViagem viagemId={v.id} versao={versao} onRevisado={revisou} />
@@ -412,15 +426,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               <Linha rotulo="Passageiros">{v.qtd_passageiros ? `${v.qtd_passageiros} vendido(s) · ${v.passageiros} com ficha` : `${v.passageiros} com ficha`}</Linha>
               {v.expedicao && <Linha rotulo="Expedição">{v.expedicao}</Linha>}
               <Linha rotulo="Valor">{moeda(v.valor)}</Linha>
-              <Linha rotulo="Cuida no Rel.">
-                <select className="rel-input" style={{ padding: "5px 8px", fontSize: 13, width: "auto", minWidth: 160 }}
-                  value={v.responsavel_id ?? ""}
-                  onChange={(e) => void acao(() => salvarViagem(v.id, { responsavel_id: e.target.value || null }))}>
-                  <option value="">ninguém</option>
-                  {equipe.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
-              </Linha>
             </dl>
+            <HistoricoViagem viagemId={v.id} equipe={equipe} versao={versao} />
           </Secao>
 
           <Secao titulo="Quem viaja" acao={ativa ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setAddPass(true)}>+ Passageiro</Botao> : undefined}>
@@ -456,11 +463,15 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
             </ul>
           </Secao>
 
+          {/* 0184: preferências da pessoa — fácil de preencher e cobradas perto do embarque */}
+          <Secao titulo="Preferências do cliente">
+            <PreferenciasViagem key={`${v.id}${versao}`} viagemId={v.id} necessidades={v.necessidades} diasParaEmbarque={v.dias_para_embarque} ativa={ativa} equipe={equipe} />
+          </Secao>
+
           <Secao titulo="Do Comercial para o Relacionamento">
-            {v.observacoes || v.necessidades ? (
+            {v.observacoes ? (
               <div className="space-y-2">
-                {v.observacoes && <p className="text-[14px] whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{v.observacoes}</p>}
-                {v.necessidades && <Aviso><b>Necessidade especial:</b> {v.necessidades}</Aviso>}
+                <p className="text-[14px] whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{v.observacoes}</p>
               </div>
             ) : (
               <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhuma observação. No Bitrix é o campo "Observações finais para o time de relacionamento".</p>

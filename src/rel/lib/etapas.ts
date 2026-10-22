@@ -156,8 +156,19 @@ export async function concluirEtapa(p: {
   if (p.etapa === "revisao") await marcarRevisada(p.viagemId, true, p.userId, p.obs ?? "");
 }
 
-export async function desfazerEtapa(viagemId: string, etapa: EtapaId, userId: string) {
-  const { error } = await supabase.from("rel_viagem_etapas").update({ concluida_em: null, concluida_por: null, atualizado_em: new Date().toISOString() })
+/**
+ * Reabre a etapa. Com `restaurar` (o "Desfazer" do ✓ Feito rápido, 0184), volta
+ * também o checklist/observação de ANTES — senão a etapa reaberta ficaria com
+ * tudo marcado e o que estava anotado se perderia.
+ */
+export async function desfazerEtapa(viagemId: string, etapa: EtapaId, userId: string, restaurar?: { antes: RegistroEtapa | null }) {
+  const volta = restaurar
+    ? {
+        checklist: restaurar.antes?.checklist ?? [], houve_alteracao: restaurar.antes?.houve_alteracao ?? null,
+        alteracao: restaurar.antes?.alteracao ?? null, obs: restaurar.antes?.obs ?? null,
+      }
+    : {};
+  const { error } = await supabase.from("rel_viagem_etapas").update({ concluida_em: null, concluida_por: null, ...volta, atualizado_em: new Date().toISOString() })
     .eq("viagem_id", viagemId).eq("etapa", etapa);
   if (error) throw error;
   if (etapa === "revisao") await marcarRevisada(viagemId, false, userId, "");

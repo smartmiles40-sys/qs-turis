@@ -24,6 +24,7 @@ import { supabase } from "@/lib/supabase";
 import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 import { carregarResumo, type Resumo } from "./lib/clientes";
 import { contarEsperando } from "./lib/whatsapp";
+import { COM_ACOMPANHAMENTO, hojeSP } from "./lib/viagens";
 import { Avatar, Etiqueta, REL_CSS } from "./ui";
 import ClientesPage from "./clientes/ClientesPage";
 import ClienteFicha from "./clientes/ClienteFicha";
@@ -119,6 +120,8 @@ const ICONES: Record<string, ReactNode> = {
   // Central de Solicitações (0149): caixa de entrada
   pedidos: <><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></>,
   seta: <polyline points="6 9 12 15 18 9" />,
+  // Minhas atividades (0184): lista com check
+  tarefas: <><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
 };
 
 function Icone({ nome, tamanho = 18 }: { nome: string; tamanho?: number }) {
@@ -131,6 +134,15 @@ interface Contadores {
   alertasAltos: number; chamadosVencidos: number;
   /** 0142: grupos com mensagem nova e quantos marcaram o número */
   gruposNovos?: number; gruposMencao?: number;
+  /** 0184: viagens que eu cuido (vão acontecer) e as que ninguém cuida */
+  minhasViagens?: number; semDono?: number;
+}
+
+async function contarDonos(eu: string): Promise<{ minhasViagens: number; semDono: number }> {
+  const base = () => supabase.from("rel_viagens_v").select("id", { count: "exact", head: true })
+    .eq("status", "ativa").in("fase", ["antes", "em_viagem"]).in("acompanhamento", ["completo", "leve"]);
+  const [m, s] = await Promise.all([base().eq("responsavel_id", eu), base().is("responsavel_id", null)]);
+  return { minhasViagens: m.count ?? 0, semDono: s.count ?? 0 };
 }
 
 async function contarAlertasEChamados(): Promise<{ alertasAltos: number; chamadosVencidos: number }> {
@@ -150,9 +162,10 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: Resumo | null; cont: Conta
   useEffect(() => {
     supabase.from("rel_alertas").select("tipo, gravidade, titulo, detalhe, cliente_id, viagem_id").in("gravidade", ["alta", "media"]).order("data").limit(8)
       .then(({ data }) => setAlertas((data ?? []) as AlertaCurto[]));
-    const hoje = new Date().toISOString().slice(0, 10);
-    const em30 = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
-    supabase.from("rel_viagens_v").select("id, titulo, data_embarque, passageiros").eq("status", "ativa").gte("data_embarque", hoje).lte("data_embarque", em30).order("data_embarque").limit(6)
+    // dia de São Paulo (o UTC já virava o dia às 21h) e só o que pede acompanhamento (0148: seguro sozinho não é embarque)
+    const hoje = hojeSP();
+    const em30 = new Date(new Date(`${hoje}T12:00:00Z`).getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+    supabase.from("rel_viagens_v").select("id, titulo, data_embarque, passageiros").eq("status", "ativa").in("acompanhamento", COM_ACOMPANHAMENTO).gte("data_embarque", hoje).lte("data_embarque", em30).order("data_embarque").limit(6)
       .then(({ data }) => setEmbarques((data ?? []) as typeof embarques));
   }, []);
 
@@ -172,6 +185,26 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: Resumo | null; cont: Conta
         <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>{saudacao}, {nome.split(" ")[0]}</h1>
         <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Relacionamento · cuidar de quem já comprou com a gente.</p>
       </div>
+      {/* 0184: o trabalho do dia primeiro — as etapas das viagens que eu cuido */}
+      <div className="grid sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3">
+        <button onClick={() => ir({ tela: "esteira" })} className="rel-card p-4 text-left transition-shadow hover:shadow-md flex items-center gap-4"
+          style={{ borderColor: "var(--rel)", background: "var(--rel-soft)" }}>
+          <span className="flex-1 min-w-0">
+            <span className="block text-[15px] font-bold" style={{ color: "var(--rel-ink)" }}>Minhas atividades de hoje →</span>
+            <span className="block text-[12.5px] mt-0.5" style={{ color: "var(--ink2)" }}>
+              {cont?.minhasViagens ? `Etapas da Esteira das ${cont.minhasViagens} viage${cont.minhasViagens === 1 ? "m" : "ns"} que você cuida: concluir em 1 clique.` : "Você ainda não cuida de nenhuma viagem — assuma as suas em “Sem dono”."}
+            </span>
+          </span>
+          <span className="text-3xl font-bold tabular-nums" style={{ color: "var(--rel-ink)" }}>{cont?.minhasViagens ?? "–"}</span>
+        </button>
+        <button onClick={() => ir({ tela: "esteira" })} className="rel-card p-4 text-left transition-shadow hover:shadow-md"
+          style={cont?.semDono ? { borderColor: "var(--err-line)", background: "var(--err-bg)" } : undefined}>
+          <span className="block text-[12px] font-semibold" style={{ color: cont?.semDono ? "var(--err-ink)" : "var(--ink2)" }}>Viagens sem dono</span>
+          <span className="block text-3xl font-bold mt-1 tabular-nums" style={{ color: cont?.semDono ? "var(--err-ink)" : "var(--ink)" }}>{cont?.semDono ?? "–"}</span>
+          <span className="block text-[11px] mt-0.5" style={{ color: "var(--ink3)" }}>pacote, aéreo e hotel que vão acontecer</span>
+        </button>
+      </div>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cartoes.map((c) => {
           const k = cor(c.tom);
@@ -262,6 +295,7 @@ export default function RelApp() {
   const [menuAberto, setMenuAberto] = useState(false);
   const [trocandoSenha, setTrocandoSenha] = useState(false);
   const [abertos, setAbertos] = useState<Record<string, boolean>>(gruposGuardados);
+  const eu = currentUser?.id ?? "";
 
   useEffect(() => {
     const onHash = () => setRota(lerRota());
@@ -282,15 +316,17 @@ export default function RelApp() {
       contarEsperando().catch(() => null),
       contarAlertasEChamados().catch(() => null),
       contarGruposNovos().catch(() => null),
-    ]).then(([r, f, ac, g]) => {
+      eu ? contarDonos(eu).catch(() => null) : Promise.resolve(null),
+    ]).then(([r, f, ac, g, d]) => {
       if (r) setResumo(r);
       setCont({
         esperando: f?.esperando ?? 0, foraDoPrazo: f?.foraDoPrazo ?? 0, duplicados: r?.duplicados ?? 0,
         alertasAltos: ac?.alertasAltos ?? 0, chamadosVencidos: ac?.chamadosVencidos ?? 0,
         gruposNovos: g?.grupos ?? 0, gruposMencao: g?.mencoes ?? 0,
+        minhasViagens: d?.minhasViagens ?? 0, semDono: d?.semDono ?? 0,
       });
     });
-  }, []);
+  }, [eu]);
   // As bolinhas do menu se atualizam sozinhas (e ao trocar de tela).
   useEffect(() => {
     const t = setInterval(() => { if (!document.hidden) atualizar(); }, 30_000);
@@ -336,8 +372,7 @@ export default function RelApp() {
       { id: "cadastros", rotulo: "Arrumar cadastros" },
     ] },
     { id: "viagens", rotulo: "Viagens", icone: "viagens", itens: [
-      // Esteira (16/10): o processo do time, etapa por etapa — a tela de trabalho.
-      { id: "esteira", rotulo: "Esteira (hoje)" },
+      // Esteira (16/10) virou "Minhas atividades" no topo do menu (0184) — estava escondida aqui
       { id: "viagens", rotulo: "Viagens" },
       { id: "alertas", rotulo: "Alertas", badge: cont?.alertasAltos || undefined, alerta: true },
     ] },
@@ -391,6 +426,16 @@ export default function RelApp() {
           style={{ background: ativo === "inicio" ? "var(--rel-soft)" : "transparent", color: ativo === "inicio" ? "var(--rel-ink)" : "var(--ink2)" }}
         >
           <Icone nome="inicio" /> <span className="flex-1 text-left">Início</span>
+        </button>
+        {/* 0184: a tela de trabalho do time fica no topo, não dentro de "Viagens" */}
+        <button
+          onClick={() => ir({ tela: "esteira" })}
+          aria-current={ativo === "esteira" ? "page" : undefined}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] font-semibold"
+          style={{ background: ativo === "esteira" ? "var(--rel-soft)" : "transparent", color: ativo === "esteira" ? "var(--rel-ink)" : "var(--ink2)" }}
+        >
+          <Icone nome="tarefas" /> <span className="flex-1 text-left">Minhas atividades</span>
+          <Bolinha n={cont?.semDono || undefined} alerta={false} />
         </button>
 
         {grupos.map((g) => {
