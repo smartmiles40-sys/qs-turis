@@ -85,6 +85,9 @@
     "api/rel-grupos.js": {
       "maxDuration": 60
     },
+    "api/closer.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }

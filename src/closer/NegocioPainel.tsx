@@ -7,6 +7,8 @@
 //     solicitações a outros setores;
 //   • próxima ação + valor previsto, mover de etapa, perdido com motivo;
 //   • histórico do cartão (o que o sistema moveu sozinho e quem mexeu);
+//   • CONTRATO (0180: gera pelo Google + ZapSign, ou manual) e PAGAMENTO
+//     (0181: link colado, marcar pago, pedir link ao Financeiro);
 //   • FICHA DE FECHAMENTO (consolidar a venda) e, depois dela, o resumo + o
 //     estado do espelho no Bitrix com "Reenviar".
 // -----------------------------------------------------------------------------
@@ -16,6 +18,8 @@ import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
 import { STATUS_PROPOSTA, TOM_PROPOSTA, type StatusProposta } from "@/propostas/lib";
 import FichaFechamento from "./FichaFechamento";
 import FichaFechamentoResumo from "./FichaFechamentoResumo";
+import ContratoBloco from "./ContratoBloco";
+import PagamentoBloco from "./PagamentoBloco";
 import {
   ETAPAS, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, espelharNoBitrix, eventosDoNegocio, moverNegocio,
   nomeDoLead, notaNoNegocio, salvarNegocio, type Etapa, type EventoNegocio, type Negocio,
@@ -123,6 +127,10 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start">
         <div className="space-y-4">
+          {/* ── Contrato (0180) e pagamento (0181) ── */}
+          <ContratoBloco negocio={n} onMudou={() => void carregar()} />
+          <PagamentoBloco negocio={n} onMudou={() => void carregar()} onAbrirSolicitacao={links.onAbrirSolicitacao} />
+
           {/* ── Fechamento ── */}
           <Bloco titulo={consolidada ? "Venda consolidada" : "Fechar a venda"}
             acao={n.etapa !== "perdido" ? <Botao variante={consolidada ? "secundario" : "primario"} onClick={() => setFichaAberta(true)}>{consolidada ? "Corrigir ficha" : "Preencher ficha de fechamento"}</Botao> : undefined}>

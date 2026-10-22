@@ -42,6 +42,7 @@ const SolicitacoesPage = lazyPagina(() => import("@/solicitacoes/SolicitacoesPag
 const PropostasPage = lazyPagina(() => import("@/propostas/PropostasPage"));
 const PropostaEditor = lazyPagina(() => import("@/propostas/PropostaEditor"));
 const QsWaDock = lazyPagina(() => import("@/components/sdr/wa/QsWaDock"));
+const ContratoConfigPage = lazyPagina(() => import("./ContratoConfigPage"));
 
 /** Cor do Closer: violeta (#6D28D9 com texto branco = 7:1, WCAG AA). */
 const CLOSER_CSS = `${REL_CSS}
@@ -51,7 +52,7 @@ html.dark { --rel-ink: #C4B5FD; --rel-soft: rgba(167, 139, 250, .16); }
 `;
 
 const PREFIXO = "closer";
-const TELAS = ["inicio", "pipeline", "agenda", "painel", "whatsapp", "reunioes", "leads", "lead", "desempenho", "solicitacoes", "propostas", "proposta-nova", "comercial"] as const;
+const TELAS = ["inicio", "pipeline", "agenda", "painel", "whatsapp", "reunioes", "leads", "lead", "desempenho", "solicitacoes", "propostas", "proposta-nova", "contrato", "comercial"] as const;
 type Tela = (typeof TELAS)[number];
 interface Rota { tela: Tela; id?: string }
 
@@ -133,7 +134,10 @@ export default function CloserApp() {
       { id: "leads", rotulo: "Leads" },
       { id: "desempenho", rotulo: "Desempenho" },
     ] },
-    ...(gestao ? [{ id: "outras", rotulo: "Gestão", icone: ICONES_AREA.equipe, itens: [{ id: "comercial", rotulo: "Abrir o Comercial (SDR)" }] }] : []),
+    ...(gestao ? [{ id: "outras", rotulo: "Gestão", icone: ICONES_AREA.equipe, itens: [
+      { id: "contrato", rotulo: "Configurar contrato" },
+      { id: "comercial", rotulo: "Abrir o Comercial (SDR)" },
+    ] }] : []),
   ];
 
   const links = {
@@ -151,6 +155,10 @@ export default function CloserApp() {
           <Cerca nome="o pipeline">
             <PipelinePage abrirId={rota.id ?? null} onAbrirId={(id) => ir(id ? { tela: "pipeline", id } : { tela: "pipeline" })} links={links} />
           </Cerca>
+        )}
+        {tela === "contrato" && (
+          // Volta do Google cai aqui: #closer/contrato/conectado (ou /erro-…).
+          <Cerca nome="a configuração do contrato"><ContratoConfigPage key={rota.id ?? ""} retorno={rota.id ?? null} /></Cerca>
         )}
         {tela === "agenda" && <Cerca nome="a agenda"><MinhaAgendaPage onOpenLead={abrirLead} /></Cerca>}
         {tela === "painel" && <Cerca nome="as atividades"><TasksPanel onOpenLead={abrirLead} /></Cerca>}

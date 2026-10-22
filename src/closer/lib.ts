@@ -48,8 +48,18 @@ export interface Negocio {
   proxima_acao: string | null;
   proxima_acao_em: string | null;
   motivo_perda: string | null;
-  status_contrato: string | null;
-  status_pagamento: string | null;
+  status_contrato: "enviado" | "visualizado" | "assinado" | "recusado" | "cancelado" | null;
+  contrato_enviado_em: string | null;
+  contrato_assinado_em: string | null;
+  status_pagamento: "enviado" | "parcial" | "pago" | "cancelado" | null;
+  pagamento_enviado_em: string | null;
+  pago_em: string | null;
+  // 0181: pagamento manual / pelo Financeiro
+  pagamento_link: string | null;
+  pagamento_link_em: string | null;
+  pagamento_link_origem: "closer" | "financeiro" | null;
+  pagamento_obs: string | null;
+  pagamento_solicitacao_id: string | null;
   proposta_id: string | null;
   ficha: Ficha | null;
   viagem_id: string | null;
@@ -108,6 +118,18 @@ export function erroAmigavel(e: unknown): string {
     "plano-vazio": "Monte o plano de pagamento (entrada e/ou parcelas).",
     "plano-ja-tem-pagamento": "O Financeiro já deu baixa em parcela desta venda — fale com o Financeiro pra mudar o plano.",
     "servico-invalido": "Escolha o tipo de serviço.",
+    // 0180 contrato / 0181 pagamento
+    "link-invalido": "Cole um link completo (começando com https://).",
+    "contrato-ja-assinado": "Este contrato já foi assinado.",
+    "sem-contrato": "Não tem contrato enviado pra cancelar.",
+    "valor-invalido": "Informe um valor maior que zero.",
+    "data-no-futuro": "A data do pagamento não pode ser no futuro.",
+    "parcela-nao-e-desta-venda": "Essa parcela não é desta venda.",
+    "parcela-ja-baixada": "Essa parcela já está paga (ou cancelada) no Financeiro.",
+    "modalidade-invalida": "Escolha o tipo de link.",
+    "parcelas-invalidas": "Parcelas: de 1 a 48.",
+    "pedido-ja-aberto": "Já tem um pedido de link aberto no Financeiro pra este cliente — acompanhe em Solicitações.",
+    "Você não é desse setor": "Só quem é do Comercial pede ao Financeiro por aqui.",
   };
   for (const [k, v] of Object.entries(mapa)) if (m.includes(k)) return v;
   const nb = m.match(/plano-nao-bate:([\d.]+)/);
