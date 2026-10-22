@@ -20,8 +20,10 @@ const TIPOS: Record<Alerta["tipo"], { rotulo: string; dica: string }> = {
   chamado: { rotulo: "Chamados vencidos", dica: "Passaram do prazo e não foram resolvidos." },
   embarque: { rotulo: "Embarques na semana", dica: "Conferir se está tudo pronto." },
   aniversario: { rotulo: "Aniversários", dica: "Nos próximos 7 dias — boa hora pra mandar uma mensagem." },
+  // 0184
+  preferencias: { rotulo: "Faltam preferências", dica: "Embarca em até 30 dias e nada anotado (gostos, alergias, restrições, ocasião). Anote no card ou marque “nada a registrar”." },
 };
-const ORDEM: Alerta["tipo"][] = ["passaporte", "sem_passaporte", "chamado", "tarefa", "documentos", "embarque", "aniversario"];
+const ORDEM: Alerta["tipo"][] = ["passaporte", "sem_passaporte", "chamado", "tarefa", "preferencias", "documentos", "embarque", "aniversario"];
 const TOM = { alta: "erro", media: "aviso", baixa: "neutro" } as const;
 const ROTULO_GRAV = { alta: "urgente", media: "atenção", baixa: "lembrete" } as const;
 

@@ -19,6 +19,7 @@ import { Aviso, Entrada } from "../ui";
 import { MarcaTipo } from "./MapaMundi";
 import { COR_SITUACAO, quandoTexto } from "./EtapasViagem";
 import AtividadesRel, { type ItemAtividade } from "./AtividadesRel";
+import { PREF_DIAS_ANTES, preferenciasDe, preferenciasVazias } from "../lib/operacao";
 
 type Aba = "atividades" | "esteira" | "viagem";
 type Item = ItemAtividade;
@@ -171,7 +172,7 @@ export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: str
   const [aba, setAbaEstado] = useState<Aba>(() => { try { const a = localStorage.getItem(CHAVE_ABA); return a === "esteira" || a === "viagem" ? a : "atividades"; } catch { return "atividades"; } });
   const setAba = (a: Aba) => { setAbaEstado(a); try { localStorage.setItem(CHAVE_ABA, a); } catch { /* sem memória */ } };
   const [busca, setBusca] = useState("");
-  const [dados, setDados] = useState<{ vs: Viagem[]; regs: Map<string, RegistroEtapa[]>; trechos: Map<string, Trecho[]> } | null>(null);
+  const [dados, setDados] = useState<{ vs: Viagem[]; regs: Map<string, RegistroEtapa[]>; trechos: Map<string, Trecho[]>; semPref: Set<string> } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [equipe, setEquipe] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => { listarEquipeRel().then(setEquipe).catch(() => setEquipe([])); }, []);
@@ -182,11 +183,14 @@ export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: str
       const hoje = hojeSP();
       // trechos só de quem embarca em até 3 dias ou está viajando (check-in e "em viagem")
       const perto = vs.filter((v) => v.fase === "em_viagem" || v.fase === "concluida" || (v.data_embarque && v.data_embarque <= somaDias(hoje, 3))).map((v) => v.id);
-      const [regs, ts] = await Promise.all([etapasDe(vs.map((v) => v.id)), trechosDasViagens(perto)]);
+      // 0184: quem embarca em até 30 dias sem preferências anotadas ganha o selo na lista
+      const logo = vs.filter((v) => v.data_embarque && v.data_embarque >= hoje && v.data_embarque <= somaDias(hoje, PREF_DIAS_ANTES)).map((v) => v.id);
+      const [regs, ts, prefs] = await Promise.all([etapasDe(vs.map((v) => v.id)), trechosDasViagens(perto), preferenciasDe(logo).catch(() => new Map())]);
+      const semPref = new Set(logo.filter((id) => { const p = prefs.get(id); return p ? preferenciasVazias(p.preferencias, p.necessidades) : false; }));
       const trechos = new Map<string, Trecho[]>();
       for (const t of ts) trechos.set(t.viagem_id, [...(trechos.get(t.viagem_id) ?? []), t]);
-      setDados({ vs, regs, trechos }); setErro(null);
-    } catch (e) { setErro(e instanceof Error ? e.message : "Não carregou."); setDados({ vs: [], regs: new Map(), trechos: new Map() }); }
+      setDados({ vs, regs, trechos, semPref }); setErro(null);
+    } catch (e) { setErro(e instanceof Error ? e.message : "Não carregou."); setDados({ vs: [], regs: new Map(), trechos: new Map(), semPref: new Set() }); }
   }, []);
   useEffect(() => { void carregar(); }, [carregar]);
 
@@ -207,8 +211,8 @@ export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: str
     <div className="w-full space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Esteira do Relacionamento</h1>
-          <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Pacotes · Passagem de bastão → Revisão → D-30 → D-7 → D-3 → Check-in → Em viagem → Retorno</p>
+          <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Minhas atividades</h1>
+          <p className="text-[13px]" style={{ color: "var(--ink3)" }}>A Esteira do Relacionamento · pacotes, aéreos e hotéis · Passagem de bastão → Revisão → D-30 → D-7 → D-3 → Check-in → Em viagem → Retorno</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div style={{ width: 240 }}><Entrada value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar cliente ou destino" aria-label="Buscar" /></div>
@@ -225,7 +229,7 @@ export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: str
       {erro && <Aviso tom="erro">{erro}</Aviso>}
       {!dados ? <div className="rel-card h-64 animate-pulse" style={{ background: "var(--card2)" }} /> : (
         <>
-          {aba === "atividades" && <AtividadesRel itens={itens} equipe={equipe} abrirViagem={onAbrirViagem} onMudou={() => void carregar()} />}
+          {aba === "atividades" && <AtividadesRel itens={itens} equipe={equipe} abrirViagem={onAbrirViagem} onMudou={() => void carregar()} semPreferencias={dados.semPref} />}
           {aba === "esteira" && <Quadro itens={itens} abrir={onAbrirViagem} />}
           {aba === "viagem" && <EmViagem itens={itens} abrir={onAbrirViagem} />}
           {semData > 0 && <p className="text-[12px]" style={{ color: "var(--ink3)" }}>{semData} viagem(ns) sem data de ida não entram na esteira — ajuste a data na viagem.</p>}

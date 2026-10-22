@@ -42,7 +42,8 @@ export interface Viagem {
   cliente_id: string | null;
   responsavel_id: string | null;
   bitrix_deal_id: string | null;
-  status: "ativa" | "cancelada";
+  /** arquivada (0146/0184): saiu das filas de trabalho — dá pra desfazer */
+  status: "ativa" | "cancelada" | "arquivada";
   observacoes: string | null;
   necessidades: string | null;
   origem: "bitrix" | "manual";
@@ -121,19 +122,22 @@ export async function classificarServico(id: string, servico: Servico | null, us
   if (error) throw error;
 }
 
-export interface PendenciasViagens { semData: number; classificar: number }
+export interface PendenciasViagens { semData: number; classificar: number; semDono: number }
 
 /** As duas caixinhas do painel: o que falta pro time arrumar (não conta como viagem). */
 export async function pendenciasViagens(): Promise<PendenciasViagens> {
-  const [a, b] = await Promise.all([
+  const [a, b, c] = await Promise.all([
     supabase.from("rel_viagens_v").select("id", { count: "exact", head: true })
       .eq("status", "ativa").eq("fase", "sem_data").in("acompanhamento", ["completo", "leve", "expedicao"]),
     supabase.from("rel_viagens_v").select("id", { count: "exact", head: true })
       .eq("status", "ativa").eq("acompanhamento", "classificar").in("fase", ["antes", "em_viagem", "sem_data"]),
+    // 0184: pacote/aéreo/hotel que vai acontecer e ninguém do time cuida
+    supabase.from("rel_viagens_v").select("id", { count: "exact", head: true })
+      .eq("status", "ativa").in("fase", ["antes", "em_viagem"]).in("acompanhamento", ["completo", "leve"]).is("responsavel_id", null),
   ]);
   if (a.error) throw a.error;
   if (b.error) throw b.error;
-  return { semData: a.count ?? 0, classificar: b.count ?? 0 };
+  return { semData: a.count ?? 0, classificar: b.count ?? 0, semDono: c.count ?? 0 };
 }
 
 export interface Passageiro {
@@ -205,7 +209,7 @@ export interface PedidoDocs {
 }
 
 export interface Alerta {
-  tipo: "passaporte" | "sem_passaporte" | "tarefa" | "documentos" | "chamado" | "aniversario" | "embarque";
+  tipo: "passaporte" | "sem_passaporte" | "tarefa" | "documentos" | "chamado" | "aniversario" | "embarque" | "preferencias";
   gravidade: "alta" | "media" | "baixa";
   cliente_id: string | null;
   viagem_id: string | null;
@@ -274,17 +278,21 @@ export function tamanhoLegivel(b: number | null | undefined): string {
 
 // ── Viagens ─────────────────────────────────────────────────────────────────
 
-export type FiltroViagens = "proximas" | "em_viagem" | "sem_data" | "classificar" | "concluidas" | "canceladas" | "todas";
+export type FiltroViagens = "proximas" | "em_viagem" | "minhas" | "sem_dono" | "sem_data" | "classificar" | "arquivadas" | "concluidas" | "canceladas" | "todas";
 
 /** Tira o que quebraria o filtro `or=(...)` do PostgREST. */
 const limparBusca = (t: string) => t.replace(/[,()*%\\:"']/g, " ").trim();
 
-export async function listarViagens(filtro: FiltroViagens, busca = ""): Promise<Viagem[]> {
+export async function listarViagens(filtro: FiltroViagens, busca = "", userId = ""): Promise<Viagem[]> {
   let q = supabase.from("rel_viagens_v").select("*").limit(500);
   // Próximas / Em viagem: só o que vai acontecer e pede acompanhamento (0148).
   // Sem data e sem classificação têm fila própria — não poluem a de trabalho.
   if (filtro === "proximas") q = q.eq("status", "ativa").eq("fase", "antes").in("acompanhamento", COM_ACOMPANHAMENTO).order("data_embarque", { ascending: true });
   else if (filtro === "em_viagem") q = q.eq("status", "ativa").eq("fase", "em_viagem").in("acompanhamento", COM_ACOMPANHAMENTO).order("data_retorno", { ascending: true });
+  // 0184: dono da viagem — as minhas (o que vai acontecer + sem data) e as sem dono (pacote/aéreo/hotel)
+  else if (filtro === "minhas") q = q.eq("status", "ativa").eq("responsavel_id", userId || "00000000-0000-0000-0000-000000000000").in("fase", ["antes", "em_viagem", "sem_data"]).order("data_embarque", { ascending: true, nullsFirst: false });
+  else if (filtro === "sem_dono") q = q.eq("status", "ativa").is("responsavel_id", null).in("fase", ["antes", "em_viagem"]).in("acompanhamento", ["completo", "leve"]).order("data_embarque", { ascending: true });
+  else if (filtro === "arquivadas") q = q.eq("status", "arquivada").order("atualizado_em", { ascending: false });
   else if (filtro === "sem_data") q = q.eq("status", "ativa").eq("fase", "sem_data").in("acompanhamento", COM_ACOMPANHAMENTO).order("criado_em", { ascending: false });
   else if (filtro === "classificar") q = q.eq("status", "ativa").eq("acompanhamento", "classificar").in("fase", ["antes", "em_viagem", "sem_data"]).order("data_embarque", { ascending: true, nullsFirst: false });
   else if (filtro === "concluidas") q = q.eq("fase", "concluida").order("data_retorno", { ascending: false });
@@ -297,7 +305,7 @@ export async function listarViagens(filtro: FiltroViagens, busca = ""): Promise<
   const l = (data ?? []) as Viagem[];
   // O que vai acontecer anda pelo PRÓXIMO VOO (0152): quem já está viajando e
   // tem conexão amanhã sobe; sem voo cadastrado, vale a data de embarque.
-  return filtro === "proximas" || filtro === "em_viagem" || filtro === "classificar"
+  return filtro === "proximas" || filtro === "em_viagem" || filtro === "classificar" || filtro === "sem_dono"
     ? l.sort((x, y) => momentoDoProximo(x) - momentoDoProximo(y))
     : l;
 }

@@ -477,8 +477,10 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
         </p>
       </div>
 
-      {pend && (pend.semData > 0 || pend.classificar > 0) && (
+      {pend && (pend.semData > 0 || pend.classificar > 0 || pend.semDono > 0) && (
         <div className="flex flex-wrap gap-2" role="group" aria-label="O que falta arrumar (não conta como viagem)">
+          {/* 0184: pacote/aéreo/hotel que vai acontecer e ninguém cuida */}
+          {pend.semDono > 0 && <Pendencia n={pend.semDono} titulo="sem dono" texto="ninguém do time cuida" onClick={onVerFila ? () => onVerFila("sem_dono") : undefined} />}
           {pend.classificar > 0 && <Pendencia n={pend.classificar} titulo="para classificar" texto="o Bitrix não diz o que foi vendido" onClick={onVerFila ? () => onVerFila("classificar") : undefined} />}
           {pend.semData > 0 && <Pendencia n={pend.semData} titulo="sem data de embarque" texto="preencher a ida no Bitrix" onClick={onVerFila ? () => onVerFila("sem_data") : undefined} />}
         </div>
