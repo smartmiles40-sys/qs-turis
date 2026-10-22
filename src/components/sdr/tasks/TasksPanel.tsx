@@ -446,16 +446,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // WhatsApp, só que aqui quem escondia era o front, não o banco.
     const leadsOwnerId = currentUser?.role === "closer" ? null : queueOwnerId;
     try {
+      // O selo "📝 N obs." conta só os leads que vieram pra tela (0195).
+      const leadsP = fetchQueueLeads(leadsOwnerId);   // paginado — leadsMap completo
       const [queueTasks, queueLeads, cadencesRes, usersData, productsRes, notesRes, contactedRes, scriptsData, availableData] = await Promise.all([
         fetchQueueTasks(queueOwnerId),   // paginado — nunca corta em 1000 (número real)
-        fetchQueueLeads(leadsOwnerId),   // paginado — leadsMap completo
+        leadsP,
         supabase.from("qs_cadences").select("*"),
         fetchQsUsers(),
         supabase.from("qs_products").select("*").eq("is_active", true).order("name"),
         // Paginadas e filtradas por dono (revisão 28/07): sem isso o painel via
         // 1.000 de 6.269 concluídas e o selo "sem contato" reaparecia em lead já
         // trabalhado. Ver fetchNoteCountsByLead/fetchContactedLeadIds.
-        fetchNoteCountsByLead(queueOwnerId),
+        leadsP.then((ls) => fetchNoteCountsByLead(queueOwnerId, ls.map((l) => l.id))),
         fetchContactedLeadIds(queueOwnerId),
         fetchCadenceScripts(), // roteiros por atividade da cadência (item 6 — script_text)
         fetchAvailableCadences(), // só disponíveis — dropdown do Cadastrar Lead (item 12)
@@ -517,10 +519,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const queueOwnerId = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
     const leadsOwnerId = currentUser?.role === "closer" ? null : queueOwnerId;  // ver loadData
     try {
+      const leadsP = fetchQueueLeads(leadsOwnerId);   // paginado
       const [queueTasks, queueLeads, notesRes, contactedRes] = await Promise.all([
         fetchQueueTasks(queueOwnerId),   // paginado (número real, sem teto de 1000)
-        fetchQueueLeads(leadsOwnerId),   // paginado
-        fetchNoteCountsByLead(queueOwnerId),
+        leadsP,
+        leadsP.then((ls) => fetchNoteCountsByLead(queueOwnerId, ls.map((l) => l.id))),
         fetchContactedLeadIds(queueOwnerId),
       ]);
       setTasks(queueTasks);
@@ -537,12 +540,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     let debounce: ReturnType<typeof setTimeout> | null = null;
     const onChange = () => {
       if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(refreshQueue, 1_200);
+      debounce = setTimeout(refreshQueue, 3_000);
     };
+    // 22/10: o SDR escuta SÓ os leads/tarefas DELE. Antes, qualquer mudança na
+    // base (de outro SDR, do sync do Bitrix, do WhatsApp) fazia TODOS os Painéis
+    // recarregarem tudo — era o que mais pesava no banco. Gestor/closer seguem
+    // vendo o time (o closer cobra desfecho em lead de SDR).
+    const soMeus = currentUser && !canSeeAllData(currentUser.role) && currentUser.role !== "closer" ? currentUser.id : null;
+    const filtro = soMeus ? { filter: `owner_id=eq.${soMeus}` } : {};
     const channel = supabase
       .channel("qs_fila_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "qs_tasks" }, onChange)
-      .on("postgres_changes", { event: "*", schema: "public", table: "qs_leads" }, onChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "qs_tasks", ...filtro }, onChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "qs_leads", ...filtro }, onChange)
       .subscribe();
     return () => {
       clearInterval(id);

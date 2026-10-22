@@ -1118,8 +1118,25 @@ function semVisao(error: { code?: string; message?: string } | null): boolean {
  * 11 idas ao banco e levava 30 segundos, só para contar. A visão da 0043 agrega
  * no banco e devolve ~800 linhas numa ida. O resultado é o mesmo.
  */
-export async function fetchNoteCountsByLead(ownerId: string | null): Promise<Map<string, number>> {
+export async function fetchNoteCountsByLead(ownerId: string | null, leadIds?: string[]): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
+
+  // 22/10 (0195): com os ids da fila, conta SÓ esses leads — a visão agregava as
+  // 45 mil observações da base a cada minuto (1,26 s por SDR, medido). Sem a
+  // função no banco ainda, cai no caminho da visão logo abaixo.
+  if (leadIds) {
+    if (leadIds.length === 0) return counts;
+    try {
+      for (let i = 0; i < leadIds.length; i += 500) {
+        const { data, error } = await supabase.rpc("qs_note_counts_por_leads", { p_leads: leadIds.slice(i, i + 500) });
+        if (error) throw error;
+        for (const r of (data || []) as { lead_id: string; total: number }[]) counts.set(r.lead_id, r.total ?? 0);
+      }
+      return counts;
+    } catch {
+      counts.clear();
+    }
+  }
 
   // Paginado desde 13/08: a base cruzou 1.000 leads (1.398 medidos) e a visão
   // passou do teto do PostgREST — sem o range, o selo voltava a mentir pro
