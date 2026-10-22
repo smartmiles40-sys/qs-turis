@@ -25,6 +25,7 @@ import { FIN_CSS } from "./ui";
 import AtendimentosPage, { FaixaDoAtendimento } from "./atendimentos/AtendimentosPage";
 import AtendimentoPage from "@/rel/atendimento/AtendimentoPage";
 import ModelosPage from "./modelos/ModelosPage";
+import ContasReceberPage from "./receber/ContasReceberPage";
 import { supabase } from "@/lib/supabase";
 import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
@@ -35,7 +36,8 @@ const PREFIXO = "fin";
 // (o WhatsApp do Relacionamento, só as conversas que estão com o Financeiro).
 // 20/10: solicitacoes (Central de Solicitações entre setores, 0149).
 // 19/10: modelos (o próprio time manda os modelos fin_* pra aprovação da Meta).
-const TELAS = ["inicio", "atendimentos", "conversas", "solicitacoes", "modelos", "equipe"] as const;
+// 22/10: receber (Contas a receber — parcelas da venda consolidada pelo closer, 0175).
+const TELAS = ["inicio", "atendimentos", "conversas", "solicitacoes", "receber", "modelos", "equipe"] as const;
 type Tela = (typeof TELAS)[number];
 interface Rota { tela: Tela; id?: string }
 
@@ -47,16 +49,18 @@ function lerRota(): Rota {
 export default function FinApp() {
   const { currentUser } = useQsAuth();
   const [rota, setRota] = useState<Rota>(lerRota);
-  const [cont, setCont] = useState<{ novos: number; esperando: number }>({ novos: 0, esperando: 0 });
+  const [cont, setCont] = useState<{ novos: number; esperando: number; atrasadas: number }>({ novos: 0, esperando: 0, atrasadas: 0 });
   const [central, recontarCentral] = useContagemSolicitacoes("financeiro");
 
   // Bolinhas do menu: atendimentos sem dono e conversas esperando resposta.
   const contar = useCallback(async () => {
-    const [a, c] = await Promise.all([
+    const [a, c, r] = await Promise.all([
       supabase.from("fin_atendimentos").select("id", { count: "exact", head: true }).eq("status", "novo"),
       supabase.from("rel_wa_fila").select("id", { count: "exact", head: true }).eq("setor", "financeiro").not("aguardando_desde", "is", null),
+      // Parcelas atrasadas (0175). Antes da migration aplicada a view não existe: conta 0.
+      supabase.from("fin_contas_receber_v").select("id", { count: "exact", head: true }).eq("situacao", "atrasado"),
     ]);
-    setCont({ novos: a.count ?? 0, esperando: c.count ?? 0 });
+    setCont({ novos: a.count ?? 0, esperando: c.count ?? 0, atrasadas: r.error ? 0 : r.count ?? 0 });
   }, []);
   useEffect(() => {
     void contar();
@@ -84,6 +88,9 @@ export default function FinApp() {
       { id: "atendimentos", rotulo: "Atendimentos", badge: cont.novos || undefined, alerta: true },
       { id: "conversas", rotulo: "Conversas (WhatsApp)", badge: cont.esperando || undefined },
       { id: "modelos", rotulo: "Modelos de mensagem" },
+    ] },
+    { id: "receber", rotulo: "Recebimentos", icone: ICONES_AREA.lista, itens: [
+      { id: "receber", rotulo: "Contas a receber", badge: cont.atrasadas || undefined, alerta: true },
     ] },
     { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
@@ -115,6 +122,7 @@ export default function FinApp() {
           )} />
       )}
       {rota.tela === "modelos" && <ModelosPage />}
+      {rota.tela === "receber" && <ContasReceberPage onMudou={() => void contar()} />}
       {rota.tela === "solicitacoes" && (
         <SolicitacoesPage setor="financeiro" abrirId={rota.id ?? null} onMudou={recontarCentral}
           onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })} />

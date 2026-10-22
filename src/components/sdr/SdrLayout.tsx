@@ -1,5 +1,6 @@
 // src/components/sdr/SdrLayout.tsx — QS (Qualificação System)
 import TrocarArea from "@/components/TrocarArea";
+import { abrirAreaCloser, podeAbrirAreaCloser } from "@/closer/lib";
 import { useState, useRef, useEffect, Component, Suspense, type ReactNode } from "react";
 import { useQsAuth, canAccessNav, telaInicial, ORDEM_EXECUCAO } from "@/contexts/QsAuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -597,6 +598,17 @@ export default function SdrLayout() {
                   </svg>
                   Configurar telefone
                 </button>
+                {/* Área do Closer (22/10): o closer já cai nela; a gestão abre por aqui. */}
+                {podeAbrirAreaCloser(currentUser) && (
+                  <button
+                    onClick={() => { setShowUserMenu(false); abrirAreaCloser(); }}
+                    className="w-full text-left px-4 py-2.5 text-[13px] font-semibold hover:bg-gray-50 transition-colors flex items-center gap-2"
+                    style={{ color: "#6D28D9" }}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: "#6D28D9" }} aria-hidden />
+                    Área do Closer (pipeline)
+                  </button>
+                )}
                 {/* Outras áreas que a pessoa tem (Relacionamento, Financeiro, Operações). */}
                 <TrocarArea atual="comercial" variante="menu" onAntes={() => setShowUserMenu(false)} />
                 <div className="my-1 border-t border-gray-100" />
@@ -721,6 +733,12 @@ export default function SdrLayout() {
                     Telefone
                   </button>
                 </div>
+                {podeAbrirAreaCloser(currentUser) && (
+                  <button onClick={() => { setMobileNavOpen(false); abrirAreaCloser(); }}
+                    className="w-full mb-2 flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-semibold text-white" style={{ background: "#6D28D9" }}>
+                    Área do Closer (pipeline)
+                  </button>
+                )}
                 <div className="mb-2"><TrocarArea atual="comercial" variante="bloco" onAntes={() => setMobileNavOpen(false)} /></div>
                 <button
                   onClick={() => { setMobileNavOpen(false); logout(); }}
