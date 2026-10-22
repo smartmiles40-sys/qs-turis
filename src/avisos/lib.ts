@@ -61,11 +61,11 @@ export interface PrefsAvisos {
   semBip: boolean;
   /** Não mostrar a notificação do Windows mesmo com permissão. */
   semWindows: boolean;
-  /** A pessoa usa a bolinha flutuante (pra oferecer reabrir). */
-  bolinha: boolean;
+  /** Esconder a bolinha flutuante (ela aparece por padrão). */
+  semBolinha: boolean;
 }
 const CHAVE_PREFS = "qs_avisos_prefs";
-const PADRAO: PrefsAvisos = { semBip: false, semWindows: false, bolinha: false };
+const PADRAO: PrefsAvisos = { semBip: false, semWindows: false, semBolinha: false };
 
 export function lerPrefs(): PrefsAvisos {
   try {
@@ -159,10 +159,6 @@ export const ROTULO_TIPO: Record<string, string> = {
   tarefas: "Tarefas",
 };
 
-/** Bolinha flutuante: só Chrome/Edge 116+ têm a "janela por cima de tudo". */
-export function temBolinha(): boolean {
-  return typeof window !== "undefined" && "documentPictureInPicture" in window;
-}
 export function temNotificacao(): boolean {
   return typeof window !== "undefined" && "Notification" in window;
 }

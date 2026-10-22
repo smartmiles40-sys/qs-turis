@@ -6,7 +6,7 @@
 //                          (Relacionamento, Financeiro, Operações, Closer).
 //   • ListaDeAvisos      → a lista (o Comercial pendura no sino que já existe,
 //                          o NotificationsPanel — não tem 2 sinos na tela).
-//   • AjustesDeAvisos    → bolinha flutuante, Windows e bip.
+//   • AjustesDeAvisos    → mostrar a bolinha, Windows e bip.
 // -----------------------------------------------------------------------------
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
@@ -88,28 +88,14 @@ export function ListaDeAvisos({ onDepoisDeAbrir, compacta }: { onDepoisDeAbrir?:
 /** Bolinha flutuante, notificação do Windows e bip. */
 export function AjustesDeAvisos() {
   const ctx = useAvisos();
-  const [erroBolinha, setErroBolinha] = useState<string | null>(null);
   if (!ctx) return null;
   const { prefs, mudarPrefs, permissao } = ctx;
   return (
     <div className="space-y-2.5 text-[12px]" style={{ color: "var(--ink2)" }}>
-      <div>
-        {ctx.bolinhaAberta ? (
-          <button onClick={ctx.fecharBolinha} className="w-full px-3 py-2 rounded-lg font-bold" style={{ background: "var(--card2)", color: "var(--ink)", border: "1px solid var(--line)" }}>
-            Fechar a bolinha flutuante
-          </button>
-        ) : (
-          <button onClick={async () => setErroBolinha(await ctx.abrirBolinha())} className="w-full px-3 py-2 rounded-lg font-bold text-white" style={{ background: "#0147FF" }}>
-            Abrir bolinha flutuante
-          </button>
-        )}
-        <p className="mt-1 leading-snug" style={{ color: "var(--ink3)" }}>
-          {ctx.bolinhaSuportada
-            ? "Uma janelinha redonda que fica por cima de tudo, até de outros programas. Arraste pela barrinha de cima. Ela fecha se o QS fechar."
-            : "Seu navegador não tem a bolinha flutuante. Use o Chrome ou o Edge atualizado."}
-        </p>
-        {erroBolinha && <p className="mt-1 font-semibold" style={{ color: "var(--err-ink)" }}>{erroBolinha}</p>}
-      </div>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" checked={!prefs.semBolinha} onChange={(e) => mudarPrefs({ semBolinha: !e.target.checked })} />
+        Mostrar a bolinha flutuante (arraste pra onde quiser)
+      </label>
 
       <div>
         {permissao === "granted" ? (
@@ -202,36 +188,26 @@ export default function SinoDeAvisos() {
           <div className="overflow-y-auto flex-1">
             <ListaDeAvisos onDepoisDeAbrir={() => setAberto(false)} />
           </div>
-          {!ajustes && !ctx.bolinhaAberta && ctx.bolinhaSuportada && (
-            <button onClick={() => void ctx.abrirBolinha()} className="flex-shrink-0 border-t px-4 py-2.5 text-[12px] font-semibold text-center"
-              style={{ borderColor: "var(--line)", color: "var(--accent)" }}>
-              Abrir bolinha flutuante (fica por cima de tudo)
-            </button>
-          )}
         </div>
       )}
     </>
   );
 }
 
-/** Item do menu do avatar (Comercial): abre/fecha a bolinha flutuante. */
+/** Item do menu do avatar (Comercial): mostra/esconde a bolinha flutuante. */
 export function BotaoBolinhaDoMenu({ onAntes }: { onAntes?: () => void }) {
   const ctx = useAvisos();
   if (!ctx) return null;
+  const visivel = !ctx.prefs.semBolinha;
   return (
     <button
-      onClick={async () => {
-        onAntes?.();
-        if (ctx.bolinhaAberta) { ctx.fecharBolinha(); return; }
-        const erro = await ctx.abrirBolinha();
-        if (erro) window.alert(erro);
-      }}
+      onClick={() => { onAntes?.(); ctx.mudarPrefs({ semBolinha: visivel }); }}
       className="w-full text-left px-4 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" />
       </svg>
-      {ctx.bolinhaAberta ? "Fechar bolinha de avisos" : "Abrir bolinha flutuante de avisos"}
+      {visivel ? "Esconder a bolinha de avisos" : "Mostrar a bolinha de avisos"}
     </button>
   );
 }
