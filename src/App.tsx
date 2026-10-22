@@ -4,6 +4,9 @@ import LoginPage from "@/components/sdr/auth/LoginPage";
 import { QsAuthProvider, useQsAuth } from "@/contexts/QsAuthContext";
 import { ChatAppDockProvider } from "@/contexts/ChatAppDockContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+// Avisos na tela (0196): sino, bip, bolinha flutuante e Windows — UM provider pro
+// app logado inteiro (fica por fora das cascas, pra bolinha não fechar ao trocar de área).
+import AvisosProvider from "@/avisos/AvisosProvider";
 
 // A área de Relacionamento é um app à parte (src/rel). Carrega só quando alguém
 // entra por ela: quem é do Comercial não baixa nada do Relacionamento.
@@ -122,29 +125,33 @@ function AppContent() {
     return <LoginPage />;
   }
 
-  if (area === "relacionamento" || area === "financeiro" || area === "operacional") {
-    return (
-      <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
-        {area === "relacionamento" ? <RelApp /> : area === "financeiro" ? <FinApp /> : <OpsApp />}
-      </Suspense>
-    );
-  }
+  return <AvisosProvider>{areaLogada()}</AvisosProvider>;
 
-  if (currentUser && (currentUser.role === "closer" || (hashCloser && podeAbrirAreaCloser(currentUser)))) {
+  function areaLogada() {
+    if (area === "relacionamento" || area === "financeiro" || area === "operacional") {
+      return (
+        <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
+          {area === "relacionamento" ? <RelApp /> : area === "financeiro" ? <FinApp /> : <OpsApp />}
+        </Suspense>
+      );
+    }
+
+    if (currentUser && (currentUser.role === "closer" || (hashCloser && podeAbrirAreaCloser(currentUser)))) {
+      return (
+        <ChatAppDockProvider>
+          <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
+            <CloserApp />
+          </Suspense>
+        </ChatAppDockProvider>
+      );
+    }
+
     return (
       <ChatAppDockProvider>
-        <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
-          <CloserApp />
-        </Suspense>
+        <SdrLayout />
       </ChatAppDockProvider>
     );
   }
-
-  return (
-    <ChatAppDockProvider>
-      <SdrLayout />
-    </ChatAppDockProvider>
-  );
 }
 
 export default function App() {

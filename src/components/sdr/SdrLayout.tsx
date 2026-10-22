@@ -88,6 +88,7 @@ const PipelineIAPage = lazyPagina(() => import("./gloria/PipelineIAPage"));
 const SolicitacoesPage = lazyPagina(() => import("@/solicitacoes/SolicitacoesPage"));
 const PropostasPage = lazyPagina(() => import("@/propostas/PropostasPage"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
+import { BotaoBolinhaDoMenu } from "@/avisos/SinoDeAvisos";
 import QsWaDock from "./wa/QsWaDock";
 import ErroDeParte from "./ErroDeParte";
 import AvisoDeVersao from "./AvisoDeVersao";
@@ -423,6 +424,28 @@ export default function SdrLayout() {
     navigate(origemDoLead ?? "leads");
   }
 
+  // AVISOS (0196): o aviso abre "#comercial/<tela>/<id>" — lead, solicitação,
+  // painel ou agenda. O Comercial não navega por endereço, então lê e limpa.
+  const abrirDoAviso = useRef<(h: string) => void>(() => undefined);
+  abrirDoAviso.current = (h: string) => {
+    const [, tela, id] = h.replace(/^#\/?/, "").split("/");
+    const alvo = id ? decodeURIComponent(id) : null;
+    if (tela === "lead" && alvo) openLeadDetail(alvo);
+    else if (tela === "solicitacoes" && canAccessNav(userRole, "solicitacoes")) { setSolicitacaoAberta(alvo); navigate("solicitacoes"); }
+    else if ((tela === "painel" || tela === "minha-agenda") && canAccessNav(userRole, tela)) navigate(tela);
+  };
+  useEffect(() => {
+    const ler = () => {
+      const h = window.location.hash;
+      if (!h.startsWith("#comercial/")) return;
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+      abrirDoAviso.current(h);
+    };
+    ler();
+    window.addEventListener("hashchange", ler);
+    return () => window.removeEventListener("hashchange", ler);
+  }, []);
+
   function openCadenceCreate() {
     setEditingCadenceId(null);
     setActiveNav("cadencia-criar");
@@ -588,6 +611,8 @@ export default function SdrLayout() {
                   </svg>
                   Trocar senha
                 </button>
+                {/* Avisos (0196): a bolinha que fica por cima de tudo */}
+                <BotaoBolinhaDoMenu onAntes={() => setShowUserMenu(false)} />
                 {/* Reabrir onboarding do telefone (BravoTech) */}
                 <button
                   onClick={reopenTelefoneOnboarding}

@@ -6,6 +6,9 @@ import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { CHANNEL_LABELS, SOURCE_LABELS } from "@/components/sdr/types";
 import type { ChannelType, LeadSource } from "@/components/sdr/types";
 import { loadWorkHours, overdueCutoff } from "@/lib/workHours";
+// Avisos (0196): solicitações, prazos e reuniões entram neste mesmo sino.
+import { useAvisos } from "@/avisos/AvisosProvider";
+import { AjustesDeAvisos, ListaDeAvisos } from "@/avisos/SinoDeAvisos";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -270,6 +273,8 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
   // de notificações), a marca de leitura vive no localStorage, por usuário.
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const ref = useRef<HTMLDivElement>(null);
+  const avisos = useAvisos();
+  const [ajustes, setAjustes] = useState(false);
 
   const dismissKey = currentUser ? `qs_notif_dismissed_${currentUser.id}` : null;
 
@@ -312,6 +317,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
 
   // Marca TODAS as notificações atuais como lidas de uma vez.
   function dismissAll() {
+    avisos?.marcarTodos();
     setDismissed((prev) => {
       const next = new Set(prev);
       overdue.forEach((t) => next.add(taskDismissKey(t.id)));
@@ -487,8 +493,9 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
   const visibleReceived = received.filter((h) => !dismissed.has(`handover:${h.id}`));
   const visibleSent = sent.filter((h) => !dismissed.has(`saiu:${h.id}`));
   const visibleHot = hotLeads.filter((l) => !dismissed.has(`lead:${l.id}`));
+  const totalAvisos = avisos?.total ?? 0;
   const total =
-    visibleOverdue.length + visibleToday.length + visibleMeetings.length + visibleReceived.length + visibleSent.length + visibleHot.length;
+    totalAvisos + visibleOverdue.length + visibleToday.length + visibleMeetings.length + visibleReceived.length + visibleSent.length + visibleHot.length;
 
   const badge = total > 9 ? "9+" : String(total);
 
@@ -540,11 +547,26 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                   Marcar todas como lidas
                 </button>
               )}
+              {avisos && (
+                <button
+                  onClick={() => setAjustes((v) => !v)}
+                  aria-expanded={ajustes}
+                  className="text-[11px] font-semibold text-gray-500 hover:text-gray-800 px-1.5 py-0.5 rounded"
+                  title="Bolinha flutuante, avisos do Windows e bip"
+                >
+                  Ajustes
+                </button>
+              )}
               {loading && (
                 <span className="w-3.5 h-3.5 border-2 border-gray-200 border-t-[#0147FF] rounded-full animate-spin" />
               )}
             </div>
           </div>
+          {ajustes && (
+            <div className="px-4 py-3 border-b border-gray-100 shrink-0" style={{ background: "var(--card2)" }}>
+              <AjustesDeAvisos />
+            </div>
+          )}
 
           {/* Corpo */}
           <div className="overflow-y-auto flex-1">
@@ -558,6 +580,19 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
               </div>
             ) : (
               <>
+                {/* 0. Avisos (0196): solicitações, prazos, reuniões — com bip e bolinha. */}
+                {totalAvisos > 0 && (
+                  <div className="pb-2 border-b border-gray-50">
+                    <SectionHeader
+                      icon={<IconBell />}
+                      label="Avisos"
+                      count={totalAvisos}
+                      color="#0147FF"
+                      bg="#EEF4FF"
+                    />
+                    <ListaDeAvisos compacta onDepoisDeAbrir={() => setOpen(false)} />
+                  </div>
+                )}
                 {/* 1. Follow-ups atrasados — a linha abre o LEAD certo (item 7). */}
                 {visibleOverdue.length > 0 && (
                   <div className="pb-2 border-b border-gray-50">
