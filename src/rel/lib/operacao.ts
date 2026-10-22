@@ -20,6 +20,8 @@ import type { Servico, Viagem } from "./viagens";
 function erroLegivel(e: { message?: string } | null): Error {
   const m = e?.message || "Falhou.";
   if (/row-level|permission denied/i.test(m)) return new Error("Sem permissão para isso.");
+  // tela publicada antes da migration 0184: o PostgREST responde em inglês ("Could not find the function…")
+  if (/could not find|schema cache|does not exist/i.test(m)) return new Error("Falta aplicar a atualização do banco (migration 0184). Avise o Bruno.");
   return new Error(m);
 }
 

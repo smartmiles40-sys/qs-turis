@@ -68,7 +68,7 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   // "✓ Feito" mostra um aviso com DESFAZER por alguns segundos
-  const [feito, setFeito] = useState<{ viagemId: string; etapa: EtapaId; texto: string } | null>(null);
+  const [feito, setFeito] = useState<{ viagemId: string; etapa: EtapaId; texto: string; antes: RegistroEtapa | null } | null>(null);
   useEffect(() => { if (!feito) return; const t = setTimeout(() => setFeito(null), 10_000); return () => clearTimeout(t); }, [feito]);
   // gestão: várias viagens sem dono → "Atribuir a…" de uma vez
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -100,21 +100,26 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
     const e = it.atual;
     if (!e) return;
     const def = ETAPA[e.id];
+    // o que já estava anotado na etapa (checklist pela metade, observação, alteração registrada) não se perde
+    const antes = e.registro ?? null;
+    const jaTinhaAlteracao = antes?.houve_alteracao === true;
     setOcupado(it.v.id); setErro(null);
     try {
       await concluirEtapa({
         viagemId: it.v.id, etapa: e.id, userId: eu,
         checklist: def.checklist.map((item) => ({ item, feito: true })),
-        houveAlteracao: def.perguntaAlteracao ? false : null, obs: null,
+        houveAlteracao: def.perguntaAlteracao ? jaTinhaAlteracao : null,
+        alteracao: jaTinhaAlteracao ? antes?.alteracao ?? null : null,
+        obs: antes?.obs ?? null,
       });
-      setFeito({ viagemId: it.v.id, etapa: e.id, texto: `${def.nome} · ${nomeDe(it.v)} concluída${def.perguntaAlteracao ? " (sem alteração na reserva)" : ""}.` });
+      setFeito({ viagemId: it.v.id, etapa: e.id, antes, texto: `${def.nome} · ${nomeDe(it.v)} concluída${def.perguntaAlteracao && !jaTinhaAlteracao ? " (sem alteração na reserva)" : ""}.` });
       onMudou();
     } catch (er) { setErro(er instanceof Error ? er.message : "Não concluiu."); }
     finally { setOcupado(null); }
   }
   async function desfazer() {
     if (!feito) return;
-    try { await desfazerEtapa(feito.viagemId, feito.etapa, eu); setFeito(null); onMudou(); }
+    try { await desfazerEtapa(feito.viagemId, feito.etapa, eu, { antes: feito.antes }); setFeito(null); onMudou(); }
     catch (er) { setErro(er instanceof Error ? er.message : "Não desfez."); }
   }
   async function atribuirLote() {

@@ -206,7 +206,8 @@ grant execute on function rel_desarquivar_viagens(uuid, uuid[]) to authenticated
 -- "necessidade especial" antiga (texto livre que vem do Bitrix).
 create or replace function rel_preferencias_vazias(p jsonb, p_necessidades text)
 returns boolean language sql immutable set search_path = public as $$
-  select coalesce((p->>'nada_a_registrar')::boolean, false) is false
+  -- compara como jsonb (sem ::boolean): um valor torto gravado pela tela não derruba a view de alertas inteira
+  select coalesce(p->'nada_a_registrar' = 'true'::jsonb, false) is false
      and length(trim(coalesce(p_necessidades, ''))) = 0
      and length(trim(concat(p->>'gostos', p->>'alergias', p->>'restricoes', p->>'ocasiao', p->>'outros'))) = 0
 $$;
