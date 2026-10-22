@@ -478,3 +478,7 @@ html.qs-app-narrow .qs-navbtn { display: flex !important; }
     transition-duration: .01ms !important;
   }
 }
+
+/* Bolinha do QS (app do computador, ?bolinha=1): a janela é transparente —
+   só a bolinha / o cartão aparecem por cima dos outros programas. */
+html.qs-bolinha, html.qs-bolinha body, html.qs-bolinha #root { background: transparent !important; min-height: 0; overflow: hidden; }

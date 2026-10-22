@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import SdrLayout from "@/components/sdr/SdrLayout";
 import LoginPage from "@/components/sdr/auth/LoginPage";
-import { QsAuthProvider, useQsAuth } from "@/contexts/QsAuthContext";
+import { QsAuthProvider, setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
 import { ChatAppDockProvider } from "@/contexts/ChatAppDockContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 // Avisos na tela (0196): sino, bip, bolinha flutuante e Windows — UM provider pro
@@ -19,6 +19,28 @@ const OpsApp = lazy(() => import("@/ops/OpsApp"));
 // menu do Comercial (#closer). Fica dentro da porta do Comercial — ver src/closer.
 const CloserApp = lazy(() => import("@/closer/CloserApp"));
 import { ehHashDoCloser, podeAbrirAreaCloser } from "@/closer/lib";
+import type { Setor } from "@/components/sdr/types";
+
+// Bolinha do QS (22/10/2026): o app do computador abre "<QS>/?bolinha=1" e
+// desenha só a bolinha flutuante — nada das áreas. Ver src/bolinha.
+const BolinhaApp = lazy(() => import("@/bolinha/BolinhaApp"));
+const MODO_BOLINHA = (() => {
+  try { return new URLSearchParams(window.location.search).get("bolinha") === "1"; } catch { return false; }
+})();
+
+/**
+ * Área pelo começo do endereço (#rel/…, #fin/…, #ops/…, #comercial/…, #closer/…).
+ * A Bolinha do QS abre o QS no navegador já num endereço desses: sem isto, o QS
+ * abriria na última área usada e o endereço de outra área não levaria a nada.
+ */
+function areaDoHash(): Setor | null {
+  const p = window.location.hash.replace(/^#\/?/, "").split("/")[0];
+  if (p === "rel") return "relacionamento";
+  if (p === "fin") return "financeiro";
+  if (p === "ops") return "operacional";
+  if (p === "comercial" || p === "closer") return "comercial";
+  return null;
+}
 
 // Páginas PÚBLICAS do Relacionamento (sem login): o cliente manda documentos
 // e responde a pesquisa pós-viagem por um link com token. Abrem antes de
@@ -62,7 +84,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 function AppContent() {
-  const { isAuthenticated, loading, bootFalhou, area, currentUser } = useQsAuth();
+  const { isAuthenticated, loading, bootFalhou, area, currentUser, trocarArea } = useQsAuth();
   // Gestão abre a Área do Closer pelo endereço #closer (o closer cai nela sempre).
   const [hashCloser, setHashCloser] = useState(ehHashDoCloser);
   useEffect(() => {
@@ -70,6 +92,17 @@ function AppContent() {
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
+  // Endereço de outra área da pessoa (link aberto pela Bolinha do QS): troca de área.
+  useEffect(() => {
+    if (!currentUser) return;
+    const on = () => {
+      const alvo = areaDoHash();
+      if (alvo && alvo !== area && setoresDe(currentUser).includes(alvo)) trocarArea(alvo);
+    };
+    on();
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, [currentUser, area, trocarArea]);
 
   // ── O SERVIDOR NÃO RESPONDEU ──────────────────────────────────────────────
   // Em 20/08 o gateway do Supabase ficou inalcançável da rede do escritório por
@@ -157,6 +190,18 @@ function AppContent() {
 export default function App() {
   const publica = paginaPublica();
   if (publica) return <ErrorBoundary>{publica}</ErrorBoundary>;
+  // Bolinha: sem ThemeProvider (é sempre clara) e sem as áreas; o login é o dela.
+  if (MODO_BOLINHA) {
+    return (
+      <ErrorBoundary>
+        <QsAuthProvider>
+          <Suspense fallback={null}>
+            <BolinhaApp />
+          </Suspense>
+        </QsAuthProvider>
+      </ErrorBoundary>
+    );
+  }
   return (
     <ErrorBoundary>
       <ThemeProvider>
