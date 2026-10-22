@@ -18,20 +18,27 @@ import { supabase } from "@/lib/supabase";
 import { setoresDe } from "@/contexts/QsAuthContext";
 import type { Setor, SdrUser } from "@/components/sdr/types";
 
-export type EstadoJanela = "bolinha" | "painel";
+export type EstadoJanela = "bolinha" | "menu" | "painel";
+/** Onde está o centro da bolinha dentro da janela (no menu, a janela é maior que a bolinha). */
+export interface LayoutJanela { estado: EstadoJanela; cx: number; cy: number }
 
 /** O que o app do computador (preload do Electron) põe na janela. */
 export interface QsDesktop {
   versao: string;
   expandir(): void;
   recolher(): void;
+  /** Os 5 atalhos flutuando em volta da bolinha (versão 1.1 do app). */
+  menu?(): void;
+  layout?(): Promise<LayoutJanela>;
+  /** No menu: o mouse está em cima de um ícone? (fora deles o clique atravessa a janela) */
+  clicavel?(sim: boolean): void;
   estado(): Promise<EstadoJanela>;
   arrastarInicio(): void;
   arrastarFim(): void;
   /** Abre o QS no navegador padrão já nesse endereço (#…). */
   abrirNoQS(hash: string): void;
   sair(): void;
-  onMudouEstado(cb: (e: EstadoJanela) => void): () => void;
+  onMudouEstado(cb: (e: EstadoJanela, info?: LayoutJanela) => void): () => void;
 }
 
 declare global {

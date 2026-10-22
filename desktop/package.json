@@ -1,7 +1,7 @@
 {
   "name": "qs-bolinha",
   "productName": "Bolinha do QS",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Bolinha flutuante do QS na área de trabalho do Windows (atalhos rápidos por cima de todas as janelas).",
   "author": "Se Tu For, Eu Vou! Viagens",
   "private": true,

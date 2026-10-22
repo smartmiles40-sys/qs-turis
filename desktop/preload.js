@@ -8,7 +8,10 @@
 // Contrato (combinado com src/bolinha/ no app web — não mudar sem mudar lá):
 //   versao: string
 //   expandir(): void          recolher(): void
-//   estado(): Promise<'bolinha'|'painel'>
+//   estado(): Promise<'bolinha'|'menu'|'painel'>
+//   menu(): void              (os 5 atalhos flutuando em volta da bolinha)
+//   layout(): Promise<{ estado, cx, cy }>  (centro da bolinha dentro da janela)
+//   clicavel(sim): void       (no menu: o mouse está em cima de um ícone?)
 //   arrastarInicio(): void    arrastarFim(): void   (mousedown / mouseup na bolinha)
 //   abrirNoQS(hash): void     (hash começando com '#', abre no navegador padrão)
 //   sair(): void
@@ -20,6 +23,9 @@ contextBridge.exposeInMainWorld("qsDesktop", {
   versao: ipcRenderer.sendSync("qs:versao"),
   expandir: () => ipcRenderer.send("qs:expandir"),
   recolher: () => ipcRenderer.send("qs:recolher"),
+  menu: () => ipcRenderer.send("qs:menu"),
+  layout: () => ipcRenderer.invoke("qs:layout"),
+  clicavel: (sim) => ipcRenderer.send("qs:clicavel", !!sim),
   estado: () => ipcRenderer.invoke("qs:estado"),
   arrastarInicio: () => ipcRenderer.send("qs:arrastar-inicio"),
   arrastarFim: () => ipcRenderer.send("qs:arrastar-fim"),
@@ -29,7 +35,7 @@ contextBridge.exposeInMainWorld("qsDesktop", {
   sair: () => ipcRenderer.send("qs:sair"),
   onMudouEstado: (cb) => {
     if (typeof cb !== "function") return () => {};
-    const ouvinte = (_evento, e) => cb(e);
+    const ouvinte = (_evento, e, info) => cb(e, info);
     ipcRenderer.on("qs:estado", ouvinte);
     return () => ipcRenderer.removeListener("qs:estado", ouvinte);
   },

@@ -41,7 +41,10 @@ const QS_ORIGEM = new URL(QS_URL).origin;
 const URL_BOLINHA = `${QS_URL}/?bolinha=1`;
 
 const BOLINHA = { width: 64, height: 64 };
-const PAINEL = { width: 380, height: 560 };
+const PAINEL = { width: 360, height: 500 };
+// Menu "AssistiveTouch": os 5 atalhos flutuam em volta da bolinha. A janela
+// cresce pra este quadrado TRANSPARENTE e deixa o clique passar onde não tem ícone.
+const MENU = { width: 340, height: 340 };
 const MARGEM = 24; // distância da borda na posição inicial
 const PARTICAO = "persist:qs-bolinha";
 const TENTAR_DE_NOVO_MS = 30 * 1000;
@@ -49,6 +52,8 @@ const ATUALIZAR_A_CADA_MS = 6 * 60 * 60 * 1000;
 
 // Sem isso o Windows não mostra as notificações nativas (toast) do app.
 if (process.platform === "win32") app.setAppUserModelId("br.com.setuforeuvou.qsbolinha");
+// O bip de aviso novo toca sem a pessoa ter clicado antes na bolinha.
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
 // ---------------------------------------------------------------------------
 // Preferências salvas (posição da bolinha, iniciar com o Windows)
@@ -106,8 +111,45 @@ function posicionar(x, y, tam) {
   janela.setBounds({ x: Math.round(x), y: Math.round(y), width: tam.width, height: tam.height });
 }
 
+// Onde está o CENTRO da bolinha dentro da janela (a página desenha a bolinha
+// ali no menu, mesmo quando a janela encostou na borda do monitor).
+let centro = { cx: BOLINHA.width / 2, cy: BOLINHA.height / 2 };
+function layout() {
+  return { estado, cx: centro.cx, cy: centro.cy };
+}
 function avisarEstado() {
-  if (janela && !janela.isDestroyed()) janela.webContents.send("qs:estado", estado);
+  if (janela && !janela.isDestroyed()) janela.webContents.send("qs:estado", estado, layout());
+}
+
+// Clique "atravessa" a parte transparente da janela (só no menu). A página
+// avisa quando o mouse está em cima de um ícone (qs:clicavel).
+function atravessar(sim) {
+  if (!janela) return;
+  if (sim) janela.setIgnoreMouseEvents(true, { forward: true });
+  else janela.setIgnoreMouseEvents(false);
+}
+
+function abrirMenu() {
+  if (!janela || estado === "menu") return;
+  pararArrasto();
+  const b = janela.getBounds();
+  if (estado === "bolinha") posicaoBolinha = { x: b.x, y: b.y };
+  const p = posicaoValida(posicaoBolinha) ? posicaoBolinha : posicaoPadrao();
+  const area = screen.getDisplayMatching({ ...p, ...BOLINHA }).workArea;
+  const cxTela = p.x + BOLINHA.width / 2;
+  const cyTela = p.y + BOLINHA.height / 2;
+  let x = cxTela - MENU.width / 2;
+  let y = cyTela - MENU.height / 2;
+  x = Math.min(Math.max(x, area.x), area.x + area.width - MENU.width);
+  y = Math.min(Math.max(y, area.y), area.y + area.height - MENU.height);
+  // Encostada na borda: o círculo de atalhos inteiro "desencosta" (a bolinha
+  // vai pro meio do quadrado) — senão os ícones daquele lado ficariam cortados.
+  centro = { cx: MENU.width / 2, cy: MENU.height / 2 };
+  estado = "menu";
+  posicionar(x, y, MENU);
+  atravessar(true);
+  janela.focus();
+  avisarEstado();
 }
 
 // ---------------------------------------------------------------------------
@@ -116,8 +158,10 @@ function avisarEstado() {
 function expandir() {
   if (!janela || estado === "painel") return;
   pararArrasto();
-  const b = janela.getBounds();
-  posicaoBolinha = { x: b.x, y: b.y };
+  atravessar(false);
+  if (estado === "bolinha") { const atual = janela.getBounds(); posicaoBolinha = { x: atual.x, y: atual.y }; }
+  const pb = posicaoValida(posicaoBolinha) ? posicaoBolinha : posicaoPadrao();
+  const b = { ...pb, ...BOLINHA };
   const area = screen.getDisplayMatching(b).workArea;
   const centroX = b.x + b.width / 2;
   const centroY = b.y + b.height / 2;
@@ -137,8 +181,10 @@ function expandir() {
 function recolher() {
   if (!janela || estado === "bolinha") return;
   pararArrasto();
+  atravessar(false);
   const p = posicaoValida(posicaoBolinha) ? posicaoBolinha : posicaoPadrao();
   estado = "bolinha";
+  centro = { cx: BOLINHA.width / 2, cy: BOLINHA.height / 2 };
   posicionar(p.x, p.y, BOLINHA);
   avisarEstado();
 }
@@ -288,7 +334,10 @@ function criarJanela() {
     }
   });
   janela.on("blur", () => {
+    if (process.env.QS_DEBUG) console.log("blur", estado);
     if (arrasto) arrastarFim();
+    // Clicou fora dos ícones (em outro programa): o menu se fecha sozinho.
+    if (estado === "menu") recolher();
   });
 
   const wc = janela.webContents;
@@ -402,6 +451,9 @@ function registrarIPC() {
   ipcMain.on("qs:expandir", (e) => daBolinha(e) && expandir());
   ipcMain.on("qs:recolher", (e) => daBolinha(e) && recolher());
   ipcMain.handle("qs:estado", () => estado);
+  ipcMain.handle("qs:layout", () => layout());
+  ipcMain.on("qs:menu", (e) => daBolinha(e) && abrirMenu());
+  ipcMain.on("qs:clicavel", (e, sim) => { if (process.env.QS_DEBUG) console.log("clicavel", sim, estado); if (daBolinha(e) && estado === "menu") atravessar(!sim); });
   ipcMain.on("qs:arrastar-inicio", (e) => daBolinha(e) && arrastarInicio());
   ipcMain.on("qs:arrastar-fim", (e) => daBolinha(e) && arrastarFim());
   ipcMain.on("qs:abrir-no-qs", (e, hash) => {

@@ -5,11 +5,12 @@
 // endereço tem ?bolinha=1 (é o que o app do computador abre — ver lib.ts).
 //
 //   • Recolhida (64×64): círculo azul com o número de avisos novos (cinza-escuro
-//     com o sino quando não tem nenhum); pulsa quando chega aviso. Arrastar
-//     move a janela (o app do computador faz o movimento); clique sem arrastar
-//     abre o painel.
-//   • Aberta (380×560): grade de 6 botões redondos — Avisos, Nova solicitação,
-//     Buscar, Hoje, Perguntar e Abrir o QS.
+//     com o sino quando não tem nenhum); pulsa e apita quando chega aviso.
+//     Arrastar move a janela (o app do computador faz o movimento).
+//   • Clique: os 5 atalhos SAEM FLUTUANDO em volta dela (Bruno 22/10: "igual
+//     a bolinha da Apple, sem tela branca") — Avisos, Nova solicitação,
+//     Buscar, Hoje e Perguntar. Clique fora ou no X fecha.
+//   • Escolheu um atalho: um cartão pequeno (360×500) só com aquilo.
 //   • Sem login: um login compacto (a janela abre sozinha pra ele aparecer).
 //
 // Os avisos (Realtime, bip, notificação do Windows) vêm do MESMO AvisosProvider
@@ -30,7 +31,9 @@ const CSS = `
 html.qs-bolinha, html.qs-bolinha body, html.qs-bolinha #root { background: transparent !important; min-height: 0; overflow: hidden; }
 @keyframes qsb-pulso { 0% { box-shadow: 0 0 0 0 rgba(1,71,255,.55); transform: scale(1); } 40% { transform: scale(1.08); } 100% { box-shadow: 0 0 0 16px rgba(1,71,255,0); transform: scale(1); } }
 .qsb-pulso { animation: qsb-pulso 1.1s ease-out 2; }
-@media (prefers-reduced-motion: reduce) { .qsb-pulso { animation: none; } }
+@keyframes qsb-sai { from { transform: translate(calc(-50% + var(--qsb-x)), calc(-50% + var(--qsb-y))) scale(.3); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+.qsb-sai { animation: qsb-sai .22s cubic-bezier(.2,.9,.3,1.2) both; }
+@media (prefers-reduced-motion: reduce) { .qsb-pulso, .qsb-sai { animation: none; } }
 `;
 
 // ── Ícones ──────────────────────────────────────────────────────────────────
@@ -53,23 +56,37 @@ const ICONE = {
   minimizar: <line x1="5" y1="12" x2="19" y2="12" />,
 };
 
-// ── Estado da janela (bolinha × painel) ────────────────────────────────────
+// ── Estado da janela (bolinha × menu × painel) ─────────────────────────────
 
 function useJanela() {
   const d = desktop();
-  // No navegador comum (sem o app) o painel aparece direto, pra testar.
-  const [estado, setEstado] = useState<EstadoJanela>(d ? "bolinha" : "painel");
+  // No navegador comum (sem o app) o menu aparece direto no meio da tela, pra testar.
+  const [estado, setEstado] = useState<EstadoJanela>(d ? "bolinha" : "menu");
+  const [centro, setCentro] = useState<{ cx: number; cy: number } | null>(null);
   useEffect(() => {
     const app = desktop();
     if (!app) return;
     let vivo = true;
-    app.estado().then((e) => { if (vivo) setEstado(e); }).catch(() => undefined);
-    const desligar = app.onMudouEstado((e) => setEstado(e));
+    if (app.layout) app.layout().then((l) => { if (vivo) { setEstado(l.estado); setCentro({ cx: l.cx, cy: l.cy }); } }).catch(() => undefined);
+    else app.estado().then((e) => { if (vivo) setEstado(e); }).catch(() => undefined);
+    const desligar = app.onMudouEstado((e, info) => {
+      setEstado(e);
+      if (info) setCentro({ cx: info.cx, cy: info.cy });
+    });
     return () => { vivo = false; try { desligar(); } catch { /* ok */ } };
   }, []);
+  // App antigo (sem menu): cai no painel.
+  const menu = useCallback(() => {
+    const app = desktop();
+    if (app && !app.menu) { setEstado("painel"); app.expandir(); return; }
+    setEstado("menu"); app?.menu?.();
+  }, []);
   const expandir = useCallback(() => { setEstado("painel"); desktop()?.expandir(); }, []);
-  const recolher = useCallback(() => { setEstado("bolinha"); desktop()?.recolher(); }, []);
-  return { estado, expandir, recolher, noComputador: !!d };
+  const recolher = useCallback(() => {
+    if (!desktop()) { setEstado("menu"); return; } // no navegador não tem "bolinha sozinha"
+    setEstado("bolinha"); desktop()?.recolher();
+  }, []);
+  return { estado, centro, menu, expandir, recolher, noComputador: !!d };
 }
 
 // ── Raiz ────────────────────────────────────────────────────────────────────
@@ -86,12 +103,12 @@ export default function BolinhaApp() {
     html.style.colorScheme = "light";
   }, []);
 
-  // Sem login: abre o painel UMA vez pra pessoa ver onde entrar.
+  // Sem login: abre o cartão UMA vez pra pessoa ver onde entrar.
   const abriuProLogin = useRef(false);
   useEffect(() => {
     if (loading || isAuthenticated || abriuProLogin.current) return;
     abriuProLogin.current = true;
-    if (janela.estado === "bolinha") janela.expandir();
+    if (janela.estado !== "painel") janela.expandir();
   }, [loading, isAuthenticated, janela]);
 
   let corpo: ReactNode;
@@ -101,7 +118,7 @@ export default function BolinhaApp() {
         <BolinhaLogada user={currentUser} janela={janela} />
       </AvisosProvider>
     );
-  } else if (janela.estado === "bolinha") {
+  } else if (janela.estado !== "painel") {
     corpo = <Bolinha total={0} mais={false} pulso={0} onAbrir={janela.expandir} />;
   } else {
     corpo = (
@@ -130,28 +147,42 @@ export default function BolinhaApp() {
 }
 
 type Janela = ReturnType<typeof useJanela>;
-type Tela = "inicio" | "avisos" | "nova" | "buscar" | "hoje" | "perguntar";
-const TITULO: Record<Tela, string> = {
-  inicio: "QS", avisos: "Avisos", nova: "Nova solicitação", buscar: "Buscar", hoje: "Hoje", perguntar: "Perguntar",
-};
+type Tela = "avisos" | "nova" | "buscar" | "hoje" | "perguntar";
+
+/** Os 5 atalhos — a ordem é a da volta em torno da bolinha, começando em cima. */
+const ATALHOS: { id: Tela; rotulo: string; icone: ReactNode; cor: string }[] = [
+  { id: "avisos", rotulo: "Avisos", icone: ICONE.sino, cor: AZUL },
+  { id: "nova", rotulo: "Nova solicitação", icone: ICONE.nova, cor: "#0E7C6A" },
+  { id: "buscar", rotulo: "Buscar", icone: ICONE.buscar, cor: "#6D28D9" },
+  { id: "hoje", rotulo: "Hoje", icone: ICONE.hoje, cor: "#B45309" },
+  { id: "perguntar", rotulo: "Perguntar", icone: ICONE.perguntar, cor: "#DB2777" },
+];
 
 function BolinhaLogada({ user, janela }: { user: SdrUser; janela: Janela }) {
   const ctx = useAvisos();
-  const [tela, setTela] = useState<Tela>("inicio");
+  const [tela, setTela] = useState<Tela>("avisos");
   // A conversa do "Perguntar" fica guardada enquanto a bolinha estiver aberta.
   const [conversa, setConversa] = useState<MensagemChat[]>([]);
   const total = ctx?.total ?? 0;
+  const mais = !!ctx?.maisQueLimite;
+  const pulso = ctx?.pulso ?? 0;
 
   if (janela.estado === "bolinha") {
-    return <Bolinha total={total} mais={!!ctx?.maisQueLimite} pulso={ctx?.pulso ?? 0} onAbrir={janela.expandir} />;
+    return <Bolinha total={total} mais={mais} pulso={pulso} onAbrir={janela.menu} />;
+  }
+  if (janela.estado === "menu") {
+    return (
+      <MenuFlutuante total={total} mais={mais} pulso={pulso} centro={janela.centro}
+        onFechar={janela.recolher} onEscolher={(t) => { setTela(t); janela.expandir(); }} />
+    );
   }
 
+  const atalho = ATALHOS.find((a) => a.id === tela)!;
   return (
-    <Cartao titulo={TITULO[tela]} janela={janela} onVoltar={tela === "inicio" ? undefined : () => setTela("inicio")}
+    <Cartao titulo={atalho.rotulo} icone={atalho.icone} cor={atalho.cor} janela={janela} onVoltar={janela.menu}
       cheio={tela === "perguntar"}>
-      {tela === "inicio" && <Inicio user={user} total={total} mais={!!ctx?.maisQueLimite} ir={setTela} />}
       {tela === "avisos" && <TelaAvisos />}
-      {tela === "nova" && <TelaNova user={user} onFechar={() => setTela("inicio")} />}
+      {tela === "nova" && <TelaNova user={user} onFechar={janela.menu} />}
       {tela === "buscar" && <TelaBuscar user={user} />}
       {tela === "hoje" && <TelaHoje user={user} />}
       {tela === "perguntar" && <TelaPerguntar conversa={conversa} setConversa={setConversa} />}
@@ -159,9 +190,9 @@ function BolinhaLogada({ user, janela }: { user: SdrUser; janela: Janela }) {
   );
 }
 
-// ── A bolinha (64×64) ──────────────────────────────────────────────────────
+// ── O pulso da bolinha quando chega aviso ──────────────────────────────────
 
-function Bolinha({ total, mais, pulso, onAbrir }: { total: number; mais: boolean; pulso: number; onAbrir: () => void }) {
+function usePulsando(pulso: number) {
   const [pulsando, setPulsando] = useState(false);
   const primeiro = useRef(pulso);
   useEffect(() => {
@@ -171,6 +202,38 @@ function Bolinha({ total, mais, pulso, onAbrir }: { total: number; mais: boolean
     const t = setTimeout(() => setPulsando(false), 2400);
     return () => { cancelAnimationFrame(a); clearTimeout(t); };
   }, [pulso]);
+  return pulsando;
+}
+
+/** O círculo em si (o mesmo na bolinha recolhida e no meio do menu). */
+function Circulo({ total, mais, pulsando, aberto }: { total: number; mais: boolean; pulsando: boolean; aberto?: boolean }) {
+  const tem = total > 0;
+  return (
+    <span className={`relative w-14 h-14 rounded-full flex flex-col items-center justify-center text-white border-2 border-white/80 ${pulsando ? "qsb-pulso" : ""}`}
+      style={{ background: aberto ? ESCURO : tem ? AZUL : ESCURO, boxShadow: "0 2px 10px rgba(15,23,42,.4)" }}>
+      {aberto ? (
+        <Svg tam={22}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Svg>
+      ) : tem ? (
+        <span className="text-[19px] font-extrabold leading-none">{mais ? "50+" : total}</span>
+      ) : (
+        <>
+          <Svg tam={18}>{ICONE.sino}</Svg>
+          <span className="text-[9px] font-bold leading-none mt-0.5 tracking-wide">QS</span>
+        </>
+      )}
+      {aberto && tem && (
+        <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-red-600 text-white text-[10.5px] font-bold flex items-center justify-center border-2 border-white">
+          {mais ? "50+" : total}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ── A bolinha (64×64) ──────────────────────────────────────────────────────
+
+function Bolinha({ total, mais, pulso, onAbrir }: { total: number; mais: boolean; pulso: number; onAbrir: () => void }) {
+  const pulsando = usePulsando(pulso);
 
   // Arrastar: o app do computador move a janela entre arrastarInicio/arrastarFim.
   // Clique = soltou em menos de 300 ms e andou menos de 5 px (coordenadas da TELA,
@@ -193,115 +256,122 @@ function Bolinha({ total, mais, pulso, onAbrir }: { total: number; mais: boolean
   }
 
   const tem = total > 0;
-  const rotulo = tem ? `${mais ? `${total}+` : total} aviso${total === 1 && !mais ? "" : "s"} novo${total === 1 && !mais ? "" : "s"} — abrir` : "QS — abrir";
+  const rotulo = tem ? `${mais ? `${total}+` : total} aviso${total === 1 && !mais ? "" : "s"} novo${total === 1 && !mais ? "" : "s"} — abrir os atalhos` : "QS — abrir os atalhos";
   return (
     <div className="w-16 h-16 flex items-center justify-center select-none">
-      <button
-        type="button"
-        aria-label={rotulo}
-        title={rotulo}
+      <button type="button" aria-label={rotulo} title={rotulo}
         onMouseDown={onMouseDown}
         onClick={() => { if (!desktop()) onAbrir(); }}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onAbrir(); } }}
-        className={`w-14 h-14 rounded-full flex flex-col items-center justify-center text-white border-2 border-white/80 cursor-pointer ${pulsando ? "qsb-pulso" : ""}`}
-        style={{ background: tem ? AZUL : ESCURO, boxShadow: "0 2px 8px rgba(15,23,42,.35)" }}
-      >
-        {tem ? (
-          <span className="text-[19px] font-extrabold leading-none">{mais ? "50+" : total}</span>
-        ) : (
-          <>
-            <Svg tam={18}>{ICONE.sino}</Svg>
-            <span className="text-[9px] font-bold leading-none mt-0.5 tracking-wide">QS</span>
-          </>
-        )}
+        className="rounded-full cursor-pointer focus:outline-none">
+        <Circulo total={total} mais={mais} pulsando={pulsando} />
       </button>
     </div>
   );
 }
 
-// ── O cartão do painel (380×560) ───────────────────────────────────────────
+// ── O menu: os 5 atalhos flutuando em volta da bolinha ─────────────────────
 
-function Cartao({ titulo, janela, onVoltar, cheio, children }: {
-  titulo: string; janela: Janela; onVoltar?: () => void; cheio?: boolean; children: ReactNode;
+const RAIO = 96;
+
+function MenuFlutuante({ total, mais, pulso, centro, onFechar, onEscolher }: {
+  total: number; mais: boolean; pulso: number; centro: { cx: number; cy: number } | null;
+  onFechar: () => void; onEscolher: (t: Tela) => void;
 }) {
+  const pulsando = usePulsando(pulso);
   const app = desktop();
-  const caixa = (
-    <div className="w-full h-full flex flex-col rounded-2xl overflow-hidden border border-slate-300 bg-slate-50 text-slate-900"
-      style={{ fontFamily: "inherit" }}>
-      <header className="flex items-center gap-1 px-2 h-12 bg-white border-b border-slate-200 flex-shrink-0">
-        {onVoltar ? (
-          <button type="button" onClick={onVoltar} aria-label="Voltar" title="Voltar" className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-600 hover:bg-slate-100">
-            <Svg tam={20}>{ICONE.voltar}</Svg>
-          </button>
-        ) : (
-          <span className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[11px] font-extrabold" style={{ background: AZUL }}>QS</span>
-        )}
-        <h1 className="flex-1 min-w-0 truncate text-[15px] font-bold px-1">{titulo}</h1>
-        {(
-          <button type="button" onClick={janela.recolher} aria-label="Recolher a bolinha" title="Recolher"
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-600 hover:bg-slate-100">
-            <Svg tam={20}>{ICONE.minimizar}</Svg>
-          </button>
-        )}
-      </header>
-      <main className={`flex-1 min-h-0 px-3 py-3 ${cheio ? "flex flex-col" : "overflow-y-auto"}`}>{children}</main>
-      {app && (
-        <footer className="flex-shrink-0 flex items-center justify-between px-3 py-1.5 border-t border-slate-200 bg-white">
-          <span className="text-[10.5px] text-slate-400">Bolinha do QS{app.versao ? ` · v${app.versao}` : ""}</span>
-          <button type="button" onClick={() => { try { app.sair(); } catch { /* ok */ } }} className="text-[11px] text-slate-500 hover:text-red-600">
-            Sair da bolinha
-          </button>
-        </footer>
-      )}
-    </div>
-  );
-  // No app do computador a janela JÁ é do tamanho do cartão; no navegador, um cartão no meio da tela.
-  if (app) return <div className="w-screen h-screen">{caixa}</div>;
+  // No app: a janela é um quadrado transparente; o clique só "pega" em cima
+  // de um ícone — fora deles atravessa pro programa de baixo.
+  useEffect(() => {
+    if (!app?.clicavel) return;
+    let ultimo: boolean | null = null;
+    const on = (e: MouseEvent) => {
+      const sim = !!(e.target as Element | null)?.closest?.("[data-clicavel]");
+      if (sim !== ultimo) { ultimo = sim; app.clicavel?.(sim); }
+    };
+    window.addEventListener("mousemove", on);
+    return () => window.removeEventListener("mousemove", on);
+  }, [app]);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onFechar(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onFechar]);
+
+  const c = app && centro ? centro : null;
+  const estilo = c ? { left: c.cx, top: c.cy } : { left: "50%", top: "50%" };
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#E2E8F0" }}>
-      <div style={{ width: 380, height: 560 }}>{caixa}</div>
+    <div className={app ? "fixed inset-0 select-none" : "fixed inset-0 select-none"} style={app ? undefined : { background: "#CBD5E1" }}>
+      <div className="absolute" style={estilo}>
+        {ATALHOS.map((a, i) => {
+          const ang = (-90 + i * (360 / ATALHOS.length)) * (Math.PI / 180);
+          const x = Math.cos(ang) * RAIO;
+          const y = Math.sin(ang) * RAIO;
+          const contador = a.id === "avisos" && total ? (mais ? `${total}+` : String(total)) : null;
+          return (
+            <button key={a.id} type="button" data-clicavel onClick={() => onEscolher(a.id)}
+              className="qsb-sai absolute flex flex-col items-center gap-1 focus:outline-none group"
+              style={{ left: x, top: y, transform: "translate(-50%, -50%)", animationDelay: `${i * 35}ms`, ["--qsb-x" as string]: `${-x}px`, ["--qsb-y" as string]: `${-y}px` }}>
+              <span className="relative w-[52px] h-[52px] rounded-full flex items-center justify-center text-white border-2 border-white/80 transition-transform group-hover:scale-110 group-focus-visible:ring-4 group-focus-visible:ring-blue-200"
+                style={{ background: a.cor, boxShadow: "0 3px 12px rgba(15,23,42,.4)" }}>
+                <Svg tam={24}>{a.icone}</Svg>
+                {contador && (
+                  <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-red-600 text-white text-[10.5px] font-bold flex items-center justify-center border-2 border-white">
+                    {contador}
+                  </span>
+                )}
+              </span>
+              <span className="whitespace-nowrap px-2 py-0.5 rounded-full text-[11px] font-semibold text-white"
+                style={{ background: "rgba(15,23,42,.82)" }}>{a.rotulo}</span>
+            </button>
+          );
+        })}
+        <button type="button" data-clicavel onClick={onFechar} aria-label="Fechar os atalhos" title="Fechar"
+          className="absolute rounded-full focus:outline-none" style={{ left: 0, top: 0, transform: "translate(-50%, -50%)" }}>
+          <Circulo total={total} mais={mais} pulsando={pulsando} aberto />
+        </button>
+      </div>
     </div>
   );
 }
 
-// ── Início: a grade de botões redondos ─────────────────────────────────────
+// ── O cartão de um atalho (360×500) ────────────────────────────────────────
 
-function Inicio({ user, total, mais, ir }: { user: SdrUser; total: number; mais: boolean; ir: (t: Tela) => void }) {
-  const nome = (user.name ?? "").trim().split(/\s+/)[0] || "";
-  const botoes: { id: Tela | "abrir"; rotulo: string; icone: ReactNode; cor: string; contador?: string }[] = [
-    { id: "avisos", rotulo: "Avisos", icone: ICONE.sino, cor: AZUL, contador: total ? (mais ? `${total}+` : String(total)) : undefined },
-    { id: "nova", rotulo: "Nova solicitação", icone: ICONE.nova, cor: "#0E7C6A" },
-    { id: "buscar", rotulo: "Buscar", icone: ICONE.buscar, cor: "#6D28D9" },
-    { id: "hoje", rotulo: "Hoje", icone: ICONE.hoje, cor: "#B45309" },
-    { id: "perguntar", rotulo: "Perguntar", icone: ICONE.perguntar, cor: "#DB2777" },
-    { id: "abrir", rotulo: "Abrir o QS", icone: ICONE.abrir, cor: ESCURO },
-  ];
-  return (
-    <div>
-      <p className="text-[15px] font-semibold text-slate-900 px-1">{nome ? `Oi, ${nome}!` : "Oi!"}</p>
-      <p className="text-[12.5px] text-slate-500 px-1 mb-5">
-        {total ? `Você tem ${mais ? `mais de ${total}` : total} aviso${total === 1 ? "" : "s"} novo${total === 1 ? "" : "s"}.` : "Nenhum aviso novo por enquanto."}
-      </p>
-      <div className="grid grid-cols-3 gap-y-6 gap-x-2">
-        {botoes.map((b) => (
-          <button key={b.id} type="button" onClick={() => (b.id === "abrir" ? abrirNoQS(rotas.inicio()) : ir(b.id))}
-            className="group flex flex-col items-center gap-1.5 focus:outline-none">
-            <span className="relative w-[68px] h-[68px] rounded-full flex items-center justify-center text-white shadow-sm transition-transform group-hover:scale-105 group-focus-visible:ring-4 group-focus-visible:ring-blue-200"
-              style={{ background: b.cor }}>
-              <Svg tam={28}>{b.icone}</Svg>
-              {b.contador && (
-                <span className="absolute -top-1 -right-1 min-w-[22px] h-[22px] px-1 rounded-full bg-red-600 text-white text-[11px] font-bold flex items-center justify-center border-2 border-white">
-                  {b.contador}
-                </span>
-              )}
-            </span>
-            <span className="text-[12px] font-semibold text-slate-700 text-center leading-tight">{b.rotulo}</span>
+function Cartao({ titulo, icone, cor, janela, onVoltar, cheio, children }: {
+  titulo: string; icone?: ReactNode; cor?: string; janela: Janela; onVoltar?: () => void; cheio?: boolean; children: ReactNode;
+}) {
+  const app = desktop();
+  const caixa = (
+    <div className="w-full h-full flex flex-col rounded-3xl overflow-hidden bg-slate-50 text-slate-900"
+      style={{ fontFamily: "inherit", boxShadow: "0 8px 28px rgba(15,23,42,.35)" }}>
+      <header className="flex items-center gap-2 px-2.5 h-12 bg-white flex-shrink-0 border-b border-slate-100">
+        {onVoltar && (
+          <button type="button" onClick={onVoltar} aria-label="Voltar aos atalhos" title="Voltar aos atalhos"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-100">
+            <Svg tam={20}>{ICONE.voltar}</Svg>
           </button>
-        ))}
-      </div>
-      <p className="text-[11px] text-slate-400 text-center mt-7 px-2">
-        {setoresDe(user).length > 1 ? "Os avisos de todas as suas áreas chegam aqui." : "Os avisos chegam aqui mesmo com o QS fechado."}
-      </p>
+        )}
+        <span className="w-7 h-7 rounded-full flex items-center justify-center text-white flex-shrink-0" style={{ background: cor ?? AZUL }}>
+          {icone ? <Svg tam={15}>{icone}</Svg> : <span className="text-[10px] font-extrabold">QS</span>}
+        </span>
+        <h1 className="flex-1 min-w-0 truncate text-[15px] font-bold">{titulo}</h1>
+        <button type="button" onClick={() => abrirNoQS(rotas.inicio())} aria-label="Abrir o QS" title="Abrir o QS no navegador"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100">
+          <Svg tam={17}>{ICONE.abrir}</Svg>
+        </button>
+        <button type="button" onClick={janela.recolher} aria-label="Recolher a bolinha" title="Recolher"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-100">
+          <Svg tam={20}>{ICONE.minimizar}</Svg>
+        </button>
+      </header>
+      <main className={`flex-1 min-h-0 px-3 py-3 ${cheio ? "flex flex-col" : "overflow-y-auto"}`}>{children}</main>
+    </div>
+  );
+  // No app a janela é um pouco maior que o cartão (sobra pra sombra).
+  if (app) return <div className="w-screen h-screen p-2">{caixa}</div>;
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#E2E8F0" }}>
+      <div style={{ width: 360, height: 500 }}>{caixa}</div>
     </div>
   );
 }

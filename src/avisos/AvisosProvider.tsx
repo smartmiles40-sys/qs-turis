@@ -102,14 +102,15 @@ export default function AvisosProvider({ children, modoBolinha, abrirFora }: {
     if (!pegarVez(a.id)) return; // outra aba já tocou
     if (!prefsRef.current.semBip) bip();
     // A bolinha mora DENTRO do QS: com o QS escondido, quem avisa é o Windows.
-    const escondida = document.hidden || !document.hasFocus();
+    // No app do computador a bolinha está sempre à vista: só o bip + o número.
+    const escondida = !modoBolinha && (document.hidden || !document.hasFocus());
     if (escondida && !prefsRef.current.semWindows && temNotificacao() && Notification.permission === "granted") {
       try {
         const n = new Notification(a.titulo, { body: a.texto ?? "", tag: `qs-aviso-${a.id}`, icon: "/favicon.svg" });
         n.onclick = () => { window.focus(); abrirRef.current(a); n.close(); };
       } catch { /* alguns navegadores só deixam via service worker — fica o bip */ }
     }
-  }, []);
+  }, [modoBolinha]);
 
   // ── Carga inicial + Realtime filtrado ──────────────────────────────────────
   const recarregar = useCallback(() => {
