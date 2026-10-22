@@ -28,11 +28,19 @@ const hora = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: 
 const nomeDoGrupo = (g: Grupo) => g.nome?.trim() || "Grupo sem nome";
 const ASSINATURA = /^\*[^*\n]{1,80}:\*\n/;
 
-function useRepetir(fn: () => void, ms: number) {
+/** Enquanto a aba está visível, roda `fn` a cada `ms`. Uma de cada vez:
+ *  se a anterior ainda não voltou (banco lento), pula esta volta em vez de empilhar (22/10). */
+function useRepetir(fn: () => unknown, ms: number) {
   const ref = useRef(fn);
   ref.current = fn;
   useEffect(() => {
-    const t = setInterval(() => { if (!document.hidden) ref.current(); }, ms);
+    let rodando = false;
+    const vez = () => {
+      if (document.hidden || rodando) return;
+      rodando = true;
+      void Promise.resolve().then(() => ref.current()).catch(() => undefined).finally(() => { rodando = false; });
+    };
+    const t = setInterval(vez, ms);
     return () => clearInterval(t);
   }, [ms]);
 }

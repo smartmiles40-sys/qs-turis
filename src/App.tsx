@@ -1,5 +1,4 @@
 import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from "react";
-import SdrLayout from "@/components/sdr/SdrLayout";
 import LoginPage from "@/components/sdr/auth/LoginPage";
 import { QsAuthProvider, useQsAuth } from "@/contexts/QsAuthContext";
 import { ChatAppDockProvider } from "@/contexts/ChatAppDockContext";
@@ -18,6 +17,10 @@ const OpsApp = lazy(() => import("@/ops/OpsApp"));
 // Área do Closer (22/10/2026): o closer cai direto nela; admin/gestor abrem pelo
 // menu do Comercial (#closer). Fica dentro da porta do Comercial — ver src/closer.
 const CloserApp = lazy(() => import("@/closer/CloserApp"));
+// Comercial (22/10/2026, desempenho): o SDR também baixa a casca dele sob demanda —
+// antes ela vinha no pedaço principal e quem é do Rel/Financeiro/Operações
+// baixava o Painel do SDR inteiro (tarefas, WhatsApp, agenda) sem nunca abrir.
+const SdrLayout = lazy(() => import("@/components/sdr/SdrLayout"));
 import { ehHashDoCloser, podeAbrirAreaCloser } from "@/closer/lib";
 
 // Páginas PÚBLICAS do Relacionamento (sem login): o cliente manda documentos
@@ -148,7 +151,9 @@ function AppContent() {
 
     return (
       <ChatAppDockProvider>
-        <SdrLayout />
+        <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
+          <SdrLayout />
+        </Suspense>
       </ChatAppDockProvider>
     );
   }

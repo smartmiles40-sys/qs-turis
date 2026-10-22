@@ -84,15 +84,21 @@ const MAX_FIXADAS = 3;
 /** O que a página manda pro painel da conversa quando é um atalho dele. */
 const EVENTO_ATALHO = "rel-wa-atalho";
 
-/** Enquanto a aba está visível, roda `fn` a cada `ms`. */
-function useRepetir(fn: () => void, ms: number) {
+/** Enquanto a aba está visível, roda `fn` a cada `ms` (e ao voltar pra aba). Uma de cada vez:
+ *  se a anterior ainda não voltou (banco lento), pula esta volta em vez de empilhar (22/10). */
+function useRepetir(fn: () => unknown, ms: number) {
   const ref = useRef(fn);
   ref.current = fn;
   useEffect(() => {
-    const t = setInterval(() => { if (!document.hidden) ref.current(); }, ms);
-    const volta = () => { if (!document.hidden) ref.current(); };
-    document.addEventListener("visibilitychange", volta);
-    return () => { clearInterval(t); document.removeEventListener("visibilitychange", volta); };
+    let rodando = false;
+    const vez = () => {
+      if (document.hidden || rodando) return;
+      rodando = true;
+      void Promise.resolve().then(() => ref.current()).catch(() => undefined).finally(() => { rodando = false; });
+    };
+    const t = setInterval(vez, ms);
+    document.addEventListener("visibilitychange", vez);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", vez); };
   }, [ms]);
 }
 
@@ -584,7 +590,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   useEffect(() => { listarRespostas().then(setRespostas); minhasFavoritas().then(setFavoritas).catch(() => undefined); }, []);
   const carregarChamados = useCallback(() => { chamadosDaConversa(id).then(setChamados).catch(() => setChamados([])); }, [id]);
   useEffect(() => { setChamados([]); carregarChamados(); }, [carregarChamados]);
-  useRepetir(() => { void recarregar(); }, 5000);
+  useRepetir(recarregar, 5000);
 
   // Prévia do arquivo antes de enviar.
   useEffect(() => {
@@ -1254,7 +1260,7 @@ export default function AtendimentoPage({ setor = "relacionamento", extraCabecal
     const t = setTimeout(() => { void carregar(); }, busca ? 300 : 0);
     return () => clearTimeout(t);
   }, [carregar, busca]);
-  useRepetir(() => { void carregar(); }, 10_000);
+  useRepetir(carregar, 10_000);
   useEffect(() => { statusDoNumero().then(setNumero).catch(() => setNumero(null)); carregarOrganizacao(); }, [carregarOrganizacao]);
   useEffect(() => { localStorage.setItem("rel_notas_abertas", notas ? "1" : "0"); }, [notas]);
   useEffect(() => { if (!aviso) return; const t = setTimeout(() => setAviso(null), 3200); return () => clearTimeout(t); }, [aviso]);
