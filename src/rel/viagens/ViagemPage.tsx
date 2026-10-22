@@ -35,6 +35,7 @@ import { BotaoPedirOutroSetor, PedidosSobre } from "@/solicitacoes/PedirOutroSet
 import ConferirVoos from "./ConferirVoos";
 import DonoViagem, { HistoricoViagem } from "./DonoViagem";
 import PreferenciasViagem from "./PreferenciasViagem";
+import FichaFechamentoResumo from "@/closer/FichaFechamentoResumo";
 import { desarquivarViagens } from "../lib/operacao";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 
@@ -467,6 +468,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
           <Secao titulo="Preferências do cliente">
             <PreferenciasViagem key={`${v.id}${versao}`} viagemId={v.id} necessidades={v.necessidades} diasParaEmbarque={v.dias_para_embarque} ativa={ativa} equipe={equipe} />
           </Secao>
+
+          {/* 0176: o que o closer consolidou (itens, plano de pagamento, preferências). Sem venda consolidada não aparece nada. */}
+          <FichaFechamentoResumo viagemId={v.id} />
 
           <Secao titulo="Do Comercial para o Relacionamento">
             {v.observacoes ? (
