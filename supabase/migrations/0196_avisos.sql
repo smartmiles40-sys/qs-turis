@@ -104,12 +104,15 @@ end $$;
 
 -- Quem RECEBE pedidos de um setor: ativos com o setor em qs_users.setores, sem
 -- os admins (que têm todos os setores). Setor sem ninguém além de admin → admins.
+-- Marketing também fica de fora: tem "comercial" nos setores, mas é espectador
+-- e nem tem a Central no menu (canAccessNav) — o aviso abriria tela nenhuma.
 create or replace function qs_avisos_recebedores(p_setor text)
 returns setof uuid
 language sql stable security definer set search_path = public as $$
   with gente as (
     select id, role from qs_users
      where is_active and p_setor = any(coalesce(setores, '{}'))
+       and role <> 'marketing'
   )
   select id from gente where role <> 'admin'
   union all
@@ -212,12 +215,15 @@ begin
             'Solicitação ' || n || ' precisa de ajuste seu', sobre,
             qs_avisos_link_sol(new.de_setor, new.criado_por, new.id), 'qs_solicitacoes', new.id::text,
             'sol_st:' || new.id || ':ajuste:' || t);
-        elsif old.status = 'nova' and new.status = 'em_andamento' and new.responsavel_id is not null then
+        -- (revisão) só quando o DONO muda: depois de um ajuste o pedido volta
+        -- a "nova" com o mesmo dono, e o "aceitar" de novo não é novidade.
+        elsif old.status = 'nova' and new.status = 'em_andamento' and new.responsavel_id is not null
+              and new.responsavel_id is distinct from old.responsavel_id then
           perform qs_aviso_criar(new.criado_por, 'solicitacao', new.de_setor,
             'Pegaram sua solicitação ' || n,
             coalesce((select name from qs_users where id = new.responsavel_id), 'Alguém') || ' está cuidando: ' || sobre,
             qs_avisos_link_sol(new.de_setor, new.criado_por, new.id), 'qs_solicitacoes', new.id::text,
-            'sol_st:' || new.id || ':aceita:' || t);
+            'sol_st:' || new.id || ':aceita:' || new.responsavel_id);
         end if;
       end if;
 
@@ -334,6 +340,8 @@ begin
            (s.prazo <= now()) venceu
       from qs_solicitacoes s
      where s.status in ('nova', 'em_andamento', 'aguardando')
+       -- esperando AJUSTE de quem pediu: a bola não está com o dono, não cobra ele
+       and not (s.status = 'aguardando' and s.aguardando_quem = 'solicitante')
        and s.prazo > now() - interval '2 hours' and s.prazo <= now() + interval '30 minutes'
   loop
     begin

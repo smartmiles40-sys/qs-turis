@@ -15,7 +15,7 @@ O mesmo aviso nunca chega 2 vezes: cada um tem uma chave única por pessoa.
 
 | Acontece | Quem é avisado |
 |---|---|
-| Pedido novo para um setor | Quem é do setor de destino (`qs_users.setores`), **menos os admins** (eles têm os 4 setores e virariam spam). Se o setor só tiver admin, aí avisa os admins. Quem criou não recebe. |
+| Pedido novo para um setor | Quem é do setor de destino (`qs_users.setores`), **menos os admins** (eles têm os 4 setores e virariam spam) e menos o Marketing (só assiste, não tem a Central no menu). Se o setor só tiver admin, aí avisa os admins. Quem criou não recebe. |
 | Pedido passado para alguém | A pessoa que recebeu o pedido |
 | Alguém pegou o pedido | Quem pediu ("Pegaram sua solicitação") |
 | Concluída / cotação entregue | Quem pediu (na cotação: "dê o desfecho") |

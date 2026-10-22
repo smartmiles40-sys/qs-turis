@@ -117,11 +117,20 @@ export default function AvisosProvider({ children }: { children: ReactNode }) {
   // ── Carga inicial + Realtime filtrado ──────────────────────────────────────
   const recarregar = useCallback(() => {
     if (!userId) return;
-    carregarNaoLidos(userId).then(setAvisos).catch((e) => console.warn("[avisos] carregar:", e));
+    carregarNaoLidos(userId).then((lista) => {
+      // (revisão) um aviso que chegou pelo Realtime ENQUANTO a consulta estava
+      // no caminho não vem nela: mantém os mais novos que o mais novo da consulta.
+      const maior = lista.reduce((m, a) => Math.max(m, a.id), 0);
+      setAvisos((atual) => {
+        const novos = atual.filter((a) => a.id > maior);
+        return novos.length ? [...novos, ...lista].slice(0, LIMITE + 1) : lista;
+      });
+    }).catch((e) => console.warn("[avisos] carregar:", e));
   }, [userId]);
 
   useEffect(() => {
-    if (!userId) { setAvisos([]); return; }
+    setAvisos([]); // trocou de pessoa: nada da anterior fica na tela
+    if (!userId) return;
     recarregar();
     let primeiraConexao = true;
     const canal = supabase
@@ -212,6 +221,10 @@ export default function AvisosProvider({ children }: { children: ReactNode }) {
     mudarPrefs({ bolinha: false });
     pip?.close();
   }, [pip, mudarPrefs]);
+
+  // (revisão) saiu do QS (logout) com a bolinha aberta: o provider desmonta e a
+  // janelinha ficaria vazia por cima de tudo. Fecha junto.
+  useEffect(() => () => { try { pipRef.current?.close(); } catch { /* já fechou */ } }, []);
 
   useEffect(() => {
     const on = () => { saindo.current = true; };
