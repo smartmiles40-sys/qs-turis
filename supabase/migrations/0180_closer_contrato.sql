@@ -251,7 +251,9 @@ begin
   -- Já está no mesmo status ou o novo é "pra trás": nada muda (idempotente).
   if c.status = p_status
      or (c.status = 'assinado')
-     or (c.status in ('recusado','cancelado') and p_status <> 'assinado')
+     or (c.status = 'cancelado' and p_status <> 'assinado')
+     -- Recusado ainda pode ser cancelado pelo closer (fecha o envio de vez).
+     or (c.status = 'recusado' and p_status not in ('assinado','cancelado'))
      or (p_status <> 'erro' and contrato_status_ordem(p_status) < contrato_status_ordem(c.status))
      or (p_status = 'erro' and c.status <> 'gerando') then
     return c.status;
@@ -312,6 +314,15 @@ begin
   if not found then raise exception 'negocio-nao-encontrado'; end if;
   if not closer_pode_mexer(n.closer_id) then raise exception 'sem-permissao'; end if;
   if n.etapa = 'perdido' then raise exception 'negocio-perdido'; end if;
+
+  -- O servidor pode estar gerando um contrato automático agora (linha 'gerando',
+  -- trava de um por cartão). Esquecido há mais de 3 min = a função caiu: vira
+  -- erro e libera. Recente: espera (senão o insert abaixo estoura a trava).
+  update qs_contratos set status = 'erro', erro = 'Tempo esgotado ao gerar.'
+   where negocio_id = n.id and status = 'gerando' and criado_em < now() - interval '3 minutes';
+  if p_acao in ('enviado','assinado') and exists (select 1 from qs_contratos where negocio_id = n.id and status = 'gerando') then
+    raise exception 'contrato-sendo-gerado';
+  end if;
 
   select * into c from qs_contratos
    where negocio_id = n.id and status not in ('erro','cancelado','gerando')

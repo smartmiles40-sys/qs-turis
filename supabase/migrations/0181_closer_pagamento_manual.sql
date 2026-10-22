@@ -78,7 +78,9 @@ begin
     end if;
     update qs_closer_negocios set
       status_pagamento = 'pago',
-      pago_em = coalesce(p_data::timestamptz, now()),
+      -- Meio-dia no horário de Brasília: p_data::timestamptz seria meia-noite UTC
+      -- (21h do dia ANTERIOR aqui) e a tela mostraria a data errada.
+      pago_em = coalesce((p_data + time '12:00') at time zone 'America/Sao_Paulo', now()),
       pagamento_obs = coalesce(v_obs, pagamento_obs)
      where id = n.id;
     insert into qs_closer_negocio_eventos (negocio_id, tipo, texto, autor_id)
