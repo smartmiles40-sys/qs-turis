@@ -354,3 +354,11 @@ export function textoVenda(v: VendaDoCliente): string {
   const passou = v.fase === "concluida" ? " (já foi)" : v.status !== "ativa" ? " (cancelada)" : "";
   return `${v.titulo}${v.destino && v.destino !== v.titulo ? ` — ${v.destino}` : ""} · ${data}${passou}${v.bitrix_deal_id ? ` · #${v.bitrix_deal_id}` : ""}`;
 }
+
+/** WhatsApp de quem pediu (qs_users.whatsapp_number) — pra falar direto com a pessoa. */
+export async function whatsappDe(userId: string): Promise<string | null> {
+  const { data } = await supabase.from("qs_users").select("whatsapp_number").eq("id", userId).maybeSingle();
+  const n = String((data as { whatsapp_number?: string | null } | null)?.whatsapp_number ?? "").replace(/\D/g, "");
+  if (n.length < 10) return null;
+  return n.startsWith("55") ? n : `55${n}`;
+}

@@ -24,7 +24,7 @@ import {
 } from "./cotacao";
 import {
   AGUARDANDO, COR_SETOR, NOME_SETOR, PRIORIDADE_SOL, agir, ajustarSolicitacao, carregarSolicitacao, deInputLocal, haQuanto, marcarVisto,
-  paraInputLocal, pessoasDoSetor, primeiroNome, textoPrazo, vincular,
+  paraInputLocal, pessoasDoSetor, primeiroNome, textoPrazo, vincular, whatsappDe,
   type AcaoSol, type AguardandoQuem, type EventoSol, type Pessoa, type PrioridadeSol, type Setor, type Solicitacao,
 } from "./lib";
 
@@ -103,6 +103,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
   const [escolha, setEscolha] = useState<Escolha | null>(null);
   const [novoPrazo, setNovoPrazo] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  const [zapDeQuemPediu, setZapDeQuemPediu] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   // 0158
   const [ajustando, setAjustando] = useState<{ f: FormCotacao | null; prioridade: PrioridadeSol; texto: string } | null>(null);
@@ -119,6 +120,10 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
     if (id) { void carregar(); void marcarVisto(id).then(onMudou); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  useEffect(() => {
+    setZapDeQuemPediu(null);
+    if (s?.criado_por && s.criado_por !== meuId) void whatsappDe(s.criado_por).then(setZapDeQuemPediu).catch(() => {});
+  }, [s?.criado_por, meuId]);
 
   async function rodar(acao: AcaoSol, t?: string | null, extra?: string | null) {
     if (!s) return;
@@ -130,7 +135,11 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
 
   if (!id) return null;
   const recebe = !!s && meusSetores.includes(s.para_setor);
-  const pediu = !!s && (s.criado_por === meuId || meusSetores.includes(s.de_setor));
+  // 0197: o pedido é DA PESSOA que pediu — confirmar, ajustar, desfecho, reabrir e
+  // prazo são dela (ou do gestor do setor dela / admin). Os colegas do setor veem e comentam.
+  const gestorDoSetor = !!s && (currentUser?.role === "admin" || (currentUser?.role === "gestor" && meusSetores.includes(s.de_setor)));
+  const pediu = !!s && (s.criado_por === meuId || gestorDoSetor);
+  const doSetorQuePediu = !!s && meusSetores.includes(s.de_setor);
   const prazo = s ? textoPrazo(s) : null;
   const cot = s ? lerCotacao(s.formulario) : null;
   const ehCotacao = !!s?.cotacao;
@@ -192,7 +201,13 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
           )}
 
           <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-[13px]">
-            <Linha rotulo="Pediu">{s.criado_por_nome ?? "—"} <span style={{ color: "var(--ink3)" }}>· {haQuanto(s.criado_em)}</span></Linha>
+            <Linha rotulo="Pediu">{s.criado_por_nome ?? "—"} <span style={{ color: "var(--ink3)" }}>· {haQuanto(s.criado_em)}</span>
+              {zapDeQuemPediu && (
+                <a className="ml-2 underline text-[12px]" style={{ color: "var(--rel-ink)" }} href={`https://wa.me/${zapDeQuemPediu}`} target="_blank" rel="noreferrer">
+                  falar com {primeiroNome(s.criado_por_nome) || "quem pediu"} no WhatsApp
+                </a>
+              )}
+            </Linha>
             <Linha rotulo="Com quem está">{s.responsavel_nome ?? <span style={{ color: "var(--warn-ink)" }}>ninguém pegou ainda</span>}</Linha>
             <Linha rotulo="Prazo">
               <span style={{ color: prazo?.tom === "erro" ? "var(--err-ink)" : prazo?.tom === "aviso" ? "var(--warn-ink)" : "var(--ink)" }}>{prazo?.texto}</span>
@@ -208,7 +223,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
                 {s.cliente_id && links?.onAbrirCliente && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirCliente?.(s.cliente_id!)}>abrir ficha</button>}
                 {s.lead_id && links?.onAbrirLead && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirLead?.(s.lead_id!)}>abrir lead</button>}
                 {s.conversa_id && links?.onAbrirConversa && <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => links.onAbrirConversa?.(s.conversa_id!)}>abrir conversa</button>}
-                {(recebe || pediu) && !amarrando && (
+                {(recebe || pediu || doSetorQuePediu) && !amarrando && (
                   <button className="underline" style={{ color: s.cliente_id ? "var(--ink3)" : "var(--rel-ink)", fontWeight: s.cliente_id ? 400 : 600 }}
                     onClick={() => { setAmarrando(true); setEscolha(s.cliente_id ? { clienteId: s.cliente_id, clienteNome: (s.sobre_nome ?? "").split(" · ")[0] || "Cliente", viagemId: s.viagem_id, vendaTexto: null } : null); }}>
                     {s.cliente_id ? "trocar cliente/venda" : "amarrar cliente"}

@@ -110,7 +110,7 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const gestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
   const [aba, setAba] = useState<Aba>("recebidas");
   const [filtro, setFiltro] = useState<Filtro>("todas");
-  const [soMinhas, setSoMinhas] = useState(false);
+  const [soMinhas, setSoMinhas] = useState(true); // 0197: o pedido é de quem pediu
   const [recebidas, setRecebidas] = useState<Solicitacao[] | null>(null);
   const [pedidas, setPedidas] = useState<Solicitacao[] | null>(null);
   const [termo, setTermo] = useState("");
