@@ -261,7 +261,7 @@ function PassaporteAnexo({ expedicaoId, passageiroId, arquivoId, onMudou }: { ex
 }
 
 /** Senha do ExpedAmigo da PESSOA (por CPF). Só aparece pra admin. */
-function SenhaExpedamigo({ cpf }: { cpf: string | null }) {
+export function SenhaExpedamigo({ cpf, recarga = 0 }: { cpf: string | null; recarga?: number }) {
   const { avisar } = useExp();
   const [estado, setEstado] = useState<EstadoSenha | null>(null);
   const [indo, setIndo] = useState(false);
@@ -269,7 +269,7 @@ function SenhaExpedamigo({ cpf }: { cpf: string | null }) {
     let vivo = true;
     if (cpf) estadoSenhaCpf(cpf).then((s) => { if (vivo) setEstado(s); });
     return () => { vivo = false; };
-  }, [cpf]);
+  }, [cpf, recarga]);
   if (!cpf || !estado?.admin) return null;
 
   const nova = async () => {

@@ -14,6 +14,9 @@ import {
   type ItemCompra,
 } from "./dados";
 import { useVerArquivo } from "./pecas";
+import { soDigitosCpf } from "../lib/cpf";
+import { estadoSenhaCpf, gerarNovaSenhaCpf } from "../paginas/_globais/pessoaAcoes";
+import { SenhaExpedamigo } from "../paginas/_globais/PessoaGaveta";
 
 export function Bloco({ titulo, children, dica }: { titulo: string; children: React.ReactNode; dica?: string }) {
   return (
@@ -198,20 +201,34 @@ export function MudarExpedicao({ exp, pax, onMovido }: { exp: ExpedicaoRow; pax:
   );
 }
 
-/** Liberação no portal do viajante (só admin). A senha fica na tela "Acessos ExpedAmigo". */
+/**
+ * Liberação no portal do viajante (só admin) + senha (app antigo: ExpedamigoPainel).
+ * Liberar já gera a senha provisória se a pessoa ainda não tem nenhuma (igual ao antigo).
+ */
 export function LiberarExpedAmigo({ pax, onMudou }: { pax: PassageiroRow; onMudou: () => void }) {
   const { avisar } = useExp();
   const [lib, setLib] = useState(Boolean(pax.liberado_expedamigo));
+  const [recarga, setRecarga] = useState(0);
+  const cpfOk = soDigitosCpf(pax.cpf ?? "").length === 11;
   return (
-    <Bloco titulo="ExpedAmigo (portal do viajante)" dica="Login e senha do viajante ficam na tela Acessos ExpedAmigo.">
+    <Bloco titulo="ExpedAmigo (portal do viajante)">
       <div className="flex items-center gap-3 text-[13px]">
         <span className="flex-1" style={{ color: lib ? "#166534" : "var(--ink2)" }}>{lib ? "Liberado — aparece no portal do viajante" : "Não liberado — oculto no portal"}</span>
         <Botao onClick={async () => {
           const v = !lib; setLib(v);
-          try { await atualizarLiberado(pax.id, v); onMudou(); }
-          catch (e) { setLib(!v); avisar(e instanceof Error ? e.message : "Erro", "erro"); }
+          try {
+            await atualizarLiberado(pax.id, v);
+            if (v && cpfOk) {
+              const s = await estadoSenhaCpf(pax.cpf as string);
+              if (s.admin && !s.tem_hash && !s.senha_provisoria) await gerarNovaSenhaCpf(pax.cpf as string);
+            }
+            setRecarga((n) => n + 1);
+            onMudou();
+          } catch (e) { setLib(!v); avisar(e instanceof Error ? e.message : "Erro", "erro"); }
         }}>{lib ? "Bloquear" : "Liberar ExpedAmigo"}</Botao>
       </div>
+      {cpfOk ? <SenhaExpedamigo cpf={pax.cpf} recarga={recarga} />
+        : <p className="text-[11.5px] mt-2" style={{ color: "var(--ink3)" }}>Sem CPF válido — a senha do portal só é gerada com CPF.</p>}
     </Bloco>
   );
 }

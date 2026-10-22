@@ -220,3 +220,27 @@ export async function marcarPasseio(paxId: string, passeioId: string, marcar: bo
   if (marcar) erroOuDados(await supabase.from("passeio_opcional_compras").upsert({ passageiro_id: paxId, passeio_opcional_id: passeioId }, { onConflict: "passageiro_id,passeio_opcional_id", ignoreDuplicates: true }));
   else erroOuDados(await supabase.from("passeio_opcional_compras").delete().eq("passageiro_id", paxId).eq("passeio_opcional_id", passeioId));
 }
+
+// ── Integrações (rota /api/expedicoes do QS) ────────────────────────────────
+
+/** POST /api/expedicoes?acao=… com o token da sessão. Devolve o JSON ou lança o erro em português. */
+export async function chamarRotaExpedicoes<T = Record<string, unknown>>(acao: string, corpo: Record<string, unknown> = {}): Promise<T> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Sessão expirada. Entre de novo.");
+  const res = await fetch(`/api/expedicoes?acao=${encodeURIComponent(acao)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify(corpo),
+  });
+  let json: (T & { ok?: boolean; error?: string }) | null = null;
+  try { json = await res.json(); } catch { /* resposta vazia */ }
+  if (!res.ok || !json?.ok) throw new Error(json?.error || `Falha (${res.status})`);
+  return json;
+}
+
+/**
+ * "Atualizar do Bitrix" (app antigo: bitrix-sync-actions.ts). Pede ao n8n pra puxar
+ * os negócios da coluna desta expedição; os passageiros chegam em instantes
+ * (o n8n devolve em /api/expedicoes?acao=sync-contato e a tabela atualiza sozinha).
+ */
+export const sincronizarDoBitrix = (expId: string) => chamarRotaExpedicoes("sincronizar-bitrix", { expedicao_id: expId });
