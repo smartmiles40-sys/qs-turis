@@ -24,7 +24,7 @@ import ChamadosDoCliente from "../chamados/ChamadosDoCliente";
 import ChamadoModal from "../chamados/ChamadoModal";
 import RecompraBotao from "../pos/RecompraBotao";
 import { EnviarFinanceiroModal, StatusNoFinanceiro } from "../../fin/EnviarFinanceiro";
-import { BotaoPedirOutroSetor, HistoricoDeSolicitacoes } from "@/solicitacoes/PedirOutroSetor";
+import { BotaoPedirOutroSetor, BotaoPedirPagamento, HistoricoDeSolicitacoes } from "@/solicitacoes/PedirOutroSetor";
 import { conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
 
 // Nomes amigáveis dos campos, pro histórico ler como gente.
@@ -208,6 +208,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
             <Botao onClick={() => setNovoChamado(true)}>Abrir chamado</Botao>
             <Botao onClick={() => setEnviarFin(true)}>💰 Enviar ao Financeiro</Botao>
             <BotaoPedirOutroSetor deSetor="relacionamento" alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
+            <BotaoPedirPagamento deSetor="relacionamento" alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
             <Botao onClick={() => setEditando(true)}>Editar</Botao>
           </div>
         )}

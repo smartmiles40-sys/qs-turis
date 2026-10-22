@@ -27,6 +27,20 @@ export function BotaoPedirOutroSetor({ deSetor, alvo, onCriada, children, classN
   );
 }
 
+/** Atalho (Bruno 22/10): pedir Pix, link, cartão ou provisão ao Financeiro já amarrado ao que está na tela. */
+export function BotaoPedirPagamento({ deSetor, alvo, onCriada, className }: {
+  deSetor: Setor; alvo: AlvoSol; onCriada?: () => void; className?: string;
+}) {
+  const [aberto, setAberto] = useState(false);
+  return (
+    <>
+      <Botao className={className} onClick={() => setAberto(true)}>💸 Pedir pagamento</Botao>
+      <NovaSolicitacao aberto={aberto} deSetor={deSetor} alvo={alvo} soPagamento onFechar={() => setAberto(false)}
+        onCriada={() => { setAberto(false); onCriada?.(); }} />
+    </>
+  );
+}
+
 /** Pedidos sobre este cliente/viagem/lead: abertos + o último fechado. Some se não houver. */
 export function PedidosSobre({ alvo, recarregar = 0, links, titulo = "Pedidos a outros setores" }: {
   alvo: AlvoSol; recarregar?: number; links?: LinksSol; titulo?: string;

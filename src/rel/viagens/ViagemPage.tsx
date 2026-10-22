@@ -31,7 +31,7 @@ import { temEsteira } from "../lib/etapas";
 import { RevisaoViagem } from "./TrechosViagem";
 import { conferirViagens, type Analise } from "../lib/problemas";
 import { TOM_FASE } from "./ViagensDoCliente";
-import { BotaoPedirOutroSetor, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
+import { BotaoPedirOutroSetor, BotaoPedirPagamento, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
 import ConferirVoos from "./ConferirVoos";
 import DonoViagem, { HistoricoViagem } from "./DonoViagem";
 import PreferenciasViagem from "./PreferenciasViagem";
@@ -389,6 +389,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               <Botao onClick={() => setEditando(true)}>Editar</Botao>
               {/* Central de Solicitações (0149): ex. pedir emissão/alteração pra Operações */}
               <BotaoPedirOutroSetor deSetor="relacionamento" onCriada={() => setSinalPedidos((n) => n + 1)}
+                alvo={{ viagemId: v.id, clienteId: v.cliente_id, sobre: [comprador, v.expedicao || v.titulo].filter(Boolean).join(" · ") }} />
+              <BotaoPedirPagamento deSetor="relacionamento" onCriada={() => setSinalPedidos((n) => n + 1)}
                 alvo={{ viagemId: v.id, clienteId: v.cliente_id, sobre: [comprador, v.expedicao || v.titulo].filter(Boolean).join(" · ") }} />
               {/* "Cancelar viagem" saiu daqui (Bruno, 15/10). Cancelada no Bitrix, cancela sozinha; reativar continua. */}
               {/* arquivada (0184) volta pela função do banco: limpa o motivo e fica no histórico (só a gestão) */}

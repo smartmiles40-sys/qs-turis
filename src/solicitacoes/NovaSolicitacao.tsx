@@ -29,18 +29,20 @@ import {
   type AlvoSol, type PrioridadeSol, type Setor, type TipoSol,
 } from "./lib";
 
-export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, onFechar, onCriada }: {
+export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, soPagamento, onFechar, onCriada }: {
   aberto: boolean;
   /** Setor de quem pede (a área em que a pessoa está). */
   deSetor: Setor;
   alvo?: AlvoSol;
   paraInicial?: Setor;
+  /** Atalho "Pedir pagamento": só o Financeiro e só os 4 tipos de pagamento. */
+  soPagamento?: boolean;
   onFechar: () => void;
   onCriada: (id: string) => void;
 }) {
-  const destinos = SETORES.filter((s) => s !== deSetor);
+  const destinos = soPagamento ? (["financeiro"] as Setor[]) : SETORES.filter((s) => s !== deSetor);
   const [tipos, setTipos] = useState<TipoSol[]>([]);
-  const [para, setPara] = useState<Setor>(paraInicial && paraInicial !== deSetor ? paraInicial : destinos.includes("operacional") ? "operacional" : destinos[0]);
+  const [para, setPara] = useState<Setor>(soPagamento ? "financeiro" : paraInicial && paraInicial !== deSetor ? paraInicial : destinos.includes("operacional") ? "operacional" : destinos[0]);
   const [tipo, setTipo] = useState("");
   const [titulo, setTitulo] = useState("");
   const [descricao, setDescricao] = useState("");
@@ -61,12 +63,12 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
     setCot(cotacaoVazia(alvo?.sobre ? alvo.sobre.split(" · ")[0] : ""));
     setPag((p) => pagamentoVazio(p.tipo)); setArquivos([]);
     setEscolha(alvo?.clienteId ? { clienteId: alvo.clienteId, clienteNome: (alvo.sobre ?? "").split(" · ")[0] || "Cliente", viagemId: alvo.viagemId ?? null, vendaTexto: null } : null);
-    setPara(paraInicial && paraInicial !== deSetor ? paraInicial : destinos.includes("operacional") ? "operacional" : destinos[0]);
+    setPara(soPagamento ? "financeiro" : paraInicial && paraInicial !== deSetor ? paraInicial : destinos.includes("operacional") ? "operacional" : destinos[0]);
     listarTipos().then(setTipos).catch(() => setTipos([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aberto]);
 
-  const doSetor = useMemo(() => tipos.filter((t) => t.setor === para && t.ativo), [tipos, para]);
+  const doSetor = useMemo(() => tipos.filter((t) => t.setor === para && t.ativo && (!soPagamento || t.formulario === "pagamento")), [tipos, para, soPagamento]);
   useEffect(() => { setTipo(doSetor[0]?.id ?? ""); }, [doSetor]);
   const tipoSel = doSetor.find((t) => t.id === tipo);
   const ehCotacao = tipoSel?.formulario === "cotacao";
@@ -141,7 +143,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
     <Modal aberto={aberto} titulo={ehCotacao ? `Pedir cotação a ${NOME_SETOR[para]}` : ehPagamento ? "Pedir pagamento ao Financeiro" : "Pedir a outro setor"} onFechar={onFechar} largura={ehCotacao || ehPagamento ? 720 : 560}
       rodape={<><Botao onClick={onFechar} disabled={enviando}>Cancelar</Botao><Botao variante="primario" onClick={() => void enviar()} disabled={enviando}>{enviando ? "Enviando…" : `Enviar pra ${NOME_SETOR[para]}`}</Botao></>}>
       <div className="space-y-4">
-        <div>
+        {!soPagamento && <div>
           <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Pra qual setor</p>
           <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Setor que recebe">
             {destinos.map((s) => (
@@ -152,9 +154,9 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, on
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
-        {para === "financeiro" && (
+        {para === "financeiro" && !soPagamento && (
           <p className="text-[12.5px] -mb-2" style={{ color: "var(--ink3)" }}>
             Precisa de dinheiro saindo? Escolha <b>Pix para fornecedor</b>, <b>Link de pagamento</b>, <b>Cartão da empresa</b> ou <b>Provisionar pagamento</b>.
           </p>

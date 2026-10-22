@@ -210,6 +210,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [sinalFin, setSinalFin] = useState(0);
   // Central de Solicitações (0149): pedir ao Relacionamento/Operações/Financeiro.
   const [pedirSetor, setPedirSetor] = useState(false);
+  const [pedirPagamento, setPedirPagamento] = useState(false);
   const [sinalPedidos, setSinalPedidos] = useState(0);
   const [selectedCloser, setSelectedCloser] = useState("");
   const [handoverSuccess, setHandoverSuccess] = useState(false);
@@ -1610,6 +1611,13 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             ↗ Pedir a outro setor
           </button>
           <button
+            onClick={() => setPedirPagamento(true)}
+            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            title="Pix pra fornecedor, link de pagamento pro cliente, cartão da empresa ou provisão — já amarrado a este lead"
+          >
+            💸 Pedir pagamento
+          </button>
+          <button
             onClick={() => setShowHandoverModal(true)}
             className="px-4 py-2 rounded-lg bg-[#2563EB] text-sm font-semibold text-white hover:bg-[#1D4ED8] transition-colors flex items-center gap-2"
           >
@@ -2118,6 +2126,10 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           alvo={{ leadId: lead.id, sobre: lead.full_name || [lead.first_name, lead.last_name].filter(Boolean).join(" ") || null }}
           onFechar={() => setPedirSetor(false)}
           onCriada={() => { setPedirSetor(false); setSinalPedidos((n) => n + 1); notifySuccess("Pedido enviado — acompanhe aqui no lead ou em Solicitações."); }} />
+        <NovaSolicitacao aberto={pedirPagamento} deSetor="comercial" soPagamento
+          alvo={{ leadId: lead.id, sobre: lead.full_name || [lead.first_name, lead.last_name].filter(Boolean).join(" ") || null }}
+          onFechar={() => setPedirPagamento(false)}
+          onCriada={() => { setPedirPagamento(false); setSinalPedidos((n) => n + 1); notifySuccess("Pedido de pagamento enviado ao Financeiro — acompanhe aqui no lead."); }} />
       </ComCoresDaCentral>
 
       <ComCoresDoRel>
