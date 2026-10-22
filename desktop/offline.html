@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  Bolinha "sem conexão" da Bolinha do QS.
+  Por quê: se o QS não abre (internet caiu, Wi-Fi do escritório fora), a janela
+  ficaria vazia/invisível. Esta página LOCAL mantém a bolinha na tela, cinza com
+  um pontinho vermelho, e a casca tenta carregar o QS de novo a cada 30s.
+  Clique = tenta agora. Arrastar continua funcionando.
+-->
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Bolinha do QS — sem conexão</title>
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; }
+      .bolinha {
+        position: absolute; inset: 4px; border-radius: 50%;
+        background: #5b6475; color: #fff; display: flex; align-items: center; justify-content: center;
+        font: 700 18px/1 "Segoe UI", system-ui, sans-serif; letter-spacing: .5px; cursor: pointer;
+      }
+      .ponto { position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; background: #e5484d; border: 2px solid #fff; }
+    </style>
+  </head>
+  <body>
+    <div class="bolinha" id="b" title="Sem conexão com o QS. Tentando de novo a cada 30 segundos — clique para tentar agora.">
+      QS<span class="ponto"></span>
+    </div>
+    <script>
+      // Diferencia clique de arrasto: andou mais de 4px = arrasto.
+      var b = document.getElementById("b");
+      var api = window.qsDesktop;
+      var ini = null;
+      b.addEventListener("mousedown", function (e) {
+        if (e.button !== 0) return;
+        ini = { x: e.screenX, y: e.screenY };
+        if (api) api.arrastarInicio();
+      });
+      window.addEventListener("mouseup", function (e) {
+        if (!ini) return;
+        var andou = Math.abs(e.screenX - ini.x) + Math.abs(e.screenY - ini.y);
+        ini = null;
+        if (!api) return;
+        api.arrastarFim();
+        if (andou <= 4) api.tentarDeNovo();
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,72 @@
+{
+  "name": "qs-bolinha",
+  "productName": "Bolinha do QS",
+  "version": "1.0.0",
+  "description": "Bolinha flutuante do QS na área de trabalho do Windows (atalhos rápidos por cima de todas as janelas).",
+  "author": "Se Tu For, Eu Vou! Viagens",
+  "private": true,
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --url=http://localhost:5173",
+    "icone": "node scripts/gerar-icone.js",
+    "build": "electron-builder --win nsis --x64 --publish never",
+    "dist": "electron-builder --win nsis --x64 --publish never",
+    "release": "electron-builder --win nsis --x64 --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "6.3.9"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "br.com.setuforeuvou.qsbolinha",
+    "productName": "Bolinha do QS",
+    "copyright": "Se Tu For, Eu Vou! Viagens",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "offline.html",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "Bolinha-do-QS-Setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Bolinha do QS",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "artifactName": "Bolinha-do-QS-Setup-${version}.exe"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "smartmiles40-sys",
+        "repo": "qs-turis",
+        "releaseType": "draft"
+      }
+    ]
+  }
+}
