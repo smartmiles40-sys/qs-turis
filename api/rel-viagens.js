@@ -47,6 +47,8 @@ import { baixarArquivos, enfileirarArquivos } from './_relBitrixArquivos.js';
 const ORCAMENTO_MS = 50_000;
 const ETAPAS_VENDA = new Set(['WON', 'UC_70BW8E']);
 const ETAPAS_CANCELA = new Set(['UC_NV92A7', 'LOSE']);
+// Campos que a ficha de fechamento do closer (0176) grava e o sync não sobrescreve.
+const CAMPOS_DA_FICHA = new Set(['titulo', 'destino', 'tipo', 'data_venda', 'data_embarque', 'data_retorno', 'valor', 'qtd_passageiros', 'necessidades']);
 
 // "Processo Pós Venda - Viagem" (Bruno, 13/10): TODO cliente que comprou passa
 // por ele, e os bilhetes dos voos estão nos cards. Ali qualquer etapa que não
@@ -422,7 +424,7 @@ function camposDaViagem(deal, mapa) {
 }
 
 async function viagemDoDeal(dealId) {
-  const r = await rest(`rel_viagens?select=id,status,cliente_id,titulo,destino,expedicao,tipo,data_venda,data_embarque,data_retorno,valor,qtd_passageiros,observacoes,necessidades,bitrix_funil,bitrix_dados,datas_travadas&bitrix_deal_id=eq.${encodeURIComponent(dealId)}&limit=1`);
+  const r = await rest(`rel_viagens?select=id,status,cliente_id,titulo,destino,expedicao,tipo,data_venda,data_embarque,data_retorno,valor,qtd_passageiros,observacoes,necessidades,bitrix_funil,bitrix_dados,datas_travadas,consolidada_em&bitrix_deal_id=eq.${encodeURIComponent(dealId)}&limit=1`);
   return r?.[0] || null;
 }
 
@@ -577,6 +579,9 @@ async function importarDealCore(deal, ctx, profundidade = 0) {
     if (k === 'titulo' && !tituloNosso) continue;
     // 0154: datas ajustadas pelos voos na tela de conferência ficam — o Bitrix não volta com as antigas
     if ((k === 'data_embarque' || k === 'data_retorno') && atual.datas_travadas) continue;
+    // 0176: venda CONSOLIDADA pelo closer — o QS manda, o Bitrix espelha. O que a
+    // ficha de fechamento gravou não volta pro valor do card (só a cópia bitrix_dados).
+    if (atual.consolidada_em && CAMPOS_DA_FICHA.has(k)) continue;
     if (k === 'bitrix_dados') { if (estavel(atual.bitrix_dados) !== estavel(v)) { patch.bitrix_dados = v; patch.bitrix_lido_em = new Date().toISOString(); } continue; }
     if (String(atual[k] ?? '') !== String(v)) patch[k] = v;
   }

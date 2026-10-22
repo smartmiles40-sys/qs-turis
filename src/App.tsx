@@ -1,4 +1,4 @@
-import { Component, Suspense, lazy, type ReactNode } from "react";
+import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import SdrLayout from "@/components/sdr/SdrLayout";
 import LoginPage from "@/components/sdr/auth/LoginPage";
 import { QsAuthProvider, useQsAuth } from "@/contexts/QsAuthContext";
@@ -12,6 +12,10 @@ const RelApp = lazy(() => import("@/rel/RelApp"));
 // quando alguém entra por ela.
 const FinApp = lazy(() => import("@/fin/FinApp"));
 const OpsApp = lazy(() => import("@/ops/OpsApp"));
+// Área do Closer (22/10/2026): o closer cai direto nela; admin/gestor abrem pelo
+// menu do Comercial (#closer). Fica dentro da porta do Comercial — ver src/closer.
+const CloserApp = lazy(() => import("@/closer/CloserApp"));
+import { ehHashDoCloser, podeAbrirAreaCloser } from "@/closer/lib";
 
 // Páginas PÚBLICAS do Relacionamento (sem login): o cliente manda documentos
 // e responde a pesquisa pós-viagem por um link com token. Abrem antes de
@@ -55,7 +59,14 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 function AppContent() {
-  const { isAuthenticated, loading, bootFalhou, area } = useQsAuth();
+  const { isAuthenticated, loading, bootFalhou, area, currentUser } = useQsAuth();
+  // Gestão abre a Área do Closer pelo endereço #closer (o closer cai nela sempre).
+  const [hashCloser, setHashCloser] = useState(ehHashDoCloser);
+  useEffect(() => {
+    const on = () => setHashCloser(ehHashDoCloser());
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
 
   // ── O SERVIDOR NÃO RESPONDEU ──────────────────────────────────────────────
   // Em 20/08 o gateway do Supabase ficou inalcançável da rede do escritório por
@@ -116,6 +127,16 @@ function AppContent() {
       <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
         {area === "relacionamento" ? <RelApp /> : area === "financeiro" ? <FinApp /> : <OpsApp />}
       </Suspense>
+    );
+  }
+
+  if (currentUser && (currentUser.role === "closer" || (hashCloser && podeAbrirAreaCloser(currentUser)))) {
+    return (
+      <ChatAppDockProvider>
+        <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
+          <CloserApp />
+        </Suspense>
+      </ChatAppDockProvider>
     );
   }
 
