@@ -191,6 +191,8 @@ export type PassageiroRow = {
   foto_arquivo_id?: string | null;
   /** ExpedAmigo: a expedição só aparece no portal do viajante quando liberada. Migration 0040. */
   liberado_expedamigo?: boolean;
+  /** 0172: a ficha do cliente (rel_clientes) — cadastro único. */
+  cliente_id?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -24,6 +24,21 @@ import { categoriasDe, type Cat } from "./KpisClientes";
 import CarimboViagem from "./CarimboViagem";
 import { diaMesAno, diasEntre, mesAno, nomeDestino, situacao, zonaDeLeitura } from "./passaporte";
 import { extrasDasViagens, todasDoCliente, type Extras } from "./viagensCliente";
+import { supabase } from "@/lib/supabase";
+
+/** Cadastro único: de quais viagens existe a expedição no Operações (rel_viagens.expedicoes_id → tipo da expedição). */
+async function expedicoesDasViagens(ids: string[]): Promise<Map<string, { expId: string; tipo: string | null }>> {
+  const m = new Map<string, { expId: string; tipo: string | null }>();
+  if (!ids.length) return m;
+  const { data, error } = await supabase.from("rel_viagens").select("id, expedicoes_id").in("id", ids.slice(0, 200)).not("expedicoes_id", "is", null);
+  if (error || !data?.length) return m;
+  const linhas = data as { id: string; expedicoes_id: string }[];
+  const { data: exps } = await supabase.from("expedicoes").select("id, tipo").in("id", [...new Set(linhas.map((l) => l.expedicoes_id))]);
+  const tipo = new Map(((exps ?? []) as { id: string; tipo: string | null }[]).map((e) => [e.id, e.tipo]));
+  // só liga quando a expedição existe aqui (o Rel lê as tabelas do Operações)
+  for (const l of linhas) if (tipo.has(l.expedicoes_id)) m.set(l.id, { expId: l.expedicoes_id, tipo: tipo.get(l.expedicoes_id) ?? null });
+  return m;
+}
 
 // Tokens de movimento (playbook): entrada out-expo 420ms com stagger de 45ms
 // (teto de 8 itens), hover out-quart 180ms, "carimbada" out-expo 450ms.
@@ -275,9 +290,11 @@ function PassaporteEmBranco() {
 
 // ── Componente ──────────────────────────────────────────────────────────────
 
-export default function ViagensComAGente({ clienteId, onAbrirViagem, metrica, cats }: {
+export default function ViagensComAGente({ clienteId, onAbrirViagem, onAbrirExpedicao, metrica, cats }: {
   clienteId: string;
   onAbrirViagem: (id: string) => void;
+  /** Cadastro único: abre a expedição (Operações) ligada à viagem. */
+  onAbrirExpedicao?: (expedicaoId: string, tipo: string | null) => void;
   /** Se a ficha já carregou, manda; se não vier (undefined), o passaporte busca sozinho. */
   metrica?: Metrica | null;
   cats?: Cat[];
@@ -287,6 +304,7 @@ export default function ViagensComAGente({ clienteId, onAbrirViagem, metrica, ca
   const [extras, setExtras] = useState<Extras | null>(null);
   const [metricaPropria, setMetricaPropria] = useState<Metrica | null>(null);
   const [catsProprias, setCatsProprias] = useState<Cat[] | null>(null);
+  const [naExpedicao, setNaExpedicao] = useState<Map<string, { expId: string; tipo: string | null }>>(new Map());
 
   useEffect(() => {
     let atual = true;
@@ -297,6 +315,7 @@ export default function ViagensComAGente({ clienteId, onAbrirViagem, metrica, ca
       .then((l) => {
         if (!atual) return;
         setLista(l);
+        if (onAbrirExpedicao) expedicoesDasViagens(l.map((v) => v.id)).then((m) => { if (atual) setNaExpedicao(m); }).catch(() => undefined);
         // os enfeites dos carimbos vêm depois e nunca derrubam a lista
         extrasDasViagens(clienteId, l.map((v) => v.id))
           .then((x) => { if (atual) setExtras(x); })
@@ -304,6 +323,7 @@ export default function ViagensComAGente({ clienteId, onAbrirViagem, metrica, ca
       })
       .catch((e) => { if (atual) { setErro(e instanceof Error ? e.message : "erro desconhecido"); setLista([]); } });
     return () => { atual = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clienteId]);
 
   // categoria e nome: usa o que a ficha mandou; só busca se não veio nada
@@ -414,6 +434,12 @@ export default function ViagensComAGente({ clienteId, onAbrirViagem, metrica, ca
                         <li key={v.id} className="pp-entra relative" style={{ "--i": i } as CSSProperties}>
                           <span aria-hidden className="pp-no"><MarcaTipo tipo={grupoTipo(v.tipo)} tamanho={10} /></span>
                           <CarimboViagem v={v} clienteId={clienteId} extra={extras?.porViagem.get(v.id)} onAbrir={onAbrirViagem} />
+                          {onAbrirExpedicao && naExpedicao.has(v.id) && (
+                            <button type="button" onClick={() => { const x = naExpedicao.get(v.id)!; onAbrirExpedicao(x.expId, x.tipo); }}
+                              className="mt-1 ml-1 inline-flex items-center gap-1 text-[12px] font-semibold underline underline-offset-2" style={{ color: "var(--rel-ink)" }}>
+                              ver na expedição →
+                            </button>
+                          )}
                         </li>
                       );
                     })}

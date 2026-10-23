@@ -1,8 +1,9 @@
 // src/expedicoes/paginas/PassageirosGlobal.tsx
 // Passageiros — base consolidada / "Clube de viajantes" (app antigo:
 // app/(app)/passageiros/ — PassageirosGlobalTabela, ViajanteCard, lib/data/pessoas.ts,
-// lib/fidelidade.ts). Pessoa = todas as linhas `passageiros` com a mesma identidade
-// (CPF → Bitrix → e-mail → nome). Visão Clube (cards com nível de fidelidade) ou
+// lib/fidelidade.ts). Pessoa = todas as linhas `passageiros` da mesma FICHA do cliente
+// (cadastro único, 0172: passageiros.cliente_id); quem não tem ficha cai na identidade
+// antiga (CPF → Bitrix → e-mail → nome). Perfil com aba Cliente = ficha do Relacionamento. Visão Clube (cards com nível de fidelidade) ou
 // Lista (tabela com filtro/ordem por coluna, estilo Excel). Novo passageiro avulso,
 // importar CSV (várias expedições), exportar .xlsx, perfil com edição que vale pra
 // todas as expedições, documentos, senha do ExpedAmigo (admin) e excluir.
@@ -12,7 +13,8 @@ import { Botao, Campo, Entrada, Vazio } from "@/rel/ui";
 import { useExp } from "../contexto";
 import { Carregando, Gaveta, Selo, useAoVivo } from "../ui";
 import { lerPorIds, listarExpedicoes } from "../lib/banco";
-import { listPessoas, type PessoaAgregada } from "../lib/pessoas";
+import type { PessoaAgregada } from "../lib/pessoas";
+import { listPessoasUnificadas, type PessoaUnificada } from "./_globais/pessoasUnificadas";
 import { esquecer } from "../lib/cache";
 import { nivelFidelidade } from "../lib/fidelidade";
 import { mascaraCpf } from "../lib/cpf";
@@ -41,7 +43,7 @@ const COLUNAS: Coluna[] = [
 
 export default function PassageirosGlobal() {
   const { somenteLeitura, ir, avisar } = useExp();
-  const [pessoas, setPessoas] = useState<PessoaAgregada[] | null>(null);
+  const [pessoas, setPessoas] = useState<PessoaUnificada[] | null>(null);
   const [expedicoes, setExpedicoes] = useState<ExpedicaoRow[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   const [busca, setBusca] = useState("");
@@ -62,7 +64,7 @@ export default function PassageirosGlobal() {
   const carregar = useCallback(async (fresco = true) => {
     if (fresco) esquecer("passageiros");
     try {
-      const [ps, exps] = await Promise.all([listPessoas(), listarExpedicoes()]);
+      const [ps, exps] = await Promise.all([listPessoasUnificadas(), listarExpedicoes()]);
       setPessoas(ps); setExpedicoes(exps); setErro(null);
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar"); }
   }, []);

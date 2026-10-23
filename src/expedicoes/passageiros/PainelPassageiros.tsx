@@ -26,7 +26,7 @@ import { AdicionarExistente, ImportarPassageiros, NovoPassageiro } from "./Criar
 import EditarPassageiro from "./EditarPassageiro";
 import PerfilPax from "./PerfilPax";
 import { GavetaProntidao } from "./Prontidao";
-import { FotoPax, SeloFidelidade, SeloProntidao, SeloStatus, SeloTipo } from "./pecas";
+import { FotoPax, SeloFidelidade, SeloProntidao, SeloSemFicha, SeloStatus, SeloTipo } from "./pecas";
 
 type Col = "id" | "nome" | "tipo" | "grupo" | "cpf" | "passaporte" | "validade" | "quarto" | "status" | "prontidao";
 const ORDEM_PRONT = { Apto: 0, Atenção: 1, Bloqueado: 2 } as const;
@@ -222,6 +222,7 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
               <button className="text-left font-semibold hover:underline" style={{ color: "var(--ink)" }} onClick={() => irSub(`pax/${p.id}`)}>{p.nome_completo}</button>
               <div className="flex flex-wrap items-center gap-1 mt-0.5">
                 <SeloFidelidade posicao={posicoes[p.id]} />
+                <SeloSemFicha pax={p} />
                 {aniv && <Selo tom="aviso" titulo={`Faz aniversário em ${formatDate(aniv.data)}${aniv.idade != null ? ` (${aniv.idade} anos)` : ""}`}>🎂 {formatDate(aniv.data, "dd/MM")}</Selo>}
               </div>
             </div>

@@ -1,6 +1,7 @@
 // src/expedicoes/passageiros/pecas.tsx
 // Peças pequenas da aba Passageiros: selos de status/tipo/prontidão, ponto do
-// semáforo, selo de fidelidade (app antigo: FidelidadeBadge.tsx), avatar com foto,
+// semáforo, selo de fidelidade (app antigo: FidelidadeBadge.tsx), selo "sem ficha"
+// (cadastro único), avatar com foto,
 // botões Sim/Não e a visualização de um arquivo (imagem em tela cheia, PDF em aba nova).
 import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -34,6 +35,14 @@ export function SeloFidelidade({ posicao }: { posicao?: number }) {
   const titulo = `${posicao}ª expedição desta pessoa com a agência`;
   if ((MARCOS_FIDELIDADE as readonly number[]).includes(posicao)) return <Selo tom="lista" titulo={titulo}>★ {posicao}ª expedição</Selo>;
   return <span title={titulo} className="text-[11px] font-semibold" style={{ color: "var(--ink3)" }}>{posicao}ª</span>;
+}
+
+/** Cadastro único (0172): cliente que já comprou e ainda não está ligado a uma ficha do
+    Relacionamento. Antes da 0172 a linha nem tem `cliente_id` — aí não aparece nada. */
+export function SeloSemFicha({ pax }: { pax: { tipo: TipoPassageiro; status_reserva: StatusReserva } }) {
+  if (!("cliente_id" in pax) || (pax as { cliente_id?: string | null }).cliente_id) return null;
+  if (pax.tipo === "Líder" || pax.status_reserva === "Lead" || pax.status_reserva === "Cancelado") return null;
+  return <Selo tom="aviso" titulo="Ainda não está ligado a uma ficha do Relacionamento — abra o passageiro, aba Cliente">sem ficha</Selo>;
 }
 
 export function FotoPax({ nome, url, tamanho = 30 }: { nome: string; url?: string | null; tamanho?: number }) {

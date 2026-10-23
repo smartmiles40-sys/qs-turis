@@ -633,7 +633,8 @@ export default function RelApp() {
           {rota.tela === "cadastros" && <ArrumarCadastrosPage onAbrir={abrirCliente} onAbrirViagem={abrirViagem} onAbrirConversa={abrirConversa} onMudou={atualizar} />}
           {rota.tela === "ficha" && (
             <ClienteFicha key={rota.id} id={rota.id} onAbrir={abrirCliente} onVoltar={() => ir({ tela: "clientes" })}
-              onAbrirConversa={abrirConversa} onAbrirViagem={abrirViagem} />
+              onAbrirConversa={abrirConversa} onAbrirViagem={abrirViagem}
+              onAbrirExpedicao={(exp, tipo, pax) => ir({ tela: tipo === "pacote" ? "exp-pacotes" : "exp-expedicoes", id: pax ? `${exp}/passageiros/pax/${pax}` : exp })} />
           )}
           {rota.tela === "esteira" && <EsteiraPage onAbrirViagem={abrirViagem} />}
           {rota.tela === "viagens" && <ViagensPage onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}

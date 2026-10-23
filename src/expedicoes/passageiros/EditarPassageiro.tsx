@@ -1,6 +1,7 @@
 // src/expedicoes/passageiros/EditarPassageiro.tsx
-// Gaveta do passageiro (app antigo: EditarPassageiroDrawer.tsx). Três abas —
-// Passageiro | Prontidão | Saúde — com UM formulário (Saúde salva no mesmo botão).
+// Gaveta do passageiro (app antigo: EditarPassageiroDrawer.tsx). Abas —
+// Passageiro | Prontidão | Saúde — com UM formulário (Saúde salva no mesmo botão),
+// e Cliente: a ficha do Relacionamento da pessoa (cadastro único, 0172/0173).
 // Salvar chama exp_atualizar_passageiro: os dados PESSOAIS vão pra todas as
 // reservas da pessoa. Embaixo: documentos (passaporte + Drive do pax), quarto e
 // acompanhante, perfil, passeios/extensões, ExpedAmigo (admin), mudar de
@@ -22,6 +23,7 @@ import { ProntidaoConteudo } from "./Prontidao";
 import SaudeCampos from "./SaudeCampos";
 import { Bloco, LiberarExpedAmigo, MudarExpedicao, PassaporteAnexo, PasseiosEExtensoes, PerfilConexoes, QuartoAcompanhante } from "./blocos";
 import { Ponto, SeloFidelidade } from "./pecas";
+import BlocoFichaCliente from "@/clientes/BlocoFichaCliente";
 
 const CAMPOS_TEXTO = [
   "nome_completo", "cpf", "telefone", "passaporte", "validade_passaporte", "data_nascimento", "email", "observacoes",
@@ -44,8 +46,8 @@ type Props = {
 };
 
 export default function EditarPassageiro({ exp, pax, dados, resultado, posicao, admin, onFechar, onMudou, onPerfil, onMovido }: Props) {
-  const { somenteLeitura, avisar } = useExp();
-  const [aba, setAba] = useState<"dados" | "prontidao" | "saude">("dados");
+  const { somenteLeitura, avisar, ir } = useExp();
+  const [aba, setAba] = useState<"dados" | "prontidao" | "saude" | "cliente">("dados");
   const inicial = useMemo(() => formDe(pax), [pax]);
   const [f, setF] = useState<Form>(inicial);
   const [salvando, setSalvando] = useState(false);
@@ -102,8 +104,9 @@ export default function EditarPassageiro({ exp, pax, dados, resultado, posicao, 
         { id: "dados", rotulo: "Passageiro" },
         { id: "prontidao", rotulo: "Prontidão" },
         { id: "saude", rotulo: "Saúde" },
+        { id: "cliente", rotulo: "Cliente" },
       ]} />
-      {resultado && aba !== "prontidao" && (
+      {resultado && aba !== "prontidao" && aba !== "cliente" && (
         <button className="mt-2 inline-flex items-center gap-1.5 text-[12px]" style={{ color: "var(--ink2)" }} onClick={() => setAba("prontidao")}>
           <Ponto s={resultado.prontidao === "Apto" ? "ok" : resultado.prontidao === "Atenção" ? "atencao" : "bloqueio"} /> Prontidão: {resultado.prontidao}
         </button>
@@ -195,6 +198,10 @@ export default function EditarPassageiro({ exp, pax, dados, resultado, posicao, 
             <p className="text-[12px] mb-3" style={{ color: "var(--ink3)" }}>Questionário de saúde — compartilhado entre as expedições da pessoa. Salve no botão abaixo.</p>
             <SaudeCampos value={f.saude} onChange={(s) => setF((x) => ({ ...x, saude: s }))} expedicaoId={exp.id} passageiroId={pax.id} />
           </div>
+        )}
+        {aba === "cliente" && (
+          <BlocoFichaCliente passageiroIds={[pax.id]} passageiroAtual={pax.id} somenteLeitura={somenteLeitura} avisar={avisar} onMudou={onMudou}
+            abrirIda={(i) => ir(i.expedicao?.tipo === "pacote" ? "pacotes" : "expedicoes", `${i.expedicao_id}/passageiros/pax/${i.id}`)} />
         )}
       </div>
     </Gaveta>
