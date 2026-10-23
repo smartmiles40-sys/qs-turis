@@ -81,8 +81,8 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
   const ehCotacao = tipoSel?.formulario === "cotacao";
   const pedidoFixo = ehCotacao ? PEDIDO_DO_TIPO[tipo] : undefined;
   const ehServico = tipoSel?.formulario === "servico" && temFormServico(tipo);
-  // Trocou o tipo: a cotação já vem com o que é; o serviço começa limpo.
-  useEffect(() => { if (pedidoFixo) setCot((c) => ({ ...c, pedido: pedidoFixo })); }, [pedidoFixo]);
+  // Trocou o tipo (ou reabriu o modal, que zera a cotação): a cotação já vem com o que é; o serviço começa limpo.
+  useEffect(() => { if (pedidoFixo) setCot((c) => ({ ...c, pedido: pedidoFixo })); }, [pedidoFixo, aberto]);
   useEffect(() => { setServ(servicoVazio()); }, [tipo]);
   // Seletor por grupo (0203), na ordem dos tipos.
   const grupos = useMemo(() => {

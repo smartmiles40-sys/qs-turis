@@ -102,7 +102,7 @@ export default function OpsApp() {
           onAbrirId={(id) => ir(id ? { tela: "propostas", id } : { tela: "propostas" })} />
       )}
       {rota.tela === "equipe" && <EquipePage area="operacional" />}
-      {rota.tela === "fichas" && <Suspense fallback={null}><ClientesPage onAbrir={(id) => ir({ tela: "ficha", id })} /></Suspense>}
+      {rota.tela === "fichas" && <Suspense fallback={null}><ClientesPage soLeitura onAbrir={(id) => ir({ tela: "ficha", id })} /></Suspense>}
       {rota.tela === "ficha" && rota.id && (
         <Suspense fallback={null}>
           <ClienteFicha key={rota.id} id={rota.id} setor="operacional" onAbrir={(id) => ir({ tela: "ficha", id })} onVoltar={() => ir({ tela: "fichas" })}

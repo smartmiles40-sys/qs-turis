@@ -45,7 +45,7 @@ const ABAS: { id: Aba; rotulo: string; soRel?: boolean }[] = [
   { id: "documentos", rotulo: "Documentos" },
   { id: "expedamigo", rotulo: "ExpedAmigo" },
   { id: "atendimento", rotulo: "Atendimento", soRel: true },
-  { id: "historico", rotulo: "Histórico" },
+  { id: "historico", rotulo: "Histórico", soRel: true },
 ];
 
 // Nomes amigáveis dos campos, pro histórico ler como gente.
@@ -215,7 +215,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         </Aviso>
       )}
 
-      {c.arquivado_em && (
+      {c.arquivado_em && ehRel && (
         <Aviso>
           Ficha arquivada — não conta como cliente{c.arquivado_motivo ? <> ({c.arquivado_motivo})</> : null}. Ela não aparece na lista nem nos KPIs.{" "}
           <button className="underline font-semibold" onClick={async () => {
@@ -255,7 +255,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
             </>}
             <BotaoPedirOutroSetor deSetor={setor} alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
             <BotaoPedirPagamento deSetor={setor} alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
-            <Botao onClick={() => setEditando(true)}>Editar</Botao>
+            {ehRel && <Botao onClick={() => setEditando(true)}>Editar</Botao>}
           </div>
         )}
       </div>
@@ -270,7 +270,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
           {faltando.length > 0 ? (
             <>
               <span className="text-[12.5px] flex-1 min-w-[180px]" style={{ color: "var(--ink3)" }}>Falta: {faltando.join(", ")}</span>
-              <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setEditando(true)}>Completar</Botao>
+              {ehRel && <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setEditando(true)}>Completar</Botao>}
             </>
           ) : <span className="text-[12.5px]" style={{ color: "var(--ink3)" }}>tudo que a viagem pede está aqui</span>}
         </div>
@@ -331,7 +331,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         {/* Família */}
         <Secao
           titulo="Família"
-          acao={ehTitular && !c.mesclado_em_id ? (
+          acao={ehRel && ehTitular && !c.mesclado_em_id ? (
             <Botao variante="fantasma" onClick={() => setNovoFamiliar(true)} style={{ color: "var(--rel-ink)" }}>+ Adicionar familiar</Botao>
           ) : undefined}
         >

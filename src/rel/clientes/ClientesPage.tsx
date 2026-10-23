@@ -57,7 +57,8 @@ function NumerosViagem({ m }: { m: Metrica }) {
   );
 }
 
-export default function ClientesPage({ onAbrir }: { onAbrir: (id: string) => void }) {
+// soLeitura: Operações vê as fichas mas não cria nem edita (RLS de escrita é só do Rel).
+export default function ClientesPage({ onAbrir, soLeitura = false }: { onAbrir: (id: string) => void; soLeitura?: boolean }) {
   const [termo, setTermo] = useState("");
   const [lista, setLista] = useState<Cliente[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -134,10 +135,10 @@ export default function ClientesPage({ onAbrir }: { onAbrir: (id: string) => voi
           <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Clientes</h1>
           <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Uma ficha por pessoa — documentos, contato e família.</p>
         </div>
-        <Botao variante="primario" onClick={() => setNovo(true)}>
+        {!soLeitura && <Botao variante="primario" onClick={() => setNovo(true)}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
           Novo cliente
-        </Botao>
+        </Botao>}
       </div>
 
       {erroKpi && <div className="mb-4"><Aviso tom="erro">Os indicadores da carteira não carregaram ({erroKpi}). A lista abaixo continua funcionando.</Aviso></div>}
@@ -227,12 +228,12 @@ export default function ClientesPage({ onAbrir }: { onAbrir: (id: string) => voi
           </ul>
         ) : lista.length === 0 ? (
           termo ? (
-            <Vazio titulo="Ninguém encontrado" texto={`Nenhuma ficha bate com "${termo}".`} acao={<Botao variante="primario" onClick={() => setNovo(true)}>Criar ficha</Botao>} />
+            <Vazio titulo="Ninguém encontrado" texto={`Nenhuma ficha bate com "${termo}".`} acao={soLeitura ? undefined : <Botao variante="primario" onClick={() => setNovo(true)}>Criar ficha</Botao>} />
           ) : (
             <Vazio
               titulo="Nenhum cliente ainda"
               texto="Cadastre o primeiro cliente. Cada pessoa tem UMA ficha — o sistema avisa se você tentar criar alguém que já existe."
-              acao={<Botao variante="primario" onClick={() => setNovo(true)}>Novo cliente</Botao>}
+              acao={soLeitura ? undefined : <Botao variante="primario" onClick={() => setNovo(true)}>Novo cliente</Botao>}
             />
           )
         ) : (

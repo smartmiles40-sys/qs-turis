@@ -116,7 +116,10 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const [aba, setAba] = useState<Aba>("recebidas");
   const [filtro, setFiltro] = useState<Filtro>("todas");
   const [origem, setOrigemEstado] = useState<Origem>(() => {
-    try { return (localStorage.getItem(CHAVE_ORIGEM + setor) as Origem | null) ?? "todas"; } catch { return "todas"; }
+    try {
+      const v = localStorage.getItem(CHAVE_ORIGEM + setor);
+      return v && v !== setor && SETORES.some((s) => s === v) ? (v as Origem) : "todas";
+    } catch { return "todas"; }
   });
   const setOrigem = (o: Origem) => { setOrigemEstado(o); try { localStorage.setItem(CHAVE_ORIGEM + setor, o); } catch { /* sem storage */ } };
   const [soMinhas, setSoMinhas] = useState(true); // 0197: o pedido é de quem pediu
