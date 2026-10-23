@@ -43,7 +43,7 @@ E o próximo passo é um *encontro rápido de boas-vindas*: online, leve, uns 20
 
 Conta pra gente: qual o melhor dia e horário pra você nos próximos 7 dias, de segunda a sexta? 💚`;
 
-function montarMensagem(nome: string, exp: ExpedicaoRow | undefined, link: string): string {
+export function montarMensagem(nome: string, exp: { tipo?: string | null; nome: string } | undefined, link: string): string {
   const pacote = exp?.tipo === "pacote";
   const primeiro = (nome || "").trim().split(/\s+/)[0] || nome;
   return MENSAGEM_ONBOARDING

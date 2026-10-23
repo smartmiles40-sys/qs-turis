@@ -10,7 +10,7 @@ begin
                            'rel_viagem_deals', 'rel_contatos', 'rel_expedicoes_vinculo'] loop
     if to_regclass('public.' || t) is not null then
       execute format('drop policy if exists %I on public.%I', t || '_ops_ler', t);
-      execute format('create policy %I on public.%I for select to authenticated using (ops_tem_acesso()%s)',
+      execute format('create policy %I on public.%I for select to authenticated using ((select ops_tem_acesso())%s)',
                      t || '_ops_ler', t, case when t = 'rel_documentos' then ' and copia_de is null' else '' end);
     end if;
   end loop;
@@ -18,4 +18,4 @@ end $$;
 
 drop policy if exists rel_docs_ops_ler on storage.objects;
 create policy rel_docs_ops_ler on storage.objects for select to authenticated
-  using (bucket_id = 'rel-documentos' and ops_tem_acesso());
+  using (bucket_id = 'rel-documentos' and (select ops_tem_acesso()));

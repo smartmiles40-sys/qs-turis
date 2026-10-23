@@ -39,7 +39,6 @@ import SinoDeAvisos from "@/avisos/SinoDeAvisos";
 // Atendimento, com emojis, editor de foto e modelos da Meta, é o maior).
 const ClientesPage = lazy(() => import("./clientes/ClientesPage"));
 const ClienteFicha = lazy(() => import("./clientes/ClienteFicha"));
-const DuplicadosPage = lazy(() => import("./clientes/DuplicadosPage"));
 const ArrumarCadastrosPage = lazy(() => import("./clientes/ArrumarCadastrosPage"));
 const AtendimentoPage = lazy(() => import("./atendimento/AtendimentoPage"));
 const GruposPage = lazy(() => import("./atendimento/GruposPage"));
@@ -376,7 +375,7 @@ export default function RelApp() {
   const abrirConversa = (id: string) => ir({ tela: "atendimento", id });
 
   // A tela de detalhe acende o item da lista dela.
-  const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
+  const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "duplicados" ? "cadastros" : rota.tela === "exp-passageiros" ? "clientes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
 
   const grupos: Grupo[] = [
     { id: "atendimento", rotulo: "Atendimento", icone: "atendimento", itens: [
@@ -403,9 +402,9 @@ export default function RelApp() {
     ] } as Grupo] : []),
     { id: "clientes", rotulo: "Clientes", icone: "clientes", itens: [
       { id: "clientes", rotulo: "Fichas" },
-      { id: "duplicados", rotulo: "Duplicados", badge: cont?.duplicados || undefined },
-      // 0151: o que o cruzamento da base não decidiu sozinho.
-      { id: "cadastros", rotulo: "Arrumar cadastros" },
+      // 0151: o que o cruzamento da base não decidiu sozinho. 23/10: Duplicados e
+      // Ficha × Expedições viraram abas daqui (uma fila só).
+      { id: "cadastros", rotulo: "Arrumar cadastros", badge: cont?.duplicados || undefined },
     ] },
     { id: "viagens", rotulo: "Viagens", icone: "viagens", itens: [
       // Esteira (16/10) virou "Minhas atividades" no topo do menu (0184) — estava escondida aqui
@@ -415,7 +414,6 @@ export default function RelApp() {
     { id: "expedicoes", rotulo: "Expedições", icone: "viagens", itens: [
       { id: "exp-expedicoes", rotulo: "Expedições" },
       { id: "exp-pacotes", rotulo: "Pacotes" },
-      { id: "exp-passageiros", rotulo: "Clube de viajantes" },
       { id: "exp-inscricoes", rotulo: "Inscrições" },
       { id: "exp-avisos", rotulo: "Avisos" },
     ] },
@@ -629,8 +627,8 @@ export default function RelApp() {
           {(rota.tela === "kpis" || rota.tela === "prazo") && (verKpis ? <KpisPage /> : <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Seu cargo não vê os KPIs.</p>)}
           {rota.tela === "whatsapp" && <WhatsAppPage />}
           {rota.tela === "clientes" && <ClientesPage onAbrir={abrirCliente} />}
-          {rota.tela === "duplicados" && <DuplicadosPage onAbrir={abrirCliente} onMudou={atualizar} />}
-          {rota.tela === "cadastros" && <ArrumarCadastrosPage onAbrir={abrirCliente} onAbrirViagem={abrirViagem} onAbrirConversa={abrirConversa} onMudou={atualizar} />}
+          {rota.tela === "duplicados" && <ArrumarCadastrosPage abaInicial="duplicados" nDuplicados={cont?.duplicados} onAbrir={abrirCliente} onAbrirViagem={abrirViagem} onAbrirConversa={abrirConversa} onMudou={atualizar} />}
+          {rota.tela === "cadastros" && <ArrumarCadastrosPage nDuplicados={cont?.duplicados} onAbrir={abrirCliente} onAbrirViagem={abrirViagem} onAbrirConversa={abrirConversa} onMudou={atualizar} />}
           {rota.tela === "ficha" && (
             <ClienteFicha key={rota.id} id={rota.id} onAbrir={abrirCliente} onVoltar={() => ir({ tela: "clientes" })}
               onAbrirConversa={abrirConversa} onAbrirViagem={abrirViagem}

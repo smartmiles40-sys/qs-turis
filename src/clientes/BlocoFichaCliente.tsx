@@ -100,7 +100,13 @@ export default function BlocoFichaCliente({ passageiroIds, clienteId, passageiro
   return (
     <>
       <ConteudoFicha key={`${estado.clienteId}-${rodada}`} clienteId={estado.clienteId} varias={estado.varias} passageiroAtual={passageiroAtual} somenteLeitura={somenteLeitura}
-        abrirIda={abrirIda} avisar={avisar} onMudou={recarregar} acao={botaoTrocar} />
+        abrirIda={abrirIda} avisar={avisar} onMudou={recarregar} acao={<>
+          {/* 23/10: a ficha completa (compras, ExpedAmigo, documentos…) é o lugar da pessoa */}
+          <Botao variante="fantasma" onClick={() => {
+            window.location.hash = window.location.hash.startsWith("#rel") ? `#rel/cliente/${estado.clienteId}` : `#ops/ficha/${estado.clienteId}`;
+          }}>Abrir ficha completa</Botao>
+          {botaoTrocar}
+        </>} />
       {modal}
     </>
   );

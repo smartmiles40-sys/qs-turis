@@ -19,8 +19,10 @@ import { Aviso, Botao, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import { usePode } from "../equipe/usePode";
 import FilaDivergencias from "@/clientes/FilaDivergencias";
 import { contarDivergencias } from "@/clientes/idasDetalhe";
+// 23/10: "Duplicados" saiu do menu e virou aba daqui — uma fila só pra arrumar cadastro.
+import DuplicadosPage from "./DuplicadosPage";
 
-type Aba = "parecidos" | "conversas" | "viagens" | "financeiro" | "cpf" | "incompletos" | "expedicoes";
+type Aba = "parecidos" | "duplicados" | "conversas" | "viagens" | "financeiro" | "cpf" | "incompletos" | "expedicoes";
 
 const NOME_CAMPO: Record<string, string> = {
   cpf: "CPF", email: "e-mail", telefone: "telefone", nascimento: "nascimento", passaporte: "passaporte",
@@ -77,12 +79,13 @@ function EscolherFicha({ sugestoes, onEscolher, ocupado }: { sugestoes: ClienteM
   );
 }
 
-export default function ArrumarCadastrosPage({ onAbrir, onAbrirViagem, onAbrirConversa, onMudou }: {
+export default function ArrumarCadastrosPage({ onAbrir, onAbrirViagem, onAbrirConversa, onMudou, abaInicial = "parecidos", nDuplicados }: {
   onAbrir: (id: string) => void; onAbrirViagem: (id: string) => void; onAbrirConversa: (id: string) => void; onMudou: () => void;
+  abaInicial?: Aba; nDuplicados?: number;
 }) {
   const podeJuntar = usePode("relacionamento.juntar_clientes") !== false;
   const [fila, setFila] = useState<FilaCadastros | null>(null);
-  const [aba, setAba] = useState<Aba>("parecidos");
+  const [aba, setAba] = useState<Aba>(abaInicial);
   const [erro, setErro] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -122,8 +125,9 @@ export default function ArrumarCadastrosPage({ onAbrir, onAbrirViagem, onAbrirCo
     </div>
   );
 
-  const abas: { id: Aba; rotulo: string; n: number }[] = [
+  const abas: { id: Aba; rotulo: string; n?: number }[] = [
     { id: "parecidos", rotulo: "Mesma pessoa?", n: fila.parecidos.length },
+    { id: "duplicados", rotulo: "Duplicados", n: nDuplicados },
     { id: "conversas", rotulo: "Conversas sem ficha", n: fila.conversas.length },
     { id: "viagens", rotulo: "Vendas sem comprador", n: fila.viagens.length },
     { id: "financeiro", rotulo: "Financeiro sem ficha", n: fila.financeiro.length },
@@ -159,13 +163,13 @@ export default function ArrumarCadastrosPage({ onAbrir, onAbrirViagem, onAbrirCo
           <button key={a.id} role="tab" aria-selected={aba === a.id} onClick={() => setAba(a.id)}
             className="rounded-full px-3 h-8 text-[12.5px] border inline-flex items-center gap-1.5"
             style={aba === a.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)", borderColor: "transparent", fontWeight: 600 } : { borderColor: "var(--line)", color: "var(--ink2)" }}>
-            {a.rotulo} <span className="tabular-nums" style={{ color: a.n ? "inherit" : "var(--ink3)" }}>{a.n}</span>
+            {a.rotulo} {a.n != null && <span className="tabular-nums" style={{ color: a.n ? "inherit" : "var(--ink3)" }}>{a.n}</span>}
           </button>
         ))}
       </div>
 
       {aba === "parecidos" && (
-        fila.parecidos.length === 0 ? <div className="rel-card"><Vazio titulo="Nada aqui" texto="Os duplicados por telefone, e-mail ou CPF ficam em Clientes → Duplicados." /></div> : (
+        fila.parecidos.length === 0 ? <div className="rel-card"><Vazio titulo="Nada aqui" texto="Os duplicados por telefone, e-mail ou CPF ficam na aba Duplicados." /></div> : (
           <div className="space-y-2">
             <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Mesmo nome e sobrenome, e uma das fichas sem telefone — quase sempre a ficha que veio do sistema de Expedições sem achar o contato do Bitrix.</p>
             <ul className="space-y-2">
@@ -183,6 +187,8 @@ export default function ArrumarCadastrosPage({ onAbrir, onAbrirViagem, onAbrirCo
           </div>
         )
       )}
+
+      {aba === "duplicados" && <DuplicadosPage onAbrir={onAbrir} onMudou={onMudou} />}
 
       {aba === "expedicoes" && (
         <FilaDivergencias onAbrirCliente={onAbrir} onMudou={() => { contarDiv(); onMudou(); }} />

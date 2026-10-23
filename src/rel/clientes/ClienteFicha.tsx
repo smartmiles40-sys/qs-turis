@@ -31,6 +31,22 @@ import RecompraBotao from "../pos/RecompraBotao";
 import { EnviarFinanceiroModal, StatusNoFinanceiro } from "../../fin/EnviarFinanceiro";
 import { BotaoPedirOutroSetor, BotaoPedirPagamento, HistoricoDeSolicitacoes } from "@/solicitacoes/PedirOutroSetor";
 import { conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
+import ComprasDoCliente from "@/clientes/ComprasDoCliente";
+import ExpedAmigoDoCliente from "@/clientes/ExpedAmigoDoCliente";
+import { nivelFidelidade } from "@/expedicoes/lib/fidelidade";
+
+// 23/10 (cadastro único): a ficha é O lugar da pessoa — tudo que estava espalhado
+// (Clube de viajantes, Clientes & compras, Acessos ExpedAmigo, passageiro) virou aba.
+type Aba = "resumo" | "viagens" | "compras" | "documentos" | "expedamigo" | "atendimento" | "historico";
+const ABAS: { id: Aba; rotulo: string; soRel?: boolean }[] = [
+  { id: "resumo", rotulo: "Resumo" },
+  { id: "viagens", rotulo: "Viagens" },
+  { id: "compras", rotulo: "Compras" },
+  { id: "documentos", rotulo: "Documentos" },
+  { id: "expedamigo", rotulo: "ExpedAmigo" },
+  { id: "atendimento", rotulo: "Atendimento", soRel: true },
+  { id: "historico", rotulo: "Histórico" },
+];
 
 // Nomes amigáveis dos campos, pro histórico ler como gente.
 const CAMPOS: Record<string, string> = {
@@ -73,13 +89,18 @@ function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; c
   );
 }
 
-export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, onAbrirViagem, onAbrirExpedicao }: {
-  id: string; onAbrir: (id: string) => void; onVoltar: () => void; onAbrirConversa: (conversaId: string) => void;
-  onAbrirViagem: (viagemId: string) => void;
+export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, onAbrirViagem, onAbrirExpedicao, setor = "relacionamento" }: {
+  id: string; onAbrir: (id: string) => void; onVoltar: () => void; onAbrirConversa?: (conversaId: string) => void;
+  /** Sem ela (Operações sem acesso ao Rel), as viagens aparecem mas não abrem. */
+  onAbrirViagem?: (viagemId: string) => void;
+  /** Quem está vendo: Operações não vê WhatsApp/contatos/chamados do Relacionamento (0173). */
+  setor?: "relacionamento" | "operacional";
   /** Cadastro único (0172): abre a expedição/passageiro no módulo de Expedições. */
   onAbrirExpedicao?: AbrirExpedicao;
 }) {
   const [c, setC] = useState<Cliente | null>(null);
+  const [aba, setAba] = useState<Aba>("resumo");
+  const ehRel = setor === "relacionamento";
   const [titular, setTitular] = useState<Cliente | null>(null);
   const [familia, setFamilia] = useState<Cliente[]>([]);
   const [historico, setHistorico] = useState<Auditoria[]>([]);
@@ -114,7 +135,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       setC(cli);
       setErro(null);
       const idTitular = cli.titular_id ?? cli.id;
-      conversasDoCliente(cli.id).then(setConversas).catch(() => setConversas([]));
+      if (setor === "relacionamento") conversasDoCliente(cli.id).then(setConversas).catch(() => setConversas([]));
       setErroMetrica(null);
       metricaDoCliente(cli.id).then(setMetrica)
         .catch((e) => { setMetrica(null); setErroMetrica(e instanceof Error ? e.message : "erro desconhecido"); });
@@ -136,9 +157,9 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Não consegui abrir a ficha.");
     }
-  }, [id]);
+  }, [id, setor]);
 
-  useEffect(() => { setC(null); void carregar(); }, [carregar]);
+  useEffect(() => { setC(null); setAba("resumo"); void carregar(); }, [carregar]);
 
   // a seção Documentos recarrega quando "pessoas" muda: só muda se mudar nome/id
   const pessoasDoc = useMemo(() => (c ? [{ id: c.id, nome: c.nome }] : []), [c?.id, c?.nome]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -176,6 +197,9 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const semFoto = metrica?.faltando.includes("doc_passaporte") ?? false;
   const faltando = [...comp.faltando, ...(semFoto ? [CAMPOS_CADASTRO.doc_passaporte] : [])];
   const pct = Math.round(((7 - faltando.length) / 7) * 100);
+  const idas = estadoIdas?.idas ?? [];
+  const nExpedicoes = idas.filter((i) => i.status_reserva !== "Cancelado" && i.status_reserva !== "Lead").length;
+  const abas = ABAS.filter((a) => ehRel || !a.soRel);
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -214,6 +238,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
               </Etiqueta>
             )}
             {metrica && metrica.valor_total > 0 && <Etiqueta>LTV {moeda(metrica.valor_total)}</Etiqueta>}
+            {nExpedicoes > 0 && <Etiqueta tom="rel">Clube: {nivelFidelidade(nExpedicoes).tier} · {nExpedicoes} viage{nExpedicoes === 1 ? "m" : "ns"}</Etiqueta>}
             {anos !== null && <Etiqueta>{anos} anos</Etiqueta>}
             {c.titular_id && titular && <Etiqueta tom="rel">{PARENTESCOS[c.parentesco ?? "outro"]} de {titular.nome.split(" ")[0]}</Etiqueta>}
             {ehTitular && familia.length > 0 && <Etiqueta tom="rel">Titular · {familia.length} familiar{familia.length > 1 ? "es" : ""}</Etiqueta>}
@@ -222,19 +247,18 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         </div>
         {!c.mesclado_em_id && (
           <div className="flex flex-wrap gap-1.5">
-            <RecompraBotao clienteId={c.id} compacto />
-            <Botao onClick={() => setNovoContato(true)}>Registrar contato</Botao>
-            <Botao onClick={() => setNovoChamado(true)}>Abrir chamado</Botao>
-            <Botao onClick={() => setEnviarFin(true)}>💰 Enviar ao Financeiro</Botao>
-            <BotaoPedirOutroSetor deSetor="relacionamento" alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
-            <BotaoPedirPagamento deSetor="relacionamento" alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
+            {ehRel && <>
+              <RecompraBotao clienteId={c.id} compacto />
+              <Botao onClick={() => setNovoContato(true)}>Registrar contato</Botao>
+              <Botao onClick={() => setNovoChamado(true)}>Abrir chamado</Botao>
+              <Botao onClick={() => setEnviarFin(true)}>💰 Enviar ao Financeiro</Botao>
+            </>}
+            <BotaoPedirOutroSetor deSetor={setor} alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
+            <BotaoPedirPagamento deSetor={setor} alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
             <Botao onClick={() => setEditando(true)}>Editar</Botao>
           </div>
         )}
       </div>
-
-      <div className="mt-3"><StatusNoFinanceiro alvo={{ clienteId: c.id }} recarregar={sinalFin} /></div>
-      <div className="mt-3"><HistoricoDeSolicitacoes clienteId={c.id} recarregar={sinalPedidos} links={{ onAbrirViagem, onAbrirConversa, onAbrirCliente: onAbrir }} /></div>
 
       {erroMetrica && <div className="mb-4"><Aviso tom="erro">Categoria, LTV e cadastro não carregaram ({erroMetrica}).</Aviso></div>}
       {!c.mesclado_em_id && (
@@ -259,146 +283,179 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
           onMudou={() => void carregar()} />
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Secao titulo="Documentos">
-          <dl>
-            <Linha rotulo="CPF">{c.cpf && formatarCpf(c.cpf)}</Linha>
-            <Linha rotulo="Nascimento">{c.nascimento && formatarData(c.nascimento)}</Linha>
-            <Linha rotulo="Passaporte">{c.passaporte}</Linha>
-            <Linha rotulo="Validade">
-              {c.passaporte_validade && (
-                <span className="inline-flex flex-wrap items-center gap-2">
-                  {formatarData(c.passaporte_validade)}
-                  {meses !== null && meses < 0 && <Etiqueta tom="erro">vencido</Etiqueta>}
-                  {meses !== null && meses >= 0 && meses < 6 && <Etiqueta tom="aviso">vence em menos de 6 meses</Etiqueta>}
-                </span>
-              )}
-            </Linha>
-          </dl>
-        </Secao>
-
-        <Secao titulo="Contato">
-          <dl>
-            <Linha rotulo="Telefone">
-              {fone && (
-                <span className="inline-flex flex-wrap items-center gap-2">
-                  {formatarTelefone(fone)}
-                  <a href={`https://wa.me/${fone}`} target="_blank" rel="noreferrer" className="text-[12px] font-semibold underline" style={{ color: "var(--rel-ink)" }}>WhatsApp</a>
-                </span>
-              )}
-            </Linha>
-            <Linha rotulo="E-mail">{c.email && <a href={`mailto:${c.email}`} className="underline">{c.email}</a>}</Linha>
-            <Linha rotulo="Bitrix">{c.bitrix_contato_id && `Contato #${c.bitrix_contato_id}`}</Linha>
-          </dl>
-        </Secao>
-      </div>
-
-      {/* Família */}
-      <Secao
-        titulo="Família"
-        acao={ehTitular && !c.mesclado_em_id ? (
-          <Botao variante="fantasma" onClick={() => setNovoFamiliar(true)} style={{ color: "var(--rel-ink)" }}>+ Adicionar familiar</Botao>
-        ) : undefined}
-      >
-        {!ehTitular && titular && (
-          <button onClick={() => onAbrir(titular.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
-            <Avatar nome={titular.nome} tamanho={32} />
-            <span className="flex-1 text-sm" style={{ color: "var(--ink)" }}><b>{titular.nome}</b> <span style={{ color: "var(--ink3)" }}>· titular</span></span>
-          </button>
-        )}
-        {familia.map((m) => (
-          <button key={m.id} onClick={() => onAbrir(m.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
-            <Avatar nome={m.nome} tamanho={32} />
-            <span className="flex-1 text-sm" style={{ color: "var(--ink)" }}>
-              {m.nome} <span style={{ color: "var(--ink3)" }}>· {PARENTESCOS[m.parentesco ?? "outro"]}</span>
-            </span>
+      <nav className="flex gap-1 overflow-x-auto -mx-1 px-1" role="tablist" aria-label="Partes da ficha">
+        {abas.map((a) => (
+          <button key={a.id} role="tab" aria-selected={aba === a.id} onClick={() => setAba(a.id)}
+            className="px-3 py-1.5 rounded-full text-[13px] font-semibold whitespace-nowrap border"
+            style={aba === a.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)", borderColor: "transparent" } : { borderColor: "var(--line)", color: "var(--ink2)" }}>
+            {a.rotulo}{a.id === "viagens" && idas.length > 0 ? ` · ${idas.length}` : ""}
           </button>
         ))}
-        {ehTitular && familia.length === 0 && (
-          <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>
-            Ninguém ligado ainda. Cônjuge, filhos e amigos que viajam juntos entram aqui — cada um com a própria ficha.
-          </p>
-        )}
-      </Secao>
+      </nav>
 
-      {c.observacoes && (
-        <Secao titulo="Observações">
-          <p className="text-[14px] whitespace-pre-wrap py-1" style={{ color: "var(--ink)" }}>{c.observacoes}</p>
+      {aba === "resumo" && <>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Secao titulo="Documentos">
+            <dl>
+              <Linha rotulo="CPF">{c.cpf && formatarCpf(c.cpf)}</Linha>
+              <Linha rotulo="Nascimento">{c.nascimento && formatarData(c.nascimento)}</Linha>
+              <Linha rotulo="Passaporte">{c.passaporte}</Linha>
+              <Linha rotulo="Validade">
+                {c.passaporte_validade && (
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    {formatarData(c.passaporte_validade)}
+                    {meses !== null && meses < 0 && <Etiqueta tom="erro">vencido</Etiqueta>}
+                    {meses !== null && meses >= 0 && meses < 6 && <Etiqueta tom="aviso">vence em menos de 6 meses</Etiqueta>}
+                  </span>
+                )}
+              </Linha>
+            </dl>
+          </Secao>
+
+          <Secao titulo="Contato">
+            <dl>
+              <Linha rotulo="Telefone">
+                {fone && (
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    {formatarTelefone(fone)}
+                    <a href={`https://wa.me/${fone}`} target="_blank" rel="noreferrer" className="text-[12px] font-semibold underline" style={{ color: "var(--rel-ink)" }}>WhatsApp</a>
+                  </span>
+                )}
+              </Linha>
+              <Linha rotulo="E-mail">{c.email && <a href={`mailto:${c.email}`} className="underline">{c.email}</a>}</Linha>
+              <Linha rotulo="Bitrix">{c.bitrix_contato_id && `Contato #${c.bitrix_contato_id}`}</Linha>
+            </dl>
+          </Secao>
+        </div>
+
+        {/* Família */}
+        <Secao
+          titulo="Família"
+          acao={ehTitular && !c.mesclado_em_id ? (
+            <Botao variante="fantasma" onClick={() => setNovoFamiliar(true)} style={{ color: "var(--rel-ink)" }}>+ Adicionar familiar</Botao>
+          ) : undefined}
+        >
+          {!ehTitular && titular && (
+            <button onClick={() => onAbrir(titular.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
+              <Avatar nome={titular.nome} tamanho={32} />
+              <span className="flex-1 text-sm" style={{ color: "var(--ink)" }}><b>{titular.nome}</b> <span style={{ color: "var(--ink3)" }}>· titular</span></span>
+            </button>
+          )}
+          {familia.map((m) => (
+            <button key={m.id} onClick={() => onAbrir(m.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
+              <Avatar nome={m.nome} tamanho={32} />
+              <span className="flex-1 text-sm" style={{ color: "var(--ink)" }}>
+                {m.nome} <span style={{ color: "var(--ink3)" }}>· {PARENTESCOS[m.parentesco ?? "outro"]}</span>
+              </span>
+            </button>
+          ))}
+          {ehTitular && familia.length === 0 && (
+            <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>
+              Ninguém ligado ainda. Cônjuge, filhos e amigos que viajam juntos entram aqui — cada um com a própria ficha.
+            </p>
+          )}
         </Secao>
+
+        {c.observacoes && (
+          <Secao titulo="Observações">
+            <p className="text-[14px] whitespace-pre-wrap py-1" style={{ color: "var(--ink)" }}>{c.observacoes}</p>
+          </Secao>
+        )}
+
+        <div className="mt-3"><StatusNoFinanceiro alvo={{ clienteId: c.id }} recarregar={sinalFin} /></div>
+        <div className="mt-3"><HistoricoDeSolicitacoes clienteId={c.id} recarregar={sinalPedidos} links={{ onAbrirViagem, onAbrirConversa, onAbrirCliente: onAbrir }} /></div>
+
+        {ligacoes && <LigacoesDoCliente l={ligacoes} />}
+      </>}
+
+      {aba === "viagens" && <>
+        <ExpedicoesDaFicha clienteId={c.id} estado={estadoIdas} onAbrirExpedicao={onAbrirExpedicao} />
+        <ViagensComAGente clienteId={c.id} onAbrirViagem={onAbrirViagem ?? (() => undefined)} metrica={metrica} cats={categoriasDe(regras)}
+          onAbrirExpedicao={onAbrirExpedicao ? (exp, tipo) => onAbrirExpedicao(exp, tipo) : undefined} />
+      </>}
+
+      {aba === "compras" && <ComprasDoCliente cliente={c} />}
+
+      {aba === "documentos" && <>
+        <DocumentosPainel pessoas={pessoasDoc} clienteId={c.id} esconder={copiasEscondidas} />
+        {estadoIdas?.ativo && estadoIdas.idas.length > 0 && <ArquivosDasExpedicoes idas={estadoIdas.idas} onCopias={setCopiasEscondidas} />}
+        <ArquivosDoCliente clienteId={c.id} bloqueado={!!c.mesclado_em_id} />
+
+      </>}
+
+      {aba === "expedamigo" && (
+        <ExpedAmigoDoCliente nome={c.nome} cpf={c.cpf} telefone={c.telefone} idas={idas} onMudou={() => void carregar()} />
       )}
 
-      {/* WhatsApp do Relacionamento (Fase 2) */}
-      <Secao
-        titulo="WhatsApp"
-        acao={!c.mesclado_em_id && c.telefone ? (
-          conversas.some((x) => x.janela_aberta)
-            ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirConversa(conversas.find((x) => x.janela_aberta)!.id)}>Abrir conversa</Botao>
-            : <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setMandarModelo(true)}>Mandar mensagem</Botao>
-        ) : undefined}
-      >
-        {!c.telefone && conversas.length === 0 ? (
-          <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Sem telefone na ficha.</p>
-        ) : conversas.length === 0 ? (
-          <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Nenhuma conversa ainda pelo WhatsApp do Relacionamento.</p>
-        ) : conversas.map((cv) => (
-          <button key={cv.id} onClick={() => onAbrirConversa(cv.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
-            <span className="flex-1 min-w-0">
-              <span className="block text-[13px] truncate" style={{ color: "var(--ink)" }}>{cv.ultima_mensagem || "—"}</span>
-              <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>
-                {horaCurta(cv.atualizado_em)} · {cv.estado === "resolvida" ? "resolvida" : cv.aguardando_desde ? `esperando há ${duracao(cv.minutos_esperando)}` : "em andamento"}
-                {cv.atendente_nome ? ` · ${cv.atendente_nome.split(" ")[0]}` : ""}
+      {aba === "atendimento" && ehRel && <>
+        {/* WhatsApp do Relacionamento (Fase 2) */}
+        <Secao
+          titulo="WhatsApp"
+          acao={!c.mesclado_em_id && c.telefone ? (
+            conversas.some((x) => x.janela_aberta)
+              ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirConversa?.(conversas.find((x) => x.janela_aberta)!.id)}>Abrir conversa</Botao>
+              : <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setMandarModelo(true)}>Mandar mensagem</Botao>
+          ) : undefined}
+        >
+          {!c.telefone && conversas.length === 0 ? (
+            <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Sem telefone na ficha.</p>
+          ) : conversas.length === 0 ? (
+            <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Nenhuma conversa ainda pelo WhatsApp do Relacionamento.</p>
+          ) : conversas.map((cv) => (
+            <button key={cv.id} onClick={() => onAbrirConversa?.(cv.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
+              <span className="flex-1 min-w-0">
+                <span className="block text-[13px] truncate" style={{ color: "var(--ink)" }}>{cv.ultima_mensagem || "—"}</span>
+                <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>
+                  {horaCurta(cv.atualizado_em)} · {cv.estado === "resolvida" ? "resolvida" : cv.aguardando_desde ? `esperando há ${duracao(cv.minutos_esperando)}` : "em andamento"}
+                  {cv.atendente_nome ? ` · ${cv.atendente_nome.split(" ")[0]}` : ""}
+                </span>
               </span>
-            </span>
-            {cv.nao_lidas > 0 && <Etiqueta tom="rel">{cv.nao_lidas}</Etiqueta>}
-          </button>
-        ))}
-      </Secao>
+              {cv.nao_lidas > 0 && <Etiqueta tom="rel">{cv.nao_lidas}</Etiqueta>}
+            </button>
+          ))}
+        </Secao>
 
-      {/* Próximas fases: deixam claro onde as coisas vão aparecer */}
-      {ligacoes && <LigacoesDoCliente l={ligacoes} />}
-      <ExpedicoesDaFicha clienteId={c.id} estado={estadoIdas} onAbrirExpedicao={onAbrirExpedicao} />
-      <ViagensComAGente clienteId={c.id} onAbrirViagem={onAbrirViagem} metrica={metrica} cats={categoriasDe(regras)}
-        onAbrirExpedicao={onAbrirExpedicao ? (exp, tipo) => onAbrirExpedicao(exp, tipo) : undefined} />
-      <DocumentosPainel pessoas={pessoasDoc} clienteId={c.id} esconder={copiasEscondidas} />
-      {estadoIdas?.ativo && estadoIdas.idas.length > 0 && <ArquivosDasExpedicoes idas={estadoIdas.idas} onCopias={setCopiasEscondidas} />}
-      <ArquivosDoCliente clienteId={c.id} bloqueado={!!c.mesclado_em_id} />
+        <Secao titulo="Contatos registrados" acao={!c.mesclado_em_id ? (
+          <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setNovoContato(true)}>+ Registrar</Botao>
+        ) : undefined}>
+          {contatos.length === 0 ? (
+            <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>
+              Nenhum contato registrado à mão. Conversa pelo WhatsApp do Relacionamento e chamado já contam sozinhos.
+            </p>
+          ) : (
+            <ol className="space-y-1.5 py-1">
+              {contatos.map((k) => (
+                <li key={k.id} className="text-[13px]" style={{ color: "var(--ink)" }}>
+                  <b>{CANAIS_CONTATO[k.canal]}</b>
+                  <span style={{ color: "var(--ink3)" }}> · {new Date(k.feito_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}{k.autor_id && usuarios[k.autor_id] ? ` · ${usuarios[k.autor_id].split(" ")[0]}` : ""}</span>
+                  {k.resumo && <span className="block text-[12px]" style={{ color: "var(--ink2)" }}>{k.resumo}</span>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </Secao>
+        <ChamadosDoCliente key={versaoChamados} clienteId={c.id} />
 
-      <Secao titulo="Contatos registrados" acao={!c.mesclado_em_id ? (
-        <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setNovoContato(true)}>+ Registrar</Botao>
-      ) : undefined}>
-        {contatos.length === 0 ? (
-          <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>
-            Nenhum contato registrado à mão. Conversa pelo WhatsApp do Relacionamento e chamado já contam sozinhos.
-          </p>
-        ) : (
-          <ol className="space-y-1.5 py-1">
-            {contatos.map((k) => (
-              <li key={k.id} className="text-[13px]" style={{ color: "var(--ink)" }}>
-                <b>{CANAIS_CONTATO[k.canal]}</b>
-                <span style={{ color: "var(--ink3)" }}> · {new Date(k.feito_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}{k.autor_id && usuarios[k.autor_id] ? ` · ${usuarios[k.autor_id].split(" ")[0]}` : ""}</span>
-                {k.resumo && <span className="block text-[12px]" style={{ color: "var(--ink2)" }}>{k.resumo}</span>}
-              </li>
-            ))}
-          </ol>
-        )}
-      </Secao>
-      <ChamadosDoCliente key={versaoChamados} clienteId={c.id} />
+      </>}
 
-      <Secao titulo="Histórico da ficha">
-        {historico.length === 0 ? (
-          <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Sem registros.</p>
-        ) : (
-          <ol className="space-y-2 py-1">
-            {historico.map((h) => (
-              <li key={h.id} className="text-[13px] flex flex-wrap gap-x-1.5" style={{ color: "var(--ink)" }}>
-                <b>{(h.por && usuarios[h.por]) || "Sistema"}</b>
-                <span>{mudancas(h)}</span>
-                <span style={{ color: "var(--ink3)" }}>· {new Date(h.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </Secao>
+      {aba === "historico" && <>
+        <Secao titulo="Histórico da ficha">
+          {historico.length === 0 ? (
+            <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Sem registros.</p>
+          ) : (
+            <ol className="space-y-2 py-1">
+              {historico.map((h) => (
+                <li key={h.id} className="text-[13px] flex flex-wrap gap-x-1.5" style={{ color: "var(--ink)" }}>
+                  <b>{(h.por && usuarios[h.por]) || "Sistema"}</b>
+                  <span>{mudancas(h)}</span>
+                  <span style={{ color: "var(--ink3)" }}>· {new Date(h.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Secao>
+
+      </>}
 
       <ClienteForm
         aberto={editando}
@@ -427,7 +484,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         alvo={{ clienteId: c.id }}
         nomeCliente={c.nome}
         onFechar={() => setMandarModelo(false)}
-        onEnviado={(cid) => { setMandarModelo(false); if (cid) onAbrirConversa(cid); else void carregar(); }}
+        onEnviado={(cid) => { setMandarModelo(false); if (cid) onAbrirConversa?.(cid); else void carregar(); }}
       />
       <ClienteForm
         aberto={novoFamiliar}

@@ -61,7 +61,7 @@ create unique index if not exists cad_divergencias_aberta_idx on cad_divergencia
 create index if not exists cad_divergencias_cliente_idx on cad_divergencias (cliente_id) where resolvido_em is null;
 alter table cad_divergencias enable row level security;
 drop policy if exists cad_divergencias_ler on cad_divergencias;
-create policy cad_divergencias_ler on cad_divergencias for select to authenticated using (rel_tem_acesso() or ops_tem_acesso());
+create policy cad_divergencias_ler on cad_divergencias for select to authenticated using ((select rel_tem_acesso()) or (select ops_tem_acesso()));
 revoke all on cad_divergencias from anon;
 
 /** Segue a ficha mesclada até a que vale. */
