@@ -73,7 +73,9 @@ export interface TipoSol {
   ativo: boolean;
   /** 0158: 'cotacao' = formulário completo + etapas + desfecho.
    *  0201: 'pagamento' = pedido de pagamento ao Financeiro (pagamento.ts). */
-  formulario?: "cotacao" | "pagamento" | null;
+  formulario?: "cotacao" | "pagamento" | "servico" | null;
+  /** 0203: grupo no seletor (Cotação · Aéreo (passagem já emitida) · Emissão e reservas · …). */
+  grupo?: string | null;
   desfecho_dias?: number | null;
 }
 

@@ -15,6 +15,11 @@
 // (esperando aprovação) · Aguardando ajustes · Em cotação · Cotação entregue
 // (com o total de sempre e os desfechos). Em "Pedidas", em cima: o que espera
 // o MEU ajuste e as cotações entregues que precisam do desfecho.
+//
+// 0203 (Bruno 23/10 — pedido do Operações): em "Recebidas", abas por QUEM PEDIU
+// (Comercial · Relacionamento · Financeiro), cada uma com quantas estão abertas e
+// quantas atrasaram — pra ver prazo e de quem é. As colunas deixaram de ter nome
+// de cotação: a Central é pra qualquer pedido (assento, remarcação, emissão…).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
@@ -24,12 +29,14 @@ import SolicitacaoDetalhe, { SetorChip, type LinksSol } from "./SolicitacaoDetal
 import TiposPrazos from "./TiposPrazos";
 import { rotuloStatus, tomStatus } from "./cotacao";
 import {
-  AGUARDANDO, COR_SETOR, NOME_SETOR, PRIORIDADE_SOL, SIGLA, buscar, contarEntregues, haQuanto, listarDoSetor, listarMinhas,
+  AGUARDANDO, COR_SETOR, NOME_SETOR, PRIORIDADE_SOL, SETORES, SIGLA, buscar, contarEntregues, haQuanto, listarDoSetor, listarMinhas,
   primeiroNome, textoPrazo, type Entregues, type Setor, type Solicitacao,
 } from "./lib";
 
 type Aba = "recebidas" | "pedidas" | "buscar";
 type Filtro = "todas" | "comigo" | "sem_dono";
+type Origem = "todas" | Setor;
+const CHAVE_ORIGEM = "qs_sol_origem_";
 
 const PESO_PRIORIDADE = { urgente: 0, alta: 1, normal: 2 } as const;
 /** O que vence primeiro em cima; urgente na frente. */
@@ -88,12 +95,10 @@ const COLUNAS: { id: Coluna; rotulo: string; dica: string }[] = [
   { id: "andamento", rotulo: "Em andamento", dica: "inclui esperando cliente/fornecedor" },
   { id: "fechadas", rotulo: "Concluídas", dica: "últimos 14 dias" },
 ];
-/** No Operações, os nomes das etapas da cotação (Bruno 21/10). */
-const COLUNAS_OPS: Record<Coluna, { rotulo: string; dica: string }> = {
-  nova: { rotulo: "Nova solicitação", dica: "esperando aprovação" },
-  ajustes: { rotulo: "Aguardando ajustes", dica: "falta info de quem pediu" },
-  andamento: { rotulo: "Em cotação", dica: "e demais pedidos em andamento" },
-  fechadas: { rotulo: "Cotação entregue", dica: "últimos 14 dias" },
+/** No Operações (0158; 0203 sem nome de cotação — vale pra qualquer pedido). */
+const COLUNAS_OPS: Partial<Record<Coluna, { rotulo: string; dica: string }>> = {
+  nova: { rotulo: "Novas solicitações", dica: "esperando alguém aprovar" },
+  fechadas: { rotulo: "Concluídas / entregues", dica: "últimos 14 dias" },
 };
 
 export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onMudou }: {
@@ -110,6 +115,10 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const gestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
   const [aba, setAba] = useState<Aba>("recebidas");
   const [filtro, setFiltro] = useState<Filtro>("todas");
+  const [origem, setOrigemEstado] = useState<Origem>(() => {
+    try { return (localStorage.getItem(CHAVE_ORIGEM + setor) as Origem | null) ?? "todas"; } catch { return "todas"; }
+  });
+  const setOrigem = (o: Origem) => { setOrigemEstado(o); try { localStorage.setItem(CHAVE_ORIGEM + setor, o); } catch { /* sem storage */ } };
   const [soMinhas, setSoMinhas] = useState(true); // 0197: o pedido é de quem pediu
   const [recebidas, setRecebidas] = useState<Solicitacao[] | null>(null);
   const [pedidas, setPedidas] = useState<Solicitacao[] | null>(null);
@@ -142,8 +151,19 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const mudou = useCallback(() => { void carregar(); onMudou?.(); }, [carregar, onMudou]);
   const abrir = (id: string | null) => { setAberta(id); onAbrirId?.(id); };
 
+  // Abas por quem pediu (0203): só os setores que mandam pra cá, com abertas e atrasadas.
+  const origens = useMemo(() => {
+    const m = new Map<Setor, { abertas: number; novas: number; atrasadas: number }>();
+    for (const s of SETORES) if (s !== setor) m.set(s, { abertas: 0, novas: 0, atrasadas: 0 });
+    for (const s of recebidas ?? []) {
+      const o = m.get(s.de_setor); if (!o || !s.aberta) continue;
+      o.abertas++; if (s.status === "nova") o.novas++; if (s.vencida || s.sem_dono_atrasada) o.atrasadas++;
+    }
+    return [...m.entries()];
+  }, [recebidas, setor]);
   const filtradas = useMemo(() => (recebidas ?? []).filter((s) =>
-    filtro === "todas" ? true : filtro === "comigo" ? s.responsavel_id === meuId : !s.responsavel_id), [recebidas, filtro, meuId]);
+    (origem === "todas" || s.de_setor === origem) &&
+    (filtro === "todas" ? true : filtro === "comigo" ? s.responsavel_id === meuId : !s.responsavel_id)), [recebidas, filtro, meuId, origem]);
   const porColuna = useMemo(() => {
     const m: Record<Coluna, Solicitacao[]> = { nova: [], ajustes: [], andamento: [], fechadas: [] };
     for (const s of filtradas) m[colunaDe(s)].push(s);
@@ -199,6 +219,14 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
               {vencidas > 0 && <span>{vencidas} passaram do prazo</span>}
             </div>
           )}
+          <div className="flex flex-wrap items-stretch gap-2" role="tablist" aria-label="Quem pediu">
+            <OrigemAba ativa={origem === "todas"} onClick={() => setOrigem("todas")} rotulo="Todos os setores"
+              abertas={origens.reduce((n, [, o]) => n + o.abertas, 0)} novas={novasN} atrasadas={origens.reduce((n, [, o]) => n + o.atrasadas, 0)} />
+            {origens.map(([s, o]) => (
+              <OrigemAba key={s} ativa={origem === s} onClick={() => setOrigem(s)} rotulo={`Do ${NOME_SETOR[s]}`} cor={COR_SETOR[s]}
+                abertas={o.abertas} novas={o.novas} atrasadas={o.atrasadas} />
+            ))}
+          </div>
           <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Filtro">
             {([["todas", "Todas"], ["comigo", "Comigo"], ["sem_dono", "Sem dono"]] as [Filtro, string][]).map(([k, r]) => (
               <button key={k} role="radio" aria-checked={filtro === k} onClick={() => setFiltro(k)} className="rounded-full px-3 h-8 text-[12.5px] border"
@@ -207,6 +235,8 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
           </div>
           {recebidas === null ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p> : recebidas.length === 0 ? (
             <div className="rel-card"><Vazio titulo={`Nenhuma solicitação pro ${NOME_SETOR[setor]}`} texto="Quando outro setor pedir alguma coisa, ela aparece aqui com prazo e quem pediu." /></div>
+          ) : filtradas.length === 0 && origem !== "todas" ? (
+            <div className="rel-card"><Vazio titulo={`Nada do ${NOME_SETOR[origem]} agora`} texto="Troque a aba acima pra ver os pedidos dos outros setores." /></div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 items-start">
               {COLUNAS.map((c0) => ({ ...c0, ...(setor === "operacional" ? COLUNAS_OPS[c0.id] : {}) })).map((c) => (
@@ -283,6 +313,24 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
       <SolicitacaoDetalhe id={aberta} onFechar={() => abrir(null)} onMudou={mudou} links={links} />
       {tipos && <TiposPrazos onFechar={() => setTipos(false)} />}
     </div>
+  );
+}
+
+/** Aba de "quem pediu" (0203): abertas, novas e quantas passaram do prazo. */
+function OrigemAba({ ativa, onClick, rotulo, cor, abertas, novas, atrasadas }: {
+  ativa: boolean; onClick: () => void; rotulo: string; cor?: string; abertas: number; novas: number; atrasadas: number;
+}) {
+  return (
+    <button role="tab" aria-selected={ativa} onClick={onClick} className="rel-card text-left px-3.5 py-2 min-w-[150px]"
+      style={ativa ? { borderColor: cor ?? "var(--rel)", boxShadow: `inset 0 -3px 0 ${cor ?? "var(--rel)"}` } : undefined}>
+      <span className="flex items-center gap-1.5 text-[13px] font-bold" style={{ color: "var(--ink)" }}>
+        {cor && <span className="w-2 h-2 rounded-full" style={{ background: cor }} aria-hidden />}{rotulo}
+      </span>
+      <span className="block text-[11.5px] mt-0.5" style={{ color: "var(--ink3)" }}>
+        {abertas} aberta{abertas === 1 ? "" : "s"}{novas ? ` · ${novas} nova${novas === 1 ? "" : "s"}` : ""}
+        {atrasadas > 0 && <b style={{ color: "var(--err-ink)" }}> · {atrasadas} atrasada{atrasadas === 1 ? "" : "s"}</b>}
+      </span>
+    </button>
   );
 }
 

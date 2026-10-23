@@ -6,8 +6,8 @@
 import type { ReactNode } from "react";
 import { Campo, Entrada } from "@/rel/ui";
 import {
-  ACOMODACOES, CATEGORIAS_HOTEL, CLASSES, HORARIOS, INVESTIMENTOS, PEDIDOS, PERFIS, REGIMES, SERVICOS_ALTERAR,
-  blocos, secoesDaCotacao, type FormCotacao,
+  ACOMODACOES, CATEGORIAS_HOTEL, CLASSES, HORARIOS, INVESTIMENTOS, NOME_PEDIDO, PEDIDOS, PERFIS, REGIMES, SERVICOS_ALTERAR,
+  blocos, secoesDaCotacao, type FormCotacao, type OQuePede,
 } from "./cotacao";
 import { PRIORIDADE_SOL, type PrioridadeSol } from "./lib";
 
@@ -33,7 +33,7 @@ export function textoHoras(h: number): string {
 }
 
 /** Botões de escolha (um ou vários). */
-function Chips({ opcoes, valor, onMudar, rotulo, varios }: {
+export function Chips({ opcoes, valor, onMudar, rotulo, varios }: {
   opcoes: (string | [string, string])[]; valor: string | string[]; onMudar: (v: string) => void; rotulo: string; varios?: boolean;
 }) {
   return (
@@ -71,7 +71,7 @@ function Numero({ valor, onMudar, rotulo, min = 0 }: { valor: number; onMudar: (
 }
 
 /** Como o Campo, mas sem <label> (pra grupos de botões). */
-function Grupo({ rotulo, dica, children }: { rotulo: string; dica?: string; children: ReactNode }) {
+export function Grupo({ rotulo, dica, children }: { rotulo: string; dica?: string; children: ReactNode }) {
   return (
     <div>
       <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>{rotulo}</p>
@@ -90,8 +90,10 @@ function Parte({ n, titulo, children }: { n: number; titulo: string; children: R
   );
 }
 
-export default function FormCotacaoCampos({ f, onMudar, prioridade, onPrioridade, horas }: {
+export default function FormCotacaoCampos({ f, onMudar, prioridade, onPrioridade, horas, pedidoFixo }: {
   f: FormCotacao;
+  /** 0203: o tipo já diz o que é (Cotação de passagem → aéreo; de hospedagem → hotel). */
+  pedidoFixo?: OQuePede;
   onMudar: (f: FormCotacao) => void;
   prioridade: PrioridadeSol;
   onPrioridade: (p: PrioridadeSol) => void;
@@ -133,9 +135,10 @@ export default function FormCotacaoCampos({ f, onMudar, prioridade, onPrioridade
         </Campo>
       </Parte>
 
-      <Parte n={2} titulo="O que está sendo pedido">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5" role="radiogroup" aria-label="O que está sendo pedido">
-          {PEDIDOS.map((p) => (
+      <Parte n={2} titulo={pedidoFixo ? NOME_PEDIDO[pedidoFixo] : "O que está sendo pedido"}>
+        {!pedidoFixo && <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5" role="radiogroup" aria-label="O que está sendo pedido">
+          {/* 0203: alteração e correção viraram tipos próprios (assento, remarcação, nome…) — só aparecem em pedido antigo */}
+          {PEDIDOS.filter((p) => (p.id !== "alteracao" && p.id !== "correcao") || f.pedido === p.id).map((p) => (
             <button key={p.id} type="button" role="radio" aria-checked={f.pedido === p.id} onClick={() => mudar("pedido", p.id)}
               className="rounded-lg px-3 py-2 text-left border"
               style={f.pedido === p.id ? { borderColor: "var(--rel)", background: "var(--rel-soft)" } : { borderColor: "var(--line)" }}>
@@ -143,7 +146,7 @@ export default function FormCotacaoCampos({ f, onMudar, prioridade, onPrioridade
               <span className="block text-[11.5px] leading-tight" style={{ color: "var(--ink3)" }}>{p.dica}</span>
             </button>
           ))}
-        </div>
+        </div>}
 
         {b.viagem && (
           <div className="space-y-3">

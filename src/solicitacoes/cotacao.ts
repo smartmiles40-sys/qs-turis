@@ -62,6 +62,9 @@ export const PEDIDOS: { id: OQuePede; rotulo: string; dica: string }[] = [
   { id: "alteracao", rotulo: "Alteração", dica: "mudar algo já cotado ou vendido" },
   { id: "correcao", rotulo: "Correção", dica: "algo saiu errado e precisa corrigir" },
 ];
+/** 0203: a cotação virou 3 tipos — o tipo já diz o que é. */
+export const PEDIDO_DO_TIPO: Record<string, OQuePede> = { ops_cotacao: "pacote", ops_cot_aereo: "aereo", ops_cot_hotel: "hospedagem" };
+
 export const NOME_PEDIDO: Record<OQuePede, string> = {
   pacote: "Pacote completo", aereo: "Só aéreo", hospedagem: "Só hospedagem", alteracao: "Alteração", correcao: "Correção",
 };

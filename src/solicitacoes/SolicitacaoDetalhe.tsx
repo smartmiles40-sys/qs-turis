@@ -25,6 +25,9 @@ import EscolherClienteVenda, { type Escolha } from "./EscolherClienteVenda";
 import PropostasDaSolicitacao from "@/propostas/PropostasDaSolicitacao";
 import FormCotacaoCampos, { VerCotacao } from "./FormCotacao";
 import FormPagamentoCampos, { PagamentoNoDetalhe, VerPagamento } from "./FormPagamento";
+import FormServicoCampos, { VerServico } from "./FormServico";
+import { PEDIDO_DO_TIPO } from "./cotacao";
+import { descricaoDoServico, faltaNoServico, lerServico, tituloDoServico, type FormServico } from "./servico";
 import { TIPO_PAG_DO, descricaoDoPagamento, faltaNoPagamento, lerPagamento, paraBanco, rotuloPagamento, tituloDoPagamento, type FormPagamento } from "./pagamento";
 import {
   MOTIVOS_NAO_SEGUIU, NOME_MOTIVO, descricaoDaCotacao, faltaNaCotacao, lerCotacao, rotuloStatus, tituloDaCotacao, tomStatus, type FormCotacao,
@@ -113,7 +116,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
   const [zapDeQuemPediu, setZapDeQuemPediu] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   // 0158
-  const [ajustando, setAjustando] = useState<{ f: FormCotacao | null; p?: FormPagamento | null; prioridade: PrioridadeSol; texto: string } | null>(null);
+  const [ajustando, setAjustando] = useState<{ f: FormCotacao | null; p?: FormPagamento | null; sv?: FormServico | null; prioridade: PrioridadeSol; texto: string } | null>(null);
   const [desfechando, setDesfechando] = useState<{ tipo: "fechou" | "nao_seguiu" | null; motivo: string; texto: string } | null>(null);
 
   const carregar = useCallback(async () => {
@@ -152,6 +155,8 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
   const ehCotacao = !!s?.cotacao;
   const ehPagamento = !!s && !!TIPO_PAG_DO[s.tipo_id ?? ""];
   const pag = ehPagamento && s ? lerPagamento(s.formulario) : null;
+  // 0203: pedido de serviço (assento, remarcação, emissão…) com os campos do tipo
+  const serv = s && !ehPagamento && !ehCotacao ? lerServico(s.formulario) : null;
   const esperandoAjuste = !!s && s.status === "aguardando" && s.aguardando_quem === "solicitante";
   const ultimoAjuste = [...eventos].reverse().find((e) => e.tipo === "ajuste");
   const faltaDesfecho = !!s && s.falta_desfecho && !s.desfecho;
@@ -161,15 +166,18 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
   async function enviarAjustes() {
     if (!s || !ajustando) return;
     // Pagamento: a amarração não muda no ajuste (cliente/venda já está no pedido).
-    const falta = ajustando.f ? faltaNaCotacao(ajustando.f) : ajustando.p ? faltaNoPagamento(ajustando.p, !!(s.cliente_id || s.viagem_id || s.lead_id)) : null;
+    const falta = ajustando.f ? faltaNaCotacao(ajustando.f) : ajustando.p ? faltaNoPagamento(ajustando.p, !!(s.cliente_id || s.viagem_id || s.lead_id))
+      : ajustando.sv ? faltaNoServico(s.tipo_id ?? "", ajustando.sv) : null;
     if (falta) { setErro(falta); return; }
-    if (!ajustando.f && !ajustando.texto.trim()) { setErro("Escreva o que você ajustou ou respondeu."); return; }
+    if (!ajustando.f && !ajustando.sv && !ajustando.texto.trim()) { setErro("Escreva o que você ajustou ou respondeu."); return; }
     setOcupado(true); setErro(null);
     try {
       await ajustarSolicitacao(s.id, ajustando.f
         ? { titulo: tituloDaCotacao(ajustando.f), descricao: descricaoDaCotacao(ajustando.f), formulario: ajustando.f, prioridade: ajustando.prioridade, texto: ajustando.texto }
         : ajustando.p
           ? { titulo: tituloDoPagamento(ajustando.p), descricao: descricaoDoPagamento(ajustando.p), formulario: paraBanco(ajustando.p), prioridade: ajustando.prioridade, texto: ajustando.texto }
+        : ajustando.sv
+          ? { titulo: tituloDoServico(s.tipo_rotulo ?? "Pedido", ajustando.sv, (s.sobre_nome ?? "").split(" · ")[0] || null), descricao: descricaoDoServico(s.tipo_id ?? "", ajustando.sv), formulario: ajustando.sv, prioridade: ajustando.prioridade, texto: ajustando.texto }
           : { titulo: s.titulo, descricao: s.descricao, prioridade: ajustando.prioridade, texto: ajustando.texto });
       setAjustando(null); await carregar(); onMudou();
     } catch (e) { setErro(e instanceof Error ? e.message : "Não enviou."); }
@@ -202,7 +210,8 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
             <p className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>{s.tipo_rotulo ?? "Pedido"}</p>
             <h3 className="text-[17px] font-bold leading-snug mt-0.5" style={{ color: "var(--ink)" }}>{s.titulo}</h3>
             {pag ? <div className="mt-2.5"><VerPagamento f={pag} /></div>
-              : cot && !ehPagamento ? <div className="mt-2.5"><VerCotacao f={cot} /></div>
+              : cot && ehCotacao ? <div className="mt-2.5"><VerCotacao f={cot} /></div>
+              : serv && s.tipo_id ? <div className="mt-2.5"><VerServico tipoId={s.tipo_id} f={serv} /></div>
               : s.descricao && <p className="text-[14px] whitespace-pre-wrap mt-2" style={{ color: "var(--ink2)" }}>{s.descricao}</p>}
           </div>
 
@@ -323,7 +332,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
               {recebe && s.aberta && <Botao variante="fantasma" disabled={ocupado} onClick={() => pedir({ acao: "recusar", titulo: "Por que não dá pra fazer?", dica: "Ex.: falta o passaporte; isso é com o Financeiro.", obrigatorio: true, botao: "Recusar", perigo: true })}>Recusar</Botao>}
 
               {pediu && esperandoAjuste && (
-                <Botao variante="primario" disabled={ocupado} onClick={() => { setErro(null); setAjustando({ f: cot && !ehPagamento ? { ...cot } : null, p: pag ? { ...pag } : null, prioridade: s.prioridade, texto: "" }); }}>Enviar ajustes</Botao>
+                <Botao variante="primario" disabled={ocupado} onClick={() => { setErro(null); setAjustando({ f: cot && ehCotacao ? { ...cot } : null, p: pag ? { ...pag } : null, sv: serv ? { ...serv, campos: { ...serv.campos } } : null, prioridade: s.prioridade, texto: "" }); }}>Enviar ajustes</Botao>
               )}
               {pediu && faltaDesfecho && <Botao variante="primario" disabled={ocupado} onClick={() => { setErro(null); setDesfechando({ tipo: null, motivo: "", texto: "" }); }}>Dar o desfecho</Botao>}
               {pediu && s.status === "concluida" && !s.confirmado_em && !ehCotacao && <Botao variante="primario" disabled={ocupado} onClick={() => void rodar("confirmar")}>✔ Resolveu, obrigado</Botao>}
@@ -344,8 +353,9 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links }: {
               <p className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>Ajuste o pedido</p>
               {ajustando.f && (
                 <FormCotacaoCampos f={ajustando.f} onMudar={(f) => setAjustando({ ...ajustando, f })}
-                  prioridade={ajustando.prioridade} onPrioridade={(p) => setAjustando({ ...ajustando, prioridade: p })} />
+                  prioridade={ajustando.prioridade} onPrioridade={(p) => setAjustando({ ...ajustando, prioridade: p })} pedidoFixo={PEDIDO_DO_TIPO[s.tipo_id ?? ""] === ajustando.f.pedido ? ajustando.f.pedido || undefined : undefined} />
               )}
+              {ajustando.sv && s.tipo_id && <FormServicoCampos tipoId={s.tipo_id} f={ajustando.sv} onMudar={(sv) => setAjustando({ ...ajustando, sv })} />}
               {ajustando.p && <FormPagamentoCampos f={ajustando.p} onMudar={(p) => setAjustando({ ...ajustando, p })} />}
               <textarea className="rel-input" rows={2} maxLength={2000} value={ajustando.texto} onChange={(e) => setAjustando({ ...ajustando, texto: e.target.value })}
                 placeholder={ajustando.f ? "Recado pro Operações (opcional). Ex.: as crianças têm 4 e 9 anos." : "O que você ajustou ou respondeu"} />

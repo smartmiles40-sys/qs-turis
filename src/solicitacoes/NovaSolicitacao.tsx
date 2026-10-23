@@ -14,13 +14,19 @@
 // 0201 (Bruno 22/10): tipos de PAGAMENTO ao Financeiro (Pix, link, cartão,
 // provisão) trocam pelo formulário do pagamento (FormPagamento) e a amarração
 // vira "cliente/venda · expedição · não é de cliente (para que é)".
+//
+// 0203 (Bruno 23/10): não é só cotação — o seletor mostra os tipos por grupo e os
+// pedidos de serviço (assento, remarcação, bagagem, emissão…) trocam a "linha do
+// que precisa" pelos campos daquele tipo (servico.ts / FormServico).
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import { Aviso, Botao, Campo, Entrada, Modal } from "@/rel/ui";
 import EscolherClienteVenda, { type Escolha } from "./EscolherClienteVenda";
 import FormCotacaoCampos, { EscolherPrioridade, textoHoras } from "./FormCotacao";
 import FormPagamentoCampos, { EscolherArquivos, VinculoPagamento } from "./FormPagamento";
-import { cotacaoVazia, descricaoDaCotacao, faltaNaCotacao, tituloDaCotacao, type FormCotacao } from "./cotacao";
+import { PEDIDO_DO_TIPO, cotacaoVazia, descricaoDaCotacao, faltaNaCotacao, tituloDaCotacao, type FormCotacao } from "./cotacao";
+import FormServicoCampos from "./FormServico";
+import { descricaoDoServico, faltaNoServico, servicoVazio, temFormServico, tituloDoServico, type FormServico } from "./servico";
 import {
   TIPO_PAG_DO, anexarArquivo, descricaoDoPagamento, faltaNoPagamento, pagamentoVazio, paraBanco, tituloDoPagamento, type FormPagamento,
 } from "./pagamento";
@@ -53,6 +59,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
   const [semCliente, setSemCliente] = useState(false);
   const [cot, setCot] = useState<FormCotacao>(() => cotacaoVazia());
   const [pag, setPag] = useState<FormPagamento>(() => pagamentoVazio("pix"));
+  const [serv, setServ] = useState<FormServico>(() => servicoVazio());
   const [arquivos, setArquivos] = useState<File[]>([]);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -61,7 +68,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
     if (!aberto) return;
     setTitulo(""); setDescricao(""); setPrioridade("normal"); setOutroPrazo(false); setPrazo(""); setErro(null); setSemCliente(false);
     setCot(cotacaoVazia(alvo?.sobre ? alvo.sobre.split(" · ")[0] : ""));
-    setPag((p) => pagamentoVazio(p.tipo)); setArquivos([]);
+    setPag((p) => pagamentoVazio(p.tipo)); setArquivos([]); setServ(servicoVazio());
     setEscolha(alvo?.clienteId ? { clienteId: alvo.clienteId, clienteNome: (alvo.sobre ?? "").split(" · ")[0] || "Cliente", viagemId: alvo.viagemId ?? null, vendaTexto: null } : null);
     setPara(soPagamento ? "financeiro" : paraInicial && paraInicial !== deSetor ? paraInicial : destinos.includes("operacional") ? "operacional" : destinos[0]);
     listarTipos().then(setTipos).catch(() => setTipos([]));
@@ -72,6 +79,17 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
   useEffect(() => { setTipo(doSetor[0]?.id ?? ""); }, [doSetor]);
   const tipoSel = doSetor.find((t) => t.id === tipo);
   const ehCotacao = tipoSel?.formulario === "cotacao";
+  const pedidoFixo = ehCotacao ? PEDIDO_DO_TIPO[tipo] : undefined;
+  const ehServico = tipoSel?.formulario === "servico" && temFormServico(tipo);
+  // Trocou o tipo: a cotação já vem com o que é; o serviço começa limpo.
+  useEffect(() => { if (pedidoFixo) setCot((c) => ({ ...c, pedido: pedidoFixo })); }, [pedidoFixo]);
+  useEffect(() => { setServ(servicoVazio()); }, [tipo]);
+  // Seletor por grupo (0203), na ordem dos tipos.
+  const grupos = useMemo(() => {
+    const m = new Map<string, TipoSol[]>();
+    for (const t of doSetor) { const g = t.grupo ?? ""; m.set(g, [...(m.get(g) ?? []), t]); }
+    return [...m.entries()];
+  }, [doSetor]);
   const tipoPag = tipoSel?.formulario === "pagamento" ? TIPO_PAG_DO[tipoSel.id] : undefined;
   const ehPagamento = !!tipoPag;
   const horas = tipoSel ? horasDoTipo(tipoSel) : undefined;
@@ -87,18 +105,18 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
   async function enviar() {
     if (!tipo) { setErro("Escolha o tipo do pedido."); return; }
     if (ehPagamento) return enviarPagamento();
-    const falta = ehCotacao ? faltaNaCotacao(cot) : null;
+    const falta = ehCotacao ? faltaNaCotacao(cot) : ehServico ? faltaNoServico(tipo, serv) : null;
     if (falta) { setErro(falta); return; }
-    if (!ehCotacao && !titulo.trim()) { setErro("Escreva em uma linha o que você precisa."); return; }
+    if (!ehCotacao && !ehServico && !titulo.trim()) { setErro("Escreva em uma linha o que você precisa."); return; }
     if (outroPrazo && !prazo) { setErro("Escolha o prazo (ou use o padrão)."); return; }
     if (!escolha && !semCliente && !alvo?.leadId) { setErro("Escolha o cliente do pedido (ou marque que não é de cliente)."); return; }
     setEnviando(true); setErro(null);
     try {
       const id = await criarSolicitacao({
         de: deSetor, para, tipo, prioridade,
-        titulo: ehCotacao ? tituloDaCotacao(cot) : titulo.trim(),
-        descricao: ehCotacao ? descricaoDaCotacao(cot) : descricao.trim(),
-        formulario: ehCotacao ? cot : null,
+        titulo: ehCotacao ? tituloDaCotacao(cot) : ehServico ? tituloDoServico(tipoSel?.rotulo ?? "Pedido", serv, escolha?.clienteNome ?? alvo?.sobre) : titulo.trim(),
+        descricao: ehCotacao ? descricaoDaCotacao(cot) : ehServico ? descricaoDoServico(tipo, serv) : descricao.trim(),
+        formulario: ehCotacao ? cot : ehServico ? serv : null,
         prazo: outroPrazo ? deInputLocal(prazo) : null, ...(alvo ?? {}),
         clienteId: escolha?.clienteId ?? null,
         viagemId: escolha?.viagemId ?? null,
@@ -140,7 +158,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
   }
 
   return (
-    <Modal aberto={aberto} titulo={ehCotacao ? `Pedir cotação a ${NOME_SETOR[para]}` : ehPagamento ? "Pedir pagamento ao Financeiro" : "Pedir a outro setor"} onFechar={onFechar} largura={ehCotacao || ehPagamento ? 720 : 560}
+    <Modal aberto={aberto} titulo={ehCotacao ? `Pedir cotação a ${NOME_SETOR[para]}` : ehPagamento ? "Pedir pagamento ao Financeiro" : `Pedir a ${NOME_SETOR[para]}`} onFechar={onFechar} largura={ehCotacao || ehPagamento || ehServico ? 720 : 560}
       rodape={<><Botao onClick={onFechar} disabled={enviando}>Cancelar</Botao><Botao variante="primario" onClick={() => void enviar()} disabled={enviando}>{enviando ? "Enviando…" : `Enviar pra ${NOME_SETOR[para]}`}</Botao></>}>
       <div className="space-y-4">
         {!soPagamento && <div>
@@ -163,7 +181,9 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
         )}
         <Campo rotulo="Tipo do pedido" dica={horas ? `Prazo: Normal ${textoHoras(horas.normal)} · Alta ${textoHoras(horas.alta)} · Urgente ${textoHoras(horas.urgente)} (seg–sex, 9h–18h).` : undefined}>
           <select className="rel-input" value={tipo} onChange={(e) => setTipo(e.target.value)}>
-            {doSetor.map((t) => <option key={t.id} value={t.id}>{t.rotulo}</option>)}
+            {grupos.map(([g, ts]) => g
+              ? <optgroup key={g} label={g}>{ts.map((t) => <option key={t.id} value={t.id}>{t.rotulo}</option>)}</optgroup>
+              : ts.map((t) => <option key={t.id} value={t.id}>{t.rotulo}</option>))}
           </select>
         </Campo>
 
@@ -201,7 +221,9 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
         </div>
 
         {ehCotacao ? (
-          <FormCotacaoCampos f={cot} onMudar={setCot} prioridade={prioridade} onPrioridade={setPrioridade} horas={horas} />
+          <FormCotacaoCampos f={cot} onMudar={setCot} prioridade={prioridade} onPrioridade={setPrioridade} horas={horas} pedidoFixo={pedidoFixo} />
+        ) : ehServico ? (
+          <FormServicoCampos tipoId={tipo} f={serv} onMudar={setServ} />
         ) : (<>
         <Campo rotulo="O que você precisa (uma linha)" dica="Ex.: cotar aéreo GRU–Lisboa 12/03 a 26/03 pra 2 adultos.">
           <Entrada value={titulo} onChange={(e) => setTitulo(e.target.value)} maxLength={160} autoFocus />
