@@ -1642,11 +1642,24 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // REGRA: encerra as demais tarefas pendentes/atrasadas do lead (menos a extra e a de origem).
     // MEDIDO (item 7 da Sprint 4): se o banco recusar, as tarefas "ressuscitavam" no
     // refresh de 60s sem aviso nenhum — agora o SDR fica sabendo na hora.
-    const exclude = [extra.id, extraFromTaskId].filter(Boolean) as string[];
-    let q = supabase.from("qs_tasks").update({ status: "ignorada", skip_reason: "Substituída por atividade extra" })
-      .eq("lead_id", extraTask.lead_id).in("status", ["pendente", "atrasada"]);
-    if (exclude.length) q = q.not("id", "in", `(${exclude.join(",")})`);
-    const { error: closeErr } = await q;
+    // EXCEÇÃO (26/10): a ligação que o CLIENTE marcou (tag `ligacao-agendada`) fica.
+    // É um horário combinado com ele — a regra fechava a ligação e soltava a reserva
+    // na agenda do SDR (8 do Victor Hugo e 6 da Yanca sumiram assim). Filtro em JS,
+    // não `.not("tags","cs",...)`: com tags null o NOT daria null e a tarefa escaparia.
+    const exclude = new Set([extra.id, extraFromTaskId].filter(Boolean) as string[]);
+    let closeErr: unknown = null;
+    const { data: abertas, error: listErr } = await supabase.from("qs_tasks")
+      .select("id, tags").eq("lead_id", extraTask.lead_id).in("status", ["pendente", "atrasada"]);
+    if (listErr) closeErr = listErr;
+    const fechar = ((abertas as { id: string; tags: string[] | null }[] | null) ?? [])
+      .filter((t) => !exclude.has(t.id) && !(t.tags ?? []).includes("ligacao-agendada"))
+      .map((t) => t.id);
+    if (!closeErr && fechar.length) {
+      const { error } = await supabase.from("qs_tasks")
+        .update({ status: "ignorada", skip_reason: "Substituída por atividade extra" })
+        .in("id", fechar).in("status", ["pendente", "atrasada"]);
+      closeErr = error;
+    }
     if (closeErr) {
       console.warn("[QS] falha ao encerrar as demais tarefas do lead:", closeErr);
       notifyError("A atividade extra foi criada, mas as OUTRAS atividades do lead não foram encerradas — elas podem continuar na fila.");
