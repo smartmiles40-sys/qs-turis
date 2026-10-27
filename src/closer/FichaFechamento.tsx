@@ -16,7 +16,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Aviso, Botao, Campo, Entrada, Modal } from "@/rel/ui";
-import { carregarProposta, totaisDaOpcao, TIPOS, type TipoItem } from "@/propostas/lib";
+import { carregarProposta, tipoVendaBitrix, totaisDaOpcao, TIPOS, type TipoItem } from "@/propostas/lib";
+import { listarItensDaVenda, nomeSugerido, somaDosItens } from "./vendaItens";
 import {
   FORMAS_PAGAMENTO, SERVICOS, brl, consolidar, espelharNoBitrix, hojeISO, nomeDoLead, responsaveisDoRel, somarMeses,
   type Ficha, type FormaPagamento, type Negocio, type ParcelaFicha, type Servico,
@@ -31,8 +32,9 @@ const vazio = (): Ficha => ({
   rel_responsavel_id: null,
 });
 
-/** Tipo do item da proposta → serviço da viagem. */
+/** Tipos dos itens → serviço da viagem. */
 function servicoDosItens(tipos: string[]): Servico {
+  if (tipos.includes("expedicao")) return "expedicao";
   if (tipos.includes("pacote")) return "pacote";
   const t = new Set(tipos);
   if (t.size === 1 && t.has("aereo")) return "aereo";
@@ -40,8 +42,14 @@ function servicoDosItens(tipos: string[]): Servico {
   if (t.size === 1 && t.has("cruzeiro")) return "cruzeiro";
   if (t.size === 1 && t.has("seguro")) return "seguro";
   if (t.size === 1 && t.has("passeio")) return "passeio";
+  if (t.size === 1 && t.has("concierge")) return "concierge";
   return "pacote";
 }
+/** Serviço da ficha → tipo do catálogo (pro "Tipo de venda" do Bitrix). */
+const TIPO_DO_SERVICO: Record<Servico, TipoItem> = {
+  pacote: "pacote", aereo: "aereo", hospedagem: "hospedagem", expedicao: "expedicao", passeio: "passeio",
+  cruzeiro: "cruzeiro", seguro: "seguro", concierge: "concierge", outro: "outro",
+};
 
 export default function FichaFechamento({ negocio, aberto, onFechar, onConsolidado }: {
   negocio: Negocio;
@@ -64,6 +72,28 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
     if (negocio.ficha) return;
     let vivo = true;
     (async () => {
+      // 0207: a venda registrada (itens por tipo) vem primeiro — é a fonte.
+      const reg = await listarItensDaVenda(negocio.id).catch(() => []);
+      if (reg.length) {
+        if (!vivo) return;
+        const datasIni = reg.map((i) => i.data_inicio).filter(Boolean).sort();
+        const datasFim = reg.map((i) => i.data_fim || i.data_inicio).filter(Boolean).sort();
+        const nomes = reg.flatMap((i) => i.passageiros.map((p) => p.nome)).filter(Boolean);
+        const unicos = [...new Set(nomes)];
+        const destino = reg.find((i) => i.dados.destino)?.dados.destino || reg.find((i) => i.dados.expedicao)?.dados.expedicao || "";
+        setF((x) => ({
+          ...x,
+          de_itens_da_venda: true,
+          destino: destino || x.destino, data_ida: datasIni[0] || x.data_ida, data_volta: datasFim[datasFim.length - 1] || x.data_volta,
+          qtd_passageiros: unicos.length || x.qtd_passageiros,
+          valor_total: somaDosItens(reg),
+          servico: servicoDosItens(reg.map((i) => i.tipo)),
+          itens: reg.map((i) => ({ tipo: i.tipo, nome: i.nome || nomeSugerido(i), descricao: "", valor_total: Number(i.valor) || 0 })),
+        }));
+        if (unicos.length) setPassageirosTxt(unicos.join("\n"));
+        setDaProposta(`Puxado da venda registrada (${reg.length} item${reg.length === 1 ? "" : "s"}). Pra mudar um item, use "Editar venda" no cartão.`);
+        return;
+      }
       // A proposta aprovada mais recente do cliente (direto no lead ou pela solicitação dele).
       const { data: sols } = await supabase.from("qs_solicitacoes").select("id").eq("lead_id", negocio.lead_id);
       const solIds = (sols ?? []).map((s) => s.id as string);
@@ -91,7 +121,7 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
       setDaProposta(`Puxado da proposta nº ${p.numero ?? ""} — opção "${op.titulo || "aprovada"}"${p.aprovada_nome ? `, aprovada por ${p.aprovada_nome}` : ""}.`);
     })().catch(() => undefined);
     return () => { vivo = false; };
-  }, [aberto, negocio.ficha, negocio.lead_id, negocio.valor_previsto]);
+  }, [aberto, negocio.ficha, negocio.id, negocio.lead_id, negocio.valor_previsto]);
 
   const mudar = (p: Partial<Ficha>) => setF((x) => ({ ...x, ...p }));
   const mudarPlano = (p: Partial<Ficha["plano"]>) => setF((x) => ({ ...x, plano: { ...x.plano, ...p } }));
@@ -125,6 +155,8 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
       const ficha: Ficha = {
         ...f,
         passageiros: passageirosTxt.split("\n").map((s) => s.trim()).filter(Boolean).map((nome) => ({ nome })),
+        // Pré-venda já mandou o tipo; senão, o do serviço (o servidor só preenche se o card estiver vazio).
+        tipo_bitrix: negocio.pre_venda_tipo_bitrix || tipoVendaBitrix(TIPO_DO_SERVICO[f.servico] ?? "outro").id,
       };
       await consolidar(negocio.id, ficha);
       let msg = "Venda consolidada! A viagem já está no Relacionamento e o plano no Financeiro.";
@@ -151,6 +183,12 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
         <Botao variante="primario" onClick={() => void enviar()} disabled={salvando}>{salvando ? "Consolidando…" : !!negocio.consolidada_em ? "Salvar correção" : "Consolidar venda"}</Botao>
       </>}>
       {daProposta && <Aviso tom="ok">{daProposta}</Aviso>}
+      {!negocio.consolidada_em && negocio.pre_venda_em && (
+        <div className="mt-2"><Aviso>
+          Esta venda já subiu pro Dashboard como <b>pré-venda</b> em {new Date(negocio.pre_venda_em).toLocaleDateString("pt-BR")}. Consolidar
+          completa a venda (viagem no Relacionamento + plano no Financeiro) e <b>não conta a venda de novo</b>.
+        </Aviso></div>
+      )}
       {!!negocio.consolidada_em && (
         <div className="mt-2"><Aviso>Esta venda já foi consolidada. Salvar de novo corrige a viagem e refaz o plano (só se o Financeiro ainda não deu baixa em nenhuma parcela).</Aviso></div>
       )}
@@ -179,7 +217,7 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
       </div>
       {f.itens.length > 0 && (
         <div className="mt-3 rel-card p-3">
-          <p className="text-[12px] font-semibold mb-1" style={{ color: "var(--ink2)" }}>Itens da proposta aprovada</p>
+          <p className="text-[12px] font-semibold mb-1" style={{ color: "var(--ink2)" }}>{f.de_itens_da_venda ? "Itens da venda registrada" : "Itens da proposta aprovada"}</p>
           <ul className="space-y-0.5">
             {f.itens.map((it, i) => (
               <li key={i} className="flex gap-2 text-[13px]" style={{ color: "var(--ink)" }}>

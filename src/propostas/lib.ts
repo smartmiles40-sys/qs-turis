@@ -13,9 +13,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Setor } from "@/components/sdr/types";
+import { TIPOS_DE_VENDA } from "@/components/sdr/agenda/DesfechoVenda";
 
 export type StatusProposta = "rascunho" | "pronta" | "enviada" | "aprovada" | "recusada" | "cancelada";
-export type TipoItem = "aereo" | "hospedagem" | "transfer" | "trem" | "passeio" | "seguro" | "carro" | "cruzeiro" | "visto" | "pacote" | "outro";
+export type TipoItem = "aereo" | "hospedagem" | "transfer" | "trem" | "passeio" | "seguro" | "carro" | "cruzeiro" | "visto" | "pacote" | "expedicao" | "concierge" | "outro";
 
 export const STATUS_PROPOSTA: Record<StatusProposta, string> = {
   rascunho: "Rascunho", pronta: "Pronta pra enviar", enviada: "Enviada", aprovada: "Aprovada", recusada: "Recusada", cancelada: "Cancelada",
@@ -33,6 +34,8 @@ export interface CampoTipo {
   dica?: string;
   /** Ocupa a linha toda no formulário. */
   largo?: boolean;
+  /** Só aparece no "Registrar venda" do closer (0207), não no editor de proposta. */
+  soVenda?: boolean;
 }
 export interface TipoInfo {
   rotulo: string;
@@ -42,15 +45,27 @@ export interface TipoInfo {
   campos: CampoTipo[];
   /** Placeholder do nome do item. */
   exemploNome: string;
+  /** Datas no "Registrar venda", quando diferem das da proposta (aéreo pede ida/volta). */
+  datasVenda?: [string | null, string | null];
+  /** Uma linha pro closer no cartão grande do "Registrar venda". */
+  ajuda?: string;
+  /** Só existe na venda (o editor de proposta não oferece). */
+  soVenda?: boolean;
 }
 
 export const REGIMES = ["Sem refeição", "Café da manhã", "Meia pensão", "Pensão completa", "All inclusive"];
 export const CLASSES_VOO = ["Econômica", "Premium Economy", "Executiva", "Primeira"];
+export const QUARTOS_EXPEDICAO = ["Duplo (casal)", "Twin (2 camas)", "Triplo", "Single", "Compartilhado com outro viajante"];
 
 export const TIPOS: Record<TipoItem, TipoInfo> = {
   aereo: {
     rotulo: "Aéreo", emoji: "✈️", datas: [null, null], exemploNome: "Voo São Paulo → Tóquio",
+    datasVenda: ["Data da ida", "Data da volta (se tiver)"], ajuda: "Passagem aérea: companhia, voos, localizador",
     campos: [
+      // 0207 (venda): o editor de proposta já tem os trechos estruturados; na venda o closer escreve rápido.
+      { chave: "companhia", rotulo: "Companhia aérea", tipo: "texto", dica: "Ex.: LATAM, JAL", soVenda: true },
+      { chave: "voos", rotulo: "Trechos / voos", tipo: "area", largo: true, soVenda: true, dica: "Um por linha. Ex.: GRU → NRT 12/03 JL 45" },
+      { chave: "classe", rotulo: "Classe", tipo: "select", opcoes: ["", ...CLASSES_VOO], soVenda: true },
       // Bilhete (21/10): três caixas — vazio no item pessoal = "Incluso"; vazio/"Não" nas malas = "Não inclusa".
       { chave: "item_pessoal", rotulo: "Item pessoal", tipo: "texto", dica: "Ex.: Até 10 kg (vazio = Incluso)" },
       { chave: "bagagem_mao", rotulo: "Mala de mão", tipo: "texto", dica: "Ex.: Até 12 kg (vazio = Não inclusa)" },
@@ -59,7 +74,7 @@ export const TIPOS: Record<TipoItem, TipoInfo> = {
     ],
   },
   hospedagem: {
-    rotulo: "Hospedagem", emoji: "🏨", datas: ["Check-in", "Check-out"], exemploNome: "Hotel Gracery Shinjuku",
+    rotulo: "Hospedagem", emoji: "🏨", datas: ["Check-in", "Check-out"], exemploNome: "Hotel Gracery Shinjuku", ajuda: "Hotel avulso: cidade, quarto, regime",
     campos: [
       { chave: "cidade", rotulo: "Cidade", tipo: "texto" },
       { chave: "estrelas", rotulo: "Estrelas", tipo: "select", opcoes: ["", "1", "2", "3", "4", "5"] },
@@ -72,7 +87,7 @@ export const TIPOS: Record<TipoItem, TipoInfo> = {
     ],
   },
   transfer: {
-    rotulo: "Transfer", emoji: "🚐", datas: ["Data", null], exemploNome: "Transfer aeroporto → hotel",
+    rotulo: "Transfer", emoji: "🚐", datas: ["Data", null], exemploNome: "Transfer aeroporto → hotel", ajuda: "Translado de/para aeroporto ou hotel",
     campos: [
       { chave: "modalidade", rotulo: "Modalidade", tipo: "select", opcoes: ["", "Privativo", "Compartilhado"] },
       { chave: "hora", rotulo: "Horário", tipo: "hora" },
@@ -81,7 +96,7 @@ export const TIPOS: Record<TipoItem, TipoInfo> = {
     ],
   },
   trem: {
-    rotulo: "Trem / ônibus", emoji: "🚄", datas: ["Data", null], exemploNome: "Shinkansen Tóquio → Kyoto",
+    rotulo: "Trem / ônibus", emoji: "🚄", datas: ["Data", null], exemploNome: "Shinkansen Tóquio → Kyoto", ajuda: "Bilhete de trem ou ônibus",
     campos: [
       { chave: "operadora", rotulo: "Operadora", tipo: "texto" },
       { chave: "numero", rotulo: "Trem / linha", tipo: "texto" },
@@ -94,7 +109,7 @@ export const TIPOS: Record<TipoItem, TipoInfo> = {
     ],
   },
   passeio: {
-    rotulo: "Passeio / ingresso", emoji: "🎟️", datas: ["Data", "Até (se for passe)"], exemploNome: "Tour Monte Fuji",
+    rotulo: "Passeio / ingresso", emoji: "🎟️", datas: ["Data", "Até (se for passe)"], exemploNome: "Tour Monte Fuji", ajuda: "Tour, ingresso ou passe",
     campos: [
       { chave: "local", rotulo: "Local / ponto de encontro", tipo: "texto" },
       { chave: "hora", rotulo: "Horário", tipo: "hora" },
@@ -104,14 +119,16 @@ export const TIPOS: Record<TipoItem, TipoInfo> = {
   },
   seguro: {
     rotulo: "Seguro viagem", emoji: "🛡️", datas: ["Início da cobertura", "Fim da cobertura"], exemploNome: "Seguro viagem",
+    ajuda: "Seguradora, plano e vigência",
     campos: [
       { chave: "seguradora", rotulo: "Seguradora", tipo: "texto" },
       { chave: "plano", rotulo: "Plano", tipo: "texto" },
       { chave: "cobertura", rotulo: "Cobertura médica", tipo: "texto", dica: "Ex.: USD 60 mil" },
+      { chave: "apolice", rotulo: "Nº da apólice", tipo: "texto", dica: "Se já tiver (pode ficar pra emissão)", soVenda: true },
     ],
   },
   carro: {
-    rotulo: "Aluguel de carro", emoji: "🚗", datas: ["Retirada", "Devolução"], exemploNome: "Aluguel de carro",
+    rotulo: "Aluguel de carro", emoji: "🚗", datas: ["Retirada", "Devolução"], exemploNome: "Aluguel de carro", ajuda: "Locadora, categoria, retirada e devolução",
     campos: [
       { chave: "locadora", rotulo: "Locadora", tipo: "texto" },
       { chave: "categoria", rotulo: "Categoria", tipo: "texto", dica: "Ex.: SUV automático" },
@@ -122,7 +139,7 @@ export const TIPOS: Record<TipoItem, TipoInfo> = {
     ],
   },
   cruzeiro: {
-    rotulo: "Cruzeiro", emoji: "🛳️", datas: ["Embarque", "Desembarque"], exemploNome: "Cruzeiro pelo Mediterrâneo",
+    rotulo: "Cruzeiro", emoji: "🛳️", datas: ["Embarque", "Desembarque"], exemploNome: "Cruzeiro pelo Mediterrâneo", ajuda: "Companhia, navio e cabine",
     campos: [
       { chave: "companhia", rotulo: "Companhia", tipo: "texto" },
       { chave: "navio", rotulo: "Navio", tipo: "texto" },
@@ -133,7 +150,7 @@ export const TIPOS: Record<TipoItem, TipoInfo> = {
     ],
   },
   visto: {
-    rotulo: "Visto", emoji: "🛂", datas: [null, null], exemploNome: "Visto de turismo",
+    rotulo: "Visto", emoji: "🛂", datas: [null, null], exemploNome: "Visto de turismo", ajuda: "Assessoria de visto",
     campos: [
       { chave: "pais", rotulo: "País", tipo: "texto" },
       { chave: "tipo_visto", rotulo: "Tipo de visto", tipo: "texto" },
@@ -142,14 +159,62 @@ export const TIPOS: Record<TipoItem, TipoInfo> = {
   },
   pacote: {
     rotulo: "Pacote / circuito", emoji: "🧳", datas: ["Início", "Fim"], exemploNome: "Circuito Japão Clássico",
+    ajuda: "Pacote personalizado: destino, hotéis, o que inclui",
     campos: [
+      // 0207: destino e hotéis são novos e opcionais (o Rel e o app do cliente usam).
+      { chave: "destino", rotulo: "Destino", tipo: "texto", dica: "Ex.: Japão — Tóquio, Kyoto e Osaka" },
       { chave: "operadora", rotulo: "Operadora", tipo: "texto" },
-      { chave: "inclui", rotulo: "O que inclui", tipo: "area", largo: true },
+      { chave: "hoteis", rotulo: "Hotéis", tipo: "area", largo: true, dica: "Um por linha. Ex.: Tóquio — Hotel Gracery (4 noites)" },
+      { chave: "inclui", rotulo: "O que inclui", tipo: "area", largo: true, dica: "Ex.: café da manhã, transfers, guia em português" },
     ],
   },
-  outro: { rotulo: "Outro", emoji: "📌", datas: ["Data", null], exemploNome: "Serviço", campos: [] },
+  // 0207 (Bruno, 27/10): tipos que só existem na VENDA (o editor de proposta não oferece).
+  expedicao: {
+    rotulo: "Expedição", emoji: "🧭", datas: ["Embarque", "Retorno"], exemploNome: "Expedição Japão — Março 2027", soVenda: true,
+    ajuda: "Viagem em grupo da agência: qual expedição, edição e quarto",
+    campos: [
+      { chave: "expedicao", rotulo: "Qual expedição", tipo: "texto", dica: "Ex.: Japão, China, Turquia" },
+      { chave: "edicao", rotulo: "Edição / turma", tipo: "texto", dica: "Ex.: Março 2027" },
+      { chave: "grupo", rotulo: "Grupo", tipo: "texto", dica: "Ex.: G1" },
+      { chave: "quarto", rotulo: "Quarto", tipo: "select", opcoes: ["", ...QUARTOS_EXPEDICAO] },
+      { chave: "divide_quarto_com", rotulo: "Divide o quarto com", tipo: "texto", dica: "Nome de quem divide (se souber)" },
+    ],
+  },
+  concierge: {
+    rotulo: "Concierge", emoji: "🛎️", datas: ["Início", "Fim"], exemploNome: "Concierge da viagem", soVenda: true,
+    ajuda: "Serviço sob medida (reservas, roteiro, assessoria)",
+    campos: [
+      { chave: "descricao", rotulo: "O que vamos fazer pelo cliente", tipo: "area", largo: true, dica: "Ex.: reservas de restaurantes, roteiro dia a dia, ingressos" },
+    ],
+  },
+  outro: { rotulo: "Outro", emoji: "📌", datas: ["Data", null], exemploNome: "Serviço", campos: [], ajuda: "Qualquer outro serviço" },
 };
+/** Tipos que o editor de PROPOSTA oferece (qs_proposta_itens não aceita expedição/concierge). */
 export const ORDEM_TIPOS: TipoItem[] = ["aereo", "hospedagem", "transfer", "trem", "passeio", "seguro", "carro", "cruzeiro", "visto", "pacote", "outro"];
+/** Ordem dos cartões do "Registrar venda" (0207): os que mais vendem primeiro. */
+export const ORDEM_TIPOS_VENDA: TipoItem[] = ["aereo", "pacote", "expedicao", "seguro", "hospedagem", "passeio", "transfer", "trem", "carro", "cruzeiro", "concierge", "visto", "outro"];
+
+/** Campos do tipo no contexto: a proposta não mostra os `soVenda`. */
+export const camposDoTipo = (tipo: TipoItem, contexto: "proposta" | "venda"): CampoTipo[] =>
+  TIPOS[tipo].campos.filter((c) => contexto === "venda" || !c.soVenda);
+/** Rótulos das datas no contexto (o aéreo da venda pede ida/volta). */
+export const datasDoTipo = (tipo: TipoItem, contexto: "proposta" | "venda"): [string | null, string | null] =>
+  (contexto === "venda" && TIPOS[tipo].datasVenda) || TIPOS[tipo].datas;
+
+// ── Tipo → "Tipo de venda" do Bitrix (UF_CRM_1743296167520) ─────────────────
+// Mapa do contrato (docs/CONTRATO-VENDA-ITENS.md). Ids e nomes vêm de
+// TIPOS_DE_VENDA (DesfechoVenda.tsx), a fonte dos ids do Bitrix. Único lugar
+// que traduz tipo de item → tipo de venda: não duplicar.
+const ID_TIPO_VENDA: Record<TipoItem, string> = {
+  aereo: "71", pacote: "67", expedicao: "69", hospedagem: "77", seguro: "73",
+  passeio: "75", transfer: "75", trem: "75", carro: "75",
+  concierge: "229", cruzeiro: "325", visto: "79", outro: "79",
+};
+/** O "Tipo de venda" do Bitrix pra um tipo de item: { id (string — enum do Bitrix), nome }. */
+export function tipoVendaBitrix(tipo: TipoItem): { id: string; nome: string } {
+  const id = ID_TIPO_VENDA[tipo] ?? "79";
+  return { id, nome: TIPOS_DE_VENDA.find((t) => t.id === id)?.nome ?? "Outros" };
+}
 
 /** Um trecho de voo (ida, volta e conexões são trechos em sequência). */
 export interface Trecho {
