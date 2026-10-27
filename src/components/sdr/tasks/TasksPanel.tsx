@@ -37,6 +37,9 @@ import {
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured, setOnCallEnded as setOnCallEndedWebphone } from "@/lib/webphone";
 import { logCallEnded, type CallProvider } from "@/lib/qs/callLog";
+import DiscadorPainel from "@/components/sdr/telefone/DiscadorPainel";
+import { discadorLigado } from "@/lib/discador/controlador";
+import type { ItemFila } from "@/lib/discador/motor";
 import CotandoAereo from "@/components/sdr/aereo/CotandoAereo";
 import { fetchCotacoesAereo, formatarDuracao, ouvirCotacaoAereo, resumir, type ResumoAereo } from "@/lib/qs/aereo";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, nextWorkMoment, clampToWorkWindow, scheduleWeekdays, isWithinHours, workdaysBetween, type WorkHours } from "@/lib/workHours";
@@ -754,6 +757,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [modoSelecao, setModoSelecao] = useState(false);
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [massaRodando, setMassaRodando] = useState<{ feitas: number; total: number } | null>(null);
+
+  // Discador: só aparece com o liga/desliga do admin LIGADO e o ramal do
+  // webfone provisionado pra este SDR.
+  const [discadorDisponivel, setDiscadorDisponivel] = useState(false);
+  const [discadorAberto, setDiscadorAberto] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    void (async () => {
+      const ligado = await discadorLigado();
+      const ok = ligado && (await isWebphoneConfigured());
+      if (vivo) setDiscadorDisponivel(ok);
+    })();
+    return () => { vivo = false; };
+  }, []);
   const [classifySel, setClassifySel] = useState<string | null>(null);
 
   // Menu (⋯) do card: adiar/reagendar/editar/excluir extra (Sprint 4 — item 1/3).
@@ -2557,6 +2574,92 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     caixa_postal: "caixa postal",
   };
 
+  /**
+   * Efeitos de um desfecho dado SEM abrir o card — ações em massa e discador.
+   * Uma regra só pros dois (o discador não pode ter cadência própria):
+   * follow-up anti-órfão, "contatado" e o 1º contato no Bitrix.
+   */
+  async function efeitosDoDesfechoEmLote(tarefa: Task, resultado: string, rotulo: string) {
+    if (resultado !== "concluida") {
+      // `null` aqui NÃO é sempre problema: quando o lead já tem outra
+      // atividade aberta (a cadência cria os dias todos de uma vez), o
+      // helper devolve null de propósito pra não duplicar a fila. Só conta
+      // como órfão quem ficou REALMENTE sem nada pendente — e essa
+      // pergunta quem responde é o banco, depois do recarregamento.
+      await insertFollowUp(tarefa, resultado);
+    }
+    markContacted(tarefa.lead_id);
+    const leadDaTarefa = getLeadForTask(tarefa);
+    notifyBitrix("primeiro-contato", {
+      lead_id: tarefa.lead_id,
+      bitrix_id: leadDaTarefa?.bitrix_id,
+      full_name: leadDaTarefa?.full_name,
+      canal: CHANNEL_LABELS[tarefa.channel_type],
+      desfecho: rotulo,
+      alcancou: false,
+      sdr: currentUser?.name ?? null,
+    });
+  }
+
+  // ── Discador (liga N de uma vez; src/lib/discador) ─────────────────────────
+
+  /** Fila do discador: ligações DELE, vencidas, na ordem da Fila de hoje,
+   *  com telefone discável e sem repetir lead. */
+  function montarFilaDoDiscador(): ItemFila[] {
+    const agora = Date.now();
+    const vistos = new Set<string>();
+    const fila: ItemFila[] = [];
+    for (const t of filteredTasks) {
+      if (t.owner_id !== currentUser?.id) continue;
+      if (!CALL_CHANNELS.includes(t.channel_type)) continue;
+      if (t.status !== "pendente" && t.status !== "atrasada") continue;
+      if (new Date(t.scheduled_at).getTime() > agora) continue; // retorno marcado pra mais tarde
+      if (vistos.has(t.lead_id)) continue;
+      const lead = getLeadForTask(t);
+      const tel = normalizePhoneBR(lead?.phone);
+      if (!tel || tel.length < 11) continue;
+      vistos.add(t.lead_id);
+      fila.push({ tarefaId: t.id, leadId: t.lead_id, telefone: tel, nome: lead?.full_name ?? null });
+    }
+    return fila;
+  }
+
+  /** "Não atendeu"/"Nº errado" dado pelo discador — mesmo caminho do lote. */
+  async function desfechoDoDiscador(item: ItemFila, resultado: "nao_atendeu" | "numero_errado", detalhe: string) {
+    const tarefa = tasksRef.current.find((t) => t.id === item.tarefaId);
+    const r = await completeTask(item.tarefaId, resultado, undefined, ["discador"]);
+    if (!r || !tarefa) return; // já concluída por outro caminho / banco recusou
+    await efeitosDoDesfechoEmLote(tarefa, resultado, `${ROTULO_MASSA[resultado] ?? resultado} (discador: ${detalhe})`);
+  }
+
+  /** Atendeu e foi derrubado (outro lead atendeu junto): retorno urgente. */
+  async function retornoUrgenteDoDiscador(item: ItemFila) {
+    const origem = tasksRef.current.find((t) => t.id === item.tarefaId);
+    const { data, error } = await supabase.from("qs_tasks").insert({
+      lead_id: item.leadId,
+      cadence_id: origem?.cadence_id ?? null,
+      owner_id: origem?.owner_id ?? currentUser?.id ?? null,
+      channel_type: origem?.channel_type ?? "ligacao",
+      priority: "alta",
+      scheduled_at: new Date().toISOString(),
+      status: "pendente",
+      is_extra: true,
+      notes: "URGENTE — atendeu o discador, mas outro lead atendeu junto e a ligação caiu. Ligue de volta agora.",
+      tags: ["discador-abandonada", "retorno", `tentativa:${(origem ? getAttemptCount(origem) : 1) + 1}`],
+    }).select().single();
+    const extra = (data as Task | null) ?? null;
+    if (error || !extra) {
+      notifyError(`${item.nome || "Um lead"} atendeu e caiu no discador, mas o retorno urgente não foi criado — ligue pra ele pela fila.`);
+      return;
+    }
+    // Mesma REGRA da extra manual: o lead fica só com ela.
+    const { error: closeErr } = await supabase.from("qs_tasks")
+      .update({ status: "ignorada", skip_reason: "Substituída por retorno urgente (discador)" })
+      .eq("lead_id", item.leadId).in("status", ["pendente", "atrasada"]).neq("id", extra.id);
+    if (closeErr) notifyError("O retorno urgente foi criado, mas as outras atividades do lead não foram encerradas.");
+    showToast(`${item.nome || "Lead"} atendeu junto com outro e caiu — retorno urgente criado.`);
+  }
+
   function alternarSelecao(taskId: string) {
     setSelecionadas((prev) => {
       const next = new Set(prev);
@@ -2636,25 +2739,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         //    contato (o n8n ignora quem já saiu de lá — repetir não estraga).
         if (tarefa) {
           leadsTocados.add(tarefa.lead_id);
-          if (resultado !== "concluida") {
-            // `null` aqui NÃO é sempre problema: quando o lead já tem outra
-            // atividade aberta (a cadência cria os dias todos de uma vez), o
-            // helper devolve null de propósito pra não duplicar a fila. Só conta
-            // como órfão quem ficou REALMENTE sem nada pendente — e essa
-            // pergunta quem responde é o banco, depois do recarregamento.
-            await insertFollowUp(tarefa, resultado);
-          }
-          markContacted(tarefa.lead_id);
-          const leadDaTarefa = getLeadForTask(tarefa);
-          notifyBitrix("primeiro-contato", {
-            lead_id: tarefa.lead_id,
-            bitrix_id: leadDaTarefa?.bitrix_id,
-            full_name: leadDaTarefa?.full_name,
-            canal: CHANNEL_LABELS[tarefa.channel_type],
-            desfecho: rotulo,
-            alcancou: false,
-            sdr: currentUser?.name ?? null,
-          });
+          await efeitosDoDesfechoEmLote(tarefa, resultado, rotulo);
         }
       }
       setMassaRodando((m) => (m ? { ...m, feitas: m.feitas + 1 } : m));
@@ -4168,6 +4253,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             >
               {modoSelecao ? "Sair da seleção" : "Selecionar várias"}
             </button>
+            {/* Discador: liga pra N leads de uma vez (liga/desliga em Configurações). */}
+            {discadorDisponivel && !discadorAberto && (
+              <button
+                onClick={() => setDiscadorAberto(true)}
+                className="qsx-fchip"
+                title="Liga pra vários leads ao mesmo tempo; o primeiro que atender vem pra você"
+              >
+                Iniciar discagem
+              </button>
+            )}
             <select
               value={statusFilter || ""}
               onChange={(e) => setStatusFilter(e.target.value as any || null)}
@@ -4268,6 +4363,20 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       <div className="flex-1" style={{ background: "var(--bg)" }}>
         <div className="px-4 md:px-6 lg:px-8 pt-3 pb-24">
         <div className="qsx-page">
+          {discadorAberto && currentUser?.id && (
+            <DiscadorPainel
+              ownerId={currentUser.id}
+              onFechar={() => setDiscadorAberto(false)}
+              deps={{
+                montarFila: montarFilaDoDiscador,
+                aplicarDesfecho: desfechoDoDiscador,
+                retornoUrgente: retornoUrgenteDoDiscador,
+                abrirAtendida: (item) => selectActive(item.tarefaId),
+                dentroDoHorario: () => isWithinHours(workHours, new Date()),
+                aposLote: () => refreshQueue(),
+              }}
+            />
+          )}
           {filteredTasks.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               {loadError ? (

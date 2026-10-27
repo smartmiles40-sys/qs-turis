@@ -441,6 +441,223 @@ export async function dialViaWebphone(phone?: string | null, ctx?: WebphoneDialC
   }
 }
 
+// ── Discador: várias chamadas ao mesmo tempo no MESMO ramal ─────────────────
+// O discador (src/lib/discador/controlador.ts) abre N "pernas" em paralelo pelo
+// UA já registrado. Nenhuma perna mexe no widget nem no desfecho automático
+// enquanto toca — só a que for PROMOVIDA (a 1ª que atender) vira a chamada
+// normal do webfone: áudio, cronômetro, mudo, log e setOnCallEnded, igual a um
+// clique em "Ligar". As outras são canceladas/derrubadas pelo discador.
+
+export interface PernaHandlers {
+  onTocando?: (statusCode: number) => void;
+  onAtendeu?: () => void;
+  onFalhou?: (statusCode: number | null, cause: string) => void;
+  /** Terminou depois de atendida (BYE de qualquer lado). */
+  onEncerrou?: () => void;
+}
+
+export interface PernaWebphone {
+  id: string;
+  /** CANCEL se ainda toca, BYE se já atendeu. Idempotente. */
+  encerrar(): void;
+}
+
+interface PernaInterna {
+  session: RTCSession;
+  promovida: boolean;
+  /** A pessoa atendeu no instante do nosso CANCEL (corrida). */
+  atendeuNaCorrida: boolean;
+  to: string;
+  ctx: WebphoneDialContext;
+}
+
+let discadorStream: MediaStream | null = null;
+let discadorLine: ResolvedSipLine | null = null;
+const pernas = new Map<string, PernaInterna>();
+let pernaSeq = 0;
+
+/** Tem chamada do SDR em andamento (fora das pernas que ainda tocam)? */
+export function webphoneEmChamada(): boolean {
+  return !!currentSession && !currentSession.isEnded();
+}
+
+/**
+ * Prepara o discador: registra o ramal e pega o microfone UMA vez (o mesmo
+ * stream vai em todas as pernas — sem isso seriam N pedidos de microfone).
+ */
+export async function prepararDiscador(): Promise<DialResult> {
+  if (webphoneEmChamada()) return { ok: false, error: "Encerre a ligação atual antes de iniciar o discador." };
+  const reg = await ensureRegistered();
+  if (!reg.ok) return { ok: false, error: reg.error ?? "Webfone indisponível." };
+  const line = await getMySipLine();
+  if (!line || !ua) return { ok: false, error: "Webfone indisponível." };
+  discadorLine = line;
+  if (!discadorStream || discadorStream.getAudioTracks().every((t) => t.readyState === "ended")) {
+    try {
+      discadorStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch {
+      return { ok: false, error: "O navegador não liberou o microfone — permita o microfone pro QS e tente de novo." };
+    }
+  }
+  return { ok: true };
+}
+
+/** Cancela o que ainda toca e solta o microfone (fim da sessão do discador). */
+export function encerrarDiscador(): void {
+  for (const [, p] of pernas) {
+    if (!p.promovida) { try { if (!p.session.isEnded()) p.session.terminate(); } catch { /* já acabou */ } }
+  }
+  // O microfone só é solto se não houver chamada promovida em curso (ela usa
+  // o mesmo stream); senão solta quando ela terminar (ver promoverPerna).
+  if (!webphoneEmChamada()) soltarMicrofoneDoDiscador();
+}
+
+function soltarMicrofoneDoDiscador(): void {
+  if (!discadorStream) return;
+  for (const t of discadorStream.getTracks()) { try { t.stop(); } catch { /* ignora */ } }
+  discadorStream = null;
+}
+let discadorAtivo = false;
+/** O controlador avisa se a sessão do discador está viva (pra soltar o mic no fim). */
+export function marcarDiscadorAtivo(v: boolean): void {
+  discadorAtivo = v;
+}
+
+/**
+ * Abre UMA perna (INVITE) sem tocar no widget. Precisa de prepararDiscador().
+ */
+export function abrirPerna(phone: string, ctx: WebphoneDialContext, h: PernaHandlers): PernaWebphone | { error: string } {
+  if (!ua || !discadorLine || !discadorStream) return { error: "Discador não preparado." };
+  const to = normalizePhoneBR(phone);
+  if (!to || to.length < 11) return { error: "Telefone inválido para ligar." };
+  const id = `p${++pernaSeq}`;
+  const target = `sip:${discadorLine.prefix}${to}@${discadorLine.domain}`;
+  let session: RTCSession;
+  try {
+    session = ua.call(target, {
+      mediaConstraints: { audio: true, video: false },
+      mediaStream: discadorStream,
+      pcConfig: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] },
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Erro ao abrir a chamada." };
+  }
+  const reg: PernaInterna = { session, promovida: false, atendeuNaCorrida: false, to, ctx };
+  pernas.set(id, reg);
+
+  // Corrida CANCEL × 200 OK: se a pessoa atendeu no instante em que cancelamos,
+  // a JsSIP responde ACK+BYE sozinha (_acceptAndTerminate) e NÃO emite
+  // "accepted". Interceptamos (método interno, com guarda) pra contar como
+  // atendida-e-derrubada — senão o lead que atendeu e ouviu silêncio sumiria
+  // da taxa de abandono.
+  const interno = session as unknown as { _acceptAndTerminate?: (...a: unknown[]) => unknown };
+  if (typeof interno._acceptAndTerminate === "function") {
+    const orig = interno._acceptAndTerminate.bind(session);
+    interno._acceptAndTerminate = (...a: unknown[]) => {
+      reg.atendeuNaCorrida = true;
+      try { h.onAtendeu?.(); } catch { /* ignora */ }
+      return orig(...a);
+    };
+  }
+
+  let atendida = false;
+  const fim = (code: number | null, cause: string) => {
+    if (reg.promovida) return; // a promovida loga pelo caminho normal
+    pernas.delete(id);
+    const derrubada = atendida || reg.atendeuNaCorrida;
+    void logWhatsApp({
+      leadId: ctx.leadId ?? null,
+      ownerId: ctx.ownerId ?? null,
+      phone: to,
+      body: derrubada
+        ? "📞 Ligação (discador) — atendeu, mas outro lead atendeu antes: derrubada pelo discador"
+        : `📞 Ligação (discador) — não atendida${code ? ` [${code}${cause ? ` ${cause}` : ""}]` : cause ? ` [${cause}]` : ""}`,
+      status: derrubada ? "sent" : "failed",
+      direction: "out",
+      kind: "call",
+    });
+  };
+
+  session.on("progress", (e: unknown) => {
+    const code = (e as { response?: { status_code?: number } })?.response?.status_code ?? 180;
+    try { h.onTocando?.(code); } catch { /* ignora */ }
+  });
+  const onAccepted = () => {
+    if (atendida) return;
+    atendida = true;
+    try { h.onAtendeu?.(); } catch { /* ignora */ }
+  };
+  session.on("accepted", onAccepted);
+  session.on("confirmed", onAccepted);
+  session.on("ended", () => {
+    fim(null, "");
+    try { h.onEncerrou?.(); } catch { /* ignora */ }
+  });
+  session.on("failed", (e: unknown) => {
+    const ev = e as { cause?: string; message?: { status_code?: number } };
+    const code = typeof ev?.message?.status_code === "number" ? ev.message.status_code : null;
+    const cause = String(ev?.cause ?? "");
+    fim(code, cause);
+    try { h.onFalhou?.(code, cause); } catch { /* ignora */ }
+  });
+
+  return {
+    id,
+    encerrar: () => {
+      if (reg.promovida) return; // a promovida quem desliga é o SDR
+      try { if (!session.isEnded()) session.terminate(); } catch { /* já acabou */ }
+    },
+  };
+}
+
+/**
+ * A perna que atendeu vira a chamada ATIVA do SDR: áudio, widget, cronômetro,
+ * mudo/DTMF, log e o desfecho automático do Painel (setOnCallEnded).
+ */
+export function promoverPerna(pernaId: string): boolean {
+  const r = pernas.get(pernaId);
+  if (!r || r.session.isEnded()) return false;
+  r.promovida = true;
+  const { session, to, ctx } = r;
+  currentSession = session;
+  attachRemoteStream(session);
+  const answeredAt = Date.now();
+  setState({
+    status: "in_call",
+    peerName: ctx.leadName ?? null,
+    peerNumber: to,
+    leadId: ctx.leadId ?? null,
+    muted: false,
+    answeredAt,
+    error: null,
+  });
+  const finish = (failed: boolean, causeRaw?: unknown) => {
+    pernas.delete(pernaId);
+    if (currentSession === session) currentSession = null;
+    if (!discadorAtivo) soltarMicrofoneDoDiscador();
+    const durSec = Math.max(0, Math.round((Date.now() - answeredAt) / 1000));
+    const cause = typeof causeRaw === "object" && causeRaw ? String((causeRaw as { cause?: string }).cause ?? "") : "";
+    setState({ status: "ended", answeredAt: null });
+    setTimeout(() => { if (state.status === "ended") setState({ status: "idle", peerName: null, peerNumber: null, leadId: null }); }, 2500);
+    void logWhatsApp({
+      leadId: ctx.leadId ?? null,
+      ownerId: ctx.ownerId ?? null,
+      phone: to,
+      body: `📞 Ligação (discador) — atendida · ${formatDuration(durSec)}` + (failed && cause ? ` [${cause}]` : ""),
+      status: "sent",
+      direction: "out",
+      kind: "call",
+    });
+    if (onCallEndedCb) {
+      try { onCallEndedCb({ leadId: ctx.leadId ?? null, phone: to, answered: true, durationSec: durSec }); }
+      catch { /* callback do app não pode derrubar o webfone */ }
+    }
+  };
+  session.on("ended", () => finish(false));
+  session.on("failed", (e: unknown) => finish(true, e));
+  return true;
+}
+
 /**
  * Salva uma anotação rápida no lead da chamada (qs_notes) e espelha na timeline
  * do Bitrix (pula sozinho se o lead não tem bitrix_id). Usado pelo botão "Anotar"
