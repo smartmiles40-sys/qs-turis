@@ -44,19 +44,12 @@ export interface Componente {
 
 export const STATUS_ITEM: Record<StatusItem, string> = { vendido: "A emitir", emitido: "Emitido", cancelado: "Cancelado" };
 
-// Até a frente Venda acrescentar `expedicao` e `concierge` no TIPOS (contrato),
-// só o NOME desses dois fica aqui — sem campos: os campos são do catálogo.
-const NOME_PROVISORIO: Record<string, [string, string]> = {
-  expedicao: ["Expedição", "🧭"],
-  concierge: ["Concierge", "🛎️"],
-};
-
-/** O tipo no catálogo; tipo que o catálogo ainda não tem vira um cartão genérico. */
+/** O tipo no catálogo; tipo que o catálogo não tem vira um cartão genérico. */
 export function infoDoTipo(tipo: string): TipoInfo {
   const t = (TIPOS as Record<string, TipoInfo | undefined>)[tipo];
   if (t) return t;
-  const [rotulo, emoji] = NOME_PROVISORIO[tipo] ?? [tipo ? tipo[0].toUpperCase() + tipo.slice(1) : "Outro", "📌"];
-  return { rotulo, emoji, datas: ["Início", "Fim"], campos: [], exemploNome: "" };
+  const rotulo = tipo ? tipo[0].toUpperCase() + tipo.slice(1) : "Outro";
+  return { rotulo, emoji: "📌", datas: ["Início", "Fim"], campos: [], exemploNome: "" };
 }
 
 /** Ordem dos cartões: expedição, depois a ordem do catálogo, depois o que sobrar. */
