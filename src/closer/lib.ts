@@ -78,6 +78,13 @@ export interface Negocio {
   bitrix_etapa: Etapa | null;
   arquivado_em: string | null;
   arquivado_motivo: string | null;
+  // 0207: pré-venda ("Marcar como venda" — sobe pro Dashboard antes da ficha).
+  // Opcionais: o banco sem a 0207 não tem as colunas.
+  pre_venda_em?: string | null;
+  pre_venda_por?: string | null;
+  pre_venda_valor?: number | null;
+  pre_venda_tipo?: string | null;
+  pre_venda_tipo_bitrix?: string | null;
   criado_em: string;
   atualizado_em: string;
   lead: { id: string; full_name: string | null; first_name: string | null; last_name: string | null; phone: string | null; email: string | null; bitrix_id: string | null } | null;
@@ -160,6 +167,15 @@ export function erroAmigavel(e: unknown): string {
     "parcelas-invalidas": "Parcelas: de 1 a 48.",
     "pedido-ja-aberto": "Já tem um pedido de link aberto no Financeiro pra este cliente — acompanhe em Solicitações.",
     "Você não é desse setor": "Só quem é do Comercial pede ao Financeiro por aqui.",
+    // 0207 venda por itens / pré-venda
+    "tipo-invalido": "Escolha o tipo de cada item.",
+    "item-sem-nome": "Dê um nome a cada item (ex.: \"Voo São Paulo → Tóquio\").",
+    "item-ja-emitido": "Um item que você tirou já foi emitido pelo Relacionamento — ele não pode sair por aqui. Fale com o Relacionamento.",
+    "itens-invalidos": "A lista de itens veio vazia ou quebrada. Tente de novo.",
+    "tipo-obrigatorio": "Diga o que foi vendido (aéreo, pacote, expedição…).",
+    "cartao-no-arquivo": "O cartão está no arquivo. Traga o cliente pro quadro antes.",
+    "closer_pre_venda": "A pré-venda ainda não está ligada no banco (falta aplicar a 0207).",
+    "closer_venda_itens_salvar": "O registro de venda ainda não está ligado no banco (falta aplicar a 0207).",
   };
   for (const [k, v] of Object.entries(mapa)) if (m.includes(k)) return v;
   const nb = m.match(/plano-nao-bate:([\d.]+)/);
@@ -219,7 +235,15 @@ export interface Ficha {
   plano: { entrada: ParcelaFicha | null; parcelas: ParcelaFicha[]; observacao_financeiro: string };
   preferencias: { gostos: string; alergias: string; restricoes: string; ocasiao: string; outras: string };
   rel_responsavel_id: string | null;
+  /** 0207: "Tipo de venda" do Bitrix (id, string) — só preenche o card se estiver vazio. */
+  tipo_bitrix?: string | null;
+  /** 0207: a ficha veio dos itens registrados (qs_venda_itens), não da proposta. */
+  de_itens_da_venda?: boolean;
 }
+
+/** Pré-venda aberta: marcada e ainda sem ficha de fechamento. */
+export const emPreVenda = (n: Pick<Negocio, "consolidada_em" | "etapa"> & { pre_venda_em?: string | null }) =>
+  !!n.pre_venda_em && !n.consolidada_em && n.etapa !== "perdido" && n.etapa !== "venda_cancelada";
 
 export async function consolidar(negocioId: string, ficha: Ficha): Promise<{ viagem_id: string; plano_id: string }> {
   const { data, error } = await supabase.rpc("closer_consolidar", { p_negocio: negocioId, p_ficha: ficha });
@@ -243,6 +267,11 @@ async function chamarApi<T>(acao: string, corpo: Record<string, unknown>): Promi
 /** Traz pro quadro um cliente que já existe no Bitrix, pelo ID do negócio. */
 export function trazerDoBitrix(dealId: string, closerId?: string | null) {
   return chamarApi<{ ok: boolean; negocioId: string; etapa: Etapa; cliente?: string }>("importar", { dealId, closerId: closerId ?? null });
+}
+
+/** Pré-venda (0207): leva o negócio pra coluna de venda no Bitrix (ou de volta, se desfeita). */
+export function preVendaNoBitrix(negocioId: string) {
+  return chamarApi<{ ok: boolean; status?: string; mensagem?: string }>("pre-venda", { negocioId });
 }
 
 /** Leva a etapa do cartão (e o valor) pro Bitrix agora. O cron faz o mesmo a cada 10 min. */

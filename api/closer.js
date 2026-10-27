@@ -12,6 +12,10 @@
 //          o cartão no banco; é o cron que leva isso pro Bitrix).
 //   POST { acao: 'importar', dealId, closerId? }
 //        → traz pro quadro um cliente que já tinha card no Bitrix.
+//   POST { acao: 'pre-venda', negocioId }  (0207)
+//        → depois da RPC closer_pre_venda: em pré-venda, o negócio vai pra
+//          coluna de venda ("Em emissão") com "Tipo de venda" e valor — é o que
+//          o Dashboard conta; desfeita, volta pra coluna da etapa do cartão.
 //
 // IDEMPOTENTE: lê o card antes; se valor e etapa já batem, não regrava nada.
 // O resumo da ficha vai pra timeline uma vez, quando o cartão entra na venda.
@@ -158,9 +162,21 @@ function etapaParaColuna(lista, statusId) {
   return { etapa: null, nome };
 }
 
+// ── Pré-venda (0207, 27/10): "clicar na venda e já subir no Dashboard" ──────
+// O cartão fica na etapa dele no QS; o BITRIX vai pra coluna de venda do funil
+// (a mesma de "Aguardando emissão": no Comercial 1 é "Em Emissão / Pix
+// Expedição", UC_70BW8E — a coluna que o Dashboard conta como venda, com
+// data_venda carimbada na chegada). Desfeita, o Bitrix volta pra etapa do cartão.
+const CAMPO_TIPO_VENDA = 'UF_CRM_1743296167520'; // enum "Tipo de venda" — o Bitrix quer o id em STRING
+const ETAPAS_FECHADAS = ['venda_realizada', 'venda_cancelada', 'perdido', 'aguardando_emissao'];
+const emPreVenda = (n) => Boolean(n.pre_venda_em) && !n.consolidada_em && !ETAPAS_FECHADAS.includes(n.etapa);
+/** A coluna que o Bitrix deve mostrar: a da etapa ou, em pré-venda, a de venda. */
+const etapaNoBitrix = (n) => (emPreVenda(n) ? 'aguardando_emissao' : n.etapa);
+
 /** Manda a etapa (e o valor) do cartão pro Bitrix. `u` = quem pediu; null = o cron. */
-async function espelhar(negocioId, u) {
-  const n = (await rest(`qs_closer_negocios?select=id,lead_id,closer_id,etapa,ficha,valor_previsto,consolidada_em,arquivado_em,bitrix_status,bitrix_etapa&id=eq.${negocioId}&limit=1`))?.[0];
+async function espelhar(negocioId, u, extra = {}) {
+  // select=*: as colunas da 0207 (pre_venda_*, bitrix_resumo_em) entram quando existirem.
+  const n = (await rest(`qs_closer_negocios?select=*&id=eq.${negocioId}&limit=1`))?.[0];
   if (!n) return { status: 404, body: { error: 'Cartão não encontrado.' } };
   if (u && !podeMexer(u, n)) return { status: 403, body: { error: 'Sem permissão neste cartão.' } };
   if (n.arquivado_em) return { status: 409, body: { error: 'O cartão está no arquivo.' } };
@@ -176,29 +192,58 @@ async function espelhar(negocioId, u) {
     const deal = await bx('crm.deal.get', { id: Number(dealId) }, 8_000);
     if (!deal) throw new Error(`Negócio ${dealId} não encontrado no Bitrix.`);
     const lista = await colunasDoFunil(deal.CATEGORY_ID);
-    const alvo = colunaParaEtapa(lista, n.etapa);
-    if (!alvo) throw new Error(`O funil deste negócio não tem a coluna "${NOME_ETAPA[n.etapa] || n.etapa}". Crie a coluna com esse nome no Bitrix e reenvie.`);
-    const valor = Number(n.ficha?.valor_total ?? n.valor_previsto ?? 0);
+    const etapaAlvo = etapaNoBitrix(n);
+    const preVenda = emPreVenda(n);
+    const alvo = colunaParaEtapa(lista, etapaAlvo);
+    if (!alvo) {
+      throw new Error(preVenda
+        ? `O funil deste negócio não tem coluna de venda ("Em emissão" / "Aguardando emissão"). A pré-venda ficou só no QS.`
+        : `O funil deste negócio não tem a coluna "${NOME_ETAPA[n.etapa] || n.etapa}". Crie a coluna com esse nome no Bitrix e reenvie.`);
+    }
+    const valor = Number(n.ficha?.valor_total ?? (preVenda ? n.pre_venda_valor : null) ?? n.valor_previsto ?? 0);
     const fields = {};
     if (String(deal.STAGE_ID) !== alvo) fields.STAGE_ID = alvo;
     if (valor > 0 && Math.abs(Number(deal.OPPORTUNITY || 0) - valor) > 0.009) {
       fields.OPPORTUNITY = valor;
       fields.CURRENCY_ID = 'BRL';
     }
+    // "Tipo de venda" (o Dashboard filtra aéreo por ele): na pré-venda o closer
+    // acabou de dizer o que vendeu → grava; pela ficha, só PREENCHE card vazio
+    // (mesma regra do bitrix-sync: nunca desfazer a correção feita no Bitrix).
+    if (ETAPAS_DE_VENDA.includes(etapaAlvo)) {
+      const tipoPre = preVenda ? String(n.pre_venda_tipo_bitrix || '').replace(/\D/g, '') : '';
+      const tipoFicha = String(n.ficha?.tipo_bitrix || '').replace(/\D/g, '');
+      const atual = String(Array.isArray(deal[CAMPO_TIPO_VENDA]) ? deal[CAMPO_TIPO_VENDA][0] ?? '' : deal[CAMPO_TIPO_VENDA] ?? '');
+      if (tipoPre && atual !== tipoPre) fields[CAMPO_TIPO_VENDA] = tipoPre;
+      else if (!tipoPre && tipoFicha && !atual) fields[CAMPO_TIPO_VENDA] = tipoFicha;
+    }
     if (Object.keys(fields).length) {
       await bx('crm.deal.update', { id: Number(dealId), fields, params: { REGISTER_SONET_EVENT: 'Y' } }, 8_000);
     }
-    // Venda fechada pela ficha: o resumo vai pra timeline do negócio uma vez só,
-    // quando o cartão entra na venda (Aguardando emissão ou Venda realizada).
-    if (n.consolidada_em && ETAPAS_DE_VENDA.includes(n.etapa) && !ETAPAS_DE_VENDA.includes(n.bitrix_etapa || '')) {
+    const marcas = { bitrix_status: 'ok', bitrix_erro: null, bitrix_etapa: etapaAlvo, bitrix_enviado_em: new Date().toISOString() };
+    // Venda fechada pela ficha: o resumo vai pra timeline do negócio uma vez por
+    // consolidação. Com a 0207 a marca é bitrix_resumo_em (com a pré-venda o
+    // card já está na coluna de venda quando a ficha chega); sem ela, a regra antiga.
+    const temMarcaResumo = Object.prototype.hasOwnProperty.call(n, 'bitrix_resumo_em');
+    const falta = temMarcaResumo
+      ? !n.bitrix_resumo_em || new Date(n.bitrix_resumo_em) < new Date(n.consolidada_em)
+      : !ETAPAS_DE_VENDA.includes(n.bitrix_etapa || '');
+    if (n.consolidada_em && ETAPAS_DE_VENDA.includes(n.etapa) && falta) {
       const parcelas = (await rest(`fin_planos?select=fin_parcelas(numero,valor,vencimento,forma,recorrente)&negocio_id=eq.${n.id}&limit=1`).catch(() => null))?.[0]?.fin_parcelas || [];
       parcelas.sort((a, b) => a.numero - b.numero);
       await comentarNoNegocio(dealId, resumoDaFicha(n.ficha, parcelas));
+      if (temMarcaResumo) marcas.bitrix_resumo_em = new Date().toISOString();
     }
+    // Pré-venda marcada/desfeita pelo botão: um recado na timeline do negócio.
+    if (extra.comentario && fields.STAGE_ID) await comentarNoNegocio(dealId, extra.comentario(n, valor)).catch(() => null);
     const nota = Object.keys(fields).length
-      ? `Bitrix atualizado (negócio ${dealId}): ${fields.STAGE_ID ? `coluna "${NOME_ETAPA[n.etapa]}"` : ''}${fields.STAGE_ID && fields.OPPORTUNITY ? ' + ' : ''}${fields.OPPORTUNITY ? `valor ${brl(valor)}` : ''}.`
+      ? `Bitrix atualizado (negócio ${dealId}): ${[
+        fields.STAGE_ID ? `coluna "${preVenda ? 'venda (pré-venda)' : NOME_ETAPA[etapaAlvo]}"` : '',
+        fields.OPPORTUNITY ? `valor ${brl(valor)}` : '',
+        fields[CAMPO_TIPO_VENDA] ? 'tipo de venda' : '',
+      ].filter(Boolean).join(' + ')}.`
       : null;
-    await marcar(n.id, { bitrix_status: 'ok', bitrix_erro: null, bitrix_etapa: n.etapa, bitrix_enviado_em: new Date().toISOString() }, nota, u?.id);
+    await marcar(n.id, marcas, nota, u?.id);
     return { status: 200, body: { ok: true, status: 'ok', mudou: Object.keys(fields), dealId } };
   } catch (e) {
     const msg = String(e?.message || 'Falhou').slice(0, 500);
@@ -592,6 +637,18 @@ export default async function handler(req, res) {
       if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
       if (!(u.role === 'closer' || ehGestao(u))) return res.status(403).json({ error: 'Só closer e gestão do Comercial.' });
       const r = await importarDoBitrix(u, body);
+      return res.status(r.status).json(r.body);
+    }
+    // 0207: pré-venda marcada/desfeita no banco (RPC closer_pre_venda) → Bitrix agora.
+    if (acao === 'pre-venda') {
+      if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
+      const id = String(body.negocioId || '');
+      if (!UUID_RE.test(id)) return res.status(400).json({ error: 'Cartão inválido.' });
+      const r = await espelhar(id, u, {
+        comentario: (n, valor) => (emPreVenda(n)
+          ? `⚡ PRÉ-VENDA marcada no QS por ${u.name || 'closer'}: ${brl(valor)}. O cliente fechou; a ficha de fechamento (plano de pagamento) vem depois e não conta a venda de novo.`
+          : `↩️ Pré-venda DESFEITA no QS por ${u.name || 'closer'}. O negócio voltou pra "${NOME_ETAPA[n.etapa] || n.etapa}".`),
+      });
       return res.status(r.status).json(r.body);
     }
     if (acao === 'espelhar') {

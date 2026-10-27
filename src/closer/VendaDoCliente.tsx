@@ -61,7 +61,7 @@ export default function VendaDoCliente({ leadId }: { leadId: string }) {
     );
   }
 
-  const valor = Number(n.ficha?.valor_total ?? n.valor_previsto ?? 0);
+  const valor = Number(n.ficha?.valor_total ?? n.pre_venda_valor ?? n.valor_previsto ?? 0);
   return (
     <div className="space-y-4">
       <div className="rel-card p-4 flex flex-wrap items-center gap-3">

@@ -17,7 +17,7 @@ import PropostaView from "./PropostaView";
 import EnviarAoCliente from "./EnviarAoCliente";
 import PropostaParaEnviar from "./PropostaParaEnviar";
 import {
-  CONDICOES, FORMAS, ORDEM_TIPOS, STATUS_PROPOSTA, TIPOS, TOM_PROPOSTA, brl, carregarProposta, dataBr, duplicarOpcao, duplicarProposta,
+  CONDICOES, FORMAS, ORDEM_TIPOS, STATUS_PROPOSTA, TIPOS, camposDoTipo, TOM_PROPOSTA, brl, carregarProposta, dataBr, duplicarOpcao, duplicarProposta,
   itemVazio, mudarStatus, opcaoVazia, pagamentoVazio, paraVM, propostaVazia, salvarProposta, textoPagamento,
   tituloDaProposta, totaisDaOpcao, trechoVazio,
   type CondicaoPag, type FormaPag, type ItemProposta, type OpcaoProposta, type Pagamento, type Proposta, type TipoItem, type Trecho,
@@ -104,9 +104,9 @@ function EditorItem({ i, onChange, onTirar, onSubir, onDescer }: {
               <EditorTrechos trechos={(Array.isArray(i.detalhes.trechos) ? i.detalhes.trechos : []) as Trecho[]} onChange={(t) => mudarD("trechos", t)} />
             </Campo>
           )}
-          {info.campos.length > 0 && (
+          {camposDoTipo(i.tipo, "proposta").length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {info.campos.map((c) => (
+              {camposDoTipo(i.tipo, "proposta").map((c) => (
                 <div key={c.chave} className={c.largo ? "col-span-2 sm:col-span-3" : ""}>
                   <Campo rotulo={c.rotulo} dica={c.dica}>
                     {c.tipo === "select" ? (

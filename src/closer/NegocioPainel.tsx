@@ -9,21 +9,34 @@
 //   • histórico do cartão (o que o sistema moveu sozinho e quem mexeu);
 //   • CONTRATO (0180: gera pelo Google + ZapSign, ou manual) e PAGAMENTO
 //     (0181: link colado, marcar pago, pedir link ao Financeiro);
+//   • REGISTRAR VENDA (0207): os itens por tipo (aéreo, pacote, expedição…) e
+//     o "Marcar como venda" (pré-venda — sobe pro Dashboard pelo Bitrix antes
+//     da ficha), com "Desfazer pré-venda";
 //   • FICHA DE FECHAMENTO (consolidar a venda) e, depois dela, o resumo + o
 //     estado do espelho no Bitrix com "Reenviar".
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
-import { STATUS_PROPOSTA, TOM_PROPOSTA, type StatusProposta } from "@/propostas/lib";
+import { ORDEM_TIPOS_VENDA, STATUS_PROPOSTA, TIPOS, TOM_PROPOSTA, tipoVendaBitrix, type StatusProposta, type TipoItem } from "@/propostas/lib";
 import FichaFechamento from "./FichaFechamento";
 import FichaFechamentoResumo from "./FichaFechamentoResumo";
 import ContratoBloco from "./ContratoBloco";
 import PagamentoBloco from "./PagamentoBloco";
+import RegistrarVenda from "./RegistrarVenda";
+import { desfazerPreVenda, itemPrincipal, listarItensDaVenda, marcarPreVenda, nomeSugerido, somaDosItens, type ItemVenda } from "./vendaItens";
 import {
-  ETAPAS, ETAPAS_COM_MOTIVO, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, espelharNoBitrix, eventosDoNegocio, moverNegocio,
+  ETAPAS, ETAPAS_COM_MOTIVO, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, emPreVenda, espelharNoBitrix, eventosDoNegocio, moverNegocio,
   nomeDoLead, notaNoNegocio, salvarNegocio, type Etapa, type EventoNegocio, type Negocio,
 } from "./lib";
+
+/** "25.990,00" / "25990.5" → número (0 se vazio/inválido). */
+function lerValorBr(t: string): number {
+  const s = t.trim();
+  if (!s) return 0;
+  const v = /^\d+\.\d{1,2}$/.test(s) ? Number(s) : Number(s.replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
 
 export interface LinksDoPainel {
   onAbrirLead: (leadId: string) => void;
@@ -67,6 +80,11 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   const [prox, setProx] = useState({ acao: "", em: "", valor: "" });
   const [nota, setNota] = useState("");
   const [fichaAberta, setFichaAberta] = useState(false);
+  // 0207: venda por itens + pré-venda
+  const [itensVenda, setItensVenda] = useState<ItemVenda[]>([]);
+  const [registrarAberto, setRegistrarAberto] = useState(false);
+  /** "Marcar como venda" sem itens registrados: pergunta só o tipo e o valor. */
+  const [rapida, setRapida] = useState<{ tipo: TipoItem | ""; valor: string } | null>(null);
   // Motivo pedido ao mover pra Perdido ou Venda cancelada.
   const [perdendo, setPerdendo] = useState<{ etapa: Etapa; motivo: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -94,6 +112,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
         supabase.from("qs_wa_messages").select("id, direction, content, sent_at, created_at").eq("lead_id", lead).is("deleted_at", null).order("created_at", { ascending: false }).limit(8),
         eventosDoNegocio(id),
       ]);
+      setItensVenda(await listarItensDaVenda(id).catch(() => []));
       setReunioes((r.data ?? []) as Reuniao[]);
       setPropostas((p.data ?? []) as PropostaLinha[]);
       setMsgs((m.data ?? []) as Mensagem[]);
@@ -117,6 +136,21 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   const nome = nomeDoLead(n.lead);
   const consolidada = !!n.consolidada_em;
   const encerrado = n.etapa === "perdido" || n.etapa === "venda_cancelada";
+  const preVenda = emPreVenda(n);
+  const totalItens = somaDosItens(itensVenda);
+  /** Um clique: com itens registrados, marca direto; sem itens, pergunta tipo e valor. */
+  const marcarComoVenda = () => {
+    const p = itemPrincipal(itensVenda);
+    if (!p || totalItens <= 0) { setRapida({ tipo: "", valor: n.valor_previsto ? String(n.valor_previsto).replace(".", ",") : "" }); return; }
+    void rodarPreVenda(() => marcarPreVenda(n.id, { tipo: p.tipo, valor: totalItens }));
+  };
+  async function rodarPreVenda(f: () => Promise<{ tom: "ok" | "aviso"; mensagem: string }>) {
+    setOcupado(true);
+    setAviso(null);
+    try { const r = await f(); setAviso({ tom: r.tom, t: r.mensagem }); await carregar(); }
+    catch (e) { setAviso({ tom: "erro", t: (e as Error).message }); }
+    finally { setOcupado(false); }
+  }
   /** Move no QS e manda pro Bitrix na hora (se falhar, o cron reenvia). */
   const moverEEspelhar = async (et: Etapa, motivo?: string) => {
     await moverNegocio(n.id, et, motivo);
@@ -129,6 +163,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
       <div className="flex flex-wrap items-center gap-3">
         <Botao variante="fantasma" onClick={onVoltar}>← Pipeline</Botao>
         <h1 className="text-[22px] font-bold flex-1 min-w-0 truncate" style={{ color: "var(--ink)" }}>{nome}</h1>
+        {preVenda && <Etiqueta tom="aviso">⚡ Pré-venda {n.pre_venda_valor ? brl(n.pre_venda_valor) : ""}</Etiqueta>}
         <Etiqueta tom={encerrado ? "erro" : "rel"}>{NOME_ETAPA[n.etapa]}</Etiqueta>
       </div>
       {aviso && <Aviso tom={aviso.tom}>{aviso.t}</Aviso>}
@@ -138,6 +173,55 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
           {/* ── Contrato (0180) e pagamento (0181) ── */}
           <ContratoBloco negocio={n} onMudou={() => void carregar()} />
           <PagamentoBloco negocio={n} onMudou={() => void carregar()} onAbrirSolicitacao={links.onAbrirSolicitacao} />
+
+          {/* ── A venda (0207): itens por tipo + pré-venda ── */}
+          {!encerrado && (
+            <Bloco titulo="A venda"
+              acao={<Botao variante={itensVenda.length ? "secundario" : "primario"} disabled={ocupado} onClick={() => setRegistrarAberto(true)}>
+                {itensVenda.length ? "Editar venda" : "Registrar venda"}
+              </Botao>}>
+              {itensVenda.length ? (
+                <ul className="space-y-1 mb-3">
+                  {itensVenda.map((i) => (
+                    <li key={i.k} className="flex flex-wrap gap-2 text-[13px]" style={{ color: "var(--ink)" }}>
+                      <span className="flex-1 min-w-0 truncate"><span aria-hidden>{TIPOS[i.tipo]?.emoji ?? "•"}</span> {i.nome || nomeSugerido(i)}</span>
+                      {i.status && i.status !== "vendido" && <Etiqueta tom="rel">{i.status}</Etiqueta>}
+                      <span style={{ color: "var(--ink2)" }}>{brl(i.valor)}</span>
+                    </li>
+                  ))}
+                  <li className="flex gap-2 text-[13px] font-bold pt-1 border-t" style={{ color: "var(--ink)", borderColor: "var(--line)" }}>
+                    <span className="flex-1">Total</span><span>{brl(totalItens)}</span>
+                  </li>
+                </ul>
+              ) : (
+                <p className="text-[13px] mb-3" style={{ color: "var(--ink2)" }}>
+                  Fechou? Registre o que o cliente comprou (aéreo, pacote, expedição, seguro…) em 3 passos. Os mesmos dados vão pro
+                  Relacionamento e pro app do cliente.
+                </p>
+              )}
+              {consolidada ? (
+                <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Venda já consolidada pela ficha de fechamento.</p>
+              ) : preVenda ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Etiqueta tom="aviso">⚡ Pré-venda desde {dataHoraBr(n.pre_venda_em)}</Etiqueta>
+                  <span className="text-[12.5px] flex-1" style={{ color: "var(--ink2)" }}>
+                    Já conta no Dashboard. Falta a ficha de fechamento (plano de pagamento) pra consolidar.
+                  </span>
+                  <Botao variante="fantasma" disabled={ocupado} onClick={() => {
+                    if (!window.confirm("Desfazer a pré-venda? O negócio volta pra etapa atual no Bitrix.")) return;
+                    void rodarPreVenda(() => desfazerPreVenda(n.id));
+                  }}>Desfazer pré-venda</Botao>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Botao variante="primario" disabled={ocupado} onClick={marcarComoVenda}>⚡ Marcar como venda</Botao>
+                  <span className="text-[12.5px] flex-1" style={{ color: "var(--ink3)" }}>
+                    Um clique: sobe pro Dashboard como venda agora. A ficha de fechamento vem depois, sem contar de novo.
+                  </span>
+                </div>
+              )}
+            </Bloco>
+          )}
 
           {/* ── Fechamento ── */}
           <Bloco titulo={consolidada ? "Venda consolidada" : "Fechar a venda"}
@@ -324,6 +408,41 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
           </Bloco>
         </div>
       </div>
+
+      {registrarAberto && (
+        <RegistrarVenda negocio={n} aberto={registrarAberto} onFechar={() => setRegistrarAberto(false)}
+          onSalvo={(r) => { setRegistrarAberto(false); setAviso({ tom: r.tom, t: r.mensagem }); void carregar(); }} />
+      )}
+
+      <Modal aberto={rapida !== null} titulo="Marcar como venda" onFechar={() => setRapida(null)}
+        rodape={<>
+          <Botao variante="fantasma" onClick={() => setRapida(null)}>Cancelar</Botao>
+          <Botao variante="secundario" onClick={() => { setRapida(null); setRegistrarAberto(true); }}>Registrar com detalhes</Botao>
+          <Botao variante="primario" disabled={ocupado || !rapida?.tipo || !(lerValorBr(rapida?.valor ?? "") > 0)}
+            onClick={() => {
+              if (!rapida?.tipo) return;
+              const tipo = rapida.tipo, valor = lerValorBr(rapida.valor);
+              setRapida(null);
+              void rodarPreVenda(() => marcarPreVenda(n.id, { tipo, valor }));
+            }}>⚡ Marcar como venda</Botao>
+        </>}>
+        <p className="text-[13px] mb-3" style={{ color: "var(--ink2)" }}>
+          Só duas perguntas pra subir no Dashboard agora. Os detalhes (voos, hotéis, passageiros) você registra depois em "Registrar venda".
+        </p>
+        <p className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>O que foi vendido (o principal)?</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+          {ORDEM_TIPOS_VENDA.map((t) => (
+            <button key={t} type="button" aria-pressed={rapida?.tipo === t} onClick={() => rapida && setRapida({ ...rapida, tipo: t })}
+              className="text-left rounded-lg px-3 py-2 text-[13px] font-semibold"
+              style={{ border: `2px solid ${rapida?.tipo === t ? "var(--rel)" : "var(--line)"}`, background: rapida?.tipo === t ? "var(--rel-soft)" : "var(--card)", color: "var(--ink)" }}>
+              <span aria-hidden>{TIPOS[t].emoji}</span> {TIPOS[t].rotulo}
+            </button>
+          ))}
+        </div>
+        <Campo rotulo="Valor total da venda (R$)" dica={rapida?.tipo ? `Entra no Bitrix como "${tipoVendaBitrix(rapida.tipo).nome}".` : undefined}>
+          <Entrada inputMode="decimal" placeholder="Ex.: 25.990,00" value={rapida?.valor ?? ""} onChange={(e) => rapida && setRapida({ ...rapida, valor: e.target.value })} />
+        </Campo>
+      </Modal>
 
       {fichaAberta && (
         <FichaFechamento negocio={n} aberto={fichaAberta} onFechar={() => setFichaAberta(false)}

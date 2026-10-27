@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Etiqueta, Modal, Vazio } from "@/rel/ui";
-import { ETAPAS, ETAPAS_COM_MOTIVO, ETAPAS_FINAIS, NOME_ETAPA, bancoSemPipelineV2, brl, dataBr, espelharNoBitrix, listarNegocios, moverNegocio, nomeDoLead, trazerDoBitrix, type Etapa, type Negocio } from "./lib";
+import { ETAPAS, ETAPAS_COM_MOTIVO, ETAPAS_FINAIS, NOME_ETAPA, bancoSemPipelineV2, brl, dataBr, emPreVenda, espelharNoBitrix, listarNegocios, moverNegocio, nomeDoLead, trazerDoBitrix, type Etapa, type Negocio } from "./lib";
 import NegocioPainel, { type LinksDoPainel } from "./NegocioPainel";
 
 const PERIODOS = [
@@ -82,8 +82,9 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
   }, [filtrados]);
 
   const abertos = filtrados.filter((n) => !ETAPAS_FINAIS.includes(n.etapa));
-  const vendas = filtrados.filter((n) => n.etapa === "venda_realizada" || n.etapa === "aguardando_emissao");
-  const valorDe = (n: Negocio) => Number(n.ficha?.valor_total ?? n.valor_previsto ?? 0);
+  // Pré-venda (0207) já é venda pro Dashboard: conta aqui também.
+  const vendas = filtrados.filter((n) => n.etapa === "venda_realizada" || n.etapa === "aguardando_emissao" || emPreVenda(n));
+  const valorDe = (n: Negocio) => Number(n.ficha?.valor_total ?? n.pre_venda_valor ?? n.valor_previsto ?? 0);
 
   /** Moveu no QS → manda pro Bitrix na hora (se falhar, o cron tenta de novo). */
   async function mover(id: string, etapa: Etapa, motivo?: string) {
@@ -211,6 +212,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
                           </p>
                         )}
                         <div className="flex flex-wrap gap-1 mt-1.5">
+                          {emPreVenda(n) && <Etiqueta tom="rel">⚡ Pré-venda</Etiqueta>}
                           {n.bitrix_status === "erro" && <Etiqueta tom="erro">Bitrix falhou</Etiqueta>}
                           {n.bitrix_status === "pendente" && <Etiqueta tom="aviso">Indo pro Bitrix</Etiqueta>}
                           {n.bitrix_status === "sem_card" && <Etiqueta>Só no QS</Etiqueta>}
