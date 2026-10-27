@@ -13,7 +13,8 @@
 // O QUE TEM: o PIPELINE (0174) com a ficha de fechamento (0176) é o Início.
 // O resto REAPROVEITA as telas que o closer já usava no Comercial — agenda,
 // fila de atividades, WhatsApp, reuniões, leads, solicitações e propostas —
-// sem reescrever nada.
+// sem reescrever nada. Desde 26/10 agenda, atividades e reuniões ficam numa
+// tela só, em abas (./ReunioesCloser).
 // -----------------------------------------------------------------------------
 import { Component, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
@@ -30,11 +31,9 @@ import CommandPalette from "@/components/sdr/CommandPalette";
 import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
 import LigacaoOficialWidget from "@/components/sdr/telefone/LigacaoOficialWidget";
 import PipelinePage from "./PipelinePage";
+import ReunioesCloser, { ABAS_REUNIOES, type AbaReunioes } from "./ReunioesCloser";
 
-const MinhaAgendaPage = lazyPagina(() => import("@/components/sdr/agenda/MinhaAgendaPage"));
-const TasksPanel = lazyPagina(() => import("@/components/sdr/tasks/TasksPanel"));
 const WaPage = lazyPagina(() => import("@/components/sdr/wa/WaPage"));
-const MeetingsPage = lazyPagina(() => import("@/components/sdr/meetings/MeetingsPage"));
 const LeadsPage = lazyPagina(() => import("@/components/sdr/leads/LeadsPage"));
 const LeadDetailPage = lazyPagina(() => import("@/components/sdr/leads/LeadDetailPage"));
 const SdrDashboard = lazyPagina(() => import("@/components/sdr/dashboard/SdrDashboard"));
@@ -114,15 +113,21 @@ export default function CloserApp() {
   }, [ir]);
 
   if (!currentUser) return null;
-  const gestao = currentUser.role === "admin" || currentUser.role === "gestor";
-  const tela = rota.tela === "inicio" ? "pipeline" : rota.tela;
-  const ativo = tela === "lead" ? (origem.current.tela === "inicio" ? "pipeline" : origem.current.tela) : tela === "proposta-nova" ? "propostas" : tela;
+  // Bruno, 26/10: a parte de Gestão do closer só abre pro master (admin).
+  const gestao = currentUser.role === "admin";
+  // 26/10: Minha agenda, Atividades e Reuniões viraram UMA tela (abas). Os
+  // endereços antigos (#closer/agenda, #closer/painel) caem na aba certa.
+  const telaPedida = rota.tela === "inicio" ? "pipeline" : rota.tela;
+  const tela = telaPedida === "agenda" || telaPedida === "painel" ? "reunioes" : telaPedida;
+  const abaReunioes: AbaReunioes = telaPedida === "painel" ? "atividades"
+    : (ABAS_REUNIOES.some((a) => a.id === rota.id) && telaPedida === "reunioes" ? rota.id as AbaReunioes : telaPedida === "agenda" ? "agenda" : "todas");
+  const deOnde = origem.current.tela === "inicio" ? "pipeline" : origem.current.tela === "agenda" || origem.current.tela === "painel" ? "reunioes" : origem.current.tela;
+  const ativo = tela === "lead" ? deOnde : tela === "proposta-nova" ? "propostas" : tela;
 
   const grupos: GrupoDoMenu[] = [
     { id: "vendas", rotulo: "Vendas", icone: ICONES_AREA.dinheiro, itens: [
       { id: "pipeline", rotulo: "Pipeline" },
-      { id: "agenda", rotulo: "Minha agenda" },
-      { id: "painel", rotulo: "Atividades" },
+      { id: "reunioes", rotulo: "Reuniões" },
       { id: "whatsapp", rotulo: "WhatsApp" },
     ] },
     { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
@@ -130,13 +135,11 @@ export default function CloserApp() {
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
     ] },
     { id: "consulta", rotulo: "Consulta", icone: ICONES_AREA.lista, itens: [
-      { id: "reunioes", rotulo: "Reuniões" },
       { id: "leads", rotulo: "Leads" },
       { id: "desempenho", rotulo: "Desempenho" },
     ] },
     ...(gestao ? [{ id: "outras", rotulo: "Gestão", icone: ICONES_AREA.equipe, itens: [
       { id: "contrato", rotulo: "Configurar contrato" },
-      { id: "comercial", rotulo: "Abrir o Comercial (SDR)" },
     ] }] : []),
   ];
 
@@ -160,15 +163,17 @@ export default function CloserApp() {
           // Volta do Google cai aqui: #closer/contrato/conectado (ou /erro-…).
           <Cerca nome="a configuração do contrato"><ContratoConfigPage key={rota.id ?? ""} retorno={rota.id ?? null} /></Cerca>
         )}
-        {tela === "agenda" && <Cerca nome="a agenda"><MinhaAgendaPage onOpenLead={abrirLead} /></Cerca>}
-        {tela === "painel" && <Cerca nome="as atividades"><TasksPanel onOpenLead={abrirLead} /></Cerca>}
         {tela === "whatsapp" && (
           // O WhatsApp cuida da própria rolagem: ocupa a altura da tela inteira.
           <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8 h-[calc(100dvh-56px)] lg:h-dvh">
             <Cerca nome="o WhatsApp"><WaPage onOpenLead={abrirLead} /></Cerca>
           </div>
         )}
-        {tela === "reunioes" && <Cerca nome="as reuniões"><MeetingsPage onOpenLead={abrirLead} /></Cerca>}
+        {tela === "reunioes" && (
+          <Cerca nome="as reuniões">
+            <ReunioesCloser aba={abaReunioes} onAba={(a) => ir({ tela: "reunioes", id: a })} onOpenLead={abrirLead} />
+          </Cerca>
+        )}
         {tela === "leads" && <Cerca nome="os leads"><LeadsPage onOpenLead={abrirLead} onOpenCadenceCreate={() => undefined} /></Cerca>}
         {tela === "lead" && rota.id && (
           <Cerca nome="o lead"><LeadDetailPage leadId={rota.id} onBack={() => ir(origem.current)} /></Cerca>

@@ -21,7 +21,7 @@ import FichaFechamentoResumo from "./FichaFechamentoResumo";
 import ContratoBloco from "./ContratoBloco";
 import PagamentoBloco from "./PagamentoBloco";
 import {
-  ETAPAS, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, espelharNoBitrix, eventosDoNegocio, moverNegocio,
+  ETAPAS, ETAPAS_COM_MOTIVO, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, espelharNoBitrix, eventosDoNegocio, moverNegocio,
   nomeDoLead, notaNoNegocio, salvarNegocio, type Etapa, type EventoNegocio, type Negocio,
 } from "./lib";
 
@@ -67,7 +67,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   const [prox, setProx] = useState({ acao: "", em: "", valor: "" });
   const [nota, setNota] = useState("");
   const [fichaAberta, setFichaAberta] = useState(false);
-  const [perdendo, setPerdendo] = useState<string | null>(null);
+  // Motivo pedido ao mover pra Perdido ou Venda cancelada.
+  const [perdendo, setPerdendo] = useState<{ etapa: Etapa; motivo: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
   const carregar = useCallback(async () => {
@@ -114,14 +115,21 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   if (erro) return <div className="space-y-3"><Botao onClick={onVoltar}>← Voltar ao pipeline</Botao><Aviso tom="erro">{erro}</Aviso></div>;
   if (!n) return <p className="text-sm" style={{ color: "var(--ink3)" }}>Carregando…</p>;
   const nome = nomeDoLead(n.lead);
-  const consolidada = n.etapa === "consolidada";
+  const consolidada = !!n.consolidada_em;
+  const encerrado = n.etapa === "perdido" || n.etapa === "venda_cancelada";
+  /** Move no QS e manda pro Bitrix na hora (se falhar, o cron reenvia). */
+  const moverEEspelhar = async (et: Etapa, motivo?: string) => {
+    await moverNegocio(n.id, et, motivo);
+    const r = await espelharNoBitrix(n.id).catch(() => null);
+    if (r && !r.ok && r.status === "erro") throw new Error(`Movido no QS, mas o Bitrix recusou: ${r.mensagem}`);
+  };
 
   return (
     <div className="max-w-[1100px] space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <Botao variante="fantasma" onClick={onVoltar}>← Pipeline</Botao>
         <h1 className="text-[22px] font-bold flex-1 min-w-0 truncate" style={{ color: "var(--ink)" }}>{nome}</h1>
-        <Etiqueta tom={n.etapa === "perdido" ? "erro" : "rel"}>{NOME_ETAPA[n.etapa]}</Etiqueta>
+        <Etiqueta tom={encerrado ? "erro" : "rel"}>{NOME_ETAPA[n.etapa]}</Etiqueta>
       </div>
       {aviso && <Aviso tom={aviso.tom}>{aviso.t}</Aviso>}
 
@@ -133,7 +141,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
 
           {/* ── Fechamento ── */}
           <Bloco titulo={consolidada ? "Venda consolidada" : "Fechar a venda"}
-            acao={n.etapa !== "perdido" ? <Botao variante={consolidada ? "secundario" : "primario"} onClick={() => setFichaAberta(true)}>{consolidada ? "Corrigir ficha" : "Preencher ficha de fechamento"}</Botao> : undefined}>
+            acao={!encerrado ? <Botao variante={consolidada ? "secundario" : "primario"} onClick={() => setFichaAberta(true)}>{consolidada ? "Corrigir ficha" : "Preencher ficha de fechamento"}</Botao> : undefined}>
             {consolidada && n.viagem_id ? (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -152,8 +160,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
                 {n.bitrix_erro && <p className="text-[12px]" style={{ color: "var(--err-ink)" }}>{n.bitrix_erro}</p>}
                 <FichaFechamentoResumo key={n.consolidada_em ?? ""} viagemId={n.viagem_id} />
               </div>
-            ) : n.etapa === "perdido" ? (
-              <Nada t={`Perdido: ${n.motivo_perda ?? ""}. Mova de volta pra uma etapa aberta se o cliente voltou.`} />
+            ) : encerrado ? (
+              <Nada t={`${NOME_ETAPA[n.etapa]}: ${n.motivo_perda ?? ""}. Mova de volta pra uma etapa aberta se o cliente voltou.`} />
             ) : (
               <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
                 Quando o cliente fechar, preencha a ficha: o que foi vendido, o plano de pagamento e as preferências. A viagem
@@ -244,18 +252,39 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
           </Bloco>
 
           <Bloco titulo="Etapa">
-            <select className="rel-input" value={n.etapa} disabled={ocupado || consolidada} aria-label="Mover para"
+            <select className="rel-input" value={n.etapa} disabled={ocupado} aria-label="Mover para"
               onChange={(e) => {
                 const et = e.target.value as Etapa;
-                if (et === "perdido") { setPerdendo(""); return; }
-                if (et === "consolidada") { setFichaAberta(true); return; }
-                void rodar(() => moverNegocio(n.id, et), `Movido para ${NOME_ETAPA[et]}.`);
+                if (et === "aguardando_emissao" && !consolidada) { setFichaAberta(true); return; }
+                if ((et === "venda_realizada" || et === "venda_cancelada") && !consolidada) {
+                  setAviso({ tom: "erro", t: `${NOME_ETAPA[et]} vale só pra venda consolidada. Preencha a ficha de fechamento antes.` });
+                  return;
+                }
+                if (ETAPAS_COM_MOTIVO.includes(et)) { setPerdendo({ etapa: et, motivo: "" }); return; }
+                void rodar(() => moverEEspelhar(et), `Movido para ${NOME_ETAPA[et]}.`);
               }}>
               {ETAPAS.map((e) => <option key={e.id} value={e.id}>{e.rotulo}</option>)}
             </select>
             <p className="text-[12px] mt-1.5" style={{ color: "var(--ink3)" }}>
-              Desde {dataBr(n.etapa_em)}. O cartão anda sozinho quando a proposta é enviada/aprovada e quando contrato e pagamento avançam.
+              Desde {dataBr(n.etapa_em)}. Anda sozinho com a reunião (reagendou, no-show, realizada) e com a proposta enviada.
+              Aguardando emissão = ficha de fechamento preenchida.
             </p>
+            {!consolidada && n.bitrix_status && (
+              <div className="flex flex-wrap items-center gap-2 mt-2 text-[12px]">
+                <span style={{ color: "var(--ink3)" }}>Bitrix:</span>
+                {n.bitrix_status === "ok" && <Etiqueta tom="rel">em dia</Etiqueta>}
+                {n.bitrix_status === "pendente" && <Etiqueta tom="aviso">indo</Etiqueta>}
+                {n.bitrix_status === "erro" && <Etiqueta tom="erro">falhou</Etiqueta>}
+                {n.bitrix_status === "sem_card" && <Etiqueta>sem card — só no QS</Etiqueta>}
+                {(n.bitrix_status === "erro" || n.bitrix_status === "pendente") && (
+                  <Botao variante="fantasma" disabled={ocupado} onClick={() => void rodar(async () => {
+                    const r = await espelharNoBitrix(n.id);
+                    if (!r.ok) throw new Error(r.mensagem || "O Bitrix não aceitou.");
+                  }, "Bitrix atualizado.")}>Reenviar</Botao>
+                )}
+              </div>
+            )}
+            {!consolidada && n.bitrix_status === "erro" && n.bitrix_erro && <p className="text-[12px] mt-1" style={{ color: "var(--err-ink)" }}>{n.bitrix_erro}</p>}
             {(n.status_contrato || n.status_pagamento) && (
               <p className="text-[12px] mt-1" style={{ color: "var(--ink2)" }}>
                 {n.status_contrato ? `Contrato: ${n.status_contrato}. ` : ""}{n.status_pagamento ? `Pagamento: ${n.status_pagamento}.` : ""}
@@ -301,14 +330,19 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
           onConsolidado={(msg) => { setFichaAberta(false); setAviso({ tom: msg.includes("Bitrix atualizado") ? "ok" : "aviso", t: msg }); void carregar(); }} />
       )}
 
-      <Modal aberto={perdendo !== null} titulo="Marcar como perdido" onFechar={() => setPerdendo(null)}
+      <Modal aberto={perdendo !== null} titulo={perdendo?.etapa === "venda_cancelada" ? "Cancelar a venda" : "Marcar como perdido"} onFechar={() => setPerdendo(null)}
         rodape={<>
           <Botao variante="fantasma" onClick={() => setPerdendo(null)}>Cancelar</Botao>
-          <Botao variante="perigo" disabled={!perdendo?.trim() || ocupado}
-            onClick={() => { const m = perdendo ?? ""; setPerdendo(null); void rodar(() => moverNegocio(n.id, "perdido", m), "Marcado como perdido."); }}>Marcar perdido</Botao>
+          <Botao variante="perigo" disabled={!perdendo?.motivo.trim() || ocupado}
+            onClick={() => {
+              if (!perdendo) return;
+              const { etapa, motivo } = perdendo;
+              setPerdendo(null);
+              void rodar(() => moverEEspelhar(etapa, motivo), `Movido para ${NOME_ETAPA[etapa]}.`);
+            }}>{perdendo?.etapa === "venda_cancelada" ? "Cancelar venda" : "Marcar perdido"}</Botao>
         </>}>
-        <label className="block text-[13px] font-semibold mb-1" style={{ color: "var(--ink2)" }} htmlFor="motivo-perda-painel">Por que não fechou?</label>
-        <textarea id="motivo-perda-painel" className="rel-input" rows={3} value={perdendo ?? ""} onChange={(e) => setPerdendo(e.target.value)} />
+        <label className="block text-[13px] font-semibold mb-1" style={{ color: "var(--ink2)" }} htmlFor="motivo-perda-painel">{perdendo?.etapa === "venda_cancelada" ? "Por que a venda foi cancelada?" : "Por que não fechou?"}</label>
+        <textarea id="motivo-perda-painel" className="rel-input" rows={3} value={perdendo?.motivo ?? ""} onChange={(e) => perdendo && setPerdendo({ ...perdendo, motivo: e.target.value })} />
       </Modal>
     </div>
   );

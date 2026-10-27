@@ -52,7 +52,7 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
   const atual = envios.find((e) => !["erro", "cancelado"].includes(e.status)) ?? null;
   const ultimoErro = envios[0]?.status === "erro" ? envios[0] : null;
   const automatico = sit?.modo === "automatico";
-  const perdido = negocio.etapa === "perdido";
+  const perdido = negocio.etapa === "perdido" || negocio.etapa === "venda_cancelada";
 
   async function rodar(f: () => Promise<unknown>, ok?: string) {
     setOcupado(true);

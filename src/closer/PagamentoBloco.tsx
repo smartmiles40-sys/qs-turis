@@ -60,7 +60,7 @@ export default function PagamentoBloco({ negocio, onMudou, onAbrirSolicitacao }:
 
   const abertas = parcelas.filter((p) => p.status === "a_receber");
   const st = negocio.status_pagamento ? STATUS_PAG[negocio.status_pagamento] : null;
-  const perdido = negocio.etapa === "perdido";
+  const perdido = negocio.etapa === "perdido" || negocio.etapa === "venda_cancelada";
   const valorBase = negocio.ficha?.valor_total ?? negocio.valor_previsto ?? null;
   const pedidoAberto = pedido && ["nova", "em_andamento", "aguardando"].includes(pedido.status);
 

@@ -200,7 +200,14 @@ function AppContent() {
   }
 }
 
+// Vitrine dos componentes do redesign (/dev/ui): só no `vite dev`. O `if` com
+// import.meta.env.DEV some do build de produção junto com o import.
+const DevUiPage = import.meta.env.DEV ? lazy(() => import("@/components/ui/DevUiPage")) : null;
+
 export default function App() {
+  if (DevUiPage && window.location.pathname === "/dev/ui") {
+    return <ThemeProvider><Suspense fallback={null}><DevUiPage /></Suspense></ThemeProvider>;
+  }
   const publica = paginaPublica();
   if (publica) return <ErrorBoundary>{publica}</ErrorBoundary>;
   // Bolinha: sem ThemeProvider (é sempre clara) e sem as áreas; o login é o dela.

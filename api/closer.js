@@ -3,14 +3,19 @@
 // ÁREA DO CLOSER (0174–0176, 22/10/2026) — o que precisa de servidor.
 //
 //   POST { acao: 'espelhar', negocioId }
-//        → a VENDA CONSOLIDADA vai pro Bitrix: crm.deal.update do negócio do
-//          lead (qs_leads.bitrix_id) com o valor (OPPORTUNITY) e a etapa de
-//          venda realizada do funil em que o card está. "QS manda, Bitrix
-//          espelha" (Bruno, 22/10).
+//        → a ETAPA do cartão (qualquer uma, 0205) e o valor vão pro Bitrix:
+//          crm.deal.update do negócio do lead (qs_leads.bitrix_id), na coluna
+//          de MESMO NOME do funil em que o card está. "Tudo vai ser feito
+//          dentro do QS e depois vai pro Bitrix" (Bruno, 26/10).
+//   GET  ?acao=cron-bitrix (Vercel Cron, Bearer CRON_SECRET, a cada 10 min)
+//        → reenvia os cartões com bitrix_status = 'pendente' (a reunião move
+//          o cartão no banco; é o cron que leva isso pro Bitrix).
+//   POST { acao: 'importar', dealId, closerId? }
+//        → traz pro quadro um cliente que já tinha card no Bitrix.
 //
 // IDEMPOTENTE: lê o card antes; se valor e etapa já batem, não regrava nada.
-// O comentário na timeline só sai quando alguma coisa mudou. Pode apertar
-// "reenviar" quantas vezes quiser.
+// O resumo da ficha vai pra timeline uma vez, quando o cartão entra na venda.
+// Mover o card no Bitrix dispara os robôs daquela coluna, como se fosse à mão.
 //
 // FALHOU? O erro fica no cartão (qs_closer_negocios.bitrix_status = 'erro' +
 // bitrix_erro) e a tela mostra o botão "Reenviar ao Bitrix". A venda no QS já
@@ -69,22 +74,6 @@ function podeMexer(u, negocio) {
   return u.role === 'closer' && negocio.closer_id === u.id;
 }
 
-/** A etapa de "venda realizada" do funil do card. Comercial 1 (categoria 0) = WON. */
-async function etapaDeVenda(categoria) {
-  const cat = String(categoria ?? '0');
-  if (cat === '0') return 'WON';
-  try {
-    const etapas = await bx('crm.status.list', { filter: { ENTITY_ID: `DEAL_STAGE_${cat}` } }, 8_000);
-    const lista = etapas || [];
-    const porNome = lista.find((e) => /venda\s+realizada/i.test(String(e?.NAME || '')));
-    if (porNome) return String(porNome.STATUS_ID);
-    const sucesso = lista.find((e) => ['S', 'success'].includes(e?.EXTRA?.SEMANTICS || e?.SEMANTICS));
-    return sucesso ? String(sucesso.STATUS_ID) : null;
-  } catch {
-    return null;
-  }
-}
-
 function resumoDaFicha(f, parcelas) {
   const linhas = [
     '✅ VENDA CONSOLIDADA no QS (o QS é a fonte da verdade desta venda).',
@@ -111,52 +100,187 @@ async function marcar(negocioId, campos, evento, autorId) {
   }
 }
 
+// ── Pipeline v2 (0205, 26/10): toda etapa do QS vai pro Bitrix ─────────────
+// O QS manda. O negócio do Bitrix vai pra coluna de MESMO NOME no funil em que
+// ele está (sem acento/caixa). Os ids das colunas não ficam no código: vêm do
+// próprio funil (crm.status.list), guardados 10 min.
+const NOMES_BITRIX = {
+  aguardando_reuniao: [/aguardando\s+reuni/],
+  reagendamento: [/reagend/],
+  em_cotacao: [/em\s+cotac/, /cotac/],
+  em_negociacao: [/negocia/],
+  no_show: [/no.?show/],
+  oportunidade_futura: [/oportunidade\s+futura/],
+  aguardando_emissao: [/aguardando\s+emiss/, /em\s+emiss/],
+  venda_cancelada: [/venda\s+cancelada/, /cancelad/, /desist/],
+  perdido: [/perdid/],
+  venda_realizada: [/venda\s+realizada/],
+};
+const NOME_ETAPA = {
+  aguardando_reuniao: 'Aguardando reunião', reagendamento: 'Reagendamento', em_cotacao: 'Em cotação',
+  em_negociacao: 'Em negociação', no_show: 'No-show', oportunidade_futura: 'Oportunidade futura',
+  aguardando_emissao: 'Aguardando emissão', venda_cancelada: 'Venda cancelada', perdido: 'Perdido',
+  venda_realizada: 'Venda realizada',
+};
+const ETAPAS_DE_VENDA = ['aguardando_emissao', 'venda_realizada'];
+const semAcento = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+const cacheFunis = new Map();
+async function colunasDoFunil(categoria) {
+  const cat = String(categoria ?? '0');
+  const c = cacheFunis.get(cat);
+  if (c && Date.now() - c.em < 600_000) return c.lista;
+  const lista = (await bx('crm.status.list', { filter: { ENTITY_ID: cat === '0' ? 'DEAL_STAGE' : `DEAL_STAGE_${cat}` } }, 8_000)) || [];
+  cacheFunis.set(cat, { em: Date.now(), lista });
+  return lista;
+}
+
+/** A coluna do Bitrix pra uma etapa do QS (null se o funil não tem). */
+function colunaParaEtapa(lista, etapa) {
+  for (const re of NOMES_BITRIX[etapa] || []) {
+    const achou = lista.find((e) => re.test(semAcento(e?.NAME)));
+    if (achou) return String(achou.STATUS_ID);
+  }
+  const id = (e) => String(e?.STATUS_ID || '');
+  if (etapa === 'venda_realizada') { const w = lista.find((e) => /(^|:)WON$/.test(id(e))); if (w) return id(w); }
+  if (etapa === 'perdido') { const l = lista.find((e) => /(^|:)LOSE$/.test(id(e))); if (l) return id(l); }
+  return null;
+}
+
+/** O caminho de volta, usado na importação: coluna do Bitrix → etapa do QS. */
+function etapaParaColuna(lista, statusId) {
+  const col = lista.find((e) => String(e?.STATUS_ID) === String(statusId));
+  const nome = col?.NAME || String(statusId);
+  const n = semAcento(col?.NAME);
+  for (const [etapa, res] of Object.entries(NOMES_BITRIX)) if (n && res.some((re) => re.test(n))) return { etapa, nome };
+  if (/(^|:)WON$/.test(String(statusId))) return { etapa: 'venda_realizada', nome };
+  if (/(^|:)LOSE$/.test(String(statusId))) return { etapa: 'perdido', nome };
+  return { etapa: null, nome };
+}
+
+/** Manda a etapa (e o valor) do cartão pro Bitrix. `u` = quem pediu; null = o cron. */
 async function espelhar(negocioId, u) {
-  const n = (await rest(`qs_closer_negocios?select=id,lead_id,closer_id,etapa,ficha,valor_previsto,bitrix_status&id=eq.${negocioId}&limit=1`))?.[0];
+  const n = (await rest(`qs_closer_negocios?select=id,lead_id,closer_id,etapa,ficha,valor_previsto,consolidada_em,arquivado_em,bitrix_status,bitrix_etapa&id=eq.${negocioId}&limit=1`))?.[0];
   if (!n) return { status: 404, body: { error: 'Cartão não encontrado.' } };
-  if (!podeMexer(u, n)) return { status: 403, body: { error: 'Sem permissão neste cartão.' } };
-  if (n.etapa !== 'consolidada') return { status: 409, body: { error: 'A venda ainda não foi consolidada.' } };
+  if (u && !podeMexer(u, n)) return { status: 403, body: { error: 'Sem permissão neste cartão.' } };
+  if (n.arquivado_em) return { status: 409, body: { error: 'O cartão está no arquivo.' } };
 
   const lead = (await rest(`qs_leads?select=id,bitrix_id&id=eq.${n.lead_id}&limit=1`))?.[0];
   const dealId = String(lead?.bitrix_id || '').replace(/\D/g, '');
   if (!dealId) {
     await marcar(n.id, { bitrix_status: 'sem_card', bitrix_erro: 'O lead não tem negócio no Bitrix.' });
-    return { status: 200, body: { ok: false, status: 'sem_card', mensagem: 'Este cliente não tem card no Bitrix — a venda ficou só no QS.' } };
+    return { status: 200, body: { ok: false, status: 'sem_card', mensagem: 'Este cliente não tem card no Bitrix — ficou só no QS.' } };
   }
 
   try {
     const deal = await bx('crm.deal.get', { id: Number(dealId) }, 8_000);
     if (!deal) throw new Error(`Negócio ${dealId} não encontrado no Bitrix.`);
+    const lista = await colunasDoFunil(deal.CATEGORY_ID);
+    const alvo = colunaParaEtapa(lista, n.etapa);
+    if (!alvo) throw new Error(`O funil deste negócio não tem a coluna "${NOME_ETAPA[n.etapa] || n.etapa}". Crie a coluna com esse nome no Bitrix e reenvie.`);
     const valor = Number(n.ficha?.valor_total ?? n.valor_previsto ?? 0);
-    const alvo = await etapaDeVenda(deal.CATEGORY_ID);
     const fields = {};
+    if (String(deal.STAGE_ID) !== alvo) fields.STAGE_ID = alvo;
     if (valor > 0 && Math.abs(Number(deal.OPPORTUNITY || 0) - valor) > 0.009) {
       fields.OPPORTUNITY = valor;
       fields.CURRENCY_ID = 'BRL';
     }
-    if (alvo && String(deal.STAGE_ID) !== alvo) fields.STAGE_ID = alvo;
-
     if (Object.keys(fields).length) {
       await bx('crm.deal.update', { id: Number(dealId), fields, params: { REGISTER_SONET_EVENT: 'Y' } }, 8_000);
+    }
+    // Venda fechada pela ficha: o resumo vai pra timeline do negócio uma vez só,
+    // quando o cartão entra na venda (Aguardando emissão ou Venda realizada).
+    if (n.consolidada_em && ETAPAS_DE_VENDA.includes(n.etapa) && !ETAPAS_DE_VENDA.includes(n.bitrix_etapa || '')) {
       const parcelas = (await rest(`fin_planos?select=fin_parcelas(numero,valor,vencimento,forma,recorrente)&negocio_id=eq.${n.id}&limit=1`).catch(() => null))?.[0]?.fin_parcelas || [];
       parcelas.sort((a, b) => a.numero - b.numero);
       await comentarNoNegocio(dealId, resumoDaFicha(n.ficha, parcelas));
     }
     const nota = Object.keys(fields).length
-      ? `Bitrix atualizado (negócio ${dealId}): ${fields.STAGE_ID ? 'etapa de venda realizada' : ''}${fields.STAGE_ID && fields.OPPORTUNITY ? ' + ' : ''}${fields.OPPORTUNITY ? `valor ${brl(valor)}` : ''}.`
-      : `Bitrix já estava certo (negócio ${dealId}) — nada regravado.`;
-    await marcar(n.id, {
-      bitrix_status: 'ok',
-      bitrix_erro: alvo ? null : 'Funil sem etapa de venda realizada: só o valor foi enviado.',
-      bitrix_enviado_em: new Date().toISOString(),
-    }, nota, u.id);
+      ? `Bitrix atualizado (negócio ${dealId}): ${fields.STAGE_ID ? `coluna "${NOME_ETAPA[n.etapa]}"` : ''}${fields.STAGE_ID && fields.OPPORTUNITY ? ' + ' : ''}${fields.OPPORTUNITY ? `valor ${brl(valor)}` : ''}.`
+      : null;
+    await marcar(n.id, { bitrix_status: 'ok', bitrix_erro: null, bitrix_etapa: n.etapa, bitrix_enviado_em: new Date().toISOString() }, nota, u?.id);
     return { status: 200, body: { ok: true, status: 'ok', mudou: Object.keys(fields), dealId } };
   } catch (e) {
     const msg = String(e?.message || 'Falhou').slice(0, 500);
     console.error('[closer] espelhar', n.id, msg);
-    await marcar(n.id, { bitrix_status: 'erro', bitrix_erro: msg }, `Bitrix recusou: ${msg}`, u.id).catch(() => null);
+    // O cron tenta de novo a cada rodada: só registra o evento se a mensagem mudou.
+    await marcar(n.id, { bitrix_status: 'erro', bitrix_erro: msg }, u ? `Bitrix recusou: ${msg}` : null, u?.id).catch(() => null);
     return { status: 200, body: { ok: false, status: 'erro', mensagem: msg } };
   }
+}
+
+/** Cron: leva pro Bitrix os cartões que mudaram de etapa (inclusive os que a reunião moveu). */
+async function cronBitrix() {
+  const pend = (await rest('qs_closer_negocios?select=id&bitrix_status=eq.pendente&arquivado_em=is.null&order=atualizado_em.asc&limit=25')) || [];
+  let ok = 0, falhou = 0;
+  for (const p of pend) {
+    const r = await espelhar(p.id, null).catch(() => null);
+    if (r?.body?.ok) ok++; else falhou++;
+  }
+  return { pendentes: pend.length, ok, falhou };
+}
+
+/**
+ * Traz pro quadro um cliente que JÁ EXISTE no Bitrix, pelo ID do negócio.
+ * Já há lead do QS com esse bitrix_id → reaproveita (e o cartão do arquivo, se houver).
+ * Não há → cria o lead já com o closer como dono: assim não entra na distribuição
+ * dos SDRs nem conta como lead novo no Monitor. A etapa segue a coluna do Bitrix.
+ */
+async function importarDoBitrix(u, body) {
+  const dealId = String(body.dealId || '').replace(/\D/g, '');
+  if (!dealId) return { status: 400, body: { error: 'Informe o ID do negócio no Bitrix (só os números).' } };
+  const closerId = u.role === 'closer' ? u.id : (UUID_RE.test(String(body.closerId || '')) ? String(body.closerId) : u.id);
+
+  const deal = await bx('crm.deal.get', { id: Number(dealId) }, 8_000).catch(() => null);
+  if (!deal) return { status: 404, body: { error: `Não achei o negócio ${dealId} no Bitrix.` } };
+
+  let lead = (await rest(`qs_leads?select=id,full_name&bitrix_id=eq.${dealId}&limit=1`))?.[0];
+  if (!lead) {
+    const c = deal.CONTACT_ID ? await bx('crm.contact.get', { id: Number(deal.CONTACT_ID) }, 8_000).catch(() => null) : null;
+    const nome = [c?.NAME, c?.SECOND_NAME, c?.LAST_NAME].filter(Boolean).join(' ').trim() || String(deal.TITLE || `Negócio ${dealId}`);
+    const criado = await rest('qs_leads', {
+      method: 'POST', prefer: 'return=representation',
+      body: {
+        full_name: nome,
+        phone: c?.PHONE?.[0]?.VALUE || null,
+        email: c?.EMAIL?.[0]?.VALUE || null,
+        bitrix_id: dealId,
+        owner_id: closerId,
+        segment: 'Bitrix (trazido pelo closer)',
+      },
+    });
+    lead = Array.isArray(criado) ? criado[0] : criado;
+    if (!lead?.id) return { status: 500, body: { error: 'Não consegui criar o cliente no QS.' } };
+    // Não é lead novo de marketing: sai do Monitor de distribuição.
+    await rest(`qs_lead_entradas?lead_id=eq.${lead.id}`, { method: 'DELETE', prefer: 'return=minimal' }).catch(() => null);
+  }
+
+  const nid = await rest('rpc/closer_negocio_trazer', {
+    method: 'POST',
+    body: { p_lead: lead.id, p_closer: closerId, p_texto: `Trazido do Bitrix (negócio ${dealId}).`, p_valor: Number(deal.OPPORTUNITY || 0) || null },
+  });
+  const negocioId = Array.isArray(nid) ? nid[0] : nid;
+  if (!UUID_RE.test(String(negocioId || ''))) return { status: 500, body: { error: 'Não consegui abrir o cartão.' } };
+
+  // Coluna de venda/cancelamento no Bitrix exige a ficha de fechamento no QS,
+  // então nesses casos o cartão entra em Em negociação.
+  const lista = await colunasDoFunil(deal.CATEGORY_ID).catch(() => []);
+  const { etapa, nome: coluna } = etapaParaColuna(lista, deal.STAGE_ID);
+  const PERMITIDAS = ['aguardando_reuniao', 'reagendamento', 'em_cotacao', 'em_negociacao', 'no_show', 'oportunidade_futura'];
+  const destino = PERMITIDAS.includes(etapa) ? etapa : 'em_negociacao';
+  // bitrix_etapa = destino: o gatilho não marca "pendente" e nada volta pro Bitrix.
+  await rest(`qs_closer_negocios?id=eq.${negocioId}`, {
+    method: 'PATCH', prefer: 'return=minimal',
+    body: { etapa: destino, bitrix_etapa: destino, bitrix_status: 'ok', bitrix_erro: null },
+  });
+  await rest('qs_closer_negocio_eventos', {
+    method: 'POST', prefer: 'return=minimal',
+    body: {
+      negocio_id: negocioId, tipo: 'bitrix', autor_id: u.id,
+      texto: `No Bitrix o negócio estava em "${coluna}".${PERMITIDAS.includes(etapa) ? '' : ' Entrou em Em negociação: pra fechar a venda, preencha a ficha de fechamento.'}`,
+    },
+  }).catch(() => null);
+  return { status: 200, body: { ok: true, negocioId, leadId: lead.id, etapa: destino, cliente: lead.full_name } };
 }
 
 function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
@@ -444,6 +568,16 @@ export default async function handler(req, res) {
     catch (e) { console.error('[closer] webhook', e?.message); return res.status(500).json({ error: 'Falhou.' }); }
   }
 
+  // Vercel Cron (Bearer CRON_SECRET): cartões com etapa pendente → Bitrix.
+  if (acaoQ === 'cron-bitrix' && req.method === 'GET') {
+    const segredo = env('CRON_SECRET');
+    const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    if (!segredo || !segredoConfere(veio, segredo)) return res.status(401).json({ error: 'Sem autorização.' });
+    if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE.' });
+    try { return res.status(200).json(await cronBitrix()); }
+    catch (e) { console.error('[closer] cron-bitrix', e?.message); return res.status(500).json({ error: 'Falhou.' }); }
+  }
+
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Use POST' });
@@ -454,6 +588,12 @@ export default async function handler(req, res) {
   const acao = String(req.query?.acao || body.acao || '');
 
   try {
+    if (acao === 'importar') {
+      if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
+      if (!(u.role === 'closer' || ehGestao(u))) return res.status(403).json({ error: 'Só closer e gestão do Comercial.' });
+      const r = await importarDoBitrix(u, body);
+      return res.status(r.status).json(r.body);
+    }
     if (acao === 'espelhar') {
       if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
       const id = String(body.negocioId || '');

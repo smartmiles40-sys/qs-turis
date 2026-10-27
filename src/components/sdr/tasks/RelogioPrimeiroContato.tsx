@@ -43,28 +43,27 @@ export default function RelogioPrimeiroContato({
 
   const maisAntigo = esperando[0];
   const min = Math.max(0, Math.floor((agora - new Date(maisAntigo.chegouEm).getTime()) / 60_000));
-  const [fundo, cor, borda] =
-    min < 5 ? ["#ECFDF5", "#047857", "#A7F3D0"]
-    : min < 30 ? ["#FFF7ED", "#B45309", "#FED7AA"]
-    : ["#FEF2F2", "#B91C1C", "#FECACA"];
+  // Cor só de status: verde até 5 min, amarelo até 30, vermelho depois.
+  const [fundo, cor] =
+    min < 5 ? ["var(--ok-bg)", "var(--ok)"]
+    : min < 30 ? ["var(--warn-bg)", "var(--warn)"]
+    : ["var(--danger-bg)", "var(--danger)"];
 
   return (
-    <div className="qsx-page mb-3 flex items-center gap-3 flex-wrap rounded-xl px-4 py-2.5"
-         style={{ background: fundo, border: `1px solid ${borda}` }}
+    <div className="flex w-full items-center gap-3 flex-wrap rounded-xl px-4 py-2.5"
+         style={{ background: fundo, minHeight: 52 }}
          role="status" aria-live="polite">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={cor} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <svg className="shrink-0" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={cor} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 2.5" /><path d="M9 2h6" />
       </svg>
-      <p className="text-[13.5px] flex-1 min-w-[220px]" style={{ color: cor }}>
-        <b style={{ fontVariantNumeric: "tabular-nums" }}>{esperando.length}</b>{" "}
-        {esperando.length === 1 ? "lead novo esperando" : "leads novos esperando"} o 1º contato
-        {" · "}
-        <b>{maisAntigo.nome}</b> chegou há <b style={{ fontVariantNumeric: "tabular-nums" }}>{tempo(min)}</b>
-        {min < 5 && <span className="font-normal"> — atendido em até 5 min, 1 em 4 vira reunião</span>}
+      <p className="m-0 text-[13px] leading-snug flex-1 min-w-[220px]" style={{ color: "var(--text)" }}>
+        <b style={{ color: cor, fontVariantNumeric: "tabular-nums" }}>
+          {esperando.length} {esperando.length === 1 ? "lead novo esperando" : "leads novos esperando"}
+        </b>{" "}
+        o 1º contato · <b>{maisAntigo.nome}</b> chegou há <b style={{ color: cor, fontVariantNumeric: "tabular-nums" }}>{tempo(min)}</b>
+        {min < 5 && <span style={{ color: "var(--muted)" }}> · atendido em até 5 min, 1 em 4 vira reunião</span>}
       </p>
-      <button type="button" onClick={() => onAtender(maisAntigo.taskId)}
-              className="h-9 px-4 rounded-lg text-[13px] font-bold text-white"
-              style={{ background: cor }}>
+      <button type="button" onClick={() => onAtender(maisAntigo.taskId)} className="qsx-btn shrink-0">
         Atender agora
       </button>
     </div>

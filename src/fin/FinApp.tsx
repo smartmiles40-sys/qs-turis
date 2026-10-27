@@ -96,17 +96,17 @@ export default function FinApp() {
       { id: "conversas", rotulo: "Conversas (WhatsApp)", badge: cont.esperando || undefined },
       { id: "modelos", rotulo: "Modelos de mensagem" },
     ] },
-    { id: "receber", rotulo: "Recebimentos", icone: ICONES_AREA.lista, itens: [
+    // Redesign (out/2026): Financeiro = recebimentos + pagamentos num grupo só;
+    // Gestão = Solicitações + Time (HANDOFF.md, "Menus por setor").
+    { id: "financeiro", rotulo: "Financeiro", icone: ICONES_AREA.lista, itens: [
       { id: "receber", rotulo: "Contas a receber", badge: cont.atrasadas || undefined, alerta: true },
-    ] },
-    { id: "pagar", rotulo: "Pagamentos", icone: ICONES_AREA.dinheiro, itens: [
       { id: "pagamentos", rotulo: "Pedidos de pagamento", badge: cont.pagamentos || undefined },
     ] },
-    { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
+    { id: "gestao", rotulo: "Gestão", icone: ICONES_AREA.pedidos, itens: [
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
+      // Time: só gestor(a) do Financeiro e admin cadastram e cuidam do time.
+      ...(gestor ? [{ id: "equipe", rotulo: "Time" }] : []),
     ] },
-    // Time: só gestor(a) do Financeiro e admin cadastram e cuidam do time.
-    ...(gestor ? [{ id: "time", rotulo: "Time", icone: ICONES_AREA.equipe, itens: [{ id: "equipe", rotulo: "Funcionários" }] }] : []),
   ];
 
   return (

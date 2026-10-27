@@ -1,9 +1,10 @@
 // src/components/sdr/SdrLayout.tsx — QS (Qualificação System)
-import TrocarArea from "@/components/TrocarArea";
-import { abrirAreaCloser, podeAbrirAreaCloser } from "@/closer/lib";
+import { comercialDividido } from "@/area/CascaDeArea";
 import { useState, useRef, useEffect, Component, Suspense, type ReactNode } from "react";
 import { useQsAuth, canAccessNav, telaInicial, ORDEM_EXECUCAO } from "@/contexts/QsAuthContext";
-import { useTheme } from "@/contexts/ThemeContext";
+import AppShell, { type ShellGroup, type ShellItem } from "@/components/ui/AppShell";
+import { Icon } from "@/components/ui/icons";
+import { Segmented } from "@/components/ui";
 import { lazyPagina } from "@/lib/qs/lazyPagina";
 
 // ── Error Boundary ─────────────────────────────────────────────────────────
@@ -101,7 +102,6 @@ import { varrerRetrabalhoVencido } from "@/lib/qs/carteira";
 import TelefoneOnboarding from "@/components/sdr/telefone/TelefoneOnboarding";
 import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
 import LigacaoOficialWidget from "@/components/sdr/telefone/LigacaoOficialWidget";
-import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 import { ComCoresDaCentral } from "@/solicitacoes/PedirOutroSetor";
 import { useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import { useAprovacoesNovas } from "@/propostas/lib";
@@ -192,95 +192,10 @@ function isGroup(item: MenuGroup | MenuItem): item is MenuGroup {
   return "items" in item;
 }
 
-function ChevronDown() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-// ── Dropdown Component ───────────────────────────────────────────────────────
-
-function BolinhaMenu({ n, alerta }: { n?: number; alerta?: boolean }) {
-  if (!n) return null;
-  return (
-    <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10.5px] font-bold leading-none"
-      style={alerta ? { background: "#FEE2E2", color: "#B91C1C" } : { background: "#FEF3C7", color: "#92400E" }}>{n}</span>
-  );
-}
-
-function NavDropdown({
-  group,
-  activeNav,
-  onNavigate,
-}: {
-  group: MenuGroup;
-  activeNav: SdrNav;
-  onNavigate: (nav: SdrNav) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  const isActive = group.items.some((i) => i.id === activeNav);
-  const soma = group.items.reduce((t, i) => t + (i.badge ?? 0), 0);
-  const algumAlerta = group.items.some((i) => i.alerta && i.badge);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-3 py-2 text-[14px] font-medium transition-colors rounded-md"
-        style={{
-          color: isActive ? "var(--accent)" : "var(--ink2)",
-          borderBottom: isActive ? "2px solid var(--accent)" : "2px solid transparent",
-          borderRadius: 0,
-        }}
-      >
-        {group.label}
-        <BolinhaMenu n={soma} alerta={algumAlerta} />
-        <ChevronDown />
-      </button>
-      {open && (
-        <div
-          className="absolute top-full left-0 mt-1 bg-white rounded-xl shadow-lg border border-gray-100 py-2 z-50"
-          style={{ minWidth: 280 }}
-        >
-          {group.items.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => {
-                onNavigate(item.id);
-                setOpen(false);
-              }}
-              className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex flex-col gap-0.5"
-            >
-              <span className="text-[13px] font-semibold text-gray-900">{item.label}<BolinhaMenu n={item.badge} alerta={item.alerta} /></span>
-              {item.description && (
-                <span className="text-[11px] text-gray-400">{item.description}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function SdrLayout() {
-  const { currentUser, logout } = useQsAuth();
-  // Quem tem as duas áreas (admin, ou alguém liberado nas duas) troca daqui.
-  const { isDark, toggleTheme } = useTheme();
+  const { currentUser } = useQsAuth();
   // A tela de entrada depende do papel: o closer cai na agenda dele, não na
   // fila do SDR. Só vale na PRIMEIRA renderização — depois quem manda é a
   // navegação do usuário.
@@ -296,17 +211,11 @@ export default function SdrLayout() {
   // A tela de onde o lead foi aberto, pro "Voltar" devolver pra ela.
   const [origemDoLead, setOrigemDoLead] = useState<SdrNav | null>(null);
   const [editingCadenceId, setEditingCadenceId] = useState<string | null>(null);
-  const [showUserMenu, setShowUserMenu] = useState(false);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [showChangePassword, setShowChangePassword] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement>(null);
 
   // "Configurar telefone" (menu do avatar) reabre o onboarding do BravoTech — o
   // TelefoneOnboarding escuta este evento e força a exibição, ignorando as
   // chaves de "já configurado"/"adiado" desta máquina.
   function reopenTelefoneOnboarding() {
-    setShowUserMenu(false);
-    setMobileNavOpen(false);
     window.dispatchEvent(new CustomEvent("qs:reopen-tel-onboarding"));
   }
 
@@ -315,21 +224,6 @@ export default function SdrLayout() {
   const [solicitacaoAberta, setSolicitacaoAberta] = useState<string | null>(null);
   const [propostaAberta, setPropostaAberta] = useState<string | null>(null);
   const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "comercial");
-  const userInitials = currentUser
-    ? currentUser.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
-    : "QS";
-
-  // Close user menu on outside click
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
-        setShowUserMenu(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
   // O retrabalho de ontem fecha no LOGIN, não na Carteira (25/09). Rodando só
   // na abertura da Carteira, o SDR que foi direto pro Painel via o retrabalho
   // de ontem como atraso — o Victor Hugo amanheceu com 376 assim. Cada um varre
@@ -463,202 +357,84 @@ export default function SdrLayout() {
     activeNav === "cadencia-criar" || activeNav === "cadencia-editar" ? "cadencias" :
     activeNav;
 
+  // ── MENU DO REDESIGN (out/2026) ─────────────────────────────────────────
+  // O menu de cima (Execução / Gestão / Desempenho / Configurações) virou a
+  // sidebar comum dos 4 setores (HANDOFF.md, "Menus por setor"). As permissões
+  // continuam as de sempre: `filteredMenu` já filtrou por papel e ordenou a
+  // Execução por ORDEM_EXECUCAO; aqui só se reagrupa e se põe ícone.
+  const permitido = new Set(filteredMenu.flatMap((e) => (isGroup(e) ? e.items.map((i) => i.id) : [e.id])));
+  const badgeDe = (id: SdrNav) => {
+    for (const e of filteredMenu) if (isGroup(e)) { const it = e.items.find((i) => i.id === id); if (it) return it; }
+    return undefined;
+  };
+  const ICONE_NAV: Partial<Record<SdrNav, ReactNode>> = {
+    painel: Icon.fila, "minha-agenda": Icon.agenda, whatsapp: Icon.chat, "atendimento-ia": Icon.ia,
+    leads: Icon.pessoas, cobertura: Icon.carteira, cadencias: Icon.cadencia, reunioes: Icon.video,
+    solicitacoes: Icon.inbox, propostas: Icon.doc, dashboard: Icon.grafico, configuracoes: Icon.config,
+  };
+  const ROTULO_NAV: Partial<Record<SdrNav, string>> = {
+    painel: "Fila de hoje", "minha-agenda": "Minha agenda", cobertura: "Minha carteira", reunioes: "Reuniões", whatsapp: "WhatsApp",
+  };
+  const item = (id: SdrNav, label: string): ShellItem | null => {
+    if (!permitido.has(id)) return null;
+    const b = badgeDe(id);
+    return { id, label: ROTULO_NAV[id] ?? label, icon: ICONE_NAV[id], count: b?.badge, late: b?.alerta };
+  };
+  // Bruno, 26/10: "Minha agenda" é do closer (o SDR vê as reuniões em Gestão ›
+  // Reuniões); "Atendimento IA" sai do menu até ser configurado; Cadências é da
+  // gestão (master). O SDR fica com Gestão = Leads, Minha carteira e Reuniões.
+  const ehSdr = userRole === "sdr";
+  const FORA_DO_MENU = new Set<SdrNav>(["cobertura", "atendimento-ia", ...(ehSdr ? (["cadencias"] as SdrNav[]) : [])]);
+  const execucao = (ORDEM_EXECUCAO[userRole] ?? ["painel", "minha-agenda", "whatsapp"])
+    .concat(["painel", "minha-agenda", "whatsapp"])
+    // SDR: "Reuniões" entra no lugar da "Minha agenda" (Bruno, 26/10) — ele
+    // acompanha as reuniões que vão acontecer, não só quem vai entrar.
+    .map((id) => (ehSdr && id === "minha-agenda" ? "reunioes" : id))
+    .filter((id, i, arr) => arr.indexOf(id) === i && !FORA_DO_MENU.has(id as SdrNav)) as SdrNav[];
+  // Desempenho: Visão Geral, Análises & Metas e Distribuição viram ABAS de uma
+  // tela só; o item do menu abre a primeira que o papel pode ver.
+  const desempenhoAbas = (["dashboard", "analises", "monitor-leads"] as SdrNav[]).filter((id) => permitido.has(id));
+  const grupos: ShellGroup[] = [
+    { label: "Execução", items: execucao.map((id) => item(id, id)).filter(Boolean) as ShellItem[] },
+    { label: "Gestão", items: [item("leads", "Leads"), item("cobertura", "Minha carteira"), ...(ehSdr ? [] : [item("cadencias", "Cadências"), item("reunioes", "Reuniões")])].filter(Boolean) as ShellItem[] },
+    { label: "Com outros setores", items: [item("solicitacoes", "Solicitações"), item("propostas", "Propostas")].filter(Boolean) as ShellItem[] },
+    { label: "Análise", items: [
+      ...(desempenhoAbas.length ? [{ id: desempenhoAbas[0], label: "Desempenho", icon: Icon.grafico }] : []),
+      item("configuracoes", "Configurações"),
+    ].filter(Boolean) as ShellItem[] },
+  ].filter((g) => g.items.length > 0);
+  const ativoNoMenu = (desempenhoAbas as string[]).includes(visualActiveNav) ? desempenhoAbas[0] : visualActiveNav;
+
+  const ROTULO_DESEMPENHO: Partial<Record<SdrNav, string>> = { dashboard: "Visão geral", analises: "Análises e metas", "monitor-leads": "Distribuição de leads" };
+
   return (
-    <div className="h-dvh flex overflow-hidden" style={{ background: "var(--bg)" }}>
-      {/* ── COLUNA PRINCIPAL (topo + conteúdo) — divide a tela com o atendimento ── */}
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-      {/* Número de WhatsApp fora do ar: acima de tudo, inclusive do topo. */}
-      {/* ── TOP BAR ────────────────────────────────────────────────────── */}
-      <header
-        className="shrink-0 z-50 flex items-center justify-between px-3 sm:px-4 h-[52px] select-none pl-safe pr-safe"
-        style={{
-          background: "var(--card)",
-          borderBottom: "1px solid var(--line)",
-        }}
-      >
-        {/* Left: Hambúrguer (mobile) + Logo + Nav */}
-        <div className="flex items-center gap-1 min-w-0">
-          {/* Botão do menu — só no mobile */}
-          <button
-            onClick={() => setMobileNavOpen(true)}
-            className="qs-navbtn md:hidden flex items-center justify-center w-9 h-9 -ml-1 mr-1 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-            aria-label="Abrir menu"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          </button>
-          {/* QS Logo */}
-          <div className="flex items-center gap-2 md:mr-4 md:pr-4 md:border-r md:border-gray-200">
-            <div
-              className="flex items-center justify-center w-7 h-7 rounded-lg text-white font-bold text-[11px]"
-              style={{ background: "#0147FF" }}
-            >
-              QS
-            </div>
-            <span className="text-[9px] text-gray-400 font-semibold leading-none tracking-wide">by STFV</span>
-          </div>
-
-          {/* Nav items (desktop) — no mobile vira o menu lateral */}
-          <nav className="qs-topnav hidden md:flex items-center gap-0.5">
-            {filteredMenu.map((item) => {
-              if (isGroup(item)) {
-                return (
-                  <NavDropdown
-                    key={item.id}
-                    group={item}
-                    activeNav={visualActiveNav}
-                    onNavigate={navigate}
-                  />
-                );
-              }
-              // Direct link (Ajustes)
-              const isActive = visualActiveNav === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => navigate(item.id)}
-                  className="px-3 py-2 text-[14px] font-medium transition-colors"
-                  style={{
-                    color: isActive ? "var(--accent)" : "var(--ink2)",
-                    borderBottom: isActive ? "2px solid var(--accent)" : "2px solid transparent",
-                    borderRadius: 0,
-                  }}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* Right: Tema + Busca + Telefone + Notificações + Avatar */}
-        <div className="flex items-center gap-2">
-          {/* Modo Noturno — alterna claro/escuro (por dispositivo) */}
-          <button
-            onClick={toggleTheme}
-            title={isDark ? "Modo claro" : "Modo noturno"}
-            aria-label={isDark ? "Ativar modo claro" : "Ativar modo noturno"}
-            className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
-          >
-            {isDark ? (
-              // Sol (voltar ao claro)
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-              </svg>
-            ) : (
-              // Lua (ir pro escuro)
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </svg>
-            )}
-          </button>
-          {/* Busca global (Ctrl+K) */}
-          <button
-            onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}
-            title="Buscar cliente (Ctrl+K)"
-            aria-label="Buscar cliente"
-            className="flex items-center gap-2 h-9 px-3 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors border border-gray-200"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-            <span className="hidden lg:inline text-[12px] font-medium">Buscar</span>
-            <kbd className="hidden lg:inline text-[10px] font-bold px-1 py-0.5 rounded border border-gray-200 text-gray-400">Ctrl K</kbd>
-          </button>
-          {/* Sino de notificações/lembretes */}
-          <NotificationsPanel
-            onGoToTasks={() => setActiveNav("painel")}
-            onOpenLead={openLeadDetail}
-          />
-          <div ref={userMenuRef} className="relative">
-            <button
-              onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-2 hover:bg-gray-50 rounded-lg px-2 py-1 transition-colors"
-            >
-              <div
-                className="flex items-center justify-center w-8 h-8 rounded-full text-white text-[11px] font-bold"
-                style={{ background: "#0147FF" }}
-              >
-                {userInitials}
-              </div>
-              {currentUser && (
-                <span className="text-[13px] font-medium text-gray-700 hidden sm:block">
-                  {currentUser.name.split(" ")[0]}
-                </span>
-              )}
-            </button>
-            {showUserMenu && (
-              <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-gray-100 py-2 z-50 min-w-[200px]">
-                {currentUser && (
-                  <div className="px-4 py-2 border-b border-gray-100">
-                    <p className="text-[13px] font-semibold text-gray-900">{currentUser.name}</p>
-                    <p className="text-[11px] text-gray-400">{currentUser.email}</p>
-                    <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700 uppercase">
-                      {currentUser.role}
-                    </span>
-                  </div>
-                )}
-                {/* Trocar a própria senha */}
-                <button
-                  onClick={() => { setShowUserMenu(false); setShowChangePassword(true); }}
-                  className="w-full text-left px-4 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                  </svg>
-                  Trocar senha
-                </button>
-                {/* Avisos (0196): a bolinha que fica por cima de tudo */}
-                <BotaoBolinhaDoMenu onAntes={() => setShowUserMenu(false)} />
-                {/* Reabrir onboarding do telefone (BravoTech) */}
-                <button
-                  onClick={reopenTelefoneOnboarding}
-                  className="w-full text-left px-4 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />
-                  </svg>
-                  Configurar telefone
-                </button>
-                {/* Área do Closer (22/10): o closer já cai nela; a gestão abre por aqui. */}
-                {podeAbrirAreaCloser(currentUser) && (
-                  <button
-                    onClick={() => { setShowUserMenu(false); abrirAreaCloser(); }}
-                    className="w-full text-left px-4 py-2.5 text-[13px] font-semibold hover:bg-gray-50 transition-colors flex items-center gap-2"
-                    style={{ color: "#6D28D9" }}
-                  >
-                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: "#6D28D9" }} aria-hidden />
-                    Área do Closer (pipeline)
-                  </button>
-                )}
-                {/* Outras áreas que a pessoa tem (Relacionamento, Financeiro, Operações). */}
-                <TrocarArea atual="comercial" variante="menu" onAntes={() => setShowUserMenu(false)} />
-                <div className="my-1 border-t border-gray-100" />
-                <button
-                  onClick={() => {
-                    setShowUserMenu(false);
-                    logout();
-                  }}
-                  className="w-full text-left px-4 py-2.5 text-[13px] text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                    <polyline points="16 17 21 12 16 7" />
-                    <line x1="21" y1="12" x2="9" y2="12" />
-                  </svg>
-                  Sair
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Modal "Trocar minha senha" (menu do avatar) */}
-      <ChangePasswordModal open={showChangePassword} onClose={() => setShowChangePassword(false)} />
+    <AppShell
+      setor="comercial"
+      groups={grupos}
+      active={ativoNoMenu}
+      onNavigate={(id) => navigate(id as SdrNav)}
+      notifications={
+        <span className="qs-notif-up">
+          <NotificationsPanel onGoToTasks={() => setActiveNav("painel")} onOpenLead={openLeadDetail} />
+        </span>
+      }
+      userActions={[
+        { id: "telefone", label: "Configurar telefone", icon: Icon.telefone, onClick: reopenTelefoneOnboarding },
+      ]}
+      comercial={comercialDividido(currentUser, "sdr")}
+      after={activeNav !== "whatsapp" ? (
+        // Painel de atendimento — divide a tela; montado uma única vez e persistente.
+        // Cerca: uma falha no painel de atendimento NÃO pode derrubar o Painel junto.
+        // Na ABA de WhatsApp o dock não é montado (dois atendimentos na mesma tela
+        // assinam o realtime duas vezes e apitam em dobro).
+        <ErroDeParte parte="o WhatsApp" modo="discreto">
+          <QsWaDock onOpenLead={openLeadDetail} />
+        </ErroDeParte>
+      ) : undefined}
+      mainClassName="qs-main--comercial"
+    >
+      {/* A bolinha flutuante (0196) tinha item no menu do avatar; segue lá. */}
+      <span hidden><BotaoBolinhaDoMenu /></span>
 
       {/* Onboarding do telefone (BravoTech) — só na 1ª vez, por máquina */}
       <TelefoneOnboarding user={currentUser ? { id: currentUser.id, name: currentUser.name } : null} />
@@ -671,110 +447,11 @@ export default function SdrLayout() {
       {/* Ligação pelo número oficial (Cloud API Calling) — some quando não há chamada. */}
       <LigacaoOficialWidget />
 
-      {/* ── MENU LATERAL (MOBILE) ────────────────────────────────────────── */}
-      {mobileNavOpen && (
-        <div className="fixed inset-0 z-[70] md:hidden" role="dialog" aria-modal="true">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setMobileNavOpen(false)}
-          />
-          <div className="absolute left-0 top-0 bottom-0 w-[84%] max-w-[320px] bg-white shadow-2xl flex flex-col pt-safe pb-safe pl-safe">
-            {/* Cabeçalho do drawer */}
-            <div className="shrink-0 flex items-center justify-between px-4 h-[52px] border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <div className="flex items-center justify-center w-7 h-7 rounded-lg text-white font-bold text-[11px]" style={{ background: "#0147FF" }}>QS</div>
-                <span className="text-[9px] text-gray-400 font-semibold leading-none tracking-wide">by STFV</span>
-              </div>
-              <button
-                onClick={() => setMobileNavOpen(false)}
-                className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 hover:bg-gray-50"
-                aria-label="Fechar menu"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
-              </button>
-            </div>
-
-            {/* Itens de navegação */}
-            <nav className="flex-1 overflow-y-auto py-3">
-              {filteredMenu.map((entry) => {
-                if (isGroup(entry)) {
-                  return (
-                    <div key={entry.id} className="mb-2">
-                      <p className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">{entry.label}</p>
-                      {entry.items.map((item) => {
-                        const active = visualActiveNav === item.id;
-                        return (
-                          <button
-                            key={item.id}
-                            onClick={() => { navigate(item.id); setMobileNavOpen(false); }}
-                            className="w-full text-left px-4 py-3 flex flex-col gap-0.5 active:bg-gray-50 transition-colors"
-                            style={{ background: active ? "var(--accent-soft)" : "transparent", borderLeft: active ? "3px solid var(--accent)" : "3px solid transparent" }}
-                          >
-                            <span className="text-[14px] font-semibold" style={{ color: active ? "var(--accent)" : "var(--ink)" }}>{item.label}<BolinhaMenu n={item.badge} alerta={item.alerta} /></span>
-                            {item.description && <span className="text-[11px] text-gray-400">{item.description}</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  );
-                }
-                const active = visualActiveNav === entry.id;
-                return (
-                  <button
-                    key={entry.id}
-                    onClick={() => { navigate(entry.id); setMobileNavOpen(false); }}
-                    className="w-full text-left px-4 py-3 active:bg-gray-50 transition-colors"
-                    style={{ background: active ? "var(--accent-soft)" : "transparent", borderLeft: active ? "3px solid var(--accent)" : "3px solid transparent" }}
-                  >
-                    <span className="text-[14px] font-semibold" style={{ color: active ? "var(--accent)" : "var(--ink)" }}>{entry.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
-
-            {/* Rodapé: usuário + sair */}
-            {currentUser && (
-              <div className="shrink-0 border-t border-gray-100 p-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex items-center justify-center w-9 h-9 rounded-full text-white text-[12px] font-bold shrink-0" style={{ background: "#0147FF" }}>{userInitials}</div>
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-semibold text-gray-900 truncate">{currentUser.name}</p>
-                    <p className="text-[11px] text-gray-400 truncate">{currentUser.email}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <button
-                    onClick={() => { setMobileNavOpen(false); setShowChangePassword(true); }}
-                    className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-semibold text-gray-700 bg-gray-50 active:bg-gray-100 transition-colors"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-                    Senha
-                  </button>
-                  <button
-                    onClick={reopenTelefoneOnboarding}
-                    className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-semibold text-gray-700 bg-gray-50 active:bg-gray-100 transition-colors"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
-                    Telefone
-                  </button>
-                </div>
-                {podeAbrirAreaCloser(currentUser) && (
-                  <button onClick={() => { setMobileNavOpen(false); abrirAreaCloser(); }}
-                    className="w-full mb-2 flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-semibold text-white" style={{ background: "#6D28D9" }}>
-                    Área do Closer (pipeline)
-                  </button>
-                )}
-                <div className="mb-2"><TrocarArea atual="comercial" variante="bloco" onAntes={() => setMobileNavOpen(false)} /></div>
-                <button
-                  onClick={() => { setMobileNavOpen(false); logout(); }}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-semibold text-red-600 bg-red-50 active:bg-red-100 transition-colors"
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-                  Sair
-                </button>
-              </div>
-            )}
-          </div>
+      {/* Desempenho: as três telas viraram abas de uma só (redesign). */}
+      {(desempenhoAbas as string[]).includes(activeNav) && desempenhoAbas.length > 1 && (
+        <div className="px-4 sm:px-6 pt-5">
+          <Segmented label="Desempenho" value={activeNav} onChange={(v) => navigate(v as SdrNav)}
+            options={desempenhoAbas.map((id) => ({ value: id, label: ROTULO_DESEMPENHO[id] ?? id }))} />
         </div>
       )}
 
@@ -894,20 +571,6 @@ export default function SdrLayout() {
         )}
         </Suspense>
       </main>
-      </div>
-
-      {/* Painel de atendimento — divide a tela; montado uma única vez e persistente */}
-      {/* Cerca: uma falha no painel de atendimento (ex.: pedaço do app que sumiu
-          num deploy) NÃO pode derrubar o Painel junto — foi exatamente o que
-          aconteceu e virou "as SDRs não conseguem concluir a atividade". */}
-      {/* Na ABA de WhatsApp o dock não é montado: dois atendimentos na mesma
-          tela confundem, assinam o realtime duas vezes e fariam a mensagem nova
-          apitar em dobro. Sair da aba remonta o dock com o estado de sempre. */}
-      {activeNav !== "whatsapp" && (
-        <ErroDeParte parte="o WhatsApp" modo="discreto">
-          <QsWaDock onOpenLead={openLeadDetail} />
-        </ErroDeParte>
-      )}
 
       {/* Toasts globais (erros de gravação, confirmações) */}
       <GlobalToasts />
@@ -916,6 +579,6 @@ export default function SdrLayout() {
 
       {/* Busca global Ctrl+K */}
       <CommandPalette onOpenLead={openLeadDetail} />
-    </div>
+    </AppShell>
   );
 }

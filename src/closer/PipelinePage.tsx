@@ -1,12 +1,17 @@
 // src/closer/PipelinePage.tsx
 // -----------------------------------------------------------------------------
-// O PIPELINE DO CLOSER (0174, 22/10/2026): um cartão por cliente atendido.
+// O PIPELINE DO CLOSER (0174 → 0205, 26/10/2026): um cartão por cliente.
 //
-//   Reunião feita → Proposta enviada → Negociando → Contrato enviado →
-//   Contrato assinado → Pagamento enviado → Pago → Venda consolidada (+ Perdido)
+//   Aguardando reunião · Reagendamento · Em cotação · Em negociação · No-show ·
+//   Oportunidade futura · Aguardando emissão · Venda cancelada · Perdido ·
+//   Venda realizada
 //
-// O cartão anda SOZINHO quando há fato (proposta enviada/aprovada, contrato,
-// pagamento) e dá pra arrastar à mão (ou usar "Mover para" no painel).
+// Tudo é feito AQUI e vai pro Bitrix depois (na hora; o cron reenvia o que
+// ficou pendente). O cartão nasce na reunião agendada e anda sozinho com ela
+// (reagendou, no-show, realizada → Em cotação) e com a proposta enviada
+// (→ Em negociação). Aguardando emissão só pela ficha de fechamento.
+// Cliente que já tinha card no Bitrix: "Trazer do Bitrix" pelo ID do negócio.
+// O closer vê só os próprios cartões; a gestão filtra por closer.
 // Filtros: período (quando entrou no pipeline), etapa e closer (só a gestão).
 // Cada coluna mostra quantos cartões e quanto vale.
 // -----------------------------------------------------------------------------
@@ -14,7 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Etiqueta, Modal, Vazio } from "@/rel/ui";
-import { ETAPAS, brl, dataBr, listarNegocios, moverNegocio, nomeDoLead, type Etapa, type Negocio } from "./lib";
+import { ETAPAS, ETAPAS_COM_MOTIVO, ETAPAS_FINAIS, NOME_ETAPA, bancoSemPipelineV2, brl, dataBr, espelharNoBitrix, listarNegocios, moverNegocio, nomeDoLead, trazerDoBitrix, type Etapa, type Negocio } from "./lib";
 import NegocioPainel, { type LinksDoPainel } from "./NegocioPainel";
 
 const PERIODOS = [
@@ -31,6 +36,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
 }) {
   const { currentUser } = useQsAuth();
   const gestao = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const ehCloser = currentUser?.role === "closer";
   const [lista, setLista] = useState<Negocio[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -40,20 +46,22 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
   const [closers, setClosers] = useState<{ id: string; name: string }[]>([]);
   const [busca, setBusca] = useState("");
   const [arrastando, setArrastando] = useState<string | null>(null);
-  const [perdendo, setPerdendo] = useState<{ id: string; motivo: string } | null>(null);
+  const [perdendo, setPerdendo] = useState<{ id: string; etapa: Etapa; motivo: string } | null>(null);
+  const [trazendo, setTrazendo] = useState<{ dealId: string; ocupado: boolean; erro: string | null } | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     setErro(null);
     try {
       const desde = periodo === "tudo" ? null : new Date(Date.now() - Number(periodo) * 86400000).toISOString();
-      setLista(await listarNegocios({ desde, closerId: closerFiltro || null }));
+      // Closer: só os clientes dele.
+      setLista(await listarNegocios({ desde, closerId: ehCloser ? currentUser?.id ?? null : closerFiltro || null }));
     } catch (e) {
       setErro((e as Error).message);
     } finally {
       setCarregando(false);
     }
-  }, [periodo, closerFiltro]);
+  }, [periodo, closerFiltro, ehCloser, currentUser?.id]);
   useEffect(() => { void carregar(); }, [carregar]);
   useEffect(() => { try { localStorage.setItem("qs_closer_periodo", periodo); } catch { /* sem memória */ } }, [periodo]);
   useEffect(() => {
@@ -73,21 +81,52 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
     return m;
   }, [filtrados]);
 
-  const abertos = filtrados.filter((n) => n.etapa !== "perdido" && n.etapa !== "consolidada");
-  const consolidados = filtrados.filter((n) => n.etapa === "consolidada");
+  const abertos = filtrados.filter((n) => !ETAPAS_FINAIS.includes(n.etapa));
+  const vendas = filtrados.filter((n) => n.etapa === "venda_realizada" || n.etapa === "aguardando_emissao");
+  const valorDe = (n: Negocio) => Number(n.ficha?.valor_total ?? n.valor_previsto ?? 0);
 
-  async function soltar(id: string, etapa: Etapa) {
-    const n = lista.find((x) => x.id === id);
-    if (!n || n.etapa === etapa) return;
-    if (etapa === "consolidada") { setAviso("Pra consolidar, abra o cartão e preencha a ficha de fechamento."); onAbrirId(id); return; }
-    if (etapa === "perdido") { setPerdendo({ id, motivo: "" }); return; }
+  /** Moveu no QS → manda pro Bitrix na hora (se falhar, o cron tenta de novo). */
+  async function mover(id: string, etapa: Etapa, motivo?: string) {
     try {
       setLista((l) => l.map((x) => (x.id === id ? { ...x, etapa } : x)));
-      await moverNegocio(id, etapa);
+      await moverNegocio(id, etapa, motivo);
+      void espelharNoBitrix(id)
+        .then((r) => { if (!r.ok && r.status === "erro") setAviso(`Mudou no QS, mas o Bitrix recusou: ${r.mensagem}`); })
+        .catch(() => null)
+        .finally(() => void carregar());
     } catch (e) {
       setAviso((e as Error).message);
     }
     void carregar();
+  }
+
+  function soltar(id: string, etapa: Etapa) {
+    const n = lista.find((x) => x.id === id);
+    if (!n || n.etapa === etapa) return;
+    if (etapa === "aguardando_emissao" && !n.consolidada_em) {
+      setAviso("Pra ir pra Aguardando emissão, preencha a ficha de fechamento — ela consolida a venda.");
+      onAbrirId(id);
+      return;
+    }
+    if ((etapa === "venda_realizada" || etapa === "venda_cancelada") && !n.consolidada_em) {
+      setAviso(`${NOME_ETAPA[etapa]} vale só pra venda consolidada. Preencha a ficha de fechamento antes.`);
+      return;
+    }
+    if (ETAPAS_COM_MOTIVO.includes(etapa)) { setPerdendo({ id, etapa, motivo: "" }); return; }
+    void mover(id, etapa);
+  }
+
+  async function trazer() {
+    if (!trazendo?.dealId.trim() || trazendo.ocupado) return;
+    setTrazendo({ ...trazendo, ocupado: true, erro: null });
+    try {
+      const r = await trazerDoBitrix(trazendo.dealId, gestao ? closerFiltro || null : null);
+      setTrazendo(null);
+      setAviso(`${r.cliente || "Cliente"} entrou no quadro em “${NOME_ETAPA[r.etapa]}”.`);
+      void carregar();
+    } catch (e) {
+      setTrazendo((t) => (t ? { ...t, ocupado: false, erro: (e as Error).message } : t));
+    }
   }
 
   if (abrirId) {
@@ -99,9 +138,10 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-[22px] font-bold flex-1" style={{ color: "var(--ink)" }}>Pipeline</h1>
         <span className="text-[13px]" style={{ color: "var(--ink2)" }}>
-          Em aberto: <b>{abertos.length}</b> · {brl(abertos.reduce((s, n) => s + Number(n.valor_previsto || 0), 0))}
-          {"  "}· Consolidadas: <b>{consolidados.length}</b> · {brl(consolidados.reduce((s, n) => s + Number(n.valor_previsto || 0), 0))}
+          Em aberto: <b>{abertos.length}</b> · {brl(abertos.reduce((s, n) => s + valorDe(n), 0))}
+          {"  "}· Vendas: <b>{vendas.length}</b> · {brl(vendas.reduce((s, n) => s + valorDe(n), 0))}
         </span>
+        <Botao onClick={() => setTrazendo({ dealId: "", ocupado: false, erro: null })}>Trazer do Bitrix</Botao>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -123,16 +163,19 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
 
       {aviso && <Aviso>{aviso} <button className="underline ml-1" onClick={() => setAviso(null)}>ok</button></Aviso>}
       {erro && <Aviso tom="erro">{erro}</Aviso>}
+      {!carregando && bancoSemPipelineV2 && (
+        <Aviso>Prévia: o banco ainda está na versão antiga do pipeline (falta aplicar a 0205 junto com o deploy). Os cartões antigos aparecem na coluna nova equivalente; não mova nada por aqui.</Aviso>
+      )}
 
       {carregando ? (
         <p className="text-sm" style={{ color: "var(--ink3)" }}>Carregando…</p>
       ) : !filtrados.length ? (
-        <Vazio titulo="Nenhum cliente no pipeline" texto="Quando você marcar uma reunião como realizada, o cliente aparece aqui em “Reunião feita”." />
+        <Vazio titulo="Nenhum cliente no pipeline" texto="Toda reunião agendada com você cria um cartão em “Aguardando reunião”. Cliente que já tinha card no Bitrix: use “Trazer do Bitrix”." />
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-3 -mx-1 px-1" style={{ scrollSnapType: "x proximity" }}>
           {colunas.map((col) => {
             const itens = porEtapa.get(col.id) ?? [];
-            const total = itens.reduce((s, n) => s + Number(n.valor_previsto || 0), 0);
+            const total = itens.reduce((s, n) => s + valorDe(n), 0);
             return (
               <section key={col.id} aria-label={col.rotulo}
                 className="flex-shrink-0 w-[264px] rounded-xl flex flex-col max-h-[calc(100dvh-230px)]"
@@ -159,7 +202,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
                         style={{ background: "var(--card)", border: "1px solid var(--line)", opacity: arrastando === n.id ? 0.5 : 1 }}>
                         <p className="text-[13px] font-semibold truncate" style={{ color: "var(--ink)" }}>{nomeDoLead(n.lead)}</p>
                         <p className="text-[12px] mt-0.5" style={{ color: "var(--ink2)" }}>
-                          {n.valor_previsto ? brl(n.valor_previsto) : "sem valor"}
+                          {valorDe(n) ? brl(valorDe(n)) : "sem valor"}
                           {gestao && n.closer?.name ? <span style={{ color: "var(--ink3)" }}> · {n.closer.name.split(" ")[0]}</span> : null}
                         </p>
                         {n.proxima_acao && (
@@ -168,9 +211,10 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
                           </p>
                         )}
                         <div className="flex flex-wrap gap-1 mt-1.5">
-                          {n.etapa === "consolidada" && n.bitrix_status === "erro" && <Etiqueta tom="erro">Bitrix falhou</Etiqueta>}
-                          {n.etapa === "consolidada" && n.bitrix_status === "pendente" && <Etiqueta tom="aviso">Bitrix pendente</Etiqueta>}
-                          {n.etapa === "perdido" && n.motivo_perda && <Etiqueta>{n.motivo_perda.slice(0, 30)}</Etiqueta>}
+                          {n.bitrix_status === "erro" && <Etiqueta tom="erro">Bitrix falhou</Etiqueta>}
+                          {n.bitrix_status === "pendente" && <Etiqueta tom="aviso">Indo pro Bitrix</Etiqueta>}
+                          {n.bitrix_status === "sem_card" && <Etiqueta>Só no QS</Etiqueta>}
+                          {ETAPAS_COM_MOTIVO.includes(n.etapa) && n.motivo_perda && <Etiqueta>{n.motivo_perda.slice(0, 30)}</Etiqueta>}
                         </div>
                       </button>
                     );
@@ -182,18 +226,36 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
         </div>
       )}
 
-      <Modal aberto={!!perdendo} titulo="Marcar como perdido" onFechar={() => setPerdendo(null)}
+      <Modal aberto={!!perdendo} titulo={perdendo?.etapa === "venda_cancelada" ? "Cancelar a venda" : "Marcar como perdido"} onFechar={() => setPerdendo(null)}
         rodape={<>
           <Botao variante="fantasma" onClick={() => setPerdendo(null)}>Cancelar</Botao>
           <Botao variante="perigo" disabled={!perdendo?.motivo.trim()} onClick={async () => {
             if (!perdendo) return;
-            try { await moverNegocio(perdendo.id, "perdido", perdendo.motivo); } catch (e) { setAviso((e as Error).message); }
+            const { id, etapa, motivo } = perdendo;
             setPerdendo(null);
-            void carregar();
-          }}>Marcar perdido</Botao>
+            await mover(id, etapa, motivo);
+          }}>{perdendo?.etapa === "venda_cancelada" ? "Cancelar venda" : "Marcar perdido"}</Botao>
         </>}>
-        <label className="block text-[13px] font-semibold mb-1" style={{ color: "var(--ink2)" }} htmlFor="motivo-perda">Por que não fechou?</label>
+        <label className="block text-[13px] font-semibold mb-1" style={{ color: "var(--ink2)" }} htmlFor="motivo-perda">{perdendo?.etapa === "venda_cancelada" ? "Por que a venda foi cancelada?" : "Por que não fechou?"}</label>
         <textarea id="motivo-perda" className="rel-input" rows={3} value={perdendo?.motivo ?? ""} onChange={(e) => perdendo && setPerdendo({ ...perdendo, motivo: e.target.value })} />
+      </Modal>
+
+      <Modal aberto={!!trazendo} titulo="Trazer cliente do Bitrix" onFechar={() => setTrazendo(null)}
+        rodape={<>
+          <Botao variante="fantasma" onClick={() => setTrazendo(null)}>Cancelar</Botao>
+          <Botao variante="primario" disabled={!trazendo?.dealId.trim() || trazendo?.ocupado} onClick={() => void trazer()}>
+            {trazendo?.ocupado ? "Buscando…" : "Trazer"}
+          </Botao>
+        </>}>
+        <p className="text-[13px] mb-3" style={{ color: "var(--ink2)" }}>
+          Pra quem já tinha card no Bitrix antes do quadro novo. Cole o ID do negócio (o número no endereço do card).
+          O cartão entra na coluna em que o negócio está no Bitrix{gestao && closerFiltro ? ", em nome do closer filtrado" : ""}.
+        </p>
+        <label className="block text-[13px] font-semibold mb-1" style={{ color: "var(--ink2)" }} htmlFor="deal-id">ID do negócio no Bitrix</label>
+        <input id="deal-id" className="rel-input" inputMode="numeric" autoFocus value={trazendo?.dealId ?? ""}
+          onChange={(e) => trazendo && setTrazendo({ ...trazendo, dealId: e.target.value.replace(/\D/g, "") })}
+          onKeyDown={(e) => { if (e.key === "Enter") void trazer(); }} />
+        {trazendo?.erro && <div className="mt-2"><Aviso tom="erro">{trazendo.erro}</Aviso></div>}
       </Modal>
     </div>
   );

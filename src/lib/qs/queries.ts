@@ -1304,3 +1304,64 @@ export async function fetchDashboardStats(
   }
 }
 
+
+// ── KPIs de reunião do SDR no mês (Bruno, 26/10) ─────────────────────────────
+// "Reuniões agendadas até o dia" = reuniões que o SDR MARCOU neste mês (pela
+// data em que foi criada, não pela data da reunião). "Realizadas até o dia" =
+// reuniões deste mês, até agora, que viraram realizada. Retomada fica de fora
+// pelo mesmo motivo do fetchMeetingCounts. Metas: qs_goals mensal, tipo
+// "reunioes" (agendadas) e "reunioes_realizadas" (só existe depois da
+// migration — antes disso a consulta volta vazia e a meta fica sem número).
+export interface MeetingKpis {
+  agendadas: number;
+  realizadas: number;
+  /** Só de hoje — pra comparar com o "necessário por dia". */
+  agendadasHoje: number;
+  realizadasHoje: number;
+  metaAgendadas: number | null;
+  metaRealizadas: number | null;
+}
+export async function fetchMeetingKpis(ownerId?: string | null): Promise<MeetingKpis> {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+  try {
+    const temTipo = await colunaTipoPronta();
+    let qAgH = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
+      .neq("status", "arquivada").gte("created_at", dayStart.toISOString());
+    let qReH = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
+      .eq("status", "realizada").gte("scheduled_at", dayStart.toISOString()).lte("scheduled_at", now.toISOString());
+    if (temTipo) { qAgH = qAgH.neq("tipo", "retomada"); qReH = qReH.neq("tipo", "retomada"); }
+    if (ownerId) { qAgH = qAgH.eq("owner_id", ownerId); qReH = qReH.eq("owner_id", ownerId); }
+    let qAg = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
+      .neq("status", "arquivada")
+      .gte("created_at", monthStart.toISOString()).lte("created_at", now.toISOString());
+    let qRe = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
+      .eq("status", "realizada")
+      .gte("scheduled_at", monthStart.toISOString()).lte("scheduled_at", now.toISOString());
+    if (temTipo) { qAg = qAg.neq("tipo", "retomada"); qRe = qRe.neq("tipo", "retomada"); }
+    if (ownerId) { qAg = qAg.eq("owner_id", ownerId); qRe = qRe.eq("owner_id", ownerId); }
+    const [ag, re, g, agH, reH] = await Promise.all([
+      qAg, qRe,
+      supabase.from("qs_goals").select("owner_id, type, target_value").eq("period", "mensal").in("type", ["reunioes", "reunioes_realizadas"]),
+      qAgH, qReH,
+    ]);
+    const goals = (g.data ?? []) as { owner_id: string | null; type: string; target_value: number }[];
+    const meta = (type: string): number | null => {
+      const list = goals.filter((x) => x.type === type);
+      if (list.length === 0) return null;
+      if (ownerId) {
+        const own = list.find((x) => x.owner_id === ownerId) ?? list.find((x) => !x.owner_id);
+        return own ? Number(own.target_value) : null;
+      }
+      // Visão do time: soma das metas individuais (ou a global, se só houver ela).
+      const ind = list.filter((x) => x.owner_id);
+      if (ind.length) return ind.reduce((s, x) => s + (Number(x.target_value) || 0), 0);
+      return Number(list[0].target_value);
+    };
+    return { agendadas: ag.count ?? 0, realizadas: re.count ?? 0, agendadasHoje: agH.count ?? 0, realizadasHoje: reH.count ?? 0, metaAgendadas: meta("reunioes"), metaRealizadas: meta("reunioes_realizadas") };
+  } catch (err) {
+    console.warn("[QS] fetchMeetingKpis failed:", err);
+    return { agendadas: 0, realizadas: 0, agendadasHoje: 0, realizadasHoje: 0, metaAgendadas: null, metaRealizadas: null };
+  }
+}

@@ -46,6 +46,25 @@ import { MEETING_STATUS_LABELS, type CloserConfig, type Meeting, type SdrUser } 
 
 /** Quantas reuniões cabem numa célula antes do "+N mais". */
 const MAX_POR_DIA = 3;
+/** Pendências do SDR (atividades extras/retornos) por célula. */
+const MAX_PEND_POR_DIA = 2;
+
+/** Atividade extra em aberto do SDR (retorno, ligação marcada…) — Bruno, 27/10:
+ *  a agenda do SDR mostra as reuniões E as pendências dele no mesmo calendário. */
+interface Pendencia {
+  id: string;
+  lead_id: string;
+  scheduled_at: string;
+  status: string;
+  notes: string | null;
+  tags: string[] | null;
+  lead: { full_name: string | null } | null;
+}
+export function rotuloPendencia(p: Pick<Pendencia, "tags" | "notes">): string {
+  if (p.tags?.includes("ligacao-agendada")) return "Ligação marcada";
+  if (p.tags?.includes("retorno")) return "Retorno";
+  return "Atividade extra";
+}
 const COR_SEM_DONO = "#94A3B8";
 
 /** Azul QS — no escuro o #0147FF sobre carta escura fica ilegível. */
@@ -93,9 +112,11 @@ interface AgendaMesProps {
   onAbrirDia?: (dia: Date) => void;
   /** Em produção nunca é passado: liga o modo preview (sem banco, sem gravação). */
   demo?: AgendaDemo;
+  /** Id do usuário: põe as atividades extras em aberto dele na grade, junto das reuniões. */
+  pendenciasDe?: string;
 }
 
-export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesProps) {
+export default function AgendaMes({ onOpenLead, onAbrirDia, demo, pendenciasDe }: AgendaMesProps) {
   const { currentUser } = useQsAuth();
   // Espectador (marketing): calendário só de leitura.
   const executa = podeExecutar(currentUser?.role);
@@ -106,6 +127,7 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesPro
   const [closers, setClosers] = useState<SdrUser[]>([]);
   const [configs, setConfigs] = useState<CloserConfig[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [pendencias, setPendencias] = useState<Pendencia[]>([]);
   const [loading, setLoading] = useState(true);
 
   /** Vazio = todos. Guarda a chave do especialista (ver chaveDoEspecialista). */
@@ -136,16 +158,29 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesPro
       setLoading(false);
       return;
     }
-    const [c, cfg, mt] = await Promise.all([
+    const [c, cfg, mt, pd] = await Promise.all([
       fetchClosers(),
       fetchCloserConfigs(),
       fetchMeetingsInRange(new Date(de), new Date(ate)),
+      pendenciasDe
+        ? supabase
+            .from("qs_tasks")
+            .select("id, lead_id, scheduled_at, status, notes, tags, lead:qs_leads(full_name)")
+            .eq("owner_id", pendenciasDe)
+            .eq("is_extra", true)
+            .in("status", ["pendente", "atrasada"])
+            .gte("scheduled_at", new Date(de).toISOString())
+            .lt("scheduled_at", new Date(ate).toISOString())
+            .order("scheduled_at")
+            .limit(500)
+        : Promise.resolve({ data: [] as unknown[] }),
     ]);
     setClosers(c);
     setConfigs(cfg);
     setMeetings(mt);
+    setPendencias(((pd.data ?? []) as unknown) as Pendencia[]);
     setLoading(false);
-  }, [de, ate, demo]);
+  }, [de, ate, demo, pendenciasDe]);
 
   useEffect(() => {
     setLoading(true);
@@ -258,6 +293,17 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesPro
     () => visiveis.filter((m) => semDesfecho(m, agora)).length,
     [visiveis, agora]
   );
+
+  const pendPorDia = useMemo(() => {
+    const mapa = new Map<string, Pendencia[]>();
+    for (const p of pendencias) {
+      const k = chaveDoDia(new Date(p.scheduled_at));
+      const arr = mapa.get(k);
+      if (arr) arr.push(p);
+      else mapa.set(k, [p]);
+    }
+    return mapa;
+  }, [pendencias]);
 
   const listaDoDiaAberto = diaAberto ? porDia.get(chaveDoDia(diaAberto)) ?? [] : [];
 
@@ -394,6 +440,7 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesPro
               const hoje = isToday(d);
               const lista = porDia.get(chaveDoDia(d)) ?? [];
               const sobrando = Math.max(0, lista.length - MAX_POR_DIA);
+              const pend = pendPorDia.get(chaveDoDia(d)) ?? [];
 
               return (
                 <div
@@ -470,6 +517,32 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesPro
                         +{sobrando} mais
                       </button>
                     )}
+                    {/* Pendências do SDR: borda tracejada pra não confundir com reunião */}
+                    {pend.slice(0, MAX_PEND_POR_DIA).map((p) => {
+                      const quando = new Date(p.scheduled_at);
+                      const atrasada = quando.getTime() < agora.getTime();
+                      const nome = p.lead?.full_name || "Lead";
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => onOpenLead?.(p.lead_id)}
+                          title={`${shortTime(quando)} · ${rotuloPendencia(p)} · ${nome}${atrasada ? " · atrasada" : ""}${p.notes ? ` — ${p.notes}` : ""}`}
+                          className={`flex w-full items-center gap-1 rounded border border-dashed px-1 py-0.5 text-left transition-colors hover:bg-gray-100 ${
+                            atrasada ? "border-red-300 dark:border-red-800" : "border-gray-300 dark:border-gray-600"
+                          }`}
+                        >
+                          <span className={`shrink-0 text-[10px] font-semibold ${atrasada ? "text-red-600 dark:text-red-400" : "text-gray-500"}`}>
+                            {shortTime(quando)}
+                          </span>
+                          <span className="truncate text-[10px] text-gray-700">{nome}</span>
+                        </button>
+                      );
+                    })}
+                    {pend.length > MAX_PEND_POR_DIA && (
+                      <span className="block px-1 text-[10px] text-gray-500">
+                        +{pend.length - MAX_PEND_POR_DIA} pendência{pend.length - MAX_PEND_POR_DIA === 1 ? "" : "s"}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
@@ -479,6 +552,7 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo }: AgendaMesPro
 
         <p className="px-3 py-2 text-[11px] text-gray-400">
           Clique no número do dia para ver o dia inteiro por especialista. Passe o mouse sobre um dia para agendar nele.
+          {pendenciasDe && " Os itens com borda tracejada são as suas pendências (retornos e atividades extras); clique pra abrir o lead."}
         </p>
       </div>
 

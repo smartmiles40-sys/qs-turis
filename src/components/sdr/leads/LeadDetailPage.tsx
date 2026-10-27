@@ -23,6 +23,9 @@ import OportunidadeFuturaModal, { FaixaOportunidadeFutura } from "@/components/s
 import { ComCoresDoRel, EnviarFinanceiroModal, StatusNoFinanceiro } from "@/fin/EnviarFinanceiro";
 import { ComCoresDaCentral, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
 import NovaSolicitacao from "@/solicitacoes/NovaSolicitacao";
+import { podeAbrirAreaCloser } from "@/closer/lib";
+import VendaDoCliente from "@/closer/VendaDoCliente";
+import CotandoAereo from "@/components/sdr/aereo/CotandoAereo";
 import type {
   Lead,
   LeadStatus,
@@ -59,7 +62,8 @@ type TabKey =
   | "visao_geral"
   | "anotacoes"
   | "reunioes"
-  | "prospeccao";
+  | "prospeccao"
+  | "venda";
 
 interface TabItem {
   key: TabKey;
@@ -194,6 +198,8 @@ const TABS: TabItem[] = [
   { key: "reunioes", label: "Reuniões" },
   { key: "prospeccao", label: "Prospecção" },
 ];
+// Contrato e link de pagamento do closer no cadastro da pessoa (26/10).
+const ABA_VENDA: TabItem = { key: "venda", label: "Venda" };
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -1301,6 +1307,10 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           </div>
         );
 
+      // ── Venda: contrato e pagamento (mesmos blocos do cartão do closer) ──
+      case "venda":
+        return <ComCoresDoRel><VendaDoCliente leadId={lead.id} /></ComCoresDoRel>;
+
       // ── Prospecção (Timeline) ──
       case "prospeccao":
         return (
@@ -1617,6 +1627,8 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
           >
             💸 Pedir pagamento
           </button>
+          {/* Cotação de aéreo do SDR: cronômetro, não meta (0206) */}
+          {currentUser?.role === "sdr" || (currentUser && canSeeAllData(currentUser.role)) ? <CotandoAereo leadId={lead.id} /> : null}
           <button
             onClick={() => setShowHandoverModal(true)}
             className="px-4 py-2 rounded-lg bg-[#2563EB] text-sm font-semibold text-white hover:bg-[#1D4ED8] transition-colors flex items-center gap-2"
@@ -1756,7 +1768,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       {/* Tabs (clean underline style) */}
       <div className="border-b border-gray-100 mb-6">
         <div className="flex gap-0 -mb-px overflow-x-auto">
-          {TABS.map((tab) => (
+          {(podeAbrirAreaCloser(currentUser) ? [...TABS, ABA_VENDA] : TABS).map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}

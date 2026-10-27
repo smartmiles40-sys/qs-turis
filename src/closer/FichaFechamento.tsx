@@ -148,10 +148,10 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
     <Modal aberto={aberto} titulo={`Ficha de fechamento — ${nomeDoLead(negocio.lead)}`} onFechar={onFechar} largura={820}
       rodape={<>
         <Botao variante="fantasma" onClick={onFechar} disabled={salvando}>Cancelar</Botao>
-        <Botao variante="primario" onClick={() => void enviar()} disabled={salvando}>{salvando ? "Consolidando…" : negocio.etapa === "consolidada" ? "Salvar correção" : "Consolidar venda"}</Botao>
+        <Botao variante="primario" onClick={() => void enviar()} disabled={salvando}>{salvando ? "Consolidando…" : !!negocio.consolidada_em ? "Salvar correção" : "Consolidar venda"}</Botao>
       </>}>
       {daProposta && <Aviso tom="ok">{daProposta}</Aviso>}
-      {negocio.etapa === "consolidada" && (
+      {!!negocio.consolidada_em && (
         <div className="mt-2"><Aviso>Esta venda já foi consolidada. Salvar de novo corrige a viagem e refaz o plano (só se o Financeiro ainda não deu baixa em nenhuma parcela).</Aviso></div>
       )}
 

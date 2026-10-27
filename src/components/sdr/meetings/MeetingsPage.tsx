@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, podeExecutar } from "@/contexts/QsAuthContext";
 import type { Meeting, MeetingStatus, Lead, SdrUser } from "../types";
@@ -11,6 +11,7 @@ import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
 import AgendaMes from "../agenda/AgendaMes";
 import AgendaDia from "../agenda/AgendaDia";
+import MinhasPendencias from "../agenda/MinhasPendencias";
 import { FaixaBloqueioDesfecho } from "../agenda/BloqueioDesfecho";
 import { useBloqueioDesfecho } from "@/lib/qs/bloqueioDesfecho";
 
@@ -85,16 +86,16 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   // (gatilho da 0036); aqui só evitamos oferecer botão que vai falhar.
   const executa = podeExecutar(currentUser?.role);
 
-  // Duas visões da mesma coisa, unificadas numa aba só a pedido do Bruno:
-  //   reunioes — a lista/CRUD daqui (filtros, busca, formulário)
-  //   agenda   — o MÊS inteiro, na grade da Google Agenda (o dia abre num painel
-  //              dentro dela mesma)
-  const [view, setView] = useState<"reunioes" | "agenda">("reunioes");
+  // Reuniões e Agenda numa tela só (Bruno, 27/10): em cima o DIA (uma coluna
+  // por especialista); embaixo as pendências e o MÊS na grade da Google Agenda,
+  // com as atividades extras do usuário junto das reuniões. Clicar num dia do
+  // mês sobe pro dia.
+  const topoDoDia = useRef<HTMLDivElement>(null);
   // Agenda trancada do closer sem desfecho (Bruno, 21/09) — a faixa aparece
   // aqui também, porque é por esta aba que ele chega nas reuniões do dia.
   const { pendentes: atrasadasDoCloser } = useBloqueioDesfecho();
 
-  // Dia que a aba Reuniões mostra. Nasce nulo (= hoje) e só muda quando o
+  // Dia que a parte de cima mostra. Nasce nulo (= hoje) e só muda quando o
   // usuário clica num dia na Agenda do mês.
   const [diaReunioes, setDiaReunioes] = useState<Date | null>(null);
 
@@ -447,43 +448,9 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   // Distinto de "Cancelar" (que mantém o registro com status cancelada). Serve pra
   // reuniões criadas por engano/duplicadas. Reuniões "realizada" têm valor histórico
   // (aconteceram de fato), então a exclusão só é oferecida em não-realizada.
-  // Alternador Reuniões ⇄ Agenda — reaproveitado nas saídas (agenda, loading,
-  // conteúdo) pra ficar sempre visível, inclusive enquanto as reuniões carregam.
-  const viewToggle = (
-    <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
-      {([
-        { id: "reunioes", label: "Reuniões" },
-        { id: "agenda", label: "Agenda" },
-      ] as const).map((v) => (
-        <button
-          key={v.id}
-          onClick={() => setView(v.id)}
-          className={`px-3.5 py-1.5 text-sm font-semibold rounded-md transition ${
-            view === v.id ? "bg-[#0147FF] text-white" : "text-gray-600 hover:bg-gray-50"
-          }`}
-        >
-          {v.label}
-        </button>
-      ))}
-    </div>
-  );
-
-  // Aba "Agenda": o mês inteiro na grade da Google Agenda. Clicar num dia abre o
-  // painel daquele dia dentro dela mesma.
-  if (view === "agenda") {
-    return (
-      <div className="space-y-4" style={{ fontFamily: "inherit" }}>
-        {viewToggle}
-        <FaixaBloqueioDesfecho pendentes={atrasadasDoCloser} />
-        <AgendaMes onOpenLead={onOpenLead} onAbrirDia={(d) => { setDiaReunioes(d); setView("reunioes"); }} />
-      </div>
-    );
-  }
-
   if (loading) {
     return (
       <div className="space-y-4" style={{ fontFamily: "inherit" }}>
-        {viewToggle}
         <div className="flex items-center justify-center py-12">
           <p className="text-sm text-gray-500">Carregando...</p>
         </div>
@@ -493,7 +460,6 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
 
   return (
     <div className="space-y-6" style={{ fontFamily: "inherit" }}>
-      {viewToggle}
       {/* Header */}
       <div className="flex flex-wrap gap-y-2 items-center justify-between">
         <div>
@@ -538,12 +504,25 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
 
       {/* A aba Reuniões é O DIA, uma coluna por especialista — o que cada um
           tem HOJE, em vez de uma tabela com o histórico inteiro. A lista com
-          filtro por status saiu a pedido do Bruno; quem quer o mês vai na aba
-          Agenda. O botão "Agendar Reunião" acima CONTINUA aqui de propósito: o
+          filtro por status saiu a pedido do Bruno; o mês fica na Agenda, logo
+          abaixo. O botão "Agendar Reunião" acima CONTINUA aqui de propósito: o
           agendamento por slot depende de closer cadastrado, e hoje não há
           nenhum no banco — sem este formulário não haveria como criar reunião. */}
       <FaixaBloqueioDesfecho pendentes={atrasadasDoCloser} />
-      <AgendaDia onOpenLead={onOpenLead} dataInicial={diaReunioes} />
+      <div ref={topoDoDia} style={{ scrollMarginTop: 16 }}>
+        <AgendaDia onOpenLead={onOpenLead} dataInicial={diaReunioes} />
+      </div>
+
+      {/* Agenda: pendências + mês, embaixo das reuniões do dia */}
+      <section className="space-y-3 border-t border-gray-100 pt-6" aria-label="Agenda">
+        <h2 className="text-base font-bold text-gray-900">Agenda</h2>
+        {currentUser && <MinhasPendencias ownerId={currentUser.id} onOpenLead={onOpenLead} />}
+        <AgendaMes
+          onOpenLead={onOpenLead}
+          pendenciasDe={currentUser?.id}
+          onAbrirDia={(d) => { setDiaReunioes(d); topoDoDia.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+        />
+      </section>
 
       {/* ── Create / Edit Modal ─────────────────────────────────────────── */}
       {showModal && (
@@ -728,7 +707,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                 </select>
                 <p className="mt-1 text-[11px] text-gray-400">
                   Sem closer, a reunião não aparece na agenda dele nem reserva o horário.
-                  Para escolher entre os horários livres, use a aba <b>Agenda</b>.
+                  Para escolher entre os horários livres, use a <b>Agenda</b> embaixo das reuniões.
                 </p>
               </div>
 

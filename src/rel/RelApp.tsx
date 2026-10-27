@@ -16,23 +16,23 @@
 // "voltar" do navegador funciona e dá pra mandar o link de uma tela pra
 // alguém do time.
 // -----------------------------------------------------------------------------
-import TrocarArea from "@/components/TrocarArea";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
-import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
-import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 import { carregarResumoDoMenu, type ResumoDoMenu } from "./lib/clientes";
 import { contarEsperando } from "./lib/whatsapp";
 import { COM_ACOMPANHAMENTO, hojeSP } from "./lib/viagens";
-import { Avatar, Etiqueta, REL_CSS } from "./ui";
+import { Etiqueta, REL_CSS } from "./ui";
 import { contarGruposNovos } from "./lib/grupos";
-import { podeGerirTime } from "./equipe/permissao";
+import { podeGerirRelacionamento, podeGerirTime } from "./equipe/permissao";
 import { usePode } from "./equipe/usePode";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import { useAprovacoesNovas } from "@/propostas/lib";
 import type { TelaExp } from "@/expedicoes/contexto";
 import SinoDeAvisos from "@/avisos/SinoDeAvisos";
+import AppShell, { type ShellGroup } from "@/components/ui/AppShell";
+import { Icon } from "@/components/ui/icons";
+import { Segmented } from "@/components/ui";
 
 // Telas carregadas sob demanda (22/10, desempenho): o Rel abre só com o menu e
 // o Início; cada tela baixa o seu pedaço na primeira vez que é aberta (o
@@ -107,29 +107,6 @@ function hashDe(r: Rota) {
 /** Sai do endereço do Relacionamento (ao trocar de área ou sair). */
 function limparHash() {
   history.replaceState(null, "", window.location.pathname + window.location.search);
-}
-
-// ── Ícones ──
-const ICONES: Record<string, ReactNode> = {
-  inicio: <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
-  atendimento: <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />,
-  modelos: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></>,
-  clientes: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
-  agenda: <><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></>,
-  equipe: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6" /><path d="M22 11h-6" /></>,
-  kpis: <><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></>,
-  viagens: <><path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" /></>,
-  pos: <><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" /></>,
-  config: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></>,
-  // Central de Solicitações (0149): caixa de entrada
-  pedidos: <><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></>,
-  seta: <polyline points="6 9 12 15 18 9" />,
-  // Minhas atividades (0184): lista com check
-  tarefas: <><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
-};
-
-function Icone({ nome, tamanho = 18 }: { nome: string; tamanho?: number }) {
-  return <svg width={tamanho} height={tamanho} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{ICONES[nome]}</svg>;
 }
 
 // ── Contadores do menu ──
@@ -277,28 +254,15 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: ResumoDoMenu | null; cont:
   );
 }
 
-// ── Menu em grupos ──
-interface Item { id: Tela; rotulo: string; badge?: number; alerta?: boolean }
-interface Grupo { id: string; rotulo: string; icone: string; itens: Item[] }
-
-const CHAVE_GRUPOS = "qs_rel_menu_aberto";
-function gruposGuardados(): Record<string, boolean> {
-  try { return JSON.parse(localStorage.getItem(CHAVE_GRUPOS) || "{}"); } catch { return {}; }
-}
-
 export default function RelApp() {
-  const { currentUser, logout } = useQsAuth();
+  const { currentUser } = useQsAuth();
   // KPIs: some do menu pra quem o cargo não deixa ver (0135).
   const verKpis = usePode("relacionamento.kpis") !== false;
   const [central, recontarCentral] = useContagemSolicitacoes("relacionamento");
   const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "relacionamento");
-  const { isDark, toggleTheme } = useTheme();
   const [rota, setRota] = useState<Rota>(lerRota);
   const [resumo, setResumo] = useState<ResumoDoMenu | null>(null);
   const [cont, setCont] = useState<Contadores | null>(null);
-  const [menuAberto, setMenuAberto] = useState(false);
-  const [trocandoSenha, setTrocandoSenha] = useState(false);
-  const [abertos, setAbertos] = useState<Record<string, boolean>>(gruposGuardados);
   const eu = currentUser?.id ?? "";
 
   useEffect(() => {
@@ -310,7 +274,6 @@ export default function RelApp() {
   const ir = useCallback((r: Rota) => {
     window.location.hash = hashDe(r);
     setRota(r);
-    setMenuAberto(false);
     window.scrollTo(0, 0);
   }, []);
 
@@ -375,215 +338,64 @@ export default function RelApp() {
   const abrirConversa = (id: string) => ir({ tela: "atendimento", id });
 
   // A tela de detalhe acende o item da lista dela.
-  const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "duplicados" ? "cadastros" : rota.tela === "exp-passageiros" ? "clientes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
+  const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "duplicados" || rota.tela === "cadastros" ? "clientes" : rota.tela === "exp-passageiros" ? "clientes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
 
-  const grupos: Grupo[] = [
-    { id: "atendimento", rotulo: "Atendimento", icone: "atendimento", itens: [
-      { id: "atendimento", rotulo: "Conversas", badge: cont?.esperando || undefined, alerta: !!cont?.foraDoPrazo },
-      // Grupos (15/10): chegam por uma ligação só de grupos (Evolution) — 0137.
-      // mensagem nova em grupo aparece aqui também; vermelho quando marcaram o número com @
-      { id: "grupos", rotulo: cont?.gruposMencao ? "Grupos  @" : "Grupos", badge: cont?.gruposNovos || undefined, alerta: !!cont?.gruposMencao },
-      { id: "chamados", rotulo: "Chamados", badge: cont?.chamadosVencidos || undefined, alerta: true },
-      // Modelos (14/10): respostas prontas + modelos da Meta — a gestora padroniza.
-      { id: "modelos", rotulo: "Modelos de mensagem" },
+  // Redesign (out/2026): menu na ordem do HANDOFF.md ("Menus por setor") e a
+  // casca é o AppShell comum dos 4 setores. Agrupamento novo:
+  //   Início, Minhas atividades · Atendimento · Carteira · Expedições · Pós-venda · Gestão
+  // Bruno, 27/10: Solicitações, Propostas e Agenda do time sobem pro Atendimento
+  // (não ficam no rodapé); Modelos de mensagem só pra supervisão; Arrumar
+  // cadastros virou aba de Clientes (o cadastro é um só).
+  const supervisao = podeGerirRelacionamento(currentUser);
+  const grupos: ShellGroup[] = [
+    { items: [
+      { id: "inicio", label: "Início", icon: Icon.inicio },
+      // 0184: a tela de trabalho do time fica no topo
+      { id: "esteira", label: "Minhas atividades", icon: Icon.check, count: cont?.semDono || undefined },
     ] },
-    // Central de Solicitações (20/10, 0149): pedidos entre setores, com dono e prazo.
-    { id: "demandas", rotulo: "Demandas", icone: "pedidos", itens: [
-      { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
-      // Propostas (0157): o Rel monta as suas (upgrade, seguro, recompra…) e envia as que pediu a Operações.
-      { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined },
+    { label: "Atendimento", items: [
+      { id: "atendimento", label: "Conversas", icon: Icon.chat, count: cont?.esperando || undefined, late: !!cont?.foraDoPrazo },
+      // Grupos (15/10, 0137): vermelho quando marcaram o número com @
+      { id: "grupos", label: cont?.gruposMencao ? "Grupos  @" : "Grupos", icon: Icon.pessoas, count: cont?.gruposNovos || undefined, late: !!cont?.gruposMencao },
+      { id: "chamados", label: "Chamados", icon: Icon.chamado, count: cont?.chamadosVencidos || undefined, late: true },
+      // Central de Solicitações (0149) e Propostas (0157)
+      { id: "solicitacoes", label: "Solicitações", icon: Icon.inbox, count: bolinhaDaCentral(central).badge, late: bolinhaDaCentral(central).alerta },
+      { id: "propostas", label: "Propostas", icon: Icon.doc, count: aprovacoes || undefined },
+      { id: "agenda", label: "Agenda do time", icon: Icon.agenda },
+      ...(supervisao ? [{ id: "modelos", label: "Modelos de mensagem", icon: Icon.modelo }] : []),
     ] },
-    // Agenda (14/10): cada pessoa tem a sua + o panorama do time.
-    { id: "agenda", rotulo: "Agenda", icone: "agenda", itens: [
-      { id: "agenda", rotulo: "Agenda do time" },
+    { label: "Carteira", items: [
+      { id: "clientes", label: "Clientes", icon: Icon.cliente, count: cont?.duplicados || undefined },
+      { id: "viagens", label: "Viagens", icon: Icon.aviao },
+      { id: "alertas", label: "Alertas", icon: Icon.alerta, count: cont?.alertasAltos || undefined, late: true },
     ] },
-    ...(verKpis ? [{ id: "kpis", rotulo: "KPIs", icone: "kpis", itens: [
-      { id: "kpis", rotulo: "Indicadores" },
-    ] } as Grupo] : []),
-    { id: "clientes", rotulo: "Clientes", icone: "clientes", itens: [
-      { id: "clientes", rotulo: "Fichas" },
-      // 0151: o que o cruzamento da base não decidiu sozinho. 23/10: Duplicados e
-      // Ficha × Expedições viraram abas daqui (uma fila só).
-      { id: "cadastros", rotulo: "Arrumar cadastros", badge: cont?.duplicados || undefined },
+    { label: "Expedições", items: [
+      { id: "exp-expedicoes", label: "Expedições", icon: Icon.mapa },
+      { id: "exp-pacotes", label: "Pacotes", icon: Icon.aviao },
+      { id: "exp-inscricoes", label: "Inscrições", icon: Icon.inscricao },
+      { id: "exp-avisos", label: "Avisos", icon: Icon.megafone },
     ] },
-    { id: "viagens", rotulo: "Viagens", icone: "viagens", itens: [
-      // Esteira (16/10) virou "Minhas atividades" no topo do menu (0184) — estava escondida aqui
-      { id: "viagens", rotulo: "Viagens" },
-      { id: "alertas", rotulo: "Alertas", badge: cont?.alertasAltos || undefined, alerta: true },
+    { label: "Pós-venda", items: [
+      { id: "disparos", label: "Disparos", icon: Icon.disparo },
+      { id: "automacoes", label: "Automações", icon: Icon.cadencia },
+      { id: "pesquisas", label: "Pesquisas", icon: Icon.pesquisa },
+      { id: "recompra", label: "Recompra", icon: Icon.recompra },
     ] },
-    { id: "expedicoes", rotulo: "Expedições", icone: "viagens", itens: [
-      { id: "exp-expedicoes", rotulo: "Expedições" },
-      { id: "exp-pacotes", rotulo: "Pacotes" },
-      { id: "exp-inscricoes", rotulo: "Inscrições" },
-      { id: "exp-avisos", rotulo: "Avisos" },
+    { label: "Gestão", items: [
+      ...(verKpis ? [{ id: "kpis", label: "KPIs", icon: Icon.kpi }] : []),
+      // Time (13/10): a gestora do Relacionamento cadastra e cuida do time.
+      ...(podeGerirTime(currentUser, "relacionamento") ? [{ id: "equipe", label: "Time", icon: Icon.time }] : []),
     ] },
-    { id: "pos", rotulo: "Pós-venda", icone: "pos", itens: [
-      { id: "disparos", rotulo: "Disparos" },
-      { id: "automacoes", rotulo: "Automações" },
-      { id: "pesquisas", rotulo: "Pesquisas" },
-      { id: "recompra", rotulo: "Recompra" },
-    ] },
-    // Time (13/10): a gestora do Relacionamento cadastra e cuida do time.
-    ...(podeGerirTime(currentUser, "relacionamento") ? [{ id: "time", rotulo: "Time", icone: "equipe", itens: [
-      { id: "equipe" as Tela, rotulo: "Funcionários" },
-    ] }] : []),
   ];
-
-  function alternar(g: string, valor?: boolean) {
-    setAbertos((a) => {
-      const n = { ...a, [g]: valor ?? !(a[g] ?? false) };
-      try { localStorage.setItem(CHAVE_GRUPOS, JSON.stringify(n)); } catch { /* sem memória: só não lembra */ }
-      return n;
-    });
-  }
-
-  const Bolinha = ({ n, alerta }: { n?: number; alerta?: boolean }) => (n ? (
-    <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full leading-none"
-      style={alerta ? { background: "var(--err-bg)", color: "var(--err-ink)" } : { background: "var(--warn-bg)", color: "var(--warn-ink)" }}>{n}</span>
-  ) : null);
-
-  const menu = (
-    <nav className="flex flex-col h-full">
-      <div className="flex items-center gap-2.5 px-4 h-16 flex-shrink-0">
-        <span className="flex items-center justify-center w-9 h-9 rounded-xl text-white font-bold text-sm" style={{ background: "var(--rel)" }}>QS</span>
-        <span className="leading-tight flex-1 min-w-0">
-          <span className="block text-sm font-bold" style={{ color: "var(--ink)" }}>Relacionamento</span>
-          <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>pós-venda</span>
-        </span>
-        {/* Avisos (0196) — no celular o sino fica na barra do topo */}
-        <span className="hidden lg:block"><SinoDeAvisos /></span>
-      </div>
-
-      <div className="px-2.5 flex-1 overflow-y-auto space-y-0.5">
-        <button
-          onClick={() => ir({ tela: "inicio" })}
-          aria-current={ativo === "inicio" ? "page" : undefined}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] font-semibold"
-          style={{ background: ativo === "inicio" ? "var(--rel-soft)" : "transparent", color: ativo === "inicio" ? "var(--rel-ink)" : "var(--ink2)" }}
-        >
-          <Icone nome="inicio" /> <span className="flex-1 text-left">Início</span>
-        </button>
-        {/* 0184: a tela de trabalho do time fica no topo, não dentro de "Viagens" */}
-        <button
-          onClick={() => ir({ tela: "esteira" })}
-          aria-current={ativo === "esteira" ? "page" : undefined}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] font-semibold"
-          style={{ background: ativo === "esteira" ? "var(--rel-soft)" : "transparent", color: ativo === "esteira" ? "var(--rel-ink)" : "var(--ink2)" }}
-        >
-          <Icone nome="tarefas" /> <span className="flex-1 text-left">Minhas atividades</span>
-          <Bolinha n={cont?.semDono || undefined} alerta={false} />
-        </button>
-
-        {grupos.map((g) => {
-          const temAtivo = g.itens.some((i) => i.id === ativo);
-          const aberto = temAtivo || (abertos[g.id] ?? false);
-          const soma = g.itens.reduce((s, i) => s + (i.badge ?? 0), 0);
-          const algumAlerta = g.itens.some((i) => i.alerta && i.badge);
-          return (
-            <div key={g.id}>
-              <button
-                onClick={() => alternar(g.id, !aberto)}
-                aria-expanded={aberto}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] font-semibold"
-                style={{ color: temAtivo ? "var(--rel-ink)" : "var(--ink2)" }}
-              >
-                <Icone nome={g.icone} />
-                <span className="flex-1 text-left">{g.rotulo}</span>
-                {!aberto && <Bolinha n={soma || undefined} alerta={algumAlerta} />}
-                <span className="transition-transform" style={{ transform: aberto ? "rotate(0deg)" : "rotate(-90deg)", color: "var(--ink3)" }}>
-                  <Icone nome="seta" tamanho={14} />
-                </span>
-              </button>
-              {aberto && (
-                <ul className="ml-[22px] pl-3 border-l space-y-0.5 mb-1" style={{ borderColor: "var(--line)" }}>
-                  {g.itens.map((it) => {
-                    const sel = ativo === it.id;
-                    return (
-                      <li key={it.id}>
-                        <button
-                          onClick={() => ir({ tela: it.id } as Rota)}
-                          aria-current={sel ? "page" : undefined}
-                          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold"
-                          style={{ background: sel ? "var(--rel-soft)" : "transparent", color: sel ? "var(--rel-ink)" : "var(--ink3)" }}
-                        >
-                          <span className="flex-1 text-left">{it.rotulo}</span>
-                          <Bolinha n={it.badge} alerta={it.alerta} />
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="p-3 space-y-1 border-t" style={{ borderColor: "var(--line)" }}>
-        {/* Outras áreas que a pessoa tem (Comercial, Financeiro, Operações). */}
-        <TrocarArea atual="relacionamento" variante="bloco" onAntes={limparHash} />
-        <div className="flex items-center gap-2.5 px-1 pt-2">
-          <Avatar nome={currentUser.name} tamanho={30} />
-          <span className="flex-1 min-w-0">
-            <span className="block text-[13px] font-semibold truncate" style={{ color: "var(--ink)" }}>{currentUser.name}</span>
-            <span className="block text-[11px] truncate" style={{ color: "var(--ink3)" }}>{currentUser.email}</span>
-          </span>
-          <button
-            onClick={() => ir({ tela: "config" })}
-            title="Configurações"
-            aria-label="Configurações"
-            className="p-1.5 rounded-lg"
-            style={{ background: ativo === "config" ? "var(--rel-soft)" : "transparent", color: ativo === "config" ? "var(--rel-ink)" : "var(--ink3)" }}
-          >
-            <Icone nome="config" />
-          </button>
-        </div>
-        <div className="flex gap-1 pt-1">
-          <button onClick={toggleTheme} className="flex-1 px-2 py-1.5 rounded-md text-[12px] font-semibold" style={{ color: "var(--ink2)", background: "var(--card2)" }}>
-            {isDark ? "Modo claro" : "Modo noturno"}
-          </button>
-          <button onClick={() => setTrocandoSenha(true)} className="flex-1 px-2 py-1.5 rounded-md text-[12px] font-semibold" style={{ color: "var(--ink2)", background: "var(--card2)" }}>
-            Senha
-          </button>
-          <button onClick={() => { limparHash(); logout(); }} className="flex-1 px-2 py-1.5 rounded-md text-[12px] font-semibold" style={{ color: "var(--err-ink)", background: "var(--err-bg)" }}>
-            Sair
-          </button>
-        </div>
-      </div>
-    </nav>
-  );
+  // 27/10: Pacotes e Automações voltaram a ter item próprio (no menu novo tinham sumido).
+  const ativoNoMenu = ativo;
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--bg)" }}>
+    <>
       <style>{REL_CSS}</style>
-
-      {/* Menu fixo (computador) */}
-      <aside className="hidden lg:block fixed inset-y-0 left-0 w-60 border-r" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
-        {menu}
-      </aside>
-
-      {/* Barra do topo (celular) */}
-      <header className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 h-14 border-b" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
-        <button onClick={() => setMenuAberto(true)} aria-label="Abrir menu" className="p-1 -ml-1" style={{ color: "var(--ink)" }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
-        </button>
-        <span className="flex items-center justify-center w-7 h-7 rounded-lg text-white font-bold text-[11px]" style={{ background: "var(--rel)" }}>QS</span>
-        <span className="text-sm font-bold flex-1" style={{ color: "var(--ink)" }}>Relacionamento</span>
-        {!!cont?.esperando && (
-          <button onClick={() => ir({ tela: "atendimento" })} aria-label="Conversas esperando">
-            <Bolinha n={cont.esperando} alerta={!!cont.foraDoPrazo} />
-          </button>
-        )}
-        <SinoDeAvisos />
-      </header>
-      {menuAberto && (
-        <div className="lg:hidden fixed inset-0 z-40">
-          <div className="absolute inset-0" style={{ background: "rgba(15,20,26,.45)" }} onClick={() => setMenuAberto(false)} />
-          <aside className="absolute inset-y-0 left-0 w-72 max-w-[85vw] shadow-xl" style={{ background: "var(--card)" }}>{menu}</aside>
-        </div>
-      )}
-
-      <main className="lg:pl-60">
+      <AppShell setor="relacionamento" groups={grupos} active={ativoNoMenu} onNavigate={(id) => ir({ tela: id } as Rota)}
+        notifications={<SinoDeAvisos />} onBeforeSwitch={limparHash}
+        onSettings={() => ir({ tela: "config" })} settingsActive={ativo === "config"}>
         <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
           {/* telas sob demanda: enquanto o pedaço da tela baixa, o mesmo "Carregando…" das listas */}
           <Suspense fallback={<p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>}>
@@ -626,6 +438,17 @@ export default function RelApp() {
           {/* Prazo de resposta saiu do Atendimento e virou parte dos KPIs; link antigo cai lá */}
           {(rota.tela === "kpis" || rota.tela === "prazo") && (verKpis ? <KpisPage /> : <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Seu cargo não vê os KPIs.</p>)}
           {rota.tela === "whatsapp" && <WhatsAppPage />}
+          {/* Clientes e Arrumar cadastros: duas abas do mesmo cadastro (Bruno, 27/10) */}
+          {(rota.tela === "clientes" || rota.tela === "cadastros" || rota.tela === "duplicados") && (
+            <div className="mb-4">
+              <Segmented label="Clientes" value={rota.tela === "clientes" ? "clientes" : "cadastros"}
+                onChange={(v) => ir({ tela: v } as Rota)}
+                options={[
+                  { value: "clientes", label: "Clientes" },
+                  { value: "cadastros", label: "Arrumar cadastros", count: cont?.duplicados || undefined },
+                ]} />
+            </div>
+          )}
           {rota.tela === "clientes" && <ClientesPage onAbrir={abrirCliente} />}
           {rota.tela === "duplicados" && <ArrumarCadastrosPage abaInicial="duplicados" nDuplicados={cont?.duplicados} onAbrir={abrirCliente} onAbrirViagem={abrirViagem} onAbrirConversa={abrirConversa} onMudou={atualizar} />}
           {rota.tela === "cadastros" && <ArrumarCadastrosPage nDuplicados={cont?.duplicados} onAbrir={abrirCliente} onAbrirViagem={abrirViagem} onAbrirConversa={abrirConversa} onMudou={atualizar} />}
@@ -655,13 +478,13 @@ export default function RelApp() {
                 }} />
             </Suspense>
           )}
-          {rota.tela === "modelos" && <ModelosPage />}
+          {rota.tela === "modelos" && (supervisao ? <ModelosPage /> : (
+            <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Modelos de mensagem são cuidados pela supervisão do Relacionamento.</p>
+          ))}
           {rota.tela === "agenda" && <AgendaPage onAbrirCliente={(id) => ir({ tela: "ficha", id })} onAbrirViagem={(id) => ir({ tela: "viagem", id })} onAbrirConversa={(id) => ir({ tela: "atendimento", id })} />}
           </Suspense>
         </div>
-      </main>
-
-      <ChangePasswordModal open={trocandoSenha} onClose={() => setTrocandoSenha(false)} />
-    </div>
+      </AppShell>
+    </>
   );
 }

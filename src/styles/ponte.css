@@ -1,0 +1,101 @@
+/* src/styles/ponte.css
+   ---------------------------------------------------------------------------
+   PONTE do redesign (out/2026): as variáveis que o QS já usa em ~1.400 lugares
+   (--ink, --card, --line, --rel…) passam a apontar pros tokens novos
+   (src/styles/tokens.css). É o que deixa o sistema inteiro preto e branco de
+   uma vez, sem abrir componente por componente — as telas redesenhadas usam os
+   tokens direto (src/components/ui), as que ainda não foram redesenhadas herdam
+   a paleta por aqui.
+
+   Especificidade de propósito: `html:root` (0,1,1) e `html.dark:root` (0,2,1)
+   vencem o `:root` e o `html.dark` que as áreas injetam em <style> (REL_CSS,
+   FIN_CSS, OPS_CSS, CLOSER_CSS), não importa a ordem em que entram na página.
+   As classes de cor por bloco (.cores-rel, .cores-central) recebem o mesmo
+   tratamento com `html .classe`.
+   --------------------------------------------------------------------------- */
+
+html:root {
+  /* paleta "Turis" → tokens */
+  --card: var(--surface);
+  --card2: var(--surface-2);
+  --line: var(--border);
+  --line2: var(--border);
+  --ink: var(--text);
+  --ink2: var(--muted);
+  --ink3: var(--subtle);
+  --accent: var(--text);
+  --accent-soft: var(--surface-2);
+  --blue: var(--info);
+  --blue-ink: var(--info);
+  --red: var(--danger);
+  --green: var(--ok);
+  --amber: var(--warn);
+  --yellow: var(--warn);
+
+  /* caixas de aviso / erro */
+  --warn-ink: var(--warn);
+  --warn-line: color-mix(in srgb, var(--warn) 35%, transparent);
+  --err-bg: var(--danger-bg);
+  --err-ink: var(--danger);
+  --err-line: color-mix(in srgb, var(--danger) 35%, transparent);
+
+  /* cor de cada área → neutra (a cor do setor fica só no pontinho do seletor).
+     --rel é FUNDO com texto branco por cima nas telas antigas: no escuro ele
+     não pode virar o --primary claro, senão o texto some (ver o bloco dark). */
+  --rel: var(--primary);
+  --rel-hover: var(--primary);
+  --rel-ink: var(--text);
+  --rel-soft: var(--surface-2);
+}
+
+html.dark:root {
+  --rel: #3F3F46;          /* branco por cima = 10:1 */
+  --rel-hover: #52525B;
+  --rel-ink: var(--text);
+  --rel-soft: var(--surface-2);
+}
+
+/* tokens.css define --bg / --warn-bg / --ok-bg com o MESMO nome que o app antigo;
+   declarar "--warn-bg: var(--warn-bg)" acima seria ciclo. Estes valores
+   repetem os do tokens.css de propósito. */
+html:root { --bg: #FAFAFA; --warn-bg: #FEFCE8; --ok-bg: #F0FDF4; }
+html.dark:root { --bg: #09090B; --warn-bg: rgba(251, 191, 36, .12); --ok-bg: rgba(74, 222, 128, .12); }
+
+html .cores-rel,
+html .cores-central {
+  --rel: var(--primary);
+  --rel-hover: var(--primary);
+  --rel-ink: var(--text);
+  --rel-soft: var(--surface-2);
+}
+html.dark .cores-rel,
+html.dark .cores-central { --rel: #3F3F46; --rel-hover: #52525B; }
+
+/* tipografia */
+body { font-family: var(--font-sans); font-size: var(--text-base); color: var(--text); background: var(--bg); }
+
+/* Azul da marca nas telas antigas (botões com classe Tailwind): vira o
+   primário neutro. Estilos inline (style={{background:"#0147FF"}}) não são
+   alcançáveis por CSS — esses saem quando cada tela for redesenhada. */
+html .bg-\[\#0147FF\], html .bg-blue-600 { background-color: #18181B; }
+html.dark .bg-\[\#0147FF\], html.dark .bg-blue-600 { background-color: #3F3F46; }
+html .hover\:bg-\[\#0038CC\]:hover, html .hover\:bg-blue-700:hover { background-color: #27272A; }
+html .text-\[\#0147FF\] { color: var(--text); }
+html .border-\[\#0147FF\] { border-color: var(--text); }
+
+/* Foco visível em todo controle (critério de aceite: navegável por teclado). */
+:is(button, a, summary, select, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+/* ── Tela cheia (Bruno, 26/10): "não quero que fique com bordas, tem que ser
+   bem preenchido". As telas ocupam a largura inteira da área de conteúdo, com
+   o mesmo respiro lateral da casca. Só os contêineres de PÁGINA perdem o teto;
+   caixas de diálogo (filhas diretas de um overlay .fixed) continuam do tamanho
+   que eram. */
+.qs-main { --content-max: none; --content-max-wide: none; }
+.qs-main .qs-page__wrap, .qs-main .qsx-page { max-width: none; }
+.qs-main :not(.fixed) > .max-w-7xl, .qs-main :not(.fixed) > .max-w-6xl, .qs-main :not(.fixed) > .max-w-5xl,
+.qs-main :not(.fixed) > .max-w-screen-xl, .qs-main :not(.fixed) > .max-w-screen-2xl,
+.qs-main :not(.fixed) > [class*="max-w-[1"] { max-width: none; }

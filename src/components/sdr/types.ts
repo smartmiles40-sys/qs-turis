@@ -25,7 +25,8 @@ export type ExecutionMode = "manual" | "ia";
 export type DistributionMode = "alternado" | "balanceado" | "desabilitado";
 export type OffdayPolicy = "iniciar_imediato" | "aguardar_proximo_dia";
 export type TaskStatus = "pendente" | "concluida" | "ignorada" | "atrasada";
-export type GoalType = "ganhos" | "leads_finalizados" | "atividades" | "conversao" | "reunioes";
+// reunioes = reuniões AGENDADAS. reunioes_realizadas e cotacoes_aereo: 0204 (26/10).
+export type GoalType = "ganhos" | "leads_finalizados" | "atividades" | "conversao" | "reunioes" | "reunioes_realizadas" | "cotacoes_aereo";
 export type GoalPeriod = "diario" | "mensal";
 // "confirmada" e "reagendada" chegam junto com a integração do Bitrix e só são
 // graváveis depois da migration 0028 (o CHECK antigo aceitava só os outros 4).

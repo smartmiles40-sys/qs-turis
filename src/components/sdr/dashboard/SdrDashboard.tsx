@@ -9,6 +9,7 @@ import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import RankingPanel from "./RankingPanel";
 import { contaNoIndicador, colunaTipoPronta } from "@/lib/qs/meetings";
 import DailyFlowPanel from "./DailyFlowPanel";
+import PainelAereo from "../aereo/PainelAereo";
 
 // Desfechos que contam como CONEXÃO (falou com a pessoa certa): o legado
 // "atendeu"/"ganho" + as classificações novas de ligação em que houve conversa
@@ -76,6 +77,8 @@ const META_DEFAULTS: Record<GoalType, number> = {
   atividades: 450,
   conversao: 30,
   reunioes: 40,
+  reunioes_realizadas: 30,
+  cotacoes_aereo: 40,
 };
 
 interface ChannelPerformanceRow {
@@ -769,10 +772,10 @@ export default function SdrDashboard() {
       // goalSum/goalCount: TODAS as metas individuais (usado quando um usuário
       // específico está selecionado — a query já vem filtrada nele).
       // sdrSum/sdrCount: só as de SDRs ativos — base da somatória do admin.
-      const goalSum: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
-      const goalCount: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
-      const sdrSum: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
-      const sdrCount: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0 };
+      const goalSum: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0, reunioes_realizadas: 0, cotacoes_aereo: 0 };
+      const goalCount: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0, reunioes_realizadas: 0, cotacoes_aereo: 0 };
+      const sdrSum: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0, reunioes_realizadas: 0, cotacoes_aereo: 0 };
+      const sdrCount: Record<GoalType, number> = { ganhos: 0, leads_finalizados: 0, atividades: 0, conversao: 0, reunioes: 0, reunioes_realizadas: 0, cotacoes_aereo: 0 };
       const seenGoal = new Set<string>();
       ((goalsRes.data ?? []) as any[]).forEach((g) => {
         const type = g.type as GoalType;
@@ -2459,6 +2462,12 @@ export default function SdrDashboard() {
           </div>
         )}
       </div>
+
+      {/* ── Cotações de aéreo: tempo fora da fila (0206, Bruno 27/10) ─────── */}
+      {(() => {
+        const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+        return <PainelAereo from={from} to={to} ownerId={selectedUser === "all" ? undefined : selectedUser} />;
+      })()}
 
       {/* ── Reuniões, Pipeline e Receita (auditoria) ─────────────────────── */}
       <div>

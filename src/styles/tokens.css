@@ -1,0 +1,86 @@
+/* QS · Design tokens do redesign (out/2026)
+   Fonte da verdade das cores, tipografia, raios e espaçamentos.
+   Tema claro é o padrão; o tema escuro entra com a classe .dark no <html>
+   (compatível com o darkMode: "class" do Tailwind e com o shadcn/ui). */
+
+
+:root {
+  /* superfícies */
+  --bg: #FAFAFA;          /* fundo da página */
+  --surface: #FFFFFF;     /* cards, sidebar, tabelas */
+  --surface-2: #F4F4F5;   /* hover, item ativo, trilhas de barra, chips */
+  --border: #E4E4E7;      /* toda borda e divisória */
+
+  /* texto */
+  --text: #09090B;        /* texto principal e títulos */
+  --muted: #52525B;       /* texto secundário */
+  --subtle: #6B6B73;      /* rótulos, metadados (passa 4.5:1 no --bg) */
+
+  /* ação primária: UM botão por tela */
+  --primary: #09090B;
+  --on-primary: #FAFAFA;
+
+  /* status: só para estado, nunca decoração */
+  --danger: #B91C1C;  --danger-bg: #FEF2F2;   /* atrasado, urgente, bloqueia */
+  --warn:   #A16207;  --warn-bg:   #FEFCE8;   /* conferir, vence logo */
+  --ok:     #15803D;  --ok-bg:     #F0FDF4;   /* pronto, pago, concluído */
+  --info:   #1D4ED8;  --info-bg:   #EFF6FF;   /* em andamento, IA, agendado */
+
+  /* identidade do setor: só o pontinho no seletor de setor */
+  --sector-comercial: #3B82F6;
+  --sector-relacionamento: #14B8A6;
+  --sector-financeiro: #8B5CF6;
+  --sector-operacoes: #F97316;
+
+  /* categorias de cliente (só em pontinhos) */
+  --cat-bronze: #B7791F;
+  --cat-silver: #A1A1AA;
+  --cat-black: var(--text);
+  --cat-green: #16A34A;
+
+  /* forma */
+  --radius-sm: 6px;   /* barras, eventos de agenda */
+  --radius-md: 8px;   /* botões, inputs */
+  --radius-lg: 12px;  /* cards, colunas de board */
+  --radius-full: 999px; /* badges, barras de progresso */
+
+  /* tipografia */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --text-xs: 11px;   /* rótulo de grupo do menu, uppercase */
+  --text-sm: 12px;   /* metadados, badges */
+  --text-base: 14px; /* corpo, tabelas, botões 13px */
+  --text-lg: 16px;   /* título de card */
+  --text-xl: 20px;   /* nome do lead/cliente em destaque */
+  --text-2xl: 24px;  /* título da página (H1), 600, -0.02em */
+  --text-kpi: 26px;  /* número de KPI, 600, tabular-nums */
+
+  /* espaçamento (escala de 4) */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px;
+
+  /* alturas */
+  --h-control: 36px;  /* botão, input, seletor */
+  --h-nav-item: 34px;
+  --sidebar-w: 240px;
+  --content-max: 1180px;      /* listas e fichas */
+  --content-max-wide: 1320px; /* boards, agenda, conversas */
+}
+
+.dark {
+  --bg: #09090B;
+  --surface: #111113;
+  --surface-2: #1A1A1D;
+  --border: #27272A;
+  --text: #FAFAFA;
+  --muted: #A1A1AA;
+  --subtle: #8E8E96;
+  --primary: #FAFAFA;
+  --on-primary: #09090B;
+  --danger: #F87171; --danger-bg: rgba(248, 113, 113, .12);
+  --warn:   #FBBF24; --warn-bg:   rgba(251, 191, 36, .12);
+  --ok:     #4ADE80; --ok-bg:     rgba(74, 222, 128, .12);
+  --info:   #60A5FA; --info-bg:   rgba(96, 165, 250, .12);
+}
+
+html { font-family: var(--font-sans); font-size: var(--text-base); background: var(--bg); color: var(--text); }
+.tabular { font-variant-numeric: tabular-nums; }

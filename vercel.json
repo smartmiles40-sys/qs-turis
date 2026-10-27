@@ -142,6 +142,10 @@
     {
       "path": "/api/avisos",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/closer?acao=cron-bitrix",
+      "schedule": "*/10 * * * *"
     }
   ],
   "headers": [

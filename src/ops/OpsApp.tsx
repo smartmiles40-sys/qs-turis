@@ -78,20 +78,20 @@ export default function OpsApp() {
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
       { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined },
     ] },
-    { id: "clientes-ops", rotulo: "Clientes", icone: ICONES_AREA.lista, itens: [
-      { id: "fichas", rotulo: "Fichas" },
+    grupoExpedicoes(contExp),
+    { id: "clientes-ops", rotulo: "Carteira", icone: ICONES_AREA.lista, itens: [
+      { id: "fichas", rotulo: "Clientes" },
       { id: "arrumar", rotulo: "Arrumar cadastros" },
     ] },
-    grupoExpedicoes(contExp),
-    { id: "time", rotulo: "Time", icone: ICONES_AREA.equipe, itens: [
-      ...(podeGerirTime(currentUser, "operacional") ? [{ id: "equipe", rotulo: "Funcionários" }] : []),
+    { id: "time", rotulo: "Gestão", icone: ICONES_AREA.equipe, itens: [
+      ...(podeGerirTime(currentUser, "operacional") ? [{ id: "equipe", rotulo: "Time" }] : []),
       { id: "exp-config", rotulo: "Acesso às Expedições" },
     ] },
   ];
 
   return (
     <CascaDeArea setor="operacional" nome="Operações" subtitulo="expedições e embarques" css={OPS_CSS}
-      grupos={grupos} ativo={rota.tela === "inicio" ? "solicitacoes" : rota.tela === "ficha" || rota.tela === "passageiros" || rota.tela === "clientes" || rota.tela === "acessos-amigo" ? "fichas" : rota.tela} onIr={(t) => ir({ tela: t as Tela })} chaveMenu="qs_ops_menu_aberto">
+      grupos={grupos} inicioId="exp-inicio" ativo={rota.tela === "inicio" ? "solicitacoes" : rota.tela === "ficha" || rota.tela === "passageiros" || rota.tela === "clientes" || rota.tela === "acessos-amigo" ? "fichas" : rota.tela} onIr={(t) => ir({ tela: t as Tela })} chaveMenu="qs_ops_menu_aberto">
       {(rota.tela === "inicio" || rota.tela === "solicitacoes") && (
         <SolicitacoesPage setor="operacional" abrirId={rota.id ?? null} onMudou={recontar}
           onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })}

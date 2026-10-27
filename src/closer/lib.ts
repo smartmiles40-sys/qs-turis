@@ -2,6 +2,7 @@
 // -----------------------------------------------------------------------------
 // Dados da ÁREA DO CLOSER (0174–0176, 22/10/2026): o pipeline (um cartão por
 // cliente que o closer atendeu) e a ficha de fechamento (venda consolidada).
+// 0205: o cartão nasce na reunião agendada; os antigos (231) foram pro arquivo.
 //
 // Escrita SEMPRE por RPC (o banco confere se é o closer dono ou gestor/admin).
 // O espelho no Bitrix é do servidor (api/closer.js?acao=espelhar).
@@ -20,21 +21,28 @@ export const ehHashDoCloser = () => /^#\/?closer(\/|$)/.test(window.location.has
 export function abrirAreaCloser() { window.location.hash = "#closer"; }
 
 // ── Etapas ─────────────────────────────────────────────────────────────────
+// 0205 (26/10): as colunas do Comercial. O QS manda e o Bitrix segue (cron).
+// A reunião move sozinha as 3 primeiras + Em cotação; o resto é o closer.
 export type Etapa =
-  | "reuniao_feita" | "proposta_enviada" | "negociando" | "contrato_enviado"
-  | "contrato_assinado" | "pagamento_enviado" | "pago" | "consolidada" | "perdido";
+  | "aguardando_reuniao" | "reagendamento" | "em_cotacao" | "em_negociacao" | "no_show"
+  | "oportunidade_futura" | "aguardando_emissao" | "venda_cancelada" | "perdido" | "venda_realizada";
 
 export const ETAPAS: { id: Etapa; rotulo: string; cor: string }[] = [
-  { id: "reuniao_feita", rotulo: "Reunião feita", cor: "#64748B" },
-  { id: "proposta_enviada", rotulo: "Proposta enviada", cor: "#2563EB" },
-  { id: "negociando", rotulo: "Negociando", cor: "#7C3AED" },
-  { id: "contrato_enviado", rotulo: "Contrato enviado", cor: "#B45309" },
-  { id: "contrato_assinado", rotulo: "Contrato assinado", cor: "#A16207" },
-  { id: "pagamento_enviado", rotulo: "Pagamento enviado", cor: "#0E7490" },
-  { id: "pago", rotulo: "Pago", cor: "#047857" },
-  { id: "consolidada", rotulo: "Venda consolidada", cor: "#15803D" },
+  { id: "aguardando_reuniao", rotulo: "Aguardando reunião", cor: "#64748B" },
+  { id: "reagendamento", rotulo: "Reagendamento", cor: "#B45309" },
+  { id: "em_cotacao", rotulo: "Em cotação", cor: "#2563EB" },
+  { id: "em_negociacao", rotulo: "Em negociação", cor: "#7C3AED" },
+  { id: "no_show", rotulo: "No-show", cor: "#DC2626" },
+  { id: "oportunidade_futura", rotulo: "Oportunidade futura", cor: "#0E7490" },
+  { id: "aguardando_emissao", rotulo: "Aguardando emissão", cor: "#A16207" },
+  { id: "venda_cancelada", rotulo: "Venda cancelada", cor: "#9F1239" },
   { id: "perdido", rotulo: "Perdido", cor: "#B91C1C" },
+  { id: "venda_realizada", rotulo: "Venda realizada", cor: "#15803D" },
 ];
+/** Etapas que encerram o cartão (saem do quadro de abertos). */
+export const ETAPAS_FINAIS: Etapa[] = ["venda_realizada", "venda_cancelada", "perdido"];
+/** Pedem motivo ao mover. */
+export const ETAPAS_COM_MOTIVO: Etapa[] = ["perdido", "venda_cancelada"];
 export const NOME_ETAPA = Object.fromEntries(ETAPAS.map((e) => [e.id, e.rotulo])) as Record<Etapa, string>;
 
 export interface Negocio {
@@ -67,6 +75,9 @@ export interface Negocio {
   bitrix_status: "pendente" | "ok" | "erro" | "sem_card" | null;
   bitrix_erro: string | null;
   bitrix_enviado_em: string | null;
+  bitrix_etapa: Etapa | null;
+  arquivado_em: string | null;
+  arquivado_motivo: string | null;
   criado_em: string;
   atualizado_em: string;
   lead: { id: string; full_name: string | null; first_name: string | null; last_name: string | null; phone: string | null; email: string | null; bitrix_id: string | null } | null;
@@ -86,10 +97,24 @@ export async function listarNegocios(f: { desde?: string | null; closerId?: stri
     .limit(1000);
   if (f.desde) q = q.gte("criado_em", f.desde);
   if (f.closerId) q = q.eq("closer_id", f.closerId);
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
-  return (data ?? []) as unknown as Negocio[];
+  const { data, error } = await q.is("arquivado_em", null);
+  if (!error) { bancoSemPipelineV2 = false; return (data ?? []) as unknown as Negocio[]; }
+  if (!error.message.includes("arquivado_em")) throw new Error(error.message);
+  // Banco ainda sem a 0205 (só no localhost, antes do deploy): lista do jeito
+  // antigo e mostra cada etapa velha na coluna nova equivalente, só pra ver.
+  bancoSemPipelineV2 = true;
+  const velho = await q;
+  if (velho.error) throw new Error(velho.error.message);
+  return ((velho.data ?? []) as unknown as Negocio[]).map((n) => ({ ...n, etapa: ETAPA_ANTIGA[n.etapa as string] ?? n.etapa }));
 }
+
+/** true quando o banco ainda não tem a 0205 (colunas novas do pipeline). */
+export let bancoSemPipelineV2 = false;
+const ETAPA_ANTIGA: Record<string, Etapa> = {
+  reuniao_feita: "em_cotacao", proposta_enviada: "em_negociacao", negociando: "em_negociacao",
+  contrato_enviado: "em_negociacao", contrato_assinado: "em_negociacao", pagamento_enviado: "em_negociacao",
+  pago: "em_negociacao", consolidada: "aguardando_emissao", perdido: "perdido",
+};
 
 export async function carregarNegocio(id: string): Promise<Negocio | null> {
   const { data, error } = await supabase
@@ -105,8 +130,10 @@ export function erroAmigavel(e: unknown): string {
   const m = String((e as { message?: string })?.message ?? e ?? "");
   const mapa: Record<string, string> = {
     "sem-permissao": "Você não pode mexer neste cartão (só o closer dono ou a gestão).",
-    "motivo-obrigatorio": "Escreva o motivo da perda.",
-    "use-a-ficha-de-fechamento": "Venda consolidada só pela ficha de fechamento.",
+    "motivo-obrigatorio": "Escreva o motivo.",
+    "use-a-ficha-de-fechamento": "Pra ir pra Aguardando emissão, preencha a ficha de fechamento (é ela que consolida a venda).",
+    "consolide-antes": "Antes, consolide a venda pela ficha de fechamento.",
+    "ja-tem-cartao-aberto": "Este cliente já tem um cartão aberto no quadro.",
     "venda-ja-consolidada": "Esta venda já foi consolidada.",
     "negocio-perdido": "Este cartão está como perdido. Mova de volta antes de consolidar.",
     "valor-total-obrigatorio": "Informe o valor total da venda.",
@@ -200,18 +227,27 @@ export async function consolidar(negocioId: string, ficha: Ficha): Promise<{ via
   return data as { viagem_id: string; plano_id: string };
 }
 
-/** Manda a venda consolidada pro Bitrix (valor + etapa de venda realizada). */
-export async function espelharNoBitrix(negocioId: string): Promise<{ ok: boolean; status?: string; mensagem?: string }> {
+async function chamarApi<T>(acao: string, corpo: Record<string, unknown>): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Sessão expirada. Entre de novo.");
-  const r = await fetch("/api/closer?acao=espelhar", {
+  const r = await fetch(`/api/closer?acao=${acao}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ acao: "espelhar", negocioId }),
+    body: JSON.stringify({ acao, ...corpo }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error((j as { error?: string }).error || `Falhou (HTTP ${r.status}).`);
-  return j as { ok: boolean; status?: string; mensagem?: string };
+  return j as T;
+}
+
+/** Traz pro quadro um cliente que já existe no Bitrix, pelo ID do negócio. */
+export function trazerDoBitrix(dealId: string, closerId?: string | null) {
+  return chamarApi<{ ok: boolean; negocioId: string; etapa: Etapa; cliente?: string }>("importar", { dealId, closerId: closerId ?? null });
+}
+
+/** Leva a etapa do cartão (e o valor) pro Bitrix agora. O cron faz o mesmo a cada 10 min. */
+export function espelharNoBitrix(negocioId: string) {
+  return chamarApi<{ ok: boolean; status?: string; mensagem?: string }>("espelhar", { negocioId });
 }
 
 export async function responsaveisDoRel(): Promise<{ id: string; name: string }[]> {

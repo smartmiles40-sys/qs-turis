@@ -136,7 +136,11 @@ export default function SinoDeAvisos() {
     if (!aberto || !botao.current) return;
     const r = botao.current.getBoundingClientRect();
     const largura = Math.min(380, window.innerWidth - 16);
-    setPos({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left, window.innerWidth - largura - 8)) });
+    // No redesign o sino mora no RODAPÉ da sidebar: abrir pra baixo cortaria o
+    // painel. Se não cabe embaixo, ele sobe até caber.
+    const altura = Math.min(560, window.innerHeight * 0.8);
+    const top = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - altura - 8));
+    setPos({ top, left: Math.max(8, Math.min(r.left, window.innerWidth - largura - 8)) });
   }, [aberto]);
   useEffect(() => {
     if (!aberto) return;

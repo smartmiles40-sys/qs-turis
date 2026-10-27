@@ -10,11 +10,12 @@ import { ICONES_AREA, type GrupoDoMenu } from "@/area/CascaDeArea";
 export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: number } = {}): GrupoDoMenu {
   return {
     id: "expedicoes", rotulo: "Expedições", icone: ICONES_AREA.aviao, itens: [
-      { id: "exp-inicio", rotulo: "Início" },
-      { id: "avisos", rotulo: "Avisos", badge: contagens.avisos || undefined },
+      // Redesign (out/2026): o "Início" das expedições virou o Início de Operações
+      // (topo do menu) e a ordem segue o HANDOFF.md.
       { id: "expedicoes", rotulo: "Expedições" },
       { id: "pacotes", rotulo: "Pacotes" },
       { id: "inscricoes", rotulo: "Inscrições", badge: contagens.inscricoes || undefined },
+      { id: "avisos", rotulo: "Avisos", badge: contagens.avisos || undefined },
       { id: "fornecedores", rotulo: "Fornecedores" },
     ],
   };

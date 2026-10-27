@@ -80,6 +80,34 @@ async function computeGoalCurrent(goal: Goal): Promise<number> {
     return count ?? 0;
   }
 
+  if (goal.type === "reunioes_realizadas") {
+    // Reuniões do SDR que aconteceram no período (pela data da reunião).
+    let q = supabase
+      .from("qs_meetings")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "realizada")
+      .gte("scheduled_at", from)
+      .lte("scheduled_at", to);
+    if (await colunaTipoPronta()) q = q.neq("tipo", "retomada");
+    if (owner) q = q.eq("owner_id", owner);
+    const { count } = await q;
+    return count ?? 0;
+  }
+
+  if (goal.type === "cotacoes_aereo") {
+    // Cotação de aéreo = proposta do SDR enviada ao cliente no período. O SDR
+    // não faz pacote (Bruno, 26/10), então toda proposta dele é de aéreo.
+    let q = supabase
+      .from("qs_propostas")
+      .select("id", { count: "exact", head: true })
+      .not("enviada_em", "is", null)
+      .gte("enviada_em", from)
+      .lte("enviada_em", to);
+    if (owner) q = q.eq("criado_por", owner);
+    const { count } = await q;
+    return count ?? 0;
+  }
+
   if (goal.type === "leads_finalizados") {
     let q = supabase
       .from("qs_leads")
@@ -123,6 +151,8 @@ const GOAL_TYPE_LABELS: Record<GoalType, string> = {
   atividades: "Atividades",
   conversao: "Taxa de Conversão",
   reunioes: "Reuniões Agendadas",
+  reunioes_realizadas: "Reuniões Realizadas",
+  cotacoes_aereo: "Cotações de Aéreo",
 };
 
 const GOAL_PERIOD_LABELS: Record<GoalPeriod, string> = {
@@ -584,7 +614,9 @@ export default function GoalsPage() {
                 <label className="block text-xs font-medium text-gray-700 mb-1">Tipo de Meta</label>
                 <select value={modal.type} onChange={(e) => setModal({ ...modal, type: e.target.value as GoalType })}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]">
-                  {(Object.entries(GOAL_TYPE_LABELS) as [GoalType, string][]).map(([key, label]) => (
+                  {/* Cotação de aéreo deixou de ser meta (Bruno, 27/10): vira tempo registrado (0206).
+                      Metas antigas desse tipo continuam aparecendo na lista, mas não se cria nova. */}
+                  {(Object.entries(GOAL_TYPE_LABELS) as [GoalType, string][]).filter(([key]) => key !== "cotacoes_aereo" || modal.type === key).map(([key, label]) => (
                     <option key={key} value={key}>{label}</option>
                   ))}
                 </select>
