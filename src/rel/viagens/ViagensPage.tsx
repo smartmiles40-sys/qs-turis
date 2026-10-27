@@ -37,7 +37,9 @@ import { COR_EXP, MarcaTipo } from "./MapaMundi";
 import { lugaresDe } from "./destinos";
 import DonoViagem from "./DonoViagem";
 import BarraLote from "./BarraLote";
-import { arquivamentosDe, sugeridaParaArquivar, type Arquivada } from "../lib/operacao";
+import { arquivamentosDe, classificarEmLote, sugeridaParaArquivar, type Arquivada } from "../lib/operacao";
+import { sugestoesDeServico, type Sugestao } from "../lib/faxina";
+import FaxinaAtalhos from "./FaxinaAtalhos";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 
 type Visao = "painel" | "calendario" | "lista" | "repetidas" | "voos";
@@ -63,6 +65,9 @@ const FILTROS: { id: FiltroViagens; rotulo: string }[] = [
   // 0148: o que falta pro time arrumar — fica fora de "Próximas" pra não poluir
   { id: "sem_data", rotulo: "Precisa de data" },
   { id: "classificar", rotulo: "Classificar" },
+  // 0208: faxina
+  { id: "sem_cliente", rotulo: "Sem cliente" },
+  { id: "repetidas", rotulo: "Repetidas?" },
   { id: "arquivadas", rotulo: "Arquivadas" },
   { id: "concluidas", rotulo: "Concluídas" },
   { id: "canceladas", rotulo: "Canceladas" },
@@ -195,6 +200,25 @@ interface ExtrasLinha {
   /** fila Sem data: mostra quando foi vendida e se é sugerida pra arquivar */
   mostrarVenda?: boolean;
   arquivo?: Arquivada | null;
+  /** 0208: fila Classificar — o que o banco acha que foi vendido */
+  sugestao?: Sugestao | null;
+}
+
+function UsarSugestao({ v, s, onMudou }: { v: Viagem; s: Sugestao; onMudou: () => void }) {
+  const [ocupado, setOcupado] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5 text-[12px]" onClick={(e) => e.stopPropagation()}>
+      <span style={{ color: "var(--ink3)" }} title={s.regra}>
+        sugestão: <b style={{ color: "var(--ink)" }}>{SERVICOS[s.servico] ?? s.servico}</b> <span>({s.regra}{s.confianca === "alta" ? "" : " · confira"})</span>
+      </span>
+      <button className="underline font-semibold" style={{ color: "var(--rel-ink)" }} disabled={ocupado}
+        onClick={() => { setOcupado(true); setErro(null); classificarEmLote([v.id], s.servico).then(onMudou).catch((e) => setErro(e instanceof Error ? e.message : "Falhou.")).finally(() => setOcupado(false)); }}>
+        {ocupado ? "salvando…" : "usar"}
+      </button>
+      {erro && <span style={{ color: "#DC2626" }}>{erro}</span>}
+    </span>
+  );
 }
 
 function Linha({ v, onAbrir, onAbrirCliente, classificar, onMudou, extras = {} }: { v: Viagem; onAbrir: () => void; onAbrirCliente: (id: string) => void; classificar?: boolean; onMudou?: () => void; extras?: ExtrasLinha }) {
@@ -219,9 +243,12 @@ function Linha({ v, onAbrir, onAbrirCliente, classificar, onMudou, extras = {} }
           {extras.mostrarVenda && (
             <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
               {v.data_venda ? `vendida em ${dataBR(v.data_venda)}` : "sem data de venda"}
-              {sugeridaParaArquivar(v) && <b style={{ color: "#B45309" }}> · sugerida pra arquivar</b>}
+              {(v.voos_total ?? 0) > 0
+                ? <b style={{ color: "var(--rel-ink)" }}> · tem {v.voos_total} voo{v.voos_total === 1 ? "" : "s"}: dá pra tirar a data dos voos</b>
+                : sugeridaParaArquivar(v) && <b style={{ color: "#B45309" }}> · sugerida pra arquivar</b>}
             </p>
           )}
+          {extras.sugestao && onMudou && <p><UsarSugestao v={v} s={extras.sugestao} onMudou={onMudou} /></p>}
           {extras.arquivo && (
             <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
               arquivada{extras.arquivo.arquivado_em ? ` em ${new Date(extras.arquivo.arquivado_em).toLocaleDateString("pt-BR")}` : ""}{extras.arquivo.arquivado_motivo ? ` · “${extras.arquivo.arquivado_motivo}”` : ""}
@@ -339,6 +366,13 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
     arquivamentosDe(lista.map((v) => v.id)).then(setArquivos).catch(() => setArquivos(new Map()));
   }, [filtro, lista]);
 
+  // 0208: o que o banco sugere pra cada venda da fila Classificar
+  const [sugestoes, setSugestoes] = useState<Map<string, Sugestao>>(new Map());
+  useEffect(() => {
+    if (filtro !== "classificar" || !lista?.length) { setSugestoes(new Map()); return; }
+    sugestoesDeServico(lista.map((v) => v.id)).then(setSugestoes).catch(() => setSugestoes(new Map()));
+  }, [filtro, lista]);
+
   useEffect(() => {
     if (visao !== "lista") return;
     let vivo = true;
@@ -364,9 +398,10 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
   }
 
   // Busca e filas de arrumação ficam pessoa por pessoa.
-  const agrupa = porGrupo && !busca.trim() && filtro !== "sem_data" && filtro !== "classificar" && filtro !== "arquivadas" && filtro !== "sem_dono";
+  const agrupa = porGrupo && !busca.trim() && !["sem_data", "classificar", "arquivadas", "sem_dono", "sem_cliente", "repetidas"].includes(filtro);
   // quem tem caixinha de marcar (ações em lote, ver BarraLote)
-  const comLote = filtro === "classificar" || (gestor && ["sem_data", "arquivadas", "sem_dono", "proximas", "em_viagem", "minhas"].includes(filtro));
+  // sem_data: "datas pelos voos" (0208) é de todo o time; arquivar segue só da gestão (BarraLote)
+  const comLote = filtro === "classificar" || filtro === "sem_data" || (gestor && ["arquivadas", "sem_dono", "proximas", "em_viagem", "minhas"].includes(filtro));
   const comDono = ["proximas", "em_viagem", "minhas", "sem_dono"].includes(filtro);
   const itens = useMemo(() => (lista ? (agrupa ? agruparExpedicoes(lista) : lista.map((v) => ({ k: "viagem" as const, v }))) : null), [lista, agrupa]);
 
@@ -401,6 +436,9 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
       {visao === "voos" && <ConferirVoos key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "lista" && <>
 
+      <FaxinaAtalhos filtro={filtro} onFiltro={setFiltro} gestor={gestor} versao={versao} onMudou={() => setVersao((x) => x + 1)}
+        onAbrirViagem={onAbrirViagem} onConferirRepetidas={() => setVisao("repetidas")} />
+
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="flex gap-1 rel-card p-1 overflow-x-auto" role="group" aria-label="Filtrar viagens">
           {FILTROS.map((f) => (
@@ -419,11 +457,13 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
       </div>
 
       {erro && <div className="mb-3"><Aviso tom="erro">{erro}</Aviso></div>}
-      {filtro === "sem_data" && <div className="mb-3"><Aviso tom="aviso">Vendas que pedem acompanhamento mas estão sem data de embarque no Bitrix. Preencha a ida (e a volta) no card do Bitrix — elas vão pro painel sozinhas na próxima sincronização.{gestor ? " Venda antiga que não vai acontecer: “Marcar as sugeridas” pega venda há mais de 12 meses ou sem data de venda — confira, escreva o motivo e arquive (dá pra desfazer)." : " Arquivar em lote é com a gestão."}</Aviso></div>}
+      {filtro === "sem_data" && <div className="mb-3"><Aviso tom="aviso">Vendas que pedem acompanhamento mas estão sem data de embarque no Bitrix. Preencha a ida (e a volta) no card do Bitrix — elas vão pro painel sozinhas na próxima sincronização. As que já têm voo cadastrado: “Marcar as que têm voo” → “Datas pelos voos”.{gestor ? " Venda antiga que não vai acontecer: “Marcar as sugeridas” pega venda há mais de 12 meses ou sem data de venda — confira, escreva o motivo e arquive (dá pra desfazer)." : " Arquivar em lote é com a gestão."}</Aviso></div>}
       {filtro === "classificar" && <div className="mb-3"><Aviso tom="aviso">O Bitrix não diz o que foi vendido (Tipo de venda vazio ou "Outros"). Escolha ao lado de cada uma — ou marque várias e escolha uma vez só na barra: pacote, aéreo e cruzeiro entram na Esteira completa; hotel e passeio só Revisão + D-3; seguro, concierge e outros ficam só na ficha do cliente.</Aviso></div>}
       {filtro === "sem_dono" && <div className="mb-3"><Aviso tom="aviso">Pacotes, aéreos e hotéis que vão acontecer e ninguém do time cuida. Clique em <b>Assumir</b> nas suas{gestor ? " — ou marque várias e atribua de uma vez" : ""}.</Aviso></div>}
+      {filtro === "sem_cliente" && <div className="mb-3"><Aviso tom="aviso">Vendas sem ficha de cliente ligada — o card do Bitrix veio sem contato. Abra a viagem, ache a pessoa em Clientes (ou crie a ficha) e ligue; sem cliente, a viagem não aparece na ficha nem no WhatsApp.</Aviso></div>}
+      {filtro === "repetidas" && <div className="mb-3"><Aviso tom="aviso">Vendas marcadas como <b>possível repetida</b>. Abra “Conferir lado a lado” pra juntar as duas ou dizer que são diferentes{gestor ? "" : " (é com a gestão)"}.</Aviso></div>}
       {filtro === "minhas" && <div className="mb-3"><Aviso tom="ok">As viagens que você cuida. As etapas de cada uma aparecem em <b>Minhas atividades</b>.</Aviso></div>}
-      {lista && <BarraLote key={filtro} filtro={filtro} lista={lista} sel={sel} setSel={setSel} gestor={gestor} equipe={equipe} onMudou={() => setVersao((x) => x + 1)} />}
+      {lista && <BarraLote key={filtro} filtro={filtro} lista={lista} sel={sel} setSel={setSel} gestor={gestor} equipe={equipe} sugestoes={sugestoes} onMudou={() => setVersao((x) => x + 1)} />}
 
       {lista === null ? (
         <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>
@@ -445,6 +485,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
                   equipe: comDono ? equipe : undefined,
                   mostrarVenda: filtro === "sem_data",
                   arquivo: filtro === "arquivadas" ? arquivos.get(v.id) ?? null : null,
+                  sugestao: filtro === "classificar" ? sugestoes.get(v.id) ?? null : null,
                 }} />;
               return it.k === "viagem" ? linha(it.v) : (
                 <LinhaGrupo key={it.g.chave} g={it.g} aberto={abertos.has(it.g.chave)} onAlternar={() => alternar(it.g.chave)}>

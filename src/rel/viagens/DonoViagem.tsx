@@ -57,7 +57,8 @@ export default function DonoViagem({ viagemId, responsavelId, equipe, onMudou, c
 
 // ── Histórico (rel_viagem_eventos) ──────────────────────────────────────────
 
-const ROTULO_EVENTO = { dono: "Responsável", servico: "Serviço", arquivada: "Arquivada", desarquivada: "Desarquivada" } as const;
+// 0208: componente (venda solta virou item), repetida (marcada pra conferir), datas (pelos voos), item (status/dados de um item)
+const ROTULO_EVENTO = { dono: "Responsável", servico: "Serviço", arquivada: "Arquivada", desarquivada: "Desarquivada", componente: "Componente", repetida: "Repetida?", datas: "Datas", item: "Item" } as const;
 
 /** O que o time decidiu na viagem: troca de dono, serviço, arquivamento. */
 export function HistoricoViagem({ viagemId, equipe, versao = 0 }: { viagemId: string; equipe: { id: string; name: string }[]; versao?: number }) {

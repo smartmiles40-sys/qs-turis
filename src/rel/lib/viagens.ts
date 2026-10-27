@@ -279,7 +279,8 @@ export function tamanhoLegivel(b: number | null | undefined): string {
 
 // ── Viagens ─────────────────────────────────────────────────────────────────
 
-export type FiltroViagens = "proximas" | "em_viagem" | "minhas" | "sem_dono" | "sem_data" | "classificar" | "arquivadas" | "concluidas" | "canceladas" | "todas";
+// 0208 (faxina): sem_cliente e repetidas (marcadas "CONFERIR: possível viagem repetida")
+export type FiltroViagens = "proximas" | "em_viagem" | "minhas" | "sem_dono" | "sem_data" | "classificar" | "sem_cliente" | "repetidas" | "arquivadas" | "concluidas" | "canceladas" | "todas";
 
 /** Tira o que quebraria o filtro `or=(...)` do PostgREST. */
 const limparBusca = (t: string) => t.replace(/[,()*%\\:"']/g, " ").trim();
@@ -294,8 +295,11 @@ export async function listarViagens(filtro: FiltroViagens, busca = "", userId = 
   else if (filtro === "minhas") q = q.eq("status", "ativa").eq("responsavel_id", userId || "00000000-0000-0000-0000-000000000000").in("fase", ["antes", "em_viagem", "sem_data"]).order("data_embarque", { ascending: true, nullsFirst: false });
   else if (filtro === "sem_dono") q = q.eq("status", "ativa").is("responsavel_id", null).in("fase", ["antes", "em_viagem"]).in("acompanhamento", ["completo", "leve"]).order("data_embarque", { ascending: true });
   else if (filtro === "arquivadas") q = q.eq("status", "arquivada").order("atualizado_em", { ascending: false });
-  else if (filtro === "sem_data") q = q.eq("status", "ativa").eq("fase", "sem_data").in("acompanhamento", COM_ACOMPANHAMENTO).order("criado_em", { ascending: false });
+  // 0208: sem data GRAVADA (a fase pode vir dos voos — 0152 — mas Esteira e alertas usam a data gravada)
+  else if (filtro === "sem_data") q = q.eq("status", "ativa").is("data_embarque", null).in("acompanhamento", COM_ACOMPANHAMENTO).order("criado_em", { ascending: false });
   else if (filtro === "classificar") q = q.eq("status", "ativa").eq("acompanhamento", "classificar").in("fase", ["antes", "em_viagem", "sem_data"]).order("data_embarque", { ascending: true, nullsFirst: false });
+  else if (filtro === "sem_cliente") q = q.eq("status", "ativa").is("cliente_id", null).order("data_embarque", { ascending: true, nullsFirst: false });
+  else if (filtro === "repetidas") q = q.eq("status", "ativa").ilike("observacoes", "%CONFERIR: possível viagem repetida%").order("data_embarque", { ascending: true, nullsFirst: false });
   else if (filtro === "concluidas") q = q.eq("fase", "concluida").order("data_retorno", { ascending: false });
   else if (filtro === "canceladas") q = q.eq("fase", "cancelada").order("atualizado_em", { ascending: false });
   else q = q.order("data_embarque", { ascending: false, nullsFirst: false });

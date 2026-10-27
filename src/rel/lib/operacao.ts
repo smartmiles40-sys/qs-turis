@@ -83,7 +83,7 @@ export async function arquivamentosDe(ids: string[]): Promise<Map<string, Arquiv
 
 // ── Histórico ───────────────────────────────────────────────────────────────
 
-export interface EventoViagem { id: number; viagem_id: string; tipo: "dono" | "servico" | "arquivada" | "desarquivada"; de: string | null; para: string | null; motivo: string | null; lote: string | null; por: string | null; em: string }
+export interface EventoViagem { id: number; viagem_id: string; tipo: "dono" | "servico" | "arquivada" | "desarquivada" | "componente" | "repetida" | "datas" | "item"; de: string | null; para: string | null; motivo: string | null; lote: string | null; por: string | null; em: string }
 
 export async function eventosDaViagem(viagemId: string): Promise<EventoViagem[]> {
   const { data, error } = await supabase.from("rel_viagem_eventos").select("*").eq("viagem_id", viagemId).order("em", { ascending: false }).limit(30);
