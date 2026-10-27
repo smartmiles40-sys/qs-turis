@@ -14,6 +14,7 @@ import { listCanned, salvarRespostasProntas, type CannedResponse } from "@/lib/q
 import ModelosMeta from "./ModelosMeta";
 import MensagemAutomatica from "./MensagemAutomatica";
 import LigacaoWhatsApp from "./LigacaoWhatsApp";
+import DiscadorConfig from "./DiscadorConfig";
 import ConexaoMeta from "./ConexaoMeta";
 import NumerosWhatsApp from "./NumerosWhatsApp";
 import { WA_SIGNATURE_MAP_KEY, WA_SIGNATURE_ENABLED_KEY, nomeCurto } from "@/lib/qs/waSignature";
@@ -58,7 +59,7 @@ const OUTRAS_AREAS: Setor[] = ["relacionamento", "financeiro", "operacional"];
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "whatsapp-meta" | "motivos" | "classificacao" | "horario" | "carteira" | "agenda" | "atendimento" | "webfone-webrtc" | "telefone-sip" | "usuarios" | "numeros" | "integracoes";
+type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "whatsapp-meta" | "motivos" | "classificacao" | "horario" | "carteira" | "agenda" | "atendimento" | "webfone-webrtc" | "discador" | "telefone-sip" | "usuarios" | "numeros" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -75,6 +76,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "carteira", label: "Carteira (Saúde)", group: "EMPRESA" },
   { key: "agenda", label: "Agenda (Google) — legado", group: "EMPRESA" },
   { key: "webfone-webrtc", label: "Webfone WebRTC (VoxFree)", group: "EMPRESA" },
+  { key: "discador", label: "Discador", group: "EMPRESA" },
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
   { key: "numeros", label: "Números do WhatsApp", group: "EMPRESA" },
@@ -2206,6 +2208,7 @@ export default function SettingsPage() {
         {activeSection === "whatsapp-meta" && ehGestor && <ConexaoMeta />}
         {activeSection === "atendimento" && <AtendimentoSection />}
         {activeSection === "webfone-webrtc" && <WebfoneWebrtcSection />}
+        {activeSection === "discador" && <DiscadorConfig />}
         {activeSection === "telefone-sip" && <SipSection />}
         {activeSection === "usuarios" && <UsuariosSection />}
         {activeSection === "numeros" && ehGestor && <NumerosWhatsApp />}
