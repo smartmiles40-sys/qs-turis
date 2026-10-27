@@ -460,7 +460,8 @@ export default function RelApp() {
           {rota.tela === "esteira" && <EsteiraPage onAbrirViagem={abrirViagem} />}
           {rota.tela === "viagens" && <ViagensPage onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
           {rota.tela === "viagem" && (
-            <ViagemPage key={rota.id} id={rota.id} onVoltar={() => ir({ tela: "viagens" })} onAbrirCliente={abrirCliente} onAbrirConversa={abrirConversa} />
+            <ViagemPage key={rota.id} id={rota.id} onVoltar={() => ir({ tela: "viagens" })} onAbrirCliente={abrirCliente} onAbrirConversa={abrirConversa}
+              onAbrirExpedicao={(exp, tipo) => ir({ tela: tipo === "pacote" ? "exp-pacotes" : "exp-expedicoes", id: exp })} />
           )}
           {rota.tela === "alertas" && <AlertasPage onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
           {rota.tela === "disparos" && <DisparosPage />}

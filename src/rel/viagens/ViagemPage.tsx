@@ -38,6 +38,7 @@ import PreferenciasViagem from "./PreferenciasViagem";
 import FichaFechamentoResumo from "@/closer/FichaFechamentoResumo";
 import { desarquivarViagens } from "../lib/operacao";
 import { podeGerirRelacionamento } from "../equipe/permissao";
+import TudoDaViagem from "./TudoDaViagem";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
   return (
@@ -260,8 +261,10 @@ function Jornada({ viagemId, ativa, recarregarViagem }: { viagemId: string; ativ
 //   dir.  — revisão da IA, requisitos de entrada, jornada de revisão
 //   baixo — todos os arquivos, visuais
 
-export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConversa }: {
+export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConversa, onAbrirExpedicao }: {
   id: string; onVoltar: () => void; onAbrirCliente: (id: string) => void; onAbrirConversa: (conversaId: string) => void;
+  /** 0208: o componente "Expedição" abre a expedição no Ops */
+  onAbrirExpedicao?: (expedicaoId: string, tipo: string | null) => void;
 }) {
   const { currentUser } = useQsAuth();
   // desarquivar (0184) é só a gestão — o banco recusa os outros, então nem mostra o botão
@@ -404,6 +407,10 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
       <PedidosSobre alvo={{ viagemId: v.id }} recarregar={sinalPedidos} links={{ onAbrirCliente, onAbrirConversa }} />
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
+
+      {/* 0208 (27/10, Bruno: "visualização fácil e rápida, sem ficar consultando"): o que falta,
+          próximas datas e os componentes por tipo (aéreo, hotel, seguro, expedição…) numa olhada */}
+      <TudoDaViagem v={v} pass={pass} versao={versao} onMudou={revisou} onAbrirExpedicao={onAbrirExpedicao} />
 
       {/* A esteira do Relacionamento (16/10): pacote, aéreo e cruzeiro completos; hotel/passeio só Revisão + D-3 (0148) */}
       {ativa && temEsteira(v) && <EtapasViagem viagem={v} trechos={analise?.trechos ?? []} equipe={equipe} onMudou={revisou} />}
