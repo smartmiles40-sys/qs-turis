@@ -26,6 +26,7 @@ import NovaSolicitacao from "@/solicitacoes/NovaSolicitacao";
 import { podeAbrirAreaCloser } from "@/closer/lib";
 import VendaDoCliente from "@/closer/VendaDoCliente";
 import CotandoAereo from "@/components/sdr/aereo/CotandoAereo";
+import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
 import type {
   Lead,
   LeadStatus,
@@ -1086,6 +1087,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                 vai buscar. Logo abaixo da ficha porque é a continuação dela:
                 aqui é o que o próprio cliente contou, não o que o sistema sabe. */}
             <RespostasDoFormulario leadId={lead.id} variante="ficha" />
+
+            {/* 0213: cadastro único do cliente (o mesmo do Rel/Ops) — o SDR já preenche. */}
+            <CadastroDoLead leadId={lead.id} />
           </div>
         );
 

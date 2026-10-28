@@ -57,7 +57,7 @@ function NumerosViagem({ m }: { m: Metrica }) {
   );
 }
 
-// soLeitura: Operações vê as fichas mas não cria nem edita (RLS de escrita é só do Rel).
+// soLeitura: só ver (sem criar). Desde a 0213 o Operações também cria e edita — não passa mais.
 export default function ClientesPage({ onAbrir, soLeitura = false }: { onAbrir: (id: string) => void; soLeitura?: boolean }) {
   const [termo, setTermo] = useState("");
   const [lista, setLista] = useState<Cliente[]>([]);
