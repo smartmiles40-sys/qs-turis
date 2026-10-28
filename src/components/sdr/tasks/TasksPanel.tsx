@@ -1856,7 +1856,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   function openWhatsAppForTask(task: Task, lead: Lead | undefined | null) {
     if (!lead) return;
     const script = task.channel_type === "whatsapp" ? getScriptForTask(task) : null;
-    const texto = script ? fillTemplate(script, { name: lead.full_name }) : null;
+    const texto = script ? fillTemplate(script, { name: lead.full_name, segment: lead.segment, sdr: lead.owner?.name ?? currentUser?.name }) : null;
 
     // MODO APARELHO: um clique só, e ele termina dentro da conversa do lead no
     // WhatsApp do celular — com o roteiro já digitado. Não passa por modal: o
@@ -3291,7 +3291,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         {(() => {
           const script = getScriptForTask(task);
           if (!script) return null;
-          const filled = fillTemplate(script, { name: lead?.full_name });
+          const filled = fillTemplate(script, { name: lead?.full_name, segment: lead?.segment, sdr: lead?.owner?.name ?? currentUser?.name });
           return (
             <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)", background: "var(--surface-2)", borderRadius: 8 }}>
               <button

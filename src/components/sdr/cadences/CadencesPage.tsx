@@ -223,6 +223,8 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [cadences, setCadences] = useState<Cadence[]>([]);
+  // Atrasadas e leads com reunião, por cadência (carrega depois da lista).
+  const [saude, setSaude] = useState<Map<string, { atrasadas: number; reunioes: number }>>(new Map());
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState<string | null>(null);
   // Card com ação em andamento (congelar/excluir/medir impacto) — trava os botões dele.
@@ -251,12 +253,12 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
     // (evita N queries head:true e não estoura performance com muitas cadências).
     // Paginado (13/08): 1.398 leads com cadence_id — o select seco cortava em
     // 1.000 e os cards subcontavam sem dar erro nenhum.
-    let leadRows: { cadence_id: string | null; status: string | null }[] = [];
+    let leadRows: { id: string; cadence_id: string | null; status: string | null }[] = [];
     try {
-      leadRows = await fetchAllRows<{ cadence_id: string | null; status: string | null }>((from, to) =>
+      leadRows = await fetchAllRows<{ id: string; cadence_id: string | null; status: string | null }>((from, to) =>
         supabase
           .from("qs_leads")
-          .select("cadence_id, status")
+          .select("id, cadence_id, status")
           .not("cadence_id", "is", null)
           .order("id")
           .range(from, to)
@@ -282,6 +284,38 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
     }));
     setCadences(withCounts);
     setLoading(false);
+
+    // Números de saúde (28/10) — depois da lista aparecer, sem travar a tela:
+    //   atrasadas = tarefas do plano abertas com data antes de hoje;
+    //   reunião   = leads da cadência com reunião marcada (fora cancelada/arquivada).
+    // Duas leituras pequenas (~2,5 mil tarefas atrasadas, ~800 reuniões no total).
+    try {
+      const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+      const [atrasadas, reunioes] = await Promise.all([
+        fetchAllRows<{ cadence_id: string | null }>((from, to) =>
+          supabase.from("qs_tasks").select("cadence_id")
+            .in("status", ["pendente", "atrasada"]).eq("is_extra", false)
+            .not("cadence_id", "is", null)
+            .lt("scheduled_at", hoje.toISOString())
+            .order("id").range(from, to)
+        ),
+        fetchAllRows<{ lead_id: string }>((from, to) =>
+          supabase.from("qs_meetings").select("lead_id")
+            .not("status", "in", "(cancelada,arquivada)")
+            .order("id").range(from, to)
+        ),
+      ]);
+      const atrasoMap = new Map<string, number>();
+      atrasadas.forEach((t) => { if (t.cadence_id) atrasoMap.set(t.cadence_id, (atrasoMap.get(t.cadence_id) ?? 0) + 1); });
+      const comReuniao = new Set(reunioes.map((r) => r.lead_id));
+      const reuniaoMap = new Map<string, number>();
+      leadRows.forEach((l) => { if (l.cadence_id && comReuniao.has(l.id)) reuniaoMap.set(l.cadence_id, (reuniaoMap.get(l.cadence_id) ?? 0) + 1); });
+      const m = new Map<string, { atrasadas: number; reunioes: number }>();
+      withCounts.forEach((c) => m.set(c.id, { atrasadas: atrasoMap.get(c.id) ?? 0, reunioes: reuniaoMap.get(c.id) ?? 0 }));
+      setSaude(m);
+    } catch (err) {
+      console.warn("Erro ao calcular atrasadas/reuniões das cadências:", err);
+    }
   }, []);
 
   useEffect(() => {
@@ -684,7 +718,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                     </div>
 
                     {/* Info Grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Status</span>
                         <span
@@ -703,6 +737,9 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Dias de Execução</span>
                         <span className="text-xs text-gray-700 font-medium">{weekdays}</span>
+                        {cadence.teto_entrada_dia ? (
+                          <span className="text-[10.5px] text-gray-400">até {cadence.teto_entrada_dia} leads novos/dia por SDR</span>
+                        ) : null}
                       </div>
 
                       <div className="flex flex-col gap-1">
@@ -734,6 +771,27 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                           <span className="text-sm font-bold text-[#0147FF]">0</span>
                         )}
                       </div>
+
+                      {(() => {
+                        const sd = saude.get(cadence.id);
+                        const total = cadence._leads_count ?? 0;
+                        return (
+                          <>
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Atrasadas</span>
+                              <span className={`text-sm font-bold ${sd && sd.atrasadas > 0 ? "text-red-600" : "text-gray-900"}`} title="Atividades do plano abertas com data antes de hoje">
+                                {sd ? sd.atrasadas : "…"}
+                              </span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Viraram reunião</span>
+                              <span className="text-sm font-bold text-gray-900" title="Leads desta cadência com reunião marcada (fora canceladas e arquivadas)">
+                                {sd ? `${sd.reunioes}${total > 0 ? ` · ${Math.round((sd.reunioes / total) * 100)}%` : ""}` : "…"}
+                              </span>
+                            </div>
+                          </>
+                        );
+                      })()}
 
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Prioridade</span>

@@ -167,10 +167,25 @@ export async function logWhatsApp(row: {
 }
 
 /** Preenche {nome}/{primeiro_nome} num template. */
-export function fillTemplate(tpl: string, lead: { name?: string | null }): string {
+export function fillTemplate(
+  tpl: string,
+  lead: { name?: string | null; segment?: string | null; sdr?: string | null }
+): string {
   const nome = (lead.name || "").trim();
   const primeiro = nome.split(/\s+/)[0] || "";
-  return tpl.replaceAll("{nome}", nome).replaceAll("{primeiro_nome}", primeiro);
+  // Variáveis do criador de cadências (28/10): {{nome}}, {{primeiro_nome}},
+  // {{expedicao}} e {{sdr}}. As de chave simples ({nome}) seguem valendo.
+  // {{expedicao}} sai do "[Japão] - Tráfego" do segmento (o que vem do Bitrix).
+  const seg = (lead.segment || "").trim();
+  const expedicao = seg.match(/\[([^\]]+)\]/)?.[1]?.trim() || "";
+  const sdr = (lead.sdr || "").trim().split(/\s+/)[0] || "";
+  return tpl
+    .replace(/\{\{\s*nome\s*\}\}/g, nome)
+    .replace(/\{\{\s*primeiro_nome\s*\}\}/g, primeiro)
+    .replace(/\{\{\s*expedi[cç][aã]o\s*\}\}/g, expedicao || "a viagem")
+    .replace(/\{\{\s*sdr\s*\}\}/g, sdr)
+    .replaceAll("{nome}", nome)
+    .replaceAll("{primeiro_nome}", primeiro);
 }
 
 /** Templates padrão (turismo). Use {nome} / {primeiro_nome}. */
