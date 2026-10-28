@@ -9,9 +9,14 @@
 //   • editar (até 15 min) e apagar pra todos as mensagens do número
 //   • negrito/itálico/tachado pelos atalhos (Ctrl+B, Ctrl+I, Ctrl+Shift+X)
 // Fixar mensagem não existe nesta versão da Evolution.
+// 28/10 (0219): clicar no topo abre os DADOS DO GRUPO (InfoGrupo: foto, descrição,
+// participantes, convite, viagem, mídia, agendadas); ✓/✓✓/azul nas mensagens do
+// número; "@todos"; responder citando também com arquivo; encaminhar; agendar.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as RKeyboardEvent } from "react";
-import { AvatarWa, MidiaDaMensagem, TextoWa, Visualizador, corDoNome, rotuloDoDia } from "./waUi";
+import { AvatarWa, MidiaDaMensagem, TextoWa, Tiques, Visualizador, corDoNome, rotuloDoDia } from "./waUi";
+import InfoGrupo from "./InfoGrupo";
+import { AgendarModal, EncaminharModal, FotoGrupo } from "./GrupoExtras";
 import { limiteArquivoMB, salvarFigurinha, salvarTranscricao, type Anexo } from "../lib/whatsapp";
 import {
   apagarNoGrupo, editarNoGrupo, enviarFigurinhaNoGrupo, enviarMidiaNoGrupo, enviarNoGrupo, enviarVozNoGrupo, mensagensDoGrupo,
@@ -27,6 +32,9 @@ const TIPO_ANEXO: Record<string, Anexo["type"]> = { imagem: "image", figurinha: 
 const hora = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 const nomeDoGrupo = (g: Grupo) => g.nome?.trim() || "Grupo sem nome";
 const ASSINATURA = /^\*[^*\n]{1,80}:\*\n/;
+const TIQUE: Record<string, "sent" | "delivered" | "read" | "failed"> = { enviada: "sent", entregue: "delivered", lida: "read", erro: "failed" };
+/** "@todos" na lista de marcar: avisa todo mundo do grupo. */
+const TODOS: Participante = { telefone: "todos", nome: "todos", admin: null };
 
 /** Enquanto a aba está visível, roda `fn` a cada `ms`. Uma de cada vez:
  *  se a anterior ainda não voltou (banco lento), pula esta volta em vez de empilhar (22/10). */
@@ -45,8 +53,10 @@ function useRepetir(fn: () => unknown, ms: number) {
   }, [ms]);
 }
 
-export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
+export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado, agendadasLigadas = null }: {
   grupo: Grupo; onVoltar: () => void; onMudou: () => void;
+  /** REL_GRUPOS_AGENDADAS ligado no servidor? (null = não sei ainda) */
+  agendadasLigadas?: boolean | null;
   /** "Conversar no privado" (21/10): abre a conversa com a pessoa no número OFICIAL do Relacionamento — nunca pela ligação dos grupos. */
   onPrivado?: (telefone: string, nome: string) => void;
 }) {
@@ -72,6 +82,10 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
   const [busIdx, setBusIdx] = useState(0);
   const [gravando, setGravando] = useState<{ ini: number; rec: MediaRecorder } | null>(null);
   const [agora, setAgora] = useState(Date.now());
+  const [infoAberta, setInfoAberta] = useState(false);
+  const [encaminhando, setEncaminhando] = useState<MensagemGrupo | null>(null);
+  const [agendando, setAgendando] = useState(false);
+  const [versaoAg, setVersaoAg] = useState(0);
   const campoRef = useRef<HTMLTextAreaElement>(null);
   const midiaRef = useRef<HTMLInputElement>(null);
   const docRef = useRef<HTMLInputElement>(null);
@@ -85,7 +99,8 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
   }, [grupo.jid]);
   useEffect(() => { void carregar(); }, [carregar]);
   useRepetir(carregar, 5000);
-  useEffect(() => { participantesDoGrupo(grupo.jid).then(setPart).catch(() => setPart([])); }, [grupo.jid]);
+  const lerParticipantes = useCallback(() => { participantesDoGrupo(grupo.jid).then(setPart).catch(() => setPart([])); }, [grupo.jid]);
+  useEffect(() => { lerParticipantes(); }, [lerParticipantes]);
   useEffect(() => {
     const ult = msgs[msgs.length - 1]?.id ?? null;
     if (ult && ult !== ultimoId.current) fimRef.current?.scrollIntoView({ block: "end" });
@@ -126,8 +141,13 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
         setEditandoMsg(null);
       } else {
         const tels: string[] = [];
-        for (const mm of mencoes) if (t.includes(mm.rotulo)) { t = t.split(mm.rotulo).join(`@${mm.tel}`); tels.push(mm.tel); }
-        await enviarNoGrupo(grupo.jid, t, { respondendoA: respondendo?.id, mencoes: tels });
+        let todos = false;
+        for (const mm of mencoes) {
+          if (!t.includes(mm.rotulo)) continue;
+          if (mm.tel === "todos") { todos = true; continue; } // "@todos" fica no texto; a Evolution marca todo mundo
+          t = t.split(mm.rotulo).join(`@${mm.tel}`); tels.push(mm.tel);
+        }
+        await enviarNoGrupo(grupo.jid, t, { respondendoA: respondendo?.id, mencoes: tels, todos });
         setRespondendo(null);
       }
       setTexto(""); setMencoes([]); setBusca(null);
@@ -140,7 +160,8 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
   const sugestoes = useMemo(() => {
     if (busca === null) return [];
     const q = busca.toLowerCase();
-    return part.filter((p) => !q || p.nome.toLowerCase().includes(q) || p.telefone.includes(q)).slice(0, 8);
+    const lista = part.filter((p) => !q || p.nome.toLowerCase().includes(q) || p.telefone.includes(q)).slice(0, 8);
+    return "todos".startsWith(q) ? [TODOS, ...lista] : lista;
   }, [busca, part]);
   function aoDigitar(v: string) {
     setTexto(v);
@@ -153,7 +174,7 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
     const el = campoRef.current;
     const pos = el?.selectionStart ?? texto.length;
     const antes = texto.slice(0, pos).replace(/@([^\s@]{0,30})$/, "");
-    const rotulo = `@${p.nome.split(" ").slice(0, 2).join(" ")}`;
+    const rotulo = p === TODOS ? "@todos" : `@${p.nome.split(" ").slice(0, 2).join(" ")}`;
     const novo = `${antes}${rotulo} ${texto.slice(pos)}`;
     setTexto(novo); setMencoes((l) => [...l.filter((x) => x.rotulo !== rotulo), { rotulo, tel: p.telefone }]); setBusca(null);
     requestAnimationFrame(() => { el?.focus(); const c = (antes + rotulo + " ").length; el?.setSelectionRange(c, c); });
@@ -191,7 +212,7 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
   async function enviarArquivo() {
     if (!arquivo || enviando) return;
     setEnviando(true); setErro(null);
-    try { await enviarMidiaNoGrupo(grupo.jid, arquivo, legenda.trim()); setArquivo(null); setLegenda(""); setTexto(""); await carregar(); onMudou(); }
+    try { await enviarMidiaNoGrupo(grupo.jid, arquivo, legenda.trim(), respondendo?.id); setArquivo(null); setLegenda(""); setTexto(""); setRespondendo(null); await carregar(); onMudou(); }
     catch (e) { setErro(e instanceof Error ? e.message : "Não enviou."); }
     setEnviando(false);
   }
@@ -235,6 +256,7 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
     const minha = (m.reacoes || []).find((r) => r.de === "eu")?.emoji ?? null;
     itens.push({ tipo: "reacoes", emojis: REACOES, atual: minha, onEscolher: (e) => void acao(() => reagirNoGrupo(m.id, e === minha ? "" : e)) });
     itens.push({ rotulo: "Responder", icone: ICO.responder, onClick: () => { setEditandoMsg(null); setRespondendo(m); campoRef.current?.focus(); } });
+    if (m.texto || m.anexo_url) itens.push({ rotulo: "Encaminhar", icone: ICO.encaminhar, onClick: () => setEncaminhando(m) });
     if (m.texto) itens.push({ rotulo: "Copiar", icone: ICO.copiar, onClick: () => { void navigator.clipboard?.writeText(m.texto.replace(ASSINATURA, "")).then(() => setAviso("Mensagem copiada.")); } });
     if (!m.de_mim && m.autor_jid) {
       const tel = String(m.autor_jid).split("@")[0];
@@ -254,18 +276,27 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
   let diaAnterior = "";
   const segundos = gravando ? Math.floor((agora - gravando.ini) / 1000) : 0;
   return (
-    <>
+    <div className="flex flex-1 min-h-0 min-w-0">
+    <div className="flex flex-col flex-1 min-h-0 min-w-0">
       <header className="wa-cab flex items-center gap-3 px-3 py-2.5 border-b" style={{ borderColor: "var(--wa-line)" }}>
         <button type="button" className="lg:hidden wa-icone p-2" onClick={onVoltar} aria-label="Voltar para a lista">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
         </button>
-        <AvatarWa nome={nomeDoGrupo(grupo)} tamanho={40} />
-        <div className="min-w-0">
-          <p className="truncate text-[16px]" style={{ color: "var(--wa-txt)" }}>{nomeDoGrupo(grupo)}</p>
-          <p className="text-[13px] truncate" style={{ color: "var(--wa-meta)" }}>
-            {part.length ? part.slice(0, 6).map((p) => p.nome.split(" ")[0]).join(", ") + (part.length > 6 ? ` e mais ${part.length - 6}` : "") : grupo.participantes ? `${grupo.participantes} participantes` : "Grupo"}
-          </p>
-        </div>
+        <button type="button" className="flex items-center gap-3 min-w-0 flex-1 text-left" onClick={() => setInfoAberta(true)} title="Dados do grupo" aria-label="Abrir dados do grupo">
+          <FotoGrupo grupo={grupo} tamanho={40} />
+          <span className="min-w-0">
+            <span className="block truncate text-[16px]" style={{ color: "var(--wa-txt)" }}>{nomeDoGrupo(grupo)}</span>
+            <span className="block text-[13px] truncate" style={{ color: "var(--wa-meta)" }}>
+              {part.length ? part.slice(0, 6).map((p) => p.nome.split(" ")[0]).join(", ") + (part.length > 6 ? ` e mais ${part.length - 6}` : "") : grupo.participantes ? `${grupo.participantes} participantes` : "clique para ver os dados do grupo"}
+            </span>
+          </span>
+        </button>
+        <button type="button" className="wa-icone w-10 h-10 inline-flex items-center justify-center flex-shrink-0" onClick={() => setAgendando(true)} aria-label="Agendar mensagem" title="Agendar mensagem">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 2.5M9 2h6" /></svg>
+        </button>
+        <button type="button" className="wa-icone w-10 h-10 inline-flex items-center justify-center flex-shrink-0" onClick={() => setInfoAberta((x) => !x)} aria-label="Dados do grupo" aria-pressed={infoAberta} title="Dados do grupo">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+        </button>
       </header>
 
       <div className="flex-1 overflow-y-auto min-h-0 wa-fundo px-3 sm:px-[6%] py-3" onClick={() => setAnexoMenu(false)}>
@@ -297,6 +328,7 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
                     <p className="italic text-[13.5px] pr-12" style={{ color: "var(--wa-meta)" }}>🚫 {m.de_mim ? "Você apagou esta mensagem" : "Esta mensagem foi apagada"}</p>
                   ) : (
                     <>
+                      {m.encaminhada && <p className="text-[12px] italic mb-0.5" style={{ color: "var(--wa-meta)" }}>↪ Encaminhada</p>}
                       {(m.responde_a || m.citado_texto) && (
                         <div className="rounded-md px-2 py-1 mb-1 text-[12.5px]" style={{ background: "rgba(127,127,127,.12)", borderLeft: `4px solid ${corDoNome(autorCitado(citada ? (citada.de_mim ? "eu" : citada.autor_jid) : m.citado_autor))}` }}>
                           <span className="block font-semibold" style={{ color: corDoNome(autorCitado(citada ? (citada.de_mim ? "eu" : citada.autor_jid) : m.citado_autor)) }}>
@@ -313,7 +345,7 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
                       {m.texto && <TextoWa texto={comNomes(m.texto)} />}
                     </>
                   )}
-                  <span className="wa-hora">{m.editada_em && !m.apagada_em ? "editada · " : ""}{hora(m.criado_em)}</span>
+                  <span className="wa-hora">{m.editada_em && !m.apagada_em ? "editada · " : ""}{hora(m.criado_em)}{m.de_mim && !m.apagada_em && <Tiques status={m.status ? TIQUE[m.status] : "sent"} />}</span>
                   {reacoes.length > 0 && (
                     <span className="absolute -bottom-3 left-2 wa-chip rounded-full px-1.5 py-0.5 text-[13px] flex items-center gap-0.5" title={reacoes.map((r) => `${r.emoji} ${r.de === "eu" ? "Você" : r.nome || autorCitado(r.de)}`).join("\n")}>
                       {[...new Set(reacoes.map((r) => r.emoji))].slice(0, 3).join("")}{reacoes.length > 1 && <span className="text-[11px] ml-0.5" style={{ color: "var(--wa-meta)" }}>{reacoes.length}</span>}
@@ -333,6 +365,7 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
 
         {arquivo ? (
           <div className="rounded-xl p-3 space-y-2" style={{ background: "var(--wa-list)" }}>
+            {respondendo && <p className="text-[12.5px] truncate" style={{ color: "var(--wa-green-ink)" }}>Respondendo a {respondendo.de_mim ? "Você" : autorDe(respondendo)}: {(respondendo.texto || "📎 mídia").replace(ASSINATURA, "")}</p>}
             <div className="flex items-center gap-3">
               {previa && arquivo.type.startsWith("image/") && (
                 <button type="button" onClick={() => setEditandoFoto(true)} className="relative flex-shrink-0 rounded-lg overflow-hidden" aria-label="Editar foto">
@@ -388,10 +421,10 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
             {sugestoes.length > 0 && (
               <ul className="wa-lista rounded-xl overflow-hidden mb-2 max-h-64 overflow-y-auto shadow-lg" role="listbox" aria-label="Marcar participante">
                 {sugestoes.map((p, i) => (
-                  <li key={p.telefone}>
+                  <li key={p === TODOS ? "@todos" : p.telefone}>
                     <button onMouseDown={(e) => { e.preventDefault(); marcar(p); }} className="wa-item w-full text-left flex items-center gap-2.5 px-3 py-2" aria-selected={i === busIdx} style={i === busIdx ? { background: "var(--wa-sel)" } : undefined}>
                       <AvatarWa nome={p.nome} tamanho={32} />
-                      <span className="flex-1 min-w-0 truncate text-[14px]" style={{ color: "var(--wa-txt)" }}>{p.nome}</span>
+                      <span className="flex-1 min-w-0 truncate text-[14px]" style={{ color: "var(--wa-txt)" }}>{p === TODOS ? <><b>@todos</b> <span style={{ color: "var(--wa-meta)" }}>· avisa todo mundo do grupo</span></> : p.nome}</span>
                       {p.admin && <span className="text-[11px]" style={{ color: "var(--wa-meta)" }}>admin</span>}
                     </button>
                   </li>
@@ -430,7 +463,7 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
                 </button>
               )}
             </div>
-            <p className="text-[11.5px] mt-1" style={{ color: "var(--wa-meta)" }}>Sai assinado com o seu nome · Ctrl+B negrito · Ctrl+I itálico · botão direito na mensagem: reagir, responder, editar, apagar</p>
+            <p className="text-[11.5px] mt-1" style={{ color: "var(--wa-meta)" }}>Sai assinado com o seu nome · @todos avisa o grupo inteiro · botão direito na mensagem: reagir, responder, encaminhar, editar, apagar · ⏰ no topo agenda</p>
           </>
         )}
         {editandoFoto && arquivo && <EditorFoto arquivo={arquivo} onCancelar={() => setEditandoFoto(false)} onPronto={(f) => { setEditandoFoto(false); setArquivo(f); }} />}
@@ -438,6 +471,16 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado }: {
 
       <MenuContexto pos={menuMsg?.pos ?? null} itens={menuMsg ? itensDaMensagem(menuMsg.m) : []} onFechar={() => setMenuMsg(null)} rotulo="Opções da mensagem" />
       {foto !== null && fotos.length > 0 && <Visualizador fotos={fotos} indice={Math.min(foto, fotos.length - 1)} onFechar={() => setFoto(null)} onTrocar={setFoto} />}
-    </>
+    </div>
+      {infoAberta && (
+        <div className="fixed inset-0 z-40 flex lg:static lg:z-auto">
+          <InfoGrupo grupo={grupo} participantes={part} onFechar={() => setInfoAberta(false)} onMudou={onMudou} onRecarregarParticipantes={lerParticipantes}
+            onPrivado={onPrivado} versaoAgendadas={versaoAg} onAgendar={() => setAgendando(true)} />
+        </div>
+      )}
+      <EncaminharModal msg={encaminhando} grupoAtual={grupo.jid} onFechar={() => setEncaminhando(null)} onFeito={(t) => { setAviso(t); onMudou(); }} />
+      <AgendarModal aberto={agendando} grupo={grupo} textoInicial={texto.trim()} ligado={agendadasLigadas} onFechar={() => setAgendando(false)}
+        onFeito={(t) => { setAviso(t); setVersaoAg((n) => n + 1); if (texto.trim()) setTexto(""); }} />
+    </div>
   );
 }
