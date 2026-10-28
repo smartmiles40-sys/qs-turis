@@ -39,6 +39,7 @@ import FichaFechamentoResumo from "@/closer/FichaFechamentoResumo";
 import { desarquivarViagens } from "../lib/operacao";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 import TudoDaViagem from "./TudoDaViagem";
+import GruposDaViagem from "./GruposDaViagem";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
   return (
@@ -472,6 +473,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               })}
             </ul>
           </Secao>
+
+          {/* 0219: os grupos do WhatsApp ligados a esta viagem ou à expedição dela */}
+          <GruposDaViagem viagemId={v.id} />
 
           {/* 0184: preferências da pessoa — fácil de preencher e cobradas perto do embarque */}
           <Secao titulo="Preferências do cliente">

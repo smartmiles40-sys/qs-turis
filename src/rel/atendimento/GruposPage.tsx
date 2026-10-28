@@ -6,13 +6,18 @@
 // (Evolution, QR) — a API oficial da Meta não entrega grupo. Essa ligação só
 // trata grupo: conversa com pessoa nunca entra aqui, e o envio só sai pra grupo.
 // Mesmo visual do Atendimento (WA_CSS), sem SLA nem etiquetas.
+// 28/10 (0219): foto do grupo, fixar no topo, marcar como lida/não lida (botão
+// direito), filtros (não lidas / sem viagem) e "Ligar às viagens" (sugestões).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ConversaGrupo from "./ConversaGrupo";
-import { AvatarWa, WA_CSS, horaDaLista } from "./waUi";
+import { WA_CSS, horaDaLista } from "./waUi";
+import { FotoGrupo } from "./GrupoExtras";
+import { VincularGruposModal } from "./VinculoGrupo";
+import MenuContexto, { ICO, posicaoDoEvento, type ItemMenu, type PosicaoMenu } from "./MenuContexto";
 import ModeloModal from "./ModeloModal";
 import { variantesBr } from "./Organizar";
-import { estadoDosGrupos, listarGrupos, marcarGrupoLido, sincronizarGrupos, type Grupo } from "../lib/grupos";
+import { estadoDosGrupos, fixarGrupo, listarGrupos, marcarGrupo, marcarGrupoLido, ordenarGrupos, sincronizarGrupos, type Grupo } from "../lib/grupos";
 import { supabase } from "@/lib/supabase";
 
 /** Enquanto a aba está visível, roda `fn` a cada `ms` (e ao voltar pra aba). Uma de cada vez:
@@ -55,7 +60,10 @@ export default function GruposPage({ grupoJid, abrir, abrirConversa }: {
   };
   const [carregando, setCarregando] = useState(true);
   const [busca, setBusca] = useState("");
-  const [estado, setEstado] = useState<{ conectado: boolean; estado: string } | null>(null);
+  const [estado, setEstado] = useState<{ conectado: boolean; estado: string; agendadas?: boolean } | null>(null);
+  const [filtro, setFiltro] = useState<"todos" | "naolidas" | "semviagem" | "comviagem">("todos");
+  const [menuGrupo, setMenuGrupo] = useState<{ g: Grupo; pos: PosicaoMenu } | null>(null);
+  const [vinculando, setVinculando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
 
@@ -76,16 +84,35 @@ export default function GruposPage({ grupoJid, abrir, abrirConversa }: {
     setSincronizando(true); setAviso(null);
     try {
       const r = await sincronizarGrupos();
-      setAviso(`${r.grupos} grupo${r.grupos === 1 ? "" : "s"} encontrado${r.grupos === 1 ? "" : "s"}.`);
+      setAviso(r.aviso || (r.grupos == null ? "Atualizei os grupos." : `${r.grupos} grupo${r.grupos === 1 ? "" : "s"} encontrado${r.grupos === 1 ? "" : "s"}${r.sairam ? ` · ${r.sairam} que o número saiu` : ""}.`));
       await carregar();
     } catch (e) { setAviso((e as Error).message); }
     setSincronizando(false);
   };
 
+  const temVinculo = grupos.some((g) => "expedicao_id" in g); // 0219 já rodou no banco?
   const visiveis = useMemo(() => {
     const q = busca.trim().toLowerCase();
-    return q ? grupos.filter((g) => nomeDoGrupo(g).toLowerCase().includes(q)) : grupos;
-  }, [grupos, busca]);
+    return grupos.filter((g) => (!q || nomeDoGrupo(g).toLowerCase().includes(q))
+      && (filtro === "todos" || (filtro === "naolidas" ? (g.nao_lidas ?? 0) > 0 || !!g.mencionado_em
+        : filtro === "semviagem" ? !g.expedicao_id && !g.viagem_id : !!(g.expedicao_id || g.viagem_id))));
+  }, [grupos, busca, filtro]);
+
+  // fixar / lida / não lida (só no QS — o celular não muda). Otimista: mexe na lista e confirma no servidor.
+  const mexer = async (jid: string, mudanca: Partial<Grupo>, fn: () => Promise<unknown>) => {
+    setGrupos((l) => ordenarGrupos(l.map((g) => (g.jid === jid ? { ...g, ...mudanca } : g))));
+    try { await fn(); } catch (e) { setAviso((e as Error).message); void carregar(); }
+  };
+  const itensDoGrupo = (g: Grupo): ItemMenu[] => {
+    const lida = !(g.nao_lidas ?? 0) && !g.mencionado_em;
+    return [
+      { rotulo: "Abrir", icone: ICO.lista, onClick: () => abrir(g.jid) },
+      ...(temVinculo ? [{ rotulo: g.fixado_em ? "Desafixar" : "Fixar no topo", icone: ICO.fixar, onClick: () => void mexer(g.jid, { fixado_em: g.fixado_em ? null : new Date().toISOString() }, () => fixarGrupo(g.jid, !g.fixado_em)) }] : []),
+      lida
+        ? { rotulo: "Marcar como não lida", icone: ICO.lida, onClick: () => void mexer(g.jid, { nao_lidas: 1 }, () => marcarGrupo(g.jid, false)) }
+        : { rotulo: "Marcar como lida", icone: ICO.lida, onClick: () => void mexer(g.jid, { nao_lidas: 0, mencionado_em: null }, () => marcarGrupo(g.jid, true)) },
+    ];
+  };
   const aberto = grupos.find((g) => g.jid === grupoJid) || null;
   // abriu o grupo = leu (zera a bolinha e o @)
   useEffect(() => {
@@ -110,10 +137,22 @@ export default function GruposPage({ grupoJid, abrir, abrirConversa }: {
               title="Buscar os grupos do número no WhatsApp">
               {sincronizando ? "Buscando…" : "Atualizar lista"}
             </button>
+            {temVinculo && (
+              <button type="button" className="wa-icone px-3 py-1.5 text-[13px] font-medium" onClick={() => setVinculando(true)} title="Ligar os grupos às expedições, com sugestão pelo nome">
+                Ligar às viagens
+              </button>
+            )}
           </div>
           <div className="px-3 pb-2">
             <input className="wa-campo w-full px-3 py-2 text-[14px]" style={{ background: "var(--wa-head)" }} placeholder="Pesquisar grupo"
               value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Pesquisar grupo" />
+          </div>
+          <div className="px-3 pb-2 flex gap-1.5 flex-wrap" role="tablist" aria-label="Filtrar grupos">
+            {([["todos", "Todos"], ["naolidas", "Não lidas"], ...(temVinculo ? [["comviagem", "Com viagem"], ["semviagem", "Sem viagem"]] : [])] as [typeof filtro, string][]).map(([id, r]) => (
+              <button key={id} type="button" role="tab" aria-selected={filtro === id} onClick={() => setFiltro(id)}
+                className="px-3 py-1 rounded-full text-[13px]"
+                style={filtro === id ? { background: "rgba(0,168,132,.15)", color: "var(--wa-green-ink)", fontWeight: 600 } : { background: "var(--wa-head)", color: "var(--wa-meta)" }}>{r}</button>
+            ))}
           </div>
           {aviso && <p className="px-4 pb-2 text-[12.5px]" style={{ color: "var(--wa-meta)" }}>{aviso}</p>}
           <div className="flex-1 overflow-y-auto min-h-0">
@@ -125,8 +164,9 @@ export default function GruposPage({ grupoJid, abrir, abrirConversa }: {
             )}
             {visiveis.map((g) => (
               <button key={g.jid} type="button" onClick={() => abrir(g.jid)} aria-current={g.jid === grupoJid}
+                onContextMenu={(e) => { e.preventDefault(); setMenuGrupo({ g, pos: posicaoDoEvento(e) }); }}
                 className="wa-item w-full text-left flex items-center gap-3 px-3 py-2.5">
-                <AvatarWa nome={nomeDoGrupo(g)} />
+                <FotoGrupo grupo={g} />
                 <span className="flex-1 min-w-0 border-b pb-2.5 -mb-2.5" style={{ borderColor: "var(--wa-line)" }}>
                   <span className="flex items-baseline gap-2">
                     <span className="flex-1 truncate text-[16px]" style={{ color: "var(--wa-txt)" }}>{nomeDoGrupo(g)}</span>
@@ -135,6 +175,9 @@ export default function GruposPage({ grupoJid, abrir, abrirConversa }: {
                   <span className="flex items-center gap-1.5">
                     <span className="flex-1 min-w-0 truncate text-[14px]" style={{ color: (g.nao_lidas ?? 0) > 0 ? "var(--wa-txt)" : "var(--wa-meta)" }}>{g.ultima_msg || (g.participantes ? `${g.participantes} participantes` : "")}</span>
                     {/* igual ao WhatsApp: @ quando marcaram o número, bolinha verde com as não lidas */}
+                    {g.fixado_em && <span className="flex-shrink-0" title="Fixado" aria-label="Fixado" style={{ color: "var(--wa-meta)" }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3l5 5-3 1-4 4 1 5-2 2-4-4-5 5-1-1 5-5-4-4 2-2 5 1 4-4z" /></svg>
+                    </span>}
                     {g.mencionado_em && <span className="w-5 h-5 rounded-full flex-shrink-0 inline-flex items-center justify-center text-[12px] font-bold" style={{ background: "var(--wa-green)", color: "#fff" }} title="Marcaram o número neste grupo" aria-label="Marcaram o número neste grupo">@</span>}
                     {(g.nao_lidas ?? 0) > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full flex-shrink-0 inline-flex items-center justify-center text-[11.5px] font-bold tabular-nums" style={{ background: "var(--wa-green)", color: "#fff" }} aria-label={`${g.nao_lidas} não lidas`}>{g.nao_lidas! > 99 ? "99+" : g.nao_lidas}</span>}
                   </span>
@@ -144,7 +187,7 @@ export default function GruposPage({ grupoJid, abrir, abrirConversa }: {
           </div>
         </aside>
         <section className={`${grupoJid ? "flex" : "hidden lg:flex"} flex-1 flex-col min-w-0 min-h-0`}>
-          {aberto ? <ConversaGrupo key={aberto.jid} grupo={aberto} onVoltar={() => abrir(null)} onMudou={carregar} onPrivado={(t, n) => void chamarNoPrivado(t, n)} />
+          {aberto ? <ConversaGrupo key={aberto.jid} grupo={aberto} onVoltar={() => abrir(null)} onMudou={carregar} onPrivado={(t, n) => void chamarNoPrivado(t, n)} agendadasLigadas={estado?.agendadas ?? null} />
             : (
               <div className="flex-1 flex items-center justify-center px-8 text-center wa-cab">
                 <p className="text-[14px] max-w-sm" style={{ color: "var(--wa-meta)" }}>
@@ -154,6 +197,8 @@ export default function GruposPage({ grupoJid, abrir, abrirConversa }: {
             )}
         </section>
       </div>
+      <MenuContexto pos={menuGrupo?.pos ?? null} itens={menuGrupo ? itensDoGrupo(menuGrupo.g) : []} onFechar={() => setMenuGrupo(null)} rotulo="Opções do grupo" />
+      <VincularGruposModal aberto={vinculando} grupos={grupos} onFechar={() => setVinculando(false)} onMudou={() => void carregar()} />
       <ModeloModal aberto={!!modeloPara} alvo={{ telefone: modeloPara?.telefone }} nomeCliente={modeloPara?.nome ?? null}
         onFechar={() => setModeloPara(null)}
         onEnviado={(id) => { setModeloPara(null); if (id) abrirConversa(id); else setAviso("Modelo enviado. Quando a pessoa responder, a conversa libera."); }} />

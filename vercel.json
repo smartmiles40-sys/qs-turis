@@ -137,7 +137,7 @@
     },
     {
       "path": "/api/rel-grupos?cron=1",
-      "schedule": "7 */6 * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/expedicoes?acao=atualizar-status",
