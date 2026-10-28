@@ -24,6 +24,7 @@ import SaudeCampos from "./SaudeCampos";
 import { Bloco, LiberarExpedAmigo, MudarExpedicao, PassaporteAnexo, PasseiosEExtensoes, PerfilConexoes, QuartoAcompanhante } from "./blocos";
 import { Ponto, SeloFidelidade } from "./pecas";
 import BlocoFichaCliente from "@/clientes/BlocoFichaCliente";
+import { BlocoValoresPax } from "../valores/PainelValores";
 
 const CAMPOS_TEXTO = [
   "nome_completo", "cpf", "telefone", "passaporte", "validade_passaporte", "data_nascimento", "email", "observacoes",
@@ -159,6 +160,8 @@ export default function EditarPassageiro({ exp, pax, dados, resultado, posicao, 
                 {txt("endereco_estado", "Estado (UF)")}
               </div>
             </Bloco>
+
+            <BlocoValoresPax exp={exp} paxId={pax.id} />
 
             <Bloco titulo="Documentos do passageiro">
               <PassaporteAnexo exp={exp} pax={pax} arquivos={dados.arquivos} onMudou={onMudou} />

@@ -188,3 +188,58 @@ Depois:
 - `scripts/app-cliente/migrar-acessos.sql`: logins da equipe com a senha preservada (simulação + rollback).
 - `scripts/app-cliente/noite-guardar-vinculos.sql` / `noite-restaurar-vinculos.sql`: protegem o cadastro único na recópia.
 - App antigo, branch local `app-viagem` (worktree `WorkFlows/sistema-expedicoes-app-viagem`): esqueleto da tela "Minha viagem".
+
+---
+
+## 3. Preenchimento pelo cliente 100% no QS (28/10, migration 0220, frente ops-valores)
+
+**Decisão:** as telas que o cliente usa continuam no app antigo (`/inscricao`, `/a/`, `/amigo`, `/lider`); depois
+da Fase 0 elas gravam **direto no banco do QS**. Então o "100% no QS" foi feito no BANCO: tudo que o cliente manda
+cai em `passageiros`, sobe pro cadastro único (`rel_clientes`) e dá baixa nos requisitos sozinho, venha de qual tela
+vier (inscrição, aprovação, equipe, Bitrix ou script).
+
+### Tela a tela (app antigo `app-viagem` 751a6b6 × QS)
+| Tela do cliente (antigo) | O que grava | No QS antes | O que a 0220 acrescenta |
+|---|---|---|---|
+| `/inscricao` (formulário: dados pessoais, passaporte + anexo, foto, endereço, contato de emergência, saúde + certificado febre amarela, preferências de voo/assento, acompanhante, perfil) | `inscricoes_pendentes` (staging) + `arquivos` no bucket `arquivos-expedicoes`; e já preenche os campos VAZIOS do passageiro (`salvarPerfilGlobalInscricao`) | tela **Inscrições** aprova/recusa (`exp_inscricao_aprovar`), mas tudo esperava a equipe | **aprovação automática** de quem já é passageiro da expedição (chave `ops_config.inscricao_auto_aprovar`, desligada). Pessoa nova continua na fila |
+| Upload do passaporte | `passaporte_arquivo_id` + número + validade | requisito "Passaporte" ficava **Pendente** até alguém marcar | **baixa automática**: número + validade ≥ 6 meses após o retorno + anexo → **Aprovado**; sem anexo → Enviado; validade curta → Vencido |
+| Certificado de febre amarela | `saude.vacina_febre_amarela_arquivo_id` | `exp__espalhar_vacina` já dava baixa na Vacina | — (já funcionava) |
+| Contato de emergência / endereço / restrições alimentares | colunas do passageiro | só no passageiro; a ficha (`rel_clientes`) recebia 6 campos (CPF, passaporte, validade, nascimento, e-mail, telefone — 0172) | também vão pra `rel_clientes.dados_expedicoes` (`contato_emergencia`, `endereco`, `endereco_partes`, `restricoes_alimentares`) |
+| Ficha de saúde, preferências, perfil | `saude`, `pref_*`, `perfil_viajante` | gaveta do passageiro (aba Saúde) e perfil | — (já funcionava; saúde fica só no passageiro, de propósito: dado sensível) |
+| `/a/<código>` (1º acesso) | `acesso_senhas`, `liberado_expedamigo` | botão "gerar link" (`exp_amigo_gerar_link`) | — |
+| `/amigo` (ExpedAmigo) e `/lider` | só leem (+ trocar senha) | aba ExpedAmigo e Roteiro do Líder alimentam o que eles mostram | — |
+| Localizador do aéreo (equipe/Bitrix) | `localizador`, `voo_nacional_necessario` | requisito só nascia certo; depois não mudava | Aéreo Internacional → Aprovado quando chega o localizador; Aéreo Doméstico ↔ Dispensado conforme `voo_nacional_necessario` |
+| Endereço dos portais nos botões do QS | — | fixo no código (`comum.ts`) | atrás de config: `VITE_EXP_PORTAL_URL` (front) e `EXP_PORTAL_URL` (api, já existia) |
+
+Regras da baixa automática: nunca rebaixa um Aprovado (só pra Vencido, se a validade nova não serve), não mexe em
+Dispensado e não desfaz um Reprovado se o que mudou foi só o status da reserva.
+
+### Valor de cada cliente (mesma migration)
+- Aba **Valores** da expedição + bloco "Valores" na gaveta do passageiro: condição (padrão / sem aéreo / ExpedAmigo /
+  especial com texto), contratado, pago, saldo (`saldo_brl` é gerado), status (Sem valor / Em aberto / Parcial /
+  Quitado, calculado pelo banco), preço de referência com aéreo (`preco_venda_brl`) e sem aéreo
+  (`preco_sem_aereo_brl`, novo), totais (vendido, recebido, a receber) e histórico de quem mudou (`exp_valor_historico`).
+- **`fin_planos`/`fin_parcelas`:** são o lugar das PARCELAS da venda (por negócio, podendo cobrir um casal). Não
+  viraram a fonte do "pago" do passageiro: a tela mostra, ao lado, o plano ligado (`exp_valores_financeiro`: plano
+  cuja viagem `rel_viagens.expedicoes_id` é a expedição e cujo cliente é o passageiro ou está em
+  `rel_viagem_passageiros`) e oferece "usar recebido como pago" quando o plano é de uma pessoa só. Hoje os dois estão
+  vazios; quando o Financeiro começar a lançar parcelas, aparece sozinho.
+
+### Checklist da virada (atualizado — soma ao da seção 1)
+Antes:
+- [ ] Aplicar a **0220** (independe da 0210).
+- [ ] No SQL Editor: `select _exp_gerar_requisitos_faltantes();` (143 passageiros sem requisitos em 28/10) e
+      `select _exp_requisitos_dar_baixa_todos();` (dá baixa no que já está preenchido). Conferir a Prontidão de 2–3 expedições.
+- [ ] Preencher o preço com/sem aéreo das expedições abertas (aba Valores) e os valores de quem já comprou.
+- [ ] Decidir a aprovação automática: `insert into ops_config (chave, valor) values ('inscricao_auto_aprovar', 'true') on conflict (chave) do update set valor = excluded.valor;`
+
+Na noite (depois do passo 8 da seção 1):
+- [ ] Vercel do QS: `EXP_PORTAL_URL` e `VITE_EXP_PORTAL_URL` = domínio do app antigo (ou o domínio próprio) → Redeploy.
+- [ ] Teste ponta a ponta com um CPF de teste que já é passageiro: abrir `/inscricao` pelo portal, mandar passaporte
+      válido + anexo + contato de emergência → no QS: passageiro atualizado, Inscrições sem pendência (se a automática
+      estiver ligada), requisito Passaporte **Aprovado**, ficha do cliente com o contato de emergência.
+- [ ] Mesmo teste com um CPF novo → cai em Inscrições (fila), aprovar à mão, conferir os mesmos pontos.
+
+Depois:
+- [ ] `acesso_links` ganhar `cliente_id` (cliente que não é de expedição) — Fase 2, não feito.
+- [ ] Links longos assinados com a chave antiga (`/amigo/acesso?t=`, `/inscricao?t=`) — ver seção 1, risco 2.

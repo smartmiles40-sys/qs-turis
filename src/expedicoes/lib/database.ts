@@ -97,6 +97,8 @@ export type CambioRow = {
   atualizado_em: string;
 }
 
+export type CondicaoPagamento = "padrao" | "sem_aereo" | "expedamigo" | "especial";
+
 export type ExpedicaoRow = {
   id: string;
   codigo: string;
@@ -111,6 +113,8 @@ export type ExpedicaoRow = {
   pax_planejados: number;
   pax_cortesia: number;
   preco_venda_brl: number;
+  /** Preço de referência por pessoa SEM aéreo (migration 0220). */
+  preco_sem_aereo_brl?: number | null;
   bitrix_pipeline_id: string | null;
   observacoes: string | null;
   ordem: number | null;
@@ -154,6 +158,12 @@ export type PassageiroRow = {
   valor_pago_brl: number;
   saldo_brl: number; // gerado: valor_contratado_brl - valor_pago_brl
   status_financeiro: string;
+  /** padrao | sem_aereo | expedamigo | especial (texto em condicao_obs) — migration 0220. */
+  condicao_pagamento?: CondicaoPagamento;
+  condicao_obs?: string | null;
+  valor_atualizado_em?: string | null;
+  valor_atualizado_por?: string | null;
+  valor_atualizado_por_nome?: string | null;
   // Dados de embarque/pessoais (migration 0010)
   contato_emergencia_nome: string | null;
   contato_emergencia_fone: string | null;

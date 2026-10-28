@@ -19,6 +19,7 @@ export interface PropsAba { exp: ExpedicaoComAgregados; sub: string[]; onMudou: 
 const ABAS = [
   { id: "", rotulo: "Visão Geral" },
   { id: "passageiros", rotulo: "Passageiros" },
+  { id: "valores", rotulo: "Valores" },
   { id: "rooming", rotulo: "Rooming" },
   { id: "checklist", rotulo: "Checklist" },
   { id: "documentos", rotulo: "Documentos" },
@@ -32,6 +33,7 @@ const OCULTAS_PACOTE = new Set<string>(["rooming", "checklist", "roteiro-lider",
 
 const COMPONENTES: Record<Exclude<IdAba, "">, React.LazyExoticComponent<ComponentType<PropsAba>>> = {
   passageiros: lazy(() => import("./abas/AbaPassageiros")),
+  valores: lazy(() => import("./abas/AbaValores")),
   rooming: lazy(() => import("./abas/AbaRooming")),
   checklist: lazy(() => import("./abas/AbaChecklist")),
   documentos: lazy(() => import("./abas/AbaDocumentos")),

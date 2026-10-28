@@ -8,10 +8,12 @@ import { supabase, linkDoArquivo, traduzirErro } from "../../lib/banco";
 /**
  * Endereço PÚBLICO do app antigo, onde ficaram os portais (/amigo, /a/<codigo>,
  * /inscricao). No app antigo vinha de NEXT_PUBLIC_SITE_URL, com este valor de
- * reserva (lib/site.ts). Se o domínio próprio (ex.: portal.setuforeuvouviagens.com.br)
- * for ligado na Vercel do projeto antigo, troque AQUI.
+ * reserva (lib/site.ts). 28/10 (0220): a troca fica atrás de config — defina
+ * VITE_EXP_PORTAL_URL na Vercel do QS (mesmo valor de EXP_PORTAL_URL, usado pela
+ * api/expedicoes.js) e faça Redeploy. Sem a variável, continua o app antigo.
+ * Checklist da virada: docs/APP-CLIENTE.md, seção 3.
  */
-export const PORTAL_ANTIGO_URL = "https://sistema-expedicoes.vercel.app";
+export const PORTAL_ANTIGO_URL = (String(import.meta.env.VITE_EXP_PORTAL_URL ?? "").trim().replace(/\/+$/, "")) || "https://sistema-expedicoes.vercel.app";
 
 /** Admin das Expedições (admin do app antigo OU admin do QS) — o banco decide; aqui só esconde botões. */
 export function useEhAdminExp(): boolean | null {
