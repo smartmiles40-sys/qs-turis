@@ -101,8 +101,11 @@ alter table passageiros add column if not exists venda_item_id         uuid refe
 alter table passageiros add column if not exists quarto_par_id         uuid;
 alter table passageiros add column if not exists quarto_desejado       text;
 alter table passageiros add column if not exists aereo_incluso         boolean;
-alter table passageiros add column if not exists condicao_especial     boolean not null default false;
-alter table passageiros add column if not exists condicao_especial_obs text;
+-- Condição do passageiro: UMA coluna só, a mesma da aba Valores do Ops (0220):
+-- condicao_pagamento padrao|sem_aereo|expedamigo|especial + condicao_obs. Criada
+-- aqui também porque a 0214 roda antes da 0220 (as duas usam "if not exists").
+alter table passageiros add column if not exists condicao_pagamento text not null default 'padrao';
+alter table passageiros add column if not exists condicao_obs       text;
 alter table passageiros add column if not exists pagamento             jsonb;
 create index if not exists passageiros_venda on passageiros (venda_id) where venda_id is not null;
 create index if not exists passageiros_quarto_par on passageiros (quarto_par_id) where quarto_par_id is not null;
@@ -439,13 +442,15 @@ begin
       if v_pax is null then
         insert into passageiros (expedicao_id, cliente_id, nome_completo, tipo, status_reserva, telefone, email, cpf,
                                  valor_contratado_brl, valor_pago_brl, inscricao_origem, venda_id, venda_item_id,
-                                 aereo_incluso, quarto_desejado, acompanhante_dividir_com, condicao_especial,
-                                 condicao_especial_obs, pagamento, observacoes)
+                                 aereo_incluso, quarto_desejado, acompanhante_dividir_com, condicao_pagamento,
+                                 condicao_obs, pagamento, observacoes)
         select v_exp, c.id, c.nome, 'Pagante'::tipo_passageiro, 'Pré-reserva'::status_reserva, c.telefone, c.email, c.cpf,
                nullif(vj ->> 'valor_contratado', '')::numeric, coalesce(nullif(vj ->> 'valor_pago', '')::numeric, 0),
                'QS — venda (' || v_origem || ')', v_venda, v_item_id,
                (vj ->> 'aereo_incluso')::boolean, nullif(trim(coalesce(vj ->> 'quarto_desejado', '')), ''),
-               nullif(trim(coalesce(vj ->> 'divide_com_nome', '')), ''), v_cesp, v_cobs, v_pag,
+               nullif(trim(coalesce(vj ->> 'divide_com_nome', '')), ''),
+               case when v_cesp then 'especial' when (vj ->> 'aereo_incluso')::boolean is false then 'sem_aereo' else 'padrao' end,
+               case when v_cesp then coalesce(nullif(btrim(coalesce(v_cobs, '')), ''), 'Condição especial — ver a venda') end, v_pag,
                nullif(trim(coalesce(p ->> 'observacoes', '')), '')
           from rel_clientes c where c.id = v_pcli
         returning id into v_pax;
@@ -457,7 +462,8 @@ begin
           aereo_incluso = coalesce((vj ->> 'aereo_incluso')::boolean, aereo_incluso),
           quarto_desejado = coalesce(nullif(trim(coalesce(vj ->> 'quarto_desejado', '')), ''), quarto_desejado),
           acompanhante_dividir_com = coalesce(nullif(trim(coalesce(vj ->> 'divide_com_nome', '')), ''), acompanhante_dividir_com),
-          condicao_especial = v_cesp, condicao_especial_obs = v_cobs, pagamento = v_pag
+          condicao_pagamento = case when v_cesp then 'especial' when (vj ->> 'aereo_incluso')::boolean is false then 'sem_aereo' else 'padrao' end,
+          condicao_obs = case when v_cesp then coalesce(nullif(btrim(coalesce(v_cobs, '')), ''), 'Condição especial — ver a venda') end, pagamento = v_pag
          where id = v_pax;
       end if;
       v_mapa := v_mapa || jsonb_build_object(vj ->> 'chave', v_pax);
@@ -520,7 +526,7 @@ grant execute on function venda_subir(jsonb) to authenticated;
 -- drop table if exists exp_vagas_ajustes;
 -- alter table passageiros drop column if exists venda_id, drop column if exists venda_item_id,
 --   drop column if exists quarto_par_id, drop column if exists quarto_desejado, drop column if exists aereo_incluso,
---   drop column if exists condicao_especial, drop column if exists condicao_especial_obs, drop column if exists pagamento;
+--   drop column if exists condicao_pagamento, drop column if exists condicao_obs, drop column if exists pagamento;
 -- alter table qs_venda_itens drop column if exists venda_id;
 -- drop table if exists qs_vendas;
 -- -----------------------------------------------------------------------------

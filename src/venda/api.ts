@@ -213,13 +213,16 @@ function emBase64(f: File): Promise<string> {
  * Contrato do corpo combinado no merge: { arquivo_base64, nome, mime }.
  */
 export async function lerVoucher(arquivo: File): Promise<LeituraVoucher> {
-  if (arquivo.size > 8 * 1024 * 1024) throw new Error("Arquivo grande demais (até 8 MB).");
+  // Envio direto até ~3 MB: a Vercel recusa corpo acima de 4,5 MB depois do base64
+  // (limite medido na frente ia-voucher; arquivo maior teria de ir pelo Storage).
+  if (arquivo.size > 3 * 1024 * 1024) throw new Error("Arquivo grande demais pra leitura direta (até 3 MB). Mande uma foto ou um PDF menor.");
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Sessão expirada. Entre de novo.");
   const r = await fetch("/api/venda-voucher", {
     method: "POST",
     headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ arquivo_base64: await emBase64(arquivo), nome: arquivo.name, mime: arquivo.type || "application/octet-stream" }),
+    // Formato da rota api/venda-voucher.js: lista `arquivos` com { nome, mime, base64 }.
+    body: JSON.stringify({ arquivos: [{ base64: await emBase64(arquivo), nome: arquivo.name, mime: arquivo.type || "application/octet-stream" }] }),
   });
   const j = await r.json().catch(() => null) as (Partial<LeituraVoucher> & { error?: string }) | null;
   if (!r.ok || !j) throw new Error(j?.error || (r.status === 404 ? "A leitura de voucher ainda não está no ar." : `A leitura falhou (HTTP ${r.status}).`));

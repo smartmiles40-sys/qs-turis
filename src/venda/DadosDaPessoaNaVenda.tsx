@@ -4,11 +4,13 @@
 // O banco procura por CPF → telefone → e-mail antes de criar (venda_cliente_resolver,
 // 0214) e só COMPLETA o que a ficha não tem: nunca sobrescreve.
 //
-// TROCAR por CadastroPessoa (frente cadastro) no merge — src/clientes/cadastro/
-// CadastroPessoa.tsx + buscarOuCriarPessoa/salvarPessoa em api.ts.
+// Ficha já conhecida (veio da ficha/viagem/oportunidade): mostra o CadastroPessoa
+// (0213) pra completar ali mesmo passaporte, validade, endereço e quem viaja junto.
+// Pessoa nova: o formulário curto abaixo; a ficha nasce no venda_subir.
 // -----------------------------------------------------------------------------
 import { Campo, Entrada } from "@/rel/ui";
 import type { PessoaVenda } from "./api";
+import CadastroPessoa from "@/clientes/cadastro/CadastroPessoa";
 
 export default function DadosDaPessoaNaVenda({ pessoa, onMudar, travada }: {
   pessoa: PessoaVenda;
@@ -17,6 +19,7 @@ export default function DadosDaPessoaNaVenda({ pessoa, onMudar, travada }: {
   travada?: boolean;
 }) {
   const set = (k: keyof PessoaVenda) => (e: React.ChangeEvent<HTMLInputElement>) => onMudar({ ...pessoa, [k]: e.target.value });
+  if (travada && pessoa.id) return <CadastroPessoa clienteId={pessoa.id} />;
   if (travada) {
     return (
       <div className="rel-card p-4">

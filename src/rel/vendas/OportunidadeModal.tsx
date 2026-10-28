@@ -15,6 +15,7 @@ import {
 import type { TipoItem } from "@/propostas/lib";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 import { podeGerirRelacionamento } from "../equipe/permissao";
+import SubirVenda from "@/venda/SubirVenda";
 
 /** Fechar como Ganho (valor) ou Perdido (motivo). Também usado pelo arrastar do quadro. */
 export function Fechamento({ op, etapa, onFechar, onFeito }: {
@@ -86,6 +87,9 @@ export default function OportunidadeModal({ id, onFechar, onMudou, onAbrirClient
   const [nota, setNota] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const [fechando, setFechando] = useState<"ganho" | "perdido" | null>(null);
+  // A venda do Rel usa a mesma tela do Closer e do Ops (src/venda/SubirVenda.tsx);
+  // gravada a venda, o cartão segue pro Ganho pra registrar o valor no pipeline.
+  const [vendendo, setVendendo] = useState(false);
   // rascunho dos campos editáveis (salvam ao sair do campo)
   const [titulo, setTitulo] = useState("");
   const [valor, setValor] = useState("");
@@ -219,10 +223,7 @@ export default function OportunidadeModal({ id, onFechar, onMudou, onAbrirClient
             </section>
 
             <div className="flex flex-wrap gap-2">
-              {/* ENCAIXAR SubirVenda origem="rel" (frente venda): quando src/venda/SubirVenda.tsx existir,
-                  este botão abre <SubirVenda origem="rel" clienteId={op.cliente_id} viagemId={op.viagem_id} …/>
-                  e, ao concluir, marca o cartão como Ganho com o valor da venda. Até lá, só fecha como Ganho. */}
-              {!fechada && <Botao variante="primario" onClick={() => setFechando("ganho")}>Registrar venda</Botao>}
+              {!fechada && <Botao variante="primario" onClick={() => setVendendo(true)}>Registrar venda</Botao>}
               {!fechada && <Botao variante="perigo" onClick={() => setFechando("perdido")}>Perdido</Botao>}
               {fechada && <Botao onClick={() => void mudar({ etapa: "negociacao" })}>Reabrir</Botao>}
               {supervisao && (
@@ -258,6 +259,11 @@ export default function OportunidadeModal({ id, onFechar, onMudou, onAbrirClient
           </div>
         )}
       </Modal>
+      {op && (
+        <SubirVenda origem="rel" aberto={vendendo} onFechar={() => setVendendo(false)}
+          cliente={{ id: op.cliente_id, nome: op.cliente?.nome ?? "" }} viagemId={op.viagem_id ?? null}
+          onSalvo={() => { setVendendo(false); setFechando("ganho"); }} />
+      )}
       <Fechamento op={fechando ? op : null} etapa={fechando} onFechar={() => setFechando(null)}
         onFeito={(o) => { setFechando(null); setOp(o); void eventos(o.id).then(setHist); onMudou(); }} />
     </>
