@@ -449,7 +449,7 @@ export default function AdvancedAnalyticsPanel() {
                 Largura da barra = % de atendimento na faixa de horário (hora local). Só horas com ligação aparecem.
               </p>
               {callsTotal === 0 ? (
-                <p className="text-sm text-gray-400">Sem ligações registradas ainda — a telefonia começa a logar assim que a migration 0020 for aplicada e os SDRs ligarem pelo sistema.</p>
+                <p className="text-sm text-gray-400">Nenhuma ligação feita pelo sistema neste período.</p>
               ) : (
                 <div className="space-y-2">
                   {hourRows.map((b) => (

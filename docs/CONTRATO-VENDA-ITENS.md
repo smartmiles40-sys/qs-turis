@@ -44,6 +44,18 @@ O Rel e o app do cliente só LEEM essa tabela e escrevem `status`, `dados` e `vi
 - 0209 — Discador (log de tentativas, config)
 - 0210 — App do cliente (acesso do cliente às viagens dele)
 
+- 0211 — Closer (closer_pre_venda atualiza valor/tipo quando a venda já registrada é editada)
+
+## O caminho do closer (27/10 — um caminho só)
+1. **Registrar venda** (itens por tipo) → no último passo, **Salvar e marcar como venda**: grava os itens e faz a
+   pré-venda na mesma ação (o Bitrix vai pra "Em emissão" e o Dashboard conta). Selo: "Venda registrada (falta fechar)".
+   "Salvar rascunho" fica discreto; "desfazer" é um link pequeno no bloco da venda.
+2. **Fechar: pagamento e contrato** → a ficha de fechamento, já preenchida com os itens: plano de pagamento,
+   preferências, responsável no Rel. Cria a viagem e o plano no Financeiro. Selo: "Fechada".
+3. Bitrix é automático: o cron `api/closer?acao=cron-bitrix` (10 min) leva os `pendente` e, 1x/hora cada, os `erro`.
+   A tela só fala do Bitrix quando falha.
+- O bloco de contrato (ZapSign/Google) some quando `api/closer` `acao=config` diz `contrato: false`.
+
 ## Regras para todos
 - NADA aplicado no banco de produção e nada de push ou deploy. As migrations ficam só escritas.
 - Leitura do banco (SELECT) pode.

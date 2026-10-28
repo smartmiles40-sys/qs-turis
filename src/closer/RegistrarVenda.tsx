@@ -10,8 +10,10 @@
 //      (TIPOS[tipo].campos em src/propostas/lib.ts). Quase nada é obrigatório:
 //      o que o closer não souber agora o Relacionamento completa;
 //   3. Valores e passageiros — valor de cada item, total somado, quem viaja.
-// No fim: "Salvar" ou "Salvar e marcar como venda" (pré-venda: sobe pro
-// Dashboard pelo Bitrix na hora).
+// No fim (27/10, um caminho só): "Salvar e marcar como venda" — grava os itens
+// e já faz a pré-venda (sobe pro Dashboard pelo Bitrix na hora). "Salvar
+// rascunho" fica discreto, pra quem ainda não fechou. Venda já marcada: o
+// "Salvar" regrava os itens e manda o valor novo pro Dashboard.
 //
 // Se já houver itens salvos, abre com eles. Se não, e houver proposta
 // APROVADA, abre com os itens dela.
@@ -139,10 +141,14 @@ export default function RegistrarVenda({ negocio, aberto, onFechar, onSalvo }: {
       const pax = passageiros.map((nome) => ({ nome }));
       const final = comValores.map((i) => ({ ...i, passageiros: pax }));
       await salvarItensDaVenda(negocio.id, final);
-      if (marcar && principal) {
+      // Já marcada e o valor/tipo mudou: manda o novo pro Dashboard (precisa da 0211 no banco; sem ela, nada muda).
+      const mudouValor = jaPreVenda && principal && (Math.abs(Number(negocio.pre_venda_valor ?? 0) - total) > 0.009 || negocio.pre_venda_tipo !== principal.tipo);
+      if ((marcar || mudouValor) && principal) {
         onSalvo(await marcarPreVenda(negocio.id, { tipo: principal.tipo, valor: total }));
       } else {
-        onSalvo({ tom: "ok", mensagem: `Venda registrada: ${final.length} item(ns), ${brl(total)}.${jaPreVenda ? " (A pré-venda continua no Dashboard com o valor marcado antes.)" : ""}` });
+        onSalvo({ tom: "ok", mensagem: marcar || jaPreVenda || consolidada
+          ? `Venda salva: ${final.length} item(ns), ${brl(total)}.`
+          : `Rascunho salvo (${brl(total)}). Ainda não conta como venda: quando fechar, abra de novo e use "Salvar e marcar como venda".` });
       }
     } catch (e) {
       setErro((e as Error).message);
@@ -158,12 +164,15 @@ export default function RegistrarVenda({ negocio, aberto, onFechar, onSalvo }: {
         {passo > 0 ? <Botao variante="fantasma" onClick={() => { setErro(null); setPasso(passo - 1); }} disabled={salvando}>← Voltar</Botao>
           : <Botao variante="fantasma" onClick={onFechar} disabled={salvando}>Cancelar</Botao>}
         {!ultimo && <Botao variante="primario" onClick={avancar} disabled={carregando}>Continuar →</Botao>}
-        {ultimo && <Botao variante={consolidada || jaPreVenda ? "primario" : "secundario"} onClick={() => void salvar(false)} disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</Botao>}
-        {ultimo && !consolidada && !jaPreVenda && (
-          <Botao variante="primario" onClick={() => void salvar(true)} disabled={salvando} title="Grava e já sobe pro Dashboard como venda">
-            {salvando ? "Salvando…" : "Salvar e marcar como venda ⚡"}
-          </Botao>
+        {ultimo && (consolidada || jaPreVenda) && (
+          <Botao variante="primario" onClick={() => void salvar(false)} disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</Botao>
         )}
+        {ultimo && !consolidada && !jaPreVenda && <>
+          <Botao variante="fantasma" onClick={() => void salvar(false)} disabled={salvando} title="Guarda o que já preencheu, sem contar como venda">Salvar rascunho</Botao>
+          <Botao variante="primario" onClick={() => void salvar(true)} disabled={salvando} title="Grava e já conta como venda no Dashboard">
+            {salvando ? "Salvando…" : "Salvar e marcar como venda"}
+          </Botao>
+        </>}
       </>}>
       <div className="mb-4"><Stepper steps={PASSOS} current={passo} /></div>
       {carregando ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p> : <>
@@ -280,8 +289,8 @@ export default function RegistrarVenda({ negocio, aberto, onFechar, onSalvo }: {
 
             {!consolidada && !jaPreVenda && (
               <Aviso>
-                <b>Salvar e marcar como venda ⚡</b> grava e já sobe pro Dashboard como venda (move o negócio no Bitrix pra "Em emissão").
-                Depois, com o plano de pagamento em mãos, você consolida pela ficha de fechamento — sem contar a venda de novo.
+                <b>Salvar e marcar como venda</b> grava e a venda já conta no Dashboard. Depois, no cartão, é só
+                <b> Fechar: pagamento e contrato</b> — a venda não conta de novo.
               </Aviso>
             )}
           </div>

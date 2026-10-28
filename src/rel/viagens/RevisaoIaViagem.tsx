@@ -91,6 +91,11 @@ export default function RevisaoIaViagem({ viagemId, onRevisado }: { viagemId: st
   const divergencias = [...(r?.divergencias ?? [])].sort((a, b) => ordem[a.gravidade] - ordem[b.gravidade]);
   const seguros = (r?.documentos ?? []).filter((d) => d.lido?.seguro);
 
+  // 27/10: a IA está parada (falta OPENAI_API_KEY na Vercel desde 16/10).
+  // Sem revisão gravada, o bloco some — não oferece um botão que só dá erro.
+  // (O "Revisar de novo" das que já têm revisão continua, com o recado claro.)
+  if (!r && !rodando) return null;
+
   return (
     <section className="rel-card p-4 sm:p-5 space-y-3" aria-busy={rodando}>
       <div className="flex flex-wrap items-center justify-between gap-2">

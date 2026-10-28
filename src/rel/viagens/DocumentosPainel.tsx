@@ -156,8 +156,11 @@ const SELO_IA = {
 function SeloIa({ d, onAplicar }: { d: DocumentoIa; onAplicar: (s: IaSugestao) => void }) {
   const [aberto, setAberto] = useState(false);
   if (!conferivel(d)) return null;
+  // 27/10: a IA está parada (sem OPENAI_API_KEY na Vercel desde 16/10) — sem
+  // conferência gravada, nada de selo "IA: não conferido".
+  if (!d.ia_em) return null;
   if (!d.ia_status || precisaConferir(d)) {
-    return <Etiqueta>{d.ia_em ? "IA: arquivo novo, conferir" : "IA: não conferido"}</Etiqueta>;
+    return <Etiqueta>IA: arquivo novo, conferir</Etiqueta>;
   }
   const r = d.ia_resultado;
   const s = SELO_IA[d.ia_status];
@@ -296,7 +299,9 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconde
       <div className="flex flex-wrap gap-2">
         <Botao variante="primario" onClick={() => setPedir(true)} disabled={!pessoas.length}>Pedir documentos ao cliente</Botao>
         <Botao onClick={() => setSubir(true)} disabled={!pessoas.length}>Enviar arquivo</Botao>
-        {pendentesIa > 0 && (
+        {/* 27/10: "Conferir N pendentes com IA" só aparece quando a IA já leu algo
+            aqui (a chave da OpenAI está faltando na Vercel desde 16/10) */}
+        {pendentesIa > 0 && docsIa.some((d) => d.ia_em) && (
           <Botao onClick={() => void conferirTodos()} disabled={!!iaOcupado} title="A IA lê cada documento e compara com a ficha do cliente">
             {iaOcupado === "lote" ? "Conferindo…" : `Conferir ${pendentesIa} pendente${pendentesIa > 1 ? "s" : ""} com IA`}
           </Botao>
@@ -352,9 +357,9 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconde
                 />
               </label>
               <Botao variante="fantasma" onClick={() => void abrir(d)}>Abrir</Botao>
-              {conferivel(d) && d.status !== "recusado" && (
+              {conferivel(d) && d.status !== "recusado" && !!d.ia_em && (
                 <Botao variante="fantasma" disabled={!!iaOcupado} onClick={() => void conferirUm(d)} title="A IA lê o documento e compara com a ficha">
-                  {iaOcupado === d.id ? "Conferindo…" : d.ia_em ? "Conferir de novo" : "Conferir com IA"}
+                  {iaOcupado === d.id ? "Conferindo…" : "Conferir de novo com IA"}
                 </Botao>
               )}
               {d.status !== "aprovado" && <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => void acao(() => revisarDocumento(d.id, "aprovado", currentUser?.id ?? ""))}>Aprovar</Botao>}

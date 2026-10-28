@@ -11,7 +11,15 @@
 // mostrem o mesmo cronômetro.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import { notifyError } from "./notify";
+import { notifyError, notifySuccess } from "./notify";
+
+/**
+ * Teto de uma cotação: 2 horas (Bruno, 27/10). Quem esquece de apertar
+ * "Terminei" não pode inflar o Desempenho com 9h de "aéreo". Cotação aberta
+ * há mais que isso é fechada sozinha com fim = início + 2h, e no resumo nenhum
+ * tempo passa de 2h.
+ */
+export const TETO_COTACAO_SEG = 2 * 60 * 60;
 
 export interface CotacaoAereo {
   id: string;
@@ -52,6 +60,40 @@ export async function carregarCotacaoAberta(ownerId: string, forcar = false): Pr
     if (!semTabela(error.code)) console.warn("[QS] carregarCotacaoAberta:", error);
   } else {
     aberta = (data as CotacaoAereo | null) ?? null;
+    if (aberta && passouDoTeto(aberta)) await fecharNoTeto(aberta);
+  }
+  avisar();
+}
+
+const passouDoTeto = (c: CotacaoAereo, agora = Date.now()) =>
+  agora - new Date(c.iniciado_em).getTime() >= TETO_COTACAO_SEG * 1000;
+
+/** Fecha a cotação esquecida com fim = início + 2h e avisa o SDR. */
+async function fecharNoTeto(c: CotacaoAereo): Promise<void> {
+  const fim = new Date(new Date(c.iniciado_em).getTime() + TETO_COTACAO_SEG * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("qs_aereo_cotacoes")
+    .update({ terminado_em: fim })
+    .eq("id", c.id)
+    .is("terminado_em", null)
+    .select("id");
+  if (error) {
+    console.warn("[QS] fecharNoTeto:", error);
+    return; // segue aberta; o resumo já limita a 2h de qualquer jeito
+  }
+  if (aberta && aberta !== "sem-tabela" && aberta.id === c.id) aberta = null;
+  if (data && data.length > 0) notifySuccess("Sua cotação de aéreo ficou aberta e foi fechada com 2h.");
+}
+
+/** Chamado pelo cronômetro: se a cotação em andamento bateu 2h, fecha sozinha. */
+let fechando = false;
+export async function fecharSeVencida(): Promise<void> {
+  if (fechando || !aberta || aberta === "sem-tabela" || !passouDoTeto(aberta)) return;
+  fechando = true;
+  try {
+    await fecharNoTeto(aberta);
+  } finally {
+    fechando = false;
   }
   avisar();
 }
@@ -101,10 +143,11 @@ export async function descartarCotacaoAereo(): Promise<boolean> {
   return true;
 }
 
-/** Duração em segundos (em andamento conta até agora). */
+/** Duração em segundos (em andamento conta até agora). Nunca passa de 2h. */
 export function duracaoSeg(c: Pick<CotacaoAereo, "iniciado_em" | "terminado_em">, agora = Date.now()): number {
   const fim = c.terminado_em ? new Date(c.terminado_em).getTime() : agora;
-  return Math.max(0, Math.round((fim - new Date(c.iniciado_em).getTime()) / 1000));
+  const seg = Math.max(0, Math.round((fim - new Date(c.iniciado_em).getTime()) / 1000));
+  return Math.min(seg, TETO_COTACAO_SEG);
 }
 
 /** "1h05" / "12 min" / "45 s". */

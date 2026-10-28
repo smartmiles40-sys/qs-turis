@@ -267,6 +267,13 @@ const CALL_CHANNELS: ChannelType[] = ["ligacao", "ligacao_whatsapp"];
 // abaixo disso; só a visão agregada do gestor chega a cortar.
 const LIST_RENDER_CAP = 150;
 
+// Atrasada há mais de 14 dias (corridos) sai da fila de hoje e vai pro bloco
+// recolhido "Atrasadas antigas" (Bruno, 27/10). Só muda ONDE aparece.
+const DIAS_ATRASADA_ANTIGA = 14;
+function atrasadaAntiga(t: { scheduled_at: string }): boolean {
+  return Date.now() - new Date(t.scheduled_at).getTime() > DIAS_ATRASADA_ANTIGA * 86_400_000;
+}
+
 // Classificação da ligação (Growth Station): motivo/resultado da chamada, seleção
 // única. `positive` = o SDR falou com a persona e avançou; `reached` = falou com
 // alguém (conta como contato feito). O enum salvo vai em qs_tasks.contact_result.
@@ -1899,7 +1906,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return permissaoVale(p);
   }, [permissoes, modoApp]);
 
-  const filteredTasks = useMemo(() => {
+  const filteredTodas = useMemo(() => {
     let filtered = [...tasks];
 
     // Guard: tarefas de leads já encerrados (ganho/perdido) não aparecem na fila.
@@ -2018,12 +2025,24 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     return filtered;
   }, [tasks, leads, cadences, search, statusFilter, channelFilter, priorityFilter, scoreFilter, periodFilter, ownerFilter, currentUser, workHours, atividadeVisivel]);
 
+  // ── ATRASADAS ANTIGAS (Bruno, 27/10) ──────────────────────────────────────
+  // Atividade vencida há mais de 14 dias não entra misturada na fila de hoje:
+  // vai pra um bloco recolhido no fim. NADA é apagado nem alterado no banco —
+  // é só onde ela aparece. A contagem "atrasadas" do topo continua contando
+  // todas (com a parte antiga dita ao lado), pra não mudar de significado.
+  const filteredTasks = useMemo(() => filteredTodas.filter((t) => !atrasadaAntiga(t)), [filteredTodas]);
+  const antigasTasks = useMemo(() => filteredTodas.filter((t) => atrasadaAntiga(t)), [filteredTodas]);
+  const [antigasAbertas, setAntigasAbertas] = useState(false);
+
   // Card "hero" atual (o que o SDR está atendendo) — usado no render E nos atalhos.
+  // Uma atividade do bloco de antigas também pode ser atendida (clique nela).
   const heroTaskMemo = useMemo(() => {
     const normais = filteredTasks.filter((t) => !t.is_extra);
-    const activeInList = activeTaskId ? filteredTasks.find((t) => t.id === activeTaskId) : undefined;
+    const activeInList = activeTaskId
+      ? filteredTasks.find((t) => t.id === activeTaskId) ?? antigasTasks.find((t) => t.id === activeTaskId)
+      : undefined;
     return activeInList ?? normais[0];
-  }, [filteredTasks, activeTaskId]);
+  }, [filteredTasks, antigasTasks, activeTaskId]);
 
   // ADIANTA AS RESPOSTAS DOS PRÓXIMOS DA FILA.
   //
@@ -2336,6 +2355,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Partição por dia ÚTIL (2026-07-24): "atrasada" só quando venceu em dia útil
   // anterior — no fim de semana a fila de sexta continua contando como "de hoje".
   const overdueTasks = counterBase.filter((t) => workdaysBetween(workHours, new Date(t.scheduled_at), new Date()) >= 1);
+  // Parte das atrasadas que fica no bloco recolhido (não muda o total acima).
+  const overdueAntigasCount = overdueTasks.filter(atrasadaAntiga).length;
   const todayTasks = counterBase.filter((t) => workdaysBetween(workHours, new Date(t.scheduled_at), new Date()) < 1);
   const extraTasks = counterBase.filter((t) => t.is_extra);
   // Controle FUP / Atrasada (métrica que o Bruno pediu — sempre à vista). A
@@ -4227,7 +4248,13 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             {/* Controle FUP / Atrasada + feitas hoje sempre à vista (pedido do
                 Bruno). "Novo" foi extinto — todo lead sem 1º contato é FUP 1. */}
             <div className="flex items-center gap-2 flex-wrap" style={{ fontVariantNumeric: "tabular-nums" }}>
-              <span className="qsx-chip prio-alta"><span className="qsx-dot dot-alta" />{overdueTasks.length} atrasadas</span>
+              <span
+                className="qsx-chip prio-alta"
+                title={overdueAntigasCount > 0 ? `Inclui ${overdueAntigasCount} atrasadas há mais de ${DIAS_ATRASADA_ANTIGA} dias, que ficam no bloco "Atrasadas antigas" no fim da fila` : undefined}
+              >
+                <span className="qsx-dot dot-alta" />{overdueTasks.length} atrasadas
+                {overdueAntigasCount > 0 && <span style={{ fontWeight: 400 }}>&nbsp;({overdueAntigasCount} antigas)</span>}
+              </span>
               <span className="qsx-chip">{fupTasks.length} em FUP</span>
               <span className="qsx-chip" style={{ color: "var(--ok)" }} title="Atividades que você concluiu hoje">{doneTodayMine} feitas hoje</span>
             </div>
@@ -4403,7 +4430,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 <>
                   <span className="text-3xl mb-2">🎯</span>
                   <p className="mt-2 text-sm font-bold" style={{ color: "var(--ink)" }}>Tudo limpo!</p>
-                  <p className="text-xs mt-1" style={{ color: "var(--ink3)" }}>Nenhuma atividade pendente. Cadastre um novo lead para começar.</p>
+                  <p className="text-xs mt-1" style={{ color: "var(--ink3)" }}>{antigasTasks.length > 0 ? "Nenhuma atividade para hoje." : "Nenhuma atividade pendente. Cadastre um novo lead para começar."}</p>
                   <button onClick={() => setShowNewLeadModal(true)} className="mt-4 qsx-btn qsx-btn-orange">
                     + Cadastrar Lead
                   </button>
@@ -4469,6 +4496,39 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </div>
             );
           })()}
+          {/* Atrasadas antigas (27/10): fora da fila de hoje, recolhidas. */}
+          {antigasTasks.length > 0 && (
+            <div className="mt-6 rounded-xl" style={{ border: "1px dashed var(--line, #e5e7eb)", background: "var(--card2, #fafafa)" }}>
+              <button
+                type="button"
+                onClick={() => setAntigasAbertas((v) => !v)}
+                aria-expanded={antigasAbertas}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left"
+              >
+                <span>
+                  <span className="text-sm font-semibold" style={{ color: "var(--ink2)" }}>
+                    Atrasadas antigas ({antigasTasks.length})
+                  </span>
+                  <span className="block text-xs mt-0.5" style={{ color: "var(--ink3)" }}>
+                    Venceram há mais de {DIAS_ATRASADA_ANTIGA} dias. Ficam aqui pra não atrapalhar a fila de hoje; a gestão vai limpar.
+                  </span>
+                </span>
+                <span className="text-xs font-medium shrink-0" style={{ color: "var(--ink3)" }}>
+                  {antigasAbertas ? "Recolher" : "Ver"}
+                </span>
+              </button>
+              {antigasAbertas && (
+                <div className="px-4 pb-4">
+                  <div className="qsx-list">{antigasTasks.slice(0, LIST_RENDER_CAP).map(renderPill)}</div>
+                  {antigasTasks.length > LIST_RENDER_CAP && (
+                    <div className="text-center text-[12px] font-medium mt-2" style={{ color: "var(--ink3)" }}>
+                      + {antigasTasks.length - LIST_RENDER_CAP} atividades
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         </div>
       </div>

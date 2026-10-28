@@ -668,7 +668,8 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
     if (a === "emojis") setExpressoes((x) => (x === "emoji" ? null : "emoji"));
     if (a === "figurinhas") setExpressoes((x) => (x === "figurinha" ? null : "figurinha"));
     if (a === "buscarNaConversa") { setBuscaAberta(true); requestAnimationFrame(() => buscaMsgRef.current?.focus()); }
-    if (a === "ficha") { if (c.cliente_id) onAbrirCliente(c.cliente_id); else onLigarFicha(c); }
+    // Financeiro não tem ficha (só lê): o atalho não faz nada lá
+    if (a === "ficha" && setor !== "financeiro") { if (c.cliente_id) onAbrirCliente(c.cliente_id); else onLigarFicha(c); }
     if (a === "resolver") { if (c.estado !== "resolvida") setConcluindo(true); else void acao(() => reabrirConversa(c.id)); }
   };
 
@@ -1117,7 +1118,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
             extra={
               <section className="px-4 py-3 space-y-2" style={{ borderBottom: "8px solid var(--wa-head)" }}>
                 <PedidosSobre alvo={{ conversaId: c.id, clienteId: c.cliente_id ?? null }} recarregar={sinalPedidos}
-                  links={{ onAbrirCliente, onAbrirViagem }} />
+                  links={{ onAbrirCliente: setor === "financeiro" ? undefined : onAbrirCliente, onAbrirViagem }} />
                 <button onClick={() => setPedirSetor(true)} className="h-8 px-3 rounded-full text-[13px] font-semibold border"
                   style={{ borderColor: "var(--wa-line)", color: "var(--wa-txt)" }}>↗ Pedir a outro setor</button>
               </section>
@@ -1193,14 +1194,15 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
 
 export type VisaoAtendimento = "conversas" | "chamados";
 
-export default function AtendimentoPage({ setor = "relacionamento", extraCabecalho, conversaId, abrir, onAbrirCliente, onAbrirViagem, onMudou, visao: visaoFora, onTrocarVisao, onAbrirWhatsApp }: {
+export default function AtendimentoPage({ setor = "relacionamento", extraCabecalho, conversaId, abrir, onAbrirCliente: onAbrirClienteFora, onAbrirViagem, onMudou, visao: visaoFora, onTrocarVisao, onAbrirWhatsApp }: {
   /** Quem está atendendo (0127). No Financeiro: só as conversas dele, sem Chamados. */
   setor?: SetorAtendimento;
   /** Faixa embaixo do cabeçalho da conversa (o Financeiro põe o status do atendimento). */
   extraCabecalho?: (c: Conversa, recarregar: () => void) => ReactNode;
   conversaId: string | null;
   abrir: (id: string | null) => void;
-  onAbrirCliente: (id: string) => void;
+  /** Sem isso (Financeiro, que não tem a ficha), os atalhos pra ficha somem. */
+  onAbrirCliente?: (id: string) => void;
   onAbrirViagem?: (id: string) => void;
   onMudou: () => void;
   /** Visão controlada por quem chama (ex.: rota #rel/chamados). Sem isso, a página lembra sozinha. */
@@ -1210,6 +1212,7 @@ export default function AtendimentoPage({ setor = "relacionamento", extraCabecal
   onAbrirWhatsApp?: () => void;
 }) {
   const { currentUser } = useQsAuth();
+  const onAbrirCliente = onAbrirClienteFora ?? (() => undefined);
   const [visaoLocal, setVisaoLocal] = useState<VisaoAtendimento>(() => (localStorage.getItem("rel_atend_visao") as VisaoAtendimento) || "conversas");
   // Conversa aberta pelo endereço sempre mostra as conversas.
   const visao: VisaoAtendimento = conversaId || setor === "financeiro" ? "conversas" : visaoFora ?? visaoLocal;

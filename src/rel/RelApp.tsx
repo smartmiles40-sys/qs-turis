@@ -30,7 +30,7 @@ import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useCon
 import { useAprovacoesNovas } from "@/propostas/lib";
 import type { TelaExp } from "@/expedicoes/contexto";
 import SinoDeAvisos from "@/avisos/SinoDeAvisos";
-import AppShell, { type ShellGroup } from "@/components/ui/AppShell";
+import AppShell, { type ShellGroup, type ShellItem } from "@/components/ui/AppShell";
 import { Icon } from "@/components/ui/icons";
 import { Segmented } from "@/components/ui";
 
@@ -73,10 +73,13 @@ type Rota =
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" } | { tela: "cadastros" }
   | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
   | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
-  | { tela: "config" } | { tela: TelaRelExp; id?: string };
+  | { tela: "config" } | { tela: "faxina" } | { tela: "mais" } | { tela: TelaRelExp; id?: string };
 type Tela = Rota["tela"];
 
-const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "cadastros", "esteira", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config"];
+const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "cadastros", "esteira", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config", "faxina", "mais"];
+
+/** Item do menu que abre/fecha o grupo "Mais" (não é tela). */
+const MAIS_ID = "__mais";
 
 function lerRota(): Rota {
   const h = window.location.hash.replace(/^#\/?/, "");
@@ -178,7 +181,7 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: ResumoDoMenu | null; cont:
           </span>
           <span className="text-3xl font-bold tabular-nums" style={{ color: "var(--rel-ink)" }}>{cont?.minhasViagens ?? "–"}</span>
         </button>
-        <button onClick={() => ir({ tela: "esteira" })} className="rel-card p-4 text-left transition-shadow hover:shadow-md"
+        <button onClick={() => ir({ tela: "faxina" })} className="rel-card p-4 text-left transition-shadow hover:shadow-md"
           style={cont?.semDono ? { borderColor: "var(--err-line)", background: "var(--err-bg)" } : undefined}>
           <span className="block text-[12px] font-semibold" style={{ color: cont?.semDono ? "var(--err-ink)" : "var(--ink2)" }}>Viagens sem dono</span>
           <span className="block text-3xl font-bold mt-1 tabular-nums" style={{ color: cont?.semDono ? "var(--err-ink)" : "var(--ink)" }}>{cont?.semDono ?? "–"}</span>
@@ -263,6 +266,7 @@ export default function RelApp() {
   const [rota, setRota] = useState<Rota>(lerRota);
   const [resumo, setResumo] = useState<ResumoDoMenu | null>(null);
   const [cont, setCont] = useState<Contadores | null>(null);
+  const [maisAberto, setMaisAberto] = useState(false);
   const eu = currentUser?.id ?? "";
 
   useEffect(() => {
@@ -339,6 +343,32 @@ export default function RelApp() {
 
   // A tela de detalhe acende o item da lista dela.
   const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "duplicados" || rota.tela === "cadastros" ? "clientes" : rota.tela === "exp-passageiros" ? "clientes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
+  const supervisao = podeGerirRelacionamento(currentUser);
+  const verTime = podeGerirTime(currentUser, "relacionamento");
+
+  // MENU ENXUTO (27/10, Bruno: "tudo o mais simples"). No 1º nível fica só o
+  // que a atendente usa todo dia — Atendimento, Viagens, Clientes — e, pra
+  // supervisão, Faxina/Modelos/Time. O resto vai pro grupo recolhido "Mais"
+  // (uso medido em 27/10: Esteira 0 etapas concluídas, Disparos/Automações/
+  // Pesquisas/Recompra/Agenda 0 registros, Chamados 1). Toda rota continua
+  // funcionando: link antigo abre a tela e o "Mais" já vem aberto.
+  const itensMais: ShellItem[] = [
+    { id: "esteira", label: "Minhas atividades", icon: Icon.check },
+    { id: "chamados", label: "Chamados", icon: Icon.chamado, count: cont?.chamadosVencidos || undefined, late: true },
+    { id: "agenda", label: "Agenda do time", icon: Icon.agenda },
+    { id: "exp-expedicoes", label: "Expedições", icon: Icon.mapa },
+    { id: "exp-pacotes", label: "Pacotes", icon: Icon.aviao },
+    { id: "exp-inscricoes", label: "Inscrições", icon: Icon.inscricao },
+    { id: "exp-avisos", label: "Avisos das expedições", icon: Icon.megafone },
+    { id: "disparos", label: "Disparos", icon: Icon.disparo },
+    { id: "automacoes", label: "Automações", icon: Icon.cadencia },
+    { id: "pesquisas", label: "Pesquisas", icon: Icon.pesquisa },
+    { id: "recompra", label: "Recompra", icon: Icon.recompra },
+    ...(verKpis ? [{ id: "kpis", label: "KPIs", icon: Icon.kpi }] : []),
+    { id: "config", label: "Configurações", icon: Icon.config },
+  ];
+  const noMais = itensMais.some((i) => i.id === ativo);
+  const somaMais = itensMais.reduce((s, i) => s + (i.count ?? 0), 0);
 
   // Redesign (out/2026): menu na ordem do HANDOFF.md ("Menus por setor") e a
   // casca é o AppShell comum dos 4 setores. Agrupamento novo:
@@ -346,54 +376,50 @@ export default function RelApp() {
   // Bruno, 27/10: Solicitações, Propostas e Agenda do time sobem pro Atendimento
   // (não ficam no rodapé); Modelos de mensagem só pra supervisão; Arrumar
   // cadastros virou aba de Clientes (o cadastro é um só).
-  const supervisao = podeGerirRelacionamento(currentUser);
+  const mostraMais = maisAberto || noMais;
   const grupos: ShellGroup[] = [
     { items: [
       { id: "inicio", label: "Início", icon: Icon.inicio },
-      // 0184: a tela de trabalho do time fica no topo
-      { id: "esteira", label: "Minhas atividades", icon: Icon.check, count: cont?.semDono || undefined },
     ] },
     { label: "Atendimento", items: [
       { id: "atendimento", label: "Conversas", icon: Icon.chat, count: cont?.esperando || undefined, late: !!cont?.foraDoPrazo },
       // Grupos (15/10, 0137): vermelho quando marcaram o número com @
       { id: "grupos", label: cont?.gruposMencao ? "Grupos  @" : "Grupos", icon: Icon.pessoas, count: cont?.gruposNovos || undefined, late: !!cont?.gruposMencao },
-      { id: "chamados", label: "Chamados", icon: Icon.chamado, count: cont?.chamadosVencidos || undefined, late: true },
       // Central de Solicitações (0149) e Propostas (0157)
       { id: "solicitacoes", label: "Solicitações", icon: Icon.inbox, count: bolinhaDaCentral(central).badge, late: bolinhaDaCentral(central).alerta },
       { id: "propostas", label: "Propostas", icon: Icon.doc, count: aprovacoes || undefined },
-      { id: "agenda", label: "Agenda do time", icon: Icon.agenda },
-      ...(supervisao ? [{ id: "modelos", label: "Modelos de mensagem", icon: Icon.modelo }] : []),
     ] },
     { label: "Carteira", items: [
-      { id: "clientes", label: "Clientes", icon: Icon.cliente, count: cont?.duplicados || undefined },
       { id: "viagens", label: "Viagens", icon: Icon.aviao },
+      { id: "clientes", label: "Clientes", icon: Icon.cliente, count: cont?.duplicados || undefined },
       { id: "alertas", label: "Alertas", icon: Icon.alerta, count: cont?.alertasAltos || undefined, late: true },
     ] },
-    { label: "Expedições", items: [
-      { id: "exp-expedicoes", label: "Expedições", icon: Icon.mapa },
-      { id: "exp-pacotes", label: "Pacotes", icon: Icon.aviao },
-      { id: "exp-inscricoes", label: "Inscrições", icon: Icon.inscricao },
-      { id: "exp-avisos", label: "Avisos", icon: Icon.megafone },
-    ] },
-    { label: "Pós-venda", items: [
-      { id: "disparos", label: "Disparos", icon: Icon.disparo },
-      { id: "automacoes", label: "Automações", icon: Icon.cadencia },
-      { id: "pesquisas", label: "Pesquisas", icon: Icon.pesquisa },
-      { id: "recompra", label: "Recompra", icon: Icon.recompra },
-    ] },
-    { label: "Gestão", items: [
-      ...(verKpis ? [{ id: "kpis", label: "KPIs", icon: Icon.kpi }] : []),
+    ...(supervisao || verTime ? [{ label: "Supervisão", items: [
+      ...(supervisao ? [
+        { id: "faxina", label: "Faxina das viagens", icon: Icon.ferramenta, count: cont?.semDono || undefined },
+        { id: "modelos", label: "Modelos de mensagem", icon: Icon.modelo },
+      ] : []),
       // Time (13/10): a gestora do Relacionamento cadastra e cuida do time.
-      ...(podeGerirTime(currentUser, "relacionamento") ? [{ id: "equipe", label: "Time", icon: Icon.time }] : []),
+      ...(verTime ? [{ id: "equipe", label: "Time", icon: Icon.time }] : []),
+    ] }] : []),
+    { items: [
+      // "Mais" recolhido: fechado, mostra a soma das bolinhas de dentro
+      { id: MAIS_ID, label: mostraMais ? "Mais ▾" : "Mais ▸", icon: Icon.mais, count: !mostraMais && somaMais ? somaMais : undefined, late: true },
+      ...(mostraMais ? itensMais : []),
     ] },
   ];
-  // 27/10: Pacotes e Automações voltaram a ter item próprio (no menu novo tinham sumido).
   const ativoNoMenu = ativo;
+  const navegar = (id: string) => {
+    if (id !== MAIS_ID) { ir({ tela: id } as Rota); return; }
+    // celular/tablet: o menu é gaveta e fecha ao tocar → abre a tela "Mais"
+    if (window.matchMedia("(max-width: 1023px)").matches) { ir({ tela: "mais" }); return; }
+    setMaisAberto(!mostraMais);
+  };
 
   return (
     <>
       <style>{REL_CSS}</style>
-      <AppShell setor="relacionamento" groups={grupos} active={ativoNoMenu} onNavigate={(id) => ir({ tela: id } as Rota)}
+      <AppShell setor="relacionamento" groups={grupos} active={ativoNoMenu} onNavigate={navegar}
         notifications={<SinoDeAvisos />} onBeforeSwitch={limparHash}
         onSettings={() => ir({ tela: "config" })} settingsActive={ativo === "config"}>
         <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
@@ -458,7 +484,24 @@ export default function RelApp() {
               onAbrirExpedicao={(exp, tipo, pax) => ir({ tela: tipo === "pacote" ? "exp-pacotes" : "exp-expedicoes", id: pax ? `${exp}/passageiros/pax/${pax}` : exp })} />
           )}
           {rota.tela === "esteira" && <EsteiraPage onAbrirViagem={abrirViagem} />}
-          {rota.tela === "viagens" && <ViagensPage onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
+          {rota.tela === "viagens" && <ViagensPage key="viagens" onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
+          {/* Faxina (supervisão): a mesma lista de Viagens, com todas as filas à mostra */}
+          {rota.tela === "faxina" && <ViagensPage key="faxina" faxina onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
+          {rota.tela === "mais" && (
+            <div className="max-w-3xl mx-auto">
+              <h1 className="text-xl font-bold mb-1" style={{ color: "var(--ink)" }}>Mais</h1>
+              <p className="text-[13px] mb-4" style={{ color: "var(--ink3)" }}>Telas que o time usa de vez em quando.</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {itensMais.map((i) => (
+                  <button key={i.id} type="button" className="rel-card p-3 text-left flex items-center gap-2 text-[13.5px] font-semibold"
+                    style={{ color: "var(--ink)" }} onClick={() => ir({ tela: i.id } as Rota)}>
+                    {i.icon}<span className="flex-1">{i.label}</span>
+                    {!!i.count && <Etiqueta tom={i.late ? "erro" : "aviso"}>{i.count}</Etiqueta>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {rota.tela === "viagem" && (
             <ViagemPage key={rota.id} id={rota.id} onVoltar={() => ir({ tela: "viagens" })} onAbrirCliente={abrirCliente} onAbrirConversa={abrirConversa}
               onAbrirExpedicao={(exp, tipo) => ir({ tela: tipo === "pacote" ? "exp-pacotes" : "exp-expedicoes", id: exp })} />

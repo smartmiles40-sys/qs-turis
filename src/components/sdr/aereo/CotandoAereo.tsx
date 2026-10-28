@@ -7,7 +7,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
-  carregarCotacaoAberta, cotacaoAereoAberta, descartarCotacaoAereo, duracaoSeg,
+  carregarCotacaoAberta, cotacaoAereoAberta, descartarCotacaoAereo, duracaoSeg, fecharSeVencida,
   iniciarCotacaoAereo, ouvirCotacaoAereo, relogio, terminarCotacaoAereo,
 } from "@/lib/qs/aereo";
 
@@ -27,7 +27,11 @@ export default function CotandoAereo({ leadId }: { leadId: string | null }) {
   const correndo = aberta && aberta !== "sem-tabela" ? aberta : null;
   useEffect(() => {
     if (!correndo) return;
-    const t = setInterval(() => setAgora(Date.now()), 1000);
+    const t = setInterval(() => {
+      setAgora(Date.now());
+      // Bateu 2h sem "Terminei": fecha sozinha (com aviso), em vez de seguir contando.
+      void fecharSeVencida();
+    }, 1000);
     return () => clearInterval(t);
   }, [correndo]);
 

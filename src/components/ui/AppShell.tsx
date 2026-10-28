@@ -15,6 +15,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { NOME_SETOR, type Setor } from "@/components/sdr/types";
+import { abrirGestao, podeAbrirGestao } from "@/gestao/acesso";
 import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 import { Avatar } from "./index";
 import { Icon } from "./icons";
@@ -41,6 +42,9 @@ const PORTA_COMERCIAL = {
   sdr: { nome: "Comercial · SDR", sub: "Fila, leads e reuniões" },
   closer: { nome: "Comercial · Closer", sub: "Pipeline e contratos" },
 } as const;
+
+/** Painel de Gestão (27/10): todos os setores, só admin e gestor. */
+const GESTAO = { nome: "Gestão", sub: "Todos os setores", cor: "var(--text)" } as const;
 
 export interface ShellMenuAction { id: string; label: string; icon?: ReactNode; onClick: () => void; danger?: boolean }
 
@@ -79,7 +83,7 @@ function useFora(aberto: boolean, fechar: () => void) {
 
 export default function AppShell({
   setor, groups, active, onNavigate, notifications, userActions = [], extraSectors = [], comercial,
-  onBeforeSwitch, onSettings, settingsActive, mainClassName, children, after,
+  onBeforeSwitch, onSettings, settingsActive, mainClassName, children, after, naGestao,
 }: {
   setor: Setor;
   groups: ShellGroup[];
@@ -102,6 +106,9 @@ export default function AppShell({
   children: ReactNode;
   /** Fica fora do <main>, à direita (o dock de WhatsApp do Comercial). */
   after?: ReactNode;
+  /** Painel de Gestão aberto (#gestao, 27/10): o seletor mostra "Gestão" e
+   *  escolher qualquer setor — até o mesmo da `setor` — sai do painel. */
+  naGestao?: boolean;
 }) {
   const { currentUser, trocarArea, logout } = useQsAuth();
   const { isDark, toggleTheme } = useTheme();
@@ -114,6 +121,9 @@ export default function AppShell({
   if (!currentUser) return null;
 
   const setores = setoresDe(currentUser);
+  const verGestao = podeAbrirGestao(currentUser);
+  // No painel de Gestão nenhum setor está "aberto": nada leva o check.
+  const aqui = (s: Setor) => !naGestao && s === setor;
   const ir = (id: string) => { setGaveta(false); onNavigate(id); };
   const buscar = () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
 
@@ -124,9 +134,9 @@ export default function AppShell({
           aria-label="Trocar de setor" onClick={() => setSetorAberto((v) => !v)}>
           <span className="qs-sector__logo">QS</span>
           <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, textAlign: "left", minWidth: 0 }}>
-            <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text)" }}>{comercial && setor === "comercial" ? PORTA_COMERCIAL[comercial.atual].nome : NOME_SETOR[setor]}</span>
+            <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text)" }}>{naGestao ? GESTAO.nome : comercial && setor === "comercial" ? PORTA_COMERCIAL[comercial.atual].nome : NOME_SETOR[setor]}</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--subtle)" }}>
-              <span className="qs-dot" style={{ background: COR[setor] }} aria-hidden />{comercial && setor === "comercial" ? PORTA_COMERCIAL[comercial.atual].sub : SUBTITULO[setor]}
+              <span className="qs-dot" style={{ background: naGestao ? GESTAO.cor : COR[setor] }} aria-hidden />{naGestao ? GESTAO.sub : comercial && setor === "comercial" ? PORTA_COMERCIAL[comercial.atual].sub : SUBTITULO[setor]}
             </span>
           </span>
           <span style={{ marginLeft: "auto", display: "inline-flex" }}>{Icon.seletor}</span>
@@ -134,13 +144,25 @@ export default function AppShell({
         {setorAberto && (
           <div className="qs-pop" role="menu">
             <span className="qs-pop__title">Trocar de setor</span>
+            {verGestao && (
+              <button type="button" role="menuitem" className="qs-pop__item"
+                onClick={() => { setSetorAberto(false); if (naGestao) return; onBeforeSwitch?.(); abrirGestao(); }}>
+                <span className="qs-dot" style={{ background: GESTAO.cor }} aria-hidden />
+                <span style={{ display: "flex", flexDirection: "column", textAlign: "left" }}>
+                  <span style={{ fontWeight: 600 }}>{GESTAO.nome}</span>
+                  <span style={{ fontSize: 12, color: "var(--subtle)", fontWeight: 400 }}>{GESTAO.sub}</span>
+                </span>
+                {naGestao && <span style={{ marginLeft: "auto", display: "inline-flex" }} aria-label="Setor atual">{Icon.check}</span>}
+              </button>
+            )}
             {setores.map((s) => (comercial && s === "comercial") ? (
               (["sdr", "closer"] as const).map((porta) => (
                 <button key={porta} type="button" role="menuitem" className="qs-pop__item"
                   onClick={() => {
                     setSetorAberto(false);
-                    if (setor === "comercial" && porta === comercial.atual) return;
-                    if (setor !== "comercial") { onBeforeSwitch?.(); trocarArea("comercial"); }
+                    if (aqui("comercial") && porta === comercial.atual) return;
+                    if (naGestao) onBeforeSwitch?.();
+                    if (setor !== "comercial") { if (!naGestao) onBeforeSwitch?.(); trocarArea("comercial"); }
                     if (porta === "sdr") comercial.irSdr(); else comercial.irCloser();
                   }}>
                   <span className="qs-dot" style={{ background: COR.comercial }} aria-hidden />
@@ -148,18 +170,18 @@ export default function AppShell({
                     <span style={{ fontWeight: 600 }}>{PORTA_COMERCIAL[porta].nome}</span>
                     <span style={{ fontSize: 12, color: "var(--subtle)", fontWeight: 400 }}>{PORTA_COMERCIAL[porta].sub}</span>
                   </span>
-                  {setor === "comercial" && porta === comercial.atual && <span style={{ marginLeft: "auto", display: "inline-flex" }} aria-label="Setor atual">{Icon.check}</span>}
+                  {aqui("comercial") && porta === comercial.atual && <span style={{ marginLeft: "auto", display: "inline-flex" }} aria-label="Setor atual">{Icon.check}</span>}
                 </button>
               ))
             ) : (
               <button key={s} type="button" role="menuitem" className="qs-pop__item"
-                onClick={() => { setSetorAberto(false); if (s !== setor) { onBeforeSwitch?.(); trocarArea(s); } }}>
+                onClick={() => { setSetorAberto(false); if (!aqui(s)) { onBeforeSwitch?.(); trocarArea(s); } }}>
                 <span className="qs-dot" style={{ background: COR[s] }} aria-hidden />
                 <span style={{ display: "flex", flexDirection: "column", textAlign: "left" }}>
                   <span style={{ fontWeight: 600 }}>{NOME_SETOR[s]}</span>
                   <span style={{ fontSize: 12, color: "var(--subtle)", fontWeight: 400 }}>{SUBTITULO[s]}</span>
                 </span>
-                {s === setor && <span style={{ marginLeft: "auto", display: "inline-flex" }} aria-label="Setor atual">{Icon.check}</span>}
+                {aqui(s) && <span style={{ marginLeft: "auto", display: "inline-flex" }} aria-label="Setor atual">{Icon.check}</span>}
               </button>
             ))}
             {extraSectors.map((x) => (
@@ -238,7 +260,7 @@ export default function AppShell({
       <header className="qs-topbar">
         <button type="button" className="qs-btn qs-btn--ghost qs-btn--icon" aria-label="Abrir menu" onClick={() => setGaveta(true)}>{Icon.menu}</button>
         <span className="qs-sector__logo">QS</span>
-        <span style={{ fontWeight: 600, flex: 1 }}>{NOME_SETOR[setor]}</span>
+        <span style={{ fontWeight: 600, flex: 1 }}>{naGestao ? GESTAO.nome : NOME_SETOR[setor]}</span>
         <button type="button" className="qs-btn qs-btn--ghost qs-btn--icon" aria-label="Buscar" onClick={buscar}>{Icon.busca}</button>
       </header>
       {gaveta && <div className="qs-scrim" onClick={() => setGaveta(false)} aria-hidden />}

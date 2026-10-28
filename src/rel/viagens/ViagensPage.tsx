@@ -18,7 +18,7 @@
 // pessoas; clicando, abre a lista de passageiros. Busca e as filas de
 // arrumação (sem data / classificar) seguem pessoa por pessoa.
 // -----------------------------------------------------------------------------
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
   FASES, SERVICOS, TIPOS_VIAGEM, criarViagem, dataBR, grupoDe, importarDoBitrix, listarEquipeRel, listarViagens, periodo, proximoVoo, quandoEmbarca, sincronizarBitrix,
@@ -38,8 +38,8 @@ import { lugaresDe } from "./destinos";
 import DonoViagem from "./DonoViagem";
 import BarraLote from "./BarraLote";
 import { arquivamentosDe, classificarEmLote, sugeridaParaArquivar, type Arquivada } from "../lib/operacao";
-import { sugestoesDeServico, type Sugestao } from "../lib/faxina";
-import FaxinaAtalhos from "./FaxinaAtalhos";
+import { limiteEmbarque, sugestoesDeServico, type Sugestao } from "../lib/faxina";
+import FaxinaAtalhos, { type MarcarAoAbrir } from "./FaxinaAtalhos";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 
 type Visao = "painel" | "calendario" | "lista" | "repetidas" | "voos";
@@ -337,10 +337,14 @@ function LinhaGrupo({ g, aberto, onAlternar, children }: { g: Grupo; aberto: boo
 
 // ── Página ──────────────────────────────────────────────────────────────────
 
-export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrirViagem: (id: string) => void; onAbrirCliente: (id: string) => void }) {
+export default function ViagensPage({ onAbrirViagem, onAbrirCliente, faxina }: {
+  onAbrirViagem: (id: string) => void; onAbrirCliente: (id: string) => void;
+  /** item "Faxina" do menu da supervisão: abre na lista com todas as filas à mostra */
+  faxina?: boolean;
+}) {
   const { currentUser } = useQsAuth();
   const gestor = podeGerirRelacionamento(currentUser);
-  const [visao, setVisaoState] = useState<Visao>(visaoSalva);
+  const [visao, setVisaoState] = useState<Visao>(() => (faxina ? "lista" : visaoSalva()));
   const setVisao = (v: Visao) => { setVisaoState(v); try { localStorage.setItem(CHAVE_VISAO, v); } catch { /* sem localStorage */ } };
   const [filtro, setFiltro] = useState<FiltroViagens>("proximas");
   // o painel abre a lista já numa fila ("Precisa de data" / "Classificar")
@@ -367,10 +371,23 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
   }, [filtro, lista]);
 
   // 0208: o que o banco sugere pra cada venda da fila Classificar
+  // 27/10: a "próxima tarefa" da faixa da faxina abre a fila JÁ com as viagens
+  // dela marcadas (o time só confere e clica no botão da barra).
+  const marcarAoAbrir = useRef<{ filtro: FiltroViagens; marcar: MarcarAoAbrir } | null>(null);
+  const fazerTarefa = (f: FiltroViagens, marcar?: MarcarAoAbrir) => {
+    marcarAoAbrir.current = marcar ? { filtro: f, marcar } : null;
+    setBusca("");
+    if (f === filtro) setVersao((x) => x + 1); else setFiltro(f);
+  };
+
   const [sugestoes, setSugestoes] = useState<Map<string, Sugestao>>(new Map());
   useEffect(() => {
     if (filtro !== "classificar" || !lista?.length) { setSugestoes(new Map()); return; }
-    sugestoesDeServico(lista.map((v) => v.id)).then(setSugestoes).catch(() => setSugestoes(new Map()));
+    sugestoesDeServico(lista.map((v) => v.id)).then((m) => {
+      setSugestoes(m);
+      const p = marcarAoAbrir.current;
+      if (p?.filtro === "classificar" && p.marcar === "sugestao") { marcarAoAbrir.current = null; setSel(new Set(lista.filter((v) => m.has(v.id)).map((v) => v.id))); }
+    }).catch(() => setSugestoes(new Map()));
   }, [filtro, lista]);
 
   useEffect(() => {
@@ -379,7 +396,17 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
     setLista(null);
     const t = setTimeout(() => {
       listarViagens(filtro, busca, currentUser?.id ?? "")
-        .then((l) => { if (vivo) { setLista(l); setErro(null); } })
+        .then((l) => {
+          if (!vivo) return;
+          setLista(l); setErro(null);
+          const p = marcarAoAbrir.current;
+          if (p && p.filtro === filtro && p.marcar !== "sugestao") {
+            marcarAoAbrir.current = null;
+            const ate = limiteEmbarque(7);
+            const marcar = p.marcar === "voo" ? l.filter((v) => (v.voos_total ?? 0) > 0) : l.filter((v) => !!v.data_embarque && v.data_embarque <= ate);
+            setSel(new Set(marcar.map((v) => v.id)));
+          }
+        })
         .catch((e) => { if (vivo) { setErro(e instanceof Error ? e.message : "Não carregou."); setLista([]); } });
     }, busca ? 300 : 0);
     return () => { vivo = false; clearTimeout(t); };
@@ -436,8 +463,8 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
       {visao === "voos" && <ConferirVoos key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "lista" && <>
 
-      <FaxinaAtalhos filtro={filtro} onFiltro={setFiltro} gestor={gestor} versao={versao} onMudou={() => setVersao((x) => x + 1)}
-        onAbrirViagem={onAbrirViagem} onConferirRepetidas={() => setVisao("repetidas")} />
+      <FaxinaAtalhos filtro={filtro} onFiltro={setFiltro} onTarefa={fazerTarefa} gestor={gestor} versao={versao} onMudou={() => setVersao((x) => x + 1)}
+        onAbrirViagem={onAbrirViagem} onConferirRepetidas={() => setVisao("repetidas")} verTudoAberto={faxina} />
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="flex gap-1 rel-card p-1 overflow-x-auto" role="group" aria-label="Filtrar viagens">

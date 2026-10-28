@@ -7,6 +7,7 @@
 // Escrita SEMPRE por RPC (o banco confere se é o closer dono ou gestor/admin).
 // O espelho no Bitrix é do servidor (api/closer.js?acao=espelhar).
 // -----------------------------------------------------------------------------
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { SdrUser } from "@/components/sdr/types";
 
@@ -245,6 +246,14 @@ export interface Ficha {
 export const emPreVenda = (n: Pick<Negocio, "consolidada_em" | "etapa"> & { pre_venda_em?: string | null }) =>
   !!n.pre_venda_em && !n.consolidada_em && n.etapa !== "perdido" && n.etapa !== "venda_cancelada";
 
+/** Em que pé está a venda, pro selo do cartão (27/10: um caminho só). */
+export function seloDaVenda(n: Pick<Negocio, "consolidada_em" | "etapa"> & { pre_venda_em?: string | null }): { t: string; tom: "aviso" | "rel" } | null {
+  if (n.etapa === "perdido" || n.etapa === "venda_cancelada") return null;
+  if (n.consolidada_em) return { t: "Fechada", tom: "rel" };
+  if (emPreVenda(n)) return { t: "Venda registrada (falta fechar)", tom: "aviso" };
+  return null;
+}
+
 export async function consolidar(negocioId: string, ficha: Ficha): Promise<{ viagem_id: string; plano_id: string }> {
   const { data, error } = await supabase.rpc("closer_consolidar", { p_negocio: negocioId, p_ficha: ficha });
   if (error) throw new Error(erroAmigavel(error));
@@ -277,6 +286,27 @@ export function preVendaNoBitrix(negocioId: string) {
 /** Leva a etapa do cartão (e o valor) pro Bitrix agora. O cron faz o mesmo a cada 10 min. */
 export function espelharNoBitrix(negocioId: string) {
   return chamarApi<{ ok: boolean; status?: string; mensagem?: string }>("espelhar", { negocioId });
+}
+
+// ── O que está ligado no servidor (27/10) ──────────────────────────────────
+// A tela esconde o que depende de variável que não está na Vercel (contrato
+// pelo ZapSign/Google, Bitrix). Uma chamada por sessão, dividida entre as telas.
+export interface ConfigDaArea { contrato: boolean; bitrix: boolean }
+let configCache: Promise<ConfigDaArea> | null = null;
+export function configDaArea(): Promise<ConfigDaArea> {
+  if (!configCache) {
+    configCache = chamarApi<ConfigDaArea>("config", {}).catch(() => {
+      configCache = null; // tenta de novo na próxima tela
+      return { contrato: false, bitrix: true };
+    });
+  }
+  return configCache;
+}
+/** Hook: null enquanto carrega. */
+export function useConfigDaArea(): ConfigDaArea | null {
+  const [c, setC] = useState<ConfigDaArea | null>(null);
+  useEffect(() => { let vivo = true; void configDaArea().then((x) => { if (vivo) setC(x); }); return () => { vivo = false; }; }, []);
+  return c;
 }
 
 export async function responsaveisDoRel(): Promise<{ id: string; name: string }[]> {

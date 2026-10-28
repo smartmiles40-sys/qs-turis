@@ -254,8 +254,20 @@ async function atualizarGrupos(lista) {
       ...(g.size !== undefined ? { participantes: g.size } : {}),
       atualizado_em: new Date().toISOString(),
     }));
+  // EM LOTE (27/10): eram 185 POSTs em fila a cada sincronização e o cron
+  // estourava os 60 s. Agrupa por CONJUNTO DE CAMPOS: num upsert em lote o
+  // PostgREST usa a união das chaves, e um grupo sem `desc` teria a descrição
+  // apagada se fosse no mesmo lote de quem tem.
+  const porChaves = new Map();
   for (const l of linhas) {
-    await rest('rel_wa_grupos?on_conflict=jid', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: l });
+    const k = Object.keys(l).sort().join(',');
+    if (!porChaves.has(k)) porChaves.set(k, []);
+    porChaves.get(k).push(l);
+  }
+  for (const lote of porChaves.values()) {
+    for (let i = 0; i < lote.length; i += 200) {
+      await rest('rel_wa_grupos?on_conflict=jid', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: lote.slice(i, i + 200) });
+    }
   }
 }
 
@@ -335,7 +347,8 @@ async function gravarParticipantes(grupoJid, participantes, marca) {
 }
 
 /** Puxa todos os grupos (com participantes) da Evolution e acerta o banco. */
-export async function sincronizarGrupos() {
+export async function sincronizarGrupos({ orcamentoMs = 100_000 } = {}) {
+  const prazo = Date.now() + orcamentoMs;
   const lista = await evo(`/group/fetchAllGroups/${encodeURIComponent(INSTANCIA())}?getParticipants=true`, { timeoutMs: 45000 });
   const grupos = (Array.isArray(lista) ? lista : []).filter((g) => ehGrupo(g?.id));
   await atualizarGrupos(grupos);
@@ -349,13 +362,23 @@ export async function sincronizarGrupos() {
     if (esta && g.saiu_em) await rest(`rel_wa_grupos?jid=eq.${encodeURIComponent(g.jid)}`, { method: 'PATCH', prefer: 'return=minimal', body: { saiu_em: null } });
   }
   // participantes: grava os de agora e apaga quem não está mais (marca de tempo desta rodada)
+  // 27/10: 6 grupos por vez (eram um por um, 2 chamadas cada) e com prazo — o
+  // cron estourava os 60 s. Grupo que ficou pra depois não perde nada: o DELETE
+  // só apaga quem não foi regravado NESTA rodada, e só roda pra quem foi
+  // regravado. Ordem embaralhada pra não ser sempre o mesmo a sobrar.
   let participantes = 0;
-  for (const g of grupos) {
-    if (!Array.isArray(g.participants)) continue;
-    participantes += await gravarParticipantes(g.id, g.participants, agora);
-    await rest(`rel_wa_grupo_participantes?grupo_jid=eq.${encodeURIComponent(g.id)}&atualizado_em=lt.${encodeURIComponent(agora)}`, { method: 'DELETE', prefer: 'return=minimal' }).catch(() => null);
+  let pulados = 0;
+  const fila = grupos.filter((g) => Array.isArray(g.participants)).sort(() => Math.random() - 0.5);
+  for (let i = 0; i < fila.length; i += 6) {
+    if (Date.now() > prazo) { pulados = fila.length - i; break; }
+    const qtds = await Promise.all(fila.slice(i, i + 6).map(async (g) => {
+      const n = await gravarParticipantes(g.id, g.participants, agora);
+      await rest(`rel_wa_grupo_participantes?grupo_jid=eq.${encodeURIComponent(g.id)}&atualizado_em=lt.${encodeURIComponent(agora)}`, { method: 'DELETE', prefer: 'return=minimal' }).catch(() => null);
+      return n;
+    }));
+    participantes += qtds.reduce((a, b) => a + b, 0);
   }
-  return { grupos: grupos.length, participantes };
+  return { grupos: grupos.length, participantes, ...(pulados ? { participantes_pra_proxima: pulados } : {}) };
 }
 
 /** Foto no grupo — também só aceita grupo já conhecido. */

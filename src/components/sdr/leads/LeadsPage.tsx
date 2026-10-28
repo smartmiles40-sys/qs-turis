@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData, podeExecutar } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
+import ImportarListaCsv from "./ImportarListaCsv";
 import type {
   Lead,
   LeadStatus,
@@ -14,7 +15,6 @@ import { STATUS_LABELS, SOURCE_LABELS } from "../types";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { createCadenceTasks, closeOpenCadenceTasks, transferLead, fetchAllRows, LEAD_SELECT } from "@/lib/qs/queries";
 import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
-import { planCadenceDates, loadWorkHours, scheduleWeekdays, nextWorkMoment, clampToWorkWindow, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured } from "@/lib/webphone";
 
@@ -88,15 +88,6 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCsvModal, setShowCsvModal] = useState(false);
-  const [csvRows, setCsvRows] = useState<Array<{ nome: string; empresa: string; telefone: string; email: string; segmento: string }>>([]);
-  const [csvImporting, setCsvImporting] = useState(false);
-  const [csvImportedCount, setCsvImportedCount] = useState<number | null>(null);
-  const [csvCadenceId, setCsvCadenceId] = useState("");
-  const [csvProgress, setCsvProgress] = useState(0);
-  // Quantos leads o import de fato vai gravar (depois dos dedupes) — denominador
-  // da barra de progresso; e quantos foram pulados (duplicados no arquivo/banco).
-  const [csvPlanned, setCsvPlanned] = useState<number | null>(null);
-  const [csvSkipped, setCsvSkipped] = useState<{ file: number; db: number } | null>(null);
 
   // ── Handover state ──
   const [showHandover, setShowHandover] = useState(false);
@@ -590,16 +581,6 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     setDupLead(null);
   }
 
-  // Fecha o modal de CSV — mas NUNCA no meio da importação: fechar deixava o
-  // import rodando escondido, sem barra de progresso nem resultado na tela.
-  function closeCsvModal() {
-    if (csvImporting) return;
-    setShowCsvModal(false);
-    setCsvRows([]);
-    setCsvImportedCount(null);
-    setCsvSkipped(null);
-    setCsvPlanned(null);
-  }
 
   // ── Cadence name helper ──
   function cadenceName(id: string | null) {
@@ -644,7 +625,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             onClick={() => { setHandoverError(null); setShowHandover(true); }}
             className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
-            Realizar Handover
+            Transferir leads
           </button>
           <button
             onClick={() => {
@@ -682,7 +663,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
-              Importar CSV
+              Importar lista (CSV)
             </button>
           )}
           {executa && (
@@ -1357,382 +1338,16 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         </div>
       )}
 
-      {/* ── CSV Import Modal (Change 15) ──────────────────────────────── */}
-      {showCsvModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={closeCsvModal}
-          />
-          <div className="relative bg-white rounded-xl border border-gray-100 shadow-none w-full max-w-2xl mx-4 p-4 md:p-6 max-h-[80vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold text-gray-900">Importar Leads via CSV</h2>
-              <button
-                onClick={closeCsvModal}
-                disabled={csvImporting}
-                title={csvImporting ? "Aguarde a importação terminar" : undefined}
-                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {csvImportedCount !== null ? (
-              <div className="text-center py-8">
-                <div className="w-12 h-12 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <p className="text-lg font-semibold text-gray-900 mb-2">{csvImportedCount} leads importados</p>
-                {/* Transparência do dedupe: quantos ficaram de fora e por quê. */}
-                {csvSkipped && (csvSkipped.db > 0 || csvSkipped.file > 0) && (
-                  <p className="text-sm text-gray-500 mb-4">
-                    {csvSkipped.db > 0 && <>{csvSkipped.db} pulado{csvSkipped.db > 1 ? "s" : ""} (já existia{csvSkipped.db > 1 ? "m" : ""} no banco)</>}
-                    {csvSkipped.db > 0 && csvSkipped.file > 0 && " · "}
-                    {csvSkipped.file > 0 && <>{csvSkipped.file} duplicado{csvSkipped.file > 1 ? "s" : ""} no próprio arquivo</>}
-                  </p>
-                )}
-                <button
-                  onClick={closeCsvModal}
-                  className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
-                >
-                  Fechar
-                </button>
-              </div>
-            ) : (
-              <>
-                {csvRows.length === 0 ? (
-                  <div>
-                    <p className="text-sm text-gray-500 mb-4">
-                      Selecione um arquivo CSV com as colunas: <strong>nome, empresa, telefone, email, segmento</strong>
-                    </p>
-                    <input
-                      type="file"
-                      accept=".csv"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          const text = ev.target?.result as string;
-                          if (!text) return;
-                          // Divisor de linha com aspas padrão CSV (RFC 4180 simplificado):
-                          // "Empresa, Ltda" é UMA coluna, "" dentro de aspas vira aspa
-                          // literal. Campos com QUEBRA DE LINHA dentro de aspas não são
-                          // suportados (o parse segue linha a linha).
-                          const splitCsvLine = (line: string, sep: string): string[] => {
-                            const out: string[] = [];
-                            let cur = "";
-                            let inQuotes = false;
-                            for (let i = 0; i < line.length; i++) {
-                              const ch = line[i];
-                              if (inQuotes) {
-                                if (ch === '"') {
-                                  if (line[i + 1] === '"') { cur += '"'; i++; } // "" escapada
-                                  else inQuotes = false;
-                                } else cur += ch;
-                              } else if (ch === '"') inQuotes = true;
-                              else if (ch === sep) { out.push(cur); cur = ""; }
-                              else cur += ch;
-                            }
-                            out.push(cur);
-                            return out.map((c) => c.trim());
-                          };
-                          const lines = text.split(/\r?\n/).filter((l) => l.trim());
-                          if (lines.length < 2) return;
-                          // Separador: o que aparecer mais no cabeçalho (Excel pt-BR usa ";").
-                          const sep = (lines[0].match(/;/g)?.length ?? 0) >= (lines[0].match(/,/g)?.length ?? 0) ? ";" : ",";
-
-                          // Parse header
-                          const header = splitCsvLine(lines[0], sep).map((h) => h.toLowerCase().replace(/['"]/g, ""));
-                          const colNome = header.findIndex((h) => h === "nome" || h === "name");
-                          const colEmpresa = header.findIndex((h) => h === "empresa" || h === "company" || h === "company_name");
-                          const colTelefone = header.findIndex((h) => h === "telefone" || h === "phone" || h === "tel");
-                          const colEmail = header.findIndex((h) => h === "email" || h === "e-mail");
-                          const colSegmento = header.findIndex((h) => h === "segmento" || h === "segment");
-
-                          const rows = lines.slice(1).map((line) => {
-                            const cols = splitCsvLine(line, sep);
-                            return {
-                              nome: colNome >= 0 ? cols[colNome] || "" : "",
-                              empresa: colEmpresa >= 0 ? cols[colEmpresa] || "" : "",
-                              telefone: colTelefone >= 0 ? cols[colTelefone] || "" : "",
-                              email: colEmail >= 0 ? cols[colEmail] || "" : "",
-                              segmento: colSegmento >= 0 ? cols[colSegmento] || "" : "",
-                            };
-                          }).filter((r) => r.nome.trim());
-
-                          setCsvRows(rows);
-                        };
-                        reader.readAsText(file);
-                      }}
-                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-[#0147FF]/10 file:text-[#0147FF] hover:file:bg-[#0147FF]/20"
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-sm text-gray-700 mb-4 font-medium">
-                      {csvRows.length} lead{csvRows.length !== 1 ? "s" : ""} encontrado{csvRows.length !== 1 ? "s" : ""}
-                    </p>
-                    <div className="overflow-x-auto max-h-64 overflow-y-auto border border-gray-100 rounded-lg mb-4">
-                      <table className="w-full text-xs">
-                        <thead className="bg-gray-50 sticky top-0">
-                          <tr>
-                            <th className="px-3 py-2 text-left font-semibold text-gray-500">Nome</th>
-                            <th className="px-3 py-2 text-left font-semibold text-gray-500">Empresa</th>
-                            <th className="px-3 py-2 text-left font-semibold text-gray-500">Telefone</th>
-                            <th className="px-3 py-2 text-left font-semibold text-gray-500">E-mail</th>
-                            <th className="px-3 py-2 text-left font-semibold text-gray-500">Segmento</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {csvRows.map((row, idx) => (
-                            <tr key={idx} className="border-t border-gray-50">
-                              <td className="px-3 py-2 text-gray-900">{row.nome}</td>
-                              <td className="px-3 py-2 text-gray-700">{row.empresa}</td>
-                              <td className="px-3 py-2 text-gray-700">{row.telefone}</td>
-                              <td className="px-3 py-2 text-gray-700">{row.email}</td>
-                              <td className="px-3 py-2 text-gray-700">{row.segmento}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {/* Cadência de destino: o gatilho divide os leads igualmente entre os SDRs dela */}
-                    <div className="mb-4">
-                      <label className="block text-xs font-medium text-gray-700 mb-1.5">Cadência de destino (distribui pros SDRs dela e cria as atividades)</label>
-                      <select
-                        value={csvCadenceId}
-                        onChange={(e) => setCsvCadenceId(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:border-[#0147FF]"
-                      >
-                        <option value="">Sem cadência (distribuição geral, sem atividades)</option>
-                        {cadences.filter((c) => c.status === "disponivel").map((c) => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {csvImporting && (
-                      <div className="mb-3">
-                        <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                          {/* Denominador = o que VAI ser gravado (depois dos dedupes). */}
-                          <div className="h-full rounded-full bg-[#0147FF] transition-all" style={{ width: `${Math.round((csvProgress / Math.max(csvPlanned ?? csvRows.length, 1)) * 100)}%` }} />
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1 tabular-nums">Importando {csvProgress}/{csvPlanned ?? csvRows.length}… Não feche esta janela.</p>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-end gap-3">
-                      <button
-                        onClick={() => setCsvRows([])}
-                        disabled={csvImporting}
-                        className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        onClick={async () => {
-                          setCsvImporting(true);
-                          // try/finally: se QUALQUER await lançar no meio, o modal não
-                          // pode ficar travado em "Importando..." (closeCsvModal barra
-                          // o fechamento enquanto csvImporting=true).
-                          try {
-                          setCsvProgress(0);
-                          setCsvSkipped(null);
-                          setCsvPlanned(null);
-
-                          // Dedupe dentro do arquivo (mesmo e-mail ou telefone = 1 lead só).
-                          const seen = new Set<string>();
-                          const rows = csvRows.filter((r) => {
-                            const key = (r.email.trim().toLowerCase() || r.telefone.replace(/\D/g, "") || r.nome.trim().toLowerCase());
-                            if (!key || seen.has(key)) return false;
-                            seen.add(key);
-                            return true;
-                          });
-                          const skippedFile = csvRows.length - rows.length;
-
-                          // Dedupe contra o BANCO (auditoria 2026-07-14): telefone (só
-                          // dígitos) ou e-mail (minúsculo) que já existem são PULADOS —
-                          // antes o dedupe era só intra-arquivo e reimportar a mesma
-                          // planilha duplicava a base inteira. Busca leve (email/phone)
-                          // feita na hora; a RLS limita ao que o usuário pode ler
-                          // (gestor/admin, que é quem importa, enxerga a base toda).
-                          // Paginado (13/08): o select seco cortava em 1.000 e a base
-                          // tem 1.398 — reimportar planilha antiga duplicaria os leads
-                          // que ficaram fora do recorte.
-                          let existing: { email: string | null; phone: string | null }[];
-                          try {
-                            existing = await fetchAllRows<{ email: string | null; phone: string | null }>((from, to) =>
-                              supabase.from("qs_leads").select("email, phone").order("id").range(from, to)
-                            );
-                          } catch (dedupeErr) {
-                            // Sem a checagem não dá pra importar com segurança (criaria
-                            // duplicados em massa) — cancela e o usuário tenta de novo.
-                            console.warn("[CSV] checagem de duplicados no banco falhou:", dedupeErr);
-                            notifyError("Não foi possível checar duplicados no banco — importação cancelada, tente novamente.");
-                            setCsvImporting(false);
-                            return;
-                          }
-                          const dbEmails = new Set(
-                            (existing ?? []).map((l) => (l.email ?? "").trim().toLowerCase()).filter(Boolean)
-                          );
-                          const dbPhones = new Set(
-                            (existing ?? []).map((l) => (l.phone ?? "").replace(/\D/g, "")).filter((p) => p.length >= 8)
-                          );
-                          let skippedDb = 0;
-                          const newRows = rows.filter((r) => {
-                            const em = r.email.trim().toLowerCase();
-                            const ph = r.telefone.replace(/\D/g, "");
-                            const exists = (!!em && dbEmails.has(em)) || (ph.length >= 8 && dbPhones.has(ph));
-                            if (exists) skippedDb++;
-                            return !exists;
-                          });
-                          setCsvSkipped({ file: skippedFile, db: skippedDb });
-                          setCsvPlanned(newRows.length); // denominador honesto da barra
-                          if (newRows.length === 0) {
-                            notifyError("Nenhum lead novo para importar — todos já existiam no banco (ou eram duplicados no arquivo).");
-                            setCsvImportedCount(0);
-                            setCsvImporting(false);
-                            return;
-                          }
-
-                          // Dias/atividades da cadência (1 busca só, reusada em todos os leads).
-                          //
-                          // CÓPIA-ESPELHO de createCadenceTasks (src/lib/qs/queries.ts) —
-                          // mantida INLINE de propósito: aqui é 1 busca de cadência pro LOTE
-                          // inteiro (vs 1 busca por lead na canônica). Qualquer mudança lá
-                          // precisa ser refletida aqui: datas via planCadenceDates, ordenação
-                          // por order_index, prioridade pelo período (manhã=alta, >=12:30=
-                          // média, sem horário=baixa), status "pendente", is_extra false e
-                          // owner_id = dono FINAL do lead inserido (inserted.owner_id).
-                          let cadDays: { day_number: number; activities: { channel_type: string; scheduled_time: string | null; order_index: number }[] }[] = [];
-                          // Datas reais de cada "Dia N" respeitando os dias de execução da
-                          // cadência (mesmo helper do createCadenceTasks) — antes o "Dia 2"
-                          // de uma importação na sexta caía no sábado.
-                          let csvDateByDay = new Map<number, Date>();
-                          // Horário de Trabalho = verdade absoluta (mesma regra do createCadenceTasks).
-                          let csvWorkHours: WorkHours = DEFAULT_WORK_HOURS;
-                          let csvFirstDay = 1;
-                          if (csvCadenceId) {
-                            const [{ data }, { data: cadRow }, wh] = await Promise.all([
-                              supabase
-                                .from("qs_cadence_days")
-                                .select("day_number, activities:qs_cadence_activities(channel_type, scheduled_time, order_index)")
-                                .eq("cadence_id", csvCadenceId)
-                                .order("day_number"),
-                              supabase
-                                .from("qs_cadences")
-                                .select("execution_weekdays, offday_policy")
-                                .eq("id", csvCadenceId)
-                                .maybeSingle(),
-                              loadWorkHours(),
-                            ]);
-                            cadDays = (data ?? []) as typeof cadDays;
-                            csvWorkHours = wh;
-                            const plan = cadRow as { execution_weekdays: number[] | null; offday_policy: string | null } | null;
-                            csvDateByDay = planCadenceDates(
-                              cadDays.map((d) => d.day_number ?? 1),
-                              scheduleWeekdays(wh, plan?.execution_weekdays ?? null),
-                              plan?.offday_policy ?? null
-                            );
-                            csvFirstDay = cadDays.length ? Math.min(...cadDays.map((d) => d.day_number ?? 1)) : 1;
-                          }
-
-                          // Insere UM POR VEZ: cada insert é uma transação própria, então o
-                          // round-robin do banco rotaciona os SDRs (em lote cairia tudo no mesmo).
-                          let ok = 0, fail = 0, tasksFail = 0;
-                          for (const row of newRows) {
-                            const nameParts = row.nome.trim().split(/\s+/);
-                            const { data: inserted, error } = await supabase
-                              .from("qs_leads")
-                              .insert({
-                                first_name: nameParts[0] || "",
-                                last_name: nameParts.slice(1).join(" ") || null,
-                                full_name: row.nome.trim(),
-                                email: row.email.trim() || null,
-                                phone: row.telefone.trim() || null,
-                                company_name: row.empresa.trim() || null,
-                                segment: row.segmento.trim() || null,
-                                source: "importacao" as LeadSource,
-                                status: csvCadenceId ? ("em_prospeccao" as LeadStatus) : ("nao_iniciado" as LeadStatus),
-                                cadence_id: csvCadenceId || null,
-                                cadence_started_at: csvCadenceId ? new Date().toISOString() : null,
-                                arrived_at: new Date().toISOString(),
-                              })
-                              .select("id, owner_id")
-                              .single();
-
-                            if (error || !inserted) { fail++; setCsvProgress((p) => p + 1); continue; }
-                            ok++;
-
-                            // Tarefas da cadência pro DONO que o gatilho escolheu.
-                            if (csvCadenceId && cadDays.length > 0) {
-                              const taskRows = cadDays.flatMap((d) =>
-                                [...d.activities].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)).map((a) => {
-                                  // Data do dia já ajustada pros dias de execução (csvDateByDay).
-                                  const planned = new Date(csvDateByDay.get(d.day_number ?? 1) ?? new Date());
-                                  const [h, m] = (a.scheduled_time || "09:00").split(":");
-                                  planned.setHours(Number(h) || 9, Number(m) || 0, 0, 0);
-                                  // Horário de Trabalho = verdade absoluta: 1º dia cai no próximo
-                                  // momento de trabalho (nunca no passado/fim de semana); dias
-                                  // futuros encaixam a hora na janela do expediente.
-                                  const when = (d.day_number ?? 1) === csvFirstDay
-                                    ? nextWorkMoment(csvWorkHours, new Date(Math.max(planned.getTime(), Date.now())))
-                                    : clampToWorkWindow(csvWorkHours, planned);
-                                  return {
-                                    lead_id: inserted.id,
-                                    cadence_id: csvCadenceId,
-                                    owner_id: inserted.owner_id,
-                                    channel_type: a.channel_type,
-                                    // Prioridade pelo PERÍODO da atividade (manhã=alta,
-                                    // tarde>=12:30=média, dia todo/sem horário=baixa) —
-                                    // mesma regra do createCadenceTasks e do serverless.
-                                    priority: (!a.scheduled_time ? "baixa" : a.scheduled_time >= "12:30" ? "media" : "alta"),
-                                    scheduled_at: when.toISOString(),
-                                    status: "pendente",
-                                    is_extra: false,
-                                    // Carimbo do DIA DO PLANO — mesma regra do
-                                    // createCadenceTasks (rótulo FUP N real).
-                                    tags: [`dia:${d.day_number ?? 1}`],
-                                  };
-                                })
-                              );
-                              if (taskRows.length > 0) {
-                                // Erro aqui NÃO pode ser silencioso: o lead ficaria
-                                // em prospecção sem NENHUMA atividade (zumbi fora da
-                                // fila de todo mundo).
-                                const { error: taskErr } = await supabase.from("qs_tasks").insert(taskRows);
-                                if (taskErr) { tasksFail++; console.warn("[CSV] tarefas não criadas p/ lead", inserted.id, taskErr.message); }
-                              }
-                            }
-                            setCsvProgress((p) => p + 1);
-                          }
-
-                          if (fail > 0) notifyError(`${fail} lead(s) não puderam ser importados — confira o arquivo.`);
-                          if (tasksFail > 0) notifyError(`${tasksFail} lead(s) entraram SEM atividades — vincule a cadência deles de novo (senão ficam fora da fila).`);
-                          setCsvImportedCount(ok);
-                          await fetchLeads();
-                          } catch (e) {
-                            console.warn("[CSV] importação falhou:", e);
-                            notifyError("Falha inesperada na importação — tente novamente.");
-                          } finally {
-                            setCsvImporting(false);
-                          }
-                        }}
-                        disabled={csvImporting}
-                        className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
-                      >
-                        {csvImporting ? "Importando..." : `Confirmar importação (${csvRows.length})`}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
+      {/* Importar lista (CSV) — 27/10 */}
+      {showCsvModal && currentUser && (
+        <ImportarListaCsv
+          currentUser={currentUser}
+          isManager={isManager}
+          users={users}
+          cadences={cadences}
+          onClose={() => setShowCsvModal(false)}
+          onImported={fetchLeads}
+        />
       )}
 
       {/* Modal de Handover (SDR → Closer) */}
@@ -1743,7 +1358,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             onClick={() => !handoverSaving && setShowHandover(false)}
           />
           <div className="relative bg-white rounded-xl border border-gray-100 shadow-xl w-full max-w-md mx-4 p-4 md:p-6 max-h-[85vh] overflow-y-auto">
-            <h2 className="text-lg font-bold text-gray-900 mb-1">Handover de leads</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-1">Transferir leads</h2>
 
             {isHandoverAdmin && (
               <div className="flex gap-1 p-1 rounded-lg bg-gray-100 mt-2 mb-3">
@@ -1838,7 +1453,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50"
                 style={{ background: "#0147FF" }}
               >
-                {handoverSaving ? "Enviando..." : "Confirmar handover"}
+                {handoverSaving ? "Enviando..." : "Transferir"}
               </button>
             </div>
           </div>

@@ -2,9 +2,10 @@
 // -----------------------------------------------------------------------------
 // CONTRATO e PAGAMENTO do cartão do closer (0180/0181, 22/10/2026).
 //
-// CONTRATO 100% em código (sem n8n): o SERVIDOR (api/closer.js) gera pelo
-// Google, arquiva o PDF no Drive e cria no ZapSign. Sem Google/ZapSign
-// configurados → MODO MANUAL (o closer cola o link e marca assinado; RPC).
+// CONTRATO 100% em código (sem n8n e, desde 27/10, sem Google): o SERVIDOR
+// (api/closer.js) monta o PDF pelos modelos do próprio QS
+// (api/_contratoModelo.js), guarda no Storage e cria no ZapSign. Sem ZapSign
+// configurado → MODO MANUAL (o closer cola o link e marca assinado; RPC).
 //
 // PAGAMENTO só manual / pelo Financeiro (sem Pagar.me/Asaas — Bruno 22/10):
 // colar o link, marcar pago (com baixa na parcela, se houver plano) e "Pedir
@@ -37,7 +38,8 @@ export type TipoContrato = "pacote" | "expedicao";
 export interface CamposContrato {
   tipo: TipoContrato;
   nome: string; cpf: string; rg: string; nascimento: string; endereco: string; email: string; telefone: string;
-  expedicao: string; destino: string; tipo_pacote: string; ida: string; volta: string; passagem: string; seguro: string;
+  expedicao: string; destino: string; tipo_pacote: string; inclusos: string; nao_inclusos: string;
+  ida: string; volta: string; passagem: string; seguro: string;
   valor_total: string; forma_pagamento: string; vendedor: string; data_venda: string;
 }
 export type ChaveCampo = keyof CamposContrato;
@@ -46,20 +48,22 @@ export type ChaveCampo = keyof CamposContrato;
 export const ROTULOS: { k: ChaveCampo; rotulo: string; obrigatorio?: boolean; so?: TipoContrato; longo?: boolean; dica?: string }[] = [
   { k: "nome", rotulo: "Nome completo do cliente", obrigatorio: true },
   { k: "cpf", rotulo: "CPF", obrigatorio: true },
-  { k: "rg", rotulo: "RG" },
-  { k: "nascimento", rotulo: "Data de nascimento", dica: "dd/mm/aaaa" },
+  { k: "nascimento", rotulo: "Data de nascimento", so: "pacote", dica: "dd/mm/aaaa" },
   { k: "email", rotulo: "E-mail (o ZapSign manda o contrato pra ele)", obrigatorio: true },
   { k: "telefone", rotulo: "Telefone", obrigatorio: true },
   { k: "endereco", rotulo: "Endereço", longo: true },
   { k: "expedicao", rotulo: "Nome da expedição", obrigatorio: true, so: "expedicao" },
-  { k: "destino", rotulo: "Destino / descrição do pacote", obrigatorio: true, so: "pacote", longo: true, dica: "Roteiro + o que está incluso." },
-  { k: "tipo_pacote", rotulo: "Tipo de pacote", so: "pacote" },
+  { k: "destino", rotulo: "Destino (quadro resumo)", obrigatorio: true, so: "pacote", longo: true, dica: "Ex.: Itália dos Sonhos: Milão, Toscana e Roma." },
+  { k: "tipo_pacote", rotulo: "Tipo de pacote", so: "pacote", dica: "Ex.: Personalizado" },
+  { k: "inclusos", rotulo: "O que está incluso (cláusula 1.3)", obrigatorio: true, so: "pacote", longo: true,
+    dica: "Um item por linha. O que vem antes dos dois-pontos sai em negrito: \"Hospedagem: 13 noites em hotéis 3 estrelas\"" },
+  { k: "nao_inclusos", rotulo: "Não inclusos", so: "pacote", longo: true, dica: "Ex.: traslados aeroporto–hotel, refeições não mencionadas, seguro-viagem" },
   { k: "ida", rotulo: "Ida prevista", dica: "dd/mm/aaaa" },
   { k: "volta", rotulo: "Volta prevista", dica: "dd/mm/aaaa" },
   { k: "passagem", rotulo: "Passagem aérea", so: "expedicao", dica: "Ex.: Inclusa / Não inclusa" },
   { k: "seguro", rotulo: "Seguro viagem", so: "expedicao", dica: "Ex.: Incluso como bônus / Por conta do(a) Contratante" },
-  { k: "valor_total", rotulo: "Valor total (todas as pessoas)", obrigatorio: true, dica: "Só o número: 26.990,00" },
-  { k: "forma_pagamento", rotulo: "Forma de pagamento", obrigatorio: true, longo: true },
+  { k: "valor_total", rotulo: "Valor total (todas as pessoas)", obrigatorio: true, dica: "Só o número: 26.990,00 (sai \"R$ 26.990,00\")" },
+  { k: "forma_pagamento", rotulo: "Forma de pagamento", obrigatorio: true, longo: true, dica: "Entrada, parcelas e datas. Ex.: Entrada de R$ 2.000,00 via Pix e 12 parcelas de R$ 2.000,00 no cartão" },
   { k: "vendedor", rotulo: "Vendedor" },
   { k: "data_venda", rotulo: "Data da venda", obrigatorio: true, dica: "dd/mm/aaaa" },
 ];
@@ -76,6 +80,18 @@ export function cpfValido(v: string): boolean {
   };
   return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
 }
+/** "dd/mm/aaaa" (ou aaaa-mm-dd) → Date, ou null se não for uma data de verdade. */
+function dataDe(s: string): Date | null {
+  const t = String(s || "").trim();
+  const br = t.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const iso = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const [d, m, a] = br ? [+br[1], +br[2], +br[3]] : iso ? [+iso[3], +iso[2], +iso[1]] : [0, 0, 0];
+  if (!a) return null;
+  const x = new Date(Date.UTC(a, m - 1, d, 12));
+  return x.getUTCDate() === d && x.getUTCMonth() === m - 1 ? x : null;
+}
+const linhasDosInclusos = (s: string) => String(s || "").split("\n").map((l) => l.trim()).filter(Boolean);
+
 function numeroDoValor(v: string): number {
   let s = (String(v || "").trim().match(/^[R$\s]*([\d.,]+)/) || [])[1] || "";
   if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
@@ -95,7 +111,11 @@ export function errosDoContrato(c: CamposContrato): Partial<Record<ChaveCampo, s
   if (!c.forma_pagamento.trim()) e.forma_pagamento = "Obrigatório.";
   if (c.tipo === "expedicao" && !c.expedicao.trim()) e.expedicao = "Obrigatório na expedição.";
   if (c.tipo === "pacote" && !c.destino.trim()) e.destino = "Obrigatório no pacote.";
-  if (!c.data_venda.trim()) e.data_venda = "Obrigatório.";
+  if (c.tipo === "pacote" && !linhasDosInclusos(c.inclusos).length) e.inclusos = "Liste o que está incluso (um item por linha).";
+  if (!dataDe(c.data_venda)) e.data_venda = "Data em dd/mm/aaaa.";
+  for (const k of ["ida", "volta"] as const) if (c[k].trim() && !dataDe(c[k])) e[k] = "Data em dd/mm/aaaa.";
+  const ida = dataDe(c.ida), volta = dataDe(c.volta);
+  if (ida && volta && volta < ida) e.volta = "A volta está antes da ida (confira o ano).";
   return e;
 }
 
@@ -109,10 +129,22 @@ export interface Previa {
 }
 export const previaDoContrato = (negocioId: string) => api<Previa>("contrato-previa", { negocioId });
 
-export interface ResultadoEnvio { ok: boolean; contratoId?: string; link?: string | null; pdf?: string | null; erro?: string; sobraram?: string[] | null }
+export interface ResultadoEnvio { ok: boolean; contratoId?: string; link?: string | null; erro?: string }
 export const enviarContrato = (negocioId: string, campos: CamposContrato, substituir = false) =>
   api<ResultadoEnvio>("contrato-enviar", { negocioId, campos, substituir });
-export const atualizarContrato = (contratoId: string) => api<{ ok: boolean; status: string }>("contrato-atualizar", { contratoId });
+/** O PDF como vai sair (sem enviar nada), pra abrir numa aba. */
+export async function pdfDeTeste(campos: CamposContrato): Promise<{ blob: Blob; erros: string[]; avisos: string[] }> {
+  const r = await api<{ base64: string; erros: string[]; avisos: string[] }>("contrato-pdf-teste", { campos });
+  const bin = atob(r.base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { blob: new Blob([bytes], { type: "application/pdf" }), erros: r.erros, avisos: r.avisos };
+}
+/** Link de 10 min do PDF guardado no QS (o enviado ou o assinado). */
+export const linkDoPdf = (contratoId: string, qual: "gerado" | "assinado") =>
+  api<{ url: string }>("contrato-pdf-link", { contratoId, qual }).then((r) => r.url);
+
+export const atualizarContrato =(contratoId: string) => api<{ ok: boolean; status: string }>("contrato-atualizar", { contratoId });
 export const cancelarContrato = (contratoId: string, motivo: string) => api<{ ok: boolean; status: string }>("contrato-cancelar", { contratoId, motivo });
 
 // ── Os envios do cartão ─────────────────────────────────────────────────────
@@ -154,15 +186,11 @@ export interface SituacaoContrato {
   modo: "automatico" | "manual";
   falta: string[];
   config: ConfigContrato;
-  google: { clienteConfigurado: boolean; conectado: boolean; email: string | null; conectadoEm: string | null; ultimoErro: string | null };
   zapsign: { token: boolean; webhookSecret: boolean; sandbox: boolean };
-  redirectUri: string;
   webhookUrl: string;
 }
 export const situacaoDoContrato = () => api<SituacaoContrato>("contrato-config");
 export const salvarConfigContrato = (valor: ConfigContrato) => api<SituacaoContrato>("contrato-config-salvar", { valor });
-export const conectarGoogle = () => api<{ url: string }>("google-conectar");
-export const desconectarGoogle = () => api<SituacaoContrato>("google-desconectar");
 export const testarZapsign = () => api<{ ok: boolean; erro?: string }>("zapsign-testar");
 
 // ── PAGAMENTO (0181) ────────────────────────────────────────────────────────

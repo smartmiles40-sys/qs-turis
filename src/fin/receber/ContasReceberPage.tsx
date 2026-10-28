@@ -100,7 +100,7 @@ export default function ContasReceberPage({ onMudou }: { onMudou?: () => void })
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
       {carregando ? <p className="text-sm" style={{ color: "var(--ink3)" }}>Carregando…</p> : !filtradas.length ? (
-        <Vazio titulo="Nenhuma parcela aqui" texto="Quando um closer consolidar uma venda, o plano de pagamento aparece nesta lista." />
+        <Vazio titulo="Nenhuma parcela aqui" texto="As parcelas aparecem aqui quando o closer fechar uma venda com o plano de pagamento. Nada pra fazer por enquanto." />
       ) : (
         <div className="rel-card overflow-x-auto">
           <table className="w-full text-[13px]" style={{ color: "var(--ink)" }}>

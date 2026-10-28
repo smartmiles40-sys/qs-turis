@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Etiqueta, Modal, Vazio } from "@/rel/ui";
-import { ETAPAS, ETAPAS_COM_MOTIVO, ETAPAS_FINAIS, NOME_ETAPA, bancoSemPipelineV2, brl, dataBr, emPreVenda, espelharNoBitrix, listarNegocios, moverNegocio, nomeDoLead, trazerDoBitrix, type Etapa, type Negocio } from "./lib";
+import { ETAPAS, ETAPAS_COM_MOTIVO, ETAPAS_FINAIS, NOME_ETAPA, bancoSemPipelineV2, brl, dataBr, emPreVenda, espelharNoBitrix, listarNegocios, moverNegocio, nomeDoLead, seloDaVenda, trazerDoBitrix, useConfigDaArea, type Etapa, type Negocio } from "./lib";
 import NegocioPainel, { type LinksDoPainel } from "./NegocioPainel";
 
 const PERIODOS = [
@@ -49,6 +49,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
   const [perdendo, setPerdendo] = useState<{ id: string; etapa: Etapa; motivo: string } | null>(null);
   const [trazendo, setTrazendo] = useState<{ dealId: string; ocupado: boolean; erro: string | null } | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  const config = useConfigDaArea();
 
   const carregar = useCallback(async () => {
     setErro(null);
@@ -105,12 +106,14 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
     const n = lista.find((x) => x.id === id);
     if (!n || n.etapa === etapa) return;
     if (etapa === "aguardando_emissao" && !n.consolidada_em) {
-      setAviso("Pra ir pra Aguardando emissão, preencha a ficha de fechamento — ela consolida a venda.");
+      setAviso(emPreVenda(n)
+        ? "Pra ir pra Aguardando emissão, use \"Fechar a venda\" no cartão (pagamento e contrato)."
+        : "Pra ir pra Aguardando emissão, use \"Registrar venda\" no cartão.");
       onAbrirId(id);
       return;
     }
     if ((etapa === "venda_realizada" || etapa === "venda_cancelada") && !n.consolidada_em) {
-      setAviso(`${NOME_ETAPA[etapa]} vale só pra venda consolidada. Preencha a ficha de fechamento antes.`);
+      setAviso(`${NOME_ETAPA[etapa]} vale só pra venda fechada. Abra o cartão: "Registrar venda" e depois "Fechar a venda".`);
       return;
     }
     if (ETAPAS_COM_MOTIVO.includes(etapa)) { setPerdendo({ id, etapa, motivo: "" }); return; }
@@ -142,7 +145,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
           Em aberto: <b>{abertos.length}</b> · {brl(abertos.reduce((s, n) => s + valorDe(n), 0))}
           {"  "}· Vendas: <b>{vendas.length}</b> · {brl(vendas.reduce((s, n) => s + valorDe(n), 0))}
         </span>
-        <Botao onClick={() => setTrazendo({ dealId: "", ocupado: false, erro: null })}>Trazer do Bitrix</Botao>
+        {config?.bitrix !== false && <Botao onClick={() => setTrazendo({ dealId: "", ocupado: false, erro: null })}>Trazer do Bitrix</Botao>}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -212,10 +215,10 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
                           </p>
                         )}
                         <div className="flex flex-wrap gap-1 mt-1.5">
-                          {emPreVenda(n) && <Etiqueta tom="rel">⚡ Pré-venda</Etiqueta>}
-                          {n.bitrix_status === "erro" && <Etiqueta tom="erro">Bitrix falhou</Etiqueta>}
-                          {n.bitrix_status === "pendente" && <Etiqueta tom="aviso">Indo pro Bitrix</Etiqueta>}
-                          {n.bitrix_status === "sem_card" && <Etiqueta>Só no QS</Etiqueta>}
+                          {(() => { const s = seloDaVenda(n); return s ? <Etiqueta tom={s.tom}>{s.t}</Etiqueta> : null; })()}
+                          {/* "Indo pro Bitrix" saiu (27/10): é automático, ninguém precisa ver. */}
+                          {n.bitrix_status === "erro" && <Etiqueta tom="erro">Bitrix não atualizou</Etiqueta>}
+                          {n.bitrix_status === "sem_card" && <Etiqueta>Sem card no Bitrix</Etiqueta>}
                           {ETAPAS_COM_MOTIVO.includes(n.etapa) && n.motivo_perda && <Etiqueta>{n.motivo_perda.slice(0, 30)}</Etiqueta>}
                         </div>
                       </button>

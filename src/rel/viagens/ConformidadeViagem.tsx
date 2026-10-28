@@ -31,6 +31,11 @@ export default function ConformidadeViagem({ viagemId, versao, onRevisado }: { v
 
   const c = estado?.ia_revisao?.conformidade ?? null;
   const falhas = (c?.itens ?? []).filter((i) => !i.ok);
+  // 27/10: a IA está parada (falta OPENAI_API_KEY na Vercel desde 16/10).
+  // Viagem sem revisão gravada não mostra o bloco — nada de botão que só dá erro.
+  // TODO: quando o servidor expuser se a chave existe (GET /api/rel-viagem-ia?status=1),
+  // voltar a mostrar o "Revisar com IA" nas viagens novas.
+  if (!estado?.ia_revisao) return null;
   return (
     <div className="rounded-xl p-3" style={{ border: "1px solid var(--line)", background: "var(--card2)" }} aria-busy={rodando}>
       <div className="flex items-center gap-3">

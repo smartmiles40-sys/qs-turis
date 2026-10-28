@@ -105,7 +105,8 @@ export async function marcarPreVenda(negocioId: string, principal?: { tipo: Tipo
     p_tipo: principal?.tipo ?? null, p_tipo_bitrix: tb?.id ?? null, p_valor: principal?.valor ?? null,
   });
   if (error) throw new Error(erroAmigavel(error));
-  return depoisDoBanco(negocioId, data as { bitrix?: boolean } | null, "Marcado como venda! Já sobe pro Dashboard.");
+  const r = data as { bitrix?: boolean; ja_estava?: boolean } | null;
+  return depoisDoBanco(negocioId, r, r?.ja_estava ? "Venda atualizada! Já sobe pro Dashboard." : "Venda registrada! Já sobe pro Dashboard.");
 }
 
 export async function desfazerPreVenda(negocioId: string): Promise<ResultadoPreVenda> {

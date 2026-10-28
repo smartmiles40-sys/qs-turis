@@ -8,6 +8,7 @@ import { fetchAllRows } from "@/lib/qs/queries";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
 import { createMeeting, closeConfirmTask, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, vincularCardAoBitrix, somenteDigitos } from "@/lib/qs/meetings";
 import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
+import ScheduleMeetingModal from "../agenda/ScheduleMeetingModal";
 import { fetchClosers } from "@/lib/qs/closerAgenda";
 import AgendaMes from "../agenda/AgendaMes";
 import AgendaDia from "../agenda/AgendaDia";
@@ -107,7 +108,13 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
-  // ── Modal (criar/editar) ──
+  // ── Um só jeito de agendar (27/10): "Agendar Reunião" abre o mesmo modal
+  // da Agenda, com os horários livres dos closers. O formulário de baixo
+  // ficou só pra gestão lançar reunião que JÁ aconteceu (data no passado,
+  // que a grade de horários livres não mostra).
+  const [agendando, setAgendando] = useState(false);
+
+  // ── Modal (lançar reunião passada) ──
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -129,6 +136,11 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const [fNotes, setFNotes] = useState("");
   const [fStatus, setFStatus] = useState<MeetingStatus>("agendada");
   const [fCloserId, setFCloserId] = useState("");
+  // SDR responsável quando quem marca é a gestão/conta Master (Bruno, 27/10):
+  // a reunião fica no nome dele (confirma, remarca, "agendou" no Bitrix).
+  const isManager = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const [sdrs, setSdrs] = useState<{ id: string; name: string }[]>([]);
+  const [fSdrId, setFSdrId] = useState("");
   // Combobox de lead (item 5): texto digitado; fLeadId só é preenchido ao escolher.
   const [fLeadSearch, setFLeadSearch] = useState("");
   // Lista aberta só com o campo em foco — fecha ao clicar fora / tabular (senão a
@@ -193,10 +205,16 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     setFLocation("");
     setFLink("");
     setFEmail("");
-    setFGerarMeet(true);
+    // Reunião que já aconteceu não ganha sala do Meet.
+    setFGerarMeet(false);
     setFNotes("");
     setFStatus("agendada");
     setFCloserId("");
+    setFSdrId("");
+    if (isManager && sdrs.length === 0) {
+      void supabase.from("qs_users").select("id, name").eq("role", "sdr").eq("is_active", true).order("name")
+        .then(({ data }) => setSdrs((data as { id: string; name: string }[]) ?? []));
+    }
     setShowModal(true);
   }
 
@@ -219,6 +237,12 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     const when = new Date(fWhen);
     if (isNaN(when.getTime())) {
       setFormError("Data/hora inválida.");
+      return;
+    }
+    // Este formulário é só pra reunião que já passou. Reunião futura vai pelo
+    // "Agendar Reunião", que mostra os horários livres dos closers.
+    if (!editingId && when.getTime() > Date.now()) {
+      setFormError("Esta data ainda não chegou. Para marcar uma reunião futura, use o botão \"Agendar Reunião\".");
       return;
     }
     const emailLimpo = fEmail.trim();
@@ -297,8 +321,16 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       meeting_owner: closerName,
     };
 
-    const ownerId =
-      currentUser && UUID_RE.test(currentUser.id) ? currentUser.id : null;
+    // Gestão marcando: o dono é o SDR escolhido (ou o SDR dono do lead).
+    const sdrDoLead = leads.find((l) => l.id === fLeadId)?.owner_id ?? "";
+    const sdrEscolhido = isManager ? fSdrId || (sdrs.some((s) => s.id === sdrDoLead) ? sdrDoLead : "") : "";
+    if (!editingId && isManager && !sdrEscolhido) {
+      setSaving(false);
+      setFormError("Escolha o SDR responsável pela reunião. É ele quem confirma e quem pode remarcar.");
+      return;
+    }
+    const ownerId = sdrEscolhido || (currentUser && UUID_RE.test(currentUser.id) ? currentUser.id : null);
+    const ownerName = sdrEscolhido ? sdrs.find((s) => s.id === sdrEscolhido)?.name ?? null : currentUser?.name ?? null;
 
     // ── CRIAÇÃO: nasce pelo serviço central (lib/qs/meetings.ts) ──────────────
     // É ele quem cria a atividade de confirmação e avisa o Bitrix — antes esta
@@ -315,7 +347,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
         lead_bitrix_id: novoLead?.bitrix_id ?? null,
         lead_email: emailLimpo || novoLead?.email || null,
         owner_id: ownerId,
-        owner_name: currentUser?.name ?? null,
+        owner_name: ownerName,
         closer_id: fCloserId || null,
         closer_name: closerName,
         title: fTitle.trim() || null,
@@ -338,12 +370,16 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
         void salvarEmailDoLead(fLeadId, emailLimpo);
       }
 
-      const sala = await gerarSalaMeet(res.meeting, { linkManual: querMeet ? null : fLink });
+      // Reunião que já passou não ganha evento no Google (nem convite pro cliente).
+      const jaPassou = when.getTime() <= Date.now();
+      const sala = jaPassou
+        ? { link: fLink.trim() || null, aviso: null }
+        : await gerarSalaMeet(res.meeting, { linkManual: querMeet ? null : fLink });
       setSaving(false);
 
       // O primeiro aviso ao Bitrix saiu antes de a sala existir; este completa
       // o card com o link.
-      if (sala.link) {
+      if (sala.link && !jaPassou) {
         avisarBitrixDaSala(res.meeting, {
           bitrix_id: novoLead?.bitrix_id,
           lead_name: novoLead?.full_name,
@@ -351,7 +387,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
         });
       }
 
-      if (sala.aviso) notifyError(sala.aviso);
+      if (jaPassou) notifySuccess("Reunião lançada. Agora registre o resultado dela na Agenda.");
+      else if (sala.aviso) notifyError(sala.aviso);
       else if (sala.link) {
         notifySuccess(`Reunião agendada e sala do Meet criada${emailLimpo ? " — convite enviado ao cliente" : ""}.`);
       }
@@ -366,7 +403,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       // Agendou de verdade → o lead (e a conversa) passa pro especialista.
       // Lançamento retroativo (já realizada/no-show) não transfere: a reunião
       // é história, não atendimento em curso.
-      if (fStatus === "agendada" && fCloserId) {
+      if (fStatus === "agendada" && fCloserId && when.getTime() > Date.now()) {
         await transferirLeadProCloser(fLeadId, fCloserId, closerName);
       }
       closeModal();
@@ -470,20 +507,41 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
               <line x1="8" y1="2" x2="8" y2="6" />
               <line x1="3" y1="10" x2="21" y2="10" />
             </svg>
-            Gestão de Reuniões
+            Reuniões
           </h1>
         </div>
-        {executa && <button
-          onClick={openCreate}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Agendar Reunião
-        </button>}
+        {executa && <div className="flex flex-wrap items-center gap-2">
+          {isManager && (
+            <button
+              onClick={openCreate}
+              title="Só para a gestão: registrar uma reunião com data no passado"
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+            >
+              Lançar reunião que já aconteceu
+            </button>
+          )}
+          <button
+            onClick={() => setAgendando(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Agendar Reunião
+          </button>
+        </div>}
       </div>
+
+      {/* Agendar: o mesmo modal da Agenda (horários livres + SDR responsável). */}
+      <ScheduleMeetingModal
+        open={agendando}
+        onClose={() => setAgendando(false)}
+        onSaved={() => {
+          setAgendando(false);
+          void fetchMeetings();
+        }}
+      />
 
       {/* Page error banner */}
       {pageError && (
@@ -505,9 +563,8 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
       {/* A aba Reuniões é O DIA, uma coluna por especialista — o que cada um
           tem HOJE, em vez de uma tabela com o histórico inteiro. A lista com
           filtro por status saiu a pedido do Bruno; o mês fica na Agenda, logo
-          abaixo. O botão "Agendar Reunião" acima CONTINUA aqui de propósito: o
-          agendamento por slot depende de closer cadastrado, e hoje não há
-          nenhum no banco — sem este formulário não haveria como criar reunião. */}
+          abaixo. O botão "Agendar Reunião" acima abre o mesmo modal da
+          Agenda (horários livres dos closers) desde 27/10. */}
       <FaixaBloqueioDesfecho pendentes={atrasadasDoCloser} />
       <div ref={topoDoDia} style={{ scrollMarginTop: 16 }}>
         <AgendaDia onOpenLead={onOpenLead} dataInicial={diaReunioes} />
@@ -531,7 +588,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
           <div className="relative bg-white rounded-xl border border-gray-100 shadow-none w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-bold text-gray-900">
-                {editingId ? "Editar Reunião" : "Agendar Reunião"}
+                {editingId ? "Editar Reunião" : "Lançar reunião que já aconteceu"}
               </h2>
               <button
                 onClick={closeModal}
@@ -544,6 +601,10 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
             </div>
 
             <div className="space-y-4">
+              <p className="text-xs text-gray-500 -mt-3">
+                Para reunião com data no passado. Depois de salvar, lance o resultado
+                (realizada, no-show…) na Agenda abaixo. Reunião futura vai pelo "Agendar Reunião".
+              </p>
               {/* Lead: combobox com busca (item 5) — filtra por nome/empresa/telefone/
                   e-mail conforme digita; fLeadId só é fixado ao escolher um item. */}
               <div className="relative">
@@ -649,9 +710,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                   autoComplete="off"
                 />
                 <p className="mt-1 text-[11px] text-gray-400">
-                  {fEmail.trim()
-                    ? "O convite do Google com o link vai pra este e-mail (e fica salvo no lead)."
-                    : "Sem e-mail o convite não é enviado — a sala é criada e o link fica na reunião pra você mandar."}
+                  Opcional. Fica salvo no cadastro do lead.
                 </p>
               </div>
 
@@ -665,13 +724,13 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                   className={inputClass}
                 />
                 <p className="mt-1 text-[11px] text-gray-400">
-                  É o nome que aparece no convite do Google e na agenda do especialista.
+                  É o nome que aparece na agenda do especialista.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>Data e hora</label>
+                  <label className={labelClass}>Quando aconteceu</label>
                   <input
                     type="datetime-local"
                     value={fWhen}
@@ -693,6 +752,27 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                 </div>
               </div>
 
+              {isManager && !editingId && (
+                <div>
+                  <label className={labelClass}>SDR responsável</label>
+                  <select value={fSdrId} onChange={(e) => setFSdrId(e.target.value)} className={inputClass}>
+                    <option value="">
+                      {(() => {
+                        const dono = leads.find((l) => l.id === fLeadId)?.owner_id;
+                        const nome = sdrs.find((s) => s.id === dono)?.name;
+                        return nome ? `O SDR do lead (${nome})` : "Escolha o SDR…";
+                      })()}
+                    </option>
+                    {sdrs.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    A reunião fica no nome dele: ele confirma, pode remarcar e aparece como quem agendou no Bitrix.
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className={labelClass}>Closer responsável</label>
                 <select
@@ -707,13 +787,13 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                 </select>
                 <p className="mt-1 text-[11px] text-gray-400">
                   Sem closer, a reunião não aparece na agenda dele nem reserva o horário.
-                  Para escolher entre os horários livres, use a <b>Agenda</b> embaixo das reuniões.
+                  Escolha quem fez a reunião.
                 </p>
               </div>
 
               {/* Sala do Meet — só pra reunião que ainda vai acontecer.
                   Lançamento retroativo (já realizada) não cria evento. */}
-              {fStatus === "agendada" && (
+              {!!editingId && fStatus === "agendada" && (
                 <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
                   <label className="flex items-start gap-2.5 cursor-pointer">
                     <input
@@ -764,7 +844,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
                   desfecho mora na Agenda (dia ou detalhe da reunião), que faz
                   tudo isso. Aqui ficam só os status de reunião que ainda vai
                   acontecer; reunião que já tem outro status aparece travada. */}
-              {(() => {
+              {!!editingId && (() => {
                 const original = editingId ? meetings.find((m) => m.id === editingId)?.status : undefined;
                 const travado = !!original && !STATUS_EDITAVEIS.includes(original);
                 return (

@@ -781,7 +781,10 @@ async function transferirProCloser(lead, closer, origem = ORIGEM_GLORIA) {
  * vão juntos pelo mesmo motivo que lá — os webhooks do n8n dividem uma
  * credencial só e o nome dela muda conforme quem mexeu por último.
  */
-async function criarSalaDoMeet(meeting, convidados, origem = ORIGEM_GLORIA) {
+// Exportada (27/10) pro reparo automático (api/agenda-reparo.js) tentar de novo
+// pelo MESMO caminho. Idempotente do lado do n8n: o id do evento no Google é
+// derivado do meeting_id, então o reenvio cai no 409 e devolve a MESMA sala.
+export async function criarSalaDoMeet(meeting, convidados, origem = ORIGEM_GLORIA) {
   const base = (process.env.N8N_AGENDA_URL || '').trim();
   const secret = (process.env.N8N_AGENDA_SECRET || '').trim();
   const alt = (process.env.N8N_SYNC_SECRET || '').trim();
@@ -831,40 +834,65 @@ async function criarSalaDoMeet(meeting, convidados, origem = ORIGEM_GLORIA) {
   }
 }
 
-/** Avisa o Bitrix, best-effort. O QS é a fonte da verdade; o card é espelho. */
-async function avisarBitrix(meeting, lead) {
+/**
+ * Manda a reunião pro card do Bitrix (webhook `qs-reuniao` do n8n) e DEVOLVE o
+ * que aconteceu. O workflow é um `crm.deal.update` no negócio que o lead já
+ * aponta (nunca cria card) + um comentário, e grava o resultado de volta na
+ * reunião (bitrix_synced / bitrix_error).
+ *
+ * Separada do `avisarBitrix` em 27/10 pro reparo automático usar o MESMO
+ * payload — dois montadores divergem no primeiro campo novo.
+ */
+export async function enviarReuniaoAoBitrix(meeting, lead, { timeoutMs = 8_000 } = {}) {
   const base = (process.env.N8N_SYNC_BASE || '').trim().replace(/\/+$/, '');
   const secret = (process.env.N8N_SYNC_SECRET || '').trim();
-  if (!base || !lead?.bitrix_id) return;
+  if (!base) return { ok: false, erro: 'N8N_SYNC_BASE ausente' };
+  if (!lead?.bitrix_id) return { ok: false, erro: 'lead sem bitrix_id' };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8_000);
-    try {
-      await fetch(`${base}/qs-reuniao`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(secret ? { 'x-qs-sync-secret': secret, 'x-qs-agenda-secret': secret } : {}) },
-        body: JSON.stringify({
-          lead_id: meeting.lead_id,
-          meeting_id: meeting.id,
-          bitrix_id: lead.bitrix_id,
-          full_name: meeting.lead_name,
-          title: meeting.title,
-          scheduled_at: meeting.scheduled_at,
-          duration_min: meeting.duration_min,
-          location: meeting.location,
-          meeting_link: meeting.meeting_link,
-          notes: meeting.notes,
-          scheduled_by: meeting.scheduled_by,
-          meeting_owner: meeting.meeting_owner,
-          client_email: meeting.client_email,
-          booking_date: meeting.booking_date,
-        }),
-        signal: ctrl.signal,
-      });
-    } finally { clearTimeout(timer); }
+    const r = await fetch(`${base}/qs-reuniao`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(secret ? { 'x-qs-sync-secret': secret, 'x-qs-agenda-secret': secret } : {}) },
+      body: JSON.stringify({
+        lead_id: meeting.lead_id,
+        meeting_id: meeting.id,
+        bitrix_id: lead.bitrix_id,
+        full_name: meeting.lead_name,
+        title: meeting.title,
+        scheduled_at: meeting.scheduled_at,
+        duration_min: meeting.duration_min,
+        location: meeting.location,
+        meeting_link: meeting.meeting_link,
+        notes: meeting.notes,
+        scheduled_by: meeting.scheduled_by,
+        meeting_owner: meeting.meeting_owner,
+        client_email: meeting.client_email,
+        booking_date: meeting.booking_date,
+      }),
+      signal: ctrl.signal,
+    });
+    const texto = await r.text().catch(() => '');
+    let corpo = null;
+    try { corpo = texto ? JSON.parse(texto) : null; } catch { /* corpo ilegível */ }
+    // 2xx = o card foi gravado (o caminho de erro do workflow responde 502).
+    // Não exige `ok: true` no corpo: uma versão antiga do workflow que responda
+    // 200 sem corpo faria o reparo reenviar — e comentar — à toa.
+    if (r.ok && corpo?.ok !== false) return { ok: true, resposta: corpo };
+    return { ok: false, status: r.status, erro: `n8n HTTP ${r.status}${corpo?.mensagem ? ` · ${corpo.mensagem}` : ''}`.slice(0, 200) };
   } catch (e) {
-    console.warn('[agenda] Bitrix não avisado:', e?.message);
+    return { ok: false, erro: e?.name === 'AbortError' ? `n8n não respondeu em ${Math.round(timeoutMs / 1000)}s` : (e?.message || 'falha ao falar com o n8n') };
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+/** Avisa o Bitrix, best-effort. O QS é a fonte da verdade; o card é espelho. */
+async function avisarBitrix(meeting, lead) {
+  if (!lead?.bitrix_id) return;
+  const r = await enviarReuniaoAoBitrix(meeting, lead);
+  // Falhou: o cron api/agenda-reparo.js tenta de novo (bitrix_synced segue falso).
+  if (!r.ok) console.warn('[agenda] Bitrix não avisado:', r.erro);
 }
 
 /**

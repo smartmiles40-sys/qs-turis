@@ -5,19 +5,22 @@
 //   • "Enviar contrato" abre a PRÉVIA: os campos que vão no contrato, puxados
 //     da venda consolidada + proposta aprovada + ficha do cliente + Bitrix +
 //     lead (cada um diz de onde veio). O closer corrige o que faltar e manda.
-//   • O SERVIDOR gera pelo Google, arquiva o PDF no Drive e cria no ZapSign.
+//   • O SERVIDOR monta o PDF pelo modelo do próprio QS (sem Google), guarda
+//     no Storage (bucket contratos, 0212) e cria no ZapSign.
 //     O webhook do ZapSign devolve: cliente abriu → assinou / recusou — e o
 //     cartão anda sozinho.
-//   • Sem Google/ZapSign configurados: MODO MANUAL (colar o link de
-//     assinatura, marcar assinado e colar o link do PDF).
+//   • Sem ZapSign configurado na Vercel (27/10): o bloco SOME do
+//     cartão — o servidor diz se está ligado (api/closer.js acao=config). Só
+//     reaparece se este cliente já tiver contrato registrado (aí mostra o
+//     status e as ações manuais, sem a lista técnica do que falta).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
-import { dataHoraBr, type Negocio } from "./lib";
+import { dataHoraBr, useConfigDaArea, type Negocio } from "./lib";
 import {
   NOME_STATUS_CONTRATO, ROTULOS, TOM_STATUS_CONTRATO, atualizarContrato, cancelarContrato, contratoManual, enviarContrato,
-  enviosDoCartao, errosDoContrato, previaDoContrato, situacaoDoContrato,
-  type CamposContrato, type EnvioContrato, type Previa, type SituacaoContrato,
+  enviosDoCartao, errosDoContrato, linkDoPdf, pdfDeTeste, previaDoContrato,
+  type CamposContrato, type EnvioContrato, type Previa,
 } from "./contrato";
 
 function LinkCopiavel({ rotulo, url }: { rotulo: string; url: string }) {
@@ -34,9 +37,28 @@ function LinkCopiavel({ rotulo, url }: { rotulo: string; url: string }) {
   );
 }
 
+/** PDF guardado no QS: o link é temporário (10 min), então é pedido na hora do clique.
+ *  A aba abre ANTES do await pra o navegador não bloquear como popup. */
+function BotaoPdf({ contratoId, qual, rotulo }: { contratoId: string; qual: "gerado" | "assinado"; rotulo: string }) {
+  const [erro, setErro] = useState<string | null>(null);
+  return (
+    <span className="inline-flex items-center gap-2 text-[13px]">
+      <button type="button" className="font-semibold underline" style={{ color: "var(--rel-ink)" }}
+        onClick={() => {
+          setErro(null);
+          const aba = window.open("about:blank", "_blank");
+          linkDoPdf(contratoId, qual)
+            .then((url) => { if (aba) aba.location.href = url; else window.open(url, "_blank"); })
+            .catch((e) => { aba?.close(); setErro((e as Error).message); });
+        }}>{rotulo}</button>
+      {erro && <span style={{ color: "var(--danger, #b42318)" }}>{erro}</span>}
+    </span>
+  );
+}
+
 export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; onMudou: () => void }) {
-  const [envios, setEnvios] = useState<EnvioContrato[]>([]);
-  const [sit, setSit] = useState<SituacaoContrato | null>(null);
+  const [envios, setEnvios] = useState<EnvioContrato[] | null>(null);
+  const config = useConfigDaArea();
   const [aviso, setAviso] = useState<{ tom: "ok" | "aviso" | "erro"; t: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [previaAberta, setPreviaAberta] = useState(false);
@@ -44,14 +66,14 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
   const [texto, setTexto] = useState("");
 
   const carregar = useCallback(async () => {
-    try { setEnvios(await enviosDoCartao(negocio.id)); } catch (e) { setAviso({ tom: "erro", t: (e as Error).message }); }
+    try { setEnvios(await enviosDoCartao(negocio.id)); } catch (e) { setEnvios([]); setAviso({ tom: "erro", t: (e as Error).message }); }
   }, [negocio.id]);
   useEffect(() => { void carregar(); }, [carregar, negocio.status_contrato]);
-  useEffect(() => { void situacaoDoContrato().then(setSit).catch(() => setSit(null)); }, []);
 
-  const atual = envios.find((e) => !["erro", "cancelado"].includes(e.status)) ?? null;
-  const ultimoErro = envios[0]?.status === "erro" ? envios[0] : null;
-  const automatico = sit?.modo === "automatico";
+  const lista = envios ?? [];
+  const atual = lista.find((e) => !["erro", "cancelado"].includes(e.status)) ?? null;
+  const ultimoErro = lista[0]?.status === "erro" ? lista[0] : null;
+  const automatico = config?.contrato === true;
   const perdido = negocio.etapa === "perdido" || negocio.etapa === "venda_cancelada";
 
   async function rodar(f: () => Promise<unknown>, ok?: string) {
@@ -62,11 +84,15 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
     finally { setOcupado(false); }
   }
 
+  // Contrato automático desligado e nada registrado: o bloco nem aparece.
+  if (!config || envios === null) return null;
+  if (!automatico && !lista.length) return null;
+
   return (
     <section className="rel-card p-4">
       <div className="flex flex-wrap items-center gap-2 mb-2">
         <h2 className="text-[14px] font-bold flex-1" style={{ color: "var(--ink)" }}>Contrato</h2>
-        {!perdido && atual?.status !== "assinado" && (
+        {automatico && !perdido && atual?.status !== "assinado" && (
           <Botao variante={atual ? "secundario" : "primario"} disabled={ocupado} onClick={() => setPreviaAberta(true)}>
             {atual ? "Reenviar contrato" : "Enviar contrato"}
           </Botao>
@@ -74,19 +100,9 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
       </div>
       {aviso && <div className="mb-2"><Aviso tom={aviso.tom}>{aviso.t}</Aviso></div>}
 
-      {sit && !automatico && (
-        <div className="mb-3">
-          <Aviso>
-            <b>Envio automático ainda não configurado — use o modo manual.</b>
-            <ul className="list-disc ml-5 mt-1">{sit.falta.map((f) => <li key={f}>{f}</li>)}</ul>
-            {sit.podeConfigurar && <a href="#closer/contrato" className="underline font-semibold">Configurar contrato</a>}
-          </Aviso>
-        </div>
-      )}
-
       {!atual && !ultimoErro && (
         <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
-          Nenhum contrato enviado. {automatico ? "O QS gera o contrato pelo modelo, guarda o PDF no Drive e manda pelo ZapSign — o cliente recebe por e-mail." : ""}
+          Nenhum contrato enviado. O QS gera o contrato pelo modelo, guarda o PDF e manda pelo ZapSign — o cliente recebe por e-mail.
         </p>
       )}
 
@@ -94,7 +110,7 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
         <div className="mb-3">
           <Aviso tom="erro">
             <b>O último envio falhou ({dataHoraBr(ultimoErro.criado_em)}):</b> {ultimoErro.erro}
-            {ultimoErro.drive_pdf_url && <> · <a className="underline" href={ultimoErro.drive_pdf_url} target="_blank" rel="noreferrer">PDF gerado</a></>}
+            {ultimoErro.drive_pdf_url && <> · <BotaoPdf contratoId={ultimoErro.id} qual="gerado" rotulo="PDF gerado" /></>}
           </Aviso>
         </div>
       )}
@@ -115,10 +131,14 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
             {atual.recusado_em ? ` · recusou ${dataHoraBr(atual.recusado_em)}` : ""}
           </p>
           {atual.link_assinatura && <LinkCopiavel rotulo="Link de assinatura do cliente" url={atual.link_assinatura} />}
-          {atual.drive_pdf_url && <LinkCopiavel rotulo="PDF no Drive" url={atual.drive_pdf_url} />}
-          {atual.pdf_assinado_url && <LinkCopiavel rotulo="PDF assinado" url={atual.pdf_assinado_url} />}
+          {(atual.drive_pdf_url || atual.pdf_assinado_url) && (
+            <div className="flex flex-wrap items-center gap-3">
+              {atual.drive_pdf_url && <BotaoPdf contratoId={atual.id} qual="gerado" rotulo="Ver PDF enviado" />}
+              {atual.pdf_assinado_url && <BotaoPdf contratoId={atual.id} qual="assinado" rotulo="Ver PDF assinado" />}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2 pt-1">
-            {atual.zapsign_token && atual.status !== "assinado" && (
+            {automatico && atual.zapsign_token && atual.status !== "assinado" && (
               <Botao disabled={ocupado} onClick={() => void rodar(async () => { await atualizarContrato(atual.id); }, "Status conferido no ZapSign.")}>Atualizar status</Botao>
             )}
             {atual.status !== "assinado" && !perdido && (
@@ -138,11 +158,11 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
         </div>
       )}
 
-      {envios.length > 1 && (
+      {lista.length > 1 && (
         <details className="mt-3">
-          <summary className="text-[12px] cursor-pointer" style={{ color: "var(--ink3)" }}>Envios anteriores ({envios.length - 1})</summary>
+          <summary className="text-[12px] cursor-pointer" style={{ color: "var(--ink3)" }}>Envios anteriores ({lista.length - 1})</summary>
           <ul className="mt-1 space-y-1">
-            {envios.filter((e) => e.id !== atual?.id).map((e) => (
+            {lista.filter((e) => e.id !== atual?.id).map((e) => (
               <li key={e.id} className="text-[12px]" style={{ color: "var(--ink2)" }}>
                 {dataHoraBr(e.criado_em)} · {NOME_STATUS_CONTRATO[e.status]} · {e.modo === "manual" ? "por fora" : "ZapSign"}{e.erro ? ` — ${e.erro.slice(0, 160)}` : ""}
               </li>
@@ -172,7 +192,7 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
             {manual === "enviado" ? "Marcar como enviado" : manual === "assinado" ? "Marcar assinado" : "Cancelar contrato"}
           </Botao>
         </>}>
-        <Campo rotulo={manual === "enviado" ? "Link de assinatura que você mandou ao cliente" : manual === "assinado" ? "Link do PDF assinado (opcional — Drive, ZapSign…)" : "Motivo (opcional)"}>
+        <Campo rotulo={manual === "enviado" ? "Link de assinatura que você mandou ao cliente" : manual === "assinado" ? "Link do PDF assinado (opcional)" : "Motivo (opcional)"}>
           <Entrada value={texto} onChange={(e) => setTexto(e.target.value)} placeholder={manual === "cancelar" ? "Ex.: valores mudaram" : "https://"} autoFocus />
         </Campo>
         {manual === "assinado" && <p className="text-[12px] mt-2" style={{ color: "var(--ink3)" }}>O cartão vai para "Contrato assinado".</p>}
@@ -194,6 +214,7 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
   const [mostrarErros, setMostrarErros] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [confirmarSubstituir, setConfirmarSubstituir] = useState(false);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
 
   useEffect(() => {
     let vivo = true;
@@ -217,7 +238,7 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
     try {
       const r = await enviarContrato(negocio.id, c, substituir);
       if (r.ok) onEnviado("Contrato enviado! O cliente recebe o link do ZapSign por e-mail. O cartão foi para \"Contrato enviado\".", "ok");
-      else setErro(r.sobraram?.length ? `${r.erro}` : (r.erro || "Não deu certo."));
+      else setErro(r.erro || "Não deu certo.");
     } catch (e) {
       const d = (e as Error & { dados?: { precisaConfirmar?: boolean } }).dados;
       if (d?.precisaConfirmar) setConfirmarSubstituir(true);
@@ -227,12 +248,32 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
     }
   }
 
+  // "Ver PDF": o contrato exatamente como vai sair, sem enviar nada (funciona no modo manual também).
+  async function verPdf() {
+    if (!c) return;
+    setErro(null);
+    const aba = window.open("about:blank", "_blank");
+    setGerandoPdf(true);
+    try {
+      const r = await pdfDeTeste(c);
+      const url = URL.createObjectURL(r.blob);
+      if (aba) aba.location.href = url; else window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      aba?.close();
+      setErro((e as Error).message);
+    } finally {
+      setGerandoPdf(false);
+    }
+  }
+
   const mudar = (k: keyof CamposContrato, v: string) => setC((x) => (x ? { ...x, [k]: v } : x));
 
   return (
     <Modal aberto titulo="Enviar contrato" onFechar={onFechar} largura={820}
       rodape={<>
         <Botao variante="fantasma" onClick={onFechar} disabled={enviando}>Fechar</Botao>
+        <Botao variante="secundario" onClick={() => void verPdf()} disabled={enviando || gerandoPdf || !c}>{gerandoPdf ? "Montando o PDF…" : "Ver PDF"}</Botao>
         {confirmarSubstituir ? (
           <Botao variante="perigo" disabled={enviando} onClick={() => void enviar(true)}>{enviando ? "Gerando e enviando…" : "Sim, cancelar o anterior e enviar este"}</Botao>
         ) : (
@@ -275,7 +316,7 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
                 <div key={r.k} className={r.longo ? "sm:col-span-2" : ""}>
                   <Campo rotulo={`${r.rotulo}${r.obrigatorio ? " *" : ""}`} erro={msgErro} dica={dica}>
                     {r.longo ? (
-                      <textarea className="rel-input" rows={r.k === "destino" ? 4 : 2} value={c[r.k]} onChange={(e) => mudar(r.k, e.target.value)} />
+                      <textarea className="rel-input" rows={r.k === "inclusos" ? 7 : r.k === "destino" || r.k === "nao_inclusos" ? 3 : 2} value={c[r.k]} onChange={(e) => mudar(r.k, e.target.value)} />
                     ) : (
                       <Entrada value={c[r.k]} onChange={(e) => mudar(r.k, e.target.value)} />
                     )}
@@ -285,8 +326,8 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
             })}
           </div>
           <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
-            O cliente e o assinante da agência recebem o link por e-mail. Campo vazio vira "-" no contrato. Se o modelo tiver alguma
-            {" {{tag}} "}que o QS não conhece, nada é enviado e a tela mostra qual.
+            O cliente e o assinante da agência recebem o link por e-mail. Campo vazio vira "-" no contrato. O texto jurídico é o
+            do modelo aprovado — aqui só mudam os dados. Use "Ver PDF" pra conferir antes de enviar.
           </p>
         </div>
       )}

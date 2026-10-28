@@ -43,7 +43,7 @@ export default function PainelAereo({ from, to, ownerId }: { from: string; to: s
     <div>
       <h2 className="text-sm font-medium text-gray-700 mb-1">Cotações de aéreo</h2>
       <p className="text-xs text-gray-500 mb-3">
-        Marcadas pelo SDR no card do lead ("Cotando aéreo" → "Terminei"). Não é meta: mostra quanto tempo saiu da fila pra cotar.
+        Marcadas pelo SDR no card do lead ("Cotando aéreo" → "Terminei"). Não é meta: mostra quanto tempo saiu da fila pra cotar. Cada cotação conta no máximo 2h.
       </p>
       <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
         {lista === null ? (

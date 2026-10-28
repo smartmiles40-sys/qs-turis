@@ -9,7 +9,10 @@
 //          dentro do QS e depois vai pro Bitrix" (Bruno, 26/10).
 //   GET  ?acao=cron-bitrix (Vercel Cron, Bearer CRON_SECRET, a cada 10 min)
 //        → reenvia os cartões com bitrix_status = 'pendente' (a reunião move
-//          o cartão no banco; é o cron que leva isso pro Bitrix).
+//          o cartão no banco; é o cron que leva isso pro Bitrix) e, 1x por
+//          hora cada, os que ficaram em 'erro'. Nunca tira uma venda do Bitrix.
+//   POST { acao: 'config' } → { contrato, bitrix }: só sim/não, pra tela
+//        esconder o que não está ligado na Vercel.
 //   POST { acao: 'importar', dealId, closerId? }
 //        → traz pro quadro um cliente que já tinha card no Bitrix.
 //   POST { acao: 'pre-venda', negocioId }  (0207)
@@ -28,30 +31,30 @@
 // Env: BITRIX_WEBHOOK_BASE (a mesma do resto do QS), SUPABASE_URL,
 // SUPABASE_SERVICE_ROLE_KEY.
 //
-// CONTRATO (0180, 22/10 — "tudo via código, sem n8n"; ver docs/CONTRATO.md):
+// CONTRATO (0180, 22/10 — "tudo via código, sem n8n"; 27/10 — sem Google: o
+// modelo mora em api/_contratoModelo.js; ver docs/CONTRATO.md):
 //   POST { acao: 'contrato-config' }               → o que está pronto / o que falta
-//   POST { acao: 'contrato-config-salvar', valor } → (gestão) templates, pasta, assinante
-//   POST { acao: 'google-conectar' }               → (gestão) URL do consentimento do Google
-//   GET  ?acao=google-callback&code&state          → o Google volta aqui; grava o refresh token
-//   POST { acao: 'google-desconectar' }            → (gestão) revoga e apaga
+//   POST { acao: 'contrato-config-salvar', valor } → (gestão) assinante da agência
 //   POST { acao: 'zapsign-testar' }                → (gestão) confere o ZAPSIGN_API_TOKEN
 //   POST { acao: 'contrato-previa', negocioId }    → campos sugeridos + de onde vieram
+//   POST { acao: 'contrato-pdf-teste', campos }    → o PDF como vai sair (base64), sem enviar
 //   POST { acao: 'contrato-enviar', negocioId, campos, substituir? }
-//        → gera pelo Google, arquiva o PDF no Drive, cria no ZapSign, grava o envio
+//        → gera o PDF no QS, guarda no Storage, cria no ZapSign, grava o envio
+//   POST { acao: 'contrato-pdf-link', contratoId, qual } → link de 10 min do PDF (gerado|assinado)
 //   POST { acao: 'contrato-atualizar', contratoId }→ relê o documento no ZapSign
 //   POST { acao: 'contrato-cancelar', contratoId, motivo } → apaga no ZapSign + cancela
-//   POST ?acao=zapsign-webhook                     → o ZapSign avisa (header X-QS-Secret)
-// Envs novas: GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, ZAPSIGN_API_TOKEN,
-// ZAPSIGN_WEBHOOK_SECRET; opcionais QS_URL_PUBLICA e ZAPSIGN_API_URL (sandbox).
+//   POST ?acao=zapsign-webhook                     → o ZapSign avisa (header X-QS-Secret ou &s=)
+// Envs: ZAPSIGN_API_TOKEN, ZAPSIGN_WEBHOOK_SECRET; opcionais QS_URL_PUBLICA e
+// ZAPSIGN_API_URL (sandbox).
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { bx, bitrixConfigurado, comentarNoNegocio } from './_bitrixLead.js';
 import { getSupabaseUserId } from './_wa.js';
 import {
-  apagarNoZapsign, arquivarAssinado, conectarGoogle, conferirEstado, contaGoogle, criarNoZapsign, desconectarGoogle,
-  gerarPdf, hashDoCorpo, lerConfig, lerNoZapsign, montarPrevia, nomesDoArquivo, normalizarCampos, oQueFalta,
-  statusDoDocumento, testarZapsign, urlDeConsentimento, urlDeRetorno, urlDoApp, validarCampos,
+  apagarNoZapsign, arquivarAssinado, criarNoZapsign, gerarPdf, guardarPdf, hashDoCorpo, lerConfig, lerNoZapsign,
+  linkDoPdf, montarPrevia, nomesDoArquivo, normalizarCampos, oQueFalta, statusDoDocumento, testarZapsign, urlDoApp,
+  validarCampos,
 } from './_contrato.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -195,6 +198,14 @@ async function espelhar(negocioId, u, extra = {}) {
     const etapaAlvo = etapaNoBitrix(n);
     const preVenda = emPreVenda(n);
     const alvo = colunaParaEtapa(lista, etapaAlvo);
+    // 27/10: o CRON nunca tira do Bitrix uma venda que alguém já marcou lá (à
+    // mão, antes do QS). Só a pessoa, pelo cartão, decide isso.
+    if (!u && alvo && String(deal.STAGE_ID) !== alvo && !ETAPAS_DE_VENDA.includes(etapaAlvo) && !['venda_cancelada', 'perdido'].includes(etapaAlvo)) {
+      const noBitrix = etapaParaColuna(lista, deal.STAGE_ID);
+      if (ETAPAS_DE_VENDA.includes(noBitrix.etapa)) {
+        throw new Error(`No Bitrix este negócio já está em "${noBitrix.nome}" (venda). O QS não tira de lá sozinho: se a venda é real, registre a venda no cartão; se não, use "Reenviar".`);
+      }
+    }
     if (!alvo) {
       throw new Error(preVenda
         ? `O funil deste negócio não tem coluna de venda ("Em emissão" / "Aguardando emissão"). A pré-venda ficou só no QS.`
@@ -254,15 +265,33 @@ async function espelhar(negocioId, u, extra = {}) {
   }
 }
 
-/** Cron: leva pro Bitrix os cartões que mudaram de etapa (inclusive os que a reunião moveu). */
+/**
+ * Cron: leva pro Bitrix os cartões que mudaram de etapa (inclusive os que a
+ * reunião moveu). 27/10: também tenta de novo os que deram ERRO — no máximo
+ * uma vez por hora cada (o espelhar regrava o cartão, e o atualizado_em anda),
+ * pra ninguém precisar clicar em "Reenviar". Para antes de 45 s pra não
+ * estourar a função; o que sobrar vai na rodada seguinte (10 min).
+ */
 async function cronBitrix() {
+  const umaHora = new Date(Date.now() - 60 * 60_000).toISOString();
   const pend = (await rest('qs_closer_negocios?select=id&bitrix_status=eq.pendente&arquivado_em=is.null&order=atualizado_em.asc&limit=25')) || [];
-  let ok = 0, falhou = 0;
-  for (const p of pend) {
+  const erros = pend.length >= 25 ? [] : (await rest(`qs_closer_negocios?select=id&bitrix_status=eq.erro&arquivado_em=is.null&atualizado_em=lt.${umaHora}&order=atualizado_em.asc&limit=${25 - pend.length}`).catch(() => null)) || [];
+  const inicio = Date.now();
+  let ok = 0, falhou = 0, sobrou = 0;
+  for (const p of [...pend, ...erros]) {
+    if (Date.now() - inicio > 45_000) { sobrou++; continue; }
     const r = await espelhar(p.id, null).catch(() => null);
     if (r?.body?.ok) ok++; else falhou++;
   }
-  return { pendentes: pend.length, ok, falhou };
+  return { pendentes: pend.length, erros: erros.length, ok, falhou, sobrou };
+}
+
+/** O que está ligado no servidor (só sim/não, nunca os valores) — a tela esconde o resto. */
+async function configDaArea() {
+  const bitrix = bitrixConfigurado();
+  let contrato = false;
+  try { contrato = (await situacaoDaConfig()).falta.length === 0; } catch { contrato = false; }
+  return { contrato, bitrix };
 }
 
 /**
@@ -349,31 +378,24 @@ async function registrarStatus(contratoId, status, extra = {}, autorId = null) {
 }
 
 async function situacaoDaConfig() {
-  const [cfg, g] = await Promise.all([lerConfig(), contaGoogle()]);
-  return { cfg, g, falta: oQueFalta(cfg, g) };
+  const cfg = await lerConfig();
+  return { cfg, falta: oQueFalta(cfg) };
 }
 
 async function configParaTela(req, u) {
-  const { cfg, g, falta } = await situacaoDaConfig();
+  const { cfg, falta } = await situacaoDaConfig();
   return {
     podeConfigurar: ehGestao(u),
     modo: falta.length ? 'manual' : 'automatico',
     falta,
     config: cfg,
-    google: {
-      clienteConfigurado: Boolean(env('GOOGLE_OAUTH_CLIENT_ID') && env('GOOGLE_OAUTH_CLIENT_SECRET')),
-      conectado: Boolean(g?.refresh_token),
-      email: g?.email || null,
-      conectadoEm: g?.conectado_em || null,
-      ultimoErro: g?.ultimo_erro || null,
-    },
     zapsign: {
       token: Boolean(env('ZAPSIGN_API_TOKEN')),
       webhookSecret: Boolean(env('ZAPSIGN_WEBHOOK_SECRET')),
       sandbox: /sandbox/i.test(env('ZAPSIGN_API_URL')),
     },
-    redirectUri: urlDeRetorno(req),
-    webhookUrl: `${urlDoApp(req)}/api/closer?acao=zapsign-webhook`,
+    // O segredo vai na própria URL (&s=…): o painel do ZapSign não deixa pôr header.
+    webhookUrl: `${urlDoApp(req)}/api/closer?acao=zapsign-webhook&s=<ZAPSIGN_WEBHOOK_SECRET>`,
   };
 }
 
@@ -421,11 +443,17 @@ async function enviarContrato(u, body) {
   }
 
   const nomes = nomesDoArquivo(c, dealId, n.id);
-  let gerado = null;
+  let guardado = null;
   try {
-    gerado = await gerarPdf(c, cfg, nomes);
-    await rest(`qs_contratos?id=eq.${linha.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { drive_pdf_id: gerado.driveId, drive_pdf_url: gerado.driveUrl } });
-    const zs = await criarNoZapsign({ c, cfg, nomes, pdf: gerado.pdf, negocioId: n.id });
+    const pdf = await gerarPdf(c);
+    // Cópia do que foi enviado no Storage. Se o Storage falhar, segue: o ZapSign guarda o original.
+    try {
+      guardado = await guardarPdf(`${n.id}/${linha.id}.pdf`, pdf);
+      await rest(`qs_contratos?id=eq.${linha.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { drive_pdf_id: guardado, drive_pdf_url: guardado } });
+    } catch (e) {
+      console.warn('[closer] PDF não guardado no Storage', linha.id, e?.message);
+    }
+    const zs = await criarNoZapsign({ c, cfg, nomes, pdf, negocioId: n.id });
     if (!zs.token) throw new Error('O ZapSign não devolveu o documento.');
     await rest(`qs_contratos?id=eq.${linha.id}`, {
       method: 'PATCH', prefer: 'return=minimal',
@@ -436,7 +464,7 @@ async function enviarContrato(u, body) {
     const msg = String(e?.message || 'Falhou.').slice(0, 900);
     console.error('[closer] contrato', n.id, msg);
     await registrarStatus(linha.id, 'erro', { erro: msg }, u.id).catch(() => null);
-    return { status: 200, body: { ok: false, erro: msg, sobraram: e.sobraram || null, pdf: gerado?.driveUrl || null } };
+    return { status: 200, body: { ok: false, erro: msg } };
   }
 
   // O envio anterior (se o closer confirmou substituir) é cancelado — lá no ZapSign também.
@@ -445,8 +473,8 @@ async function enviarContrato(u, body) {
     await registrarStatus(ativo.id, 'cancelado', { motivo: 'Substituído por um contrato novo.' }, u.id).catch(() => null);
   }
   if (dealId) await comentarNoNegocio(dealId, `📄 Contrato de ${c.tipo === 'expedicao' ? 'expedição' : 'pacote'} enviado pelo QS (ZapSign) para ${c.email}.`).catch(() => null);
-  const final = (await rest(`qs_contratos?select=id,link_assinatura,drive_pdf_url&id=eq.${linha.id}&limit=1`))?.[0];
-  return { status: 200, body: { ok: true, contratoId: linha.id, link: final?.link_assinatura || null, pdf: final?.drive_pdf_url || null } };
+  const final = (await rest(`qs_contratos?select=id,link_assinatura&id=eq.${linha.id}&limit=1`))?.[0];
+  return { status: 200, body: { ok: true, contratoId: linha.id, link: final?.link_assinatura || null } };
 }
 
 /** Lê o documento no ZapSign e aplica o status (webhook e botão "Atualizar"). */
@@ -456,11 +484,9 @@ async function conferirNoZapsign(contrato, autorId) {
   if (!st) return contrato.status;
   const extra = { ...(st.extra || {}) };
   if (st.status === 'assinado' && !contrato.pdf_assinado_url && st.arquivo) {
-    // Cópia assinada no Drive (o link do ZapSign expira). Sem Google: fica sem cópia.
+    // Cópia assinada no Storage (o link do ZapSign expira em minutos).
     try {
-      const cfg = await lerConfig();
-      const nomes = nomesDoArquivo(contrato.campos || {}, contrato.bitrix_deal_id, contrato.negocio_id);
-      extra.pdf_assinado_url = await arquivarAssinado(st.arquivo, `${nomes.arquivo} (assinado).pdf`, cfg);
+      extra.pdf_assinado_url = await arquivarAssinado(st.arquivo, `${contrato.negocio_id}/${contrato.id}-assinado.pdf`);
     } catch (e) {
       console.warn('[closer] PDF assinado não arquivado', contrato.id, e?.message);
     }
@@ -468,7 +494,7 @@ async function conferirNoZapsign(contrato, autorId) {
   const antes = contrato.status;
   const depois = await registrarStatus(contrato.id, st.status, extra, autorId);
   if (st.status === 'assinado' && antes !== 'assinado' && contrato.bitrix_deal_id) {
-    await comentarNoNegocio(contrato.bitrix_deal_id, `✅ Contrato ASSINADO pelo cliente (ZapSign).${extra.pdf_assinado_url ? ` PDF: ${extra.pdf_assinado_url}` : ''}`).catch(() => null);
+    await comentarNoNegocio(contrato.bitrix_deal_id, `✅ Contrato ASSINADO pelo cliente (ZapSign).${extra.pdf_assinado_url ? ' O PDF assinado está guardado no QS (cartão do closer).' : ''}`).catch(() => null);
   }
   return depois;
 }
@@ -478,7 +504,10 @@ const COLS_CONTRATO = 'id,negocio_id,status,modo,campos,zapsign_token,pdf_assina
 async function webhookZapsign(req, res) {
   const segredo = env('ZAPSIGN_WEBHOOK_SECRET');
   if (!segredo) return res.status(503).json({ error: 'ZAPSIGN_WEBHOOK_SECRET não configurado.' });
-  if (!segredoConfere(req.headers['x-qs-secret'], segredo)) return res.status(401).json({ error: 'Segredo inválido.' });
+  // O painel do ZapSign nem sempre deixa pôr header: aceita o segredo também na URL (&s=...).
+  // Seguro o bastante porque o status nunca vem do corpo — é reconsultado no ZapSign.
+  const recebido = req.headers['x-qs-secret'] || new URL(req.url || '', 'http://x').searchParams.get('s');
+  if (!segredoConfere(recebido, segredo)) return res.status(401).json({ error: 'Segredo inválido.' });
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const token = String(body.token || body.doc_token || body.document?.token || '').trim();
   const evento = String(body.event_type || body.event || '').slice(0, 60) || null;
@@ -517,30 +546,12 @@ async function webhookZapsign(req, res) {
   }
 }
 
-async function googleCallback(req, res) {
-  const app = urlDoApp(req);
-  const voltar = (resultado) => { res.statusCode = 302; res.setHeader('Location', `${app}/#closer/contrato/${resultado}`); return res.end(); };
-  const estado = conferirEstado(req.query?.state);
-  if (!estado) return voltar('erro-estado');
-  if (req.query?.error) return voltar('erro-negado');
-  const u = (await rest(`qs_users?select=id,role,setores,is_active&id=eq.${estado.u}&limit=1`).catch(() => null))?.[0];
-  if (!u?.is_active || !ehGestao(u)) return voltar('erro-permissao');
-  try {
-    await conectarGoogle(req, String(req.query?.code || ''), u.id);
-    return voltar('conectado');
-  } catch (e) {
-    console.error('[closer] google callback', e?.message);
-    await rest('qs_contrato_google?id=eq.1', { method: 'PATCH', prefer: 'return=minimal', body: { ultimo_erro: String(e?.message).slice(0, 300), ultimo_erro_em: new Date().toISOString() } }).catch(() => null);
-    return voltar('erro-google');
-  }
-}
-
 async function acaoDeContrato(acao, req, u, body) {
   if (acao === 'contrato-config') return { status: 200, body: await configParaTela(req, u) };
 
   if (acao === 'contrato-config-salvar') {
     if (!ehGestao(u)) return { status: 403, body: { error: 'Só a gestão do Comercial muda a configuração.' } };
-    // Grava pela RPC (valida os IDs e confere a permissão de novo no banco) — com o token do usuário.
+    // Grava pela RPC (confere a permissão de novo no banco) — com o token do usuário.
     const r = await fetch(`${env('SUPABASE_URL').replace(/\/$/, '')}/rest/v1/rpc/contrato_config_salvar`, {
       method: 'POST',
       headers: { apikey: env('SUPABASE_SERVICE_ROLE_KEY'), Authorization: req.headers['authorization'], 'Content-Type': 'application/json' },
@@ -550,18 +561,6 @@ async function acaoDeContrato(acao, req, u, body) {
       const j = await r.json().catch(() => ({}));
       return { status: 400, body: { error: /id-google-invalido/.test(j.message) ? 'ID do Google inválido (copie só o pedaço entre /d/ e /edit).' : /email-invalido/.test(j.message) ? 'E-mail do assinante inválido.' : (j.message || 'Não salvou.') } };
     }
-    return { status: 200, body: await configParaTela(req, u) };
-  }
-
-  if (acao === 'google-conectar') {
-    if (!ehGestao(u)) return { status: 403, body: { error: 'Só a gestão do Comercial conecta a conta Google.' } };
-    if (!env('GOOGLE_OAUTH_CLIENT_ID') || !env('GOOGLE_OAUTH_CLIENT_SECRET')) return { status: 503, body: { error: 'Falta GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET na Vercel.' } };
-    return { status: 200, body: { url: urlDeConsentimento(req, u.id) } };
-  }
-
-  if (acao === 'google-desconectar') {
-    if (!ehGestao(u)) return { status: 403, body: { error: 'Só a gestão do Comercial desconecta.' } };
-    await desconectarGoogle();
     return { status: 200, body: await configParaTela(req, u) };
   }
 
@@ -582,6 +581,25 @@ async function acaoDeContrato(acao, req, u, body) {
   }
 
   if (acao === 'contrato-enviar') return enviarContrato(u, body);
+
+  // O PDF exatamente como vai sair, com os campos da prévia — sem enviar nada.
+  if (acao === 'contrato-pdf-teste') {
+    const c = normalizarCampos(body.campos);
+    const pdf = await gerarPdf(c);
+    return { status: 200, body: { ok: true, base64: pdf.toString('base64'), campos: c, ...validarCampos(c) } };
+  }
+
+  if (acao === 'contrato-pdf-link') {
+    const id = String(body.contratoId || '');
+    if (!UUID_RE.test(id)) return { status: 400, body: { error: 'Contrato inválido.' } };
+    const c = (await rest(`qs_contratos?select=negocio_id,drive_pdf_url,pdf_assinado_url&id=eq.${id}&limit=1`))?.[0];
+    if (!c) return { status: 404, body: { error: 'Contrato não encontrado.' } };
+    const n = await carregarNegocio(c.negocio_id);
+    if (!n || !podeMexer(u, n)) return { status: 403, body: { error: 'Sem permissão neste cartão.' } };
+    const guardado = body.qual === 'assinado' ? c.pdf_assinado_url : c.drive_pdf_url;
+    if (!guardado) return { status: 404, body: { error: 'Este contrato não tem esse PDF guardado.' } };
+    return { status: 200, body: { url: await linkDoPdf(guardado) } };
+  }
 
   if (acao === 'contrato-atualizar' || acao === 'contrato-cancelar') {
     const id = String(body.contratoId || '');
@@ -605,9 +623,9 @@ async function acaoDeContrato(acao, req, u, body) {
 }
 
 export default async function handler(req, res) {
-  const acaoQ = String(req.query?.acao || '');
+  // req.query vem da Vercel; a ponte do `vite dev` não preenche — lê da URL também.
+  const acaoQ = String(req.query?.acao || new URL(req.url || '', 'http://x').searchParams.get('acao') || '');
   // Entradas SEM usuário logado (cada uma com a própria trava).
-  if (acaoQ === 'google-callback' && req.method === 'GET') return googleCallback(req, res);
   if (acaoQ === 'zapsign-webhook' && req.method === 'POST') {
     try { return await webhookZapsign(req, res); }
     catch (e) { console.error('[closer] webhook', e?.message); return res.status(500).json({ error: 'Falhou.' }); }
@@ -633,6 +651,7 @@ export default async function handler(req, res) {
   const acao = String(req.query?.acao || body.acao || '');
 
   try {
+    if (acao === 'config') return res.status(200).json(await configDaArea());
     if (acao === 'importar') {
       if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
       if (!(u.role === 'closer' || ehGestao(u))) return res.status(403).json({ error: 'Só closer e gestão do Comercial.' });
@@ -658,7 +677,7 @@ export default async function handler(req, res) {
       const r = await espelhar(id, u);
       return res.status(r.status).json(r.body);
     }
-    if (acao.startsWith('contrato-') || acao.startsWith('google-') || acao === 'zapsign-testar') {
+    if (acao.startsWith('contrato-') || acao === 'zapsign-testar') {
       if (!(u.role === 'closer' || ehGestao(u))) return res.status(403).json({ error: 'Só closer e gestão do Comercial.' });
       const r = await acaoDeContrato(acao, req, u, body);
       if (r) return res.status(r.status).json(r.body);

@@ -91,7 +91,7 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
           itens: reg.map((i) => ({ tipo: i.tipo, nome: i.nome || nomeSugerido(i), descricao: "", valor_total: Number(i.valor) || 0 })),
         }));
         if (unicos.length) setPassageirosTxt(unicos.join("\n"));
-        setDaProposta(`Puxado da venda registrada (${reg.length} item${reg.length === 1 ? "" : "s"}). Pra mudar um item, use "Editar venda" no cartão.`);
+        setDaProposta(`Puxado da venda registrada (${reg.length} item${reg.length === 1 ? "" : "s"}). Pra mudar um item, use "Editar itens" no cartão.`);
         return;
       }
       // A proposta aprovada mais recente do cliente (direto no lead ou pela solicitação dele).
@@ -149,7 +149,7 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
   async function enviar() {
     setErro(null);
     if (!f.valor_total || f.valor_total <= 0) { setErro("Informe o valor total da venda."); return; }
-    if (Math.abs(diferenca) > 0.05) { setErro(`O plano soma ${brl(soma)} e a venda é ${brl(f.valor_total)} — ajuste antes de consolidar.`); return; }
+    if (Math.abs(diferenca) > 0.05) { setErro(`O plano soma ${brl(soma)} e a venda é ${brl(f.valor_total)} — ajuste antes de fechar.`); return; }
     setSalvando(true);
     try {
       const ficha: Ficha = {
@@ -159,12 +159,12 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
         tipo_bitrix: negocio.pre_venda_tipo_bitrix || tipoVendaBitrix(TIPO_DO_SERVICO[f.servico] ?? "outro").id,
       };
       await consolidar(negocio.id, ficha);
-      let msg = "Venda consolidada! A viagem já está no Relacionamento e o plano no Financeiro.";
+      let msg = "Venda fechada! A viagem já está no Relacionamento e o plano no Financeiro.";
       try {
         const b = await espelharNoBitrix(negocio.id);
-        msg += b.ok ? " Bitrix atualizado." : ` Bitrix: ${b.mensagem ?? "não atualizou"} — dá pra reenviar no cartão.`;
+        msg += b.ok ? " Bitrix atualizado." : ` Bitrix: ${b.mensagem ?? "não atualizou"} — o QS tenta de novo sozinho.`;
       } catch (e) {
-        msg += ` Bitrix não respondeu (${(e as Error).message}) — use "Reenviar ao Bitrix" no cartão.`;
+        msg += ` Bitrix não respondeu (${(e as Error).message}) — o QS tenta de novo sozinho.`;
       }
       onConsolidado(msg);
     } catch (e) {
@@ -177,23 +177,31 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
   const h = (t: string) => <h3 className="text-[13px] font-bold uppercase tracking-wide mt-5 mb-2" style={{ color: "var(--rel-ink)" }}>{t}</h3>;
 
   return (
-    <Modal aberto={aberto} titulo={`Ficha de fechamento — ${nomeDoLead(negocio.lead)}`} onFechar={onFechar} largura={820}
+    <Modal aberto={aberto} titulo={`Fechar: pagamento e contrato — ${nomeDoLead(negocio.lead)}`} onFechar={onFechar} largura={820}
       rodape={<>
         <Botao variante="fantasma" onClick={onFechar} disabled={salvando}>Cancelar</Botao>
-        <Botao variante="primario" onClick={() => void enviar()} disabled={salvando}>{salvando ? "Consolidando…" : !!negocio.consolidada_em ? "Salvar correção" : "Consolidar venda"}</Botao>
+        <Botao variante="primario" onClick={() => void enviar()} disabled={salvando}>{salvando ? "Fechando…" : !!negocio.consolidada_em ? "Salvar correção" : "Fechar a venda"}</Botao>
       </>}>
       {daProposta && <Aviso tom="ok">{daProposta}</Aviso>}
       {!negocio.consolidada_em && negocio.pre_venda_em && (
         <div className="mt-2"><Aviso>
-          Esta venda já subiu pro Dashboard como <b>pré-venda</b> em {new Date(negocio.pre_venda_em).toLocaleDateString("pt-BR")}. Consolidar
-          completa a venda (viagem no Relacionamento + plano no Financeiro) e <b>não conta a venda de novo</b>.
+          A venda já conta no Dashboard desde {new Date(negocio.pre_venda_em).toLocaleDateString("pt-BR")}. Fechar cria a viagem no
+          Relacionamento e o plano no Financeiro — <b>não conta a venda de novo</b>.
         </Aviso></div>
       )}
       {!!negocio.consolidada_em && (
-        <div className="mt-2"><Aviso>Esta venda já foi consolidada. Salvar de novo corrige a viagem e refaz o plano (só se o Financeiro ainda não deu baixa em nenhuma parcela).</Aviso></div>
+        <div className="mt-2"><Aviso>Esta venda já foi fechada. Salvar de novo corrige a viagem e refaz o plano (só se o Financeiro ainda não deu baixa em nenhuma parcela).</Aviso></div>
       )}
 
       {h("1. O que foi vendido")}
+      {f.de_itens_da_venda && (
+        <p className="text-[12.5px] mb-2" style={{ color: "var(--ink2)" }}>
+          Tudo já veio da venda registrada: <b>{SERVICOS[f.servico]}{f.destino ? ` · ${f.destino}` : ""} · {brl(f.valor_total)}</b>.
+          Só mexa abaixo se algo estiver errado.
+        </p>
+      )}
+      <details open={!f.de_itens_da_venda}>
+      <summary className="text-[12.5px] cursor-pointer mb-2" style={{ color: "var(--ink3)", display: f.de_itens_da_venda ? undefined : "none" }}>Ver e ajustar datas, passageiros e valor</summary>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Campo rotulo="Tipo de serviço">
           <select className={SELECT_CLS} value={f.servico} onChange={(e) => mudar({ servico: e.target.value as Servico })}>
@@ -228,6 +236,7 @@ export default function FichaFechamento({ negocio, aberto, onFechar, onConsolida
           </ul>
         </div>
       )}
+      </details>
 
       {h("2. Plano de pagamento")}
       <div className="rel-card p-3 space-y-3">

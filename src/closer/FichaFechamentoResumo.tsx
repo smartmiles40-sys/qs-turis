@@ -70,7 +70,7 @@ export default function FichaFechamentoResumo({ viagemId }: { viagemId: string }
       <div className="flex flex-wrap items-baseline gap-2 mb-2">
         <h3 className="text-[14px] font-bold flex-1" style={{ color: "var(--ink)" }}>Ficha de fechamento</h3>
         <span className="text-[11px]" style={{ color: "var(--ink3)" }}>
-          Consolidada em {dataBr(r.consolidada_em)}{r.closer_nome ? ` · closer ${r.closer_nome}` : ""}
+          Fechada em {dataBr(r.consolidada_em)}{r.closer_nome ? ` · closer ${r.closer_nome}` : ""}
         </span>
       </div>
 

@@ -13,23 +13,42 @@ import { useEffect, useState } from "react";
 import { Badge, Button } from "@/components/ui";
 import { dataBR, pendenciasViagens, SERVICOS, type FiltroViagens, type Servico } from "../lib/viagens";
 import {
-  anexarComoComponente, componentesSoltos, marcarRepetidas, paresRepetidos, resumoFaxina,
+  anexarComoComponente, componentesSoltos, contarSemDonoEmbarcando, marcarRepetidas, paresRepetidos, resumoFaxina,
   type ComponenteSolto, type ParRepetido, type ResumoFaxina,
 } from "../lib/faxina";
 import { Aviso, Modal } from "../ui";
 
 interface Chip { id: FiltroViagens | "soltas"; rotulo: string; n: number; extra?: string; tom?: "warn" | "danger" }
 
-export default function FaxinaAtalhos({ filtro, onFiltro, gestor, versao, onMudou, onAbrirViagem, onConferirRepetidas }: {
+/** O que a lista deve deixar marcado ao abrir a fila (a tarefa da faixa). */
+export type MarcarAoAbrir = "embarca7" | "sugestao" | "voo";
+
+// 27/10 (Bruno: "tudo o mais simples"): a faixa mostra UMA tarefa — a mais
+// importante agora — com o botão que resolve. Ordem:
+//   1. sem dono embarcando em até 7 dias → Distribuir
+//   2. a classificar com sugestão pronta  → Aplicar sugestões
+//   3. possíveis repetidas                → Conferir
+//   4. sem data, mas já com voo           → Preencher pelas datas dos voos
+// Os outros números ficam em "Ver tudo", recolhido.
+interface Tarefa { texto: string; botao: string; dica?: string; fazer: () => void }
+
+export default function FaxinaAtalhos({ filtro, onFiltro, onTarefa, gestor, versao, onMudou, onAbrirViagem, onConferirRepetidas, verTudoAberto }: {
   filtro: FiltroViagens; onFiltro: (f: FiltroViagens) => void; gestor: boolean; versao: number; onMudou: () => void;
+  /** abre a fila já com as viagens da tarefa marcadas */
+  onTarefa: (f: FiltroViagens, marcar?: MarcarAoAbrir) => void;
   onAbrirViagem: (id: string) => void; onConferirRepetidas: () => void;
+  /** abre com "Ver tudo" já aberto (item Faxina do menu da supervisão) */
+  verTudoAberto?: boolean;
 }) {
   const [r, setR] = useState<ResumoFaxina | null>(null);
   const [antigo, setAntigo] = useState<{ semData: number; classificar: number; semDono: number } | null>(null);
   const [painel, setPainel] = useState<"repetidas" | "soltas" | null>(null);
+  const [semDono7, setSemDono7] = useState<number | null>(null);
+  const [verTudo, setVerTudo] = useState(!!verTudoAberto);
 
   useEffect(() => {
     let vivo = true;
+    contarSemDonoEmbarcando(7).then((n) => { if (vivo) setSemDono7(n); }).catch(() => { if (vivo) setSemDono7(0); });
     resumoFaxina()
       .then((x) => {
         if (!vivo) return;
@@ -43,23 +62,65 @@ export default function FaxinaAtalhos({ filtro, onFiltro, gestor, versao, onMudo
   const chips: Chip[] = r ? [
     { id: "sem_dono", rotulo: "Sem dono", n: r.sem_dono, tom: r.sem_dono ? "danger" : undefined },
     { id: "classificar", rotulo: "Classificar", n: r.classificar, extra: r.classificar_com_sugestao ? `${r.classificar_com_sugestao} com sugestão` : undefined, tom: r.classificar_futuras ? "warn" : undefined },
-    { id: "sem_data", rotulo: "Sem data", n: r.sem_data, extra: r.sem_data_com_voo ? `${r.sem_data_com_voo} já têm voo` : undefined },
+    { id: "sem_data", rotulo: "Precisa de data", n: r.sem_data, extra: r.sem_data_com_voo ? `${r.sem_data_com_voo} já têm voo` : undefined },
     { id: "repetidas", rotulo: "Repetidas?", n: r.repetidas_marcadas, extra: r.repetidas_candidatas ? `+${r.repetidas_candidatas} pares novos` : undefined, tom: r.repetidas_marcadas ? "warn" : undefined },
     { id: "sem_cliente", rotulo: "Sem cliente", n: r.sem_cliente },
     { id: "soltas", rotulo: "Vendas soltas", n: r.componentes_soltos, extra: "seguro/hotel da mesma viagem" },
   ] : antigo ? [
     { id: "sem_dono", rotulo: "Sem dono", n: antigo.semDono, tom: antigo.semDono ? "danger" : undefined },
     { id: "classificar", rotulo: "Classificar", n: antigo.classificar, tom: antigo.classificar ? "warn" : undefined },
-    { id: "sem_data", rotulo: "Sem data", n: antigo.semData },
+    { id: "sem_data", rotulo: "Precisa de data", n: antigo.semData },
     { id: "repetidas", rotulo: "Repetidas?", n: -1 },
     { id: "sem_cliente", rotulo: "Sem cliente", n: -1 },
   ] : [];
 
   if (!chips.length) return null;
+
+  const plural = (n: number, um: string, varios: string) => (n === 1 ? um : varios);
+  let tarefa: Tarefa | null = null;
+  if (semDono7) {
+    tarefa = {
+      texto: `${semDono7} ${plural(semDono7, "viagem embarca", "viagens embarcam")} em até 7 dias e ninguém cuida.`,
+      botao: gestor ? "Distribuir" : "Ver e assumir",
+      dica: gestor ? "Já abrimos marcadas: escolha as pessoas em “distribuir entre…”." : "Clique em Assumir nas que forem suas.",
+      fazer: () => onTarefa("sem_dono", "embarca7"),
+    };
+  } else if (r?.classificar_com_sugestao) {
+    tarefa = {
+      texto: `${r.classificar_com_sugestao} ${plural(r.classificar_com_sugestao, "venda a classificar já tem", "vendas a classificar já têm")} sugestão do que foi vendido${r.classificar_futuras ? ` (${r.classificar_futuras} ainda vão acontecer)` : ""}.`,
+      botao: "Aplicar sugestões",
+      dica: "Já abrimos marcadas: confira e clique em “Usar a sugestão”.",
+      fazer: () => onTarefa("classificar", "sugestao"),
+    };
+  } else if (r && (r.repetidas_marcadas || r.repetidas_candidatas)) {
+    const n = r.repetidas_marcadas || r.repetidas_candidatas;
+    tarefa = {
+      texto: `${n} ${plural(n, "venda pode estar repetida", "vendas podem estar repetidas")} (mesma pessoa, mesma ida).`,
+      botao: "Conferir",
+      fazer: () => (r.repetidas_marcadas ? onConferirRepetidas() : setPainel("repetidas")),
+    };
+  } else if (r?.sem_data_com_voo) {
+    tarefa = {
+      texto: `${r.sem_data_com_voo} ${plural(r.sem_data_com_voo, "viagem está sem data mas já tem", "viagens estão sem data mas já têm")} voo cadastrado.`,
+      botao: "Preencher pelas datas dos voos",
+      dica: "Já abrimos marcadas: clique em “Datas pelos voos”.",
+      fazer: () => onTarefa("sem_data", "voo"),
+    };
+  }
+
   return (
     <div className="mb-3">
-      <p className="qs-label mb-1.5">Faxina das viagens</p>
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Filas de arrumação">
+      <div className="qs-card px-3 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="qs-label">Faxina · próxima tarefa</span>
+        <span className="flex-1 min-w-[220px] text-[13.5px]" style={{ color: "var(--text)" }}>
+          {tarefa ? tarefa.texto : semDono7 === null && !r ? "Conferindo…" : "Nada urgente na faxina agora."}
+          {tarefa?.dica && <span className="block text-[11.5px]" style={{ color: "var(--subtle)" }}>{tarefa.dica}</span>}
+        </span>
+        {tarefa && <Button size="sm" variant="primary" onClick={tarefa.fazer}>{tarefa.botao}</Button>}
+        <Button size="sm" variant="ghost" aria-expanded={verTudo} onClick={() => setVerTudo((v) => !v)}>{verTudo ? "Fechar" : "Ver tudo"}</Button>
+      </div>
+      {verTudo && <>
+      <div className="flex flex-wrap gap-2 mt-2" role="group" aria-label="Filas de arrumação">
         {chips.map((c) => {
           const ativo = c.id === filtro;
           return (
@@ -76,6 +137,7 @@ export default function FaxinaAtalhos({ filtro, onFiltro, gestor, versao, onMudo
           );
         })}
       </div>
+      </>}
       {filtro === "repetidas" && (
         <div className="flex flex-wrap items-center gap-2 mt-2">
           <Button size="sm" onClick={onConferirRepetidas}>Conferir lado a lado</Button>

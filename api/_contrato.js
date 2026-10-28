@@ -1,30 +1,32 @@
 // api/_contrato.js
 // -----------------------------------------------------------------------------
 // CONTRATO 100% EM CÓDIGO (0180, Bruno 22/10/2026: "eu não quero que seja nada
-// via n8n"). Aqui mora tudo o que o n8n fazia, agora no servidor do QS:
+// via n8n"; 27/10: "vamos parar de usar o console" — sem Google Docs/Drive).
 //
-//   1. GOOGLE (OAuth do próprio QS): o refresh token fica em qs_contrato_google
-//      (só o service_role lê). A cada contrato o QS pega um access token novo.
-//   2. MONTAR OS CAMPOS: venda consolidada (ficha) + proposta aprovada + ficha
-//      do cliente (rel_clientes) + Bitrix (negócio e contato) + lead.
-//   3. GERAR: copia o template (convertendo .docx → Google Doc) → troca as
-//      {{tags}} (o MESMO mapa do n8n, com as variações antigas) → TRAVA: se
-//      sobrou '{{' no texto, não envia → exporta PDF → arquiva o PDF na pasta
-//      do Drive → apaga o Doc temporário.
+//   1. MONTAR OS CAMPOS: venda consolidada (ficha) + proposta aprovada + ficha
+//      do cliente (rel_clientes) + Bitrix (negócio e contato) + lead. O closer
+//      confere e corrige tudo na prévia antes de mandar.
+//   2. GERAR: o próprio QS monta o PDF a partir dos modelos que moram no
+//      código (api/_contratoModelo.js — texto fiel aos contratos em uso).
+//   3. GUARDAR: o PDF gerado e o assinado vão pro Storage (bucket privado
+//      "contratos"); a tela abre por link temporário.
 //   4. ZAPSIGN: cria o documento (cliente + assinante fixo da agência) com
 //      external_id = id do cartão no QS.
 //
-// Só fetch puro (sem googleapis/zapsign SDK) e timeout em toda chamada.
-// Quem chama: api/closer.js (?acao=contrato-*, google-*, zapsign-webhook).
+// Só fetch puro (sem SDK) e timeout em toda chamada.
+// Quem chama: api/closer.js (?acao=contrato-*, zapsign-webhook).
 // -----------------------------------------------------------------------------
 
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { rest } from './_supabaseAdmin.js';
 import { bx, bitrixConfigurado } from './_bitrixLead.js';
+import { gerarPdfDoContrato, linhasDosInclusos } from './_contratoModelo.js';
 
 const env = (k) => String(process.env[k] || '').trim();
 
 export const CONFIG_PADRAO = {
+  // IDs do Google da época do n8n: não são mais usados (o modelo mora no
+  // código), só ficam pra RPC contrato_config_salvar continuar aceitando.
   template_pacote: '1vRh_zQHh-Q2rD8g0FsGIHRxAwqwtPY7X',
   template_expedicao: '1FbKqTW5ysiFbKQI_9eM0xDPJ123Zz0UG',
   pasta_contratos: '14sJB-IOUEBjcyq0R6JxF5ZO1AaY0exQ8',
@@ -32,8 +34,6 @@ export const CONFIG_PADRAO = {
   assinante_email: 'contato@setuforeuvou.com',
   assinante_telefone: '5585987660748',
 };
-
-const ESCOPOS_GOOGLE = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/documents'];
 
 // ── fetch com prazo ─────────────────────────────────────────────────────────
 async function buscar(url, opts = {}, ms = 20_000) {
@@ -58,191 +58,20 @@ export async function lerConfig() {
   return out;
 }
 
-export async function contaGoogle() {
-  const r = await rest('qs_contrato_google?select=refresh_token,email,conectado_em,conectado_por,ultimo_erro,ultimo_erro_em&id=eq.1&limit=1').catch(() => null);
-  return r?.[0] || null;
-}
-
 /** O que falta pra rodar sozinho. Vazio = modo automático. */
-export function oQueFalta(cfg, google) {
+export function oQueFalta(cfg) {
   const falta = [];
-  if (!env('GOOGLE_OAUTH_CLIENT_ID') || !env('GOOGLE_OAUTH_CLIENT_SECRET')) falta.push('Cadastrar GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_CLIENT_SECRET na Vercel.');
-  else if (!google?.refresh_token) falta.push('Conectar a conta Google (Configurar contrato → "Conectar conta Google").');
   if (!env('ZAPSIGN_API_TOKEN')) falta.push('Cadastrar ZAPSIGN_API_TOKEN na Vercel.');
-  if (!env('ZAPSIGN_WEBHOOK_SECRET')) falta.push('Cadastrar ZAPSIGN_WEBHOOK_SECRET na Vercel (e o mesmo valor no webhook do ZapSign).');
-  if (!cfg.template_pacote || !cfg.template_expedicao) falta.push('Informar os IDs dos templates de contrato.');
-  if (!cfg.pasta_contratos) falta.push('Informar a pasta dos contratos no Drive.');
+  if (!env('ZAPSIGN_WEBHOOK_SECRET')) falta.push('Cadastrar ZAPSIGN_WEBHOOK_SECRET na Vercel (e o mesmo valor na URL do webhook do ZapSign).');
   if (!cfg.assinante_email) falta.push('Informar o assinante da agência.');
   return falta;
 }
 
-// ── GOOGLE: OAuth ───────────────────────────────────────────────────────────
-export function urlDeRetorno(req) {
+// ── URL pública do app (webhook do ZapSign na tela de configuração) ───────
+export function urlDoApp(req) {
   const fixa = env('QS_URL_PUBLICA');
   const host = req.headers['x-forwarded-host'] || req.headers.host;
-  const base = (fixa || `https://${host}`).replace(/\/+$/, '');
-  return `${base}/api/closer?acao=google-callback`;
-}
-export function urlDoApp(req) {
-  return urlDeRetorno(req).replace(/\/api\/closer\?acao=google-callback$/, '');
-}
-
-const b64url = (b) => Buffer.from(b).toString('base64url');
-
-/** state = dados.assinatura (HMAC com o client secret) — sem tabela, vale 15 min. */
-export function assinarEstado(userId) {
-  const dados = b64url(JSON.stringify({ u: userId, t: Date.now() }));
-  const sig = createHmac('sha256', env('GOOGLE_OAUTH_CLIENT_SECRET')).update(dados).digest('base64url');
-  return `${dados}.${sig}`;
-}
-export function conferirEstado(state) {
-  const [dados, sig] = String(state || '').split('.');
-  if (!dados || !sig || !env('GOOGLE_OAUTH_CLIENT_SECRET')) return null;
-  const esperado = createHmac('sha256', env('GOOGLE_OAUTH_CLIENT_SECRET')).update(dados).digest('base64url');
-  const a = Buffer.from(sig);
-  const b = Buffer.from(esperado);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  try {
-    const j = JSON.parse(Buffer.from(dados, 'base64url').toString('utf8'));
-    if (!j?.u || Date.now() - Number(j.t) > 15 * 60_000) return null;
-    return j;
-  } catch {
-    return null;
-  }
-}
-
-export function urlDeConsentimento(req, userId) {
-  const p = new URLSearchParams({
-    client_id: env('GOOGLE_OAUTH_CLIENT_ID'),
-    redirect_uri: urlDeRetorno(req),
-    response_type: 'code',
-    scope: ESCOPOS_GOOGLE.join(' '),
-    access_type: 'offline',
-    prompt: 'consent',
-    include_granted_scopes: 'true',
-    state: assinarEstado(userId),
-  });
-  return `https://accounts.google.com/o/oauth2/v2/auth?${p}`;
-}
-
-async function tokenGoogle(params) {
-  const r = await buscar('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: env('GOOGLE_OAUTH_CLIENT_ID'), client_secret: env('GOOGLE_OAUTH_CLIENT_SECRET'), ...params }),
-  }, 15_000);
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const err = new Error(j.error_description || j.error || `Google HTTP ${r.status}`);
-    err.codigo = j.error;
-    throw err;
-  }
-  return j;
-}
-
-/** Troca o code do consentimento pelo refresh token e grava (só service_role). */
-export async function conectarGoogle(req, code, userId) {
-  const tk = await tokenGoogle({ code, grant_type: 'authorization_code', redirect_uri: urlDeRetorno(req) });
-  if (!tk.refresh_token) throw new Error('O Google não devolveu o refresh token. Tire o acesso do app em myaccount.google.com/permissions e conecte de novo.');
-  const faltando = ESCOPOS_GOOGLE.filter((s) => !String(tk.scope || '').includes(s));
-  if (faltando.length) throw new Error('Marque as permissões do Drive e do Docs na tela do Google.');
-  let email = null;
-  try {
-    const r = await buscar('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', { headers: { Authorization: `Bearer ${tk.access_token}` } }, 10_000);
-    email = (await r.json())?.user?.emailAddress || null;
-  } catch { /* só o rótulo da tela */ }
-  await rest('qs_contrato_google?on_conflict=id', {
-    method: 'POST',
-    prefer: 'resolution=merge-duplicates,return=minimal',
-    body: { id: 1, refresh_token: tk.refresh_token, email, escopos: tk.scope || null, conectado_por: userId, conectado_em: new Date().toISOString(), ultimo_erro: null, ultimo_erro_em: null },
-  });
-  return email;
-}
-
-export async function desconectarGoogle() {
-  const g = await contaGoogle();
-  if (g?.refresh_token) {
-    await buscar(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(g.refresh_token)}`, { method: 'POST' }, 8_000).catch(() => null);
-  }
-  await rest('qs_contrato_google?id=eq.1', { method: 'DELETE', prefer: 'return=minimal' });
-}
-
-async function accessToken() {
-  const g = await contaGoogle();
-  if (!g?.refresh_token) throw new Error('A conta Google não está conectada.');
-  try {
-    const tk = await tokenGoogle({ refresh_token: g.refresh_token, grant_type: 'refresh_token' });
-    return tk.access_token;
-  } catch (e) {
-    const msg = e.codigo === 'invalid_grant'
-      ? 'O Google recusou a conexão (revogada ou expirada). Conecte a conta Google de novo em Configurar contrato.'
-      : `Google: ${e.message}`;
-    await rest('qs_contrato_google?id=eq.1', { method: 'PATCH', prefer: 'return=minimal', body: { ultimo_erro: msg, ultimo_erro_em: new Date().toISOString() } }).catch(() => null);
-    throw new Error(msg);
-  }
-}
-
-async function google(token, method, url, { json, body, headers = {}, binario = false, ms = 25_000 } = {}) {
-  const r = await buscar(url, {
-    method,
-    headers: { Authorization: `Bearer ${token}`, ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers },
-    body: json !== undefined ? JSON.stringify(json) : body,
-  }, ms);
-  if (!r.ok) {
-    const j = await r.json().catch(() => null);
-    const m = j?.error?.message || `HTTP ${r.status}`;
-    const err = new Error(r.status === 404 ? `Google: arquivo não encontrado ou sem acesso (${m}).` : `Google: ${m}`);
-    err.status = r.status;
-    throw err;
-  }
-  if (binario) return Buffer.from(await r.arrayBuffer());
-  if (r.status === 204) return null;
-  return r.json().catch(() => null);
-}
-
-// ── MAPA DE TAGS (o mesmo do n8n "Normalizar e Montar Contrato") ───────────
-// A PRIMEIRA tag de cada linha é a do template atual; as outras são variações
-// antigas mantidas por segurança (tag que não existe no doc é ignorada).
-// matchCase: true — acento e maiúscula precisam bater.
-const TAGS_COMUNS = [
-  ['nome', ['{{Nome completo do Cliente (não colocar só ponto!)}}', '{{Contato: Nome}}']],
-  ['cpf', ['{{Contato: CPF 2}}', '{{CPF}}']],
-  ['rg', ['{{Contato: RG}}', '{{RG}}']],
-  ['endereco', ['{{Contato: Endereço}}', '{{endereco}}']],
-  ['email', ['{{Contato: E-mail}}', '{{email}}']],
-  ['telefone', ['{{Contato: Telefone}}', '{{telefone}}']],
-  ['ida', ['{{Ida - Prevista}}', '{{idaprevista}}']],
-  ['volta', ['{{Volta - Prevista}}', '{{voltaprevista}}']],
-  ['valor_total', ['{{Valor total (para todas as pessoas) não adicionar -> R$}}', '{{Valor_total}}']],
-  ['forma_pagamento', ['{{Forma de pagamento confirmada:}}', '{{Forma_de_pagamento}}']],
-  ['data_venda', ['{{Data da venda realizada}}', '{{data_atual}}']],
-];
-const TAGS_EXPEDICAO = [
-  ['expedicao', ['{{Nome da expedição}}', '{{Expedição}}']],
-  ['nascimento', ['{{Contato: Data de Nascimento}}', '{{nascimento}}']],
-  ['passagem', ['{{Passagem Aérea}}', '{{Passagem aérea}}', '{{passagem_aerea}}']],
-  ['seguro', ['{{Seguro Viagem}}', '{{Seguro viagem}}', '{{seguro_viagem}}']],
-];
-const TAGS_PACOTE = [
-  ['destino', ['{{Destino}}']],
-  ['tipo_pacote', ['{{Tipo de pacote}}']],
-];
-const VAZIO = '-';
-
-/** O texto que entra no lugar de cada tag (CPF formatado, valor sem "R$"). */
-function textoDoCampo(k, c) {
-  const v = String(c[k] ?? '').trim();
-  if (!v) return VAZIO;
-  if (k === 'cpf') return formatarCpf(v);
-  if (k === 'valor_total') return formatarValor(v);
-  return v;
-}
-
-export function pedidosDeTroca(c) {
-  const lista = [...TAGS_COMUNS, ...(c.tipo === 'expedicao' ? TAGS_EXPEDICAO : TAGS_PACOTE)];
-  return lista.flatMap(([k, tags]) => tags.map((tag) => ({
-    replaceAllText: { containsText: { text: tag, matchCase: true }, replaceText: textoDoCampo(k, c) },
-  })));
+  return (fixa || `https://${host}`).replace(/\/+$/, '');
 }
 
 // ── Formatação (igual ao n8n) ───────────────────────────────────────────────
@@ -424,7 +253,13 @@ function juntarNome(nome, sobrenome) {
 
 // ── PRÉVIA: os campos que vão no contrato e de onde vieram ─────────────────
 export const CAMPOS = ['tipo', 'nome', 'cpf', 'rg', 'nascimento', 'endereco', 'email', 'telefone', 'expedicao', 'destino', 'tipo_pacote',
-  'ida', 'volta', 'passagem', 'seguro', 'valor_total', 'forma_pagamento', 'vendedor', 'data_venda'];
+  'inclusos', 'nao_inclusos', 'ida', 'volta', 'passagem', 'seguro', 'valor_total', 'forma_pagamento', 'vendedor', 'data_venda'];
+const LONGOS = { destino: 1500, inclusos: 4000, nao_inclusos: 1500, forma_pagamento: 1000, endereco: 500 };
+// Rótulo do item da proposta quando ele não tem nome (cláusula 1.3 do pacote).
+const ROTULO_ITEM = {
+  aereo: 'Aéreo', hospedagem: 'Hospedagem', transfer: 'Transfer', trem: 'Trens', passeio: 'Passeio', seguro: 'Seguro viagem',
+  carro: 'Carro', cruzeiro: 'Cruzeiro', visto: 'Visto', pacote: 'Pacote', expedicao: 'Expedição', concierge: 'Assessoria',
+};
 // Dados da PESSOA: a correção do closer no último envio vale de novo.
 const DA_PESSOA = ['nome', 'cpf', 'rg', 'nascimento', 'endereco', 'email', 'telefone'];
 
@@ -520,10 +355,16 @@ export async function montarPrevia(negocio) {
     por('expedicao', ficha?.destino, 'venda consolidada');
   }
   const itens = ficha?.itens?.length ? ficha.itens : proposta?.itens || [];
-  const descItens = itens.map((i) => `${i.nome || i.tipo}${i.descricao ? ` (${String(i.descricao).replace(/\s+/g, ' ').slice(0, 200)})` : ''}`).join('; ');
   const destinoBase = ficha?.destino || proposta?.destino || '';
-  if (destinoBase) por('destino', descItens ? `${destinoBase} — inclui: ${descItens}` : destinoBase, ficha ? 'venda consolidada' : 'proposta aprovada');
+  if (destinoBase) por('destino', destinoBase, ficha ? 'venda consolidada' : 'proposta aprovada');
   por('destino', d.destino, 'Bitrix (negócio)');
+  // Cláusula 1.3 do pacote: um item por linha, "Rótulo: descrição".
+  const linhaDoItem = (i) => {
+    const desc = String(i.descricao || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+    const rot = String(i.nome || ROTULO_ITEM[i.tipo] || i.tipo || '').trim();
+    return rot && desc ? `${rot}: ${desc}` : rot || desc;
+  };
+  if (tipo === 'pacote' && itens.length) por('inclusos', itens.map(linhaDoItem).filter(Boolean).join('\n'), ficha ? 'venda consolidada' : 'proposta aprovada');
   por('tipo_pacote', d.tipo_pacote, 'Bitrix (negócio)');
   if (tipo === 'pacote') por('tipo_pacote', 'Personalizado', 'padrão');
   por('ida', dataBr(ficha?.data_ida || proposta?.data_ida), ficha ? 'venda consolidada' : 'proposta aprovada');
@@ -558,10 +399,25 @@ export async function montarPrevia(negocio) {
 // ── Validação (a mesma regra no front) ─────────────────────────────────────
 export function normalizarCampos(entrada) {
   const c = {};
-  for (const k of CAMPOS) c[k] = String(entrada?.[k] ?? '').replace(/\s+\n/g, '\n').trim().slice(0, k === 'destino' ? 3000 : 500);
+  for (const k of CAMPOS) c[k] = String(entrada?.[k] ?? '').replace(/[ \t]+\n/g, '\n').trim().slice(0, LONGOS[k] || 300);
   c.tipo = c.tipo === 'expedicao' ? 'expedicao' : 'pacote';
+  // Padrão do contrato (o mesmo que sai no PDF): e-mail minúsculo, CPF e
+  // telefone com máscara, valor 0.000,00, datas dd/mm/aaaa, sem espaço duplo.
   c.email = c.email.toLowerCase();
+  if (cpfValido(c.cpf)) c.cpf = formatarCpf(c.cpf);
+  if (c.telefone) c.telefone = formatarTelefone(c.telefone);
+  if (numeroDoValor(c.valor_total) > 0) c.valor_total = formatarValor(c.valor_total);
+  for (const k of ['nascimento', 'ida', 'volta', 'data_venda']) c[k] = dataBr(c[k]);
+  for (const k of ['nome', 'expedicao', 'tipo_pacote']) c[k] = c[k].replace(/\s+/g, ' ');
   return c;
+}
+
+/** "dd/mm/aaaa" → Date (meio-dia UTC), ou null se não for uma data de verdade. */
+function dataDe(s) {
+  const m = String(s || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1], 12));
+  return d.getUTCDate() === +m[1] && d.getUTCMonth() === +m[2] - 1 ? d : null;
 }
 export function validarCampos(c) {
   const erros = [];
@@ -574,29 +430,22 @@ export function validarCampos(c) {
   if (!c.forma_pagamento) erros.push('Forma de pagamento.');
   if (c.tipo === 'expedicao' && !c.expedicao) erros.push('Nome da expedição.');
   if (c.tipo === 'pacote' && !c.destino) erros.push('Destino / descrição do pacote.');
-  if (!c.data_venda) erros.push('Data.');
-  for (const [k, rot] of [['rg', 'RG'], ['endereco', 'Endereço'], ['ida', 'Ida prevista'], ['volta', 'Volta prevista']]) if (!c[k]) avisos.push(`${rot} vazio — sai "-" no contrato.`);
-  if (c.tipo === 'expedicao' && !c.nascimento) avisos.push('Data de nascimento vazia — sai "-" no contrato.');
+  if (c.tipo === 'pacote' && !linhasDosInclusos(c.inclusos).length) erros.push('O que está incluso (cláusula 1.3, um item por linha).');
+  if (!dataDe(c.data_venda)) erros.push('Data da venda (dd/mm/aaaa).');
+  for (const [k, rot] of [['ida', 'Ida prevista'], ['volta', 'Volta prevista']]) if (c[k] && !dataDe(c[k])) erros.push(`${rot} em dd/mm/aaaa.`);
+  if (dataDe(c.ida) && dataDe(c.volta) && dataDe(c.volta) < dataDe(c.ida)) erros.push('A volta está antes da ida (confira o ano).');
+  for (const [k, rot] of [['endereco', 'Endereço'], ['ida', 'Ida prevista'], ['volta', 'Volta prevista']]) if (!c[k]) avisos.push(`${rot} vazio — sai "-" no contrato.`);
+  if (c.tipo === 'pacote' && !c.nascimento) avisos.push('Data de nascimento vazia — sai "-" no contrato.');
+  if (c.nascimento && !dataDe(c.nascimento)) avisos.push('Data de nascimento fora do padrão dd/mm/aaaa.');
+  if (c.tipo === 'expedicao' && (!c.passagem || !c.seguro)) avisos.push('Passagem aérea ou seguro vazio — sai "-" no quadro resumo.');
   return { erros, avisos };
 }
 
-// ── GERAR (Google) ──────────────────────────────────────────────────────────
-function textoDoDocumento(doc) {
-  const partes = [];
-  const andar = (o) => {
-    if (!o || typeof o !== 'object') return;
-    if (Array.isArray(o)) { for (const x of o) andar(x); return; }
-    if (o.textRun && typeof o.textRun.content === 'string') partes.push(o.textRun.content);
-    for (const k of Object.keys(o)) if (k !== 'textRun') andar(o[k]);
-  };
-  andar(doc);
-  return partes.join('');
-}
-
+// ── GERAR (no próprio QS: api/_contratoModelo.js) e GUARDAR (Supabase Storage) ──
 export function nomesDoArquivo(c, dealId, negocioId) {
   const tipoLabel = c.tipo === 'expedicao' ? 'Expedição' : 'Pacote';
-  const ref = c.tipo === 'expedicao' ? c.expedicao : (String(c.destino).split(' — ')[0] || c.tipo_pacote);
-  const refCurta = String(ref || '').slice(0, 80);
+  const ref = c.tipo === 'expedicao' ? c.expedicao : (String(c.destino).split(/[:—]/)[0] || c.tipo_pacote);
+  const refCurta = String(ref || '').trim().slice(0, 80);
   const id = dealId ? `D_${dealId}` : `QS-${String(negocioId).slice(0, 8)}`;
   return {
     arquivo: `Contrato de ${tipoLabel}${refCurta ? ` ${refCurta}` : ''} | ${c.nome} | ${id}`.replace(/[\\/]/g, '-'),
@@ -604,58 +453,45 @@ export function nomesDoArquivo(c, dealId, negocioId) {
   };
 }
 
-/**
- * Copia o template, troca as tags, confere, exporta PDF e arquiva no Drive.
- * Devolve { pdf: Buffer, driveId, driveUrl }. Erro com .sobraram = tags que ficaram.
- */
-export async function gerarPdf(c, cfg, nomes) {
-  const token = await accessToken();
-  const template = c.tipo === 'expedicao' ? cfg.template_expedicao : cfg.template_pacote;
-  const copia = await google(token, 'POST',
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(template)}/copy?supportsAllDrives=true&fields=id`,
-    { json: { name: nomes.arquivo, parents: [cfg.pasta_contratos], mimeType: 'application/vnd.google-apps.document' } });
-  const docId = copia?.id;
-  if (!docId) throw new Error('O Google não devolveu a cópia do template.');
-  try {
-    await google(token, 'POST', `https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`, { json: { requests: pedidosDeTroca(c) } });
-    // TRAVA: se ainda tem {{ no documento, não manda pro cliente.
-    const doc = await google(token, 'GET', `https://docs.googleapis.com/v1/documents/${docId}?includeTabsContent=true`);
-    const sobra = [...new Set(textoDoDocumento(doc).match(/\{\{[^}]{0,120}\}\}?/g) || [])];
-    if (sobra.length || textoDoDocumento(doc).includes('{{')) {
-      const err = new Error(`O template tem tags que o QS não conhece: ${sobra.join(', ') || '{{ sem fechar'}. Nada foi enviado ao cliente.`);
-      err.sobraram = sobra;
-      throw err;
-    }
-    const pdf = await google(token, 'GET', `https://www.googleapis.com/drive/v3/files/${docId}/export?mimeType=application/pdf`, { binario: true, ms: 30_000 });
-    const arq = await subirPdf(token, cfg.pasta_contratos, `${nomes.arquivo}.pdf`, pdf);
-    return { pdf, driveId: arq.id, driveUrl: arq.webViewLink || `https://drive.google.com/file/d/${arq.id}/view` };
-  } finally {
-    // Apaga o Google Doc temporário (o PDF é o que fica).
-    await google(token, 'DELETE', `https://www.googleapis.com/drive/v3/files/${docId}?supportsAllDrives=true`, { ms: 10_000 }).catch((e) => console.warn('[contrato] doc temporário não apagado', docId, e?.message));
-  }
+/** Gera o PDF do contrato a partir dos campos (sem Google). */
+export const gerarPdf = (c) => gerarPdfDoContrato(c);
+
+// Bucket PRIVADO "contratos" (0211). O banco guarda o caminho com o prefixo
+// "storage:"; a tela pede um link temporário (linkDoPdf) na hora de abrir.
+const BUCKET = 'contratos';
+const PREFIXO = 'storage:';
+const baseSupabase = () => env('SUPABASE_URL').replace(/\/+$/, '');
+const chaveServico = () => env('SUPABASE_SERVICE_ROLE_KEY');
+
+export async function guardarPdf(caminho, buffer) {
+  const r = await buscar(`${baseSupabase()}/storage/v1/object/${BUCKET}/${caminho}`, {
+    method: 'POST',
+    headers: { apikey: chaveServico(), Authorization: `Bearer ${chaveServico()}`, 'Content-Type': 'application/pdf', 'x-upsert': 'true' },
+    body: buffer,
+  }, 20_000);
+  if (!r.ok) throw new Error(`Storage: ${(await r.text()).slice(0, 200) || `HTTP ${r.status}`}`);
+  return `${PREFIXO}${caminho}`;
 }
 
-async function subirPdf(token, pasta, nome, buffer) {
-  const fronteira = `qs${Date.now().toString(36)}`;
-  const meta = JSON.stringify({ name: nome, parents: [pasta], mimeType: 'application/pdf' });
-  const corpo = Buffer.concat([
-    Buffer.from(`--${fronteira}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${fronteira}\r\nContent-Type: application/pdf\r\n\r\n`, 'utf8'),
-    buffer,
-    Buffer.from(`\r\n--${fronteira}--`, 'utf8'),
-  ]);
-  return google(token, 'POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink', {
-    body: corpo, headers: { 'Content-Type': `multipart/related; boundary=${fronteira}` }, ms: 30_000,
-  });
+/** "storage:…" → link de 10 min; link http antigo (Drive) passa direto. */
+export async function linkDoPdf(guardado) {
+  const s = String(guardado || '');
+  if (!s.startsWith(PREFIXO)) return s || null;
+  const r = await buscar(`${baseSupabase()}/storage/v1/object/sign/${BUCKET}/${s.slice(PREFIXO.length)}`, {
+    method: 'POST',
+    headers: { apikey: chaveServico(), Authorization: `Bearer ${chaveServico()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expiresIn: 600 }),
+  }, 10_000);
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j?.signedURL) throw new Error('Não achei o PDF guardado.');
+  return `${baseSupabase()}/storage/v1${j.signedURL}`;
 }
 
-/** Guarda a cópia ASSINADA no Drive (o link do ZapSign expira em minutos). */
-export async function arquivarAssinado(urlAssinado, nome, cfg) {
+/** Guarda a cópia ASSINADA (o link do ZapSign expira em minutos). */
+export async function arquivarAssinado(urlAssinado, caminho) {
   const r = await buscar(urlAssinado, {}, 20_000);
   if (!r.ok) throw new Error(`Não baixei o PDF assinado (HTTP ${r.status}).`);
-  const buf = Buffer.from(await r.arrayBuffer());
-  const token = await accessToken();
-  const arq = await subirPdf(token, cfg.pasta_contratos, nome, buf);
-  return arq.webViewLink || `https://drive.google.com/file/d/${arq.id}/view`;
+  return guardarPdf(caminho, Buffer.from(await r.arrayBuffer()));
 }
 
 // ── ZAPSIGN ─────────────────────────────────────────────────────────────────

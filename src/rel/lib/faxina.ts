@@ -15,7 +15,7 @@
 // telas continuam funcionando com o que já existia (0184).
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import type { Servico } from "./viagens";
+import { hojeSP, type Servico } from "./viagens";
 
 export const FALTA_0208 = "Falta aplicar a atualização do banco (migration 0208). Avise o Bruno.";
 
@@ -53,6 +53,23 @@ export async function resumoFaxina(): Promise<ResumoFaxina | null> {
   const { data, error } = await supabase.from("rel_faxina_resumo").select("*").maybeSingle();
   if (error) { if (faltaMigration(error)) return null; throw error; }
   return data as ResumoFaxina | null;
+}
+
+/** Viagens SEM DONO que embarcam nos próximos `dias` (a 1ª tarefa da faxina, 27/10).
+ *  Mesmo recorte da fila "Sem dono" (listarViagens), só com a ida perto. */
+export async function contarSemDonoEmbarcando(dias = 7): Promise<number> {
+  const hoje = hojeSP();
+  const ate = new Date(new Date(`${hoje}T12:00:00Z`).getTime() + dias * 86_400_000).toISOString().slice(0, 10);
+  const { count, error } = await supabase.from("rel_viagens_v").select("id", { count: "exact", head: true })
+    .eq("status", "ativa").is("responsavel_id", null).in("fase", ["antes", "em_viagem"]).in("acompanhamento", ["completo", "leve"])
+    .lte("data_embarque", ate);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/** A data-limite de "embarca em até N dias" (pra marcar as mesmas na lista). */
+export function limiteEmbarque(dias = 7): string {
+  return new Date(new Date(`${hojeSP()}T12:00:00Z`).getTime() + dias * 86_400_000).toISOString().slice(0, 10);
 }
 
 // ── Classificar: sugestões ──────────────────────────────────────────────────

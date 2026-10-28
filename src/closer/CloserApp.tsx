@@ -161,7 +161,7 @@ export default function CloserApp() {
         )}
         {tela === "contrato" && (
           // Volta do Google cai aqui: #closer/contrato/conectado (ou /erro-…).
-          <Cerca nome="a configuração do contrato"><ContratoConfigPage key={rota.id ?? ""} retorno={rota.id ?? null} /></Cerca>
+          <Cerca nome="a configuração do contrato"><ContratoConfigPage /></Cerca>
         )}
         {tela === "whatsapp" && (
           // O WhatsApp cuida da própria rolagem: ocupa a altura da tela inteira.

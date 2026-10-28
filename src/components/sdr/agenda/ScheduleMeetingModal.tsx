@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
 import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, vincularCardAoBitrix, somenteDigitos } from "@/lib/qs/meetings";
+import { fetchAllRows } from "@/lib/qs/queries";
 import CampoBitrixId from "./CampoBitrixId";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
 import type { Lead, Meeting, MeetingTipo } from "../types";
@@ -86,6 +87,11 @@ export default function ScheduleMeetingModal({
   const [bitrixId, setBitrixId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // SDR RESPONSÁVEL (Bruno, 27/10). Quando a gestão ou a conta Master marca, a
+  // reunião fica no nome do SDR escolhido aqui: é ele quem confirma, quem pode
+  // remarcar (junto com o closer) e quem aparece como "agendou" no Bitrix.
+  const [sdrs, setSdrs] = useState<{ id: string; name: string }[]>([]);
+  const [sdrResp, setSdrResp] = useState("");
 
   // Reset a cada abertura: modal reaproveitado não pode herdar o lead anterior.
   useEffect(() => {
@@ -99,18 +105,42 @@ export default function ScheduleMeetingModal({
     setEmail(lead?.email ?? "");
     setGerarMeet(true);
     setBitrixId("");
+    setSdrResp("");
     setError(null);
   }, [open, lead, reschedule]);
+
+  useEffect(() => {
+    if (!open || !isManager || remarcando) return;
+    void (async () => {
+      const { data } = await supabase
+        .from("qs_users")
+        .select("id, name")
+        .eq("role", "sdr")
+        .eq("is_active", true)
+        .order("name");
+      setSdrs((data as { id: string; name: string }[]) ?? []);
+    })();
+  }, [open, isManager, remarcando]);
 
   // Lista de leads só é necessária quando o lead NÃO veio pronto.
   useEffect(() => {
     if (!open || lead || remarcando) return;
+    // Paginado (27/10): a base passa de 5 mil e o PostgREST corta em 1.000 —
+    // sem isso o lead que ordena depois do corte não aparecia na busca.
     void (async () => {
-      const { data } = await supabase
-        .from("qs_leads")
-        .select("id, full_name, first_name, last_name, company_name, phone, email, bitrix_id, cadence_id")
-        .order("full_name");
-      setLeads((data as Lead[]) ?? []);
+      try {
+        const rows = await fetchAllRows<Lead>((from, to) =>
+          supabase
+            .from("qs_leads")
+            .select("id, full_name, first_name, last_name, company_name, phone, email, bitrix_id, cadence_id, owner_id")
+            .order("full_name")
+            .order("id")
+            .range(from, to) as unknown as PromiseLike<{ data: Lead[] | null; error: { message?: string } | null }>
+        );
+        setLeads(rows);
+      } catch {
+        setLeads([]);
+      }
     })();
   }, [open, lead, remarcando]);
 
@@ -132,6 +162,12 @@ export default function ScheduleMeetingModal({
     if (selectedLead?.email && !email.trim()) setEmail(selectedLead.email);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLead?.id]);
+
+  // O SDR responsável começa como o dono do lead, quando o dono é SDR.
+  useEffect(() => {
+    const dono = selectedLead?.owner_id;
+    if (dono && sdrs.some((s) => s.id === dono)) setSdrResp(dono);
+  }, [selectedLead?.owner_id, sdrs]);
 
   if (!open) return null;
 
@@ -171,6 +207,15 @@ export default function ScheduleMeetingModal({
       setSaving(false);
       return;
     }
+
+    if (isManager && !sdrResp) {
+      setError("Escolha o SDR responsável pela reunião. É ele quem confirma e quem pode remarcar.");
+      setSaving(false);
+      return;
+    }
+    const responsavel = isManager
+      ? { id: sdrResp, nome: sdrs.find((s) => s.id === sdrResp)?.name ?? null }
+      : { id: currentUser?.id ?? null, nome: currentUser?.name ?? null };
 
     // O PRODUTO é obrigatório (Bruno, 17/08). Sem ele o card do closer chega
     // com "Reunião — Fulano", que não diz o que vai ser vendido: ele abre a
@@ -233,8 +278,8 @@ export default function ScheduleMeetingModal({
       lead_bitrix_id: selectedLead?.bitrix_id ?? somenteDigitos(bitrixId) ?? null,
       lead_email: emailLimpo || selectedLead?.email || null,
       cadence_id: selectedLead?.cadence_id ?? null,
-      owner_id: currentUser?.id ?? null,
-      owner_name: currentUser?.name ?? null,
+      owner_id: responsavel.id,
+      owner_name: responsavel.nome,
       closer_id: pick.closerId,
       closer_name: pick.closerName,
       title: title || `Reunião — ${selectedLead?.full_name ?? "cliente"}`,
@@ -388,6 +433,26 @@ export default function ScheduleMeetingModal({
                   </p>
                 </div>
               )}
+            </div>
+          )}
+
+          {isManager && !remarcando && (
+            <div>
+              <label className={labelClass}>SDR responsável</label>
+              <select
+                value={sdrResp}
+                onChange={(e) => setSdrResp(e.target.value)}
+                disabled={saving}
+                className={inputClass}
+              >
+                <option value="">Escolha o SDR…</option>
+                {sdrs.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-gray-500">
+                A reunião fica no nome dele: ele confirma, pode remarcar e aparece como quem agendou no Bitrix.
+              </p>
             </div>
           )}
 

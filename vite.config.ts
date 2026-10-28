@@ -61,7 +61,33 @@ function devApiBridge(): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => {
+// -----------------------------------------------------------------------------
+// Versão do build (27/10/2026) — ver src/lib/versao.ts.
+// O mesmo valor vai pra dentro do JS (`__QS_VERSAO__`) e pra `/version.json`.
+// A aba aberta compara os dois a cada 5 min: diferente = saiu deploy.
+// Commit da Vercel + hora do build: redeploy do mesmo commit (env nova) também
+// conta como versão nova, que é o seguro.
+// -----------------------------------------------------------------------------
+const VERSAO_DO_BUILD = [
+  (process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(0, 12),
+  Date.now().toString(36),
+].join("-");
+
+function versaoDoBuild(): Plugin {
+  return {
+    name: "qs-version-json",
+    apply: "build",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "version.json",
+        source: JSON.stringify({ versao: VERSAO_DO_BUILD, geradoEm: new Date().toISOString() }),
+      });
+    },
+  };
+}
+
+export default defineConfig(({ mode, command }) => {
   // Carrega TODAS as env vars (inclusive as sem prefixo VITE_ e o .env.chatapp.local)
   // para dentro de process.env, para os handlers de /api enxergarem as CHATAPP_*.
   const env = {
@@ -81,7 +107,11 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react(), devApiBridge()],
+    plugins: [react(), devApiBridge(), versaoDoBuild()],
+    // Em dev fica vazio: sem build não há version.json e o vigia não liga.
+    define: {
+      __QS_VERSAO__: JSON.stringify(command === "build" ? VERSAO_DO_BUILD : ""),
+    },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

@@ -22,6 +22,10 @@ const CloserApp = lazy(() => import("@/closer/CloserApp"));
 // baixava o Painel do SDR inteiro (tarefas, WhatsApp, agenda) sem nunca abrir.
 const SdrLayout = lazy(() => import("@/components/sdr/SdrLayout"));
 import { ehHashDoCloser, podeAbrirAreaCloser } from "@/closer/lib";
+// Painel de Gestão (27/10/2026): todos os setores numa tela, só admin e gestor.
+// Endereço #gestao, aberto pelo seletor de setor. Ver src/gestao.
+const GestaoApp = lazy(() => import("@/gestao/GestaoApp"));
+import { ehHashDaGestao, podeAbrirGestao } from "@/gestao/acesso";
 import type { Setor } from "@/components/sdr/types";
 
 // Bolinha do QS (22/10/2026): o app do computador abre "<QS>/?bolinha=1" e
@@ -90,8 +94,9 @@ function AppContent() {
   const { isAuthenticated, loading, bootFalhou, area, currentUser, trocarArea } = useQsAuth();
   // Gestão abre a Área do Closer pelo endereço #closer (o closer cai nela sempre).
   const [hashCloser, setHashCloser] = useState(ehHashDoCloser);
+  const [hashGestao, setHashGestao] = useState(ehHashDaGestao);
   useEffect(() => {
-    const on = () => setHashCloser(ehHashDoCloser());
+    const on = () => { setHashCloser(ehHashDoCloser()); setHashGestao(ehHashDaGestao()); };
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
@@ -172,6 +177,14 @@ function AppContent() {
   return <AvisosProvider>{areaLogada()}</AvisosProvider>;
 
   function areaLogada() {
+    if (hashGestao && podeAbrirGestao(currentUser)) {
+      return (
+        <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
+          <GestaoApp />
+        </Suspense>
+      );
+    }
+
     if (area === "relacionamento" || area === "financeiro" || area === "operacional") {
       return (
         <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
