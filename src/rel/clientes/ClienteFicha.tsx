@@ -17,6 +17,7 @@ import CategoriaChip from "./CategoriaChip";
 import { categoriasDe } from "./KpisClientes";
 import { Aviso, Avatar, Botao, Etiqueta } from "../ui";
 import ClienteForm from "./ClienteForm";
+import { BotaoSubirVenda } from "@/venda/SubirVenda";
 import LigacoesDoCliente from "./LigacoesDoCliente";
 import ModeloModal from "../atendimento/ModeloModal";
 import DocumentosPainel from "../viagens/DocumentosPainel";
@@ -257,6 +258,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
               <Botao onClick={() => setNovoChamado(true)}>Abrir chamado</Botao>
               <Botao onClick={() => setEnviarFin(true)}>💰 Enviar ao Financeiro</Botao>
             </>}
+            {/* 0214: a tela única de venda (Rel e Ops), já com a pessoa da ficha. */}
+            <BotaoSubirVenda origem={ehRel ? "rel" : "ops"} cliente={{ id: c.id, nome: c.nome, telefone: c.telefone ?? "", email: c.email ?? "" }} />
             <BotaoPedirOutroSetor deSetor={setor} alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
             <BotaoPedirPagamento deSetor={setor} alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
             {/* 0213: Rel e Ops editam igual (vale a última gravação; fica no Histórico) */}

@@ -38,6 +38,7 @@ import PreferenciasViagem from "./PreferenciasViagem";
 import FichaFechamentoResumo from "@/closer/FichaFechamentoResumo";
 import { desarquivarViagens } from "../lib/operacao";
 import { podeGerirRelacionamento } from "../equipe/permissao";
+import { BotaoSubirVenda } from "@/venda/SubirVenda";
 import TudoDaViagem from "./TudoDaViagem";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
@@ -390,6 +391,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
                 </a>
               )}
               <Botao onClick={() => setEditando(true)}>Editar</Botao>
+              {/* 0214: venda nova nesta viagem (seguro, passeio, upgrade…) pela tela única de venda. */}
+              {ativa && <BotaoSubirVenda origem="rel" viagemId={v.id} rotulo="Nova venda nesta viagem"
+                cliente={v.cliente_id ? { id: v.cliente_id, nome: comprador || "Cliente da viagem" } : undefined} />}
               {/* Central de Solicitações (0149): ex. pedir emissão/alteração pra Operações */}
               <BotaoPedirOutroSetor deSetor="relacionamento" onCriada={() => setSinalPedidos((n) => n + 1)}
                 alvo={{ viagemId: v.id, clienteId: v.cliente_id, sobre: [comprador, v.expedicao || v.titulo].filter(Boolean).join(" · ") }} />

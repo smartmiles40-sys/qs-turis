@@ -1,0 +1,162 @@
+// src/venda/BlocoExpedicao.tsx
+// -----------------------------------------------------------------------------
+// O item EXPEDIÇÃO da venda (0214). Regras do Bruno (28/10):
+//   • só dá pra vender expedição COM VAGA (vagas = pax_planejados − pagantes
+//     ativos). Lotada aparece, mas trava: "peça pro Operacional abrir vaga";
+//   • quem viaja: o comprador e quem vai junto, cada um com o SEU valor
+//     (sem aéreo é outro valor) e quanto já pagou;
+//   • quarto: tipo e com quem divide. Se a outra pessoa também está comprando
+//     (aqui ou numa venda anterior), as vendas ficam ligadas e o quarto já
+//     nasce montado pro Ops (passageiros.quarto_par_id).
+// O valor do item é a soma dos valores de quem viaja.
+// -----------------------------------------------------------------------------
+import { useEffect, useMemo, useState } from "react";
+import { Aviso, Botao, Campo, Entrada, Etiqueta } from "@/rel/ui";
+import { QUARTOS_EXPEDICAO } from "@/propostas/lib";
+import type { ItemVenda } from "@/closer/vendaItens";
+import { brl, dataBr } from "@/closer/lib";
+import { lerValor, passageirosParaQuarto, viajanteNovo, type ExpedicaoVaga, type PaxParaQuarto, type Viajante } from "./api";
+
+const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+const mesAno = (iso: string | null) => (iso ? `${MESES[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : "");
+
+export default function BlocoExpedicao({ item, viajantes, expedicoes, carregandoExp, nomeComprador, onItem, onViajantes, podeAbrirVaga }: {
+  item: ItemVenda;
+  viajantes: Viajante[];
+  expedicoes: ExpedicaoVaga[] | null;
+  carregandoExp: boolean;
+  nomeComprador: string;
+  onItem: (p: Partial<ItemVenda>) => void;
+  onViajantes: (v: Viajante[]) => void;
+  /** Ops vê o atalho pra tela de vagas. */
+  podeAbrirVaga?: boolean;
+}) {
+  const expId = item.dados.expedicao_id ?? "";
+  const exp = expedicoes?.find((e) => e.id === expId) ?? null;
+  const [jaNaExp, setJaNaExp] = useState<PaxParaQuarto[]>([]);
+
+  useEffect(() => {
+    if (!expId) { setJaNaExp([]); return; }
+    let vivo = true;
+    void passageirosParaQuarto(expId).then((l) => vivo && setJaNaExp(l));
+    return () => { vivo = false; };
+  }, [expId]);
+
+  // Valor do item = soma de quem viaja.
+  const soma = useMemo(() => Math.round(viajantes.reduce((s, v) => s + (lerValor(v.valor_contratado) ?? 0), 0) * 100) / 100, [viajantes]);
+  useEffect(() => { if ((item.valor ?? 0) !== soma) onItem({ valor: soma }); }, [soma]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function escolher(e: ExpedicaoVaga | null) {
+    if (!e) { onItem({ dados: { ...item.dados, expedicao_id: "" } }); return; }
+    onItem({
+      nome: item.nome || `Expedição ${e.nome}`,
+      data_inicio: e.data_embarque ?? "", data_fim: e.data_retorno ?? "",
+      dados: { ...item.dados, expedicao_id: e.id, expedicao: e.nome, codigo: e.codigo, edicao: mesAno(e.data_embarque) },
+    });
+    // Sugere o preço de tabela pra quem ainda não tem valor.
+    if (e.preco_venda_brl) onViajantes(viajantes.map((v) => (v.valor_contratado ? v : { ...v, valor_contratado: String(e.preco_venda_brl).replace(".", ",") })));
+  }
+
+  const mudar = (chave: string, p: Partial<Viajante>) => onViajantes(viajantes.map((v) => (v.chave === chave ? { ...v, ...p } : v)));
+  const lotada = exp && exp.vagas <= 0;
+  const faltaVaga = exp && viajantes.length > exp.vagas;
+
+  return (
+    <div className="space-y-4">
+      <Campo rotulo="Qual expedição? *" dica="Só dá pra vender as que têm vaga.">
+        <select className="rel-input" value={expId} disabled={carregandoExp}
+          onChange={(ev) => escolher(expedicoes?.find((x) => x.id === ev.target.value) ?? null)}>
+          <option value="">{carregandoExp ? "Carregando…" : "Escolha a expedição e a data…"}</option>
+          {(expedicoes ?? []).map((e) => (
+            <option key={e.id} value={e.id} disabled={e.vagas <= 0}>
+              {e.nome} — {dataBr(e.data_embarque)} · {e.vagas > 0 ? `${e.vagas} vaga${e.vagas > 1 ? "s" : ""}` : "LOTADA"}
+            </option>
+          ))}
+        </select>
+      </Campo>
+      {expedicoes && !expedicoes.some((e) => e.vagas > 0) && !carregandoExp && (
+        <Aviso>Nenhuma expedição com vaga agora. Peça pro <b>Operacional abrir vaga</b> (menu Operações › Subir venda › Vagas).</Aviso>
+      )}
+      {exp && (
+        <p className="text-[12.5px] flex flex-wrap gap-1.5 items-center" style={{ color: "var(--ink3)" }}>
+          <Etiqueta tom={exp.vagas > 2 ? "rel" : "aviso"}>{exp.vagas} de {exp.pax_planejados} vagas livres</Etiqueta>
+          {exp.codigo} · embarque {dataBr(exp.data_embarque)}{exp.data_retorno ? ` · volta ${dataBr(exp.data_retorno)}` : ""}
+          {exp.preco_venda_brl ? ` · tabela ${brl(exp.preco_venda_brl)}` : ""}
+        </p>
+      )}
+      {(lotada || faltaVaga) && (
+        <Aviso tom="erro">
+          {lotada ? "Esta expedição está lotada." : `Só ${exp!.vagas} vaga${exp!.vagas === 1 ? "" : "s"} e você pôs ${viajantes.length} pessoas.`}{" "}
+          <b>Peça pro Operacional abrir vaga</b> antes de fechar.{podeAbrirVaga ? " (Você é do Ops: abra em Subir venda › Vagas.)" : ""}
+        </Aviso>
+      )}
+
+      {/* ── Quem viaja ── */}
+      <div className="space-y-3">
+        {viajantes.map((v, n) => {
+          const outros = viajantes.filter((x) => x.chave !== v.chave);
+          return (
+            <div key={v.chave} className="rounded-xl p-3" style={{ border: "1px solid var(--line)", background: "var(--bg, transparent)" }}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[13.5px] font-bold flex-1" style={{ color: "var(--ink)" }}>
+                  {v.comprador ? `${nomeComprador || "Quem comprou"} (comprador)` : `Acompanhante ${n}`}
+                </span>
+                {!v.comprador && <Botao variante="fantasma" onClick={() => onViajantes(viajantes.filter((x) => x.chave !== v.chave).map((x) => (x.divide === `v:${v.chave}` ? { ...x, divide: "" } : x)))}>Tirar</Botao>}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {!v.comprador && <>
+                  <Campo rotulo="Nome completo *"><Entrada value={v.nome} onChange={(e) => mudar(v.chave, { nome: e.target.value })} /></Campo>
+                  <Campo rotulo="WhatsApp" dica="Ajuda a achar a ficha dela."><Entrada inputMode="tel" value={v.telefone} onChange={(e) => mudar(v.chave, { telefone: e.target.value })} /></Campo>
+                </>}
+                <Campo rotulo="Valor que esta pessoa paga *" dica="Preço dela (sem aéreo costuma ser outro).">
+                  <Entrada inputMode="decimal" placeholder="R$ 0,00" value={v.valor_contratado} onChange={(e) => mudar(v.chave, { valor_contratado: e.target.value })} />
+                </Campo>
+                <Campo rotulo="Já pagou" dica="Entrada/sinal já recebido. Pode ficar 0.">
+                  <Entrada inputMode="decimal" placeholder="R$ 0,00" value={v.valor_pago} onChange={(e) => mudar(v.chave, { valor_pago: e.target.value })} />
+                </Campo>
+                <Campo rotulo="Aéreo incluso?">
+                  <div className="flex gap-2">
+                    {[true, false].map((b) => (
+                      <button key={String(b)} type="button" aria-pressed={v.aereo_incluso === b} onClick={() => mudar(v.chave, { aereo_incluso: b })}
+                        className="flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold"
+                        style={{ border: `2px solid ${v.aereo_incluso === b ? "var(--rel)" : "var(--line)"}`, background: v.aereo_incluso === b ? "var(--rel-soft)" : "var(--card)", color: "var(--ink)" }}>
+                        {b ? "Sim, com aéreo" : "Não, só terrestre"}
+                      </button>
+                    ))}
+                  </div>
+                </Campo>
+                <Campo rotulo="Quarto">
+                  <select className="rel-input" value={v.quarto_desejado} onChange={(e) => mudar(v.chave, { quarto_desejado: e.target.value })}>
+                    {["", ...QUARTOS_EXPEDICAO].map((o) => <option key={o} value={o}>{o || "Escolha…"}</option>)}
+                  </select>
+                </Campo>
+                <div className="sm:col-span-2">
+                  <Campo rotulo="Divide o quarto com" dica="Se a outra pessoa também comprou, o quarto já nasce montado pro Operacional.">
+                    <select className="rel-input" value={v.divide} onChange={(e) => mudar(v.chave, { divide: e.target.value })}>
+                      <option value="">Ninguém / ainda não sabe</option>
+                      {outros.length > 0 && <optgroup label="Nesta venda">
+                        {outros.map((o) => <option key={o.chave} value={`v:${o.chave}`}>{o.comprador ? nomeComprador || "Comprador" : o.nome || "Acompanhante sem nome"}</option>)}
+                      </optgroup>}
+                      {jaNaExp.length > 0 && <optgroup label="Já comprou esta expedição">
+                        {jaNaExp.map((p) => <option key={p.id} value={`p:${p.id}`} disabled={p.tem_par}>{p.nome}{p.tem_par ? " (já tem par)" : ""}</option>)}
+                      </optgroup>}
+                      <option value="t">Outra pessoa (só escrever o nome)</option>
+                    </select>
+                  </Campo>
+                  {v.divide === "t" && (
+                    <div className="mt-2"><Entrada placeholder="Nome de quem divide" value={v.divide_nome} onChange={(e) => mudar(v.chave, { divide_nome: e.target.value })} /></div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        <button type="button" className="text-[13px] font-semibold" style={{ color: "var(--rel-ink)" }}
+          onClick={() => onViajantes([...viajantes, { ...viajanteNovo(false), valor_contratado: exp?.preco_venda_brl ? String(exp.preco_venda_brl).replace(".", ",") : "" }])}>
+          + Vai acompanhado? Adicionar quem viaja junto
+        </button>
+        <p className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>Valor da expedição nesta venda: {brl(soma)}</p>
+      </div>
+    </div>
+  );
+}
