@@ -73,6 +73,9 @@
     "api/rel-disparos.js": {
       "maxDuration": 60
     },
+    "api/disparos.js": {
+      "maxDuration": 60
+    },
     "api/rel-docs.js": {
       "maxDuration": 30
     },
@@ -125,6 +128,10 @@
     {
       "path": "/api/rel-disparos",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/disparos",
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/rel-docs-ia",
