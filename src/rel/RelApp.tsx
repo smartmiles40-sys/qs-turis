@@ -47,7 +47,10 @@ const ViagensPage = lazy(() => import("./viagens/ViagensPage"));
 const EsteiraPage = lazy(() => import("./viagens/EsteiraPage"));
 const ViagemPage = lazy(() => import("./viagens/ViagemPage"));
 const AlertasPage = lazy(() => import("./viagens/AlertasPage"));
-const DisparosPage = lazy(() => import("./disparos/DisparosPage"));
+// Disparos (28/10, 0217): o motor único do disparo em massa (o mesmo do
+// Comercial), com o público de clientes e o link do grupo. A tela antiga
+// (rel_campanhas, 0 usos) saiu do menu; as Automações seguem em rel-disparos.
+const DisparosPage = lazy(() => import("@/components/sdr/disparos/DisparosPage"));
 const AutomacoesPage = lazy(() => import("./disparos/AutomacoesPage"));
 const PesquisasPage = lazy(() => import("./pos/PesquisasPage"));
 const RecompraPage = lazy(() => import("./pos/RecompraPage"));
@@ -360,7 +363,7 @@ export default function RelApp() {
     { id: "exp-pacotes", label: "Pacotes", icon: Icon.aviao },
     { id: "exp-inscricoes", label: "Inscrições", icon: Icon.inscricao },
     { id: "exp-avisos", label: "Avisos das expedições", icon: Icon.megafone },
-    { id: "disparos", label: "Disparos", icon: Icon.disparo },
+    { id: "disparos", label: "Disparos e remarketing", icon: Icon.disparo },
     { id: "automacoes", label: "Automações", icon: Icon.cadencia },
     { id: "pesquisas", label: "Pesquisas", icon: Icon.pesquisa },
     { id: "recompra", label: "Recompra", icon: Icon.recompra },
@@ -507,7 +510,7 @@ export default function RelApp() {
               onAbrirExpedicao={(exp, tipo) => ir({ tela: tipo === "pacote" ? "exp-pacotes" : "exp-expedicoes", id: exp })} />
           )}
           {rota.tela === "alertas" && <AlertasPage onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
-          {rota.tela === "disparos" && <DisparosPage />}
+          {rota.tela === "disparos" && <DisparosPage setor="relacionamento" />}
           {rota.tela === "automacoes" && <AutomacoesPage />}
           {rota.tela === "pesquisas" && <PesquisasPage onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} />}
           {rota.tela === "recompra" && <RecompraPage onAbrirCliente={abrirCliente} />}

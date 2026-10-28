@@ -74,6 +74,7 @@ const LeadsPage = lazyPagina(() => import("./leads/LeadsPage"));
 const LeadDetailPage = lazyPagina(() => import("./leads/LeadDetailPage"));
 const CadencesPage = lazyPagina(() => import("./cadences/CadencesPage"));
 const CadenceCreatePage = lazyPagina(() => import("./cadences/CadenceCreatePage"));
+const DisparosPage = lazyPagina(() => import("./disparos/DisparosPage"));
 const MeetingsPage = lazyPagina(() => import("./meetings/MeetingsPage"));
 const SettingsPage = lazyPagina(() => import("./settings/SettingsPage"));
 // A "Cobertura de Leads" respondia "quem espera contato AGORA" — pergunta de
@@ -115,6 +116,7 @@ export type SdrNav =
   | "cadencias"
   | "cadencia-criar"
   | "cadencia-editar"
+  | "disparos"
   | "dashboard"
   | "analises"
   | "monitor-leads"
@@ -173,6 +175,7 @@ const MENU: (MenuGroup | MenuItem)[] = [
     items: [
       { id: "leads", label: "Leads", description: "Cadastro e gestão de leads" },
       { id: "cadencias", label: "Cadências", description: "Fluxos de prospecção" },
+      { id: "disparos", label: "Disparo em massa", description: "Modelo aprovado pelo número de cada SDR, como passo 1 de uma cadência" },
       { id: "reunioes", label: "Reuniões", description: "Lista de reuniões e Agenda do mês" },
     ],
   },
@@ -369,7 +372,7 @@ export default function SdrLayout() {
   };
   const ICONE_NAV: Partial<Record<SdrNav, ReactNode>> = {
     painel: Icon.fila, "minha-agenda": Icon.agenda, whatsapp: Icon.chat, "atendimento-ia": Icon.ia,
-    leads: Icon.pessoas, cobertura: Icon.carteira, cadencias: Icon.cadencia, reunioes: Icon.video,
+    leads: Icon.pessoas, cobertura: Icon.carteira, cadencias: Icon.cadencia, disparos: Icon.disparo, reunioes: Icon.video,
     solicitacoes: Icon.inbox, propostas: Icon.doc, dashboard: Icon.grafico, configuracoes: Icon.config,
   };
   const ROTULO_NAV: Partial<Record<SdrNav, string>> = {
@@ -396,7 +399,7 @@ export default function SdrLayout() {
   const desempenhoAbas = (["dashboard", "analises", "monitor-leads"] as SdrNav[]).filter((id) => permitido.has(id));
   const grupos: ShellGroup[] = [
     { label: "Execução", items: execucao.map((id) => item(id, id)).filter(Boolean) as ShellItem[] },
-    { label: "Gestão", items: [item("leads", "Leads"), item("cobertura", "Minha carteira"), ...(ehSdr ? [] : [item("cadencias", "Cadências"), item("reunioes", "Reuniões")])].filter(Boolean) as ShellItem[] },
+    { label: "Gestão", items: [item("leads", "Leads"), item("cobertura", "Minha carteira"), ...(ehSdr ? [] : [item("cadencias", "Cadências"), item("disparos", "Disparo em massa"), item("reunioes", "Reuniões")])].filter(Boolean) as ShellItem[] },
     { label: "Com outros setores", items: [item("solicitacoes", "Solicitações"), item("propostas", "Propostas")].filter(Boolean) as ShellItem[] },
     { label: "Análise", items: [
       ...(desempenhoAbas.length ? [{ id: desempenhoAbas[0], label: "Desempenho", icon: Icon.grafico }] : []),
@@ -486,6 +489,11 @@ export default function SdrLayout() {
               leadId={selectedLeadId}
               onBack={voltarDoLead}
             />
+          </PageErrorBoundary>
+        )}
+        {activeNav === "disparos" && (
+          <PageErrorBoundary pageName="Disparo em massa">
+            <DisparosPage setor="comercial" />
           </PageErrorBoundary>
         )}
         {activeNav === "cadencias" && (
