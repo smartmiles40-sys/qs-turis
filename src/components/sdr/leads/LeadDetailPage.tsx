@@ -19,6 +19,7 @@ import ScheduleMeetingModal from "@/components/sdr/agenda/ScheduleMeetingModal";
 import MeetingDetailModal from "@/components/sdr/agenda/MeetingDetailModal";
 import { setMeetingStatus, desfechoDaOportunidadeFutura } from "@/lib/qs/meetings";
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
+import { DetalheDaReuniao } from "@/controle-comercial/ReunioesDoCliente";
 import OportunidadeFuturaModal, { FaixaOportunidadeFutura } from "@/components/sdr/leads/OportunidadeFuturaModal";
 import { ComCoresDoRel, EnviarFinanceiroModal, StatusNoFinanceiro } from "@/fin/EnviarFinanceiro";
 import { ComCoresDaCentral, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
@@ -1280,6 +1281,8 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
                     {meeting.notes && (
                       <p className="text-[12.5px] text-gray-500 whitespace-pre-wrap pt-1">{meeting.notes}</p>
                     )}
+                    {/* Convidados, desfecho e gravação (28/10, 0215). */}
+                    <DetalheDaReuniao m={meeting} onMudou={() => void reloadMeetings()} />
                   </div>
 
                   {/* DESFECHO SÓ PELO MODAL OFICIAL (25/09). Aqui havia Realizada/

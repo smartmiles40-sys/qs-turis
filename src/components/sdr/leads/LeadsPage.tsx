@@ -17,6 +17,7 @@ import { createCadenceTasks, closeOpenCadenceTasks, transferLead, fetchAllRows, 
 import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured } from "@/lib/webphone";
+import { casaFonte, lerFiltroDaUrl, useFiltrosNaUrl, useFontes } from "@/controle-comercial/filtroUrl";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -77,7 +78,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const [filterSource, setFilterSource] = useState<LeadSource | "">("");
   const [filterStatus, setFilterStatus] = useState<LeadStatus | "">("");
   const [filterCadence, setFilterCadence] = useState("");
-  const [filterOwner, setFilterOwner] = useState("");
+  // Fonte (segment) e SDR responsável ficam no endereço (?fonte=&sdr=), 28/10.
+  const [filterOwner, setFilterOwner] = useState(() => lerFiltroDaUrl("sdr"));
+  const [filterFonte, setFilterFonte] = useState(() => lerFiltroDaUrl("fonte"));
+  useFiltrosNaUrl(filterFonte, filterOwner);
   const [filterLossReason, setFilterLossReason] = useState("");
   // Temperatura (lead_score do Bitrix, agora editável no detalhe): Quente/Morno/Frio.
   const [filterTemp, setFilterTemp] = useState<LeadTemperature | "">("");
@@ -493,6 +497,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     }
   }
 
+  const fontes = useFontes(leads);
+
   // ── Filtering (client-side) ──
   const filteredLeads = useMemo(() => {
     let result = [...leads];
@@ -519,11 +525,12 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     if (filterStatus) result = result.filter((l) => l.status === filterStatus);
     if (filterCadence) result = result.filter((l) => l.cadence_id === filterCadence);
     if (filterOwner) result = result.filter((l) => l.owner_id === filterOwner);
+    if (filterFonte) result = result.filter((l) => casaFonte(l.segment, filterFonte));
     if (filterLossReason) result = result.filter((l) => l.loss_reason_id === filterLossReason);
     // Temperatura: compara o rótulo NORMALIZADO (o Bitrix manda "Quente"/"hot"/etc.).
     if (filterTemp) result = result.filter((l) => normalizeTemperature(l.lead_score) === filterTemp);
     return result;
-  }, [leads, search, filterSource, filterStatus, filterCadence, filterOwner, filterLossReason, filterTemp, currentUser]);
+  }, [leads, search, filterSource, filterStatus, filterCadence, filterOwner, filterLossReason, filterTemp, filterFonte, currentUser]);
 
   // Seleção NÃO sobrevive a filtro/busca: mantém marcado só o que continua
   // VISÍVEL na lista filtrada — antes dava pra selecionar, trocar o filtro e as
@@ -589,13 +596,14 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   }
 
   // ── Active filter helpers ──
-  const hasActiveFilters = filterSource || filterStatus || filterCadence || filterOwner || filterLossReason || filterTemp;
+  const hasActiveFilters = filterSource || filterStatus || filterCadence || filterOwner || filterLossReason || filterTemp || filterFonte;
 
   function clearFilters() {
     setFilterSource("");
     setFilterStatus("");
     setFilterCadence("");
     setFilterOwner("");
+    setFilterFonte("");
     setFilterLossReason("");
     setFilterTemp("");
     setCurrentPage(1);
@@ -770,6 +778,19 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           <option value="">Responsável</option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>{u.name}</option>
+          ))}
+        </select>
+
+        {/* Fonte = de onde o lead veio (qs_leads.segment: "[Japão] - Tráfego"…) */}
+        <select
+          value={filterFonte}
+          onChange={(e) => { setFilterFonte(e.target.value); setCurrentPage(1); }}
+          aria-label="Fonte"
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 max-w-[220px]"
+        >
+          <option value="">Fonte</option>
+          {fontes.map((f) => (
+            <option key={f.valor} value={f.valor}>{f.rotulo} ({f.n})</option>
           ))}
         </select>
 
