@@ -4,6 +4,7 @@ import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { fetchAllRows } from "@/lib/qs/queries";
 import { normalizePhoneBR } from "@/lib/whatsapp";
 import { planCadenceDates, loadWorkHours, scheduleWeekdays, nextWorkMoment, clampToWorkWindow, DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/workHours";
+import { criarAlocadorEntrada, tetoDaCadencia, chaveDia, type AlocadorEntrada } from "@/lib/qs/cadenceTeto";
 import type { Cadence, LeadSource, LeadStatus, SdrUser } from "../types";
 
 // Importar LISTA de leads por planilha (CSV) pros SDRs (Bruno, 27/10/2026).
@@ -293,6 +294,11 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
       let dataDoDia = new Map<number, Date>();
       let horario: WorkHours = DEFAULT_WORK_HOURS;
       let primeiroDia = 1;
+      // Teto de entrada (0216): no máximo N leads novos por dia por SDR — o
+      // excedente começa nos próximos dias de execução (ver cadenceTeto.ts).
+      let alocador: AlocadorEntrada | null = null;
+      let diasPermitidos: number[] = [1, 2, 3, 4, 5];
+      let politica: string | null = null;
       if (cadenceId) {
         const [{ data }, { data: cadRow }, wh] = await Promise.all([
           supabase
@@ -300,7 +306,8 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
             .select("day_number, activities:qs_cadence_activities(channel_type, scheduled_time, order_index)")
             .eq("cadence_id", cadenceId)
             .order("day_number"),
-          supabase.from("qs_cadences").select("execution_weekdays, offday_policy").eq("id", cadenceId).maybeSingle(),
+          // "*": teto_entrada_dia pode não existir sem a 0216.
+          supabase.from("qs_cadences").select("*").eq("id", cadenceId).maybeSingle(),
           loadWorkHours(),
         ]);
         cadDays = (data ?? []) as typeof cadDays;
@@ -312,6 +319,10 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
           plan?.offday_policy ?? null
         );
         primeiroDia = cadDays.length ? Math.min(...cadDays.map((d) => d.day_number ?? 1)) : 1;
+        diasPermitidos = scheduleWeekdays(wh, plan?.execution_weekdays ?? null);
+        politica = plan?.offday_policy ?? null;
+        const teto = tetoDaCadencia(cadRow);
+        if (teto) alocador = criarAlocadorEntrada({ cadenceId, teto, primeiroDia, allowedWeekdays: diasPermitidos });
       }
 
       let ok = 0, falhas = 0, semAtividade = 0;
@@ -351,9 +362,19 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
         porSdr.set(inserted.owner_id, (porSdr.get(inserted.owner_id) ?? 0) + 1);
 
         if (cadenceId && cadDays.length > 0) {
+          // Datas DESTE lead: iguais às do lote, a não ser que o teto o empurre.
+          let datasDoLead = dataDoDia;
+          const previsto = dataDoDia.get(primeiroDia);
+          if (alocador && previsto) {
+            const inicio = await alocador.alocar(inserted.owner_id, previsto);
+            if (chaveDia(inicio) !== chaveDia(previsto)) {
+              const base = new Date(inicio); base.setHours(0, 0, 0, 0);
+              datasDoLead = planCadenceDates(cadDays.map((d) => d.day_number ?? 1), diasPermitidos, politica, nextWorkMoment(horario, base));
+            }
+          }
           const tarefas = cadDays.flatMap((d) =>
             [...d.activities].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)).map((a) => {
-              const planned = new Date(dataDoDia.get(d.day_number ?? 1) ?? new Date());
+              const planned = new Date(datasDoLead.get(d.day_number ?? 1) ?? new Date());
               const [h, m] = (a.scheduled_time || "09:00").split(":");
               planned.setHours(Number(h) || 9, Number(m) || 0, 0, 0);
               const when = (d.day_number ?? 1) === primeiroDia
@@ -389,7 +410,10 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
 
       if (falhas > 0) notifyError(`${falhas} lead(s) não entraram. Confira essas linhas da planilha.`);
       if (semAtividade > 0) notifyError(`${semAtividade} lead(s) entraram SEM atividades. Vincule a cadência deles de novo.`);
-      if (ok > 0) notifySuccess(`${ok} lead(s) importados.`);
+      if (ok > 0) {
+        const esp = alocador?.espalhados() ?? 0;
+        notifySuccess(`${ok} lead(s) importados.` + (esp > 0 ? ` ${esp} começam nos próximos dias (teto de leads novos por dia da cadência).` : ""));
+      }
       setResultado({ ok, falhas, semAtividade, porSdr });
       await onImported();
     } catch (e) {

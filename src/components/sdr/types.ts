@@ -143,6 +143,8 @@ export interface Cadence {
   distribution_mode: DistributionMode;
   offday_policy: OffdayPolicy;
   redirect_cadence_id: string | null;
+  /** Máx. de leads NOVOS por dia, por SDR, ao entrar (0216). null/ausente = sem teto. */
+  teto_entrada_dia?: number | null;
   created_at: string;
   days?: CadenceDay[];
   owners?: CadenceOwner[];
@@ -172,6 +174,10 @@ export interface CadenceActivity {
   order_index: number;
   /** Roteiro escrito pelo gestor (script do card / pré-preenche o WhatsApp). */
   script_text?: string | null;
+  /** Tipo do passo além do canal (0216). "whatsapp_modelo" = modelo aprovado da Meta. */
+  step_kind?: string | null;
+  /** Nome do modelo da Meta quando step_kind = "whatsapp_modelo" (0216). */
+  template_name?: string | null;
 }
 
 export interface Meeting {

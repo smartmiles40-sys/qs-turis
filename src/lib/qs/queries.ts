@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { colunaTipoPronta } from "@/lib/qs/meetings";
 import { notifyError } from "@/lib/qs/notify";
 import { planCadenceDates, loadWorkHours, scheduleWeekdays, nextWorkMoment, clampToWorkWindow } from "@/lib/workHours";
+import { criarAlocadorEntrada, tetoDaCadencia, chaveDia } from "@/lib/qs/cadenceTeto";
 import type {
   SdrUser,
   Lead,
@@ -657,9 +658,11 @@ export async function createCadenceTasks(
     // em dia sem execução (antes, lead de sexta ganhava o "Dia 2" no sábado — o
     // follow-up já respeitava dia útil, a geração inicial não). Mesmo helper de
     // calendário do plano (planCadenceDates / nextExecutionDay em workHours.ts).
+    // select("*"): teto_entrada_dia (0216) pode ainda não existir no banco —
+    // pedir a coluna por nome derrubaria a geração inteira.
     const { data: cadRow } = await supabase
       .from("qs_cadences")
-      .select("execution_weekdays, offday_policy")
+      .select("*")
       .eq("id", cadenceId)
       .maybeSingle();
     const cadPlan = cadRow as { execution_weekdays: number[] | null; offday_policy: string | null } | null;
@@ -676,7 +679,7 @@ export async function createCadenceTasks(
     const dayList = opts?.soPrimeiroDia
       ? todosOsDias.filter((d) => (d.day_number ?? 1) === menorDia)
       : todosOsDias;
-    const dateByDay = planCadenceDates(
+    let dateByDay = planCadenceDates(
       dayList.map((d) => d.day_number ?? 1),
       allowedWeekdays,
       cadPlan?.offday_policy ?? null,
@@ -684,6 +687,28 @@ export async function createCadenceTasks(
       // ganhar Dia 1 e Dia 2 no mesmo dia útil. Ver api/_leads.js.
       nextWorkMoment(wh, new Date())
     );
+
+    // TETO DE ENTRADA (0216): se o SDR já tem N leads começando esta cadência
+    // no dia, o plano deste lead começa no próximo dia de execução livre.
+    // Não vale pro retrabalho da Carteira (soPrimeiroDia): é uma sessão só.
+    const teto = tetoDaCadencia(cadRow);
+    if (teto && ownerId && !opts?.soPrimeiroDia) {
+      const previsto = dateByDay.get(menorDia);
+      if (previsto) {
+        const alocador = criarAlocadorEntrada({ cadenceId, teto, primeiroDia: menorDia, allowedWeekdays });
+        const inicio = await alocador.alocar(ownerId, previsto);
+        if (chaveDia(inicio) !== chaveDia(previsto)) {
+          const base = new Date(inicio);
+          base.setHours(0, 0, 0, 0);
+          dateByDay = planCadenceDates(
+            dayList.map((d) => d.day_number ?? 1),
+            allowedWeekdays,
+            cadPlan?.offday_policy ?? null,
+            nextWorkMoment(wh, base)
+          );
+        }
+      }
+    }
 
     // 1º dia da cadência (menor day_number, que cairia HOJE na chegada do lead).
     const firstDayNumber = Math.min(...dayList.map((d) => d.day_number ?? 1));

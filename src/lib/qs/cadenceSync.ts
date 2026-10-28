@@ -90,18 +90,36 @@ export async function aplicarPlanoNosLeads(
    * atividades novas em 160 filas. O gestor decide com o número na mão, não com
    * uma estimativa.
    */
-  apenasSimular = false
+  apenasSimular = false,
+  /**
+   * Simular um plano que AINDA NÃO foi salvo (criador de cadências, 28/10): a
+   * tela de revisão mostra o impacto antes do gestor decidir se aplica nos leads
+   * em andamento. Só vale junto com apenasSimular.
+   */
+  simulacao?: {
+    days: { day_number: number; activities: { channel_type: string; scheduled_time: string | null; order_index: number }[] }[];
+    execution_weekdays: number[];
+    offday_policy: string;
+  }
 ): Promise<ResultadoSync> {
   const vazio: ResultadoSync = { leads: 0, criadas: 0, encerradas: 0, paraHoje: 0 };
   try {
     // ── 1. O plano de agora ────────────────────────────────────────────────
-    const { data: days, error: eDays } = await supabase
-      .from("qs_cadence_days")
-      .select("*, activities:qs_cadence_activities(*)")
-      .eq("cadence_id", cadenceId)
-      .order("day_number");
-    if (eDays) throw eDays;
-    const dayList = (days ?? []) as (CadenceDay & { activities: CadenceActivity[] })[];
+    let dayList: (CadenceDay & { activities: CadenceActivity[] })[];
+    if (simulacao && apenasSimular) {
+      dayList = simulacao.days.map((d) => ({
+        day_number: d.day_number,
+        activities: d.activities,
+      })) as unknown as (CadenceDay & { activities: CadenceActivity[] })[];
+    } else {
+      const { data: days, error: eDays } = await supabase
+        .from("qs_cadence_days")
+        .select("*, activities:qs_cadence_activities(*)")
+        .eq("cadence_id", cadenceId)
+        .order("day_number");
+      if (eDays) throw eDays;
+      dayList = (days ?? []) as (CadenceDay & { activities: CadenceActivity[] })[];
+    }
     // Plano sem atividade nenhuma: encerrar tudo deixaria os leads sem fila, o
     // que é pior do que não fazer nada. Sai sem tocar em ninguém.
     if (dayList.length === 0) return vazio;
@@ -111,7 +129,9 @@ export async function aplicarPlanoNosLeads(
       .select("execution_weekdays, offday_policy")
       .eq("id", cadenceId)
       .maybeSingle();
-    const cad = cadRow as { execution_weekdays: number[] | null; offday_policy: string | null } | null;
+    const cad = (simulacao && apenasSimular)
+      ? { execution_weekdays: simulacao.execution_weekdays, offday_policy: simulacao.offday_policy }
+      : (cadRow as { execution_weekdays: number[] | null; offday_policy: string | null } | null);
 
     const wh = await loadWorkHours();
     const allowedWeekdays = scheduleWeekdays(wh, cad?.execution_weekdays ?? null);
@@ -137,12 +157,12 @@ export async function aplicarPlanoNosLeads(
     if (leads.length === 0) return vazio;
 
     // ── 3. O que esses leads já têm (uma leitura só, em blocos) ────────────
-    const existentes: { id: string; lead_id: string; channel_type: string; status: string; tags: string[] | null }[] = [];
+    const existentes: { id: string; lead_id: string; channel_type: string; status: string; tags: string[] | null; scheduled_at: string | null }[] = [];
     const ids = leads.map((l) => l.id);
     for (let i = 0; i < ids.length; i += 200) {
       const { data, error } = await supabase
         .from("qs_tasks")
-        .select("id, lead_id, channel_type, status, tags")
+        .select("id, lead_id, channel_type, status, tags, scheduled_at")
         .in("lead_id", ids.slice(i, i + 200))
         .eq("is_extra", false);
       if (error) throw error;
@@ -177,7 +197,19 @@ export async function aplicarPlanoNosLeads(
       }
 
       // A régua de datas deste lead sai do dia em que ELE entrou na cadência.
-      const base = new Date(lead.cadence_started_at ?? lead.arrived_at ?? new Date());
+      // Lead espalhado pelo teto de entrada (0216) começou DEPOIS do dia em que
+      // entrou: a régua dele é a data real do 1º dia do plano, se existir.
+      const primeiroDiaPlano = Math.min(...dayList.map((d) => d.day_number ?? 1));
+      const inicioReal = tarefas
+        .filter((t) => diaDaTag(t.tags) === primeiroDiaPlano && t.scheduled_at)
+        .map((t) => new Date(String(t.scheduled_at)).getTime())
+        .sort((a, b) => a - b)[0];
+      // Só troca a régua quando o 1º dia ficou MAIS de um dia depois da entrada
+      // (sinal de espalhamento) — lead comum segue exatamente como antes.
+      const entrada = new Date(lead.cadence_started_at ?? lead.arrived_at ?? new Date());
+      const base = inicioReal != null && inicioReal - entrada.getTime() > 36 * 3_600_000
+        ? new Date(inicioReal)
+        : entrada;
       const dateByDay = planCadenceDates(
         dayList.map((d) => d.day_number ?? 1),
         allowedWeekdays,
