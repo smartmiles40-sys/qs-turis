@@ -1,0 +1,36 @@
+{
+  "legivel": true,
+  "moeda": "BRL",
+  "valor_total": 18450.00,
+  "voos": [
+    { "origem": "GRU", "origem_cidade": "São Paulo", "origem_pais": "Brasil", "destino": "DXB", "destino_cidade": "Dubai", "destino_pais": "Emirados Árabes Unidos",
+      "data": "2027-03-10", "hora_saida": "01:25", "chegada_data": null, "hora_chegada": "22:45", "cia": "Emirates", "voo": "EK 262", "localizador": "QWE7RT",
+      "classe": "Econômica", "bagagem": "2 x 23 kg", "passageiros": ["SILVA/MARIA CLARA MRS", "SILVA/JOAO PEDRO MR"], "valor": 7800, "custo": 7100 },
+    { "origem": "DXB", "origem_cidade": "Dubai", "origem_pais": "Emirados Árabes Unidos", "destino": "NRT", "destino_cidade": "Tóquio", "destino_pais": "Japão",
+      "data": "2027-03-11", "hora_saida": "02:40", "chegada_data": "2027-03-11", "hora_chegada": "17:35", "cia": "Emirates", "voo": "EK 318", "localizador": "QWE7RT",
+      "classe": "Econômica", "bagagem": "2 x 23 kg", "passageiros": ["SILVA/MARIA CLARA MRS", "SILVA/JOAO PEDRO MR"], "valor": null, "custo": null },
+    { "origem": "HND", "origem_cidade": "Tóquio", "origem_pais": "Japão", "destino": "CTS", "destino_cidade": "Sapporo", "destino_pais": "Japão",
+      "data": "2027-03-15", "hora_saida": "08:00", "chegada_data": null, "hora_chegada": null, "cia": "JAL", "voo": "JL 503", "localizador": "JL9XK2",
+      "classe": "Econômica", "bagagem": "1 x 20 kg", "passageiros": ["SILVA/MARIA CLARA MRS", "SILVA/JOAO PEDRO MR"], "valor": 1650, "custo": 1500 },
+    { "origem": "CTS", "origem_cidade": "Sapporo", "origem_pais": "Japão", "destino": "KIX", "destino_cidade": "Osaka", "destino_pais": "Japão",
+      "data": "2027-03-18", "hora_saida": "12:30", "chegada_data": null, "hora_chegada": "15:05", "cia": "JAL", "voo": "JL 2504", "localizador": "JL9XK2",
+      "classe": "Econômica", "bagagem": "1 x 20 kg", "passageiros": ["SILVA/MARIA CLARA MRS", "SILVA/JOAO PEDRO MR"], "valor": 1400, "custo": 1250 },
+    { "origem": "KIX", "origem_cidade": "Osaka", "origem_pais": "Japão", "destino": "DXB", "destino_cidade": "Dubai", "destino_pais": "Emirados Árabes Unidos",
+      "data": "2027-03-22", "hora_saida": "23:30", "chegada_data": null, "hora_chegada": "05:20", "cia": "Emirates", "voo": "EK 317", "localizador": "QWE7RT",
+      "classe": "Econômica", "bagagem": "2 x 23 kg", "passageiros": ["SILVA/MARIA CLARA MRS", "SILVA/JOAO PEDRO MR"], "valor": 7600, "custo": 6900 },
+    { "origem": "DXB", "origem_cidade": "Dubai", "origem_pais": "Emirados Árabes Unidos", "destino": "GRU", "destino_cidade": "São Paulo", "destino_pais": "Brasil",
+      "data": "2027-03-23", "hora_saida": "06:00", "chegada_data": null, "hora_chegada": "16:10", "cia": "Emirates", "voo": "EK 261", "localizador": "QWE7RT",
+      "classe": "Econômica", "bagagem": "2 x 23 kg", "passageiros": ["SILVA/MARIA CLARA MRS", "SILVA/JOAO PEDRO MR"], "valor": null, "custo": null },
+    { "origem": "GRU", "origem_cidade": "São Paulo", "origem_pais": "Brasil", "destino": "NAT", "destino_cidade": "Natal", "destino_pais": "Brasil",
+      "data": "2027-03-23", "hora_saida": "19:55", "chegada_data": null, "hora_chegada": "23:20", "cia": "LATAM", "voo": "LA 3412", "localizador": "LT55PQ",
+      "classe": "Econômica", "bagagem": "1 x 23 kg", "passageiros": ["SILVA/MARIA CLARA MRS", "SILVA/JOAO PEDRO MR"], "valor": null, "custo": null }
+  ],
+  "hospedagens": [],
+  "seguros": [],
+  "servicos": [],
+  "pessoas": [
+    { "nome": "Maria Clara Silva", "cpf": "123.456.789-09", "passaporte": "FX123456", "nascimento": "1988-05-02", "validade_passaporte": "2027-07-01" },
+    { "nome": "João Pedro Silva", "cpf": null, "passaporte": "FX654321", "nascimento": null, "validade_passaporte": "2031-01-10" }
+  ],
+  "observacoes": []
+}

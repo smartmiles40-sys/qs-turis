@@ -1,0 +1,27 @@
+{
+  "legivel": true,
+  "moeda": "BRL",
+  "valor_total": 9800,
+  "voos": [],
+  "hospedagens": [
+    { "hotel": "Hotel Casa Andina Miraflores", "cidade": "Lima", "pais": "Peru", "checkin": "2027-05-04", "checkout": "2027-05-06",
+      "checkin_hora": "15:00", "checkout_hora": "12:00", "regime": "Breakfast included", "quarto": "Duplo standard", "quartos": 1,
+      "endereco": "Av. La Paz 463, Miraflores", "localizador": "CA-88211", "fornecedor": "Operadora Andes", "passageiros": ["Ana Souza", "Carlos Souza"], "valor": 2100, "custo": 1800 },
+    { "hotel": "Tierra Viva Cusco Plaza", "cidade": "Cusco", "pais": "Peru", "checkin": "2027-05-06", "checkout": "2027-05-09",
+      "checkin_hora": null, "checkout_hora": null, "regime": "Meia pensão", "quarto": "Duplo superior", "quartos": 1,
+      "endereco": null, "localizador": null, "fornecedor": "Operadora Andes", "passageiros": ["Ana Souza", "Carlos Souza"], "valor": 3200, "custo": 2800 }
+  ],
+  "seguros": [],
+  "servicos": [
+    { "tipo": "transfer", "nome": null, "data_inicio": "2027-05-04", "data_fim": null, "cidade": "Lima", "hora": "10:30", "de": "Aeroporto de Lima", "para": "Hotel Casa Andina Miraflores",
+      "fornecedor": "Operadora Andes", "detalhes": [{ "chave": "modalidade", "valor": "Privativo" }], "passageiros": ["Ana Souza", "Carlos Souza"], "valor": 350, "custo": 280 },
+    { "tipo": "trem", "nome": "PeruRail Vistadome Cusco → Águas Calientes", "data_inicio": "2027-05-07", "data_fim": null, "cidade": "Cusco", "hora": "06:40", "de": "Cusco (Poroy)", "para": "Águas Calientes",
+      "fornecedor": "PeruRail", "detalhes": [{ "chave": "operadora", "valor": "PeruRail" }, { "chave": "classe", "valor": "Vistadome" }, { "chave": "chegada", "valor": "10:12" }, { "chave": "cor_do_vagao", "valor": "azul" }],
+      "passageiros": ["Ana Souza", "Carlos Souza"], "valor": 1450, "custo": 1300 },
+    { "tipo": "passeio", "nome": "Visita guiada a Machu Picchu", "data_inicio": "2027-05-07", "data_fim": null, "cidade": "Machu Picchu", "hora": "11:00", "de": null, "para": null,
+      "fornecedor": "Operadora Andes", "detalhes": [{ "chave": "duracao", "valor": "3 horas" }, { "chave": "modalidade", "valor": "Em grupo" }],
+      "passageiros": ["Ana Souza", "Carlos Souza"], "valor": 2700, "custo": 2300 }
+  ],
+  "pessoas": [],
+  "observacoes": ["Levar passaporte original para entrar em Machu Picchu"]
+}
