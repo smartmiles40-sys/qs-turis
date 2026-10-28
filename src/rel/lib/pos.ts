@@ -3,8 +3,10 @@
 // Pós-viagem (pesquisa), recompra e chamados — Fase 5 (0103).
 //
 // Ler e criar o CONVITE da pesquisa / o chamado: direto no banco (RLS).
-// A RESPOSTA da pesquisa chega só pelo servidor (link público, api/rel-pesquisa)
-// e a RECOMPRA também (api/rel-recompra), porque ela cria o lead no Comercial.
+// A RESPOSTA da pesquisa chega só pelo servidor (link público, api/rel-pesquisa).
+// RECOMPRA (0218): a lista de candidatos continua aqui, mas a oportunidade não
+// vai mais pro Comercial — vira cartão no Pipeline de vendas do Rel
+// (lib/vendas.ts). api/rel-recompra responde 410.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
 
@@ -206,20 +208,6 @@ export async function candidatosRecompra(): Promise<CandidatoRecompra[]> {
 export async function recomprasDoCliente(clienteId: string): Promise<Recompra[]> {
   const { data } = await supabase.from("rel_recompras").select("*").eq("cliente_id", clienteId).order("criado_em", { ascending: false });
   return (data ?? []) as Recompra[];
-}
-
-/** Cria a oportunidade no Comercial (servidor). Erro 409 = já existe uma nos últimos 30 dias. */
-export async function criarRecompra(clienteId: string, interesse: string, viagemId?: string | null): Promise<{ leadId: string; dono: string | null; jaExistia?: boolean }> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error("Sessão expirada. Entre de novo.");
-  const r = await fetch("/api/rel-recompra", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ clienteId, viagemId: viagemId || null, interesse }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((j as { error?: string }).error || `Falhou (${r.status}).`);
-  return j as { leadId: string; dono: string | null; jaExistia?: boolean };
 }
 
 // ── Chamados ────────────────────────────────────────────────────────────────

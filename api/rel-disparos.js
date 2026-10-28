@@ -9,6 +9,7 @@
 //   POST { acao: 'testar_automacao', automacaoId } → quem receberia HOJE (não envia)
 //   POST { acao: 'rodar_automacoes' }            → roda agora (admin/gestor)
 //   GET  (Vercel Cron, Bearer CRON_SECRET)       → roda as automações ativas (10h)
+//        0218: em MODO SIMULAÇÃO por padrão (registra na fila, não envia)
 //
 // Regras que não se negociam:
 //   • SÓ modelo aprovado pela Meta, pelo número do RELACIONAMENTO;
@@ -24,6 +25,7 @@ import { rest } from './_supabaseAdmin.js';
 import { enviarTemplate, modelosAprovados } from './_meta.js';
 import { gravarRel } from './_relEntrada.js';
 import { quemChama, numeroDoRelacionamento, numeroConectado } from './_relWa.js';
+import { envioRealLigado, processarSemEnvio } from './_relAutomacoes.js';
 
 const LOTE = 20;
 const PAUSA_MS = 250;
@@ -246,18 +248,39 @@ async function alvosDaAutomacao(automacaoId, dia = null) {
   return Array.isArray(r) ? r : [];
 }
 
-/** Roda as automações ativas de hoje. Devolve um resumo por automação. */
+/**
+ * Roda as automações ativas de hoje. Devolve um resumo por automação.
+ *
+ * 0218: MODO SIMULAÇÃO por padrão — sem as duas chaves do envio real
+ * (envioRealLigado, em _relAutomacoes.js) nada sai pra Meta: cada mensagem é
+ * registrada na fila como 'simulado', com o texto que sairia. Canal 'tarefa'
+ * nunca envia: vira tarefa no sino de quem cuida da viagem.
+ */
 async function rodarAutomacoes({ limiteMs = 50_000 } = {}) {
   const inicio = Date.now();
-  const numero = await numeroDoRelacionamento();
-  if (!numeroConectado(numero)) return { erro: 'Número do Relacionamento não está conectado — nada enviado.' };
   const ativas = await rest('rel_automacoes?select=*&ativo=eq.true').catch(() => []);
-  if (!ativas?.length) return { ok: true, automacoes: [] };
-  const lista = await modelosAprovados(numero.phone_number_id);
+  if (!ativas?.length) return { ok: true, automacoes: [], real: false };
+  const real = await envioRealLigado();
   const hoje = hojeBRT();
   const resumo = [];
 
-  for (const a of ativas) {
+  // Sem envio real (simulação) ou canal tarefa: não depende do número da Meta.
+  const semEnvio = ativas.filter((a) => !real || a.canal === 'tarefa');
+  for (const a of semEnvio) {
+    const alvos = await alvosDaAutomacao(a.id).catch(() => []);
+    resumo.push(await processarSemEnvio(a, alvos, { hoje, prazo: inicio + limiteMs }));
+  }
+  const comEnvio = ativas.filter((a) => real && a.canal !== 'tarefa');
+  if (!comEnvio.length) return { ok: true, automacoes: resumo, real };
+
+  // ── ENVIO REAL (só com as duas chaves ligadas) ──
+  // TODO(frente "disparo"): trocar o enviarUm() abaixo por enfileirar no motor
+  // oficial de disparo quando ele existir (ver _relAutomacoes.js).
+  const numero = await numeroDoRelacionamento();
+  if (!numeroConectado(numero)) return { ok: true, automacoes: resumo, real, erroEnvio: 'Número do Relacionamento não está conectado — nada enviado.' };
+  const lista = await modelosAprovados(numero.phone_number_id);
+
+  for (const a of comEnvio) {
     const r = { id: a.id, nome: a.nome, novos: 0, enviados: 0, pulados: 0, falhas: 0 };
     const alvos = await alvosDaAutomacao(a.id).catch(() => []);
     for (const alvo of alvos) {
@@ -282,7 +305,7 @@ async function rodarAutomacoes({ limiteMs = 50_000 } = {}) {
     await rest(`rel_automacoes?id=eq.${a.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { ultima_execucao: new Date().toISOString() } }).catch(() => null);
     resumo.push(r);
   }
-  return { ok: true, automacoes: resumo };
+  return { ok: true, automacoes: resumo, real };
 }
 
 // ── Rota ────────────────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ export const SETORES_CARGO: Record<SetorCargo, string> = {
 
 export type Permissao =
   | "relacionamento.modelos" | "relacionamento.disparos" | "relacionamento.juntar_clientes" | "relacionamento.editar_viagens"
-  | "relacionamento.agenda_time" | "relacionamento.kpis" | "relacionamento.conferir_documentos"
+  | "relacionamento.agenda_time" | "relacionamento.kpis" | "relacionamento.conferir_documentos" | "relacionamento.hunter"
   | "financeiro.status_atividades" | "financeiro.ver_valores" | "financeiro.modelos";
 
 /**
@@ -37,6 +37,8 @@ export const PERMISSOES: { chave: Permissao; rotulo: string; setor: SetorCargo; 
   { chave: "relacionamento.agenda_time", rotulo: "Marcar compromissos na agenda dos outros", setor: "relacionamento", padrao: false },
   { chave: "relacionamento.kpis", rotulo: "Ver os KPIs", setor: "relacionamento", padrao: true },
   { chave: "relacionamento.conferir_documentos", rotulo: "Conferir documentos dos clientes", setor: "relacionamento", padrao: true },
+  // 0218: hunter recebe as oportunidades automáticas do Pipeline de vendas no rodízio
+  { chave: "relacionamento.hunter", rotulo: "É hunter: recebe oportunidades de venda", setor: "relacionamento", padrao: false },
   { chave: "financeiro.status_atividades", rotulo: "Mudar o status dos atendimentos", setor: "financeiro", padrao: true },
   { chave: "financeiro.ver_valores", rotulo: "Ver valores das viagens", setor: "financeiro", padrao: true },
   { chave: "financeiro.modelos", rotulo: "Criar e editar respostas prontas do Financeiro", setor: "financeiro", padrao: false },
