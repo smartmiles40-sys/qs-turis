@@ -102,6 +102,7 @@ import { varrerRetrabalhoVencido } from "@/lib/qs/carteira";
 import TelefoneOnboarding from "@/components/sdr/telefone/TelefoneOnboarding";
 import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
 import LigacaoOficialWidget from "@/components/sdr/telefone/LigacaoOficialWidget";
+import Presenca from "@/controle-comercial/Presenca";
 import { ComCoresDaCentral } from "@/solicitacoes/PedirOutroSetor";
 import { useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import { useAprovacoesNovas } from "@/propostas/lib";
@@ -446,6 +447,8 @@ export default function SdrLayout() {
       <WebphoneWidget />
       {/* Ligação pelo número oficial (Cloud API Calling) — some quando não há chamada. */}
       <LigacaoOficialWidget />
+      {/* Mesa do supervisor (0215): batida de presença a cada 60 s; não desenha nada. */}
+      <Presenca tela={activeNav} leadId={activeNav === "lead-detail" ? selectedLeadId : null} />
 
       {/* Desempenho: as três telas viraram abas de uma só (redesign). */}
       {(desempenhoAbas as string[]).includes(activeNav) && desempenhoAbas.length > 1 && (

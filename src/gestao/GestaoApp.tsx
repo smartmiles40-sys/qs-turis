@@ -21,6 +21,7 @@ import SinoDeAvisos from "@/avisos/SinoDeAvisos";
 import { comercialDividido } from "@/area/CascaDeArea";
 import type { Setor } from "@/components/sdr/types";
 import { sairDaGestao } from "./acesso";
+import FonteSdrGestao from "@/controle-comercial/FonteSdrGestao";
 import {
   ALERTAS, NOME_SETOR_GESTAO, PERIODOS, brl, carregarCloser, carregarFin, carregarOps, carregarRel, carregarSdr,
   type Alerta, type BlocoCloser, type BlocoSdr, type LinhaCloser, type LinhaSdr, type Numero, type Periodo, type SetorGestao,
@@ -81,6 +82,7 @@ export default function GestaoApp() {
         <Atencao rodada={rodada} ve={ve} />
 
         {ve("sdr") && <SecaoSdr periodo={periodo} chave={chave} />}
+        {ve("sdr") && <FonteSdrGestao periodo={periodo} chave={chave} />}
         {ve("closer") && <SecaoCloser periodo={periodo} chave={chave} />}
         {ve("rel") && <SecaoRel chave={chave} />}
         {ve("fin") && <SecaoFin periodo={periodo} chave={chave} />}

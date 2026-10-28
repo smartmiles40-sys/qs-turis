@@ -30,6 +30,8 @@ import PagamentoBloco from "./PagamentoBloco";
 // 28/10 (0214): a venda do closer usa a tela única de venda (src/venda/SubirVenda.tsx).
 import SubirVenda from "@/venda/SubirVenda";
 import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
+import ReunioesDoCliente from "@/controle-comercial/ReunioesDoCliente";
+import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
 import { desfazerPreVenda, listarItensDaVenda, nomeSugerido, somaDosItens, type ItemVenda } from "./vendaItens";
 import {
   ETAPAS, ETAPAS_COM_MOTIVO, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, emPreVenda, espelharNoBitrix, eventosDoNegocio, moverNegocio,
@@ -43,15 +45,9 @@ export interface LinksDoPainel {
   onAbrirSolicitacao: (id: string) => void;
 }
 
-interface Reuniao { id: string; scheduled_at: string; status: string; title: string | null; venda_valor: number | null }
 interface PropostaLinha { id: string; numero: number; titulo: string | null; destino: string | null; status: StatusProposta; enviada_em: string | null; vista_em: string | null; visualizacoes: number | null; aprovada_em: string | null; aprovada_nome: string | null }
 interface Mensagem { id: string; direction: string; content: string | null; sent_at: string | null; created_at: string }
 interface Solicitacao { id: string; numero: number; titulo: string; status: string; para_setor: string; criado_em: string }
-
-const STATUS_REUNIAO: Record<string, string> = {
-  agendada: "Agendada", confirmada: "Confirmada", realizada: "Realizada", no_show: "No-show", reagendada: "Reagendada",
-  cancelada: "Cancelada", arquivada: "Arquivada", desistencia: "Desistência",
-};
 
 function Bloco({ titulo, children, acao }: { titulo: string; children: React.ReactNode; acao?: React.ReactNode }) {
   return (
@@ -70,7 +66,6 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   const [n, setN] = useState<Negocio | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<{ tom: "ok" | "aviso" | "erro"; t: string } | null>(null);
-  const [reunioes, setReunioes] = useState<Reuniao[]>([]);
   const [propostas, setPropostas] = useState<PropostaLinha[]>([]);
   const [msgs, setMsgs] = useState<Mensagem[]>([]);
   const [sols, setSols] = useState<Solicitacao[]>([]);
@@ -102,14 +97,13 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
       const ids = solList.map((x) => x.id);
       let qp = supabase.from("qs_propostas").select("id, numero, titulo, destino, status, enviada_em, vista_em, visualizacoes, aprovada_em, aprovada_nome").order("criado_em", { ascending: false }).limit(20);
       qp = ids.length ? qp.or(`lead_id.eq.${lead},solicitacao_id.in.(${ids.join(",")})`) : qp.eq("lead_id", lead);
-      const [r, p, m, ev] = await Promise.all([
-        supabase.from("qs_meetings").select("id, scheduled_at, status, title, venda_valor").eq("lead_id", lead).order("scheduled_at", { ascending: false }).limit(10),
+      // As reuniões (com Meet, convidados, desfecho e gravação) carregam no <ReunioesDoCliente>.
+      const [p, m, ev] = await Promise.all([
         qp,
         supabase.from("qs_wa_messages").select("id, direction, content, sent_at, created_at").eq("lead_id", lead).is("deleted_at", null).order("created_at", { ascending: false }).limit(8),
         eventosDoNegocio(id),
       ]);
       setItensVenda(await listarItensDaVenda(id).catch(() => []));
-      setReunioes((r.data ?? []) as Reuniao[]);
       setPropostas((p.data ?? []) as PropostaLinha[]);
       setMsgs((m.data ?? []) as Mensagem[]);
       setEventos(ev);
@@ -250,19 +244,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
           </Bloco>
 
           {/* ── Reuniões ── */}
-          <Bloco titulo="Reuniões">
-            {!reunioes.length ? <Nada t="Sem reuniões." /> : (
-              <ul className="space-y-1">
-                {reunioes.map((r) => (
-                  <li key={r.id} className="flex flex-wrap gap-2 text-[13px]" style={{ color: "var(--ink)" }}>
-                    <span className="w-28" style={{ color: "var(--ink2)" }}>{dataHoraBr(r.scheduled_at)}</span>
-                    <span className="flex-1 min-w-0 truncate">{r.title || "Reunião"}</span>
-                    <Etiqueta>{STATUS_REUNIAO[r.status] ?? r.status}</Etiqueta>
-                    {r.venda_valor ? <span style={{ color: "var(--ink3)" }}>{brl(r.venda_valor)}</span> : null}
-                  </li>
-                ))}
-              </ul>
-            )}
+          <Bloco titulo="Reuniões (Google Meet)">
+            <ReunioesDoCliente leadId={n.lead_id} />
           </Bloco>
 
           {/* ── Mensagens ── */}
@@ -308,6 +291,9 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
             {/* 0213: cadastro único (nome, DN, CPF, passaporte, endereço, quem viaja junto) */}
             <div className="mt-3"><CadastroDoLead leadId={n.lead_id} modo="cartao" /></div>
           </Bloco>
+
+          {/* O que o cliente respondeu na LP (some sozinho quando não há resposta). */}
+          <RespostasDoFormulario leadId={n.lead_id} variante="ficha" />
 
           <Bloco titulo="Etapa">
             <select className="rel-input" value={n.etapa} disabled={ocupado} aria-label="Mover para"

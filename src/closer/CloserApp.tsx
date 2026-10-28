@@ -30,6 +30,7 @@ import AvisoDeVersao from "@/components/sdr/AvisoDeVersao";
 import CommandPalette from "@/components/sdr/CommandPalette";
 import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
 import LigacaoOficialWidget from "@/components/sdr/telefone/LigacaoOficialWidget";
+import Presenca from "@/controle-comercial/Presenca";
 import PipelinePage from "./PipelinePage";
 import ReunioesCloser, { ABAS_REUNIOES, type AbaReunioes } from "./ReunioesCloser";
 
@@ -209,6 +210,8 @@ export default function CloserApp() {
       )}
       <WebphoneWidget />
       <LigacaoOficialWidget />
+      {/* Mesa do supervisor (0215): batida de presença; não desenha nada. */}
+      <Presenca tela={tela === "pipeline" && rota.id ? "closer:negocio" : `closer:${tela}`} leadId={tela === "lead" ? rota.id ?? null : null} />
       <GlobalToasts />
       <ConfirmDialog />
       <AvisoDeVersao />
