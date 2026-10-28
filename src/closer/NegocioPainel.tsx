@@ -28,6 +28,7 @@ import FichaFechamentoResumo from "./FichaFechamentoResumo";
 import ContratoBloco from "./ContratoBloco";
 import PagamentoBloco from "./PagamentoBloco";
 import RegistrarVenda from "./RegistrarVenda";
+import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
 import { desfazerPreVenda, listarItensDaVenda, nomeSugerido, somaDosItens, type ItemVenda } from "./vendaItens";
 import {
   ETAPAS, ETAPAS_COM_MOTIVO, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, emPreVenda, espelharNoBitrix, eventosDoNegocio, moverNegocio,
@@ -303,6 +304,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
             <p className="text-[12px] mt-1" style={{ color: "var(--ink3)" }}>
               {n.lead?.bitrix_id ? `Bitrix: negócio ${n.lead.bitrix_id}` : "Sem card no Bitrix"}{n.closer?.name ? ` · closer ${n.closer.name}` : ""}
             </p>
+            {/* 0213: cadastro único (nome, DN, CPF, passaporte, endereço, quem viaja junto) */}
+            <div className="mt-3"><CadastroDoLead leadId={n.lead_id} modo="cartao" /></div>
           </Bloco>
 
           <Bloco titulo="Etapa">

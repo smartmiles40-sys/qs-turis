@@ -33,6 +33,7 @@ import { BotaoPedirOutroSetor, BotaoPedirPagamento, HistoricoDeSolicitacoes } fr
 import { conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
 import ComprasDoCliente from "@/clientes/ComprasDoCliente";
 import ExpedAmigoDoCliente from "@/clientes/ExpedAmigoDoCliente";
+import CadastroPessoa from "@/clientes/cadastro/CadastroPessoa";
 import { nivelFidelidade } from "@/expedicoes/lib/fidelidade";
 
 // 23/10 (cadastro único): a ficha é O lugar da pessoa — tudo que estava espalhado
@@ -45,7 +46,8 @@ const ABAS: { id: Aba; rotulo: string; soRel?: boolean }[] = [
   { id: "documentos", rotulo: "Documentos" },
   { id: "expedamigo", rotulo: "ExpedAmigo" },
   { id: "atendimento", rotulo: "Atendimento", soRel: true },
-  { id: "historico", rotulo: "Histórico", soRel: true },
+  // 0213: Operações também edita a ficha — e vê o histórico de quem mudou o quê.
+  { id: "historico", rotulo: "Histórico" },
 ];
 
 // Nomes amigáveis dos campos, pro histórico ler como gente.
@@ -54,6 +56,8 @@ const CAMPOS: Record<string, string> = {
   nascimento: "nascimento", telefone: "telefone", email: "e-mail", titular_id: "família",
   parentesco: "parentesco", bitrix_contato_id: "ID do Bitrix", observacoes: "observações",
   lgpd_consentimento_em: "consentimento LGPD", mesclado_em_id: "junção",
+  endereco_cep: "CEP", endereco_rua: "rua", endereco_numero: "número", endereco_complemento: "complemento",
+  endereco_bairro: "bairro", endereco_cidade: "cidade", endereco_estado: "UF",
 };
 
 function mudancas(a: Auditoria): string {
@@ -255,7 +259,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
             </>}
             <BotaoPedirOutroSetor deSetor={setor} alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
             <BotaoPedirPagamento deSetor={setor} alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
-            {ehRel && <Botao onClick={() => setEditando(true)}>Editar</Botao>}
+            {/* 0213: Rel e Ops editam igual (vale a última gravação; fica no Histórico) */}
+            <Botao onClick={() => setEditando(true)}>Editar</Botao>
           </div>
         )}
       </div>
@@ -270,7 +275,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
           {faltando.length > 0 ? (
             <>
               <span className="text-[12.5px] flex-1 min-w-[180px]" style={{ color: "var(--ink3)" }}>Falta: {faltando.join(", ")}</span>
-              {ehRel && <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setEditando(true)}>Completar</Botao>}
+              <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setEditando(true)}>Completar</Botao>
             </>
           ) : <span className="text-[12.5px]" style={{ color: "var(--ink3)" }}>tudo que a viagem pede está aqui</span>}
         </div>
@@ -331,7 +336,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         {/* Família */}
         <Secao
           titulo="Família"
-          acao={ehRel && ehTitular && !c.mesclado_em_id ? (
+          acao={ehTitular && !c.mesclado_em_id ? (
             <Botao variante="fantasma" onClick={() => setNovoFamiliar(true)} style={{ color: "var(--rel-ink)" }}>+ Adicionar familiar</Botao>
           ) : undefined}
         >
@@ -355,6 +360,13 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
             </p>
           )}
         </Secao>
+
+        {/* 0213: endereço e quem viaja junto — o mesmo cadastro que SDR, Closer e Ops preenchem */}
+        {!c.mesclado_em_id && (
+          <Secao titulo="Endereço e quem viaja junto">
+            <div className="pt-2"><CadastroPessoa clienteId={c.id} secoes={["endereco", "acompanhantes"]} onMudou={() => void carregar()} /></div>
+          </Secao>
+        )}
 
         {c.observacoes && (
           <Secao titulo="Observações">
