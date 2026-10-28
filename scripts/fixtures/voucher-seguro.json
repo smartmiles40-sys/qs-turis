@@ -1,0 +1,14 @@
+{
+  "legivel": true,
+  "moeda": "BRL",
+  "valor_total": 612.4,
+  "voos": [],
+  "hospedagens": [],
+  "seguros": [
+    { "seguradora": "Assist Card", "plano": "AC 60 Mundo", "cobertura": "USD 60.000", "apolice": "AC-2027-998877",
+      "inicio": "2027-03-10", "fim": "2027-03-20", "segurados": ["MARIA CLARA SILVA", "JOAO PEDRO SILVA"], "valor": null, "custo": null }
+  ],
+  "servicos": [],
+  "pessoas": [],
+  "observacoes": []
+}
