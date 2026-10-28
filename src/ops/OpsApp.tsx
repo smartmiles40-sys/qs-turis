@@ -34,6 +34,8 @@ const ExpedicoesArea = lazy(() => import("@/expedicoes/ExpedicoesArea"));
 const ClientesPage = lazy(() => import("@/rel/clientes/ClientesPage"));
 const ClienteFicha = lazy(() => import("@/rel/clientes/ClienteFicha"));
 const FilaDivergencias = lazy(() => import("@/clientes/FilaDivergencias"));
+// 28/10 (0214): Ops sobe venda "sem pipeline, só subir a venda" + abre vaga nas expedições.
+const SubirVendaOps = lazy(() => import("@/venda/SubirVendaOps"));
 
 /** Cor de Operações: âmbar escuro (#B45309 com texto branco = 5:1, WCAG AA). */
 const OPS_CSS = `${REL_CSS}
@@ -43,7 +45,7 @@ html.dark { --rel-ink: #FDBA74; --rel-soft: rgba(251, 146, 60, .15); }
 `;
 
 const PREFIXO = "ops";
-const TELAS = ["inicio", "solicitacoes", "propostas", "equipe", "fichas", "ficha", "arrumar", ...TELAS_EXP] as const;
+const TELAS = ["inicio", "solicitacoes", "subir-venda", "propostas", "equipe", "fichas", "ficha", "arrumar", ...TELAS_EXP] as const;
 type Tela = (typeof TELAS)[number];
 const ehExp = (t: string): t is TelaExp => (TELAS_EXP as readonly string[]).includes(t);
 interface Rota { tela: Tela; id?: string }
@@ -76,6 +78,7 @@ export default function OpsApp() {
   const grupos: GrupoDoMenu[] = [
     { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
+      { id: "subir-venda", rotulo: "Subir venda" },
       { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined },
     ] },
     grupoExpedicoes(contExp),
@@ -101,6 +104,7 @@ export default function OpsApp() {
         <PropostasPage setor="operacional" abrirId={rota.id ?? null} onMudou={recontarAprovacoes}
           onAbrirId={(id) => ir(id ? { tela: "propostas", id } : { tela: "propostas" })} />
       )}
+      {rota.tela === "subir-venda" && <Suspense fallback={null}><SubirVendaOps /></Suspense>}
       {rota.tela === "equipe" && <EquipePage area="operacional" />}
       {rota.tela === "fichas" && <Suspense fallback={null}><ClientesPage soLeitura onAbrir={(id) => ir({ tela: "ficha", id })} /></Suspense>}
       {rota.tela === "ficha" && rota.id && (

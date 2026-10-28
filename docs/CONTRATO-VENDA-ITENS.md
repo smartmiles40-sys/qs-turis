@@ -45,6 +45,9 @@ O Rel e o app do cliente só LEEM essa tabela e escrevem `status`, `dados` e `vi
 - 0210 — App do cliente (acesso do cliente às viagens dele)
 
 - 0211 — Closer (closer_pre_venda atualiza valor/tipo quando a venda já registrada é editada)
+- 0214 — Subir venda (tela única Closer/Rel/Ops): `qs_vendas` (cabeçalho: pagamento, condição especial),
+  `qs_venda_itens.venda_id`, colunas da venda em `passageiros`, vagas (`exp_vagas_para_venda`, `exp_vagas_ajustar`)
+  e a RPC `venda_subir` que grava pessoa + itens + passageiros numa transação. Tela: `src/venda/SubirVenda.tsx`.
 
 ## O caminho do closer (27/10 — um caminho só)
 1. **Registrar venda** (itens por tipo) → no último passo, **Salvar e marcar como venda**: grava os itens e faz a

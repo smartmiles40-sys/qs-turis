@@ -27,7 +27,8 @@ import FichaFechamento from "./FichaFechamento";
 import FichaFechamentoResumo from "./FichaFechamentoResumo";
 import ContratoBloco from "./ContratoBloco";
 import PagamentoBloco from "./PagamentoBloco";
-import RegistrarVenda from "./RegistrarVenda";
+// 28/10 (0214): a venda do closer usa a tela única de venda (src/venda/SubirVenda.tsx).
+import SubirVenda from "@/venda/SubirVenda";
 import { desfazerPreVenda, listarItensDaVenda, nomeSugerido, somaDosItens, type ItemVenda } from "./vendaItens";
 import {
   ETAPAS, ETAPAS_COM_MOTIVO, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, emPreVenda, espelharNoBitrix, eventosDoNegocio, moverNegocio,
@@ -376,7 +377,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
       </div>
 
       {registrarAberto && (
-        <RegistrarVenda negocio={n} aberto={registrarAberto} onFechar={() => setRegistrarAberto(false)}
+        <SubirVenda origem="closer" negocio={n} aberto={registrarAberto} onFechar={() => setRegistrarAberto(false)}
           onSalvo={(r) => { setRegistrarAberto(false); setAviso({ tom: r.tom, t: r.mensagem }); void carregar(); }} />
       )}
 
