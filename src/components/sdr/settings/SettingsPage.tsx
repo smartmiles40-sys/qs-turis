@@ -16,6 +16,7 @@ import MensagemAutomatica from "./MensagemAutomatica";
 import LigacaoWhatsApp from "./LigacaoWhatsApp";
 import DiscadorConfig from "./DiscadorConfig";
 import ConexaoMeta from "./ConexaoMeta";
+import MesaSupervisor, { podeVerMesa } from "@/controle-comercial/MesaSupervisor";
 import NumerosWhatsApp from "./NumerosWhatsApp";
 import { WA_SIGNATURE_MAP_KEY, WA_SIGNATURE_ENABLED_KEY, nomeCurto } from "@/lib/qs/waSignature";
 import { NOME_SETOR, SETORES } from "../types";
@@ -59,7 +60,7 @@ const OUTRAS_AREAS: Setor[] = ["relacionamento", "financeiro", "operacional"];
 
 // ── Sidebar nav ──────────────────────────────────────────────────────────────
 
-type SettingsSection = "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "whatsapp-meta" | "motivos" | "classificacao" | "horario" | "carteira" | "agenda" | "atendimento" | "webfone-webrtc" | "discador" | "telefone-sip" | "usuarios" | "numeros" | "integracoes";
+type SettingsSection = "mesa" | "produtos" | "canais" | "modelos-meta" | "mensagem-automatica" | "ligacao-whatsapp" | "whatsapp-meta" | "motivos" | "classificacao" | "horario" | "carteira" | "agenda" | "atendimento" | "webfone-webrtc" | "discador" | "telefone-sip" | "usuarios" | "numeros" | "integracoes";
 
 interface SidebarItem {
   key: SettingsSection;
@@ -68,6 +69,7 @@ interface SidebarItem {
 }
 
 const SIDEBAR_ITEMS: SidebarItem[] = [
+  { key: "mesa", label: "Mesa (quem está online)", group: "SUPERVISÃO" },
   { key: "produtos", label: "Produtos", group: "PLATAFORMA" },
   { key: "canais", label: "Canais de Contato", group: "PLATAFORMA" },
   { key: "motivos", label: "Motivos de Perda", group: "PLATAFORMA" },
@@ -2141,7 +2143,7 @@ export default function SettingsPage() {
   // recusa quem não é (a checagem que vale é a do servidor), mas deixar o botão
   // à mostra pra um SDR só rende um 403 na cara de quem não podia clicar.
   const ehGestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
-  const itensVisiveis = SIDEBAR_ITEMS.filter((i) => (i.key !== "numeros" && i.key !== "whatsapp-meta") || ehGestor);
+  const itensVisiveis = SIDEBAR_ITEMS.filter((i) => i.key === "mesa" ? podeVerMesa(currentUser) : (i.key !== "numeros" && i.key !== "whatsapp-meta") || ehGestor);
 
   const groups = itensVisiveis.reduce<Record<string, SidebarItem[]>>(
     (acc, item) => {
@@ -2195,6 +2197,7 @@ export default function SettingsPage() {
 
       {/* Content */}
       <main className="flex-1 min-w-0">
+        {activeSection === "mesa" && podeVerMesa(currentUser) && <MesaSupervisor />}
         {activeSection === "produtos" && <ProdutosSection />}
         {activeSection === "canais" && <CanaisSection />}
         {activeSection === "motivos" && <MotivosSection />}
