@@ -208,7 +208,7 @@ function ListaEnvios({ campanha, onFechar }: { campanha: Campanha | null; onFech
     setLista(null);
     envios({ campanhaId: campanha.id }).then(setLista).catch(() => setLista([]));
   }, [campanha]);
-  const tom = { enviado: "rel", falhou: "erro", pulado: "neutro", pendente: "aviso" } as const;
+  const tom = { enviado: "rel", falhou: "erro", pulado: "neutro", pendente: "aviso", simulado: "neutro", tarefa: "aviso" } as const; // 0218: status das automações
   return (
     <Modal aberto={!!campanha} titulo={`Envios · ${campanha?.nome ?? ""}`} onFechar={onFechar} largura={620}>
       {lista === null ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>

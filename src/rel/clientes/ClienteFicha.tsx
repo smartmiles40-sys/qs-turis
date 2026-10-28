@@ -248,7 +248,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         {!c.mesclado_em_id && (
           <div className="flex flex-wrap gap-1.5">
             {ehRel && <>
-              <RecompraBotao clienteId={c.id} compacto />
+              <RecompraBotao clienteId={c.id} clienteNome={c.nome} compacto />
               <Botao onClick={() => setNovoContato(true)}>Registrar contato</Botao>
               <Botao onClick={() => setNovoChamado(true)}>Abrir chamado</Botao>
               <Botao onClick={() => setEnviarFin(true)}>💰 Enviar ao Financeiro</Botao>

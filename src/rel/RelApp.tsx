@@ -51,6 +51,8 @@ const DisparosPage = lazy(() => import("./disparos/DisparosPage"));
 const AutomacoesPage = lazy(() => import("./disparos/AutomacoesPage"));
 const PesquisasPage = lazy(() => import("./pos/PesquisasPage"));
 const RecompraPage = lazy(() => import("./pos/RecompraPage"));
+// 0218: o Rel vende pra base (a recompra não vai mais pro Comercial)
+const PipelinePage = lazy(() => import("./vendas/PipelinePage"));
 const KpisPage = lazy(() => import("./kpis/KpisPage"));
 const WhatsAppPage = lazy(() => import("./whatsapp/WhatsAppPage"));
 const EquipePage = lazy(() => import("./equipe/EquipePage"));
@@ -72,7 +74,7 @@ type Rota =
   | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "solicitacoes"; id?: string } | { tela: "propostas"; id?: string } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" } | { tela: "cadastros" }
   | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
-  | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" }
+  | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" } | { tela: "vendas"; id?: string }
   | { tela: "config" } | { tela: "faxina" } | { tela: "mais" } | { tela: TelaRelExp; id?: string };
 type Tela = Rota["tela"];
 
@@ -91,6 +93,7 @@ function lerRota(): Rota {
   if (tela === "grupos") return id ? { tela: "grupos", id: decodeURIComponent(id) } : { tela: "grupos" };
   if (tela === "solicitacoes") return id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" };
   if (tela === "propostas") return id ? { tela: "propostas", id } : { tela: "propostas" };
+  if (tela === "vendas") return id ? { tela: "vendas", id } : { tela: "vendas" };
   if (ehRelExp(tela)) return id ? { tela, id: decodeURIComponent(id) } : { tela };
   if ((SIMPLES as string[]).includes(tela)) return { tela } as Rota;
   return { tela: "inicio" };
@@ -103,6 +106,7 @@ function hashDe(r: Rota) {
   if (r.tela === "grupos" && r.id) return `#rel/grupos/${encodeURIComponent(r.id)}`;
   if (r.tela === "solicitacoes" && r.id) return `#rel/solicitacoes/${r.id}`;
   if (r.tela === "propostas" && r.id) return `#rel/propostas/${r.id}`;
+  if (r.tela === "vendas" && r.id) return `#rel/vendas/${r.id}`;
   if (ehRelExp(r.tela) && "id" in r && r.id) return `#rel/${r.tela}/${encodeURIComponent(r.id)}`;
   return r.tela === "inicio" ? "#rel" : `#rel/${r.tela}`;
 }
@@ -388,6 +392,8 @@ export default function RelApp() {
       // Central de Solicitações (0149) e Propostas (0157)
       { id: "solicitacoes", label: "Solicitações", icon: Icon.inbox, count: bolinhaDaCentral(central).badge, late: bolinhaDaCentral(central).alerta },
       { id: "propostas", label: "Propostas", icon: Icon.doc, count: aprovacoes || undefined },
+      // 0218: pipeline de vendas pra base (hunters)
+      { id: "vendas", label: "Pipeline de vendas", icon: Icon.funil },
     ] },
     { label: "Carteira", items: [
       { id: "viagens", label: "Viagens", icon: Icon.aviao },
@@ -510,7 +516,11 @@ export default function RelApp() {
           {rota.tela === "disparos" && <DisparosPage />}
           {rota.tela === "automacoes" && <AutomacoesPage />}
           {rota.tela === "pesquisas" && <PesquisasPage onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} />}
-          {rota.tela === "recompra" && <RecompraPage onAbrirCliente={abrirCliente} />}
+          {rota.tela === "recompra" && <RecompraPage onAbrirCliente={abrirCliente} onAbrirOportunidade={(id) => ir({ tela: "vendas", id })} />}
+          {rota.tela === "vendas" && (
+            <PipelinePage abrirId={rota.id ?? null} onAbrirId={(id) => ir(id ? { tela: "vendas", id } : { tela: "vendas" })}
+              onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} onAbrirProposta={(id) => ir({ tela: "propostas", id })} />
+          )}
           {rota.tela === "config" && <ConfigPage onAbrirWhatsApp={() => ir({ tela: "whatsapp" })} />}
           {rota.tela === "equipe" && <EquipePage />}
           {ehRelExp(rota.tela) && (

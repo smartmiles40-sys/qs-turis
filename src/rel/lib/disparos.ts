@@ -89,8 +89,13 @@ export interface Envio {
   id: string;
   cliente_id: string | null;
   telefone: string | null;
-  status: "pendente" | "enviado" | "falhou" | "pulado";
+  /** 0218: 'simulado' = modo simulação (registrado, NÃO enviado); 'tarefa' = a atendente manda à mão */
+  status: "pendente" | "enviado" | "falhou" | "pulado" | "simulado" | "tarefa";
   motivo: string | null;
+  /** 0218: o texto montado pra este cliente */
+  texto?: string | null;
+  automacao_id?: string | null;
+  responsavel_id?: string | null;
   enviado_em: string | null;
   criado_em: string;
   cliente?: { nome: string } | null;
@@ -135,6 +140,18 @@ export const GATILHOS: { id: Gatilho; rotulo: string; usaDias: boolean; frase: (
   { id: "aniversario_viagem", rotulo: "1 ano da viagem", usaDias: false, frase: () => "1 ano depois do embarque" },
 ];
 
+/** 0218: WhatsApp oficial (modelo aprovado) ou tarefa pro atendente mandar à mão. */
+export type CanalAutomacao = "whatsapp" | "tarefa";
+
+/** Variáveis do texto da TAREFA (livre, não passa pela Meta). */
+export const VARIAVEIS_TAREFA: { chave: string; rotulo: string }[] = [
+  { chave: "nome", rotulo: "primeiro nome" },
+  { chave: "destino", rotulo: "destino" },
+  { chave: "data_embarque", rotulo: "data de embarque" },
+  { chave: "link_pesquisa", rotulo: "link da pesquisa" },
+  { chave: "link_documentos", rotulo: "link de documentos" },
+];
+
 export interface Automacao {
   id: string;
   nome: string;
@@ -143,6 +160,13 @@ export interface Automacao {
   modelo_nome: string;
   modelo_idioma: string;
   params: MapaVariaveis;
+  canal: CanalAutomacao;
+  /** texto da tarefa, com {nome}, {destino}… */
+  texto: string | null;
+  /** corpo do modelo guardado ao salvar (a simulação monta a prévia sem ir à Meta) */
+  modelo_corpo: string | null;
+  /** quem recebe a tarefa quando a viagem não tem responsável */
+  tarefa_para: string | null;
   ativo: boolean;
   ultima_execucao: string | null;
   criado_em: string;
@@ -154,8 +178,15 @@ export async function listarAutomacoes(): Promise<Automacao[]> {
   return (data ?? []) as Automacao[];
 }
 
-export async function salvarAutomacao(a: Partial<Automacao> & Pick<Automacao, "nome" | "gatilho" | "dias" | "modelo_nome" | "modelo_idioma" | "params">) {
-  const corpo = { nome: a.nome, gatilho: a.gatilho, dias: a.dias, modelo_nome: a.modelo_nome, modelo_idioma: a.modelo_idioma, params: a.params };
+export async function salvarAutomacao(a: Partial<Automacao> & Pick<Automacao, "nome" | "gatilho" | "dias" | "modelo_nome" | "modelo_idioma" | "params" | "canal">) {
+  const tarefa = a.canal === "tarefa";
+  const corpo = {
+    nome: a.nome, gatilho: a.gatilho, dias: a.dias, canal: a.canal,
+    modelo_nome: tarefa ? "" : a.modelo_nome, modelo_idioma: tarefa ? "pt_BR" : a.modelo_idioma, params: tarefa ? {} : a.params,
+    modelo_corpo: tarefa ? null : a.modelo_corpo ?? null,
+    texto: tarefa ? (a.texto ?? "").trim() || null : null,
+    tarefa_para: tarefa ? a.tarefa_para || null : null,
+  };
   const res = a.id
     ? await supabase.from("rel_automacoes").update(corpo).eq("id", a.id)
     : await supabase.from("rel_automacoes").insert({ ...corpo, ativo: false });
@@ -170,6 +201,37 @@ export async function ligarAutomacao(id: string, ativo: boolean) {
 export async function apagarAutomacao(id: string) {
   const { error } = await supabase.from("rel_automacoes").delete().eq("id", id);
   if (error) throw new Error(error.message);
+}
+
+// ── Fila das automações e modo de envio (0218) ─────────────────────────────
+
+/** O que as automações registraram (simulado / tarefa / enviado / pulado) desde `desdeDias` dias. */
+export async function filaDasAutomacoes(desdeDias = 1, limite = 300): Promise<Envio[]> {
+  const desde = new Date(Date.now() - desdeDias * 86_400_000).toISOString();
+  const { data, error } = await supabase.from("rel_envios")
+    .select("id, cliente_id, telefone, status, motivo, enviado_em, criado_em, texto, automacao_id, responsavel_id, cliente:rel_clientes(nome)")
+    .not("automacao_id", "is", null).gte("criado_em", desde)
+    .order("criado_em", { ascending: false }).limit(limite);
+  if (error) throw error;
+  return (data ?? []) as unknown as Envio[];
+}
+
+export async function marcarTarefaFeita(envioId: string) {
+  const { error } = await supabase.rpc("rel_envio_tarefa_feita", { p_id: envioId });
+  if (error) throw new Error(error.message);
+}
+
+/** false = modo simulação (padrão). Mesmo true, o servidor só envia com REL_AUTOMACOES_ENVIO_REAL=1. */
+export async function lerEnvioReal(): Promise<boolean> {
+  const { data } = await supabase.from("rel_rotinas_config").select("automacoes_envio_real").eq("id", true).maybeSingle();
+  return Boolean((data as { automacoes_envio_real?: boolean } | null)?.automacoes_envio_real);
+}
+
+export async function mudarEnvioReal(ligado: boolean, userId: string) {
+  const { data, error } = await supabase.from("rel_rotinas_config")
+    .update({ automacoes_envio_real: ligado, atualizado_em: new Date().toISOString(), atualizado_por: userId }).eq("id", true).select("id");
+  if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error("Só a supervisão do Relacionamento muda isso.");
 }
 
 // ── Servidor ────────────────────────────────────────────────────────────────
@@ -199,5 +261,10 @@ export const retomarCampanha = (campanhaId: string) => chamar<{ ok: true }>({ ac
 export const testarAutomacao = (automacaoId: string) =>
   chamar<{ alvos: { nome: string; telefone: string | null; motivo: string | null }[] }>({ acao: "testar_automacao", automacaoId });
 
-export interface ResumoAutomacoes { automacoes: { id: string; nome: string; novos: number; enviados: number; pulados: number; falhas: number; cortado?: boolean }[] }
+export interface ResumoAutomacoes {
+  automacoes: { id: string; nome: string; novos: number; enviados: number; pulados: number; falhas: number; simulados?: number; tarefas?: number; cortado?: boolean }[];
+  /** 0218: true só com as duas chaves do envio real ligadas */
+  real?: boolean;
+  erroEnvio?: string;
+}
 export const rodarAutomacoesAgora = () => chamar<ResumoAutomacoes>({ acao: "rodar_automacoes" });

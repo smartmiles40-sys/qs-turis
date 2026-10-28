@@ -9,12 +9,17 @@
 // Detrator (0–6) fica separado em "Cuidar antes de oferecer": oferecer viagem
 // pra quem saiu insatisfeito antes de ouvir o motivo é o caminho mais curto
 // pra perder o cliente de vez.
+//
+// 0218: a oportunidade NÃO vai mais pro Comercial — vira cartão no Pipeline de
+// vendas do Rel. Esta lista alimenta o pipeline: quem já tem cartão aberto
+// mostra a etapa e o dono em vez do botão.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { candidatosRecompra, type CandidatoRecompra } from "../lib/pos";
 import { formatarTelefone } from "../lib/clientes";
 import { Aviso, Avatar, Etiqueta, Vazio } from "../ui";
 import RecompraBotao from "./RecompraBotao";
+import { abertasPorCliente, nomeCurto, rotuloEtapa, type Oportunidade } from "../lib/vendas";
 
 const ROTULO_PRIORIDADE: Record<number, { t: string; tom: "rel" | "neutro" | "aviso" | "erro" }> = {
   0: { t: "Amou e sabe pra onde quer ir", tom: "rel" },
@@ -24,7 +29,9 @@ const ROTULO_PRIORIDADE: Record<number, { t: string; tom: "rel" | "neutro" | "av
   9: { t: "Insatisfeito", tom: "erro" },
 };
 
-function Linha({ c, onAbrirCliente, onCriada }: { c: CandidatoRecompra; onAbrirCliente: (id: string) => void; onCriada: () => void }) {
+function Linha({ c, aberta, onAbrirCliente, onAbrirOportunidade, onCriada }: {
+  c: CandidatoRecompra; aberta?: Oportunidade; onAbrirCliente: (id: string) => void; onAbrirOportunidade?: (id: string) => void; onCriada: () => void;
+}) {
   const r = ROTULO_PRIORIDADE[c.prioridade];
   const ultimaRecompra = c.recompras[0];
   return (
@@ -40,22 +47,32 @@ function Linha({ c, onAbrirCliente, onCriada }: { c: CandidatoRecompra; onAbrirC
           {c.proximo_destino && <Etiqueta tom="rel">✈ quer ir para {c.proximo_destino}</Etiqueta>}
           {ultimaRecompra && (
             <span className="text-[11px]" style={{ color: "var(--ink3)" }}>
-              oportunidade já criada em {new Date(ultimaRecompra.criado_em).toLocaleDateString("pt-BR")}
+              foi pro Comercial em {new Date(ultimaRecompra.criado_em).toLocaleDateString("pt-BR")} (antes da mudança)
             </span>
           )}
         </span>
       </button>
-      <RecompraBotao clienteId={c.cliente_id} viagemId={c.ultima_viagem.id} sugestao={c.proximo_destino} compacto onCriada={onCriada} />
+      {aberta ? (
+        <button type="button" className="text-[12px] font-semibold underline" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirOportunidade?.(aberta.id)}>
+          No pipeline: {rotuloEtapa(aberta.etapa)}{aberta.dono?.name ? ` · ${nomeCurto(aberta.dono.name)}` : " · sem dono"}
+        </button>
+      ) : (
+        <RecompraBotao clienteId={c.cliente_id} clienteNome={c.nome} viagemId={c.ultima_viagem.id} sugestao={c.proximo_destino} compacto onCriada={onCriada} />
+      )}
     </li>
   );
 }
 
-export default function RecompraPage({ onAbrirCliente }: { onAbrirCliente: (id: string) => void }) {
+export default function RecompraPage({ onAbrirCliente, onAbrirOportunidade }: { onAbrirCliente: (id: string) => void; onAbrirOportunidade?: (id: string) => void }) {
   const [lista, setLista] = useState<CandidatoRecompra[] | null>(null);
+  const [abertas, setAbertas] = useState<Map<string, Oportunidade>>(new Map());
   const [erro, setErro] = useState<string | null>(null);
 
   const carregar = useCallback(() => {
-    candidatosRecompra().then((l) => { setLista(l); setErro(null); })
+    candidatosRecompra().then(async (l) => {
+      setLista(l); setErro(null);
+      setAbertas(await abertasPorCliente(l.map((x) => x.cliente_id)).catch(() => new Map()));
+    })
       .catch((e) => { setErro(e instanceof Error ? e.message : "Não consegui carregar."); setLista([]); });
   }, []);
   useEffect(() => { carregar(); }, [carregar]);
@@ -69,7 +86,7 @@ export default function RecompraPage({ onAbrirCliente }: { onAbrirCliente: (id: 
         <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Recompra</h1>
         <p className="text-[13px]" style={{ color: "var(--ink3)" }}>
           Quem voltou de viagem há 30 dias a pouco mais de um ano e ainda não tem a próxima marcada.
-          Criar a oportunidade manda o cliente para o Comercial.
+          O cliente fica com o Relacionamento: criar a oportunidade põe o cartão no Pipeline de vendas do Rel.
         </p>
       </div>
 
@@ -84,7 +101,7 @@ export default function RecompraPage({ onAbrirCliente }: { onAbrirCliente: (id: 
         ) : prontos.length === 0 ? (
           <Vazio titulo="Ninguém na janela agora" texto="Aparecem aqui os clientes 30 dias depois de voltar de viagem." />
         ) : (
-          <ul>{prontos.map((c) => <Linha key={c.cliente_id} c={c} onAbrirCliente={onAbrirCliente} onCriada={carregar} />)}</ul>
+          <ul>{prontos.map((c) => <Linha key={c.cliente_id} c={c} aberta={abertas.get(c.cliente_id)} onAbrirCliente={onAbrirCliente} onAbrirOportunidade={onAbrirOportunidade} onCriada={carregar} />)}</ul>
         )}
       </section>
 
@@ -96,7 +113,7 @@ export default function RecompraPage({ onAbrirCliente }: { onAbrirCliente: (id: 
           <p className="px-4 pb-2 text-[12px]" style={{ color: "var(--ink3)" }}>
             Deram nota de 0 a 6. Vale uma conversa pra entender o que deu errado antes de qualquer oferta.
           </p>
-          <ul>{cuidar.map((c) => <Linha key={c.cliente_id} c={c} onAbrirCliente={onAbrirCliente} onCriada={carregar} />)}</ul>
+          <ul>{cuidar.map((c) => <Linha key={c.cliente_id} c={c} aberta={abertas.get(c.cliente_id)} onAbrirCliente={onAbrirCliente} onAbrirOportunidade={onAbrirOportunidade} onCriada={carregar} />)}</ul>
         </section>
       )}
     </div>
