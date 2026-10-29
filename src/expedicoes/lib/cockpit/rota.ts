@@ -21,7 +21,7 @@ export const ABAS_COCKPIT: readonly { id: AbaCockpit; rotulo: string }[] = [
   { id: "logistica", rotulo: "Logística" },
   { id: "financeiro", rotulo: "Financeiro" },
   { id: "arquivos", rotulo: "Arquivos" },
-  { id: "portal", rotulo: "Portal" },
+  { id: "portal", rotulo: "ExpedAmigo" },
 ];
 
 /** Seções que dá pra abrir direto (?secao=…). */

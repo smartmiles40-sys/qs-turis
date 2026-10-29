@@ -5,7 +5,11 @@
 // Seções: liberar para todos (admin), voucher da hospedagem, extensões, roteiro
 // dia a dia (fotos + passeios opcionais), voos de grupo, passeios e ingressos,
 // informações do destino e avisos. Perfil só leitura vê só o aviso (como no antigo).
-// Cockpit (redesign 29/10, spec §3.2 Portal): no topo, a lista de status do que o
+// 29/10 (Bruno): a aba se chama ExpedAmigo e virou ETAPAS (Acesso → Roteiro →
+// Voos → Hospedagem → Passeios → Informações → Avisos → Líder), uma por vez, com
+// "Copiar de outra expedição" (portal/copiar.ts). O formato dos dados é o
+// contrato da futura API do portal: docs/API-EXPEDAMIGO.md.
+// Antes (redesign 29/10, spec §3.2 Portal): no topo, a lista de status do que o
 // passageiro/líder enxerga (acesso, roteiro, documentos do líder, voucher,
 // extensões) com o botão que leva ao editor. "Liberar para todos" (admin) fica no
 // topo, e os Documentos do líder (antes no Roteiro Líder) moram aqui.
@@ -23,6 +27,7 @@ import { Secao, type CampoPortal } from "../../portal/Secao";
 import { VoucherAnexo, VoucherHospedagem } from "../../portal/Anexos";
 import { RoteiroInline, type Par } from "../../portal/RoteiroInline";
 import { LiberarTodos } from "../../portal/LiberarTodos";
+import { CopiarDeOutra } from "../../portal/CopiarDeOutra";
 import DocsLider from "../../roteiro-lider/DocsLider";
 import { MARCADOR_DOC_LIDER } from "../../lib/constants";
 import { Btn } from "@/components/ui";
@@ -33,6 +38,8 @@ export default function AbaPortal({ exp, cockpit }: PropsAba) {
   const [docsLider, setDocsLider] = useState<number | null>(null);
   const [admin, setAdmin] = useState(false);
   const [links, setLinks] = useState<Record<string, string>>({});
+  const [etapa, setEtapa] = useState<IdEtapa | null>(null);
+  const [copiando, setCopiando] = useState(false);
 
   const carregar = useCallback(async () => {
     try { setC(await carregarPortal(exp.id)); }
@@ -46,13 +53,9 @@ export default function AbaPortal({ exp, cockpit }: PropsAba) {
       .is("passageiro_id", null).eq("descricao", MARCADOR_DOC_LIDER)
       .then(({ count }) => setDocsLider(count ?? 0));
   }, [exp.id, c]);
-  // ?secao=docs-lider → rola até os documentos do líder.
+  // ?secao=docs-lider → abre direto a etapa dos documentos do líder.
   const secao = cockpit?.secao ?? null;
-  useEffect(() => {
-    if (secao !== "docs-lider" || !c) return;
-    const t = window.setTimeout(() => irPara("docs-lider"), 80);
-    return () => window.clearTimeout(t);
-  }, [secao, c]);
+  useEffect(() => { if (secao === "docs-lider") setEtapa("lider"); }, [secao]);
 
   // Miniaturas (fotos do roteiro e dos passeios opcionais).
   useEffect(() => {
@@ -121,51 +124,81 @@ export default function AbaPortal({ exp, cockpit }: PropsAba) {
     ...(temExtensoes ? [{ key: "extensao_id", label: "Faz parte de", type: "select" as const, full: true, opcoesPares: paresExtensao }] : []),
   ];
 
-  // ── Status do portal (topo) ──
+  // ── Etapas (Bruno, 29/10: "preenchimento mais fácil") ──
+  // Em vez de uma página comprida, o ExpedAmigo vira uma sequência de etapas:
+  // cada uma mostra o que já está pronto e abre só o bloco dela. "Próxima" leva
+  // à seguinte; o topo mostra o que falta.
   const pax = (cockpit?.resumo?.rooming.passageiros ?? []).filter((p) => p.status_reserva !== "Cancelado");
   const liberados = pax.filter((p) => p.liberado_expedamigo).length;
   const totalDias = cockpit?.info.totalDias ?? 0;
   const extComVoucher = c.extensoes.filter((e) => e.hospedagem_voucher_arquivo_id).length;
-  const status: { id: string; rotulo: string; detalhe: string; tom: "ok" | "warn" | "info"; tag: string; alvo: string; cta: string }[] = [
-    { id: "acesso", rotulo: "Acesso dos passageiros", alvo: "acesso", cta: admin ? "Liberar" : "Ver",
-      detalhe: cockpit?.resumo ? `${liberados} de ${pax.length} com o ExpedAmigo liberado` : "carregando…",
-      ...(pax.length && liberados === pax.length ? { tom: "ok" as const, tag: "OK" } : { tom: "warn" as const, tag: "Pendente" }) },
-    { id: "roteiro", rotulo: "Roteiro dia a dia", alvo: "roteiro", cta: "Editar",
-      detalhe: `${c.roteiro.length} dia${c.roteiro.length === 1 ? "" : "s"} cadastrado${c.roteiro.length === 1 ? "" : "s"}${totalDias ? ` de ${totalDias}` : ""}`,
-      ...(c.roteiro.length === 0 ? { tom: "warn" as const, tag: "Vazio" } : totalDias && c.roteiro.length < totalDias ? { tom: "warn" as const, tag: "Incompleto" } : { tom: "ok" as const, tag: "OK" }) },
-    ...(exp.tipo === "pacote" ? [] : [{ id: "docs-lider", rotulo: "Documentos do líder", alvo: "docs-lider", cta: "Anexar",
-      detalhe: docsLider == null ? "carregando…" : `${docsLider} documento${docsLider === 1 ? "" : "s"} na Área do Líder`,
-      ...(docsLider ? { tom: "ok" as const, tag: "OK" } : { tom: "warn" as const, tag: "Vazio" }) }]),
-    { id: "voucher", rotulo: "Voucher da hospedagem", alvo: "voucher", cta: "Anexar",
-      detalhe: c.hospedagemVoucherArquivoId ? "anexado" : "nenhum voucher anexado",
-      ...(c.hospedagemVoucherArquivoId ? { tom: "ok" as const, tag: "OK" } : { tom: "warn" as const, tag: "Pendente" }) },
-    { id: "extensoes", rotulo: "Extensões", alvo: "extensoes", cta: "Editar",
-      detalhe: c.extensoes.length ? `${c.extensoes.length} extens${c.extensoes.length === 1 ? "ão" : "ões"} · ${extComVoucher} com voucher` : "nenhuma extensão",
-      ...(c.extensoes.length === 0 ? { tom: "info" as const, tag: "Não tem" } : extComVoucher === c.extensoes.length ? { tom: "ok" as const, tag: "OK" } : { tom: "warn" as const, tag: "Falta voucher" }) },
+  const conta = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
+  const etapas: Etapa[] = [
+    { id: "acesso", rotulo: "Acesso", detalhe: cockpit?.resumo ? `${liberados} de ${pax.length} passageiros liberados` : "carregando…",
+      tom: pax.length && liberados === pax.length ? "ok" : "warn" },
+    { id: "roteiro", rotulo: "Roteiro", detalhe: `${conta(c.roteiro.length, "dia", "dias")}${totalDias ? ` de ${totalDias}` : ""}`,
+      tom: c.roteiro.length === 0 || (totalDias && c.roteiro.length < totalDias) ? "warn" : "ok" },
+    { id: "voos", rotulo: "Voos", detalhe: conta(voosGrupo.length, "voo de grupo", "voos de grupo"), tom: voosGrupo.length ? "ok" : "warn" },
+    { id: "hospedagem", rotulo: "Hospedagem", detalhe: `${c.hospedagemVoucherArquivoId ? "voucher anexado" : "sem voucher"}${c.extensoes.length ? ` · ${conta(c.extensoes.length, "extensão", "extensões")}` : ""}`,
+      tom: c.hospedagemVoucherArquivoId && extComVoucher === c.extensoes.length ? "ok" : "warn" },
+    { id: "passeios", rotulo: "Passeios", detalhe: c.passeios.length ? conta(c.passeios.length, "passeio", "passeios") : "nenhum (opcional)", tom: c.passeios.length ? "ok" : "info" },
+    { id: "info", rotulo: "Informações", detalhe: conta(c.info.length, "bloco", "blocos"), tom: c.info.length ? "ok" : "warn" },
+    { id: "avisos", rotulo: "Avisos", detalhe: conta(c.avisos.length, "aviso", "avisos"), tom: c.avisos.length ? "ok" : "warn" },
+    ...(exp.tipo === "pacote" ? [] : [{ id: "lider" as const, rotulo: "Líder", detalhe: docsLider == null ? "carregando…" : conta(docsLider, "documento", "documentos"),
+      tom: (docsLider ? "ok" : "warn") as Etapa["tom"] }]),
   ];
+  const faltam = etapas.filter((e) => e.tom === "warn").length;
+  const atual: IdEtapa = etapa ?? etapas.find((e) => e.tom === "warn")?.id ?? "acesso";
+  const pos = etapas.findIndex((e) => e.id === atual);
+  const ir = (id: IdEtapa) => { setEtapa(id); document.getElementById("ck-portal-topo")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
 
   return (
-    <div className="space-y-4">
-      {cabecalho}
+    <div className="space-y-4" id="ck-portal-topo">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        {cabecalho}
+        <Btn onClick={() => setCopiando(true)} title="Trazer Informações, Avisos, Passeios, Extensões ou Roteiro de outra edição">Copiar de outra expedição</Btn>
+      </div>
 
-      <section className="ck-card" aria-label="Status do portal">
-        <h3 className="ck-h3">O que o viajante e o líder enxergam</h3>
-        {status.map((st) => (
-          <div key={st.id} className="ck-lin">
-            <span className={`ck-tag ck-tag--${st.tom}`}>{st.tag}</span>
-            <div className="ck-lin__tx"><span className="ck-lin__t">{st.rotulo}</span><span className="ck-lin__s">{st.detalhe}</span></div>
-            <Btn size="sm" onClick={() => irPara(st.alvo)}>{st.cta}</Btn>
-          </div>
+      <nav className="ea-etapas" aria-label="Etapas do ExpedAmigo">
+        {etapas.map((e, n) => (
+          <button key={e.id} type="button" className={`ea-etapa${e.id === atual ? " ea-etapa--on" : ""}`} aria-current={e.id === atual ? "step" : undefined} onClick={() => ir(e.id)}>
+            <span className={`ea-etapa__n ea-etapa__n--${e.tom}`}>{e.tom === "ok" ? "✓" : n + 1}</span>
+            <span className="ea-etapa__tx"><span className="ea-etapa__t">{e.rotulo}</span><span className="ea-etapa__d">{e.detalhe}</span></span>
+          </button>
         ))}
-      </section>
+      </nav>
+      <p className="ck-nota" style={{ margin: 0 }}>{faltam ? `Falta${faltam > 1 ? "m" : ""} ${faltam} etapa${faltam > 1 ? "s" : ""}. ` : "Tudo preenchido. "}
+        Dica: Informações e Avisos quase não mudam de uma edição pra outra — use "Copiar de outra expedição".</p>
 
+      {atual === "acesso" && <>
       <div id="ck-portal-acesso">
         {admin ? <LiberarTodos expedicaoId={exp.id} />
           : <p className="ck-nota" style={{ margin: 0 }}>Liberar o ExpedAmigo para todos é só para admin.</p>}
       </div>
-
-      {exp.tipo !== "pacote" && <div id="ck-portal-docs-lider"><DocsLider expedicaoId={exp.id} /></div>}
-
+      </>}
+      {atual === "roteiro" && <>
+      <div id="ck-portal-roteiro" />
+      <RoteiroInline expedicaoId={exp.id} c={c} links={links} paresExtensao={paresExtensao} segmentoLabel={segmentoLabel} onMudou={carregar} />
+      </>}
+      {atual === "voos" && <>
+      <Secao tabela="expedicao_voos" titulo="Voos de grupo" icone="aviao" expedicaoId={exp.id} onMudou={carregar}
+        descricao="Voos da expedição (ida, volta, internos), em ordem cronológica."
+        itens={voosGrupo} campos={camposVoo}
+        anexos={(r) => [r.arquivo_id]}
+        resumo={(r) => <>
+          <div className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>
+            {r.trecho}: {r.origem ?? "—"} → {r.destino ?? "—"}{r.arquivo_id && ok("voucher")}
+            {r.grupo_id && nomeGrupo.get(r.grupo_id) && <span className="ml-1.5"><Selo tom="aviso">{nomeGrupo.get(r.grupo_id)}</Selo></span>}
+            {badgeSeg(r.extensao_id, r.apenas_sem_extensao)}
+          </div>
+          {linha2([r.companhia, r.numero_voo, r.partida].filter(Boolean).join(" · ") || "sem detalhes")}
+        </>}
+        rodape={voosIndividuais > 0 ? <p className="mt-2 text-[11.5px]" style={{ color: "var(--ink3)" }}>
+          + {voosIndividuais} voo(s) individual(is) de passageiros — esses ficam no perfil de cada passageiro (quem tem voo próprio vê só os dele no portal).</p> : undefined}
+        extra={(item) => item ? <VoucherAnexo tabela="expedicao_voos" expedicaoId={exp.id} itemId={item.id}
+          arquivoId={c.voos.find((v) => v.id === item.id)?.arquivo_id ?? null} arquivo={arq(c.voos.find((v) => v.id === item.id)?.arquivo_id)} onMudou={carregar} /> : salveAntes("o voo")} />
+      </>}
+      {atual === "hospedagem" && <>
       <div id="ck-portal-voucher" />
       <VoucherHospedagem expedicaoId={exp.id} arquivoId={c.hospedagemVoucherArquivoId} arquivo={arq(c.hospedagemVoucherArquivoId)} onMudou={carregar} />
 
@@ -188,27 +221,8 @@ export default function AbaPortal({ exp, cockpit }: PropsAba) {
           return <VoucherAnexo tabela="extensoes" expedicaoId={exp.id} itemId={item.id} rotulo="Voucher da hospedagem" campo="hospedagem_voucher_arquivo_id"
             arquivoId={atual?.hospedagem_voucher_arquivo_id ?? null} arquivo={arq(atual?.hospedagem_voucher_arquivo_id)} onMudou={carregar} />;
         }} />
-
-      <div id="ck-portal-roteiro" />
-      <RoteiroInline expedicaoId={exp.id} c={c} links={links} paresExtensao={paresExtensao} segmentoLabel={segmentoLabel} onMudou={carregar} />
-
-      <Secao tabela="expedicao_voos" titulo="Voos de grupo" icone="aviao" expedicaoId={exp.id} onMudou={carregar}
-        descricao="Voos da expedição (ida, volta, internos), em ordem cronológica."
-        itens={voosGrupo} campos={camposVoo}
-        anexos={(r) => [r.arquivo_id]}
-        resumo={(r) => <>
-          <div className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>
-            {r.trecho}: {r.origem ?? "—"} → {r.destino ?? "—"}{r.arquivo_id && ok("voucher")}
-            {r.grupo_id && nomeGrupo.get(r.grupo_id) && <span className="ml-1.5"><Selo tom="aviso">{nomeGrupo.get(r.grupo_id)}</Selo></span>}
-            {badgeSeg(r.extensao_id, r.apenas_sem_extensao)}
-          </div>
-          {linha2([r.companhia, r.numero_voo, r.partida].filter(Boolean).join(" · ") || "sem detalhes")}
-        </>}
-        rodape={voosIndividuais > 0 ? <p className="mt-2 text-[11.5px]" style={{ color: "var(--ink3)" }}>
-          + {voosIndividuais} voo(s) individual(is) de passageiros — esses ficam no perfil de cada passageiro (quem tem voo próprio vê só os dele no portal).</p> : undefined}
-        extra={(item) => item ? <VoucherAnexo tabela="expedicao_voos" expedicaoId={exp.id} itemId={item.id}
-          arquivoId={c.voos.find((v) => v.id === item.id)?.arquivo_id ?? null} arquivo={arq(c.voos.find((v) => v.id === item.id)?.arquivo_id)} onMudou={carregar} /> : salveAntes("o voo")} />
-
+      </>}
+      {atual === "passeios" && <>
       <Secao tabela="expedicao_passeios" titulo="Passeios e ingressos" icone="ticket" expedicaoId={exp.id} onMudou={carregar}
         descricao="Atividades, passeios e entradas."
         itens={c.passeios}
@@ -226,7 +240,8 @@ export default function AbaPortal({ exp, cockpit }: PropsAba) {
         </>}
         extra={(item) => item ? <VoucherAnexo tabela="expedicao_passeios" expedicaoId={exp.id} itemId={item.id}
           arquivoId={c.passeios.find((p) => p.id === item.id)?.arquivo_id ?? null} arquivo={arq(c.passeios.find((p) => p.id === item.id)?.arquivo_id)} onMudou={carregar} /> : salveAntes("o passeio")} />
-
+      </>}
+      {atual === "info" && <>
       <Secao tabela="expedicao_info" titulo="Informações do destino" icone="info" expedicaoId={exp.id} onMudou={carregar}
         descricao="Blocos de dicas: moeda, clima, tomadas, vistos…"
         itens={c.info}
@@ -249,7 +264,8 @@ export default function AbaPortal({ exp, cockpit }: PropsAba) {
               arquivoId={b?.arquivo_id_2 ?? null} arquivo={arq(b?.arquivo_id_2)} labelCampo="arquivo_label_2" labelValor={b?.arquivo_label_2 ?? null} onMudou={carregar} />
           </>;
         }} />
-
+      </>}
+      {atual === "avisos" && <>
       <Secao tabela="expedicao_avisos" titulo="Avisos e boas práticas" icone="megafone" expedicaoId={exp.id} onMudou={carregar}
         descricao="Substitui o PDF: avisos, boas práticas e dicas da viagem."
         itens={c.avisos}
@@ -262,11 +278,20 @@ export default function AbaPortal({ exp, cockpit }: PropsAba) {
           <div className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}><span className="mr-1.5"><Selo>{r.tipo ?? "Aviso"}</Selo></span>{r.titulo}</div>
           {linha2(r.conteudo)}
         </>} />
+      </>}
+      {atual === "lider" && <>
+      {exp.tipo !== "pacote" && <div id="ck-portal-docs-lider"><DocsLider expedicaoId={exp.id} /></div>}
+      </>}
+
+      <div className="flex justify-between gap-2">
+        {pos > 0 ? <Btn onClick={() => ir(etapas[pos - 1].id)}>← {etapas[pos - 1].rotulo}</Btn> : <span />}
+        {pos < etapas.length - 1 && <Btn variant="primary" onClick={() => ir(etapas[pos + 1].id)}>Próxima: {etapas[pos + 1].rotulo} →</Btn>}
+      </div>
+
+      <CopiarDeOutra aberto={copiando} onFechar={() => setCopiando(false)} destino={exp} temRoteiro={c.roteiro.length > 0} onCopiou={carregar} />
     </div>
   );
 }
 
-/** Rola até um bloco do editor do portal (lista de status do topo). */
-function irPara(alvo: string) {
-  document.getElementById(`ck-portal-${alvo}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-}
+type IdEtapa = "acesso" | "roteiro" | "voos" | "hospedagem" | "passeios" | "info" | "avisos" | "lider";
+interface Etapa { id: IdEtapa; rotulo: string; detalhe: string; tom: "ok" | "warn" | "info" }
