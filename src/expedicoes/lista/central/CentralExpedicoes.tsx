@@ -132,7 +132,7 @@ export default function CentralExpedicoes() {
 
   const filtradas = useMemo(() => {
     const q = busca.trim().toLowerCase();
-    const ano = hoje.slice(0, 4);
+    const anoAtual = hoje.slice(0, 4);
     return linhas.filter((l) => {
       const e = l.e;
       if (q && !`${e.codigo} ${e.nome} ${e.destino}`.toLowerCase().includes(q) && !semAcento(paxPorExp.get(e.id) ?? "").includes(semAcento(q))) return false;
@@ -140,7 +140,7 @@ export default function CentralExpedicoes() {
       if (destino && e.destino !== destino) return false;
       if (respOp && e.responsavel_operacional_id !== respOp) return false;
       if (status && e.status !== status) return false;
-      if (periodo === "ano") return (e.data_embarque ?? "").startsWith(ano);
+      if (periodo === "ano") return (e.data_embarque ?? "").startsWith(anoAtual);
       if (periodo) { const d = l.inf.diasParaInicio; if (!e.data_embarque || d < 0 || d > Number(periodo)) return false; }
       return true;
     });

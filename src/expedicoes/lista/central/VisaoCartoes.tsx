@@ -45,32 +45,53 @@ export default function VisaoCartoes({ linhas, proximaId, abrir, acoes }: {
   acoes: AcoesDaLinha | null;
 }) {
   if (!linhas.length) return <div className="cx-sec cx-vazio">Nenhuma expedição com essa busca.</div>;
-  // Separadas por ano de embarque (2025, 2026, 2027, Futuras); dentro do ano, a ordem de sempre.
-  const porAno = new Map<GrupoAno, LinhaExp[]>();
-  for (const l of ordenar(linhas)) {
-    const g = grupoAno(l);
-    porAno.set(g, [...(porAno.get(g) ?? []), l]);
-  }
+  // Bruno, 29/10: "as que já foram precisam ir para Concluídas" e "aparecer
+  // todas, não só 2026". Em cima, as que vêm pela frente separadas por ano
+  // (2026, 2027, Futuras); embaixo, o bloco Concluídas (mais recente primeiro,
+  // também por ano: 2026, 2025, Anteriores); por último, as canceladas.
+  const ordenadas = ordenar(linhas);
+  const pelaFrente = ordenadas.filter((l) => !l.cancelada && l.fase !== "concluida");
+  const concluidas = ordenadas.filter((l) => !l.cancelada && l.fase === "concluida");
+  const canceladas = ordenadas.filter((l) => l.cancelada);
+  const cartoes = (ls: LinhaExp[]) => (
+    <ul className="cx-cards">
+      {ls.map((l) => <Cartao key={l.e.id} l={l} proxima={l.e.id === proximaId} abrir={abrir} acoes={acoes} />)}
+    </ul>
+  );
   return (
     <div className="cx-anos">
-      {ORDEM_ANOS.filter((g) => porAno.has(g)).map((g) => {
-        const ls = porAno.get(g)!;
-        const ativas = ls.filter((l) => !l.cancelada).length;
-        return (
-          <section key={g} className="cx-ano" aria-label={ROTULO_ANO[g]}>
-            <h2 className="cx-ano__h">
-              {ROTULO_ANO[g]}
-              <span className="cx-sec__n">{ativas}</span>
-              {ativas !== ls.length && <span className="cx-ano__c">+ {ls.length - ativas} cancelada{ls.length - ativas > 1 ? "s" : ""}</span>}
-            </h2>
-            <ul className="cx-cards">
-              {ls.map((l) => <Cartao key={l.e.id} l={l} proxima={l.e.id === proximaId} abrir={abrir} acoes={acoes} />)}
-            </ul>
-          </section>
-        );
-      })}
+      {porAno(pelaFrente, ORDEM_ANOS).map(([g, ls]) => (
+        <section key={g} className="cx-ano" aria-label={ROTULO_ANO[g]}>
+          <h2 className="cx-ano__h">{ROTULO_ANO[g]}<span className="cx-sec__n">{ls.length}</span></h2>
+          {cartoes(ls)}
+        </section>
+      ))}
+      {concluidas.length > 0 && (
+        <section className="cx-ano cx-ano--fim" aria-label="Expedições concluídas">
+          <h2 className="cx-ano__h">Concluídas<span className="cx-sec__n">{concluidas.length}</span></h2>
+          {porAno(concluidas, ["futuras", "2027", "2026", "2025", "anteriores", "sem_data"]).map(([g, ls]) => (
+            <div key={g} className="cx-ano">
+              <h3 className="cx-ano__sub">{ROTULO_ANO[g]} · {ls.length}</h3>
+              {cartoes(ls)}
+            </div>
+          ))}
+        </section>
+      )}
+      {canceladas.length > 0 && (
+        <section className="cx-ano cx-ano--fim" aria-label="Expedições canceladas">
+          <h2 className="cx-ano__h">Canceladas<span className="cx-sec__n">{canceladas.length}</span></h2>
+          {cartoes(canceladas)}
+        </section>
+      )}
     </div>
   );
+}
+
+/** Agrupa por ano de embarque, na ordem pedida, pulando anos vazios. */
+function porAno(ls: LinhaExp[], ordem: GrupoAno[]): [GrupoAno, LinhaExp[]][] {
+  const m = new Map<GrupoAno, LinhaExp[]>();
+  for (const l of ls) m.set(grupoAno(l), [...(m.get(grupoAno(l)) ?? []), l]);
+  return ordem.filter((g) => m.has(g)).map((g) => [g, m.get(g)!]);
 }
 
 function Cartao({ l, proxima, abrir, acoes }: { l: LinhaExp; proxima: boolean; abrir: (id: string) => void; acoes: AcoesDaLinha | null }) {

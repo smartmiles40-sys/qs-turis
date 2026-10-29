@@ -132,3 +132,5 @@ html.dark .cx-sel select { background: transparent; }
   padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .cx-ano__c { font-size: 12px; font-weight: 500; color: var(--muted); }
 .cx-anos__ir { display: flex; gap: 6px; flex-wrap: wrap; }
+.cx-ano--fim { padding-top: 6px; }
+.cx-ano__sub { margin: 4px 0 0; font-size: 13px; font-weight: 600; color: var(--muted); }
