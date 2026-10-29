@@ -46,6 +46,21 @@ export function porInicio(a: LinhaExp, b: LinhaExp): number {
     || (a.grupo ?? "").localeCompare(b.grupo ?? "", undefined, { numeric: true });
 }
 
+/** Separação por ano (Bruno, 29/10: "2025, 26, 27 e futuras"), pela data de
+    embarque. Antes de 2025 cai em "Anteriores"; depois de 2027, em "Futuras". */
+export type GrupoAno = "anteriores" | "2025" | "2026" | "2027" | "futuras" | "sem_data";
+export const ORDEM_ANOS: GrupoAno[] = ["2025", "2026", "2027", "futuras", "anteriores", "sem_data"];
+export const ROTULO_ANO: Record<GrupoAno, string> = {
+  anteriores: "Anteriores", "2025": "2025", "2026": "2026", "2027": "2027", futuras: "Futuras", sem_data: "Sem data",
+};
+export function grupoAno(l: LinhaExp): GrupoAno {
+  const a = Number(l.e.data_embarque?.slice(0, 4));
+  if (!a) return "sem_data";
+  if (a < 2025) return "anteriores";
+  if (a > 2027) return "futuras";
+  return String(a) as GrupoAno;
+}
+
 /** Concluída há no máximo 12 meses (seção e indicador "Concluídas"). */
 export function concluidaRecente(l: LinhaExp): boolean {
   return l.fase === "concluida" && l.inf.diasParaFim >= -365;

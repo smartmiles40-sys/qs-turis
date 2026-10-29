@@ -11,7 +11,7 @@
 import type { KeyboardEvent as KE } from "react";
 import { META_FASE, ORDEM_FASES } from "../../lib/fase.ts";
 import { MenuLinha, type AcoesDaLinha } from "./menu";
-import { periodo, porInicio, type LinhaExp } from "./linhas";
+import { ORDEM_ANOS, ROTULO_ANO, grupoAno, periodo, porInicio, type GrupoAno, type LinhaExp } from "./linhas";
 
 function ordenar(linhas: LinhaExp[]): LinhaExp[] {
   const rank = (l: LinhaExp) => (l.cancelada ? 99 : ORDEM_FASES.indexOf(l.fase));
@@ -45,10 +45,31 @@ export default function VisaoCartoes({ linhas, proximaId, abrir, acoes }: {
   acoes: AcoesDaLinha | null;
 }) {
   if (!linhas.length) return <div className="cx-sec cx-vazio">Nenhuma expedição com essa busca.</div>;
+  // Separadas por ano de embarque (2025, 2026, 2027, Futuras); dentro do ano, a ordem de sempre.
+  const porAno = new Map<GrupoAno, LinhaExp[]>();
+  for (const l of ordenar(linhas)) {
+    const g = grupoAno(l);
+    porAno.set(g, [...(porAno.get(g) ?? []), l]);
+  }
   return (
-    <ul className="cx-cards" aria-label="Expedições">
-      {ordenar(linhas).map((l) => <Cartao key={l.e.id} l={l} proxima={l.e.id === proximaId} abrir={abrir} acoes={acoes} />)}
-    </ul>
+    <div className="cx-anos">
+      {ORDEM_ANOS.filter((g) => porAno.has(g)).map((g) => {
+        const ls = porAno.get(g)!;
+        const ativas = ls.filter((l) => !l.cancelada).length;
+        return (
+          <section key={g} className="cx-ano" aria-label={ROTULO_ANO[g]}>
+            <h2 className="cx-ano__h">
+              {ROTULO_ANO[g]}
+              <span className="cx-sec__n">{ativas}</span>
+              {ativas !== ls.length && <span className="cx-ano__c">+ {ls.length - ativas} cancelada{ls.length - ativas > 1 ? "s" : ""}</span>}
+            </h2>
+            <ul className="cx-cards">
+              {ls.map((l) => <Cartao key={l.e.id} l={l} proxima={l.e.id === proximaId} abrir={abrir} acoes={acoes} />)}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
   );
 }
 

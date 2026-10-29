@@ -124,3 +124,11 @@ html.dark .cx-sel select { background: transparent; }
 .cx-card .cx-chip { align-self: flex-start; }
 .cx-card__oc { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
 .cx-card__ocl { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
+
+/* ── Por ano (29/10): 2025 · 2026 · 2027 · Futuras ─────────────────────────── */
+.cx-anos { display: flex; flex-direction: column; gap: 22px; }
+.cx-ano { display: flex; flex-direction: column; gap: 10px; scroll-margin-top: 12px; }
+.cx-ano__h { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 17px; font-weight: 700; color: var(--text);
+  padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.cx-ano__c { font-size: 12px; font-weight: 500; color: var(--muted); }
+.cx-anos__ir { display: flex; gap: 6px; flex-wrap: wrap; }

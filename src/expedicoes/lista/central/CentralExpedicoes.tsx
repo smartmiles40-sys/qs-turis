@@ -33,7 +33,7 @@ import { STATUS_EXPEDICAO } from "../../lib/constants";
 import { META_FASE, dataSP } from "../../lib/fase.ts";
 import type { ExpedicaoComAgregados, StatusExpedicao } from "../../lib/database";
 import { EditarExpedicao, NovaExpedicao, salvarCampoExpedicao } from "../FormExpedicao";
-import { ORDENACAO_PADRAO, csvDasLinhas, lerOrdenacao, montarLinha, porInicio, type Ordenacao } from "./linhas";
+import { ORDEM_ANOS, ORDENACAO_PADRAO, ROTULO_ANO, csvDasLinhas, grupoAno, lerOrdenacao, montarLinha, porInicio, type Ordenacao } from "./linhas";
 import { type AcoesDaLinha } from "./menu";
 import VisaoCartoes from "./VisaoCartoes";
 import VisaoTabela from "./VisaoTabela";
@@ -49,6 +49,22 @@ const DIAS_SEMANA = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta"
 
 const lerVisao = (): Visao => (lerParamDoHash("visao") === "tabela" ? "tabela" : "cartoes");
 
+const semAcento = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/** expedicao_id → nomes dos passageiros (minúsculos, sem acento), paginado (teto 1000 do PostgREST). */
+async function nomesDosPassageiros(): Promise<Map<string, string>> {
+  const m = new Map<string, string>();
+  for (let de = 0; ; de += 1000) {
+    const { data, error } = await supabase.from("passageiros").select("id, expedicao_id, nome_completo")
+      .order("id").range(de, de + 999);
+    if (error) throw new Error(traduzirErro(error.message));
+    for (const p of (data ?? []) as { expedicao_id: string; nome_completo: string | null }[]) {
+      if (p.nome_completo) m.set(p.expedicao_id, `${m.get(p.expedicao_id) ?? ""} ${semAcento(p.nome_completo)}`);
+    }
+    if (!data || data.length < 1000) return m;
+  }
+}
+
 export default function CentralExpedicoes() {
   const { somenteLeitura, usuarios, ir, avisar } = useExp();
   const [lista, setLista] = useState<ExpedicaoComAgregados[] | null>(null);
@@ -59,6 +75,10 @@ export default function CentralExpedicoes() {
   const [respOp, setRespOp] = useState(() => lerParamDoHash("resp") ?? "");
   const [status, setStatus] = useState(() => lerParamDoHash("status") ?? "");
   const [periodo, setPeriodo] = useState(() => lerParamDoHash("periodo") ?? "");
+  const [ano, setAno] = useState(() => lerParamDoHash("ano") ?? "");
+  // Cadastro de clientes (29/10): nomes dos passageiros de cada expedição, pra
+  // busca achar a expedição pelo nome do cliente.
+  const [paxPorExp, setPaxPorExp] = useState<Map<string, string>>(() => new Map());
   const [ordenacao, setOrdenacao] = useState<Ordenacao>(() => lerOrdenacao(lerParamDoHash("ord")));
   const [nova, setNova] = useState(false);
   const [editando, setEditando] = useState<ExpedicaoComAgregados | null>(null);
@@ -74,6 +94,7 @@ export default function CentralExpedicoes() {
   useEffect(() => { gravarParamNoHash("resp", respOp || null); }, [respOp]);
   useEffect(() => { gravarParamNoHash("status", status || null); }, [status]);
   useEffect(() => { gravarParamNoHash("periodo", periodo || null); }, [periodo]);
+  useEffect(() => { gravarParamNoHash("ano", ano || null); }, [ano]);
   useEffect(() => {
     const igual = ordenacao.col === ORDENACAO_PADRAO.col && ordenacao.dir === ORDENACAO_PADRAO.dir;
     gravarParamNoHash("ord", igual ? null : `${ordenacao.col}:${ordenacao.dir}`);
@@ -83,12 +104,14 @@ export default function CentralExpedicoes() {
   const carregar = useCallback(async (fresco = true) => {
     if (fresco) esquecer("expedicoes");
     try {
-      const l = await agregarExpedicoes(await listarExpedicoes("expedicao"));
-      setLista(l); setErro(null);
+      const [l, pax] = await Promise.all([agregarExpedicoes(await listarExpedicoes("expedicao")), nomesDosPassageiros()]);
+      setLista(l); setPaxPorExp(pax); setErro(null);
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar"); }
   }, []);
   useEffect(() => { void carregar(false); }, [carregar]);
-  useAoVivo([{ tabela: "expedicoes" }], carregar, 300);
+  // Operacional criou/editou expedição ou mexeu em passageiro (vagas, confirmados,
+  // nome do cliente) → a Central recarrega sozinha, em qualquer tela aberta.
+  useAoVivo([{ tabela: "expedicoes" }, { tabela: "passageiros" }], carregar, 300);
 
   // Atalho "n" = nova (igual à lista antiga) e "/" = busca.
   useEffect(() => {
@@ -112,7 +135,8 @@ export default function CentralExpedicoes() {
     const ano = hoje.slice(0, 4);
     return linhas.filter((l) => {
       const e = l.e;
-      if (q && !`${e.codigo} ${e.nome} ${e.destino}`.toLowerCase().includes(q)) return false;
+      if (q && !`${e.codigo} ${e.nome} ${e.destino}`.toLowerCase().includes(q) && !semAcento(paxPorExp.get(e.id) ?? "").includes(semAcento(q))) return false;
+      if (ano && grupoAno(l) !== ano) return false;
       if (destino && e.destino !== destino) return false;
       if (respOp && e.responsavel_operacional_id !== respOp) return false;
       if (status && e.status !== status) return false;
@@ -120,8 +144,9 @@ export default function CentralExpedicoes() {
       if (periodo) { const d = l.inf.diasParaInicio; if (!e.data_embarque || d < 0 || d > Number(periodo)) return false; }
       return true;
     });
-  }, [linhas, busca, destino, respOp, status, periodo, hoje]);
-  const filtrosAtivos = [busca.trim(), destino, respOp, status, periodo].filter(Boolean).length;
+  }, [linhas, busca, destino, respOp, status, periodo, ano, hoje, paxPorExp]);
+  const filtrosAtivos = [busca.trim(), destino, respOp, status, periodo, ano].filter(Boolean).length;
+  const anosComExp = useMemo(() => new Set(linhas.map(grupoAno)), [linhas]);
 
   const ativas = filtradas.filter((l) => !l.cancelada);
 
@@ -189,8 +214,10 @@ export default function CentralExpedicoes() {
           <section className="cx-bar" aria-label="Controles">
             <Segmented label="Visualização" options={VISOES} value={visao} onChange={setVisao} />
             <div className="cx-bar__f">
-              <SearchInput id="cx-busca" placeholder="Buscar expedição por nome, código ou destino  [/]" value={busca}
+              <SearchInput id="cx-busca" placeholder="Buscar por expedição, código, destino ou cliente  [/]" value={busca}
                 onChange={(e) => setBusca(e.target.value)} aria-label="Buscar expedição" autoFocus />
+              <Seletor rotulo="Ano" valor={ano} onMudar={setAno} todos="Todos"
+                opcoes={ORDEM_ANOS.filter((g) => anosComExp.has(g)).map((g) => ({ v: g, r: ROTULO_ANO[g] }))} />
               <Seletor rotulo="Destino" valor={destino} onMudar={setDestino} opcoes={destinos.map((x) => ({ v: x, r: x }))} />
               <Seletor rotulo="Resp. operacional" valor={respOp} onMudar={setRespOp}
                 opcoes={responsaveis.map((u) => ({ v: u.id, r: u.nome.split(" ")[0] }))} />
@@ -198,7 +225,7 @@ export default function CentralExpedicoes() {
               <Seletor rotulo="Período" valor={periodo} onMudar={setPeriodo} todos="Todas"
                 opcoes={PERIODOS.filter((p) => p.id).map((p) => ({ v: p.id, r: p.rotulo }))} />
               {filtrosAtivos > 0 && (
-                <Btn variant="ghost" onClick={() => { setBusca(""); setDestino(""); setRespOp(""); setStatus(""); setPeriodo(""); }}>Limpar</Btn>
+                <Btn variant="ghost" onClick={() => { setBusca(""); setDestino(""); setRespOp(""); setStatus(""); setPeriodo(""); setAno(""); }}>Limpar</Btn>
               )}
             </div>
           </section>
@@ -217,7 +244,7 @@ export default function CentralExpedicoes() {
         </>
       )}
 
-      <NovaExpedicao aberta={nova} tipo="expedicao" onFechar={() => setNova(false)} onCriada={(id) => { setNova(false); abrir(id); }} />
+      <NovaExpedicao aberta={nova} tipo="expedicao" onFechar={() => setNova(false)} onCriada={(id) => { setNova(false); void carregar(); abrir(id); }} />
       <EditarExpedicao exp={editando} onFechar={() => setEditando(null)} onSalva={() => { setEditando(null); void carregar(); }} />
       <Modal aberto={!!excluindo} titulo={excluindo ? `Excluir "${excluindo.nome}"?` : ""} onFechar={() => setExcluindo(null)} largura={440}
         rodape={<>
