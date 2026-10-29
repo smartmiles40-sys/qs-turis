@@ -27,7 +27,6 @@ import { useAprovacoesNovas } from "@/propostas/lib";
 import { TELAS_EXP, type TelaExp } from "@/expedicoes/contexto";
 import { grupoExpedicoes } from "@/expedicoes/menu";
 import { useContagensExp } from "@/expedicoes/useContagensExp";
-import { setoresDe } from "@/contexts/QsAuthContext";
 
 const ExpedicoesArea = lazy(() => import("@/expedicoes/ExpedicoesArea"));
 // 23/10 (cadastro único): a ficha do cliente é a MESMA do Relacionamento (0172/0173).
@@ -36,6 +35,8 @@ const ClienteFicha = lazy(() => import("@/rel/clientes/ClienteFicha"));
 const FilaDivergencias = lazy(() => import("@/clientes/FilaDivergencias"));
 // 28/10 (0214): Ops sobe venda "sem pipeline, só subir a venda" + abre vaga nas expedições.
 const SubirVendaOps = lazy(() => import("@/venda/SubirVendaOps"));
+// 29/10: Pacotes personalizados — a MESMA ficha da viagem do Relacionamento (só o Rel edita; o banco garante).
+const ViagemPage = lazy(() => import("@/rel/viagens/ViagemPage"));
 
 /** Cor de Operações: âmbar escuro (#B45309 com texto branco = 5:1, WCAG AA). */
 const OPS_CSS = `${REL_CSS}
@@ -45,7 +46,7 @@ html.dark { --rel-ink: #FDBA74; --rel-soft: rgba(251, 146, 60, .15); }
 `;
 
 const PREFIXO = "ops";
-const TELAS = ["inicio", "solicitacoes", "subir-venda", "propostas", "equipe", "fichas", "ficha", "arrumar", ...TELAS_EXP] as const;
+const TELAS = ["inicio", "solicitacoes", "subir-venda", "propostas", "equipe", "fichas", "ficha", "arrumar", "viagem", ...TELAS_EXP] as const;
 type Tela = (typeof TELAS)[number];
 const ehExp = (t: string): t is TelaExp => (TELAS_EXP as readonly string[]).includes(t);
 interface Rota { tela: Tela; id?: string }
@@ -94,7 +95,7 @@ export default function OpsApp() {
 
   return (
     <CascaDeArea setor="operacional" nome="Operações" subtitulo="expedições e embarques" css={OPS_CSS}
-      grupos={grupos} inicioId="exp-inicio" ativo={rota.tela === "inicio" ? "solicitacoes" : rota.tela === "ficha" || rota.tela === "passageiros" || rota.tela === "clientes" || rota.tela === "acessos-amigo" ? "fichas" : rota.tela} onIr={(t) => ir({ tela: t as Tela })} chaveMenu="qs_ops_menu_aberto">
+      grupos={grupos} inicioId="exp-inicio" ativo={rota.tela === "inicio" ? "solicitacoes" : rota.tela === "ficha" || rota.tela === "passageiros" || rota.tela === "clientes" || rota.tela === "acessos-amigo" ? "fichas" : rota.tela === "viagem" ? "pacotes" : rota.tela} onIr={(t) => ir({ tela: t as Tela })} chaveMenu="qs_ops_menu_aberto">
       {(rota.tela === "inicio" || rota.tela === "solicitacoes") && (
         <SolicitacoesPage setor="operacional" abrirId={rota.id ?? null} onMudou={recontar}
           onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })}
@@ -110,8 +111,15 @@ export default function OpsApp() {
       {rota.tela === "ficha" && rota.id && (
         <Suspense fallback={null}>
           <ClienteFicha key={rota.id} id={rota.id} setor="operacional" onAbrir={(id) => ir({ tela: "ficha", id })} onVoltar={() => ir({ tela: "fichas" })}
-            onAbrirViagem={setoresDe(currentUser).includes("relacionamento") ? (id) => { window.location.hash = `#rel/viagem/${id}`; } : undefined}
+            onAbrirViagem={(id) => ir({ tela: "viagem", id })}
             onAbrirExpedicao={(exp, tipo, pax) => ir({ tela: tipo === "pacote" ? "pacotes" : "expedicoes", id: pax ? `${exp}/passageiros/pax/${pax}` : exp })} />
+        </Suspense>
+      )}
+      {rota.tela === "viagem" && rota.id && (
+        <Suspense fallback={null}>
+          <ViagemPage key={rota.id} id={rota.id} onVoltar={() => ir({ tela: "pacotes" })} onAbrirCliente={(id) => ir({ tela: "ficha", id })}
+            onAbrirConversa={() => { window.location.hash = "#rel/atendimento"; }}
+            onAbrirExpedicao={(exp, tipo) => ir({ tela: tipo === "pacote" ? "pacotes" : "expedicoes", id: exp })} />
         </Suspense>
       )}
       {rota.tela === "arrumar" && (
