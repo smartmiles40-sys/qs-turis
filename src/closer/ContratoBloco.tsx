@@ -9,10 +9,13 @@
 //     no Storage (bucket contratos, 0212) e cria no ZapSign.
 //     O webhook do ZapSign devolve: cliente abriu → assinou / recusou — e o
 //     cartão anda sozinho.
-//   • Sem ZapSign configurado na Vercel (27/10): o bloco SOME do
-//     cartão — o servidor diz se está ligado (api/closer.js acao=config). Só
-//     reaparece se este cliente já tiver contrato registrado (aí mostra o
-//     status e as ações manuais, sem a lista técnica do que falta).
+//   • Sem ZapSign configurado (29/10, Bruno: "quero por dentro do card"): o
+//     bloco FICA no cartão em modo manual — "Montar contrato" abre a mesma
+//     prévia, o "Ver PDF" baixa o contrato pronto, e o closer manda por fora e
+//     marca aqui. Com ZapSign, o mesmo botão já envia.
+//   • O contrato é À PARTE da venda (29/10): sai a qualquer momento — antes de
+//     registrar, depois de consolidar. Cartão consolidado não muda de etapa
+//     (closer_recalcular_etapa ignora 'consolidada'); só o status do contrato.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
@@ -84,17 +87,15 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
     finally { setOcupado(false); }
   }
 
-  // Contrato automático desligado e nada registrado: o bloco nem aparece.
   if (!config || envios === null) return null;
-  if (!automatico && !lista.length) return null;
 
   return (
     <section className="rel-card p-4">
       <div className="flex flex-wrap items-center gap-2 mb-2">
         <h2 className="text-[14px] font-bold flex-1" style={{ color: "var(--ink)" }}>Contrato</h2>
-        {automatico && !perdido && atual?.status !== "assinado" && (
+        {!perdido && atual?.status !== "assinado" && (
           <Botao variante={atual ? "secundario" : "primario"} disabled={ocupado} onClick={() => setPreviaAberta(true)}>
-            {atual ? "Reenviar contrato" : "Enviar contrato"}
+            {automatico ? (atual ? "Reenviar contrato" : "Enviar contrato") : "Montar contrato"}
           </Botao>
         )}
       </div>
@@ -102,7 +103,9 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
 
       {!atual && !ultimoErro && (
         <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
-          Nenhum contrato enviado. O QS gera o contrato pelo modelo, guarda o PDF e manda pelo ZapSign — o cliente recebe por e-mail.
+          {automatico
+            ? "Nenhum contrato enviado. O QS gera o contrato pelo modelo, guarda o PDF e manda pelo ZapSign — o cliente recebe por e-mail."
+            : "Nenhum contrato ainda. \"Montar contrato\" junta os dados e gera o PDF pelo modelo; mande ao cliente e marque aqui embaixo."}
         </p>
       )}
 
@@ -270,11 +273,13 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
   const mudar = (k: keyof CamposContrato, v: string) => setC((x) => (x ? { ...x, [k]: v } : x));
 
   return (
-    <Modal aberto titulo="Enviar contrato" onFechar={onFechar} largura={820}
+    <Modal aberto titulo={previa && !automatico ? "Montar contrato" : "Enviar contrato"} onFechar={onFechar} largura={820}
       rodape={<>
         <Botao variante="fantasma" onClick={onFechar} disabled={enviando}>Fechar</Botao>
-        <Botao variante="secundario" onClick={() => void verPdf()} disabled={enviando || gerandoPdf || !c}>{gerandoPdf ? "Montando o PDF…" : "Ver PDF"}</Botao>
-        {confirmarSubstituir ? (
+        <Botao variante={previa && !automatico ? "primario" : "secundario"} onClick={() => void verPdf()} disabled={enviando || gerandoPdf || !c}>
+          {gerandoPdf ? "Montando o PDF…" : previa && !automatico ? "Gerar o PDF do contrato" : "Ver PDF"}
+        </Botao>
+        {previa && !automatico ? null : confirmarSubstituir ? (
           <Botao variante="perigo" disabled={enviando} onClick={() => void enviar(true)}>{enviando ? "Gerando e enviando…" : "Sim, cancelar o anterior e enviar este"}</Botao>
         ) : (
           <Botao variante="primario" disabled={enviando || !c || !automatico} onClick={() => void enviar(false)}
@@ -289,8 +294,8 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
         <div className="space-y-3">
           {!automatico && (
             <Aviso>
-              <b>O envio automático não está configurado</b> — confira os dados aqui e use "Mandei por fora" no cartão.
-              <ul className="list-disc ml-5 mt-1">{previa.falta.map((f) => <li key={f}>{f}</li>)}</ul>
+              Confira os dados e clique em <b>"Gerar o PDF do contrato"</b>. Mande o PDF ao cliente e, no cartão, use "Mandei por
+              fora" e depois "Assinou por fora". (O envio direto pelo ZapSign liga quando o token for configurado.)
             </Aviso>
           )}
           {previa.avisoBitrix && <Aviso>{previa.avisoBitrix} Os campos do Bitrix ficaram de fora — preencha à mão.</Aviso>}

@@ -214,11 +214,13 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
               )}
             </Bloco>
           )}
-          {(vendaRegistrada || n.status_pagamento || n.status_contrato) && <>
+          {(vendaRegistrada || n.status_pagamento || n.status_contrato) && (
             <PagamentoBloco negocio={n} onMudou={() => void carregar()} onAbrirSolicitacao={links.onAbrirSolicitacao} />
-            {/* Some sozinho se o contrato automático não estiver ligado na Vercel. */}
+          )}
+          {/* Contrato à parte da venda (29/10): sempre no cartão, antes ou depois de consolidar; sem ZapSign, modo manual. */}
+          {(!encerrado || n.status_contrato) && (
             <ContratoBloco negocio={n} onMudou={() => void carregar()} />
-          </>}
+          )}
 
           {/* ── Propostas ── */}
           <Bloco titulo="Propostas" acao={<Botao onClick={() => links.onNovaProposta(n.lead_id, nome)}>+ Nova proposta</Botao>}>
