@@ -7,6 +7,12 @@
 // -----------------------------------------------------------------------------
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 import "./ui.css";
+import { iniciaisDe } from "./nomeCliente";
+
+export { parseClientName, nomeLimpo, iniciaisDe, type NomeCliente } from "./nomeCliente";
+// Peças da spec da Ficha/Solicitações (29/10): StatCard, StatusChip, SectorDot/Chip,
+// SegmentedControl, FilterPill, Timeline, ChecklistItem, ProgressRing, Menu, Card.
+export * from "./qs";
 
 export type Tone = "danger" | "warn" | "ok" | "info";
 
@@ -89,6 +95,9 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
     </div>
   );
 }
+
+/** Nome da spec (29/10) pro mesmo controle: abas tipo "Quadro | Lista | Prazos". */
+export { Segmented as SegmentedControl };
 
 // ── SearchInput ──────────────────────────────────────────────────────────────
 export function SearchInput(props: InputHTMLAttributes<HTMLInputElement>) {
@@ -196,9 +205,8 @@ export function Stepper({ steps = ETAPAS_ESTEIRA as readonly string[], current }
 }
 
 // ── Avatar ───────────────────────────────────────────────────────────────────
-export function iniciais(nome: string) {
-  return nome.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join("").toUpperCase() || "?";
-}
+/** Iniciais pelo nome limpo: "[V4] (STFV) Roselene Pereira" → "RP" (antes saía "[("). */
+export function iniciais(nome: string) { return iniciaisDe(nome); }
 export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
   return <span className="qs-av" style={{ width: size, height: size, fontSize: Math.round(size * 0.38) }} aria-hidden>{iniciais(name)}</span>;
 }

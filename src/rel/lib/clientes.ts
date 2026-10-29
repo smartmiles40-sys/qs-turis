@@ -8,6 +8,7 @@
 // as funções daqui só deixam bonito na tela e validam antes de enviar.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
+import { iniciaisDe } from "@/components/ui/nomeCliente";
 
 export type Parentesco = "conjuge" | "filho" | "pai_mae" | "irmao" | "neto" | "amigo" | "outro";
 
@@ -116,8 +117,8 @@ export function mesesParaVencer(validade: string | null | undefined): number | n
   return (v.getFullYear() - h.getFullYear()) * 12 + (v.getMonth() - h.getMonth()) - (v.getDate() < h.getDate() ? 1 : 0);
 }
 
-export const iniciais = (nome: string) =>
-  nome.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("");
+/** Iniciais pelo nome LIMPO (sem o "[V4] (STFV)" do começo — ver parseClientName). */
+export const iniciais = (nome: string) => iniciaisDe(nome);
 
 // ── Validação ───────────────────────────────────────────────────────────────
 

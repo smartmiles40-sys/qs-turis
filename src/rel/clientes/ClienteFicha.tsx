@@ -1,55 +1,100 @@
 // src/rel/clientes/ClienteFicha.tsx
 // -----------------------------------------------------------------------------
-// A ficha do cliente: documentos, contato, família e o histórico de mudanças.
-// É aqui que as próximas fases vão pendurar viagens, documentos e conversas.
+// A FICHA DO CLIENTE — o lugar da pessoa no Relacionamento e no Operações
+// (cadastro único, 0172/0173/0213).
+//
+// Redesenho de 29/10 (docs/ref/qs-redesign-ficha-solicitacoes.md, seção 3):
+//   breadcrumb → cabeçalho (nome limpo + tags, chips, alertas, ações + "Mais
+//   ações") → indicadores → duas colunas: [Pronta para embarcar? + abas] e a
+//   lateral (Contato, Pessoas ligadas, Origem, LGPD, Observações).
+// A aba ativa vai pra URL: #rel/cliente/<id>?aba=documentos (src/lib/hashQuery).
+//
+// Onde foi parar cada ação da ficha antiga (nenhuma sumiu):
+//   Registrar contato ........ botão primário do cabeçalho (e aba Atendimento)
+//   Pedir a outro setor ...... botão do cabeçalho (e estado vazio de Atendimento)
+//   WhatsApp (abrir/mandar) .. botão do cabeçalho; Contato da lateral (wa.me/ligar); aba Atendimento
+//   + Oportunidade de venda .. Mais ações › Vendas
+//   Subir venda .............. Mais ações › Vendas
+//   Pedir pagamento .......... Mais ações › Financeiro
+//   Enviar ao Financeiro ..... Mais ações › Financeiro
+//   Abrir chamado ............ Mais ações › Atendimento (e na lista de chamados)
+//   Editar / Completar ....... Mais ações › Cadastro, "Preencher agora", "Registrar aceite" (LGPD)
+//   + Adicionar familiar ..... Pessoas ligadas (lateral) e Mais ações › Cadastro
+//   Endereço e quem viaja junto  card Endereço (Visão geral) e Pessoas ligadas › Quem viaja junto
+//   Desarquivar / abrir a ficha que ficou  avisos no topo (iguais)
+//   Divergências ficha × expedição  FilaDivergencias, logo abaixo dos indicadores (igual)
+//   Status no Financeiro e Solicitações do cliente  aba Atendimento
+//   De onde veio e onde aparece (0151)  Origem (lateral) + aba Histórico
+//   Histórico da ficha ....... aba Histórico (linha do tempo completa)
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  PARENTESCOS, carregarCliente, carregarFamilia, carregarHistorico, formatarCpf, formatarData,
-  formatarTelefone, idade, mesesParaVencer, CANAIS_CONTATO, CAMPOS_CADASTRO, REGRAS_PADRAO, carregarRegras,
-  listarContatos, metricaDoCliente, moeda, carregarLigacoes, completude, type LigacoesCliente, type Auditoria, type Cliente, type Contato, type Metrica, type RegrasCategorias,
+  carregarCliente, carregarFamilia, carregarHistorico, CANAIS_CONTATO, REGRAS_PADRAO, carregarRegras,
+  listarContatos, metricaDoCliente, moeda, carregarLigacoes, completude, formatarData,
+  type LigacoesCliente, type Auditoria, type Cliente, type Contato, type Metrica, type RegrasCategorias,
 } from "../lib/clientes";
+import { linkBitrix, type Viagem } from "../lib/viagens";
 import ViagensComAGente from "./ViagensComAGente";
 import ArquivosDoCliente from "./ArquivosDoCliente";
 import ContatoModal from "./ContatoModal";
-import CategoriaChip from "./CategoriaChip";
 import { categoriasDe } from "./KpisClientes";
-import { Aviso, Avatar, Botao, Etiqueta } from "../ui";
+import { Aviso, Botao, Etiqueta, Modal } from "../ui";
 import ClienteForm from "./ClienteForm";
-import { BotaoSubirVenda } from "@/venda/SubirVenda";
-import LigacoesDoCliente from "./LigacoesDoCliente";
+import SubirVenda from "@/venda/SubirVenda";
+import type { ResultadoPreVenda } from "@/closer/vendaItens";
 import ModeloModal from "../atendimento/ModeloModal";
 import DocumentosPainel from "../viagens/DocumentosPainel";
 import ExpedicoesDaFicha, { type AbrirExpedicao, type EstadoIdas } from "./ExpedicoesDaFicha";
 import ArquivosDasExpedicoes from "./ArquivosDasExpedicoes";
+import LigacoesDoCliente from "./LigacoesDoCliente";
 import FilaDivergencias from "@/clientes/FilaDivergencias";
 import { idasDaFicha } from "@/clientes/cadastroUnico";
-import { faltaCadastroUnico } from "@/clientes/idasDetalhe";
+import { detalharIdas, faltaCadastroUnico, type IdaDetalhada } from "@/clientes/idasDetalhe";
 import ChamadosDoCliente from "../chamados/ChamadosDoCliente";
 import ChamadoModal from "../chamados/ChamadoModal";
-import RecompraBotao from "../pos/RecompraBotao";
+import NovaOportunidade from "../vendas/NovaOportunidade";
 import { EnviarFinanceiroModal, StatusNoFinanceiro } from "../../fin/EnviarFinanceiro";
-import { BotaoPedirOutroSetor, BotaoPedirPagamento, HistoricoDeSolicitacoes } from "@/solicitacoes/PedirOutroSetor";
+import { HistoricoDeSolicitacoes } from "@/solicitacoes/PedirOutroSetor";
+import NovaSolicitacao from "@/solicitacoes/NovaSolicitacao";
+import { solicitacoesDe, type Solicitacao } from "@/solicitacoes/lib";
 import { conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
 import ComprasDoCliente from "@/clientes/ComprasDoCliente";
 import ExpedAmigoDoCliente from "@/clientes/ExpedAmigoDoCliente";
 import CadastroPessoa from "@/clientes/cadastro/CadastroPessoa";
+import { lerPessoa, type Pessoa } from "@/clientes/cadastro";
 import { nivelFidelidade } from "@/expedicoes/lib/fidelidade";
+import { todasDoCliente } from "./viagensCliente";
+import {
+  Avatar, Btn, Card, EmptyState, FilterPill, Menu, StatCard, StatusChip, Timeline, parseClientName, type MenuGrupo,
+} from "@/components/ui";
+import { Icon } from "@/components/ui/icons";
+import { gravarParamNoHash, lerParamDoHash } from "@/lib/hashQuery";
+import ProntaParaEmbarcar from "./ficha/ProntaParaEmbarcar";
+import VisaoGeral, { resumoEndereco } from "./ficha/VisaoGeral";
+import LateralFicha from "./ficha/LateralFicha";
+import { linhaDoTempo, proximaViagem, statusDaViagem, trilha } from "./ficha/dados";
+import { ITENS_PEDIVEIS, pedirItem } from "./ficha/pedirACliente";
+import "./ficha/ficha.css";
 
 // 23/10 (cadastro único): a ficha é O lugar da pessoa — tudo que estava espalhado
 // (Clube de viajantes, Clientes & compras, Acessos ExpedAmigo, passageiro) virou aba.
-type Aba = "resumo" | "viagens" | "compras" | "documentos" | "expedamigo" | "atendimento" | "historico";
-const ABAS: { id: Aba; rotulo: string; soRel?: boolean }[] = [
-  { id: "resumo", rotulo: "Resumo" },
+type Aba = "geral" | "viagens" | "compras" | "documentos" | "expedamigo" | "atendimento" | "historico";
+const ABAS: { id: Aba; rotulo: string }[] = [
+  { id: "geral", rotulo: "Visão geral" },
   { id: "viagens", rotulo: "Viagens" },
   { id: "compras", rotulo: "Compras" },
   { id: "documentos", rotulo: "Documentos" },
   { id: "expedamigo", rotulo: "ExpedAmigo" },
-  { id: "atendimento", rotulo: "Atendimento", soRel: true },
+  // Atendimento: WhatsApp/contatos/chamados só pro Relacionamento (0173); as
+  // solicitações e o status no Financeiro, pros dois setores.
+  { id: "atendimento", rotulo: "Atendimento" },
   // 0213: Operações também edita a ficha — e vê o histórico de quem mudou o quê.
   { id: "historico", rotulo: "Histórico" },
 ];
+const ehAba = (x: string | null): x is Aba => !!x && ABAS.some((a) => a.id === x);
+/** Link antigo (?aba=resumo) cai na Visão geral. */
+const abaDaUrl = (): Aba => { const a = lerParamDoHash("aba"); return a === "resumo" ? "geral" : ehAba(a) ? a : "geral"; };
 
 // Nomes amigáveis dos campos, pro histórico ler como gente.
 const CAMPOS: Record<string, string> = {
@@ -73,26 +118,11 @@ function mudancas(a: Auditoria): string {
   return `alterou ${campos.map((k) => CAMPOS[k]).join(", ")}`;
 }
 
-function Linha({ rotulo, children }: { rotulo: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-3 py-2">
-      <dt className="text-[12px] sm:w-40 flex-shrink-0" style={{ color: "var(--ink3)" }}>{rotulo}</dt>
-      <dd className="text-[14px] min-w-0 break-words" style={{ color: "var(--ink)" }}>{children || <span style={{ color: "var(--ink3)" }}>—</span>}</dd>
-    </div>
-  );
+function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
+  return <Card title={titulo} action={acao}>{children}</Card>;
 }
 
-function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="rel-card p-4 sm:p-5">
-      <div className="flex items-center justify-between mb-1">
-        <h2 className="text-[13px] font-bold uppercase tracking-wide" style={{ color: "var(--ink2)" }}>{titulo}</h2>
-        {acao}
-      </div>
-      {children}
-    </section>
-  );
-}
+const dataBR = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "");
 
 export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, onAbrirViagem, onAbrirExpedicao, setor = "relacionamento" }: {
   id: string; onAbrir: (id: string) => void; onVoltar: () => void; onAbrirConversa?: (conversaId: string) => void;
@@ -104,7 +134,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   onAbrirExpedicao?: AbrirExpedicao;
 }) {
   const [c, setC] = useState<Cliente | null>(null);
-  const [aba, setAba] = useState<Aba>("resumo");
+  const [aba, setAbaEstado] = useState<Aba>(abaDaUrl);
   const ehRel = setor === "relacionamento";
   const [titular, setTitular] = useState<Cliente | null>(null);
   const [familia, setFamilia] = useState<Cliente[]>([]);
@@ -113,11 +143,16 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState(false);
   const [novoFamiliar, setNovoFamiliar] = useState(false);
+  const [viajaJunto, setViajaJunto] = useState(false);
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [mandarModelo, setMandarModelo] = useState(false);
   const [novoChamado, setNovoChamado] = useState(false);
   // Financeiro (0127): mandar o cliente pra lá e acompanhar o status.
   const [enviarFin, setEnviarFin] = useState(false);
+  const [pedirSetor, setPedirSetor] = useState<null | "geral" | "pagamento">(null);
+  const [oportunidade, setOportunidade] = useState(false);
+  const [subirVenda, setSubirVenda] = useState(false);
+  const [avisoVenda, setAvisoVenda] = useState<ResultadoPreVenda | null>(null);
   const [sinalPedidos, setSinalPedidos] = useState(0);
   const [sinalFin, setSinalFin] = useState(0);
   const [versaoChamados, setVersaoChamados] = useState(0);
@@ -132,6 +167,18 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [estadoIdas, setEstadoIdas] = useState<EstadoIdas | null>(null);
   // cópias de 13/10 (rel_documentos) cujo arquivo original aparece em "Arquivos das expedições"
   const [copiasEscondidas, setCopiasEscondidas] = useState<Set<string>>(new Set());
+  // 0213: endereço + quem viaja junto (undefined = carregando; null = cadastro único fora do ar)
+  const [pessoa, setPessoa] = useState<Pessoa | null | undefined>(undefined);
+  const [viagensRel, setViagensRel] = useState<Viagem[]>([]);
+  const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
+  const [detalheProx, setDetalheProx] = useState<IdaDetalhada | null>(null);
+  const [pedidos, setPedidos] = useState<Record<string, "pedindo" | "pedido" | undefined>>({});
+  const [erroPedido, setErroPedido] = useState<string | null>(null);
+
+  const setAba = useCallback((a: Aba) => {
+    setAbaEstado(a);
+    gravarParamNoHash("aba", a === "geral" ? null : a);
+  }, []);
 
   const carregar = useCallback(async () => {
     try {
@@ -146,6 +193,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         .catch((e) => { setMetrica(null); setErroMetrica(e instanceof Error ? e.message : "erro desconhecido"); });
       listarContatos(cli.id).then(setContatos).catch(() => setContatos([]));
       carregarLigacoes(cli.id).then(setLigacoes).catch(() => setLigacoes(null));
+      lerPessoa(cli.id).then((p) => setPessoa(p)).catch(() => setPessoa(null)); // CadastroInativo ou erro: o card avisa
+      todasDoCliente(cli.id).then(setViagensRel).catch(() => setViagensRel([]));
       idasDaFicha(cli.id)
         .then((idas) => setEstadoIdas({ ativo: true, idas }))
         .catch((e) => setEstadoIdas(faltaCadastroUnico(e)
@@ -164,7 +213,19 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
     }
   }, [id, setor]);
 
-  useEffect(() => { setC(null); setAba("resumo"); void carregar(); }, [carregar]);
+  useEffect(() => { setC(null); void carregar(); }, [carregar]);
+
+  // Solicitações sobre a pessoa (indicador + linha do tempo); recarrega quando alguém pede algo.
+  useEffect(() => {
+    solicitacoesDe({ clienteId: id }, 300).then(setSolicitacoes).catch(() => setSolicitacoes([]));
+  }, [id, sinalPedidos]);
+
+  // Voltar/avançar do navegador com outra ?aba= na mesma ficha.
+  useEffect(() => {
+    const onHash = () => setAbaEstado(abaDaUrl());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   // a seção Documentos recarrega quando "pessoas" muda: só muda se mudar nome/id
   const pessoasDoc = useMemo(() => (c ? [{ id: c.id, nome: c.nome }] : []), [c?.id, c?.nome]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -177,41 +238,114 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
     });
   }, []);
 
-  if (erro) return <div className="max-w-3xl mx-auto"><Aviso tom="erro">{erro}</Aviso></div>;
+  const idas = estadoIdas?.idas ?? [];
+  const proxima = useMemo(() => proximaViagem(idas, viagensRel), [idas, viagensRel]);
+
+  // Prontidão (regras do Operações) só da ida da próxima viagem: Contrato, Pagamento, Aéreo, Seguro…
+  const idProxIda = proxima?.idaExp?.id ?? null;
+  useEffect(() => {
+    if (!proxima?.idaExp) { setDetalheProx(null); return; }
+    let vivo = true;
+    detalharIdas([proxima.idaExp]).then((d) => { if (vivo) setDetalheProx(d[0] ?? null); }).catch(() => { if (vivo) setDetalheProx(null); });
+    return () => { vivo = false; };
+  }, [idProxIda]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const timeline = useMemo(() => linhaDoTempo({ historico, mudancas, usuarios, contatos, solicitacoes, ligacoes, viagens: viagensRel }),
+    [historico, usuarios, contatos, solicitacoes, ligacoes, viagensRel]);
+
+  if (erro) return <div className="fc"><Aviso tom="erro">{erro}</Aviso></div>;
   if (!c) return (
-    <div className="max-w-3xl mx-auto space-y-4" aria-busy="true" aria-label="Carregando a ficha">
-      <div className="rel-card p-5 flex items-center gap-4">
-        <span className="w-[52px] h-[52px] rounded-full animate-pulse" style={{ background: "var(--card2)" }} />
-        <span className="flex-1 space-y-2">
-          <span className="block h-4 w-1/2 rounded animate-pulse" style={{ background: "var(--card2)" }} />
-          <span className="block h-3 w-1/3 rounded animate-pulse" style={{ background: "var(--card2)" }} />
+    <div className="fc" aria-busy="true" aria-label="Carregando a ficha">
+      <div className="qs-card2" style={{ display: "flex", gap: 16, alignItems: "center" }}>
+        <span className="fc-esq" style={{ width: 56, height: 56, borderRadius: "50%" }} />
+        <span style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+          <span className="fc-esq" style={{ height: 18, width: "45%" }} />
+          <span className="fc-esq" style={{ height: 12, width: "30%" }} />
         </span>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="rel-card h-40 animate-pulse" /><div className="rel-card h-40 animate-pulse" />
-      </div>
+      <div className="qs-stats">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="qs-stat fc-esq" style={{ height: 88 }} />)}</div>
     </div>
   );
 
-  const meses = mesesParaVencer(c.passaporte_validade);
-  const anos = idade(c.nascimento);
+  const { name: nome, tags } = parseClientName(c.nome);
+  const bloqueado = !!c.mesclado_em_id;
   const ehTitular = !c.titular_id;
   const fone = c.telefone ?? "";
-  // Completude: os campos da ficha + a foto do passaporte (vem da métrica).
+  // Completude: os campos da ficha + a foto do passaporte (vem da métrica) — a mesma regra de antes.
   const comp = completude(c);
-  const semFoto = metrica?.faltando.includes("doc_passaporte") ?? false;
-  const faltando = [...comp.faltando, ...(semFoto ? [CAMPOS_CADASTRO.doc_passaporte] : [])];
-  const pct = Math.round(((7 - faltando.length) / 7) * 100);
-  const idas = estadoIdas?.idas ?? [];
+  const semFoto: boolean | null = metrica ? metrica.faltando.includes("doc_passaporte") : null;
+  const nFaltando = comp.faltando.length + (semFoto ? 1 : 0);
+  const pct = Math.round(((7 - nFaltando) / 7) * 100);
   const nExpedicoes = idas.filter((i) => i.status_reserva !== "Cancelado" && i.status_reserva !== "Lead").length;
-  const abas = ABAS.filter((a) => ehRel || !a.soRel);
+  const cats = categoriasDe(regras);
+  const cat = metrica && metrica.categoria !== "sem_categoria" ? cats.find((x) => x.id === metrica.categoria) : null;
+  const leadDesde = [...(ligacoes?.leads ?? [])].map((l) => l.criado_em).sort()[0] ?? null;
+  const abertas = solicitacoes.filter((s) => s.aberta);
+  const atrasadas = abertas.filter((s) => s.vencida).length;
+  const endereco = resumoEndereco(pessoa ?? null);
+  const status = statusDaViagem(proxima, detalheProx, nFaltando, ligacoes);
+  const etapas = trilha(proxima, status, detalheProx);
+  const conversaAberta = conversas.find((x) => x.janela_aberta);
+  const nCompras = (metrica?.viagens_compradas ?? 0) + (metrica?.compras_avulsas ?? 0);
+  const nViagens = idas.length + viagensRel.length;
+  const nuncaContato = metrica ? metrica.ultimo_contato_em == null : false;
+
+  const abrirWhatsApp = () => {
+    if (ehRel && conversaAberta) onAbrirConversa?.(conversaAberta.id);
+    else if (ehRel && fone) setMandarModelo(true);
+    else if (fone) window.open(`https://wa.me/${fone.replace(/\D/g, "").length <= 11 ? "55" : ""}${fone.replace(/\D/g, "")}`, "_blank", "noopener");
+  };
+
+  async function pedir(chave: string) {
+    const item = ITENS_PEDIVEIS[chave];
+    if (!item || !c) return;
+    setErroPedido(null);
+    setPedidos((p) => ({ ...p, [chave]: "pedindo" }));
+    try {
+      await pedirItem({ clienteId: c.id, nome, deSetor: setor, item });
+      setPedidos((p) => ({ ...p, [chave]: "pedido" }));
+      setSinalPedidos((n) => n + 1);
+    } catch (e) {
+      setPedidos((p) => ({ ...p, [chave]: undefined }));
+      setErroPedido(e instanceof Error ? e.message : "Não consegui criar o pedido.");
+    }
+  }
+  const estadoPedido = (chave: string): "nao" | "pedindo" | "pedido" => pedidos[chave] ?? "nao";
+
+  const menu: MenuGrupo[] = [
+    { titulo: "Vendas", itens: [
+      ...(ehRel ? [{ rotulo: "Nova oportunidade de venda", onClick: () => setOportunidade(true) }] : []),
+      { rotulo: "Subir venda", onClick: () => { setAvisoVenda(null); setSubirVenda(true); } },
+    ] },
+    { titulo: "Financeiro", itens: [
+      { rotulo: "Pedir pagamento", onClick: () => setPedirSetor("pagamento") },
+      ...(ehRel ? [{ rotulo: "Enviar ao Financeiro", onClick: () => setEnviarFin(true) }] : []),
+    ] },
+    { titulo: "Atendimento", itens: ehRel ? [{ rotulo: "Abrir chamado", onClick: () => setNovoChamado(true) }] : [] },
+    { titulo: "Cadastro", itens: [
+      { rotulo: "Editar ficha", onClick: () => setEditando(true) },
+      ...(ehTitular ? [{ rotulo: "Adicionar familiar", onClick: () => setNovoFamiliar(true) }] : []),
+    ] },
+  ];
+
+  // Documentos da aba: slots (faltando = borda tracejada) + o painel de sempre embaixo.
+  const slots: { chave: string; rotulo: string; sub: string; ok: boolean }[] = [
+    { chave: "doc_passaporte", rotulo: "Foto do passaporte", ok: semFoto !== true, sub: semFoto === true ? "Faltando" : semFoto === null ? "não deu pra conferir" : "Enviada" },
+    { chave: "cpf", rotulo: "CPF", ok: !!c.cpf, sub: c.cpf ? "Número cadastrado" : "Faltando" },
+    { chave: "passaporte", rotulo: "Nº do passaporte", ok: !!c.passaporte, sub: c.passaporte ? c.passaporte : "Faltando" },
+    { chave: "passaporte_validade", rotulo: "Validade do passaporte", ok: !!c.passaporte_validade, sub: c.passaporte_validade ? formatarData(c.passaporte_validade) : "Faltando" },
+    { chave: "nascimento", rotulo: "Data de nascimento", ok: !!c.nascimento, sub: c.nascimento ? formatarData(c.nascimento) : "Faltando" },
+    { chave: "contrato", rotulo: "Contrato", ok: status[0].tom === "ok", sub: status[0].texto === "—" ? "sem viagem com contrato" : status[0].texto },
+  ];
+  const statusTom = (t: string) => (t === "ok" ? "qs-tone-ok" : t === "warn" ? "qs-tone-warn" : t === "danger" ? "qs-tone-danger" : "");
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
-      <button onClick={onVoltar} className="inline-flex items-center gap-1 text-[13px] font-semibold py-2 pr-2 -my-1" style={{ color: "var(--ink2)" }}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
-        Clientes
-      </button>
+    <div className="fc">
+      <nav className="fc-crumb" aria-label="Navegação">
+        <button type="button" onClick={onVoltar}>Clientes</button>
+        <span aria-hidden>/</span>
+        <span aria-current="page">{nome}</span>
+      </nav>
 
       {c.mesclado_em_id && (
         <Aviso>
@@ -231,246 +365,224 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       )}
 
       {/* Cabeçalho */}
-      <div className="rel-card p-4 sm:p-5 flex flex-wrap items-center gap-4">
-        <Avatar nome={c.nome} tamanho={52} />
-        <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold leading-tight" style={{ color: "var(--ink)" }}>{c.nome}</h1>
-          <div className="flex flex-wrap gap-1.5 mt-1.5">
-            {metrica && <CategoriaChip categoria={metrica.categoria} cats={categoriasDe(regras)} />}
-            {metrica && (
-              <Etiqueta tom={metrica.dias_sem_contato == null || metrica.dias_sem_contato > metrica.meta_contato_dias ? "aviso" : "rel"}>
-                {metrica.dias_sem_contato == null ? "nunca teve contato" : metrica.dias_sem_contato === 0 ? "contato hoje" : `${metrica.dias_sem_contato} dias sem contato`}
-              </Etiqueta>
+      <section className="fc-head" aria-label="Cliente">
+        <div className="fc-head__id">
+          <Avatar name={c.nome} size={56} />
+          <div className="fc-head__tx">
+            <div className="fc-head__nome">
+              <h1 className="fc-h1">{nome}</h1>
+              {tags.map((t) => <StatusChip key={t}>{t}</StatusChip>)}
+            </div>
+            <div className="fc-linha">
+              {cat && <StatusChip icon={<span className="fc-dot" style={{ background: cat.cor }} aria-hidden />}>{cat.nome}</StatusChip>}
+              {nExpedicoes > 0 && <StatusChip>Clube {nivelFidelidade(nExpedicoes).tier} · {nExpedicoes} viage{nExpedicoes === 1 ? "m" : "ns"}</StatusChip>}
+              {c.titular_id && titular && <StatusChip>{c.parentesco ? `${({ conjuge: "Cônjuge", filho: "Filho(a)", pai_mae: "Pai / Mãe", irmao: "Irmão(ã)", neto: "Neto(a)", amigo: "Amigo(a)", outro: "Família" } as const)[c.parentesco]} de ${parseClientName(titular.nome).name.split(" ")[0]}` : "Família"}</StatusChip>}
+              <StatusChip>{leadDesde ? `Lead desde ${dataBR(leadDesde)}` : `Ficha desde ${dataBR(c.criado_em)}`}</StatusChip>
+            </div>
+            {(!c.lgpd_consentimento_em || nuncaContato) && (
+              <div className="fc-linha">
+                {!c.lgpd_consentimento_em && <StatusChip tone="warn" icon={Icon.alerta}>Sem consentimento LGPD</StatusChip>}
+                {nuncaContato && <StatusChip tone="warn">Nunca teve contato</StatusChip>}
+              </div>
             )}
-            {metrica && metrica.valor_total > 0 && <Etiqueta>LTV {moeda(metrica.valor_total)}</Etiqueta>}
-            {nExpedicoes > 0 && <Etiqueta tom="rel">Clube: {nivelFidelidade(nExpedicoes).tier} · {nExpedicoes} viage{nExpedicoes === 1 ? "m" : "ns"}</Etiqueta>}
-            {anos !== null && <Etiqueta>{anos} anos</Etiqueta>}
-            {c.titular_id && titular && <Etiqueta tom="rel">{PARENTESCOS[c.parentesco ?? "outro"]} de {titular.nome.split(" ")[0]}</Etiqueta>}
-            {ehTitular && familia.length > 0 && <Etiqueta tom="rel">Titular · {familia.length} familiar{familia.length > 1 ? "es" : ""}</Etiqueta>}
-            {c.lgpd_consentimento_em ? <Etiqueta tom="rel">LGPD ok</Etiqueta> : <Etiqueta tom="aviso">Sem consentimento LGPD</Etiqueta>}
           </div>
         </div>
-        {!c.mesclado_em_id && (
-          <div className="flex flex-wrap gap-1.5">
-            {ehRel && <>
-              <RecompraBotao clienteId={c.id} clienteNome={c.nome} compacto />
-              <Botao onClick={() => setNovoContato(true)}>Registrar contato</Botao>
-              <Botao onClick={() => setNovoChamado(true)}>Abrir chamado</Botao>
-              <Botao onClick={() => setEnviarFin(true)}>💰 Enviar ao Financeiro</Botao>
-            </>}
-            {/* 0214: a tela única de venda (Rel e Ops), já com a pessoa da ficha. */}
-            <BotaoSubirVenda origem={ehRel ? "rel" : "ops"} cliente={{ id: c.id, nome: c.nome, telefone: c.telefone ?? "", email: c.email ?? "" }} />
-            <BotaoPedirOutroSetor deSetor={setor} alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
-            <BotaoPedirPagamento deSetor={setor} alvo={{ clienteId: c.id, sobre: c.nome }} onCriada={() => setSinalPedidos((n) => n + 1)} />
-            {/* 0213: Rel e Ops editam igual (vale a última gravação; fica no Histórico) */}
-            <Botao onClick={() => setEditando(true)}>Editar</Botao>
+        {!bloqueado && (
+          <div className="fc-head__acts">
+            {fone && <Btn icon={Icon.chat} onClick={abrirWhatsApp}>WhatsApp</Btn>}
+            <Btn onClick={() => setPedirSetor("geral")}>Pedir a outro setor</Btn>
+            {ehRel && <Btn variant="primary" onClick={() => setNovoContato(true)}>Registrar contato</Btn>}
+            <Menu rotulo="Mais ações" grupos={menu} />
           </div>
         )}
-      </div>
+      </section>
 
-      {erroMetrica && <div className="mb-4"><Aviso tom="erro">Categoria, LTV e cadastro não carregaram ({erroMetrica}).</Aviso></div>}
-      {!c.mesclado_em_id && (
-        <div className="rel-card px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2" aria-label="Cadastro">
-          <span className="text-[13px] font-bold" style={{ color: pct === 100 ? "var(--rel-ink)" : "var(--ink)" }}>Cadastro {pct}% completo</span>
-          <span className="h-1.5 w-28 rounded-full overflow-hidden" style={{ background: "var(--card2)" }} aria-hidden>
-            <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: pct >= 70 ? "var(--rel)" : "#E0A100" }} />
-          </span>
-          {faltando.length > 0 ? (
-            <>
-              <span className="text-[12.5px] flex-1 min-w-[180px]" style={{ color: "var(--ink3)" }}>Falta: {faltando.join(", ")}</span>
-              <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setEditando(true)}>Completar</Botao>
-            </>
-          ) : <span className="text-[12.5px]" style={{ color: "var(--ink3)" }}>tudo que a viagem pede está aqui</span>}
-        </div>
+      {/* Indicadores */}
+      <section className="qs-stats" aria-label="Indicadores do cliente">
+        <StatCard label="LTV" value={metrica ? moeda(metrica.valor_total) : "—"}
+          sub={metrica ? `${nCompras} compra${nCompras === 1 ? "" : "s"}` : erroMetrica ? "não carregou" : "carregando…"} />
+        <StatCard label="Próximo embarque" value={proxima ? formatarData(proxima.ida) : metrica?.proximo_embarque ? formatarData(metrica.proximo_embarque) : "—"}
+          sub={proxima ? [proxima.nome, proxima.grupo].filter(Boolean).join(" · ") : "nenhuma viagem à frente"}
+          onClick={proxima ? () => setAba("viagens") : undefined} />
+        <StatCard label="Cadastro" value={`${pct}%`} tone={pct < 100 ? "warn" : "ok"}
+          sub={nFaltando ? `${nFaltando} dado${nFaltando > 1 ? "s" : ""} faltando` : "completo"} />
+        <StatCard label="Solicitações abertas" value={abertas.length} tone={atrasadas ? "danger" : "default"}
+          sub={abertas.length === 0 ? "nenhuma pendente com outro setor" : atrasadas ? `${atrasadas} atrasada${atrasadas > 1 ? "s" : ""}` : "em andamento"}
+          onClick={() => setAba("atendimento")} />
+        <StatCard label="Último contato" value={!metrica ? "—" : metrica.ultimo_contato_em ? dataBR(metrica.ultimo_contato_em) : "Nunca"}
+          tone={nuncaContato ? "warn" : "default"}
+          sub={!metrica ? "" : metrica.dias_sem_contato == null ? "registre o primeiro contato" : metrica.dias_sem_contato === 0 ? "hoje" : `${metrica.dias_sem_contato} dias sem contato`}
+          onClick={ehRel && !bloqueado ? () => setNovoContato(true) : undefined} />
+      </section>
+
+      {erroMetrica && <Aviso tom="erro">Categoria, LTV e cadastro não carregaram ({erroMetrica}).</Aviso>}
+      {avisoVenda && (
+        <div role="status" onClick={() => setAvisoVenda(null)}><Aviso tom={avisoVenda.tom}>{avisoVenda.mensagem}</Aviso></div>
       )}
 
       {/* 0172: o que está diferente entre a ficha e as expedições (some quando não há nada) */}
-      {!c.mesclado_em_id && (
+      {!bloqueado && (
         <FilaDivergencias clienteId={c.id} onAbrirCliente={onAbrir}
           onAbrirPassageiro={onAbrirExpedicao ? (exp, tipo, pax) => onAbrirExpedicao(exp, tipo, pax) : undefined}
           onMudou={() => void carregar()} />
       )}
 
-      <nav className="flex gap-1 overflow-x-auto -mx-1 px-1" role="tablist" aria-label="Partes da ficha">
-        {abas.map((a) => (
-          <button key={a.id} role="tab" aria-selected={aba === a.id} onClick={() => setAba(a.id)}
-            className="px-3 py-1.5 rounded-full text-[13px] font-semibold whitespace-nowrap border"
-            style={aba === a.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)", borderColor: "transparent" } : { borderColor: "var(--line)", color: "var(--ink2)" }}>
-            {a.rotulo}{a.id === "viagens" && idas.length > 0 ? ` · ${idas.length}` : ""}
-          </button>
-        ))}
-      </nav>
+      <div className="fc-cols">
+        <main className="fc-main">
+          <ProntaParaEmbarcar c={c} nome={nome} semFoto={semFoto} endereco={endereco} deSetor={setor} bloqueado={bloqueado}
+            onPreencher={() => setEditando(true)} onPedido={() => setSinalPedidos((n) => n + 1)} />
 
-      {aba === "resumo" && <>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Secao titulo="Documentos">
-            <dl>
-              <Linha rotulo="CPF">{c.cpf && formatarCpf(c.cpf)}</Linha>
-              <Linha rotulo="Nascimento">{c.nascimento && formatarData(c.nascimento)}</Linha>
-              <Linha rotulo="Passaporte">{c.passaporte}</Linha>
-              <Linha rotulo="Validade">
-                {c.passaporte_validade && (
-                  <span className="inline-flex flex-wrap items-center gap-2">
-                    {formatarData(c.passaporte_validade)}
-                    {meses !== null && meses < 0 && <Etiqueta tom="erro">vencido</Etiqueta>}
-                    {meses !== null && meses >= 0 && meses < 6 && <Etiqueta tom="aviso">vence em menos de 6 meses</Etiqueta>}
-                  </span>
-                )}
-              </Linha>
-            </dl>
-          </Secao>
+          <div className="fc-abas" role="tablist" aria-label="Seções da ficha">
+            {ABAS.map((a) => (
+              <FilterPill key={a.id} role="tab" active={aba === a.id} controls="fc-painel" onClick={() => setAba(a.id)}
+                count={a.id === "viagens" ? nViagens : a.id === "compras" ? nCompras : a.id === "documentos" ? nFaltando : a.id === "atendimento" ? abertas.length : null}
+                countTone={a.id === "documentos" ? "warn" : a.id === "atendimento" && atrasadas ? "danger" : undefined}>
+                {a.rotulo}
+              </FilterPill>
+            ))}
+          </div>
 
-          <Secao titulo="Contato">
-            <dl>
-              <Linha rotulo="Telefone">
-                {fone && (
-                  <span className="inline-flex flex-wrap items-center gap-2">
-                    {formatarTelefone(fone)}
-                    <a href={`https://wa.me/${fone}`} target="_blank" rel="noreferrer" className="text-[12px] font-semibold underline" style={{ color: "var(--rel-ink)" }}>WhatsApp</a>
-                  </span>
-                )}
-              </Linha>
-              <Linha rotulo="E-mail">{c.email && <a href={`mailto:${c.email}`} className="underline">{c.email}</a>}</Linha>
-              <Linha rotulo="Bitrix">{c.bitrix_contato_id && `Contato #${c.bitrix_contato_id}`}</Linha>
-            </dl>
-          </Secao>
-        </div>
+          <div id="fc-painel" role="tabpanel" aria-label={ABAS.find((a) => a.id === aba)?.rotulo} className="fc-main">
+            {erroPedido && <Aviso tom="erro">{erroPedido}</Aviso>}
 
-        {/* Família */}
-        <Secao
-          titulo="Família"
-          acao={ehTitular && !c.mesclado_em_id ? (
-            <Botao variante="fantasma" onClick={() => setNovoFamiliar(true)} style={{ color: "var(--rel-ink)" }}>+ Adicionar familiar</Botao>
-          ) : undefined}
-        >
-          {!ehTitular && titular && (
-            <button onClick={() => onAbrir(titular.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
-              <Avatar nome={titular.nome} tamanho={32} />
-              <span className="flex-1 text-sm" style={{ color: "var(--ink)" }}><b>{titular.nome}</b> <span style={{ color: "var(--ink3)" }}>· titular</span></span>
-            </button>
-          )}
-          {familia.map((m) => (
-            <button key={m.id} onClick={() => onAbrir(m.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
-              <Avatar nome={m.nome} tamanho={32} />
-              <span className="flex-1 text-sm" style={{ color: "var(--ink)" }}>
-                {m.nome} <span style={{ color: "var(--ink3)" }}>· {PARENTESCOS[m.parentesco ?? "outro"]}</span>
-              </span>
-            </button>
-          ))}
-          {ehTitular && familia.length === 0 && (
-            <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>
-              Ninguém ligado ainda. Cônjuge, filhos e amigos que viajam juntos entram aqui — cada um com a própria ficha.
-            </p>
-          )}
-        </Secao>
+            {aba === "geral" && (
+              <VisaoGeral c={c} pessoa={pessoa} semFoto={semFoto} bloqueado={bloqueado} proxima={proxima} etapas={etapas} timeline={timeline}
+                pedirEndereco={() => void pedir("endereco")} pedindoEndereco={estadoPedido("endereco")}
+                onIrAba={setAba} onMudou={() => void carregar()} />
+            )}
 
-        {/* 0213: endereço e quem viaja junto — o mesmo cadastro que SDR, Closer e Ops preenchem */}
-        {!c.mesclado_em_id && (
-          <Secao titulo="Endereço e quem viaja junto">
-            <div className="pt-2"><CadastroPessoa clienteId={c.id} secoes={["endereco", "acompanhantes"]} onMudou={() => void carregar()} /></div>
-          </Secao>
-        )}
+            {aba === "viagens" && <>
+              {proxima && (
+                <Card title="Próxima viagem" action={proxima.viagem?.bitrix_deal_id
+                  ? <a className="fc-link" href={linkBitrix(proxima.viagem.bitrix_deal_id)} target="_blank" rel="noreferrer">Abrir no Bitrix</a>
+                  : proxima.viagem && onAbrirViagem ? <button type="button" className="fc-link fc-link--btn" onClick={() => onAbrirViagem(proxima.viagem!.id)}>Abrir viagem</button> : undefined}>
+                  <div className="fc-viagem">
+                    <span className="fc-viagem__n">{proxima.nome}</span>
+                    <span className="fc-viagem__s">
+                      {[proxima.grupo, `${formatarData(proxima.ida)}${proxima.volta ? ` a ${formatarData(proxima.volta)}` : ""}`, proxima.viagem?.valor ? moeda(proxima.viagem.valor) : proxima.idaExp?.valor_contratado_brl ? moeda(proxima.idaExp.valor_contratado_brl) : null].filter(Boolean).join(" · ")}
+                    </span>
+                  </div>
+                  <div className="fc-status">
+                    {status.map((s) => (
+                      <div key={s.rotulo} className="fc-status__i">
+                        <span className="fc-status__l">{s.rotulo}</span>
+                        <span className={`fc-status__v ${statusTom(s.tom)}`}>{s.texto}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* ENCAIXAR: <ContratoDoCliente clienteId={c.id} /> — contrato por cliente (componente feito à parte) */}
+                </Card>
+              )}
+              <ExpedicoesDaFicha clienteId={c.id} estado={estadoIdas} onAbrirExpedicao={onAbrirExpedicao} />
+              <ViagensComAGente clienteId={c.id} onAbrirViagem={onAbrirViagem ?? (() => undefined)} metrica={metrica} cats={cats}
+                onAbrirExpedicao={onAbrirExpedicao ? (exp, tipo) => onAbrirExpedicao(exp, tipo) : undefined} />
+            </>}
 
-        {c.observacoes && (
-          <Secao titulo="Observações">
-            <p className="text-[14px] whitespace-pre-wrap py-1" style={{ color: "var(--ink)" }}>{c.observacoes}</p>
-          </Secao>
-        )}
+            {aba === "compras" && <ComprasDoCliente cliente={c} />}
 
-        <div className="mt-3"><StatusNoFinanceiro alvo={{ clienteId: c.id }} recarregar={sinalFin} /></div>
-        <div className="mt-3"><HistoricoDeSolicitacoes clienteId={c.id} recarregar={sinalPedidos} links={{ onAbrirViagem, onAbrirConversa, onAbrirCliente: onAbrir }} /></div>
+            {aba === "documentos" && <>
+              <section className="fc-slots" aria-label="Documentos da pessoa">
+                {slots.map((s) => {
+                  const pedivel = !s.ok && !bloqueado && ITENS_PEDIVEIS[s.chave];
+                  const st = estadoPedido(s.chave);
+                  return (
+                    <div key={s.chave} className={`fc-slot${s.ok ? "" : " fc-slot--falta"}`}>
+                      <span className="fc-slot__l">{s.rotulo}</span>
+                      <span className="fc-slot__s">{s.sub}</span>
+                      {pedivel && (
+                        <span><Btn size="sm" disabled={st !== "nao"} onClick={() => void pedir(s.chave)}>
+                          {st === "pedido" ? "Pedido ✓" : st === "pedindo" ? "Pedindo…" : "Pedir à cliente"}
+                        </Btn></span>
+                      )}
+                    </div>
+                  );
+                })}
+              </section>
+              <DocumentosPainel pessoas={pessoasDoc} clienteId={c.id} esconder={copiasEscondidas} />
+              {estadoIdas?.ativo && estadoIdas.idas.length > 0 && <ArquivosDasExpedicoes idas={estadoIdas.idas} onCopias={setCopiasEscondidas} />}
+              <ArquivosDoCliente clienteId={c.id} bloqueado={bloqueado} />
+            </>}
 
-        {ligacoes && <LigacoesDoCliente l={ligacoes} />}
-      </>}
+            {aba === "expedamigo" && (
+              <ExpedAmigoDoCliente nome={c.nome} cpf={c.cpf} telefone={c.telefone} idas={idas} onMudou={() => void carregar()} />
+            )}
 
-      {aba === "viagens" && <>
-        <ExpedicoesDaFicha clienteId={c.id} estado={estadoIdas} onAbrirExpedicao={onAbrirExpedicao} />
-        <ViagensComAGente clienteId={c.id} onAbrirViagem={onAbrirViagem ?? (() => undefined)} metrica={metrica} cats={categoriasDe(regras)}
-          onAbrirExpedicao={onAbrirExpedicao ? (exp, tipo) => onAbrirExpedicao(exp, tipo) : undefined} />
-      </>}
+            {aba === "atendimento" && <>
+              {solicitacoes.length === 0 && (!ehRel || (conversas.length === 0 && contatos.length === 0)) && (
+                <Card as="div">
+                  <EmptyState title="Nenhum atendimento aberto"
+                    description="Chamados e pedidos a outros setores sobre esta pessoa aparecem aqui, com prazo e responsável."
+                    action={!bloqueado ? <Btn onClick={() => setPedirSetor("geral")}>Pedir a outro setor</Btn> : undefined} />
+                </Card>
+              )}
+              <HistoricoDeSolicitacoes clienteId={c.id} recarregar={sinalPedidos} links={{ onAbrirViagem, onAbrirConversa, onAbrirCliente: onAbrir }} />
+              <StatusNoFinanceiro alvo={{ clienteId: c.id }} recarregar={sinalFin} />
 
-      {aba === "compras" && <ComprasDoCliente cliente={c} />}
+              {ehRel && <>
+                {/* WhatsApp do Relacionamento (Fase 2) */}
+                <Secao
+                  titulo="WhatsApp"
+                  acao={!bloqueado && c.telefone ? (
+                    conversaAberta
+                      ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirConversa?.(conversaAberta.id)}>Abrir conversa</Botao>
+                      : <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setMandarModelo(true)}>Mandar mensagem</Botao>
+                  ) : undefined}
+                >
+                  {!c.telefone && conversas.length === 0 ? (
+                    <p className="fc-p">Sem telefone na ficha.</p>
+                  ) : conversas.length === 0 ? (
+                    <p className="fc-p">Nenhuma conversa ainda pelo WhatsApp do Relacionamento.</p>
+                  ) : conversas.map((cv) => (
+                    <button key={cv.id} onClick={() => onAbrirConversa?.(cv.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[13px] truncate" style={{ color: "var(--ink)" }}>{cv.ultima_mensagem || "—"}</span>
+                        <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>
+                          {horaCurta(cv.atualizado_em)} · {cv.estado === "resolvida" ? "resolvida" : cv.aguardando_desde ? `esperando há ${duracao(cv.minutos_esperando)}` : "em andamento"}
+                          {cv.atendente_nome ? ` · ${cv.atendente_nome.split(" ")[0]}` : ""}
+                        </span>
+                      </span>
+                      {cv.nao_lidas > 0 && <Etiqueta tom="rel">{cv.nao_lidas}</Etiqueta>}
+                    </button>
+                  ))}
+                </Secao>
 
-      {aba === "documentos" && <>
-        <DocumentosPainel pessoas={pessoasDoc} clienteId={c.id} esconder={copiasEscondidas} />
-        {estadoIdas?.ativo && estadoIdas.idas.length > 0 && <ArquivosDasExpedicoes idas={estadoIdas.idas} onCopias={setCopiasEscondidas} />}
-        <ArquivosDoCliente clienteId={c.id} bloqueado={!!c.mesclado_em_id} />
+                <Secao titulo="Contatos registrados" acao={!bloqueado ? (
+                  <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setNovoContato(true)}>+ Registrar</Botao>
+                ) : undefined}>
+                  {contatos.length === 0 ? (
+                    <p className="fc-p">Nenhum contato registrado à mão. Conversa pelo WhatsApp do Relacionamento e chamado já contam sozinhos.</p>
+                  ) : (
+                    <ol className="space-y-1.5 py-1">
+                      {contatos.map((k) => (
+                        <li key={k.id} className="text-[13px]" style={{ color: "var(--ink)" }}>
+                          <b>{CANAIS_CONTATO[k.canal]}</b>
+                          <span style={{ color: "var(--ink3)" }}> · {new Date(k.feito_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}{k.autor_id && usuarios[k.autor_id] ? ` · ${usuarios[k.autor_id].split(" ")[0]}` : ""}</span>
+                          {k.resumo && <span className="block text-[12px]" style={{ color: "var(--ink2)" }}>{k.resumo}</span>}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </Secao>
+                <ChamadosDoCliente key={versaoChamados} clienteId={c.id} />
+              </>}
+            </>}
 
-      </>}
+            {aba === "historico" && <>
+              <Card title="Histórico completo" action={<span className="qs-num qs-tone-subtle" style={{ fontSize: 13 }}>{timeline.length} evento{timeline.length === 1 ? "" : "s"}</span>}>
+                <Timeline items={timeline} empty="Sem registros." />
+              </Card>
+              {ligacoes && <div id="fc-onde-aparece"><LigacoesDoCliente l={ligacoes} /></div>}
+            </>}
+          </div>
+        </main>
 
-      {aba === "expedamigo" && (
-        <ExpedAmigoDoCliente nome={c.nome} cpf={c.cpf} telefone={c.telefone} idas={idas} onMudou={() => void carregar()} />
-      )}
-
-      {aba === "atendimento" && ehRel && <>
-        {/* WhatsApp do Relacionamento (Fase 2) */}
-        <Secao
-          titulo="WhatsApp"
-          acao={!c.mesclado_em_id && c.telefone ? (
-            conversas.some((x) => x.janela_aberta)
-              ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirConversa?.(conversas.find((x) => x.janela_aberta)!.id)}>Abrir conversa</Botao>
-              : <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setMandarModelo(true)}>Mandar mensagem</Botao>
-          ) : undefined}
-        >
-          {!c.telefone && conversas.length === 0 ? (
-            <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Sem telefone na ficha.</p>
-          ) : conversas.length === 0 ? (
-            <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Nenhuma conversa ainda pelo WhatsApp do Relacionamento.</p>
-          ) : conversas.map((cv) => (
-            <button key={cv.id} onClick={() => onAbrirConversa?.(cv.id)} className="rel-linha w-full flex items-center gap-3 p-2 -mx-2 rounded-lg text-left">
-              <span className="flex-1 min-w-0">
-                <span className="block text-[13px] truncate" style={{ color: "var(--ink)" }}>{cv.ultima_mensagem || "—"}</span>
-                <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>
-                  {horaCurta(cv.atualizado_em)} · {cv.estado === "resolvida" ? "resolvida" : cv.aguardando_desde ? `esperando há ${duracao(cv.minutos_esperando)}` : "em andamento"}
-                  {cv.atendente_nome ? ` · ${cv.atendente_nome.split(" ")[0]}` : ""}
-                </span>
-              </span>
-              {cv.nao_lidas > 0 && <Etiqueta tom="rel">{cv.nao_lidas}</Etiqueta>}
-            </button>
-          ))}
-        </Secao>
-
-        <Secao titulo="Contatos registrados" acao={!c.mesclado_em_id ? (
-          <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setNovoContato(true)}>+ Registrar</Botao>
-        ) : undefined}>
-          {contatos.length === 0 ? (
-            <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>
-              Nenhum contato registrado à mão. Conversa pelo WhatsApp do Relacionamento e chamado já contam sozinhos.
-            </p>
-          ) : (
-            <ol className="space-y-1.5 py-1">
-              {contatos.map((k) => (
-                <li key={k.id} className="text-[13px]" style={{ color: "var(--ink)" }}>
-                  <b>{CANAIS_CONTATO[k.canal]}</b>
-                  <span style={{ color: "var(--ink3)" }}> · {new Date(k.feito_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}{k.autor_id && usuarios[k.autor_id] ? ` · ${usuarios[k.autor_id].split(" ")[0]}` : ""}</span>
-                  {k.resumo && <span className="block text-[12px]" style={{ color: "var(--ink2)" }}>{k.resumo}</span>}
-                </li>
-              ))}
-            </ol>
-          )}
-        </Secao>
-        <ChamadosDoCliente key={versaoChamados} clienteId={c.id} />
-
-      </>}
-
-      {aba === "historico" && <>
-        <Secao titulo="Histórico da ficha">
-          {historico.length === 0 ? (
-            <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Sem registros.</p>
-          ) : (
-            <ol className="space-y-2 py-1">
-              {historico.map((h) => (
-                <li key={h.id} className="text-[13px] flex flex-wrap gap-x-1.5" style={{ color: "var(--ink)" }}>
-                  <b>{(h.por && usuarios[h.por]) || "Sistema"}</b>
-                  <span>{mudancas(h)}</span>
-                  <span style={{ color: "var(--ink3)" }}>· {new Date(h.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </Secao>
-
-      </>}
+        <LateralFicha c={c} titular={titular} familia={familia} acompanhantes={pessoa ? pessoa.acompanhantes : null}
+          ligacoes={ligacoes} metrica={metrica} ehRel={ehRel}
+          onAbrir={onAbrir} onAdicionarFamiliar={() => setNovoFamiliar(true)} onViajaJunto={() => setViajaJunto(true)}
+          onEnviarTermo={() => setMandarModelo(true)} onEditar={() => setEditando(true)}
+          onVerOndeAparece={() => { setAba("historico"); setTimeout(() => document.getElementById("fc-onde-aparece")?.scrollIntoView({ behavior: "smooth" }), 50); }}
+          onMudou={() => void carregar()} />
+      </div>
 
       <ClienteForm
         aberto={editando}
@@ -482,11 +594,11 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       <ContatoModal
         aberto={novoContato}
         clienteId={c.id}
-        nome={c.nome}
+        nome={nome}
         onFechar={() => setNovoContato(false)}
         onSalvo={() => { setNovoContato(false); void carregar(); }}
       />
-      <EnviarFinanceiroModal aberto={enviarFin} origem="relacionamento" alvo={{ clienteId: c.id, telefone: c.telefone }} nome={c.nome}
+      <EnviarFinanceiroModal aberto={enviarFin} origem="relacionamento" alvo={{ clienteId: c.id, telefone: c.telefone }} nome={nome}
         onFechar={() => setEnviarFin(false)} onEnviado={() => { setEnviarFin(false); setSinalFin((n) => n + 1); }} />
       <ChamadoModal
         aberto={novoChamado}
@@ -497,7 +609,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       <ModeloModal
         aberto={mandarModelo}
         alvo={{ clienteId: c.id }}
-        nomeCliente={c.nome}
+        nomeCliente={nome}
         onFechar={() => setMandarModelo(false)}
         onEnviado={(cid) => { setMandarModelo(false); if (cid) onAbrirConversa?.(cid); else void carregar(); }}
       />
@@ -508,6 +620,21 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         onSalvo={() => { setNovoFamiliar(false); void carregar(); }}
         onAbrirFicha={(x) => { setNovoFamiliar(false); onAbrir(x); }}
       />
+      <NovaSolicitacao aberto={pedirSetor !== null} deSetor={setor} alvo={{ clienteId: c.id, sobre: nome }} soPagamento={pedirSetor === "pagamento"}
+        onFechar={() => setPedirSetor(null)} onCriada={() => { setPedirSetor(null); setSinalPedidos((n) => n + 1); }} />
+      {ehRel && (
+        <NovaOportunidade aberto={oportunidade} onFechar={() => setOportunidade(false)} cliente={{ id: c.id, nome: c.nome }} origem="manual"
+          onCriada={() => { setOportunidade(false); setAvisoVenda({ tom: "ok", mensagem: "Oportunidade criada no Pipeline de vendas do Relacionamento." }); }} />
+      )}
+      {subirVenda && (
+        <SubirVenda origem={ehRel ? "rel" : "ops"} aberto={subirVenda}
+          cliente={{ id: c.id, nome: c.nome, telefone: c.telefone ?? "", email: c.email ?? "" }}
+          onFechar={() => setSubirVenda(false)} onSalvo={(r) => { setSubirVenda(false); setAvisoVenda(r); }} />
+      )}
+      {/* "Quem viaja junto" (cad_acompanhantes, 0213) — o mesmo cadastro que SDR, Closer e Ops preenchem */}
+      <Modal aberto={viajaJunto} titulo={`Quem viaja junto com ${nome.split(" ")[0]}`} onFechar={() => { setViajaJunto(false); void carregar(); }} largura={640}>
+        {viajaJunto && <CadastroPessoa clienteId={c.id} secoes={["acompanhantes"]} embutido onMudou={(p) => setPessoa(p)} />}
+      </Modal>
     </div>
   );
 }

@@ -8,6 +8,7 @@
 // (--rel, verde-petróleo) pra ninguém confundir em qual porta entrou.
 // -----------------------------------------------------------------------------
 import { useEffect, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes } from "react";
+import { iniciaisDe } from "@/components/ui/nomeCliente";
 
 export const REL_CSS = `
 :root {
@@ -131,7 +132,7 @@ export function Modal({ aberto, titulo, onFechar, children, rodape, largura = 56
 }
 
 export function Avatar({ nome, tamanho = 36 }: { nome: string; tamanho?: number }) {
-  const ini = nome.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("");
+  const ini = iniciaisDe(nome); // sem o "[V4] (STFV)" do começo (spec 29/10)
   return (
     <span
       className="inline-flex items-center justify-center rounded-full font-bold flex-shrink-0"

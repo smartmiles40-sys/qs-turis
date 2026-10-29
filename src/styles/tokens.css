@@ -32,6 +32,28 @@
   --sector-financeiro: #8B5CF6;
   --sector-operacoes: #F97316;
 
+  /* ── Ficha do cliente / Solicitações (spec 29/10, docs/ref/qs-redesign-ficha-solicitacoes.md)
+     Os tokens da spec entram AQUI, com o nome que este sistema já usa:
+       spec --surface-muted → --surface-2      spec --text-muted → --muted / --subtle
+       spec --warn-bg/--warn-fg → --warn-bg/--warn   (idem danger e ok)
+       spec --accent → --positive  (o nome --accent já é do app antigo: ponte.css aponta pro texto)
+     Só os que faltavam ganham nome novo. */
+  --surface-muted: var(--surface-2);
+  --text-muted: var(--muted);
+  --border-strong: #D4D4D8;   /* borda de botão secundário e input */
+  --positive: #0F766E;        /* ação positiva principal, links (Concluir, Pedir) */
+  --on-positive: #FFFFFF;
+
+  /* setor em chip (fundo/texto), além do pontinho acima */
+  --sector-comercial-bg: #E8EFFE;      --sector-comercial-fg: #1D4ED8;
+  --sector-financeiro-bg: #ECEBFE;     --sector-financeiro-fg: #4338CA;
+  --sector-operacoes-bg: #FFEDE3;      --sector-operacoes-fg: #9A3412;
+  --sector-relacionamento-bg: #E3F1EF; --sector-relacionamento-fg: #0F766E;
+
+  --radius-card: 16px;  /* cards da ficha (spec) */
+  --radius-btn: 10px;   /* botões da ficha (spec) */
+  --h-touch: 44px;      /* alvo de toque mínimo dos botões primário/secundário */
+
   /* categorias de cliente (só em pontinhos) */
   --cat-bronze: #B7791F;
   --cat-silver: #A1A1AA;
@@ -80,6 +102,13 @@
   --warn:   #FBBF24; --warn-bg:   rgba(251, 191, 36, .12);
   --ok:     #4ADE80; --ok-bg:     rgba(74, 222, 128, .12);
   --info:   #60A5FA; --info-bg:   rgba(96, 165, 250, .12);
+  --border-strong: #3F3F46;
+  --positive: #2DD4BF;
+  --on-positive: #09090B;
+  --sector-comercial-bg: rgba(96, 165, 250, .14);      --sector-comercial-fg: #93C5FD;
+  --sector-financeiro-bg: rgba(167, 139, 250, .14);    --sector-financeiro-fg: #C4B5FD;
+  --sector-operacoes-bg: rgba(251, 146, 60, .14);      --sector-operacoes-fg: #FDBA74;
+  --sector-relacionamento-bg: rgba(45, 212, 191, .14); --sector-relacionamento-fg: #5EEAD4;
 }
 
 html { font-family: var(--font-sans); font-size: var(--text-base); background: var(--bg); color: var(--text); }

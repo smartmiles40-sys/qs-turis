@@ -59,7 +59,8 @@ export function comercialDividido(
 
 /** Lê "#<prefixo>/<tela>/<id>" → { tela, id }. Fora da área = início. */
 export function lerHashDaArea(prefixo: string): { tela: string; id?: string } {
-  const [area, tela, id] = window.location.hash.replace(/^#\/?/, "").split("/");
+  // "?aba=…" no fim do hash é estado da tela (src/lib/hashQuery.ts), não parte da rota
+  const [area, tela, id] = window.location.hash.replace(/^#\/?/, "").split("?")[0].split("/");
   if (area !== prefixo || !tela) return { tela: "inicio" };
   return id ? { tela, id: decodeURIComponent(id) } : { tela };
 }

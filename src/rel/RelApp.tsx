@@ -33,6 +33,7 @@ import SinoDeAvisos from "@/avisos/SinoDeAvisos";
 import AppShell, { type ShellGroup, type ShellItem } from "@/components/ui/AppShell";
 import { Icon } from "@/components/ui/icons";
 import { Segmented } from "@/components/ui";
+import { hashSemQuery } from "@/lib/hashQuery";
 
 // Telas carregadas sob demanda (22/10, desempenho): o Rel abre só com o menu e
 // o Início; cada tela baixa o seu pedaço na primeira vez que é aberta (o
@@ -87,7 +88,8 @@ const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kp
 const MAIS_ID = "__mais";
 
 function lerRota(): Rota {
-  const h = window.location.hash.replace(/^#\/?/, "");
+  // "?aba=…" no fim do hash é estado da tela (src/lib/hashQuery.ts), não parte da rota
+  const h = hashSemQuery();
   const [area, tela, id] = h.split("/");
   if (area !== "rel") return { tela: "inicio" };
   if (tela === "cliente" && id) return { tela: "ficha", id };
