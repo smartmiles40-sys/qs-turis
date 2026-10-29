@@ -41,7 +41,8 @@ const MODO_BOLINHA = (() => {
  * abriria na última área usada e o endereço de outra área não levaria a nada.
  */
 function areaDoHash(): Setor | null {
-  const p = window.location.hash.replace(/^#\/?/, "").split("/")[0];
+  // "?ver=…" no fim do hash é estado da tela (src/lib/hashQuery.ts): "#ops?ver=lista" ainda é o Operações
+  const p = window.location.hash.replace(/^#\/?/, "").split("?")[0].split("/")[0];
   if (p === "rel") return "relacionamento";
   if (p === "fin") return "financeiro";
   if (p === "ops") return "operacional";

@@ -1,0 +1,160 @@
+/* Central de Solicitações — redesign 29/10 (docs/ref/qs-redesign-ficha-solicitacoes.md, seção 4).
+   Só tokens (src/styles/tokens.css): cor só pra status e pro ponto/chip de setor. Funciona no modo noite. */
+
+.sol { max-width: 1320px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; color: var(--text); font-family: var(--font-sans); min-width: 0; }
+.sol-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.sol-head__tx { flex: 1; min-width: 220px; }
+.sol-head h1 { margin: 0; font-size: var(--text-2xl); font-weight: 600; letter-spacing: -.02em; color: var(--text); }
+.sol-head p { margin: 4px 0 0; font-size: 14px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sol-head__acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.sol-setor { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); }
+
+.sol-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+
+/* barra de controles: um card só */
+.sol-ctrl { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sol-ctrl__l1 { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.sol-ctrl__busca { flex: 1; min-width: 200px; }
+.sol-ctrl__busca .qs-search { width: 100%; }
+.sol-ctrl__l2 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sol-ctrl__rot { font-size: 12px; font-weight: 600; color: var(--subtle); margin-right: 2px; }
+.sol-ctrl__sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 6px; }
+.sol-ctrl .qs-pill { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.sol-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); flex-wrap: wrap; }
+.sol-seg button { min-height: 36px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 600 13px var(--font-sans); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.sol-seg button:hover { color: var(--text); }
+.sol-seg button[aria-selected="true"], .sol-seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.sol-seg__n { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--warn-bg); color: var(--warn); }
+
+.sol-erro { font-size: 13px; color: var(--danger); margin: 0; }
+.sol-carregando { font-size: 13px; color: var(--subtle); margin: 0; }
+
+/* "Precisa de você" (Pedidas por nós) */
+.sol-precisa { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border)); background: var(--surface); border-radius: var(--radius-card); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.sol-precisa h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.sol-precisa__g { display: flex; flex-direction: column; gap: 4px; }
+.sol-precisa__t { font-size: 12px; font-weight: 600; color: var(--muted); }
+
+/* ── Quadro ── */
+.sol-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(272px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 4px; align-items: start; }
+.sol-col { background: var(--surface-2); border-radius: var(--radius-card); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sol-col__h { display: flex; flex-direction: column; gap: 1px; padding: 2px 4px 4px; }
+.sol-col__t { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+.sol-col__n { font-size: 12px; color: var(--subtle); font-variant-numeric: tabular-nums; }
+.sol-col__d { font-size: 11.5px; color: var(--subtle); }
+.sol-vazio { border: 1px dashed var(--border-strong); border-radius: 10px; padding: 14px 8px; text-align: center; font-size: 12px; color: var(--subtle); }
+.sol-entregues { background: var(--surface); border-radius: 10px; padding: 8px 10px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+
+.sol-card { position: relative; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; cursor: pointer; font: inherit; color: var(--text); }
+.sol-card:hover { border-color: var(--border-strong); }
+.sol-card:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.sol-card--alerta { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); box-shadow: inset 3px 0 0 var(--danger); }
+.sol-card__top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.sol-card__meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--subtle); }
+.sol-card__num { font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sol-card__tipo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sol-card__titulo { font-size: 14px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.sol-card--fechada .sol-card__titulo { color: var(--muted); }
+.sol-card__cli { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; color: var(--muted); }
+.sol-card__cli span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sol-card__semcli { font-size: 12px; font-weight: 600; color: var(--warn); }
+.sol-card__pe { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; color: var(--subtle); }
+.sol-card__extra { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.sol-novidade { position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--info); }
+.sol-tw { color: var(--warn); font-weight: 600; }
+.sol-td { color: var(--danger); font-weight: 600; }
+.sol-to { color: var(--ok); font-weight: 600; }
+
+/* ── Lista ── */
+.sol-tabela { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); overflow-x: auto; }
+.sol-tabela table { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 13px; }
+.sol-tabela th { text-align: left; font-size: 12px; font-weight: 600; color: var(--subtle); padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.sol-tabela td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--muted); }
+.sol-tabela tr:last-child td { border-bottom: 0; }
+.sol-tabela tbody tr { cursor: pointer; }
+.sol-tabela tbody tr:hover { background: var(--surface-2); }
+.sol-tabela__ped { display: flex; flex-direction: column; gap: 2px; border: 0; background: transparent; padding: 0; text-align: left; font: inherit; cursor: pointer; color: var(--text); max-width: 380px; }
+.sol-tabela__ped small { font-size: 12px; color: var(--subtle); }
+.sol-tabela__ped span { font-weight: 600; overflow-wrap: anywhere; }
+.sol-tabela__ped:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; border-radius: 4px; }
+
+/* ── Prazos ── */
+.sol-prazos { display: flex; flex-direction: column; gap: 12px; }
+.sol-faixa { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 12px 14px; }
+.sol-faixa__h { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.sol-faixa__h h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.sol-linha { width: 100%; display: grid; grid-template-columns: 150px minmax(0, 2fr) minmax(0, 1.2fr) 110px; align-items: center; gap: 10px; padding: 9px 8px; border: 0; border-top: 1px solid var(--border); background: transparent; text-align: left; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; border-radius: 0; }
+.sol-linha:hover { background: var(--surface-2); }
+.sol-linha:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+.sol-linha b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sol-linha span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) {
+  .sol-linha { grid-template-columns: 1fr; gap: 2px; }
+}
+
+/* ── Modal do detalhe ── */
+.sol-modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.sol-modal__fundo { position: absolute; inset: 0; background: rgba(9, 9, 11, .55); border: 0; cursor: default; }
+.sol-modal__caixa { position: relative; width: 100%; max-width: 940px; max-height: calc(100vh - 32px); display: flex; flex-direction: column; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-card); box-shadow: 0 24px 64px rgba(0, 0, 0, .28); overflow: hidden; }
+.sol-modal__caixa:focus { outline: none; }
+.sol-modal__h { padding: 16px 20px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.sol-modal__l1 { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.sol-modal__chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.sol-modal__nav { display: flex; align-items: center; gap: 4px; flex: none; }
+.sol-modal__pos { font-size: 12px; color: var(--subtle); margin-right: 4px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sol-modal__titulo { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; line-height: 1.3; overflow-wrap: anywhere; }
+.sol-faixa-prazo { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; background: var(--surface-2); color: var(--muted); }
+.sol-faixa-prazo--warn { background: var(--warn-bg); color: var(--warn); }
+.sol-faixa-prazo--danger { background: var(--danger-bg); color: var(--danger); }
+.sol-faixa-prazo--ok { background: var(--ok-bg); color: var(--ok); }
+.sol-modal__corpo { overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; padding: 18px 20px 20px; }
+.sol-modal__esq, .sol-modal__dir { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.sol-rot { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--subtle); margin: 0 0 8px; }
+.sol-bloco { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sol-quem { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap; }
+.sol-quem b { color: var(--text); }
+.sol-desc { margin: 0; font-size: 14px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sol-cli { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sol-cli__tx { display: flex; flex-direction: column; min-width: 0; }
+.sol-cli__n { font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.sol-cli__v { font-size: 12px; color: var(--subtle); overflow-wrap: anywhere; }
+.sol-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.sol-link { border: 0; background: transparent; padding: 0; font: 600 13px var(--font-sans); color: var(--positive); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.sol-link--fraco { color: var(--subtle); font-weight: 500; }
+.sol-dl { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px 10px; margin: 0; font-size: 13px; }
+.sol-dl dt { color: var(--subtle); font-weight: 500; }
+.sol-dl dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.sol-acoes { display: flex; flex-direction: column; gap: 8px; }
+.sol-acoes .qs-btn2, .sol-acoes .qs-menu, .sol-acoes .qs-menu > .qs-btn2 { width: 100%; }
+.sol-acoes__dica { font-size: 12px; line-height: 1.45; color: var(--subtle); margin: 0; }
+.sol-painel { border: 1px solid var(--border-strong); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); scroll-margin: 16px; }
+.sol-painel__t { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.sol-painel__d { margin: 0; font-size: 12px; color: var(--subtle); }
+.sol-painel__bts { display: flex; flex-wrap: wrap; gap: 8px; }
+.sol-aviso { border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.45; background: var(--surface-2); color: var(--text); }
+.sol-aviso--warn { background: var(--warn-bg); color: var(--warn); }
+.sol-aviso--danger { background: var(--danger-bg); color: var(--danger); }
+.sol-aviso--ok { background: var(--ok-bg); color: var(--ok); }
+.sol-aviso small { display: block; margin-top: 4px; font-size: 12px; opacity: .9; }
+.sol-comentar { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.sol-comentar label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.sol-comentar__l { display: flex; gap: 8px; align-items: flex-end; }
+.sol-ta { width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: 14px/1.4 var(--font-sans); resize: vertical; }
+.sol-ta:focus { outline: none; border-color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 12%, transparent); }
+.sol-ev-texto { display: block; margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); color: var(--text); font-weight: 400; white-space: pre-wrap; }
+
+@media (max-width: 760px) {
+  .sol-modal { padding: 0; }
+  .sol-modal__caixa { max-width: none; max-height: none; height: 100%; border-radius: 0; border: 0; }
+  .sol-modal__corpo { grid-template-columns: 1fr; padding: 14px 16px 20px; }
+  .sol-modal__h { padding: 12px 16px; }
+  .sol-modal__titulo { font-size: 18px; }
+}
+@media (max-width: 640px) {
+  .sol-ctrl__sep { display: none; }
+  .sol-head__acts { width: 100%; }
+  .sol-head__acts .qs-btn2 { flex: 1; }
+}
+.qs-btn2.sol-perigo { background: var(--danger); color: var(--surface); border-color: var(--danger); }
+.qs-btn2.sol-perigo:hover { background: var(--danger); opacity: .9; }
+.sol-chips-r { display: flex; flex-wrap: wrap; gap: 6px; }
