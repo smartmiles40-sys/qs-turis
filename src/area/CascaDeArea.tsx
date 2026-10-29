@@ -74,7 +74,7 @@ const ICONE_DO_ITEM: Record<string, ReactNode> = {
   inicio: Icon.inicio, atendimentos: Icon.inbox, conversas: Icon.chat, modelos: Icon.modelo,
   receber: Icon.dinheiro, pagamentos: Icon.pagamento, solicitacoes: Icon.inbox, propostas: Icon.doc,
   equipe: Icon.time, fichas: Icon.cliente, arrumar: Icon.ferramenta, fornecedores: Icon.fornecedor,
-  "exp-expedicoes": Icon.aviao, "exp-inscricoes": Icon.inscricao, "exp-avisos": Icon.megafone, "checklist-padrao": Icon.check,
+  "exp-expedicoes": Icon.aviao, "exp-inscricoes": Icon.inscricao, "exp-avisos": Icon.megafone, "checklist-padrao": Icon.check, receitas: Icon.check,
   "exp-inicio": Icon.inicio, "exp-config": Icon.cadeado,
 };
 

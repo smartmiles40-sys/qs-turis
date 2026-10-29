@@ -29,6 +29,7 @@ import { usePode } from "./equipe/usePode";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import { useAprovacoesNovas } from "@/propostas/lib";
 import type { TelaExp } from "@/expedicoes/contexto";
+import { useContagemReceitas } from "@/expedicoes/useContagensExp";
 import SinoDeAvisos from "@/avisos/SinoDeAvisos";
 import AppShell, { type ShellGroup, type ShellItem } from "@/components/ui/AppShell";
 import { Icon } from "@/components/ui/icons";
@@ -69,7 +70,7 @@ const PropostasPage = lazy(() => import("@/propostas/PropostasPage"));
 // (as policies já barram a escrita — is_readonly) e decide inscrições.
 // Telas com prefixo "exp-" pra não bater com as do Rel ("clientes", "passageiros").
 const ExpedicoesArea = lazy(() => import("@/expedicoes/ExpedicoesArea"));
-const REL_EXP = { "exp-expedicoes": "expedicoes", "exp-pacotes": "pacotes", "exp-passageiros": "passageiros", "exp-inscricoes": "inscricoes", "exp-avisos": "avisos" } as const satisfies Record<string, TelaExp>;
+const REL_EXP = { "exp-expedicoes": "expedicoes", "exp-pacotes": "pacotes", "exp-passageiros": "passageiros", "exp-inscricoes": "inscricoes", "exp-avisos": "avisos", "exp-receitas": "receitas" } as const satisfies Record<string, TelaExp>;
 type TelaRelExp = keyof typeof REL_EXP;
 const ehRelExp = (t: string): t is TelaRelExp => t in REL_EXP;
 
@@ -272,6 +273,8 @@ export default function RelApp() {
   const verKpis = usePode("relacionamento.kpis") !== false;
   const [central, recontarCentral] = useContagemSolicitacoes("relacionamento");
   const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "relacionamento");
+  // 29/10 (Carol): receitas a enviar na janela de 20 dias (menu "Mais › Receitas")
+  const receitasRel = useContagemReceitas();
   const [rota, setRota] = useState<Rota>(lerRota);
   const [resumo, setResumo] = useState<ResumoDoMenu | null>(null);
   const [cont, setCont] = useState<Contadores | null>(null);
@@ -368,6 +371,8 @@ export default function RelApp() {
     { id: "exp-expedicoes", label: "Expedições", icon: Icon.mapa },
     { id: "exp-pacotes", label: "Pacotes", icon: Icon.aviao },
     { id: "exp-inscricoes", label: "Inscrições", icon: Icon.inscricao },
+    // 29/10 (Carol): receitas a emitir/enviar antes do embarque
+    { id: "exp-receitas", label: "Receitas", icon: Icon.check, count: receitasRel || undefined, late: true },
     { id: "exp-avisos", label: "Avisos das expedições", icon: Icon.megafone },
     { id: "disparos", label: "Disparos e remarketing", icon: Icon.disparo },
     { id: "automacoes", label: "Automações", icon: Icon.cadencia },

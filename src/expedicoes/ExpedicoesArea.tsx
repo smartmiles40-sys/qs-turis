@@ -28,6 +28,7 @@ const PAGINAS: Partial<Record<TelaExp, React.LazyExoticComponent<ComponentType>>
   "acessos-amigo": lazy(() => import("./paginas/AcessosAmigo")),
   "exp-config": lazy(() => import("./paginas/Config")),
   "checklist-padrao": lazy(() => import("./paginas/ChecklistPadrao")),
+  receitas: lazy(() => import("./paginas/Receitas")),
 };
 
 export default function ExpedicoesArea({ tela, caminho, ir, setorRelacionamento = false }: {

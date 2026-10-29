@@ -201,6 +201,9 @@ export type PassageiroRow = {
   foto_arquivo_id?: string | null;
   /** ExpedAmigo: a expedição só aparece no portal do viajante quando liberada. Migration 0040. */
   liberado_expedamigo?: boolean;
+  /** 0223: receita médica a emitir/enviar (~20 dias antes do embarque) — menu Receitas. */
+  receita_pendente?: boolean;
+  receita_enviada_em?: string | null;
   /** 0172: a ficha do cliente (rel_clientes) — cadastro único. */
   cliente_id?: string | null;
   created_at: string;
@@ -660,6 +663,10 @@ export type InscricaoPendenteRow = {
   /** Motivo da recusa + anexo técnico opcional (migration 0042). */
   motivo_recusa: string | null;
   recusa_arquivo_id: string | null;
+  /** 0223 (Carol): anotação da triagem de saúde — some junto na aprovação. */
+  comentario_saude?: string | null;
+  /** 0223: "preciso emitir e enviar a receita" — vai pro passageiro na aprovação. */
+  receita_pendente?: boolean;
   created_at: string;
   updated_at: string;
 }

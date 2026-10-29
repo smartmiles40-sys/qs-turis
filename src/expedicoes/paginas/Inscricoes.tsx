@@ -5,6 +5,13 @@
 // Aprovar/recusar/restaurar/excluir = funções SQL atômicas da 0163 (no antigo era
 // service role). Quem decide: useExp().podeDecidirInscricao (Relacionamento
 // também); restaurar/excluir só quem edita. O log de decisões aparece pro admin.
+//
+// 29/10 — pedidos da Carol, trazidos do app antigo (711f772, 66369ee, fe8ff18):
+//  · filtro "Só com alerta de saúde" (com contador);
+//  · TRIAGEM DE SAÚDE nas inscrições com "Sim": anotação que o time vê antes de
+//    aprovar + caixinha "Preciso emitir e enviar a receita" (vai pro passageiro na
+//    aprovação → menu Receitas). Precisa da 0223; sem ela a caixa nem aparece;
+//  · fila AGRUPADA POR EXPEDIÇÃO, cada grupo abre/fecha, por data de embarque.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Botao, Modal, Vazio, Aviso } from "@/rel/ui";
 import { useExp } from "../contexto";
@@ -69,6 +76,8 @@ export default function Inscricoes() {
   const [recusando, setRecusando] = useState<InscricaoPendenteRow | null>(null);
   const [excluindo, setExcluindo] = useState<InscricaoPendenteRow | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
+  const [soSaude, setSoSaude] = useState(false);
+  const [fechados, setFechados] = useState<Set<string>>(new Set());
 
   const carregar = useCallback(async () => {
     try {
@@ -89,7 +98,18 @@ export default function Inscricoes() {
   useAoVivo([{ tabela: "inscricoes_pendentes" }], () => { void carregar(); if (ehAdmin) void carregarLog(); });
 
   const ordenar = (a: InscricaoPendenteRow, b: InscricaoPendenteRow) => (b.recusada_em ?? b.created_at).localeCompare(a.recusada_em ?? a.created_at);
-  const pendentes = useMemo(() => (linhas ?? []).filter((l) => l.status !== "recusada").sort(ordenar), [linhas]);
+  const todasPendentes = useMemo(() => (linhas ?? []).filter((l) => l.status !== "recusada").sort(ordenar), [linhas]);
+  const comAlerta = useMemo(() => todasPendentes.filter(temAlertaSaude), [todasPendentes]);
+  const pendentes = soSaude ? comAlerta : todasPendentes;
+  // 0223 aplicada? (a coluna vem no select *)
+  const temTriagem = (linhas ?? []).some((l) => "comentario_saude" in l);
+  // Fila por expedição, a que embarca primeiro em cima.
+  const grupos = useMemo(() => {
+    const m = new Map<string, InscricaoPendenteRow[]>();
+    for (const it of pendentes) m.set(it.expedicao_id, [...(m.get(it.expedicao_id) ?? []), it]);
+    return [...m.entries()].sort(([a], [b]) => (exps.get(a)?.data_embarque ?? "9999").localeCompare(exps.get(b)?.data_embarque ?? "9999"));
+  }, [pendentes, exps]);
+  const alternarGrupo = (id: string) => setFechados((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const recusadas = useMemo(() => (linhas ?? []).filter((l) => l.status === "recusada").sort(ordenar), [linhas]);
 
   const alternar = (id: string) => setAbertos((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -127,7 +147,7 @@ export default function Inscricoes() {
     const exp = exps.get(it.expedicao_id);
     const nome = it.nome_completo ?? txt(d, "nome_completo") ?? "—";
     const saude = (d.saude && typeof d.saude === "object" ? d.saude : {}) as Record<string, string>;
-    const alertaSaude = PERGUNTAS_SAUDE.some((q) => q.campo !== "vacina_febre_amarela" && saude[q.campo] === "Sim");
+    const alertaSaude = temAlertaSaude(it);
     const aberto = abertos.has(it.id);
     const endereco = ["endereco_rua", "endereco_numero", "endereco_complemento", "endereco_bairro", "endereco_cidade", "endereco_estado"].map((k) => txt(d, k)).filter(Boolean).join(", ");
     const cert = saude.vacina_febre_amarela_arquivo_id;
@@ -150,7 +170,9 @@ export default function Inscricoes() {
         </div>
 
         {!recusada && alertaSaude && (
-          <Aviso>Respostas de saúde marcadas com "Sim" — <strong>verificar com a Carol</strong> antes de aprovar.</Aviso>
+          temTriagem
+            ? <TriagemSaude it={it} pode={podeDecidirInscricao} saude={saude} onSalvo={carregar} />
+            : <Aviso>Respostas de saúde marcadas com "Sim" — <strong>verificar com a Carol</strong> antes de aprovar.</Aviso>
         )}
 
         {recusada && (it.motivo_recusa || it.recusa_arquivo_id) && (
@@ -243,14 +265,37 @@ export default function Inscricoes() {
 
   return (
     <div className="space-y-5">
-      <header className="flex items-center gap-2">
+      <header className="flex items-center gap-2 flex-wrap">
         <h1 className="text-[20px] font-bold" style={{ color: "var(--ink)" }}>Inscrições pendentes</h1>
-        <Selo tom={pendentes.length ? "aviso" : "neutro"}>{pendentes.length}</Selo>
+        <Selo tom={todasPendentes.length ? "aviso" : "neutro"}>{todasPendentes.length}</Selo>
+        <span className="flex-1" />
+        <button type="button" onClick={() => setSoSaude((v) => !v)} aria-pressed={soSaude}
+          className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
+          style={soSaude ? { background: "var(--warn-bg)", color: "var(--warn-ink)", border: "1px solid var(--warn-ink)" } : { background: "var(--card)", color: "var(--ink2)", border: "1px solid var(--line)" }}>
+          Só com alerta de saúde ({comAlerta.length})
+        </button>
       </header>
 
       {pendentes.length === 0
-        ? <Vazio titulo="Nenhuma inscrição pendente no momento." texto="As inscrições do formulário público aparecem aqui para aprovar ou recusar." />
-        : <div className="grid gap-3 lg:grid-cols-2">{pendentes.map((it) => card(it, false))}</div>}
+        ? <Vazio titulo={soSaude ? "Nenhuma inscrição com alerta de saúde." : "Nenhuma inscrição pendente no momento."} texto="As inscrições do formulário público aparecem aqui para aprovar ou recusar." />
+        : grupos.map(([expId, its]) => {
+          const exp = exps.get(expId);
+          const fechado = fechados.has(expId);
+          const nSaude = its.filter(temAlertaSaude).length;
+          return (
+            <section key={expId} className="space-y-3">
+              <button type="button" onClick={() => alternarGrupo(expId)} aria-expanded={!fechado}
+                className="w-full flex items-center gap-2 text-left border-b pb-1.5" style={{ borderColor: "var(--line)" }}>
+                <span style={{ color: "var(--ink3)" }}>{fechado ? "▸" : "▾"}</span>
+                <span className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>{exp?.nome ?? "Expedição"}</span>
+                <span className="text-[12px]" style={{ color: "var(--ink3)" }}>{exp?.data_embarque ? `embarque ${formatDate(exp.data_embarque)}` : "sem data"}</span>
+                <Selo tom="aviso">{its.length}</Selo>
+                {nSaude > 0 && <Selo tom="erro">{nSaude} com saúde</Selo>}
+              </button>
+              {!fechado && <div className="grid gap-3 lg:grid-cols-2">{its.map((it) => card(it, false))}</div>}
+            </section>
+          );
+        })}
 
       {recusadas.length > 0 && (
         <section className="space-y-3">
@@ -294,6 +339,67 @@ export default function Inscricoes() {
           (passaporte, foto, certificado, anexo do motivo) — não dá pra desfazer. Anexo que já estiver no cadastro de algum passageiro é mantido.
         </p>
       </Modal>
+    </div>
+  );
+}
+
+/** Alguma resposta de saúde "Sim" (a vacina de febre amarela não conta como alerta). */
+function temAlertaSaude(it: InscricaoPendenteRow): boolean {
+  const d = (it.dados ?? {}) as Dados;
+  const saude = (d.saude && typeof d.saude === "object" ? d.saude : {}) as Record<string, string>;
+  return PERGUNTAS_SAUDE.some((q) => q.campo !== "vacina_febre_amarela" && saude[q.campo] === "Sim");
+}
+
+/** Triagem de saúde (Carol): o que veio "Sim", a anotação e o lembrete de receita. */
+function TriagemSaude({ it, pode, saude, onSalvo }: { it: InscricaoPendenteRow; pode: boolean; saude: Record<string, string>; onSalvo: () => void }) {
+  const { avisar } = useExp();
+  const [texto, setTexto] = useState(it.comentario_saude ?? "");
+  const [receita, setReceita] = useState(!!it.receita_pendente);
+  const [indo, setIndo] = useState(false);
+  useEffect(() => { setTexto(it.comentario_saude ?? ""); setReceita(!!it.receita_pendente); }, [it.comentario_saude, it.receita_pendente]);
+  const sins = PERGUNTAS_SAUDE.filter((q) => q.campo !== "vacina_febre_amarela" && saude[q.campo] === "Sim");
+  const mudouTexto = texto.trim() !== (it.comentario_saude ?? "").trim();
+
+  async function salvar(rec: boolean) {
+    setIndo(true);
+    try {
+      await rpc("exp_inscricao_triagem_saude", { p_id: it.id, p_comentario: texto, p_receita: rec });
+      avisar("Triagem de saúde salva");
+      onSalvo();
+    } catch (e) { avisar(e instanceof Error ? e.message : "Não salvou a triagem", "erro"); setReceita(!!it.receita_pendente); }
+    finally { setIndo(false); }
+  }
+
+  return (
+    <div className="rounded-lg px-3 py-2.5 space-y-2 text-[12.5px]" style={{ background: "var(--warn-bg)", color: "var(--ink)" }}>
+      <div className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "var(--warn-ink)" }}>Triagem de saúde</div>
+      <ul className="space-y-0.5">
+        {sins.map((q) => {
+          const extra = [q.detalheCampo ? saude[q.detalheCampo] : "", q.detalhe2Campo ? saude[q.detalhe2Campo] : ""].filter(Boolean).join(" · ");
+          return <li key={q.campo}><strong>{q.curto}</strong>{extra ? `: ${extra}` : ""}</li>;
+        })}
+      </ul>
+      {pode ? (
+        <>
+          <textarea className="rel-input" rows={2} value={texto} maxLength={2000} onChange={(e) => setTexto(e.target.value)}
+            placeholder={'Anotação da triagem — ex.: "receita já emitida", "não precisa de receita"'} />
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={receita} disabled={indo} onChange={(e) => { setReceita(e.target.checked); void salvar(e.target.checked); }} />
+              Preciso emitir e enviar a receita
+            </label>
+            <span className="flex-1" />
+            {mudouTexto && <Botao disabled={indo} onClick={() => void salvar(receita)}>{indo ? "Salvando…" : "Salvar anotação"}</Botao>}
+          </div>
+        </>
+      ) : (
+        <>
+          {it.comentario_saude
+            ? <p className="whitespace-pre-wrap"><strong>Anotação:</strong> {it.comentario_saude}</p>
+            : <p>Sem anotação da triagem ainda — <strong>verificar com a Carol</strong> antes de aprovar.</p>}
+          {it.receita_pendente && <p>Receita a emitir e enviar</p>}
+        </>
+      )}
     </div>
   );
 }
