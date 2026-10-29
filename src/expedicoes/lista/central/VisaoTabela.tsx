@@ -12,7 +12,7 @@ import { STATUS_EXPEDICAO } from "../../lib/constants";
 import type { StatusExpedicao } from "../../lib/database";
 import { CelulaEscolha, PilulaStatus } from "../../ui";
 import { periodo, porInicio, type ColTabela, type LinhaExp, type Ordenacao } from "./linhas";
-import type { AcoesDaLinha } from "./VisaoFases";
+import type { AcoesDaLinha } from "./menu";
 
 const PESO_FASE = { em_viagem: 0, embarque: 1, preparacao: 2, vendendo: 3, concluida: 4 } as const;
 

@@ -7,10 +7,8 @@
 .cx-head p { margin: 4px 0 0; font-size: 14px; color: var(--muted); }
 .cx-acts { display: flex; gap: 10px; flex-wrap: wrap; }
 
-.cx-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .cx-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .cx-dot--lg { width: 10px; height: 10px; }
-.cx-kpi-l { display: inline-flex; align-items: center; gap: 8px; }
 
 /* Precisa de atenção */
 .cx-tag { font-size: 12px; font-weight: 700; border-radius: 6px; padding: 4px 9px; white-space: nowrap; background: var(--surface-2); color: var(--muted); }
@@ -20,7 +18,7 @@
 /* Barra de controles */
 .cx-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 .cx-bar__f { display: flex; gap: 10px; flex-wrap: wrap; flex: 1 1 520px; justify-content: flex-end; min-width: 0; }
-.cx-bar .qs-search { flex: 1 1 240px; max-width: 380px; min-width: 0; }
+.cx-bar .qs-search { flex: 1 1 320px; max-width: 560px; min-width: 0; }
 .cx-sel { display: inline-flex; align-items: center; gap: 6px; min-height: var(--h-touch); border: 1px solid var(--border-strong); border-radius: 10px;
   padding: 0 10px; background: var(--surface); font-size: 14px; color: var(--muted); max-width: 100%; }
 .cx-sel select { border: 0; background: transparent; font: 600 14px var(--font-sans); color: var(--text); max-width: 180px; cursor: pointer; }
@@ -109,3 +107,20 @@ html.dark .cx-sel select { background: transparent; }
   .cx-sel { flex: 1 1 100%; }
   .cx-sel select { max-width: none; flex: 1; }
 }
+
+/* ── Cartões (29/10): uma expedição do lado da outra, só o principal ───────── */
+.cx-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.cx-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 16px; }
+.cx-card:hover { border-color: var(--border-strong); }
+.cx-card:focus-visible { outline: 2px solid var(--positive); outline-offset: 2px; }
+.cx-card--fim { opacity: .72; }
+.cx-card__h { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.cx-card__nome { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.cx-card__t { font-size: 15px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.cx-card__meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); min-width: 0; }
+.cx-card__datas { font-size: 13px; color: var(--text); }
+.cx-card .cx-chip { align-self: flex-start; }
+.cx-card__oc { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.cx-card__ocl { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }

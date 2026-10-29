@@ -8,10 +8,12 @@
 //   barra (visão, busca, Destino, Resp. operacional, Status, Período) →
 //   Por fase | Linha do tempo | Tabela.
 //
-// 29/10 (Bruno): saiu o "Precisa de atenção" ("não tem tanta importância") e a
-// coluna de alertas; TODAS as expedições ficam visíveis no Por fase (nenhuma
-// seção recolhida de início, todas as concluídas e as canceladas no fim), cada
-// uma com o andamento da fase e o status.
+// 29/10 (Bruno): saiu o "Precisa de atenção" ("não tem tanta importância").
+// Depois: "tem que ser algo de fácil acesso, entrar fácil e fazer as alterações
+// rápido; uma expedição do lado da outra só com as informações principais" →
+// a tela virou BUSCA + GRADE DE CARTÕES (VisaoCartoes), com TODAS as expedições
+// (canceladas e concluídas no fim). Saíram os indicadores, o Por fase e a Linha
+// do tempo; a Tabela fica como alternativa (ordenar, reordenar arrastando).
 //
 // A fase vem das DATAS (lib/fase.ts), não do status manual. Visão, busca,
 // filtros e ordenação ficam na query do hash (#ops/expedicoes?visao=tabela&q=…),
@@ -19,7 +21,7 @@
 // docs/MAPA-EXPEDICOES.md › "Central: onde ficou cada ação da lista antiga".
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Btn, SearchInput, Segmented, StatCard } from "@/components/ui";
+import { Btn, SearchInput, Segmented } from "@/components/ui";
 import { Botao, Modal } from "@/rel/ui";
 import { gravarParamNoHash, lerParamDoHash } from "@/lib/hashQuery";
 import { useExp } from "../../contexto";
@@ -31,23 +33,21 @@ import { STATUS_EXPEDICAO } from "../../lib/constants";
 import { META_FASE, dataSP } from "../../lib/fase.ts";
 import type { ExpedicaoComAgregados, StatusExpedicao } from "../../lib/database";
 import { EditarExpedicao, NovaExpedicao, salvarCampoExpedicao } from "../FormExpedicao";
-import { ORDENACAO_PADRAO, concluidaRecente, csvDasLinhas, lerOrdenacao, montarLinha, porInicio, type LinhaExp, type Ordenacao } from "./linhas";
-import VisaoFases, { type AcoesDaLinha } from "./VisaoFases";
-import VisaoLinha from "./VisaoLinha";
+import { ORDENACAO_PADRAO, csvDasLinhas, lerOrdenacao, montarLinha, porInicio, type Ordenacao } from "./linhas";
+import { type AcoesDaLinha } from "./menu";
+import VisaoCartoes from "./VisaoCartoes";
 import VisaoTabela from "./VisaoTabela";
 import "./central.css";
 
-type Visao = "fases" | "linha" | "tabela";
-const VISOES: { value: Visao; label: string }[] = [
-  { value: "fases", label: "Por fase" }, { value: "linha", label: "Linha do tempo" }, { value: "tabela", label: "Tabela" },
-];
+type Visao = "cartoes" | "tabela";
+const VISOES: { value: Visao; label: string }[] = [{ value: "cartoes", label: "Cartões" }, { value: "tabela", label: "Tabela" }];
 const PERIODOS = [
   { id: "", rotulo: "Todas" }, { id: "30", rotulo: "Próx. 30d" }, { id: "60", rotulo: "Próx. 60d" },
   { id: "90", rotulo: "Próx. 90d" }, { id: "ano", rotulo: "Este ano" },
 ] as const;
 const DIAS_SEMANA = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
 
-const lerVisao = (): Visao => { const v = lerParamDoHash("visao"); return v === "linha" || v === "tabela" ? v : "fases"; };
+const lerVisao = (): Visao => (lerParamDoHash("visao") === "tabela" ? "tabela" : "cartoes");
 
 export default function CentralExpedicoes() {
   const { somenteLeitura, usuarios, ir, avisar } = useExp();
@@ -68,7 +68,7 @@ export default function CentralExpedicoes() {
   const hoje = dataSP(new Date());
 
   // Estado → URL (sem navegar; ver lib/hashQuery.ts)
-  useEffect(() => { gravarParamNoHash("visao", visao === "fases" ? null : visao); }, [visao]);
+  useEffect(() => { gravarParamNoHash("visao", visao === "cartoes" ? null : visao); }, [visao]);
   useEffect(() => { gravarParamNoHash("q", busca.trim() || null); }, [busca]);
   useEffect(() => { gravarParamNoHash("destino", destino || null); }, [destino]);
   useEffect(() => { gravarParamNoHash("resp", respOp || null); }, [respOp]);
@@ -123,9 +123,7 @@ export default function CentralExpedicoes() {
   }, [linhas, busca, destino, respOp, status, periodo, hoje]);
   const filtrosAtivos = [busca.trim(), destino, respOp, status, periodo].filter(Boolean).length;
 
-  // Canceladas não têm fase: vão numa seção própria, no fim do Por fase.
   const ativas = filtradas.filter((l) => !l.cancelada);
-  const canceladas = filtradas.filter((l) => l.cancelada);
 
   const proximaId = useMemo(() => {
     const prox = ativas.filter((l) => l.e.data_embarque && l.inf.diasParaInicio >= 0).sort(porInicio)[0];
@@ -166,24 +164,9 @@ export default function CentralExpedicoes() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  // Indicadores (spec §2.1) — sobre as expedições não canceladas, sem filtros.
-  const kpis = useMemo(() => {
-    const vivas = linhas.filter((l) => !l.cancelada);
-    const de = (f: string) => vivas.filter((l) => l.fase === f);
-    const soma = (ls: LinhaExp[], f: (l: LinhaExp) => number) => ls.reduce((s, l) => s + f(l), 0);
-    const viagem = de("em_viagem"), emb = de("embarque");
-    const vend = vivas.filter((l) => l.fase === "preparacao" || l.fase === "vendendo");
-    return {
-      viagem: { n: viagem.length, pax: soma(viagem, (l) => l.e.prontidao_total) },
-      emb: { n: emb.length, aptos: soma(emb, (l) => l.e.prontidao_aptos), total: soma(emb, (l) => l.e.prontidao_total) },
-      vend: { n: vend.length, vendidas: soma(vend, (l) => l.e.pax_confirmados), vagas: soma(vend, (l) => l.e.pax_planejados), livres: soma(vend, (l) => l.vagasLivres) },
-      concl: vivas.filter(concluidaRecente).length,
-    };
-  }, [linhas]);
 
   const hojeTexto = `${DIAS_SEMANA[new Date(`${hoje}T12:00:00Z`).getUTCDay()]} ${hoje.slice(8, 10)}/${hoje.slice(5, 7)}/${hoje.slice(0, 4)}`;
   const nTotal = linhas.filter((l) => !l.cancelada).length;
-  const dot = (cor: string) => <span className="cx-dot" style={{ background: cor }} aria-hidden />;
 
   return (
     <div className="cx-page">
@@ -203,24 +186,11 @@ export default function CentralExpedicoes() {
 
       {!lista ? <Carregando /> : (
         <>
-          <section className="cx-kpis" aria-label="Resumo da operação">
-            <StatCard label={<span className="cx-kpi-l">{dot(META_FASE.em_viagem.cor)}Em viagem</span>} value={kpis.viagem.n}
-              sub={`${kpis.viagem.pax} ${kpis.viagem.pax === 1 ? "passageiro" : "passageiros"} fora do Brasil`} />
-            <StatCard label={<span className="cx-kpi-l">{dot(META_FASE.embarque.cor)}Embarcam em 30 dias</span>} value={kpis.emb.n}
-              sub={`${kpis.emb.aptos} de ${kpis.emb.total} aptos`} tone={kpis.emb.total && kpis.emb.aptos / kpis.emb.total < 0.5 ? "warn" : "default"} />
-            <StatCard label={<span className="cx-kpi-l">{dot(META_FASE.preparacao.cor)}Vendas abertas</span>} value={kpis.vend.n}
-              sub={`${kpis.vend.vendidas} de ${kpis.vend.vagas} vagas vendidas`} />
-            <StatCard label={<span className="cx-kpi-l">{dot(META_FASE.vendendo.cor)}Vagas para vender</span>} value={kpis.vend.livres}
-              sub="nas expedições com venda aberta" />
-            <StatCard label={<span className="cx-kpi-l">{dot(META_FASE.concluida.cor)}Concluídas</span>} value={kpis.concl}
-              sub="nos últimos 12 meses" />
-          </section>
-
           <section className="cx-bar" aria-label="Controles">
             <Segmented label="Visualização" options={VISOES} value={visao} onChange={setVisao} />
             <div className="cx-bar__f">
-              <SearchInput id="cx-busca" placeholder="Buscar por código, nome ou destino  [/]" value={busca} onChange={(e) => setBusca(e.target.value)}
-                aria-label="Buscar expedição" />
+              <SearchInput id="cx-busca" placeholder="Buscar expedição por nome, código ou destino  [/]" value={busca}
+                onChange={(e) => setBusca(e.target.value)} aria-label="Buscar expedição" autoFocus />
               <Seletor rotulo="Destino" valor={destino} onMudar={setDestino} opcoes={destinos.map((x) => ({ v: x, r: x }))} />
               <Seletor rotulo="Resp. operacional" valor={respOp} onMudar={setRespOp}
                 opcoes={responsaveis.map((u) => ({ v: u.id, r: u.nome.split(" ")[0] }))} />
@@ -238,10 +208,8 @@ export default function CentralExpedicoes() {
               Nenhuma expedição ainda. Crie a primeira viagem em grupo para organizar passageiros, prazos, rooming e prontidão.
               {!somenteLeitura && <div style={{ marginTop: 12 }}><Btn variant="primary" onClick={() => setNova(true)}>Criar primeira expedição</Btn></div>}
             </div>
-          ) : visao === "fases" ? (
-            <VisaoFases linhas={ativas} canceladas={canceladas} proximaId={proximaId} abrir={abrir} acoes={acoes} />
-          ) : visao === "linha" ? (
-            <VisaoLinha linhas={ativas} hoje={hoje} abrir={abrir} />
+          ) : visao === "cartoes" ? (
+            <VisaoCartoes linhas={filtradas} proximaId={proximaId} abrir={abrir} acoes={acoes} />
           ) : (
             <VisaoTabela linhas={filtradas} ordemDe={ordemDe} ordenacao={ordenacao} onOrdenar={setOrdenacao} abrir={abrir} acoes={acoes}
               proximaId={proximaId} onReordenar={reordenar} podeArrastar={filtrosAtivos === 0} />
