@@ -5,8 +5,13 @@
 // (lista/ExpedicoesLista.tsx — que continua servindo os PACOTES).
 //
 //   cabeçalho (total + hoje, Exportar, Nova) → 5 indicadores por fase →
-//   "Precisa de atenção" (lib/alertas/expedicoes.ts) → barra (visão, busca,
-//   Destino, Resp. operacional, Status, Período) → Por fase | Linha do tempo | Tabela.
+//   barra (visão, busca, Destino, Resp. operacional, Status, Período) →
+//   Por fase | Linha do tempo | Tabela.
+//
+// 29/10 (Bruno): saiu o "Precisa de atenção" ("não tem tanta importância") e a
+// coluna de alertas; TODAS as expedições ficam visíveis no Por fase (nenhuma
+// seção recolhida de início, todas as concluídas e as canceladas no fim), cada
+// uma com o andamento da fase e o status.
 //
 // A fase vem das DATAS (lib/fase.ts), não do status manual. Visão, busca,
 // filtros e ordenação ficam na query do hash (#ops/expedicoes?visao=tabela&q=…),
@@ -24,10 +29,6 @@ import { agregarExpedicoes } from "../../lib/agregados";
 import { esquecer } from "../../lib/cache";
 import { STATUS_EXPEDICAO } from "../../lib/constants";
 import { META_FASE, dataSP } from "../../lib/fase.ts";
-import {
-  ROTULO_SEVERIDADE, alertasDasExpedicoes, alertasPorExpedicao, contarAlertasAcionaveis, type AlertaExp,
-} from "../../lib/alertas/expedicoes.ts";
-import { lerExtrasDosAlertas, type ExtrasAlerta } from "../../lib/alertas/dadosAlertas";
 import type { ExpedicaoComAgregados, StatusExpedicao } from "../../lib/database";
 import { EditarExpedicao, NovaExpedicao, salvarCampoExpedicao } from "../FormExpedicao";
 import { ORDENACAO_PADRAO, concluidaRecente, csvDasLinhas, lerOrdenacao, montarLinha, porInicio, type LinhaExp, type Ordenacao } from "./linhas";
@@ -45,15 +46,12 @@ const PERIODOS = [
   { id: "90", rotulo: "Próx. 90d" }, { id: "ano", rotulo: "Este ano" },
 ] as const;
 const DIAS_SEMANA = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
-/** Fases em que as regras extras (sem valor, roteiro) podem disparar — só essas são lidas. */
-const FASES_COM_EXTRAS = new Set(["em_viagem", "embarque", "preparacao"]);
 
 const lerVisao = (): Visao => { const v = lerParamDoHash("visao"); return v === "linha" || v === "tabela" ? v : "fases"; };
 
 export default function CentralExpedicoes() {
   const { somenteLeitura, usuarios, ir, avisar } = useExp();
   const [lista, setLista] = useState<ExpedicaoComAgregados[] | null>(null);
-  const [extras, setExtras] = useState<Map<string, ExtrasAlerta> | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [visao, setVisao] = useState<Visao>(lerVisao);
   const [busca, setBusca] = useState(() => lerParamDoHash("q") ?? "");
@@ -87,16 +85,10 @@ export default function CentralExpedicoes() {
     try {
       const l = await agregarExpedicoes(await listarExpedicoes("expedicao"));
       setLista(l); setErro(null);
-      const d = dataSP(new Date());
-      const alvo = l.filter((e) => e.status !== "Cancelada" && FASES_COM_EXTRAS.has(montarLinha(e, d).fase)).map((e) => e.id);
-      lerExtrasDosAlertas(alvo).then(setExtras).catch(() => setExtras(new Map()));
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar"); }
   }, []);
   useEffect(() => { void carregar(false); }, [carregar]);
   useAoVivo([{ tabela: "expedicoes" }], carregar, 300);
-  // Ações do roteiro do líder mudam na aba do detalhe: recarga espaçada. (Passageiros
-  // não assina aqui: a base inteira mudando a todo instante refaria os agregados.)
-  useAoVivo([{ tabela: "roteiro_lider_dias" }], carregar, 3000);
 
   // Atalho "n" = nova (igual à lista antiga) e "/" = busca.
   useEffect(() => {
@@ -131,23 +123,14 @@ export default function CentralExpedicoes() {
   }, [linhas, busca, destino, respOp, status, periodo, hoje]);
   const filtrosAtivos = [busca.trim(), destino, respOp, status, periodo].filter(Boolean).length;
 
-  // Canceladas ficam fora das fases (só na Tabela); Concluídas: últimos 12 meses.
+  // Canceladas não têm fase: vão numa seção própria, no fim do Por fase.
   const ativas = filtradas.filter((l) => !l.cancelada);
-  const nasFases = ativas.filter((l) => l.fase !== "concluida" || concluidaRecente(l));
-  const concluidasAntigas = ativas.length - nasFases.length;
-  const canceladas = filtradas.length - ativas.length;
+  const canceladas = filtradas.filter((l) => l.cancelada);
 
   const proximaId = useMemo(() => {
     const prox = ativas.filter((l) => l.e.data_embarque && l.inf.diasParaInicio >= 0).sort(porInicio)[0];
     return prox?.e.id ?? null;
   }, [ativas]);
-
-  // Alertas: TODAS as expedições (o card é consolidado, não obedece aos filtros).
-  const alertas = useMemo(() => alertasDasExpedicoes((lista ?? []).map((e) => {
-    const x = extras?.get(e.id);
-    return { ...e, seguro_sem_apolice: e.seguro_sem_apolice ?? null, pax_sem_valor: x ? x.pax_sem_valor : null, acoes_roteiro: x ? x.acoes_roteiro : null };
-  }), hoje), [lista, extras, hoje]);
-  const alertasPorExp = useMemo(() => alertasPorExpedicao(alertas), [alertas]);
 
   const abrir = (id: string, aba = "") => ir("expedicoes", aba ? `${id}/${aba}` : id);
 
@@ -174,7 +157,7 @@ export default function CentralExpedicoes() {
 
   const exportar = () => {
     const rotulo = (f: keyof typeof META_FASE) => META_FASE[f].curto;
-    const linhasCsv = visao === "fases" ? [...nasFases].sort(porInicio) : [...filtradas].sort(porInicio);
+    const linhasCsv = [...filtradas].sort(porInicio);
     const blob = new Blob([csvDasLinhas(linhasCsv, rotulo)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -233,8 +216,6 @@ export default function CentralExpedicoes() {
               sub="nos últimos 12 meses" />
           </section>
 
-          <PrecisaDeAtencao alertas={alertas} carregandoExtras={!extras} abrir={abrir} />
-
           <section className="cx-bar" aria-label="Controles">
             <Segmented label="Visualização" options={VISOES} value={visao} onChange={setVisao} />
             <div className="cx-bar__f">
@@ -258,11 +239,7 @@ export default function CentralExpedicoes() {
               {!somenteLeitura && <div style={{ marginTop: 12 }}><Btn variant="primary" onClick={() => setNova(true)}>Criar primeira expedição</Btn></div>}
             </div>
           ) : visao === "fases" ? (
-            <>
-              <VisaoFases linhas={nasFases} alertasPorExp={alertasPorExp} proximaId={proximaId} abrir={abrir} acoes={acoes}
-                notaConcluidas={concluidasAntigas ? `+${concluidasAntigas} mais ${concluidasAntigas === 1 ? "antiga" : "antigas"} na Tabela` : undefined} />
-              {canceladas > 0 && <p className="cx-nota">{canceladas} {canceladas === 1 ? "cancelada fica" : "canceladas ficam"} só na Tabela.</p>}
-            </>
+            <VisaoFases linhas={ativas} canceladas={canceladas} proximaId={proximaId} abrir={abrir} acoes={acoes} />
           ) : visao === "linha" ? (
             <VisaoLinha linhas={ativas} hoje={hoje} abrir={abrir} />
           ) : (
@@ -303,40 +280,5 @@ function Seletor({ rotulo, valor, onMudar, opcoes, todos = "Todos" }: {
         {opcoes.map((o) => <option key={o.v} value={o.v}>{o.r}</option>)}
       </select>
     </label>
-  );
-}
-
-function PrecisaDeAtencao({ alertas, carregandoExtras, abrir }: { alertas: AlertaExp[]; carregandoExtras: boolean; abrir: (id: string, aba?: string) => void }) {
-  const [todos, setTodos] = useState(false);
-  const n = contarAlertasAcionaveis(alertas);
-  const LIMITE = 6;
-  const visiveis = todos ? alertas : alertas.slice(0, LIMITE);
-  return (
-    <section className="qs-card2 cx-alerts" aria-label="Precisa de atenção">
-      <div className="cx-alerts__h">
-        <h2 className="cx-alerts__t">
-          Precisa de atenção
-          <span className={`cx-alerts__n${n ? "" : " cx-alerts__n--zero"}`} aria-label={`${n} itens que pedem ação`}>{n}</span>
-        </h2>
-        <span className="cx-alerts__dica">Consolidado de todas as expedições, do mais urgente para o menos{carregandoExtras ? " · conferindo valores e roteiros…" : ""}</span>
-      </div>
-      {!alertas.length ? <p className="cx-nota" style={{ margin: 0 }}>Nada pedindo atenção agora.</p> : (
-        <ul>
-          {visiveis.map((a) => (
-            <li key={a.chave} className="cx-alert">
-              <span className={`cx-tag cx-tag--${a.severidade}`}>{ROTULO_SEVERIDADE[a.severidade]}</span>
-              <div className="cx-alert__tx">
-                <span className="cx-alert__t">{a.titulo}</span>
-                <span className="cx-alert__s">{a.sub}</span>
-              </div>
-              <Btn size="sm" onClick={() => abrir(a.expedicaoId, a.aba)}>{a.cta}</Btn>
-            </li>
-          ))}
-        </ul>
-      )}
-      {alertas.length > LIMITE && (
-        <div><Btn variant="ghost" size="sm" onClick={() => setTodos((t) => !t)}>{todos ? "Mostrar menos" : `Ver todos (${alertas.length})`}</Btn></div>
-      )}
-    </section>
   );
 }

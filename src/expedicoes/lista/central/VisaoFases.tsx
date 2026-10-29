@@ -2,22 +2,36 @@
 // Visão "Por fase" da Central (spec §2.4): uma seção recolhível por fase, na
 // ordem Em viagem → Embarque → Preparação → Vendas abertas → Concluídas. Cada
 // expedição é UMA linha (grid de 6 colunas + ações), e a linha inteira abre o
-// cockpit. Concluídas começa recolhida; o recolhido fica no localStorage.
+// cockpit. 29/10 (Bruno: "todas visíveis, sem poluir"): nenhuma seção começa
+// recolhida (dá pra recolher, e isso fica no localStorage), Canceladas viram a
+// última seção, e a coluna de alertas deu lugar ao STATUS da expedição.
 import { useEffect, useRef, useState, type KeyboardEvent as KE } from "react";
 import { META_FASE, ORDEM_FASES, type Fase } from "../../lib/fase.ts";
 import { STATUS_EXPEDICAO } from "../../lib/constants";
 import type { StatusExpedicao } from "../../lib/database";
 import { porInicio, periodo, type LinhaExp } from "./linhas";
 
-const CHAVE_RECOLHIDAS = "qs:exp:central:recolhidas";
-const PADRAO_RECOLHIDAS: Fase[] = ["concluida"];
+// Chave nova (v2): quem tinha "Concluídas" recolhida pela regra antiga volta a ver tudo.
+const CHAVE_RECOLHIDAS = "qs:exp:central:recolhidas:v2";
+type Secao = Fase | "cancelada";
 
-function lerRecolhidas(): Set<Fase> {
+function lerRecolhidas(): Set<Secao> {
   try {
     const v = JSON.parse(localStorage.getItem(CHAVE_RECOLHIDAS) ?? "null");
-    if (Array.isArray(v)) return new Set(v.filter((f): f is Fase => ORDEM_FASES.includes(f)));
-  } catch { /* sem localStorage: usa o padrão */ }
-  return new Set(PADRAO_RECOLHIDAS);
+    if (Array.isArray(v)) return new Set(v.filter((f): f is Secao => f === "cancelada" || ORDEM_FASES.includes(f)));
+  } catch { /* sem localStorage: tudo aberto */ }
+  return new Set();
+}
+
+const META_CANCELADA = { rotulo: "Canceladas", dica: "Não acontecem mais; ficam aqui pra consulta", cor: "var(--danger)", metrica: "Andamento" };
+
+/** Tom do chip de status manual (Vendas Abertas, Em andamento, Concluída…). */
+function tomDoStatus(status: string): { background: string; color: string } {
+  const s = status.toLowerCase();
+  if (s.includes("cancel")) return { background: "var(--danger-bg)", color: "var(--danger)" };
+  if (s.includes("conclu")) return { background: "var(--fase-concluida-bg)", color: "var(--fase-concluida-fg)" };
+  if (s.includes("andamento")) return { background: "var(--fase-viagem-bg)", color: "var(--fase-viagem-fg)" };
+  return { background: "var(--surface-2)", color: "var(--muted)" };
 }
 
 export interface AcoesDaLinha {
@@ -26,31 +40,33 @@ export interface AcoesDaLinha {
   onExcluir: (l: LinhaExp) => void;
 }
 
-export default function VisaoFases({ linhas, alertasPorExp, proximaId, abrir, acoes, notaConcluidas }: {
+export default function VisaoFases({ linhas, canceladas, proximaId, abrir, acoes }: {
   linhas: LinhaExp[];
-  alertasPorExp: Map<string, number>;
+  /** Vão na última seção, "Canceladas". */
+  canceladas: LinhaExp[];
   proximaId: string | null;
   abrir: (id: string) => void;
   /** null = modo leitura (sem coluna de ações). */
   acoes: AcoesDaLinha | null;
-  /** Ex.: "+3 mais antigas na Tabela". */
-  notaConcluidas?: string;
 }) {
-  const [recolhidas, setRecolhidas] = useState<Set<Fase>>(lerRecolhidas);
-  const alternar = (f: Fase) => setRecolhidas((r) => {
+  const [recolhidas, setRecolhidas] = useState<Set<Secao>>(lerRecolhidas);
+  const alternar = (f: Secao) => setRecolhidas((r) => {
     const n = new Set(r);
     if (n.has(f)) n.delete(f); else n.add(f);
     try { localStorage.setItem(CHAVE_RECOLHIDAS, JSON.stringify([...n])); } catch { /* ignora */ }
     return n;
   });
 
-  const secoes = ORDEM_FASES.map((f) => ({ fase: f, itens: linhas.filter((l) => l.fase === f).sort(porInicio) })).filter((s) => s.itens.length);
+  const secoes: { fase: Secao; itens: LinhaExp[] }[] = [
+    ...ORDEM_FASES.map((f) => ({ fase: f as Secao, itens: linhas.filter((l) => l.fase === f).sort(porInicio) })),
+    { fase: "cancelada" as Secao, itens: [...canceladas].sort(porInicio) },
+  ].filter((s) => s.itens.length);
   if (!secoes.length) return <div className="cx-sec cx-vazio">Nenhuma expedição com os filtros atuais.</div>;
 
   return (
     <div className="cx-secs">
       {secoes.map(({ fase, itens }) => {
-        const m = META_FASE[fase];
+        const m = fase === "cancelada" ? META_CANCELADA : META_FASE[fase];
         const aberta = !recolhidas.has(fase);
         const idCorpo = `cx-sec-${fase}`;
         return (
@@ -59,18 +75,18 @@ export default function VisaoFases({ linhas, alertasPorExp, proximaId, abrir, ac
               <span className="cx-dot cx-dot--lg" style={{ background: m.cor }} aria-hidden />
               <span className="cx-sec__t">{m.rotulo}</span>
               <span className="cx-sec__n">{itens.length}</span>
-              <span className="cx-sec__dica">{m.dica}{fase === "concluida" && notaConcluidas ? ` · ${notaConcluidas}` : ""}</span>
+              <span className="cx-sec__dica">{m.dica}</span>
               <span className="cx-sec__tg">{aberta ? "Recolher" : "Ver todas"}</span>
             </button>
             {aberta && (
               <div className="cx-scroll" id={idCorpo}>
                 <div className="cx-wrap-grid" role="table" aria-label={`Expedições: ${m.rotulo}`}>
                   <div className={`cx-grid cx-grid--cab${acoes ? "" : " cx-grid--ro"}`} role="row">
-                    {["Expedição", "Datas", "Saída", "Ocupação", m.metrica, "Alertas"].map((h) => <span key={h} role="columnheader">{h}</span>)}
+                    {["Expedição", "Datas", "Saída", "Ocupação", m.metrica, "Status"].map((h) => <span key={h} role="columnheader">{h}</span>)}
                     {acoes && <span role="columnheader"><span className="sr-only">Ações</span></span>}
                   </div>
                   {itens.map((l) => (
-                    <LinhaFase key={l.e.id} l={l} alertas={alertasPorExp.get(l.e.id) ?? 0} proxima={l.e.id === proximaId} abrir={abrir} acoes={acoes} />
+                    <LinhaFase key={l.e.id} l={l} proxima={l.e.id === proximaId} abrir={abrir} acoes={acoes} />
                   ))}
                 </div>
               </div>
@@ -96,15 +112,17 @@ export function ChipSaida({ l }: { l: LinhaExp }) {
   return <span className="cx-chip" style={estilo}>em {inf.diasParaInicio}d</span>;
 }
 
-function LinhaFase({ l, alertas, proxima, abrir, acoes }: {
-  l: LinhaExp; alertas: number; proxima: boolean; abrir: (id: string) => void; acoes: AcoesDaLinha | null;
+function LinhaFase({ l, proxima, abrir, acoes }: {
+  l: LinhaExp; proxima: boolean; abrir: (id: string) => void; acoes: AcoesDaLinha | null;
 }) {
   const { e, fase, inf } = l;
   const tecla = (ev: KE) => { if (ev.key === "Enter" && ev.target === ev.currentTarget) abrir(e.id); };
 
   // 5ª coluna: métrica da fase
   let metrica: { v: string; s: string; frac: number | null; cor: string; vermelho?: boolean };
-  if (fase === "em_viagem") {
+  if (l.cancelada) {
+    metrica = { v: "Cancelada", s: e.pax_confirmados ? `${e.pax_confirmados} pax tinham fechado` : "", frac: null, cor: "" };
+  } else if (fase === "em_viagem") {
     metrica = { v: inf.diasParaFim === 0 ? "Volta hoje" : `Volta em ${inf.diasParaFim} ${inf.diasParaFim === 1 ? "dia" : "dias"}`, s: `${inf.totalDias} dias no total`, frac: inf.progresso, cor: "var(--fase-viagem)" };
   } else if (fase === "embarque" || fase === "preparacao") {
     const total = e.prontidao_total;
@@ -143,7 +161,7 @@ function LinhaFase({ l, alertas, proxima, abrir, acoes }: {
         {metrica.frac != null && <Barra frac={metrica.frac} cor={metrica.cor} />}
       </div>
       <span role="cell">
-        {alertas ? <span className="cx-alerta">{alertas} {alertas === 1 ? "alerta" : "alertas"}</span> : <span className="cx-alerta cx-alerta--ok">Em dia</span>}
+        <span className="cx-alerta" style={tomDoStatus(e.status ?? "")}>{e.status || "Sem status"}</span>
       </span>
       {acoes && <span role="cell" onClick={(ev) => ev.stopPropagation()} onKeyDown={(ev) => ev.stopPropagation()}><MenuLinha l={l} acoes={acoes} /></span>}
     </div>
