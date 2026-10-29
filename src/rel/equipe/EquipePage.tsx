@@ -26,6 +26,8 @@ import { Aviso, Avatar, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "..
 import { podeGerirTime } from "./permissao";
 import { listarCargos, PERMISSOES, permissoesPadrao, salvarCargo, SETORES_CARGO, type Cargo, type SetorCargo } from "./cargos";
 import { esquecerPermissoes } from "./usePode";
+import PapeisDaPessoa from "./PapeisDaPessoa";
+import { papeisDe, type Papel as PapelNoSetor } from "@/solicitacoes/lib";
 
 /** Papel na área: o atendente (papel com o nome da área) ou gestor. */
 type Papel = AreaComTime | "gestor";
@@ -93,6 +95,7 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
   const [erroForm, setErroForm] = useState<string | null>(null);
   const [senhaNova, setSenhaNova] = useState<{ nome: string; email: string; senha: string } | null>(null);
   const [aba, setAba] = useState<"time" | "cargos">("time");
+  const [papeis, setPapeis] = useState<Record<string, PapelNoSetor[]> | null>(null);
   const [cargos, setCargos] = useState<Cargo[]>([]);
   const carregarCargos = useCallback(() => { listarCargos().then(setCargos).catch(() => setCargos([])); }, []);
 
@@ -102,6 +105,8 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
       if (!r.success) throw new Error(r.error || "Não consegui carregar o time.");
       setEquipe(r.equipe ?? []);
       setErro(null);
+      // 0222: papel de cada um (CX/CS/Hunter). null = migration não aplicada → some.
+      setPapeis(await papeisDe((r.equipe ?? []).map((m) => m.id)));
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Não consegui carregar o time.");
     }
@@ -204,6 +209,10 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
                   <div className="text-[12px] mt-0.5" style={{ color: "var(--ink3)" }}>
                     Assina no WhatsApp como <b style={{ color: "var(--ink2)" }}>{assinaturaDe(m.name)}</b>
                   </div>
+                )}
+                {papeis && m.role !== "admin" && (
+                  <PapeisDaPessoa userId={m.id} papeis={papeis[m.id] ?? []} podeMudar={podeMexer(m)}
+                    onMudou={(p) => setPapeis((x) => ({ ...(x ?? {}), [m.id]: p }))} />
                 )}
               </div>
               {podeMexer(m) ? (

@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Ficha do cliente</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#F6F6F3}
+a{color:#0F766E}a:hover{color:#0B5B55}
+button,input,select,textarea{font-family:inherit}
+</style>
+</helmet>
+<div style="background: #F6F6F3; font-family: Inter, system-ui, -apple-system, sans-serif; color: #18181B; min-height: 100vh">
+<div style="max-width: 1280px; margin: 0 auto; padding: 28px 24px 64px; display: flex; flex-direction: column; gap: 20px">
+
+<nav aria-label="Navegação" style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #5B5B63">
+<a href="#" style="color: #5B5B63; text-decoration: none">Clientes</a>
+<span aria-hidden="true">/</span>
+<span style="color: #18181B; font-weight: 500">Roselene Pereira</span>
+</nav>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 24px; display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; justify-content: space-between">
+<div style="display: flex; gap: 18px; align-items: flex-start; flex: 1 1 520px; min-width: 0">
+<div aria-hidden="true" style="width: 64px; height: 64px; border-radius: 50%; background: #E3F1EF; color: #0F766E; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 22px; flex-shrink: 0">RP</div>
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0">
+<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.01em">Roselene Pereira</h1>
+<span style="font-size: 12px; font-weight: 600; color: #3F3F46; background: #F1F1EE; border-radius: 6px; padding: 3px 8px">V4</span>
+<span style="font-size: 12px; font-weight: 600; color: #3F3F46; background: #F1F1EE; border-radius: 6px; padding: 3px 8px">STFV</span>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px">
+<span style="display: inline-flex; align-items: center; gap: 6px; border: 1px solid #E7E5E0; border-radius: 999px; padding: 4px 10px; font-weight: 600"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #A16207"></span>Bronze</span>
+<span style="border: 1px solid #E7E5E0; border-radius: 999px; padding: 4px 10px; font-weight: 500">Clube Viajante · 1 viagem</span>
+<span style="border: 1px solid #E7E5E0; border-radius: 999px; padding: 4px 10px; font-weight: 500">Lead desde 28/07/2026</span>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px">
+<span style="display: inline-flex; align-items: center; gap: 6px; background: #FEF3C7; color: #92400E; border-radius: 8px; padding: 5px 10px; font-weight: 600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg>Sem consentimento LGPD</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; background: #FEF3C7; color: #92400E; border-radius: 8px; padding: 5px 10px; font-weight: 600">Nunca teve contato</span>
+</div>
+</div>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; position: relative">
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; color: #18181B; font-weight: 600; font-size: 14px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.6A8.4 8.4 0 1 1 21 11.5z"></path></svg>WhatsApp</button>
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; color: #18181B; font-weight: 600; font-size: 14px; cursor: pointer">Pedir a outro setor</button>
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: #18181B; color: #FFFFFF; font-weight: 600; font-size: 14px; cursor: pointer">Registrar contato</button>
+<button type="button" onClick="{{toggleMore}}" aria-expanded="{{moreOpen}}" style="height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; color: #18181B; font-weight: 600; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer">Mais ações<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+<sc-if value="{{moreOpen}}" hint-placeholder-val="{{ false }}">
+<div style="position: absolute; right: 0; top: 54px; z-index: 20; width: 280px; background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; box-shadow: 0 12px 32px rgba(24,24,27,0.12); padding: 8px; display: flex; flex-direction: column; gap: 2px">
+<sc-for list="{{menu}}" as="g" hint-placeholder-count="4">
+<div style="padding: 10px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">{{g.group}}</div>
+<sc-for list="{{g.items}}" as="m" hint-placeholder-count="2">
+<button type="button" style="text-align: left; min-height: 40px; padding: 0 10px; border: 0; background: transparent; border-radius: 8px; font-size: 14px; color: #18181B; cursor: pointer">{{m.label}}</button>
+</sc-for>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</section>
+
+<section aria-label="Indicadores do cliente" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5B5B63; font-weight: 500">LTV</span>
+<span style="font-size: 24px; font-weight: 700; letter-spacing: -0.01em">R$ 41.990</span>
+<span style="font-size: 13px; color: #5B5B63">1 compra</span>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5B5B63; font-weight: 500">Próximo embarque</span>
+<span style="font-size: 24px; font-weight: 700; letter-spacing: -0.01em">[data]</span>
+<span style="font-size: 13px; color: #5B5B63">[Expedição · grupo]</span>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5B5B63; font-weight: 500">Cadastro</span>
+<span style="font-size: 24px; font-weight: 700; letter-spacing: -0.01em; color: #B45309">43%</span>
+<span style="font-size: 13px; color: #5B5B63">4 dados faltando</span>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5B5B63; font-weight: 500">Solicitações abertas</span>
+<span style="font-size: 24px; font-weight: 700; letter-spacing: -0.01em">0</span>
+<span style="font-size: 13px; color: #5B5B63">nenhuma pendente com outro setor</span>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5B5B63; font-weight: 500">Último contato</span>
+<span style="font-size: 24px; font-weight: 700; letter-spacing: -0.01em">Nunca</span>
+<span style="font-size: 13px; color: #92400E; font-weight: 500">registre o primeiro contato</span>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<main style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between">
+<div style="display: flex; gap: 16px; align-items: center">
+<svg width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Cadastro 43% completo"><circle cx="32" cy="32" r="26" fill="none" stroke="#F1F1EE" stroke-width="8"></circle><circle cx="32" cy="32" r="26" fill="none" stroke="#D97706" stroke-width="8" stroke-linecap="round" stroke-dasharray="70.3 163.4" transform="rotate(-90 32 32)"></circle><text x="32" y="37" text-anchor="middle" font-size="14" font-weight="700" fill="#18181B" font-family="Inter, sans-serif">43%</text></svg>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 700">Pronta para embarcar?</h2>
+<p style="margin: 0; font-size: 14px; color: #5B5B63">Faltam 6 itens entre cadastro, contrato e embarque</p>
+</div>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap">
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; color: #18181B; font-weight: 600; font-size: 14px; cursor: pointer">Preencher agora</button>
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 0; background: #0F766E; color: #FFFFFF; font-weight: 600; font-size: 14px; cursor: pointer">Pedir tudo à cliente</button>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px">
+<sc-for list="{{groups}}" as="grp" hint-placeholder-count="2">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 6px; border-bottom: 1px solid #F1F1EE">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">{{grp.title}}</span>
+<span style="font-size: 13px; font-weight: 600; color: #3F3F46">{{grp.score}}</span>
+</div>
+<sc-for list="{{grp.items}}" as="it" hint-placeholder-count="4">
+<div style="display: flex; align-items: center; gap: 10px; min-height: 40px">
+<sc-if value="{{it.done}}" hint-placeholder-val="{{ true }}">
+<span aria-label="Preenchido" style="width: 22px; height: 22px; border-radius: 50%; background: #DCFAE6; color: #067647; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg></span>
+</sc-if>
+<sc-if value="{{it.missing}}" hint-placeholder-val="{{ false }}">
+<span aria-label="Faltando" style="width: 22px; height: 22px; border-radius: 50%; border: 2px dashed #D97706; box-sizing: border-box; flex-shrink: 0"></span>
+</sc-if>
+<div style="display: flex; flex-direction: column; flex: 1; min-width: 0">
+<span style="font-size: 14px; font-weight: 500">{{it.label}}</span>
+<span style="font-size: 12px; color: #5B5B63; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{it.hint}}</span>
+</div>
+<sc-if value="{{it.missing}}" hint-placeholder-val="{{ false }}">
+<button type="button" style="min-height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid #E7E5E0; background: #FFFFFF; font-size: 13px; font-weight: 600; color: #0F766E; cursor: pointer">Pedir</button>
+</sc-if>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+</section>
+
+<div role="tablist" aria-label="Seções da ficha" style="display: flex; gap: 8px; flex-wrap: wrap">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="7">
+<button type="button" role="tab" aria-selected="{{t.active}}" onClick="{{t.pick}}" style="{{t.style}}">{{t.label}}<sc-if value="{{t.hasCount}}" hint-placeholder-val="{{ false }}"><span style="{{t.countStyle}}">{{t.count}}</span></sc-if></button>
+</sc-for>
+</div>
+
+<sc-if value="{{isGeral}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Documentos</h3>
+<dl style="margin: 0; display: grid; grid-template-columns: 130px 1fr; row-gap: 12px; column-gap: 12px; font-size: 14px; align-items: center">
+<dt style="color: #5B5B63">CPF</dt>
+<dd style="margin: 0; display: flex; align-items: center; gap: 8px; font-weight: 500">{{cpf}}<button type="button" onClick="{{toggleCpf}}" style="min-height: 32px; border: 0; background: transparent; color: #0F766E; font-size: 13px; font-weight: 600; cursor: pointer; padding: 0 4px">{{cpfBtn}}</button></dd>
+<dt style="color: #5B5B63">Nascimento</dt>
+<dd style="margin: 0"><span style="font-size: 12px; font-weight: 600; color: #92400E; background: #FEF3C7; border-radius: 6px; padding: 3px 8px">Faltando</span></dd>
+<dt style="color: #5B5B63">Passaporte</dt>
+<dd style="margin: 0"><span style="font-size: 12px; font-weight: 600; color: #92400E; background: #FEF3C7; border-radius: 6px; padding: 3px 8px">Faltando</span></dd>
+<dt style="color: #5B5B63">Validade</dt>
+<dd style="margin: 0"><span style="font-size: 12px; font-weight: 600; color: #92400E; background: #FEF3C7; border-radius: 6px; padding: 3px 8px">Faltando</span></dd>
+</dl>
+<div style="border: 1.5px dashed #DAD8D2; border-radius: 12px; padding: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 14px; font-weight: 600">Foto do passaporte</span>
+<span style="font-size: 12px; color: #5B5B63">Ao subir a foto, número e validade são lidos sozinhos</span>
+</div>
+<button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">Subir foto</button>
+</div>
+</section>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Endereço</h3>
+<sc-if value="{{notEditEnd}}" hint-placeholder-val="{{ true }}"><span style="font-size: 12px; font-weight: 600; color: #92400E; background: #FEF3C7; border-radius: 6px; padding: 3px 8px">Faltando</span></sc-if>
+</div>
+<sc-if value="{{notEditEnd}}" hint-placeholder-val="{{ true }}">
+<div style="flex: 1; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; padding: 8px 0">
+<p style="margin: 0; font-size: 14px; color: #5B5B63; line-height: 1.5">Ainda não temos o endereço. Ele entra no contrato e é usado para envio de kits e encomendas.</p>
+<div style="display: flex; gap: 10px; flex-wrap: wrap">
+<button type="button" onClick="{{openEnd}}" style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Adicionar endereço</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 0; background: transparent; color: #0F766E; font-size: 14px; font-weight: 600; cursor: pointer">Pedir à cliente</button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{editEnd}}" hint-placeholder-val="{{ false }}">
+<div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; font-size: 13px">
+<label style="grid-column: span 2; display: flex; flex-direction: column; gap: 4px; font-weight: 600">CEP<input placeholder="00000-000" style="height: 40px; border: 1px solid #DAD8D2; border-radius: 8px; padding: 0 10px; font-size: 14px"></label>
+<label style="grid-column: span 4; display: flex; flex-direction: column; gap: 4px; font-weight: 600">Rua<input placeholder="preenchida pelo CEP" style="height: 40px; border: 1px solid #DAD8D2; border-radius: 8px; padding: 0 10px; font-size: 14px; background: #FAFAF8"></label>
+<label style="grid-column: span 2; display: flex; flex-direction: column; gap: 4px; font-weight: 600">Número<input style="height: 40px; border: 1px solid #DAD8D2; border-radius: 8px; padding: 0 10px; font-size: 14px"></label>
+<label style="grid-column: span 4; display: flex; flex-direction: column; gap: 4px; font-weight: 600">Complemento<input placeholder="apto, bloco" style="height: 40px; border: 1px solid #DAD8D2; border-radius: 8px; padding: 0 10px; font-size: 14px"></label>
+<label style="grid-column: span 3; display: flex; flex-direction: column; gap: 4px; font-weight: 600">Bairro<input style="height: 40px; border: 1px solid #DAD8D2; border-radius: 8px; padding: 0 10px; font-size: 14px; background: #FAFAF8"></label>
+<label style="grid-column: span 2; display: flex; flex-direction: column; gap: 4px; font-weight: 600">Cidade<input style="height: 40px; border: 1px solid #DAD8D2; border-radius: 8px; padding: 0 10px; font-size: 14px; background: #FAFAF8"></label>
+<label style="grid-column: span 1; display: flex; flex-direction: column; gap: 4px; font-weight: 600">UF<input style="height: 40px; border: 1px solid #DAD8D2; border-radius: 8px; padding: 0 10px; font-size: 14px; background: #FAFAF8"></label>
+<div style="grid-column: span 6; display: flex; gap: 10px; justify-content: flex-end; padding-top: 4px">
+<button type="button" onClick="{{closeEnd}}" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Cancelar</button>
+<button type="button" onClick="{{closeEnd}}" style="min-height: 40px; padding: 0 16px; border-radius: 10px; border: 0; background: #18181B; color: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Salvar endereço</button>
+</div>
+</div>
+</sc-if>
+</section>
+</div>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Viagem</h3>
+<a href="#" style="font-size: 14px; font-weight: 600; text-decoration: none">Ver todas as viagens</a>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 18px; font-weight: 700">[Expedição]</span>
+<span style="font-size: 14px; color: #5B5B63">[Grupo] · [data de ida] a [data de volta]</span>
+</div>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; flex-wrap: wrap">
+<sc-for list="{{tripSteps}}" as="s" hint-placeholder-count="5">
+<li style="{{s.style}}">{{s.label}}</li>
+</sc-for>
+</ol>
+</div>
+</section>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Linha do tempo</h3>
+<button type="button" onClick="{{goHist}}" style="min-height: 36px; border: 0; background: transparent; color: #0F766E; font-size: 14px; font-weight: 600; cursor: pointer">Histórico completo</button>
+</div>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+<sc-for list="{{timeline}}" as="ev" hint-placeholder-count="4">
+<li style="display: flex; gap: 14px">
+<div style="display: flex; flex-direction: column; align-items: center; width: 14px; flex-shrink: 0">
+<span style="{{ev.dotStyle}}"></span>
+<span style="flex: 1; width: 2px; background: #F1F1EE"></span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px; padding-bottom: 18px">
+<span style="font-size: 12px; color: #5B5B63; font-weight: 500">{{ev.when}}</span>
+<span style="font-size: 14px; font-weight: 600">{{ev.title}}</span>
+<span style="font-size: 13px; color: #5B5B63">{{ev.sub}}</span>
+</div>
+</li>
+</sc-for>
+</ol>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{isViagens}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Viagem 1</span>
+<span style="font-size: 20px; font-weight: 700">[Expedição]</span>
+<span style="font-size: 14px; color: #5B5B63">[Grupo] · [datas] · R$ 41.990</span>
+</div>
+<a href="#" style="font-size: 14px; font-weight: 600; text-decoration: none">Abrir no Bitrix</a>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px">
+<sc-for list="{{tripChecks}}" as="c" hint-placeholder-count="6">
+<div style="border: 1px solid #E7E5E0; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 13px; color: #5B5B63; font-weight: 500">{{c.label}}</span>
+<span style="{{c.style}}">{{c.status}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{isDocs}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px">
+<sc-for list="{{docs}}" as="d" hint-placeholder-count="6">
+<div style="{{d.style}}">
+<span style="font-size: 14px; font-weight: 600">{{d.label}}</span>
+<span style="font-size: 13px; color: #5B5B63">{{d.sub}}</span>
+<button type="button" style="align-self: flex-start; min-height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">{{d.action}}</button>
+</div>
+</sc-for>
+</section>
+</sc-if>
+
+<sc-if value="{{isCompras}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 8px 0; overflow-x: auto">
+<table style="width: 100%; border-collapse: collapse; font-size: 14px; min-width: 560px">
+<thead><tr style="text-align: left; color: #5B5B63; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em"><th style="padding: 12px 22px; font-weight: 700">Compra</th><th style="padding: 12px; font-weight: 700">Data</th><th style="padding: 12px; font-weight: 700">Valor</th><th style="padding: 12px 22px; font-weight: 700">Pagamento</th></tr></thead>
+<tbody><tr style="border-top: 1px solid #F1F1EE"><td style="padding: 14px 22px; font-weight: 600">[Expedição] · venda no Bitrix</td><td style="padding: 14px 12px">[data]</td><td style="padding: 14px 12px; font-weight: 600">R$ 41.990</td><td style="padding: 14px 22px"><span style="font-size: 12px; font-weight: 600; background: #F1F1EE; border-radius: 6px; padding: 3px 8px">[status das parcelas]</span></td></tr></tbody>
+</table>
+</section>
+</sc-if>
+
+<sc-if value="{{isEmpty}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 40px 22px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center">
+<span style="font-size: 16px; font-weight: 700">{{emptyTitle}}</span>
+<span style="font-size: 14px; color: #5B5B63; max-width: 420px">{{emptySub}}</span>
+<button type="button" style="margin-top: 6px; min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">{{emptyCta}}</button>
+</section>
+</sc-if>
+
+<sc-if value="{{isHist}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px">
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+<sc-for list="{{timeline}}" as="ev" hint-placeholder-count="4">
+<li style="display: flex; gap: 14px">
+<div style="display: flex; flex-direction: column; align-items: center; width: 14px; flex-shrink: 0"><span style="{{ev.dotStyle}}"></span><span style="flex: 1; width: 2px; background: #F1F1EE"></span></div>
+<div style="display: flex; flex-direction: column; gap: 2px; padding-bottom: 18px"><span style="font-size: 12px; color: #5B5B63; font-weight: 500">{{ev.when}}</span><span style="font-size: 14px; font-weight: 600">{{ev.title}}</span><span style="font-size: 13px; color: #5B5B63">{{ev.sub}}</span></div>
+</li>
+</sc-for>
+</ol>
+</section>
+</sc-if>
+</main>
+
+<aside style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Contato</h3>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #5B5B63">Telefone</span><span style="font-size: 15px; font-weight: 600">(65) 99974-8101</span></div>
+<div style="display: flex; gap: 6px">
+<button type="button" aria-label="Abrir WhatsApp" style="width: 44px; height: 44px; border-radius: 10px; border: 1px solid #E7E5E0; background: #FFFFFF; color: #067647; display: inline-flex; align-items: center; justify-content: center; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.6A8.4 8.4 0 1 1 21 11.5z"></path></svg></button>
+<button type="button" aria-label="Ligar" style="width: 44px; height: 44px; border-radius: 10px; border: 1px solid #E7E5E0; background: #FFFFFF; color: #18181B; display: inline-flex; align-items: center; justify-content: center; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"></path></svg></button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #5B5B63">E-mail</span><a href="#" style="font-size: 15px; font-weight: 600; text-decoration: none; overflow-wrap: anywhere">roseps@uol.com.br</a></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #5B5B63">Bitrix</span><a href="#" style="font-size: 15px; font-weight: 600; text-decoration: none">Contato #26733</a></div>
+</section>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Pessoas ligadas</h3>
+<span style="font-size: 13px; color: #5B5B63">0</span>
+</div>
+<p style="margin: 0; font-size: 14px; color: #5B5B63; line-height: 1.5">Família e quem viaja junto ficam aqui, num lugar só. Cada pessoa tem a própria ficha e uma marcação de quem embarca na mesma viagem.</p>
+<button type="button" style="min-height: 44px; border-radius: 10px; border: 1.5px dashed #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Adicionar pessoa</button>
+</section>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Origem</h3>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 15px; font-weight: 600">Lead no Comercial</span>
+<span style="font-size: 13px; color: #5B5B63">Chegou 28/07/2026 por integração · com Talita</span>
+</div>
+<div style="background: #FFF4ED; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; font-weight: 700; color: #9A3412">Lead consta como perdido</span>
+<span style="font-size: 13px; color: #7C2D12; line-height: 1.45">Mas existe venda registrada para esta cliente. Vale conferir o negócio no Bitrix.</span>
+</div>
+</section>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">LGPD</h3>
+<p style="margin: 0; font-size: 14px; color: #3F3F46; line-height: 1.5">Sem consentimento registrado para uso de dados e comunicação.</p>
+<button type="button" style="min-height: 44px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Enviar termo para aceite</button>
+</section>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Observações</h3>
+<p style="margin: 0; font-size: 14px; color: #3F3F46">Ficha criada a partir da venda no Bitrix.</p>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Nova observação<textarea rows="2" placeholder="Algo que o time precisa saber" style="border: 1px solid #DAD8D2; border-radius: 10px; padding: 10px; font-size: 14px; resize: vertical"></textarea></label>
+</section>
+</aside>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1820}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'geral', more: false, editEnd: false, showCpf: false };
+  }
+  renderVals() {
+    const s = this.state;
+    const tabDefs = [
+      ['geral', 'Visão geral', ''], ['viagens', 'Viagens', '1'], ['compras', 'Compras', '1'],
+      ['docs', 'Documentos', '4'], ['amigo', 'ExpedAmigo', ''], ['atend', 'Atendimento', ''], ['hist', 'Histórico', '']
+    ];
+    const base = 'min-height: 40px; padding: 0 14px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; ';
+    const tabs = tabDefs.map(([id, label, count]) => {
+      const active = s.tab === id;
+      return {
+        label, count, hasCount: !!count, active,
+        style: base + (active ? 'background:#18181B;color:#FFFFFF;border:1px solid #18181B' : 'background:#FFFFFF;color:#3F3F46;border:1px solid #E7E5E0'),
+        countStyle: 'font-size:12px;border-radius:999px;padding:1px 7px;' + (active ? 'background:rgba(255,255,255,0.18);color:#FFFFFF' : (id === 'docs' ? 'background:#FEF3C7;color:#92400E' : 'background:#F1F1EE;color:#3F3F46')),
+        pick: () => this.setState({ tab: id })
+      };
+    });
+    const mk = (label, done, hint) => ({ label, done, missing: !done, hint });
+    const groups = [
+      { title: 'Cadastro', score: '3 de 7', items: [
+        mk('CPF', true, '292.•••.•••-72'), mk('Telefone', true, '(65) 99974-8101'), mk('E-mail', true, 'roseps@uol.com.br'),
+        mk('Data de nascimento', false, 'necessária para emitir passagem'), mk('Nº do passaporte', false, 'lido da foto do passaporte'),
+        mk('Validade do passaporte', false, 'mínimo de 6 meses após a volta'), mk('Foto do passaporte', false, 'frente legível, sem reflexo')
+      ]},
+      { title: 'Contrato e embarque', score: '0 de 2', items: [
+        mk('Endereço', false, 'entra no contrato e no envio de kits'), mk('Consentimento LGPD', false, 'termo de uso de dados e comunicação')
+      ]}
+    ];
+    const stepDefs = [['Venda', 'ok'], ['Contrato', 'pend'], ['Pagamento', 'pend'], ['Documentos', 'warn'], ['Embarque', 'pend']];
+    const stepStyle = { ok: 'background:#DCFAE6;color:#067647', warn: 'background:#FEF3C7;color:#92400E', pend: 'background:#F1F1EE;color:#3F3F46' };
+    const tripSteps = stepDefs.map(([label, k]) => ({ label, style: 'font-size:13px;font-weight:600;border-radius:999px;padding:6px 12px;' + stepStyle[k] }));
+    const chk = (label, status, k) => ({ label, status, style: 'font-size:14px;font-weight:700;' + (k === 'ok' ? 'color:#067647' : k === 'warn' ? 'color:#92400E' : 'color:#3F3F46') });
+    const tripChecks = [chk('Contrato', '[status ZapSign]', 'pend'), chk('Pagamento', '[parcelas]', 'pend'), chk('Documentos', '4 faltando', 'warn'), chk('Aéreo', '[status]', 'pend'), chk('Seguro viagem', '[status]', 'pend'), chk('Grupo de WhatsApp', '[status]', 'pend')];
+    const doc = (label, sub, action, ok) => ({ label, sub, action, style: 'border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:6px;' + (ok ? 'border:1px solid #E7E5E0' : 'border:1.5px dashed #D9C9A3;background:#FFFCF5') });
+    const docs = [doc('Foto do passaporte', 'Faltando', 'Subir arquivo', false), doc('CPF', 'Número cadastrado', 'Anexar documento', true), doc('Contrato assinado', '[status ZapSign]', 'Ver contrato', true), doc('Comprovantes de pagamento', '[quantidade]', 'Ver arquivos', true), doc('Seguro viagem', 'Faltando', 'Subir arquivo', false), doc('Visto, se exigido', 'Conferir destino', 'Subir arquivo', false)];
+    const dot = (c) => 'width:12px;height:12px;border-radius:50%;margin-top:4px;flex-shrink:0;background:' + c;
+    const timeline = [
+      { when: '[data]', title: 'Ficha criada a partir da venda', sub: 'Origem Bitrix · cadastro 43% completo', dotStyle: dot('#0F766E') },
+      { when: '[data]', title: 'Venda registrada no Bitrix', sub: 'R$ 41.990 · Clube Viajante', dotStyle: dot('#2563EB') },
+      { when: '[data]', title: 'Lead marcado como perdido no Comercial', sub: 'Status diverge da venda, conferir', dotStyle: dot('#C2410C') },
+      { when: '28/07/2026', title: 'Lead chegou por integração', sub: 'Comercial · com Talita', dotStyle: dot('#A1A1AA') }
+    ];
+    const empties = {
+      amigo: ['Nenhuma indicação ainda', 'Quando a cliente indicar amigos pelo ExpedAmigo, as indicações e recompensas aparecem aqui.', 'Gerar link de indicação'],
+      atend: ['Nenhum atendimento aberto', 'Chamados e pedidos a outros setores sobre esta cliente aparecem aqui, com prazo e responsável.', 'Pedir a outro setor']
+    };
+    const em = empties[s.tab] || ['', '', ''];
+    const menu = [
+      { group: 'Vendas', items: [{ label: 'Nova oportunidade de venda' }, { label: 'Subir venda' }] },
+      { group: 'Financeiro', items: [{ label: 'Pedir pagamento' }, { label: 'Enviar ao Financeiro' }] },
+      { group: 'Atendimento', items: [{ label: 'Abrir chamado' }] },
+      { group: 'Cadastro', items: [{ label: 'Editar ficha' }] }
+    ];
+    return {
+      tabs, groups, tripSteps, tripChecks, docs, timeline, menu,
+      isGeral: s.tab === 'geral', isViagens: s.tab === 'viagens', isDocs: s.tab === 'docs', isCompras: s.tab === 'compras', isHist: s.tab === 'hist',
+      isEmpty: s.tab === 'amigo' || s.tab === 'atend', emptyTitle: em[0], emptySub: em[1], emptyCta: em[2],
+      moreOpen: s.more, toggleMore: () => this.setState({ more: !s.more }),
+      editEnd: s.editEnd, notEditEnd: !s.editEnd,
+      openEnd: () => this.setState({ editEnd: true }), closeEnd: () => this.setState({ editEnd: false }),
+      cpf: s.showCpf ? '292.759.381-72' : '292.•••.•••-72', cpfBtn: s.showCpf ? 'Ocultar' : 'Mostrar',
+      toggleCpf: () => this.setState({ showCpf: !s.showCpf }),
+      goHist: () => this.setState({ tab: 'hist' })
+    };
+  }
+}
+</script>
+</body>
+</html>

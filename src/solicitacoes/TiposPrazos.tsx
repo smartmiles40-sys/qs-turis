@@ -6,11 +6,17 @@
 // pedidos antigos continuam com ele.
 //
 // 0159 (Bruno 21/10): um prazo pra cada prioridade — Normal · Alta · Urgente.
+// 0222 (Bruno 29/10): "Quem recebe" por tipo (CX, CS, Hunter ou o setor todo) e
+// a chave de distribuição automática do setor (rodízio entre as pessoas do papel).
+// Sem a 0222 aplicada, essas duas coisas não aparecem.
 // -----------------------------------------------------------------------------
 import { useEffect, useState } from "react";
 import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Entrada, Modal } from "@/rel/ui";
-import { NOME_SETOR, SETORES, horasDoTipo, listarTipos, salvarTipo, type Setor, type TipoSol } from "./lib";
+import {
+  NOME_PAPEL, NOME_SETOR, PAPEIS, SETORES, definirDistribuicao, horasDoTipo, lerDistribuicao, listarTipos, salvarTipo,
+  type Papel, type Setor, type TipoSol,
+} from "./lib";
 
 export default function TiposPrazos({ onFechar }: { onFechar: () => void }) {
   const { currentUser } = useQsAuth();
@@ -21,9 +27,11 @@ export default function TiposPrazos({ onFechar }: { onFechar: () => void }) {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
+  const [distrib, setDistrib] = useState<Record<string, boolean> | null>(null);
+  const [distribEditada, setDistribEditada] = useState<Record<string, boolean>>({});
 
   const carregar = () => listarTipos().then(setTipos).catch((e) => setErro(e instanceof Error ? e.message : "Não carregou."));
-  useEffect(() => { void carregar(); }, []);
+  useEffect(() => { void carregar(); void lerDistribuicao().then(setDistrib); }, []);
 
   const mudar = (id: string, campo: Partial<TipoSol>) => { setOk(false); setEditado((e) => ({ ...e, [id]: { ...e[id], ...campo } })); };
 
@@ -39,20 +47,35 @@ export default function TiposPrazos({ onFechar }: { onFechar: () => void }) {
         const id = `${setor.slice(0, 3)}_${rotulo.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "_").slice(0, 30)}_${Date.now().toString(36).slice(-4)}`;
         await salvarTipo({ id, setor: setor as Setor, rotulo: rotulo.trim(), prazo_horas: 8, prazo_alta_horas: 4, prazo_urgente_horas: 2, ordem: 500, ativo: true });
       }
-      setEditado({}); setNovo({}); setOk(true); await carregar();
+      for (const [setor, ativo] of Object.entries(distribEditada)) await definirDistribuicao(setor as Setor, ativo);
+      setEditado({}); setNovo({}); setDistribEditada({}); setOk(true); await carregar();
+      setDistrib(await lerDistribuicao());
     } catch (e) { setErro(e instanceof Error ? e.message : "Não salvou."); }
     finally { setSalvando(false); }
   }
 
   return (
-    <Modal aberto titulo="Tipos de pedido e prazos" onFechar={onFechar} largura={680}
+    <Modal aberto titulo="Tipos de pedido e prazos" onFechar={onFechar} largura={780}
       rodape={<><Botao onClick={onFechar}>Fechar</Botao><Botao variante="primario" disabled={salvando} onClick={() => void salvar()}>{salvando ? "Salvando…" : "Salvar"}</Botao></>}>
       <div className="space-y-5">
         <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Prazo em <b>horas úteis</b> (seg–sex, 9h–18h). 9h = 1 dia útil · 18h = 2 dias. Cada prioridade tem o seu prazo: quem pede escolhe a prioridade e o prazo já sai certo.</p>
-        {meus.map((setor) => (
+        {meus.map((setor) => {
+          const distribuindo = distrib ? (distribEditada[setor] ?? distrib[setor] ?? false) : false;
+          return (
           <section key={setor} aria-label={NOME_SETOR[setor]}>
+            {distrib && (
+              <label className="flex items-start gap-2 text-[12.5px] mb-2" style={{ color: "var(--ink2)" }}>
+                <input type="checkbox" className="mt-0.5" checked={distribuindo}
+                  onChange={(e) => { setOk(false); setDistribEditada((d) => ({ ...d, [setor]: e.target.checked })); }} />
+                <span>
+                  <b>Distribuir automático no {NOME_SETOR[setor]}</b>: o pedido já chega com dono, em rodízio entre as pessoas do papel
+                  (Time → papel de cada um). Papel sem ninguém vai pros gestores do setor.
+                </span>
+              </label>
+            )}
             <div className="flex items-end gap-2 mb-2">
               <h3 className="flex-1 text-[13px] font-bold" style={{ color: "var(--ink)" }}>{NOME_SETOR[setor]} recebe</h3>
+              {distribuindo && <span className="text-[11px] font-bold text-center" style={{ width: 104, color: "var(--ink3)" }}>Quem recebe</span>}
               {([["Normal", "var(--ink3)"], ["Alta", "var(--warn-ink)"], ["Urgente", "var(--err-ink)"]] as const).map(([r, cor]) => (
                 <span key={r} className="text-[11px] font-bold text-center" style={{ width: 64, color: cor }}>{r}</span>
               ))}
@@ -64,6 +87,13 @@ export default function TiposPrazos({ onFechar }: { onFechar: () => void }) {
                 return (
                   <div key={t.id} className="flex items-center gap-2">
                     <Entrada value={v.rotulo} onChange={(e) => mudar(t.id, { rotulo: e.target.value })} aria-label="Nome do tipo" style={{ opacity: v.ativo ? 1 : 0.5 }} />
+                    {distribuindo && (
+                      <select className="rel-input" style={{ width: 104 }} aria-label={`Quem recebe ${v.rotulo}`}
+                        value={v.papel ?? ""} onChange={(e) => mudar(t.id, { papel: (e.target.value || null) as Papel | null })}>
+                        <option value="">Setor todo</option>
+                        {PAPEIS.map((p) => <option key={p} value={p}>{NOME_PAPEL[p]}</option>)}
+                      </select>
+                    )}
                     {([["prazo_horas", "Normal"], ["prazo_alta_horas", "Alta"], ["prazo_urgente_horas", "Urgente"]] as const).map(([campo, r]) => (
                       <input key={campo} type="number" min={1} max={400} className="rel-input" style={{ width: 64 }} aria-label={`Prazo ${r} em horas úteis`}
                         value={horasDoTipo(v)[campo === "prazo_horas" ? "normal" : campo === "prazo_alta_horas" ? "alta" : "urgente"]}
@@ -78,7 +108,8 @@ export default function TiposPrazos({ onFechar }: { onFechar: () => void }) {
               <Entrada value={novo[setor] ?? ""} onChange={(e) => { setOk(false); setNovo((n) => ({ ...n, [setor]: e.target.value })); }} placeholder="+ novo tipo (prazo começa em 8h)" aria-label={`Novo tipo pra ${NOME_SETOR[setor]}`} />
             </div>
           </section>
-        ))}
+          );
+        })}
         {erro && <Aviso tom="erro">{erro}</Aviso>}
         {ok && <Aviso tom="ok">Salvo.</Aviso>}
       </div>

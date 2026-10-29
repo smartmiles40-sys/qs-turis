@@ -77,6 +77,41 @@ export interface TipoSol {
   /** 0203: grupo no seletor (Cotação · Aéreo (passagem já emitida) · Emissão e reservas · …). */
   grupo?: string | null;
   desfecho_dias?: number | null;
+  /** 0222: papel que recebe este tipo (null = o setor todo). */
+  papel?: Papel | null;
+}
+
+// ── 0222: papéis no setor + distribuição automática ───────────────────────────
+/** Papel da pessoa dentro do setor (Bruno, 29/10: CX, CS e Hunter no Relacionamento). */
+export type Papel = "cx" | "cs" | "hunter";
+export const PAPEIS: Papel[] = ["cx", "cs", "hunter"];
+export const NOME_PAPEL: Record<Papel, string> = { cx: "CX", cs: "CS", hunter: "Hunter" };
+export const DICA_PAPEL: Record<Papel, string> = {
+  cx: "Experiência da viagem: documentos, dados, pré-embarque, falar com o cliente",
+  cs: "Pós-venda: reclamação, problema na viagem, satisfação",
+  hunter: "Vende pra base: oportunidades, recompra, remarketing",
+};
+
+/** Setores com distribuição automática ligada. null = a 0222 ainda não foi aplicada. */
+export async function lerDistribuicao(): Promise<Record<string, boolean> | null> {
+  const { data, error } = await supabase.from("qs_sol_distribuicao").select("setor, ativo");
+  if (error) return null;
+  return Object.fromEntries((data ?? []).map((d: { setor: string; ativo: boolean }) => [d.setor, d.ativo]));
+}
+export async function definirDistribuicao(setor: Setor, ativo: boolean) {
+  const { error } = await supabase.rpc("qs_sol_definir_distribuicao", { p_setor: setor, p_ativo: ativo });
+  if (error) throw new Error(error.message);
+}
+/** Papéis de cada pessoa (id → papéis). null = a 0222 ainda não foi aplicada. */
+export async function papeisDe(ids: string[]): Promise<Record<string, Papel[]> | null> {
+  if (!ids.length) return {};
+  const { data, error } = await supabase.from("qs_users").select("id, papeis").in("id", ids);
+  if (error) return null;
+  return Object.fromEntries((data ?? []).map((u: { id: string; papeis: Papel[] | null }) => [u.id, u.papeis ?? []]));
+}
+export async function definirPapeis(userId: string, papeis: Papel[]) {
+  const { error } = await supabase.rpc("qs_sol_definir_papeis", { p_user: userId, p_papeis: papeis });
+  if (error) throw new Error(error.message);
 }
 
 export interface Solicitacao {

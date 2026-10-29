@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Solicitações entre setores</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#F6F6F3}
+a{color:#0F766E}a:hover{color:#0B5B55}
+button,input,select,textarea{font-family:inherit}
+</style>
+</helmet>
+<div style="background: #F6F6F3; font-family: Inter, system-ui, -apple-system, sans-serif; color: #18181B; min-height: 100vh">
+<div style="max-width: 1360px; margin: 0 auto; padding: 28px 24px 64px; display: flex; flex-direction: column; gap: 20px">
+
+<header style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.01em">Solicitações</h1>
+<p style="margin: 0; font-size: 14px; color: #5B5B63; display: flex; align-items: center; gap: 6px; flex-wrap: wrap">Pedidos entre setores, com dono e prazo. Você está em<span style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: #18181B"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #0F766E"></span>Relacionamento</span></p>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap">
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Tipos e prazos</button>
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: #18181B; color: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Pedir a outro setor</button>
+</div>
+</header>
+
+<section aria-label="Resumo" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">
+<sc-for list="{{kpis}}" as="k" hint-placeholder-count="5">
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5B5B63; font-weight: 500">{{k.label}}</span>
+<span style="{{k.style}}">{{k.value}}</span>
+<span style="font-size: 12px; color: #5B5B63">{{k.sub}}</span>
+</div>
+</sc-for>
+</section>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between">
+<div role="tablist" aria-label="Escopo" style="display: flex; gap: 4px; background: #F1F1EE; border-radius: 12px; padding: 4px; flex-wrap: wrap">
+<sc-for list="{{scopes}}" as="sc" hint-placeholder-count="3">
+<button type="button" role="tab" aria-selected="{{sc.active}}" onClick="{{sc.pick}}" style="{{sc.style}}">{{sc.label}}</button>
+</sc-for>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; flex: 1 1 320px; justify-content: flex-end">
+<label style="flex: 1 1 220px; max-width: 360px; display: flex; align-items: center; gap: 8px; height: 44px; border: 1px solid #DAD8D2; border-radius: 10px; padding: 0 12px; color: #5B5B63">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Buscar</span>
+<input placeholder="Buscar por cliente, viagem ou número" style="border: 0; outline: none; flex: 1; font-size: 14px; min-width: 0; background: transparent"></label>
+<div role="group" aria-label="Visualização" style="display: flex; gap: 4px; background: #F1F1EE; border-radius: 12px; padding: 4px">
+<sc-for list="{{views}}" as="v" hint-placeholder-count="3">
+<button type="button" aria-pressed="{{v.active}}" onClick="{{v.pick}}" style="{{v.style}}">{{v.label}}</button>
+</sc-for>
+</div>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid #F1F1EE">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63; margin-right: 4px">Setor</span>
+<sc-for list="{{sectors}}" as="se" hint-placeholder-count="4">
+<button type="button" aria-pressed="{{se.active}}" onClick="{{se.pick}}" style="{{se.style}}"><span aria-hidden="true" style="{{se.dot}}"></span>{{se.label}}<span style="font-size: 12px; color: #5B5B63; font-weight: 600">{{se.count}}</span></button>
+</sc-for>
+<span aria-hidden="true" style="width: 1px; height: 24px; background: #E7E5E0; margin: 0 6px"></span>
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63; margin-right: 4px">Dono</span>
+<sc-for list="{{owners}}" as="ow" hint-placeholder-count="3">
+<button type="button" aria-pressed="{{ow.active}}" onClick="{{ow.pick}}" style="{{ow.style}}">{{ow.label}}</button>
+</sc-for>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<div style="flex: 999 1 640px; min-width: 0">
+
+<sc-if value="{{isQuadro}}" hint-placeholder-val="{{ true }}">
+<div style="overflow-x: auto; padding-bottom: 6px">
+<div style="display: grid; grid-template-columns: repeat(4, minmax(240px, 1fr)); gap: 14px; min-width: 1000px">
+<sc-for list="{{columns}}" as="col" hint-placeholder-count="4">
+<div style="background: #EFEEEA; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 4px 4px 2px">
+<div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 14px; font-weight: 700">{{col.title}}</span><span style="font-size: 12px; font-weight: 700; background: #FFFFFF; border-radius: 999px; padding: 2px 8px">{{col.count}}</span></div>
+<span style="font-size: 12px; color: #5B5B63">{{col.hint}}</span>
+</div>
+<sc-if value="{{col.isEmpty}}" hint-placeholder-val="{{ false }}">
+<div style="border: 1.5px dashed #D4D2CB; border-radius: 12px; padding: 18px 12px; text-align: center; font-size: 13px; color: #5B5B63">Nada por aqui</div>
+</sc-if>
+<sc-for list="{{col.items}}" as="c" hint-placeholder-count="1">
+<button type="button" onClick="{{c.pick}}" style="{{c.cardStyle}}">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%">
+<div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
+<span style="font-size: 12px; font-weight: 700; color: #3F3F46">{{c.num}}</span>
+<span style="{{c.sectorStyle}}">{{c.sectorShort}}</span>
+<span style="font-size: 12px; color: #5B5B63">{{c.type}}</span>
+</div>
+<sc-if value="{{c.urgent}}" hint-placeholder-val="{{ false }}"><span style="font-size: 11px; font-weight: 700; color: #B42318; background: #FEE4E2; border-radius: 6px; padding: 2px 7px">Urgente</span></sc-if>
+</div>
+<span style="{{c.titleStyle}}">{{c.title}}</span>
+<sc-if value="{{c.hasClient}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; align-items: center; gap: 8px; min-width: 0">
+<span aria-hidden="true" style="width: 24px; height: 24px; border-radius: 50%; background: #E3F1EF; color: #0F766E; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0">{{c.initials}}</span>
+<span style="font-size: 13px; color: #3F3F46; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{c.clientLine}}</span>
+</div>
+</sc-if>
+<sc-if value="{{c.noClient}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; font-weight: 600; color: #92400E">Sem cliente vinculado</span></sc-if>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding-top: 8px; border-top: 1px solid #F1F1EE">
+<span style="{{c.dueStyle}}">{{c.dueLabel}}</span>
+<span style="font-size: 12px; color: #5B5B63">{{c.owner}} · de {{c.req}}</span>
+</div>
+</button>
+</sc-for>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isLista}}" hint-placeholder-val="{{ false }}">
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; overflow-x: auto">
+<table style="width: 100%; border-collapse: collapse; font-size: 14px; min-width: 880px">
+<thead>
+<tr style="text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #5B5B63">
+<th style="padding: 14px 16px; font-weight: 700">Pedido</th><th style="padding: 14px 10px; font-weight: 700">Cliente · viagem</th><th style="padding: 14px 10px; font-weight: 700">Setor</th><th style="padding: 14px 10px; font-weight: 700">Prazo</th><th style="padding: 14px 10px; font-weight: 700">Dono</th><th style="padding: 14px 16px; font-weight: 700">Status</th>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+<tr style="{{r.rowStyle}}">
+<td style="padding: 12px 16px"><button type="button" onClick="{{r.pick}}" style="border: 0; background: transparent; text-align: left; padding: 4px 0; cursor: pointer; display: flex; flex-direction: column; gap: 2px; font-size: 14px; color: #18181B"><span style="font-size: 12px; color: #5B5B63; font-weight: 600">{{r.num}} · {{r.type}}</span><span style="font-weight: 600">{{r.title}}</span></button></td>
+<td style="padding: 12px 10px; color: #3F3F46">{{r.clientLine}}</td>
+<td style="padding: 12px 10px"><span style="{{r.sectorStyle}}">{{r.sectorShort}}</span></td>
+<td style="padding: 12px 10px"><span style="{{r.dueStyle}}">{{r.dueLabel}}</span></td>
+<td style="padding: 12px 10px; color: #3F3F46">{{r.owner}}</td>
+<td style="padding: 12px 16px"><span style="{{r.statusStyle}}">{{r.statusLabel}}</span></td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</sc-if>
+
+<sc-if value="{{isPrazos}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 14px">
+<sc-for list="{{buckets}}" as="b" hint-placeholder-count="4">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="{{b.dot}}"></span>
+<h2 style="margin: 0; font-size: 15px; font-weight: 700">{{b.label}}</h2>
+<span style="font-size: 12px; font-weight: 700; background: #F1F1EE; border-radius: 999px; padding: 2px 8px">{{b.count}}</span>
+</div>
+<sc-if value="{{b.isEmpty}}" hint-placeholder-val="{{ false }}"><span style="font-size: 13px; color: #5B5B63">Nada neste período</span></sc-if>
+<sc-for list="{{b.items}}" as="c" hint-placeholder-count="1">
+<button type="button" onClick="{{c.pick}}" style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-height: 48px; padding: 8px 10px; border-radius: 10px; border: 1px solid #F1F1EE; background: #FFFFFF; text-align: left; cursor: pointer; font-size: 14px; color: #18181B">
+<span style="{{c.dueStyle}}">{{c.dueLabel}}</span>
+<span style="font-weight: 600; flex: 1 1 240px">{{c.num}} · {{c.title}}</span>
+<span style="font-size: 13px; color: #5B5B63">{{c.clientLine}}</span>
+<span style="font-size: 13px; color: #5B5B63">{{c.owner}}</span>
+</button>
+</sc-for>
+</section>
+</sc-for>
+</div>
+</sc-if>
+</div>
+
+<sc-if value="{{hasSel}}" hint-placeholder-val="{{ true }}">
+<div style="position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box">
+<button type="button" onClick="{{closeSel}}" aria-label="Fechar detalhe" style="position: absolute; inset: 0; border: 0; padding: 0; background: rgba(24,24,27,0.45); cursor: pointer"></button>
+<section role="dialog" aria-modal="true" aria-label="Detalhe da solicitação" style="position: relative; width: 100%; max-width: 940px; max-height: 100%; overflow-y: auto; background: #FFFFFF; border-radius: 20px; box-shadow: 0 24px 64px rgba(24,24,27,0.25); display: flex; flex-direction: column">
+
+<header style="padding: 24px 28px 20px; border-bottom: 1px solid #F1F1EE; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+<div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap">
+<span style="font-size: 13px; font-weight: 700; color: #3F3F46">{{sel.num}}</span>
+<span style="{{sel.sectorStyle}}">{{sel.sectorShort}}</span>
+<span style="font-size: 13px; color: #5B5B63">{{sel.type}}</span>
+<span style="{{sel.statusStyle}}">{{sel.statusLabel}}</span>
+<sc-if value="{{sel.urgent}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; font-weight: 700; color: #B42318; background: #FEE4E2; border-radius: 6px; padding: 3px 8px">Urgente</span></sc-if>
+</div>
+<div style="display: flex; gap: 6px; align-items: center">
+<span style="font-size: 13px; color: #5B5B63; margin-right: 4px">{{selPos}}</span>
+<button type="button" onClick="{{prevSel}}" aria-label="Solicitação anterior" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #E7E5E0; background: #FFFFFF; display: inline-flex; align-items: center; justify-content: center; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></button>
+<button type="button" onClick="{{nextSel}}" aria-label="Próxima solicitação" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #E7E5E0; background: #FFFFFF; display: inline-flex; align-items: center; justify-content: center; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
+<button type="button" onClick="{{closeSel}}" aria-label="Fechar" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #E7E5E0; background: #FFFFFF; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; margin-left: 4px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
+</div>
+</div>
+<h2 style="margin: 0; font-size: 26px; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em">{{sel.title}}</h2>
+<div style="{{sel.bannerStyle}}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+<span>{{sel.bannerText}}</span>
+</div>
+</header>
+
+<div style="display: flex; flex-wrap: wrap">
+<div style="flex: 999 1 460px; min-width: 0; padding: 24px 28px; display: flex; flex-direction: column; gap: 24px">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">O que foi pedido</span>
+<div style="background: #F8F8F6; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 50%; background: #FFEDE3; color: #9A3412; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">{{sel.reqInitial}}</span>
+<span style="font-size: 14px; font-weight: 600">{{sel.req}}</span><span style="font-size: 13px; color: #5B5B63">Operações</span>
+</div>
+<p style="margin: 0; font-size: 16px; color: #18181B; line-height: 1.6">[Descrição escrita por quem pediu, com o contexto e o que precisa voltar para Operações]</p>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Andamento</span>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px">
+<sc-for list="{{sel.activity}}" as="a" hint-placeholder-count="3">
+<li style="display: flex; gap: 10px; font-size: 14px; align-items: flex-start"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #A1A1AA; margin-top: 6px; flex-shrink: 0"></span><span style="color: #3F3F46">{{a.text}}</span></li>
+</sc-for>
+</ol>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Comentário<textarea rows="3" placeholder="Atualize quem pediu" style="border: 1px solid #DAD8D2; border-radius: 12px; padding: 12px; font-size: 14px; resize: vertical"></textarea></label>
+</div>
+</div>
+
+<div style="flex: 1 1 300px; min-width: 0; background: #FAFAF8; border-left: 1px solid #F1F1EE; padding: 24px; display: flex; flex-direction: column; gap: 20px">
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: center; gap: 12px">
+<span aria-hidden="true" style="width: 40px; height: 40px; border-radius: 50%; background: #E3F1EF; color: #0F766E; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0">{{sel.initials}}</span>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<span style="font-size: 15px; font-weight: 600">{{sel.clientName}}</span>
+<span style="font-size: 13px; color: #5B5B63">{{sel.tripLine}}</span>
+</div>
+</div>
+<sc-if value="{{sel.hasClient}}" hint-placeholder-val="{{ true }}"><a href="Main.dc.html" style="min-height: 40px; border-radius: 10px; border: 1px solid #DAD8D2; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; text-decoration: none">Abrir ficha da cliente</a></sc-if>
+<sc-if value="{{sel.noClient}}" hint-placeholder-val="{{ false }}"><button type="button" style="min-height: 40px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Vincular cliente</button></sc-if>
+</div>
+
+<dl style="margin: 0; display: grid; grid-template-columns: 96px 1fr; row-gap: 12px; column-gap: 12px; font-size: 14px">
+<dt style="color: #5B5B63">Prazo</dt><dd style="margin: 0"><span style="{{sel.dueStyle}}">{{sel.dueLabel}}</span></dd>
+<dt style="color: #5B5B63">Prioridade</dt><dd style="margin: 0; font-weight: 500">{{sel.prio}}</dd>
+<dt style="color: #5B5B63">Pediu</dt><dd style="margin: 0; font-weight: 500">{{sel.req}} · Operações</dd>
+<dt style="color: #5B5B63">Com</dt><dd style="margin: 0; font-weight: 500">{{sel.owner}} · Relacionamento</dd>
+</dl>
+
+<sc-if value="{{sel.open}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 8px; margin-top: auto">
+<button type="button" style="min-height: 44px; border-radius: 10px; border: 0; background: #0F766E; color: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Concluir solicitação</button>
+<button type="button" style="min-height: 44px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Esperando cliente</button>
+<button type="button" style="min-height: 44px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Pedir ajuste a quem pediu</button>
+<button type="button" style="min-height: 40px; border: 0; background: transparent; color: #3F3F46; font-size: 14px; font-weight: 600; cursor: pointer">Passar para outra pessoa</button>
+</div>
+</sc-if>
+<sc-if value="{{sel.done}}" hint-placeholder-val="{{ false }}">
+<button type="button" style="min-height: 44px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: auto">Reabrir</button>
+</sc-if>
+</div>
+</div>
+</section>
+</div>
+</sc-if>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { scope: 'recebidas', view: 'quadro', sector: 'all', owner: 'todas', sel: '40' };
+  }
+  renderVals() {
+    const s = this.state;
+    const data = [
+      { id: '40', sector: 'ops', type: 'Falar com o cliente', title: 'Solicitar endereço da passageira', client: 'Ana Larissa Duarte Linhares', trip: 'Tailândia', due: 'Hoje, 13:00', tone: 'hoje', prio: 'Normal', owner: 'Mariane', req: 'Antônio', status: 'andamento' },
+      { id: '39', sector: 'ops', type: 'Falar com o cliente', title: 'Passar a informação para a família Sobreira', client: '', trip: '', due: 'Qua 28/10, 15:43', tone: 'feito', prio: 'Urgente', owner: 'Mariane', req: 'Antônio', status: 'concluida' },
+      { id: '38', sector: 'ops', type: 'Falar com o cliente', title: 'Avisar que ela precisa pegar a encomenda no correio', client: 'Laureana Telles dos Santos', trip: '', due: 'Qua 28/10, 12:17', tone: 'feito', prio: 'Normal', owner: 'Mariane', req: 'Antônio', status: 'concluida' },
+      { id: '37', sector: 'ops', type: 'Falar com o cliente', title: 'Avisar que ela precisa retirar a encomenda no correio', client: 'Danielle Mesquita Torres', trip: 'Tailândia G1 e G2', due: 'Qua 28/10, 09:16', tone: 'feito', prio: 'Urgente', owner: 'Mariane', req: 'Antônio', status: 'concluida' },
+      { id: '31', sector: 'ops', type: 'Falar com o cliente', title: 'Passar o contato do motorista para ela', client: '[Cliente]', trip: '', due: '[prazo]', tone: 'feito', prio: 'Normal', owner: 'Mariane', req: 'Antônio', status: 'concluida' }
+    ];
+    const sectorMeta = { com: ['Comercial', 'COM', '#2563EB', '#E8EFFE', '#1D4ED8'], fin: ['Financeiro', 'FIN', '#4F46E5', '#ECEBFE', '#4338CA'], ops: ['Operações', 'OPS', '#C2410C', '#FFEDE3', '#9A3412'] };
+    const dueTones = { hoje: 'background:#FEF3C7;color:#92400E', atrasada: 'background:#FEE4E2;color:#B42318', ok: 'background:#F1F1EE;color:#3F3F46', feito: 'background:#F1F1EE;color:#5B5B63' };
+    const statusMeta = { nova: ['Nova', 'background:#E8EFFE;color:#1D4ED8'], ajuste: ['Aguardando ajuste', 'background:#FEF3C7;color:#92400E'], andamento: ['Esperando cliente', 'background:#FFEDE3;color:#9A3412'], concluida: ['Concluída', 'background:#DCFAE6;color:#067647'] };
+    const initials = (n) => n && n[0] !== '[' ? n.split(' ').filter(Boolean).slice(0, 1).concat(n.split(' ').slice(-1)).map((w) => w[0]).join('').toUpperCase() : '?';
+    const chip = 'font-size:12px;font-weight:600;border-radius:6px;padding:3px 8px;white-space:nowrap;';
+    const enrich = (d) => {
+      const m = sectorMeta[d.sector];
+      const done = d.status === 'concluida';
+      const selected = s.sel === d.id;
+      return {
+        ...d, num: '#' + d.id, done, open: !done, urgent: d.prio === 'Urgente' && !done,
+        hasClient: !!d.client, noClient: !d.client,
+        clientName: d.client || 'Sem cliente vinculado', clientLine: d.client ? (d.client + (d.trip ? ' · ' + d.trip : '')) : '—',
+        tripLine: d.trip || 'Viagem não informada', initials: initials(d.client),
+        sectorShort: m[1], sectorStyle: chip + 'background:' + m[3] + ';color:' + m[4],
+        dueLabel: done ? 'Concluída · ' + d.due : 'Vence ' + d.due.toLowerCase(), dueStyle: chip + dueTones[d.tone],
+        statusLabel: statusMeta[d.status][0], statusStyle: chip + statusMeta[d.status][1],
+        titleStyle: 'font-size:15px;font-weight:600;line-height:1.35;' + (done ? 'color:#5B5B63' : 'color:#18181B'),
+        cardStyle: 'width:100%;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:12px;background:#FFFFFF;font-family:inherit;color:#18181B;box-shadow:0 1px 2px rgba(24,24,27,0.06);' + (selected ? 'border:2px solid #0F766E' : 'border:2px solid transparent'),
+        rowStyle: 'border-top:1px solid #F1F1EE;' + (selected ? 'background:#F0F7F6' : ''),
+        reqInitial: d.req ? d.req[0] : '?',
+        bannerText: done ? 'Concluída dentro do fluxo · prazo era ' + d.due.toLowerCase() : 'Vence ' + d.due.toLowerCase() + ' · responda quem pediu antes do prazo',
+        bannerStyle: 'display:flex;align-items:center;gap:8px;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;' + (done ? 'background:#DCFAE6;color:#067647' : d.tone === 'atrasada' ? 'background:#FEE4E2;color:#B42318' : 'background:#FEF3C7;color:#92400E'),
+        activity: done
+          ? [{ text: d.req + ' (Operações) abriu o pedido' }, { text: d.owner + ' assumiu' }, { text: d.owner + ' concluiu' }]
+          : [{ text: d.req + ' (Operações) abriu o pedido' }, { text: d.owner + ' assumiu' }, { text: 'Mensagem enviada, esperando resposta da cliente' }],
+        pick: () => this.setState({ sel: d.id })
+      };
+    };
+    const all = data.map(enrich);
+    const filtered = all.filter((d) => (s.sector === 'all' || d.sector === s.sector) && (s.owner === 'todas' || (s.owner === 'comigo' ? d.owner === 'Mariane' : !d.owner)));
+    const openAll = all.filter((d) => !d.done);
+    const seg = (active) => 'min-height:36px;padding:0 14px;border-radius:9px;border:0;font-size:14px;font-weight:600;cursor:pointer;' + (active ? 'background:#FFFFFF;color:#18181B;box-shadow:0 1px 2px rgba(24,24,27,0.1)' : 'background:transparent;color:#5B5B63');
+    const pill = (active) => 'min-height:36px;padding:0 12px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:7px;' + (active ? 'background:#18181B;color:#FFFFFF;border:1px solid #18181B' : 'background:#FFFFFF;color:#3F3F46;border:1px solid #E7E5E0');
+    const scopes = [['recebidas', 'Recebidas'], ['pedidas', 'Pedidas por nós'], ['todas', 'Histórico']].map(([id, label]) => ({ label, active: s.scope === id, style: seg(s.scope === id), pick: () => this.setState({ scope: id }) }));
+    const views = [['quadro', 'Quadro'], ['lista', 'Lista'], ['prazos', 'Prazos']].map(([id, label]) => ({ label, active: s.view === id, style: seg(s.view === id), pick: () => this.setState({ view: id }) }));
+    const sectors = [['all', 'Todos', '#18181B'], ['com', 'Comercial', '#2563EB'], ['fin', 'Financeiro', '#4F46E5'], ['ops', 'Operações', '#C2410C']].map(([id, label, c]) => ({
+      label, active: s.sector === id, style: pill(s.sector === id),
+      dot: 'width:8px;height:8px;border-radius:50%;background:' + (s.sector === id ? '#FFFFFF' : c),
+      count: String(openAll.filter((d) => id === 'all' || d.sector === id).length),
+      pick: () => this.setState({ sector: id })
+    }));
+    const owners = [['todas', 'Todas'], ['comigo', 'Comigo'], ['semdono', 'Sem dono']].map(([id, label]) => ({ label, active: s.owner === id, style: pill(s.owner === id), pick: () => this.setState({ owner: id }) }));
+    const colDefs = [['nova', 'Novas', 'esperando alguém assumir'], ['ajuste', 'Aguardando ajustes', 'falta informação de quem pediu'], ['andamento', 'Em andamento', 'inclui esperando cliente ou fornecedor'], ['concluida', 'Concluídas', 'últimos 14 dias']];
+    const columns = colDefs.map(([st, title, hint]) => {
+      const items = filtered.filter((d) => d.status === st);
+      return { title, hint, items, count: String(items.length), isEmpty: items.length === 0 };
+    });
+    const openF = filtered.filter((d) => !d.done);
+    const doneF = filtered.filter((d) => d.done);
+    const bucketDefs = [
+      ['Atrasadas', '#B42318', openF.filter((d) => d.tone === 'atrasada')],
+      ['Vencem hoje', '#D97706', openF.filter((d) => d.tone === 'hoje')],
+      ['Próximos 7 dias', '#2563EB', openF.filter((d) => d.tone === 'ok')],
+      ['Concluídas · últimos 14 dias', '#067647', doneF]
+    ];
+    const buckets = bucketDefs.map(([label, c, items]) => ({ label, items, count: String(items.length), isEmpty: items.length === 0, dot: 'width:10px;height:10px;border-radius:50%;background:' + c }));
+    const kv = (label, value, sub, color) => ({ label, value, sub, style: 'font-size:26px;font-weight:700;letter-spacing:-0.01em;color:' + (color || '#18181B') });
+    const kpis = [
+      kv('Abertas', String(openAll.length), 'recebidas por Relacionamento'),
+      kv('Vencem hoje', String(openAll.filter((d) => d.tone === 'hoje').length), 'priorize estas primeiro', '#B45309'),
+      kv('Atrasadas', String(openAll.filter((d) => d.tone === 'atrasada').length), 'fora do prazo combinado'),
+      kv('Sem dono', String(openAll.filter((d) => !d.owner).length), 'ninguém assumiu ainda'),
+      kv('Concluídas', String(all.filter((d) => d.done).length), 'nos últimos 14 dias', '#067647')
+    ];
+    const sel = all.find((d) => d.id === s.sel);
+    const nav = filtered.length ? filtered : all;
+    const idx = sel ? Math.max(0, nav.findIndex((d) => d.id === sel.id)) : 0;
+    const go = (step) => () => this.setState({ sel: nav[(idx + step + nav.length) % nav.length].id });
+    return {
+      selPos: (idx + 1) + ' de ' + nav.length, prevSel: go(-1), nextSel: go(1),
+      kpis, scopes, views, sectors, owners, columns, buckets, rows: filtered,
+      isQuadro: s.view === 'quadro', isLista: s.view === 'lista', isPrazos: s.view === 'prazos',
+      hasSel: !!sel, sel: sel || all[0], closeSel: () => this.setState({ sel: null })
+    };
+  }
+}
+</script>
+</body>
+</html>

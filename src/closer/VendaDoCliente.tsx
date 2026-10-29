@@ -42,11 +42,34 @@ export default function VendaDoCliente({ leadId }: { leadId: string }) {
   if (carregando) return <p className="text-sm" style={{ color: "var(--ink3)" }}>Carregando…</p>;
   if (erro) return <Aviso tom="erro">{erro}</Aviso>;
 
-  if (!n || n.arquivado_em) {
+  // 29/10 (Bruno: contrato "à parte", até depois de consolidada): cartão no
+  // ARQUIVO também manda contrato — os 231 cartões antigos foram pro arquivo na
+  // 0205 e o bloco sumia justo neles. O cartão continua no arquivo.
+  if (n && n.arquivado_em) {
+    return (
+      <div className="space-y-4">
+        <div className="rel-card p-4 flex flex-wrap items-center gap-3">
+          <Etiqueta tom="neutro">No arquivo</Etiqueta>
+          <span className="text-[13px] flex-1" style={{ color: "var(--ink2)" }}>
+            Cartão do pipeline antigo{n.closer?.name ? ` · closer ${n.closer.name}` : ""}. O contrato sai daqui mesmo, sem trazer pro quadro.
+          </span>
+          <Botao variante="fantasma" disabled={abrindo} onClick={async () => {
+            setAbrindo(true);
+            try { await abrirNegocio(leadId); await carregar(); }
+            catch (e) { setErro((e as Error).message); }
+            finally { setAbrindo(false); }
+          }}>{abrindo ? "Abrindo…" : "Trazer pro pipeline"}</Botao>
+        </div>
+        <ContratoBloco negocio={n} onMudou={() => void carregar()} />
+      </div>
+    );
+  }
+
+  if (!n) {
     return (
       <div className="rel-card p-5 space-y-3">
         <p className="text-[14px] font-semibold" style={{ color: "var(--ink)" }}>
-          {n ? "O cartão deste cliente está no arquivo (pipeline antigo)." : "Este cliente ainda não tem cartão no pipeline."}
+          Este cliente ainda não tem cartão no pipeline.
         </p>
         <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
           O cartão nasce quando uma reunião é agendada com você. Pra mandar contrato ou link de pagamento agora, traga o cliente pro quadro.
