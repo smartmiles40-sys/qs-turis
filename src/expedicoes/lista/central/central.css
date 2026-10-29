@@ -134,3 +134,27 @@ html.dark .cx-sel select { background: transparent; }
 .cx-anos__ir { display: flex; gap: 6px; flex-wrap: wrap; }
 .cx-ano--fim { padding-top: 6px; }
 .cx-ano__sub { margin: 4px 0 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+
+/* ── Checklist padrão (29/10) ──────────────────────────────────────────────── */
+.ckp-setores { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.ckp-setor { display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; color: var(--text); font-size: 13.5px; font-weight: 600;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+.ckp-setor small { font-weight: 400; color: var(--muted); }
+.ckp-setor--on { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.ckp-setor__n { font-size: 20px; font-weight: 700; min-width: 28px; }
+.ckp-nota { margin: 0; font-size: 13px; color: var(--muted); }
+.ckp-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ckp-t { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; }
+.ckp-t--sug { border-style: dashed; background: transparent; }
+.ckp-t__l { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ckp-t__nome { flex: 1 1 260px; text-align: left; background: none; border: 0; padding: 0; color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; }
+.ckp-t__nome:disabled { cursor: default; }
+.ckp-t__subs { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.ckp-chip { font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+.ckp-prio { font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.ckp-prio--c { color: var(--danger); }
+.ckp-prio--a { color: var(--warn); }
+.ckp-sug { font-size: 11.5px; font-weight: 700; color: var(--muted); border: 1px dashed var(--border-strong); border-radius: 999px; padding: 2px 8px; }
+.ckp-and { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.ckp-and b { color: var(--danger); }
+.ckp-subs { margin: 8px 0 0 0; padding-left: 22px; font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }

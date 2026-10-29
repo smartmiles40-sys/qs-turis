@@ -163,3 +163,38 @@ export function construirChecklistPadrao(params: ChecklistPadraoParams): Checkli
 
   return rows;
 }
+
+// ─── Divisão por setor (Bruno, 29/10) ─────────────────────────────────────────
+// "Qual é o check-list das tarefas que são padrão em todas as expedições, com a
+// divisão de todos os setores". Hoje o padrão só tem Operações (os processos de
+// comercial e financeiro saíram a pedido, quando o checklist era só do Ops).
+// As tarefas abaixo são SUGESTÃO pros outros setores — aparecem na tela
+// "Checklist padrão" marcadas como sugestão e NÃO entram nas expedições até o
+// Bruno aprovar (migration 0223 tira o padrão do código e põe no banco, editável).
+export type SetorChecklist = "operacional" | "comercial" | "financeiro" | "relacionamento";
+export const NOME_SETOR_CHECKLIST: Record<SetorChecklist, string> = {
+  operacional: "Operações", comercial: "Comercial", financeiro: "Financeiro", relacionamento: "Relacionamento",
+};
+export const COR_SETOR_CHECKLIST: Record<SetorChecklist, string> = {
+  operacional: "operacoes", comercial: "comercial", financeiro: "financeiro", relacionamento: "relacionamento",
+};
+export function setorDoProcesso(p: Pick<ProcessoTemplate, "papel">): SetorChecklist {
+  return p.papel === "comercial" || p.papel === "financeiro" || p.papel === "relacionamento" ? p.papel : "operacional";
+}
+
+export const PROCESSOS_SUGERIDOS: ProcessoTemplate[] = [
+  // Comercial
+  { etapa: "Após o fechamento", tarefa: "Passar a venda para Operações com a ficha completa", papel: "comercial", prioridade: "Alta" },
+  { etapa: "12 a 6 meses", tarefa: "Acompanhar vagas e fechar o grupo", papel: "comercial", prioridade: "Alta" },
+  { etapa: "6 a 2 meses", tarefa: "Encerrar vendas e avisar Operações das últimas vagas", papel: "comercial", prioridade: "Média" },
+  // Financeiro
+  { etapa: "Após o fechamento", tarefa: "Lançar contrato e plano de pagamento de cada passageiro", papel: "financeiro", prioridade: "Alta" },
+  { etapa: "6 a 2 meses", tarefa: "Cobrar parcelas em atraso", papel: "financeiro", prioridade: "Alta" },
+  { etapa: "2 meses a 15 dias", tarefa: "Confirmar quitação de todos os passageiros", papel: "financeiro", prioridade: "Crítica" },
+  { etapa: "Pós-viagem", tarefa: "Fechar o custo real da expedição", papel: "financeiro", prioridade: "Média" },
+  // Relacionamento
+  { etapa: "Após o fechamento", tarefa: "Boas-vindas e entrada no grupo do WhatsApp", papel: "relacionamento", prioridade: "Alta" },
+  { etapa: "6 a 2 meses", tarefa: "Cobrar passaporte, documentos e preferências dos passageiros", papel: "relacionamento", prioridade: "Alta" },
+  { etapa: "Na semana", tarefa: "Mensagem de véspera com horários e checklist de mala", papel: "relacionamento", prioridade: "Alta" },
+  { etapa: "Pós-viagem", tarefa: "Pesquisa de satisfação e convite para a próxima expedição", papel: "relacionamento", prioridade: "Média" },
+];

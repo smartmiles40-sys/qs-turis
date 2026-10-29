@@ -17,6 +17,8 @@ export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: numbe
       { id: "inscricoes", rotulo: "Inscrições", badge: contagens.inscricoes || undefined },
       { id: "avisos", rotulo: "Avisos", badge: contagens.avisos || undefined },
       { id: "fornecedores", rotulo: "Fornecedores" },
+      // 29/10: o checklist que toda expedição recebe, dividido por setor
+      { id: "checklist-padrao", rotulo: "Checklist padrão" },
     ],
   };
 }
