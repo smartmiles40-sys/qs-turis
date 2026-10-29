@@ -1,4 +1,5 @@
 -- 0223_inscricao_saude_receitas.sql
+-- APLICADA em 29/10/2026 (0223a colunas + triagem, 0223b gatilho + receitas), com o ok do Bruno. Testada com rollback: a aprovação leva o lembrete pro passageiro.
 -- Pedidos da Carol (Relacionamento) nas Inscrições, trazidos do sistema antigo
 -- (sistema-expedicoes 711f772 / fe8ff18 / 23fc68f, migrations 0061 e 0062 de lá):
 --
