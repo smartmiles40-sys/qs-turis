@@ -1,4 +1,5 @@
 -- 0222 — Solicitações já chegam com dono (distribuição automática) + papéis do setor
+-- APLICADA em produção em 29/10/2026 (ok do Bruno), em 3 partes: 0222a/b/c.
 -- -----------------------------------------------------------------------------
 -- Bruno, 29/10/2026: "quando chega uma solicitação no QS hoje não vai pra
 -- ninguém e acaba tendo que ser distribuída manualmente; quero que já venha com
@@ -203,8 +204,8 @@ update qs_solicitacao_tipos set papel = 'cx'
  where setor = 'relacionamento' and rotulo in ('Falar com o cliente', 'Pegar documentos / dados do cliente', 'Outro');
 update qs_solicitacao_tipos set papel = 'cs'
  where setor = 'relacionamento' and rotulo = 'Pós-venda / reclamação';
-insert into qs_solicitacao_tipos (setor, rotulo, ordem, prazo_horas, prazo_alta_horas, prazo_urgente_horas, papel, ativo)
-select 'relacionamento', 'Oportunidade de venda pra base', 40, 24, 8, 4, 'hunter', true
+insert into qs_solicitacao_tipos (id, setor, rotulo, ordem, prazo_horas, prazo_alta_horas, prazo_urgente_horas, papel, ativo)
+select 'rel_oportunidade_venda', 'relacionamento', 'Oportunidade de venda pra base', 40, 24, 8, 4, 'hunter', true
  where not exists (select 1 from qs_solicitacao_tipos where setor = 'relacionamento' and rotulo = 'Oportunidade de venda pra base');
 
 update qs_users set papeis = array['cx'] where name = 'Mariane | Relacionamento';
