@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Expedição Japão e China G1</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#F6F6F3}
+a{color:#0F766E}a:hover{color:#0B5B55}
+button,input,select{font-family:inherit}
+</style>
+</helmet>
+<div style="background: #F6F6F3; font-family: Inter, system-ui, -apple-system, sans-serif; color: #18181B; min-height: 100vh">
+<div style="max-width: 1360px; margin: 0 auto; padding: 28px 24px 64px; display: flex; flex-direction: column; gap: 20px">
+
+<a href="Expedicoes.dc.html" style="font-size: 14px; color: #5B5B63; text-decoration: none; align-self: flex-start">Expedições</a>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 22px">
+<div style="display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: flex-start">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+<h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.01em">Japão &amp; China 2026</h1>
+<span style="font-size: 13px; font-weight: 700; background: #F1F1EE; border-radius: 6px; padding: 3px 9px">G1</span>
+<span style="font-size: 13px; font-weight: 700; background: #18181B; color: #FFFFFF; border-radius: 999px; padding: 4px 12px">Em viagem · Dia 4 de 18</span>
+</div>
+<p style="margin: 0; font-size: 14px; color: #5B5B63"><span style="font-family: ui-monospace, Menlo, monospace; color: #3F3F46">JAPCHI-2026-10-A</span> · Japão e China · 26/10/2026 → 12/11/2026 · Líderes Everton, Jacqueline e Beatriz</p>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap">
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Portal do líder</button>
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Editar</button>
+</div>
+</div>
+<ol aria-label="Fases da expedição" style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px">
+<sc-for list="{{phases}}" as="p" hint-placeholder-count="5">
+<li style="display: flex; flex-direction: column; gap: 8px">
+<span style="{{p.bar}}"></span>
+<span style="{{p.text}}">{{p.label}}</span>
+</li>
+</sc-for>
+</ol>
+</section>
+
+<div role="tablist" aria-label="Seções da expedição" style="display: flex; gap: 8px; flex-wrap: wrap">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="6">
+<button type="button" role="tab" aria-selected="{{t.active}}" onClick="{{t.pick}}" style="{{t.style}}">{{t.label}}<sc-if value="{{t.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="{{t.badgeStyle}}">{{t.badge}}</span></sc-if></button>
+</sc-for>
+</div>
+
+<sc-if value="{{isGeral}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: stretch">
+<section style="flex: 999 1 560px; min-width: 0; background: #18181B; color: #FFFFFF; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #D4D4D8">Hoje · quinta, 29/10 · Dia 4</span>
+<span style="font-size: 13px; color: #D4D4D8">Tóquio · fuso +12h de Brasília</span>
+</div>
+<h2 style="margin: 0; font-size: 26px; font-weight: 700; line-height: 1.25">Tóquio: Asakusa e Akihabara</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">
+<div style="background: #27272A; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12px; color: #D4D4D8">Hotel</span><span style="font-size: 15px; font-weight: 600">KOKO HOTEL Tsukiji Ginza</span><span style="font-size: 12px; color: #D4D4D8">check-out 31/10</span></div>
+<div style="background: #27272A; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12px; color: #D4D4D8">No grupo</span><span style="font-size: 15px; font-weight: 600">25 pessoas</span><span style="font-size: 12px; color: #D4D4D8">22 pagantes e 3 líderes</span></div>
+<div style="background: #27272A; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12px; color: #D4D4D8">Líderes em campo</span><span style="font-size: 15px; font-weight: 600">Everton, Jacqueline, Beatriz</span><span style="font-size: 12px; color: #D4D4D8">contato no portal do líder</span></div>
+</div>
+</section>
+
+<section style="flex: 1 1 340px; min-width: 0; background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Próximos dias</h3>
+<sc-for list="{{nextDays}}" as="d" hint-placeholder-count="2">
+<div style="display: flex; gap: 12px; align-items: flex-start">
+<span style="min-width: 44px; height: 44px; border-radius: 10px; background: #F1F1EE; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #3F3F46">DIA<span style="font-size: 16px; color: #18181B">{{d.n}}</span></span>
+<div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<span style="font-size: 12px; color: #5B5B63">{{d.date}}</span>
+<span style="font-size: 14px; font-weight: 600">{{d.title}}</span>
+<sc-if value="{{d.hasFlag}}" hint-placeholder-val="{{ false }}"><span style="{{d.flagStyle}}">{{d.flag}}</span></sc-if>
+</div>
+</div>
+</sc-for>
+<button type="button" onClick="{{goLog}}" style="margin-top: auto; min-height: 40px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Roteiro completo</button>
+</section>
+</div>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">A viagem inteira</h3>
+<span style="font-size: 13px; color: #5B5B63">18 dias · 4 hotéis · 25/25 alocados em todos</span>
+</div>
+<div style="overflow-x: auto">
+<div style="min-width: 980px; display: grid; grid-template-columns: repeat(18, minmax(0, 1fr)); row-gap: 8px; column-gap: 3px">
+<sc-for list="{{tripDays}}" as="td" hint-placeholder-count="18">
+<div style="{{td.style}}"><span style="font-size: 11px; font-weight: 700">{{td.n}}</span><span style="font-size: 11px">{{td.date}}</span></div>
+</sc-for>
+<sc-for list="{{hotels}}" as="h" hint-placeholder-count="4">
+<div style="{{h.style}}"><span style="font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{h.city}}</span><span style="font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{h.name}}</span></div>
+</sc-for>
+</div>
+</div>
+</section>
+
+<section aria-label="Saúde da expedição" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px">
+<sc-for list="{{health}}" as="hc" hint-placeholder-count="4">
+<button type="button" onClick="{{hc.go}}" style="text-align: left; cursor: pointer; background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; color: #18181B">
+<div style="display: flex; justify-content: space-between; align-items: center; width: 100%"><span style="font-size: 13px; color: #5B5B63; font-weight: 500">{{hc.label}}</span><span style="{{hc.tagStyle}}">{{hc.tag}}</span></div>
+<span style="font-size: 22px; font-weight: 700">{{hc.value}}</span>
+<div style="height: 6px; width: 100%; border-radius: 999px; background: #F1F1EE; overflow: hidden"><div style="{{hc.fill}}"></div></div>
+<span style="font-size: 12px; color: #5B5B63">{{hc.sub}}</span>
+</button>
+</sc-for>
+</section>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Ações da operação</h3>
+<span style="font-size: 13px; color: #5B5B63">vindas do roteiro do líder, até alguém dar baixa</span>
+</div>
+<sc-for list="{{actions}}" as="ac" hint-placeholder-count="3">
+<div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap; border: 1px solid #F1F1EE; border-radius: 12px; padding: 12px 14px">
+<span style="{{ac.tagStyle}}">{{ac.tag}}</span>
+<div style="display: flex; flex-direction: column; gap: 2px; flex: 1 1 380px; min-width: 0">
+<span style="font-size: 14px; font-weight: 600">{{ac.title}}</span>
+<span style="font-size: 13px; color: #5B5B63">{{ac.sub}}</span>
+</div>
+<span style="font-size: 13px; color: #5B5B63">{{ac.owner}}</span>
+<button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">Dar baixa</button>
+</div>
+</sc-for>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{isPax}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; overflow: hidden">
+<div style="padding: 16px 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; border-bottom: 1px solid #F1F1EE">
+<div style="display: flex; gap: 8px; flex-wrap: wrap">
+<sc-for list="{{paxFilters}}" as="f" hint-placeholder-count="4"><button type="button" aria-pressed="{{f.active}}" onClick="{{f.pick}}" style="{{f.style}}">{{f.label}}</button></sc-for>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap">
+<button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">Cobrar formulário (7)</button>
+<button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 0; background: #18181B; color: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">Cobrar apólice de seguro (25)</button>
+</div>
+</div>
+<div style="overflow-x: auto">
+<table style="width: 100%; border-collapse: collapse; font-size: 14px; min-width: 1080px">
+<thead>
+<tr style="text-align: left; font-size: 12px; color: #5B5B63">
+<th style="padding: 12px 20px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em">Passageiro</th>
+<sc-for list="{{cols}}" as="c" hint-placeholder-count="6"><th style="padding: 12px 8px; font-weight: 700"><span style="display: flex; flex-direction: column; gap: 2px"><span style="text-transform: uppercase; letter-spacing: 0.05em">{{c.label}}</span><span style="{{c.scoreStyle}}">{{c.score}}</span></span></th></sc-for>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{paxRows}}" as="p" hint-placeholder-count="10">
+<tr style="border-top: 1px solid #F1F1EE">
+<td style="padding: 10px 20px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 50%; background: #F1F1EE; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0">{{p.ini}}</span>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600">{{p.name}}</span><span style="font-size: 12px; color: #5B5B63">{{p.sub}}</span></div>
+</div>
+</td>
+<sc-for list="{{p.cells}}" as="c" hint-placeholder-count="6"><td style="padding: 10px 8px"><span style="{{c.style}}">{{c.label}}</span></td></sc-for>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div style="padding: 14px 20px; border-top: 1px solid #F1F1EE; font-size: 13px; color: #5B5B63">Mostrando {{paxShown}} de 25 passageiros</div>
+</section>
+</sc-if>
+
+<sc-if value="{{isLog}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Hospedagem e rooming</h3>
+<div style="display: flex; gap: 8px; flex-wrap: wrap"><button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">Exportar Excel</button><button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 0; background: #18181B; color: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">Abrir rooming</button></div>
+</div>
+<sc-for list="{{hotelList}}" as="h" hint-placeholder-count="4">
+<div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap; border: 1px solid #F1F1EE; border-radius: 12px; padding: 12px 14px">
+<span style="min-width: 70px; font-size: 13px; font-weight: 700">{{h.city}}</span>
+<div style="display: flex; flex-direction: column; gap: 2px; flex: 1 1 300px"><span style="font-size: 14px; font-weight: 600">{{h.name}}</span><span style="font-size: 13px; color: #5B5B63">{{h.dates}} · {{h.rooms}}</span></div>
+<span style="font-size: 12px; font-weight: 700; background: #DCFAE6; color: #067647; border-radius: 999px; padding: 4px 10px">25/25 alocados</span>
+</div>
+</sc-for>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; padding-top: 4px; font-size: 13px; color: #3F3F46">
+<span style="background: #F1F1EE; border-radius: 999px; padding: 6px 12px; font-weight: 600">3 duplas que viajam juntas</span>
+<span style="background: #F1F1EE; border-radius: 999px; padding: 6px 12px; font-weight: 600">8 acompanhantes indicados na inscrição</span>
+</div>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding-bottom: 8px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Roteiro do líder</h3>
+<button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">Adicionar dia</button>
+</div>
+<sc-for list="{{roteiro}}" as="r" hint-placeholder-count="6">
+<div style="{{r.rowStyle}}">
+<span style="min-width: 44px; height: 44px; border-radius: 10px; background: #F1F1EE; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #3F3F46">DIA<span style="font-size: 16px; color: #18181B">{{r.n}}</span></span>
+<div style="display: flex; flex-direction: column; gap: 3px; flex: 1 1 380px; min-width: 0">
+<span style="font-size: 14px; font-weight: 600">{{r.title}}</span>
+<span style="font-size: 13px; color: #5B5B63">{{r.meta}}</span>
+</div>
+<span style="{{r.tagStyle}}">{{r.tag}}</span>
+</div>
+</sc-for>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{isFin}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="background: #FEF3C7; color: #92400E; border-radius: 14px; padding: 16px 18px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 700">Nenhum dos 25 passageiros tem valor lançado</span><span style="font-size: 13px">Defina o preço padrão da expedição e aplique a todos, ajustando só as exceções</span></div>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 0; background: #18181B; color: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Definir preço padrão</button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+<sc-for list="{{fin}}" as="f" hint-placeholder-count="4">
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px"><span style="font-size: 13px; color: #5B5B63; font-weight: 500">{{f.label}}</span><span style="font-size: 24px; font-weight: 700">{{f.value}}</span><span style="font-size: 12px; color: #5B5B63">{{f.sub}}</span></div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isArq}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #5B5B63">Drive da expedição</h3>
+<button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 0; background: #18181B; color: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">Enviar arquivos</button>
+</div>
+<div style="background: #FEF3C7; color: #92400E; border-radius: 12px; padding: 12px 14px; font-size: 14px; font-weight: 600">21 de 22 arquivos estão em "Outros". Classificar ajuda o portal e o líder a acharem cada documento.</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px">
+<sc-for list="{{folders}}" as="fo" hint-placeholder-count="10">
+<div style="{{fo.style}}"><span style="font-size: 14px; font-weight: 600">{{fo.label}}</span><span style="font-size: 13px; color: #5B5B63">{{fo.count}}</span></div>
+</sc-for>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{isPortal}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 6px">
+<div style="display: flex; flex-direction: column; gap: 2px"><h3 style="margin: 0; font-size: 16px; font-weight: 700">Portal ExpedAmigo e área do líder</h3><span style="font-size: 13px; color: #5B5B63">O que o passageiro e o líder enxergam em /amigo</span></div>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 0; background: #18181B; color: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Liberar portal para todos</button>
+</div>
+<sc-for list="{{portal}}" as="po" hint-placeholder-count="5">
+<div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap; border: 1px solid #F1F1EE; border-radius: 12px; padding: 12px 14px">
+<span style="{{po.tagStyle}}">{{po.tag}}</span>
+<div style="display: flex; flex-direction: column; gap: 2px; flex: 1 1 320px"><span style="font-size: 14px; font-weight: 600">{{po.label}}</span><span style="font-size: 13px; color: #5B5B63">{{po.sub}}</span></div>
+<button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">{{po.cta}}</button>
+</div>
+</sc-for>
+</section>
+</sc-if>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1760}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'geral', paxFilter: 'todos' };
+  }
+  renderVals() {
+    const s = this.state;
+    const chip = 'font-size:12px;font-weight:700;border-radius:999px;padding:4px 10px;white-space:nowrap;';
+    const tone = { ok: 'background:#DCFAE6;color:#067647', warn: 'background:#FEF3C7;color:#92400E', bad: 'background:#FEE4E2;color:#B42318', neu: 'background:#F1F1EE;color:#3F3F46', dark: 'background:#18181B;color:#FFFFFF' };
+    const go = (id) => () => this.setState({ tab: id });
+    const phaseList = ['Vendas', 'Preparação', 'Embarque', 'Em viagem', 'Pós-viagem'];
+    const phases = phaseList.map((label, i) => ({
+      label,
+      bar: 'height:6px;border-radius:999px;background:' + (i < 3 ? '#18181B' : i === 3 ? '#0F766E' : '#E7E5E0'),
+      text: 'font-size:13px;' + (i === 3 ? 'font-weight:700;color:#0F766E' : i < 3 ? 'font-weight:600;color:#18181B' : 'color:#5B5B63')
+    }));
+    const tabDefs = [['geral', 'Visão geral', '', ''], ['pax', 'Passageiros', '25', 'warn'], ['log', 'Logística', '', ''], ['fin', 'Financeiro', '!', 'bad'], ['arq', 'Arquivos', '22', 'neu'], ['portal', 'Portal', '', '']];
+    const base = 'min-height:40px;padding:0 16px;border-radius:999px;font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;';
+    const tabs = tabDefs.map(([id, label, badge, t]) => {
+      const active = s.tab === id;
+      return { label, badge, hasBadge: !!badge, active, pick: go(id),
+        style: base + (active ? 'background:#18181B;color:#FFFFFF;border:1px solid #18181B' : 'background:#FFFFFF;color:#3F3F46;border:1px solid #E7E5E0'),
+        badgeStyle: 'font-size:12px;border-radius:999px;padding:1px 7px;' + (active ? 'background:rgba(255,255,255,0.2);color:#FFFFFF' : tone[t] || tone.neu) };
+    });
+    const nextDays = [
+      { n: '5', date: 'sex 30/10 · Tóquio', title: 'Meiji, Harajuku e Shibuya', hasFlag: false, flag: '', flagStyle: '' },
+      { n: '6', date: 'sáb 31/10 · Monte Fuji e Osaka', title: 'Monte Fuji e viagem a Osaka', hasFlag: true, flag: 'Crítico · troca de líderes', flagStyle: chip + tone.bad + ';align-self:flex-start' }
+    ];
+    const start = new Date(2026, 9, 26);
+    const wd = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+    const tripDays = Array.from({ length: 18 }, (_, i) => {
+      const d = new Date(start.getTime() + i * 86400000);
+      const n = i + 1;
+      const st = n < 4 ? 'background:#F1F1EE;color:#5B5B63' : n === 4 ? 'background:#0F766E;color:#FFFFFF' : 'background:#FFFFFF;color:#18181B;border:1px solid #E7E5E0';
+      return { n: 'D' + n, date: String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'), style: 'grid-row:1;border-radius:8px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;gap:1px;box-sizing:border-box;' + st };
+    });
+    const hotelDefs = [
+      ['Em voo', 'GRU → PEK', 1, 3, '#F1F1EE', '#3F3F46'],
+      ['Pequim', 'Ramada Wyndham Airport', 2, 4, '#E4E4E7', '#18181B'],
+      ['Tóquio', 'KOKO Tsukiji Ginza', 3, 7, '#CCE7E3', '#0B4F4A'],
+      ['Osaka', 'Hiyori Namba Station', 6, 14, '#E4E4E7', '#18181B'],
+      ['Pequim', 'Sunworld Dynasty', 13, 19, '#CCE7E3', '#0B4F4A']
+    ];
+    const hotels = hotelDefs.map(([city, name, a, b, bg, fg], i) => ({ city, name,
+      style: 'grid-row:' + (2 + (i % 2)) + ';grid-column:' + a + ' / ' + b + ';background:' + bg + ';color:' + fg + ';border-radius:8px;padding:6px 10px;display:flex;flex-direction:column;gap:1px;min-width:0' }));
+    const health = [
+      { label: 'Ocupação', value: '22/22', sub: 'esgotada · líderes não contam', tag: 'OK', tagStyle: chip + tone.ok, fill: 'height:100%;background:#18181B;width:100%', go: go('pax') },
+      { label: 'Seguro viagem', value: '0/25', sub: 'apólices não anexadas no perfil', tag: 'Pendente', tagStyle: chip + tone.warn, fill: 'height:100%;background:#D97706;width:2%', go: go('pax') },
+      { label: 'Financeiro', value: 'R$ 0,00', sub: '25 passageiros sem valor lançado', tag: 'Sem dados', tagStyle: chip + tone.bad, fill: 'height:100%;background:#B42318;width:2%', go: go('fin') },
+      { label: 'Checklist', value: '18/74', sub: '24% das tarefas concluídas', tag: 'Atrasado', tagStyle: chip + tone.warn, fill: 'height:100%;background:#D97706;width:24%', go: go('log') }
+    ];
+    const actions = [
+      { tag: 'Crítico', tagStyle: chip + tone.bad, title: 'Dia 6 · 31/10 · Troca de líderes entre G1 e G2', sub: 'Luis sai do G2 e vai para o G1. Everton e Jacqueline vão para o hotel do G2. Alinhar check-out, transfer de bagagens e saída cedo para o Monte Fuji', owner: 'Operações' },
+      { tag: 'Sem baixa', tagStyle: chip + tone.warn, title: 'Dia 3 · 28/10 · Chegada em aeroportos diferentes em Tóquio', sub: 'G1 em Haneda às 19h50 e G2 em Narita às 11h55. Confirmar transfers e hotéis', owner: 'Operações' },
+      { tag: 'Sem baixa', tagStyle: chip + tone.warn, title: 'Dia 1 · 26/10 · 7 passageiros se juntam ao grupo em Tóquio', sub: 'Confirmar origem e chegada dos 7 passageiros restantes do G1', owner: 'Operações' }
+    ];
+    const C = (label, k) => ({ label, style: chip + tone[k] });
+    const pax = [
+      ['Everton Lopes Santos', 'Líder · 3ª expedição', true, '16/02/2030', false, 'Quarto 13', 'EL'],
+      ['Beatriz Rodrigues Galvão', 'Líder · 4ª expedição', true, '24/11/2035', true, 'Quarto 5', 'BG'],
+      ['Jacqueline Rezende Queiroz', 'Líder · 4ª expedição', true, '16/02/2030', false, 'Quarto 13', 'JQ'],
+      ['Adma Geane Menegazzo Rover', 'Pagante', false, '16/04/2034', true, 'Quarto 9', 'AR'],
+      ['Alexandre de Freitas Carpenedo', 'Pagante', false, '03/04/2028', false, 'Quarto 11', 'AC'],
+      ['Ana Claudia Del Bel Tunes', 'Pagante · 3ª expedição', false, '07/01/2028', true, 'Quarto 6', 'AT'],
+      ['Anelisa Ventura Silveira', 'Pagante · 2ª expedição', false, '03/12/2034', true, 'Quarto 2', 'AS'],
+      ['Antônio de Paula Lima', 'Pagante', false, '23/03/2035', true, 'Quarto 7', 'AL'],
+      ['Consuelo de Oliveira', 'Pagante', false, '06/06/2032', true, 'Quarto 4', 'CO'],
+      ['Maria Taisla da Silva', 'Pagante', false, '10/04/2034', true, 'Quarto 10', 'MS'],
+      ['Tuanny Gomes de Oliveira', 'Pagante', false, '15/06/2036', false, 'Quarto 12', 'TO']
+    ];
+    const rowsAll = pax.map(([name, sub, leader, val, form, room, ini]) => ({
+      name, sub, leader, form, ini,
+      cells: [C('Válido · ' + val.slice(3), 'ok'), C('Não', 'neu'), C('Sem apólice', 'warn'), form ? C('Preencheu', 'ok') : C('Pendente', 'warn'), C(room, 'ok'), C(leader ? 'Isento' : 'Sem valor', leader ? 'neu' : 'bad')]
+    }));
+    const paxRows = rowsAll.filter((r) => s.paxFilter === 'todos' || (s.paxFilter === 'lideres' ? r.leader : s.paxFilter === 'form' ? !r.form : true));
+    const fp = (a) => 'min-height:36px;padding:0 12px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;' + (a ? 'background:#18181B;color:#FFFFFF;border:1px solid #18181B' : 'background:#FFFFFF;color:#3F3F46;border:1px solid #E7E5E0');
+    const paxFilters = [['todos', 'Todos · 25'], ['pend', 'Com pendência · 25'], ['form', 'Formulário pendente · 7'], ['lideres', 'Líderes · 3']].map(([id, label]) => ({ label, active: s.paxFilter === id, style: fp(s.paxFilter === id), pick: () => this.setState({ paxFilter: id }) }));
+    const sc = (t, k) => ({ score: t, scoreStyle: 'font-size:12px;font-weight:700;text-transform:none;letter-spacing:0;' + (k === 'ok' ? 'color:#067647' : k === 'bad' ? 'color:#B42318' : 'color:#92400E') });
+    const cols = [
+      { label: 'Passaporte', ...sc('25/25 válidos', 'ok') }, { label: 'Visto', ...sc('25 sem visto', 'warn') }, { label: 'Seguro', ...sc('0/25', 'warn') },
+      { label: 'Formulário', ...sc('18/25', 'warn') }, { label: 'Quarto', ...sc('25/25', 'ok') }, { label: 'Pagamento', ...sc('0/22 com valor', 'bad') }
+    ];
+    const hotelList = [
+      { city: 'Pequim', name: 'Ramada by Wyndham Beijing Airport', dates: '27/10 → 28/10', rooms: '13 quartos' },
+      { city: 'Tóquio', name: 'KOKO HOTEL Tsukiji Ginza', dates: '28/10 → 31/10', rooms: '13 quartos' },
+      { city: 'Osaka', name: 'Hiyori Hotel Osaka Namba Station', dates: '31/10 → 07/11', rooms: '13 quartos' },
+      { city: 'Pequim', name: 'Sunworld Dynasty Hotel Beijing Wangfujing', dates: '07/11 → 12/11', rooms: '13 quartos' }
+    ];
+    const rr = (n, title, meta, tag, k, today) => ({ n, title, meta, tag, tagStyle: chip + tone[k],
+      rowStyle: 'display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 10px;border-radius:12px;' + (today ? 'background:#F0F7F6' : 'border-top:1px solid #F6F6F3') });
+    const roteiro = [
+      rr('1', 'Saída de GRU, voo internacional', '26/10 · GRU, em voo · 18 pax · Everton, Jacqueline, Beatriz', 'Verificar', 'warn', false),
+      rr('2', 'Chegada em Pequim (PEK), escala e pernoite', '27/10 · Pequim · 18 pax', 'OK', 'neu', false),
+      rr('3', 'Pequim → Tóquio Haneda · chegada 19h50', '28/10 · Tóquio · 18 → 25 pax', 'Atenção', 'warn', false),
+      rr('4', 'Tóquio, dia 1', '29/10 · Tóquio · 25 pax · hoje', 'Hoje', 'dark', true),
+      rr('5', 'Tóquio, dia 2', '30/10 · Tóquio · 25 pax', 'OK', 'neu', false),
+      rr('6', 'Monte Fuji → Osaka · Luis migra do G2 para o G1', '31/10 · Monte Fuji, Osaka · 24 pax · Luis, Beatriz', 'Crítico', 'bad', false)
+    ];
+    const fin = [
+      { label: 'Vendido', value: 'R$ 0,00', sub: '0 de 25 com valor' }, { label: 'Recebido', value: 'R$ 0,00', sub: 'nenhum pagamento lançado' },
+      { label: 'A receber', value: 'R$ 0,00', sub: '0 com saldo' }, { label: 'Preço por pessoa', value: 'Definir', sub: 'com e sem aéreo' }
+    ];
+    const fdef = [['Aéreos', 0], ['Documentos pessoais', 1], ['Contrato', 0], ['Bilhetes', 0], ['Vistos', 0], ['Seguros', 0], ['Hospedagem', 0], ['Vouchers', 0], ['Cartão de embarque', 0], ['Outros', 21]];
+    const folders = fdef.map(([label, n]) => ({ label, count: n + (n === 1 ? ' arquivo' : ' arquivos'),
+      style: 'border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:4px;' + (n === 0 ? 'border:1.5px dashed #DAD8D2' : label === 'Outros' ? 'border:1px solid #F5D08A;background:#FFFBEB' : 'border:1px solid #E7E5E0') }));
+    const pt = (label, sub, tag, k, cta) => ({ label, sub, tag, tagStyle: chip + tone[k], cta });
+    const portal = [
+      pt('Acesso dos passageiros', 'Gera senha provisória para quem ainda não tem', 'Conferir', 'warn', 'Ver acessos'),
+      pt('Roteiro dia a dia', 'Dias cadastrados com foto, na ordem das datas', 'Publicado', 'ok', 'Editar roteiro'),
+      pt('Documentos do líder', 'Manual dos Líderes e Avisos diários (2 PDFs)', 'Publicado', 'ok', 'Gerenciar'),
+      pt('Voucher da hospedagem', 'Um arquivo vale para todos do mesmo hotel', 'Faltando', 'warn', 'Anexar voucher'),
+      pt('Extensões da viagem', 'Dias extras que só um subgrupo faz', 'Nenhuma', 'neu', 'Adicionar')
+    ];
+    return {
+      phases, tabs, nextDays, tripDays, hotels, health, actions, paxFilters, cols, paxRows, paxShown: String(paxRows.length),
+      hotelList, roteiro, fin, folders, portal, goLog: go('log'),
+      isGeral: s.tab === 'geral', isPax: s.tab === 'pax', isLog: s.tab === 'log', isFin: s.tab === 'fin', isArq: s.tab === 'arq', isPortal: s.tab === 'portal'
+    };
+  }
+}
+</script>
+</body>
+</html>

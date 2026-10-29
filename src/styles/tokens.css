@@ -50,6 +50,15 @@
   --sector-operacoes-bg: #FFEDE3;      --sector-operacoes-fg: #9A3412;
   --sector-relacionamento-bg: #E3F1EF; --sector-relacionamento-fg: #0F766E;
 
+
+  /* ── Fases da expedição (spec Expedições 29/10, src/expedicoes/lib/fase.ts)
+     ponto/barra (--fase-x), fundo e texto do chip (--fase-x-bg / -fg). */
+  --fase-viagem: var(--primary);   --fase-viagem-bg: var(--primary);  --fase-viagem-fg: var(--on-primary);
+  --fase-embarque: #D97706;        --fase-embarque-bg: #FEF3C7;       --fase-embarque-fg: #92400E;
+  --fase-preparacao: #2563EB;      --fase-preparacao-bg: #E8EFFE;     --fase-preparacao-fg: #1D4ED8;
+  --fase-vendendo: #71717A;        --fase-vendendo-bg: var(--surface-2); --fase-vendendo-fg: #3F3F46;
+  --fase-concluida: #067647;       --fase-concluida-bg: #DCFAE6;      --fase-concluida-fg: #067647;
+
   --radius-card: 16px;  /* cards da ficha (spec) */
   --radius-btn: 10px;   /* botões da ficha (spec) */
   --h-touch: 44px;      /* alvo de toque mínimo dos botões primário/secundário */
@@ -109,6 +118,10 @@
   --sector-financeiro-bg: rgba(167, 139, 250, .14);    --sector-financeiro-fg: #C4B5FD;
   --sector-operacoes-bg: rgba(251, 146, 60, .14);      --sector-operacoes-fg: #FDBA74;
   --sector-relacionamento-bg: rgba(45, 212, 191, .14); --sector-relacionamento-fg: #5EEAD4;
+  --fase-embarque: #F59E0B;        --fase-embarque-bg: rgba(245, 158, 11, .14);  --fase-embarque-fg: #FCD34D;
+  --fase-preparacao: #60A5FA;      --fase-preparacao-bg: rgba(96, 165, 250, .14); --fase-preparacao-fg: #93C5FD;
+  --fase-vendendo: #A1A1AA;        --fase-vendendo-fg: #D4D4D8;
+  --fase-concluida: #4ADE80;       --fase-concluida-bg: rgba(74, 222, 128, .12);  --fase-concluida-fg: #86EFAC;
 }
 
 html { font-family: var(--font-sans); font-size: var(--text-base); background: var(--bg); color: var(--text); }

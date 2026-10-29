@@ -737,6 +737,8 @@ export type ExpedicaoComAgregados = ExpedicaoRow & {
   /** Passageiros aptos a embarcar / total avaliado (não cancelados). */
   prontidao_aptos: number;
   prontidao_total: number;
+  /** Passageiros com requisito Seguro sem apólice anexada (Central, 29/10). */
+  seguro_sem_apolice?: number;
   responsavel_op_nome: string | null;
   responsavel_com_nome: string | null;
 };

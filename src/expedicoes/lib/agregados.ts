@@ -46,6 +46,9 @@ function montar(rows: ExpedicaoRow[], ativos: PaxProntidao[], reqPorPax: Map<str
       prontidao_total: paxDaExp.length,
       prontidao_aptos: paxDaExp.filter((p) =>
         avaliarProntidao({ passageiro: p, expedicao: e, destino: e.destino, requisitos: reqPorPax.get(p.id) ?? [] }).prontidao === "Apto").length,
+      // Central (29/10): seguro exigido sem a apólice anexada (o requisito Seguro sem arquivo).
+      // Não existe coluna de apólice — o anexo do requisito É a apólice (docs/MAPA-EXPEDICOES.md).
+      seguro_sem_apolice: paxDaExp.filter((p) => (reqPorPax.get(p.id) ?? []).some((r) => r.tipo === "Seguro" && r.status !== "Dispensado" && !r.arquivo_id)).length,
       checklist_pct: processos.length ? processos.filter((c) => c.status === "Concluído").length / processos.length : 0,
       responsavel_op_nome: e.responsavel_operacional_id ? nome.get(e.responsavel_operacional_id) ?? null : null,
       responsavel_com_nome: e.responsavel_comercial_id ? nome.get(e.responsavel_comercial_id) ?? null : null,

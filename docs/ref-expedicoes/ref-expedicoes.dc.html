@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Expedições</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#F6F6F3}
+a{color:#0F766E}a:hover{color:#0B5B55}
+button,input,select{font-family:inherit}
+</style>
+</helmet>
+<div style="background: #F6F6F3; font-family: Inter, system-ui, -apple-system, sans-serif; color: #18181B; min-height: 100vh">
+<div style="max-width: 1360px; margin: 0 auto; padding: 28px 24px 64px; display: flex; flex-direction: column; gap: 20px">
+
+<header style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.01em">Expedições</h1>
+<p style="margin: 0; font-size: 14px; color: #5B5B63">43 expedições · hoje, quinta 29/10/2026</p>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap">
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #DAD8D2; background: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Exportar</button>
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: #18181B; color: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Nova expedição</button>
+</div>
+</header>
+
+<section aria-label="Resumo da operação" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+<sc-for list="{{kpis}}" as="k" hint-placeholder-count="5">
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px">
+<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #5B5B63; font-weight: 500"><span aria-hidden="true" style="{{k.dot}}"></span>{{k.label}}</span>
+<span style="font-size: 26px; font-weight: 700; letter-spacing: -0.01em">{{k.value}}</span>
+<span style="font-size: 12px; color: #5B5B63">{{k.sub}}</span>
+</div>
+</sc-for>
+</section>
+
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+<div style="display: flex; align-items: center; gap: 10px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 700">Precisa de atenção</h2>
+<span style="font-size: 12px; font-weight: 700; background: #FEE4E2; color: #B42318; border-radius: 999px; padding: 2px 9px">{{alertCount}}</span>
+</div>
+<span style="font-size: 13px; color: #5B5B63">Consolidado de todas as expedições, do mais urgente para o menos</span>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+<sc-for list="{{alerts}}" as="al" hint-placeholder-count="4">
+<li style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border: 1px solid #F1F1EE; border-radius: 12px; padding: 12px 14px">
+<span style="{{al.tagStyle}}">{{al.tag}}</span>
+<div style="display: flex; flex-direction: column; gap: 2px; flex: 1 1 360px; min-width: 0">
+<span style="font-size: 14px; font-weight: 600">{{al.title}}</span>
+<span style="font-size: 13px; color: #5B5B63">{{al.sub}}</span>
+</div>
+<a href="Expedicao.dc.html" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #DAD8D2; display: inline-flex; align-items: center; font-size: 13px; font-weight: 600; text-decoration: none; color: #18181B">{{al.cta}}</a>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<section style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between">
+<div role="group" aria-label="Visualização" style="display: flex; gap: 4px; background: #EFEEEA; border-radius: 12px; padding: 4px">
+<sc-for list="{{views}}" as="v" hint-placeholder-count="3">
+<button type="button" aria-pressed="{{v.active}}" onClick="{{v.pick}}" style="{{v.style}}">{{v.label}}</button>
+</sc-for>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; flex: 1 1 520px; justify-content: flex-end">
+<label style="flex: 1 1 240px; max-width: 380px; display: flex; align-items: center; gap: 8px; height: 44px; border: 1px solid #DAD8D2; border-radius: 10px; padding: 0 12px; background: #FFFFFF; color: #5B5B63">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Buscar expedição</span>
+<input placeholder="Buscar por código, nome ou destino" style="border: 0; outline: none; flex: 1; font-size: 14px; min-width: 0; background: transparent"></label>
+<label style="display: flex; align-items: center; gap: 6px; height: 44px; border: 1px solid #DAD8D2; border-radius: 10px; padding: 0 10px; background: #FFFFFF; font-size: 14px"><span style="color: #5B5B63">Destino</span><select style="border: 0; background: transparent; font-size: 14px; font-weight: 600"><option>Todos</option><option>Japão e China</option><option>Tailândia</option><option>Turquia e Grécia</option></select></label>
+<label style="display: flex; align-items: center; gap: 6px; height: 44px; border: 1px solid #DAD8D2; border-radius: 10px; padding: 0 10px; background: #FFFFFF; font-size: 14px"><span style="color: #5B5B63">Resp. operacional</span><select style="border: 0; background: transparent; font-size: 14px; font-weight: 600"><option>Todos</option></select></label>
+</div>
+</section>
+
+<sc-if value="{{isFases}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<sc-for list="{{sections}}" as="sec" hint-placeholder-count="4">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; overflow: hidden">
+<button type="button" onClick="{{sec.toggle}}" aria-expanded="{{sec.open}}" style="width: 100%; border: 0; background: #FFFFFF; cursor: pointer; display: flex; align-items: center; gap: 12px; padding: 16px 20px; text-align: left; font-size: 14px; color: #18181B">
+<span aria-hidden="true" style="{{sec.dot}}"></span>
+<span style="font-size: 16px; font-weight: 700">{{sec.title}}</span>
+<span style="font-size: 12px; font-weight: 700; background: #F1F1EE; border-radius: 999px; padding: 2px 9px">{{sec.count}}</span>
+<span style="font-size: 13px; color: #5B5B63; flex: 1">{{sec.hint}}</span>
+<span style="font-size: 13px; font-weight: 600; color: #3F3F46">{{sec.toggleLabel}}</span>
+</button>
+<sc-if value="{{sec.open}}" hint-placeholder-val="{{ true }}">
+<div style="overflow-x: auto; border-top: 1px solid #F1F1EE">
+<div style="min-width: 1040px">
+<div style="display: grid; grid-template-columns: minmax(260px, 2.3fr) minmax(170px, 1.1fr) minmax(100px, 0.7fr) minmax(170px, 1.3fr) minmax(200px, 1.6fr) 96px; gap: 16px; padding: 10px 20px; font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #5B5B63; background: #FAFAF8">
+<span>Expedição</span><span>Datas</span><span>Saída</span><span>Ocupação</span><span>{{sec.metricLabel}}</span><span>Alertas</span>
+</div>
+<sc-for list="{{sec.rows}}" as="r" hint-placeholder-count="3">
+<a href="Expedicao.dc.html" style="display: grid; grid-template-columns: minmax(260px, 2.3fr) minmax(170px, 1.1fr) minmax(100px, 0.7fr) minmax(170px, 1.3fr) minmax(200px, 1.6fr) 96px; gap: 16px; align-items: center; padding: 14px 20px; border-top: 1px solid #F1F1EE; text-decoration: none; color: #18181B">
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0">
+<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><span style="font-size: 15px; font-weight: 600">{{r.name}}</span><sc-if value="{{r.hasGroup}}" hint-placeholder-val="{{ true }}"><span style="font-size: 12px; font-weight: 700; background: #F1F1EE; color: #3F3F46; border-radius: 6px; padding: 2px 7px">{{r.group}}</span></sc-if></div>
+<span style="font-size: 12px; color: #5B5B63; font-family: ui-monospace, SFMono-Regular, Menlo, monospace">{{r.code}}</span>
+</div>
+<span style="font-size: 14px; color: #3F3F46">{{r.dates}}</span>
+<span style="{{r.dStyle}}">{{r.dLabel}}</span>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span style="font-weight: 600">{{r.paxLabel}}</span><span style="color: #5B5B63">{{r.occLabel}}</span></div>
+<div style="height: 6px; border-radius: 999px; background: #F1F1EE; overflow: hidden"><div style="{{r.occFill}}"></div></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span style="{{r.metricTextStyle}}">{{r.metric}}</span><span style="color: #5B5B63">{{r.metricSub}}</span></div>
+<sc-if value="{{r.hasBar}}" hint-placeholder-val="{{ true }}"><div style="height: 6px; border-radius: 999px; background: #F1F1EE; overflow: hidden"><div style="{{r.metricFill}}"></div></div></sc-if>
+</div>
+<span style="{{r.alertStyle}}">{{r.alertLabel}}</span>
+</a>
+</sc-for>
+</div>
+</div>
+</sc-if>
+</section>
+</sc-for>
+</div>
+</sc-if>
+
+<sc-if value="{{isLinha}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: #3F3F46; align-items: center">
+<span style="font-weight: 700">Legenda</span>
+<sc-for list="{{legend}}" as="lg" hint-placeholder-count="4"><span style="display: inline-flex; align-items: center; gap: 6px"><span aria-hidden="true" style="{{lg.sw}}"></span>{{lg.label}}</span></sc-for>
+<span style="display: inline-flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 2px; height: 14px; background: #B42318"></span>Hoje</span>
+</div>
+<div style="overflow-x: auto">
+<div style="min-width: 1180px; display: flex; flex-direction: column">
+<div style="display: flex; border-bottom: 1px solid #E7E5E0">
+<div style="width: 280px; flex-shrink: 0"></div>
+<div style="flex: 1; display: grid; grid-template-columns: repeat(15, minmax(0, 1fr))">
+<sc-for list="{{months}}" as="m" hint-placeholder-count="15"><span style="{{m.style}}">{{m.label}}</span></sc-for>
+</div>
+</div>
+<sc-for list="{{gantt}}" as="g" hint-placeholder-count="10">
+<a href="Expedicao.dc.html" style="display: flex; align-items: center; min-height: 40px; border-bottom: 1px solid #F6F6F3; text-decoration: none; color: #18181B">
+<div style="width: 280px; flex-shrink: 0; display: flex; flex-direction: column; padding-right: 12px">
+<span style="font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{g.label}}</span>
+<span style="font-size: 12px; color: #5B5B63">{{g.sub}}</span>
+</div>
+<div style="flex: 1; position: relative; height: 40px">
+<div style="{{g.today}}"></div>
+<div style="{{g.bar}}"></div>
+</div>
+</a>
+</sc-for>
+</div>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{isTabela}}" hint-placeholder-val="{{ false }}">
+<div style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 16px; overflow-x: auto">
+<table style="width: 100%; border-collapse: collapse; font-size: 14px; min-width: 980px">
+<thead><tr style="text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #5B5B63"><th style="padding: 14px 18px; font-weight: 700">Expedição</th><th style="padding: 14px 10px; font-weight: 700">Código</th><th style="padding: 14px 10px; font-weight: 700">Datas</th><th style="padding: 14px 10px; font-weight: 700">Fase</th><th style="padding: 14px 10px; font-weight: 700">Pax</th><th style="padding: 14px 18px; font-weight: 700">Aptos</th></tr></thead>
+<tbody>
+<sc-for list="{{all}}" as="r" hint-placeholder-count="8">
+<tr style="border-top: 1px solid #F1F1EE"><td style="padding: 12px 18px; font-weight: 600">{{r.name}} {{r.group}}</td><td style="padding: 12px 10px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #3F3F46">{{r.code}}</td><td style="padding: 12px 10px; color: #3F3F46">{{r.dates}}</td><td style="padding: 12px 10px"><span style="{{r.phaseStyle}}">{{r.phaseLabel}}</span></td><td style="padding: 12px 10px">{{r.paxLabel}}</td><td style="padding: 12px 18px">{{r.aptosLabel}}</td></tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</sc-if>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { view: 'fases', closed: { concluida: true, vendendo: false } };
+  }
+  renderVals() {
+    const s = this.state;
+    const today = new Date(2026, 9, 29);
+    const pd = (t) => { const [d, m, y] = t.split('/').map(Number); return new Date(y, m - 1, d); };
+    const days = (a, b) => Math.round((b - a) / 86400000);
+    const raw = [
+      ['Japão & China', 'G1', 'Japão e China', '26/10/2026', '12/11/2026', 22, 22, 0, 25, 'JAPCHI-2026-10-A', 3],
+      ['Japão & China', 'G2', 'Japão e China', '26/10/2026', '12/11/2026', 21, 22, 0, 24, 'JAPCHI-2026-10-B', 1],
+      ['Tailândia', 'G1', 'Tailândia', '13/11/2026', '28/11/2026', 20, 20, 0, 22, 'TAI-G1-2026-11', 1],
+      ['Tailândia', 'G2', 'Tailândia', '13/11/2026', '28/11/2026', 20, 20, 0, 22, 'TAI-G2-2026-11', 1],
+      ['Tailândia', 'G3', 'Tailândia', '17/11/2026', '02/12/2026', 20, 20, 0, 22, 'TAI-G3-2026-11', 1],
+      ['Tailândia', 'G4', 'Tailândia', '17/11/2026', '02/12/2026', 20, 20, 0, 22, 'TAI-G4-2026-11', 1],
+      ['Islândia', 'G1', 'Islândia', '13/02/2027', '23/02/2027', 17, 17, 0, 18, 'ISL-2027-02', 0],
+      ['Islândia', 'G2', 'Islândia', '13/02/2027', '23/02/2027', 14, 17, 0, 14, 'ISLNDI-FEV2027', 0],
+      ['Japão & China', 'G2', 'Japão e China', '26/03/2027', '11/04/2027', 20, 20, 0, 20, 'JAPOEC-MAR2027', 0],
+      ['Japão & China', 'G1', 'Japão e China', '28/03/2027', '13/04/2027', 19, 20, 0, 19, 'JAPCHI-2027-03', 0],
+      ['Turquia & Grécia', 'G1', 'Turquia e Grécia', '29/05/2027', '12/06/2027', 20, 20, 0, 20, 'TURGRE-2027-05', 0],
+      ['Turquia & Grécia', 'G2', 'Turquia e Grécia', '05/06/2027', '17/06/2027', 20, 20, 0, 20, 'TURGRE-2027-06', 0],
+      ['Turquia & Grécia', 'G3', 'Turquia e Grécia', '12/06/2027', '24/06/2027', 20, 20, 0, 20, 'TURQUI-JUN2027', 0],
+      ['Turquia & Grécia', 'G4', 'Turquia e Grécia', '26/06/2027', '08/07/2027', 19, 20, 0, 20, 'TURQUI-AGO2027', 0],
+      ['Amazônia', '', 'Brasil (Amazônia)', '07/07/2027', '11/07/2027', 22, 25, 0, 22, 'AMZ-2027-07', 0],
+      ['Peru', '', 'Peru', '22/08/2027', '30/08/2027', 12, 20, 0, 12, 'PER-2027-06', 0],
+      ['Itália · Costa Amalfitana', '', 'Itália', '04/09/2027', '14/09/2027', 16, 20, 0, 16, 'ITA-2027-09', 0],
+      ['Egito', '', 'Egito', '16/09/2027', '29/09/2027', 15, 20, 0, 15, 'EGI-2027-09', 0],
+      ['China', '', 'China', '09/10/2027', '24/10/2027', 5, 20, 0, 5, 'CHI-2027-05', 1],
+      ['Japão & China', '', 'Japão e China', '14/10/2027', '31/10/2027', 14, 20, 0, 16, 'JAPCHI-2027-10', 0],
+      ['Tailândia', 'G1', 'Tailândia', '06/11/2027', '21/11/2027', 20, 20, 0, 21, 'TAI-2027-11', 0],
+      ['Tailândia', 'G2', 'Tailândia', '06/11/2027', '21/11/2027', 1, 20, 0, 2, 'TAI-2027-11-G2', 1],
+      ['Egito', '', 'Egito', '05/10/2026', '18/10/2026', 22, 22, 24, 24, 'EGI-2026-10', 0],
+      ['Sua viagem ao Japão', '', 'Japão', '28/09/2026', '27/10/2026', 9, 8, 9, 9, 'JAPCOR-2026-09', 0],
+      ['Egito', '', 'Egito', '19/09/2026', '01/10/2026', 43, 45, 47, 47, 'EGI-2026-09', 0],
+      ['Peru', 'G1', 'Peru', '22/08/2026', '30/08/2026', 9, 20, 11, 11, 'PER-2026-08', 0],
+      ['Peru', '', 'Peru', '30/05/2026', '07/06/2026', 23, 23, 23, 23, 'PER-2026-05', 0],
+      ['Japão & China', '', 'Japão e China', '28/03/2026', '14/04/2026', 38, 45, 42, 42, 'JAPCHI-2026-03', 0],
+      ['Islândia', '', 'Islândia', '12/02/2026', '21/02/2026', 19, 20, 19, 19, 'ISL-2026-02', 0]
+    ];
+    const chip = 'font-size:12px;font-weight:700;border-radius:999px;padding:4px 10px;white-space:nowrap;justify-self:start;';
+    const phaseMeta = {
+      viagem: ['Em viagem', '#18181B', 'background:#18181B;color:#FFFFFF'],
+      embarque: ['Embarque em até 30 dias', '#D97706', 'background:#FEF3C7;color:#92400E'],
+      preparacao: ['Preparação', '#2563EB', 'background:#E8EFFE;color:#1D4ED8'],
+      vendendo: ['Vendas abertas', '#71717A', 'background:#F1F1EE;color:#3F3F46'],
+      concluida: ['Concluída', '#067647', 'background:#DCFAE6;color:#067647']
+    };
+    const all = raw.map(([name, group, dest, a, b, pax, cap, aptos, total, code, alerts]) => {
+      const st = pd(a), en = pd(b);
+      const dStart = days(today, st), dEnd = days(today, en);
+      let phase = 'vendendo';
+      if (dEnd < 0) phase = 'concluida';
+      else if (dStart <= 0) phase = 'viagem';
+      else if (dStart <= 30) phase = 'embarque';
+      else if (dStart <= 120) phase = 'preparacao';
+      const occ = Math.min(100, Math.round(pax / cap * 100));
+      const ready = total ? Math.round(aptos / total * 100) : 0;
+      const tripLen = days(st, en) + 1;
+      let dLabel = 'em ' + dStart + 'd', dStyle = chip + 'background:#F1F1EE;color:#3F3F46';
+      if (phase === 'viagem') { dLabel = 'Dia ' + (1 - dStart) + ' de ' + tripLen; dStyle = chip + 'background:#18181B;color:#FFFFFF'; }
+      if (phase === 'embarque') dStyle = chip + 'background:#FEF3C7;color:#92400E';
+      if (phase === 'concluida') { dLabel = 'Voltou'; dStyle = chip + 'background:#DCFAE6;color:#067647'; }
+      let metric = '', metricSub = '', hasBar = true, mColor = '#067647', mText = 'font-weight:600;';
+      if (phase === 'viagem') { metric = 'Volta em ' + dEnd + ' dias'; metricSub = tripLen + ' dias no total'; mColor = '#18181B'; }
+      else if (phase === 'embarque' || phase === 'preparacao') {
+        metric = aptos + ' de ' + total + ' aptos'; metricSub = (total - aptos) + ' pendentes';
+        mColor = ready < 50 && phase === 'embarque' ? '#B42318' : '#2563EB';
+        if (ready < 50 && phase === 'embarque') mText += 'color:#B42318';
+      } else if (phase === 'vendendo') { metric = (cap - pax) + ' vagas'; metricSub = cap - pax === 0 ? 'esgotada' : 'para vender'; hasBar = false; }
+      else { metric = 'Concluída'; metricSub = aptos + ' embarcaram'; hasBar = false; }
+      const progress = phase === 'viagem' ? Math.round((1 - dStart) / tripLen * 100) : ready;
+      const pm = phaseMeta[phase];
+      return {
+        name, group, hasGroup: !!group, dest, code, phase, st, en,
+        dates: a.slice(0, 5) + ' → ' + b, dLabel, dStyle, dStart,
+        paxLabel: pax + '/' + cap + ' pax', occLabel: occ + '%',
+        occFill: 'height:100%;border-radius:999px;background:#18181B;width:' + occ + '%',
+        metric, metricSub, hasBar, metricTextStyle: mText,
+        metricFill: 'height:100%;border-radius:999px;background:' + mColor + ';width:' + Math.max(progress, 2) + '%',
+        alertLabel: alerts ? alerts + (alerts > 1 ? ' alertas' : ' alerta') : 'Em dia',
+        alertStyle: chip + (alerts ? 'background:#FEE4E2;color:#B42318' : 'background:#F1F1EE;color:#5B5B63'),
+        phaseLabel: pm[0], phaseStyle: chip + pm[2], aptosLabel: aptos + '/' + total
+      };
+    });
+    const order = ['viagem', 'embarque', 'preparacao', 'vendendo', 'concluida'];
+    const hints = {
+      viagem: 'grupos fora do Brasil agora', embarque: 'foco total em documentos e prontidão',
+      preparacao: 'até 120 dias para embarcar', vendendo: 'mais de 120 dias, foco em vender vagas', concluida: 'últimos 12 meses'
+    };
+    const metricLabels = { viagem: 'Andamento', embarque: 'Prontidão', preparacao: 'Prontidão', vendendo: 'Vagas', concluida: 'Resultado' };
+    const sections = order.map((ph) => {
+      const rows = all.filter((r) => r.phase === ph).sort((x, y) => x.st - y.st);
+      const open = !s.closed[ph];
+      return {
+        title: phaseMeta[ph][0], hint: hints[ph], count: String(rows.length), rows, open,
+        metricLabel: metricLabels[ph], toggleLabel: open ? 'Recolher' : 'Ver todas',
+        dot: 'width:10px;height:10px;border-radius:50%;background:' + phaseMeta[ph][1],
+        toggle: () => this.setState({ closed: { ...s.closed, [ph]: open } })
+      };
+    }).filter((x) => x.rows.length);
+    const t0 = new Date(2026, 9, 1), t1 = new Date(2027, 11, 31), span = t1 - t0;
+    const pct = (d) => Math.max(0, Math.min(100, (d - t0) / span * 100));
+    const mn = ['Out', 'Nov', 'Dez', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const months = mn.map((label, i) => ({ label: label + (i === 0 || i === 3 ? (i === 0 ? ' 26' : ' 27') : ''), style: 'font-size:12px;font-weight:600;color:#5B5B63;padding:8px 6px;border-left:1px solid #F1F1EE' }));
+    const todayLine = 'position:absolute;top:0;bottom:0;width:2px;background:#B42318;left:' + pct(today) + '%';
+    const gantt = all.filter((r) => r.phase !== 'concluida').sort((x, y) => x.st - y.st).map((r) => ({
+      label: r.name + (r.group ? ' ' + r.group : ''), sub: r.dates + ' · ' + r.paxLabel, today: todayLine,
+      bar: 'position:absolute;top:11px;height:18px;border-radius:6px;min-width:10px;left:' + pct(r.st) + '%;width:' + Math.max(0.8, pct(r.en) - pct(r.st)) + '%;background:' + phaseMeta[r.phase][1]
+    }));
+    const legend = ['viagem', 'embarque', 'preparacao', 'vendendo'].map((p) => ({ label: phaseMeta[p][0], sw: 'width:14px;height:10px;border-radius:3px;background:' + phaseMeta[p][1] }));
+    const tag = (t) => 'font-size:12px;font-weight:700;border-radius:6px;padding:4px 9px;white-space:nowrap;' + (t === 'Crítico' ? 'background:#FEE4E2;color:#B42318' : t === 'Atenção' ? 'background:#FEF3C7;color:#92400E' : 'background:#F1F1EE;color:#3F3F46');
+    const alerts = [
+      ['Crítico', 'Tailândia G1 e G2 embarcam em 15 dias com 0 de 44 passageiros aptos', 'Documentos e formulários pendentes nos dois grupos', 'Ver pendências'],
+      ['Crítico', 'Tailândia G3 e G4 embarcam em 19 dias com 0 de 44 passageiros aptos', 'Mesma situação dos grupos G1 e G2', 'Ver pendências'],
+      ['Atenção', 'Japão & China G1 · troca de líderes no Dia 6 (31/10)', 'Luis sai do G2 para o G1. Alinhar check-out, transfer de bagagens e hotéis', 'Abrir roteiro'],
+      ['Atenção', 'Japão & China G1 em viagem com 25 apólices de seguro não anexadas', 'Também sem valores lançados no financeiro', 'Ver passageiros'],
+      ['Info', 'China 2027 (Outubro) com 5 de 20 vagas vendidas', 'Faltam 344 dias para o embarque', 'Ver expedição']
+    ].map(([t, title, sub, cta]) => ({ tag: t, tagStyle: tag(t), title, sub, cta }));
+    const open = all.filter((r) => r.phase !== 'concluida');
+    const sum = (arr, f) => arr.reduce((acc, r) => acc + f(r), 0);
+    const viagem = raw.filter((x) => all[raw.indexOf(x)].phase === 'viagem');
+    const emb = raw.filter((x) => all[raw.indexOf(x)].phase === 'embarque');
+    const vend = raw.filter((x) => ['vendendo', 'preparacao'].includes(all[raw.indexOf(x)].phase));
+    const kd = (c) => 'width:8px;height:8px;border-radius:50%;background:' + c;
+    const kpis = [
+      { label: 'Em viagem', value: String(viagem.length), sub: sum(viagem, (x) => x[5]) + ' passageiros fora do Brasil', dot: kd('#18181B') },
+      { label: 'Embarcam em 30 dias', value: String(emb.length), sub: sum(emb, (x) => x[7]) + ' de ' + sum(emb, (x) => x[8]) + ' aptos', dot: kd('#D97706') },
+      { label: 'Vendas abertas', value: String(vend.length), sub: sum(vend, (x) => x[5]) + ' de ' + sum(vend, (x) => x[6]) + ' vagas vendidas', dot: kd('#2563EB') },
+      { label: 'Vagas para vender', value: String(sum(vend, (x) => Math.max(0, x[6] - x[5]))), sub: 'nas expedições com venda aberta', dot: kd('#71717A') },
+      { label: 'Concluídas', value: String(all.filter((r) => r.phase === 'concluida').length), sub: 'nos últimos 12 meses', dot: kd('#067647') }
+    ];
+    const seg = (a) => 'min-height:36px;padding:0 14px;border-radius:9px;border:0;font-size:14px;font-weight:600;cursor:pointer;' + (a ? 'background:#FFFFFF;color:#18181B;box-shadow:0 1px 2px rgba(24,24,27,0.1)' : 'background:transparent;color:#5B5B63');
+    const views = [['fases', 'Por fase'], ['linha', 'Linha do tempo'], ['tabela', 'Tabela']].map(([id, label]) => ({ label, active: s.view === id, style: seg(s.view === id), pick: () => this.setState({ view: id }) }));
+    return {
+      kpis, alerts, alertCount: String(alerts.filter((a) => a.tag !== 'Info').length), views, sections, months, gantt, legend,
+      all: all.sort((x, y) => x.st - y.st),
+      isFases: s.view === 'fases', isLinha: s.view === 'linha', isTabela: s.view === 'tabela'
+    };
+  }
+}
+</script>
+</body>
+</html>

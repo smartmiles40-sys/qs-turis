@@ -14,6 +14,8 @@ import { ExpProvider, type TelaExp } from "./contexto";
 import { Carregando } from "./ui";
 
 const ExpedicoesLista = lazy(() => import("./lista/ExpedicoesLista"));
+// Redesign 29/10: Expedições abre a Central (por fase); Pacotes segue na lista antiga.
+const CentralExpedicoes = lazy(() => import("./lista/central/CentralExpedicoes"));
 const ExpedicaoDetalhe = lazy(() => import("./detalhe/ExpedicaoDetalhe"));
 const PAGINAS: Partial<Record<TelaExp, React.LazyExoticComponent<ComponentType>>> = {
   "exp-inicio": lazy(() => import("./paginas/Inicio")),
@@ -38,7 +40,7 @@ export default function ExpedicoesArea({ tela, caminho, ir, setorRelacionamento 
       <Suspense fallback={<Carregando />}>
         {(tela === "expedicoes" || tela === "pacotes") && (caminho
           ? <ExpedicaoDetalhe key={caminho.split("/")[0]} caminho={caminho} />
-          : <ExpedicoesLista key={tela} tipo={tela === "pacotes" ? "pacote" : "expedicao"} />)}
+          : tela === "pacotes" ? <ExpedicoesLista key={tela} tipo="pacote" /> : <CentralExpedicoes key={tela} />)}
         {Pagina && <Pagina />}
       </Suspense>
     </ExpProvider>
