@@ -4,8 +4,12 @@
 // totais da expedição (vendido, recebido, a receber) e o preço de referência com e
 // sem aéreo. Edição na própria célula; o banco registra quem mudou (0220).
 // Também exporta <BlocoValoresPax>, o mesmo editor pra gaveta do passageiro.
+// Cockpit (redesign 29/10, spec §3.2 Financeiro): faixa âmbar quando falta valor
+// ("Nenhum dos N passageiros tem valor lançado") com "Definir preço padrão", e os
+// totais viram 4 StatCards (Vendido, Recebido, A receber, Preço por pessoa).
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Botao, Vazio } from "@/rel/ui";
+import { Btn, StatCard } from "@/components/ui";
 import { Busca, Carregando, CelulaEditavel, Selo, useAoVivo } from "../ui";
 import { useExp } from "../contexto";
 import { formatBRL, formatDate } from "../lib/utils";
@@ -23,6 +27,7 @@ export default function PainelValores({ exp, onMudou }: { exp: ExpedicaoComAgreg
   const [busca, setBusca] = useState("");
   const [filtro, setFiltro] = useState<StatusFin | null>(null);
   const [verHist, setVerHist] = useState(false);
+  const [aplicando, setAplicando] = useState(false);
   const avisarRef = useRef(avisar);
   avisarRef.current = avisar;
 
@@ -48,6 +53,35 @@ export default function PainelValores({ exp, onMudou }: { exp: ExpedicaoComAgreg
     onMudou();
   };
 
+  // Quem está sem valor (cancelados, líderes e cortesias não pagam: fora da conta).
+  const semValor = dados.pax.filter((p) => p.status_reserva !== "Cancelado" && p.tipo !== "Líder" && p.tipo !== "Cortesia"
+    && statusFin(n(p.valor_contratado_brl), n(p.valor_pago_brl)) === "Sem valor");
+
+  /** Lança o preço de referência em quem está sem valor — só com clique + confirmação. */
+  async function definirPrecoPadrao() {
+    const alvo = semValor.map((p) => ({ p, v: precoSugerido(p.condicao_pagamento, n(exp.preco_venda_brl), exp.preco_sem_aereo_brl) }));
+    const comPreco = alvo.filter((a): a is { p: PaxValor; v: number } => a.v != null);
+    if (!comPreco.length) { avisar("Defina antes o preço por pessoa (com aéreo e, se precisar, sem aéreo) no cartão ao lado.", "erro"); return; }
+    const pulados = alvo.length - comPreco.length;
+    const msg = `Lançar o preço de referência em ${comPreco.length} passageiro${comPreco.length === 1 ? "" : "s"} sem valor?`
+      + `\n\nCom aéreo: ${formatBRL(n(exp.preco_venda_brl))} · Sem aéreo: ${exp.preco_sem_aereo_brl ? formatBRL(n(exp.preco_sem_aereo_brl)) : "—"}`
+      + (pulados ? `\n${pulados} fica${pulados === 1 ? "" : "m"} de fora (ExpedAmigo/especial ou sem preço pra condição) — lance à mão.` : "")
+      + "\n\nCada mudança fica no histórico com o seu nome.";
+    if (!window.confirm(msg)) return;
+    setAplicando(true);
+    let ok = 0;
+    try {
+      for (const { p, v } of comPreco) { await salvarValores(p.id, { valor_contratado_brl: v }); ok++; }
+      avisar(`Preço lançado em ${ok} passageiro${ok === 1 ? "" : "s"}`);
+    } catch (e) {
+      avisar(`${ok ? `${ok} lançado${ok === 1 ? "" : "s"}; ` : ""}${e instanceof Error ? e.message : "Erro ao lançar"}`, "erro");
+    } finally {
+      setAplicando(false);
+      await carregar();
+      onMudou();
+    }
+  }
+
   return (
     <div className="space-y-3">
       {!dados.migracao && (
@@ -56,26 +90,31 @@ export default function PainelValores({ exp, onMudou }: { exp: ExpedicaoComAgreg
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
-        <Numero rotulo="Vendido" valor={formatBRL(t.vendido)} dica={`${t.ativos - t.porStatus["Sem valor"]} de ${t.ativos} com valor`} />
-        <Numero rotulo="Recebido" valor={formatBRL(t.recebido)} dica={t.vendido ? `${Math.round((t.recebido / t.vendido) * 100)}% do vendido` : "—"} cor="#166534" />
-        <Numero rotulo="A receber" valor={formatBRL(t.aReceber)} dica={`${t.porStatus["Em aberto"] + t.porStatus.Parcial} com saldo`} cor="#B45309" />
-        <div className="rel-card px-3.5 py-2.5">
-          <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Preço com aéreo</div>
-          <div className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>
-            <CelulaEditavel tipo="number" valor={n(exp.preco_venda_brl) || null} onSalvar={salvarPreco("preco_venda_brl")} formatar={(v) => formatBRL(n(v))} placeholder="definir" />
+      {semValor.length > 0 && (
+        <div className="ck-banner" role="status">
+          <div className="ck-banner__tx">
+            <b>{semValor.length === t.ativos ? `Nenhum dos ${t.ativos} passageiros tem valor lançado` : `${semValor.length} passageiro${semValor.length === 1 ? "" : "s"} sem valor lançado`}</b>
+            <span>Os totais abaixo ficam incompletos até lançar. Líderes e cortesias não entram nesta conta.</span>
           </div>
-          <div className="text-[11px]" style={{ color: "var(--ink3)" }}>por pessoa (referência)</div>
+          {editavel && (
+            <Btn variant="primary" disabled={aplicando} onClick={() => void definirPrecoPadrao()}
+              title="Lança o preço de referência (com ou sem aéreo, pela condição) em quem está sem valor">
+              {aplicando ? "Lançando…" : "Definir preço padrão"}
+            </Btn>
+          )}
         </div>
-        <div className="rel-card px-3.5 py-2.5">
-          <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Preço sem aéreo</div>
-          <div className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>
+      )}
+
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 200px), 1fr))" }}>
+        <StatCard label="Vendido" value={formatBRL(t.vendido)} sub={`${t.ativos - t.porStatus["Sem valor"]} de ${t.ativos} com valor`} />
+        <StatCard label="Recebido" value={formatBRL(t.recebido)} tone="ok" sub={t.vendido ? `${Math.round((t.recebido / t.vendido) * 100)}% do vendido` : "—"} />
+        <StatCard label="A receber" value={formatBRL(t.aReceber)} tone={t.aReceber > 0 ? "warn" : "default"} sub={`${t.porStatus["Em aberto"] + t.porStatus.Parcial} com saldo`} />
+        <StatCard label="Preço por pessoa"
+          value={<CelulaEditavel tipo="number" valor={n(exp.preco_venda_brl) || null} onSalvar={salvarPreco("preco_venda_brl")} formatar={(v) => formatBRL(n(v))} placeholder="definir" />}
+          sub={<span style={{ display: "inline-flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>com aéreo · sem aéreo:{" "}
             {dados.migracao
               ? <CelulaEditavel tipo="number" valor={exp.preco_sem_aereo_brl ?? null} onSalvar={salvarPreco("preco_sem_aereo_brl")} formatar={(v) => formatBRL(n(v))} placeholder="definir" />
-              : <span style={{ color: "var(--ink3)" }}>—</span>}
-          </div>
-          <div className="text-[11px]" style={{ color: "var(--ink3)" }}>por pessoa (referência)</div>
-        </div>
+              : <span>—</span>}</span>} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -308,16 +347,6 @@ function ListaHistorico({ itens, nomes }: { itens: Historico[]; nomes: Map<strin
         </Fragment>
       ))}
     </ul>
-  );
-}
-
-function Numero({ rotulo, valor, dica, cor }: { rotulo: string; valor: string; dica: string; cor?: string }) {
-  return (
-    <div className="rel-card px-3.5 py-2.5">
-      <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>{rotulo}</div>
-      <div className="text-[17px] font-bold" style={{ color: cor ?? "var(--ink)" }}>{valor}</div>
-      <div className="text-[11px]" style={{ color: "var(--ink3)" }}>{dica}</div>
-    </div>
   );
 }
 

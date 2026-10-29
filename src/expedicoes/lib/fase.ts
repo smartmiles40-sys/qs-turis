@@ -120,3 +120,18 @@ export function infoFase(inicio: DataEntrada | null | undefined, fim: DataEntrad
   const progresso = Math.max(0, Math.min(1, diaDaViagem / totalDias));
   return { fase: getFase(inicio, fimOk, hoje), diasParaInicio, diasParaFim, totalDias, diaDaViagem, progresso };
 }
+
+/**
+ * Aviso discreto do cockpit (spec §1): o status manual (Planejamento / Vendas
+ * Abertas / Em andamento / Concluída) contradiz a fase calculada pelas datas.
+ * Null = coerentes (ou cancelada, que não tem fase).
+ */
+export function divergenciaStatus(status: string | null | undefined, fase: Fase): string | null {
+  if (!status || status === "Cancelada") return null;
+  const em = (f: Fase) => META_FASE[f].curto.toLowerCase();
+  if (status === "Concluída" && fase !== "concluida") return `O status é "Concluída", mas pelas datas a expedição está em ${em(fase)}.`;
+  if (fase === "concluida" && status !== "Concluída") return `Pelas datas a viagem já acabou, mas o status ainda é "${status}".`;
+  if (fase === "em_viagem" && status !== "Em andamento") return `Pelas datas o grupo está em viagem, mas o status é "${status}".`;
+  if (status === "Em andamento" && fase !== "em_viagem") return `O status é "Em andamento", mas pelas datas a expedição está em ${em(fase)}.`;
+  return null;
+}

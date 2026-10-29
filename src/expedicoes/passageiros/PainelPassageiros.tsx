@@ -5,13 +5,18 @@
 // prontidão por passageiro, criar/puxar da base/importar CSV e exportar .xlsx.
 // Endereços: …/passageiros/pax/<id> (gaveta do pax), …/pax/<id>/perfil (página
 // completa) e …/passageiros/prontidao/<id> (gaveta de prontidão).
+// Cockpit (redesign 29/10, spec §3.2 + §4.2): alterna "Matriz" (padrão — uma coluna
+// por requisito, com placar) e "Planilha" (esta tabela de sempre, com todas as
+// edições). Depois do embarque os KPIs viram "pendências administrativas" (nada
+// bloqueia mais). Embaixo, o status de documentos por passageiro (era a aba Documentos).
+// A validade do passaporte usa a regra única de lib/passaporte.ts.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Botao, Vazio } from "@/rel/ui";
 import { BotaoExcluir, Busca, Carregando, CelulaEditavel, CelulaEscolha, Selo, useAoVivo } from "../ui";
 import { useExp } from "../contexto";
 import { STATUS_RESERVA, TIPO_PASSAGEIRO } from "../lib/constants";
 import { cpfValido } from "../lib/cpf";
-import { aniversarioNaViagem, daysUntil, formatDate } from "../lib/utils";
+import { aniversarioNaViagem, formatDate } from "../lib/utils";
 import { conferirAcompanhante } from "../lib/rooming/acompanhante";
 import { construirPosicoesFidelidade } from "../lib/fidelidade";
 import { chaveIdentidade, listPessoas, type PessoaAgregada } from "../lib/pessoas";
@@ -27,11 +32,20 @@ import EditarPassageiro from "./EditarPassageiro";
 import PerfilPax from "./PerfilPax";
 import { GavetaProntidao } from "./Prontidao";
 import { FotoPax, SeloFidelidade, SeloProntidao, SeloSemFicha, SeloStatus, SeloTipo } from "./pecas";
+import { Segmented } from "@/components/ui";
+import MatrizPassageiros from "./MatrizPassageiros";
+import StatusDocumentosPax from "./StatusDocumentosPax";
+import { avaliarValidadePassaporte, avisoPassaporte } from "../lib/passaporte";
+import { dataSP, infoFase } from "../lib/fase";
+import { resumoProntidao } from "../lib/cockpit/matriz";
+import { linhasDaMatriz } from "../detalhe/cockpit/dados";
 
 type Col = "id" | "nome" | "tipo" | "grupo" | "cpf" | "passaporte" | "validade" | "quarto" | "status" | "prontidao";
 const ORDEM_PRONT = { Apto: 0, Atenção: 1, Bloqueado: 2 } as const;
 
 export default function PainelPassageiros({ exp, sub, onMudou }: { exp: ExpedicaoComAgregados; sub: string[]; onMudou: () => void }) {
+  const [vista, setVista] = useState<"matriz" | "planilha">("matriz");
+  const fase = useMemo(() => infoFase(exp.data_embarque, exp.data_retorno, dataSP(new Date())).fase, [exp.data_embarque, exp.data_retorno]);
   const { ir, somenteLeitura, avisar } = useExp();
   const tela = exp.tipo === "pacote" ? "pacotes" : "expedicoes";
   const irSub = useCallback((resto?: string) => ir(tela, `${exp.id}/passageiros${resto ? `/${resto}` : ""}`), [ir, tela, exp.id]);
@@ -75,6 +89,8 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
 
   const pront = useMemo(() => (dados ? prontidaoDe(exp, dados.pax, dados.requisitos).resultado : new Map()), [dados, exp]);
   const posicoes = useMemo(() => (pessoas ? construirPosicoesFidelidade(pessoas, exp.id) : {}), [pessoas, exp.id]);
+  const linhasMx = useMemo(() => (dados ? linhasDaMatriz({ exp, fase, pax: dados.pax, requisitos: dados.requisitos, quartos: dados.quartos, alocacoes: dados.alocacoes, prontidao: pront }) : []),
+    [dados, exp, fase, pront]);
   const indice = useMemo(() => {
     const m = new Map<string, number>();
     [...(dados?.pax ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)).forEach((p, i) => m.set(p.id, i + 1));
@@ -147,6 +163,7 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
     bloq: [...pront.values()].filter((r) => r.prontidao === "Bloqueado").length,
     pendForm: dados.pax.filter((p) => !preencheuFormulario(p)).length,
   };
+  const rp = resumoProntidao(fase, [...pront.values()]);
   const lideres = ordenados.filter((p) => p.tipo === "Líder");
   const demais = ordenados.filter((p) => p.tipo !== "Líder");
   const temLider = dados.pax.some((p) => p.tipo === "Líder");
@@ -209,8 +226,9 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
   const linha = (p: PassageiroRow) => {
     const r = pront.get(p.id);
     const aniv = aniversarioNaViagem(p.data_nascimento, exp.data_embarque, exp.data_retorno);
-    const venceCedo = p.validade_passaporte && exp.data_embarque
-      ? (daysUntil(p.validade_passaporte) ?? 0) - (daysUntil(exp.data_embarque) ?? 0) < 180 : false;
+    // Regra única (lib/passaporte.ts): precisa valer 6 meses DEPOIS da volta.
+    const valid = avaliarValidadePassaporte(p, exp);
+    const venceCedo = valid.estado === "vence_cedo" || valid.estado === "vence_na_viagem";
     const g = nomeGrupo(p);
     return (
       <tr key={p.id} className="border-t align-top rel-linha" style={{ borderColor: "var(--line)" }}>
@@ -251,7 +269,7 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
         <td className="px-2 py-2 font-mono text-[12px] min-w-[100px]"><CelulaEditavel valor={p.passaporte} onSalvar={salvarCampo(p, "passaporte")} /></td>
         <td className="px-2 py-2 min-w-[110px]">
           <CelulaEditavel tipo="date" valor={p.validade_passaporte?.slice(0, 10) ?? null} onSalvar={salvarCampo(p, "validade_passaporte")}
-            formatar={(v) => <span style={{ color: venceCedo ? "var(--err-ink)" : undefined }}>{formatDate(String(v))}{venceCedo && <span className="block text-[10.5px]">⚠ &lt; 6m do embarque</span>}</span>} />
+            formatar={(v) => <span style={{ color: venceCedo ? "var(--err-ink)" : undefined }}>{formatDate(String(v))}{venceCedo && <span className="block text-[10.5px]">⚠ {avisoPassaporte(valid) ?? "vence cedo"}</span>}</span>} />
         </td>
         <td className="px-2 py-2">{celulaQuarto(p)}</td>
         <td className="px-2 py-2">
@@ -346,11 +364,17 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
 
       {dados.pax.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          <Segmented label="Visão" value={vista} onChange={setVista}
+            options={[{ value: "matriz", label: "Matriz" }, { value: "planilha", label: "Planilha" }]} />
+          <span className="w-px h-5" style={{ background: "var(--line)" }} />
           {[["Total", kpi.total], ["Confirmados", kpi.confirmados], ["Pré-reserva", kpi.pre], ["Leads", kpi.leads]].map(([r, n]) => (
             <span key={r} className="px-2.5 py-1 rounded-lg" style={{ background: "var(--card)", border: "1px solid var(--line)", color: "var(--ink2)" }}><b style={{ color: "var(--ink)" }}>{n}</b> {r}</span>
           ))}
           <span className="w-px h-5" style={{ background: "var(--line)" }} />
-          <Selo tom="ok">{kpi.aptos} Aptos</Selo><Selo tom="aviso">{kpi.atencao} Atenção</Selo><Selo tom="erro">{kpi.bloq} Bloqueados</Selo>
+          {rp.modo === "prontidao"
+            ? <><Selo tom="ok">{kpi.aptos} Aptos</Selo><Selo tom="aviso">{kpi.atencao} Atenção</Selo><Selo tom="erro">{kpi.bloq} Bloqueados</Selo></>
+            : <Selo tom={rp.comPendencia ? "aviso" : "ok"} titulo="A viagem já começou: nada bloqueia. É só o que ficou faltando de documento.">
+                {rp.comPendencia} com pendência administrativa{rp.porTipo.length ? ` (${rp.porTipo.slice(0, 3).map((t) => `${t.qtd} ${t.tipo}`).join(", ")})` : ""}</Selo>}
           <span className="w-px h-5" style={{ background: "var(--line)" }} />
           {pilula(soPendentes, () => setSoPendentes((v) => !v), `Formulário pendente: ${kpi.pendForm}${soPendentes ? " ✕" : ""}`)}
         </div>
@@ -361,6 +385,8 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
           <Vazio titulo="Nenhum passageiro ainda" texto="Adicione manualmente, importe de uma planilha (CSV) ou puxe alguém que já está na base da agência."
             acao={!somenteLeitura ? <Botao variante="primario" onClick={() => setCriar("novo")}>Adicionar passageiro</Botao> : undefined} />
         </section>
+      ) : vista === "matriz" ? (
+        <MatrizPassageiros linhas={linhasMx} posicoes={posicoes} busca={busca} onAbrir={(id, m) => irSub(`${m}/${id}`)} />
       ) : (
         <>
           {temLider && (
@@ -378,6 +404,12 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
           {!somenteLeitura && <p className="text-[11.5px]" style={{ color: "var(--ink3)" }}>Clique numa célula pra editar. Enter salva, Esc cancela. Dados pessoais (CPF, passaporte…) valem pra todas as expedições da pessoa.</p>}
         </>
       )}
+
+      {/* Status de documentos por passageiro (tabela `documentos`; era a aba Documentos). */}
+      <details className="ck-sec">
+        <summary><h3 className="ck-h3">Status de documentos por passageiro</h3><span className="ck-nota">checklist de documentos (tabela antiga)</span></summary>
+        <div className="ck-sec__b"><StatusDocumentosPax exp={exp} /></div>
+      </details>
 
       {criar === "novo" && <NovoPassageiro expId={exp.id} onFechar={() => setCriar(null)} onCriado={() => { recarregar(); carregarPessoas(); }} />}
       {criar === "existente" && <AdicionarExistente expId={exp.id} pessoas={pessoas} chavesNaExp={new Set(dados.pax.map(chaveIdentidade))}

@@ -1,146 +1,242 @@
 // src/expedicoes/detalhe/ExpedicaoDetalhe.tsx
-// Página de uma expedição (ou pacote): cabeçalho com ocupação/checklist/
-// prontidão, abas iguais ao app antigo e a Visão Geral. Cada aba é um arquivo
-// em ./abas/ e recebe { exp, sub, onMudou } — `sub` é o resto do endereço
-// (#ops/expedicoes/<id>/<aba>/<sub...>). Pacote não tem Rooming, Checklist nem
-// Roteiro do Líder.
+// -----------------------------------------------------------------------------
+// COCKPIT DA EXPEDIÇÃO (redesign 29/10, docs/ref-expedicoes/qs-redesign-expedicoes.md §3;
+// mockup ref-expedicao.dc.html). Vale também pra pacote (sem a aba Logística).
+//
+// Cabeçalho: nome base + chip do grupo + chip da fase ("Em viagem · Dia 4 de 18"),
+// metadados (código, destino, datas, líderes, responsáveis), Portal do líder e
+// Editar, e a barra das 5 fases. Saíram o degradê e os 3 anéis (Ocupação,
+// Checklist, Prontidão) — esses números estão na "Saúde" da Visão geral.
+//
+// Abas: de 10 para 6 (lib/cockpit/rota.ts). A aba ativa vai na query do hash
+// (?aba=logistica&secao=rooming) por replaceState — não remonta a tela nem enche
+// o "voltar". Endereços antigos (<id>%2Frooming, <id>/valores, ?aba=rooming)
+// redirecionam pra aba nova e o endereço é reescrito no formato novo.
+// Os sub-endereços de Passageiros (pax/<id>, pax/<id>/perfil, prontidao/<id>)
+// continuam no caminho.
+// -----------------------------------------------------------------------------
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
-import { Botao } from "@/rel/ui";
+import { Btn } from "@/components/ui";
 import { useExp } from "../contexto";
-import { Abas, Anel, Carregando, PilulaStatus, useAoVivo } from "../ui";
+import { Carregando, useAoVivo } from "../ui";
 import { expedicaoComAgregados } from "../lib/agregados";
-import { daysUntil, formatDate, formatPercent } from "../lib/utils";
+import { formatDate } from "../lib/utils";
 import type { ExpedicaoComAgregados } from "../lib/database";
 import { EditarExpedicao } from "../lista/FormExpedicao";
+import { META_FASE, dataSP, divergenciaStatus, infoFase, type Fase, type InfoFase } from "../lib/fase";
+import { nomeDaExpedicao } from "../lib/nomeExpedicao";
+import { ABAS_COCKPIT, ABAS_FORA_DO_PACOTE, hashCanonico, resolverRotaCockpit, type AbaCockpit, type SecaoCockpit } from "../lib/cockpit/rota";
+import { contagensMatriz, type LinhaMatriz } from "../lib/cockpit/matriz";
+import { carregarResumoCockpit, linhasDaMatriz, type ResumoCockpit } from "./cockpit/dados";
 import VisaoGeral from "./VisaoGeral";
+import "./cockpit.css";
 
-export interface PropsAba { exp: ExpedicaoComAgregados; sub: string[]; onMudou: () => void }
+/** O que o cockpit já leu e calculou — as abas aproveitam em vez de ler de novo. */
+export interface Cockpit {
+  hoje: string;
+  info: InfoFase;
+  /** null enquanto carrega. */
+  resumo: ResumoCockpit | null;
+  /** Matriz de passageiros (mesma conta do badge da aba). */
+  linhas: LinhaMatriz[];
+  secao: SecaoCockpit | null;
+  irAba: (aba: AbaCockpit, secao?: SecaoCockpit | null) => void;
+  recarregarResumo: () => void;
+}
 
-const ABAS = [
-  { id: "", rotulo: "Visão Geral" },
-  { id: "passageiros", rotulo: "Passageiros" },
-  { id: "valores", rotulo: "Valores" },
-  { id: "rooming", rotulo: "Rooming" },
-  { id: "checklist", rotulo: "Checklist" },
-  { id: "documentos", rotulo: "Documentos" },
-  { id: "links", rotulo: "Links" },
-  { id: "grupos", rotulo: "Divisões" },
-  { id: "portal", rotulo: "ExpedAmigo" },
-  { id: "roteiro-lider", rotulo: "Roteiro do Líder" },
-] as const;
-type IdAba = (typeof ABAS)[number]["id"];
-const OCULTAS_PACOTE = new Set<string>(["rooming", "checklist", "roteiro-lider", "grupos"]);
+export interface PropsAba {
+  exp: ExpedicaoComAgregados;
+  sub: string[];
+  onMudou: () => void;
+  /** Contexto do cockpit (redesign 29/10). Opcional pra quem ainda monta a aba solta. */
+  cockpit?: Cockpit;
+}
 
-const COMPONENTES: Record<Exclude<IdAba, "">, React.LazyExoticComponent<ComponentType<PropsAba>>> = {
+const COMPONENTES: Record<Exclude<AbaCockpit, "geral">, React.LazyExoticComponent<ComponentType<PropsAba>>> = {
   passageiros: lazy(() => import("./abas/AbaPassageiros")),
-  valores: lazy(() => import("./abas/AbaValores")),
-  rooming: lazy(() => import("./abas/AbaRooming")),
-  checklist: lazy(() => import("./abas/AbaChecklist")),
-  documentos: lazy(() => import("./abas/AbaDocumentos")),
-  links: lazy(() => import("./abas/AbaLinks")),
-  grupos: lazy(() => import("./abas/AbaGrupos")),
+  logistica: lazy(() => import("./abas/AbaLogistica")),
+  financeiro: lazy(() => import("./abas/AbaFinanceiro")),
+  arquivos: lazy(() => import("./abas/AbaArquivos")),
   portal: lazy(() => import("./abas/AbaPortal")),
-  "roteiro-lider": lazy(() => import("./abas/AbaRoteiroLider")),
 };
+
+/** Barra de fases: Vendas → Preparação → Embarque → Em viagem → Pós-viagem. */
+const BARRA_FASES: { fase: Fase; rotulo: string }[] = [
+  { fase: "vendendo", rotulo: "Vendas" }, { fase: "preparacao", rotulo: "Preparação" }, { fase: "embarque", rotulo: "Embarque" },
+  { fase: "em_viagem", rotulo: "Em viagem" }, { fase: "concluida", rotulo: "Pós-viagem" },
+];
+
+function textoChipFase(i: InfoFase): string {
+  switch (i.fase) {
+    case "em_viagem": return `Em viagem · Dia ${i.diaDaViagem} de ${i.totalDias}`;
+    case "embarque": return i.diasParaInicio === 1 ? "Embarca amanhã" : `Embarca em ${i.diasParaInicio} dias`;
+    case "preparacao": return `Preparação · embarca em ${i.diasParaInicio} dias`;
+    case "vendendo": return Number.isFinite(i.diasParaInicio) ? `Vendas abertas · embarca em ${i.diasParaInicio} dias` : "Vendas abertas · sem data";
+    case "concluida": return i.diasParaFim === -1 ? "Concluída · voltou ontem" : `Concluída · voltou há ${-i.diasParaFim} dias`;
+  }
+}
 
 export default function ExpedicaoDetalhe({ caminho }: { caminho: string }) {
   const { ir, somenteLeitura } = useExp();
-  const [id, abaBruta = "", ...sub] = caminho.split("/");
+  const id = caminho.split("/")[0];
   const [exp, setExp] = useState<ExpedicaoComAgregados | null | undefined>(undefined);
+  const [resumo, setResumo] = useState<ResumoCockpit | null>(null);
   const [editando, setEditando] = useState(false);
 
+  // ── dados ──
   const carregar = useCallback(async () => {
     try { setExp(await expedicaoComAgregados(id)); } catch { setExp(null); }
   }, [id]);
-  useEffect(() => { setExp(undefined); void carregar(); }, [carregar]);
-  // O cabeçalho só recarrega os NÚMEROS (expedicaoComAgregados lê colunas leves);
-  // cada aba cuida dos próprios dados. passageiro_requisitos não tem expedicao_id
-  // (não dá pra filtrar no realtime) → espera de 2,5 s, pra edição em outra
-  // expedição não ficar refazendo o cabeçalho a cada clique.
+  useEffect(() => { setExp(undefined); setResumo(null); void carregar(); }, [carregar]);
+  const expCarregada = exp ?? null;
+  const carregarResumo = useCallback(async () => {
+    if (!expCarregada) return;
+    try { setResumo(await carregarResumoCockpit(expCarregada)); } catch { /* o cabeçalho segue; os blocos mostram "—" */ }
+  }, [expCarregada?.id, expCarregada?.tipo, expCarregada?.data_embarque, expCarregada?.data_retorno, expCarregada?.destino]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void carregarResumo(); }, [carregarResumo]);
+  const recarregarTudo = useCallback(() => { void carregar(); void carregarResumo(); }, [carregar, carregarResumo]);
+
+  // O cabeçalho só recarrega os NÚMEROS (expedicaoComAgregados lê colunas leves).
+  // passageiro_requisitos / passageiro_quarto não têm expedicao_id (não dá pra
+  // filtrar no realtime) → espera de 2,5 s, pra edição em outra expedição não
+  // ficar refazendo o cockpit a cada clique.
   useAoVivo([
     { tabela: "expedicoes", filtro: `id=eq.${id}` },
     { tabela: "passageiros", filtro: `expedicao_id=eq.${id}` },
     { tabela: "checklist_itens", filtro: `expedicao_id=eq.${id}` },
-  ], carregar, 600);
-  useAoVivo([{ tabela: "passageiro_requisitos" }], carregar, 2500);
+  ], recarregarTudo, 600);
+  useAoVivo([
+    { tabela: "quartos", filtro: `expedicao_id=eq.${id}` },
+    { tabela: "arquivos", filtro: `expedicao_id=eq.${id}` },
+    { tabela: "roteiro_lider_dias", filtro: `expedicao_id=eq.${id}` },
+    { tabela: "roteiro_dias", filtro: `expedicao_id=eq.${id}` },
+  ], () => void carregarResumo(), 800);
+  useAoVivo([{ tabela: "passageiro_requisitos" }, { tabela: "passageiro_quarto" }], recarregarTudo, 2500);
 
+  // ── rota: aba + seção ──
   const pacote = exp?.tipo === "pacote";
-  const abas = useMemo(() => ABAS.filter((a) => !(pacote && OCULTAS_PACOTE.has(a.id))), [pacote]);
-  const aba = (abas.some((a) => a.id === abaBruta) ? abaBruta : "") as IdAba;
+  const [hashAtual, setHashAtual] = useState(() => window.location.hash);
+  useEffect(() => {
+    const f = () => setHashAtual(window.location.hash);
+    window.addEventListener("hashchange", f);
+    return () => window.removeEventListener("hashchange", f);
+  }, []);
+  useEffect(() => { setHashAtual(window.location.hash); }, [caminho]);
+  const rota = useMemo(() => resolverRotaCockpit({ caminho, hash: hashAtual, pacote }), [caminho, hashAtual, pacote]);
   const telaLista = pacote ? "pacotes" : "expedicoes";
+
+  const trocarHash = useCallback((aba: AbaCockpit, secao: SecaoCockpit | null) => {
+    const h = hashCanonico(window.location.hash, id, aba, secao);
+    if (!h) { ir(telaLista, aba === "geral" ? id : `${id}/${aba}`); return; }
+    if (h !== window.location.hash) history.replaceState(history.state, "", window.location.pathname + window.location.search + h);
+    setHashAtual(h);
+  }, [id, ir, telaLista]);
+  // Endereço antigo → reescreve no formato novo (sem navegar). Só depois de saber se é pacote.
+  useEffect(() => { if (exp && rota.normalizar) trocarHash(rota.aba, rota.secao); }, [exp, rota, trocarHash]);
+  const irAba = useCallback((aba: AbaCockpit, secao?: SecaoCockpit | null) => trocarHash(aba, secao ?? null), [trocarHash]);
+
+  // ── derivados ──
+  const hoje = dataSP(new Date());
+  const info = useMemo(() => infoFase(exp?.data_embarque, exp?.data_retorno, hoje), [exp?.data_embarque, exp?.data_retorno, hoje]);
+  const linhas = useMemo(() => (exp && resumo ? linhasDaMatriz({
+    exp, fase: info.fase, pax: resumo.rooming.passageiros, requisitos: resumo.requisitos, quartos: resumo.rooming.quartos, alocacoes: resumo.rooming.alocacoes,
+  }) : []), [exp, resumo, info.fase]);
+  const contagens = useMemo(() => contagensMatriz(linhas), [linhas]);
+  const semValor = linhas.some((l) => l.celulas.pagamento.tom === "danger");
+  const lideres = useMemo(() => (resumo?.rooming.passageiros ?? [])
+    .filter((p) => p.tipo === "Líder" && p.status_reserva !== "Cancelado")
+    .map((p) => p.nome_completo.trim().split(/\s+/)[0]), [resumo]);
 
   if (exp === undefined) return <Carregando />;
   if (exp === null) {
     return (
-      <div className="text-center py-16">
-        <p className="text-[14px] font-semibold" style={{ color: "var(--ink)" }}>Expedição não encontrada.</p>
-        <Botao className="mt-3" onClick={() => ir("expedicoes")}>Voltar pra lista</Botao>
+      <div className="ck-page" style={{ textAlign: "center", padding: "64px 0" }}>
+        <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Expedição não encontrada.</p>
+        <div><Btn onClick={() => ir("expedicoes")}>Voltar pra lista</Btn></div>
       </div>
     );
   }
 
-  const d = daysUntil(exp.data_embarque);
-  const Comp = aba ? COMPONENTES[aba] : null;
+  const cockpit: Cockpit = { hoje, info, resumo, linhas, secao: rota.secao, irAba, recarregarResumo: () => void carregarResumo() };
+  const { base, grupo } = nomeDaExpedicao(exp);
+  const meta = META_FASE[info.fase];
+  const cancelada = exp.status === "Cancelada";
+  const divergencia = divergenciaStatus(exp.status, info.fase);
+  const idxFase = BARRA_FASES.findIndex((f) => f.fase === info.fase);
+  const abas = ABAS_COCKPIT.filter((a) => !(pacote && ABAS_FORA_DO_PACOTE.has(a.id)));
+  const badge = (a: AbaCockpit): { txt: string; tom: "warn" | "danger" | "" } | null => {
+    if (!resumo) return null;
+    if (a === "passageiros" && contagens.pendencia) return { txt: String(contagens.pendencia), tom: "warn" };
+    if (a === "financeiro" && semValor) return { txt: "!", tom: "danger" };
+    if (a === "arquivos" && resumo.arquivos) return { txt: String(resumo.arquivos), tom: "" };
+    return null;
+  };
+  const Comp = rota.aba !== "geral" ? COMPONENTES[rota.aba] : null;
+  const metaLinha = [
+    exp.destino,
+    exp.data_embarque ? `${formatDate(exp.data_embarque)} → ${formatDate(exp.data_retorno)}` : "sem datas",
+    lideres.length ? `${lideres.length === 1 ? "Líder" : "Líderes"} ${lideres.length === 1 ? lideres[0] : `${lideres.slice(0, -1).join(", ")} e ${lideres[lideres.length - 1]}`}` : null,
+    exp.responsavel_op_nome ? `Op: ${exp.responsavel_op_nome}` : null,
+    exp.responsavel_com_nome ? `Com: ${exp.responsavel_com_nome}` : null,
+  ].filter(Boolean);
+
   return (
-    <div className="space-y-4">
-      <header className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--line)" }}>
-        <div className="px-5 py-4 text-white" style={{ background: "linear-gradient(135deg, #1F2937, #B45309)" }}>
-          <button onClick={() => ir(telaLista)} className="text-[12px] opacity-80 hover:opacity-100">← {pacote ? "Pacotes" : "Expedições"}</button>
-          <div className="mt-1 flex flex-wrap items-start gap-4">
-            <div className="flex-1 min-w-[220px]">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-[22px] font-bold leading-tight">{exp.nome}</h1>
-                <PilulaStatus status={exp.status} />
-              </div>
-              <p className="text-[12.5px] opacity-85 mt-1">
-                <span className="font-mono">{exp.codigo}</span> · {exp.destino} · {formatDate(exp.data_embarque)} → {formatDate(exp.data_retorno)}
-              </p>
-              <p className="text-[12px] opacity-75 mt-0.5">
-                {exp.responsavel_op_nome && <>Op: {exp.responsavel_op_nome}</>}
-                {exp.responsavel_op_nome && exp.responsavel_com_nome && " · "}
-                {exp.responsavel_com_nome && <>Com: {exp.responsavel_com_nome}</>}
-              </p>
+    <div className="ck-page">
+      <button type="button" className="ck-voltar" onClick={() => ir(telaLista)}>← {pacote ? "Pacotes" : "Expedições"}</button>
+
+      <section className="ck-head" aria-label="Expedição">
+        <div className="ck-head__top">
+          <div className="ck-head__tx">
+            <div className="ck-head__l1">
+              <h1>{base}</h1>
+              {grupo && <span className="ck-gr">{grupo}</span>}
+              {cancelada
+                ? <span className="ck-fasechip" style={{ background: "var(--danger-bg)", color: "var(--danger)" }}>Cancelada</span>
+                : <span className="ck-fasechip" style={{ background: meta.bg, color: meta.fg }}>{textoChipFase(info)}</span>}
             </div>
-            <div className="text-right">
-              {d == null ? <span className="text-[13px]">—</span> : d >= 0 ? (
-                <>
-                  <div className="text-[30px] font-bold leading-none">{d}</div>
-                  <div className="text-[11.5px] opacity-85">{d === 0 ? "embarca hoje" : d === 1 ? "dia p/ embarcar" : "dias p/ embarcar"}</div>
-                </>
-              ) : <div className="text-[14px] font-semibold">✈ Embarcou</div>}
-              {!somenteLeitura && <button onClick={() => setEditando(true)} className="mt-2 text-[12px] px-2.5 py-1 rounded-md" style={{ background: "rgba(255,255,255,.15)" }}>Editar</button>}
-            </div>
+            <p className="ck-head__meta"><span className="ck-mono">{exp.codigo}</span>{metaLinha.map((t, i) => <span key={i}> · {t}</span>)}</p>
+          </div>
+          <div className="ck-head__acts">
+            {/* TODO: a Área do Líder (/lider) segue no app antigo e não há endereço dela no QS. */}
+            <Btn disabled title="A Área do Líder (/lider) ainda está no app antigo — sem endereço no QS">Portal do líder</Btn>
+            {!somenteLeitura && <Btn onClick={() => setEditando(true)}>Editar</Btn>}
           </div>
         </div>
-        <div className="grid grid-cols-3 divide-x" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
-          <Indicador rotulo="Ocupação" texto={`${exp.pax_confirmados}/${exp.pax_planejados}`} dica="confirmados" fracao={exp.pax_planejados ? exp.pax_confirmados / exp.pax_planejados : 0} cor="#B45309" />
-          {pacote ? <Indicador rotulo="Passageiros" texto={String(exp.prontidao_total)} dica="no pacote" fracao={0} vazio /> :
-            <Indicador rotulo="Checklist" texto={formatPercent(exp.checklist_pct, 0)} dica="concluído" fracao={exp.checklist_pct} cor="var(--rel)" />}
-          <Indicador rotulo="Prontidão" texto={`${exp.prontidao_aptos}/${exp.prontidao_total}`} dica="aptos p/ embarque" fracao={exp.prontidao_total ? exp.prontidao_aptos / exp.prontidao_total : 0} vazio={!exp.prontidao_total} />
-        </div>
-      </header>
+        {divergencia && <p className="ck-aviso" role="note" style={{ margin: 0 }}>{divergencia} A tela segue as datas; ajuste o status em Editar se precisar.</p>}
+        {!cancelada && (
+          <ol className="ck-fases" aria-label="Fases da expedição">
+            {BARRA_FASES.map((f, i) => (
+              <li key={f.fase} data-estado={i < idxFase ? "feita" : i === idxFase ? "atual" : "futura"} aria-current={i === idxFase ? "step" : undefined}>
+                <span className="ck-fases__bar" />
+                <span className="ck-fases__t">{f.rotulo}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
 
-      <Abas abas={abas.map((a) => ({ id: a.id, rotulo: a.rotulo }))} ativa={aba} onTrocar={(t) => ir(telaLista, t ? `${exp.id}/${t}` : exp.id)} />
-
-      {Comp ? (
-        <Suspense fallback={<Carregando />}><Comp exp={exp} sub={sub} onMudou={carregar} /></Suspense>
-      ) : (
-        <VisaoGeral exp={exp} sub={sub} onMudou={carregar} />
-      )}
-
-      {editando && <EditarExpedicao exp={exp} onFechar={() => setEditando(false)} onSalva={() => { setEditando(false); void carregar(); }} />}
-    </div>
-  );
-}
-
-function Indicador({ rotulo, texto, dica, fracao, cor = "auto", vazio }: { rotulo: string; texto: string; dica: string; fracao: number; cor?: string; vazio?: boolean }) {
-  return (
-    <div className="flex items-center gap-3 px-4 py-3" style={{ borderColor: "var(--line)" }}>
-      <Anel fracao={fracao} cor={cor} vazio={vazio} tamanho={40}>{" "}</Anel>
-      <div className="min-w-0">
-        <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>{rotulo}</div>
-        <div className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>{texto} <span className="text-[11.5px] font-normal" style={{ color: "var(--ink3)" }}>{dica}</span></div>
+      <div role="tablist" aria-label="Seções da expedição" className="ck-tabs">
+        {abas.map((a) => {
+          const b = badge(a.id);
+          return (
+            <button key={a.id} type="button" role="tab" id={`ck-tab-${a.id}`} aria-selected={rota.aba === a.id} aria-controls="ck-painel" className="ck-tab"
+              onClick={() => irAba(a.id)}>
+              {a.rotulo}
+              {b && <span className={`ck-badge${b.tom ? ` ck-badge--${b.tom}` : ""}`} aria-label={a.id === "financeiro" ? "há passageiro sem valor" : undefined}>{b.txt}</span>}
+            </button>
+          );
+        })}
       </div>
+
+      <div id="ck-painel" role="tabpanel" aria-labelledby={`ck-tab-${rota.aba}`} style={{ minWidth: 0 }}>
+        {Comp ? (
+          <Suspense fallback={<Carregando />}><Comp exp={exp} sub={rota.sub} onMudou={recarregarTudo} cockpit={cockpit} /></Suspense>
+        ) : (
+          <VisaoGeral exp={exp} sub={[]} onMudou={recarregarTudo} cockpit={cockpit} />
+        )}
+      </div>
+
+      {editando && <EditarExpedicao exp={exp} onFechar={() => setEditando(false)} onSalva={() => { setEditando(false); recarregarTudo(); }} />}
     </div>
   );
 }

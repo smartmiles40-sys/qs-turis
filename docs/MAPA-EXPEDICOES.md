@@ -601,12 +601,33 @@ Decisões: canceladas ficam fora das fases, da Linha do tempo e dos indicadores 
 | Realtime em `expedicoes` | Mantido (300 ms) + `roteiro_lider_dias` (3 s) |
 | — (novo) | `Exportar`: CSV (";" + BOM, abre no Excel) das linhas visíveis |
 
+## 8. Cockpit da Expedição (redesign 29/10 — spec §3, §4.1, §4.2)
+
+As 10 abas viraram 6: **Visão geral · Passageiros · Logística · Financeiro · Arquivos · Portal** (Logística some em pacote). A aba vai na query: `#ops/expedicoes/<id>?aba=logistica&secao=rooming`. Todo endereço antigo (`<id>%2Frooming`, `<id>/valores`, `?aba=rooming`) é reescrito pro novo (`lib/cockpit/rota.ts`, testado). As gavetas de Passageiros seguem no caminho (`<id>/passageiros/pax/<pid>`, `…/prontidao/<pid>`).
+
+Lógica pura (testada em `tests/expedicoes/cockpit.test.ts`): `lib/cockpit/rota.ts`, `viagem.ts` (faixa da viagem, roteiro, ações da operação), `matriz.ts` (matriz de passageiros, placar, §4.2), `saude.ts` (4 cartões), `lib/passaporte.ts` (regra ÚNICA de validade: 6 meses depois da volta — usada na prontidão, na planilha, na matriz e no status de documentos), `lib/checklistResumo.ts` (§4.1: o mesmo número em todo lugar = todas as tarefas da expedição).
+
+| Aba antiga | Onde ficou |
+|---|---|
+| Visão Geral | Visão geral: bloco por fase (Hoje+Próximos dias / Contagem / Vendas / Concluída), A viagem inteira, Saúde, Ações da operação; embaixo prazos 7 dias, documentos pendentes, resumo+observações, momentos especiais. Os 3 anéis do cabeçalho viraram os cartões de Saúde |
+| Passageiros | Passageiros: Matriz (padrão) ↔ Planilha (tudo de antes: editar célula, filtros, G1/G2, quarto, Bitrix, exportar, importar, adicionar, gavetas). KPIs pós-embarque = pendências administrativas |
+| Valores | Financeiro: mesmo painel + faixa "sem valor" com **Definir preço padrão** (confirma e grava pela RPC `exp_pax_salvar_valores`, só com clique) + 4 StatCards |
+| Rooming | Logística › Hospedagem e rooming: hotéis "x/y alocados", Exportar Excel, "Abrir rooming" = o mesmo quadro de arrastar |
+| Checklist | Logística › Checklist (igual) |
+| Documentos | Arquivos (Drive com grade de pastas + aviso de "Outros") e Passageiros › "Status de documentos por passageiro" (`passageiros/StatusDocumentosPax.tsx`, link corrigido pra pacote) |
+| Links | Arquivos › Links |
+| Divisões | Logística › Divisões (igual) |
+| ExpedAmigo | Portal: lista de status no topo + Liberar para todos (admin) + todos os editores de antes |
+| Roteiro do Líder | Logística › Roteiro do líder (mesmo editor, tag por dia, hoje destacado); Documentos do líder → Portal |
+
+Desligados de propósito (sem gravar nada): **Cobrar todos / Cobrar formulário / Cobrar apólice** (não existe disparo nas Expedições), **Dar baixa** (precisa da migration do `PROPOSTA-SCHEMA-EXPEDICOES.md` §1), **Portal do líder** no cabeçalho (sem URL da Área do Líder neste app).
+
 ## Testes (lib pura)
 
 O projeto não tem vitest/jest e o Node da máquina é o 20 (sem `--experimental-strip-types`). Os testes usam `node:test` + `node:assert` e um gancho que transpila `.ts` com o `typescript` do `node_modules` (`tests/ts-loader.mjs`, ligado por `tests/registrar-ts.mjs`). Nada foi instalado.
 
 ```bash
-node --import ./tests/registrar-ts.mjs --test tests/expedicoes/fase.test.ts tests/expedicoes/nomeExpedicao.test.ts tests/expedicoes/alertas.test.ts
+node --import ./tests/registrar-ts.mjs --test tests/expedicoes/*.test.ts
 ```
 
 (No Node 22.6+ dá pra trocar o gancho por `--experimental-strip-types`.) A lógica testada (`lib/fase.ts`, `lib/nomeExpedicao.ts`, `lib/alertas/expedicoes.ts`) não usa alias `@/` e importa com extensão `.ts`, pra rodar no Node puro. Os testes ficam fora de `src/` (o `tsc -b` não os checa; `node:test` não está nos `types` do app).

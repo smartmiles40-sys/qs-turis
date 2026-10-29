@@ -24,7 +24,12 @@ A RLS da tabela (0160, `exp_tem_acesso` / `is_readonly`) já cobre o update. Dep
 
 Não é schema novo: `passageiro_requisitos.numero` já existe e a gaveta do Seguro não mostra. Para a Central, "apólice" = requisito `Seguro` (não dispensado) com `arquivo_id`. Fica registrado para o agente do Cockpit.
 
+## 3. Cockpit: onde a baixa entra (29/10)
+
+O cockpit já está pronto pra §1: `lib/cockpit/viagem.ts → acoesDaOperacao` aceita `resolvida` por dia (resolvidas somem da lista) e o botão **Dar baixa** da Visão geral está desligado com a dica "precisa da migration". Depois da migration: ler `resolvida_em` em `detalhe/cockpit/dados.ts` (o `select("*")` de `roteiro_lider_dias` já traz) e gravar `resolvida_em = now(), resolvida_por = auth.uid()` no clique.
+
 ## Fora do escopo (dado que falta e não é desta etapa)
 
-- Ritmo de vendas (spec §3.3, Vendendo): não há histórico de `status_reserva`.
+- Ritmo de vendas (spec §3.3, Vendendo): não há histórico de `status_reserva`. O cockpit mostra "entraram nos últimos 30 dias" pela `created_at` do passageiro (aproximação, rotulada assim).
+- Disparo de cobrança (formulário, apólice, "Cobrar todos"): não há nas Expedições; os botões estão desligados.
 - Fuso da cidade do dia, hotel como entidade: ver `MAPA-EXPEDICOES.md` › Lacunas.

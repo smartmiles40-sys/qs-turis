@@ -5,6 +5,7 @@
 import type { PropsAba } from "../ExpedicaoDetalhe";
 import PainelPassageiros from "../../passageiros/PainelPassageiros";
 
-export default function AbaPassageiros({ exp, sub, onMudou }: PropsAba) {
-  return <PainelPassageiros exp={exp} sub={sub} onMudou={onMudou} />;
+export default function AbaPassageiros({ exp, sub, onMudou, cockpit }: PropsAba) {
+  // Mudou passageiro → o resumo do cockpit (badge da aba, Visão geral) refaz a conta.
+  return <PainelPassageiros exp={exp} sub={sub} onMudou={() => { onMudou(); cockpit?.recarregarResumo(); }} />;
 }

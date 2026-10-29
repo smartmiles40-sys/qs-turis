@@ -210,7 +210,8 @@ export const PRONTIDAO = ["Apto", "Atenção", "Bloqueado"] as const;
 export type Prontidao = (typeof PRONTIDAO)[number];
 
 /** Meses de validade do passaporte exigidos após o retorno (padrão de mercado). */
-export const MESES_VALIDADE_PASSAPORTE_PADRAO = 6;
+// Regra da validade mora em lib/passaporte.ts (6 meses depois da VOLTA) — aqui só o número, pros textos.
+export { MESES_VALIDADE_APOS_VOLTA as MESES_VALIDADE_PASSAPORTE_PADRAO } from "./passaporte";
 
 /**
  * Mapa semáforo → token de cor semântica do tema (app/globals.css).

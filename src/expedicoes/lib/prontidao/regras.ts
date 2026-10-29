@@ -14,7 +14,7 @@
  *    foto/PDF vem da instância (arquivo_id) — só fica Apto com os dois ok.
  */
 import { parseISO } from "date-fns";
-import { MESES_VALIDADE_PASSAPORTE_PADRAO } from "@/expedicoes/lib/constants";
+import { avaliarValidadePassaporte } from "@/expedicoes/lib/passaporte";
 import { requisitosDoDestino } from "@/expedicoes/lib/prontidao/requisitos-destino";
 import type {
   PassageiroRow,
@@ -115,12 +115,6 @@ export type PaxRegra = Pick<PassageiroRow,
 export type ReqRegra = Pick<PassageiroRequisitoRow,
   "id" | "tipo" | "descricao" | "status" | "obrigatoriedade" | "bloqueia_embarque" | "validade" | "arquivo_id">;
 
-function addMonths(iso: string, months: number): Date {
-  const d = parseISO(iso);
-  d.setMonth(d.getMonth() + months);
-  return d;
-}
-
 /** Compara duas datas ISO; retorna a − b em ms (negativo = a antes de b). */
 function antesDe(aIso: string, bIso: string): boolean {
   return parseISO(aIso).getTime() < parseISO(bIso).getTime();
@@ -146,13 +140,14 @@ function checarPassaporte(
   exp: ExpedicaoLite,
   bloqueia: boolean,
 ): Semaforo {
-  if (!p.passaporte || !p.validade_passaporte) return bloqueia ? "bloqueio" : "atencao";
-  // Vence antes do retorno → bloqueio.
-  if (antesDe(p.validade_passaporte, exp.data_retorno)) return "bloqueio";
-  // Válido pro retorno, mas vence dentro da janela de 6 meses → atenção.
-  const limite = addMonths(exp.data_retorno, MESES_VALIDADE_PASSAPORTE_PADRAO).toISOString();
-  if (antesDe(p.validade_passaporte, limite)) return "atencao";
-  return "ok";
+  // Regra ÚNICA da validade (lib/passaporte.ts, 29/10): a mesma da matriz de
+  // Passageiros e da planilha — 6 meses depois da VOLTA.
+  switch (avaliarValidadePassaporte(p, exp).estado) {
+    case "sem": return bloqueia ? "bloqueio" : "atencao";
+    case "vence_na_viagem": return "bloqueio"; // vence antes do retorno
+    case "vence_cedo": return "atencao"; // válido pro retorno, mas dentro da janela de 6 meses
+    default: return "ok";
+  }
 }
 
 function checarContrato(p: PaxRegra): Semaforo {

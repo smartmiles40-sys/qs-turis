@@ -1,5 +1,7 @@
-// Aba "Roteiro do Líder" (app antigo: expedicoes/[id]/roteiro-lider/ —
-// RoteiroLiderEditor + DocsLiderPanel). Resumo operacional dia a dia que a
+// Seção "Roteiro do líder" da aba Logística do cockpit (app antigo:
+// expedicoes/[id]/roteiro-lider/ — RoteiroLiderEditor). Os documentos do líder
+// (DocsLiderPanel) foram pra aba Portal (redesign 29/10). Cada dia ganha a tag
+// OK / Verificar / Atenção / Crítico / Hoje e o dia de hoje fica destacado. Resumo operacional dia a dia que a
 // equipe traduz pro líder; aparece na Área do Líder (/lider, que segue no app
 // antigo lendo `roteiro_lider_dias` por `ordem` e depois `dia`).
 // No antigo as escritas usavam service role; aqui vão direto com a sessão
@@ -13,11 +15,13 @@ import { BotaoExcluir, Carregando, Gaveta } from "../../ui";
 import { supabase, erroOuDados, traduzirErro } from "../../lib/banco";
 import type { RoteiroLiderDiaRow } from "../../lib/database";
 import { formatDate } from "../../lib/utils";
-import DocsLider from "../../roteiro-lider/DocsLider";
+import { tagDoDiaLider } from "../../lib/cockpit/viagem";
+import { dataSP } from "../../lib/fase";
 import { IconeSvg } from "../../drive/icones";
 
 const NIVEIS = ["", "Crítico", "Atenção", "Verificar"] as const;
 const EMOJI: Record<string, string> = { Crítico: "🔴", Atenção: "🟠", Verificar: "🟡" };
+const TOM_CLASSE = { neutral: "ck-tag", info: "ck-tag ck-tag--info", warn: "ck-tag ck-tag--warn", danger: "ck-tag ck-tag--danger", dark: "ck-tag ck-tag--dark" } as const;
 
 type Form = {
   dia: string; data: string; fase: string; local: string; programacao: string; lideres_ativos: string; pax: string;
@@ -34,6 +38,7 @@ export default function AbaRoteiroLider({ exp }: PropsAba) {
   const { somenteLeitura, avisar } = useExp();
   const [dias, setDias] = useState<RoteiroLiderDiaRow[] | null>(null);
   const [editando, setEditando] = useState<RoteiroLiderDiaRow | "novo" | null>(null);
+  const hoje = dataSP(new Date());
 
   const carregar = useCallback(async () => {
     try {
@@ -63,13 +68,10 @@ export default function AbaRoteiroLider({ exp }: PropsAba) {
 
   return (
     <div className="space-y-4">
-      <DocsLider expedicaoId={exp.id} />
-
       <section>
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>Roteiro do Líder</h2>
-            <p className="text-[12.5px] mt-0.5" style={{ color: "var(--ink3)" }}>Resumo operacional dia a dia — o que a equipe traduz pro líder. Aparece na Área do Líder, nesta ordem.</p>
+                        <p className="text-[12.5px] mt-0.5" style={{ color: "var(--ink3)" }}>Resumo operacional dia a dia — o que a equipe traduz pro líder. Aparece na Área do Líder, nesta ordem.</p>
           </div>
           {!somenteLeitura && <Botao variante="primario" onClick={() => setEditando("novo")}><IconeSvg nome="mais" /> Adicionar dia</Botao>}
         </div>
@@ -80,12 +82,11 @@ export default function AbaRoteiroLider({ exp }: PropsAba) {
           </div>
         ) : (
           <div className="space-y-1.5">
-            {dias.map((d, i) => (
-              <div key={d.id} className="group flex items-start gap-3 rounded-xl border px-3 py-2" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
-                <div className="flex w-10 flex-shrink-0 flex-col items-center rounded-md py-1 text-white" style={{ background: "#1F2937" }}>
-                  <span className="text-[8px] font-bold uppercase" style={{ color: "#FCD34D" }}>Dia</span>
-                  <span className="text-[15px] font-bold leading-tight">{d.dia}</span>
-                </div>
+            {dias.map((d, i) => {
+              const tag = tagDoDiaLider(d, hoje);
+              return (
+              <div key={d.id} className="ck-rot group" data-hoje={tag.rotulo === "Hoje" ? "true" : undefined}>
+                <span className="ck-dia">DIA<b>{d.dia}</b></span>
                 <div className="min-w-0 flex-1">
                   {d.fase && <div className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>{d.fase}</div>}
                   <div className="text-[13px] font-medium leading-snug whitespace-pre-line" style={{ color: "var(--ink)" }}>{d.programacao ?? "—"}</div>
@@ -94,7 +95,6 @@ export default function AbaRoteiroLider({ exp }: PropsAba) {
                     {d.local && <span>{d.local}</span>}
                     {d.lideres_ativos && <span>👤 {d.lideres_ativos}</span>}
                     {d.pax && <span>{d.pax} pax</span>}
-                    {d.alerta_nivel && <span title={d.alerta_texto ?? undefined}>{EMOJI[d.alerta_nivel] ?? "⚠️"} {d.alerta_nivel}</span>}
                   </div>
                   {d.alerta_nivel && (d.alerta_texto || d.alerta_acao) && (
                     <div className="mt-1 text-[11.5px] rounded-md px-2 py-1" style={{ background: d.alerta_nivel === "Crítico" ? "var(--err-bg)" : "var(--warn-bg)", color: d.alerta_nivel === "Crítico" ? "var(--err-ink)" : "var(--warn-ink)" }}>
@@ -102,6 +102,7 @@ export default function AbaRoteiroLider({ exp }: PropsAba) {
                     </div>
                   )}
                 </div>
+                <span className={TOM_CLASSE[tag.tom]} title={d.alerta_texto ?? undefined}>{tag.rotulo}</span>
                 {!somenteLeitura && (
                   <div className="flex flex-shrink-0 items-center gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 transition-opacity">
                     <button type="button" title="Subir" aria-label="Subir" disabled={i === 0} onClick={() => void mover(i, -1)} className="p-1.5 rounded-md hover:bg-[var(--card2)] disabled:opacity-30" style={{ color: "var(--ink2)" }}>▲</button>
@@ -115,7 +116,8 @@ export default function AbaRoteiroLider({ exp }: PropsAba) {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

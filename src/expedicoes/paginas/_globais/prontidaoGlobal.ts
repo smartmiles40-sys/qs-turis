@@ -4,6 +4,7 @@
 // getAlertasOperacionais, getResumoProntidao, getResumoProcessos), mas lendo só as
 // expedições em grupo ativas (pacotes ficam de fora, como lá) e paginando tudo
 // (o antigo cortava checklist_itens em 1000 linhas sem avisar).
+import { resumoChecklist } from "../../lib/checklistResumo";
 import { avaliarProntidao } from "../../lib/prontidao/regras";
 import { avaliarAlerta, regraDoTipo, type SeveridadeAlerta } from "../../lib/alertas/regras";
 import { lerPaxProntidao, lerPorIds, lerReqProntidao, listarExpedicoes, type PaxProntidao, type ReqProntidao } from "../../lib/banco";
@@ -133,7 +134,8 @@ export async function resumoProcessos(expedicoes: ExpedicaoRow[]): Promise<Resum
     }
     return {
       id: e.id, nome: e.nome, data_embarque: e.data_embarque, status: e.status, faseAtual: faseAtualChecklist(daysUntil(e.data_embarque)),
-      total: topo.length, concluidos, atrasados, proximos7d, checklist_pct: topo.length ? concluidos / topo.length : 0,
+      // % do checklist = conta ÚNICA (lib/checklistResumo.ts, spec §4.1): todas as tarefas.
+      total: topo.length, concluidos, atrasados, proximos7d, checklist_pct: resumoChecklist(itens.filter((i) => i.expedicao_id === e.id)).pct,
     };
   });
 }

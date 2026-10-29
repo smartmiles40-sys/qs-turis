@@ -9,6 +9,7 @@
 // cabeçalho da expedição lê expedição + passageiros + checklist ao mesmo tempo.
 import { avaliarProntidao, type ResultadoProntidao } from "./prontidao/regras";
 import { lerExpedicao, lerPaxProntidao, lerReqProntidao, lerTudo, listarPassageirosDe, listarRequisitosDe, listarUsuarios, type PaxProntidao, type ReqProntidao } from "./banco";
+import { resumoChecklist } from "./checklistResumo";
 import type { ExpedicaoComAgregados, ExpedicaoRow, PassageiroRequisitoRow, PassageiroRow, UsuarioRow } from "./database";
 
 /** Passageiro + requisitos + resultado. Por padrão a linha inteira; as contas leves usam PaxProntidao/ReqProntidao. */
@@ -37,7 +38,7 @@ function montar(rows: ExpedicaoRow[], ativos: PaxProntidao[], reqPorPax: Map<str
   const nome = new Map(usuarios.map((u) => [u.id, u.nome]));
   return rows.map((e) => {
     const paxDaExp = ativos.filter((p) => p.expedicao_id === e.id);
-    const processos = checklist.filter((c) => c.expedicao_id === e.id && !c.parent_id);
+    const tarefas = checklist.filter((c) => c.expedicao_id === e.id);
     return {
       ...e,
       // Ocupação conta só pagantes/cortesias — líderes (equipe) ficam fora.
@@ -49,7 +50,9 @@ function montar(rows: ExpedicaoRow[], ativos: PaxProntidao[], reqPorPax: Map<str
       // Central (29/10): seguro exigido sem a apólice anexada (o requisito Seguro sem arquivo).
       // Não existe coluna de apólice — o anexo do requisito É a apólice (docs/MAPA-EXPEDICOES.md).
       seguro_sem_apolice: paxDaExp.filter((p) => (reqPorPax.get(p.id) ?? []).some((r) => r.tipo === "Seguro" && r.status !== "Dispensado" && !r.arquivo_id)).length,
-      checklist_pct: processos.length ? processos.filter((c) => c.status === "Concluído").length / processos.length : 0,
+      // §4.1 (29/10): conta ÚNICA do checklist — todas as tarefas (lib/checklistResumo.ts).
+      // Antes só os processos de topo, o que dava "78%" no topo contra "18/74" no Resumo.
+      checklist_pct: resumoChecklist(tarefas).pct,
       responsavel_op_nome: e.responsavel_operacional_id ? nome.get(e.responsavel_operacional_id) ?? null : null,
       responsavel_com_nome: e.responsavel_comercial_id ? nome.get(e.responsavel_comercial_id) ?? null : null,
     };

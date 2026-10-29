@@ -1,22 +1,22 @@
-// Aba "Documentos" da expedição (app antigo: expedicoes/[id]/documentos/page.tsx).
-// 1) Drive da expedição — arquivos compartilhados, sem passageiro (os anexos do
-//    portal e os documentos do líder também moram aqui).
-// 2) Status de documentos por passageiro — só leitura: passaporte, validade,
-//    visto, seguro, apólice, voo nacional e o status geral (mesma regra do antigo:
-//    sem passaporte ou passaporte que vence < 180 dias depois do embarque = Crítico;
-//    seguro não emitido ou visto pendente = Pendente).
+// "Status de documentos por passageiro" (era o 2º bloco da aba Documentos do app
+// antigo: expedicoes/[id]/documentos/page.tsx). Redesign 29/10: o Drive foi pra aba
+// Arquivos (detalhe/abas/AbaArquivos.tsx) e este bloco virou uma seção recolhível
+// da aba Passageiros (a matriz já mostra visto/seguro pelos REQUISITOS; aqui fica
+// o cadastro antigo da tabela `documentos`, que nada no QS grava mais).
+// Só leitura: passaporte, validade, visto, seguro, apólice, voo nacional e o status
+// geral — sem passaporte ou validade fora da regra única (lib/passaporte.ts: 6 meses
+// depois da VOLTA) = Crítico; seguro não emitido ou visto pendente = Pendente.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { PropsAba } from "../ExpedicaoDetalhe";
-import { useExp } from "../../contexto";
-import { Cartao, Carregando, Selo, useAoVivo, type Tom } from "../../ui";
-import { lerPorIds, lerTudo } from "../../lib/banco";
-import type { DocumentoRow, PassageiroRow } from "../../lib/database";
-import { daysUntil, formatDate } from "../../lib/utils";
-import Drive from "../../drive/Drive";
+import { useExp } from "../contexto";
+import { Carregando, Selo, useAoVivo, type Tom } from "../ui";
+import { lerPorIds, lerTudo } from "../lib/banco";
+import type { DocumentoRow, ExpedicaoRow, PassageiroRow } from "../lib/database";
+import { formatDate } from "../lib/utils";
+import { avaliarValidadePassaporte } from "../lib/passaporte";
 
 type StatusGeral = "OK" | "Pendente" | "Crítico";
 
-export default function AbaDocumentos({ exp }: PropsAba) {
+export default function StatusDocumentosPax({ exp }: { exp: ExpedicaoRow }) {
   const { ir, avisar } = useExp();
   const [pax, setPax] = useState<PassageiroRow[] | null>(null);
   const [docs, setDocs] = useState<DocumentoRow[]>([]);
@@ -33,13 +33,14 @@ export default function AbaDocumentos({ exp }: PropsAba) {
   useAoVivo([{ tabela: "passageiros", filtro: `expedicao_id=eq.${exp.id}` }, { tabela: "documentos" }], carregar, 800);
 
   const docPorPax = useMemo(() => new Map(docs.map((d) => [d.passageiro_id, d])), [docs]);
-  const embarqueDias = daysUntil(exp.data_embarque) ?? 0;
+  // Bug corrigido (29/10): o link do passageiro era fixo em "expedicoes" e quebrava em pacote.
+  const tela = exp.tipo === "pacote" ? "pacotes" : "expedicoes";
+  const validade = (p: PassageiroRow) => avaliarValidadePassaporte(p, exp);
 
   function statusGeral(p: PassageiroRow): StatusGeral {
     const d = docPorPax.get(p.id);
     if (!p.passaporte) return "Crítico";
-    const v = daysUntil(p.validade_passaporte);
-    if (v != null && v - embarqueDias < 180) return "Crítico";
+    if (p.validade_passaporte && validade(p).estado !== "ok") return "Crítico";
     if (d?.seguro_status !== "Emitido") return "Pendente";
     if (d?.visto_necessario && d?.status_visto !== "Aprovado") return "Pendente";
     return "OK";
@@ -53,16 +54,10 @@ export default function AbaDocumentos({ exp }: PropsAba) {
 
   return (
     <div className="space-y-4">
-      <Cartao titulo={<>Drive da expedição<span className="block text-[11.5px] font-normal mt-0.5" style={{ color: "var(--ink3)" }}>
-        Arquivos compartilhados (não vinculados a um passageiro). Pra anexar algo de um passageiro específico, abra o perfil dele em Passageiros.</span></>}>
-        <Drive expedicaoId={exp.id} />
-      </Cartao>
-
       <section>
         <div className="flex flex-wrap items-end gap-2 mb-2">
           <div className="flex-1 min-w-[200px]">
-            <h2 className="text-[14px] font-bold" style={{ color: "var(--ink)" }}>Status de documentos por passageiro</h2>
-            <p className="text-[12px]" style={{ color: "var(--ink3)" }}>{pax?.length ?? 0} passageiro(s)</p>
+            <p className="text-[12px]" style={{ color: "var(--ink3)" }}>{pax?.length ?? 0} passageiro(s) · cadastro antigo (tabela documentos), só leitura</p>
           </div>
           {pax && pax.length > 0 && (
             <div className="flex gap-1.5">
@@ -87,10 +82,9 @@ export default function AbaDocumentos({ exp }: PropsAba) {
                   <tr><td colSpan={9} className="text-center py-8" style={{ color: "var(--ink3)" }}>Sem passageiros nessa expedição.</td></tr>
                 ) : pax.map((p) => {
                   const d = docPorPax.get(p.id);
-                  const v = daysUntil(p.validade_passaporte);
-                  const alertaValidade = v != null && v - embarqueDias < 180;
+                  const alertaValidade = !!p.validade_passaporte && validade(p).estado !== "ok";
                   const sg = statusGeral(p);
-                  const perfil = () => ir("expedicoes", `${exp.id}/passageiros/pax/${p.id}`);
+                  const perfil = () => ir(tela, `${exp.id}/passageiros/pax/${p.id}`);
                   return (
                     <tr key={p.id} className="border-t rel-linha" style={{ borderColor: "var(--line)", opacity: p.status_reserva === "Cancelado" ? 0.6 : 1 }}>
                       <td className="px-2.5 py-1.5 font-semibold whitespace-nowrap">

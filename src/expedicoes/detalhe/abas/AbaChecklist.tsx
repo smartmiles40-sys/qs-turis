@@ -8,6 +8,8 @@ import { useExp } from "../../contexto";
 import { Carregando, useAoVivo } from "../../ui";
 import { faseAtualChecklist } from "../../lib/constants";
 import { daysUntil } from "../../lib/utils";
+import { resumoChecklist } from "../../lib/checklistResumo";
+import { dataSP } from "../../lib/fase";
 import type { ChecklistItemRow } from "../../lib/database";
 import { gerarChecklistPadrao, listarChecklist, reordenar } from "../../checklist/dados";
 import { ChipsFases, Grafico, Kanban, Tabela, Triagem } from "../../checklist/Visoes";
@@ -82,7 +84,8 @@ export default function AbaChecklist({ exp, onMudou }: PropsAba) {
   }
 
   const topo = itens.filter((i) => !i.parent_id);
-  const concluidos = topo.filter((i) => i.status === "Concluído").length;
+  // §4.1: a MESMA conta da Saúde e do cabeçalho (lib/checklistResumo.ts).
+  const resumo = resumoChecklist(itens, dataSP(new Date()));
 
   return (
     <div className="space-y-3">
@@ -93,7 +96,8 @@ export default function AbaChecklist({ exp, onMudou }: PropsAba) {
             <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold" style={{ color: "#16A34A" }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: "#16A34A" }} />ao vivo</span>
           </div>
           <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
-            {concluidos}/{topo.length} processos concluídos
+            {resumo.concluidas}/{resumo.total} tarefas concluídas ({Math.round(resumo.pct * 100)}%)
+            {resumo.atrasadas > 0 && <> · <b style={{ color: "var(--danger)" }}>{resumo.atrasadas} atrasada{resumo.atrasadas === 1 ? "" : "s"}</b></>}
             {faseAtual && <> · fase atual: <b style={{ color: "var(--ink)" }}>{faseAtual}</b></>}
           </p>
         </div>

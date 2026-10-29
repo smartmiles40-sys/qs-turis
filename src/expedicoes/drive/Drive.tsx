@@ -29,15 +29,25 @@ export interface PropsDrive {
   categorias?: readonly CategoriaArquivo[];
   /** avisa quem usa o Drive que algo mudou (ex.: recalcular prontidão) */
   onMudou?: () => void;
+  /** Pasta controlada por fora (cockpit: grade de pastas da aba Arquivos). */
+  pasta?: CategoriaArquivo | "Todos";
+  onPasta?: (p: CategoriaArquivo | "Todos") => void;
+  /** Esconde a fileira de pastas (quem usa já mostra as pastas). */
+  ocultarPastas?: boolean;
+  /** Entrega a lista lida (o cockpit conta por pasta sem ler de novo). */
+  onArquivos?: (lista: ArquivoRow[]) => void;
 }
 
 type Pasta = CategoriaArquivo | "Todos";
 
-export default function Drive({ expedicaoId, passageiroId = null, somenteLeitura: soLerProp, pastaInicial, categorias = CATEGORIA_ARQUIVO, onMudou }: PropsDrive) {
+export default function Drive({ expedicaoId, passageiroId = null, somenteLeitura: soLerProp, pastaInicial, categorias = CATEGORIA_ARQUIVO, onMudou,
+  pasta: pastaFora, onPasta, ocultarPastas = false, onArquivos }: PropsDrive) {
   const { somenteLeitura: soLerCtx, avisar } = useExp();
   const soLer = soLerCtx || Boolean(soLerProp);
   const inicial = (categorias as readonly string[]).includes(pastaInicial ?? "") ? (pastaInicial as CategoriaArquivo) : "Todos";
-  const [pasta, setPasta] = useState<Pasta>(inicial);
+  const [pastaLocal, setPastaLocal] = useState<Pasta>(inicial);
+  const pasta: Pasta = pastaFora ?? pastaLocal;
+  const setPasta = (p: Pasta) => { setPastaLocal(p); onPasta?.(p); };
   const [arquivos, setArquivos] = useState<ArquivoRow[] | null>(null);
   const [busca, setBusca] = useState("");
   const [enviando, setEnviando] = useState<{ feitos: number; total: number } | null>(null);
@@ -46,6 +56,8 @@ export default function Drive({ expedicaoId, passageiroId = null, somenteLeitura
   const [editando, setEditando] = useState<ArquivoRow | null>(null);
   const [miniaturas, setMiniaturas] = useState<Record<string, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
+  const onArquivosRef = useRef(onArquivos);
+  onArquivosRef.current = onArquivos;
 
   const carregar = useCallback(async () => {
     try {
@@ -55,6 +67,7 @@ export default function Drive({ expedicaoId, passageiroId = null, somenteLeitura
       });
       lista.sort((a, b) => b.created_at.localeCompare(a.created_at));
       setArquivos(lista);
+      onArquivosRef.current?.(lista);
     } catch (e) { avisar(e instanceof Error ? e.message : "Erro ao carregar arquivos", "erro"); setArquivos([]); }
   }, [expedicaoId, passageiroId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void carregar(); }, [carregar]);
@@ -115,12 +128,12 @@ export default function Drive({ expedicaoId, passageiroId = null, somenteLeitura
   return (
     <div className="space-y-3">
       {/* Pastas */}
-      <div className="flex flex-wrap gap-1.5 items-center" role="tablist" aria-label="Pastas">
+      {!ocultarPastas && <div className="flex flex-wrap gap-1.5 items-center" role="tablist" aria-label="Pastas">
         <ChipPasta rotulo="Todos" ativa={pasta === "Todos"} n={arquivos?.length ?? 0} onClick={() => setPasta("Todos")} />
         {categorias.map((c) => (
           <ChipPasta key={c} rotulo={c} ativa={pasta === c} n={contagem.get(c) ?? 0} onClick={() => setPasta(c)} icone={<IconeCategoria categoria={c} />} />
         ))}
-      </div>
+      </div>}
 
       {/* Envio */}
       {!soLer && (
