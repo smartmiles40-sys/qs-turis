@@ -107,6 +107,9 @@
     "api/assistente.js": {
       "maxDuration": 30
     },
+    "api/mkt-drive.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -171,6 +174,10 @@
     {
       "path": "/api/rel-vendas",
       "schedule": "20 * * * *"
+    },
+    {
+      "path": "/api/mkt-drive?cron=1",
+      "schedule": "17 * * * *"
     }
   ],
   "headers": [
