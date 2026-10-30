@@ -1,13 +1,15 @@
 // src/mkt/disparos/RecorrenciasPage.tsx
 // -----------------------------------------------------------------------------
 // RECORRÊNCIAS DO MARKETING (0242): "toda segunda às 9h, pra lista X".
+// Desde 30/10 não é mais tela própria: é a seção "Toda semana" da aba Disparos
+// (src/mkt/disparos/DisparosMktPage.tsx). Criar é pelo "+ Novo disparo".
 // É um MOLDE: na hora marcada o cron cria uma campanha agendada normal (com o
 // público de NAQUELE momento) e ela anda na mesma fila, ritmo e simulação.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Badge, Button, EmptyState, Page, PageHeader } from "@/components/ui";
+import { Alert, Badge, Button, EmptyState } from "@/components/ui";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { descreverPublico, lerConfig, type ConfigDisparo, type MapaVariaveis } from "@/lib/qs/disparos";
+import { descreverPublico, type ConfigDisparo, type MapaVariaveis } from "@/lib/qs/disparos";
 import { Campo, Chips, INPUT, INPUT_ESTILO, Modal } from "@/components/sdr/disparos/pecas";
 import { apagarRecorrencia, listarRecorrencias, salvarRecorrencia, type PublicoMkt, type Recorrencia } from "./api";
 import { ModeloEVariaveis, PublicoMktForm, variaveisOk } from "./pecasMkt";
@@ -55,26 +57,25 @@ function Editor({ cfg, inicial, onFechar, onSalvo }: { cfg: ConfigDisparo; inici
   );
 }
 
-export default function RecorrenciasPage() {
-  const [cfg, setCfg] = useState<ConfigDisparo | null>(null);
+/** A seção "Toda semana" da aba Disparos. `versao` muda = recarrega. */
+export function SecaoRecorrencias({ cfg, versao, onContar }: { cfg: ConfigDisparo; versao: number; onContar?: (n: number) => void }) {
   const [lista, setLista] = useState<Recorrencia[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-  const [editando, setEditando] = useState<Recorrencia | "nova" | null>(null);
+  const [editando, setEditando] = useState<Recorrencia | null>(null);
 
   const carregar = useCallback(async () => {
-    try { const [c, l] = await Promise.all([lerConfig("marketing"), listarRecorrencias()]); setCfg(c); setLista(l); setErro(null); }
+    try { const l = await listarRecorrencias(); setLista(l); setErro(null); onContar?.(l.length); }
     catch (e) { setErro(e instanceof Error ? e.message : "Não carregou."); setLista([]); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => { void carregar(); }, [carregar]);
+  useEffect(() => { void carregar(); }, [carregar, versao]);
 
   return (
-    <Page>
-      <PageHeader title="Recorrências" subtitle="Disparos que se repetem sozinhos: toda segunda às 9h, toda sexta às 18h…"
-        actions={cfg ? <Button variant="primary" onClick={() => setEditando("nova")}>+ Nova recorrência</Button> : undefined} />
+    <div className="space-y-3">
       {erro && <Alert tone="danger">{erro}</Alert>}
-      {cfg && !cfg.numeroMkt && <Alert tone="warn">O Marketing ainda não tem número: a campanha de cada ocorrência é criada, mas fica pausada até o número existir.</Alert>}
+      {!cfg.numeroMkt && lista?.length ? <Alert tone="warn">O Marketing ainda não tem número: a campanha de cada semana é criada, mas fica parada até o número existir.</Alert> : null}
       {lista === null ? <p className="text-[13px]" style={{ color: "var(--subtle)" }}>Carregando…</p>
-        : lista.length === 0 ? <div className="qs-card"><EmptyState title="Nenhuma recorrência" description="Ex.: toda segunda às 9h, as vagas abertas da semana pra lista 'Comunidade'." /></div>
+        : lista.length === 0 ? <div className="qs-card"><EmptyState title="Nenhum disparo semanal" description="Ex.: toda segunda às 9h, as vagas abertas da semana pra lista “Comunidade”. Crie pelo “+ Novo disparo” › Repetir toda semana." /></div>
         : (
           <ul className="space-y-2">
             {lista.map((r) => (
@@ -92,14 +93,14 @@ export default function RecorrenciasPage() {
                 }}>{r.ativa ? "Pausar" : "Ativar"}</Button>
                 <Button size="sm" variant="ghost" onClick={() => setEditando(r)}>Editar</Button>
                 <Button size="sm" variant="destructive" onClick={async () => {
-                  if (!window.confirm(`Apagar a recorrência "${r.nome}"? As campanhas já criadas continuam.`)) return;
+                  if (!window.confirm(`Apagar o disparo semanal "${r.nome}"? As campanhas já criadas continuam.`)) return;
                   try { await apagarRecorrencia(r.id); void carregar(); } catch (e) { notifyError(e instanceof Error ? e.message : "Falhou."); }
                 }}>Apagar</Button>
               </li>
             ))}
           </ul>
         )}
-      {editando && cfg && <Editor cfg={cfg} inicial={editando === "nova" ? null : editando} onFechar={() => setEditando(null)} onSalvo={() => { setEditando(null); void carregar(); }} />}
-    </Page>
+      {editando && <Editor cfg={cfg} inicial={editando} onFechar={() => setEditando(null)} onSalvo={() => { setEditando(null); void carregar(); }} />}
+    </div>
   );
 }

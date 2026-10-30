@@ -34,7 +34,7 @@ function useVisivel(cb: () => void, ms: number) {
   }, [ms]);
 }
 
-/** Lê ?c=<id> do hash (#mkt/conversas?c=…), que é o link do aviso "avisar humano". */
+/** Lê ?c=<id> do hash (#mkt/whatsapp?aba=conversas&c=…), que é o link do aviso "avisar humano". */
 function conversaDoLink(): string | null {
   const m = /[?&]c=([0-9a-f-]{36})/i.exec(window.location.hash || window.location.search);
   return m ? m[1] : null;
@@ -67,11 +67,10 @@ export default function ConversasPage() {
   const atual = conversas?.find((c) => c.id === aberta) ?? null;
 
   return (
-    <div className="mkt-raiz p-4 md:p-6 max-w-[1500px] mx-auto">
+    <div className="mkt-raiz">
       <style>{MKT_CSS}</style>
-      <h1 className="text-xl font-bold mb-3" style={{ color: "var(--ink)" }}>Conversas · WhatsApp do Marketing</h1>
       {erro && <div className="mb-3"><Aviso tom="erro">{erro}</Aviso></div>}
-      <div className="flex gap-3" style={{ height: "calc(100vh - 170px)", minHeight: 420 }}>
+      <div className="flex gap-3" style={{ height: "calc(100vh - 230px)", minHeight: 420 }}>
         <aside className={`mkt-card flex flex-col w-full md:w-[340px] shrink-0 ${atual ? "hidden md:flex" : "flex"}`}>
           <div className="p-2 space-y-2 border-b" style={{ borderColor: "var(--line)" }}>
             <Entrada value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar nome ou número…" />
@@ -82,7 +81,7 @@ export default function ConversasPage() {
             </div>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {!conversas ? <Carregando /> : !lista.length ? <div className="p-4 text-[13px]" style={{ color: "var(--ink3)" }}>Nenhuma conversa.</div> : lista.map((c) => (
+            {!conversas ? <Carregando /> : !lista.length ? <div className="p-4 text-[13px]" style={{ color: "var(--ink3)" }}>{conversas.length ? "Nenhuma conversa com esse filtro." : "Nenhuma conversa ainda."}</div> : lista.map((c) => (
               <button key={c.id} type="button" onClick={() => setAberta(c.id)} className="w-full text-left px-3 py-2.5 border-b"
                 style={{ borderColor: "var(--line)", background: c.id === aberta ? COR_SUAVE : undefined }}>
                 <div className="flex items-center gap-1.5">
@@ -100,7 +99,7 @@ export default function ConversasPage() {
           </div>
         </aside>
         {atual ? <Conversa c={atual} onVoltar={() => setAberta(null)} onMudou={carregar} />
-          : <div className="mkt-card flex-1 hidden md:flex items-center justify-center text-[13px]" style={{ color: "var(--ink3)" }}>Escolha uma conversa.</div>}
+          : <div className="mkt-card flex-1 hidden md:flex items-center justify-center text-[13px]" style={{ color: "var(--ink3)" }}>{conversas && !conversas.length && !erro ? "Quando alguém escrever para o número do Marketing, a conversa aparece aqui." : "Escolha uma conversa."}</div>}
       </div>
     </div>
   );

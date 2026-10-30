@@ -73,22 +73,43 @@ export function PublicoMktForm({ p, set }: { p: PublicoMkt; set: (p: PublicoMkt)
 }
 
 /** Modelo aprovado + de onde vem cada {{n}} + a bolha. */
-export function ModeloEVariaveis({ aprovados, modeloNome, setModeloNome, mapa, setMapa, fonte }: {
+export function ModeloEVariaveis({ aprovados, modeloNome, setModeloNome, mapa, setMapa, fonte, semBolha, emCartoes }: {
   aprovados: ModeloDisparo[]; modeloNome: string; setModeloNome: (n: string) => void;
   mapa: MapaVariaveis; setMapa: (m: MapaVariaveis) => void; fonte?: FontePublico;
+  /** A prévia do WhatsApp está ao lado: não repete a bolha aqui. */
+  semBolha?: boolean;
+  /** Mostra os modelos como cartões clicáveis (o "TemplatePicker" do SendFlow). */
+  emCartoes?: boolean;
 }) {
   const modelo = aprovados.find((m) => m.nome === modeloNome) ?? null;
   const vars = modelo ? variaveisDoCorpo(modelo.corpo) : [];
   const fontes = FONTES_MKT.filter((f) => f.id !== "campo" || !fonte || fonte === "contatos");
-  if (!aprovados.length) return <Alert tone="warn">Nenhum modelo aprovado do Marketing ainda. Monte na aba Modelos, aprove na Meta e marque como aprovado.</Alert>;
+  if (!aprovados.length) return <Alert tone="warn">Nenhum modelo aprovado do Marketing ainda. Monte em “Modelos”, aprove na Meta e marque como aprovado — disparo em massa só sai com modelo aprovado.</Alert>;
   return (
     <div className="space-y-2">
-      <Campo rotulo="Modelo aprovado">
-        <select className={INPUT} style={INPUT_ESTILO} value={modeloNome} onChange={(e) => { setModeloNome(e.target.value); setMapa({}); }}>
-          <option value="">Escolha…</option>
-          {aprovados.map((m) => <option key={`${m.nome}:${m.idioma}`} value={m.nome}>{m.nome}</option>)}
-        </select>
-      </Campo>
+      {emCartoes ? (
+        <div role="radiogroup" aria-label="Modelo aprovado" className="grid gap-2 sm:grid-cols-2">
+          {aprovados.map((m) => {
+            const on = m.nome === modeloNome;
+            return (
+              <button key={`${m.nome}:${m.idioma}`} type="button" role="radio" aria-checked={on} onClick={() => { if (!on) { setModeloNome(m.nome); setMapa({}); } }}
+                className="rounded-xl border p-3 text-left transition-colors"
+                style={on ? { borderColor: "var(--rel)", background: "var(--rel-soft)" } : { borderColor: "var(--line)", background: "var(--card)" }}>
+                <span className="block text-[13px] font-semibold" style={{ color: on ? "var(--rel-ink)" : "var(--ink)" }}>{m.nome}</span>
+                <span className="mt-0.5 block text-[12px] leading-snug line-clamp-2" style={{ color: "var(--ink3)" }}>{m.corpo}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <Campo rotulo="Modelo aprovado">
+          <select className={INPUT} style={INPUT_ESTILO} value={modeloNome} onChange={(e) => { setModeloNome(e.target.value); setMapa({}); }}>
+            <option value="">Escolha…</option>
+            {aprovados.map((m) => <option key={`${m.nome}:${m.idioma}`} value={m.nome}>{m.nome}</option>)}
+          </select>
+        </Campo>
+      )}
+      {vars.length > 0 && <p className="text-[12.5px] font-semibold" style={{ color: "var(--ink2)" }}>De onde vem cada pedaço variável do texto:</p>}
       {vars.map((v) => (
         <div key={v} className="grid grid-cols-[48px_1fr_1fr] items-center gap-2">
           <span className="text-[13px] qs-num" style={{ color: "var(--muted)" }}>{`{{${v}}}`}</span>
@@ -103,7 +124,7 @@ export function ModeloEVariaveis({ aprovados, modeloNome, setModeloNome, mapa, s
             : <span />}
         </div>
       ))}
-      {modelo && <Bolha titulo={modelo.cabecalho} texto={preverTexto(modelo.corpo, mapa)} rodape={modelo.rodape} botao={modelo.botaoParar !== false ? "Parar de receber" : null} />}
+      {modelo && !semBolha && <Bolha titulo={modelo.cabecalho} texto={preverTexto(modelo.corpo, mapa)} rodape={modelo.rodape} botao={modelo.botaoParar !== false ? "Parar de receber" : null} />}
     </div>
   );
 }
@@ -136,7 +157,7 @@ export function CaixaPreviaMkt({ pv, carregando }: { pv: Previa | null; carregan
           )}
         </>
       )}
-      {!pv.numeroOk && <Alert tone="warn">O Marketing ainda não tem número: dá pra montar e agendar, mas nada entra na fila até o admin definir o número (aba Número).</Alert>}
+      {!pv.numeroOk && <Alert tone="warn">O Marketing ainda não tem número: dá pra montar e agendar, mas nada entra na fila até o admin definir o número (botão Número).</Alert>}
     </div>
   );
 }

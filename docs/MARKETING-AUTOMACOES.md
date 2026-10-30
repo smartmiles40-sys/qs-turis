@@ -65,4 +65,4 @@ Regras da Meta: resposta privada a comentário = 1 DM por comentário, em até 7
 
 - QR Code: o QS não tem biblioteca de QR (e não dava para instalar dependência); a tela dá o link wa.me para colar num gerador.
 - Conversas atualiza a cada 10 s (sem Realtime, de propósito, por egress).
-- O link do aviso "avisar humano" é `#mkt/conversas?c=<id>` — depende da casca do Marketing abrir essa rota.
+- O link do aviso "avisar humano" é `#mkt/whatsapp?aba=conversas&c=<id>` (desde 30/10: Automações e Conversas viraram abas da página WhatsApp).

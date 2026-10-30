@@ -8,7 +8,7 @@
 // Tudo direto no banco: a RLS da 0242 deixa o Marketing escrever só nas mkt_*.
 // -----------------------------------------------------------------------------
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Button, EmptyState, Page, PageHeader, ProgressBar, SearchInput, Segmented } from "@/components/ui";
+import { Alert, Badge, Button, EmptyState, ProgressBar, SearchInput, Segmented } from "@/components/ui";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { Campo, INPUT, INPUT_ESTILO, Modal } from "@/components/sdr/disparos/pecas";
 import {
@@ -299,9 +299,11 @@ export default function ContatosPage() {
   }
 
   return (
-    <Page wide>
-      <PageHeader title="Contatos" subtitle="A base do Marketing: importe planilhas, organize em listas e tags e use no disparo."
-        actions={<div className="flex gap-2"><Button onClick={() => setAbrindo("novo")}>+ Contato</Button><Button variant="primary" onClick={() => setImportando(true)}>Importar CSV</Button></div>} />
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[13px]" style={{ color: "var(--ink3)" }}>A base do Marketing: importe planilhas, organize em listas e tags e use no disparo.</p>
+        <div className="flex gap-2"><Button onClick={() => setAbrindo("novo")}>+ Contato</Button><Button variant="primary" onClick={() => setImportando(true)}>Importar CSV</Button></div>
+      </div>
       {erro && <Alert tone="danger">{erro}</Alert>}
       <Segmented options={[{ value: "contatos" as Aba, label: "Contatos", count: total }, { value: "listas" as Aba, label: "Listas", count: listas.length }]} value={aba} onChange={setAba} label="Seções" />
 
@@ -377,7 +379,7 @@ export default function ContatosPage() {
 
       {importando && <Importar listas={listas} onFechar={() => setImportando(false)} onFeito={tudo} />}
       {abrindo && <Ficha id={abrindo} listas={listas} onFechar={() => setAbrindo(null)} onMudou={tudo} />}
-    </Page>
+    </div>
   );
 }
 

@@ -322,7 +322,7 @@ async function executarAcao(ctx, a, fluxo, exec) {
           method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal',
           body: {
             user_id: uid, tipo: 'mkt_humano', area: null, titulo: 'Marketing: conversa pede atendimento', texto: texto.slice(0, 300),
-            link: `#mkt/conversas?c=${c.id}`, origem: 'mkt_automacao', origem_id: c.id, chave: `mkt-humano:${c.id}:${agoraIso().slice(0, 13)}`,
+            link: `#mkt/whatsapp?aba=conversas&c=${c.id}`, origem: 'mkt_automacao', origem_id: c.id, chave: `mkt-humano:${c.id}:${agoraIso().slice(0, 13)}`,
           },
         }));
       }
