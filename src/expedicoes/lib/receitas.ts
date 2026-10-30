@@ -3,6 +3,9 @@
 // Marca-se na triagem da inscrição ("Preciso emitir e enviar a receita"); a 0223
 // leva a marca pro passageiro na aprovação. A receita só entra na lista quando
 // faltam ≤ 20 dias pro embarque; a data-limite é embarque − 20 dias.
+// 30/10 (Bruno): a tela solta "Receitas" saiu do menu — a receita mora na FICHA do
+// cliente (aba Saúde). O alerta continua: bloco "Receitas a enviar" nas Inscrições,
+// cada linha leva pra ficha (src/rel/clientes/ficha/ReceitasAEnviar.tsx).
 import { addDays, format, parseISO } from "date-fns";
 import { supabase, listarExpedicoes, traduzirErro } from "./banco";
 import type { ExpedicaoRow } from "./database";
@@ -11,6 +14,8 @@ export const DIAS_JANELA_RECEITA = 20;
 
 export interface Receita {
   passageiroId: string;
+  /** a ficha da pessoa (cadastro único 0172) — null = passageiro ainda sem ficha */
+  clienteId: string | null;
   nome: string;
   telefone: string | null;
   saude: Record<string, string>;
@@ -26,18 +31,18 @@ const diasEntre = (de: string, ate: string) => Math.round((parseISO(ate).getTime
 /** Todas as receitas marcadas nas expedições que ainda não embarcaram (ou embarcam hoje). */
 export async function listarReceitas(hoje: string): Promise<Receita[]> {
   const { data, error } = await supabase.from("passageiros")
-    .select("id,nome_completo,telefone,saude,expedicao_id,receita_enviada_em")
+    .select("id,cliente_id,nome_completo,telefone,saude,expedicao_id,receita_enviada_em")
     .eq("receita_pendente", true).limit(1000);
   if (error) throw new Error(traduzirErro(error.message));
   const exps = new Map((await listarExpedicoes()).map((e) => [e.id, e]));
   const out: Receita[] = [];
-  for (const p of (data ?? []) as { id: string; nome_completo: string; telefone: string | null; saude: unknown; expedicao_id: string; receita_enviada_em: string | null }[]) {
+  for (const p of (data ?? []) as { id: string; cliente_id: string | null; nome_completo: string; telefone: string | null; saude: unknown; expedicao_id: string; receita_enviada_em: string | null }[]) {
     const exp = exps.get(p.expedicao_id);
     if (!exp || exp.status === "Cancelada") continue;
     if (exp.data_embarque && exp.data_embarque < hoje) continue;
     const limite = exp.data_embarque ? format(addDays(parseISO(exp.data_embarque), -DIAS_JANELA_RECEITA), "yyyy-MM-dd") : null;
     out.push({
-      passageiroId: p.id, nome: p.nome_completo, telefone: p.telefone,
+      passageiroId: p.id, clienteId: p.cliente_id, nome: p.nome_completo, telefone: p.telefone,
       saude: (p.saude && typeof p.saude === "object" ? p.saude : {}) as Record<string, string>,
       exp, limite, diasAteLimite: limite ? diasEntre(hoje, limite) : null, enviadaEm: p.receita_enviada_em,
     });
