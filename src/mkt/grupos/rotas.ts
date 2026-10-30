@@ -1,12 +1,23 @@
-// src/mkt/grupos/rotas.ts — telas da frente "Grupos do WhatsApp" (0243) no menu do Marketing.
-// Ícones: nomes de src/mkt/icones.tsx (frente conteudo).
+// src/mkt/grupos/rotas.ts — "Grupos" no menu do Marketing: UMA entrada, com as abas
+// Campanhas | Cadências | Grupos | Celular dentro da página (pedido do Bruno, 30/10:
+// "não precisa ter tanta coisa assim no menu esquerdo, pode ser um campo dentro da página").
+// O chip do Marketing virou o selo no canto da página.
 import { lazy } from "react";
 import type { RotaMkt } from "../rotas";
+import { hashNovoDaRotaAntiga } from "./rotasAntigas";
 
 export const ROTAS_GRUPOS: RotaMkt[] = [
-  { id: "grupos", rotulo: "Grupos do WhatsApp", grupo: "disparos", icone: "grupo", componente: lazy(() => import("./GruposPage")) },
-  { id: "grupos-campanhas", rotulo: "Campanhas p/ grupos", grupo: "disparos", icone: "disparo", componente: lazy(() => import("./CampanhasPage")) },
-  { id: "grupos-cadencias", rotulo: "Cadências de grupo", grupo: "disparos", icone: "automacao", componente: lazy(() => import("./CadenciasPage")) },
-  { id: "grupos-celular", rotulo: "Celular do MKT", grupo: "disparos", icone: "lista", componente: lazy(() => import("./CelularPage")) },
-  { id: "grupos-chip", rotulo: "Chip do Marketing", grupo: "disparos", icone: "config", componente: lazy(() => import("./ConexaoPage")) },
+  { id: "grupos", rotulo: "Grupos", grupo: "disparos", icone: "grupo", componente: lazy(() => import("./GruposArea")) },
 ];
+
+// Links antigos (#mkt/grupos-campanhas…) → #mkt/grupos?aba=…  Roda ao carregar o módulo
+// (antes da área ler a rota) e a cada "hashchange" — este ouvinte entra antes do da área,
+// então a área já lê o endereço corrigido. replaceState: não enche o "voltar".
+if (typeof window !== "undefined") {
+  const corrigir = () => {
+    const novo = hashNovoDaRotaAntiga(window.location.hash);
+    if (novo) history.replaceState(history.state, "", window.location.pathname + window.location.search + novo);
+  };
+  corrigir();
+  window.addEventListener("hashchange", corrigir);
+}

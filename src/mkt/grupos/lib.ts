@@ -138,9 +138,15 @@ export async function lerLinks(): Promise<TagLink[]> {
   return ok(await supabase.from("mkt_grupos_tag_links").select("tag_id,grupo_jid").limit(20000)) as TagLink[];
 }
 export async function lerCampanhas(filtro?: { cadenciaId?: string }): Promise<Campanha[]> {
-  let q = supabase.from("mkt_grupos_campanhas").select("*").order("enviar_em", { ascending: false, nullsFirst: true }).limit(300);
+  // teto do PostgREST é 1000 (corta calado): as mais novas primeiro
+  let q = supabase.from("mkt_grupos_campanhas").select("*").order("enviar_em", { ascending: false, nullsFirst: true }).limit(1000);
   if (filtro?.cadenciaId) q = q.eq("cadencia_id", filtro.cadenciaId);
   return ok(await q) as Campanha[];
+}
+export async function lerCampanha(id: string): Promise<Campanha | null> {
+  const r = await supabase.from("mkt_grupos_campanhas").select("*").eq("id", id).maybeSingle();
+  if (r.error) throw new Error(r.error.message);
+  return (r.data as Campanha | null) ?? null;
 }
 export async function lerEnvios(campanhaId: string): Promise<Envio[]> {
   return ok(await supabase.from("mkt_grupos_envios").select("id,grupo_jid,grupo_nome,status,tentativas,erro,enviado_em,chegou_em").eq("campanha_id", campanhaId).order("id").limit(5000)) as Envio[];
