@@ -107,7 +107,11 @@
     "api/assistente.js": {
       "maxDuration": 30
     },
+<<<<<<< HEAD
     "api/mkt-drive.js": {
+=======
+    "api/mkt-grupos.js": {
+>>>>>>> mkt-grupos
       "maxDuration": 60
     },
     "api/*.js": {
@@ -176,8 +180,13 @@
       "schedule": "20 * * * *"
     },
     {
+<<<<<<< HEAD
       "path": "/api/mkt-drive?cron=1",
       "schedule": "17 * * * *"
+=======
+      "path": "/api/mkt-grupos",
+      "schedule": "* * * * *"
+>>>>>>> mkt-grupos
     }
   ],
   "headers": [
