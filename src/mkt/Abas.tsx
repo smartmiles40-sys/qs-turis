@@ -34,7 +34,14 @@ export function useAbaMkt(ids: string[], padrao = ids[0]): [string, (id: string)
     return () => window.removeEventListener("hashchange", voltar);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids.join(",")]);
-  const ir = (id: string) => { setAba(id); gravarParamNoHash("aba", id === padrao ? null : id); };
+  // Trocar de aba limpa o resto do estado do endereço (item aberto, filtro…):
+  // senão o item da aba anterior reabre quando a pessoa volta pra ela.
+  const ir = (id: string) => {
+    setAba(id);
+    const base = window.location.hash.split("?")[0] || "#";
+    history.replaceState(history.state, "", window.location.pathname + window.location.search + base);
+    gravarParamNoHash("aba", id === padrao ? null : id);
+  };
   return [aba, ir];
 }
 
