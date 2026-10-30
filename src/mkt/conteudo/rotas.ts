@@ -1,6 +1,12 @@
 // src/mkt/conteudo/rotas.ts — telas da frente "conteúdo" (quadro + aprovação), 0240.
+// "Equipe e papéis" + "Colunas do quadro" viraram UMA entrada (Ajustes, com abas,
+// só pro gestor) em 30/10/2026 — os links antigos (#mkt/equipe, #mkt/colunas)
+// caem na aba certa (idsAntigos.ts).
 import { lazy } from "react";
 import type { RotaMkt } from "../rotas";
+import { IDS_ANTIGOS_CONTEUDO, instalarIdsAntigos } from "./idsAntigos";
+
+instalarIdsAntigos("mkt", IDS_ANTIGOS_CONTEUDO);
 
 export const ROTAS_CONTEUDO: RotaMkt[] = [
   // Orgânico
@@ -11,6 +17,5 @@ export const ROTAS_CONTEUDO: RotaMkt[] = [
   // Comum
   { id: "quadro", rotulo: "Quadro de conteúdo", grupo: "comum", icone: "quadro", componente: lazy(() => import("./QuadroPage")) },
   { id: "aprovacoes", rotulo: "Aprovações", grupo: "comum", icone: "aprovacao", componente: lazy(() => import("./AprovacoesPage")) },
-  { id: "equipe", rotulo: "Equipe e papéis", grupo: "comum", icone: "equipe", componente: lazy(() => import("./EquipeMktPage")) },
-  { id: "colunas", rotulo: "Colunas do quadro", grupo: "comum", icone: "colunas", componente: lazy(() => import("./ColunasPage")), papeis: ["gestor"] },
+  { id: "ajustes", rotulo: "Ajustes", grupo: "comum", icone: "config", componente: lazy(() => import("./AjustesPage")), papeis: ["gestor"] },
 ];

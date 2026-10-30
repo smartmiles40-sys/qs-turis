@@ -1,10 +1,15 @@
-// Editor por blocos (compartilhado por Campanhas e Modelos). À esquerda os
-// blocos editáveis; à direita a prévia real do HTML do e-mail (iframe sandbox).
-import { useState } from "react";
+// Editor por blocos (compartilhado por Campanhas e Modelos). Os blocos editáveis
+// e, se a tela não tiver a prévia no lado dela (semPrevia), a prévia real do HTML.
+// O rodapé (com o descadastro) é fixo: não sai e fica sempre por último.
+import { useMemo } from "react";
 import { blocoNovo, ROTULO_BLOCO, type Alinhamento, type Bloco, type Coluna } from "../lib/blocos";
-import { Area, Botao, Campo, Entrada, Escolha } from "../ui";
+import { Area, Botao, Campo, Entrada, Escolha, PreviaEmail } from "../ui";
 
-const TIPOS: Bloco["tipo"][] = ["titulo", "texto", "imagem", "botao", "colunas", "divisor", "espaco", "rodape"];
+/** O que dá pra pôr (o rodapé não: ele já existe e é obrigatório). */
+const TIPOS: { tipo: Bloco["tipo"]; icone: string }[] = [
+  { tipo: "titulo", icone: "T" }, { tipo: "texto", icone: "¶" }, { tipo: "imagem", icone: "▣" }, { tipo: "botao", icone: "▭" },
+  { tipo: "colunas", icone: "▥" }, { tipo: "divisor", icone: "—" }, { tipo: "espaco", icone: "↕" },
+];
 
 function Alinhar({ valor, onChange }: { valor?: Alinhamento; onChange: (a: Alinhamento) => void }) {
   return (
@@ -85,45 +90,63 @@ function EditarBloco({ b, onChange }: { b: Bloco; onChange: (b: Bloco) => void }
   }
 }
 
-export function EditorBlocos({ blocos, onChange, html }: { blocos: Bloco[]; onChange: (b: Bloco[]) => void; html: string }) {
-  const [novo, setNovo] = useState<Bloco["tipo"]>("texto");
+export function EditorBlocos({ blocos, onChange, html, semPrevia }: { blocos: Bloco[]; onChange: (b: Bloco[]) => void; html: string; semPrevia?: boolean }) {
+  // Rodapé sempre existe e sempre por último (o renderEmail também garante no HTML).
+  const corpo = blocos.filter((b) => b.tipo !== "rodape");
+  const rodapeAuto = useMemo(() => blocoNovo("rodape"), []);
+  const rodape = blocos.find((b) => b.tipo === "rodape") ?? rodapeAuto;
+  const ordenados = [...corpo, rodape];
+  const por = (lista: Bloco[]) => onChange([...lista.filter((b) => b.tipo !== "rodape"), rodape]);
+  const adicionar = (tipo: Bloco["tipo"]) => por([...corpo, blocoNovo(tipo)]);
   const mover = (i: number, d: number) => {
     const j = i + d;
-    if (j < 0 || j >= blocos.length) return;
-    const c = [...blocos];
+    if (j < 0 || j >= corpo.length) return;
+    const c = [...corpo];
     [c[i], c[j]] = [c[j], c[i]];
-    onChange(c);
+    por(c);
   };
-  return (
-    <div className="grid lg:grid-cols-2 gap-4">
-      <div className="space-y-3">
-        {blocos.map((b, i) => (
-          <div key={b.id} className="mke-card p-3">
+
+  const editor = (
+    <div className="space-y-3">
+      {ordenados.map((b, i) => {
+        const fixo = b.tipo === "rodape";
+        return (
+          <div key={b.id} className="rel-card p-3" style={fixo ? { background: "var(--card2)" } : undefined}>
             <div className="flex items-center gap-2 mb-2">
               <span className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--ink2)" }}>{ROTULO_BLOCO[b.tipo]}</span>
-              <div className="ml-auto flex gap-1">
-                <Botao variante="fantasma" aria-label="Subir bloco" onClick={() => mover(i, -1)} disabled={i === 0}>↑</Botao>
-                <Botao variante="fantasma" aria-label="Descer bloco" onClick={() => mover(i, 1)} disabled={i === blocos.length - 1}>↓</Botao>
-                <Botao variante="fantasma" aria-label="Duplicar bloco" onClick={() => onChange([...blocos.slice(0, i + 1), { ...b, id: blocoNovo(b.tipo).id }, ...blocos.slice(i + 1)])}>⧉</Botao>
-                <Botao variante="fantasma" aria-label="Remover bloco" onClick={() => onChange(blocos.filter((x) => x.id !== b.id))}>✕</Botao>
-              </div>
+              {fixo ? <span className="text-[11px]" style={{ color: "var(--ink3)" }}>· obrigatório, sempre no fim</span> : (
+                <div className="ml-auto flex gap-1">
+                  <Botao variante="fantasma" aria-label="Subir bloco" onClick={() => mover(i, -1)} disabled={i === 0}>↑</Botao>
+                  <Botao variante="fantasma" aria-label="Descer bloco" onClick={() => mover(i, 1)} disabled={i >= corpo.length - 1}>↓</Botao>
+                  <Botao variante="fantasma" aria-label="Duplicar bloco" onClick={() => por([...corpo.slice(0, i + 1), { ...b, id: blocoNovo(b.tipo).id }, ...corpo.slice(i + 1)])}>⧉</Botao>
+                  <Botao variante="fantasma" aria-label="Remover bloco" onClick={() => por(corpo.filter((x) => x.id !== b.id))}>✕</Botao>
+                </div>
+              )}
             </div>
-            <EditarBloco b={b} onChange={(nb) => onChange(blocos.map((x) => (x.id === b.id ? nb : x)))} />
+            <EditarBloco b={b} onChange={(nb) => onChange(ordenados.map((x) => (x.id === b.id ? nb : x)))} />
           </div>
-        ))}
-        <div className="flex gap-2">
-          <Escolha value={novo} onChange={(e) => setNovo(e.target.value as Bloco["tipo"])} aria-label="Tipo de bloco" className="max-w-xs">
-            {TIPOS.map((t) => <option key={t} value={t}>{ROTULO_BLOCO[t]}</option>)}
-          </Escolha>
-          <Botao onClick={() => onChange([...blocos.filter((b) => b.tipo !== "rodape"), blocoNovo(novo), ...blocos.filter((b) => b.tipo === "rodape" && novo !== "rodape")])}>
-            + Adicionar bloco
-          </Botao>
+        );
+      })}
+      <div className="rel-card p-3" style={{ borderStyle: "dashed" }}>
+        <div className="text-xs font-semibold mb-2" style={{ color: "var(--ink2)" }}>Adicionar bloco</div>
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+          {TIPOS.map((t) => (
+            <button key={t.tipo} type="button" onClick={() => adicionar(t.tipo)}
+              className="flex flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-semibold hover:opacity-90"
+              style={{ border: "1px solid var(--line)", background: "var(--card)", color: "var(--ink2)" }}>
+              <span aria-hidden className="text-[17px] leading-none" style={{ color: "var(--rel-ink)" }}>{t.icone}</span>
+              {ROTULO_BLOCO[t.tipo]}
+            </button>
+          ))}
         </div>
       </div>
-      <div className="lg:sticky lg:top-4 self-start">
-        <div className="text-xs font-semibold mb-1" style={{ color: "var(--ink2)" }}>Prévia (como chega na caixa de entrada; variáveis aparecem cruas)</div>
-        <iframe title="Prévia do e-mail" sandbox="" srcDoc={html} className="w-full rounded-xl" style={{ height: 640, border: "1px solid var(--line)", background: "#fff" }} />
-      </div>
+    </div>
+  );
+  if (semPrevia) return editor;
+  return (
+    <div className="grid lg:grid-cols-[minmax(0,1fr)_400px] gap-4">
+      {editor}
+      <div className="lg:sticky lg:top-4 self-start"><PreviaEmail html={html} /></div>
     </div>
   );
 }

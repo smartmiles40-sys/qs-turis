@@ -1,6 +1,6 @@
 // src/mkt/conteudo/ColunasPage.tsx
 // -----------------------------------------------------------------------------
-// COLUNAS DO QUADRO (0240): o gestor renomeia, reordena, pinta, cria e apaga.
+// COLUNAS DO QUADRO (0240) — aba "Colunas" de Ajustes (AjustesPage.tsx): o gestor renomeia, reordena, pinta, cria e apaga.
 // As 5 colunas com papel no fluxo (Entrada, Em aprovação, Ajustes, Aprovado,
 // Publicado) podem ser renomeadas e mudar de lugar, mas não somem — o banco
 // segura (mkt_colunas_protege).
@@ -10,7 +10,6 @@ import { Aviso, Botao, Entrada } from "@/rel/ui";
 import { useMkt } from "../contexto";
 import { apagarColuna, erroDe, listarColunas, reordenarColunas, salvarColuna } from "./dados";
 import { NOME_TIPO_COLUNA, type Coluna } from "./tipos";
-import { Cabecalho } from "./ui";
 
 const CORES = ["", "#BE185D", "#0E7C6A", "#1D4ED8", "#B45309", "#6D28D9", "#DC2626", "#64748B"];
 
@@ -38,8 +37,10 @@ export default function ColunasPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <Cabecalho titulo="Colunas do quadro" texto="As colunas com papel no fluxo de aprovação podem mudar de nome e de lugar, mas não podem ser apagadas." />
+    <div>
+      <p className="text-[13px] mb-3" style={{ color: "var(--ink3)" }}>
+        Cada coluna é uma etapa do quadro. As que têm papel no fluxo de aprovação podem mudar de nome, cor e lugar, mas não podem ser apagadas.
+      </p>
       {!aprovador && <div className="mb-3"><Aviso>Só o gestor de Marketing muda as colunas.</Aviso></div>}
       {erro && <div className="mb-3"><Aviso tom="erro">{erro}</Aviso></div>}
       <ul className="space-y-2">

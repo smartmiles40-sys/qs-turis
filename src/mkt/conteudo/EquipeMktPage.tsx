@@ -1,6 +1,6 @@
 // src/mkt/conteudo/EquipeMktPage.tsx
 // -----------------------------------------------------------------------------
-// EQUIPE DO MARKETING (0240): quem é do Orgânico, do Tráfego e quem aprova.
+// EQUIPE DO MARKETING (0240) — aba "Equipe" de Ajustes (AjustesPage.tsx) — aba "Equipe" de Ajustes (AjustesPage.tsx): quem é do Orgânico, do Tráfego e quem aprova.
 // Só o gestor de Marketing (ou admin) muda — a RPC mkt_definir_papeis confere.
 // Quem aparece aqui: quem tem a porta do Marketing (papel marketing, setor
 // Marketing marcado em Configurações › Usuários, gestor com a área, admin).
@@ -10,7 +10,6 @@ import { Aviso, Avatar, Vazio } from "@/rel/ui";
 import { useMkt } from "../contexto";
 import { NOME_PAPEL_MKT, PAPEIS_MKT, type PapelMkt } from "../menu";
 import { definirPapeis, erroDe } from "./dados";
-import { Cabecalho } from "./ui";
 
 export default function EquipeMktPage() {
   const { pessoas, aprovador, recarregar, carregando, erro } = useMkt();
@@ -27,9 +26,10 @@ export default function EquipeMktPage() {
 
   if (carregando) return <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>;
   return (
-    <div className="max-w-3xl mx-auto">
-      <Cabecalho titulo="Equipe do Marketing"
-        texto="Orgânico e Tráfego mudam o menu de cada um; Gestor aprova os conteúdos e configura o quadro. Pra pôr alguém novo na área, o admin marca “Marketing” na pessoa em Configurações › Usuários." />
+    <div>
+      <p className="text-[13px] mb-3" style={{ color: "var(--ink3)" }}>
+        Orgânico e Tráfego mudam o menu de cada um; Gestor aprova os conteúdos e configura o quadro. Pra pôr alguém novo na área, o admin marca “Marketing” na pessoa em Configurações › Usuários.
+      </p>
       {erro && <Aviso tom="erro">{erroDe(new Error(erro))}</Aviso>}
       {erroAcao && <div className="mb-3"><Aviso tom="erro">{erroAcao}</Aviso></div>}
       {!aprovador && <div className="mb-3"><Aviso>Só o gestor de Marketing muda os papéis. Aqui você vê quem é quem.</Aviso></div>}

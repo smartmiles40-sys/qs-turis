@@ -1,12 +1,14 @@
-// Marketing › E-mail › Segmentos (regras E/OU aninhadas) e Pontuação (score).
+// Marketing › E-mail › aba Públicos: Segmentos (regras E/OU aninhadas) e
+// Pontuação (score). Antes era a tela "Segmentos e pontuação" do menu.
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  chamar, dataHora, erroDoBanco, listarCampanhas, listarListas, listarSegmentos, status as lerStatus,
+  chamar, dataHora, erroDoBanco, listarCampanhas, listarListas, listarSegmentos,
   type Campanha, type Condicao, type Lista, type Regras, type Segmento, type StatusConexao,
 } from "../lib/api";
+import { useEmail } from "../contexto";
 import { CAMPOS, condicaoPadrao, definicao, ehGrupo, operador, REGRAS_VAZIAS } from "../lib/segmentos";
-import { Aviso, Botao, Campo, Entrada, Escolha, Tela, Vazio } from "../ui";
+import { Aviso, Botao, Campo, Cartao, Entrada, Escolha, Topo, Vazio } from "../ui";
 
 interface Apoio { listas: Lista[]; campanhas: Campanha[] }
 
@@ -87,31 +89,39 @@ function EditorSegmento({ s, apoio, onVoltar }: { s: Segmento; apoio: Apoio; onV
     setPrevia(data as typeof previa);
   };
   return (
-    <Tela titulo={x.nome} acoes={<><Botao onClick={onVoltar}>← Segmentos</Botao><Botao onClick={contar}>Contar</Botao><Botao variante="primario" onClick={salvar}>Salvar</Botao></>}>
+    <div>
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <Botao variante="fantasma" onClick={onVoltar}>← Públicos</Botao>
+        <h2 className="text-[17px] font-bold truncate" style={{ color: "var(--ink)" }}>{x.nome}</h2>
+        <span className="ml-auto" />
+        <Botao onClick={() => void contar()}>Contar quem entra</Botao>
+        <Botao variante="primario" onClick={() => void salvar()}>Salvar</Botao>
+      </div>
       {msg ? <Aviso tom={msg.tom}>{msg.texto}</Aviso> : null}
-      <div className="mke-card p-4 grid sm:grid-cols-2 gap-3 mb-4">
+      <div className="rel-card p-4 grid sm:grid-cols-2 gap-3 mb-4">
         <Campo rotulo="Nome"><Entrada value={x.nome} onChange={(e) => setX({ ...x, nome: e.target.value })} /></Campo>
         <Campo rotulo="Descrição"><Entrada value={x.descricao ?? ""} onChange={(e) => setX({ ...x, descricao: e.target.value })} /></Campo>
       </div>
       <p className="text-xs mb-2" style={{ color: "var(--ink2)" }}>Segmento sem regra nenhuma = ninguém. O segmento é recalculado na hora do envio.</p>
       <EditarGrupo g={x.regras} nivel={0} apoio={apoio} onChange={(r) => setX({ ...x, regras: r })} />
       {previa ? (
-        <div className="mke-card p-4 mt-4 text-[13px]">
+        <div className="rel-card p-4 mt-4 text-[13px]">
           <b>{previa.total.toLocaleString("pt-BR")}</b> contato(s) casam agora.
           {previa.amostra.length ? <ul className="mt-2 space-y-0.5">{previa.amostra.map((a, i) => <li key={i}>{a.nome || "—"} · {a.email || "sem e-mail"} · {a.score ?? 0} pts</li>)}</ul> : null}
         </div>
       ) : null}
-    </Tela>
+    </div>
   );
 }
 
 function Pontuacao() {
+  const { recarregar } = useEmail();
   const [cfg, setCfg] = useState<StatusConexao | null>(null);
   const [pesos, setPesos] = useState<[string, string][]>([]);
   const [janela, setJanela] = useState("90");
   const [msg, setMsg] = useState<{ tom: "ok" | "erro"; texto: string } | null>(null);
   useEffect(() => {
-    lerStatus().then((s) => {
+    chamar<StatusConexao>({ acao: "status" }).then((s) => {
       setCfg(s);
       setPesos(Object.entries(s.config.score_pesos ?? {}).map(([k, v]) => [k, String(v)]));
       setJanela(String(s.config.score_janela_dias ?? 90));
@@ -121,7 +131,7 @@ function Pontuacao() {
     try {
       const score_pesos = Object.fromEntries(pesos.filter(([k]) => k.trim()).map(([k, v]) => [k.trim(), Number(v)]));
       const s = await chamar<StatusConexao>({ acao: "salvar_config", config: { score_pesos, score_janela_dias: Number(janela) } });
-      setCfg(s); setMsg({ tom: "ok", texto: "Pesos salvos. Valem a partir do próximo recálculo." });
+      setCfg(s); void recarregar(); setMsg({ tom: "ok", texto: "Pesos salvos. Valem a partir do próximo recálculo." });
     } catch (e) { setMsg({ tom: "erro", texto: (e as Error).message }); }
   };
   const recalcular = async () => {
@@ -129,7 +139,7 @@ function Pontuacao() {
     catch (e) { setMsg({ tom: "erro", texto: (e as Error).message }); }
   };
   return (
-    <div className="mke-card p-4 space-y-3 max-w-2xl">
+    <div className="rel-card p-4 space-y-3 max-w-2xl">
       {msg ? <Aviso tom={msg.tom}>{msg.texto}</Aviso> : null}
       <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
         A nota do contato é a soma dos pesos dos eventos dele nos últimos <b>{janela}</b> dias. Sobe na hora (abriu, clicou);
@@ -178,23 +188,35 @@ export default function Segmentos() {
 
   if (aberto) return <EditorSegmento s={aberto} apoio={apoio} onVoltar={() => { setAberto(null); carregar(); }} />;
   return (
-    <Tela titulo="Segmentos e pontuação" acoes={aba === "segmentos" ? <Botao variante="primario" onClick={novo}>+ Novo segmento</Botao> : undefined}>
-      <div role="tablist" className="flex gap-1 mb-4">
-        <button role="tab" aria-selected={aba === "segmentos"} className="mke-tab px-3 py-1.5 rounded-lg text-sm" onClick={() => setAba("segmentos")}>Segmentos</button>
-        <button role="tab" aria-selected={aba === "pontuacao"} className="mke-tab px-3 py-1.5 rounded-lg text-sm" onClick={() => setAba("pontuacao")}>Pontuação (score)</button>
-      </div>
+    <div>
+      <Topo
+        titulo="Públicos"
+        texto={aba === "segmentos" ? "Segmento = um grupo de contatos por regra (ex.: abriu os últimos e-mails E mora em SP). É recalculado na hora do envio." : "A nota de cada contato sobe quando ele abre e clica — use no segmento pra achar os mais quentes."}
+        acoes={<>
+          <div className="inline-flex rounded-lg border p-0.5" style={{ borderColor: "var(--line)" }} role="tablist" aria-label="Públicos">
+            {(["segmentos", "pontuacao"] as const).map((v) => (
+              <button key={v} type="button" role="tab" aria-selected={aba === v} onClick={() => setAba(v)}
+                className="px-3 py-1.5 rounded-md text-[13px] font-semibold"
+                style={aba === v ? { background: "var(--rel)", color: "#fff" } : { color: "var(--ink2)" }}>
+                {v === "segmentos" ? "Segmentos" : "Pontuação"}
+              </button>
+            ))}
+          </div>
+          {aba === "segmentos" ? <Botao variante="primario" onClick={() => void novo()}>+ Novo segmento</Botao> : null}
+        </>}
+      />
       {erro ? <Aviso tom="erro">{erro}</Aviso> : null}
-      {aba === "pontuacao" ? <Pontuacao /> : lista === null ? <p className="text-sm">Carregando…</p> : lista.length === 0 ? <Vazio texto="Nenhum segmento ainda." /> : (
+      {aba === "pontuacao" ? <Pontuacao /> : lista === null ? <p className="text-sm">Carregando…</p> : lista.length === 0 ? <div className="rel-card"><Vazio titulo="Nenhum segmento ainda" texto="As campanhas também podem ir só por lista; o segmento é pra afinar." /></div> : (
         <div className="grid sm:grid-cols-2 gap-3">
           {lista.map((s) => (
-            <div key={s.id} className="mke-card p-4">
-              <button className="font-semibold hover:underline" onClick={() => setAberto(s)}>{s.nome}</button>
+            <Cartao key={s.id}>
+              <button type="button" className="font-semibold hover:underline" style={{ color: "var(--ink)" }} onClick={() => setAberto(s)}>{s.nome}</button>
               <div className="text-xs mt-1" style={{ color: "var(--ink2)" }}>{s.descricao || `${s.regras.condicoes.length} regra(s)`} · {dataHora(s.atualizado_em)}</div>
-              <div className="mt-3 flex gap-2"><Botao onClick={() => setAberto(s)}>Editar</Botao><Botao variante="fantasma" onClick={() => apagar(s)}>Apagar</Botao></div>
-            </div>
+              <div className="mt-3 flex gap-2"><Botao onClick={() => setAberto(s)}>Editar</Botao><Botao variante="fantasma" onClick={() => void apagar(s)}>Apagar</Botao></div>
+            </Cartao>
           ))}
         </div>
       )}
-    </Tela>
+    </div>
   );
 }

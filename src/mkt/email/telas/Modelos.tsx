@@ -1,52 +1,70 @@
-// Marketing › E-mail › Modelos: e-mails salvos (usados por campanhas e automações).
-import { useEffect, useState } from "react";
+// Marketing › E-mail › aba Modelos: e-mails prontos (usados por campanhas e
+// automações). Cartões com a miniatura do e-mail; o editor tem a prévia ao lado.
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { chamar, dataHora, erroDoBanco, listarModelos, status as lerStatus, type Modelo, type StatusConexao } from "../lib/api";
-import { MODELO_INICIAL, type Bloco } from "../lib/blocos";
-import { Aviso, Botao, Campo, Entrada, Tela, Vazio } from "../ui";
-import { EditorBlocos } from "./EditorBlocos";
+import { chamar, dataHora, erroDoBanco, listarModelos, type Modelo } from "../lib/api";
+import { MODELO_INICIAL, renderEmail, type Bloco } from "../lib/blocos";
 import { useHtmlDosBlocos } from "../lib/useHtmlDosBlocos";
+import { useEmail } from "../contexto";
+import { Aviso, Botao, Campo, Cartao, Entrada, Miniatura, Topo, Vazio } from "../ui";
+import { EditorBlocos } from "./EditorBlocos";
+import { LadoPrevia } from "./LadoPrevia";
 
-function Editor({ m, cfg, onVoltar }: { m: Modelo; cfg: StatusConexao | null; onVoltar: () => void }) {
+function Editor({ m, onVoltar }: { m: Modelo; onVoltar: () => void }) {
+  const { cfg } = useEmail();
   const [x, setX] = useState<Modelo>(m);
   const [msg, setMsg] = useState<{ tom: "ok" | "erro"; texto: string } | null>(null);
-  const [para, setPara] = useState("");
+  const [mexido, setMexido] = useState(false);
   const html = useHtmlDosBlocos(x.blocos, { texto: cfg?.config.rodape_texto, endereco: cfg?.config.rodape_endereco });
+  const mudar = (p: Partial<Modelo>) => { setX((v) => ({ ...v, ...p })); setMexido(true); };
   const salvar = async () => {
     const { error } = await supabase.from("mkt_email_modelos")
       .update({ nome: x.nome.trim() || "Sem nome", assunto: x.assunto, preheader: x.preheader, blocos: x.blocos, html }).eq("id", x.id);
     setMsg(error ? { tom: "erro", texto: erroDoBanco(error) } : { tom: "ok", texto: "Modelo salvo." });
+    if (!error) setMexido(false);
     return !error;
   };
-  const testar = async () => {
-    if (!(await salvar())) return;
-    try { await chamar({ acao: "teste", modeloId: x.id, para }); setMsg({ tom: "ok", texto: `Teste enviado para ${para}.` }); }
-    catch (e) { setMsg({ tom: "erro", texto: (e as Error).message }); }
+  const testar = async (para: string) => {
+    if (!(await salvar())) return "Não consegui salvar o modelo antes do teste.";
+    try { await chamar({ acao: "teste", modeloId: x.id, para }); return null; } catch (e) { return (e as Error).message; }
   };
   return (
-    <Tela titulo={x.nome} acoes={<><Botao onClick={onVoltar}>← Modelos</Botao><Botao variante="primario" onClick={salvar}>Salvar</Botao></>}>
+    <div>
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <Botao variante="fantasma" onClick={() => { if (mexido) void salvar(); onVoltar(); }}>← Modelos</Botao>
+        <h2 className="text-[17px] font-bold truncate" style={{ color: "var(--ink)" }}>{x.nome || "Modelo"}</h2>
+        <span className="ml-auto text-[12px]" style={{ color: "var(--ink3)" }}>{mexido ? "Alterações não salvas" : "Salvo"}</span>
+        <Botao variante="primario" disabled={!mexido} onClick={() => void salvar()}>Salvar</Botao>
+      </div>
       {msg ? <Aviso tom={msg.tom}>{msg.texto}</Aviso> : null}
-      <div className="mke-card p-4 grid sm:grid-cols-3 gap-3 mb-4">
-        <Campo rotulo="Nome"><Entrada value={x.nome} onChange={(e) => setX({ ...x, nome: e.target.value })} /></Campo>
-        <Campo rotulo="Assunto"><Entrada value={x.assunto ?? ""} onChange={(e) => setX({ ...x, assunto: e.target.value })} /></Campo>
-        <Campo rotulo="Pré-cabeçalho"><Entrada value={x.preheader ?? ""} onChange={(e) => setX({ ...x, preheader: e.target.value })} /></Campo>
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_400px] gap-5">
+        <div className="min-w-0 space-y-4">
+          <Cartao className="grid sm:grid-cols-3 gap-3">
+            <Campo rotulo="Nome do modelo"><Entrada value={x.nome} onChange={(e) => mudar({ nome: e.target.value })} /></Campo>
+            <Campo rotulo="Assunto sugerido"><Entrada value={x.assunto ?? ""} onChange={(e) => mudar({ assunto: e.target.value })} /></Campo>
+            <Campo rotulo="Pré-cabeçalho"><Entrada value={x.preheader ?? ""} onChange={(e) => mudar({ preheader: e.target.value })} /></Campo>
+          </Cartao>
+          <EditorBlocos semPrevia blocos={x.blocos as Bloco[]} html={html} onChange={(b) => mudar({ blocos: b })} />
+        </div>
+        <LadoPrevia html={html} assunto={x.assunto} preheader={x.preheader} remetente={cfg?.config.remetente_nome} onTeste={testar} />
       </div>
-      <EditorBlocos blocos={x.blocos as Bloco[]} onChange={(b) => setX({ ...x, blocos: b })} html={html} />
-      <div className="mke-card p-4 mt-4 flex flex-wrap gap-3 items-end">
-        <div className="w-72"><Campo rotulo="Enviar teste para"><Entrada type="email" value={para} onChange={(e) => setPara(e.target.value)} /></Campo></div>
-        <Botao disabled={!para} onClick={testar}>Enviar teste</Botao>
-      </div>
-    </Tela>
+    </div>
   );
 }
 
 export default function Modelos() {
+  const { cfg } = useEmail();
   const [lista, setLista] = useState<Modelo[] | null>(null);
   const [aberto, setAberto] = useState<Modelo | null>(null);
-  const [cfg, setCfg] = useState<StatusConexao | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const carregar = () => listarModelos().then(setLista);
-  useEffect(() => { carregar(); lerStatus().then(setCfg).catch(() => null); }, []);
+  useEffect(() => { void carregar(); }, []);
+  const rodape = { rodapeTexto: cfg?.config.rodape_texto, rodapeEndereco: cfg?.config.rodape_endereco };
+  const miniaturas = useMemo(
+    () => new Map((lista ?? []).map((m) => [m.id, renderEmail(m.blocos ?? [], rodape)])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lista, rodape.rodapeTexto, rodape.rodapeEndereco],
+  );
 
   const novo = async () => {
     const { data, error } = await supabase.from("mkt_email_modelos").insert({ nome: "Novo modelo", blocos: MODELO_INICIAL() }).select("*").single();
@@ -56,24 +74,33 @@ export default function Modelos() {
   const apagar = async (m: Modelo) => {
     if (!window.confirm(`Apagar o modelo "${m.nome}"? Automações que usam ele param de mandar esse passo.`)) return;
     const { error } = await supabase.from("mkt_email_modelos").delete().eq("id", m.id);
-    if (error) setErro(erroDoBanco(error)); else carregar();
+    if (error) setErro(erroDoBanco(error)); else void carregar();
   };
 
-  if (aberto) return <Editor m={aberto} cfg={cfg} onVoltar={() => { setAberto(null); carregar(); }} />;
+  if (aberto) return <Editor m={aberto} onVoltar={() => { setAberto(null); void carregar(); }} />;
   return (
-    <Tela titulo="Modelos de e-mail" sub="Monte uma vez, use em campanhas e automações." acoes={<Botao variante="primario" onClick={novo}>+ Novo modelo</Botao>}>
+    <div>
+      <Topo titulo="Modelos" texto="Monte uma vez, use em campanhas e automações." acoes={<Botao variante="primario" onClick={() => void novo()}>+ Novo modelo</Botao>} />
       {erro ? <Aviso tom="erro">{erro}</Aviso> : null}
-      {lista === null ? <p className="text-sm">Carregando…</p> : lista.length === 0 ? <Vazio texto="Nenhum modelo salvo." /> : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {lista === null ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p> : lista.length === 0 ? (
+        <div className="rel-card"><Vazio titulo="Nenhum modelo salvo" texto="Um modelo é um e-mail pronto (título, texto, foto, botão) pra reaproveitar." acao={<Botao variante="primario" onClick={() => void novo()}>Criar o primeiro</Botao>} /></div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {lista.map((m) => (
-            <div key={m.id} className="mke-card p-4">
-              <button className="font-semibold text-left hover:underline" onClick={() => setAberto(m)}>{m.nome}</button>
-              <div className="text-xs mt-1" style={{ color: "var(--ink2)" }}>{m.assunto || "sem assunto"} · {dataHora(m.atualizado_em)}</div>
-              <div className="mt-3 flex gap-2"><Botao onClick={() => setAberto(m)}>Editar</Botao><Botao variante="fantasma" onClick={() => apagar(m)}>Apagar</Botao></div>
+            <div key={m.id} className="rel-card p-2.5 flex flex-col">
+              <button type="button" className="text-left" onClick={() => setAberto(m)} aria-label={`Editar o modelo ${m.nome}`}>
+                <Miniatura html={miniaturas.get(m.id) ?? ""} />
+                <span className="block text-[14px] font-semibold mt-2 truncate" style={{ color: "var(--ink)" }}>{m.nome}</span>
+                <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>{m.assunto || "sem assunto"} · {dataHora(m.atualizado_em)}</span>
+              </button>
+              <div className="mt-2 flex gap-1">
+                <Botao onClick={() => setAberto(m)}>Editar</Botao>
+                <Botao variante="fantasma" onClick={() => void apagar(m)}>Apagar</Botao>
+              </div>
             </div>
           ))}
         </div>
       )}
-    </Tela>
+    </div>
   );
 }
