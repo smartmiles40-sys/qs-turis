@@ -24,7 +24,9 @@
 
 import { rest } from './_supabaseAdmin.js';
 import { credenciaisDaMeta, graph } from './_meta.js';
-import { ehPedidoDeParada } from './_waOptout.js';
+// PARAR do número do Marketing: a régua mais estrita dos disparos (até 5
+// palavras), igual pros dois lados do webhook — integração 30/10.
+import { ehParadaMkt as ehPedidoDeParada } from './_mktRegras.js';
 import {
   MAX_PASSOS_RODADA, MAX_PASSOS_TOTAL, MAX_PROFUNDIDADE,
   aplicarAcaoNaPessoa, escolherGatilho, janelaAberta, lerEntrada, lerIdDeResposta,
@@ -260,7 +262,23 @@ async function salvarPessoa(ctx, antes, depois) {
 async function executarAcao(ctx, a, fluxo, exec) {
   const c = ctx.conversa;
   switch (a?.tipo) {
-    case 'adicionar_tag': case 'remover_tag': case 'adicionar_lista': case 'remover_lista':
+    case 'adicionar_lista': case 'remover_lista': {
+      // Lista de verdade (mkt_listas, 0242) — a mesma que Contatos, Disparos e
+      // E-mail usam; nunca a tag "lista:<nome>".
+      if (!ctx.contato) return 'sem contato';
+      const nome = personalizar(a.lista, pessoaDe(ctx)).trim();
+      if (!nome) return 'lista sem nome';
+      let lista = await um(`mkt_listas?select=id&nome=ilike.${encodeURIComponent(nome.replace(/[%_*]/g, ''))}&limit=1`);
+      if (!lista && a.tipo === 'adicionar_lista') lista = await inserir('mkt_listas', { nome });
+      if (!lista) return null;
+      if (a.tipo === 'adicionar_lista') {
+        await rest('mkt_lista_contatos?on_conflict=lista_id,contato_id', { method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal', body: { lista_id: lista.id, contato_id: ctx.contato.id } });
+      } else {
+        await rest(`mkt_lista_contatos?lista_id=eq.${lista.id}&contato_id=eq.${ctx.contato.id}`, { method: 'DELETE', prefer: 'return=minimal' });
+      }
+      return null;
+    }
+    case 'adicionar_tag': case 'remover_tag':
     case 'definir_campo': case 'limpar_campo': {
       if (!ctx.contato) return 'sem contato';
       const antes = pessoaDe(ctx);

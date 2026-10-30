@@ -83,7 +83,11 @@ const mudanca = (phoneId: string, msg: Record<string, unknown>, field = "message
 const texto = (id: string, body: string) => ({ from: "556196708984", id, timestamp: String(Math.floor(Date.now() / 1000)), type: "text", text: { body } });
 
 const tocouMkt = () => chamadas.filter((c) => /\/rest\/v1\/(mkt_|rpc\/mkt_)/.test(c.url));
-const tocouForaDoMkt = () => chamadas.filter((c) => c.url.includes("/rest/v1/") && !/\/rest\/v1\/(mkt_|rpc\/mkt_|qs_wa_numeros_meta|rpc\/qs_meta_token)/.test(c.url));
+// Integração 30/10: o funil dos disparos (api/_mktEntrada.js) também LÊ os
+// envios — só GET e só das campanhas do setor marketing. Escrever em qs_* segue proibido.
+const leituraDoFunilMkt = (c: { metodo: string; url: string }) =>
+  c.metodo === "GET" && c.url.includes("/rest/v1/qs_disparo_envios?") && c.url.includes("qs_disparo_campanhas.setor=eq.marketing");
+const tocouForaDoMkt = () => chamadas.filter((c) => c.url.includes("/rest/v1/") && !leituraDoFunilMkt(c) && !/\/rest\/v1\/(mkt_|rpc\/mkt_|qs_wa_numeros_meta|rpc\/qs_meta_token)/.test(c.url));
 
 beforeEach(() => { chamadas = []; fluxoAtivo = null; });
 

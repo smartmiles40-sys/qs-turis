@@ -59,7 +59,7 @@ async function podeDisparar(u, setor) {
   if (u.role === 'admin') return true;
   const s = Array.isArray(u.setores) ? u.setores : [];
   // Marketing (0242): papel marketing, ou gestor com o setor marketing.
-  if (setor === 'marketing') return u.role === 'marketing' || (u.role === 'gestor' && s.includes('marketing'));
+  if (setor === 'marketing') return u.role === 'marketing' || s.includes('marketing');
   if (u.role === 'gestor' && (s.includes(setor) || (setor === 'comercial' && s.length === 0))) return true;
   const r = await rest('rpc/qs_pode_de', { method: 'POST', body: { p_user: u.id, p: `${setor}.disparos` } }).catch(() => null);
   return r === true;

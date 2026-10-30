@@ -18,6 +18,16 @@
 // -----------------------------------------------------------------------------
 import type React from "react";
 import { ROTAS_CONTEUDO } from "./conteudo/rotas";
+import { ROTAS_DRIVE } from "./drive/rotas";
+import { ROTAS_DISPAROS } from "./disparos/rotas";
+import { ROTAS_GRUPOS } from "./grupos/rotas";
+import { ROTAS_AUTOMACOES } from "./automacoes/rotas";
+import { ROTAS_EMAIL } from "./email/rotas";
+import { registrarSeletorDrive } from "./conteudo/seletorDrive";
+import { SeletorDriveDoCard } from "./drive/seletorDoCard";
+
+// "Escolher do Drive" nos anexos do card (o picker em si é carregado sob demanda).
+registrarSeletorDrive(SeletorDriveDoCard);
 
 export interface RotaMkt {
   id: string;
@@ -40,4 +50,11 @@ export const GRUPOS_MKT: { id: GrupoMkt; rotulo: string }[] = [
   { id: "email", rotulo: "E-mail" },
 ];
 
-export const ROTAS_MKT: RotaMkt[] = [ ...ROTAS_CONTEUDO ];
+export const ROTAS_MKT: RotaMkt[] = [
+  ...ROTAS_CONTEUDO,
+  ...ROTAS_DRIVE,
+  ...ROTAS_DISPAROS,
+  ...ROTAS_GRUPOS,
+  ...ROTAS_AUTOMACOES,
+  ...ROTAS_EMAIL,
+];

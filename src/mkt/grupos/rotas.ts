@@ -1,7 +1,7 @@
 // src/mkt/grupos/rotas.ts — telas da frente "Grupos do WhatsApp" (0243) no menu do Marketing.
 // Ícones: nomes de src/mkt/icones.tsx (frente conteudo).
 import { lazy } from "react";
-import type { RotaMkt } from "./tipoRota";
+import type { RotaMkt } from "../rotas";
 
 export const ROTAS_GRUPOS: RotaMkt[] = [
   { id: "grupos", rotulo: "Grupos do WhatsApp", grupo: "disparos", icone: "grupo", componente: lazy(() => import("./GruposPage")) },

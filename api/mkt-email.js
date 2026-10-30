@@ -35,7 +35,7 @@ import { UUID, limparPublico, limparPesos, emailValido, remetenteDoDominio } fro
 function temAcesso(u) {
   if (!u?.is_active) return false;
   const s = Array.isArray(u.setores) ? u.setores : [];
-  return u.role === 'admin' || u.role === 'marketing' || (u.role === 'gestor' && s.includes('marketing'));
+  return u.role === 'admin' || u.role === 'marketing' || s.includes('marketing');
 }
 
 async function quem(req) {

@@ -38,7 +38,7 @@ async function quem(req) {
   const u = (await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
   if (!u?.is_active) return null;
   const s = Array.isArray(u.setores) ? u.setores : [];
-  const ok = u.role === 'admin' || u.role === 'marketing' || (u.role === 'gestor' && s.includes('marketing'));
+  const ok = u.role === 'admin' || u.role === 'marketing' || s.includes('marketing');
   return ok ? u : null;
 }
 

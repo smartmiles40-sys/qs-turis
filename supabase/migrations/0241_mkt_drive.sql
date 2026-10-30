@@ -39,11 +39,9 @@ stable
 security definer
 set search_path = public
 as $$
-  select exists (
-    select 1 from qs_users
-     where id = auth.uid() and is_active
-       and (role in ('admin', 'marketing') or 'marketing' = any(coalesce(setores, '{}')))
-  );
+  -- Integração 30/10: uma regra só pra área toda (mkt_tem_acesso, 0240 —
+  -- admin, papel marketing ou quem tem o setor Marketing).
+  select public.mkt_tem_acesso();
 $$;
 revoke all on function public.mkt_drive_pode() from public, anon;
 grant execute on function public.mkt_drive_pode() to authenticated;
