@@ -5,8 +5,9 @@
 //     Exportar Excel + o quadro de arrastar (RoomingBoard, sem mudança)
 //   • Roteiro do líder      (era "Roteiro Líder") → mesmo editor, com tags por dia
 //   • Divisões              (era "Grupos")
-//   • Checklist             (era "Checklist")
-// Cada bloco é uma seção recolhível; ?secao=rooming|roteiro|divisoes|checklist abre
+// (30/10: o Checklist saiu daqui e virou aba própria do cockpit, entre Logística e
+// Financeiro — AbaChecklist.tsx. ?secao=checklist redireciona pra ela, ver rota.ts.)
+// Cada bloco é uma seção recolhível; ?secao=rooming|roteiro|divisoes abre
 // e rola até ela (os links antigos chegam assim — ver lib/cockpit/rota.ts).
 // Não existe em pacote (o cockpit nem mostra a aba).
 // -----------------------------------------------------------------------------
@@ -23,10 +24,9 @@ import type { SecaoCockpit } from "../../lib/cockpit/rota";
 import type { PropsAba } from "../ExpedicaoDetalhe";
 import AbaRoteiroLider from "./AbaRoteiroLider";
 import AbaGrupos from "./AbaGrupos";
-import AbaChecklist from "./AbaChecklist";
 
-type SecaoLog = "rooming" | "roteiro" | "divisoes" | "checklist";
-const SECOES_LOG: readonly SecaoLog[] = ["rooming", "roteiro", "divisoes", "checklist"];
+type SecaoLog = "rooming" | "roteiro" | "divisoes";
+const SECOES_LOG: readonly SecaoLog[] = ["rooming", "roteiro", "divisoes"];
 
 export default function AbaLogistica(props: PropsAba) {
   const { cockpit } = props;
@@ -62,17 +62,11 @@ export default function AbaLogistica(props: PropsAba) {
       {secao("rooming", "Hospedagem e rooming", "hotéis pelas datas dos quartos", <Hospedagem {...props} />)}
       {secao("roteiro", "Roteiro do líder", "aparece na Área do Líder, nesta ordem", <AbaRoteiroLider {...props} />)}
       {secao("divisoes", "Divisões", "G1 / G2 e quem vai em cada", <AbaGrupos {...props} />)}
-      {secao("checklist", "Checklist", cockpit?.resumo ? resumoCk(cockpit.resumo.checklist) : null, <AbaChecklist {...props} />)}
     </div>
   );
 }
 
 const ehLog = (s: SecaoCockpit | null): s is SecaoLog => !!s && (SECOES_LOG as readonly string[]).includes(s);
-
-function resumoCk(ck: { status: string }[]) {
-  const feitas = ck.filter((c) => c.status === "Concluído").length;
-  return `${feitas}/${ck.length} tarefas concluídas`;
-}
 
 /** Hotéis (trechos do rooming) com "x/y alocados" + Exportar Excel + quadro de arrastar. */
 function Hospedagem({ exp, cockpit }: PropsAba) {

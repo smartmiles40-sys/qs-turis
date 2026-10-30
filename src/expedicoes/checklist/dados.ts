@@ -74,6 +74,8 @@ export async function gerarChecklistPadrao(exp: { id: string; data_embarque: str
 export interface NovaTarefa {
   tarefa: string; etapa: EtapaChecklist; prioridade: Prioridade; prazo: string | null;
   responsavel_id: string | null; observacoes: string | null; parent_id: string | null; status?: StatusChecklist;
+  /** Só com a 0224 aplicada (a coluna não existe antes). */
+  setor?: ChecklistItemRow["setor"];
 }
 
 /** Cria tarefa (ou subtarefa, com parent_id). ordem = irmãos + 1, igual ao antigo. */
@@ -85,6 +87,7 @@ export async function criarTarefa(expedicaoId: string, t: NovaTarefa, itens: Che
     expedicao_id: expedicaoId, etapa: t.etapa, tarefa: t.tarefa.trim(), prioridade: t.prioridade, prazo: t.prazo || null,
     responsavel_id: t.responsavel_id || null, observacoes: t.observacoes?.trim() || null, parent_id: t.parent_id,
     status: t.status ?? "Pendente", ordem, dependencia_id: null, evidencia_url: null, bitrix_task_id: null,
+    ...(t.setor !== undefined ? { setor: t.setor } : {}),
   });
   falhou(error);
 }

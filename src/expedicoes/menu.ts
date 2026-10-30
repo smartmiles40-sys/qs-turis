@@ -19,8 +19,8 @@ export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: numbe
       // 29/10 (Carol): receitas a enviar — conta só as que já estão na janela de 20 dias
       { id: "receitas", rotulo: "Receitas", badge: contagens.receitas || undefined, alerta: true },
       { id: "fornecedores", rotulo: "Fornecedores" },
-      // 29/10: o checklist que toda expedição recebe, dividido por setor
-      { id: "checklist-padrao", rotulo: "Checklist padrão" },
+      // 30/10: "Checklist padrão" saiu do menu — virou a aba Checklist do cockpit
+      // (botão "Editar o padrão"). O endereço #ops/checklist-padrao redireciona.
     ],
   };
 }

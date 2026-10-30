@@ -1,7 +1,7 @@
 // src/expedicoes/lib/cockpit/rota.ts
 // -----------------------------------------------------------------------------
 // ABAS DO COCKPIT E REDIRECTS (redesign 29/10, spec §3.2).
-// As 10 abas antigas viraram 6. A aba ativa vai na query do hash:
+// As 10 abas antigas viraram 6 (+ Checklist em 30/10 = 7). A aba ativa vai na query do hash:
 //   #ops/expedicoes/<id>?aba=logistica&secao=rooming
 // e TODO endereço antigo continua abrindo no lugar certo:
 //   • segmento de caminho com a barra codificada (o QS grava assim):  <id>%2Frooming
@@ -13,12 +13,14 @@
 // Lógica PURA (sem alias "@/") pra rodar no node:test.
 // -----------------------------------------------------------------------------
 
-export type AbaCockpit = "geral" | "passageiros" | "logistica" | "financeiro" | "arquivos" | "portal";
+export type AbaCockpit = "geral" | "passageiros" | "logistica" | "checklist" | "financeiro" | "arquivos" | "portal";
 
 export const ABAS_COCKPIT: readonly { id: AbaCockpit; rotulo: string }[] = [
   { id: "geral", rotulo: "Visão geral" },
   { id: "passageiros", rotulo: "Passageiros" },
   { id: "logistica", rotulo: "Logística" },
+  // 30/10 (Bruno): o checklist virou aba própria, entre Logística e Financeiro (saiu de dentro da Logística).
+  { id: "checklist", rotulo: "Checklist" },
   { id: "financeiro", rotulo: "Financeiro" },
   { id: "arquivos", rotulo: "Arquivos" },
   { id: "portal", rotulo: "ExpedAmigo" },
@@ -36,7 +38,7 @@ export const REDIRECT_ABA: Readonly<Record<string, { aba: AbaCockpit; secao?: Se
   valores: { aba: "financeiro" },
   financeiro: { aba: "financeiro" },
   rooming: { aba: "logistica", secao: "rooming" },
-  checklist: { aba: "logistica", secao: "checklist" },
+  checklist: { aba: "checklist" },
   "roteiro-lider": { aba: "logistica", secao: "roteiro" },
   roteiro: { aba: "logistica", secao: "roteiro" },
   grupos: { aba: "logistica", secao: "divisoes" },
@@ -51,7 +53,7 @@ export const REDIRECT_ABA: Readonly<Record<string, { aba: AbaCockpit; secao?: Se
 
 const SECOES = new Set<string>(["rooming", "roteiro", "divisoes", "checklist", "drive", "links", "docs-lider", "documentos"]);
 
-/** Abas que não existem em pacote (Logística = rooming + roteiro + divisões + checklist, todas ocultas em pacote). */
+/** Abas que não existem em pacote (Logística = rooming + roteiro + divisões). O Checklist aparece nos dois (o padrão tem tipo de produto). */
 export const ABAS_FORA_DO_PACOTE: ReadonlySet<AbaCockpit> = new Set(["logistica"]);
 
 function partesDoHash(hash: string): { segs: string[]; query: URLSearchParams } {
@@ -115,6 +117,8 @@ export function resolverRotaCockpit(o: { caminho: string; hash?: string | null; 
   }
   let secao: SecaoCockpit | null = alvo.secao ?? (secaoQuery && SECOES.has(secaoQuery) ? (secaoQuery as SecaoCockpit) : null);
   let aba = alvo.aba;
+  // 30/10: a seção Checklist saiu da Logística → o link salvo "?aba=logistica&secao=checklist" vai pra aba nova.
+  if (aba === "logistica" && secao === "checklist") { aba = "checklist"; secao = null; normalizar = true; }
   if (o.pacote && ABAS_FORA_DO_PACOTE.has(aba)) { aba = "geral"; secao = null; normalizar = true; }
   return { id, aba, secao, sub: aba === "passageiros" ? sub : [], normalizar };
 }

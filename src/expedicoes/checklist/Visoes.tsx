@@ -15,6 +15,7 @@ import { ETAPA_CHECKLIST, FASES_CHECKLIST, PRIORIDADE, STATUS_CHECKLIST } from "
 import { daysUntil, formatDate } from "../lib/utils";
 import type { ChecklistItemRow, EtapaChecklist, Prioridade, StatusChecklist, UsuarioRow } from "../lib/database";
 import { COR_PONTO, KANBAN_COLUNAS, TOM_PRIORIDADE, TOM_STATUS, excluirTarefa, salvarCampo } from "./dados";
+import { ChipSetor } from "./ChipSetor";
 
 type MapaUsuarios = Map<string, UsuarioRow>;
 
@@ -263,7 +264,14 @@ function Linha({ it, filhos, aberto, onAlternar, usuarios, onMudou, onEditar, on
           {!sub && filhos.length > 0 && (
             <span className="rounded px-1 text-[10.5px] tabular-nums" style={{ background: "var(--card2)", color: "var(--ink3)" }}>{subFeitas}/{filhos.length}</span>
           )}
+          {!sub && <ChipSetor setor={it.setor} />}
         </div>
+        {/* 30/10: quem marcou feita e quando (0224) */}
+        {concluido && it.concluido_em && (
+          <span className="block text-[10.5px]" style={{ color: "#16A34A" }}>
+            ✓ feita{it.concluido_por && usuarios.get(it.concluido_por) ? ` por ${primeiroNome(usuarios.get(it.concluido_por))}` : ""} em {formatDate(it.concluido_em, "dd/MM 'às' HH:mm")}
+          </span>
+        )}
       </td>
       <td className="px-2.5 whitespace-nowrap">
         <span className="relative inline-flex items-center gap-1.5">

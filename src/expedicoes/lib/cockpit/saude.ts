@@ -76,7 +76,7 @@ export function cartoesSaude(o: {
       id: "checklist", rotulo: "Checklist", valor: `${c.concluidas}/${c.total}`,
       sub: !c.total ? "checklist não gerado" : `${pct(c.pct)} das tarefas concluídas${c.atrasadas ? ` · ${c.atrasadas} atrasada${c.atrasadas === 1 ? "" : "s"}` : ""}`,
       tag: !c.total ? "Sem dados" : c.concluidas === c.total ? "OK" : c.atrasadas ? "Atrasado" : "Pendente",
-      fracao: c.pct, aba: "logistica", secao: "checklist",
+      fracao: c.pct, aba: "checklist",
     });
   }
   return out;
