@@ -7,7 +7,7 @@
 // Fica fora do ExpedicoesArea pra o menu não puxar as telas pro pacote principal.
 import { ICONES_AREA, type GrupoDoMenu } from "@/area/CascaDeArea";
 
-export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: number; receitas?: number } = {}): GrupoDoMenu {
+export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: number; receitas?: number; saude?: number } = {}): GrupoDoMenu {
   return {
     id: "expedicoes", rotulo: "Expedições", icone: ICONES_AREA.aviao, itens: [
       // Redesign (out/2026): o "Início" das expedições virou o Início de Operações
@@ -18,6 +18,8 @@ export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: numbe
       { id: "avisos", rotulo: "Avisos", badge: contagens.avisos || undefined },
       // 29/10 (Carol): receitas a enviar — conta só as que já estão na janela de 20 dias
       { id: "receitas", rotulo: "Receitas", badge: contagens.receitas || undefined, alerta: true },
+      // 30/10: fila do médico — conta os laudos a fazer de quem embarca em até 45 dias
+      { id: "saude", rotulo: "Saúde · médico", badge: contagens.saude || undefined, alerta: true },
       { id: "fornecedores", rotulo: "Fornecedores" },
       // 29/10: o checklist que toda expedição recebe, dividido por setor
       { id: "checklist-padrao", rotulo: "Checklist padrão" },

@@ -29,6 +29,8 @@ const PAGINAS: Partial<Record<TelaExp, React.LazyExoticComponent<ComponentType>>
   "exp-config": lazy(() => import("./paginas/Config")),
   "checklist-padrao": lazy(() => import("./paginas/ChecklistPadrao")),
   receitas: lazy(() => import("./paginas/Receitas")),
+  // 30/10: Saúde · fila do médico (laudos, acompanhamento, alimentação pra logística)
+  saude: lazy(() => import("./paginas/Saude")),
 };
 
 export default function ExpedicoesArea({ tela, caminho, ir, setorRelacionamento = false }: {

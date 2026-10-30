@@ -27,6 +27,7 @@ import { useAprovacoesNovas } from "@/propostas/lib";
 import { TELAS_EXP, type TelaExp } from "@/expedicoes/contexto";
 import { grupoExpedicoes } from "@/expedicoes/menu";
 import { useContagensExp } from "@/expedicoes/useContagensExp";
+import { useContagemSaude } from "@/expedicoes/useContagemSaude";
 
 const ExpedicoesArea = lazy(() => import("@/expedicoes/ExpedicoesArea"));
 // 23/10 (cadastro único): a ficha do cliente é a MESMA do Relacionamento (0172/0173).
@@ -62,6 +63,7 @@ export default function OpsApp() {
   const [central, recontar] = useContagemSolicitacoes("operacional");
   const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "operacional");
   const contExp = useContagensExp();
+  const contSaude = useContagemSaude(); // 30/10: selo do "Saúde · médico"
 
   useEffect(() => {
     const onHash = () => setRota(lerRota());
@@ -82,7 +84,7 @@ export default function OpsApp() {
       { id: "subir-venda", rotulo: "Subir venda" },
       { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined },
     ] },
-    grupoExpedicoes(contExp),
+    grupoExpedicoes({ ...contExp, saude: contSaude }),
     { id: "clientes-ops", rotulo: "Carteira", icone: ICONES_AREA.lista, itens: [
       { id: "fichas", rotulo: "Clientes" },
       { id: "arrumar", rotulo: "Arrumar cadastros" },

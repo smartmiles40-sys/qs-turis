@@ -12,6 +12,12 @@
 //    aprovar + caixinha "Preciso emitir e enviar a receita" (vai pro passageiro na
 //    aprovação → menu Receitas). Precisa da 0223; sem ela a caixa nem aparece;
 //  · fila AGRUPADA POR EXPEDIÇÃO, cada grupo abre/fecha, por data de embarque.
+//
+// 30/10 (Bruno, V2): duas abas — "Quem falta responder" (inscricoes/QuemFalta.tsx:
+// respondeu × falta por expedição e pacote, contagem regressiva, lembrete pra
+// copiar) e "Aguardando aprovação" (a fila de antes). A saúde vai pro médico em
+// #ops/saude (paginas/Saude.tsx).
+import QuemFalta from "./inscricoes/QuemFalta";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Botao, Modal, Vazio, Aviso } from "@/rel/ui";
 import { useExp } from "../contexto";
@@ -78,6 +84,7 @@ export default function Inscricoes() {
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [soSaude, setSoSaude] = useState(false);
   const [fechados, setFechados] = useState<Set<string>>(new Set());
+  const [aba, setAba] = useState<"falta" | "aprovacao">("falta");
 
   const carregar = useCallback(async () => {
     try {
@@ -263,10 +270,31 @@ export default function Inscricoes() {
     );
   };
 
+  const abaBotao = (id: typeof aba, rotulo: ReactNode) => (
+    <button type="button" role="tab" aria-selected={aba === id} onClick={() => setAba(id)}
+      className="px-3.5 py-2 text-[13.5px] font-bold border-b-2 -mb-px"
+      style={aba === id ? { borderColor: "var(--rel)", color: "var(--ink)" } : { borderColor: "transparent", color: "var(--ink3)" }}>
+      {rotulo}
+    </button>
+  );
+  const abas = (
+    <div className="space-y-1">
+      <h1 className="text-[20px] font-bold" style={{ color: "var(--ink)" }}>Inscrições</h1>
+      <div role="tablist" className="flex flex-wrap gap-1 border-b" style={{ borderColor: "var(--line)" }}>
+        {abaBotao("falta", "Quem falta responder")}
+        {abaBotao("aprovacao", <>Aguardando aprovação <Selo tom={todasPendentes.length ? "aviso" : "neutro"}>{todasPendentes.length}</Selo>{comAlerta.length > 0 && <> <Selo tom="erro">{comAlerta.length} com saúde</Selo></>}</>)}
+        <span className="flex-1" />
+        {window.location.hash.startsWith("#ops") && <button type="button" onClick={() => ir("saude")} className="self-center text-[12.5px] font-semibold underline-offset-2 hover:underline" style={{ color: "var(--rel-ink)" }}>Saúde · fila do médico ↗</button>}
+      </div>
+    </div>
+  );
+  if (aba === "falta") return <div className="space-y-5">{abas}<QuemFalta /></div>;
+
   return (
     <div className="space-y-5">
+      {abas}
       <header className="flex items-center gap-2 flex-wrap">
-        <h1 className="text-[20px] font-bold" style={{ color: "var(--ink)" }}>Inscrições pendentes</h1>
+        <h2 className="text-[16px] font-bold" style={{ color: "var(--ink)", margin: 0 }}>Inscrições pendentes</h2>
         <Selo tom={todasPendentes.length ? "aviso" : "neutro"}>{todasPendentes.length}</Selo>
         <span className="flex-1" />
         <button type="button" onClick={() => setSoSaude((v) => !v)} aria-pressed={soSaude}
