@@ -27,6 +27,7 @@ import { Bolha, Campo, Chips, INPUT, INPUT_ESTILO, Modal } from "./pecas";
 
 const STATUS: Record<StatusCampanha, { rotulo: string; tom?: "ok" | "warn" | "danger" | "info" }> = {
   rascunho: { rotulo: "rascunho" },
+  agendada: { rotulo: "agendada", tom: "info" }, // só o Marketing agenda (0242)
   enviando: { rotulo: "enviando", tom: "info" },
   pausada: { rotulo: "pausada", tom: "warn" },
   cancelada: { rotulo: "cancelada", tom: "danger" },
@@ -36,9 +37,9 @@ const DIAS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 
 // ── Opções dos filtros do Comercial ─────────────────────────────────────────
 
-interface Opcoes { segmentos: string[]; sdrs: { id: string; rotulo: string }[]; cadencias: { id: string; rotulo: string; ativa: boolean }[] }
+export interface Opcoes { segmentos: string[]; sdrs: { id: string; rotulo: string }[]; cadencias: { id: string; rotulo: string; ativa: boolean }[] }
 
-function useOpcoes(setor: SetorDisparo): Opcoes {
+export function useOpcoes(setor: SetorDisparo): Opcoes {
   const [o, setO] = useState<Opcoes>({ segmentos: [], sdrs: [], cadencias: [] });
   useEffect(() => {
     if (setor !== "comercial") return;
@@ -66,7 +67,7 @@ function useOpcoes(setor: SetorDisparo): Opcoes {
 
 // ── Filtros do público ──────────────────────────────────────────────────────
 
-function FiltrosComercial({ p, set, op }: { p: Publico; set: (p: Publico) => void; op: Opcoes }) {
+export function FiltrosComercial({ p, set, op }: { p: Publico; set: (p: Publico) => void; op: Opcoes }) {
   const [buscaSeg, setBuscaSeg] = useState("");
   const segs = op.segmentos.filter((s) => !buscaSeg || s.toLowerCase().includes(buscaSeg.toLowerCase())).slice(0, 40);
   return (
@@ -99,7 +100,7 @@ function FiltrosComercial({ p, set, op }: { p: Publico; set: (p: Publico) => voi
   );
 }
 
-function FiltrosRel({ p, set }: { p: Publico; set: (p: Publico) => void }) {
+export function FiltrosRel({ p, set }: { p: Publico; set: (p: Publico) => void }) {
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
@@ -274,7 +275,7 @@ function NovaCampanha({ setor, cfg, onFechar, onCriada }: { setor: SetorDisparo;
 
 // ── Painel da campanha ──────────────────────────────────────────────────────
 
-function PainelCampanha({ c, onFechar }: { c: Campanha; onFechar: () => void }) {
+export function PainelCampanha({ c, onFechar }: { c: Campanha; onFechar: () => void }) {
   const [p, setP] = useState<Painel | null>(null);
   useEffect(() => { painel(c.id).then(setP).catch((e) => notifyError(e instanceof Error ? e.message : "Falhou.")); }, [c.id]);
   const r = p?.resumo;

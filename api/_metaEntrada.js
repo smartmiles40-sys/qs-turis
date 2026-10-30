@@ -30,6 +30,7 @@ import { transcrever, transcricaoConfigurada } from './_transcrever.js';
 import { guardarMidia, rotuloDaMidia, leadDoTelefone } from './_waMidia.js';
 import { avisarGloria } from './_gloria.js';
 import { processarRelacionamento } from './_relEntrada.js';
+import { ehNumeroDoMarketing, processarMarketing } from './_mktEntrada.js';
 
 const GRAPH = 'https://graph.facebook.com/v23.0';
 
@@ -302,6 +303,19 @@ export async function processarMensagensDaMeta(changes) {
 
   for (const ch of changes) {
     const value = ch?.value || {};
+    // Número do MARKETING (0242): fica na mesma WABA, mas resposta a disparo de
+    // Marketing nunca vira lead nem cai no chat de SDR. Desvia antes de tudo.
+    // Sem número do Marketing configurado, isto é sempre false (nada muda).
+    if (await ehNumeroDoMarketing(value?.metadata?.phone_number_id)) {
+      try {
+        const r = await processarMarketing(ch);
+        conta.recibos += r.recibos; conta.recebidas += r.respostas;
+      } catch (e) {
+        conta.erros++;
+        console.error(`[meta-entrada] marketing ${ch.field}:`, e?.message);
+      }
+      continue;
+    }
     let numero;
     try { numero = await numeroDaMeta(value?.metadata?.phone_number_id); }
     catch (e) {

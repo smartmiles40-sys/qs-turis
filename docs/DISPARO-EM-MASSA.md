@@ -139,3 +139,94 @@ deixa **ler**. Escrever é só pela rota, com o service_role.
 - Modelo com imagem ou vídeo no topo: ainda não, só texto.
 - Respostas do Rel: o painel conta, mas não cria atividade (o Rel atende pela
   caixa de Atendimento).
+
+---
+
+# Marketing: base de contatos + disparos (0242, 30/10/2026)
+
+O SendFlow veio pra dentro do QS: o Marketing dispara **pelo app e pela WABA da
+Meta que o QS já tem**, sem aprovar outra API. Mesmo motor (`api/disparos.js`,
+`api/_disparo.js`), setor `marketing`, com um **número NOVO só do Marketing**
+dentro da WABA do QS. Regra que não muda: **massa só pela API oficial, só com
+modelo aprovado.** Grupo é por chip (outra frente).
+
+Telas (área de Marketing, `src/mkt/disparos/`):
+
+- **Contatos** — importar CSV (telefone com 55 e 9º dígito, cabeçalho com
+  acento, `;` do Excel, repetido no arquivo e no banco), listas, tags,
+  opt-out de WhatsApp e de e-mail, ficha com linha do tempo e notas.
+- **Disparos WhatsApp** — campanha com modelo aprovado do Marketing,
+  variáveis (nome, destino, texto fixo, **campo do contato** = coluna do CSV),
+  público (base do Marketing por listas/tags, **leads** ou **clientes** do QS),
+  prévia de quem recebe e quem sai e por quê, **agendar data e hora**,
+  pausar/retomar/cancelar, funil (enviado → entregue → lido → respondeu, erro).
+  Abas Modelos (igual ao Comercial: monta e gera o pacote da Meta) e Número.
+- **Recorrências** — "toda segunda às 9h": na hora, vira uma campanha agendada.
+- **Sequências** — passo 1 no dia 0, passo 2 no dia 3…, contados da entrada de
+  cada pessoa; entra pelo botão Inscrever ou ao entrar numa lista-gatilho;
+  quem responde (opcional) ou diz PARAR sai.
+
+## Como o Marketing difere do Comercial e do Rel
+
+| | Comercial | Rel | Marketing |
+|---|---|---|---|
+| Sai pelo número | do SDR dono | do Relacionamento | **do Marketing** (`qs_settings.mkt_disparo_numero`) |
+| Público | leads | clientes | contatos (listas/tags), leads ou clientes |
+| Depois do envio | bolha no chat + cadência | bolha no Atendimento | **só** na linha do tempo do contato |
+| Resposta | atividade pro SDR | conta no painel | conta no funil + linha do tempo (sem caixa ainda) |
+| Agendar / recorrência / sequência | — | — | sim |
+
+- Sem número do Marketing = não envia: dá pra montar, agendar e inscrever; o
+  "Iniciar" recusa, a agendada pausa com aviso e a sequência espera.
+- O número do Marketing **nunca** pode ser um que já está em
+  `qs_wa_numeros_meta` (SDR/Rel) — a tela recusa.
+- Saem sozinhos, além das regras do QS: quem disse **PARAR ao Marketing**
+  (vale venha de que base vier) e quem recebeu disparo do Marketing nos
+  últimos N dias (o intervalo do Ritmo). Em sequência o "recebeu há pouco"
+  não vale (o passo 2 É a continuação), PARAR vale sempre.
+- **Webhook**: o número do Marketing está na mesma WABA, então os eventos
+  chegam no mesmo webhook. `api/_metaEntrada.js` desvia o número do Marketing
+  ANTES de tudo pra `api/_mktEntrada.js`: recibo anda o funil, resposta marca
+  "respondeu", "PARAR"/botão "Parar de receber" grava o opt-out no contato
+  (cria a ficha se não houver). Nada vira lead, nada cai no chat do SDR.
+- O cron de sempre (`/api/disparos`, 5 em 5 min) agora faz, nesta ordem:
+  recorrências → agendadas → sequências → rodada → conciliar.
+
+## O que o Bruno precisa fazer
+
+1. **Aplicar a 0242** (`supabase/migrations/0242_mkt_disparos.sql`). É
+   aditiva: tabelas `mkt_*` novas; no motor da 0217 só acrescenta o setor
+   `marketing`, o estado `agendada` e colunas novas; as policies de leitura
+   ganham "OU o Marketing lê as do Marketing". Rollback no fim do arquivo.
+   Atenção: o código novo funciona com Comercial/Rel mesmo ANTES da 0242
+   (a fila só manda as colunas novas nas campanhas do Marketing), mas as telas
+   do Marketing só abrem depois dela.
+2. **Número novo na WABA do QS** (WhatsApp Manager da conta do QS → Telefones →
+   Adicionar número): um chip que **não** esteja no WhatsApp do celular
+   (Coexistência é outra coisa). Confirmar por SMS, definir o nome de exibição,
+   **registrar** o número (PIN de 2 etapas) e copiar o **Phone number ID**.
+3. No QS, Marketing → Disparos WhatsApp → aba **Número** (admin): colar o
+   Phone number ID e "Conferir na Meta" (só lê: confere que o número está na
+   WABA do QS, a qualidade e o limite).
+4. **Modelos**: na aba Modelos, montar o texto (categoria Marketing, botão
+   "Parar de receber"), copiar o pacote e criar no WhatsApp Manager da **mesma
+   WABA do QS** (o modelo é da conta, não do número: o aprovado vale pro
+   número do Marketing também). Quando aprovar, marcar "aprovado" na tela.
+5. Número novo começa no **limite baixo da Meta** (≈250 pessoas novas/24 h) e
+   sobe com qualidade verde. O Ritmo (por hora/dia) é por número: comece
+   baixo.
+6. Ligar o envio de verdade é o mesmo passo de sempre (seção "Ligar o envio de
+   verdade" acima): o TODO de `enviarTemplate()` + `disparo_simulacao = false`.
+   Pro Marketing, o `enviarTemplate` real precisa da credencial: o número do
+   Marketing não está em `qs_wa_numeros_meta`, então use o token do número
+   oficial (`credenciaisDaMeta()`, mesma WABA) com `phoneId` = o do Marketing.
+
+## O que ainda não tem
+
+- Caixa de atendimento do número do Marketing: a resposta fica na linha do
+  tempo do contato (texto até 300 caracteres) e no funil; ninguém responde
+  pelo QS ainda.
+- Confirmação automática do "PARAR" ("ok, você não recebe mais"): registra,
+  mas não responde.
+- Modelo com imagem/vídeo no topo (igual ao Comercial: só texto).
+- Score do contato: a coluna existe (contrato), mas ninguém calcula ainda.

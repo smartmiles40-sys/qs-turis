@@ -84,6 +84,9 @@ export const MOTIVOS = {
   sem_numero: 'SDR dono sem número conectado na Meta',
   sem_dono: 'lead sem SDR dono',
   repetido: 'telefone repetido na lista',
+  // Marketing (0242): o número do Marketing tem a lista de PARAR dele.
+  mkt_optout: 'pediu PARAR ao número do Marketing',
+  mkt_recente: 'recebeu disparo do Marketing há pouco tempo',
 };
 
 /**
@@ -98,6 +101,13 @@ export async function montarPublico({ setor, publico, ritmo }) {
   const recebem = [];
   const vistos = new Set();
   const fora = (m) => { excluidos[m] = (excluidos[m] || 0) + 1; };
+
+  // Marketing (0242): base de contatos, leads ou clientes — sempre pelo número
+  // do Marketing. Import dinâmico: o _mktDisparo importa daqui.
+  if (setor === 'marketing') {
+    const { montarPublicoMkt } = await import('./_mktDisparo.js');
+    return montarPublicoMkt({ publico, ritmo });
+  }
 
   if (setor === 'relacionamento') {
     const numero = await numeroDoRelacionamento();
@@ -162,6 +172,8 @@ export function valoresDasVariaveis(params, alvo, ctx) {
     else if (f === 'sdr') v = primeiroNome(ctx.nomesSdr?.get(alvo.sdr_id));
     else if (f === 'destino') v = alvo.destino || destinoDoSegmento(alvo.segment) || String(cfg?.valor || '');
     else if (f === 'link_grupo') v = String(ctx.grupoLink || '');
+    // Marketing (0242): campo livre do contato (coluna extra do CSV).
+    else if (f === 'campo') v = String(alvo.campos?.[String(cfg?.valor || '')] ?? '');
     else v = String(cfg?.valor || '');
     out[k] = v;
   }
@@ -177,6 +189,44 @@ export function preencher(corpo, valores) {
     return v;
   });
   return faltando ? { erro: `variável {{${faltando}}} ficou vazia` } : { texto };
+}
+
+// ── A fila ──────────────────────────────────────────────────────────────────
+
+/**
+ * Põe `recebem` na fila da campanha e a passa a 'enviando'. Serve ao botão
+ * "Iniciar" (de: 'rascunho'), à campanha agendada (de: 'agendada') e aos passos
+ * das sequências do Marketing (de: o estado em que estiver — o passo do dia
+ * pode receber gente nova mais tarde e a campanha volta a andar).
+ * O mesmo telefone não entra duas vezes na mesma campanha (unique).
+ */
+export async function montarFila({ campanha, recebem, de = 'rascunho' }) {
+  const mkt = campanha.setor === 'marketing';
+  const linhas = recebem.map((a) => ({
+    campanha_id: campanha.id, lead_id: a.lead_id || null, cliente_id: a.cliente_id || null, viagem_id: a.viagem_id || null,
+    sdr_id: a.sdr_id || null, phone_number_id: a.phone_number_id, nome: a.nome, telefone: a.telefone,
+    // Colunas da 0242 só nas campanhas do Marketing: Comercial/Rel continuam
+    // funcionando mesmo antes de a 0242 ser aplicada.
+    ...(mkt ? { contato_id: a.contato_id || null, inscricao_id: a.inscricao_id || null } : {}),
+  }));
+  for (let i = 0; i < linhas.length; i += 500) {
+    await rest('qs_disparo_envios?on_conflict=campanha_id,telefone', {
+      method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal', body: linhas.slice(i, i + 500), timeoutMs: 20_000,
+    });
+  }
+  // Total = o que está na fila (no passo de sequência a campanha recebe gente
+  // em mais de uma rodada). No "Iniciar" é igual a linhas.length.
+  let total = linhas.length;
+  if (mkt) {
+    const contados = await rest(`qs_disparo_envios?select=id&campanha_id=eq.${campanha.id}&limit=20000`, { timeoutMs: 20_000 }).catch(() => null);
+    if (Array.isArray(contados)) total = contados.length;
+  }
+  // Pausada continua pausada (o passo da sequência só acrescenta gente).
+  const body = { status: campanha.status === 'pausada' ? 'pausada' : 'enviando', total, ultimo_erro: null };
+  if (!campanha.iniciada_em) body.iniciada_em = new Date().toISOString();
+  if (campanha.status === 'concluida') body.concluida_em = null;
+  await rest(`qs_disparo_campanhas?id=eq.${campanha.id}&status=eq.${encodeURIComponent(de)}`, { method: 'PATCH', prefer: 'return=minimal', body });
+  return { total: linhas.length };
 }
 
 // ── O envio ─────────────────────────────────────────────────────────────────
@@ -400,8 +450,14 @@ async function enviarUm({ envio, campanha, corpo, cfg, ctx }) {
       const o = await rest('rpc/rel_cliente_optout', { method: 'POST', body: { p_cliente: envio.cliente_id } });
       if (o === true) return patchEnvio(envio.id, { status: 'pulado', motivo: MOTIVOS.optout });
     }
+    // Marketing (0242): quem disse PARAR ao número do Marketing (com ou sem o 9º dígito).
+    if (campanha.setor === 'marketing') {
+      const tels = variantes(envio.telefone).join(',');
+      const o = await rest(`mkt_contatos?select=id&telefone=in.(${tels})&optout_whatsapp_em=not.is.null&limit=1`);
+      if (o?.length) return patchEnvio(envio.id, { status: 'pulado', motivo: MOTIVOS.mkt_optout });
+    }
 
-    const alvo = { nome: envio.nome, sdr_id: envio.sdr_id, segment: ctx.segmentos.get(envio.lead_id), destino: ctx.destinos.get(envio.viagem_id) };
+    const alvo = { nome: envio.nome, sdr_id: envio.sdr_id, segment: ctx.segmentos.get(envio.lead_id), destino: ctx.destinos.get(envio.viagem_id), campos: ctx.campos?.get(envio.contato_id) };
     const params = valoresDasVariaveis(campanha.params, alvo, ctx);
     const m = preencher(corpo, params);
     if (m.erro) return patchEnvio(envio.id, { status: 'pulado', motivo: m.erro });
@@ -421,6 +477,17 @@ async function enviarUm({ envio, campanha, corpo, cfg, ctx }) {
     if (r.simulado) return;
 
     // Envio REAL daqui pra baixo (só depois do TODO de enviarTemplate).
+    // Marketing (0242): o número é do Marketing — NÃO vira bolha no chat do
+    // SDR nem do Rel, não entra em cadência. Fica na linha do tempo do contato.
+    if (campanha.setor === 'marketing') {
+      if (envio.contato_id) {
+        await rest('mkt_contato_eventos', {
+          method: 'POST', prefer: 'return=minimal',
+          body: { contato_id: envio.contato_id, tipo: 'disparo_enviado', dados: { campanha_id: campanha.id, campanha: campanha.nome, modelo: campanha.modelo_nome, wamid: r.wamid, texto: m.texto.slice(0, 500) } },
+        }).catch(() => null);
+      }
+      return;
+    }
     // Bolha no chat: registrarSaida (Comercial) / gravarRel (Rel) — import
     // dinâmico pra simulação não carregar o que não usa.
     if (envio.lead_id) {
@@ -456,7 +523,14 @@ async function contexto(campanha, envios) {
     const r = await rest(`rel_viagens?select=id,destino,titulo&id=in.(${vgs.join(',')})`).catch(() => []);
     for (const v of r || []) destinos.set(v.id, v.destino || v.titulo);
   }
-  return { nomesSdr, segmentos, destinos, grupoLink: campanha.grupo_link };
+  // Marketing (0242): campos livres do contato (variável "campo").
+  const campos = new Map();
+  const cts = [...new Set(envios.map((e) => e.contato_id).filter(Boolean))];
+  if (cts.length) {
+    const r = await rest(`mkt_contatos?select=id,campos&id=in.(${cts.join(',')})`).catch(() => []);
+    for (const x of r || []) campos.set(x.id, x.campos || {});
+  }
+  return { nomesSdr, segmentos, destinos, campos, grupoLink: campanha.grupo_link };
 }
 
 /**
@@ -547,10 +621,16 @@ function variantes(tel) {
  */
 export async function conciliar() {
   const desde = new Date(Date.now() - 7 * 86_400_000).toISOString();
-  const abertos = await rest(
+  let abertos = await rest(
     `qs_disparo_envios?select=id,campanha_id,lead_id,cliente_id,sdr_id,telefone,wamid,status,enviado_em` +
     `&simulado=eq.false&wamid=not.is.null&status=in.(enviado,entregue,lido)&enviado_em=gte.${encodeURIComponent(desde)}&limit=500`
   ).catch(() => []);
+  // Marketing (0242): o funil das campanhas do Marketing vem direto do webhook
+  // do número dele (api/_mktEntrada.js) — o recibo não passa pelo chat do QS.
+  if (abertos?.length) {
+    const mkt = new Set(((await rest('qs_disparo_campanhas?select=id&setor=eq.marketing').catch(() => [])) || []).map((c) => c.id));
+    if (mkt.size) abertos = abertos.filter((e) => !mkt.has(e.campanha_id));
+  }
   if (!abertos?.length) return { conferidos: 0 };
   let mudou = 0;
   const nomes = new Map();
