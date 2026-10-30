@@ -118,7 +118,8 @@ export function analisarViagem(e: EntradaConferente): Problema[] {
   if (v.status === "cancelada") return [];
   const agora = e.agora ?? Date.now();
   const hoje = hojeSP();
-  const ordenados = [...e.trechos].sort((a, b) => ms(a.partida_em) - ms(b.partida_em));
+  // 0227: trecho cancelado à mão não entra em conta nenhuma (nem conexão, nem check-in)
+  const ordenados = e.trechos.filter((t) => t.status_manual !== "cancelado").sort((a, b) => ms(a.partida_em) - ms(b.partida_em));
   const comHora = ordenados.filter((t) => !soDia(t));
   const voos = comHora.filter(ehVoo);
   const hoteis = comHora.filter((t) => t.tipo === "hospedagem");

@@ -85,7 +85,7 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
     const porPrazo = (a: ItemAtividade, b: ItemAtividade) => String(a.atual?.prazo ?? a.atual?.abre).localeCompare(String(b.atual?.prazo ?? b.atual?.abre)) || String(a.v.data_embarque).localeCompare(String(b.v.data_embarque));
     (Object.keys(g) as Grupo[]).forEach((k) => g[k].sort(porPrazo));
     const checkins = itens.filter(daVista).flatMap((it) => it.trechos
-      .filter((t) => ehVoo(t) && t.checkin_em && !t.checkin_feito_em && new Date(t.checkin_em).getTime() <= agora + 24 * 3600_000 && new Date(t.partida_em).getTime() > agora)
+      .filter((t) => ehVoo(t) && t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.checkin_em).getTime() <= agora + 24 * 3600_000 && new Date(t.partida_em).getTime() > agora)
       .map((t) => ({ it, t }))).sort((a, b) => a.t.partida_em.localeCompare(b.t.partida_em));
     const feitasHoje = itens.filter(daVista).flatMap((it) => it.registros
       .filter((r) => r.concluida_em && new Date(r.concluida_em).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) === hoje)
