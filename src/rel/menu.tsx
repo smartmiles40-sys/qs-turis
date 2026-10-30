@@ -68,6 +68,7 @@ export const ITENS_REL: ItemRel[] = [
   { id: "exp-expedicoes", label: "Expedições", icon: Icon.mapa, grupo: "expedicoes", dica: "Grupos das expedições (só leitura)" },
   { id: "exp-pacotes", label: "Pacotes", icon: Icon.carteira, grupo: "expedicoes", dica: "Pacotes vendidos" },
   { id: "exp-inscricoes", label: "Inscrições", icon: Icon.inscricao, grupo: "expedicoes", dica: "Fichas de inscrição pra decidir" },
+  { id: "exp-saude", label: "Saúde · médico", icon: Icon.alerta, grupo: "expedicoes", dica: "Quem tem alerta de saúde e o laudo do médico" },
   { id: "exp-avisos", label: "Avisos das expedições", icon: Icon.megafone, grupo: "expedicoes", dica: "O que foi avisado aos passageiros" },
   { id: "clientes", label: "Clientes", icon: Icon.cliente, grupo: "carteira", dica: "Fichas dos clientes e arrumar cadastros" },
   { id: "agenda", label: "Agenda do time", icon: Icon.agenda, grupo: "acompanhamento", dica: "Compromissos de todo o time" },

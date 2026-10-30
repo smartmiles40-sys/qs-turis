@@ -295,6 +295,7 @@ export default function Inscricoes() {
   return (
     <div className="space-y-5">
       {abas}
+      <ReceitasAEnviar />
       <header className="flex items-center gap-2 flex-wrap">
         <h2 className="text-[16px] font-bold" style={{ color: "var(--ink)", margin: 0 }}>Inscrições pendentes</h2>
         <Selo tom={todasPendentes.length ? "aviso" : "neutro"}>{todasPendentes.length}</Selo>
