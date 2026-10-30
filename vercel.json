@@ -107,11 +107,19 @@
     "api/assistente.js": {
       "maxDuration": 30
     },
-<<<<<<< HEAD
     "api/mkt-drive.js": {
-=======
+      "maxDuration": 60
+    },
     "api/mkt-grupos.js": {
->>>>>>> mkt-grupos
+      "maxDuration": 60
+    },
+    "api/mkt-email.js": {
+      "maxDuration": 60
+    },
+    "api/mkt-automacoes.js": {
+      "maxDuration": 60
+    },
+    "api/mkt-instagram.js": {
       "maxDuration": 60
     },
     "api/*.js": {
@@ -180,13 +188,20 @@
       "schedule": "20 * * * *"
     },
     {
-<<<<<<< HEAD
       "path": "/api/mkt-drive?cron=1",
       "schedule": "17 * * * *"
-=======
+    },
+    {
       "path": "/api/mkt-grupos",
       "schedule": "* * * * *"
->>>>>>> mkt-grupos
+    },
+    {
+      "path": "/api/mkt-email",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/mkt-automacoes?cron=1",
+      "schedule": "* * * * *"
     }
   ],
   "headers": [
