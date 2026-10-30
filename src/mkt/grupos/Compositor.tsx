@@ -1,139 +1,220 @@
-// src/mkt/grupos/Compositor.tsx — peças comuns: destino (tags/grupos) e conteúdo.
-import { useMemo, useState } from "react";
-import { Btn, SearchInput } from "@/components/ui";
+// src/mkt/grupos/Compositor.tsx — "Nova campanha" / "Editar campanha", igual ao SendFlow:
+// formulário à esquerda, prévia do WhatsApp à direita (fixa enquanto rola), público por
+// cartões, "Agendar / Enviar agora" ou "Vários dias" (uma campanha por data).
+// Grava direto no banco (RLS 0243); quem agenda de verdade é o servidor (confere tudo).
+import { useEffect, useMemo, useState } from "react";
+import { CONTEUDO_VAZIO, conteudoParaGravar, gruposDoDestino, lerCampanha, salvarCampanha, type Campanha, type Conteudo } from "./lib";
 import {
-  type Conteudo, type Grupo, type Tag, type TagLink, type TipoMsg,
-  classeCampo, estiloCampo, gruposDoDestino, subirArquivo,
-} from "./lib";
+  avisoPausadaDeProposito, campanhasDasDatas, estimarDuracao, formatarDuracao, hojeSP, isoDeSP, partesSP, problemasDaCampanha,
+  problemasDasDatas, type EntradaData,
+} from "./datas";
+import type { Bases } from "./useBases";
+import { intervaloDoChip, useChip } from "./contexto";
+import { agendarNoServidor, useConfirmarRetomada } from "./Retomar";
+import { EditorConteudo } from "./EditorConteudo";
+import { SeletorPublico } from "./SeletorPublico";
+import { CalendarioDatas } from "./CalendarioDatas";
+import { BotaoGrande, Campo, Escolha, LinhaChave, Nota, PreviaWhatsApp, cor } from "./pecas";
 
-export function TagChip({ tag, ativo, onClick }: { tag: Tag; ativo?: boolean; onClick?: () => void }) {
-  return (
-    <button type="button" onClick={onClick}
-      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium"
-      style={{ border: `1px solid ${tag.cor}`, background: ativo ? tag.cor : "transparent", color: ativo ? "#fff" : "var(--ink)" }}>
-      <span aria-hidden style={{ width: 8, height: 8, borderRadius: 99, background: ativo ? "#fff" : tag.cor }} />
-      {tag.nome}
-    </button>
-  );
-}
-
-/** Escolher os grupos: por tag (os grupos entram na hora do envio) e/ou um a um. */
-export function DestinoPicker({ valor, onChange, grupos, tags, links }: {
-  valor: { tag_ids: string[]; grupo_jids: string[] };
-  onChange: (v: { tag_ids: string[]; grupo_jids: string[] }) => void;
-  grupos: Grupo[]; tags: Tag[]; links: TagLink[];
+export function Compositor({ bases, editarId, copiarId, onPronto, onCancelar }: {
+  bases: Bases; editarId?: string | null; copiarId?: string | null; onPronto: () => void; onCancelar: () => void;
 }) {
-  const [busca, setBusca] = useState("");
-  const ativos = useMemo(() => grupos.filter((g) => !g.saiu_em), [grupos]);
-  const lista = useMemo(() => {
-    const b = busca.trim().toLowerCase();
-    return b ? ativos.filter((g) => (g.nome || g.jid).toLowerCase().includes(b)) : ativos;
-  }, [ativos, busca]);
-  const total = gruposDoDestino(valor, grupos, links).length;
-  const alterna = <K extends "tag_ids" | "grupo_jids">(k: K, id: string) =>
-    onChange({ ...valor, [k]: valor[k].includes(id) ? valor[k].filter((x) => x !== id) : [...valor[k], id] });
+  const { estado } = useChip();
+  const editando = Boolean(editarId);
+  const [original, setOriginal] = useState<Campanha | null>(null);
+  const [carregando, setCarregando] = useState(Boolean(editarId || copiarId));
+  const [nome, setNome] = useState("");
+  const [c, setC] = useState<Conteudo>({ ...CONTEUDO_VAZIO });
+  const [agendar, setAgendar] = useState(true);
+  const [data, setData] = useState("");
+  const [hora, setHora] = useState("09:00");
+  const [multi, setMulti] = useState(false);
+  const [entradas, setEntradas] = useState<EntradaData[]>([]);
+  const [horaPadrao, setHoraPadrao] = useState("09:00");
+  const [erros, setErros] = useState<Record<string, string>>({});
+  const [erroGeral, setErroGeral] = useState<string | null>(null);
+  const [progresso, setProgresso] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+  const [pedirRetomada, modalRetomada] = useConfirmarRetomada();
 
-  return (
-    <div className="flex flex-col gap-3">
-      <div>
-        <div className="qs-label mb-1.5">Por tag</div>
-        <div className="flex flex-wrap gap-1.5">
-          {tags.length === 0 && <span className="text-[13px] qs-tone-muted">Nenhuma tag ainda — crie em Grupos.</span>}
-          {tags.map((t) => <TagChip key={t.id} tag={t} ativo={valor.tag_ids.includes(t.id)} onClick={() => alterna("tag_ids", t.id)} />)}
-        </div>
-      </div>
-      <div>
-        <div className="qs-label mb-1.5">Um a um ({valor.grupo_jids.length} marcados)</div>
-        <SearchInput placeholder="Buscar grupo" value={busca} onChange={(e) => setBusca(e.target.value)} />
-        <div className="mt-2 max-h-56 overflow-auto rounded-lg" style={{ border: "1px solid var(--line)" }}>
-          {lista.slice(0, 300).map((g) => (
-            <label key={g.jid} className="flex items-center gap-2 px-3 py-1.5 text-[13px] cursor-pointer">
-              <input type="checkbox" checked={valor.grupo_jids.includes(g.jid)} onChange={() => alterna("grupo_jids", g.jid)} />
-              <span className="truncate">{g.nome || g.jid}</span>
-              <span className="ml-auto qs-tone-muted">{g.participantes ?? "—"}</span>
-            </label>
-          ))}
-          {lista.length === 0 && <div className="px-3 py-2 text-[13px] qs-tone-muted">Nenhum grupo. Sincronize em Grupos.</div>}
-        </div>
-      </div>
-      <div className="text-[13px]"><strong>{total}</strong> grupo(s) recebem hoje. Grupo de tag entra/sai conforme a tag na hora do envio.</div>
-    </div>
-  );
-}
+  useEffect(() => {
+    const id = editarId || copiarId;
+    if (!id) return;
+    let vivo = true;
+    lerCampanha(id).then((x) => {
+      if (!vivo) return;
+      if (!x) { setErroGeral("Campanha não encontrada."); return; }
+      setC({
+        tipo: x.tipo, texto: x.texto ?? "", midia_url: x.midia_url, midia_nome: x.midia_nome, enquete_opcoes: x.enquete_opcoes,
+        enquete_multipla: x.enquete_multipla, mencionar_todos: x.mencionar_todos, tag_ids: x.tag_ids || [], grupo_jids: x.grupo_jids || [],
+        intervalo_min_seg: x.intervalo_min_seg, intervalo_max_seg: x.intervalo_max_seg,
+      });
+      if (editarId) {
+        setOriginal(x);
+        setNome(x.nome);
+        if (x.enviar_em) { const p = partesSP(x.enviar_em); setData(p.data); setHora(p.hora); }
+      } else {
+        setNome(`${x.nome} (cópia)`);
+      }
+    }).catch((e) => setErroGeral((e as Error).message)).finally(() => { if (vivo) setCarregando(false); });
+    return () => { vivo = false; };
+  }, [editarId, copiarId]);
 
-const TIPOS: { v: TipoMsg; r: string }[] = [
-  { v: "texto", r: "Texto" }, { v: "imagem", r: "Imagem" }, { v: "video", r: "Vídeo" },
-  { v: "documento", r: "Documento" }, { v: "audio", r: "Áudio" }, { v: "enquete", r: "Enquete" },
-];
-const ACEITA: Partial<Record<TipoMsg, string>> = { imagem: "image/*", video: "video/mp4", documento: ".pdf,application/pdf", audio: "audio/*" };
+  const travada = Boolean(original?.fanout_em);
+  const nGrupos = gruposDoDestino(c, bases.grupos, bases.links).length;
+  const iv = intervaloDoChip(estado, c);
+  const est = estimarDuracao(nGrupos, iv.min, iv.max);
+  const pausadaDeProposito = original?.status === "pausada" ? avisoPausadaDeProposito(original.avisos) : null;
+  const grupoDaPrevia = useMemo(() => {
+    const g = gruposDoDestino(c, bases.grupos, bases.links)[0];
+    return g ? { nome: g.nome || "Grupo", participantes: g.participantes } : null;
+  }, [c, bases.grupos, bases.links]);
 
-/** Texto, mídia, enquete, @todos e intervalo entre grupos. */
-export function ConteudoEditor({ valor, onChange }: { valor: Conteudo; onChange: (v: Conteudo) => void }) {
-  const [subindo, setSubindo] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
-  const set = (p: Partial<Conteudo>) => onChange({ ...valor, ...p });
-  const opcoes = valor.enquete_opcoes ?? ["", ""];
-  const comMidia = ["imagem", "video", "documento", "audio"].includes(valor.tipo);
-
-  async function escolher(f: File | undefined) {
-    if (!f) return;
-    setErro(null); setSubindo(true);
-    try { const r = await subirArquivo(f); set({ midia_url: r.url, midia_nome: r.nome }); }
-    catch (e) { setErro((e as Error).message); }
-    finally { setSubindo(false); }
+  function corpo(enviarEm: string | null, conteudo: Conteudo = c) {
+    const g = conteudoParaGravar(conteudo);
+    return {
+      nome: nome.trim(), enviar_em: enviarEm, tipo: g.tipo, texto: g.texto, midia_url: g.midia_url, midia_nome: g.midia_nome,
+      enquete_opcoes: g.enquete_opcoes, enquete_multipla: g.enquete_multipla, mencionar_todos: g.mencionar_todos,
+      tag_ids: c.tag_ids, grupo_jids: c.grupo_jids, intervalo_min_seg: g.intervalo_min_seg, intervalo_max_seg: g.intervalo_max_seg,
+    };
   }
 
+  /** Salvar (e, se `paraAgendar`, mandar o servidor agendar). */
+  async function enviar(paraAgendar: boolean) {
+    setErroGeral(null);
+    const enviarEm = !paraAgendar ? (data ? isoDeSP(data, hora) : null) : agendar ? isoDeSP(data, hora) : new Date().toISOString();
+    const base = corpo(enviarEm);
+    const problemas = paraAgendar
+      ? problemasDaCampanha({ ...base, enquete_opcoes: base.enquete_opcoes }, { exigirData: true })
+      : (!nome.trim() ? { nome: "Dê um nome pra campanha." } : {});
+    if (paraAgendar && agendar && !enviarEm) problemas.enviar_em = "Escolha a data e a hora.";
+    if (Object.keys(problemas).length) { setErros(problemas); setErroGeral("Confira os campos marcados."); return; }
+    setErros({});
+    const executar = async () => {
+      setOcupado(true);
+      try {
+        const statusSemAgendar = original?.status === "pausada" ? "pausada" : "rascunho";
+        const salva = await salvarCampanha(editando && !paraAgendar ? { ...base, status: statusSemAgendar } : base, original?.id);
+        if (paraAgendar) {
+          const e = await agendarNoServidor(salva.id);
+          if (e.length) { setErroGeral(e.join(" · ")); setOriginal(salva); return; }
+        }
+        onPronto();
+      } catch (e) { setErroGeral((e as Error).message); }
+      finally { setOcupado(false); }
+    };
+    if (paraAgendar && original) pedirRetomada(original, executar);
+    else await executar();
+  }
+
+  /** "Vários dias": uma campanha por data, uma de cada vez (progresso honesto). */
+  async function enviarVarias() {
+    setErroGeral(null);
+    const baseConteudo = { tipo: c.tipo, texto: c.texto, midia_url: c.midia_url, midia_nome: c.midia_nome };
+    const probl = problemasDasDatas(baseConteudo, entradas);
+    const lista = campanhasDasDatas(baseConteudo, entradas);
+    const conteudo = problemasDaCampanha({ ...corpo(lista[0]?.enviar_em ?? null), ...(lista[0] || {}) }, { exigirData: false });
+    delete conteudo.midia; // a mídia é conferida por data
+    if (Object.keys(conteudo).length || probl.length) { setErros(conteudo); setErroGeral([...probl, ...(Object.keys(conteudo).length ? ["Confira os campos marcados."] : [])].join(" ")); return; }
+    setErros({});
+    setOcupado(true);
+    let falhas = 0;
+    try {
+      for (let i = 0; i < lista.length; i++) {
+        setProgresso(`Criando ${i + 1} de ${lista.length}…`);
+        const d = lista[i];
+        try {
+          const salva = await salvarCampanha(corpo(d.enviar_em, { ...c, tipo: d.tipo, texto: d.texto, midia_url: d.midia_url, midia_nome: d.midia_nome }));
+          if ((await agendarNoServidor(salva.id)).length) falhas++;
+        } catch { falhas++; }
+      }
+      if (!falhas) { onPronto(); return; }
+      setErroGeral(`${falhas} de ${lista.length} não foram agendadas (ficaram como rascunho ou deram erro). As demais foram agendadas — revise em Rascunhos.`);
+    } finally { setProgresso(null); setOcupado(false); }
+  }
+
+  const titulo = editando ? "Editar campanha" : copiarId ? "Nova campanha (cópia)" : "Nova campanha";
+  const rotuloPrincipal = ocupado ? (progresso ?? "Salvando…")
+    : editando ? (pausadaDeProposito || original?.status === "pausada" ? "▶ Salvar e retomar" : "📅 Salvar e agendar")
+      : multi ? `📅 Agendar ${entradas.length} campanha${entradas.length === 1 ? "" : "s"}`
+        : agendar ? "📅 Agendar campanha" : "🚀 Enviar agora";
+
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-1.5">
-        {TIPOS.map((t) => (
-          <Btn key={t.v} size="sm" variant={valor.tipo === t.v ? "primary" : "secondary"}
-            onClick={() => set({ tipo: t.v, ...(t.v === "enquete" && !valor.enquete_opcoes ? { enquete_opcoes: ["", ""] } : {}) })}>{t.r}</Btn>
-        ))}
+    <div>
+      {modalRetomada}
+      <div className="mb-1.5 text-[13px]" style={{ color: cor.ink3 }}>
+        <button type="button" onClick={onCancelar} className="hover:underline">Campanhas</button> / <b style={{ color: cor.ink }}>{titulo}</b>
       </div>
-      {comMidia && (
-        <div className="flex flex-col gap-1.5">
-          <input type="file" accept={ACEITA[valor.tipo]} disabled={subindo} onChange={(e) => escolher(e.target.files?.[0])} />
-          {subindo && <span className="text-[13px] qs-tone-muted">Subindo…</span>}
-          {valor.midia_url && <a href={valor.midia_url} target="_blank" rel="noreferrer" className="text-[13px] underline truncate">{valor.midia_nome || valor.midia_url}</a>}
-          {erro && <span className="text-[13px] qs-tone-danger">{erro}</span>}
-        </div>
-      )}
-      <label className="flex flex-col gap-1">
-        <span className="qs-label">{valor.tipo === "enquete" ? "Pergunta" : comMidia ? "Legenda (opcional)" : "Mensagem"}</span>
-        <textarea rows={valor.tipo === "texto" ? 6 : 3} maxLength={4096} className={classeCampo} style={estiloCampo}
-          value={valor.texto} onChange={(e) => set({ texto: e.target.value })}
-          placeholder={valor.tipo === "texto" ? "*negrito*, _itálico_ — igual ao WhatsApp" : ""} />
-      </label>
-      {valor.tipo === "enquete" && (
-        <div className="flex flex-col gap-1.5">
-          <span className="qs-label">Opções (2 a 12)</span>
-          {opcoes.map((o, i) => (
-            <div key={i} className="flex gap-1.5">
-              <input className={classeCampo} style={estiloCampo} value={o} maxLength={100}
-                onChange={(e) => set({ enquete_opcoes: opcoes.map((x, j) => (j === i ? e.target.value : x)) })} />
-              {opcoes.length > 2 && <Btn size="sm" variant="ghost" onClick={() => set({ enquete_opcoes: opcoes.filter((_, j) => j !== i) })}>✕</Btn>}
+      <h2 className="mb-5 text-[22px] font-semibold" style={{ color: cor.ink }}>{titulo}</h2>
+
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="gr-cartao p-4 sm:p-[22px]">
+          {carregando && <div className="mb-5 rounded-xl px-3.5 py-3 text-[13px]" style={{ background: cor.card2, color: cor.ink3 }}>Carregando campanha…</div>}
+          {pausadaDeProposito && <div className="mb-5"><Nota tom="aviso" icone="⚠️"><b>{pausadaDeProposito}</b></Nota></div>}
+          {travada && <div className="mb-5"><Nota tom="aviso" icone="🔒">A fila desta campanha já foi montada: o conteúdo não muda mais. Pause, retome ou cancele na lista.</Nota></div>}
+
+          <fieldset disabled={travada || ocupado} className="min-w-0">
+            <Campo rotulo="Nome da campanha" dica="(só pra você identificar)" erro={erros.nome}>
+              <input className="rel-input" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Live Japão — lembrete 1h antes" />
+            </Campo>
+
+            <EditorConteudo valor={c} onChange={setC} erros={erros} />
+
+            <SeletorPublico valor={c} onChange={(v) => setC({ ...c, ...v })} grupos={bases.grupos} tags={bases.tags} links={bases.links} erro={erros.publico} />
+
+            <Campo rotulo="Agendamento" dica="· horário de Brasília" erro={erros.enviar_em}>
+              {!editando && (
+                <div className="mb-3">
+                  <LinhaChave titulo="Vários dias" texto="agenda a mesma campanha em várias datas de uma vez" ligada={multi} onChange={setMulti} />
+                </div>
+              )}
+              {multi && !editando ? (
+                <CalendarioDatas entradas={entradas} onChange={setEntradas} textoBase={c.texto} horaPadrao={horaPadrao} onHoraPadrao={setHoraPadrao} />
+              ) : (
+                <>
+                  <div className="mb-3 flex gap-2">
+                    <Escolha ativo={agendar} onClick={() => setAgendar(true)}>Agendar</Escolha>
+                    <Escolha ativo={!agendar} onClick={() => setAgendar(false)}>Enviar agora</Escolha>
+                  </div>
+                  {agendar && (
+                    <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-2.5" style={{ maxWidth: 380 }}>
+                      <input type="date" className="rel-input" aria-label="Data do envio" min={hojeSP()} value={data} onChange={(e) => setData(e.target.value)} />
+                      <input type="time" className="rel-input" aria-label="Hora do envio" value={hora} onChange={(e) => setHora(e.target.value)} />
+                    </div>
+                  )}
+                  {!agendar && <p className="text-[12px]" style={{ color: cor.ink3 }}>Entra na fila na hora — o motor roda a cada minuto e respeita a janela do chip.</p>}
+                </>
+              )}
+            </Campo>
+          </fieldset>
+
+          <Nota icone="⏱️">
+            O envio respeita o intervalo de <b>{iv.min}–{iv.max}s entre grupos</b> (anti-bloqueio).{" "}
+            {nGrupos ? <>~{nGrupos} grupo{nGrupos === 1 ? "" : "s"} ≈ {formatarDuracao(est.minSeg)}–{formatarDuracao(est.maxSeg)} pra concluir.</> : "Escolha o público pra ver quanto tempo leva."}
+            {" "}Em grupo o WhatsApp não diz quem leu: o resultado mostra se chegou ao grupo.
+          </Nota>
+
+          {progresso && <p className="mt-4 text-[14px]" role="status" aria-live="polite" style={{ color: cor.ink2 }}>{progresso}</p>}
+          {erroGeral && <p className="mt-4 text-[14px]" role="alert" style={{ color: "var(--err-ink)" }}>{erroGeral}</p>}
+
+          {!travada && (
+            <div className="mt-[22px] flex flex-wrap gap-3">
+              <BotaoGrande disabled={ocupado || carregando || (multi && !editando && entradas.length === 0)}
+                onClick={() => void (multi && !editando ? enviarVarias() : enviar(true))}>{rotuloPrincipal}</BotaoGrande>
+              {!(multi && !editando) && (
+                <BotaoGrande variante="secundario" disabled={ocupado || carregando} onClick={() => void enviar(false)}>
+                  {editando && original?.status === "pausada" ? "Salvar e manter pausada" : "Salvar rascunho"}
+                </BotaoGrande>
+              )}
+              <BotaoGrande variante="secundario" disabled={ocupado} onClick={onCancelar}>Cancelar</BotaoGrande>
             </div>
-          ))}
-          {opcoes.length < 12 && <Btn size="sm" onClick={() => set({ enquete_opcoes: [...opcoes, ""] })}>+ opção</Btn>}
-          <label className="flex items-center gap-2 text-[13px]">
-            <input type="checkbox" checked={valor.enquete_multipla} onChange={(e) => set({ enquete_multipla: e.target.checked })} />
-            Permitir várias respostas
-          </label>
+          )}
         </div>
-      )}
-      <label className="flex items-center gap-2 text-[13px]">
-        <input type="checkbox" checked={valor.mencionar_todos} onChange={(e) => set({ mencionar_todos: e.target.checked })} />
-        Mencionar todos (@todos — todo mundo recebe notificação)
-      </label>
-      <div className="flex flex-wrap items-center gap-2 text-[13px]">
-        Intervalo entre um grupo e outro: de
-        <input type="number" min={5} className="w-20 px-2 py-1 rounded-lg" style={estiloCampo}
-          value={valor.intervalo_min_seg ?? ""} placeholder="20" onChange={(e) => set({ intervalo_min_seg: e.target.value ? Number(e.target.value) : null })} />
-        a
-        <input type="number" min={5} className="w-20 px-2 py-1 rounded-lg" style={estiloCampo}
-          value={valor.intervalo_max_seg ?? ""} placeholder="45" onChange={(e) => set({ intervalo_max_seg: e.target.value ? Number(e.target.value) : null })} />
-        segundos (vazio = o padrão do chip).
+
+        <div className="lg:sticky lg:top-4">
+          <PreviaWhatsApp tipo={c.tipo} texto={c.texto} midiaUrl={c.midia_url} midiaNome={c.midia_nome} mencionarTodos={c.mencionar_todos}
+            enqueteOpcoes={c.enquete_opcoes} enqueteMultipla={c.enquete_multipla} grupo={grupoDaPrevia} />
+        </div>
       </div>
     </div>
   );
