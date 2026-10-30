@@ -154,14 +154,14 @@ async function agendar(campanhaId) {
   if (!UUID.test(String(campanhaId || ''))) throw new Error('Campanha inválida.');
   const camp = (await rest(`mkt_grupos_campanhas?select=*&id=eq.${campanhaId}&limit=1`))?.[0];
   if (!camp) throw new Error('Campanha não encontrada.');
-  if (!['rascunho', 'pausada'].includes(camp.status)) throw new Error(`Campanha ${camp.status} não pode ser agendada.`);
+  if (!['rascunho', 'pausada', 'agendada'].includes(camp.status)) throw new Error(`Campanha ${camp.status} não pode ser agendada.`);
   const erros = validarCampanha(camp, { exigirData: !camp.fanout_em });
   if (erros.length) return { ok: false, erros };
   if (!camp.fanout_em) {
     const { grupos, avisos } = resolverGrupos({ tagIds: camp.tag_ids || [], grupoJids: camp.grupo_jids || [], ...(await lerGruposETags()) });
     if (!grupos.length) return { ok: false, erros: ['Nenhum grupo válido no destino.', ...avisos] };
   }
-  await rest(`mkt_grupos_campanhas?id=eq.${campanhaId}&status=eq.${camp.status}`, { method: 'PATCH', prefer: 'return=minimal', body: { status: 'agendada' } });
+  if (camp.status !== 'agendada') await rest(`mkt_grupos_campanhas?id=eq.${campanhaId}&status=eq.${camp.status}`, { method: 'PATCH', prefer: 'return=minimal', body: { status: 'agendada' } });
   return { ok: true };
 }
 
