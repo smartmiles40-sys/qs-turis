@@ -41,6 +41,7 @@ import { podeGerirRelacionamento } from "../equipe/permissao";
 import { BotaoSubirVenda } from "@/venda/SubirVenda";
 import TudoDaViagem from "./TudoDaViagem";
 import GruposDaViagem from "./GruposDaViagem";
+import { SeloDaViagem } from "@/prioridades/SeloPrioridade";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
   return (
@@ -361,6 +362,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               {ativa && <ProximoVooDestaque v={v} />}
               {v.tarefas_atrasadas > 0 && <Etiqueta tom="erro">{v.tarefas_atrasadas} tarefa{v.tarefas_atrasadas > 1 ? "s" : ""} atrasada{v.tarefas_atrasadas > 1 ? "s" : ""}</Etiqueta>}
               {!ativa && <Etiqueta tom="erro">{v.status === "arquivada" ? "Arquivada" : "Cancelada"}</Etiqueta>}
+              <SeloDaViagem v={v} />
             </div>
             <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
               <div>

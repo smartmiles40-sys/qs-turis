@@ -38,6 +38,7 @@ const FilaDivergencias = lazy(() => import("@/clientes/FilaDivergencias"));
 const SubirVendaOps = lazy(() => import("@/venda/SubirVendaOps"));
 // 29/10: Pacotes personalizados — a MESMA ficha da viagem do Relacionamento (só o Rel edita; o banco garante).
 const ViagemPage = lazy(() => import("@/rel/viagens/ViagemPage"));
+const PrioridadesPage = lazy(() => import("@/prioridades/PrioridadesPage")); // V2 (0226): pacotes prioritários
 
 /** Cor de Operações: âmbar escuro (#B45309 com texto branco = 5:1, WCAG AA). */
 const OPS_CSS = `${REL_CSS}
@@ -47,7 +48,7 @@ html.dark { --rel-ink: #FDBA74; --rel-soft: rgba(251, 146, 60, .15); }
 `;
 
 const PREFIXO = "ops";
-const TELAS = ["inicio", "solicitacoes", "subir-venda", "propostas", "equipe", "fichas", "ficha", "arrumar", "viagem", ...TELAS_EXP] as const;
+const TELAS = ["inicio", "solicitacoes", "subir-venda", "propostas", "equipe", "fichas", "ficha", "arrumar", "viagem", "prioridades", ...TELAS_EXP] as const;
 type Tela = (typeof TELAS)[number];
 const ehExp = (t: string): t is TelaExp => (TELAS_EXP as readonly string[]).includes(t);
 interface Rota { tela: Tela; id?: string }
@@ -83,6 +84,7 @@ export default function OpsApp() {
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
       { id: "subir-venda", rotulo: "Subir venda" },
       { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined },
+      { id: "prioridades", rotulo: "Prioridades" },
     ] },
     grupoExpedicoes({ ...contExp, saude: contSaude }),
     { id: "clientes-ops", rotulo: "Carteira", icone: ICONES_AREA.lista, itens: [
@@ -108,6 +110,7 @@ export default function OpsApp() {
           onAbrirId={(id) => ir(id ? { tela: "propostas", id } : { tela: "propostas" })} />
       )}
       {rota.tela === "subir-venda" && <Suspense fallback={null}><SubirVendaOps /></Suspense>}
+      {rota.tela === "prioridades" && <Suspense fallback={null}><PrioridadesPage setor="operacional" /></Suspense>}
       {rota.tela === "equipe" && <EquipePage area="operacional" />}
       {rota.tela === "fichas" && <Suspense fallback={null}><ClientesPage onAbrir={(id) => ir({ tela: "ficha", id })} /></Suspense>}
       {rota.tela === "ficha" && rota.id && (

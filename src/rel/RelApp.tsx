@@ -49,6 +49,7 @@ const ViagensPage = lazy(() => import("./viagens/ViagensPage"));
 const EsteiraPage = lazy(() => import("./viagens/EsteiraPage"));
 const ViagemPage = lazy(() => import("./viagens/ViagemPage"));
 const AlertasPage = lazy(() => import("./viagens/AlertasPage"));
+const PrioridadesPage = lazy(() => import("@/prioridades/PrioridadesPage")); // V2 (0226): pacotes prioritários
 // Disparos (28/10, 0217): o motor único do disparo em massa (o mesmo do
 // Comercial), com o público de clientes e o link do grupo. A tela antiga
 // (rel_campanhas, 0 usos) saiu do menu; as Automações seguem em rel-disparos.
@@ -80,12 +81,12 @@ type Rota =
   | { tela: "inicio" }
   | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "solicitacoes"; id?: string } | { tela: "propostas"; id?: string } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" } | { tela: "cadastros" }
-  | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
+  | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" } | { tela: "prioridades" }
   | { tela: "campanhas" } | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" } | { tela: "vendas"; id?: string }
   | { tela: "config" } | { tela: "faxina" } | { tela: "mais" } | { tela: TelaRelExp; id?: string };
 type Tela = Rota["tela"];
 
-const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "cadastros", "esteira", "viagens", "alertas", "campanhas", "disparos", "automacoes", "pesquisas", "recompra", "config", "faxina", "mais"];
+const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "cadastros", "esteira", "viagens", "alertas", "prioridades", "campanhas", "disparos", "automacoes", "pesquisas", "recompra", "config", "faxina", "mais"];
 
 /** As 4 telas que moram dentro de Campanhas: abertas, acendem "Campanhas" no menu. */
 const DENTRO_DE_CAMPANHAS: string[] = ["disparos", "automacoes", "pesquisas", "recompra"];
@@ -459,6 +460,7 @@ export default function RelApp() {
               onAbrirExpedicao={(exp, tipo, pax) => ir({ tela: tipo === "pacote" ? "exp-pacotes" : "exp-expedicoes", id: pax ? `${exp}/passageiros/pax/${pax}` : exp })} />
           )}
           {rota.tela === "esteira" && <EsteiraPage onAbrirViagem={abrirViagem} />}
+          {rota.tela === "prioridades" && <PrioridadesPage setor="relacionamento" />}
           {rota.tela === "viagens" && <ViagensPage key="viagens" onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
           {/* Faxina (supervisão): a mesma lista de Viagens, com todas as filas à mostra */}
           {rota.tela === "faxina" && <ViagensPage key="faxina" faxina onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}

@@ -41,6 +41,7 @@ import { arquivamentosDe, classificarEmLote, sugeridaParaArquivar, type Arquivad
 import { limiteEmbarque, sugestoesDeServico, type Sugestao } from "../lib/faxina";
 import FaxinaAtalhos, { type MarcarAoAbrir } from "./FaxinaAtalhos";
 import { podeGerirRelacionamento } from "../equipe/permissao";
+import { SeloCurto } from "@/prioridades/SeloPrioridade";
 
 type Visao = "painel" | "calendario" | "lista" | "repetidas" | "voos";
 const VISOES: { id: Visao; rotulo: string }[] = [
@@ -232,7 +233,7 @@ function Linha({ v, onAbrir, onAbrirCliente, classificar, onMudou, extras = {} }
             checked={!!extras.marcada} onClick={(e) => e.stopPropagation()} onChange={(e) => extras.onMarcar!(e.target.checked)} />
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold truncate" style={{ color: "var(--ink)" }}>{v.titulo}</p>
+          <p className="text-sm font-semibold truncate" style={{ color: "var(--ink)" }}>{v.titulo} <SeloCurto viagemId={v.id} /></p>
           <p className="text-[12px] truncate" style={{ color: "var(--ink3)" }}>
             {v.cliente_id && v.cliente_nome ? (
               <button className="underline" onClick={(e) => { e.stopPropagation(); onAbrirCliente(v.cliente_id!); }}>{v.cliente_nome}</button>

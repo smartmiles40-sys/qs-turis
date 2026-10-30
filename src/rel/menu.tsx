@@ -57,6 +57,7 @@ export const ITENS_REL: ItemRel[] = [
   { id: "solicitacoes", label: "Solicitações", icon: Icon.inbox, grupo: "entre", dica: "Pedidos que chegam dos outros setores" },
   { id: "propostas", label: "Propostas", icon: Icon.doc, grupo: "entre", dica: "Propostas pra aprovar e acompanhar" },
   { id: "viagens", label: "Viagens", icon: Icon.aviao, grupo: "posvenda", dica: "Todas as viagens vendidas" },
+  { id: "prioridades", label: "Prioridades", icon: Icon.alerta, grupo: "posvenda", dica: "Pacotes prioritários e o check do dia" },
   { id: "alertas", label: "Alertas", icon: Icon.alerta, grupo: "posvenda", dica: "Passaporte vencendo, etapa atrasada…" },
   { id: "vendas", label: "Pipeline de vendas", icon: Icon.funil, grupo: "posvenda", dica: "Oportunidades de vender de novo pra base" },
   { id: "campanhas", label: "Campanhas", icon: Icon.disparo, grupo: "posvenda", dica: "Disparos, automações, pesquisas e recompra" },
