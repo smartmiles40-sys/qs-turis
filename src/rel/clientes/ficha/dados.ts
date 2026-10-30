@@ -132,6 +132,8 @@ export interface FontesTimeline {
   solicitacoes: Solicitacao[];
   ligacoes: LigacoesCliente | null;
   viagens: Viagem[];
+  /** 30/10 (ficha completa): idas, contratos, laudos, receitas, itens de venda — ver eventosDaFichaCompleta (fontes.ts) */
+  extras?: (TimelineItem & { em: string })[];
 }
 
 /** Tudo que aconteceu com a pessoa, do mais novo pro mais antigo. */
@@ -157,5 +159,6 @@ export function linhaDoTempo(f: FontesTimeline): (TimelineItem & { em: string })
     out.push({ id: `v${v.id}`, em, when: v.data_venda ? formatarData(v.data_venda) : quando(v.criado_em), title: `Venda: ${v.titulo}`,
       sub: [v.valor ? moeda(v.valor) : null, v.data_embarque ? `embarca ${formatarData(v.data_embarque)}` : null].filter(Boolean).join(" · ") || undefined, setor: "financeiro" });
   }
+  if (f.extras) out.push(...f.extras);
   return out.sort((a, b) => b.em.localeCompare(a.em));
 }
