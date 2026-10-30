@@ -1,8 +1,10 @@
 // src/rel/clientes/ficha/ProntaParaEmbarcar.tsx
 // -----------------------------------------------------------------------------
-// "Pronta para embarcar?" (spec 29/10): o anel com o % do cadastro (a MESMA
-// regra de antes: os 6 campos da ficha + a foto do passaporte = 7 itens) e o
-// checklist em dois grupos — Cadastro e Contrato e embarque. Item faltando tem
+// "Pronta para embarcar?" (spec 29/10): o anel com o % do cadastro e o checklist
+// em dois grupos — Cadastro e Contrato e embarque.
+// 30/10 (revisão): o anel usa a completude ÚNICA da ficha (completudeProximaViagem,
+// a mesma do card "Cadastro" e da faixa) e "validade do passaporte" só fica feita
+// se passa na regra dos 6 meses. Item faltando tem
 // "Pedir", que vira solicitação pro Relacionamento ligada a esta ficha.
 // -----------------------------------------------------------------------------
 import { useState } from "react";
@@ -10,6 +12,7 @@ import { Btn, ChecklistItem, ProgressRing, StatusChip } from "@/components/ui";
 import type { Setor } from "@/solicitacoes/lib";
 import { formatarData, formatarTelefone, type Cliente } from "../../lib/clientes";
 import { ITENS_PEDIVEIS, pedirItem, pedirTudo, type ItemPedivel } from "./pedirACliente";
+import type { Completude } from "./regras";
 
 /** "292.•••.•••-72" — só o começo e o fim. */
 export function cpfMascarado(cpf: string | null | undefined): string {
@@ -22,14 +25,16 @@ export interface EnderecoResumo { linha: string | null; completo: boolean }
 
 interface Item { chave: string; rotulo: string; feito: boolean; valor?: string | null; dica: string }
 
-export function itensDoChecklist(c: Cliente, semFoto: boolean | null, endereco: EnderecoResumo | null): { cadastro: Item[]; contrato: Item[] } {
+export function itensDoChecklist(c: Cliente, semFoto: boolean | null, endereco: EnderecoResumo | null, comp?: Completude): { cadastro: Item[]; contrato: Item[] } {
+  const validade = comp?.itens.find((i) => i.chave === "passaporte_validade");
   const cadastro: Item[] = [
     { chave: "cpf", rotulo: "CPF", feito: !!c.cpf, valor: cpfMascarado(c.cpf), dica: "necessário para contrato e emissão" },
     { chave: "telefone", rotulo: "Telefone", feito: !!c.telefone, valor: formatarTelefone(c.telefone), dica: "WhatsApp para avisos da viagem" },
     { chave: "email", rotulo: "E-mail", feito: !!c.email, valor: c.email, dica: "para vouchers e contrato" },
     { chave: "nascimento", rotulo: "Data de nascimento", feito: !!c.nascimento, valor: formatarData(c.nascimento), dica: "necessária para emitir passagem" },
     { chave: "passaporte", rotulo: "Nº do passaporte", feito: !!c.passaporte, valor: c.passaporte, dica: "lido da foto do passaporte" },
-    { chave: "passaporte_validade", rotulo: "Validade do passaporte", feito: !!c.passaporte_validade, valor: formatarData(c.passaporte_validade), dica: "mínimo de 6 meses após a volta" },
+    { chave: "passaporte_validade", rotulo: "Validade do passaporte", feito: validade ? validade.ok : !!c.passaporte_validade,
+      valor: c.passaporte_validade ? `${formatarData(c.passaporte_validade)}${validade?.motivo ? ` · ${validade.motivo}` : ""}` : null, dica: "mínimo de 6 meses após a volta" },
     // semFoto null = a métrica não carregou: como antes, não conta como faltando
     { chave: "doc_passaporte", rotulo: "Foto do passaporte", feito: semFoto !== true, valor: semFoto === null ? "não deu pra conferir agora" : "enviada", dica: "frente legível, sem reflexo" },
   ];
@@ -42,7 +47,7 @@ export function itensDoChecklist(c: Cliente, semFoto: boolean | null, endereco: 
 
 type EstadoPedido = { [chave: string]: "pedindo" | "pedido" | undefined };
 
-export default function ProntaParaEmbarcar({ c, nome, semFoto, endereco, deSetor, bloqueado, onPreencher, onPedido }: {
+export default function ProntaParaEmbarcar({ c, nome, semFoto, endereco, deSetor, bloqueado, comp, onPreencher, onPedido }: {
   c: Cliente;
   /** Nome limpo (parseClientName). */
   nome: string;
@@ -51,14 +56,16 @@ export default function ProntaParaEmbarcar({ c, nome, semFoto, endereco, deSetor
   deSetor: Setor;
   /** Ficha juntada a outra: só leitura. */
   bloqueado?: boolean;
+  /** a completude única da ficha (completudeProximaViagem) — o anel mostra o MESMO % do card */
+  comp?: Completude;
   onPreencher: () => void;
   onPedido: () => void;
 }) {
   const [estado, setEstado] = useState<EstadoPedido>({});
   const [msg, setMsg] = useState<{ tom: "ok" | "danger"; t: string } | null>(null);
-  const { cadastro, contrato } = itensDoChecklist(c, semFoto, endereco);
+  const { cadastro, contrato } = itensDoChecklist(c, semFoto, endereco, comp);
   const faltaCad = cadastro.filter((i) => !i.feito).length;
-  const pct = Math.round(((cadastro.length - faltaCad) / cadastro.length) * 100);
+  const pct = comp ? comp.pct : Math.round(((cadastro.length - faltaCad) / cadastro.length) * 100);
   const faltando = [...cadastro, ...contrato].filter((i) => !i.feito);
 
   async function pedir(itens: ItemPedivel[], chaves: string[]) {

@@ -30,13 +30,21 @@ const diasEntre = (de: string, ate: string) => Math.round((parseISO(ate).getTime
 
 /** Todas as receitas marcadas nas expedições que ainda não embarcaram (ou embarcam hoje). */
 export async function listarReceitas(hoje: string): Promise<Receita[]> {
-  const { data, error } = await supabase.from("passageiros")
-    .select("id,cliente_id,nome_completo,telefone,saude,expedicao_id,receita_enviada_em")
-    .eq("receita_pendente", true).limit(1000);
-  if (error) throw new Error(traduzirErro(error.message));
+  // 30/10 (revisão): ordem estável + página de 1000 (o PostgREST corta em silêncio) e sem reserva cancelada
+  const PAGINA = 1000;
+  const data: unknown[] = [];
+  for (let de = 0; ; de += PAGINA) {
+    const { data: pg, error } = await supabase.from("passageiros")
+      .select("id,cliente_id,nome_completo,telefone,saude,expedicao_id,receita_enviada_em")
+      .eq("receita_pendente", true).neq("status_reserva", "Cancelado")
+      .order("id").range(de, de + PAGINA - 1);
+    if (error) throw new Error(traduzirErro(error.message));
+    data.push(...(pg ?? []));
+    if ((pg ?? []).length < PAGINA) break;
+  }
   const exps = new Map((await listarExpedicoes()).map((e) => [e.id, e]));
   const out: Receita[] = [];
-  for (const p of (data ?? []) as { id: string; cliente_id: string | null; nome_completo: string; telefone: string | null; saude: unknown; expedicao_id: string; receita_enviada_em: string | null }[]) {
+  for (const p of data as { id: string; cliente_id: string | null; nome_completo: string; telefone: string | null; saude: unknown; expedicao_id: string; receita_enviada_em: string | null }[]) {
     const exp = exps.get(p.expedicao_id);
     if (!exp || exp.status === "Cancelada") continue;
     if (exp.data_embarque && exp.data_embarque < hoje) continue;

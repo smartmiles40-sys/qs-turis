@@ -246,10 +246,11 @@ export async function juntarClientes(manter: string, remover: string) {
   if (error) throw new Error(error.message);
 }
 
-export async function carregarHistorico(id: string): Promise<Auditoria[]> {
+/** Auditoria da ficha, mais nova primeiro. `limite` cresce com o "Carregar mais" do Histórico. */
+export async function carregarHistorico(id: string, limite = 50): Promise<Auditoria[]> {
   const { data, error } = await supabase
     .from("rel_auditoria").select("id, acao, antes, depois, por, em")
-    .eq("registro_id", id).order("em", { ascending: false }).limit(50);
+    .eq("registro_id", id).order("em", { ascending: false }).order("id", { ascending: false }).range(0, limite - 1);
   if (error) return [];
   return (data ?? []) as Auditoria[];
 }

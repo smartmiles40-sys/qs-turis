@@ -38,11 +38,11 @@
 // e o modo "Preencher por telefone" (ficha/PreencherPorTelefone): salva campo a
 // campo, auditado, com "Ficha X% completa · falta: …".
 // -----------------------------------------------------------------------------
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   carregarCliente, carregarFamilia, carregarHistorico, CANAIS_CONTATO, REGRAS_PADRAO, carregarRegras,
-  listarContatos, metricaDoCliente, moeda, carregarLigacoes, completude, formatarData,
+  listarContatos, metricaDoCliente, moeda, carregarLigacoes, formatarData,
   type LigacoesCliente, type Auditoria, type Cliente, type Contato, type Metrica, type RegrasCategorias,
 } from "../lib/clientes";
 import { linkBitrix, type Viagem } from "../lib/viagens";
@@ -84,17 +84,21 @@ import { gravarParamNoHash, lerParamDoHash } from "@/lib/hashQuery";
 import ProntaParaEmbarcar from "./ficha/ProntaParaEmbarcar";
 import VisaoGeral, { resumoEndereco } from "./ficha/VisaoGeral";
 import LateralFicha from "./ficha/LateralFicha";
-import { linhaDoTempo, proximaViagem, statusDaViagem, trilha } from "./ficha/dados";
+import { linhaDoTempo, proximaViagem, statusDaViagem, trilha, voltaParaAlerta } from "./ficha/dados";
 import { ITENS_PEDIVEIS, pedirItem } from "./ficha/pedirACliente";
 import AbaContratos, { type EstadoContratos } from "./ficha/AbaContratos";
 import AbaSaude, { type EstadoLaudos } from "./ficha/AbaSaude";
 import AbaPreferencias from "./ficha/AbaPreferencias";
 import Passaportes from "./ficha/Passaportes";
 import PreencherPorTelefone from "./ficha/PreencherPorTelefone";
+import DocumentosViagem, { type EstadoDocsViagem } from "./ficha/DocumentosViagem";
 import {
-  completudeProximaViagem, contratosDoCliente, eventosDaFichaCompleta, idasCompletas, laudosDoCliente, perfilDaFicha, perfilEfetivo,
-  vendaItensDoCliente, ROTULO_PERFIL, type CampoPerfil, type IdaCompleta, type PerfilViagem, type VendaItemFicha,
+  auditoriaDasIdas, completudeProximaViagem, contratosDoCliente, decisoesDaPessoa, documentosDeViagem, estadoDoPerfil, eventosDaFichaCompleta,
+  eventosDoHistoricoExtra, idasCompletas, laudosDoCliente, passaportesAntigosDaFicha, perfilEfetivo, uploadsDaPessoa,
+  vendaItensDoCliente, ROTULO_PERFIL, type AuditoriaIda, type CampoPerfil, type DecisaoInscricao, type EstadoPerfil, type IdaCompleta,
+  type UploadFicha, type VendaItemFicha,
 } from "./ficha/fontes";
+import type { PassaporteAntigo } from "./ficha/regras";
 import "./ficha/ficha.css";
 
 // 23/10 (cadastro único): a ficha é O lugar da pessoa — tudo que estava espalhado
@@ -213,8 +217,19 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [pedidos, setPedidos] = useState<Record<string, "pedindo" | "pedido" | undefined>>({});
   const [erroPedido, setErroPedido] = useState<string | null>(null);
   // 30/10 (ficha completa)
-  const [idasC, setIdasC] = useState<IdaCompleta[]>([]);
-  const [perfil, setPerfil] = useState<PerfilViagem | null>(null); // null = 0228 fora do ar
+  // undefined = carregando (o "Preencher por telefone" só abre depois que idas, perfil e pessoa chegam)
+  const [idasCE, setIdasCE] = useState<IdaCompleta[] | undefined>(undefined);
+  const [erroIdasC, setErroIdasC] = useState<string | null>(null);
+  const [perfilE, setPerfilE] = useState<EstadoPerfil | undefined>(undefined);
+  const [docsViagem, setDocsViagem] = useState<EstadoDocsViagem | null>(null);
+  const [passAntigos, setPassAntigos] = useState<PassaporteAntigo[] | null>(null);
+  const [auditIdas, setAuditIdas] = useState<{ lista: AuditoriaIda[]; temMais: boolean }>({ lista: [], temMais: false });
+  const [uploads, setUploads] = useState<UploadFicha[]>([]);
+  const [decisoes, setDecisoes] = useState<DecisaoInscricao[]>([]);
+  // "Carregar mais" do Histórico: quantas linhas de cada auditoria (ficha e idas) puxar
+  const [limHist, setLimHist] = useState(200);
+  const limHistRef = useRef(limHist);
+  limHistRef.current = limHist;
   const [contratos, setContratos] = useState<EstadoContratos | null>(null);
   const [laudos, setLaudos] = useState<EstadoLaudos | null>(null);
   const [vendaItens, setVendaItens] = useState<VendaItemFicha[]>([]);
@@ -243,12 +258,21 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       // 30/10 (ficha completa): idas com tudo → contratos; perfil de viagem (0228); laudos; itens de venda
       idasCompletas(cli.id)
         .then((ic) => {
-          setIdasC(ic);
+          setIdasCE(ic); setErroIdasC(null);
           contratosDoCliente(cli.id, ic).then(setContratos)
             .catch((e) => setContratos({ lista: [], rpcAtiva: true, erro: e instanceof Error ? e.message : "erro" }));
+          const ids = ic.map((i) => i.id);
+          auditoriaDasIdas(ids, limHistRef.current).then(setAuditIdas).catch(() => setAuditIdas({ lista: [], temMais: false }));
+          uploadsDaPessoa(cli.id, ids).then(setUploads).catch(() => setUploads([]));
         })
-        .catch(() => { setIdasC([]); setContratos({ lista: [], rpcAtiva: true, erro: "as viagens não carregaram" }); });
-      perfilDaFicha(cli.id).then(setPerfil).catch(() => setPerfil(null));
+        .catch((e) => {
+          setIdasCE((x) => x ?? []); setErroIdasC(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "erro desconhecido");
+          setContratos({ lista: [], rpcAtiva: true, erro: "as viagens não carregaram" });
+        });
+      estadoDoPerfil(cli.id).then(setPerfilE);
+      documentosDeViagem(cli.id).then(setDocsViagem).catch((e) => setDocsViagem({ ativo: true, lista: [], erro: e instanceof Error ? e.message : "erro" }));
+      passaportesAntigosDaFicha(cli.id).then(setPassAntigos).catch(() => setPassAntigos([]));
+      decisoesDaPessoa(cli.cpf).then(setDecisoes).catch(() => setDecisoes([]));
       laudosDoCliente(cli.id).then(setLaudos).catch(() => setLaudos({ ativo: true, lista: [], erro: "não carregou" }));
       vendaItensDoCliente(cli.id).then(setVendaItens).catch(() => setVendaItens([]));
       idasDaFicha(cli.id)
@@ -259,7 +283,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       const [tit, fam, hist] = await Promise.all([
         cli.titular_id ? carregarCliente(cli.titular_id) : Promise.resolve(null),
         carregarFamilia(idTitular),
-        carregarHistorico(cli.id),
+        carregarHistorico(cli.id, limHistRef.current),
       ]);
       setTitular(tit);
       setFamilia(fam.filter((m) => m.id !== cli.id));
@@ -306,11 +330,25 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
     return () => { vivo = false; };
   }, [idProxIda]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const extras = useMemo(() => eventosDaFichaCompleta({ idas: idasC, contratos: contratos?.lista ?? [], laudos: laudos?.lista ?? [], vendaItens, usuarios }),
-    [idasC, contratos, laudos, vendaItens, usuarios]);
+  const idasC = useMemo(() => idasCE ?? [], [idasCE]);
+  const perfil = perfilE?.estado === "ok" ? perfilE.perfil : null;
+  const extras = useMemo(() => [
+    ...eventosDaFichaCompleta({ idas: idasC, contratos: contratos?.lista ?? [], laudos: laudos?.lista ?? [], vendaItens, usuarios }),
+    ...eventosDoHistoricoExtra({ idas: idasC, auditoria: auditIdas.lista, uploads, decisoes, usuarios }),
+  ], [idasC, contratos, laudos, vendaItens, usuarios, auditIdas, uploads, decisoes]);
   const timeline = useMemo(() => linhaDoTempo({ historico, mudancas, usuarios, contatos, solicitacoes, ligacoes, viagens: viagensRel, extras }),
     [historico, usuarios, contatos, solicitacoes, ligacoes, viagensRel, extras]);
   const pe = useMemo(() => perfilEfetivo(perfil, idasC), [perfil, idasC]);
+  const voltaRef = useMemo(() => voltaParaAlerta(estadoIdas?.idas ?? [], viagensRel), [estadoIdas, viagensRel]);
+
+  /** "Carregar mais" do Histórico: puxa mais auditoria da ficha e das idas. */
+  async function carregarMaisHistorico() {
+    const novo = limHist + 300;
+    setLimHist(novo);
+    const [hist, aud] = await Promise.all([carregarHistorico(id, novo), auditoriaDasIdas(idasC.map((i) => i.id), novo)]);
+    setHistorico(hist); setAuditIdas(aud);
+  }
+  const recarregarPerfil = () => { setPerfilE(undefined); void estadoDoPerfil(id).then(setPerfilE); };
 
   if (erro) return <div className="fc"><Aviso tom="erro">{erro}</Aviso></div>;
   if (!c) return (
@@ -330,11 +368,16 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const bloqueado = !!c.mesclado_em_id;
   const ehTitular = !c.titular_id;
   const fone = c.telefone ?? "";
-  // Completude: os campos da ficha + a foto do passaporte (vem da métrica) — a mesma regra de antes.
-  const comp = completude(c);
   const semFoto: boolean | null = metrica ? metrica.faltando.includes("doc_passaporte") : null;
-  const nFaltando = comp.faltando.length + (semFoto ? 1 : 0);
-  const pct = Math.round(((7 - nFaltando) / 7) * 100);
+  // 30/10 (revisão): UM cálculo de completude — card "Cadastro", checklist, faixa e telefone usam o mesmo
+  // (passaporte vencido / fora dos 6 meses não conta como ok; foto do passaporte = "pedir à cliente")
+  const compViagem = completudeProximaViagem(c, pessoa ?? null, pe, semFoto, voltaRef);
+  const nFaltando = compViagem.falta.length;
+  const pct = compViagem.pct;
+  const itemValidade = compViagem.itens.find((i) => i.chave === "passaporte_validade");
+  // o "Preencher por telefone" só abre com tudo carregado (senão fotografa a ficha pela metade)
+  const prontoTelefone = pessoa !== undefined && perfilE !== undefined && idasCE !== undefined;
+  const abrirTelefone = () => { if (prontoTelefone) setTelefone(true); };
   const nExpedicoes = idas.filter((i) => i.status_reserva !== "Cancelado" && i.status_reserva !== "Lead").length;
   const cats = categoriasDe(regras);
   const cat = metrica && metrica.categoria !== "sem_categoria" ? cats.find((x) => x.id === metrica.categoria) : null;
@@ -348,8 +391,6 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const nCompras = (metrica?.viagens_compradas ?? 0) + (metrica?.compras_avulsas ?? 0);
   const nViagens = idas.length + viagensRel.length;
   const nuncaContato = metrica ? metrica.ultimo_contato_em == null : false;
-  // 30/10: o que a PRÓXIMA viagem pede (inclui emergência, camiseta, saúde, endereço)
-  const compViagem = completudeProximaViagem(c, pessoa ?? null, pe, semFoto);
 
   const abrirWhatsApp = () => {
     if (ehRel && conversaAberta) onAbrirConversa?.(conversaAberta.id);
@@ -394,7 +435,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
     { chave: "doc_passaporte", rotulo: "Foto do passaporte", ok: semFoto !== true, sub: semFoto === true ? "Faltando" : semFoto === null ? "não deu pra conferir" : "Enviada" },
     { chave: "cpf", rotulo: "CPF", ok: !!c.cpf, sub: c.cpf ? "Número cadastrado" : "Faltando" },
     { chave: "passaporte", rotulo: "Nº do passaporte", ok: !!c.passaporte, sub: c.passaporte ? c.passaporte : "Faltando" },
-    { chave: "passaporte_validade", rotulo: "Validade do passaporte", ok: !!c.passaporte_validade, sub: c.passaporte_validade ? formatarData(c.passaporte_validade) : "Faltando" },
+    { chave: "passaporte_validade", rotulo: "Validade do passaporte", ok: !!itemValidade?.ok,
+      sub: c.passaporte_validade ? `${formatarData(c.passaporte_validade)}${itemValidade?.motivo ? ` · ${itemValidade.motivo}` : ""}` : "Faltando" },
     { chave: "nascimento", rotulo: "Data de nascimento", ok: !!c.nascimento, sub: c.nascimento ? formatarData(c.nascimento) : "Faltando" },
     { chave: "contrato", rotulo: "Contrato", ok: status[0].tom === "ok", sub: status[0].texto === "—" ? "sem viagem com contrato" : status[0].texto },
   ];
@@ -451,7 +493,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         {!bloqueado && (
           <div className="fc-head__acts">
             {fone && <Btn icon={Icon.chat} onClick={abrirWhatsApp}>WhatsApp</Btn>}
-            <Btn onClick={() => setTelefone(true)}>Preencher por telefone</Btn>
+            <Btn onClick={abrirTelefone} disabled={!prontoTelefone} title={!prontoTelefone ? "Carregando a ficha…" : undefined}>Preencher por telefone</Btn>
             <Btn onClick={() => setPedirSetor("geral")}>Pedir a outro setor</Btn>
             {ehRel && <Btn variant="primary" onClick={() => setNovoContato(true)}>Registrar contato</Btn>}
             <Menu rotulo="Mais ações" grupos={menu} />
@@ -481,10 +523,18 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         <div className="fc-tel__faixa" role="status">
           <span className="fc-tel__pct">
             <strong className="qs-num">Ficha {compViagem.pct}% completa pra próxima viagem</strong>
-            <span className="fc-bloco__s"> · falta: {compViagem.falta.map((f) => f.rotulo).join(", ")}</span>
+            <span className="fc-bloco__s"> · falta: {compViagem.falta.map((f) => (f.motivo ? `${f.rotulo} (${f.motivo.toLowerCase()})` : f.rotulo)).join(", ")}</span>
           </span>
-          <Btn size="sm" variant="primary" onClick={() => setTelefone(true)}>Preencher por telefone</Btn>
+          <Btn size="sm" variant="primary" onClick={abrirTelefone} disabled={!prontoTelefone}>Preencher por telefone</Btn>
         </div>
+      )}
+      {perfilE?.estado === "erro" && (
+        <Aviso tom="erro">O perfil de viagem (emergência, saúde, preferências) não carregou: {perfilE.erro}.{" "}
+          <button type="button" className="underline font-semibold" onClick={recarregarPerfil}>Tentar de novo</button></Aviso>
+      )}
+      {erroIdasC && (
+        <Aviso tom="erro">As viagens da pessoa não carregaram ({erroIdasC}).{" "}
+          <button type="button" className="underline font-semibold" onClick={() => void carregar()}>Tentar de novo</button></Aviso>
       )}
 
       {erroMetrica && <Aviso tom="erro">Categoria, LTV e cadastro não carregaram ({erroMetrica}).</Aviso>}
@@ -501,8 +551,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
 
       <div className="fc-cols">
         <main className="fc-main">
-          <ProntaParaEmbarcar c={c} nome={nome} semFoto={semFoto} endereco={endereco} deSetor={setor} bloqueado={bloqueado}
-            onPreencher={() => setTelefone(true)} onPedido={() => setSinalPedidos((n) => n + 1)} />
+          <ProntaParaEmbarcar c={c} nome={nome} semFoto={semFoto} endereco={endereco} deSetor={setor} bloqueado={bloqueado} comp={compViagem}
+            onPreencher={abrirTelefone} onPedido={() => setSinalPedidos((n) => n + 1)} />
 
           <div className="fc-abas" role="tablist" aria-label="Seções da ficha">
             {ABAS.map((a) => (
@@ -554,7 +604,10 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
             {aba === "compras" && <ComprasDoCliente cliente={c} />}
 
             {aba === "documentos" && <>
-              <Passaportes c={c} idas={idasC} voltaProxima={proxima?.volta ?? proxima?.ida ?? null} onPreencher={!bloqueado ? () => setTelefone(true) : undefined} />
+              <Passaportes c={c} idas={idasC} voltaProxima={voltaRef} antigos={passAntigos} docsViagem={docsViagem?.lista ?? []} usuarios={usuarios}
+                onPreencher={!bloqueado && prontoTelefone ? abrirTelefone : undefined} />
+              <DocumentosViagem clienteId={c.id} estado={docsViagem} idas={idasC} bloqueado={bloqueado} voltaProxima={voltaRef}
+                onMudou={() => { void documentosDeViagem(c.id).then(setDocsViagem); }} />
               <section className="fc-slots" aria-label="Documentos da pessoa">
                 {slots.map((s) => {
                   const pedivel = !s.ok && !bloqueado && ITENS_PEDIVEIS[s.chave];
@@ -581,12 +634,12 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
 
             {aba === "saude" && (
               <AbaSaude laudos={laudos} pe={pe} idas={idasC} bloqueado={bloqueado} usuarios={usuarios}
-                onPreencher={() => setTelefone(true)} onMudou={() => void carregar()} onAbrirExpedicao={onAbrirExpedicao} />
+                onPreencher={abrirTelefone} onMudou={() => void carregar()} onAbrirExpedicao={onAbrirExpedicao} />
             )}
 
             {aba === "preferencias" && (
               <AbaPreferencias clienteId={c.id} pe={pe} idas={idasC} perfilAtivo={perfil !== null} bloqueado={bloqueado}
-                onPreencher={() => setTelefone(true)} onMudou={() => void carregar()} />
+                onPreencher={abrirTelefone} onMudou={() => void carregar()} />
             )}
 
             {aba === "expedamigo" && (
@@ -656,6 +709,11 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
             {aba === "historico" && <>
               <Card title="Histórico completo" action={<span className="qs-num qs-tone-subtle" style={{ fontSize: 13 }}>{timeline.length} evento{timeline.length === 1 ? "" : "s"}</span>}>
                 <Timeline items={timeline} empty="Sem registros." />
+                {(historico.length >= limHist || auditIdas.temMais) && (
+                  <div className="fc-acoes" style={{ marginTop: 10 }}>
+                    <Btn size="sm" onClick={() => void carregarMaisHistorico()}>Carregar mais</Btn>
+                  </div>
+                )}
               </Card>
               {ligacoes && <div id="fc-onde-aparece"><LigacoesDoCliente l={ligacoes} /></div>}
             </>}
@@ -671,8 +729,9 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       </div>
 
       {/* 30/10: monta só quando abre — começa sempre com os dados da ficha recarregados */}
-      {telefone && (
-        <PreencherPorTelefone aberto c={c} pessoa={pessoa} perfil={perfil} idas={idasC} semFoto={semFoto}
+      {telefone && prontoTelefone && (
+        <PreencherPorTelefone aberto c={c} pessoa={pessoa ?? null} perfil={perfil} perfilErro={perfilE?.estado === "erro" ? perfilE.erro : null}
+          idas={idasC} semFoto={semFoto} voltaReferencia={voltaRef}
           onFechar={(mudou) => { setTelefone(false); if (mudou) void carregar(); }} />
       )}
       <ClienteForm

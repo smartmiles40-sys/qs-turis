@@ -21,6 +21,7 @@ import {
   linkLaudo, situacaoReceita, DIAS_RECEITA, ROTULO_STATUS_LAUDO, SELO_APTO, type laudosDoCliente,
   type IdaCompleta, type LaudoMedico, type PerfilEfetivo,
 } from "./fontes";
+import { dataBRSP, dataSP } from "./regras";
 
 const quando = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }) : "");
 
@@ -63,8 +64,10 @@ export default function AbaSaude({ laudos, pe, idas, bloqueado, usuarios, onPree
   }
 
   const comReceita = idas.filter((i) => situacaoReceita(i));
-  const comSaude = idas.filter((i) => (i.saude && Object.keys(i.saude).length) || i.condicoes_medicas || i.restricoes_alimentares);
+  const comSaude = idas.filter((i) => (i.saude && Object.keys(i.saude).length) || i.condicoes_medicas || i.restricoes_alimentares || i.saude_triagem_obs);
   const temColunaReceita = idas.some((i) => "receita_pendente" in i);
+  const hoje = dataSP();
+  const triagens = idas.filter((i) => i.saude_triagem_obs?.trim());
 
   return (
     <div className="fc-main">
@@ -81,6 +84,14 @@ export default function AbaSaude({ laudos, pe, idas, bloqueado, usuarios, onPree
             </p>
             <ListaSaude saude={pe.saude.valor} />
           </>
+        )}
+        {triagens.length > 0 && (
+          <div className="fc-bloco">
+            <span className="fc-bloco__t">Comentário da triagem de saúde</span>
+            {triagens.map((i) => (
+              <span key={i.id} className="fc-bloco__s" style={{ display: "block" }}>{i.expedicao?.nome ?? "Viagem"}: {i.saude_triagem_obs}</span>
+            ))}
+          </div>
         )}
         {pe.restricoes_alimentares && (
           <div className="fc-bloco"><span className="fc-bloco__t">Alimentação (observação)</span><span className="fc-bloco__s">{pe.restricoes_alimentares.valor}</span></div>
@@ -102,7 +113,7 @@ export default function AbaSaude({ laudos, pe, idas, bloqueado, usuarios, onPree
                         <span style={{ display: "flex", flexDirection: "column", flex: "1 1 220px", minWidth: 0 }}>
                           <span className="fc-bloco__t">{l.expedicao?.nome ?? "Laudo"}{l.expedicao?.data_embarque ? ` · ${formatarData(l.expedicao.data_embarque)}` : ""}</span>
                           <span className="fc-bloco__s">
-                            {[valido && l.emitido_em ? `emitido ${formatarData(l.emitido_em)}` : ROTULO_STATUS_LAUDO[l.status ?? ""] ?? l.status,
+                            {[valido && l.emitido_em ? `emitido ${dataBRSP(l.emitido_em)}` : ROTULO_STATUS_LAUDO[l.status ?? ""] ?? l.status,
                               l.emitido_por_nome, l.ressalvas, l.parecer].filter(Boolean).join(" · ") || "—"}
                           </span>
                         </span>
@@ -152,9 +163,9 @@ export default function AbaSaude({ laudos, pe, idas, bloqueado, usuarios, onPree
             })}
           </ul>
         )}
-        {!bloqueado && temColunaReceita && idas.some((i) => !situacaoReceita(i) && i.status_reserva !== "Cancelado" && (i.expedicao?.data_embarque ?? "") >= new Date().toISOString().slice(0, 10)) && (
+        {!bloqueado && temColunaReceita && idas.some((i) => !situacaoReceita(i) && i.status_reserva !== "Cancelado" && (i.expedicao?.data_embarque ?? "") >= hoje) && (
           <div className="fc-acoes" style={{ marginTop: 10 }}>
-            {idas.filter((i) => !situacaoReceita(i) && i.status_reserva !== "Cancelado" && (i.expedicao?.data_embarque ?? "") >= new Date().toISOString().slice(0, 10)).map((i) => (
+            {idas.filter((i) => !situacaoReceita(i) && i.status_reserva !== "Cancelado" && (i.expedicao?.data_embarque ?? "") >= hoje).map((i) => (
               <Btn key={i.id} size="sm" disabled={ocupado === i.id} onClick={() => void receita(i, { pendente: true }, "Receita marcada pra emitir e enviar.")}>
                 Precisa de receita em {i.expedicao?.nome ?? "viagem"}
               </Btn>
@@ -176,6 +187,7 @@ export default function AbaSaude({ laudos, pe, idas, bloqueado, usuarios, onPree
                   )}
                 </span>
                 {i.saude && Object.keys(i.saude).length > 0 && <div style={{ marginTop: 6 }}><ListaSaude saude={i.saude} /></div>}
+                {i.saude_triagem_obs && <span className="fc-bloco__s" style={{ display: "block" }}>Triagem de saúde: {i.saude_triagem_obs}</span>}
                 {i.condicoes_medicas && <span className="fc-bloco__s" style={{ display: "block" }}>Condições médicas: {i.condicoes_medicas}</span>}
                 {i.restricoes_alimentares && <span className="fc-bloco__s" style={{ display: "block" }}>Alimentação: {i.restricoes_alimentares}</span>}
               </li>

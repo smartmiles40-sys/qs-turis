@@ -19,6 +19,7 @@ import {
 
 const LEGIVEL = (k: CampoPerfil, v: unknown): string => {
   if (typeof v === "boolean") return v ? "Sim" : "Não";
+  if (Array.isArray(v)) return v.map((m: { programa?: string; numero?: string }) => [m.programa, m.numero].filter(Boolean).join(" nº ")).join(" · ");
   if (k === "contato_emergencia_fone" && typeof v === "string") return mascaraTelefone(v);
   return String(v ?? "");
 };

@@ -9,12 +9,12 @@
 // proposta de unificar está em docs/PROPOSTA-SCHEMA-FICHA.md.
 // -----------------------------------------------------------------------------
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { Avatar, Btn, Card, StatusChip, nomeLimpo } from "@/components/ui";
 import { Icon } from "@/components/ui/icons";
 import { VINCULOS, type Acompanhante } from "@/clientes/cadastro";
 import { PARENTESCOS, formatarTelefone, type Cliente, type LigacoesCliente, type Metrica } from "../../lib/clientes";
+import { anotarObservacao } from "./fontes";
 
 const BITRIX = "https://agenciasetuforeuvou.bitrix24.com.br";
 const dataBR = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "—");
@@ -175,11 +175,11 @@ function Observacoes({ c, bloqueado, onSalvo }: { c: Cliente; bloqueado: boolean
     const t = texto.trim();
     if (!t) return;
     setSalvando(true); setErro(null);
-    // Vai pro FIM do mesmo campo (rel_clientes.observacoes), com data e autor —
-    // é o campo que o Editar ficha já mostra; nada de tabela nova.
-    const linha = `${new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })} · ${currentUser?.name?.split(" ")[0] ?? "Equipe"}: ${t}`;
-    const novo = c.observacoes?.trim() ? `${c.observacoes.trim()}\n\n${linha}` : linha;
-    const { error } = await supabase.from("rel_clientes").update({ observacoes: novo }).eq("id", c.id);
+    // 30/10 (revisão): acrescenta NO BANCO (rel_cliente_anotar, 0232), com data e autor —
+    // gravar o campo inteiro a partir da tela fazia uma nota apagar a outra.
+    let error: { message: string } | null = null;
+    try { await anotarObservacao(c.id, t, currentUser?.name?.split(" ")[0] ?? "Equipe"); }
+    catch (e) { error = { message: e instanceof Error ? e.message : "erro" }; }
     setSalvando(false);
     if (error) { setErro(`Não consegui salvar: ${error.message}`); return; }
     setTexto("");

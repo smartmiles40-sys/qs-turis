@@ -14,6 +14,7 @@ import type { Auditoria, Contato, LigacoesCliente } from "../../lib/clientes";
 import { CANAIS_CONTATO, formatarData, moeda } from "../../lib/clientes";
 import type { Solicitacao } from "@/solicitacoes/lib";
 import { SIGLA } from "@/solicitacoes/lib";
+import { agruparSeguidos, voltaDeReferencia } from "./regras";
 
 export type TomEtapa = "ok" | "warn" | "danger" | "neutral";
 
@@ -46,6 +47,19 @@ export function proximaViagem(idas: IdaEmExpedicao[], viagens: Viagem[]): Proxim
   }
   cands.sort((a, b) => a.ida.localeCompare(b.ida) || (a.idaExp ? -1 : 1));
   return cands[0] ?? null;
+}
+
+/**
+ * A volta que vale pro alerta dos 6 meses do passaporte: a viagem EM ANDAMENTO
+ * (embarcou e não voltou) ou, sem ela, a próxima — expedição/pacote ou viagem do Rel.
+ */
+export function voltaParaAlerta(idas: IdaEmExpedicao[], viagens: Viagem[]): string | null {
+  const datas = [
+    ...idas.filter((i) => i.status_reserva !== "Cancelado" && i.status_reserva !== "Lead" && i.expedicao?.data_embarque)
+      .map((i) => ({ ida: i.expedicao!.data_embarque, volta: i.expedicao!.data_retorno })),
+    ...viagens.filter((v) => v.status === "ativa" && v.data_embarque).map((v) => ({ ida: v.data_embarque, volta: v.data_retorno })),
+  ];
+  return voltaDeReferencia(datas);
 }
 
 export const tomDoSemaforo = (s: Semaforo | null | undefined): TomEtapa =>
@@ -132,15 +146,21 @@ export interface FontesTimeline {
   solicitacoes: Solicitacao[];
   ligacoes: LigacoesCliente | null;
   viagens: Viagem[];
-  /** 30/10 (ficha completa): idas, contratos, laudos, receitas, itens de venda — ver eventosDaFichaCompleta (fontes.ts) */
-  extras?: (TimelineItem & { em: string })[];
+  /** 30/10 (ficha completa): idas, contratos, laudos, receitas, itens de venda, audit_log das idas, uploads,
+   *  decisões — ver eventosDaFichaCompleta / eventosDoHistoricoExtra (fontes.ts) */
+  extras?: (TimelineItem & { em: string; grupo?: string | null })[];
 }
 
-/** Tudo que aconteceu com a pessoa, do mais novo pro mais antigo. */
+/**
+ * Tudo que aconteceu com a pessoa, do mais novo pro mais antigo. Gravações seguidas
+ * da mesma pessoa no mesmo lugar (ex.: o "Preencher por telefone", campo a campo)
+ * em até 10 min viram UMA linha.
+ */
 export function linhaDoTempo(f: FontesTimeline): (TimelineItem & { em: string })[] {
-  const out: (TimelineItem & { em: string })[] = [];
+  const out: (TimelineItem & { em: string; grupo?: string | null })[] = [];
   for (const h of f.historico) {
-    out.push({ id: `a${h.id}`, em: h.em, when: quando(h.em), title: `Ficha: ${f.mudancas(h)}`, sub: (h.por && f.usuarios[h.por]) || "Sistema", setor: "relacionamento" });
+    const quem = (h.por && f.usuarios[h.por]) || "Sistema";
+    out.push({ id: `a${h.id}`, em: h.em, when: quando(h.em), title: `Ficha: ${f.mudancas(h)}`, sub: quem, setor: "relacionamento", grupo: `ficha:${quem}` });
   }
   for (const k of f.contatos) {
     out.push({ id: `c${k.id}`, em: k.feito_em, when: quando(k.feito_em), title: `Contato por ${CANAIS_CONTATO[k.canal]}`,
@@ -160,5 +180,6 @@ export function linhaDoTempo(f: FontesTimeline): (TimelineItem & { em: string })
       sub: [v.valor ? moeda(v.valor) : null, v.data_embarque ? `embarca ${formatarData(v.data_embarque)}` : null].filter(Boolean).join(" · ") || undefined, setor: "financeiro" });
   }
   if (f.extras) out.push(...f.extras);
-  return out.sort((a, b) => b.em.localeCompare(a.em));
+  out.sort((a, b) => b.em.localeCompare(a.em));
+  return agruparSeguidos(out as (typeof out[number] & { title: string })[], 10).map(({ grupo: _g, ...r }) => r);
 }

@@ -213,10 +213,26 @@ select c.id, c.passaporte, p.passaporte from rel_clientes c join passageiros p o
 3. Onde fica o contador de receitas:
    - hoje: só dentro de Inscrições, sem número no menu;
    - alternativa: badge no item Inscrições.
-4. Guardar o `comentario_saude` da triagem no passageiro na aprovação. Hoje some.
+4. ~~Guardar o `comentario_saude` da triagem no passageiro na aprovação.~~ Feito na 0232 (`passageiros.saude_triagem_obs`).
 5. Ops subir PDF de contrato na ficha: hoje `rel_documentos` só aceita insert do Rel.
 6. "Importar do Bitrix" (`bitrix_dados`) como sugestão no Preencher por telefone.
 7. Ao juntar com o v2-saude, vai dar conflito em `src/expedicoes/menu.ts` e `src/expedicoes/paginas/Inscricoes.tsx`.
    - Lá as Inscrições viraram abas, e o item "Saúde · médico" entrou no menu.
    - Manter o item Receitas **fora** do menu.
    - Colocar `<ReceitasAEnviar />` acima das abas das Inscrições, ou na tela Saúde · médico.
+
+## 13. Correções de 30/10 (revisão) — migration 0232 (não aplicada)
+
+Aplicar **depois da 0228** (obrigatória) e **da 0225** (o ajuste dos laudos só entra com ela).
+
+- `rel_cliente_anotar(p, texto)`: a observação acrescenta no banco, com data (SP) e autor.
+- `cad_gravar_campo` (a partir da vigente): passaporte/validade só vão pras idas que não voltaram.
+  As idas passadas guardam o passaporte com que a pessoa viajou.
+- `cad_documentos_viagem` + `cad_documento_viagem_salvar/apagar`: 2º passaporte, visto, seguro, vacina, outro.
+- Perfil: `nome_passaporte`, `sexo`, `nacionalidade`, `rg`, `milhas` (lista programa + número).
+- `passageiros.saude_triagem_obs` + `exp_inscricao_aprovar` recriada da vigente (só o acréscimo).
+- Trigger antes do DELETE de passageiro: laudo sem cliente herda o `cliente_id`; sem ficha, sai junto.
+
+Front (sem a 0232 tudo degrada): completude única em `ficha/regras.ts` (testes em `tests/ficha/`),
+histórico com `audit_log` das idas + uploads + decisões das inscrições, "Carregar mais",
+contratos com comentários do Bitrix, "PDF guardado" neutro, passaportes antigos (de `rel_auditoria`).

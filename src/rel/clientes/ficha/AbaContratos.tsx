@@ -4,8 +4,11 @@
 // (Bruno, 30/10), com status e link do PDF:
 //   ZapSign / manual (PDF)  qs_contratos via cad_contratos_do_cliente (0228)
 //   cartão do closer        qs_closer_negocios.status_contrato (via 0228)
-//   arquivo guardado        rel_documentos tipo 'contrato' ou nome com "contrat"
-//   expedição / pacote      passageiros.contrato_assinado (marcado pelo Operações)
+//   PDF guardado            rel_documentos tipo 'contrato' ou nome com "contrat" — NÃO conta
+//                           como assinado (tom neutro): quem confere é quem abre o PDF
+//   do Bitrix               rel_bitrix_comentarios que citam contrato/ZapSign/Clicksign (link)
+//   expedição / pacote      passageiros.contrato_assinado (marcado pelo Operações); ida
+//                           ainda "Lead" não aparece como "não assinado"
 // Sem a 0228 a lista sai sem os envios do closer — a tela avisa.
 // -----------------------------------------------------------------------------
 import { useState } from "react";
@@ -16,7 +19,7 @@ import { linkArquivoFicha, type ContratoDaFicha, type contratosDoCliente } from 
 import type { AbrirExpedicao } from "../ExpedicoesDaFicha";
 
 const ORIGEM: Record<ContratoDaFicha["origem"], string> = {
-  zapsign: "ZapSign", manual: "Manual (PDF)", cartao: "Cartão do closer", arquivo: "Arquivo", expedicao: "Expedição / pacote",
+  zapsign: "ZapSign", manual: "Manual (PDF)", cartao: "Cartão do closer", arquivo: "Arquivo", expedicao: "Expedição / pacote", bitrix: "Comentário do Bitrix",
 };
 
 export type EstadoContratos = Awaited<ReturnType<typeof contratosDoCliente>>;
@@ -48,7 +51,7 @@ export default function AbaContratos({ r, onAbrirExpedicao }: { r: EstadoContrat
       <Card title="Contratos" action={<span className="qs-num qs-tone-subtle" style={{ fontSize: 13 }}>{r.lista.length} registro{r.lista.length === 1 ? "" : "s"} · {assinados} assinado{assinados === 1 ? "" : "s"}</span>}>
         {r.lista.length === 0 ? (
           <EmptyState title="Nenhum contrato encontrado"
-            description="Contratos do ZapSign, PDFs gerados pelo closer, arquivos de contrato e o contrato de cada expedição aparecem aqui." />
+            description="Contratos do ZapSign, PDFs gerados pelo closer, arquivos de contrato, comentários do Bitrix sobre contrato e o contrato de cada expedição aparecem aqui." />
         ) : (
           <ul className="fc-pessoas" aria-label="Contratos da pessoa">
             {r.lista.map((c) => (
@@ -59,7 +62,7 @@ export default function AbaContratos({ r, onAbrirExpedicao }: { r: EstadoContrat
                 </span>
                 <StatusChip tone={c.tom}>{c.status}</StatusChip>
                 {(c.url || c.arquivoPath) && (
-                  <button type="button" className="fc-link fc-link--btn" onClick={() => void abrir(c)}>{c.origem === "zapsign" && !c.url?.includes("pdf") ? "Abrir" : "Abrir PDF"}</button>
+                  <button type="button" className="fc-link fc-link--btn" onClick={() => void abrir(c)}>{c.origem === "bitrix" ? "Abrir link" : c.origem === "zapsign" && !c.url?.includes("pdf") ? "Abrir" : "Abrir PDF"}</button>
                 )}
                 {c.ida && onAbrirExpedicao && (
                   <button type="button" className="fc-link fc-link--btn" onClick={() => onAbrirExpedicao(c.ida!.expedicaoId, c.ida!.tipo, c.ida!.passageiroId)}>Abrir na expedição</button>
