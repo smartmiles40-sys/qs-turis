@@ -21,8 +21,8 @@ export interface NumeroMeta {
   origem: "painel" | "vercel" | null;
   dono: string | null;
   donoId: string | null;
-  /** comercial | relacionamento (0101): o do Relacionamento atende o pós-venda. */
-  setor?: "comercial" | "relacionamento";
+  /** comercial | relacionamento (0101) | marketing (0244, automações do Tráfego). */
+  setor?: "comercial" | "relacionamento" | "marketing";
   conectadoEm: string | null;
   qualidade: "GREEN" | "YELLOW" | "RED" | string | null;
   limite: string | null;
@@ -107,7 +107,7 @@ export interface OpcoesConexao {
   /** Dono do número; null = número do TIME (o padrão, por onde falam os closers). */
   userId?: string | null;
   /** "relacionamento" = número do pós-venda (sem dono, caixa própria). */
-  setor?: "comercial" | "relacionamento";
+  setor?: "comercial" | "relacionamento" | "marketing";
 }
 
 /**

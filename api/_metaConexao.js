@@ -123,8 +123,9 @@ export async function eventoDaConta(wabaId, value) {
  * tira o WhatsApp do aparelho.
  */
 export async function conectarNumero({ code, wabaId, phoneId, modo, userId, rotulo, por, urlBase, setor = 'comercial' }) {
-  // Número do Relacionamento (0101) é do time do pós-venda: nunca tem dono.
-  if (setor === 'relacionamento') userId = null;
+  // Número do Relacionamento (0101) e do Marketing (0244) é do time: nunca tem dono.
+  if (setor !== 'relacionamento' && setor !== 'marketing') setor = 'comercial';
+  if (setor === 'relacionamento' || setor === 'marketing') userId = null;
   if (modo && modo !== 'coexistencia') return { erro: 'O QS conecta números só por Coexistência (WhatsApp Business no celular + QS).' };
   const m = 'coexistencia';
   if (!code) return { erro: 'A janela da Meta não devolveu o código. Conecte de novo até o fim.' };
@@ -191,7 +192,7 @@ export async function conectarNumero({ code, wabaId, phoneId, modo, userId, rotu
     // → caixa do pós-venda). Gravado SEMPRE, inclusive na reconexão: número que
     // muda de setor muda de caixa a partir daqui.
     await rest(`qs_wa_numeros_meta?phone_number_id=eq.${encodeURIComponent(String(phoneId))}`, {
-      method: 'PATCH', prefer: 'return=minimal', body: { setor: setor === 'relacionamento' ? 'relacionamento' : 'comercial' },
+      method: 'PATCH', prefer: 'return=minimal', body: { setor },
     });
   } catch (e) {
     return { erro: `Conectado na Meta, mas não consegui guardar no QS: ${e.message}` };
@@ -269,7 +270,7 @@ export async function listarConexoes() {
   // e o 92633-2597 do QS). Fica no banco pelo histórico das conversas e pra
   // numeroPadrao() saber que não deve usá-lo. Número de SDR desconectado continua
   // aparecendo — é por ele que se vê que precisa reconectar.
-  const visiveis = (linhas || []).filter((n) => n.user_id || n.setor === 'relacionamento' || n.status !== 'desconectado');
+  const visiveis = (linhas || []).filter((n) => n.user_id || n.setor === 'relacionamento' || n.setor === 'marketing' || n.status !== 'desconectado');
   const numeros = await Promise.all(visiveis.map(async (n) => {
     const temToken = Boolean(n.segredo_id) || (n.phone_number_id === envPhone && Boolean(process.env.META_CALLS_TOKEN || process.env.META_WA_TOKEN));
     let meta = null;
@@ -297,11 +298,16 @@ export async function listarConexoes() {
     let ultimaEntrada = null;
     try {
       // O do Relacionamento não grava em qs_wa_messages: a última entrada vem da caixa dele.
+      // O do Marketing (0244) também tem caixa própria.
+      if (n.setor === 'marketing') {
+        const r = await rest(`mkt_wa_conversas?select=ultima_entrada_em&phone_number_id=eq.${encodeURIComponent(n.phone_number_id)}&ultima_entrada_em=not.is.null&order=ultima_entrada_em.desc&limit=1`);
+        ultimaEntrada = r?.[0]?.ultima_entrada_em || null;
+      }
       if (n.setor === 'relacionamento') {
         const r = await rest(`rel_wa_conversas?select=ultima_entrada_em&phone_number_id=eq.${encodeURIComponent(n.phone_number_id)}&ultima_entrada_em=not.is.null&order=ultima_entrada_em.desc&limit=1`);
         ultimaEntrada = r?.[0]?.ultima_entrada_em || null;
       }
-      const filtro = n.setor === 'relacionamento' ? null : n.user_id
+      const filtro = (n.setor === 'relacionamento' || n.setor === 'marketing') ? null : n.user_id
         ? `linha_user_id=eq.${encodeURIComponent(n.user_id)}`
         : (n.cw_inbox_id != null ? `cw_inbox_id=eq.${Number(n.cw_inbox_id)}` : null);
       if (filtro) {

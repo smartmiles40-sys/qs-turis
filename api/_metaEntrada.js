@@ -30,7 +30,6 @@ import { transcrever, transcricaoConfigurada } from './_transcrever.js';
 import { guardarMidia, rotuloDaMidia, leadDoTelefone } from './_waMidia.js';
 import { avisarGloria } from './_gloria.js';
 import { processarRelacionamento } from './_relEntrada.js';
-import { ehNumeroDoMarketing, processarMarketing } from './_mktEntrada.js';
 
 const GRAPH = 'https://graph.facebook.com/v23.0';
 
@@ -295,6 +294,16 @@ async function reacaoDoCliente(m, nomeCliente) {
 const STATUS_OK = new Set(['sent', 'delivered', 'read', 'failed']);
 
 /**
+ * Pra onde vai a mudança de um número (30/10/2026, 0244). Só o setor
+ * 'marketing' muda alguma coisa: QUALQUER outro valor (comercial,
+ * relacionamento, nulo, número desconhecido) segue exatamente o caminho de
+ * antes. Pura — tests/mkt/roteamento.test.ts prova isso.
+ */
+export function destinoDoNumero(numero) {
+  return numero?.setor === 'marketing' ? 'marketing' : 'antigo';
+}
+
+/**
  * Processa as `changes` do webhook que são de mensagem. Nunca lança: o webhook
  * tem que responder 200 pra Meta não entrar em retentativa.
  */
@@ -303,19 +312,6 @@ export async function processarMensagensDaMeta(changes) {
 
   for (const ch of changes) {
     const value = ch?.value || {};
-    // Número do MARKETING (0242): fica na mesma WABA, mas resposta a disparo de
-    // Marketing nunca vira lead nem cai no chat de SDR. Desvia antes de tudo.
-    // Sem número do Marketing configurado, isto é sempre false (nada muda).
-    if (await ehNumeroDoMarketing(value?.metadata?.phone_number_id)) {
-      try {
-        const r = await processarMarketing(ch);
-        conta.recibos += r.recibos; conta.recebidas += r.respostas;
-      } catch (e) {
-        conta.erros++;
-        console.error(`[meta-entrada] marketing ${ch.field}:`, e?.message);
-      }
-      continue;
-    }
     let numero;
     try { numero = await numeroDaMeta(value?.metadata?.phone_number_id); }
     catch (e) {
@@ -325,6 +321,30 @@ export async function processarMensagensDaMeta(changes) {
       continue;
     }
     const nomes = new Map((value.contacts || []).map((c) => [String(c.wa_id), c.profile?.name || null]));
+
+    // Número do MARKETING (0242 + 0244): NUNCA vira lead nem conversa do Rel.
+    // Duas peças, cada uma com o seu catch: o funil dos disparos (recibo,
+    // "respondeu", PARAR) e o motor das automações. Import dinâmico de
+    // propósito: só carrega quando chega mensagem desse número — um erro aqui
+    // não tem como derrubar o caminho do Comercial/Rel logo abaixo.
+    if (destinoDoNumero(numero) === 'marketing') {
+      try {
+        const { processarMarketing: funilDosDisparos } = await import('./_mktEntrada.js');
+        await funilDosDisparos(ch);
+      } catch (e) {
+        conta.erros++;
+        console.error(`[meta-entrada] marketing/disparos ${ch.field}:`, e?.message);
+      }
+      try {
+        const { processarMarketing } = await import('./_mktAutoEntrada.js');
+        const r = await processarMarketing(ch, numero, nomes);
+        conta.recebidas += r.recebidas; conta.ecos += r.ecos; conta.recibos += r.recibos; conta.pendentes += r.pendentes || 0;
+      } catch (e) {
+        conta.erros++;
+        console.error(`[meta-entrada] marketing ${ch.field}:`, e?.message);
+      }
+      continue;
+    }
 
     // Número do RELACIONAMENTO (0101): o pós-venda tem caixa própria. Desvia
     // aqui, antes de qualquer coisa do Comercial — mensagem de cliente que já

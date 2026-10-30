@@ -204,7 +204,7 @@ export default function ConexaoMeta() {
 
       {/* ── Números ──────────────────────────────────────────────────────── */}
       <section className="grid gap-3 sm:grid-cols-2">
-        {painel.numeros.filter((n) => n.setor !== "relacionamento").map((n) => {
+        {painel.numeros.filter((n) => n.setor !== "relacionamento" && n.setor !== "marketing").map((n) => {
           const q = n.qualidade ? QUALIDADE[n.qualidade] : null;
           const ligado = n.status === "conectado";
           return (

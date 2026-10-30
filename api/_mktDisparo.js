@@ -38,7 +38,14 @@ export const MOTIVOS_MKT = {
 
 /** { phone_number_id, numero, rotulo } ou null (sem número = não envia). */
 export async function lerNumeroMkt() {
-  const v = (await rest('qs_settings?select=value&key=eq.mkt_disparo_numero&limit=1').catch(() => null))?.[0]?.value;
+  // Fonte única (integração 30/10): o número conectado pela Meta com setor
+  // 'marketing' (0244, aba "Número e robô" das Automações) — o mesmo que o
+  // webhook desvia. qs_settings.mkt_disparo_numero fica só como reserva.
+  const conectado = (await rest('qs_wa_numeros_meta?select=phone_number_id,numero,rotulo&setor=eq.marketing&limit=1').catch(() => null))?.[0];
+  if (conectado && /^\d{6,30}$/.test(String(conectado.phone_number_id || ''))) {
+    return { phone_number_id: String(conectado.phone_number_id), numero: conectado.numero || null, rotulo: conectado.rotulo || 'Marketing' };
+  }
+  const v =(await rest('qs_settings?select=value&key=eq.mkt_disparo_numero&limit=1').catch(() => null))?.[0]?.value;
   const id = String(v?.phone_number_id || '').trim();
   return /^\d{6,30}$/.test(id) ? { phone_number_id: id, numero: v.numero || null, rotulo: v.rotulo || 'Marketing' } : null;
 }

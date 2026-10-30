@@ -91,7 +91,7 @@ export default function ModelosMeta() {
     carregarPainelMeta()
       .then((p) => {
         const deSdr = p.numeros.filter((n) => n.status === "conectado" && ehDeSdr(n));
-        const oficial = p.numeros.some((n) => !n.donoId && n.setor !== "relacionamento" && n.status === "conectado");
+        const oficial = p.numeros.some((n) => !n.donoId && n.setor !== "relacionamento" && n.setor !== "marketing" && n.status === "conectado");
         setNumeros(deSdr);
         setSdrs(p.sdrs);
         setTemOficial(oficial);
