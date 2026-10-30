@@ -14,6 +14,9 @@
 //   GET  /api/rel-grupos?estado=1        → a ligação está de pé?
 //   POST { acao: 'sincronizar' }         → puxa a lista de grupos da Evolution
 //   POST { acao: 'texto', jid, texto }   → manda texto NO GRUPO (assinado)
+//   30/10 (V2): conversa com PESSOA que chega por aqui não é mais jogada fora —
+//   é GRAVADA (só gravada) na conversa da Cloud API como cópia de reserva
+//   (api/_relGruposPrivado.js). Envio pra pessoa continua impossível por aqui.
 //   28/10 (0219): o miolo (evo, travas) foi pra api/_relGruposEvo.js, a lista/
 //   participantes pra api/_relGruposSync.js e as ações novas (info do grupo,
 //   participantes, convite, encaminhar, vínculo com a viagem, agendadas) pra
@@ -26,6 +29,7 @@ import { quemChama } from './_relWa.js';
 import { INSTANCIA, evo, ehGrupo, safeParse, grupoLiberado, chaveDe, meusIds, assinatura, gravarMsg } from './_relGruposEvo.js';
 import { atualizarGrupos, gravarParticipantes, sincronizarGrupos, rodizioInfo } from './_relGruposSync.js';
 import { acaoMais, enviarAgendadas, agendadasLigadas } from './_relGruposMais.js';
+import { gravarPrivado, varrerPrivado } from './_relGruposPrivado.js';
 
 export { sincronizarGrupos };
 
@@ -132,10 +136,28 @@ async function aplicarReacao(alvoId, de, nome, emoji) {
   await rest(`rel_wa_grupo_mensagens?id=eq.${m.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { reacoes: lista } });
 }
 
+const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Conversa com pessoa (1:1). A Meta costuma entregar a mesma mensagem em 1–3 s:
+ * espera um pouco pra cópia oficial chegar primeiro (aí aqui só reconhece). Se o
+ * banco falhar, não derruba o webhook — a varredura do cron (5 min) pega depois,
+ * porque a mensagem continua guardada na Evolution.
+ */
+async function gravarPessoa(d) {
+  try {
+    await espera(d?.key?.fromMe ? 8000 : 5000);
+    return (await gravarPrivado(d)).r;
+  } catch (e) {
+    console.error('[rel-grupos] 1:1 não gravada agora (a varredura tenta de novo):', d?.key?.id, e?.message);
+    return 'pendente';
+  }
+}
+
 async function gravarMensagem(d) {
   const key = d?.key || {};
   const jid = key.remoteJid;
-  if (!ehGrupo(jid)) return 'ignorada'; // ← pessoa, status, canal: nunca entra
+  if (!ehGrupo(jid)) return gravarPessoa(d); // pessoa: só GRAVA (cópia de reserva da Cloud API)
   const msg = d.message || {};
   // reação de alguém (ou do celular do número)
   if (msg.reactionMessage) {
@@ -300,8 +322,30 @@ export default async function handler(req, res) {
     try {
       const a = await enviarAgendadas({ prazo: Date.now() + 25_000 });
       const r = await rodizioInfo({ quantos: 4, prazo });
-      console.log(`[rel-grupos] cron: ${JSON.stringify({ ...a, ...r })}`);
-      return res.status(200).json({ ...a, ...r });
+      // Rede de segurança do 1:1 (30/10): o que a Evolution recebeu nas últimas
+      // 3 h e não está no banco entra agora (Meta falhou / banco não respondeu).
+      // Monitor (0138): a Evolution só avisa quando VOLTA ("open"); a queda quase
+      // nunca chega pelo webhook. O cron confere o estado e anota quando muda.
+      try {
+        const st = await evo(`/instance/connectionState/${encodeURIComponent(INSTANCIA())}`, { timeoutMs: 8000 });
+        const estado = String(st?.instance?.state || st?.state || 'desconhecido');
+        const ult = (await rest('rel_wa_grupos_conexao?select=estado&order=em.desc&limit=1').catch(() => null))?.[0];
+        if (estado !== 'connecting' && ult?.estado !== estado) {
+          await rest('rel_wa_grupos_conexao', { method: 'POST', prefer: 'return=minimal', body: { estado, motivo: 'cron' } });
+        }
+      } catch (e) {
+        console.warn('[rel-grupos] estado da Evolution:', e?.message);
+        const ult = (await rest('rel_wa_grupos_conexao?select=estado&order=em.desc&limit=1').catch(() => null))?.[0];
+        if (ult?.estado !== 'sem-resposta') await rest('rel_wa_grupos_conexao', { method: 'POST', prefer: 'return=minimal', body: { estado: 'sem-resposta', motivo: String(e?.message || '').slice(0, 120) } }).catch(() => null);
+      }
+      let privado = null;
+      try {
+        const v = await varrerPrivado({ desde: new Date(Date.now() - 3 * 3600_000), prazo: Date.now() + 40_000, maxPaginas: 5 });
+        privado = v.conta;
+        if (v.achadas.length) console.warn(`[rel-grupos] varredura 1:1 recuperou ${v.achadas.length}: ${JSON.stringify(v.achadas).slice(0, 800)}`);
+      } catch (e) { console.error('[rel-grupos] varredura 1:1:', e?.message); }
+      console.log(`[rel-grupos] cron: ${JSON.stringify({ ...a, ...r, privado })}`);
+      return res.status(200).json({ ...a, ...r, privado });
     } catch (e) { console.error('[rel-grupos] cron:', e?.message); return res.status(502).json({ error: 'falhou' }); }
   }
 

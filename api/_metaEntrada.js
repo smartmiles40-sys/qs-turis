@@ -36,19 +36,31 @@ const GRAPH = 'https://graph.facebook.com/v23.0';
 // ── De quem é o número ──────────────────────────────────────────────────────
 
 const cacheNumeros = new Map();
+// 30/10: banco lento NÃO pode virar "número desconhecido". Em 29/10 13:56 UTC o
+// erro foi guardado como null por 5 min e 6 mensagens do RELACIONAMENTO caíram
+// no Comercial (qs_wa_messages sem caixa). Agora: tenta 2x e, se não der, LANÇA —
+// quem chama não grava em lugar errado e pede à Meta que reenvie.
 async function numeroDaMeta(phoneNumberId) {
   const k = String(phoneNumberId || '');
   const hit = cacheNumeros.get(k);
   if (hit && Date.now() - hit.em < 5 * 60_000) return hit.v;
-  let v = null;
-  try {
-    const r = await rest(`qs_wa_numeros_meta?select=phone_number_id,user_id,rotulo,cw_inbox_id,setor&phone_number_id=eq.${encodeURIComponent(k)}&limit=1`);
-    v = r?.[0] || null;
-  } catch (e) {
-    console.warn('[meta-entrada] não li qs_wa_numeros_meta:', e?.message);
+  let ultimoErro = null;
+  for (let t = 1; t <= 2; t++) {
+    try {
+      const r = await rest(`qs_wa_numeros_meta?select=phone_number_id,user_id,rotulo,cw_inbox_id,setor&phone_number_id=eq.${encodeURIComponent(k)}&limit=1`, { timeoutMs: t === 1 ? 8000 : 15000 });
+      const v = r?.[0] || null;
+      cacheNumeros.set(k, { v, em: Date.now() });
+      return v;
+    } catch (e) {
+      ultimoErro = e;
+      console.warn(`[meta-entrada] não li qs_wa_numeros_meta (tentativa ${t}):`, e?.message);
+    }
   }
-  cacheNumeros.set(k, { v, em: Date.now() });
-  return v;
+  // cache velho vale mais que nada (o setor de um número não muda de uma hora pra outra)
+  if (hit) return hit.v;
+  const err = new Error(`número ${k} indefinido: ${ultimoErro?.message}`);
+  err.code = 'NUMERO_INDEFINIDO';
+  throw err;
 }
 
 const cacheNomes = new Map();
@@ -286,11 +298,18 @@ const STATUS_OK = new Set(['sent', 'delivered', 'read', 'failed']);
  * tem que responder 200 pra Meta não entrar em retentativa.
  */
 export async function processarMensagensDaMeta(changes) {
-  const conta = { recebidas: 0, ecos: 0, historico: 0, recibos: 0, reacoes: 0, semLead: 0, erros: 0 };
+  const conta = { recebidas: 0, ecos: 0, historico: 0, recibos: 0, reacoes: 0, semLead: 0, erros: 0, pendentes: 0 };
 
   for (const ch of changes) {
     const value = ch?.value || {};
-    const numero = await numeroDaMeta(value?.metadata?.phone_number_id);
+    let numero;
+    try { numero = await numeroDaMeta(value?.metadata?.phone_number_id); }
+    catch (e) {
+      // sem saber de quem é o número, não grava em lugar nenhum: a Meta reenvia
+      conta.erros++; conta.pendentes++;
+      console.error(`[meta-entrada] ${ch.field}: ${e?.message} — fica pra Meta reenviar`);
+      continue;
+    }
     const nomes = new Map((value.contacts || []).map((c) => [String(c.wa_id), c.profile?.name || null]));
 
     // Número do RELACIONAMENTO (0101): o pós-venda tem caixa própria. Desvia
@@ -299,7 +318,7 @@ export async function processarMensagensDaMeta(changes) {
     if (numero?.setor === 'relacionamento') {
       try {
         const r = await processarRelacionamento(ch, numero, nomes);
-        conta.recebidas += r.recebidas; conta.ecos += r.ecos; conta.historico += r.historico; conta.recibos += r.recibos;
+        conta.recebidas += r.recebidas; conta.ecos += r.ecos; conta.historico += r.historico; conta.recibos += r.recibos; conta.pendentes += r.pendentes || 0;
       } catch (e) {
         conta.erros++;
         console.error(`[meta-entrada] relacionamento ${ch.field}:`, e?.message);
@@ -354,6 +373,8 @@ export async function processarMensagensDaMeta(changes) {
       }
     } catch (e) {
       conta.erros++;
+      // banco lento/fora: pede reenvio à Meta (o wamid garante que nada duplica)
+      if (e?.code === 'TIMEOUT' || e?.status >= 500 || /fetch failed|ECONNRESET/i.test(String(e?.message))) conta.pendentes++;
       console.error(`[meta-entrada] ${ch.field}:`, e?.message);
     }
   }

@@ -320,6 +320,7 @@ export default async function handler(req, res) {
       await pulso(soma ? 'gravado' : 'ignorado');
     } catch (e) {
       console.error('[wa-calls] mensagens da Meta falharam:', e?.message);
+      mensagens = { pendentes: 1 };
       await pulso('erro-ao-gravar');
     }
   } else if (camposVistos.length) {
@@ -376,6 +377,15 @@ export default async function handler(req, res) {
     // cuida de conversa é o wa-webhook. Sai calado.
     if (camposVistos.length && camposVistos.every((c) => ['messages', 'smb_message_echoes', 'history'].includes(c))) {
       await pulsoPendente;
+      // 30/10: o banco não gravou alguma mensagem (lento/fora). Responder 200 faz
+      // a Meta dar por entregue e a mensagem some (foi o que houve em 29/10). Com
+      // 503 a Meta reenvia o MESMO corpo (backoff, até ~7 dias) — e regravar é
+      // seguro: tudo é idempotente pelo wamid. Só neste ramo (sem ligação nem
+      // permissão no corpo), pra nada de chamada ser reprocessado.
+      if (mensagens?.pendentes > 0) {
+        console.warn(`[wa-calls] ${mensagens.pendentes} mensagem(ns) não gravada(s) — 503 pra Meta reenviar`);
+        return res.status(503).json({ ok: false, mensagens });
+      }
       return res.status(200).json({ ok: true, gravados: 0, mensagens });
     }
 

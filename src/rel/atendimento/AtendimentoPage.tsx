@@ -102,7 +102,16 @@ function useRepetir(fn: () => unknown, ms: number) {
   }, [ms]);
 }
 
-const nomeDa = (c: Conversa) => c.cliente_nome || c.nome_contato || formatarTelefone(c.telefone);
+// 0231: conversa que só a Evolution viu e sem telefone resolvível ("lid:<código>")
+const semNumero = (t: string | null | undefined) => String(t || "").startsWith("lid:");
+const foneDaConversa = (t: string) => (semNumero(t) ? "sem número identificado" : formatarTelefone(t));
+const nomeDa = (c: Conversa) => c.cliente_nome || c.nome_contato || foneDaConversa(c.telefone);
+
+/** Campos da 0231 (cópia da Evolution). Opcionais: a tela funciona sem a migration. */
+type GrupoCitado = { jid: string; nome?: string | null; texto?: string | null };
+const extrasDa = (m: Mensagem) => m as Mensagem & { via?: string | null; grupo_citado?: GrupoCitado | null };
+/** Veio pela cópia do aparelho (Evolution) e a Meta ainda não entregou a dela. */
+const peloAparelho = (m: Mensagem) => String(m.wamid || "").startsWith("evo:");
 const motivoDe = (c: Conversa) => MOTIVOS_SEM_SLA[c.sem_sla_motivo || ""] || "Outro";
 const naoLida = (c: Conversa) => c.nao_lidas > 0 || !!c.marcada_nao_lida;
 
@@ -340,6 +349,7 @@ function Bolha({ m, primeira, nomeCliente, citada, favorita, meuId, onAbrirFoto,
   onAbrirFoto: (url: string) => void; onMenu: (m: Mensagem, pos: PosicaoMenu) => void; onIrPara: (id: string) => void;
 }) {
   const minha = m.direcao === "out";
+  const grupoCitado = extrasDa(m).grupo_citado || null;
   const anexos = m.anexos || [];
   const texto = m.texto || "";
   const semArquivo = !anexos.length && ehRotuloSemArquivo(texto);
@@ -348,7 +358,9 @@ function Bolha({ m, primeira, nomeCliente, citada, favorita, meuId, onAbrirFoto,
   const hora = (
     <>
       {favorita && <span title="Com estrela">{ESTRELA}</span>}
-      {SELO[m.origem] && <span style={{ fontStyle: "italic" }}>{SELO[m.origem]} ·</span>}
+      {peloAparelho(m)
+        ? <span style={{ fontStyle: "italic" }} title="A Meta não entregou esta mensagem; ela foi lida do aparelho (cópia de reserva). Não dá pra reagir nem citar.">veio pelo aparelho ·</span>
+        : SELO[m.origem] && <span style={{ fontStyle: "italic" }}>{SELO[m.origem]} ·</span>}
       <span>{new Date(m.enviada_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
       {minha && <Tiques status={m.status} />}
     </>
@@ -387,6 +399,15 @@ function Bolha({ m, primeira, nomeCliente, citada, favorita, meuId, onAbrirFoto,
         <div className={`wa-bolha relative ${minha ? "wa-out" : "wa-in"} ${primeira ? "wa-rabo" : ""}`} style={anexos.length ? { padding: 3 } : undefined}>
           {seta}
           {autor && <span className="block text-[12.5px] font-semibold mb-0.5" style={{ color: "var(--wa-green-ink)", padding: anexos.length ? "3px 6px 0" : 0 }}>{autor}</span>}
+          {grupoCitado && (
+            <div className="wa-cita" style={anexos.length ? { margin: "3px 3px 4px" } : undefined}
+              title={`Respondendo no privado a uma mensagem do grupo ${grupoCitado.nome || ""}`.trim()}>
+              <span className="block text-[12.5px] font-semibold" style={{ color: "var(--wa-green-ink)" }}>
+                respondendo no privado ao grupo {grupoCitado.nome || "do WhatsApp"}
+              </span>
+              {grupoCitado.texto && <span className="block text-[13px] line-clamp-2 wa-emoji" style={{ color: "var(--wa-meta)" }}>{grupoCitado.texto}</span>}
+            </div>
+          )}
           {citada && (
             <div className="wa-cita" role="button" tabIndex={0} onClick={() => onIrPara(citada.id)} onKeyDown={(e) => { if (e.key === "Enter") onIrPara(citada.id); }}
               style={anexos.length ? { margin: "3px 3px 4px" } : undefined} title="Ir para a mensagem">
@@ -830,7 +851,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
           <span className="min-w-0">
             <span className="block text-[16px] truncate" style={{ color: "var(--wa-txt)" }}>{nome}</span>
             <span className="block text-[12.5px] truncate" style={{ color: "var(--wa-meta)" }}>
-              {formatarTelefone(c.telefone)}
+              {semNumero(c.telefone) ? <span style={{ color: "var(--warn-ink)", fontWeight: 600 }}>sem número identificado · só leitura</span> : formatarTelefone(c.telefone)}
               {c.cliente_id ? " · dados do contato" : <span style={{ color: "var(--warn-ink)", fontWeight: 600 }}> · ligar à ficha</span>}
               {c.atendente_nome && ` · com ${c.atendente_nome.split(" ")[0]}`}
             </span>

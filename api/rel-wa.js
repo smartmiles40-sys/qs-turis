@@ -155,6 +155,9 @@ async function destino({ conversaId, clienteId, telefone }, numero) {
     if (!UUID.test(conversaId)) return { erro: 'Conversa inválida.' };
     const c = (await rest(`rel_wa_conversas?select=id,telefone,phone_number_id,ultima_entrada_em,setor&id=eq.${conversaId}&limit=1`))?.[0];
     if (!c) return { erro: 'Conversa não encontrada.' };
+    // 30/10: conversa que só a Evolution viu e sem telefone ("lid:…") — não há
+    // pra onde mandar pela Meta, e pela Evolution nunca sai mensagem pra pessoa.
+    if (!/^\d{8,15}$/.test(String(c.telefone || ''))) return { erro: 'Essa conversa chegou sem número identificado. Ache o cliente pela ficha e escreva pelo número dele.' };
     return { telefone: c.telefone, phoneId: c.phone_number_id, ultimaEntrada: c.ultima_entrada_em, conversaId: c.id, setor: c.setor };
   }
   if (clienteId) {
@@ -337,7 +340,7 @@ export default async function handler(req, res) {
   async function vistoAzul() {
     if (!alvo.conversaId) return;
     const ult = (await rest(
-      `rel_wa_mensagens?select=wamid&conversa_id=eq.${alvo.conversaId}&direcao=eq.in&order=enviada_em.desc&limit=1`
+      `rel_wa_mensagens?select=wamid&conversa_id=eq.${alvo.conversaId}&direcao=eq.in&wamid=like.wamid.*&order=enviada_em.desc&limit=1`
     ).catch(() => null))?.[0];
     if (ult?.wamid) await marcarComoLida({ wamid: ult.wamid, phoneId: alvo.phoneId }).catch(() => null);
   }
@@ -379,7 +382,8 @@ export default async function handler(req, res) {
     let respondendoA = null;
     if (body.respondendoA && alvo.conversaId) {
       const m = (await rest(`rel_wa_mensagens?select=wamid&id=eq.${encodeURIComponent(String(body.respondendoA))}&conversa_id=eq.${alvo.conversaId}&limit=1`).catch(() => null))?.[0];
-      respondendoA = m?.wamid || null;
+      // "evo:…" = cópia que só a Evolution viu: a Meta não conhece esse id (citar daria erro)
+      respondendoA = m?.wamid && !String(m.wamid).startsWith('evo:') ? m.wamid : null;
     }
     const final = await assinar(texto);
     const env = await enviarTexto({ para: alvo.telefone, texto: final, responderA: respondendoA, phoneId: alvo.phoneId });
@@ -487,6 +491,7 @@ export default async function handler(req, res) {
     const emoji = String(body.emoji ?? '').slice(0, 16);
     const m = (await rest(`rel_wa_mensagens?select=wamid&id=eq.${encodeURIComponent(String(body.mensagemId || ''))}&conversa_id=eq.${alvo.conversaId}&limit=1`).catch(() => null))?.[0];
     if (!m?.wamid) return res.status(404).json({ error: 'Mensagem não encontrada.' });
+    if (String(m.wamid).startsWith('evo:')) return res.status(409).json({ error: 'Essa mensagem chegou pelo aparelho e a Meta não a conhece: não dá pra reagir a ela. Responda com texto.' });
     const env = await enviarReacao({ para: alvo.telefone, wamid: m.wamid, emoji, phoneId: alvo.phoneId });
     if (!env?.wamid) return res.status(502).json({ error: `A Meta não aceitou a reação${env?.detalhe ? `: ${env.detalhe}` : '.'}` });
     await rest('rpc/rel_wa_reagir', { method: 'POST', body: { p_wamid: m.wamid, p_de: u.id, p_nome: primeiroNome, p_emoji: emoji } }).catch(() => null);

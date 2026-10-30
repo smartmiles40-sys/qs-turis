@@ -20,14 +20,58 @@ import { enviarTexto } from './_meta.js';
 import { lerMensagemMeta, baixarMidiaMeta } from './_metaEntrada.js';
 import { rotuloDaMidia } from './_waMidia.js';
 import { ehPedidoDeParada } from './_waOptout.js';
+import { chaveDoWamid } from './_relGruposPrivado.js';
 
 const STATUS_OK = new Set(['sent', 'delivered', 'read', 'failed']);
 
-/** Grava uma mensagem. Devolve { nova, conversa } — nunca lança. */
+/**
+ * A cópia da Evolution (wamid "evo:<id>", api/_relGruposPrivado.js) chegou antes
+ * desta, da Meta? Então a linha já existe: a Meta "assume" (wamid oficial, pra
+ * recibo/reação/citação funcionarem) e não grava de novo. Com a 0231 o próprio
+ * rel_wa_ingest faz isso com trava; aqui é o mesmo sem depender dela.
+ */
+async function assumirCopiaDaEvolution({ wamid, status, origem, autorId, autorNome }) {
+  const chave = chaveDoWamid(wamid);
+  if (!chave || !String(wamid).startsWith('wamid.')) return null;
+  const ja = (await rest(`rel_wa_mensagens?select=id,conversa_id,origem&wamid=eq.${encodeURIComponent(`evo:${chave}`)}&limit=1`))?.[0];
+  if (!ja) return null;
+  const body = { wamid: String(wamid) };
+  if (status) body.status = status;
+  if (origem === 'qs' || origem === 'automatica') Object.assign(body, { origem, autor_id: autorId, autor_nome: autorNome });
+  await rest(`rel_wa_mensagens?id=eq.${ja.id}`, { method: 'PATCH', prefer: 'return=minimal', body });
+  return { nova: false, conversa: ja.conversa_id };
+}
+
+const transitorio = (e) => e?.code === 'TIMEOUT' || (e?.status >= 500) || /fetch failed|ECONNRESET|socket/i.test(String(e?.message || ''));
+
+/**
+ * Grava uma mensagem. Devolve { nova, conversa, erro? } — nunca lança.
+ * 30/10: tenta de novo quando o banco demora (em 29/10 quatro mensagens de
+ * clientes se perderam num "PostgREST não respondeu em 10000ms") e devolve
+ * `erro: true` pra quem chamou poder pedir à Meta que reenvie.
+ */
 export async function gravarRel({ phoneId, telefone, nome = null, wamid, direcao, origem, texto, anexos = [], enviadaEm = null, autorId = null, autorNome = null, status = null, respondendoA = null }) {
-  try {
+  for (let tentativa = 1; tentativa <= 2; tentativa++) {
+    try {
+      const assumida = await assumirCopiaDaEvolution({ wamid, status, origem, autorId, autorNome });
+      if (assumida) return assumida;
+      return await ingerir({ phoneId, telefone, nome, wamid, direcao, origem, texto, anexos, enviadaEm, autorId, autorNome, status, respondendoA }, tentativa);
+    } catch (e) {
+      console.error(`[rel-entrada] não gravei (tentativa ${tentativa}): ${e?.message}`);
+      // erro de dado (não some com o tempo) não pede reenvio — a Meta repetiria pra sempre
+      if (!transitorio(e)) return { nova: false, conversa: null, falhou: true };
+      if (tentativa === 2) return { nova: false, conversa: null, erro: true };
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  return { nova: false, conversa: null, erro: true };
+}
+
+async function ingerir({ phoneId, telefone, nome, wamid, direcao, origem, texto, anexos, enviadaEm, autorId, autorNome, status, respondendoA }, tentativa) {
     const r = await rest('rpc/rel_wa_ingest', {
       method: 'POST',
+      // 2ª tentativa com mais folga: o insert é idempotente (wamid único)
+      timeoutMs: tentativa > 1 ? 20_000 : 10_000,
       body: {
         p_phone_id: String(phoneId),
         p_telefone: String(telefone || ''),
@@ -45,10 +89,6 @@ export async function gravarRel({ phoneId, telefone, nome = null, wamid, direcao
       },
     });
     return { nova: r?.nova === true, conversa: r?.conversa || null };
-  } catch (e) {
-    console.error('[rel-entrada] não gravei:', e?.message);
-    return { nova: false, conversa: null };
-  }
 }
 
 // ── "Fora do horário" ───────────────────────────────────────────────────────
@@ -121,7 +161,7 @@ async function registrarOptoutRel(conversaId) {
  * cima por mensagem individual: uma ruim não pode derrubar as outras.
  */
 export async function processarRelacionamento(ch, numero, nomes) {
-  const conta = { recebidas: 0, ecos: 0, historico: 0, recibos: 0 };
+  const conta = { recebidas: 0, ecos: 0, historico: 0, recibos: 0, pendentes: 0 };
   const value = ch?.value || {};
   const phoneId = numero.phone_number_id;
   const pasta = (fone) => `rel-${String(fone).replace(/\D/g, '')}`;
@@ -157,6 +197,7 @@ export async function processarRelacionamento(ch, numero, nomes) {
       const telefone = String(m.from || '');
       if (m.type === 'reaction') { await reacao(m, 'cliente', (nomes.get(telefone) || 'Cliente').split(' ')[0]); continue; }
       const r = await uma(m, { direcao: 'in', origem: 'cliente', telefone, nome: nomes.get(telefone) || null, baixar: true });
+      if (r?.erro) conta.pendentes++;
       if (r?.nova) {
         conta.recebidas++;
         // "PARAR" antes de qualquer resposta automática.
@@ -177,6 +218,7 @@ export async function processarRelacionamento(ch, numero, nomes) {
     for (const m of value.message_echoes || []) {
       if (m.type === 'reaction') { await reacao(m, 'celular', 'Celular'); continue; }
       const r = await uma(m, { direcao: 'out', origem: 'celular', telefone: String(m.to || ''), nome: null, baixar: true });
+      if (r?.erro) conta.pendentes++;
       if (r?.nova) conta.ecos++;
     }
   }
