@@ -107,6 +107,9 @@
     "api/assistente.js": {
       "maxDuration": 30
     },
+    "api/mkt-email.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -171,6 +174,10 @@
     {
       "path": "/api/rel-vendas",
       "schedule": "20 * * * *"
+    },
+    {
+      "path": "/api/mkt-email",
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [
