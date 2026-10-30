@@ -1,15 +1,17 @@
 // src/mkt/disparos/SequenciasPage.tsx
 // -----------------------------------------------------------------------------
 // SEQUÊNCIAS DO MARKETING (0242) — as "cadências" do SendFlow.
+// Desde 30/10 é a seção "Sequências" da aba Disparos (DisparosMktPage.tsx);
+// criar é pelo "+ Novo disparo" › Sequência de mensagens.
 // Passo 1 no dia 0, passo 2 no dia 3, passo 3 no dia 7… contados da ENTRADA
 // de cada pessoa. Entra pelo botão "Inscrever" (o público daquele momento) ou
 // sozinha, ao entrar na lista-gatilho. Respondeu ou disse PARAR = sai.
 // Cada passo vira uma campanha do dia, na mesma fila do disparo.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Badge, Button, EmptyState, Page, PageHeader } from "@/components/ui";
+import { Alert, Badge, Button, EmptyState } from "@/components/ui";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { lerConfig, type ConfigDisparo, type MapaVariaveis } from "@/lib/qs/disparos";
+import { type ConfigDisparo, type MapaVariaveis } from "@/lib/qs/disparos";
 import { Campo, INPUT, INPUT_ESTILO, Modal } from "@/components/sdr/disparos/pecas";
 import {
   apagarSequencia, ativarSequencia, inscreverNaSequencia, listarInscricoes, listarSequencias, salvarSequencia, tirarInscricao,
@@ -129,28 +131,29 @@ function Inscritos({ s, onFechar }: { s: Sequencia; onFechar: () => void }) {
   );
 }
 
-export default function SequenciasPage() {
-  const [cfg, setCfg] = useState<ConfigDisparo | null>(null);
+/** A seção "Sequências" da aba Disparos. `criar` abre o editor de uma nova. */
+export function SecaoSequencias({ cfg, versao, criar, onCriarFechou, onContar }: {
+  cfg: ConfigDisparo; versao: number; criar: boolean; onCriarFechou: () => void; onContar?: (n: number) => void;
+}) {
   const [lista, setLista] = useState<Sequencia[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-  const [editando, setEditando] = useState<Sequencia | "nova" | null>(null);
+  const [editando, setEditando] = useState<Sequencia | null>(null);
   const [inscrevendo, setInscrevendo] = useState<Sequencia | null>(null);
   const [vendo, setVendo] = useState<Sequencia | null>(null);
 
   const carregar = useCallback(async () => {
-    try { const [c, l] = await Promise.all([lerConfig("marketing"), listarSequencias()]); setCfg(c); setLista(l); setErro(null); }
+    try { const l = await listarSequencias(); setLista(l); setErro(null); onContar?.(l.length); }
     catch (e) { setErro(e instanceof Error ? e.message : "Não carregou."); setLista([]); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => { void carregar(); }, [carregar]);
+  useEffect(() => { void carregar(); }, [carregar, versao]);
 
   return (
-    <Page>
-      <PageHeader title="Sequências" subtitle="Passo 1 no dia 0, passo 2 no dia 3… contados de quando cada pessoa entra."
-        actions={cfg ? <Button variant="primary" onClick={() => setEditando("nova")}>+ Nova sequência</Button> : undefined} />
+    <div className="space-y-3">
       {erro && <Alert tone="danger">{erro}</Alert>}
-      {cfg && !cfg.numeroMkt && <Alert tone="warn">O Marketing ainda não tem número: as inscrições esperam (nenhum passo é queimado) até o número existir.</Alert>}
+      {!cfg.numeroMkt && lista?.length ? <Alert tone="warn">O Marketing ainda não tem número: as inscrições esperam (nenhum passo é queimado) até o número existir.</Alert> : null}
       {lista === null ? <p className="text-[13px]" style={{ color: "var(--subtle)" }}>Carregando…</p>
-        : lista.length === 0 ? <div className="qs-card"><EmptyState title="Nenhuma sequência" description="Ex.: quem entra na lista da live recebe o convite no dia 0, o roteiro no dia 2 e as vagas no dia 5." /></div>
+        : lista.length === 0 ? <div className="qs-card"><EmptyState title="Nenhuma sequência" description="Ex.: quem entra na lista da live recebe o convite no dia 0, o roteiro no dia 2 e as vagas no dia 5. Crie pelo “+ Novo disparo” › Sequência de mensagens." /></div>
         : (
           <ul className="space-y-2">
             {lista.map((s) => (
@@ -180,9 +183,9 @@ export default function SequenciasPage() {
             ))}
           </ul>
         )}
-      {editando && cfg && <Editor cfg={cfg} inicial={editando === "nova" ? null : editando} onFechar={() => setEditando(null)} onSalvo={() => { setEditando(null); void carregar(); }} />}
+      {(editando || criar) && <Editor cfg={cfg} inicial={editando} onFechar={() => { setEditando(null); onCriarFechou(); }} onSalvo={() => { setEditando(null); onCriarFechou(); void carregar(); }} />}
       {inscrevendo && <Inscrever s={inscrevendo} onFechar={() => setInscrevendo(null)} onFeito={() => { setInscrevendo(null); void carregar(); }} />}
       {vendo && <Inscritos s={vendo} onFechar={() => setVendo(null)} />}
-    </Page>
+    </div>
   );
 }

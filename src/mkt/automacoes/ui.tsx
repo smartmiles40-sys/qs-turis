@@ -4,12 +4,14 @@
 // var(--mkt), com reserva roxa se a casca do Marketing ainda não a definiu.
 import { useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
-export const COR = "var(--mkt, #6D28D9)";
-export const COR_SUAVE = "var(--mkt-soft, rgba(109, 40, 217, .10))";
+// Magenta do Marketing (MKT_CSS da casca define --rel/--rel-soft/--rel-ink).
+export const COR = "var(--rel, #BE185D)";
+export const COR_SUAVE = "var(--rel-soft, #FCE7F3)";
+export const COR_TEXTO = "var(--rel-ink, #9D174D)";
 
 export const MKT_CSS = `
 .mkt-input { width: 100%; padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font-size: 13.5px; }
-.mkt-input:focus { outline: none; border-color: ${COR}; box-shadow: 0 0 0 3px rgba(109,40,217,.22); }
+.mkt-input:focus { outline: none; border-color: ${COR}; box-shadow: 0 0 0 3px rgba(190,24,93,.22); }
 .mkt-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
 :is(.mkt-raiz button, .mkt-raiz a, .mkt-raiz [tabindex]):focus-visible { outline: 2px solid ${COR}; outline-offset: 2px; }
 `;
@@ -61,7 +63,7 @@ export function Abas<T extends string>({ abas, atual, onTrocar }: { abas: { id: 
       {abas.map((a) => (
         <button key={a.id} role="tab" aria-selected={a.id === atual} type="button" onClick={() => onTrocar(a.id)}
           className="px-3 py-1.5 rounded-lg text-[13px] font-semibold whitespace-nowrap"
-          style={a.id === atual ? { background: COR_SUAVE, color: COR } : { color: "var(--ink2)" }}>
+          style={a.id === atual ? { background: COR_SUAVE, color: COR_TEXTO } : { color: "var(--ink2)" }}>
           {a.rotulo}
         </button>
       ))}
@@ -93,7 +95,7 @@ export function Modal({ aberto, titulo, onFechar, children, rodape, largura = 56
 }
 
 export function Chip({ children, cor }: { children: ReactNode; cor?: string }) {
-  return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: cor ? `${cor}22` : COR_SUAVE, color: cor ?? COR }}>{children}</span>;
+  return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: cor ? `${cor}22` : COR_SUAVE, color: cor ?? COR_TEXTO }}>{children}</span>;
 }
 
 export function quando(iso: string | null | undefined): string {
