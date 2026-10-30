@@ -43,20 +43,46 @@ function limpar(texto) {
     .trim();
 }
 
-const ALVOS = PEDIDOS.map(limpar);
+const ALVOS = new Set(PEDIDOS.map(limpar));
+
+/** Cortesia que pode vir antes do pedido: "por favor parar", "pode parar", "quero sair". */
+const ANTES = ['por favor', 'favor', 'pode', 'podem', 'quero', 'gostaria de', 'pfv', 'pf', 'ok', 'oi', 'ola'].map(limpar);
+
+/**
+ * O que pode vir DEPOIS sem mudar o sentido: "parar por favor", "não quero
+ * mais, obrigada", "me tira dessa lista". Só palavras desta lista — qualquer
+ * outra ("não quero PERDER a data", "para QUANDO é…") desfaz o pedido.
+ */
+const DEPOIS = new Set([
+  'mais', 'por', 'favor', 'pf', 'pfv', 'obrigado', 'obrigada', 'obg', 'grato', 'grata',
+  'ja', 'agora', 'de', 'da', 'dessa', 'desta', 'disso', 'isso', 'lista', 'grupo',
+  'mensagem', 'mensagens', 'msg', 'msgs', 'receber', 'enviar', 'mandar', 'aqui', 'me', 'nao', 'ok',
+]);
 
 /**
  * A mensagem é um pedido de saída?
  *
- * A comparação vale sobre a mensagem INTEIRA e só até 40 caracteres. "PARAR" é
- * opt-out; "não quero perder a data, me manda o link" NÃO é — descadastrar
- * alguém animado é um estrago maior do que deixar passar um pedido legítimo,
- * que a pessoa repete.
+ * A mensagem INTEIRA, até 40 caracteres, tem que ser o pedido — com cortesia
+ * antes e só "cauda neutra" depois (DEPOIS). Correção de 30/10/2026: antes
+ * bastava COMEÇAR com o pedido, e "não quero perder a data, me manda o link?"
+ * ou "para quando é a próxima turma?" descadastravam lead interessado.
+ * Descadastrar alguém animado é um estrago maior do que deixar passar um
+ * pedido legítimo, que a pessoa repete.
  */
 export function ehPedidoDeParada(texto) {
-  const limpo = limpar(texto);
+  let limpo = limpar(texto);
   if (!limpo || limpo.length > 40) return false;
-  return ALVOS.some((alvo) => limpo === alvo || limpo.startsWith(`${alvo} `));
+  for (const a of ANTES) {
+    if (limpo.startsWith(`${a} `)) { limpo = limpo.slice(a.length + 1); break; }
+  }
+  const palavras = limpo.split(' ');
+  // o pedido mais longo que cabe no começo; o resto tem que ser só cauda neutra
+  for (let n = Math.min(palavras.length, 5); n >= 1; n--) {
+    if (ALVOS.has(palavras.slice(0, n).join(' '))) {
+      return palavras.slice(n).every((p) => DEPOIS.has(p));
+    }
+  }
+  return false;
 }
 
 /**
