@@ -18,6 +18,13 @@
 // Closer: depois do banco, a pré-venda da 0207 leva o Bitrix pra "Em emissão"
 // (marcarPreVenda → api/closer.js acao=pre-venda). Não há outra chamada ao Bitrix.
 // "Salvar rascunho" do closer só guarda os itens (não ocupa vaga).
+//
+// 5. ANÁLISE PÓS-VENDA (0230, Bruno 30/10/2026): antes de concluir, a venda é
+//    revisada (proposta aprovada × o que já foi emitido × o que está sendo
+//    vendido) e a pessoa aguarda o extrato: OK / falta emitir / divergente +
+//    risco. Dá pra concluir com pendência; aí a análise fica guardada na venda
+//    (status) e abre a solicitação "Emissões pendentes" pro Relacionamento.
+//    Ver src/venda/analise.ts e docs/ANALISE-POS-VENDA.md.
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Stepper } from "@/components/ui";
@@ -38,8 +45,11 @@ import {
 import DadosDaPessoaNaVenda from "./DadosDaPessoaNaVenda";
 import BlocoExpedicao from "./BlocoExpedicao";
 import CampoDoTipo from "./CampoDoTipo";
+import ExtratoAnalise from "./ExtratoAnalise";
+import { STATUS_ANALISE, abrirPedidoSem0230, analisarRascunho, analisarVendaGravada, type Analise } from "./analise";
 
-const PASSOS = ["Quem comprou", "O que vendeu", "Detalhes", "Valores e pagamento"] as const;
+const PASSOS = ["Quem comprou", "O que vendeu", "Detalhes", "Valores e pagamento", "Análise pós-venda"] as const;
+const PASSO_ANALISE = 4;
 
 export interface SubirVendaProps {
   origem: OrigemVenda;
@@ -71,6 +81,10 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   const [erro, setErro] = useState<string | null>(null);
   const [info, setInfo] = useState<{ tom: "ok" | "aviso"; t: string; lista?: string[] } | null>(null);
   const arquivo = useRef<HTMLInputElement>(null);
+  // Análise pós-venda (passo 5)
+  const [analise, setAnalise] = useState<Analise | null>(null);
+  const [analisando, setAnalisando] = useState(false);
+  const [erroAnalise, setErroAnalise] = useState<string | null>(null);
 
   const ehCloser = origem === "closer" && !!negocio;
   const consolidada = !!negocio?.consolidada_em;
@@ -83,6 +97,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     let vivo = true;
     setCarregando(true); setErro(null); setInfo(null); setPasso(0);
     setPag(pagamentoVendaVazio()); setEspecial(false); setEspecialObs(""); setObs("");
+    setAnalise(null); setErroAnalise(null);
     const base = pessoaVazia();
     if (negocio?.lead) Object.assign(base, { nome: nomeDoLead(negocio.lead), telefone: negocio.lead.phone ?? "", email: negocio.lead.email ?? "" });
     if (cliente) Object.assign(base, Object.fromEntries(Object.entries(cliente).map(([k, v]) => [k, v ?? ""])), { id: cliente.id ?? null });
@@ -187,7 +202,60 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   function avancar() {
     const e = conferir(passo);
     setErro(e);
-    if (!e) setPasso((p) => Math.min(p + 1, PASSOS.length - 1));
+    if (e) return;
+    const prox = Math.min(passo + 1, PASSOS.length - 1);
+    setPasso(prox);
+    if (prox === PASSO_ANALISE) void rodarAnalise();
+  }
+
+  /** Itens como vão pro banco (expedição leva quem viaja; o resto, o comprador se vier vazio). */
+  function itensFinais(): ItemVenda[] {
+    return comValores.map((i) => (i.tipo === "expedicao"
+      ? { ...i, passageiros: (viajantes[i.k] ?? []).map((v) => ({ nome: v.comprador ? pessoa.nome : v.nome })) }
+      : { ...i, passageiros: i.passageiros.length ? i.passageiros : [{ nome: pessoa.nome }] }));
+  }
+
+  // ── 5. Análise pós-venda: a pessoa aguarda o extrato antes de concluir ──
+  async function rodarAnalise() {
+    setAnalisando(true); setErroAnalise(null);
+    try {
+      const final = itensFinais();
+      const vjs = final.filter((i) => i.tipo === "expedicao").flatMap((i) => (viajantes[i.k] ?? []).map((v) => ({
+        nome: v.comprador ? pessoa.nome : v.nome, valor_contratado: lerValor(v.valor_contratado), valor_pago: lerValor(v.valor_pago) ?? 0,
+      })));
+      setAnalise(await analisarRascunho({
+        origem, negocio_id: ehCloser ? negocio!.id : null, cliente_id: pessoa.id || null, viagem_id: viagemId ?? null,
+        cliente: { nome: pessoa.nome },
+        itens: final.map((i) => ({ tipo: i.tipo, nome: i.nome.trim() || nomeSugerido(i), data_inicio: i.data_inicio || null, data_fim: i.data_fim || null, dados: i.dados, passageiros: i.passageiros, valor: i.valor, custo: i.custo, status: i.status ?? "vendido" })),
+        viajantes: vjs,
+        pagamento: { forma: pag.forma, condicao: pag.condicao, entrada: lerValor(pag.entrada), entrada_data: pag.entrada_data || null, parcelas: Number(pag.parcelas) || null },
+        total,
+      }));
+    } catch (e) {
+      setAnalise(null);
+      setErroAnalise(`${(e as Error).message} Dá pra concluir mesmo assim — a análise roda de novo no painel "Vendas com pendência".`);
+    } finally {
+      setAnalisando(false);
+    }
+  }
+
+  /** Depois de gravar: guarda a análise na venda e abre a solicitação pro Rel se falta algo. Nunca derruba a venda. */
+  async function guardarAnalise(vendaId: string): Promise<string> {
+    try {
+      const a = await analisarVendaGravada(vendaId, "subir_venda", analise);
+      const sol = a.solicitacao;
+      const rot = STATUS_ANALISE[a.status]?.rotulo ?? a.status;
+      if (a.gravado === false && a.falta0230 && (a.contagens.falta + a.contagens.divergente + a.contagens.extra) > 0) {
+        const n = await abrirPedidoSem0230(origem, a, { cliente_id: pessoa.id || null, viagem_id: viagemId ?? null, nome: pessoa.nome }).catch(() => null);
+        return ` Análise: ${rot}.${n ? ` Solicitação nº ${n} aberta pro Relacionamento com o que falta emitir.` : ""}`;
+      }
+      if (sol?.nova) return ` Análise: ${rot} — solicitação nº ${sol.numero} aberta pro Relacionamento com ${a.contagens.falta} emissão(ões) pendente(s).`;
+      if (sol) return ` Análise: ${rot} — atualizada no pedido nº ${sol.numero}.`;
+      if (origem === "rel" && a.status !== "tudo_emitido") return ` Análise: ${rot} — ficou em "Vendas com pendência".`;
+      return ` Análise: ${rot}.${a.gravado === false && a.aviso ? ` ${a.aviso}` : ""}`;
+    } catch (e) {
+      return ` A análise pós-venda não rodou agora (${(e as Error).message}); reanalise no painel "Vendas com pendência".`;
+    }
   }
 
   async function salvar(marcar: boolean) {
@@ -195,9 +263,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     if (e) { setErro(e); return; }
     setErro(null); setSalvando(true);
     try {
-      const final = comValores.map((i) => (i.tipo === "expedicao"
-        ? { ...i, passageiros: (viajantes[i.k] ?? []).map((v) => ({ nome: v.comprador ? pessoa.nome : v.nome })) }
-        : { ...i, passageiros: i.passageiros.length ? i.passageiros : [{ nome: pessoa.nome }] }));
+      const final = itensFinais();
 
       // Rascunho do closer: só os itens (não ocupa vaga, não cria passageiro).
       if (ehCloser && !marcar && !jaPreVenda && !consolidada) {
@@ -211,7 +277,8 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
         cliente: pessoa, itens: final, viajantes, pagamento: pag,
         condicao_especial: especial, condicao_obs: especialObs, observacoes: obs,
       }, nomeSugerido));
-      const pax = r.passageiros ? ` ${r.passageiros} passageiro(s) já estão na expedição (pré-reserva — o Operacional confirma).` : "";
+      const pax = (r.passageiros ? ` ${r.passageiros} passageiro(s) já estão na expedição (pré-reserva — o Operacional confirma).` : "")
+        + (r.venda_id ? await guardarAnalise(r.venda_id) : "");
 
       if (ehCloser && principal) {
         // Mesma regra do RegistrarVenda: marca (ou atualiza o valor/tipo) no Dashboard pela pré-venda da 0207.
@@ -238,13 +305,16 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
         {passo > 0 ? <Botao variante="fantasma" onClick={() => { setErro(null); setPasso(passo - 1); }} disabled={salvando}>← Voltar</Botao>
           : <Botao variante="fantasma" onClick={onFechar} disabled={salvando}>Cancelar</Botao>}
         {!ultimo && <Botao variante="primario" onClick={avancar} disabled={carregando}>Continuar →</Botao>}
+        {ultimo && (
+          <Botao variante="fantasma" onClick={() => void rodarAnalise()} disabled={analisando || salvando} title="Roda a conferência de novo">Reanalisar</Botao>
+        )}
         {ultimo && ehCloser && !consolidada && !jaPreVenda && (
           <Botao variante="fantasma" onClick={() => void salvar(false)} disabled={salvando} title="Guarda os itens sem contar como venda">Salvar rascunho</Botao>
         )}
         {ultimo && (
-          <Botao variante="primario" onClick={() => void salvar(true)} disabled={salvando}
+          <Botao variante="primario" onClick={() => void salvar(true)} disabled={salvando || analisando}
             title={ehCloser ? "Grava tudo e já conta como venda no Dashboard" : "Grava tudo: Relacionamento e Operacional já veem"}>
-            {salvando ? "Salvando…" : ehCloser && (jaPreVenda || consolidada) ? "Salvar" : "Confirmar venda"}
+            {salvando ? "Salvando…" : ehCloser && (jaPreVenda || consolidada) ? "Salvar" : analise && analise.status !== "tudo_emitido" ? "Concluir com pendência" : "Confirmar venda"}
           </Botao>
         )}
       </>}>
@@ -428,6 +498,31 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
             {ehCloser && !consolidada && !jaPreVenda && (
               <Aviso><b>Confirmar venda</b> grava tudo e a venda já conta no Dashboard. Depois, no cartão, é só <b>Fechar: pagamento e contrato</b>.</Aviso>
             )}
+          </div>
+        )}
+        {/* ── 5. Análise pós-venda ── */}
+        {passo === PASSO_ANALISE && (
+          <div className="space-y-3">
+            {analisando ? (
+              <div className="rel-card p-6 text-center" role="status" aria-live="polite">
+                <p className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>Revisando a venda…</p>
+                <p className="text-[13px] mt-1" style={{ color: "var(--ink3)" }}>Cruzando a proposta apresentada com o que já foi emitido e olhando os riscos. Leva alguns segundos.</p>
+              </div>
+            ) : analise ? (
+              <>
+                <ExtratoAnalise status={analise.status} base={analise.base} contagens={analise.contagens} linhas={analise.linhas} riscos={analise.riscos}
+                  resumo={analise.resumo} proposta={analise.proposta} ia={analise.ia} />
+                {analise.status !== "tudo_emitido" && (
+                  <Aviso>
+                    Dá pra concluir assim.{" "}
+                    {origem === "rel"
+                      ? <>A venda fica em <b>Vendas com pendência</b> com este extrato pra você emitir.</>
+                      : <>Ao concluir, abre uma <b>solicitação pro Relacionamento</b> com {analise.contagens.falta ? <>as <b>{analise.contagens.falta}</b> emissão(ões) que faltam</> : "as divergências"} — e a venda fica com o status <b>{STATUS_ANALISE[analise.status]?.rotulo}</b> até tudo bater.</>}
+                    {" "}Se algo está errado na venda, volte e corrija antes.
+                  </Aviso>
+                )}
+              </>
+            ) : erroAnalise ? <Aviso>{erroAnalise}</Aviso> : null}
           </div>
         )}
         {erro && <div className="mt-4"><Aviso tom="erro">{erro}</Aviso></div>}

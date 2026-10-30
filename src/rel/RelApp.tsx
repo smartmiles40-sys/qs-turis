@@ -58,6 +58,7 @@ const PesquisasPage = lazy(() => import("./pos/PesquisasPage"));
 const RecompraPage = lazy(() => import("./pos/RecompraPage"));
 // 0218: o Rel vende pra base (a recompra não vai mais pro Comercial)
 const PipelinePage = lazy(() => import("./vendas/PipelinePage"));
+const VendasComPendencia = lazy(() => import("@/venda/VendasComPendencia")); // 0230: análise pós-venda
 const KpisPage = lazy(() => import("./kpis/KpisPage"));
 const WhatsAppPage = lazy(() => import("./whatsapp/WhatsAppPage"));
 const EquipePage = lazy(() => import("./equipe/EquipePage"));
@@ -527,6 +528,7 @@ export default function RelApp() {
           {rota.tela === "automacoes" && <AutomacoesPage />}
           {rota.tela === "pesquisas" && <PesquisasPage onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} />}
           {rota.tela === "recompra" && <RecompraPage onAbrirCliente={abrirCliente} onAbrirOportunidade={(id) => ir({ tela: "vendas", id })} />}
+          {rota.tela === "vendas" && !rota.id && <div className="mb-4"><VendasComPendencia compacto /></div>}
           {rota.tela === "vendas" && (
             <PipelinePage abrirId={rota.id ?? null} onAbrirId={(id) => ir(id ? { tela: "vendas", id } : { tela: "vendas" })}
               onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} onAbrirProposta={(id) => ir({ tela: "propostas", id })} />
