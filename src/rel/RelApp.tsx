@@ -29,10 +29,10 @@ import { usePode } from "./equipe/usePode";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import { useAprovacoesNovas } from "@/propostas/lib";
 import type { TelaExp } from "@/expedicoes/contexto";
-import { useContagemReceitas } from "@/expedicoes/useContagensExp";
 import SinoDeAvisos from "@/avisos/SinoDeAvisos";
-import AppShell, { type ShellGroup, type ShellItem } from "@/components/ui/AppShell";
-import { Icon } from "@/components/ui/icons";
+import AppShell from "@/components/ui/AppShell";
+import { OUTROS_ID, itensDeFora, itensDoMenu, montarMenuRel, type Contagens } from "./menu";
+import { filtroDoMenu, useMenuPorPapel } from "./equipe/menuPorPapel";
 import { Segmented } from "@/components/ui";
 import { hashSemQuery } from "@/lib/hashQuery";
 
@@ -58,6 +58,8 @@ const PesquisasPage = lazy(() => import("./pos/PesquisasPage"));
 const RecompraPage = lazy(() => import("./pos/RecompraPage"));
 // 0218: o Rel vende pra base (a recompra não vai mais pro Comercial)
 const PipelinePage = lazy(() => import("./vendas/PipelinePage"));
+// V2 (30/10): Disparos, Automações, Pesquisas e Recompra numa página só
+const CampanhasPage = lazy(() => import("./campanhas/CampanhasPage"));
 const KpisPage = lazy(() => import("./kpis/KpisPage"));
 const WhatsAppPage = lazy(() => import("./whatsapp/WhatsAppPage"));
 const EquipePage = lazy(() => import("./equipe/EquipePage"));
@@ -79,14 +81,14 @@ type Rota =
   | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "solicitacoes"; id?: string } | { tela: "propostas"; id?: string } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" } | { tela: "cadastros" }
   | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" }
-  | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" } | { tela: "vendas"; id?: string }
+  | { tela: "campanhas" } | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" } | { tela: "vendas"; id?: string }
   | { tela: "config" } | { tela: "faxina" } | { tela: "mais" } | { tela: TelaRelExp; id?: string };
 type Tela = Rota["tela"];
 
-const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "cadastros", "esteira", "viagens", "alertas", "disparos", "automacoes", "pesquisas", "recompra", "config", "faxina", "mais"];
+const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "cadastros", "esteira", "viagens", "alertas", "campanhas", "disparos", "automacoes", "pesquisas", "recompra", "config", "faxina", "mais"];
 
-/** Item do menu que abre/fecha o grupo "Mais" (não é tela). */
-const MAIS_ID = "__mais";
+/** As 4 telas que moram dentro de Campanhas: abertas, acendem "Campanhas" no menu. */
+const DENTRO_DE_CAMPANHAS: string[] = ["disparos", "automacoes", "pesquisas", "recompra"];
 
 function lerRota(): Rota {
   // "?aba=…" no fim do hash é estado da tela (src/lib/hashQuery.ts), não parte da rota
@@ -273,12 +275,11 @@ export default function RelApp() {
   const verKpis = usePode("relacionamento.kpis") !== false;
   const [central, recontarCentral] = useContagemSolicitacoes("relacionamento");
   const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "relacionamento");
-  // 29/10 (Carol): receitas a enviar na janela de 20 dias (menu "Mais › Receitas")
-  const receitasRel = useContagemReceitas();
+  // V2 (30/10, 0229): menu por papel (CX/CS/Hunter). Sem a 0229, ou desligado, = menu completo.
+  const menuPapel = useMenuPorPapel(currentUser?.id ?? "");
   const [rota, setRota] = useState<Rota>(lerRota);
   const [resumo, setResumo] = useState<ResumoDoMenu | null>(null);
   const [cont, setCont] = useState<Contadores | null>(null);
-  const [maisAberto, setMaisAberto] = useState(false);
   const eu = currentUser?.id ?? "";
 
   useEffect(() => {
@@ -353,84 +354,42 @@ export default function RelApp() {
   const abrirViagem = (id: string) => ir({ tela: "viagem", id });
   const abrirConversa = (id: string) => ir({ tela: "atendimento", id });
 
-  // A tela de detalhe acende o item da lista dela.
-  const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "duplicados" || rota.tela === "cadastros" ? "clientes" : rota.tela === "exp-passageiros" ? "clientes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
   const supervisao = podeGerirRelacionamento(currentUser);
   const verTime = podeGerirTime(currentUser, "relacionamento");
 
-  // MENU ENXUTO (27/10, Bruno: "tudo o mais simples"). No 1º nível fica só o
-  // que a atendente usa todo dia — Atendimento, Viagens, Clientes — e, pra
-  // supervisão, Faxina/Modelos/Time. O resto vai pro grupo recolhido "Mais"
-  // (uso medido em 27/10: Esteira 0 etapas concluídas, Disparos/Automações/
-  // Pesquisas/Recompra/Agenda 0 registros, Chamados 1). Toda rota continua
-  // funcionando: link antigo abre a tela e o "Mais" já vem aberto.
-  const itensMais: ShellItem[] = [
-    { id: "esteira", label: "Minhas atividades", icon: Icon.check },
-    { id: "chamados", label: "Chamados", icon: Icon.chamado, count: cont?.chamadosVencidos || undefined, late: true },
-    { id: "agenda", label: "Agenda do time", icon: Icon.agenda },
-    { id: "exp-expedicoes", label: "Expedições", icon: Icon.mapa },
-    { id: "exp-pacotes", label: "Pacotes", icon: Icon.aviao },
-    { id: "exp-inscricoes", label: "Inscrições", icon: Icon.inscricao },
-    // 29/10 (Carol): receitas a emitir/enviar antes do embarque
-    { id: "exp-receitas", label: "Receitas", icon: Icon.check, count: receitasRel || undefined, late: true },
-    { id: "exp-avisos", label: "Avisos das expedições", icon: Icon.megafone },
-    { id: "disparos", label: "Disparos e remarketing", icon: Icon.disparo },
-    { id: "automacoes", label: "Automações", icon: Icon.cadencia },
-    { id: "pesquisas", label: "Pesquisas", icon: Icon.pesquisa },
-    { id: "recompra", label: "Recompra", icon: Icon.recompra },
-    ...(verKpis ? [{ id: "kpis", label: "KPIs", icon: Icon.kpi }] : []),
-    { id: "config", label: "Configurações", icon: Icon.config },
-  ];
-  const noMais = itensMais.some((i) => i.id === ativo);
-  const somaMais = itensMais.reduce((s, i) => s + (i.count ?? 0), 0);
-
-  // Redesign (out/2026): menu na ordem do HANDOFF.md ("Menus por setor") e a
-  // casca é o AppShell comum dos 4 setores. Agrupamento novo:
-  //   Início, Minhas atividades · Atendimento · Carteira · Expedições · Pós-venda · Gestão
-  // Bruno, 27/10: Solicitações, Propostas e Agenda do time sobem pro Atendimento
-  // (não ficam no rodapé); Modelos de mensagem só pra supervisão; Arrumar
-  // cadastros virou aba de Clientes (o cadastro é um só).
-  const mostraMais = maisAberto || noMais;
-  const grupos: ShellGroup[] = [
-    { items: [
-      { id: "inicio", label: "Início", icon: Icon.inicio },
-    ] },
-    { label: "Atendimento", items: [
-      { id: "atendimento", label: "Conversas", icon: Icon.chat, count: cont?.esperando || undefined, late: !!cont?.foraDoPrazo },
-      // Grupos (15/10, 0137): vermelho quando marcaram o número com @
-      { id: "grupos", label: cont?.gruposMencao ? "Grupos  @" : "Grupos", icon: Icon.pessoas, count: cont?.gruposNovos || undefined, late: !!cont?.gruposMencao },
-      // Central de Solicitações (0149) e Propostas (0157)
-      { id: "solicitacoes", label: "Solicitações", icon: Icon.inbox, count: bolinhaDaCentral(central).badge, late: bolinhaDaCentral(central).alerta },
-      { id: "propostas", label: "Propostas", icon: Icon.doc, count: aprovacoes || undefined },
-      // 0218: pipeline de vendas pra base (hunters)
-      { id: "vendas", label: "Pipeline de vendas", icon: Icon.funil },
-    ] },
-    { label: "Carteira", items: [
-      { id: "viagens", label: "Viagens", icon: Icon.aviao },
-      { id: "clientes", label: "Clientes", icon: Icon.cliente, count: cont?.duplicados || undefined },
-      { id: "alertas", label: "Alertas", icon: Icon.alerta, count: cont?.alertasAltos || undefined, late: true },
-    ] },
-    ...(supervisao || verTime ? [{ label: "Supervisão", items: [
-      ...(supervisao ? [
-        { id: "faxina", label: "Faxina das viagens", icon: Icon.ferramenta, count: cont?.semDono || undefined },
-        { id: "modelos", label: "Modelos de mensagem", icon: Icon.modelo },
-      ] : []),
-      // Time (13/10): a gestora do Relacionamento cadastra e cuida do time.
-      ...(verTime ? [{ id: "equipe", label: "Time", icon: Icon.time }] : []),
-    ] }] : []),
-    { items: [
-      // "Mais" recolhido: fechado, mostra a soma das bolinhas de dentro
-      { id: MAIS_ID, label: mostraMais ? "Mais ▾" : "Mais ▸", icon: Icon.mais, count: !mostraMais && somaMais ? somaMais : undefined, late: true },
-      ...(mostraMais ? itensMais : []),
-    ] },
-  ];
-  const ativoNoMenu = ativo;
-  const navegar = (id: string) => {
-    if (id !== MAIS_ID) { ir({ tela: id } as Rota); return; }
-    // celular/tablet: o menu é gaveta e fecha ao tocar → abre a tela "Mais"
-    if (window.matchMedia("(max-width: 1023px)").matches) { ir({ tela: "mais" }); return; }
-    setMaisAberto(!mostraMais);
+  // MENU V2 (30/10, Bruno: tirar o "Mais ▸" — "ninguém vai usar"). O menu é um
+  // catálogo (src/rel/menu.tsx) em grupos sempre visíveis:
+  //   Início, Minhas atividades · Atendimento · Entre setores · Pós-venda ·
+  //   Expedições · Carteira · Acompanhamento · Supervisão
+  // Disparos, Automações, Pesquisas e Recompra viraram UM item, "Campanhas",
+  // que abre a página-hub. Receitas saiu do menu (vai morar na ficha do
+  // cliente); a rota #rel/exp-receitas continua abrindo.
+  //
+  // Menu por papel (0229): quem tem papel (CX/CS/Hunter) e não é da gestão vê
+  // só os painéis do papel — se a gestão ligou. O resto fica em "Outros painéis".
+  const acesso = { supervisao, verTime, verKpis };
+  const filtro = supervisao ? null : filtroDoMenu(menuPapel.cfg, menuPapel.papeis);
+  const sol = bolinhaDaCentral(central);
+  const contagens: Contagens = {
+    atendimento: { count: cont?.esperando, late: !!cont?.foraDoPrazo },
+    // Grupos (15/10, 0137): vermelho quando marcaram o número com @
+    grupos: { count: cont?.gruposNovos, late: !!cont?.gruposMencao, label: cont?.gruposMencao ? "Grupos  @" : undefined },
+    chamados: { count: cont?.chamadosVencidos, late: true },
+    solicitacoes: { count: sol.badge, late: sol.alerta },
+    propostas: { count: aprovacoes || undefined },
+    clientes: { count: cont?.duplicados },
+    alertas: { count: cont?.alertasAltos, late: true },
+    faxina: { count: cont?.semDono },
   };
+  const grupos = montarMenuRel(acesso, filtro, contagens);
+  const noMenu = new Set(itensDoMenu(acesso, filtro).map((i) => i.id));
+
+  // A tela de detalhe acende o item da lista dela.
+  const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "duplicados" || rota.tela === "cadastros" ? "clientes" : rota.tela === "exp-passageiros" ? "clientes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
+  // Disparos/Automações/Pesquisas/Recompra abertos acendem "Campanhas" (se não estão soltos no menu).
+  const ativoNoMenu = DENTRO_DE_CAMPANHAS.includes(ativo) && !noMenu.has(ativo) && noMenu.has("campanhas") ? "campanhas" : ativo;
+  const navegar = (id: string) => ir({ tela: id === OUTROS_ID ? "mais" : id } as Rota);
+  const deFora = itensDeFora(acesso, filtro);
 
   return (
     <>
@@ -503,21 +462,33 @@ export default function RelApp() {
           {rota.tela === "viagens" && <ViagensPage key="viagens" onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
           {/* Faxina (supervisão): a mesma lista de Viagens, com todas as filas à mostra */}
           {rota.tela === "faxina" && <ViagensPage key="faxina" faxina onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
-          {rota.tela === "mais" && (
-            <div className="max-w-3xl mx-auto">
-              <h1 className="text-xl font-bold mb-1" style={{ color: "var(--ink)" }}>Mais</h1>
-              <p className="text-[13px] mb-4" style={{ color: "var(--ink3)" }}>Telas que o time usa de vez em quando.</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {itensMais.map((i) => (
-                  <button key={i.id} type="button" className="rel-card p-3 text-left flex items-center gap-2 text-[13.5px] font-semibold"
-                    style={{ color: "var(--ink)" }} onClick={() => ir({ tela: i.id } as Rota)}>
-                    {i.icon}<span className="flex-1">{i.label}</span>
-                    {!!i.count && <Etiqueta tom={i.late ? "erro" : "aviso"}>{i.count}</Etiqueta>}
-                  </button>
-                ))}
+          {/* "Outros painéis" (#rel/mais, o endereço antigo do Mais): o que ficou fora do
+              menu da pessoa. Sem menu por papel, é a lista de todos os painéis. */}
+          {rota.tela === "mais" && (() => {
+            const lista = deFora.length ? deFora : itensDoMenu(acesso, null);
+            return (
+              <div className="max-w-3xl mx-auto">
+                <h1 className="text-xl font-bold mb-1" style={{ color: "var(--ink)" }}>{deFora.length ? "Outros painéis" : "Todos os painéis"}</h1>
+                <p className="text-[13px] mb-4" style={{ color: "var(--ink3)" }}>
+                  {deFora.length ? "Não estão no seu menu porque não são do seu papel no setor, mas você pode abrir quando precisar." : "Tudo o que o Relacionamento tem. Tudo isto já está no seu menu."}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {lista.map((i) => (
+                    <button key={i.id} type="button" className="rel-card p-3 text-left flex items-start gap-2"
+                      style={{ color: "var(--ink)" }} onClick={() => ir({ tela: i.id } as Rota)}>
+                      <span className="mt-0.5">{i.icon}</span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[13.5px] font-semibold">{i.label}</span>
+                        <span className="block text-[12px]" style={{ color: "var(--ink3)" }}>{i.dica}</span>
+                      </span>
+                      {!!contagens[i.id]?.count && <Etiqueta tom={contagens[i.id]?.late ? "erro" : "aviso"}>{contagens[i.id]?.count}</Etiqueta>}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
+          {rota.tela === "campanhas" && <CampanhasPage ir={(t) => ir({ tela: t })} />}
           {rota.tela === "viagem" && (
             <ViagemPage key={rota.id} id={rota.id} onVoltar={() => ir({ tela: "viagens" })} onAbrirCliente={abrirCliente} onAbrirConversa={abrirConversa}
               onAbrirExpedicao={(exp, tipo) => ir({ tela: tipo === "pacote" ? "exp-pacotes" : "exp-expedicoes", id: exp })} />

@@ -27,7 +27,10 @@ import { podeGerirTime } from "./permissao";
 import { listarCargos, PERMISSOES, permissoesPadrao, salvarCargo, SETORES_CARGO, type Cargo, type SetorCargo } from "./cargos";
 import { esquecerPermissoes } from "./usePode";
 import PapeisDaPessoa from "./PapeisDaPessoa";
-import { papeisDe, type Papel as PapelNoSetor } from "@/solicitacoes/lib";
+import { lerDistribuicao, listarTipos, papeisDe, type Papel as PapelNoSetor, type TipoSol } from "@/solicitacoes/lib";
+import OQueAPessoaVe from "./OQueAPessoaVe";
+import MenuPorPapelSecao from "./MenuPorPapelSecao";
+import { lerMenuPorPapel, type MenuPorPapel } from "./menuPorPapel";
 
 /** Papel na área: o atendente (papel com o nome da área) ou gestor. */
 type Papel = AreaComTime | "gestor";
@@ -36,8 +39,10 @@ const PAPEL: Record<string, string> = { relacionamento: "Atendente", financeiro:
 /** O que muda de uma área pra outra. */
 const AREA: Record<AreaComTime, { nome: string; titulo: string; sub: string; vazio: string; dicaPapel: string; assina: boolean }> = {
   relacionamento: {
-    nome: "Relacionamento", titulo: "Time do Relacionamento",
-    sub: "Quem atende o pós-venda, o cargo, a assinatura no WhatsApp e o último acesso.",
+    // V2 (30/10): Time e cargos numa tela só — por pessoa, o cargo, o papel, as
+    // solicitações que chegam pra ela e o menu que ela vê.
+    nome: "Relacionamento", titulo: "Time e cargos",
+    sub: "Quem é quem no pós-venda: cargo, papel (CX, CS, Hunter), as solicitações que chegam pra cada um e o menu que cada um vê.",
     vazio: "Adicione quem atende o pós-venda.",
     dicaPapel: "Atendente: atende, cuida das fichas e viagens. Gestor(a): também configura o Relacionamento e cuida do time.",
     assina: true,
@@ -94,7 +99,21 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
   const [salvando, setSalvando] = useState(false);
   const [erroForm, setErroForm] = useState<string | null>(null);
   const [senhaNova, setSenhaNova] = useState<{ nome: string; email: string; senha: string } | null>(null);
-  const [aba, setAba] = useState<"time" | "cargos">("time");
+  const [aba, setAba] = useState<"time" | "cargos" | "menus">("time");
+  // V2 (0229 + 0222): só no Relacionamento
+  const ehRel = area === "relacionamento";
+  const [tipos, setTipos] = useState<TipoSol[] | null>(null);
+  const [distrib, setDistrib] = useState<boolean | null>(null);
+  const [menuCfg, setMenuCfg] = useState<{ cfg: MenuPorPapel | null; carregou: boolean }>({ cfg: null, carregou: false });
+  const carregarMenu = useCallback(() => {
+    void lerMenuPorPapel().then((cfg) => setMenuCfg({ cfg, carregou: true })).catch(() => setMenuCfg({ cfg: null, carregou: true }));
+  }, []);
+  useEffect(() => {
+    if (!ehRel || !pode) return;
+    listarTipos().then(setTipos).catch(() => setTipos([]));
+    void lerDistribuicao().then((d) => setDistrib(d ? d.relacionamento ?? false : null));
+    carregarMenu();
+  }, [ehRel, pode, carregarMenu]);
   const [papeis, setPapeis] = useState<Record<string, PapelNoSetor[]> | null>(null);
   const [cargos, setCargos] = useState<Cargo[]>([]);
   const carregarCargos = useCallback(() => { listarCargos().then(setCargos).catch(() => setCargos([])); }, []);
@@ -161,6 +180,8 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
   const soDaArea = (m: MembroEquipe) => m.so_area ?? (area === "relacionamento" ? m.so_relacionamento : false);
   const podeMexer = (m: MembroEquipe) => ehAdmin || soDaArea(m);
   const nomeDoCargo = (id?: string | null) => cargos.find((c) => c.id === id)?.nome;
+  // KPIs no menu: o cargo marca (0135); sem cargo, o padrão (vê).
+  const veKpis = (id?: string | null) => { const c = cargos.find((x) => x.id === id); return c ? c.permissoes.includes("relacionamento.kpis") : true; };
   // Cargos que dá pra dar: ativos; o gestor da área só os da alçada dele.
   const cargosDisponiveis = cargos.filter((c) => c.ativo && (ehAdmin || alcadaDe(area).includes(c.setor)));
 
@@ -172,14 +193,15 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
       </div>
 
       <div className="flex gap-1 border-b" style={{ borderColor: "var(--line)" }} role="tablist" aria-label="Equipe">
-        {([["time", "Time"], ["cargos", "Cargos"]] as const).map(([v, r]) => (
+        {([["time", "Time"], ["cargos", "Cargos"], ...(ehRel ? [["menus", "Menus por papel"]] as const : [])] as const).map(([v, r]) => (
           <button key={v} role="tab" aria-selected={aba === v} onClick={() => setAba(v)}
             className="h-10 px-3 text-[13px] font-semibold -mb-px"
             style={aba === v ? { color: "var(--rel-ink)", borderBottom: "2px solid var(--rel)" } : { color: "var(--ink2)", borderBottom: "2px solid transparent" }}>{r}</button>
         ))}
       </div>
 
-      {aba === "cargos" ? <CargosSecao cargos={cargos} ehAdmin={ehAdmin} area={area} onMudou={carregarCargos} /> : <>
+      {aba === "menus" ? <MenuPorPapelSecao cfg={menuCfg.cfg} carregou={menuCfg.carregou} equipe={equipe ?? []} papeisDe={papeis} onMudou={carregarMenu} />
+      : aba === "cargos" ? <CargosSecao cargos={cargos} ehAdmin={ehAdmin} area={area} onMudou={carregarCargos} /> : <>
 
       {aviso && <Aviso tom={aviso.tom}>{aviso.texto}</Aviso>}
       {erro && <Aviso tom="erro">{erro} <Botao className="ml-2" onClick={() => void carregar()}>Tentar de novo</Botao></Aviso>}
@@ -213,6 +235,10 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
                 {papeis && m.role !== "admin" && (
                   <PapeisDaPessoa userId={m.id} papeis={papeis[m.id] ?? []} podeMudar={podeMexer(m)}
                     onMudou={(p) => setPapeis((x) => ({ ...(x ?? {}), [m.id]: p }))} />
+                )}
+                {ehRel && papeis && (
+                  <OQueAPessoaVe m={m} papeis={papeis[m.id] ?? []} tipos={tipos} equipe={equipe} papeisDe={papeis}
+                    cfg={menuCfg.cfg} cfgCarregou={menuCfg.carregou} distribuicaoLigada={distrib} verKpis={veKpis(m.cargo_id)} />
                 )}
               </div>
               {podeMexer(m) ? (
@@ -337,7 +363,7 @@ function CargosSecao({ cargos, ehAdmin, area, onMudou }: { cargos: Cargo[]; ehAd
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[13px] max-w-xl" style={{ color: "var(--ink2)" }}>
           O cargo é o nome da função de cada pessoa. O que libera o acesso continua sendo o papel (atendente ou gestor).
-          As permissões ficam guardadas pro futuro — ainda não travam nada.
+          As permissões abaixo valem na hora (o banco confere). Que painéis cada papel vê no menu fica na aba Menus por papel.
         </p>
         <Botao variante="primario" onClick={() => { setErro(null); setForm({ nome: "", setor: area, descricao: "", permissoes: permissoesPadrao(area as SetorCargo) }); }}>+ Novo cargo</Botao>
       </div>
