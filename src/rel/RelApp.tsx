@@ -61,6 +61,7 @@ const RecompraPage = lazy(() => import("./pos/RecompraPage"));
 const PipelinePage = lazy(() => import("./vendas/PipelinePage"));
 // V2 (30/10): Disparos, Automações, Pesquisas e Recompra numa página só
 const CampanhasPage = lazy(() => import("./campanhas/CampanhasPage"));
+const VendasComPendencia = lazy(() => import("@/venda/VendasComPendencia")); // 0230: análise pós-venda
 const KpisPage = lazy(() => import("./kpis/KpisPage"));
 const WhatsAppPage = lazy(() => import("./whatsapp/WhatsAppPage"));
 const EquipePage = lazy(() => import("./equipe/EquipePage"));
@@ -500,6 +501,7 @@ export default function RelApp() {
           {rota.tela === "automacoes" && <AutomacoesPage />}
           {rota.tela === "pesquisas" && <PesquisasPage onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} />}
           {rota.tela === "recompra" && <RecompraPage onAbrirCliente={abrirCliente} onAbrirOportunidade={(id) => ir({ tela: "vendas", id })} />}
+          {rota.tela === "vendas" && !rota.id && <div className="mb-4"><VendasComPendencia compacto /></div>}
           {rota.tela === "vendas" && (
             <PipelinePage abrirId={rota.id ?? null} onAbrirId={(id) => ir(id ? { tela: "vendas", id } : { tela: "vendas" })}
               onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} onAbrirProposta={(id) => ir({ tela: "propostas", id })} />

@@ -142,7 +142,7 @@ const PAISES = {
   'reino unido': 'gb', inglaterra: 'gb', uk: 'gb', indonesia: 'id', panama: 'pa', mexico: 'mx', alemanha: 'de', germany: 'de',
   holanda: 'nl', netherlands: 'nl', 'africa do sul': 'za', marrocos: 'ma', jordania: 'jo', india: 'in', vietna: 'vn', australia: 'au',
 };
-const paisChave = (p) => { const k = semAcento(p).toLowerCase().trim(); return k ? (PAISES[k] || k) : ''; };
+export const paisChave = (p) => { const k = semAcento(p).toLowerCase().trim(); return k ? (PAISES[k] || k) : ''; };
 
 /** Aeroportos mais comuns da agência: IATA → [país, cidade]. Só complementa o que a IA não disse. */
 const IATA = {
@@ -189,6 +189,9 @@ export function nomeLimpo(s) {
     .replace(/(^|\s)(\p{L})/gu, (_, e, l) => e + l.toUpperCase())
     .replace(/\b(De|Da|Do|Das|Dos|E)\b/g, (p) => p.toLowerCase());
 }
+
+/** IATA → país curto ('br', 'jp'…) ou '' (usado pela conferência pós-venda, api/_vendaConferencia.js). */
+export const paisDoIata = (c) => IATA[txt(c).toUpperCase().slice(0, 3)]?.[0] || '';
 
 // ── Voos: normalizar, juntar conexões, voo interno ───────────────────────────
 function normalizarVoo(v) {

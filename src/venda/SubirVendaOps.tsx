@@ -12,12 +12,14 @@ import { dataBr } from "@/closer/lib";
 import type { ResultadoPreVenda } from "@/closer/vendaItens";
 import { ajustarVagas, listarExpedicoesParaVenda, type ExpedicaoVaga } from "./api";
 import { BotaoSubirVenda } from "./SubirVenda";
+import VendasComPendencia from "./VendasComPendencia";
 
 export default function SubirVendaOps() {
   const [lista, setLista] = useState<ExpedicaoVaga[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<ResultadoPreVenda | null>(null);
   const [abrindo, setAbrindo] = useState<ExpedicaoVaga | null>(null);
+  const [versao, setVersao] = useState(0); // recarrega o painel de pendências depois de subir venda
 
   const carregar = useCallback(() => {
     listarExpedicoesParaVenda().then((l) => { setLista(l); setErro(null); }).catch((e) => { setLista([]); setErro((e as Error).message); });
@@ -33,10 +35,12 @@ export default function SubirVendaOps() {
             Expedição, aéreo, seguro, hospedagem… numa tela só. O Relacionamento e o Financeiro já veem.
           </p>
         </div>
-        <BotaoSubirVenda origem="ops" variante="primario" rotulo="Subir uma venda" onSalvo={(r) => { setAviso(r); carregar(); }} />
+        <BotaoSubirVenda origem="ops" variante="primario" rotulo="Subir uma venda" onSalvo={(r) => { setAviso(r); carregar(); setVersao((n) => n + 1); }} />
       </div>
       {aviso && <Aviso tom={aviso.tom}>{aviso.mensagem}</Aviso>}
       {erro && <Aviso tom="erro">{erro}</Aviso>}
+
+      <VendasComPendencia key={versao} />
 
       <section className="rel-card p-4">
         <h2 className="text-[15px] font-bold mb-1" style={{ color: "var(--ink)" }}>Vagas das expedições</h2>

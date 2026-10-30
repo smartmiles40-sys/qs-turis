@@ -4,6 +4,9 @@
     "api/venda-voucher.js": {
       "maxDuration": 60
     },
+    "api/venda-analise.js": {
+      "maxDuration": 60
+    },
     "api/wa-send-media.js": {
       "maxDuration": 60
     },
