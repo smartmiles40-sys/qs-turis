@@ -23,6 +23,7 @@ import { ROTAS_DISPAROS } from "./disparos/rotas";
 import { ROTAS_GRUPOS } from "./grupos/rotas";
 import { ROTAS_AUTOMACOES } from "./automacoes/rotas";
 import { ROTAS_EMAIL } from "./email/rotas";
+import { instalarIdsAntigos } from "./conteudo/idsAntigos";
 import { registrarSeletorDrive } from "./conteudo/seletorDrive";
 import { SeletorDriveDoCard } from "./drive/seletorDoCard";
 
@@ -45,16 +46,28 @@ export const GRUPOS_MKT: { id: GrupoMkt; rotulo: string }[] = [
   { id: "organico", rotulo: "Orgânico" },
   { id: "trafego", rotulo: "Tráfego" },
   { id: "comum", rotulo: "Comum" },
-  { id: "disparos", rotulo: "Disparos" },
+  { id: "disparos", rotulo: "Disparos e automações" },
   { id: "automacoes", rotulo: "Automações" },
   { id: "email", rotulo: "E-mail" },
 ];
 
+// Telas que viraram ABAS (30/10/2026, menu enxuto): o link antigo salvo (e os
+// avisos "pediu humano" já gravados com #mkt/conversas?c=…) cai na aba certa.
+// Conteúdo e e-mail instalam os seus nos próprios rotas.ts.
+instalarIdsAntigos("mkt", {
+  "mkt-disparos": { tela: "whatsapp" },
+  "mkt-recorrencias": { tela: "whatsapp" },
+  "mkt-sequencias": { tela: "whatsapp" },
+  "mkt-contatos": { tela: "whatsapp", params: { aba: "contatos" } },
+  automacoes: { tela: "whatsapp", params: { aba: "automacoes" } },
+  conversas: { tela: "whatsapp", params: { aba: "conversas" } },
+});
+
 export const ROTAS_MKT: RotaMkt[] = [
   ...ROTAS_CONTEUDO,
   ...ROTAS_DRIVE,
-  ...ROTAS_DISPAROS,
   ...ROTAS_GRUPOS,
+  ...ROTAS_DISPAROS,
   ...ROTAS_AUTOMACOES,
   ...ROTAS_EMAIL,
 ];
