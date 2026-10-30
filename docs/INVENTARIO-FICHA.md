@@ -81,10 +81,19 @@ Preenchimento das colunas pessoais em 30/10:
 
 ## 4. Laudos médicos
 
-- A tabela `cad_laudos_medicos` **não existe no banco** em 30/10, e `docs/CONTRATO-LAUDOS.md` também não existe no worktree `qs-turis-v2-saude`.
-- A ficha lê com contrato **assumido**: `cad_laudos_medicos(id, cliente_id, status, arquivo_path, emitido_em, medico_id, apto, observacao)`, com `select("*")` e de forma tolerante. Sem a tabela, mostra "Ainda não disponível".
-- Bucket assumido do PDF: `laudos-medicos` (constante `BUCKET_LAUDOS` em `ficha/fontes.ts`). **Ajustar ao contrato do v2-saude.**
-- ➕ Os laudos aparecem na aba Saúde › Laudos médicos e no Histórico.
+- A tabela `cad_laudos_medicos` **não existe no banco** em 30/10. Ela vem da migration 0225 do agente v2-saude, que não foi aplicada.
+- A ficha segue o contrato `docs/CONTRATO-LAUDOS.md` do worktree `qs-turis-v2-saude`:
+  - 1 laudo por passageiro (viagem), com `cliente_id`;
+  - `status` a_fazer / em_andamento / emitido / dispensado;
+  - `apto` sim / nao / ressalvas, mais `ressalvas` e `parecer`;
+  - PDF no bucket privado `laudos-medicos`;
+  - `emitido_em` e `emitido_por_nome`.
+- Como a ficha mostra:
+  - laudo **válido = `status = 'emitido'`**, com selo Apto / Apto com ressalvas / Não apto;
+  - os outros aparecem como "em curso com o médico";
+  - quem não passa em `exp_pode_ver_saude()` recebe a lista vazia;
+  - sem a tabela, a seção mostra "ainda não disponível".
+- ➕ Os laudos aparecem na aba Saúde › Laudos médicos, com o nome da viagem e "Abrir PDF". No Histórico entram só os emitidos.
 
 ## 5. Contratos
 
@@ -207,4 +216,7 @@ select c.id, c.passaporte, p.passaporte from rel_clientes c join passageiros p o
 4. Guardar o `comentario_saude` da triagem no passageiro na aprovação. Hoje some.
 5. Ops subir PDF de contrato na ficha: hoje `rel_documentos` só aceita insert do Rel.
 6. "Importar do Bitrix" (`bitrix_dados`) como sugestão no Preencher por telefone.
-7. Contrato dos laudos: tabela, colunas e bucket.
+7. Ao juntar com o v2-saude, vai dar conflito em `src/expedicoes/menu.ts` e `src/expedicoes/paginas/Inscricoes.tsx`.
+   - Lá as Inscrições viraram abas, e o item "Saúde · médico" entrou no menu.
+   - Manter o item Receitas **fora** do menu.
+   - Colocar `<ReceitasAEnviar />` acima das abas das Inscrições, ou na tela Saúde · médico.

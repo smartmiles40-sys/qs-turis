@@ -18,7 +18,7 @@ import { resumoSaude } from "@/expedicoes/lib/saude";
 import { definirReceita } from "@/expedicoes/lib/receitas";
 import type { AbrirExpedicao } from "../ExpedicoesDaFicha";
 import {
-  linkLaudo, situacaoReceita, DIAS_RECEITA, type laudosDoCliente,
+  linkLaudo, situacaoReceita, DIAS_RECEITA, ROTULO_STATUS_LAUDO, SELO_APTO, type laudosDoCliente,
   type IdaCompleta, type LaudoMedico, type PerfilEfetivo,
 } from "./fontes";
 
@@ -87,29 +87,37 @@ export default function AbaSaude({ laudos, pe, idas, bloqueado, usuarios, onPree
         )}
       </Card>
 
-      <Card title="Laudos médicos">
-        {!laudos ? <p className="fc-p">Carregando…</p>
-          : !laudos.ativo ? <p className="fc-p">Ainda não disponível — a tabela de laudos (cad_laudos_medicos) não está no banco.</p>
-            : laudos.erro ? <Aviso tom="erro">Os laudos não carregaram ({laudos.erro}).</Aviso>
-              : laudos.lista.length === 0 ? <p className="fc-p">Nenhum laudo médico registrado.</p>
-                : (
-                  <ul className="fc-pessoas" aria-label="Laudos médicos">
-                    {laudos.lista.map((l) => (
+      {/* Contrato dos laudos (v2-saude): sem a tabela → bloco escondido; quem não pode ver saúde recebe lista vazia */}
+      {laudos?.ativo !== false ? (
+        <Card title="Laudos médicos">
+          {!laudos ? <p className="fc-p">Carregando…</p>
+            : laudos.lista.length === 0 ? <p className="fc-p">Nenhum laudo médico registrado (ou você não tem acesso à saúde).</p>
+              : (
+                <ul className="fc-pessoas" aria-label="Laudos médicos">
+                  {laudos.lista.map((l) => {
+                    const valido = l.status === "emitido";
+                    const selo = valido && l.apto ? SELO_APTO[l.apto] : null;
+                    return (
                       <li key={l.id} className="fc-dl__r" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                         <span style={{ display: "flex", flexDirection: "column", flex: "1 1 220px", minWidth: 0 }}>
-                          <span className="fc-bloco__t">Laudo {l.emitido_em ? `de ${formatarData(String(l.emitido_em))}` : ""}</span>
+                          <span className="fc-bloco__t">{l.expedicao?.nome ?? "Laudo"}{l.expedicao?.data_embarque ? ` · ${formatarData(l.expedicao.data_embarque)}` : ""}</span>
                           <span className="fc-bloco__s">
-                            {[l.status, l.medico_id && usuarios[l.medico_id] ? `médico(a): ${usuarios[l.medico_id]}` : null, l.observacao].filter(Boolean).join(" · ") || "—"}
+                            {[valido && l.emitido_em ? `emitido ${formatarData(l.emitido_em)}` : ROTULO_STATUS_LAUDO[l.status ?? ""] ?? l.status,
+                              l.emitido_por_nome, l.ressalvas, l.parecer].filter(Boolean).join(" · ") || "—"}
                           </span>
                         </span>
-                        {l.apto === true && <StatusChip tone="ok">apto</StatusChip>}
-                        {l.apto === false && <StatusChip tone="danger">não apto</StatusChip>}
+                        {selo ? <StatusChip tone={selo.tom}>{selo.texto}</StatusChip>
+                          : <StatusChip tone="neutral">{valido ? "emitido" : "em curso com o médico"}</StatusChip>}
                         {l.arquivo_path && <button type="button" className="fc-link fc-link--btn" onClick={() => void abrirLaudo(l)}>Abrir PDF</button>}
                       </li>
-                    ))}
-                  </ul>
-                )}
-      </Card>
+                    );
+                  })}
+                </ul>
+              )}
+        </Card>
+      ) : (
+        <p className="fc-p">Laudos médicos: ainda não disponível (a migration 0225 do médico não está no banco).</p>
+      )}
 
       <Card title="Receitas">
         {!temColunaReceita && idas.length > 0 ? (

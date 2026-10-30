@@ -290,35 +290,41 @@ export async function linkArquivoFicha(path: string): Promise<string> {
 // ── Laudos médicos (tabela do agente v2-saude) ──────────────────────────────
 
 /**
- * Contrato ASSUMIDO (docs/CONTRATO-LAUDOS.md do worktree qs-turis-v2-saude ainda
- * não existia em 30/10): cad_laudos_medicos(id, cliente_id, status, arquivo_path,
- * emitido_em, medico_id, apto, observacao). Lido com select("*") pra não quebrar
- * se vierem colunas a mais/a menos.
+ * Contrato do agente v2-saude (docs/CONTRATO-LAUDOS.md daquele worktree, migration
+ * 0225 NÃO aplicada): cad_laudos_medicos, 1 linha por passageiro (viagem).
+ *   status a_fazer | em_andamento | emitido | dispensado — "laudo válido" = emitido
+ *   apto   sim | nao | ressalvas (+ ressalvas), parecer, arquivo_path no bucket
+ *   PRIVADO laudos-medicos, emitido_em / emitido_por_nome.
+ * RLS: quem não passa em exp_pode_ver_saude() recebe lista VAZIA (não é erro).
+ * Sem a 0225 a tabela não existe → a ficha esconde o bloco (sem erro).
  */
 export interface LaudoMedico {
   id: string;
   status: string | null;
+  apto: string | null;
+  ressalvas: string | null;
+  parecer: string | null;
   arquivo_path: string | null;
+  arquivo_nome: string | null;
   emitido_em: string | null;
-  medico_id: string | null;
-  apto: boolean | null;
-  observacao: string | null;
-  criado_em?: string | null;
-  created_at?: string | null;
-  [k: string]: unknown;
+  emitido_por_nome: string | null;
+  expedicao_id: string | null;
+  atualizado_em: string | null;
+  expedicao?: { id: string; nome: string; data_embarque: string | null } | null;
 }
-/** Bucket assumido dos PDFs de laudo — AJUSTAR quando o contrato do v2-saude sair. */
 export const BUCKET_LAUDOS = "laudos-medicos";
+export const ROTULO_STATUS_LAUDO: Record<string, string> = { a_fazer: "a fazer", em_andamento: "em andamento", emitido: "emitido", dispensado: "dispensado" };
+export const SELO_APTO: Record<string, { texto: string; tom: "ok" | "warn" | "danger" }> = {
+  sim: { texto: "Apto", tom: "ok" }, ressalvas: { texto: "Apto com ressalvas", tom: "warn" }, nao: { texto: "Não apto", tom: "danger" },
+};
 
 export async function laudosDoCliente(clienteId: string): Promise<{ ativo: boolean; lista: LaudoMedico[]; erro?: string }> {
-  const { data, error } = await supabase.from("cad_laudos_medicos").select("*").eq("cliente_id", clienteId).limit(200);
-  if (error) {
-    if (faltaNoBanco(error)) return { ativo: false, lista: [] };
-    return { ativo: true, lista: [], erro: error.message };
-  }
-  const lista = ((data ?? []) as LaudoMedico[])
-    .sort((a, b) => String(b.emitido_em ?? b.criado_em ?? b.created_at ?? "").localeCompare(String(a.emitido_em ?? a.criado_em ?? a.created_at ?? "")));
-  return { ativo: true, lista };
+  const { data, error } = await supabase.from("cad_laudos_medicos")
+    .select("id,status,apto,ressalvas,parecer,arquivo_path,arquivo_nome,emitido_em,emitido_por_nome,expedicao_id,atualizado_em,expedicao:expedicoes(id,nome,data_embarque)")
+    .eq("cliente_id", clienteId).order("atualizado_em", { ascending: false }).limit(200);
+  // contrato: sem a tabela (ou qualquer erro de leitura) → esconde o bloco, sem mostrar erro
+  if (error) return { ativo: false, lista: [], erro: faltaNoBanco(error) ? undefined : error.message };
+  return { ativo: true, lista: (data ?? []) as unknown as LaudoMedico[] };
 }
 
 export async function linkLaudo(path: string): Promise<string> {
@@ -455,10 +461,11 @@ export function eventosDaFichaCompleta(f: {
       title: `Contrato ${c.status}: ${c.titulo}`, sub: c.detalhe ?? undefined });
   }
   for (const l of f.laudos) {
-    const em = String(l.emitido_em ?? l.criado_em ?? l.created_at ?? "");
-    if (!em) continue;
-    out.push({ id: `ld${l.id}`, em, when: em.length > 10 ? quandoTl(em) : soData(em), tone: l.apto === false ? "danger" : l.apto ? "ok" : "info",
-      title: `Laudo médico${l.apto === true ? " — apto" : l.apto === false ? " — não apto" : ""}`, sub: [l.status, l.observacao].filter(Boolean).join(" · ") || undefined });
+    if (l.status !== "emitido" || !l.emitido_em) continue; // só laudo válido entra no histórico
+    const selo = l.apto ? SELO_APTO[l.apto] : null;
+    out.push({ id: `ld${l.id}`, em: l.emitido_em, when: quandoTl(l.emitido_em), tone: selo ? selo.tom : "info",
+      title: `Laudo médico${selo ? ` — ${selo.texto.toLowerCase()}` : ""}${l.expedicao?.nome ? ` (${l.expedicao.nome})` : ""}`,
+      sub: [l.emitido_por_nome, l.ressalvas].filter(Boolean).join(" · ") || undefined });
   }
   for (const v of f.vendaItens) {
     out.push({ id: `vi${v.id}`, em: v.criado_em, when: quandoTl(v.criado_em), setor: "comercial",
