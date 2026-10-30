@@ -71,7 +71,7 @@ export function abrirNoQS(hash: string) {
 // CascaDeArea (#fin/…, #ops/…), CloserApp (#closer/…) e o SdrLayout, que lê
 // "#comercial/lead|solicitacoes|painel|minha-agenda".
 
-const PREFIXO: Record<Setor, string> = { comercial: "comercial", relacionamento: "rel", financeiro: "fin", operacional: "ops" };
+const PREFIXO: Record<Setor, string> = { comercial: "comercial", relacionamento: "rel", financeiro: "fin", operacional: "ops", marketing: "mkt" };
 
 /** O Comercial do closer é a Área do Closer. */
 function prefixoComercial(u: Pick<SdrUser, "role"> | null | undefined) {

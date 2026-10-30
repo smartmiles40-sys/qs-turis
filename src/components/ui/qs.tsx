@@ -12,13 +12,13 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 
 // ── Setor ────────────────────────────────────────────────────────────────────
 /** Os 4 setores do QS (mesmos ids de components/sdr/types → Setor). */
-export type SetorQs = "comercial" | "relacionamento" | "financeiro" | "operacional";
+export type SetorQs = "comercial" | "relacionamento" | "financeiro" | "operacional" | "marketing";
 const NOME_SETOR_QS: Record<SetorQs, string> = {
-  comercial: "Comercial", relacionamento: "Relacionamento", financeiro: "Financeiro", operacional: "Operações",
+  comercial: "Comercial", relacionamento: "Relacionamento", financeiro: "Financeiro", operacional: "Operações", marketing: "Marketing",
 };
 /** Nome do token de cor do setor (o de Operações se chama "operacoes" nos tokens). */
 const TOKEN_SETOR: Record<SetorQs, string> = {
-  comercial: "comercial", relacionamento: "relacionamento", financeiro: "financeiro", operacional: "operacoes",
+  comercial: "comercial", relacionamento: "relacionamento", financeiro: "financeiro", operacional: "operacoes", marketing: "marketing",
 };
 
 export function SectorDot({ setor, size = 8, label }: { setor: SetorQs; size?: number; label?: string }) {

@@ -120,8 +120,9 @@ export function setoresDe(user: Pick<SdrUser, "role" | "setores"> | null | undef
   // Gestor fica com as áreas escolhidas (13/10: a gestora do Rel não ganha o
   // Comercial por tabela). Sem nenhuma, é do Comercial.
   if (user.role === "gestor") return validos.length ? SETORES.filter((x) => validos.includes(x)) : ["comercial"];
-  // SDR, closer, marketing: sempre do Comercial.
-  return SETORES.filter((x) => x === "comercial" || validos.includes(x));
+  // SDR, closer, marketing: sempre do Comercial. O papel marketing também
+  // tem a porta do Marketing (0240) — no Comercial continua só leitura.
+  return SETORES.filter((x) => x === "comercial" || validos.includes(x) || (x === "marketing" && user.role === "marketing"));
 }
 
 const CHAVE_AREA = "qs_area";

@@ -2,10 +2,11 @@
 
 export type UserRole = "admin" | "gestor" | "sdr" | "closer" | "marketing" | "relacionamento" | "financeiro" | "operacional";
 /** As áreas do QS. Cada uma é uma porta no login (0100; Financeiro e Operações na 0126). */
-export type Setor = "comercial" | "relacionamento" | "financeiro" | "operacional";
+// Marketing: 0240 (30/10/2026).
+export type Setor = "comercial" | "relacionamento" | "financeiro" | "operacional" | "marketing";
 
 /** Todas as áreas, na ordem das portas do login. */
-export const SETORES: Setor[] = ["comercial", "relacionamento", "financeiro", "operacional"];
+export const SETORES: Setor[] = ["comercial", "relacionamento", "financeiro", "operacional", "marketing"];
 
 /** Nome da área pra tela. */
 export const NOME_SETOR: Record<Setor, string> = {
@@ -13,6 +14,7 @@ export const NOME_SETOR: Record<Setor, string> = {
   relacionamento: "Relacionamento",
   financeiro: "Financeiro",
   operacional: "Operações",
+  marketing: "Marketing",
 };
 export type LeadStatus = "nao_iniciado" | "em_prospeccao" | "ganho" | "perdido";
 export type LeadSource = "manual" | "api" | "integracao" | "importacao";

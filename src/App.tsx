@@ -14,6 +14,8 @@ const RelApp = lazy(() => import("@/rel/RelApp"));
 // quando alguém entra por ela.
 const FinApp = lazy(() => import("@/fin/FinApp"));
 const OpsApp = lazy(() => import("@/ops/OpsApp"));
+// Marketing (0240, 30/10/2026): Orgânico + Tráfego + quadro de conteúdo. Ver src/mkt.
+const MarketingApp = lazy(() => import("@/mkt/MarketingApp"));
 // Área do Closer (22/10/2026): o closer cai direto nela; admin/gestor abrem pelo
 // menu do Comercial (#closer). Fica dentro da porta do Comercial — ver src/closer.
 const CloserApp = lazy(() => import("@/closer/CloserApp"));
@@ -36,7 +38,7 @@ const MODO_BOLINHA = (() => {
 })();
 
 /**
- * Área pelo começo do endereço (#rel/…, #fin/…, #ops/…, #comercial/…, #closer/…).
+ * Área pelo começo do endereço (#rel/…, #fin/…, #ops/…, #mkt/…, #comercial/…, #closer/…).
  * A Bolinha do QS abre o QS no navegador já num endereço desses: sem isto, o QS
  * abriria na última área usada e o endereço de outra área não levaria a nada.
  */
@@ -46,6 +48,7 @@ function areaDoHash(): Setor | null {
   if (p === "rel") return "relacionamento";
   if (p === "fin") return "financeiro";
   if (p === "ops") return "operacional";
+  if (p === "mkt") return "marketing";
   if (p === "comercial" || p === "closer") return "comercial";
   return null;
 }
@@ -186,10 +189,10 @@ function AppContent() {
       );
     }
 
-    if (area === "relacionamento" || area === "financeiro" || area === "operacional") {
+    if (area === "relacionamento" || area === "financeiro" || area === "operacional" || area === "marketing") {
       return (
         <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
-          {area === "relacionamento" ? <RelApp /> : area === "financeiro" ? <FinApp /> : <OpsApp />}
+          {area === "relacionamento" ? <RelApp /> : area === "financeiro" ? <FinApp /> : area === "marketing" ? <MarketingApp /> : <OpsApp />}
         </Suspense>
       );
     }

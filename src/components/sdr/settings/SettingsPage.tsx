@@ -54,7 +54,7 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
 /** Papéis que ficam presos à própria área (0100 / 0126): sem caixinhas de setor. */
 const PAPEL_DE_AREA: UserRole[] = ["relacionamento", "financeiro", "operacional"];
 /** Áreas além do Comercial que dá pra liberar. */
-const OUTRAS_AREAS: Setor[] = ["relacionamento", "financeiro", "operacional"];
+const OUTRAS_AREAS: Setor[] = ["relacionamento", "financeiro", "operacional", "marketing"];
 
 
 

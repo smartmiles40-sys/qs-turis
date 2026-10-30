@@ -31,6 +31,7 @@
   --sector-relacionamento: #14B8A6;
   --sector-financeiro: #8B5CF6;
   --sector-operacoes: #F97316;
+  --sector-marketing: #EC4899;
 
   /* ── Ficha do cliente / Solicitações (spec 29/10, docs/ref/qs-redesign-ficha-solicitacoes.md)
      Os tokens da spec entram AQUI, com o nome que este sistema já usa:
@@ -48,6 +49,7 @@
   --sector-comercial-bg: #E8EFFE;      --sector-comercial-fg: #1D4ED8;
   --sector-financeiro-bg: #ECEBFE;     --sector-financeiro-fg: #4338CA;
   --sector-operacoes-bg: #FFEDE3;      --sector-operacoes-fg: #9A3412;
+  --sector-marketing-bg: #FCE7F3;      --sector-marketing-fg: #9D174D;
   --sector-relacionamento-bg: #E3F1EF; --sector-relacionamento-fg: #0F766E;
 
 
@@ -117,6 +119,7 @@
   --sector-comercial-bg: rgba(96, 165, 250, .14);      --sector-comercial-fg: #93C5FD;
   --sector-financeiro-bg: rgba(167, 139, 250, .14);    --sector-financeiro-fg: #C4B5FD;
   --sector-operacoes-bg: rgba(251, 146, 60, .14);      --sector-operacoes-fg: #FDBA74;
+  --sector-marketing-bg: rgba(244, 114, 182, .14);     --sector-marketing-fg: #F9A8D4;
   --sector-relacionamento-bg: rgba(45, 212, 191, .14); --sector-relacionamento-fg: #5EEAD4;
   --fase-embarque: #F59E0B;        --fase-embarque-bg: rgba(245, 158, 11, .14);  --fase-embarque-fg: #FCD34D;
   --fase-preparacao: #60A5FA;      --fase-preparacao-bg: rgba(96, 165, 250, .14); --fase-preparacao-fg: #93C5FD;

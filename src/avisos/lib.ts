@@ -11,7 +11,7 @@
 import { supabase } from "@/lib/supabase";
 import type { Setor } from "@/components/sdr/types";
 
-export type TipoAviso = "solicitacao" | "prazo" | "reuniao" | "esteira" | "tarefas";
+export type TipoAviso = "solicitacao" | "prazo" | "reuniao" | "esteira" | "tarefas" | "marketing";
 
 export interface Aviso {
   id: number;
@@ -150,6 +150,7 @@ export const COR_TIPO: Record<string, string> = {
   reuniao: "#6D28D9",
   esteira: "#0E7C6A",
   tarefas: "#B45309",
+  marketing: "#BE185D", // 0240: aprovação de conteúdo, pedido do Tráfego
 };
 export const ROTULO_TIPO: Record<string, string> = {
   solicitacao: "Solicitação",
@@ -157,6 +158,7 @@ export const ROTULO_TIPO: Record<string, string> = {
   reuniao: "Reunião",
   esteira: "Esteira",
   tarefas: "Tarefas",
+  marketing: "Marketing",
 };
 
 export function temNotificacao(): boolean {

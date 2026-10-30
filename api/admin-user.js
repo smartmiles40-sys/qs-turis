@@ -39,7 +39,8 @@ const PAPEIS = new Set(['admin', 'gestor', 'sdr', 'closer', 'marketing', 'relaci
 
 // Áreas do QS (0100 / 0126). O banco ainda acerta pelo papel (admin = todas,
 // papel de área = só a dele); aqui só filtra o que não é setor conhecido.
-const SETORES = new Set(['comercial', 'relacionamento', 'financeiro', 'operacional']);
+// 'marketing': 0240 (30/10/2026).
+const SETORES = new Set(['comercial', 'relacionamento', 'financeiro', 'operacional', 'marketing']);
 // Áreas que têm "gestor de área" (tudo menos o Comercial) — o papel do atendente
 // tem o MESMO nome da área.
 const AREAS = new Set(['relacionamento', 'financeiro', 'operacional']);

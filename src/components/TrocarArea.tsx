@@ -19,6 +19,7 @@ export const COR_AREA: Record<Setor, string> = {
   relacionamento: "#0E7C6A",
   financeiro: "#3730A3",
   operacional: "#B45309",
+  marketing: "#BE185D",
 };
 
 /** O "de/da" certo antes do nome da área. */
@@ -27,6 +28,7 @@ const PARA: Record<Setor, string> = {
   relacionamento: "o Relacionamento",
   financeiro: "o Financeiro",
   operacional: "Operações",
+  marketing: "o Marketing",
 };
 
 export default function TrocarArea({ atual, variante, onAntes }: {

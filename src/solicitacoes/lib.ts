@@ -15,9 +15,12 @@
 // Prazo vem do TIPO (horas úteis). Tudo que muda passa por RPC.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import { NOME_SETOR, SETORES, type Setor } from "@/components/sdr/types";
+import { NOME_SETOR, type Setor } from "@/components/sdr/types";
 
-export { NOME_SETOR, SETORES, type Setor };
+// A Central de Solicitações é dos 4 setores de atendimento (o banco só aceita
+// esses em qs_solicitacoes). O Marketing (0240) tem o quadro próprio.
+export const SETORES: Setor[] = ["comercial", "relacionamento", "financeiro", "operacional"];
+export { NOME_SETOR, type Setor };
 
 export type StatusSol = "nova" | "em_andamento" | "aguardando" | "concluida" | "recusada" | "cancelada";
 export type AguardandoQuem = "cliente" | "fornecedor" | "solicitante" | "outro_setor";
@@ -56,9 +59,9 @@ export function horasDoTipo(t: Pick<TipoSol, "prazo_horas" | "prazo_alta_horas" 
 export const ABERTAS: StatusSol[] = ["nova", "em_andamento", "aguardando"];
 
 /** Sigla curta do setor pros cartões. */
-export const SIGLA: Record<Setor, string> = { comercial: "COM", relacionamento: "REL", financeiro: "FIN", operacional: "OPS" };
+export const SIGLA: Record<Setor, string> = { comercial: "COM", relacionamento: "REL", financeiro: "FIN", operacional: "OPS", marketing: "MKT" };
 /** Cor de cada setor (a mesma da porta do login). */
-export const COR_SETOR: Record<Setor, string> = { comercial: "#0147FF", relacionamento: "#0E7C6A", financeiro: "#3730A3", operacional: "#B45309" };
+export const COR_SETOR: Record<Setor, string> = { comercial: "#0147FF", relacionamento: "#0E7C6A", financeiro: "#3730A3", operacional: "#B45309", marketing: "#BE185D" };
 
 export interface TipoSol {
   id: string;

@@ -19,7 +19,7 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { abrirAreaCloser, podeAbrirAreaCloser } from "@/closer/lib";
 import { Icon } from "@/components/ui/icons";
 
-export interface ItemDoMenu { id: string; rotulo: string; badge?: number; alerta?: boolean }
+export interface ItemDoMenu { id: string; rotulo: string; badge?: number; alerta?: boolean; /** Ícone próprio (Marketing, 0240); sem = pelo id ou o do grupo. */ icone?: ReactNode }
 export interface GrupoDoMenu { id: string; rotulo: string; icone: ReactNode; itens: ItemDoMenu[] }
 
 const traco = (d: ReactNode, t = 18) => (
@@ -105,7 +105,7 @@ export default function CascaDeArea({
     { items: [{ id: inicioId, label: "Início", icon: ICONE_DO_ITEM.inicio }] },
     ...grupos.map((g) => ({
       label: g.rotulo,
-      items: g.itens.map((i) => ({ id: i.id, label: i.rotulo, icon: ICONE_DO_ITEM[i.id] ?? g.icone, count: i.badge, late: i.alerta })),
+      items: g.itens.map((i) => ({ id: i.id, label: i.rotulo, icon: i.icone ?? ICONE_DO_ITEM[i.id] ?? g.icone, count: i.badge, late: i.alerta })),
     })),
   ];
   return (

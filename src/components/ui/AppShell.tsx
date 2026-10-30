@@ -53,12 +53,14 @@ const SUBTITULO: Record<Setor, string> = {
   relacionamento: "Pós-venda",
   financeiro: "Recebimentos e pagamentos",
   operacional: "Expedições e embarques",
+  marketing: "Orgânico e tráfego",
 };
 const COR: Record<Setor, string> = {
   comercial: "var(--sector-comercial)",
   relacionamento: "var(--sector-relacionamento)",
   financeiro: "var(--sector-financeiro)",
   operacional: "var(--sector-operacoes)",
+  marketing: "var(--sector-marketing)",
 };
 const NOME_PAPEL: Record<string, string> = {
   admin: "Administrador", gestor: "Gestor", sdr: "SDR", closer: "Closer", marketing: "Marketing",

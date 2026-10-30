@@ -33,6 +33,13 @@ const PORTAS: Record<Setor, { titulo: string; sub: string; cor: string; corSoft:
     cor: "#B45309",
     corSoft: "rgba(180, 83, 9, 0.10)",
   },
+  // Marketing (0240, 30/10): magenta escuro — texto branco em cima = 6:1 (AA).
+  marketing: {
+    titulo: "Marketing",
+    sub: "Conteúdo orgânico, tráfego e aprovação",
+    cor: "#BE185D",
+    corSoft: "rgba(190, 24, 93, 0.09)",
+  },
 };
 
 function lerUltimaPorta(): Setor {
@@ -64,6 +71,14 @@ function IconeFinanceiro() {
   );
 }
 
+function IconeMarketing() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 11l18-5v12L3 14v-3z" /><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+    </svg>
+  );
+}
+
 function IconeOperacoes() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -77,6 +92,7 @@ const ICONE_PORTA: Record<Setor, () => JSX.Element> = {
   relacionamento: IconeRelacionamento,
   financeiro: IconeFinanceiro,
   operacional: IconeOperacoes,
+  marketing: IconeMarketing,
 };
 
 export default function LoginPage() {
@@ -134,10 +150,12 @@ export default function LoginPage() {
 
         {/* As portas (uma por área) */}
         <div role="radiogroup" aria-label="Área do sistema" className="grid grid-cols-2 gap-3 mb-4">
-          {SETORES.map((s) => {
+          {SETORES.map((s, i) => {
             const item = PORTAS[s];
             const Icone = ICONE_PORTA[s];
             const ativo = porta === s;
+            // Número ímpar de portas (5 com o Marketing): a última pega a linha toda.
+            const sozinha = i === SETORES.length - 1 && SETORES.length % 2 === 1;
             return (
               <button
                 key={s}
@@ -145,7 +163,7 @@ export default function LoginPage() {
                 role="radio"
                 aria-checked={ativo}
                 onClick={() => { setPorta(s); setError(""); }}
-                className="text-left rounded-xl p-4 border-2 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                className={`text-left rounded-xl p-4 border-2${sozinha ? " col-span-2" : ""} transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2`}
                 style={{
                   background: ativo ? item.corSoft : "var(--card)",
                   borderColor: ativo ? item.cor : "var(--line)",

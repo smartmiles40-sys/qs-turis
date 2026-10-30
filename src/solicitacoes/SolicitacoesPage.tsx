@@ -42,7 +42,7 @@ import {
 import "./solicitacoes.css";
 
 /** Nome curto do setor nos chips dos cartões. */
-const CURTO: Record<Setor, string> = { comercial: "Comercial", relacionamento: "Relac.", financeiro: "Financeiro", operacional: "Operações" };
+const CURTO: Record<Setor, string> = { comercial: "Comercial", relacionamento: "Relac.", financeiro: "Financeiro", operacional: "Operações", marketing: "Marketing" };
 
 /** Tom do chip de status (cor só pra estado). */
 function tomChip(s: Solicitacao): ChipTone {
