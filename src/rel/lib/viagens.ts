@@ -72,6 +72,17 @@ export interface Viagem {
   proximo_voo_numero?: string | null;
   proximo_voo_sem_hora?: boolean | null;
   ultimo_voo_em?: string | null;
+  // 0227: status forçado pelo supervisor, ida/volta reais e alertas ignorados
+  fase_auto?: FaseViagem;
+  fase_manual?: "antes" | "em_viagem" | "concluida" | null;
+  fase_manual_motivo?: string | null;
+  fase_manual_por?: string | null;
+  fase_manual_em?: string | null;
+  fase_manual_ate?: string | null;
+  ida_real?: string | null;
+  volta_real?: string | null;
+  voos_internos?: number;
+  alertas_ignorados?: Record<string, { motivo?: string | null; por?: string | null; em?: string | null }> | null;
 }
 
 // ── Serviço vendido × acompanhamento (0148, Bruno 20/10) ───────────────────
@@ -613,6 +624,13 @@ export interface Trecho {
   contato?: string | null;
   endereco?: string | null;
   observacoes?: string | null;
+  // 0227: voado/cancelado marcado à mão e a marca de corrigido (o automático respeita)
+  status_manual?: "voado" | "cancelado" | null;
+  status_manual_motivo?: string | null;
+  status_manual_por?: string | null;
+  status_manual_em?: string | null;
+  corrigido_em?: string | null;
+  corrigido_por?: string | null;
   // da view rel_trechos_v
   checkin_em: string | null;
   viagem_tipo: TipoViagem;

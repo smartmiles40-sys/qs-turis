@@ -41,6 +41,7 @@ import { podeGerirRelacionamento } from "../equipe/permissao";
 import { BotaoSubirVenda } from "@/venda/SubirVenda";
 import TudoDaViagem from "./TudoDaViagem";
 import GruposDaViagem from "./GruposDaViagem";
+import VoosDaViagem from "./VoosDaViagem";
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
   return (
@@ -416,6 +417,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
       {/* 0208 (27/10, Bruno: "visualização fácil e rápida, sem ficar consultando"): o que falta,
           próximas datas e os componentes por tipo (aéreo, hotel, seguro, expedição…) numa olhada */}
       <TudoDaViagem v={v} pass={pass} versao={versao} onMudou={revisou} onAbrirExpedicao={onAbrirExpedicao} />
+
+      {/* 30/10 (0227): os voos que valem, voo interno sim/não, check-ins e a correção manual pelo supervisor */}
+      <VoosDaViagem v={v} trechos={analise ? analise.trechos : null} onMudou={revisou} />
 
       {/* A esteira do Relacionamento (16/10): pacote, aéreo e cruzeiro completos; hotel/passeio só Revisão + D-3 (0148) */}
       {ativa && temEsteira(v) && <EtapasViagem viagem={v} trechos={analise?.trechos ?? []} equipe={equipe} onMudou={revisou} />}

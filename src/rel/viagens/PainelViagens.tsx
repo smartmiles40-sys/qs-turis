@@ -27,6 +27,7 @@ import { Aviso } from "../ui";
 import MapaMundi, { COR_EXP, COR_PAC, MarcaTipo, type PontoMapa } from "./MapaMundi";
 import { lugaresDe } from "./destinos";
 import { conferirViagens, contar, type Analise } from "../lib/problemas";
+import { resumirVoos } from "../lib/statusViagem";
 
 type Filtro = "todos" | "expedicao" | "pacote";
 const SEM_DESTINO = "\u0000sem-destino";
@@ -74,7 +75,7 @@ function diasAte(d: string | null): string {
 function montarPartidas(viagens: Viagem[], rev: Map<string, Revisao>, trechos: Trecho[]): Partida[] {
   const agora = Date.now();
   const checkinAberto = new Set(
-    trechos.filter((t) => t.checkin_em && !t.checkin_feito_em && new Date(t.checkin_em).getTime() <= agora && new Date(t.partida_em).getTime() > agora)
+    trechos.filter((t) => t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.checkin_em).getTime() <= agora && new Date(t.partida_em).getTime() > agora)
       .map((t) => t.viagem_id),
   );
   const hoje = hojeISO();
@@ -228,20 +229,23 @@ function Quadro({ titulo, cor, partidas, onAbrirViagem }: { titulo: string; cor:
 // Pacote é onde mais tem o que cruzar: cada linha é uma venda, com o voo de ida
 // (de onde, pra onde, hora local e localizador) e a situação da checagem.
 
-type SituacaoPac = "pendente" | "revisado" | "ida" | "volta";
+type SituacaoPac = "pendente" | "revisado" | "ida" | "volta" | "voos";
 const SITUACAO_PAC: Record<SituacaoPac, { texto: string; cor: string }> = {
+  // 30/10: voo fora das datas (ex.: Vinícius, card do Pós-Venda de mar/2026 numa viagem de jun/2027)
+  voos: { texto: "VOOS A CONFERIR", cor: "#FF5252" },
   pendente: { texto: "PENDENTE CHECAGEM", cor: "#FFFFFF" },
   revisado: { texto: "REVISADO ✓", cor: "#5BE3B0" },
   ida: { texto: "VIAGEM DE IDA", cor: "#7CC4FF" },
   volta: { texto: "VIAGEM DE VOLTA", cor: "#FF8A65" },
 };
 
-interface LinhaPac { v: Viagem; voo: Trecho | null; situacao: SituacaoPac; alertas: { alta: number; media: number } }
+interface LinhaPac { v: Viagem; voo: Trecho | null; situacao: SituacaoPac; alertas: { alta: number; media: number }; interno: number | null }
 
-function situacaoPac(v: Viagem, revisada: boolean): SituacaoPac {
+function situacaoPac(v: Viagem, revisada: boolean, voosErrados: boolean): SituacaoPac {
   const hoje = hojeISO();
   if (v.data_retorno && v.data_retorno === hoje && (v.fase === "em_viagem" || v.data_embarque !== hoje)) return "volta";
   if (v.fase === "em_viagem" || v.data_embarque === hoje) return "ida";
+  if (voosErrados) return "voos";
   return revisada ? "revisado" : "pendente";
 }
 
@@ -271,13 +275,14 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                 <th className="px-2 py-2 font-semibold">PARA</th>
                 <th className="px-2 py-2 font-semibold">PRÓXIMO VOO</th>
                 <th className="px-2 py-2 font-semibold">LOCALIZADOR</th>
+                <th className="px-2 py-2 font-semibold text-center" title="Voo interno: os voos que não são a ida nem a volta internacional">INTERNO</th>
                 <th className="px-2 py-2 font-semibold text-right">PAX</th>
                 <th className="px-2 py-2 font-semibold text-center">ALERTAS</th>
                 <th className="px-4 py-2 font-semibold text-right">SITUAÇÃO</th>
               </tr>
             </thead>
             <tbody>
-              {lista.map(({ v, voo, situacao, alertas }, i) => {
+              {lista.map(({ v, voo, situacao, alertas, interno }, i) => {
                 const s = SITUACAO_PAC[situacao];
                 const atraso = Math.min(i, 12) * 0.06;
                 const de = voo ? (voo.origem_codigo || voo.origem || "—") : "—";
@@ -294,6 +299,10 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                     <td className="px-2 py-2 uppercase max-w-[160px] truncate"><Flap texto={para.slice(0, 18)} atraso={atraso} /></td>
                     <td className="px-2 py-2 whitespace-nowrap" style={{ color: "#FFD54F" }}><Flap texto={ida} atraso={atraso} /></td>
                     <td className="px-2 py-2 whitespace-nowrap tracking-wider" style={{ color: voo?.localizador ? "#F2F2F2" : "#5C6A71" }}>{voo?.localizador ? <Flap texto={voo.localizador} atraso={atraso} /> : "——"}</td>
+                    <td className="px-2 py-2 text-center whitespace-nowrap font-bold" style={{ color: interno ? "#C4B5FD" : "#5C6A71" }}
+                      aria-label={interno == null ? "sem voos" : interno ? `${interno} voos internos` : "sem voo interno"}>
+                      {interno == null ? "——" : interno ? `SIM · ${interno}` : "NÃO"}
+                    </td>
                     <td className="px-2 py-2 text-right tabular-nums" style={{ color: "#FFD54F" }}>{String(pax(v)).padStart(2, "0")}</td>
                     <td className="px-2 py-2 text-center whitespace-nowrap font-bold" aria-label={`${alertas.alta} urgentes, ${alertas.media} pra conferir`}>
                       {alertas.alta > 0 && <span className="inline-block px-1.5 rounded mr-1" style={{ background: "#DC2626", color: "#fff" }}>⚠ {alertas.alta}</span>}
@@ -352,6 +361,7 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
   const [trechos, setTrechos] = useState<Trecho[]>([]);
   const [voosPac, setVoosPac] = useState<Map<string, Trecho>>(new Map());
   const [analises, setAnalises] = useState<Map<string, Analise> | null>(null);
+  const [resumos, setResumos] = useState<Map<string, ReturnType<typeof resumirVoos<Trecho>>>>(new Map());
   const [erro, setErro] = useState<string | null>(null);
   // Falha parcial (trechos ou revisões): o painel abre, mas avisa — senão
   // "nenhum voo" ou "tudo PENDENTE" pareceria verdade.
@@ -369,20 +379,21 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
           // o conferente roda em todas: dá os riscos E os trechos (o voo de ida de cada pacote)
           conferirViagens(vs).catch(() => { falhas.push("a conferência de riscos"); return new Map<string, Analise>(); }),
         ]);
-        // o voo de cada pacote no quadro = o PRÓXIMO (0152), o mesmo que a view
-        // escolheu (proximo_voo_em); sem voo futuro, o 1º da viagem.
-        const proxDe = new Map(vs.map((v) => [v.id, v.proximo_voo_em ? new Date(v.proximo_voo_em).getTime() : null]));
+        // o voo de cada pacote no quadro = o PRÓXIMO voo que VALE (statusViagem.ts:
+        // dentro das datas, não cancelado, partida ≥ agora). 30/10: antes, sem voo
+        // futuro caía no "1º da viagem" — e o Vinícius (Turquia jun/2027) mostrava
+        // 21/03/2026, a data do card do Pós-Venda de outra viagem. Sem voo futuro = sem voo.
         const vp = new Map<string, Trecho>();
-        for (const a of tp.values()) for (const t of a.trechos) {
-          if (t.tipo !== "voo_internacional" && t.tipo !== "voo_interno") continue;
-          const alvo = proxDe.get(t.viagem_id);
-          if (alvo != null && new Date(t.partida_em).getTime() === alvo) vp.set(t.viagem_id, t);
-          else if (!vp.has(t.viagem_id)) vp.set(t.viagem_id, t);
+        const rs = new Map<string, ReturnType<typeof resumirVoos<Trecho>>>();
+        for (const v of vs) {
+          const r = resumirVoos(v, tp.get(v.id)?.trechos ?? []);
+          rs.set(v.id, r);
+          if (r.proximo) vp.set(v.id, r.proximo);
         }
         if (!vivo) return;
         // só os trechos das viagens do painel (arquivada, seguro sozinho e sem classificação ficam fora)
         const doPainel = new Set(vs.map((v) => v.id));
-        setViagens(vs); setTrechos(ts.filter((t) => doPainel.has(t.viagem_id))); setRev(rv); setVoosPac(vp); setAnalises(tp); setErro(null);
+        setViagens(vs); setTrechos(ts.filter((t) => doPainel.has(t.viagem_id) && t.status_manual !== "cancelado")); setRev(rv); setVoosPac(vp); setResumos(rs); setAnalises(tp); setErro(null);
         setAviso(falhas.length ? `Não consegui carregar ${falhas.join(" e ")} — os números abaixo podem estar incompletos.` : null);
       } catch (e) {
         if (vivo) { setErro(e instanceof Error ? e.message : "Não carregou o painel."); setViagens([]); }
@@ -423,9 +434,15 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
   const partidasExp = partidas.filter((p) => p.tipo === "expedicao");
   const linhasPac = useMemo<LinhaPac[]>(() => (viagens ?? [])
     .filter((v) => grupoDe(v) === "pacote")
-    .map((v) => { const c = contar(analises?.get(v.id)?.problemas ?? []); return { v, voo: voosPac.get(v.id) ?? null, situacao: situacaoPac(v, !!rev.get(v.id)?.revisado_em), alertas: { alta: c.alta, media: c.media } }; })
+    .map((v) => {
+      const c = contar(analises?.get(v.id)?.problemas ?? []);
+      const r = resumos.get(v.id);
+      const voosErrados = !!r?.inconsistencias.some((i) => !i.ignorada && i.chave.startsWith("voo_fora:"));
+      return { v, voo: voosPac.get(v.id) ?? null, situacao: situacaoPac(v, !!rev.get(v.id)?.revisado_em, voosErrados), alertas: { alta: c.alta, media: c.media },
+        interno: r && r.voos.some((x) => x.valido) ? r.internos : null };
+    })
     .sort((a, b) => (a.voo?.partida_em ?? a.v.data_embarque ?? "9999").localeCompare(b.voo?.partida_em ?? b.v.data_embarque ?? "9999")),
-  [viagens, voosPac, rev, analises]);
+  [viagens, voosPac, rev, analises, resumos]);
 
   const hoje = hojeISO();
   const proxEmbarque = (t: "expedicao" | "pacote") => partidas.find((p) => p.tipo === t && p.data && p.data >= hoje && p.situacao !== "em_viagem");
@@ -433,7 +450,7 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
   const trechosVale = trechos.filter((t) => vale(grupoTipo(t.viagem_tipo)));
   const proxVooInterno = trechosVale.find((t) => t.tipo === "voo_interno" && new Date(t.partida_em).getTime() >= agora);
   const proxCheckin = trechosVale
-    .filter((t) => t.checkin_em && !t.checkin_feito_em && new Date(t.partida_em).getTime() > agora)
+    .filter((t) => t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.partida_em).getTime() > agora)
     .sort((a, b) => a.checkin_em!.localeCompare(b.checkin_em!))[0];
   const contaRev = (t: "expedicao" | "pacote") => {
     const vs = (viagens ?? []).filter((v) => grupoDe(v) === t);

@@ -139,7 +139,7 @@ function EmViagem({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void
               : hotel ? (hotel.destino || hotel.origem || hotel.descricao || "hotel")
               : chegou ? (chegou.destino || chegou.descricao || "—") : (it.v.destino || "—");
             const tel = (it.v.cliente_telefone || "").replace(/\D/g, "");
-            const checkinPendente = ts.some((t) => ehVoo(t) && t.checkin_em && !t.checkin_feito_em && new Date(t.checkin_em).getTime() <= agora && new Date(t.partida_em).getTime() > agora);
+            const checkinPendente = ts.some((t) => ehVoo(t) && t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.checkin_em).getTime() <= agora && new Date(t.partida_em).getTime() > agora);
             return (
               <tr key={it.v.id} className="rel-linha cursor-pointer" style={{ borderTop: "1px solid var(--line2)" }} onClick={() => abrir(it.v.id)}>
                 <td className="px-3 py-2.5">
