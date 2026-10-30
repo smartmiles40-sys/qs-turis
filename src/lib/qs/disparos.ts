@@ -8,19 +8,21 @@
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
 
-export type SetorDisparo = "comercial" | "relacionamento";
+// "marketing" (0242): pelo número NOVO do Marketing — telas em src/mkt/disparos/.
+export type SetorDisparo = "comercial" | "relacionamento" | "marketing";
 
 // ── Variáveis do modelo ─────────────────────────────────────────────────────
 
-export type Fonte = "nome" | "sdr" | "destino" | "link_grupo" | "texto";
+export type Fonte = "nome" | "sdr" | "destino" | "link_grupo" | "texto" | "campo";
 export type MapaVariaveis = Record<string, { fonte: Fonte; valor?: string }>;
 
 export const FONTES: { id: Fonte; rotulo: string; dica: string; setores: SetorDisparo[] }[] = [
-  { id: "nome", rotulo: "Primeiro nome da pessoa", dica: "Maria", setores: ["comercial", "relacionamento"] },
+  { id: "nome", rotulo: "Primeiro nome da pessoa", dica: "Maria", setores: ["comercial", "relacionamento", "marketing"] },
   { id: "sdr", rotulo: "Primeiro nome do SDR dono", dica: "Victor", setores: ["comercial"] },
-  { id: "destino", rotulo: "Destino (da fonte do lead ou da última viagem)", dica: "Japão", setores: ["comercial", "relacionamento"] },
+  { id: "destino", rotulo: "Destino (da fonte do lead ou da última viagem)", dica: "Japão", setores: ["comercial", "relacionamento", "marketing"] },
   { id: "link_grupo", rotulo: "Link do grupo da expedição", dica: "https://chat.whatsapp.com/…", setores: ["relacionamento"] },
-  { id: "texto", rotulo: "Texto fixo", dica: "o que você escrever", setores: ["comercial", "relacionamento"] },
+  { id: "texto", rotulo: "Texto fixo", dica: "o que você escrever", setores: ["comercial", "relacionamento", "marketing"] },
+  { id: "campo", rotulo: "Campo do contato (coluna do CSV)", dica: "valor do campo", setores: ["marketing"] },
 ];
 
 export const variaveisDoCorpo = (corpo: string) =>
@@ -32,6 +34,7 @@ export function preverTexto(corpo: string, mapa: MapaVariaveis, grupoLink?: stri
     if (!c) return `[${k}]`;
     if (c.fonte === "texto") return c.valor || `[${k}]`;
     if (c.fonte === "link_grupo") return grupoLink || "https://chat.whatsapp.com/…";
+    if (c.fonte === "campo") return c.valor ? `[${c.valor}]` : `[${k}]`;
     return FONTES.find((f) => f.id === c.fonte)?.dica ?? `[${k}]`;
   });
 }
@@ -90,6 +93,17 @@ export const STATUS_LEAD: { id: string; rotulo: string }[] = [
 
 export function descreverPublico(setor: SetorDisparo, p: Publico): string {
   const partes: string[] = [];
+  // Marketing (0242): a base de origem vem em p.fonte (contatos | leads | clientes).
+  if (setor === "marketing") {
+    const m = p as Publico & { fonte?: string; listas?: string[]; sem_tags?: string[]; tags_modo?: string; sequencia_id?: string; passo?: number };
+    if (m.fonte === "sequencia") return `Sequência — passo ${m.passo ?? "?"}`;
+    if (m.fonte === "leads") return descreverPublico("comercial", p).replace(/^Leads/, "Leads do QS").replace(/^Todos os leads/, "Todos os leads do QS");
+    if (m.fonte === "clientes") return descreverPublico("relacionamento", p).replace(/^Clientes/, "Clientes do QS").replace(/^Todos os clientes/, "Todos os clientes do QS");
+    if (m.listas?.length) partes.push(`${m.listas.length} lista(s)`);
+    if (m.tags?.length) partes.push(`tags ${m.tags_modo === "todas" ? "(todas)" : "(qualquer)"}: ${m.tags.join(", ")}`);
+    if (m.sem_tags?.length) partes.push(`sem as tags: ${m.sem_tags.join(", ")}`);
+    return partes.length ? `Contatos — ${partes.join(" · ")}` : "Todos os contatos do Marketing";
+  }
   if (setor === "comercial") {
     if (p.segmentos?.length) partes.push(`fonte: ${p.segmentos.length === 1 ? p.segmentos[0] : `${p.segmentos.length} fontes`}`);
     if (p.status?.length) partes.push(`etapa: ${p.status.map((s) => STATUS_LEAD.find((x) => x.id === s)?.rotulo ?? s).join(", ")}`);
@@ -114,7 +128,7 @@ const br = (iso: string) => iso.split("-").reverse().join("/");
 
 // ── Campanhas e envios ──────────────────────────────────────────────────────
 
-export type StatusCampanha = "rascunho" | "enviando" | "pausada" | "cancelada" | "concluida";
+export type StatusCampanha = "rascunho" | "agendada" | "enviando" | "pausada" | "cancelada" | "concluida";
 export interface Campanha {
   id: string;
   setor: SetorDisparo;
@@ -132,6 +146,11 @@ export interface Campanha {
   criado_em: string;
   iniciada_em: string | null;
   concluida_em: string | null;
+  // 0242 (Marketing)
+  agendada_para?: string | null;
+  recorrencia_id?: string | null;
+  sequencia_id?: string | null;
+  sequencia_passo?: number | null;
 }
 
 export type StatusEnvio = "pendente" | "pulado" | "enviado" | "entregue" | "lido" | "respondeu" | "erro" | "cancelado";
@@ -178,6 +197,8 @@ export interface ConfigDisparo {
   modelos: ModeloDisparo[];
   numerosSdr: { sdr_id: string; nome: string; numero: string | null }[];
   numeroRel: { numero: string | null; conectado: boolean } | null;
+  /** Só no setor marketing (0242). null = o Marketing não envia. */
+  numeroMkt?: { phone_number_id: string; numero: string | null; rotulo: string } | null;
 }
 export const lerConfig = (setor: SetorDisparo) => chamar<ConfigDisparo>({ acao: "config", setor });
 
@@ -187,6 +208,8 @@ export interface Previa {
   porSdr: { sdr_id: string; nome: string; n: number }[];
   amostra: { nome: string; telefone: string; sdr: string | null; destino: string | null }[];
   numeroOk: boolean;
+  /** Marketing: até 200 de quem recebe (nome + final do telefone). */
+  lista?: { nome: string; telefone: string; contato_id: string | null }[];
 }
 export const previa = (setor: SetorDisparo, publico: Publico) => chamar<Previa>({ acao: "previa", setor, publico });
 
