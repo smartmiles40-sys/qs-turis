@@ -16,8 +16,8 @@ export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: numbe
       { id: "pacotes", rotulo: "Pacotes" },
       { id: "inscricoes", rotulo: "Inscrições", badge: contagens.inscricoes || undefined },
       { id: "avisos", rotulo: "Avisos", badge: contagens.avisos || undefined },
-      // 29/10 (Carol): receitas a enviar — conta só as que já estão na janela de 20 dias
-      { id: "receitas", rotulo: "Receitas", badge: contagens.receitas || undefined, alerta: true },
+      // 30/10 (Bruno): "Receitas" saiu do menu — a receita mora na ficha do cliente (aba Saúde).
+      // O alerta "Receitas a enviar" fica dentro das Inscrições; a rota antiga redireciona.
       // 30/10: fila do médico — conta os laudos a fazer de quem embarca em até 45 dias
       { id: "saude", rotulo: "Saúde · médico", badge: contagens.saude || undefined, alerta: true },
       { id: "fornecedores", rotulo: "Fornecedores" },

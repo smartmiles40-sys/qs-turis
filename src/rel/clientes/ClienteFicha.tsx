@@ -26,6 +26,17 @@
 //   Status no Financeiro e Solicitações do cliente  aba Atendimento
 //   De onde veio e onde aparece (0151)  Origem (lateral) + aba Histórico
 //   Histórico da ficha ....... aba Histórico (linha do tempo completa)
+//
+// 30/10 — FICHA COMPLETA (Bruno: "TUDO que o cliente já passou, pra não pedir de
+// novo"; inventário em docs/INVENTARIO-FICHA.md). Abas novas:
+//   Contratos ....... todos, de qualquer origem (ficha/AbaContratos, 0228)
+//   Saúde ........... declarado + laudos + RECEITAS com histórico (ficha/AbaSaude);
+//                     a tela solta "Receitas" saiu do menu de Ops
+//   Preferências .... emergência, alimentação, camiseta, voo… (ficha/AbaPreferencias)
+//   Documentos ...... + todos os passaportes com o alerta de 6 meses (ficha/Passaportes)
+//   Histórico ....... + idas, contratos, laudos, receitas, itens de venda
+// e o modo "Preencher por telefone" (ficha/PreencherPorTelefone): salva campo a
+// campo, auditado, com "Ficha X% completa · falta: …".
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
@@ -75,16 +86,29 @@ import VisaoGeral, { resumoEndereco } from "./ficha/VisaoGeral";
 import LateralFicha from "./ficha/LateralFicha";
 import { linhaDoTempo, proximaViagem, statusDaViagem, trilha } from "./ficha/dados";
 import { ITENS_PEDIVEIS, pedirItem } from "./ficha/pedirACliente";
+import AbaContratos, { type EstadoContratos } from "./ficha/AbaContratos";
+import AbaSaude, { type EstadoLaudos } from "./ficha/AbaSaude";
+import AbaPreferencias from "./ficha/AbaPreferencias";
+import Passaportes from "./ficha/Passaportes";
+import PreencherPorTelefone from "./ficha/PreencherPorTelefone";
+import {
+  completudeProximaViagem, contratosDoCliente, eventosDaFichaCompleta, idasCompletas, laudosDoCliente, perfilDaFicha, perfilEfetivo,
+  vendaItensDoCliente, ROTULO_PERFIL, type CampoPerfil, type IdaCompleta, type PerfilViagem, type VendaItemFicha,
+} from "./ficha/fontes";
 import "./ficha/ficha.css";
 
 // 23/10 (cadastro único): a ficha é O lugar da pessoa — tudo que estava espalhado
 // (Clube de viajantes, Clientes & compras, Acessos ExpedAmigo, passageiro) virou aba.
-type Aba = "geral" | "viagens" | "compras" | "documentos" | "expedamigo" | "atendimento" | "historico";
+type Aba = "geral" | "viagens" | "compras" | "documentos" | "contratos" | "saude" | "preferencias" | "expedamigo" | "atendimento" | "historico";
 const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "geral", rotulo: "Visão geral" },
   { id: "viagens", rotulo: "Viagens" },
   { id: "compras", rotulo: "Compras" },
   { id: "documentos", rotulo: "Documentos" },
+  // 30/10 (ficha completa): todos os contratos, a saúde (com laudos e receitas) e os dados de viagem
+  { id: "contratos", rotulo: "Contratos" },
+  { id: "saude", rotulo: "Saúde" },
+  { id: "preferencias", rotulo: "Preferências" },
   { id: "expedamigo", rotulo: "ExpedAmigo" },
   // Atendimento: WhatsApp/contatos/chamados só pro Relacionamento (0173); as
   // solicitações e o status no Financeiro, pros dois setores.
@@ -106,6 +130,15 @@ const CAMPOS: Record<string, string> = {
   endereco_bairro: "bairro", endereco_cidade: "cidade", endereco_estado: "UF",
 };
 
+/** 0228: o que mudou dentro de rel_clientes.perfil (dados de viagem/saúde). */
+function mudancasPerfil(antes: unknown, depois: unknown): string[] {
+  const a = (antes && typeof antes === "object" ? antes : {}) as Record<string, unknown>;
+  const d = (depois && typeof depois === "object" ? depois : {}) as Record<string, unknown>;
+  return (Object.keys(ROTULO_PERFIL) as CampoPerfil[])
+    .filter((k) => JSON.stringify(a[k] ?? null) !== JSON.stringify(d[k] ?? null))
+    .map((k) => ROTULO_PERFIL[k].toLowerCase());
+}
+
 function mudancas(a: Auditoria): string {
   if (a.acao === "INSERT") return "criou a ficha";
   if (a.acao === "JUNTAR") return `juntou a ficha repetida de ${(a.antes?.nome as string) ?? "outra pessoa"} nesta`;
@@ -113,14 +146,19 @@ function mudancas(a: Auditoria): string {
   const antes = a.antes ?? {};
   const depois = a.depois ?? {};
   const campos = Object.keys(CAMPOS).filter((k) => JSON.stringify(antes[k]) !== JSON.stringify(depois[k]));
-  if (!campos.length) return "salvou sem mudanças";
+  const perfil = mudancasPerfil(antes.perfil, depois.perfil);
+  if (!campos.length && !perfil.length) return "salvou sem mudanças";
   if (campos.includes("mesclado_em_id")) return "juntou esta ficha a outra";
-  return `alterou ${campos.map((k) => CAMPOS[k]).join(", ")}`;
+  return `alterou ${[...campos.map((k) => CAMPOS[k]), ...perfil].join(", ")}`;
 }
 
 function Secao({ titulo, acao, children }: { titulo: string; acao?: ReactNode; children: ReactNode }) {
   return <Card title={titulo} action={acao}>{children}</Card>;
 }
+
+/** Receitas (0223) ainda a enviar — contador da aba Saúde. */
+const receitasAbertas = (idas: IdaCompleta[]) => idas.filter((i) => i.receita_pendente && !i.receita_enviada_em
+  && (i.expedicao?.data_embarque ?? "9999") >= new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" })).length;
 
 const dataBR = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "");
 
@@ -174,6 +212,13 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [detalheProx, setDetalheProx] = useState<IdaDetalhada | null>(null);
   const [pedidos, setPedidos] = useState<Record<string, "pedindo" | "pedido" | undefined>>({});
   const [erroPedido, setErroPedido] = useState<string | null>(null);
+  // 30/10 (ficha completa)
+  const [idasC, setIdasC] = useState<IdaCompleta[]>([]);
+  const [perfil, setPerfil] = useState<PerfilViagem | null>(null); // null = 0228 fora do ar
+  const [contratos, setContratos] = useState<EstadoContratos | null>(null);
+  const [laudos, setLaudos] = useState<EstadoLaudos | null>(null);
+  const [vendaItens, setVendaItens] = useState<VendaItemFicha[]>([]);
+  const [telefone, setTelefone] = useState(false);
 
   const setAba = useCallback((a: Aba) => {
     setAbaEstado(a);
@@ -195,6 +240,17 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       carregarLigacoes(cli.id).then(setLigacoes).catch(() => setLigacoes(null));
       lerPessoa(cli.id).then((p) => setPessoa(p)).catch(() => setPessoa(null)); // CadastroInativo ou erro: o card avisa
       todasDoCliente(cli.id).then(setViagensRel).catch(() => setViagensRel([]));
+      // 30/10 (ficha completa): idas com tudo → contratos; perfil de viagem (0228); laudos; itens de venda
+      idasCompletas(cli.id)
+        .then((ic) => {
+          setIdasC(ic);
+          contratosDoCliente(cli.id, ic).then(setContratos)
+            .catch((e) => setContratos({ lista: [], rpcAtiva: true, erro: e instanceof Error ? e.message : "erro" }));
+        })
+        .catch(() => { setIdasC([]); setContratos({ lista: [], rpcAtiva: true, erro: "as viagens não carregaram" }); });
+      perfilDaFicha(cli.id).then(setPerfil).catch(() => setPerfil(null));
+      laudosDoCliente(cli.id).then(setLaudos).catch(() => setLaudos({ ativo: true, lista: [], erro: "não carregou" }));
+      vendaItensDoCliente(cli.id).then(setVendaItens).catch(() => setVendaItens([]));
       idasDaFicha(cli.id)
         .then((idas) => setEstadoIdas({ ativo: true, idas }))
         .catch((e) => setEstadoIdas(faltaCadastroUnico(e)
@@ -250,8 +306,11 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
     return () => { vivo = false; };
   }, [idProxIda]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const timeline = useMemo(() => linhaDoTempo({ historico, mudancas, usuarios, contatos, solicitacoes, ligacoes, viagens: viagensRel }),
-    [historico, usuarios, contatos, solicitacoes, ligacoes, viagensRel]);
+  const extras = useMemo(() => eventosDaFichaCompleta({ idas: idasC, contratos: contratos?.lista ?? [], laudos: laudos?.lista ?? [], vendaItens, usuarios }),
+    [idasC, contratos, laudos, vendaItens, usuarios]);
+  const timeline = useMemo(() => linhaDoTempo({ historico, mudancas, usuarios, contatos, solicitacoes, ligacoes, viagens: viagensRel, extras }),
+    [historico, usuarios, contatos, solicitacoes, ligacoes, viagensRel, extras]);
+  const pe = useMemo(() => perfilEfetivo(perfil, idasC), [perfil, idasC]);
 
   if (erro) return <div className="fc"><Aviso tom="erro">{erro}</Aviso></div>;
   if (!c) return (
@@ -289,6 +348,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const nCompras = (metrica?.viagens_compradas ?? 0) + (metrica?.compras_avulsas ?? 0);
   const nViagens = idas.length + viagensRel.length;
   const nuncaContato = metrica ? metrica.ultimo_contato_em == null : false;
+  // 30/10: o que a PRÓXIMA viagem pede (inclui emergência, camiseta, saúde, endereço)
+  const compViagem = completudeProximaViagem(c, pessoa ?? null, pe, semFoto);
 
   const abrirWhatsApp = () => {
     if (ehRel && conversaAberta) onAbrirConversa?.(conversaAberta.id);
@@ -390,6 +451,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         {!bloqueado && (
           <div className="fc-head__acts">
             {fone && <Btn icon={Icon.chat} onClick={abrirWhatsApp}>WhatsApp</Btn>}
+            <Btn onClick={() => setTelefone(true)}>Preencher por telefone</Btn>
             <Btn onClick={() => setPedirSetor("geral")}>Pedir a outro setor</Btn>
             {ehRel && <Btn variant="primary" onClick={() => setNovoContato(true)}>Registrar contato</Btn>}
             <Menu rotulo="Mais ações" grupos={menu} />
@@ -415,6 +477,16 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
           onClick={ehRel && !bloqueado ? () => setNovoContato(true) : undefined} />
       </section>
 
+      {!bloqueado && compViagem.falta.length > 0 && (
+        <div className="fc-tel__faixa" role="status">
+          <span className="fc-tel__pct">
+            <strong className="qs-num">Ficha {compViagem.pct}% completa pra próxima viagem</strong>
+            <span className="fc-bloco__s"> · falta: {compViagem.falta.map((f) => f.rotulo).join(", ")}</span>
+          </span>
+          <Btn size="sm" variant="primary" onClick={() => setTelefone(true)}>Preencher por telefone</Btn>
+        </div>
+      )}
+
       {erroMetrica && <Aviso tom="erro">Categoria, LTV e cadastro não carregaram ({erroMetrica}).</Aviso>}
       {avisoVenda && (
         <div role="status" onClick={() => setAvisoVenda(null)}><Aviso tom={avisoVenda.tom}>{avisoVenda.mensagem}</Aviso></div>
@@ -430,13 +502,14 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       <div className="fc-cols">
         <main className="fc-main">
           <ProntaParaEmbarcar c={c} nome={nome} semFoto={semFoto} endereco={endereco} deSetor={setor} bloqueado={bloqueado}
-            onPreencher={() => setEditando(true)} onPedido={() => setSinalPedidos((n) => n + 1)} />
+            onPreencher={() => setTelefone(true)} onPedido={() => setSinalPedidos((n) => n + 1)} />
 
           <div className="fc-abas" role="tablist" aria-label="Seções da ficha">
             {ABAS.map((a) => (
               <FilterPill key={a.id} role="tab" active={aba === a.id} controls="fc-painel" onClick={() => setAba(a.id)}
-                count={a.id === "viagens" ? nViagens : a.id === "compras" ? nCompras : a.id === "documentos" ? nFaltando : a.id === "atendimento" ? abertas.length : null}
-                countTone={a.id === "documentos" ? "warn" : a.id === "atendimento" && atrasadas ? "danger" : undefined}>
+                count={a.id === "viagens" ? nViagens : a.id === "compras" ? nCompras : a.id === "documentos" ? nFaltando : a.id === "atendimento" ? abertas.length
+                  : a.id === "contratos" ? (contratos ? contratos.lista.length : null) : a.id === "saude" ? receitasAbertas(idasC) || null : null}
+                countTone={a.id === "documentos" ? "warn" : a.id === "atendimento" && atrasadas ? "danger" : a.id === "saude" ? "warn" : undefined}>
                 {a.rotulo}
               </FilterPill>
             ))}
@@ -481,6 +554,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
             {aba === "compras" && <ComprasDoCliente cliente={c} />}
 
             {aba === "documentos" && <>
+              <Passaportes c={c} idas={idasC} voltaProxima={proxima?.volta ?? proxima?.ida ?? null} onPreencher={!bloqueado ? () => setTelefone(true) : undefined} />
               <section className="fc-slots" aria-label="Documentos da pessoa">
                 {slots.map((s) => {
                   const pedivel = !s.ok && !bloqueado && ITENS_PEDIVEIS[s.chave];
@@ -502,6 +576,18 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
               {estadoIdas?.ativo && estadoIdas.idas.length > 0 && <ArquivosDasExpedicoes idas={estadoIdas.idas} onCopias={setCopiasEscondidas} />}
               <ArquivosDoCliente clienteId={c.id} bloqueado={bloqueado} />
             </>}
+
+            {aba === "contratos" && <AbaContratos r={contratos} onAbrirExpedicao={onAbrirExpedicao} />}
+
+            {aba === "saude" && (
+              <AbaSaude laudos={laudos} pe={pe} idas={idasC} bloqueado={bloqueado} usuarios={usuarios}
+                onPreencher={() => setTelefone(true)} onMudou={() => void carregar()} onAbrirExpedicao={onAbrirExpedicao} />
+            )}
+
+            {aba === "preferencias" && (
+              <AbaPreferencias clienteId={c.id} pe={pe} idas={idasC} perfilAtivo={perfil !== null} bloqueado={bloqueado}
+                onPreencher={() => setTelefone(true)} onMudou={() => void carregar()} />
+            )}
 
             {aba === "expedamigo" && (
               <ExpedAmigoDoCliente nome={c.nome} cpf={c.cpf} telefone={c.telefone} idas={idas} onMudou={() => void carregar()} />
@@ -584,6 +670,11 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
           onMudou={() => void carregar()} />
       </div>
 
+      {/* 30/10: monta só quando abre — começa sempre com os dados da ficha recarregados */}
+      {telefone && (
+        <PreencherPorTelefone aberto c={c} pessoa={pessoa} perfil={perfil} idas={idasC} semFoto={semFoto}
+          onFechar={(mudou) => { setTelefone(false); if (mudou) void carregar(); }} />
+      )}
       <ClienteForm
         aberto={editando}
         cliente={c}

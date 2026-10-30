@@ -108,3 +108,24 @@ html.dark .fc-input { background: var(--surface); }
 .fc-esq { background: var(--surface-2); border-radius: 8px; animation: fc-pulso 1.4s ease-in-out infinite; }
 @keyframes fc-pulso { 50% { opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .fc-esq { animation: none; } }
+
+/* 30/10 — "Preencher por telefone" + faixa "Ficha X% completa" */
+.fc-tel__faixa { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 14px; border-radius: 12px; background: var(--warn-bg); border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border)); }
+.fc-tel__faixa .fc-bloco__s, .fc-tel__faixa strong { color: var(--warn); }
+.fc-tel__pct { min-width: 0; flex: 1 1 260px; font-size: 14px; overflow-wrap: anywhere; }
+.fc-tel { display: flex; flex-direction: column; gap: 14px; color: var(--text); font-family: var(--font-sans); }
+.fc-tel__topo { position: sticky; top: -16px; z-index: 1; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--surface-muted); border: 1px solid var(--border); }
+.fc-tel__barra { flex: 1 1 100%; order: 3; height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.fc-tel__barra span { display: block; height: 100%; background: var(--positive); transition: width .25s ease; }
+@media (prefers-reduced-motion: reduce) { .fc-tel__barra span { transition: none; } }
+.fc-tel__grupo { border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px 14px; margin: 0; min-width: 0; }
+.fc-tel__grupo legend { padding: 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--subtle); display: inline-flex; gap: 8px; align-items: center; }
+.fc-tel__grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 14px; }
+.fc-tel__campo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fc-tel__rodape { display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; font-size: 12px; color: var(--subtle); min-height: 16px; }
+.fc-tel__st { font-size: 12px; color: var(--subtle); }
+.fc-tel__st--ok { color: var(--positive); }
+.fc-tel__st--erro { color: var(--danger); }
+.fc-tel__saude { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+.fc-tel__q { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); min-width: 0; }
+.fc-tel__qt { font-size: 13px; line-height: 1.35; }

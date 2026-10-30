@@ -31,6 +31,7 @@ import { requisitosDoDestino } from "../lib/prontidao/requisitos-destino";
 import { REQUISITOS_DE_COLUNA } from "../lib/prontidao/regras";
 import type { ExpedicaoRow, InscricaoPendenteRow } from "../lib/database";
 import { abrirArquivo, chamarRotaAdmin, nomeSeguro, rpc, useEhAdminExp } from "./_admin/comum";
+import ReceitasAEnviar from "@/rel/clientes/ficha/ReceitasAEnviar";
 
 type Dados = Record<string, unknown>;
 type Decisao = { id: string; expedicao_id: string | null; cpf: string | null; nome_completo: string | null; acao: string; motivo: string | null; decidido_por_nome: string | null; created_at: string };
@@ -288,7 +289,8 @@ export default function Inscricoes() {
       </div>
     </div>
   );
-  if (aba === "falta") return <div className="space-y-5">{abas}<QuemFalta /></div>;
+  // 30/10: o alerta das receitas (0223) fica acima das abas; cada linha abre a ficha, aba Saúde
+  if (aba === "falta") return <div className="space-y-5">{abas}<ReceitasAEnviar /><QuemFalta /></div>;
 
   return (
     <div className="space-y-5">
