@@ -22,6 +22,7 @@ import { periodo, quandoEmbarca, type Viagem } from "@/rel/lib/viagens";
 import { Carregando, useAoVivo } from "../../ui";
 import ExpedicoesLista from "../ExpedicoesLista";
 import "../central/central.css";
+import { SeloCurto } from "@/prioridades/SeloPrioridade";
 
 type Pacote = Pick<Viagem, "id" | "titulo" | "destino" | "data_embarque" | "data_retorno" | "status" | "fase" | "dias_para_embarque"
   | "cliente_nome" | "responsavel_nome" | "passageiros" | "qtd_passageiros" | "tarefas_atrasadas" | "tarefas_pendentes" | "proximo_voo_em">;
@@ -136,7 +137,7 @@ function Cartao({ p }: { p: Pacote }) {
   return (
     <li className={`cx-card${p.fase === "concluida" || p.status === "cancelada" ? " cx-card--fim" : ""}`} tabIndex={0}
       onClick={() => abrirViagem(p.id)} onKeyDown={tecla} aria-label={`Abrir ${p.titulo}`}>
-      <div className="cx-card__nome"><span className="cx-card__t">{p.cliente_nome ?? p.titulo}</span></div>
+      <div className="cx-card__nome"><span className="cx-card__t">{p.cliente_nome ?? p.titulo}</span> <SeloCurto viagemId={p.id} /></div>
       <div className="cx-card__meta">
         <span>{p.destino ?? p.titulo}</span>
         {pax > 0 && <span>· {pax} pax</span>}
