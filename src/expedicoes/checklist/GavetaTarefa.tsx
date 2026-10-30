@@ -9,20 +9,24 @@ import { Gaveta } from "../ui";
 import { ETAPA_CHECKLIST, PRIORIDADE, STATUS_CHECKLIST } from "../lib/constants";
 import type { ChecklistItemRow, EtapaChecklist, Prioridade, StatusChecklist } from "../lib/database";
 import { criarTarefa, moverEtapa, salvarVarios } from "./dados";
+import { NOME_SETOR, SETORES_CK, type SetorCk } from "../lib/checklist/modelo";
 
 export type ModoGaveta =
   | { tipo: "nova" }
   | { tipo: "sub"; pai: ChecklistItemRow }
   | { tipo: "editar"; item: ChecklistItemRow };
 
-export function GavetaTarefa({ expedicaoId, modo, itens, onFechar, onSalvo }: {
+export function GavetaTarefa({ expedicaoId, modo, itens, onFechar, onSalvo, comSetor = false }: {
   expedicaoId: string; modo: ModoGaveta | null; itens: ChecklistItemRow[]; onFechar: () => void; onSalvo: () => void;
+  /** 30/10: com a 0224 aplicada, a tarefa avulsa também diz de qual setor é. */
+  comSetor?: boolean;
 }) {
   const { usuarios, avisar } = useExp();
   const [f, setF] = useState({
     tarefa: "", etapa: "6 a 2 meses" as EtapaChecklist, prioridade: "Média" as Prioridade, prazo: "",
     responsavel_id: "", observacoes: "", status: "Pendente" as StatusChecklist,
   });
+  const [setor, setSetor] = useState<SetorCk>("operacional");
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
 
@@ -64,6 +68,7 @@ export function GavetaTarefa({ expedicaoId, modo, itens, onFechar, onSalvo }: {
         await criarTarefa(expedicaoId, {
           tarefa: f.tarefa, etapa: f.etapa, prioridade: f.prioridade, prazo: f.prazo || null, responsavel_id: f.responsavel_id || null,
           observacoes: f.observacoes || null, parent_id: modo.tipo === "sub" ? modo.pai.id : null,
+          ...(comSetor ? { setor: modo.tipo === "sub" ? modo.pai.setor ?? null : setor } : {}),
         }, itens);
         avisar(modo.tipo === "sub" ? "Subtarefa criada" : "Tarefa criada");
       }
@@ -76,7 +81,7 @@ export function GavetaTarefa({ expedicaoId, modo, itens, onFechar, onSalvo }: {
   const sel = "rel-input";
   return (
     <Gaveta aberta titulo={titulo} largura={480} onFechar={onFechar}
-      subtitulo={modo.tipo === "sub" ? <>Dentro de “{modo.pai.tarefa}”</> : modo.tipo === "nova" ? "Tarefa avulsa, fora do checklist padrão." : undefined}
+      subtitulo={modo.tipo === "sub" ? <>Dentro de “{modo.pai.tarefa}”</> : modo.tipo === "nova" ? "Tarefa avulsa: só desta expedição, fora do checklist padrão." : undefined}
       rodape={<><Botao onClick={onFechar}>Cancelar</Botao><Botao variante="primario" disabled={salvando} onClick={salvar}>{salvando ? "Salvando…" : modo.tipo === "editar" ? "Salvar" : "Criar"}</Botao></>}>
       <div className="space-y-3.5">
         <Campo rotulo="Tarefa" erro={erro}>
@@ -105,6 +110,13 @@ export function GavetaTarefa({ expedicaoId, modo, itens, onFechar, onSalvo }: {
             </Campo>
           )}
         </div>
+        {comSetor && modo.tipo === "nova" && (
+          <Campo rotulo="Setor" dica="De quem é a tarefa (aparece no filtro por setor).">
+            <select className={sel} value={setor} onChange={(e) => setSetor(e.target.value as SetorCk)}>
+              {SETORES_CK.map((s) => <option key={s} value={s}>{NOME_SETOR[s]}</option>)}
+            </select>
+          </Campo>
+        )}
         <Campo rotulo="Responsável">
           <select className={sel} value={f.responsavel_id} onChange={(e) => setF({ ...f, responsavel_id: e.target.value })}>
             <option value="">— sem responsável —</option>

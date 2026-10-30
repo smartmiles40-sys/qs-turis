@@ -10,6 +10,7 @@ import { generateExpedicaoCodigo } from "../lib/utils";
 import { STATUS_EXPEDICAO } from "../lib/constants";
 import { REQUISITOS_POR_DESTINO } from "../lib/prontidao/requisitos-destino";
 import { construirChecklistPadrao } from "../lib/processos/template";
+import { aplicarModelo, modeloNoBanco } from "../checklist/modeloDados";
 import type { ExpedicaoRow, PapelUsuario } from "../lib/database";
 
 const DESTINOS = Object.keys(REQUISITOS_POR_DESTINO);
@@ -57,7 +58,11 @@ export function NovaExpedicao({ aberta, tipo, onFechar, onCriada }: {
     setErro(null); setSalvando(true);
     try {
       let itens: unknown[] = [];
-      if (tipo === "expedicao") {
+      // 30/10: com a 0224, o checklist vem do PADRÃO DO BANCO (editável por Ops), aplicado logo
+      // depois de criar (expedição e pacote, conforme o "vale pra" de cada tarefa). Sem ela, o
+      // padrão do código vai junto na mesma transação, como antes.
+      const padraoNoBanco = await modeloNoBanco();
+      if (tipo === "expedicao" && !padraoNoBanco) {
         // Responsável padrão = primeiro usuário de cada papel (igual ao antigo).
         const porPapel: Partial<Record<PapelUsuario, string>> = {};
         for (const u of usuarios) if (!porPapel[u.papel]) porPapel[u.papel] = u.id;
@@ -72,7 +77,13 @@ export function NovaExpedicao({ aberta, tipo, onFechar, onCriada }: {
         p_itens: itens,
       });
       if (error) throw new Error(traduzirErro(error.message));
-      avisar(tipo === "pacote" ? `Pacote criado · ${codigo}` : `Expedição criada · ${codigo} · checklist padrão gerado`);
+      let nPadrao = itens.length;
+      let falhouPadrao = false;
+      if (padraoNoBanco) {
+        try { nPadrao = (await aplicarModelo({ expedicoes: [data as string], simular: false })).length; } catch { falhouPadrao = true; }
+      }
+      if (falhouPadrao) avisar("Criada, mas o checklist padrão não entrou: abra a aba Checklist e clique em Gerar.", "erro");
+      else avisar(tipo === "pacote" ? `Pacote criado · ${codigo}${nPadrao ? ` · ${nPadrao} tarefas do padrão` : ""}` : `Expedição criada · ${codigo} · checklist padrão gerado`);
       onCriada(data as string);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao criar");

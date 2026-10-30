@@ -8,7 +8,7 @@
 // Editar, e a barra das 5 fases. Saíram o degradê e os 3 anéis (Ocupação,
 // Checklist, Prontidão) — esses números estão na "Saúde" da Visão geral.
 //
-// Abas: de 10 para 6 (lib/cockpit/rota.ts). A aba ativa vai na query do hash
+// Abas: de 10 para 6, e 7 com o Checklist entre Logística e Financeiro (30/10) (lib/cockpit/rota.ts). A aba ativa vai na query do hash
 // (?aba=logistica&secao=rooming) por replaceState — não remonta a tela nem enche
 // o "voltar". Endereços antigos (<id>%2Frooming, <id>/valores, ?aba=rooming)
 // redirecionam pra aba nova e o endereço é reescrito no formato novo.
@@ -28,6 +28,7 @@ import { nomeDaExpedicao } from "../lib/nomeExpedicao";
 import { ABAS_COCKPIT, ABAS_FORA_DO_PACOTE, hashCanonico, resolverRotaCockpit, type AbaCockpit, type SecaoCockpit } from "../lib/cockpit/rota";
 import { contagensMatriz, type LinhaMatriz } from "../lib/cockpit/matriz";
 import { carregarResumoCockpit, linhasDaMatriz, type ResumoCockpit } from "./cockpit/dados";
+import { resumoChecklist } from "../lib/checklistResumo";
 import VisaoGeral from "./VisaoGeral";
 import "./cockpit.css";
 
@@ -55,6 +56,7 @@ export interface PropsAba {
 const COMPONENTES: Record<Exclude<AbaCockpit, "geral">, React.LazyExoticComponent<ComponentType<PropsAba>>> = {
   passageiros: lazy(() => import("./abas/AbaPassageiros")),
   logistica: lazy(() => import("./abas/AbaLogistica")),
+  checklist: lazy(() => import("./abas/AbaChecklist")),
   financeiro: lazy(() => import("./abas/AbaFinanceiro")),
   arquivos: lazy(() => import("./abas/AbaArquivos")),
   portal: lazy(() => import("./abas/AbaPortal")),
@@ -143,6 +145,8 @@ export default function ExpedicaoDetalhe({ caminho }: { caminho: string }) {
   }) : []), [exp, resumo, info.fase]);
   const contagens = useMemo(() => contagensMatriz(linhas), [linhas]);
   const semValor = linhas.some((l) => l.celulas.pagamento.tom === "danger");
+  // 30/10: badge da aba Checklist = tarefas atrasadas (mesma conta da Saúde).
+  const ckAtrasadas = useMemo(() => (resumo ? resumoChecklist(resumo.checklist, hoje).atrasadas : 0), [resumo, hoje]);
   const lideres = useMemo(() => (resumo?.rooming.passageiros ?? [])
     .filter((p) => p.tipo === "Líder" && p.status_reserva !== "Cancelado")
     .map((p) => p.nome_completo.trim().split(/\s+/)[0]), [resumo]);
@@ -167,6 +171,7 @@ export default function ExpedicaoDetalhe({ caminho }: { caminho: string }) {
   const badge = (a: AbaCockpit): { txt: string; tom: "warn" | "danger" | "" } | null => {
     if (!resumo) return null;
     if (a === "passageiros" && contagens.pendencia) return { txt: String(contagens.pendencia), tom: "warn" };
+    if (a === "checklist" && ckAtrasadas) return { txt: String(ckAtrasadas), tom: "danger" };
     if (a === "financeiro" && semValor) return { txt: "!", tom: "danger" };
     if (a === "arquivos" && resumo.arquivos) return { txt: String(resumo.arquivos), tom: "" };
     return null;
@@ -222,7 +227,7 @@ export default function ExpedicaoDetalhe({ caminho }: { caminho: string }) {
             <button key={a.id} type="button" role="tab" id={`ck-tab-${a.id}`} aria-selected={rota.aba === a.id} aria-controls="ck-painel" className="ck-tab"
               onClick={() => irAba(a.id)}>
               {a.rotulo}
-              {b && <span className={`ck-badge${b.tom ? ` ck-badge--${b.tom}` : ""}`} aria-label={a.id === "financeiro" ? "há passageiro sem valor" : undefined}>{b.txt}</span>}
+              {b && <span className={`ck-badge${b.tom ? ` ck-badge--${b.tom}` : ""}`} aria-label={a.id === "financeiro" ? "há passageiro sem valor" : a.id === "checklist" ? "tarefas atrasadas" : undefined}>{b.txt}</span>}
             </button>
           );
         })}

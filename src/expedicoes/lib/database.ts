@@ -428,6 +428,14 @@ export type ChecklistItemRow = {
   observacoes: string | null;
   created_at: string;
   updated_at: string;
+  // 0224 (checklist padrão editável) — opcionais: só existem com a migration aplicada.
+  /** De qual tarefa do padrão (exp_checklist_modelo) veio. Nulo = avulsa. */
+  modelo_id?: string | null;
+  setor?: "operacional" | "comercial" | "financeiro" | "relacionamento" | null;
+  criado_por?: string | null;
+  /** Quem marcou como concluída (auth uid) e quando — gatilho da 0224. */
+  concluido_por?: string | null;
+  concluido_em?: string | null;
 }
 
 export type LinkExpedicaoRow = {

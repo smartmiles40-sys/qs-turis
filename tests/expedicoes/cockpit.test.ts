@@ -18,7 +18,7 @@ const ID = "8f1c2a3b-0000-4000-8000-000000000001";
 test("rota: abas antigas no caminho (barra codificada) viram aba nova + seção", () => {
   const casos: [string, string, string | null][] = [
     ["passageiros", "passageiros", null], ["valores", "financeiro", null], ["rooming", "logistica", "rooming"],
-    ["checklist", "logistica", "checklist"], ["roteiro-lider", "logistica", "roteiro"], ["grupos", "logistica", "divisoes"],
+    ["checklist", "checklist", null], ["roteiro-lider", "logistica", "roteiro"], ["grupos", "logistica", "divisoes"],
     ["documentos", "arquivos", "drive"], ["links", "arquivos", "links"], ["portal", "portal", null],
   ];
   for (const [antiga, aba, secao] of casos) {
@@ -38,8 +38,14 @@ test("rota: barra NORMAL no hash (o app hospedeiro só entrega o id) também red
 });
 
 test("rota: ?aba= nova e antiga", () => {
-  const n = resolverRotaCockpit({ caminho: ID, hash: `#ops/expedicoes/${ID}?aba=logistica&secao=checklist` });
-  assert.deepEqual([n.aba, n.secao, n.normalizar], ["logistica", "checklist", false]);
+  const n = resolverRotaCockpit({ caminho: ID, hash: `#ops/expedicoes/${ID}?aba=logistica&secao=rooming` });
+  assert.deepEqual([n.aba, n.secao, n.normalizar], ["logistica", "rooming", false]);
+  // 30/10: o Checklist virou aba própria; o link antigo da seção cai nela
+  const ck = resolverRotaCockpit({ caminho: ID, hash: `#ops/expedicoes/${ID}?aba=logistica&secao=checklist` });
+  assert.deepEqual([ck.aba, ck.secao, ck.normalizar], ["checklist", null, true]);
+  const ck2 = resolverRotaCockpit({ caminho: ID, hash: `#ops/expedicoes/${ID}?aba=checklist` });
+  assert.deepEqual([ck2.aba, ck2.secao, ck2.normalizar], ["checklist", null, false]);
+  assert.equal(resolverRotaCockpit({ caminho: ID, hash: `#ops/expedicoes/${ID}?aba=checklist`, pacote: true }).aba, "checklist");
   const a = resolverRotaCockpit({ caminho: ID, hash: `#ops/expedicoes/${ID}?aba=rooming` });
   assert.deepEqual([a.aba, a.secao, a.normalizar], ["logistica", "rooming", true]);
   const v = resolverRotaCockpit({ caminho: ID, hash: `#ops/expedicoes/${ID}?aba=valores` });
@@ -264,8 +270,8 @@ test("saúde: 4 cartões com tag e destino; pacote sem checklist", () => {
   const c = cartoesSaude({ fase: "embarque", pacote: false, confirmados: 2, planejados: 2, linhas: m, checklist: ck });
   assert.deepEqual(c.map((x) => [x.id, x.tag]), [["ocupacao", "OK"], ["seguro", "Pendente"], ["financeiro", "Pendente"], ["checklist", "Atrasado"]]);
   assert.equal(c[0].sub, "esgotada · líderes não contam");
-  assert.equal(c[3].aba, "logistica");
-  assert.equal(c[3].secao, "checklist");
+  assert.equal(c[3].aba, "checklist");
+  assert.equal(c[3].secao, undefined);
   const p = cartoesSaude({ fase: "vendendo", pacote: true, confirmados: 1, planejados: 10, linhas: [], checklist: null });
   assert.deepEqual(p.map((x) => [x.id, x.tag]), [["ocupacao", "Pendente"], ["seguro", "Sem dados"], ["financeiro", "Sem dados"]]);
 });

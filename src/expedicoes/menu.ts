@@ -21,8 +21,8 @@ export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: numbe
       // 30/10: fila do médico — conta os laudos a fazer de quem embarca em até 45 dias
       { id: "saude", rotulo: "Saúde · médico", badge: contagens.saude || undefined, alerta: true },
       { id: "fornecedores", rotulo: "Fornecedores" },
-      // 29/10: o checklist que toda expedição recebe, dividido por setor
-      { id: "checklist-padrao", rotulo: "Checklist padrão" },
+      // 30/10: "Checklist padrão" saiu do menu — virou a aba Checklist do cockpit
+      // (botão "Editar o padrão"). O endereço #ops/checklist-padrao redireciona.
     ],
   };
 }
