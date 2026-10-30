@@ -294,6 +294,16 @@ async function reacaoDoCliente(m, nomeCliente) {
 const STATUS_OK = new Set(['sent', 'delivered', 'read', 'failed']);
 
 /**
+ * Pra onde vai a mudança de um número (30/10/2026, 0244). Só o setor
+ * 'marketing' muda alguma coisa: QUALQUER outro valor (comercial,
+ * relacionamento, nulo, número desconhecido) segue exatamente o caminho de
+ * antes. Pura — tests/mkt/roteamento.test.ts prova isso.
+ */
+export function destinoDoNumero(numero) {
+  return numero?.setor === 'marketing' ? 'marketing' : 'antigo';
+}
+
+/**
  * Processa as `changes` do webhook que são de mensagem. Nunca lança: o webhook
  * tem que responder 200 pra Meta não entrar em retentativa.
  */
@@ -311,6 +321,22 @@ export async function processarMensagensDaMeta(changes) {
       continue;
     }
     const nomes = new Map((value.contacts || []).map((c) => [String(c.wa_id), c.profile?.name || null]));
+
+    // Número do MARKETING (0244): vai pro motor de automações do Marketing e
+    // NUNCA vira lead nem conversa do Rel. Import dinâmico de propósito: o
+    // módulo só é carregado quando chega mensagem desse número — um erro nele
+    // não tem como derrubar o caminho do Comercial/Rel logo abaixo.
+    if (destinoDoNumero(numero) === 'marketing') {
+      try {
+        const { processarMarketing } = await import('./_mktEntrada.js');
+        const r = await processarMarketing(ch, numero, nomes);
+        conta.recebidas += r.recebidas; conta.ecos += r.ecos; conta.recibos += r.recibos; conta.pendentes += r.pendentes || 0;
+      } catch (e) {
+        conta.erros++;
+        console.error(`[meta-entrada] marketing ${ch.field}:`, e?.message);
+      }
+      continue;
+    }
 
     // Número do RELACIONAMENTO (0101): o pós-venda tem caixa própria. Desvia
     // aqui, antes de qualquer coisa do Comercial — mensagem de cliente que já

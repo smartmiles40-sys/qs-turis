@@ -109,6 +109,12 @@
     },
     "api/*.js": {
       "maxDuration": 10
+    },
+    "api/mkt-automacoes.js": {
+      "maxDuration": 60
+    },
+    "api/mkt-instagram.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
@@ -171,6 +177,10 @@
     {
       "path": "/api/rel-vendas",
       "schedule": "20 * * * *"
+    },
+    {
+      "path": "/api/mkt-automacoes?cron=1",
+      "schedule": "* * * * *"
     }
   ],
   "headers": [
