@@ -132,7 +132,7 @@ export default function Inscricoes() {
         .map((t) => ({ tipo: t.tipo, descricao: t.descricao, obrigatoriedade: t.obrigatoriedade, bloqueia_embarque: t.bloqueia_embarque, observacoes: t.observacoes ?? null }));
       const r = await rpc<{ passageiro_id: string; nome: string }>("exp_inscricao_aprovar", { p_id: it.id, p_requisitos: modelos });
       avisar(`${r?.nome ?? it.nome_completo ?? "Inscrição"} aprovado(a)`);
-      // Bitrix (via n8n), melhor esforço — nunca desfaz a aprovação.
+      // Bitrix (comentário no negócio, direto do QS), melhor esforço — nunca desfaz a aprovação.
       if (r?.passageiro_id) chamarRotaAdmin("exp_inscricao_bitrix", { passageiro_id: r.passageiro_id }).catch(() => { /* fica no log da Vercel */ });
       await carregar();
       if (ehAdmin) void carregarLog();
