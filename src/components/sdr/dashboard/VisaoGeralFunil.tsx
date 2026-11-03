@@ -16,6 +16,11 @@ import {
   diagnostico, etapas, fetchFunil, fmtPct, intervaloFunil, PERIODOS_FUNIL, taxas, tempoHumano,
   type Funil, type LinhaFunil, type PeriodoFunil,
 } from "@/lib/qs/funil";
+import { useQsAuth } from "@/contexts/QsAuthContext";
+import {
+  Kpi, MetaDoMes, FunilDegraus, EvolucaoDiaria, RankingReunioes, LigacoesGravadas, useExtrasDesempenho, salDoPeriodo,
+  type Extras,
+} from "./DesempenhoExtras";
 
 const AZUL = "#0147FF";
 const LARANJA = "#F5821F";
@@ -284,7 +289,7 @@ function Leituras({ f }: { f: Funil }) {
   );
 }
 
-function VisaoGestor({ f, filtroSdr }: { f: Funil; filtroSdr: string }) {
+function VisaoGestor({ f, filtroSdr, extras, de, ate }: { f: Funil; filtroSdr: string; extras: Extras | null; de: string; ate: string }) {
   const t = f.time;
   const tx = t ? taxas(t) : null;
   const sdrs = filtroSdr ? f.sdrs.filter((s) => s.sdr_id === filtroSdr) : f.sdrs;
@@ -310,6 +315,14 @@ function VisaoGestor({ f, filtroSdr }: { f: Funil; filtroSdr: string }) {
         </div>
       )}
 
+      {/* Meta e ranking logo abaixo dos números (Bruno, 03/11): o "estamos no
+          ritmo?" e o "quem está puxando" vêm antes do detalhe por pessoa. */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <MetaDoMes kpis={extras?.kpis ?? null} time={!filtroSdr} />
+        <RankingReunioes de={de} ate={ate} extras={extras} eu={filtroSdr || null} />
+      </div>
+      <EvolucaoDiaria de={de} ate={ate} extras={extras} sdrId={filtroSdr || null} />
+
       <div className="flex items-baseline justify-between gap-3 flex-wrap">
         <h2 className="m-0 text-[19px] font-extrabold text-gray-900">Onde cada SDR perde o lead</h2>
         <span className="text-[13px] text-gray-500">Laranja = a etapa em que a pessoa fica mais abaixo da média do time</span>
@@ -322,25 +335,66 @@ function VisaoGestor({ f, filtroSdr }: { f: Funil; filtroSdr: string }) {
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
         <Velocidade f={f} />
         <Atencao f={f} />
+        <LigacoesGravadas extras={extras} gestor />
       </div>
       <Leituras f={f} />
     </>
   );
 }
 
-function VisaoSdr({ f, onIrParaPainel }: { f: Funil; onIrParaPainel?: () => void }) {
+function VisaoSdr({ f, onIrParaPainel, extras, de, ate, euId }: {
+  f: Funil; onIrParaPainel?: () => void; extras: Extras | null; de: string; ate: string; euId: string | null;
+}) {
+  // DESEMPENHO VISUAL (Bruno, 03/11). Ordem da leitura, de cima pra baixo:
+  //   1. cinco números grandes (o que fiz no período);
+  //   2. a meta do mês com o ritmo, ao lado da fila de hoje;
+  //   3. o funil em degraus (onde perco o lead) + o ranking do time;
+  //   4. a evolução dia a dia;
+  //   5. os detalhes (reuniões, origem, FUP, ligações gravadas).
   const eu = f.sdrs[0];
   const t = f.time;
+  const sal = salDoPeriodo(extras, de, ate, euId);
+
+  const hoje = (
+    <div className="rounded-2xl p-5 flex flex-col gap-2 text-white h-full" style={{ background: AZUL }}>
+      <div className="text-[11.5px] font-bold uppercase tracking-wider" style={{ color: "#DCE6FF" }}>Hoje</div>
+      <div className="text-[44px] font-extrabold leading-none" style={NUM}>{f.eu.fila_hoje}</div>
+      <div className="text-[14px] font-semibold" style={{ color: "#DCE6FF" }}>atividades na fila</div>
+      <div className="text-[14px]" style={{ color: "#EEF3FF" }}>
+        {f.eu.atrasadas > 0 ? `${f.eu.atrasadas} atrasadas de dias anteriores: comece por elas.` : "Nenhuma atrasada. Boa!"}
+      </div>
+      {onIrParaPainel && (
+        <button type="button" onClick={onIrParaPainel}
+                className="mt-auto self-start h-11 px-5 rounded-xl bg-white font-bold text-[14.5px]" style={{ color: AZUL }}>
+          Abrir o Painel
+        </button>
+      )}
+    </div>
+  );
+
   if (!eu) {
-    return <Cartao><p className="text-[14px] text-gray-500">Nenhum lead chegou pra você nesse período.</p></Cartao>;
+    return (
+      <>
+        <div className="grid gap-5 lg:grid-cols-3">
+          <div className="lg:col-span-2"><MetaDoMes kpis={extras?.kpis ?? null} /></div>
+          {hoje}
+        </div>
+        <Cartao><p className="text-[14px] text-gray-500">Nenhum lead chegou pra você nesse período.</p></Cartao>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <RankingReunioes de={de} ate={ate} extras={extras} eu={euId} />
+          <EvolucaoDiaria de={de} ate={ate} extras={extras} sdrId={euId} />
+        </div>
+      </>
+    );
   }
+
   const d = diagnostico(eu, t, true);
-  const passos = etapas(eu, t).filter((p) => p.id !== "recebeu");
-  const fim = eu.recebidos ? (eu.aconteceu / eu.recebidos) * 100 : null;
-  const fimTime = t && t.recebidos ? (t.aconteceu / t.recebidos) * 100 : null;
+  const tx = taxas(eu);
+  const txT = t ? taxas(t) : null;
+  const passos = etapas(eu, t);
   const ate5 = eu.medidos_1o ? (eu.ate5min / eu.medidos_1o) * 100 : null;
   const ate5Time = t && t.medidos_1o ? (t.ate5min / t.medidos_1o) * 100 : null;
   const origem = [
@@ -350,70 +404,59 @@ function VisaoSdr({ f, onIrParaPainel }: { f: Funil; onIrParaPainel?: () => void
     { r: "Tráfego", p: eu.fontes.trafego },
     { r: "Frio", p: eu.temperatura.frio },
   ];
+  const vsTime = (id: "trabalhou" | "falou" | "marcou" | "aconteceu") => (txT && txT[id] !== null ? ` · time ${fmtPct(txT[id])}` : "");
 
   return (
     <>
-      <div className="grid gap-5 lg:grid-cols-3">
-        <div className="rounded-2xl p-5 flex flex-col gap-2 text-white" style={{ background: AZUL }}>
-          <div className="text-[11.5px] font-bold uppercase tracking-wider" style={{ color: "#DCE6FF" }}>Hoje</div>
-          <div className="text-[40px] font-extrabold leading-none" style={NUM}>
-            {f.eu.fila_hoje} <span className="text-[16px] font-semibold" style={{ color: "#DCE6FF" }}>atividades na fila</span>
-          </div>
-          <div className="text-[14px]" style={{ color: "#EEF3FF" }}>
-            {f.eu.atrasadas > 0 ? `${f.eu.atrasadas} atrasadas de dias anteriores: comece por elas.` : "Nenhuma atrasada. Boa!"}
-          </div>
-          {onIrParaPainel && (
-            <button type="button" onClick={onIrParaPainel}
-                    className="mt-2 self-start h-11 px-5 rounded-xl bg-white font-bold text-[14.5px]" style={{ color: AZUL }}>
-              Abrir o Painel
-            </button>
-          )}
-        </div>
-        <Cartao className="flex flex-col gap-2">
-          <div className="text-[11.5px] font-extrabold uppercase tracking-wider" style={{ color: AZUL }}>Seu ponto forte</div>
-          <div className="text-[19px] font-extrabold leading-snug text-gray-900">{d.forteFrase ?? "Você está na média do time em todas as etapas."}</div>
-        </Cartao>
-        <div className="rounded-2xl p-5 flex flex-col gap-2" style={{ background: d.pior ? "#FFF4EA" : "#ECFDF5" }}>
-          <div className="text-[11.5px] font-extrabold uppercase tracking-wider" style={{ color: d.pior ? "#9A4A06" : "#047857" }}>
-            {d.pior ? "Onde crescer" : "Tudo em dia"}
-          </div>
-          <div className="text-[16px] leading-snug" style={{ color: d.pior ? "#3B2410" : "#065F46" }}>{d.frase}</div>
-        </div>
+      {/* 1. Os números do período */}
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
+        <Kpi rotulo="Leads trabalhados" valor={eu.trabalhou.toLocaleString("pt-BR")}
+          sub={`de ${eu.recebidos} recebidos · ${fmtPct(tx.trabalhou)}`} tom={d.pior === "trabalhou" ? "alerta" : undefined} />
+        <Kpi rotulo="Contatos" valor={eu.falou.toLocaleString("pt-BR")}
+          sub={`falou com ${fmtPct(tx.falou)}${vsTime("falou")}`} tom={d.pior === "falou" ? "alerta" : undefined} />
+        <Kpi rotulo="Agendamentos" valor={eu.marcou.toLocaleString("pt-BR")}
+          sub={`${fmtPct(tx.marcou)} das conversas${vsTime("marcou")}`} tom={d.pior === "marcou" ? "alerta" : undefined} />
+        <Kpi rotulo="Comparecimento" valor={fmtPct(tx.aconteceu)}
+          sub={`${eu.aconteceu} realizadas · ${eu.noshow} no-show${vsTime("aconteceu")}`} tom={d.pior === "aconteceu" ? "alerta" : undefined} />
+        <Kpi rotulo="SAL aceito" valor={sal ? sal.sal : "—"}
+          sub={sal && sal.realizadas ? `${fmtPct((sal.sal / sal.realizadas) * 100)} das reuniões realizadas no período` : "das reuniões realizadas no período"} />
       </div>
 
-      <Cartao className="flex flex-col gap-4">
-        <div className="flex justify-between items-baseline flex-wrap gap-2">
-          <h2 className="m-0 text-[19px] font-extrabold text-gray-900">Seu funil</h2>
-          <div className="flex gap-4 text-[13px] text-gray-600">
-            <span className="flex items-center gap-1.5"><span className="w-3.5 h-2.5 rounded-sm" style={{ background: AZUL }} />Você</span>
-            <span className="flex items-center gap-1.5"><span className="w-0.5 h-3.5 bg-gray-900" />Média do time</span>
-          </div>
-        </div>
-        {[...passos, { id: "fim", rotulo: "Do começo ao fim", ajuda: "recebeu → reunião aconteceu", n: eu.aconteceu, taxa: fim, taxaTime: fimTime }].map((p) => {
-          const ruim = p.id === d.pior;
-          const escala = p.id === "fim" ? 4 : 1; // a taxa final é pequena: amplia pra dar pra ver
-          return (
-            <div key={p.id} className="grid items-center gap-4" style={{ gridTemplateColumns: "minmax(0,220px) minmax(0,1fr) 150px" }}>
-              <div>
-                <div className="text-[14.5px] font-bold text-gray-900">{p.rotulo}</div>
-                <div className="text-[12.5px] text-gray-500">{p.ajuda}</div>
-              </div>
-              <div className="relative h-4 rounded-full" style={{ background: "#EEF0F4" }}>
-                <div className="absolute left-0 top-0 h-4 rounded-full" style={{ width: `${Math.min(100, (p.taxa ?? 0) * escala)}%`, background: ruim ? LARANJA : AZUL }} />
-                {p.taxaTime !== null && (
-                  <div className="absolute -top-1 w-0.5 h-6 bg-gray-900" style={{ left: `${Math.min(100, p.taxaTime * escala)}%` }} title={`Time: ${fmtPct(p.taxaTime)}`} />
-                )}
-              </div>
-              <div className="flex justify-end items-baseline gap-2" style={NUM}>
-                <span className="text-[20px] font-extrabold" style={{ color: ruim ? LARANJA_TXT : "#0F172A" }}>{fmtPct(p.taxa, p.id === "fim" ? 1 : 0)}</span>
-                <span className="text-[13px] text-gray-500">time {fmtPct(p.taxaTime, p.id === "fim" ? 1 : 0)}</span>
-              </div>
-            </div>
-          );
-        })}
-      </Cartao>
-
+      {/* 2. Meta do mês + fila de hoje */}
       <div className="grid gap-5 lg:grid-cols-3">
+        <div className="lg:col-span-2"><MetaDoMes kpis={extras?.kpis ?? null} /></div>
+        {hoje}
+      </div>
+
+      {/* 3. Funil + ranking */}
+      <div className="grid gap-5 lg:grid-cols-5">
+        <Cartao className="lg:col-span-3 flex flex-col gap-4">
+          <div className="flex justify-between items-baseline flex-wrap gap-2">
+            <h2 className="m-0 text-[17px] font-extrabold text-gray-900">Seu funil</h2>
+            <span className="text-[12.5px] text-gray-500">↓ = quanto passa pra próxima etapa · laranja = onde você mais fica abaixo do time</span>
+          </div>
+          <FunilDegraus passos={passos} pior={d.pior} recebidos={eu.recebidos} />
+          <div className="grid gap-3 sm:grid-cols-2 pt-1">
+            <div className="rounded-xl px-4 py-3" style={{ background: "#EEF3FF" }}>
+              <div className="text-[11.5px] font-extrabold uppercase tracking-wider" style={{ color: AZUL }}>Seu ponto forte</div>
+              <div className="text-[14px] leading-snug mt-1 text-gray-900">{d.forteFrase ?? "Você está na média do time em todas as etapas."}</div>
+            </div>
+            <div className="rounded-xl px-4 py-3" style={{ background: d.pior ? "#FFF4EA" : "#ECFDF5" }}>
+              <div className="text-[11.5px] font-extrabold uppercase tracking-wider" style={{ color: d.pior ? "#9A4A06" : "#047857" }}>
+                {d.pior ? "Onde crescer" : "Tudo em dia"}
+              </div>
+              <div className="text-[14px] leading-snug mt-1" style={{ color: d.pior ? "#3B2410" : "#065F46" }}>{d.frase}</div>
+            </div>
+          </div>
+        </Cartao>
+        <div className="lg:col-span-2"><RankingReunioes de={de} ate={ate} extras={extras} eu={euId} /></div>
+      </div>
+
+      {/* 4. Dia a dia */}
+      <EvolucaoDiaria de={de} ate={ate} extras={extras} sdrId={euId} />
+
+      {/* 5. Detalhes */}
+      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
         <Cartao><BarraReunioes l={eu} /></Cartao>
         <Cartao className="flex flex-col gap-1.5">
           <Rotulo>Que lead vira reunião</Rotulo>
@@ -429,15 +472,16 @@ function VisaoSdr({ f, onIrParaPainel }: { f: Funil; onIrParaPainel?: () => void
           {[
             { r: "Tentativas por lead", v: eu.tent_media === null ? "—" : eu.tent_media.toFixed(1).replace(".", ","), time: t?.tent_media === null || !t ? null : t.tent_media!.toFixed(1).replace(".", ",") },
             { r: "1º contato em até 5 min", v: fmtPct(ate5), time: fmtPct(ate5Time) },
-            { r: "Tempo típico até o 1º contato", v: tempoHumano(eu.mediana_1o_min), time: tempoHumano(t?.mediana_1o_min ?? null) },
+            { r: "Tempo até o 1º contato", v: tempoHumano(eu.mediana_1o_min), time: tempoHumano(t?.mediana_1o_min ?? null) },
             { r: "Leads ainda em FUP", v: String(eu.em_fup), time: null },
           ].map((x) => (
-            <div key={x.r} className="flex justify-between text-[14px]" style={NUM}>
+            <div key={x.r} className="flex justify-between gap-2 text-[14px]" style={NUM}>
               <span className="text-gray-700">{x.r}</span>
-              <span className="font-extrabold">{x.v}{x.time && <span className="font-medium text-gray-500 ml-1.5">time {x.time}</span>}</span>
+              <span className="font-extrabold whitespace-nowrap">{x.v}{x.time && <span className="font-medium text-gray-500 ml-1.5">time {x.time}</span>}</span>
             </div>
           ))}
         </Cartao>
+        <LigacoesGravadas extras={extras} gestor={false} />
       </div>
     </>
   );
@@ -471,6 +515,12 @@ export default function VisaoGeralFunil({ onIrParaPainel }: Props) {
   }, [carregar]);
 
   const gestor = !!f?.gestor;
+  const { currentUser } = useQsAuth();
+  // SDR em foco: o próprio (SDR) ou o escolhido no filtro (gestão); sem foco,
+  // o time — e aí não se baixam as atividades de todo mundo.
+  const foco = f ? (gestor ? filtroSdr || null : currentUser?.id ?? null) : null;
+  // Só busca depois do funil: é ele que diz se a pessoa é gestão.
+  const extras = useExtrasDesempenho(intervalo.de, intervalo.ate, foco, !!f);
 
   return (
     <div className="max-w-[1440px] mx-auto flex flex-col gap-6">
@@ -507,7 +557,9 @@ export default function VisaoGeralFunil({ onIrParaPainel }: Props) {
       {erro && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13.5px] text-red-700">{erro}</div>}
       {!f && !erro && <div className="text-[14px] text-gray-400">Carregando…</div>}
 
-      {f && (gestor ? <VisaoGestor f={f} filtroSdr={filtroSdr} /> : <VisaoSdr f={f} onIrParaPainel={onIrParaPainel} />)}
+      {f && (gestor
+        ? <VisaoGestor f={f} filtroSdr={filtroSdr} extras={extras} de={intervalo.de} ate={intervalo.ate} />
+        : <VisaoSdr f={f} onIrParaPainel={onIrParaPainel} extras={extras} de={intervalo.de} ate={intervalo.ate} euId={currentUser?.id ?? null} />)}
     </div>
   );
 }
