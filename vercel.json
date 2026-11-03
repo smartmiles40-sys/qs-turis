@@ -46,6 +46,9 @@
     "api/lead-inbound.js": {
       "maxDuration": 60
     },
+    "api/bitrix-entrada.js": {
+      "maxDuration": 60
+    },
     "api/primeiro-contato.js": {
       "maxDuration": 60
     },
