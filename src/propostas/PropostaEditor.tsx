@@ -16,6 +16,8 @@ import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
 import PropostaView from "./PropostaView";
 import EnviarAoCliente from "./EnviarAoCliente";
 import PropostaParaEnviar from "./PropostaParaEnviar";
+import ModeloEditor, { EscolherModelo, aplicarModelo } from "./ModeloEditor";
+import { MODELOS, type ModeloProposta } from "./modelos";
 import {
   CONDICOES, FORMAS, ORDEM_TIPOS, STATUS_PROPOSTA, TIPOS, camposDoTipo, TOM_PROPOSTA, brl, carregarProposta, dataBr, duplicarOpcao, duplicarProposta,
   itemVazio, mudarStatus, opcaoVazia, pagamentoVazio, paraVM, propostaVazia, salvarProposta, textoPagamento,
@@ -194,7 +196,12 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
   onAbrir: (id: string) => void;
 }) {
   const { currentUser } = useQsAuth();
-  const [p, setP] = useState<Proposta | null>(id ? null : { ...propostaVazia(setor), ...inicial });
+  // 0280: proposta nova já nasce num modelo-padrão (pacote, se ninguém disse outro)
+  const [p, setP] = useState<Proposta | null>(() => {
+    if (id) return null;
+    const base = { ...propostaVazia(setor), ...inicial };
+    return inicial?.modelo === null ? base : { ...base, ...aplicarModelo(base, inicial?.modelo ?? "pacote") };
+  });
   const [aba, setAba] = useState(0);
   const [sujo, setSujo] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -296,6 +303,14 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
     await acao(() => mudarStatus(pid, "pronta"), `Pronta — ${quemPediu} recebeu o aviso na solicitação.`);
   }
 
+  function trocarModelo(m: ModeloProposta | null) {
+    if (m === p!.modelo) return;
+    const temConteudo = !!p!.modelo && Object.values(p!.conteudo).some((v) => (typeof v === "string" ? v.trim() : Array.isArray(v) && v.length));
+    if ((p!.id || temConteudo) && !window.confirm(m ? `Passar a proposta pro modelo "${MODELOS[m].rotulo}"? Os serviços e valores ficam; os textos das seções começam do padrão do modelo.` : "Voltar pro formato antigo? Os textos das seções do modelo deixam de aparecer pro cliente.")) return;
+    mudar(aplicarModelo(p!, m));
+    setAba(0);
+  }
+
   function tirarOpcao(n: number) {
     if (!window.confirm(`Tirar a ${varias ? `Opção ${n + 1}` : "opção"} e todos os serviços dela?`)) return;
     mudar({ opcoes: p!.opcoes.filter((_, k) => k !== n) });
@@ -353,6 +368,13 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
       {outroTime && p.status === "rascunho" && <Aviso>Quem envia ao cliente é {quemPediu}. Quando terminar, clique em <b>Pronta</b> — {quemPediu.split(" ")[0]} recebe o aviso na solicitação, abre e envia.</Aviso>}
       {p.status === "pronta" && <Aviso>Liberada pra {quemPediu}. Se mudar algo e salvar, {quemPediu.split(" ")[0]} precisa abrir de novo antes de enviar.</Aviso>}
 
+      {/* 0280: modelo-padrão da proposta */}
+      <section className="rel-card p-4 space-y-2">
+        <h2 className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>Modelo da proposta</h2>
+        <EscolherModelo atual={p.modelo} onEscolher={trocarModelo} />
+        {p.modelo && p.semColunaModelo && <Aviso tom="erro">O banco ainda não tem a migration 0280: o modelo e os textos desta proposta NÃO ficam salvos. Peça pra aplicar a 0280 antes de usar.</Aviso>}
+      </section>
+
       {/* Dados da viagem */}
       <section className="rel-card p-4 space-y-3">
         <h2 className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>A viagem</h2>
@@ -384,8 +406,10 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
         </label>
       </section>
 
+      {p.modelo && <ModeloEditor p={p} mudar={mudar} />}
+
       {/* Opções */}
-      <section className="space-y-3">
+      {!p.modelo && <section className="space-y-3">
         <div className="flex flex-wrap items-center gap-1.5">
           {varias && p.opcoes.map((o, n) => (
             <button key={o.k} type="button" onClick={() => setAba(n)} aria-current={n === nOpcao}
@@ -469,15 +493,15 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
             </div>
           </div>
         )}
-      </section>
+      </section>}
 
       {/* Observações */}
-      <section className="rel-card p-4">
+      {!p.modelo && <section className="rel-card p-4">
         <Campo rotulo="Informações importantes (o que inclui, o que não inclui, documentos, condições)">
           <textarea className={area} rows={5} value={p.observacoes} onChange={(e) => mudar({ observacoes: e.target.value })}
             placeholder={"Inclui: …\nNão inclui: refeições não mencionadas, gorjetas, despesas pessoais.\nDocumentos: passaporte com validade mínima de 6 meses."} />
         </Campo>
-      </section>
+      </section>}
 
       <div className="flex gap-2 pb-10">
         <Botao variante="primario" onClick={() => void salvar(true)} disabled={salvando || cancelada}>{salvando ? "Salvando…" : "Salvar"}</Botao>
