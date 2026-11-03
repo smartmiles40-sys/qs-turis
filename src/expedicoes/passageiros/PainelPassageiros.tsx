@@ -10,7 +10,11 @@
 // edições). Depois do embarque os KPIs viram "pendências administrativas" (nada
 // bloqueia mais). Embaixo, o status de documentos por passageiro (era a aba Documentos).
 // A validade do passaporte usa a regra única de lib/passaporte.ts.
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+// 03/11 (Bruno): a INSCRIÇÃO mora aqui, no nome de cada passageiro — selo "Falta
+// responder a ficha" / "Aguardando aprovação" / "Inscrição aprovada" (lib/inscricaoPax.ts),
+// o resumo no topo e a fila desta viagem pra aprovar/recusar ali mesmo
+// (paginas/Inscricoes.tsx embutida). A tela solta de Inscrições saiu do menu do Rel.
+import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Botao, Vazio } from "@/rel/ui";
 import { BotaoExcluir, Busca, Carregando, CelulaEditavel, CelulaEscolha, Selo, useAoVivo } from "../ui";
 import { useExp } from "../contexto";
@@ -23,9 +27,13 @@ import { chaveIdentidade, listPessoas, type PessoaAgregada } from "../lib/pessoa
 import { esquecer } from "../lib/cache";
 import type { ExpedicaoComAgregados, PassageiroRow, StatusReserva, TipoPassageiro } from "../lib/database";
 import {
-  alocarNoTrecho, ativarDivisao, atualizarPassageiro, capacidade, carregarAba, definirGrupoDoPax, preencheuFormulario, prontidaoDe,
+  alocarNoTrecho, ativarDivisao, atualizarPassageiro, capacidade, carregarAba, definirGrupoDoPax, lerInscricoesDaExpedicao, preencheuFormulario, prontidaoDe,
   removerDivisao, resumoSyncBitrix, sincronizarDoBitrix, souAdmin, trechosDe, usaDivisao, type DadosAba,
 } from "./dados";
+import { ROTULO_INSCRICAO, TOM_INSCRICAO, estadosDeInscricao, textoResumoInscricoes } from "../lib/inscricaoPax";
+import type { InscricaoPendenteRow } from "../lib/database";
+
+const InscricoesDaViagem = lazy(() => import("../paginas/Inscricoes"));
 import { exportarPassageiros } from "./exportar";
 import { AdicionarExistente, ImportarPassageiros, NovoPassageiro } from "./Criar";
 import EditarPassageiro from "./EditarPassageiro";
@@ -86,6 +94,30 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
   // Sem expedicao_id nessas duas (não dá pra filtrar no realtime): espera de 2 s,
   // pra edição em OUTRA expedição não refazer a planilha inteira a cada clique.
   useAoVivo([{ tabela: "passageiro_requisitos" }, { tabela: "passageiro_quarto" }], () => void carregar(), 2000);
+
+  // Inscrições do formulário público desta viagem (selo no nome + fila pra decidir)
+  const [inscricoes, setInscricoes] = useState<InscricaoPendenteRow[]>([]);
+  const [verFila, setVerFila] = useState(false);
+  const [abrirInscricao, setAbrirInscricao] = useState<string | null>(null);
+  const carregarInscricoes = useCallback(() => {
+    lerInscricoesDaExpedicao(exp.id).then(setInscricoes).catch(() => setInscricoes([]));
+  }, [exp.id]);
+  useEffect(() => { carregarInscricoes(); }, [carregarInscricoes]);
+  useAoVivo([{ tabela: "inscricoes_pendentes", filtro: `expedicao_id=eq.${exp.id}` }], carregarInscricoes, 600);
+  const insc = useMemo(() => estadosDeInscricao(dados?.pax ?? [], inscricoes), [dados, inscricoes]);
+  const abrirFila = useCallback((inscricaoId: string | null) => {
+    setAbrirInscricao(inscricaoId);
+    setVerFila(true);
+    requestAnimationFrame(() => document.getElementById("ck-insc-fila")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, []);
+  const seloInscricao = (paxId: string) => {
+    const e = insc.porPax.get(paxId);
+    if (!e) return null;
+    const selo = <Selo tom={TOM_INSCRICAO[e.estado]}>{ROTULO_INSCRICAO[e.estado]}</Selo>;
+    return e.inscricaoId
+      ? <button type="button" onClick={() => abrirFila(e.inscricaoId)} title="Abrir a inscrição pra aprovar ou recusar">{selo}</button>
+      : selo;
+  };
 
   const pront = useMemo(() => (dados ? prontidaoDe(exp, dados.pax, dados.requisitos).resultado : new Map()), [dados, exp]);
   const posicoes = useMemo(() => (pessoas ? construirPosicoesFidelidade(pessoas, exp.id) : {}), [pessoas, exp.id]);
@@ -241,6 +273,7 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
               <div className="flex flex-wrap items-center gap-1 mt-0.5">
                 <SeloFidelidade posicao={posicoes[p.id]} />
                 <SeloSemFicha pax={p} />
+                {seloInscricao(p.id)}
                 {aniv && <Selo tom="aviso" titulo={`Faz aniversário em ${formatDate(aniv.data)}${aniv.idade != null ? ` (${aniv.idade} anos)` : ""}`}>🎂 {formatDate(aniv.data, "dd/MM")}</Selo>}
               </div>
             </div>
@@ -362,6 +395,33 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
         </>}
       </div>
 
+      {(dados.pax.length > 0 || inscricoes.length > 0) && (
+        <section className="rel-card px-3.5 py-2.5 space-y-3" aria-label="Inscrições desta viagem">
+          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+            <span className="font-bold" style={{ color: "var(--ink)" }}>Inscrições</span>
+            {insc.resumo.aguardando + insc.resumo.semPassageiro > 0 && <Selo tom="aviso">{insc.resumo.aguardando + insc.resumo.semPassageiro} pra decidir</Selo>}
+            <span style={{ color: "var(--ink2)" }}>{textoResumoInscricoes(insc.resumo)}</span>
+            <span className="flex-1" />
+            {insc.resumo.falta > 0 && pilula(soPendentes && vista === "planilha", () => {
+              if (soPendentes && vista === "planilha") setSoPendentes(false); else { setVista("planilha"); setSoPendentes(true); }
+            }, `Ver quem falta${soPendentes && vista === "planilha" ? " ✕" : ""}`)}
+            {inscricoes.length > 0 && (
+              <Botao variante={verFila ? "secundario" : insc.resumo.aguardando + insc.resumo.semPassageiro ? "primario" : "fantasma"}
+                onClick={() => (verFila ? setVerFila(false) : abrirFila(null))}>
+                {verFila ? "Fechar inscrições" : "Aprovar / recusar inscrições"}
+              </Botao>
+            )}
+          </div>
+          {verFila && (
+            <div id="ck-insc-fila" className="border-t pt-3" style={{ borderColor: "var(--line)" }}>
+              <Suspense fallback={<Carregando />}>
+                <InscricoesDaViagem embutido expedicaoId={exp.id} abrirId={abrirInscricao} onMudou={() => { carregarInscricoes(); recarregar(); }} />
+              </Suspense>
+            </div>
+          )}
+        </section>
+      )}
+
       {dados.pax.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-[12px]">
           <Segmented label="Visão" value={vista} onChange={setVista}
@@ -386,7 +446,7 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
             acao={!somenteLeitura ? <Botao variante="primario" onClick={() => setCriar("novo")}>Adicionar passageiro</Botao> : undefined} />
         </section>
       ) : vista === "matriz" ? (
-        <MatrizPassageiros linhas={linhasMx} posicoes={posicoes} busca={busca} onAbrir={(id, m) => irSub(`${m}/${id}`)} />
+        <MatrizPassageiros linhas={linhasMx} posicoes={posicoes} busca={busca} onAbrir={(id, m) => irSub(`${m}/${id}`)} aoLadoDoNome={seloInscricao} />
       ) : (
         <>
           {temLider && (

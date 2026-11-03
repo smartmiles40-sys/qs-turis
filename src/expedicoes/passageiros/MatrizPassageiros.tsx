@@ -9,7 +9,7 @@
 // Só lê: "Cobrar formulário" e "Cobrar apólice" ficam desligados até existir um
 // disparo nas Expedições (MAPA-EXPEDICOES §6) — nada de mandar mensagem daqui.
 // -----------------------------------------------------------------------------
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Btn, FilterPill } from "@/components/ui";
 import { ordinalFem } from "../lib/fidelidade";
 import {
@@ -23,12 +23,14 @@ const iniciais = (nome: string) => {
   return ((p[0]?.[0] ?? "") + (p.length > 1 ? p[p.length - 1][0] : "")).toUpperCase() || "?";
 };
 
-export default function MatrizPassageiros({ linhas, posicoes, onAbrir, busca = "" }: {
+export default function MatrizPassageiros({ linhas, posicoes, onAbrir, busca = "", aoLadoDoNome }: {
   linhas: readonly LinhaMatriz[];
   /** Nª expedição da pessoa com a gente (construirPosicoesFidelidade). */
   posicoes: Record<string, number>;
   onAbrir: (paxId: string, modo: "pax" | "prontidao") => void;
   busca?: string;
+  /** 03/11: selo da inscrição junto do nome (lib/inscricaoPax.ts). */
+  aoLadoDoNome?: (paxId: string) => ReactNode;
 }) {
   const [filtro, setFiltro] = useState<FiltroMatriz>("todos");
   const placar = useMemo(() => placarDaMatriz(linhas), [linhas]);
@@ -87,6 +89,7 @@ export default function MatrizPassageiros({ linhas, posicoes, onAbrir, busca = "
                         <span className="ck-mx__s">{l.lider ? "Líder" : l.pax.tipo}{pos ? ` · ${ordinalFem(pos)} expedição` : ""}{l.pax.status_reserva !== "Confirmado" ? ` · ${l.pax.status_reserva}` : ""}</span>
                       </span>
                     </button>
+                    {aoLadoDoNome && <div style={{ marginTop: 4, paddingLeft: 40 }}>{aoLadoDoNome(l.pax.id)}</div>}
                   </td>
                   {COLUNAS_MATRIZ.map((c) => {
                     const cel = l.celulas[c.id];

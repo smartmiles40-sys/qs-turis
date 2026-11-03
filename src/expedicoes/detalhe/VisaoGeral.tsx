@@ -12,7 +12,7 @@
 // pra nenhuma informação sumir.
 // Só lê: os dados vêm do cockpit (detalhe/cockpit/dados.ts); nada aqui grava.
 // -----------------------------------------------------------------------------
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Btn } from "@/components/ui";
 import { useExp } from "../contexto";
 import { Carregando } from "../ui";
@@ -30,6 +30,10 @@ import { prontidaoDosPax } from "./cockpit/dados";
 import type { PropsAba } from "./ExpedicaoDetalhe";
 
 const TOM_BARRA = { ok: "ok", warn: "warn", danger: "danger" } as const;
+
+// 03/11 (Bruno: "Avisos da expedição pode tirar [do menu], isso deve ficar dentro da
+// expedição"): a lista de avisos (paginas/Avisos.tsx) só desta viagem, aqui na Visão geral.
+const AvisosDaViagem = lazy(() => import("../paginas/Avisos"));
 
 export default function VisaoGeral({ exp, cockpit }: PropsAba) {
   const { ir } = useExp();
@@ -226,6 +230,17 @@ export default function VisaoGeral({ exp, cockpit }: PropsAba) {
           );
         })}
       </section>
+
+      {/* Avisos só existem antes do embarque (prazo de passaporte, visto, vacina, seguro…) */}
+      {(fase === "vendendo" || fase === "preparacao" || fase === "embarque") && exp.status !== "Cancelada" && (
+        <section className="ck-card" aria-label="Avisos da expedição">
+          <div className="ck-card__h">
+            <h3 className="ck-h3">Avisos da expedição</h3>
+            <span className="ck-nota">pendências dos passageiros que já entraram no prazo · clique pra abrir o passageiro</span>
+          </div>
+          <Suspense fallback={<Carregando />}><AvisosDaViagem exp={exp} /></Suspense>
+        </section>
+      )}
 
       {!pacote && (
         <section className="ck-card" aria-label="Ações da operação">

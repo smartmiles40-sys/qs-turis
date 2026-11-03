@@ -4,20 +4,22 @@
 // passar pro médico e ele fazer os laudos, o acompanhamento e a curadoria do
 // cliente". Endereço #ops/saude.
 //
-//  · Fila do médico — quem declarou algo clínico no formulário (lib/saudeFila.ts),
-//    da viagem que embarca primeiro pra última; cada caso tem o que o cliente
-//    declarou, o status do laudo, o PDF, as anotações (data + autor) e "apto a
-//    viajar". O laudo fica em cad_laudos_medicos (0225), ligado ao cliente_id —
-//    a ficha do cliente lê de lá (docs/CONTRATO-LAUDOS.md).
+//  · Pipeline da saúde (03/11, Bruno: "somente a parte de saúde que realmente fica
+//    um pipeline") — quadro em colunas: Inscrição com alerta → Declarou alerta →
+//    Laudo em andamento → Receita a enviar → Liberado (+ Não apto). As etapas saem
+//    só de dados que já existem (lib/saudePipeline.ts, testada). Clicar no cartão
+//    abre o caso: o que o cliente declarou, o status do laudo, o PDF, as anotações
+//    (data + autor) e "apto a viajar". O laudo fica em cad_laudos_medicos (0225),
+//    ligado ao cliente_id — a ficha do cliente lê de lá (docs/CONTRATO-LAUDOS.md).
+//    Era "Fila do médico" + "Laudos resolvidos" (viraram colunas).
 //  · Alimentação — restrições/alergias por viagem, com o texto pronto pra mandar
 //    ao restaurante/fornecedor (só copia; nada é enviado daqui).
-//  · Resolvidos — laudos emitidos/dispensados.
 //
 // Quem vê: exp_pode_ver_saude() (Operações, gestão do Relacionamento, papel
 // 'medico'). Sem a 0225 a tela abre só pra leitura (Ops já lê passageiros.saude).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Aviso, Botao, Vazio } from "@/rel/ui";
+import { Aviso, Botao, Modal, Vazio } from "@/rel/ui";
 import { useExp } from "../contexto";
 import { Busca, Carregando, Selo, useAoVivo } from "../ui";
 import { supabase } from "../lib/banco";
@@ -26,12 +28,16 @@ import { formatDate, formatDateTime } from "../lib/utils";
 import { formatarCpf } from "../lib/cpf";
 import { copiar } from "./_admin/comum";
 import {
-  ROTULO_APTO, ROTULO_STATUS, abrirPdfLaudo, anotar, carregarFila, lerNotas, pendenteMedico, resumoAlimentar,
+  ROTULO_APTO, ROTULO_STATUS, abrirPdfLaudo, anotar, carregarFila, diasAte, expedicoesFuturas, lerNotas, pendenteMedico, resumoAlimentar,
   salvarLaudo, subirPdfLaudo, textoDias, tirarPdfLaudo, urgencia,
   type Apto, type CasoSaude, type ItemDeclarado, type NotaLaudo, type StatusLaudo,
 } from "../lib/saudeFila";
+import { ETAPAS_SAUDE, etapaSaude, inscricaoTemAlertaSaude, montarPipeline, type CartaoPipeline, type EtapaSaude } from "../lib/saudePipeline";
+import type { ExpedicaoRow } from "../lib/database";
 
-type Aba = "fila" | "alimentacao" | "resolvidos";
+type Aba = "pipeline" | "alimentacao";
+type InscSaude = { id: string; nome: string; exp: ExpedicaoRow; dias: number | null };
+type ItemPipe = { tipo: "caso"; c: CasoSaude } | { tipo: "inscricao"; i: InscSaude };
 const TOM_STATUS: Record<StatusLaudo, "erro" | "aviso" | "ok" | "neutro"> = { a_fazer: "erro", em_andamento: "aviso", emitido: "ok", dispensado: "neutro" };
 const TOM_APTO: Record<Apto, "ok" | "erro" | "aviso"> = { sim: "ok", nao: "erro", ressalvas: "aviso" };
 const COR_URG = { erro: "var(--err-ink)", aviso: "var(--warn-ink)", neutro: "var(--line)" } as const;
@@ -47,8 +53,8 @@ export default function Saude() {
   const [dados, setDados] = useState<{ casos: CasoSaude[]; temLaudos: boolean } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [acesso, setAcesso] = useState<boolean | null>(null);
-  const [inscSaude, setInscSaude] = useState(0);
-  const [aba, setAba] = useState<Aba>("fila");
+  const [inscricoes, setInscricoes] = useState<InscSaude[]>([]);
+  const [aba, setAba] = useState<Aba>("pipeline");
   const [busca, setBusca] = useState("");
   const [expFiltro, setExpFiltro] = useState("");
   const [aberto, setAberto] = useState<string | null>(null);
@@ -61,90 +67,174 @@ export default function Saude() {
   const carregar = useCallback(async () => {
     try { setDados(await carregarFila(hoje)); setErro(null); }
     catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar"); }
-    const { data } = await supabase.from("inscricoes_pendentes").select("dados").eq("status", "pendente").limit(1000);
-    setInscSaude((data ?? []).filter((r) => {
-      const s = ((r as { dados?: { saude?: Record<string, string> } }).dados?.saude ?? {}) as Record<string, string>;
-      return Object.entries(s).some(([k, v]) => v === "Sim" && k !== "vacina_febre_amarela");
-    }).length);
+    // Coluna 1 do pipeline: inscrição com "Sim" na saúde, das viagens que ainda não embarcaram
+    try {
+      const [exps, { data }] = await Promise.all([
+        expedicoesFuturas(hoje),
+        supabase.from("inscricoes_pendentes").select("id,nome_completo,expedicao_id,dados").eq("status", "pendente").limit(1000),
+      ]);
+      const porId = new Map(exps.map((e) => [e.id, e]));
+      setInscricoes(((data ?? []) as { id: string; nome_completo: string | null; expedicao_id: string; dados: unknown }[])
+        .filter((r) => porId.has(r.expedicao_id) && inscricaoTemAlertaSaude(r.dados))
+        .map((r) => {
+          const exp = porId.get(r.expedicao_id)!;
+          return { id: r.id, nome: r.nome_completo ?? "—", exp, dias: diasAte(hoje, exp.data_embarque) };
+        }));
+    } catch { setInscricoes([]); }
   }, [hoje]);
   useEffect(() => { void carregar(); }, [carregar]);
-  useAoVivo([{ tabela: "cad_laudos_medicos" }, { tabela: "cad_laudo_notas" }, { tabela: "passageiros" }], () => { void carregar(); }, 1500);
+  useAoVivo([{ tabela: "cad_laudos_medicos" }, { tabela: "cad_laudo_notas" }, { tabela: "passageiros" }, { tabela: "inscricoes_pendentes" }], () => { void carregar(); }, 1500);
 
   const casos = dados?.casos ?? [];
   const exps = useMemo(() => {
-    const m = new Map<string, CasoSaude["exp"]>();
+    const m = new Map<string, ExpedicaoRow>();
     for (const c of casos) m.set(c.exp.id, c.exp);
-    return [...m.values()];
-  }, [casos]);
+    for (const i of inscricoes) m.set(i.exp.id, i.exp);
+    return [...m.values()].sort((a, b) => (a.data_embarque ?? "9999").localeCompare(b.data_embarque ?? "9999"));
+  }, [casos, inscricoes]);
   const q = busca.trim().toLowerCase();
-  const filtrar = (l: CasoSaude[]) => l.filter((c) => (!expFiltro || c.exp.id === expFiltro)
-    && (!q || `${c.pax.nome_completo} ${c.exp.nome} ${c.pax.cpf ?? ""}`.toLowerCase().includes(q)));
+  const passa = (expId: string, texto: string) => (!expFiltro || expId === expFiltro) && (!q || texto.toLowerCase().includes(q));
+
+  const colunas = useMemo(() => {
+    const cartoes: CartaoPipeline<ItemPipe>[] = [];
+    for (const c of casos) {
+      const etapa = etapaSaude({ clinicos: c.clinico.length, laudo: c.laudo, receitaPendente: c.pax.receita_pendente, receitaEnviadaEm: c.pax.receita_enviada_em });
+      if (etapa && passa(c.exp.id, `${c.pax.nome_completo} ${c.exp.nome} ${c.pax.cpf ?? ""}`)) cartoes.push({ etapa, dias: c.dias, nome: c.pax.nome_completo, item: { tipo: "caso", c } });
+    }
+    for (const i of inscricoes) {
+      if (passa(i.exp.id, `${i.nome} ${i.exp.nome}`)) cartoes.push({ etapa: "inscricao", dias: i.dias, nome: i.nome, item: { tipo: "inscricao", i } });
+    }
+    return montarPipeline(cartoes);
+  }, [casos, inscricoes, expFiltro, q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fila = casos.filter(pendenteMedico);
-  const resolvidos = casos.filter((c) => c.laudo && (c.laudo.status === "emitido" || c.laudo.status === "dispensado"));
   const alimentares = casos.filter((c) => c.alimentar.length);
   const aFazer = fila.filter((c) => !c.laudo || c.laudo.status === "a_fazer").length;
   const andamento = fila.filter((c) => c.laudo?.status === "em_andamento").length;
   const urgentes = fila.filter((c) => (c.dias ?? 999) <= 15).length;
+  const casoAberto = aberto ? casos.find((c) => c.pax.id === aberto) ?? null : null;
 
   if (acesso === false) return <Aviso tom="erro">Dado de saúde é sensível (LGPD): esta tela é só de Operações, da gestão do Relacionamento e do médico.</Aviso>;
   if (erro) return <Aviso tom="erro">{erro}</Aviso>;
   if (!dados || acesso === null) return <Carregando />;
 
-  const lista = filtrar(aba === "fila" ? fila : aba === "resolvidos" ? resolvidos : alimentares);
+  const listaAlimentar = alimentares.filter((c) => passa(c.exp.id, `${c.pax.nome_completo} ${c.exp.nome} ${c.pax.cpf ?? ""}`));
+  const telaDe = (e: ExpedicaoRow) => (e.tipo === "pacote" ? "pacotes" : "expedicoes");
 
   return (
     <div className="space-y-5">
       <header className="space-y-1">
         <h1 className="text-[20px] font-bold" style={{ color: "var(--ink)" }}>Saúde dos viajantes</h1>
         <p className="text-[13px]" style={{ color: "var(--ink3)", margin: 0 }}>
-          O que cada cliente declarou no formulário de inscrição, pra o médico fazer o laudo e acompanhar. Mais urgente (embarque mais perto) em cima.
+          Cada caso anda da esquerda pra direita: do alerta no formulário até o médico liberar. Em cada coluna, quem embarca antes fica em cima.
         </p>
       </header>
 
       {!dados.temLaudos && (
-        <Aviso>Os laudos ainda não estão ligados no banco (falta aplicar a migration 0225). Dá pra ver a fila; salvar laudo, PDF e anotações fica desligado.</Aviso>
+        <Aviso>Os laudos ainda não estão ligados no banco (falta aplicar a migration 0225). Dá pra ver o pipeline; salvar laudo, PDF e anotações fica desligado.</Aviso>
       )}
 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        <Contador rotulo="Laudos a fazer" valor={aFazer} tom="erro" onClick={() => setAba("fila")} />
-        <Contador rotulo="Em andamento" valor={andamento} tom="aviso" onClick={() => setAba("fila")} />
-        <Contador rotulo="Embarcam em até 15 dias sem laudo" valor={urgentes} tom={urgentes ? "erro" : "neutro"} onClick={() => setAba("fila")} />
+        <Contador rotulo="Laudos a fazer" valor={aFazer} tom="erro" onClick={() => setAba("pipeline")} />
+        <Contador rotulo="Em andamento" valor={andamento} tom="aviso" onClick={() => setAba("pipeline")} />
+        <Contador rotulo="Embarcam em até 15 dias sem laudo" valor={urgentes} tom={urgentes ? "erro" : "neutro"} onClick={() => setAba("pipeline")} />
         <Contador rotulo="Restrições alimentares" valor={alimentares.length} tom="lista" onClick={() => setAba("alimentacao")} />
       </div>
 
-      {inscSaude > 0 && (
-        <div className="rel-card px-3.5 py-2.5 flex flex-wrap items-center gap-2 text-[13px]" style={{ color: "var(--ink2)" }}>
-          <Selo tom="aviso">{inscSaude}</Selo>
-          inscrições com resposta de saúde ainda aguardam aprovação — entram nesta fila quando forem aprovadas.
-          <span className="flex-1" />
-          <Botao variante="fantasma" onClick={() => ir("inscricoes")}>Ver inscrições ↗</Botao>
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center gap-2">
-        <Abas aba={aba} setAba={setAba} n={{ fila: fila.length, alimentacao: alimentares.length, resolvidos: resolvidos.length }} />
+        <Abas aba={aba} setAba={setAba} n={{ pipeline: ETAPAS_SAUDE.reduce((s, e) => s + colunas[e.id].length, 0), alimentacao: alimentares.length }} />
         <span className="flex-1" />
-        <select className="rel-input" style={{ width: "auto", minWidth: 220 }} value={expFiltro} onChange={(e) => setExpFiltro(e.target.value)} aria-label="Filtrar por viagem">
-          <option value="">Todas as viagens</option>
-          {exps.map((e) => <option key={e.id} value={e.id}>{e.nome}</option>)}
+        <select className="rel-input" style={{ width: "auto", minWidth: 220 }} value={expFiltro} onChange={(e) => setExpFiltro(e.target.value)} aria-label="Filtrar por expedição">
+          <option value="">Todas as expedições e pacotes</option>
+          {exps.map((e) => <option key={e.id} value={e.id}>{e.nome}{e.data_embarque ? ` · ${formatDate(e.data_embarque)}` : ""}</option>)}
         </select>
         <div style={{ minWidth: 240 }}><Busca valor={busca} onMudar={setBusca} placeholder="Buscar cliente…" /></div>
       </div>
 
       {aba === "alimentacao"
-        ? <Alimentacao casos={lista} onCopiar={async (t) => avisar((await copiar(t)) ? "Resumo copiado — cole no WhatsApp/e-mail do fornecedor" : "Não consegui copiar", "ok")} />
-        : lista.length === 0
-          ? <Vazio titulo={aba === "fila" ? "Nenhum caso esperando o médico." : "Nenhum laudo resolvido ainda."} texto="Os casos vêm das respostas de saúde do formulário de inscrição das viagens que ainda não embarcaram." />
-          : <div className="space-y-2.5">
-            {lista.map((c) => (
-              <CartaoCaso key={c.pax.id} c={c} aberto={aberto === c.pax.id} podeSalvar={dados.temLaudos}
-                onAlternar={() => setAberto((a) => (a === c.pax.id ? null : c.pax.id))}
-                onMudou={carregar}
-                onPassageiro={() => ir(c.exp.tipo === "pacote" ? "pacotes" : "expedicoes", `${c.exp.id}/passageiros/pax/${c.pax.id}`)} />
-            ))}
-          </div>}
+        ? <Alimentacao casos={listaAlimentar} onCopiar={async (t) => avisar((await copiar(t)) ? "Resumo copiado — cole no WhatsApp/e-mail do fornecedor" : "Não consegui copiar", "ok")} />
+        : <Pipeline colunas={colunas}
+          onAbrirCaso={(c) => setAberto(c.pax.id)}
+          onAbrirInscricao={(i) => ir(telaDe(i.exp), `${i.exp.id}/passageiros`)} />}
+
+      {casoAberto && (
+        <Modal aberto titulo={casoAberto.pax.nome_completo} onFechar={() => setAberto(null)} largura={760}>
+          <CartaoCaso c={casoAberto} aberto={casoAberto.clinico.length > 0} podeSalvar={dados.temLaudos}
+            onAlternar={() => setAberto(null)}
+            onMudou={carregar}
+            onPassageiro={() => { setAberto(null); ir(telaDe(casoAberto.exp), `${casoAberto.exp.id}/passageiros/pax/${casoAberto.pax.id}`); }} />
+        </Modal>
+      )}
     </div>
+  );
+}
+
+// ── Pipeline (quadro em colunas) ─────────────────────────────────────────────
+const COR_COLUNA: Record<EtapaSaude, string> = {
+  inscricao: "var(--ink3)", declarou: "var(--err-ink)", andamento: "var(--warn-ink)", receita: "#5B21B6", liberado: "#166534", nao_apto: "var(--err-ink)",
+};
+
+function Pipeline({ colunas, onAbrirCaso, onAbrirInscricao }: {
+  colunas: Record<EtapaSaude, CartaoPipeline<ItemPipe>[]>;
+  onAbrirCaso: (c: CasoSaude) => void;
+  onAbrirInscricao: (i: InscSaude) => void;
+}) {
+  const total = ETAPAS_SAUDE.reduce((s, e) => s + colunas[e.id].length, 0);
+  if (!total) return <Vazio titulo="Nenhum caso de saúde nas viagens que vão acontecer." texto="Os casos vêm das respostas de saúde do formulário de inscrição e das receitas marcadas na triagem." />;
+  return (
+    <div className="overflow-x-auto pb-2 -mx-1 px-1">
+      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${ETAPAS_SAUDE.length}, minmax(230px, 1fr))`, minWidth: ETAPAS_SAUDE.length * 242 }}>
+        {ETAPAS_SAUDE.map((e) => {
+          const l = colunas[e.id];
+          return (
+            <section key={e.id} aria-label={e.rotulo} className="rounded-xl p-2.5 space-y-2 flex flex-col" style={{ background: "var(--card2)", border: "1px solid var(--line)" }}>
+              <header className="px-0.5" title={e.dica}>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: COR_COLUNA[e.id] }} />
+                  <span className="text-[12.5px] font-bold uppercase tracking-wide" style={{ color: "var(--ink2)" }}>{e.rotulo}</span>
+                  <span className="ml-auto text-[12px] font-bold tabular-nums" style={{ color: l.length ? COR_COLUNA[e.id] : "var(--ink3)" }}>{l.length}</span>
+                </div>
+                <p className="text-[11px] mt-0.5" style={{ color: "var(--ink3)", margin: 0 }}>{e.dica}</p>
+              </header>
+              <div className="space-y-2">
+                {l.length === 0
+                  ? <p className="text-[12px] text-center py-3" style={{ color: "var(--ink3)", margin: 0 }}>—</p>
+                  : l.map((k) => k.item.tipo === "caso"
+                    ? <CartaoPipe key={`c-${k.item.c.pax.id}`} item={k.item} onClick={() => onAbrirCaso((k.item as { c: CasoSaude }).c)} />
+                    : <CartaoPipe key={`i-${k.item.i.id}`} item={k.item} onClick={() => onAbrirInscricao((k.item as { i: InscSaude }).i)} />)}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CartaoPipe({ item, onClick }: { item: ItemPipe; onClick: () => void }) {
+  const nome = item.tipo === "caso" ? item.c.pax.nome_completo : item.i.nome;
+  const exp = item.tipo === "caso" ? item.c.exp : item.i.exp;
+  const dias = item.tipo === "caso" ? item.c.dias : item.i.dias;
+  const resolvido = item.tipo === "caso" && (item.c.laudo?.status === "emitido" || item.c.laudo?.status === "dispensado");
+  const urg = resolvido ? "neutro" : urgencia(dias);
+  return (
+    <button type="button" onClick={onClick} className="rel-card w-full p-2.5 text-left space-y-1 hover:shadow-md transition-shadow"
+      style={{ borderLeft: `4px solid ${COR_URG[urg]}` }}
+      title={item.tipo === "caso" ? "Abrir o caso (laudo, PDF, anotações)" : "Abrir os passageiros da viagem pra aprovar a inscrição"}>
+      <div className="text-[13px] font-bold leading-snug" style={{ color: "var(--ink)" }}>{nome}</div>
+      <div className="text-[11.5px] leading-snug" style={{ color: "var(--ink3)" }}>
+        {exp.tipo === "pacote" ? "Pacote" : "Expedição"} {exp.nome}
+        {exp.data_embarque ? ` · ${formatDate(exp.data_embarque)}` : ""}
+      </div>
+      <div className="flex flex-wrap gap-1 pt-0.5">
+        <Selo tom={urg === "neutro" ? "neutro" : urg}>{textoDias(dias)}</Selo>
+        {item.tipo === "caso" && item.c.clinico.length > 0 && <Selo tom="erro" titulo={item.c.clinico.map((x) => x.curto).join(" · ")}>{item.c.clinico.length === 1 ? item.c.clinico[0].curto : `${item.c.clinico.length} alertas`}</Selo>}
+        {item.tipo === "caso" && item.c.laudo?.apto && <Selo tom={TOM_APTO[item.c.laudo.apto]}>{ROTULO_APTO[item.c.laudo.apto]}</Selo>}
+        {item.tipo === "caso" && item.c.laudo?.arquivo_path && <Selo tom="lista">PDF</Selo>}
+        {item.tipo === "caso" && item.c.pax.receita_pendente && <Selo tom={item.c.pax.receita_enviada_em ? "ok" : "lista"}>{item.c.pax.receita_enviada_em ? "Receita enviada" : "Receita"}</Selo>}
+        {item.tipo === "inscricao" && <Selo tom="aviso">Aguardando aprovação</Selo>}
+      </div>
+    </button>
   );
 }
 
@@ -166,7 +256,7 @@ function Abas({ aba, setAba, n }: { aba: Aba; setAba: (a: Aba) => void; n: Recor
       {rotulo} ({n[id]})
     </button>
   );
-  return <div role="tablist" className="flex flex-wrap gap-1.5">{item("fila", "Fila do médico")}{item("alimentacao", "Alimentação · logística")}{item("resolvidos", "Laudos resolvidos")}</div>;
+  return <div role="tablist" className="flex flex-wrap gap-1.5">{item("pipeline", "Pipeline da saúde")}{item("alimentacao", "Alimentação · logística")}</div>;
 }
 
 function Itens({ titulo, itens, tom }: { titulo: string; itens: ItemDeclarado[]; tom: "erro" | "aviso" | "neutro" }) {

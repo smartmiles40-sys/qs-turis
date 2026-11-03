@@ -59,7 +59,7 @@ export const ITENS_REL: ItemRel[] = [
   { id: "propostas", label: "Propostas", icon: Icon.doc, grupo: "entre", dica: "Propostas pra aprovar e acompanhar" },
   { id: "viagens", label: "Viagens", icon: Icon.aviao, grupo: "posvenda", dica: "Todas as viagens vendidas" },
   { id: "prioridades", label: "Prioridades", icon: Icon.alerta, grupo: "posvenda", dica: "Pacotes prioritários e o check do dia" },
-  { id: "alertas", label: "Alertas", icon: Icon.alerta, grupo: "posvenda", dica: "Passaporte vencendo, etapa atrasada…" },
+  // 03/11 (Bruno): "Alertas" saiu ("ninguém vai olhar"); #rel/alertas cai em Viagens.
   { id: "vendas", label: "Pipeline de vendas", icon: Icon.funil, grupo: "posvenda", dica: "Oportunidades de vender de novo pra base" },
   { id: "campanhas", label: "Campanhas", icon: Icon.disparo, grupo: "posvenda", dica: "Disparos, automações, pesquisas e recompra" },
   { id: "recompra", label: "Recompra", icon: Icon.recompra, grupo: "posvenda", dica: "Quem voltou e está pronto pra próxima", noCompleto: false },
@@ -70,9 +70,11 @@ export const ITENS_REL: ItemRel[] = [
   { id: "exp-painel", label: "Painel das viagens", icon: Icon.grafico, grupo: "expedicoes", dica: "Quem embarca, quem está viajando e o que falta em cada viagem" },
   { id: "exp-expedicoes", label: "Expedições", icon: Icon.mapa, grupo: "expedicoes", dica: "Grupos das expedições (só leitura)" },
   { id: "exp-pacotes", label: "Pacotes", icon: Icon.carteira, grupo: "expedicoes", dica: "Pacotes vendidos" },
-  { id: "exp-inscricoes", label: "Inscrições", icon: Icon.inscricao, grupo: "expedicoes", dica: "Fichas de inscrição pra decidir" },
-  { id: "exp-saude", label: "Saúde · médico", icon: Icon.alerta, grupo: "expedicoes", dica: "Quem tem alerta de saúde e o laudo do médico" },
-  { id: "exp-avisos", label: "Avisos das expedições", icon: Icon.megafone, grupo: "expedicoes", dica: "O que foi avisado aos passageiros" },
+  // 03/11 (Bruno): Inscrições e Avisos saíram do menu e moram DENTRO da expedição —
+  // a inscrição como selo no nome de cada passageiro (aba Passageiros, com aprovar/
+  // recusar ali) e os avisos na Visão geral. #rel/exp-inscricoes e #rel/exp-avisos
+  // continuam abrindo as telas antigas.
+  { id: "exp-saude", label: "Saúde · médico", icon: Icon.alerta, grupo: "expedicoes", dica: "Pipeline dos casos de saúde: do alerta no formulário ao liberado pelo médico" },
   { id: "clientes", label: "Clientes", icon: Icon.cliente, grupo: "carteira", dica: "Fichas dos clientes e arrumar cadastros" },
   { id: "agenda", label: "Agenda do time", icon: Icon.agenda, grupo: "acompanhamento", dica: "Compromissos de todo o time" },
   { id: "kpis", label: "Desempenho", icon: Icon.kpi, grupo: "acompanhamento", dica: "KPIs e prazo de resposta", so: "kpis" },
@@ -95,6 +97,9 @@ export type Contagens = Partial<Record<string, { count?: number; late?: boolean;
 
 const pode = (i: ItemRel, a: Acesso) =>
   i.so === "supervisao" ? a.supervisao : i.so === "time" ? a.verTime : i.so === "kpis" ? a.verKpis : true;
+
+/** Ids que existem no catálogo (menus por papel salvos antes podem ter item que saiu, ex. "alertas"). */
+export const IDS_REL = new Set(ITENS_REL.map((i) => i.id));
 
 /** Itens que a pessoa vê no menu. `filtro` null = menu completo. */
 export function itensDoMenu(a: Acesso, filtro: Set<string> | null): ItemRel[] {

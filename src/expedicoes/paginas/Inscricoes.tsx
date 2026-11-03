@@ -72,14 +72,24 @@ function Grupo({ titulo, children }: { titulo: string; children: ReactNode[] | R
   );
 }
 
-export default function Inscricoes() {
+/**
+ * 03/11 (Bruno: "isso pode ficar dentro das expedições, atrelado ao nome da pessoa"):
+ * `expedicaoId` + `embutido` = a mesma fila (aprovar/recusar/triagem de saúde),
+ * só das inscrições daquela expedição, dentro da aba Passageiros do cockpit — sem
+ * o título, sem as abas, sem mexer no endereço. A tela solta (#…/inscricoes) segue igual.
+ */
+export default function Inscricoes({ expedicaoId, embutido = false, abrirId, onMudou }: {
+  expedicaoId?: string; embutido?: boolean; abrirId?: string | null; onMudou?: () => void;
+} = {}) {
   const { somenteLeitura, podeDecidirInscricao, ir, avisar } = useExp();
-  const ehAdmin = useEhAdminExp();
+  const ehAdminReal = useEhAdminExp();
+  const ehAdmin = ehAdminReal && !embutido;
   const [linhas, setLinhas] = useState<InscricaoPendenteRow[] | null>(null);
   const [exps, setExps] = useState<Map<string, ExpedicaoRow>>(new Map());
   const [decisoes, setDecisoes] = useState<Decisao[]>([]);
   const [erro, setErro] = useState<string | null>(null);
-  const [abertos, setAbertos] = useState<Set<string>>(new Set());
+  const [abertos, setAbertos] = useState<Set<string>>(() => new Set(abrirId ? [abrirId] : []));
+  useEffect(() => { if (abrirId) setAbertos((s) => new Set([...s, abrirId])); }, [abrirId]);
   const [verRecusadas, setVerRecusadas] = useState(false);
   const [verLog, setVerLog] = useState(false);
   const [recusando, setRecusando] = useState<InscricaoPendenteRow | null>(null);
@@ -96,17 +106,18 @@ export default function Inscricoes() {
   });
   // 03/11: só as inscrições de viagens que já embarcaram (fila velha, 26 de 41 em 03/11).
   const [soSaiu, setSoSaiu] = useState(() => lerParamDoHash("saiu") === "1");
-  useEffect(() => { if (aba) gravarParamNoHash("aba", aba); }, [aba]);
-  useEffect(() => { gravarParamNoHash("saiu", soSaiu ? "1" : null); }, [soSaiu]);
+  // embutida no cockpit: o endereço é do cockpit (?aba=passageiros) — não grava nada nele
+  useEffect(() => { if (aba && !embutido) gravarParamNoHash("aba", aba); }, [aba, embutido]);
+  useEffect(() => { if (!embutido) gravarParamNoHash("saiu", soSaiu ? "1" : null); }, [soSaiu, embutido]);
 
   const carregar = useCallback(async () => {
     try {
       const [ins, ex] = await Promise.all([lerTudo<InscricaoPendenteRow>("inscricoes_pendentes"), listarExpedicoes()]);
-      setLinhas(ins);
+      setLinhas(expedicaoId ? ins.filter((i) => i.expedicao_id === expedicaoId) : ins);
       setExps(new Map(ex.map((e) => [e.id, e])));
       setErro(null);
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar"); }
-  }, []);
+  }, [expedicaoId]);
   const carregarLog = useCallback(async () => {
     const { data } = await supabase.from("inscricoes_decisoes")
       .select("id,expedicao_id,cpf,nome_completo,acao,motivo,decidido_por_nome,created_at")
@@ -152,6 +163,7 @@ export default function Inscricoes() {
       // Bitrix (comentário no negócio, direto do QS), melhor esforço — nunca desfaz a aprovação.
       if (r?.passageiro_id) chamarRotaAdmin("exp_inscricao_bitrix", { passageiro_id: r.passageiro_id }).catch(() => { /* fica no log da Vercel */ });
       await carregar();
+      onMudou?.();
       if (ehAdmin) void carregarLog();
     } catch (e) { avisar(e instanceof Error ? e.message : "Não foi possível aprovar", "erro"); }
     finally { setOcupado(null); }
@@ -159,7 +171,7 @@ export default function Inscricoes() {
 
   async function restaurar(it: InscricaoPendenteRow) {
     setOcupado(it.id);
-    try { await rpc("exp_inscricao_restaurar", { p_id: it.id }); avisar("Inscrição voltou pra fila"); await carregar(); if (ehAdmin) void carregarLog(); }
+    try { await rpc("exp_inscricao_restaurar", { p_id: it.id }); avisar("Inscrição voltou pra fila"); await carregar(); onMudou?.(); if (ehAdmin) void carregarLog(); }
     catch (e) { avisar(e instanceof Error ? e.message : "Não foi possível restaurar", "erro"); }
     finally { setOcupado(null); }
   }
@@ -269,7 +281,7 @@ export default function Inscricoes() {
 
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Botao variante="fantasma" onClick={() => alternar(it.id)}>{aberto ? "Esconder dados" : "Ver todos os dados"}</Botao>
-          <Botao variante="fantasma" onClick={() => ir("expedicoes", `${it.expedicao_id}/passageiros`)}>Passageiros da expedição ↗</Botao>
+          {!embutido && <Botao variante="fantasma" onClick={() => ir(exp?.tipo === "pacote" ? "pacotes" : "expedicoes", `${it.expedicao_id}/passageiros`)}>Passageiros da expedição ↗</Botao>}
           <span className="flex-1" />
           {!recusada && podeDecidirInscricao && (
             <>
@@ -306,6 +318,71 @@ export default function Inscricoes() {
       </div>
     </div>
   );
+  const modais = (
+    <>
+      <ModalRecusa it={recusando} exp={recusando ? exps.get(recusando.expedicao_id) : undefined} onFechar={() => setRecusando(null)}
+        onFeito={async () => { setRecusando(null); avisar("Inscrição movida para Recusadas"); await carregar(); onMudou?.(); if (ehAdmin) void carregarLog(); }} />
+
+      <Modal aberto={!!excluindo} titulo="Excluir definitivamente" onFechar={() => setExcluindo(null)} largura={460}
+        rodape={<>
+          <Botao onClick={() => setExcluindo(null)}>Cancelar</Botao>
+          <Botao variante="perigo" disabled={!!ocupado} onClick={async () => {
+            if (!excluindo) return;
+            setOcupado(excluindo.id);
+            try {
+              const caminhos = await rpc<string[]>("exp_inscricao_excluir", { p_id: excluindo.id });
+              if (caminhos?.length) await supabase.storage.from("arquivos-expedicoes").remove(caminhos);
+              avisar("Inscrição excluída");
+              setExcluindo(null);
+              await carregar(); onMudou?.(); if (ehAdmin) void carregarLog();
+            } catch (e) { avisar(e instanceof Error ? e.message : "Não foi possível excluir", "erro"); }
+            finally { setOcupado(null); }
+          }}>Excluir de vez</Botao>
+        </>}>
+        <p className="text-[13.5px]" style={{ color: "var(--ink2)" }}>
+          Excluir DEFINITIVAMENTE a inscrição de <strong>{excluindo?.nome_completo ?? "—"}</strong>? Isso apaga os dados e os anexos
+          (passaporte, foto, certificado, anexo do motivo) — não dá pra desfazer. Anexo que já estiver no cadastro de algum passageiro é mantido.
+        </p>
+      </Modal>
+    </>
+  );
+
+  // 03/11: dentro do cockpit (aba Passageiros) — só a fila desta expedição, com aprovar/recusar.
+  if (embutido) {
+    const lista = soSaude ? comAlerta : todasPendentes;
+    const primeiroAberto = abrirId ? lista.find((i) => i.id === abrirId) : undefined;
+    const ordem = primeiroAberto ? [primeiroAberto, ...lista.filter((i) => i !== primeiroAberto)] : lista;
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[13.5px] font-bold" style={{ color: "var(--ink)" }}>Aguardando aprovação</span>
+          <Selo tom={todasPendentes.length ? "aviso" : "neutro"}>{todasPendentes.length}</Selo>
+          <span className="flex-1" />
+          {comAlerta.length > 0 && (
+            <button type="button" onClick={() => setSoSaude((v) => !v)} aria-pressed={soSaude}
+              className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
+              style={soSaude ? { background: "var(--warn-bg)", color: "var(--warn-ink)", border: "1px solid var(--warn-ink)" } : { background: "var(--card)", color: "var(--ink2)", border: "1px solid var(--line)" }}>
+              Só com alerta de saúde ({comAlerta.length})
+            </button>
+          )}
+        </div>
+        {!podeDecidirInscricao && <p className="text-[12.5px]" style={{ color: "var(--ink3)", margin: 0 }}>Você vê as inscrições, mas quem aprova é o Relacionamento ou Operações.</p>}
+        {ordem.length === 0
+          ? <p className="text-[13px]" style={{ color: "var(--ink3)", margin: 0 }}>Nenhuma inscrição desta viagem esperando decisão.</p>
+          : <div className="grid gap-3 lg:grid-cols-2">{ordem.map((it) => card(it, false))}</div>}
+        {recusadas.length > 0 && (
+          <section className="space-y-3">
+            <button type="button" onClick={() => setVerRecusadas((v) => !v)} className="text-[13px] font-bold" style={{ color: "var(--ink2)" }}>
+              {verRecusadas ? "▾" : "▸"} Recusadas ({recusadas.length})
+            </button>
+            {verRecusadas && <div className="grid gap-3 lg:grid-cols-2">{recusadas.map((it) => card(it, true))}</div>}
+          </section>
+        )}
+        {modais}
+      </div>
+    );
+  }
+
   // 30/10: o alerta das receitas (0223) fica acima das abas; cada linha abre a ficha, aba Saúde
   if (aba === "falta") return <div className="space-y-5">{abas}<ReceitasAEnviar /><QuemFalta /></div>;
 
@@ -380,30 +457,7 @@ export default function Inscricoes() {
         </section>
       )}
 
-      <ModalRecusa it={recusando} exp={recusando ? exps.get(recusando.expedicao_id) : undefined} onFechar={() => setRecusando(null)}
-        onFeito={async () => { setRecusando(null); avisar("Inscrição movida para Recusadas"); await carregar(); if (ehAdmin) void carregarLog(); }} />
-
-      <Modal aberto={!!excluindo} titulo="Excluir definitivamente" onFechar={() => setExcluindo(null)} largura={460}
-        rodape={<>
-          <Botao onClick={() => setExcluindo(null)}>Cancelar</Botao>
-          <Botao variante="perigo" disabled={!!ocupado} onClick={async () => {
-            if (!excluindo) return;
-            setOcupado(excluindo.id);
-            try {
-              const caminhos = await rpc<string[]>("exp_inscricao_excluir", { p_id: excluindo.id });
-              if (caminhos?.length) await supabase.storage.from("arquivos-expedicoes").remove(caminhos);
-              avisar("Inscrição excluída");
-              setExcluindo(null);
-              await carregar(); if (ehAdmin) void carregarLog();
-            } catch (e) { avisar(e instanceof Error ? e.message : "Não foi possível excluir", "erro"); }
-            finally { setOcupado(null); }
-          }}>Excluir de vez</Botao>
-        </>}>
-        <p className="text-[13.5px]" style={{ color: "var(--ink2)" }}>
-          Excluir DEFINITIVAMENTE a inscrição de <strong>{excluindo?.nome_completo ?? "—"}</strong>? Isso apaga os dados e os anexos
-          (passaporte, foto, certificado, anexo do motivo) — não dá pra desfazer. Anexo que já estiver no cadastro de algum passageiro é mantido.
-        </p>
-      </Modal>
+      {modais}
     </div>
   );
 }

@@ -9,25 +9,35 @@ import { Vazio } from "@/rel/ui";
 import { useExp } from "../contexto";
 import { Busca, Carregando, Selo, useAoVivo } from "../ui";
 import { formatDate } from "../lib/utils";
-import { calcularAlertas, carregarProntidaoAtivas, type AlertaOperacional } from "./_globais/prontidaoGlobal";
+import { calcularAlertas, carregarProntidaoAtivas, prontidaoDe, type AlertaOperacional } from "./_globais/prontidaoGlobal";
+import type { ExpedicaoRow } from "../lib/database";
 
 type Filtro = "todos" | "critico" | "atencao";
 
-export default function Avisos() {
+/**
+ * 03/11 (Bruno: "Avisos da expedição pode tirar também, isso deve ficar dentro da
+ * expedição"): com `exp`, a mesma lista só daquela expedição, lendo só os
+ * passageiros dela (prontidaoDe([exp])), sem título e sem o cabeçalho do grupo —
+ * mora na Visão geral do cockpit. A tela solta (#…/avisos) segue igual.
+ */
+export default function Avisos({ exp }: { exp?: ExpedicaoRow } = {}) {
   const { ir } = useExp();
+  const embutido = !!exp;
   const [alertas, setAlertas] = useState<AlertaOperacional[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const [busca, setBusca] = useState("");
 
   const carregar = useCallback(async () => {
-    try { setAlertas(calcularAlertas(await carregarProntidaoAtivas({ soFuturas: true }))); setErro(null); }
+    try { setAlertas(calcularAlertas(exp ? await prontidaoDe([exp]) : await carregarProntidaoAtivas({ soFuturas: true }))); setErro(null); }
     catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar"); }
-  }, []);
+  }, [exp?.id, exp?.status, exp?.data_embarque, exp?.destino]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void carregar(); }, [carregar]);
   // Tabelas inteiras (avisos olham todas as expedições futuras): espera de 2 s pra
   // rajada de edição virar uma recarga. A leitura é leve e é a mesma do selo do menu.
-  useAoVivo([{ tabela: "passageiros" }, { tabela: "passageiro_requisitos" }, { tabela: "expedicoes" }], carregar, 2000);
+  useAoVivo(exp
+    ? [{ tabela: "passageiros", filtro: `expedicao_id=eq.${exp.id}` }, { tabela: "passageiro_requisitos" }]
+    : [{ tabela: "passageiros" }, { tabela: "passageiro_requisitos" }, { tabela: "expedicoes" }], carregar, 2000);
 
   const lista = alertas ?? [];
   const criticos = lista.filter((a) => a.severidade === "critico").length;
@@ -49,12 +59,14 @@ export default function Avisos() {
 
   return (
     <div className="space-y-4">
-      <header>
-        <h1 className="text-[22px] font-bold" style={{ color: "var(--ink)" }}>Avisos</h1>
-        <p className="text-[13px]" style={{ color: "var(--ink3)" }}>
-          Pendências de passageiros que entraram no prazo — passaporte, visto, vacina, seguro, aéreo, contrato…
-        </p>
-      </header>
+      {!embutido && (
+        <header>
+          <h1 className="text-[22px] font-bold" style={{ color: "var(--ink)" }}>Avisos</h1>
+          <p className="text-[13px]" style={{ color: "var(--ink3)" }}>
+            Pendências de passageiros que entraram no prazo — passaporte, visto, vacina, seguro, aéreo, contrato…
+          </p>
+        </header>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1" role="group" aria-label="Filtrar avisos">
@@ -70,22 +82,24 @@ export default function Avisos() {
       </div>
 
       {erro && <p className="text-[13px]" style={{ color: "var(--err-ink)" }}>{erro}</p>}
-      {!alertas ? <Carregando texto="Conferindo a prontidão de todas as expedições…" /> : grupos.length === 0 ? (
+      {!alertas ? <Carregando texto={embutido ? "Conferindo a prontidão dos passageiros…" : "Conferindo a prontidão de todas as expedições…"} /> : grupos.length === 0 ? (
         lista.length === 0
-          ? <div className="rel-card"><Vazio titulo="Tudo dentro do prazo" texto="Nenhum aviso no momento — passaportes, vistos, documentos e prazos das expedições estão em dia. 🎉" /></div>
+          ? embutido
+            ? <p className="text-[13px]" style={{ color: "var(--ink3)", margin: 0 }}>Nenhum aviso: nada de passaporte, visto, documento ou prazo vencendo nesta viagem.</p>
+            : <div className="rel-card"><Vazio titulo="Tudo dentro do prazo" texto="Nenhum aviso no momento — passaportes, vistos, documentos e prazos das expedições estão em dia. 🎉" /></div>
           : <div className="rel-card py-10 text-center text-[13px]" style={{ color: "var(--ink3)" }}>Nenhum aviso para o filtro/busca atual.</div>
       ) : (
         grupos.map((g) => (
           <section key={g.id} className="rel-card overflow-hidden">
-            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b" style={{ borderColor: "var(--line)", background: "var(--card2)" }}>
+            {!embutido && <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b" style={{ borderColor: "var(--line)", background: "var(--card2)" }}>
               <button className="text-[13.5px] font-bold hover:underline text-left" style={{ color: "var(--ink)" }} onClick={() => ir("expedicoes", `${g.id}/passageiros`)}>{g.nome}</button>
               <span className="text-[11.5px]" style={{ color: "var(--ink3)" }}>embarque {formatDate(g.embarque)} · faltam {g.dias} dia{g.dias === 1 ? "" : "s"}</span>
               <span className="ml-auto"><Selo tom={g.dias <= 30 ? "erro" : "aviso"}>{g.itens.length} aviso{g.itens.length === 1 ? "" : "s"}</Selo></span>
-            </div>
+            </div>}
             <ul>
               {g.itens.map((a, i) => (
                 <li key={`${a.passageiro_id}-${a.tipo}-${i}`}>
-                  <button onClick={() => ir("expedicoes", `${a.expedicao_id}/passageiros/pax/${a.passageiro_id}`)}
+                  <button onClick={() => ir(exp?.tipo === "pacote" ? "pacotes" : "expedicoes", `${a.expedicao_id}/passageiros/pax/${a.passageiro_id}`)}
                     className="w-full flex items-center gap-3 px-4 py-2 text-left border-b last:border-0 rel-linha" style={{ borderColor: "var(--line)" }}>
                     <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: a.severidade === "critico" ? "#DC2626" : "#EA580C" }} aria-label={a.severidade === "critico" ? "Crítico" : "Atenção"} />
                     <span className="flex-1 min-w-0">

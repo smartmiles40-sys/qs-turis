@@ -33,8 +33,10 @@ export interface Laudo {
 export interface NotaLaudo { id: string; laudo_id: string; texto: string; autor_nome: string | null; criado_em: string }
 
 export type Pax = Pick<PassageiroRow, "id" | "nome_completo" | "cpf" | "telefone" | "email" | "expedicao_id" | "cliente_id" | "status_reserva"
-  | "saude" | "perfil_viajante" | "inscricao_origem" | "restricoes_alimentares" | "condicoes_medicas" | "data_nascimento" | "liberado_expedamigo">;
-const COLUNAS_PAX = "id,nome_completo,cpf,telefone,email,expedicao_id,cliente_id,status_reserva,saude,perfil_viajante,inscricao_origem,restricoes_alimentares,condicoes_medicas,data_nascimento,liberado_expedamigo";
+  | "saude" | "perfil_viajante" | "inscricao_origem" | "restricoes_alimentares" | "condicoes_medicas" | "data_nascimento" | "liberado_expedamigo"
+  | "receita_pendente" | "receita_enviada_em">;
+// 03/11: + receita_pendente/receita_enviada_em (0223, aplicada) pra coluna "Receita a enviar" do pipeline
+const COLUNAS_PAX = "id,nome_completo,cpf,telefone,email,expedicao_id,cliente_id,status_reserva,saude,perfil_viajante,inscricao_origem,restricoes_alimentares,condicoes_medicas,data_nascimento,liberado_expedamigo,receita_pendente,receita_enviada_em";
 
 export interface ItemDeclarado { campo: string; curto: string; detalhe: string | null }
 
@@ -115,7 +117,8 @@ export async function carregarFila(hoje: string): Promise<{ casos: CasoSaude[]; 
   for (const p of pax) {
     const c = classificar(p);
     const laudo = laudoDe.get(p.id) ?? null;
-    if (!c.clinico.length && !c.alimentar.length && !laudo) continue;
+    const receitaAberta = !!p.receita_pendente && !p.receita_enviada_em;
+    if (!c.clinico.length && !c.alimentar.length && !laudo && !receitaAberta) continue;
     const exp = p.expedicao_id ? porId.get(p.expedicao_id) : undefined;
     if (!exp) continue;
     casos.push({ pax: p, exp, dias: diasAte(hoje, exp.data_embarque), ...c, laudo });

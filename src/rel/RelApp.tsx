@@ -48,7 +48,9 @@ const ConfigPage = lazy(() => import("./config/ConfigPage"));
 const ViagensPage = lazy(() => import("./viagens/ViagensPage"));
 const EsteiraPage = lazy(() => import("./viagens/EsteiraPage"));
 const ViagemPage = lazy(() => import("./viagens/ViagemPage"));
-const AlertasPage = lazy(() => import("./viagens/AlertasPage"));
+// 03/11 (Bruno: "pode tirar a parte de Alertas, que ninguém vai olhar"): a tela
+// Alertas (viagens/AlertasPage.tsx, rel_alertas) saiu do caminho — sem menu, sem
+// bloco no Início. O endereço antigo #rel/alertas cai em Viagens (lerRota).
 const PrioridadesPage = lazy(() => import("@/prioridades/PrioridadesPage")); // V2 (0226): pacotes prioritários
 // Disparos (28/10, 0217): o motor único do disparo em massa (o mesmo do
 // Comercial), com o público de clientes e o link do grupo. A tela antiga
@@ -82,12 +84,12 @@ type Rota =
   | { tela: "inicio" }
   | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "solicitacoes"; id?: string } | { tela: "propostas"; id?: string } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" } | { tela: "cadastros" }
-  | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "alertas" } | { tela: "prioridades" }
+  | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "prioridades" }
   | { tela: "campanhas" } | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" } | { tela: "vendas"; id?: string }
   | { tela: "config" } | { tela: "faxina" } | { tela: "mais" } | { tela: TelaRelExp; id?: string };
 type Tela = Rota["tela"];
 
-const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "cadastros", "esteira", "viagens", "alertas", "prioridades", "campanhas", "disparos", "automacoes", "pesquisas", "recompra", "config", "faxina", "mais"];
+const SIMPLES: Tela[] = ["inicio", "chamados", "modelos", "agenda", "prazo", "kpis", "whatsapp", "equipe", "clientes", "duplicados", "cadastros", "esteira", "viagens", "prioridades", "campanhas", "disparos", "automacoes", "pesquisas", "recompra", "config", "faxina", "mais"];
 
 /** As 4 telas que moram dentro de Campanhas: abertas, acendem "Campanhas" no menu. */
 const DENTRO_DE_CAMPANHAS: string[] = ["disparos", "automacoes", "pesquisas", "recompra"];
@@ -99,6 +101,11 @@ function lerRota(): Rota {
   if (area !== "rel") return { tela: "inicio" };
   if (tela === "cliente" && id) return { tela: "ficha", id };
   if (tela === "viagem" && id) return { tela: "viagem", id };
+  // 03/11: Alertas saiu; link antigo (favorito, mensagem) abre Viagens e o endereço é reescrito
+  if (tela === "alertas") {
+    history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#rel/viagens`);
+    return { tela: "viagens" };
+  }
   if (tela === "atendimento") return id ? { tela: "atendimento", id } : { tela: "atendimento" };
   if (tela === "grupos") return id ? { tela: "grupos", id: decodeURIComponent(id) } : { tela: "grupos" };
   if (tela === "solicitacoes") return id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" };
@@ -129,7 +136,7 @@ function limparHash() {
 // ── Contadores do menu ──
 interface Contadores {
   esperando: number; foraDoPrazo: number; duplicados: number;
-  alertasAltos: number; chamadosVencidos: number;
+  chamadosVencidos: number;
   /** 0142: grupos com mensagem nova e quantos marcaram o número */
   gruposNovos?: number; gruposMencao?: number;
   /** 0184: viagens que eu cuido (vão acontecer) e as que ninguém cuida */
@@ -143,23 +150,15 @@ async function contarDonos(eu: string): Promise<{ minhasViagens: number; semDono
   return { minhasViagens: m.count ?? 0, semDono: s.count ?? 0 };
 }
 
-async function contarAlertasEChamados(): Promise<{ alertasAltos: number; chamadosVencidos: number }> {
-  const [a, c] = await Promise.all([
-    supabase.from("rel_alertas").select("tipo", { count: "exact", head: true }).eq("gravidade", "alta"),
-    supabase.from("rel_chamados").select("id", { count: "exact", head: true }).neq("status", "resolvido").lt("prazo", new Date().toISOString()),
-  ]);
-  return { alertasAltos: a.count ?? 0, chamadosVencidos: c.count ?? 0 };
+async function contarChamadosVencidos(): Promise<{ chamadosVencidos: number }> {
+  const c = await supabase.from("rel_chamados").select("id", { count: "exact", head: true }).neq("status", "resolvido").lt("prazo", new Date().toISOString());
+  return { chamadosVencidos: c.count ?? 0 };
 }
 
 // ── Tela inicial ──
-interface AlertaCurto { tipo: string; gravidade: string; titulo: string; detalhe: string; cliente_id: string | null; viagem_id: string | null }
-
 function Inicio({ resumo, cont, nome, ir }: { resumo: ResumoDoMenu | null; cont: Contadores | null; nome: string; ir: (r: Rota) => void }) {
-  const [alertas, setAlertas] = useState<AlertaCurto[] | null>(null);
   const [embarques, setEmbarques] = useState<{ id: string; titulo: string; data_embarque: string; passageiros: number }[]>([]);
   useEffect(() => {
-    supabase.from("rel_alertas").select("tipo, gravidade, titulo, detalhe, cliente_id, viagem_id").in("gravidade", ["alta", "media"]).order("data").limit(8)
-      .then(({ data }) => setAlertas((data ?? []) as AlertaCurto[]));
     // dia de São Paulo (o UTC já virava o dia às 21h) e só o que pede acompanhamento (0148: seguro sozinho não é embarque)
     const hoje = hojeSP();
     const em30 = new Date(new Date(`${hoje}T12:00:00Z`).getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
@@ -169,7 +168,6 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: ResumoDoMenu | null; cont:
 
   const cartoes: { rotulo: string; valor: number | undefined; dica: string; rota: Rota; tom?: "aviso" | "erro" }[] = [
     { rotulo: "Esperando resposta", valor: cont?.esperando, dica: cont?.foraDoPrazo ? `${cont.foraDoPrazo} fora do prazo` : "no WhatsApp", rota: { tela: "atendimento" }, tom: cont?.foraDoPrazo ? "erro" : undefined },
-    { rotulo: "Alertas importantes", valor: cont?.alertasAltos, dica: "passaporte vencendo, esteira atrasada…", rota: { tela: "alertas" }, tom: cont?.alertasAltos ? "aviso" : undefined },
     { rotulo: "Chamados vencidos", valor: cont?.chamadosVencidos, dica: "passaram do prazo", rota: { tela: "chamados" }, tom: cont?.chamadosVencidos ? "erro" : undefined },
     { rotulo: "Clientes", valor: resumo?.clientes, dica: resumo?.duplicados ? `${resumo.duplicados} possíveis duplicados` : "fichas ativas", rota: { tela: "clientes" } },
   ];
@@ -203,7 +201,7 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: ResumoDoMenu | null; cont:
         </button>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         {cartoes.map((c) => {
           const k = cor(c.tom);
           return (
@@ -217,31 +215,7 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: ResumoDoMenu | null; cont:
         })}
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        <section className="rel-card p-4 sm:p-5">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-[13px] font-bold uppercase tracking-wide" style={{ color: "var(--ink2)" }}>Precisa de atenção</h2>
-            <button className="text-[12px] font-semibold" style={{ color: "var(--rel-ink)" }} onClick={() => ir({ tela: "alertas" })}>Ver todos</button>
-          </div>
-          {alertas === null ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>
-            : alertas.length === 0 ? <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Nada pendente. 🎉</p>
-            : (
-              <ul className="space-y-1">
-                {alertas.map((a, i) => (
-                  <li key={i}>
-                    <button className="rel-linha w-full text-left p-2 -mx-2 rounded-lg flex gap-2 items-start"
-                      onClick={() => a.viagem_id ? ir({ tela: "viagem", id: a.viagem_id }) : a.cliente_id ? ir({ tela: "ficha", id: a.cliente_id }) : ir({ tela: "alertas" })}>
-                      <Etiqueta tom={a.gravidade === "alta" ? "erro" : "aviso"}>{a.gravidade === "alta" ? "urgente" : "atenção"}</Etiqueta>
-                      <span className="min-w-0">
-                        <span className="block text-[13px] font-semibold truncate" style={{ color: "var(--ink)" }}>{a.titulo}</span>
-                        <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>{a.detalhe}</span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-        </section>
+      <div>
         <section className="rel-card p-4 sm:p-5">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-[13px] font-bold uppercase tracking-wide" style={{ color: "var(--ink2)" }}>Embarques nos próximos 30 dias</h2>
@@ -309,14 +283,14 @@ export default function RelApp() {
       void Promise.all([
         carregarResumoDoMenu().catch(() => null),
         contarEsperando().catch(() => null),
-        contarAlertasEChamados().catch(() => null),
+        contarChamadosVencidos().catch(() => null),
         contarGruposNovos().catch(() => null),
         eu ? contarDonos(eu).catch(() => null) : Promise.resolve(null),
       ]).then(([r, f, ac, g, d]) => {
         if (r) setResumo(r);
         setCont({
           esperando: f?.esperando ?? 0, foraDoPrazo: f?.foraDoPrazo ?? 0, duplicados: r?.duplicados ?? 0,
-          alertasAltos: ac?.alertasAltos ?? 0, chamadosVencidos: ac?.chamadosVencidos ?? 0,
+          chamadosVencidos: ac?.chamadosVencidos ?? 0,
           gruposNovos: g?.grupos ?? 0, gruposMencao: g?.mencoes ?? 0,
           minhasViagens: d?.minhasViagens ?? 0, semDono: d?.semDono ?? 0,
         });
@@ -380,14 +354,15 @@ export default function RelApp() {
     solicitacoes: { count: sol.badge, late: sol.alerta },
     propostas: { count: aprovacoes || undefined },
     clientes: { count: cont?.duplicados },
-    alertas: { count: cont?.alertasAltos, late: true },
     faxina: { count: cont?.semDono },
   };
   const grupos = montarMenuRel(acesso, filtro, contagens);
   const noMenu = new Set(itensDoMenu(acesso, filtro).map((i) => i.id));
 
   // A tela de detalhe acende o item da lista dela.
-  const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "duplicados" || rota.tela === "cadastros" ? "clientes" : rota.tela === "exp-passageiros" ? "clientes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
+  const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "duplicados" || rota.tela === "cadastros" ? "clientes" : rota.tela === "exp-passageiros" ? "clientes"
+    // 03/11: Inscrições e Avisos saíram do menu (moram dentro da expedição): o link antigo acende Expedições
+    : rota.tela === "exp-inscricoes" || rota.tela === "exp-avisos" ? "exp-expedicoes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
   // Disparos/Automações/Pesquisas/Recompra abertos acendem "Campanhas" (se não estão soltos no menu).
   const ativoNoMenu = DENTRO_DE_CAMPANHAS.includes(ativo) && !noMenu.has(ativo) && noMenu.has("campanhas") ? "campanhas" : ativo;
   const navegar = (id: string) => ir({ tela: id === OUTROS_ID ? "mais" : id } as Rota);
@@ -496,7 +471,6 @@ export default function RelApp() {
             <ViagemPage key={rota.id} id={rota.id} onVoltar={() => ir({ tela: "viagens" })} onAbrirCliente={abrirCliente} onAbrirConversa={abrirConversa}
               onAbrirExpedicao={(exp, tipo) => ir({ tela: tipo === "pacote" ? "exp-pacotes" : "exp-expedicoes", id: exp })} />
           )}
-          {rota.tela === "alertas" && <AlertasPage onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
           {rota.tela === "disparos" && <DisparosPage setor="relacionamento" />}
           {rota.tela === "automacoes" && <AutomacoesPage />}
           {rota.tela === "pesquisas" && <PesquisasPage onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} />}
