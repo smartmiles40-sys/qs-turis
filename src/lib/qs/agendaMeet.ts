@@ -1,6 +1,6 @@
 // src/lib/qs/agendaMeet.ts
 // -----------------------------------------------------------------------------
-// Ponte do QS com o Google Calendar (via /api/agenda-meet → n8n).
+// Ponte do QS com o Google Calendar (via /api/agenda-meet → Calendar API; sem n8n desde 03/11/2026).
 //
 // Três ações, um endpoint só: criar, reagendar e cancelar.
 //
@@ -32,7 +32,7 @@ export interface RespostaAgenda {
   duplicado?: boolean;
   /** Evento criado, mas o Google não devolveu sala. Mostrar reunião sem link. */
   semMeet?: boolean;
-  /** E-mails malformados que o n8n descartou — vale avisar quem agendou. */
+  /** E-mails malformados que o servidor descartou — vale avisar quem agendou. */
   convidadosDescartados?: string[];
 }
 
@@ -86,14 +86,14 @@ async function chamar(acao: Acao, dados: Entrada): Promise<RespostaAgenda> {
       body: JSON.stringify(corpo),
     });
 
-    // 501 = N8N_AGENDA_URL não configurada. Já foi silêncio TOTAL, e custou
+    // 501 = GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN não configurados. Já foi silêncio TOTAL, e custou
     // caro: em 05/08 três reuniões reais nasceram sem sala e sem ninguém saber,
     // porque o front engolia este caso e a rota não gravava nada. Continua sem
     // estragar o agendamento (a reunião vale), mas agora avisa.
     if (r.status === 501) return { ok: false, desligado: true, aviso: "a agenda do Google está desligada" };
 
     const bruto = await r.text();
-    // Formato do corpo do /api/agenda-meet (que repassa o do n8n quase como veio).
+    // Formato do corpo do /api/agenda-meet (mesmo formato que o webhook do n8n devolvia).
     interface CorpoAgenda {
       ok?: boolean; erro?: string; error?: string; codigo?: string | number;
       event_id?: string | null; meet_link?: string | null; html_link?: string | null;
@@ -145,7 +145,7 @@ export function criarEvento(dados: Entrada): Promise<RespostaAgenda> {
 export async function reagendarEvento(dados: Entrada): Promise<RespostaAgenda> {
   const r = await chamar("reagendar", dados);
   if (r.precisaRecriar) {
-    // Contrato do n8n: "nao_encontrado" → o QS deve chamar criar com o mesmo
+    // Contrato da agenda (herdado do n8n): "nao_encontrado" → o QS deve chamar criar com o mesmo
     // meeting_id e gravar o event_id novo. Fazer isso aqui evita que cada tela
     // tenha que lembrar dessa regra.
     return criarEvento({ ...dados, eventId: null });

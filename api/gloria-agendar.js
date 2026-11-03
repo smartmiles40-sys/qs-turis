@@ -23,7 +23,7 @@
 //   • Opção vencida, ocupada ou com menos de 3h de antecedência.
 //   • MODO TESTE: faz todas as leituras, mostra o que faria, e não grava nada.
 //
-// Envs: GLORIA_SECRET + SUPABASE_* (+ N8N_AGENDA_* para a sala do Meet).
+// Envs: GLORIA_SECRET + SUPABASE_* (+ GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN para a sala do Meet).
 // -----------------------------------------------------------------------------
 
 import { rest, insert } from './_supabaseAdmin.js';

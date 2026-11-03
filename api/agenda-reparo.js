@@ -2,7 +2,7 @@
 // -----------------------------------------------------------------------------
 // REUNIÃO SEM MEET / SEM BITRIX SE CONSERTA SOZINHA (27/10/2026).
 //
-// Quando o n8n falha na hora de agendar, a reunião ficava assim pra sempre: sem
+// Quando o Google (antes, o n8n) falha na hora de agendar, a reunião ficava assim pra sempre: sem
 // link do Meet (`calendar_error` preenchido) ou sem o card do Bitrix atualizado
 // (`bitrix_synced` falso). Ninguém tentava de novo. Em 30 dias: 1 futura sem
 // Meet e 4 agendadas que nunca chegaram no Bitrix.
@@ -20,8 +20,9 @@
 //      o mesmo webhook `qs-reuniao` do agendamento.
 //
 // POR QUE NÃO DUPLICA:
-//   • Meet: o workflow do n8n cria o evento com um id DERIVADO do meeting_id.
-//     Reenviar a mesma reunião faz o Google responder 409 e o n8n devolve a
+//   • Meet: o evento nasce com um id DERIVADO do meeting_id (idEvento em
+//     api/_googleAgenda.js, o mesmo algoritmo do n8n de antes de 03/11).
+//     Reenviar a mesma reunião faz o Google responder 409 e devolver a
 //     MESMA sala — não nasce segundo evento nem segundo convite. E aqui só
 //     entra reunião SEM `calendar_event_id` (evento que já existe não é
 //     recriado; o PATCH de erro também só grava se continuar sem evento).
@@ -45,12 +46,14 @@
 // continua contando no Painel de Gestão ("sem Meet" / "sem Bitrix"), que é
 // onde alguém resolve à mão.
 //
-// Env: CRON_SECRET, N8N_AGENDA_URL (Meet), N8N_SYNC_BASE (Bitrix). Sem a env
-// de um lado, aquele lado é pulado com recado, sem erro.
+// Env: CRON_SECRET, GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_REFRESH_TOKEN
+// (Meet), N8N_SYNC_BASE (Bitrix). Sem a env de um lado, aquele lado é pulado
+// com recado, sem erro.
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { criarSalaDoMeet, enviarReuniaoAoBitrix } from './_agenda.js';
+import { googleConfigurado, motivoNaoConfigurado } from './_google.js';
 
 const MAX_TENTATIVAS = 5;
 /** Espera (min) antes da tentativa n+1, onde n = tentativas já feitas. */
@@ -88,7 +91,7 @@ const enc = encodeURIComponent;
 // ─── 1. Meet ─────────────────────────────────────────────────────────────────
 
 async function repararMeet(prazo) {
-  if (!(process.env.N8N_AGENDA_URL || '').trim()) return { pulado: 'N8N_AGENDA_URL ausente' };
+  if (!googleConfigurado()) return { pulado: motivoNaoConfigurado() };
   const agora = Date.now();
   const rows = await rest(
     'qs_meetings?select=*,lead:qs_leads(id,email,bitrix_id),closer:qs_users!qs_meetings_closer_id_fkey(email)' +
