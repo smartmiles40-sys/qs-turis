@@ -11,6 +11,12 @@
 //        → reenvia os cartões com bitrix_status = 'pendente' (a reunião move
 //          o cartão no banco; é o cron que leva isso pro Bitrix) e, 1x por
 //          hora cada, os que ficaram em 'erro'. Nunca tira uma venda do Bitrix.
+//   GET  ?acao=conferir-bitrix[&escopo=todos] (Bearer CRON_SECRET) ou
+//   POST { acao: 'conferir-bitrix', escopo? } (gestão do Comercial)
+//        → MODO CONFERIR (03/11): lista o que o cron mandaria (de → pra onde,
+//          ou por que não mexe), SEM escrever nada no Bitrix nem no QS.
+//          Script: scripts/closer-bitrix-conferir.mjs. Regras e mapeamento
+//          etapa → coluna: api/_closerBitrixPlano.js.
 //   POST { acao: 'config' } → { contrato, bitrix }: só sim/não, pra tela
 //        esconder o que não está ligado na Vercel.
 //   POST { acao: 'importar', dealId, closerId? }
@@ -51,6 +57,9 @@
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { bx, bitrixConfigurado, comentarNoNegocio } from './_bitrixLead.js';
 import { getSupabaseUserId } from './_wa.js';
+import {
+  CAMPO_TIPO_VENDA, ETAPAS_DE_VENDA, FUNIL_COMERCIAL, FUNIL_PRE_VENDAS, NOME_ETAPA, emPreVenda, etapaParaColuna, planejarEspelho,
+} from './_closerBitrixPlano.js';
 import {
   apagarNoZapsign, arquivarAssinado, criarNoZapsign, gerarPdf, guardarPdf, hashDoCorpo, lerConfig, lerNoZapsign,
   linkDoPdf, montarPrevia, nomesDoArquivo, normalizarCampos, oQueFalta, statusDoDocumento, testarZapsign, urlDoApp,
@@ -108,30 +117,9 @@ async function marcar(negocioId, campos, evento, autorId) {
 }
 
 // ── Pipeline v2 (0205, 26/10): toda etapa do QS vai pro Bitrix ─────────────
-// O QS manda. O negócio do Bitrix vai pra coluna de MESMO NOME no funil em que
-// ele está (sem acento/caixa). Os ids das colunas não ficam no código: vêm do
-// próprio funil (crm.status.list), guardados 10 min.
-const NOMES_BITRIX = {
-  aguardando_reuniao: [/aguardando\s+reuni/],
-  reagendamento: [/reagend/],
-  em_cotacao: [/em\s+cotac/, /cotac/],
-  em_negociacao: [/negocia/],
-  no_show: [/no.?show/],
-  oportunidade_futura: [/oportunidade\s+futura/],
-  aguardando_emissao: [/aguardando\s+emiss/, /em\s+emiss/],
-  venda_cancelada: [/venda\s+cancelada/, /cancelad/, /desist/],
-  perdido: [/perdid/],
-  venda_realizada: [/venda\s+realizada/],
-};
-const NOME_ETAPA = {
-  aguardando_reuniao: 'Aguardando reunião', reagendamento: 'Reagendamento', em_cotacao: 'Em cotação',
-  em_negociacao: 'Em negociação', no_show: 'No-show', oportunidade_futura: 'Oportunidade futura',
-  aguardando_emissao: 'Aguardando emissão', venda_cancelada: 'Venda cancelada', perdido: 'Perdido',
-  venda_realizada: 'Venda realizada',
-};
-const ETAPAS_DE_VENDA = ['aguardando_emissao', 'venda_realizada'];
-const semAcento = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-
+// O QS manda. A DECISÃO (qual coluna, quando não mexer) mora em
+// ./_closerBitrixPlano.js (03/11), com o mapeamento etapa → coluna conferido
+// no portal. Os ids das colunas vêm do próprio funil (crm.status.list), 10 min.
 const cacheFunis = new Map();
 async function colunasDoFunil(categoria) {
   const cat = String(categoria ?? '0');
@@ -142,39 +130,10 @@ async function colunasDoFunil(categoria) {
   return lista;
 }
 
-/** A coluna do Bitrix pra uma etapa do QS (null se o funil não tem). */
-function colunaParaEtapa(lista, etapa) {
-  for (const re of NOMES_BITRIX[etapa] || []) {
-    const achou = lista.find((e) => re.test(semAcento(e?.NAME)));
-    if (achou) return String(achou.STATUS_ID);
-  }
-  const id = (e) => String(e?.STATUS_ID || '');
-  if (etapa === 'venda_realizada') { const w = lista.find((e) => /(^|:)WON$/.test(id(e))); if (w) return id(w); }
-  if (etapa === 'perdido') { const l = lista.find((e) => /(^|:)LOSE$/.test(id(e))); if (l) return id(l); }
-  return null;
-}
-
-/** O caminho de volta, usado na importação: coluna do Bitrix → etapa do QS. */
-function etapaParaColuna(lista, statusId) {
-  const col = lista.find((e) => String(e?.STATUS_ID) === String(statusId));
-  const nome = col?.NAME || String(statusId);
-  const n = semAcento(col?.NAME);
-  for (const [etapa, res] of Object.entries(NOMES_BITRIX)) if (n && res.some((re) => re.test(n))) return { etapa, nome };
-  if (/(^|:)WON$/.test(String(statusId))) return { etapa: 'venda_realizada', nome };
-  if (/(^|:)LOSE$/.test(String(statusId))) return { etapa: 'perdido', nome };
-  return { etapa: null, nome };
-}
-
 // ── Pré-venda (0207, 27/10): "clicar na venda e já subir no Dashboard" ──────
 // O cartão fica na etapa dele no QS; o BITRIX vai pra coluna de venda do funil
-// (a mesma de "Aguardando emissão": no Comercial 1 é "Em Emissão / Pix
-// Expedição", UC_70BW8E — a coluna que o Dashboard conta como venda, com
-// data_venda carimbada na chegada). Desfeita, o Bitrix volta pra etapa do cartão.
-const CAMPO_TIPO_VENDA = 'UF_CRM_1743296167520'; // enum "Tipo de venda" — o Bitrix quer o id em STRING
-const ETAPAS_FECHADAS = ['venda_realizada', 'venda_cancelada', 'perdido', 'aguardando_emissao'];
-const emPreVenda = (n) => Boolean(n.pre_venda_em) && !n.consolidada_em && !ETAPAS_FECHADAS.includes(n.etapa);
-/** A coluna que o Bitrix deve mostrar: a da etapa ou, em pré-venda, a de venda. */
-const etapaNoBitrix = (n) => (emPreVenda(n) ? 'aguardando_emissao' : n.etapa);
+// (no Comercial 1 é "Em Emissão / Pix Expedição", UC_70BW8E — a coluna que o
+// Dashboard conta como venda). Desfeita, o Bitrix volta pra etapa do cartão.
 
 /** Manda a etapa (e o valor) do cartão pro Bitrix. `u` = quem pediu; null = o cron. */
 async function espelhar(negocioId, u, extra = {}) {
@@ -187,6 +146,7 @@ async function espelhar(negocioId, u, extra = {}) {
   const lead = (await rest(`qs_leads?select=id,bitrix_id&id=eq.${n.lead_id}&limit=1`))?.[0];
   const dealId = String(lead?.bitrix_id || '').replace(/\D/g, '');
   if (!dealId) {
+    if (extra.seco) return { status: 200, body: { seco: true, ok: false, motivo: 'O lead não tem negócio no Bitrix.' } };
     await marcar(n.id, { bitrix_status: 'sem_card', bitrix_erro: 'O lead não tem negócio no Bitrix.' });
     return { status: 200, body: { ok: false, status: 'sem_card', mensagem: 'Este cliente não tem card no Bitrix — ficou só no QS.' } };
   }
@@ -195,39 +155,13 @@ async function espelhar(negocioId, u, extra = {}) {
     const deal = await bx('crm.deal.get', { id: Number(dealId) }, 8_000);
     if (!deal) throw new Error(`Negócio ${dealId} não encontrado no Bitrix.`);
     const lista = await colunasDoFunil(deal.CATEGORY_ID);
-    const etapaAlvo = etapaNoBitrix(n);
-    const preVenda = emPreVenda(n);
-    const alvo = colunaParaEtapa(lista, etapaAlvo);
-    // 27/10: o CRON nunca tira do Bitrix uma venda que alguém já marcou lá (à
-    // mão, antes do QS). Só a pessoa, pelo cartão, decide isso.
-    if (!u && alvo && String(deal.STAGE_ID) !== alvo && !ETAPAS_DE_VENDA.includes(etapaAlvo) && !['venda_cancelada', 'perdido'].includes(etapaAlvo)) {
-      const noBitrix = etapaParaColuna(lista, deal.STAGE_ID);
-      if (ETAPAS_DE_VENDA.includes(noBitrix.etapa)) {
-        throw new Error(`No Bitrix este negócio já está em "${noBitrix.nome}" (venda). O QS não tira de lá sozinho: se a venda é real, registre a venda no cartão; se não, use "Reenviar".`);
-      }
-    }
-    if (!alvo) {
-      throw new Error(preVenda
-        ? `O funil deste negócio não tem coluna de venda ("Em emissão" / "Aguardando emissão"). A pré-venda ficou só no QS.`
-        : `O funil deste negócio não tem a coluna "${NOME_ETAPA[n.etapa] || n.etapa}". Crie a coluna com esse nome no Bitrix e reenvie.`);
-    }
-    const valor = Number(n.ficha?.valor_total ?? (preVenda ? n.pre_venda_valor : null) ?? n.valor_previsto ?? 0);
-    const fields = {};
-    if (String(deal.STAGE_ID) !== alvo) fields.STAGE_ID = alvo;
-    if (valor > 0 && Math.abs(Number(deal.OPPORTUNITY || 0) - valor) > 0.009) {
-      fields.OPPORTUNITY = valor;
-      fields.CURRENCY_ID = 'BRL';
-    }
-    // "Tipo de venda" (o Dashboard filtra aéreo por ele): na pré-venda o closer
-    // acabou de dizer o que vendeu → grava; pela ficha, só PREENCHE card vazio
-    // (mesma regra do bitrix-sync: nunca desfazer a correção feita no Bitrix).
-    if (ETAPAS_DE_VENDA.includes(etapaAlvo)) {
-      const tipoPre = preVenda ? String(n.pre_venda_tipo_bitrix || '').replace(/\D/g, '') : '';
-      const tipoFicha = String(n.ficha?.tipo_bitrix || '').replace(/\D/g, '');
-      const atual = String(Array.isArray(deal[CAMPO_TIPO_VENDA]) ? deal[CAMPO_TIPO_VENDA][0] ?? '' : deal[CAMPO_TIPO_VENDA] ?? '');
-      if (tipoPre && atual !== tipoPre) fields[CAMPO_TIPO_VENDA] = tipoPre;
-      else if (!tipoPre && tipoFicha && !atual) fields[CAMPO_TIPO_VENDA] = tipoFicha;
-    }
+    // Card ainda na Pré-Vendas: o plano leva pro Comercial 1 (precisa das colunas de lá).
+    const listaComercial = String(deal.CATEGORY_ID ?? '0') === FUNIL_PRE_VENDAS ? await colunasDoFunil(FUNIL_COMERCIAL) : null;
+    const plano = planejarEspelho({ n, deal, lista, listaComercial, porPessoa: Boolean(u) });
+    // Modo CONFERIR (03/11): devolve o que seria enviado e não escreve nada.
+    if (extra.seco) return { status: 200, body: { seco: true, dealId, ...plano } };
+    if (!plano.ok) throw new Error(plano.motivo);
+    const { fields, etapaAlvo, preVenda, valor } = plano;
     if (Object.keys(fields).length) {
       await bx('crm.deal.update', { id: Number(dealId), fields, params: { REGISTER_SONET_EVENT: 'Y' } }, 8_000);
     }
@@ -284,6 +218,36 @@ async function cronBitrix() {
     if (r?.body?.ok) ok++; else falhou++;
   }
   return { pendentes: pend.length, erros: erros.length, ok, falhou, sobrou };
+}
+
+/**
+ * CONFERIR (03/11): o que o cron mandaria pro Bitrix, SEM mandar. Lê cada card
+ * (crm.deal.get) e devolve de onde → pra onde, ou por que não mexeria.
+ * escopo 'fila' (padrão) = pendentes + erro; 'todos' = todo cartão aberto.
+ */
+async function conferirBitrix(escopo = 'fila') {
+  const filtro = escopo === 'todos' ? 'bitrix_status=in.(pendente,erro,ok)' : 'bitrix_status=in.(pendente,erro)';
+  const cartoes = (await rest(`qs_closer_negocios?select=id,etapa,bitrix_status,lead:qs_leads(full_name,bitrix_id),closer:qs_users!qs_closer_negocios_closer_id_fkey(name)&${filtro}&arquivado_em=is.null&order=atualizado_em.asc&limit=150`)) || [];
+  const inicio = Date.now();
+  const itens = [];
+  let naoConferidos = 0;
+  for (const c of cartoes) {
+    if (Date.now() - inicio > 45_000) { naoConferidos++; continue; }
+    const r = await espelhar(c.id, null, { seco: true }).catch((e) => ({ body: { ok: false, motivo: e?.message || 'falhou ao ler o Bitrix' } }));
+    const b = r?.body || {};
+    itens.push({
+      negocioId: c.id, cliente: c.lead?.full_name || null, closer: c.closer?.name || null, dealId: b.dealId || c.lead?.bitrix_id || null,
+      etapaQs: c.etapa, statusQs: c.bitrix_status, envia: Boolean(b.ok && Object.keys(b.fields || {}).length),
+      ok: Boolean(b.ok), motivo: b.motivo || b.mensagem || null, de: b.de || null, para: b.para || null, campos: b.fields || {},
+    });
+  }
+  const resumo = {
+    conferidos: itens.length, naoConferidos,
+    enviaria: itens.filter((i) => i.envia).length,
+    jaIgual: itens.filter((i) => i.ok && !i.envia).length,
+    bloqueados: itens.filter((i) => !i.ok).length,
+  };
+  return { seco: true, escopo, resumo, itens };
 }
 
 /** O que está ligado no servidor (só sim/não, nunca os valores) — a tela esconde o resto. */
@@ -640,6 +604,16 @@ export default async function handler(req, res) {
     try { return res.status(200).json(await cronBitrix()); }
     catch (e) { console.error('[closer] cron-bitrix', e?.message); return res.status(500).json({ error: 'Falhou.' }); }
   }
+  // Conferir (dry-run) com o mesmo segredo do cron: só lê o Bitrix.
+  if (acaoQ === 'conferir-bitrix' && req.method === 'GET') {
+    const segredo = env('CRON_SECRET');
+    const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    if (!segredo || !segredoConfere(veio, segredo)) return res.status(401).json({ error: 'Sem autorização.' });
+    if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE.' });
+    const escopo = new URL(req.url || '', 'http://x').searchParams.get('escopo') === 'todos' ? 'todos' : 'fila';
+    try { return res.status(200).json(await conferirBitrix(escopo)); }
+    catch (e) { console.error('[closer] conferir-bitrix', e?.message); return res.status(500).json({ error: 'Falhou.' }); }
+  }
 
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
@@ -669,6 +643,12 @@ export default async function handler(req, res) {
           : `↩️ Pré-venda DESFEITA no QS por ${u.name || 'closer'}. O negócio voltou pra "${NOME_ETAPA[n.etapa] || n.etapa}".`),
       });
       return res.status(r.status).json(r.body);
+    }
+    // Conferir pela tela (gestão): a mesma lista do GET, sem enviar nada.
+    if (acao === 'conferir-bitrix') {
+      if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
+      if (!ehGestao(u)) return res.status(403).json({ error: 'Só a gestão do Comercial.' });
+      return res.status(200).json(await conferirBitrix(body.escopo === 'todos' ? 'todos' : 'fila'));
     }
     if (acao === 'espelhar') {
       if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });

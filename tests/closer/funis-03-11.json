@@ -1,0 +1,204 @@
+{
+ "0": [
+  {
+   "STATUS_ID": "NEW",
+   "NAME": "Leads - Qualificação"
+  },
+  {
+   "STATUS_ID": "PREPAYMENT_INVOICE",
+   "NAME": "SQL - Orçamentos e Propostas"
+  },
+  {
+   "STATUS_ID": "EXECUTING",
+   "NAME": "Reunião de Vendas"
+  },
+  {
+   "STATUS_ID": "UC_3I8BDW",
+   "NAME": "Em cotação"
+  },
+  {
+   "STATUS_ID": "UC_YGG9JY",
+   "NAME": "Em Negociação"
+  },
+  {
+   "STATUS_ID": "UC_ANBZSL",
+   "NAME": "Reagendamento"
+  },
+  {
+   "STATUS_ID": "UC_3Y96XD",
+   "NAME": "No-Show"
+  },
+  {
+   "STATUS_ID": "UC_PV9OAM",
+   "NAME": "Oportunidade futura"
+  },
+  {
+   "STATUS_ID": "UC_70BW8E",
+   "NAME": "Em Emissão / Pix Expedição"
+  },
+  {
+   "STATUS_ID": "UC_IHT3PF",
+   "NAME": "Gerar Pagamento"
+  },
+  {
+   "STATUS_ID": "UC_FYJCD5",
+   "NAME": "Envio de contrato"
+  },
+  {
+   "STATUS_ID": "WON",
+   "NAME": "Venda realizada"
+  },
+  {
+   "STATUS_ID": "LOSE",
+   "NAME": "Perdidos"
+  },
+  {
+   "STATUS_ID": "UC_NV92A7",
+   "NAME": "Cancelamento/Desistência"
+  }
+ ],
+ "3": [
+  {
+   "STATUS_ID": "C3:UC_UAOBYR",
+   "NAME": "Aguardando Resposta"
+  },
+  {
+   "STATUS_ID": "C3:UC_CZGXGK",
+   "NAME": "Em Conversa WhatsApp"
+  },
+  {
+   "STATUS_ID": "C3:UC_U9DTHX",
+   "NAME": "Influencers"
+  },
+  {
+   "STATUS_ID": "C3:UC_S0EQ3F",
+   "NAME": "Solicitações Futuras"
+  },
+  {
+   "STATUS_ID": "C3:UC_C45FXK",
+   "NAME": "Solicitações Gerais"
+  },
+  {
+   "STATUS_ID": "C3:NEW",
+   "NAME": "Cotação Relacionamento"
+  },
+  {
+   "STATUS_ID": "C3:UC_ODXILZ",
+   "NAME": "Cotação Enviada"
+  },
+  {
+   "STATUS_ID": "C3:PREPAYMENT_INVOICE",
+   "NAME": "Emissão"
+  },
+  {
+   "STATUS_ID": "C3:UC_TZOOFB",
+   "NAME": "Envio de contrato"
+  },
+  {
+   "STATUS_ID": "C3:WON",
+   "NAME": "Venda Realizada"
+  },
+  {
+   "STATUS_ID": "C3:LOSE",
+   "NAME": "Cotação Enviada"
+  },
+  {
+   "STATUS_ID": "C3:UC_Z747ZG",
+   "NAME": "Solicitação Concluida"
+  }
+ ],
+ "25": [
+  {
+   "STATUS_ID": "C25:PREPAYMENT_INVOIC",
+   "NAME": "Novo Lead - Aguardando resposta"
+  },
+  {
+   "STATUS_ID": "C25:UC_271QUB",
+   "NAME": "Follow-up 1"
+  },
+  {
+   "STATUS_ID": "C25:EXECUTING",
+   "NAME": "Follow-up 2"
+  },
+  {
+   "STATUS_ID": "C25:FINAL_INVOICE",
+   "NAME": "Follow-up 3"
+  },
+  {
+   "STATUS_ID": "C25:UC_RYOCP0",
+   "NAME": "Follow up 4"
+  },
+  {
+   "STATUS_ID": "C25:UC_U4CG83",
+   "NAME": "Follow up 5"
+  },
+  {
+   "STATUS_ID": "C25:UC_8PO00M",
+   "NAME": "Follow up 6"
+  },
+  {
+   "STATUS_ID": "C25:UC_2WU9RM",
+   "NAME": "Follow up 7"
+  },
+  {
+   "STATUS_ID": "C25:UC_SMAJ8R",
+   "NAME": "Follow up 8"
+  },
+  {
+   "STATUS_ID": "C25:UC_Q9JX20",
+   "NAME": "Follow up 9"
+  },
+  {
+   "STATUS_ID": "C25:UC_Y12BCP",
+   "NAME": "Follow up 10"
+  },
+  {
+   "STATUS_ID": "C25:UC_UVLDW4",
+   "NAME": "Follow up 11"
+  },
+  {
+   "STATUS_ID": "C25:UC_ZQB3P9",
+   "NAME": "Follow up 12"
+  },
+  {
+   "STATUS_ID": "C25:UC_FCMJTD",
+   "NAME": "Follow up 13"
+  },
+  {
+   "STATUS_ID": "C25:UC_UXJG5H",
+   "NAME": "Follow up 14"
+  },
+  {
+   "STATUS_ID": "C25:UC_P5RR4T",
+   "NAME": "Follow up 15"
+  },
+  {
+   "STATUS_ID": "C25:UC_5QX8R1",
+   "NAME": "Follow up 16"
+  },
+  {
+   "STATUS_ID": "C25:UC_DEM5M5",
+   "NAME": "Follow up 17"
+  },
+  {
+   "STATUS_ID": "C25:UC_U4L0WD",
+   "NAME": "Follow up 18"
+  },
+  {
+   "STATUS_ID": "C25:NEW",
+   "NAME": "Subir lista"
+  },
+  {
+   "STATUS_ID": "C25:WON",
+   "NAME": "Reunião Agendada"
+  },
+  {
+   "STATUS_ID": "C25:LOSE",
+   "NAME": "Leads perdidos"
+  },
+  {
+   "STATUS_ID": "C25:UC_BYL4GG",
+   "NAME": "Proposta Pacote / Aéreo"
+  }
+ ]
+}
