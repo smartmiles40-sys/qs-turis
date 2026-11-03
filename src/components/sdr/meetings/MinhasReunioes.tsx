@@ -199,7 +199,7 @@ export default function MinhasReunioes({ onOpenLead, versao = 0 }: Props) {
             <button key={dia.toISOString()} type="button"
               onClick={() => setDiaEscolhido(ativo ? null : dia)}
               aria-pressed={ativo}
-              title={`${WEEKDAY_LONG[dia.getDay()]}: ${total} reuniõe${total === 1 ? "" : "s"}${abertas ? `, ${abertas} em aberto` : ""}`}
+              title={`${WEEKDAY_LONG[dia.getDay()]}: ${total} ${total === 1 ? "reunião" : "reuniões"}${abertas ? `, ${abertas} em aberto` : ""}`}
               className="rounded-xl border px-1 py-2 flex flex-col items-center gap-0.5 transition-colors"
               style={{
                 borderColor: ativo ? "var(--text)" : "var(--border)",
