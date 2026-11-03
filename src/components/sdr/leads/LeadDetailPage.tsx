@@ -28,6 +28,7 @@ import { podeAbrirAreaCloser } from "@/closer/lib";
 import VendaDoCliente from "@/closer/VendaDoCliente";
 import CotandoAereo from "@/components/sdr/aereo/CotandoAereo";
 import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
+import LigacoesDoLead from "@/components/sdr/leads/LigacoesDoLead";
 import type {
   Lead,
   LeadStatus,
@@ -64,6 +65,7 @@ type TabKey =
   | "visao_geral"
   | "anotacoes"
   | "reunioes"
+  | "ligacoes"
   | "prospeccao"
   | "venda";
 
@@ -198,6 +200,7 @@ const TABS: TabItem[] = [
   { key: "visao_geral", label: "Visão Geral" },
   { key: "anotacoes", label: "Anotações" },
   { key: "reunioes", label: "Reuniões" },
+  { key: "ligacoes", label: "Ligações" },
   { key: "prospeccao", label: "Prospecção" },
 ];
 // Contrato e link de pagamento do closer no cadastro da pessoa (26/10).
@@ -1315,6 +1318,10 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
         );
 
       // ── Venda: contrato e pagamento (mesmos blocos do cartão do closer) ──
+      // Áudio das ligações do webfone (0233).
+      case "ligacoes":
+        return <LigacoesDoLead leadId={lead.id} />;
+
       case "venda":
         return <ComCoresDoRel><VendaDoCliente leadId={lead.id} /></ComCoresDoRel>;
 

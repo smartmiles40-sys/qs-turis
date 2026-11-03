@@ -25,6 +25,7 @@ import { supabase } from "./supabase";
 import { getSetting, setSetting } from "./qsSettings";
 import { normalizePhoneBR, logWhatsApp } from "./whatsapp";
 import { notifyBitrix } from "./qs/bitrixSync";
+import { iniciarGravacao, type Gravacao } from "./gravacaoLigacao";
 
 // Tipo da sessão de chamada (o JsSIP não reexporta RTCSession pelo índice).
 type RTCSession = ReturnType<InstanceType<typeof UA>["call"]>;
@@ -201,6 +202,10 @@ function getRemoteAudio(): HTMLAudioElement {
   document.body.appendChild(el);
   remoteAudio = el;
   return el;
+}
+
+function conexaoDa(session: RTCSession): RTCPeerConnection | undefined {
+  return (session as unknown as { connection?: RTCPeerConnection }).connection;
 }
 
 function attachRemoteStream(session: RTCSession): void {
@@ -395,11 +400,18 @@ export async function dialViaWebphone(phone?: string | null, ctx?: WebphoneDialC
     currentSession = session;
     attachRemoteStream(session);
 
+    // Gravação (0233): começa quando atende, arquiva quando desliga.
+    let gravacao: Gravacao | null = null;
+    const gravar = () => {
+      if (!gravacao) gravacao = iniciarGravacao(conexaoDa(session), { leadId: ctx?.leadId, telefone: to, origem: "webfone" });
+    };
+
     session.on("progress", () => setState({ status: "ringing" }));
-    session.on("accepted", () => { answeredAt = Date.now(); setState({ status: "in_call", answeredAt }); });
-    session.on("confirmed", () => { if (!answeredAt) answeredAt = Date.now(); setState({ status: "in_call", answeredAt }); });
+    session.on("accepted", () => { answeredAt = Date.now(); setState({ status: "in_call", answeredAt }); gravar(); });
+    session.on("confirmed", () => { if (!answeredAt) answeredAt = Date.now(); setState({ status: "in_call", answeredAt }); gravar(); });
 
     const finish = (failed: boolean, causeRaw?: unknown) => {
+      gravacao?.finalizar();
       const wasCurrent = currentSession === session;
       if (wasCurrent) currentSession = null;
       const answered = answeredAt !== null;
@@ -622,6 +634,7 @@ export function promoverPerna(pernaId: string): boolean {
   currentSession = session;
   attachRemoteStream(session);
   const answeredAt = Date.now();
+  const gravacao = iniciarGravacao(conexaoDa(session), { leadId: ctx.leadId, telefone: to, origem: "discador" });
   setState({
     status: "in_call",
     peerName: ctx.leadName ?? null,
@@ -632,6 +645,7 @@ export function promoverPerna(pernaId: string): boolean {
     error: null,
   });
   const finish = (failed: boolean, causeRaw?: unknown) => {
+    gravacao?.finalizar();
     pernas.delete(pernaId);
     if (currentSession === session) currentSession = null;
     if (!discadorAtivo) soltarMicrofoneDoDiscador();
