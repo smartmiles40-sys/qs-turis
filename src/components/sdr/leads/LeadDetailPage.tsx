@@ -1,4 +1,17 @@
-import React, { useState, useEffect, useCallback } from "react";
+// src/components/sdr/leads/LeadDetailPage.tsx
+// -----------------------------------------------------------------------------
+// FICHA DO LEAD — usada pelo SDR (SdrLayout) e pelo Closer (CloserApp).
+//
+// Redesenho de 03/11 (Bruno, Claude Design, variações SDR e Closer):
+//   cabeçalho (avatar, temperatura, status, ações do papel + "Mais ações") →
+//   faixa "Próximo passo" → coluna esquerda (SDR: Cadência; Closer: Passagem do
+//   SDR + Venda; os dois: Sobre o lead + Respostas do formulário) → coluna
+//   "Atividade" (chips Tudo/Reuniões/Ligações/Notas/Sistema + Prospecção,
+//   Cadastro e Venda, que eram abas).
+// NENHUMA função da ficha antiga saiu — o mapa está em "Mais ações" e nos chips.
+// Peças novas em ./ficha/ (regras puras testadas em tests/ficha-lead/).
+// -----------------------------------------------------------------------------
+import React, { useState, useEffect, useCallback, useSyncExternalStore, lazy, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
@@ -9,8 +22,26 @@ import {
   deleteQsLead,
   updateQsNote,
   deleteQsNote,
+  completeTask,
+  undoCompleteTask,
+  updateOpenTask,
   LEAD_SELECT,
 } from "@/lib/qs/queries";
+import { confirmar } from "@/lib/qs/confirmar";
+import { formatPhoneDisplay } from "@/lib/whatsapp";
+import { dialViaSip } from "@/lib/sip";
+import { dialViaWebphone, isWebphoneConfigured } from "@/lib/webphone";
+import { carregarCotacaoAberta, cotacaoAereoAberta, iniciarCotacaoAereo, ouvirCotacaoAereo } from "@/lib/qs/aereo";
+import "./ficha/ficha.css";
+import MenuDaFicha, { type ItemDoMenu } from "./ficha/MenuDaFicha";
+import CadenciaSdr from "./ficha/CadenciaSdr";
+import PassagemDoSdr from "./ficha/PassagemDoSdr";
+import VendaResumo, { useVendaDoLead } from "./ficha/VendaResumo";
+import { IcCalendario, IcCheck, IcNota, IcPontos, IcRaio, IcRelogio, IcSeta, IcTelefone, IcVoltar, IcWhats } from "./ficha/icones";
+import {
+  dataRelativa, ehLigacao, escolherProximoPasso, iniciaisDoNome, diaDaCadencia, passaNoFiltro, quandoCurto,
+  quandoPorExtenso, reuniaoAberta as reuniaoEstaAberta, textoDeVazio, type FiltroAtividade, type PapelDaFicha, type TipoAtividade,
+} from "./ficha/regras";
 import { getLeadScore } from "@/lib/leadScore";
 import { loadWorkHours, nextWorkMoment } from "@/lib/workHours";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
@@ -47,41 +78,43 @@ import {
   MEETING_STATUS_LABELS,
 } from "../types";
 
+// A tela ÚNICA de venda (0214): "Marcar como ganho" do closer abre ela — é a
+// única que grava a venda e exige a proposta anexada. Preguiçosa: o SDR não paga.
+const SubirVenda = lazy(() => import("@/venda/SubirVenda"));
+
 // ── Props ────────────────────────────────────────────────────────────────────
 
 interface LeadDetailPageProps {
   leadId: string;
   onBack: () => void;
+  /**
+   * Qual variação do desenho: "closer" (CloserApp) ou "sdr" (SdrLayout).
+   * Sem a prop, decide pelo papel de quem abriu (closer → closer).
+   */
+  papel?: PapelDaFicha;
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-// Abas enxutas (sprint 2026-07-24, pedido do Bruno): Visão Geral absorveu as
-// Informações Pessoais; Empresa/Contatos/Campos Personalizados saíram — eram
-// estruturas mortas no fluxo real (o Bitrix só preenche nome/fone/email/fonte/
-// temperatura; o resto ficava eternamente vazio).
-type TabKey =
-  | "historico"
-  | "visao_geral"
-  | "anotacoes"
-  | "reunioes"
-  | "ligacoes"
-  | "prospeccao"
-  | "venda";
+// O que a coluna "Atividade" mostra. Os 5 primeiros são os chips do desenho
+// (filtros da linha do tempo); os 3 últimos eram ABAS da ficha antiga
+// (Prospecção, Cadastro — que morava na Visão Geral — e Venda).
+type AbaAtividade = FiltroAtividade | "prospeccao" | "cadastro" | "venda";
 
-interface TabItem {
-  key: TabKey;
-  label: string;
+interface ItemDaLinha {
+  id: string;
+  tipo: TipoAtividade;
+  ts: string;
+  titulo: string;
+  por?: string | null;
+  texto?: string | null;
+  linhas?: { k: string; v: React.ReactNode }[];
+  nota?: Note;
+  reuniao?: Meeting;
+  perigo?: boolean;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-const STATUS_COLORS: Record<LeadStatus, { bg: string; text: string; dot: string }> = {
-  nao_iniciado: { bg: "bg-gray-100", text: "text-gray-700", dot: "bg-gray-400" },
-  em_prospeccao: { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-500" },
-  ganho: { bg: "bg-green-50", text: "text-green-700", dot: "bg-green-500" },
-  perdido: { bg: "bg-red-50", text: "text-red-700", dot: "bg-red-500" },
-};
 
 const MEETING_COLORS: Record<string, { bg: string; text: string }> = {
   agendada: { bg: "bg-blue-50", text: "text-blue-700" },
@@ -191,26 +224,47 @@ function parseMoney(raw: string): number | null {
   return Number(normalized);
 }
 
-// ── Custom fields ────────────────────────────────────────────────────────────
-
-// ── Tabs Definition ──────────────────────────────────────────────────────────
-
-const TABS: TabItem[] = [
-  { key: "historico", label: "Histórico" },
-  { key: "visao_geral", label: "Visão Geral" },
-  { key: "anotacoes", label: "Anotações" },
-  { key: "reunioes", label: "Reuniões" },
-  { key: "ligacoes", label: "Ligações" },
-  { key: "prospeccao", label: "Prospecção" },
+// ── Chips da coluna "Atividade" ──────────────────────────────────────────────
+// Os 5 do desenho + os que eram abas. "Venda" (contrato e link de pagamento do
+// closer no cadastro da pessoa, 26/10) só pra quem abre a área do closer.
+const CHIPS_FILTRO: { id: FiltroAtividade; rotulo: string }[] = [
+  { id: "tudo", rotulo: "Tudo" },
+  { id: "reuniao", rotulo: "Reuniões" },
+  { id: "ligacao", rotulo: "Ligações" },
+  { id: "nota", rotulo: "Notas" },
+  { id: "sistema", rotulo: "Sistema" },
 ];
-// Contrato e link de pagamento do closer no cadastro da pessoa (26/10).
-const ABA_VENDA: TabItem = { key: "venda", label: "Venda" };
+
+const RESULTADO_DA_TAREFA: Record<string, string> = {
+  ganho: "Ganho / Agendou", concluida: "Concluída", sem_interesse: "Perdido", atendeu: "Atendeu (pediu retorno)",
+  nao_atendeu: "Não atendeu", caixa_postal: "Caixa postal", numero_errado: "Nº errado", desligou: "Desligou",
+  com_avanco: "Com avanço", sem_avanco: "Sem avanço", gatekeeper: "Parado no gatekeeper",
+  persona_indisponivel: "Persona indisponível", telefone_incorreto: "Telefone incorreto", sem_conexao: "Sem conexão",
+};
+
+const TOM_DA_TEMPERATURA: Record<string, string> = { quente: "danger", morno: "warn", frio: "info" };
+
+/** "2026-11-05T18:30" no fuso local, pro <input type="datetime-local">. */
+function paraInputLocal(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) {
+export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: LeadDetailPageProps) {
   const { currentUser } = useQsAuth();
-  const [activeTab, setActiveTab] = useState<TabKey>("historico");
+  const papel: PapelDaFicha = papelDaProp ?? (currentUser?.role === "closer" ? "closer" : "sdr");
+  const [aba, setAbaCrua] = useState<AbaAtividade>("tudo");
+  // Faixa/menus novos do redesenho (03/11).
+  const [mostrarPerdido, setMostrarPerdido] = useState(false);
+  const [tarefaReagendar, setTarefaReagendar] = useState<Task | null>(null);
+  const [novaDataTarefa, setNovaDataTarefa] = useState("");
+  const [salvandoReagendar, setSalvandoReagendar] = useState(false);
+  const [tarefaOcupada, setTarefaOcupada] = useState<string | null>(null);
+  const [subirVendaAberto, setSubirVendaAberto] = useState(false);
+  const [avisoVenda, setAvisoVenda] = useState<{ tom: "ok" | "aviso"; mensagem: string } | null>(null);
   const [newNote, setNewNote] = useState("");
   const [showHandoverModal, setShowHandoverModal] = useState(false);
   // Oportunidade futura (0083): o modal e um contador que faz a faixa reler.
@@ -247,7 +301,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [savingHandover, setSavingHandover] = useState(false);
   const [schedulingReContact, setSchedulingReContact] = useState(false);
   const [bitrixCopied, setBitrixCopied] = useState(false);
-  const [showScoreMenu, setShowScoreMenu] = useState(false);
   const [savingScore, setSavingScore] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState<LeadEditForm | null>(null);
@@ -259,7 +312,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [wonError, setWonError] = useState<string | null>(null);
   const [savingWon, setSavingWon] = useState(false);
   const [removingCadence, setRemovingCadence] = useState(false);
-  const [noteMenuId, setNoteMenuId] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteBody, setEditingNoteBody] = useState("");
   const [savingNoteEdit, setSavingNoteEdit] = useState(false);
@@ -274,6 +326,19 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   const [closers, setClosers] = useState<SdrUser[]>([]);
   const [allUsers, setAllUsers] = useState<SdrUser[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // ── Venda do closer (card "Venda" + "Marcar como ganho" → SubirVenda) ──
+  const veVenda = papel === "closer" && podeAbrirAreaCloser(currentUser);
+  const venda = useVendaDoLead(leadId, veVenda);
+  // Saiu do bloco "Venda" (contrato/link mudam lá dentro) → o card relê.
+  function setAba(nova: AbaAtividade) {
+    if (aba === "venda" && nova !== "venda" && veVenda) venda.recarregar();
+    setAbaCrua(nova);
+  }
+
+  // ── Cotando aéreo (0206): o cronômetro aparece no cabeçalho enquanto corre ──
+  const cotacao = useSyncExternalStore(ouvirCotacaoAereo, cotacaoAereoAberta);
+  useEffect(() => { if (currentUser?.id) void carregarCotacaoAberta(currentUser.id); }, [currentUser?.id]);
 
   // ── Fetch lead and related data ──
   const fetchLead = useCallback(async () => {
@@ -473,7 +538,6 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
       if (!updated) return; // updateQsLead já avisou por toast
       setLead(updated);
       notifySuccess(label ? `Temperatura atualizada: ${label}.` : "Temperatura removida.");
-      setShowScoreMenu(false);
     } finally {
       setSavingScore(false);
     }
@@ -636,11 +700,12 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   }
 
   // ── Mark as lost (with re-engagement check — Change 16) ──
-  async function markAsLost(lossReasonId?: string) {
+  // `jaConfirmado`: o modal "Marcar como perdido" (03/11) já é a confirmação.
+  async function markAsLost(lossReasonId?: string, jaConfirmado = false) {
     if (!lead) return;
-    // Confirmação: o "Perdido" é um select — um toque errado não pode encerrar o lead.
+    // Confirmação: um toque errado não pode encerrar o lead.
     const reasonLabel = lossReasonId ? lossReasons.find((r) => r.id === lossReasonId)?.label : null;
-    if (!window.confirm(`Marcar ${lead.full_name ?? "este lead"} como PERDIDO${reasonLabel ? ` (${reasonLabel})` : ""}?`)) {
+    if (!jaConfirmado && !window.confirm(`Marcar ${lead.full_name ?? "este lead"} como PERDIDO${reasonLabel ? ` (${reasonLabel})` : ""}?`)) {
       setSelectedLossReason("");
       return;
     }
@@ -802,14 +867,176 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   async function afterMeetingSaved() {
     await reloadMeetings();
     setShowMeetingModal(false);
-    setActiveTab("reunioes");
+    setAba("reuniao");
+  }
+
+  // ── Reativar lead (ganho/perdido → em prospecção, cadência do dia 1) ──
+  async function reativarLead() {
+    if (!lead || reactivating) return;
+    if (!window.confirm(`Reativar ${lead.full_name ?? "este lead"}? As atividades da cadência serão recriadas do dia 1.`)) return;
+    setReactivating(true);
+    try {
+      const { error } = await supabase.from("qs_leads").update({
+        status: "em_prospeccao",
+        loss_reason_id: null,
+        cadence_started_at: new Date().toISOString(),
+        arrived_at: new Date().toISOString(),
+      }).eq("id", lead.id);
+      if (error) {
+        console.warn("Erro ao reativar lead:", error);
+        notifyError("Não foi possível reativar o lead — tente novamente.");
+        return;
+      }
+
+      // Recria as tarefas pela função única da cadência (a versão antiga
+      // inseria uma coluna inexistente e falhava em silêncio: o lead
+      // voltava a "em prospecção" com ZERO atividades e sumia da fila).
+      if (lead.cadence_id) {
+        await createCadenceTasks(lead.id, lead.cadence_id, lead.owner_id);
+      }
+
+      // Sprint 4: a reativação agora tem rastro no Bitrix — antes o
+      // deal ficava em LOSE lá enquanto o QS trabalhava o lead de novo.
+      // Whitelist do sync é perdido|ganho|reuniao|nota → vai como "nota".
+      notifyBitrix("nota", {
+        lead_id: lead.id,
+        bitrix_id: lead.bitrix_id,
+        body: `Lead REATIVADO no QS${currentUser?.name ? ` por ${currentUser.name}` : ""} — voltou pra prospecção com a cadência reiniciada do dia 1. Atualize a coluna do negócio no Bitrix se necessário.`,
+      });
+
+      setLead({ ...lead, status: "em_prospeccao" as LeadStatus, loss_reason_id: null });
+      await reloadTasks();
+    } finally {
+      setReactivating(false);
+    }
+  }
+
+  // ── Ligar (mesmo caminho do canal "Ligação" da Fila) ──
+  // Pergunta antes: o telefone de um cliente de verdade toca. Prefere o webfone
+  // WebRTC; sem ramal provisionado, cai no click-to-dial do softphone (BravoTech).
+  async function ligar() {
+    if (!lead?.phone) return;
+    const ok = await confirmar({
+      titulo: "Você confirma querer ligar por telefone?",
+      mensagem: `A chamada vai tocar agora para ${lead.full_name || "o lead"} (${formatPhoneDisplay(lead.phone)}).`,
+      confirmarLabel: "Confirmar e ligar",
+      recusarLabel: "Recusar",
+    });
+    if (!ok) return;
+    if (await isWebphoneConfigured()) {
+      notifySuccess("Ligando pelo webfone…");
+      const r = await dialViaWebphone(lead.phone, { leadName: lead.full_name ?? null, leadId: lead.id, ownerId: currentUser?.id ?? null });
+      if (!r.ok) notifyError(r.error || "Webfone WebRTC indisponível.");
+      return;
+    }
+    const r = await dialViaSip(lead.phone);
+    if (r.ok) notifySuccess("Discando no softphone (BravoTech)… registre o desfecho ao terminar.");
+    else notifyError(r.error || "Não foi possível abrir o softphone (BravoTech).");
+  }
+
+  // ── Concluir / desfazer uma atividade pela ficha ──
+  // Igual ao "Concluir" da Fila pra canais que não são ligação (conclui, conta
+  // como contato feito e move o card do Bitrix de Novo lead pra Follow-up 1).
+  // LIGAÇÃO não conclui aqui: ela exige a classificação (atendeu, caixa postal…)
+  // que gera o follow-up — isso é a Fila de hoje, e a ficha manda pra lá.
+  async function concluirTarefa(t: Task) {
+    if (!lead || tarefaOcupada) return;
+    if (ehLigacao(t.channel_type)) {
+      const ir = await confirmar({
+        titulo: "Ligação se conclui na Fila de hoje",
+        mensagem: "A ligação pede a classificação (atendeu, caixa postal, com avanço…) e já gera o próximo passo. Isso é feito na Fila de hoje.",
+        confirmarLabel: "Abrir a Fila de hoje",
+        recusarLabel: "Ficar aqui",
+      });
+      if (ir) window.location.hash = "#comercial/painel";
+      return;
+    }
+    setTarefaOcupada(t.id);
+    try {
+      const feita = await completeTask(t.id, "concluida");
+      if (!feita) return; // completeTask já avisou (ou já estava concluída)
+      notifyBitrix("primeiro-contato", {
+        lead_id: lead.id,
+        bitrix_id: lead.bitrix_id,
+        full_name: lead.full_name,
+        canal: CHANNEL_LABELS[t.channel_type],
+        desfecho: "Concluída",
+        alcancou: true,
+        sdr: currentUser?.name ?? null,
+      });
+      await reloadTasks();
+      notifySuccess(`${CHANNEL_LABELS[t.channel_type] ?? "Atividade"} concluída.`);
+    } finally {
+      setTarefaOcupada(null);
+    }
+  }
+
+  async function desfazerTarefa(t: Task) {
+    if (tarefaOcupada || ehLigacao(t.channel_type)) return;
+    setTarefaOcupada(t.id);
+    try {
+      const ok = await undoCompleteTask(t.id);
+      if (!ok) return;
+      await reloadTasks();
+      notifySuccess("Conclusão desfeita — a atividade voltou pra fila.");
+    } finally {
+      setTarefaOcupada(null);
+    }
+  }
+
+  // ── Reagendar uma atividade aberta (Horário de Trabalho manda: encaixa no expediente) ──
+  function abrirReagendarTarefa(t: Task) {
+    setTarefaReagendar(t);
+    setNovaDataTarefa(paraInputLocal(t.scheduled_at));
+  }
+
+  async function salvarReagendarTarefa() {
+    if (!tarefaReagendar || !novaDataTarefa || salvandoReagendar) return;
+    const pedido = new Date(novaDataTarefa);
+    if (Number.isNaN(pedido.getTime())) { notifyError("Data inválida."); return; }
+    setSalvandoReagendar(true);
+    try {
+      const encaixe = nextWorkMoment(await loadWorkHours(), pedido);
+      const ok = await updateOpenTask(tarefaReagendar.id, { scheduled_at: encaixe.toISOString() });
+      if (!ok) return; // updateOpenTask já avisou
+      await reloadTasks();
+      setTarefaReagendar(null);
+      const mudou = Math.abs(encaixe.getTime() - pedido.getTime()) > 60_000;
+      notifySuccess(`Atividade reagendada para ${quandoPorExtenso(encaixe.toISOString())}${mudou ? " (encaixada no horário de trabalho)" : ""}.`);
+    } finally {
+      setSalvandoReagendar(false);
+    }
+  }
+
+  // ── "Marcar como ganho" do closer → a tela única de venda ──
+  function abrirSubirVenda() {
+    if (venda.carregando) return;
+    if (!venda.negocio) {
+      notifyError("Este cliente ainda não tem cartão no pipeline. Traga pro pipeline no bloco Venda e depois registre a venda.");
+      setAba("venda");
+      return;
+    }
+    setSubirVendaAberto(true);
   }
 
   // ── Loading / Not found ──
+  function Aviso({ titulo, texto, acao }: { titulo: string; texto?: string | null; acao?: React.ReactNode }) {
+    return (
+      <div className="fl" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "60vh", gap: 8, padding: 16 }}>
+        <p style={{ margin: 0, fontWeight: 600 }}>{titulo}</p>
+        {texto && <p className="fl-mudo" style={{ maxWidth: 420, textAlign: "center" }}>{texto}</p>}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 8 }}>
+          {acao}
+          <button type="button" className="fl-btn" onClick={onBack}>Voltar para Leads</button>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex items-center justify-center" style={{ fontFamily: "inherit" }}>
-        <p className="text-sm text-gray-500">Carregando...</p>
+      <div className="fl" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+        <p className="fl-mudo">Carregando...</p>
       </div>
     );
   }
@@ -817,30 +1044,12 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
   // Falha de rede/servidor NÃO é "Lead não encontrado" — oferece tentar de novo.
   if (!lead && loadError) {
     return (
-      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "inherit" }}>
-        <p className="text-sm font-medium text-gray-700 mb-1">Não foi possível carregar o lead.</p>
-        <p className="text-xs text-gray-400 mb-4 max-w-sm text-center">{loadError}</p>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setRetryTick((t) => t + 1)}
-            className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
-          >
-            Tentar de novo
-          </button>
-          <button onClick={onBack} className="text-sm text-[#0147FF] hover:underline">Voltar para Leads</button>
-        </div>
-      </div>
+      <Aviso titulo="Não foi possível carregar o lead." texto={loadError}
+        acao={<button type="button" className="fl-btn fl-btn--acao" onClick={() => setRetryTick((t) => t + 1)}>Tentar de novo</button>} />
     );
   }
 
-  if (!lead) {
-    return (
-      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "inherit" }}>
-        <p className="text-sm text-gray-500 mb-4">Lead não encontrado.</p>
-        <button onClick={onBack} className="text-sm text-[#0147FF] hover:underline">Voltar para Leads</button>
-      </div>
-    );
-  }
+  if (!lead) return <Aviso titulo="Lead não encontrado." />;
 
   // ── Isolamento por dono ──────────────────────────────────────────────────────
   // SDR/closer só abrem o PRÓPRIO lead (esta tela abre por ID direto — via busca
@@ -852,31 +1061,321 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     // senão o "Abrir card" da lista de WhatsApp termina num beco sem saída.
     (canSeeAllData(currentUser.role) || currentUser.role === "closer" || lead.owner_id === currentUser.id);
   if (!canView) {
-    return (
-      <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6 flex flex-col items-center justify-center" style={{ fontFamily: "inherit" }}>
-        <p className="text-sm text-gray-700 font-medium mb-1">Este lead é de outro SDR.</p>
-        <p className="text-sm text-gray-500 mb-4">Você só tem acesso aos seus próprios leads.</p>
-        <button onClick={onBack} className="text-sm text-[#0147FF] hover:underline">Voltar para Leads</button>
-      </div>
-    );
+    return <Aviso titulo="Este lead é de outro SDR." texto="Você só tem acesso aos seus próprios leads." />;
   }
 
-  const statusColor = STATUS_COLORS[lead.status];
   // Lead fechado não mostra Ganho/Perdido (re-clicar re-disparava o Bitrix e
   // sobrescrevia o desfecho); a saída correta é "Reativar Lead".
   const isClosed = lead.status === "ganho" || lead.status === "perdido";
   // Excluir lead é ação de gestor/admin (RLS leads_delete = qs_is_manager()).
   const canDeleteLead = !!currentUser && canSeeAllData(currentUser.role);
+  // Oportunidade futura: decisão do closer (ou da gestão) sobre o NEGÓCIO.
+  const podeOportunidade = !!currentUser && (canSeeAllData(currentUser.role) || currentUser.role === "closer");
+  // Cotação de aéreo do SDR: cronômetro, não meta (0206). Sem a migration, some.
+  const podeCotarAereo = !!currentUser && (currentUser.role === "sdr" || canSeeAllData(currentUser.role)) && cotacao !== "sem-tabela";
+  const cotandoAgora = cotacao && cotacao !== "sem-tabela" ? cotacao : null;
 
-  // ── Info Row helper ──
-  function InfoRow({ label, value }: { label: string; value: string | null | undefined }) {
+  const agora = new Date();
+  const nomeDoLead = lead.full_name || [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Sem nome";
+  const temperatura = getLeadScore(lead);
+  const totalDeDias = cadenceDays.reduce((m, d) => Math.max(m, d.day_number), 0);
+  const diaCad = diaDaCadencia(lead.cadence_started_at, totalDeDias, agora);
+  const reunioesAbertas = meetings.filter(reuniaoEstaAberta).sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+  const reuniaoRealizada = meetings.some((m) => m.status === "realizada");
+  const proximo = escolherProximoPasso(papel, tasks, meetings);
+  const autorDe = (id: string | null) => allUsers.find((u) => u.id === id)?.name ?? null;
+
+  // Selo de status do cabeçalho. SDR: a cadência; Closer: o estado da reunião.
+  const seloStatus: { texto: string; tom: string } = (() => {
+    if (lead.status === "ganho") return { texto: "Ganho", tom: "ok" };
+    if (lead.status === "perdido") return { texto: `Perdido${lead.loss_reason?.label ? ` · ${lead.loss_reason.label}` : ""}`, tom: "danger" };
+    if (papel === "closer") {
+      const aberta = reunioesAbertas[0];
+      if (aberta) return { texto: aberta.status === "confirmada" ? "Reunião confirmada" : "Reunião agendada", tom: "info" };
+      const ultima = [...meetings].sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())[0];
+      if (ultima) return { texto: `Reunião: ${MEETING_STATUS_LABELS[ultima.status]?.toLowerCase() ?? ultima.status}`, tom: ultima.status === "no_show" || ultima.status === "desistencia" ? "warn" : "" };
+      return { texto: "Sem reunião", tom: "" };
+    }
+    if (lead.status === "em_prospeccao" && diaCad) return { texto: `Em prospecção · Dia ${diaCad.dia} de ${diaCad.total}`, tom: "info" };
+    return { texto: STATUS_LABELS[lead.status], tom: lead.status === "em_prospeccao" ? "info" : "" };
+  })();
+
+  // ── Linha do tempo (coluna "Atividade") ──
+  const linha: ItemDaLinha[] = [];
+  const chegada = lead.arrived_at || lead.created_at;
+  if (chegada) {
+    linha.push({
+      id: "chegada", tipo: "sistema", ts: chegada, titulo: "Lead entrou no sistema", por: SOURCE_LABELS[lead.source] ?? lead.source,
+      linhas: [
+        ...(lead.segment ? [{ k: "Fonte / Produto", v: lead.segment }] : []),
+        ...(lead.lead_score ? [{ k: "Temperatura", v: temperatura?.label ?? lead.lead_score }] : []),
+        ...(lead.bitrix_id ? [{ k: "ID do Bitrix", v: lead.bitrix_id }] : []),
+      ],
+    });
+  }
+  notes.forEach((n) => linha.push({
+    id: `n-${n.id}`, tipo: "nota", ts: n.created_at, titulo: "Anotação", texto: n.body, nota: n,
+    // Autor REAL da nota (antes exibia sempre o dono do lead — num handover, as notas antigas "mudavam" de autor).
+    por: autorDe(n.author_id) ?? lead.owner?.name ?? "Autor",
+  }));
+  tasks.filter((t) => t.status === "concluida" && t.completed_at).forEach((t) => {
+    const res = (t as unknown as { contact_result?: string }).contact_result;
+    linha.push({
+      id: `t-${t.id}`, tipo: ehLigacao(t.channel_type) ? "ligacao" : "tarefa", ts: t.completed_at!,
+      titulo: `${CHANNEL_LABELS[t.channel_type] ?? t.channel_type} — ${res ? (RESULTADO_DA_TAREFA[res] ?? res) : "concluída"}`,
+      por: t.is_extra ? "Atividade extra" : "Cadência SDR", texto: t.notes || null,
+    });
+  });
+  meetings.forEach((m) => linha.push({
+    id: `m-${m.id}`, tipo: "reuniao", ts: m.created_at, reuniao: m,
+    titulo: m.origem === "autoagendamento" ? "Lead marcou pela página de agendamento" : `Reunião ${MEETING_STATUS_LABELS[m.status]?.toLowerCase() ?? m.status}`,
+    por: m.scheduled_by || (m.origem === "gloria" ? "Glória (IA)" : null),
+    linhas: [
+      { k: "Quando", v: quandoPorExtenso(m.scheduled_at) + (m.duration_min ? ` · ${m.duration_min} min` : "") },
+      ...(m.meeting_owner || m.closer?.name ? [{ k: "Com", v: m.closer?.name ?? m.meeting_owner }] : []),
+      { k: "Situação", v: MEETING_STATUS_LABELS[m.status] ?? m.status },
+      ...(m.title ? [{ k: "Assunto", v: m.title }] : []),
+      ...(m.location ? [{ k: "Local", v: m.location }] : []),
+      ...(m.meeting_link ? [{ k: "Link", v: <a href={m.meeting_link} target="_blank" rel="noopener noreferrer">Abrir o link</a> }] : []),
+    ],
+    texto: m.notes || null,
+  }));
+  // closed_at não "anda" com edições posteriores (updated_at andava)
+  if (lead.status === "ganho") linha.push({ id: "ganho", tipo: "sistema", ts: lead.closed_at ?? lead.updated_at, titulo: "Lead GANHO",
+    linhas: lead.closed_value != null ? [{ k: "Valor fechado", v: lead.closed_value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) }] : [] });
+  if (lead.status === "perdido") linha.push({ id: "perdido", tipo: "sistema", ts: lead.closed_at ?? lead.updated_at, titulo: "Lead perdido", perigo: true,
+    texto: lead.loss_reason?.label ? `Motivo: ${lead.loss_reason.label}` : null });
+  linha.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+  const contagem = (f: FiltroAtividade) => linha.filter((i) => passaNoFiltro(f, i.tipo)).length;
+
+  // ── "Mais ações": tudo o que a ficha antiga tinha em botões soltos ──
+  const itensMais: ItemDoMenu[] = [
+    ...(papel === "closer" ? [
+      { rotulo: "Agendar reunião", onClick: () => setShowMeetingModal(true) },
+      { rotulo: "Enviar para Closer", onClick: () => setShowHandoverModal(true), dica: "Passa o lead para outro closer (handover)" },
+    ] : []),
+    ...(reunioesAbertas[0] ? [{ rotulo: "Lançar desfecho da reunião", onClick: () => setReuniaoAberta(reunioesAbertas[0]) }] : []),
+    ...(podeOportunidade ? [{ rotulo: "Oportunidade futura", onClick: () => setMostrarOportunidade(true) }] : []),
+    ...(!isClosed ? [
+      { rotulo: "Marcar como perdido", onClick: () => { setSelectedLossReason(""); setMostrarPerdido(true); } },
+      // SDR: o "Ganho" de status do lead (com valor fechado). O closer ganha pela tela de venda.
+      ...(papel === "sdr" ? [{ rotulo: "Marcar como ganho", onClick: openWonModal }] : []),
+    ] : [{ rotulo: reactivating ? "Reativando…" : "↩ Reativar lead", onClick: () => void reativarLead(), disabled: reactivating }]),
+    ...(podeCotarAereo && !cotandoAgora ? [{
+      rotulo: "Cotando aéreo", onClick: () => void iniciarCotacaoAereo(lead.id),
+      dica: "Marque quando começar a cotar um aéreo pra este cliente. O tempo entra no seu Desempenho.",
+    }] : []),
+    { rotulo: "Pedir a outro setor", onClick: () => setPedirSetor(true), dica: "Vira um pedido com dono e prazo na fila do outro setor; você acompanha aqui" },
+    { rotulo: "Enviar ao financeiro", onClick: () => setEnviarFin(true), dica: "O Financeiro fala com o cliente pelo WhatsApp e resolve a dúvida; você acompanha o status aqui" },
+    ...(papel === "sdr" ? [{ rotulo: "Pedir pagamento", onClick: () => setPedirPagamento(true), dica: "Pix pra fornecedor, link de pagamento pro cliente, cartão da empresa ou provisão — já amarrado a este lead" }] : []),
+    { separador: true },
+    { rotulo: "Editar dados", onClick: openEditModal },
+    ...(lead.cadence_id ? [{ rotulo: removingCadence ? "Removendo…" : "Remover da cadência", onClick: () => void removeFromCadence(), disabled: removingCadence }] : []),
+    ...(lead.bitrix_id ? [{ rotulo: bitrixCopied ? "ID copiado ✓" : `Copiar ID do Bitrix (${lead.bitrix_id})`, onClick: () => void copiarIdBitrix() }] : []),
+    ...(canDeleteLead ? [
+      { separador: true } as ItemDoMenu,
+      { rotulo: deletingLead ? "Excluindo…" : "Excluir lead", onClick: () => void handleDeleteLead(), disabled: deletingLead, perigo: true,
+        dica: "Excluir o lead e todo o histórico (irreversível)" },
+    ] : []),
+  ];
+
+  async function copiarIdBitrix() {
+    if (!lead?.bitrix_id) return;
+    try {
+      await navigator.clipboard.writeText(lead.bitrix_id);
+      // Feedback visual (Sprint 4): antes o clique não dava sinal nenhum.
+      setBitrixCopied(true);
+      setTimeout(() => setBitrixCopied(false), 1500);
+    } catch {
+      notifyError("Não foi possível copiar o ID — copie manualmente.");
+    }
+  }
+
+  // ── Um item da linha do tempo ──
+  function renderItem(i: ItemDaLinha, ultimo: boolean) {
+    const n = i.nota;
+    // A RLS (0007: notes_update/delete) só aceita autor ou gestor — o menu segue a mesma regra.
+    const podeMexerNaNota = !!n && !!currentUser && (canSeeAllData(currentUser.role) || n.author_id === currentUser.id);
+    const editando = !!n && editingNoteId === n.id;
+    const m = i.reuniao;
+    const ponto = i.perigo ? "perigo" : i.tipo;
     return (
-      <div className="flex items-start justify-between py-3 border-b border-gray-100 last:border-0">
-        <span className="text-sm text-gray-500">{label}</span>
-        <span className="text-sm font-medium text-gray-900 text-right max-w-[60%]">{value || "\u2014"}</span>
-      </div>
+      <li key={i.id}>
+        <div className="fl-tempo__eixo">
+          <div className={`fl-tempo__ponto fl-tempo__ponto--${ponto}`}>
+            {i.tipo === "reuniao" ? <IcCalendario /> : i.tipo === "ligacao" ? <IcTelefone size={16} /> : i.tipo === "nota" ? <IcNota /> : i.tipo === "tarefa" ? <IcCheck /> : <IcRaio />}
+          </div>
+          {!ultimo && <div className="fl-tempo__fio" />}
+        </div>
+        <div className="fl-tempo__corpo">
+          <div className="fl-tempo__titulo" style={{ justifyContent: "space-between" }}>
+            <div className="fl-tempo__titulo">
+              <strong>{i.titulo}</strong>
+              <span>{quandoCurto(i.ts, agora)}{i.por ? ` · ${i.por}` : ""}</span>
+            </div>
+            {podeMexerNaNota && !editando && (
+              <MenuDaFicha botao={<IcPontos />} rotuloAcessivel="Ações da anotação" classeBotao="fl-btn fl-btn--icone fl-btn--sm"
+                itens={[
+                  { rotulo: "Editar", onClick: () => startEditNote(n!) },
+                  { rotulo: "Excluir", onClick: () => void handleDeleteNote(n!), perigo: true },
+                ]} />
+            )}
+          </div>
+          {editando ? (
+            <div className="fl-nota">
+              <textarea value={editingNoteBody} onChange={(e) => setEditingNoteBody(e.target.value)} rows={3} aria-label="Editar anotação" />
+              <div className="fl-modal__rodape">
+                <button type="button" className="fl-btn fl-btn--sm" onClick={() => { setEditingNoteId(null); setEditingNoteBody(""); }}>Cancelar</button>
+                <button type="button" className="fl-btn fl-btn--sm fl-btn--acao" onClick={saveNoteEdit} disabled={!editingNoteBody.trim() || savingNoteEdit}>
+                  {savingNoteEdit ? "Salvando..." : "Salvar"}
+                </button>
+              </div>
+            </div>
+          ) : i.texto ? <p className="fl-tempo__texto">{i.texto}</p> : null}
+          {i.linhas && i.linhas.length > 0 && (
+            <dl className="fl-quadro" style={{ margin: 0 }}>
+              {i.linhas.map((r) => (<div key={r.k}><dt>{r.k}</dt><dd>{r.v}</dd></div>))}
+            </dl>
+          )}
+          {m && reuniaoEstaAberta(m) && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {/* DESFECHO SÓ PELO MODAL OFICIAL (25/09): SAL, valor, Bitrix e a agenda do closer. */}
+              <button type="button" className="fl-btn fl-btn--sm" onClick={() => setReuniaoAberta(m)}>Lançar desfecho / remarcar</button>
+              <button type="button" className="fl-btn fl-btn--sm" onClick={() => setAba("reuniao")}>Ver detalhes</button>
+            </div>
+          )}
+        </div>
+      </li>
     );
   }
+
+  // ── A coluna "Atividade" ──
+  function renderAtividade(lead: Lead) {
+    if (aba === "prospeccao") return renderProspeccao(lead);
+    if (aba === "cadastro") return <CadastroDoLead leadId={lead.id} />;
+    if (aba === "venda") return <ComCoresDoRel><VendaDoCliente leadId={lead.id} /></ComCoresDoRel>;
+    const filtro = aba;
+    const visiveis = linha.filter((i) => passaNoFiltro(filtro, i.tipo));
+    return (
+      <>
+        <div className="fl-nota">
+          <label htmlFor="fl-nova-nota">Nova anotação</label>
+          <textarea id="fl-nova-nota" rows={2} value={newNote} onChange={(e) => setNewNote(e.target.value)}
+            placeholder="O que aconteceu na conversa?" />
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button type="button" className="fl-btn fl-btn--sm fl-btn--acao" onClick={addNote} disabled={!newNote.trim() || savingNote}>
+              {savingNote ? "Salvando..." : "Salvar nota"}
+            </button>
+          </div>
+        </div>
+
+        {/* Áudio das ligações do webfone (0233), antes da lista de tentativas. */}
+        {filtro === "ligacao" && <LigacoesDoLead leadId={lead.id} />}
+        {/* Reuniões: os cartões completos (convidados, desfecho, gravação — 0215). */}
+        {filtro === "reuniao" ? renderReunioesCompletas() : visiveis.length === 0 ? (
+          filtro === "ligacao" ? null : <div className="fl-vazio">{textoDeVazio(filtro)}</div>
+        ) : (
+          <>
+            {filtro === "ligacao" && <span className="fl-rotulo">Tentativas registradas</span>}
+            <ol className="fl-tempo">{visiveis.map((i, k) => renderItem(i, k === visiveis.length - 1))}</ol>
+          </>
+        )}
+      </>
+    );
+  }
+
+  // ── Faixa "Próximo passo" ──
+  function renderProximoPasso() {
+    let titulo = "Nenhum próximo passo marcado";
+    let quando: string = isClosed ? `Lead ${lead!.status === "ganho" ? "ganho" : "perdido"}.` : "Agende uma reunião ou crie a atividade na Fila de hoje.";
+    let botoes: React.ReactNode = !isClosed && (
+      <button type="button" className="fl-btn fl-btn--acao" onClick={() => setShowMeetingModal(true)}>Agendar reunião</button>
+    );
+    if (proximo?.tipo === "reuniao") {
+      const m = proximo.reuniao;
+      titulo = m.title || (m.tipo === "retomada" ? "Reunião de retomada" : "Reunião com o cliente");
+      const com = m.closer?.name ?? m.meeting_owner;
+      quando = `${quandoPorExtenso(m.scheduled_at)} · ${dataRelativa(m.scheduled_at, agora)}${com ? ` · com ${com}` : ""}`;
+      botoes = (
+        <>
+          <button type="button" className="fl-btn fl-btn--contorno" onClick={() => setReuniaoRemarcar(m)}>Reagendar</button>
+          {papel === "closer" ? (
+            <>
+              <button type="button" className={`fl-btn ${m.meeting_link ? "fl-btn--contorno" : "fl-btn--acao"}`} onClick={() => setReuniaoAberta(m)}>Lançar desfecho</button>
+              {m.meeting_link && (
+                <a className="fl-btn fl-btn--acao" href={m.meeting_link} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>Entrar no Meet</a>
+              )}
+            </>
+          ) : (
+            <button type="button" className="fl-btn fl-btn--acao" onClick={() => setReuniaoAberta(m)}>Concluir atividade</button>
+          )}
+        </>
+      );
+    } else if (proximo?.tipo === "tarefa") {
+      const t = proximo.tarefa;
+      const atrasada = new Date(t.scheduled_at).getTime() < agora.getTime() && !mesmoDiaLocal(t.scheduled_at);
+      titulo = `${CHANNEL_LABELS[t.channel_type] ?? t.channel_type}${t.is_extra ? " (atividade extra)" : ""}`;
+      if (t.notes) titulo += ` · ${t.notes.length > 70 ? t.notes.slice(0, 70) + "…" : t.notes}`;
+      quando = `${quandoPorExtenso(t.scheduled_at)} · ${atrasada ? "atrasada, " : ""}${dataRelativa(t.scheduled_at, agora)}`;
+      botoes = (
+        <>
+          <button type="button" className="fl-btn fl-btn--contorno" onClick={() => abrirReagendarTarefa(t)}>Reagendar</button>
+          <button type="button" className="fl-btn fl-btn--acao" disabled={tarefaOcupada === t.id} onClick={() => void concluirTarefa(t)}>
+            Concluir atividade
+          </button>
+        </>
+      );
+    }
+    return (
+      <section className="fl-faixa" aria-label="Próximo passo">
+        <div className="fl-faixa__o-que">
+          <div className="fl-faixa__icone">{proximo?.tipo === "tarefa" ? <IcRelogio /> : <IcCalendario size={22} />}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+            <span className="fl-faixa__rot">Próximo passo</span>
+            <span className="fl-faixa__titulo">{titulo}</span>
+            <span className="fl-faixa__quando">{quando}</span>
+          </div>
+        </div>
+        {botoes && <div className="fl-faixa__botoes">{botoes}</div>}
+      </section>
+    );
+  }
+
+  function mesmoDiaLocal(iso: string) {
+    const d = new Date(iso);
+    return d.toDateString() === agora.toDateString();
+  }
+
+  // ── "Sobre o lead" (era a Visão Geral: status, responsável, dados do lead) ──
+  function renderSobre(lead: Lead) {
+    const linhas: [string, React.ReactNode][] = [
+      ["Responsável", lead.owner?.name ?? "Não atribuído"],
+      ["Origem", SOURCE_LABELS[lead.source] ?? lead.source],
+      ...(lead.segment ? [["Fonte / Produto", lead.segment] as [string, React.ReactNode]] : []),
+      ["Chegou em", lead.arrived_at ? formatDateTime(lead.arrived_at) : "—"],
+      ["Temperatura", temperatura ? <span style={{ color: `var(--${TOM_DA_TEMPERATURA[temperatura.level]})` }}>{temperatura.label}</span> : "—"],
+      ["Status", STATUS_LABELS[lead.status] + (lead.status === "perdido" && lead.loss_reason?.label ? ` · ${lead.loss_reason.label}` : "")],
+      ...(papel === "closer" && lead.cadence_id ? [["Cadência", cadence?.name ?? "—"] as [string, React.ReactNode]] : []),
+      ...(lead.cadence_started_at ? [["Cadência desde", formatDate(lead.cadence_started_at)] as [string, React.ReactNode]] : []),
+      ...((lead.city || lead.state) ? [["Cidade / UF", [lead.city, lead.state].filter(Boolean).join(" / ")] as [string, React.ReactNode]] : []),
+      ...(lead.job_title ? [["Cargo", lead.job_title] as [string, React.ReactNode]] : []),
+      ...(lead.company_name ? [["Empresa", lead.company_name] as [string, React.ReactNode]] : []),
+      ...(lead.linkedin_url ? [["LinkedIn", lead.linkedin_url] as [string, React.ReactNode]] : []),
+      ...(lead.estimated_value != null ? [["Valor estimado", lead.estimated_value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })] as [string, React.ReactNode]] : []),
+      ...(lead.closed_value != null ? [["Valor fechado", lead.closed_value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })] as [string, React.ReactNode]] : []),
+      ["Criado em", formatDate(lead.created_at)],
+      ["Última atualização", formatDate(lead.updated_at)],
+    ];
+    return (
+      <section className="fl-card" aria-label="Sobre o lead" style={{ gap: 10 }}>
+        <h2 style={{ marginBottom: 4 }}>Sobre o lead</h2>
+        {linhas.map(([k, v]) => <div key={k} className="fl-linha"><span>{k}</span><span>{v}</span></div>)}
+        {lead.owner?.email && <p className="fl-mudo">{lead.owner.email}</p>}
+        <button type="button" className="fl-btn fl-btn--link" onClick={openEditModal}>Editar dados</button>
+      </section>
+    );
+  }
+
 
   // ── Próximas atividades (Sprint 4) ───────────────────────────────────────────
   // As tasks pendentes eram buscadas mas NUNCA exibidas — só as concluídas
@@ -921,317 +1420,9 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
     );
   }
 
-  // ── Tab Content ────────────────────────────────────────────────────────────
 
-  function renderTabContent(lead: Lead) {
-    switch (activeTab) {
-      // ── Histórico (timeline unificada) ──
-      case "historico": {
-        type Ev = { ts: string; icon: string; color: string; title: string; body?: string };
-        const outcomeLabels: Record<string, string> = {
-          ganho: "Ganho / Agendou", concluida: "Concluída", sem_interesse: "Perdido", atendeu: "Atendeu (pediu retorno)",
-          nao_atendeu: "Não atendeu", caixa_postal: "Caixa postal", numero_errado: "Nº errado", desligou: "Desligou",
-        };
-        const meetingLabels: Record<string, string> = { agendada: "agendada", realizada: "realizada", no_show: "no-show", cancelada: "cancelada", desistencia: "encerrada por desistência do cliente" };
-        const events: Ev[] = [];
-
-        // Chegada do lead
-        const chegada = lead.arrived_at || lead.created_at;
-        if (chegada) events.push({ ts: chegada, icon: "📥", color: "#0147FF", title: "Lead entrou no sistema", body: `Origem: ${SOURCE_LABELS[lead.source] ?? lead.source}${lead.segment ? ` · ${lead.segment}` : ""}` });
-
-        // Anotações
-        notes.forEach((n) => events.push({ ts: n.created_at, icon: "📝", color: "#6D3BEB", title: "Anotação", body: n.body }));
-
-        // Atividades concluídas (com desfecho)
-        tasks.filter((t) => t.status === "concluida" && t.completed_at).forEach((t) => {
-          const res = (t as unknown as { contact_result?: string }).contact_result;
-          events.push({
-            ts: t.completed_at!, icon: "✅", color: "#12A18A",
-            title: `${CHANNEL_LABELS[t.channel_type] ?? t.channel_type} — ${res ? (outcomeLabels[res] ?? res) : "concluída"}`,
-            body: t.notes || undefined,
-          });
-        });
-
-        // Reuniões
-        meetings.forEach((m) => events.push({
-          ts: m.created_at, icon: "📅", color: "#E8920B",
-          title: `Reunião ${meetingLabels[m.status] ?? m.status} — ${formatDateTime(m.scheduled_at)}`,
-          body: [m.title, m.location].filter(Boolean).join(" · ") || undefined,
-        }));
-
-        // Desfecho do lead
-        // closed_at não "anda" com edições posteriores (updated_at andava)
-        if (lead.status === "ganho") events.push({ ts: lead.closed_at ?? lead.updated_at, icon: "🏆", color: "#12A18A", title: "Lead GANHO" });
-        if (lead.status === "perdido") events.push({ ts: lead.closed_at ?? lead.updated_at, icon: "🚫", color: "#E5484D", title: "Lead perdido", body: lead.loss_reason?.label ? `Motivo: ${lead.loss_reason.label}` : undefined });
-
-        events.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
-
-        return (
-          <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-            <h3 className="text-sm font-semibold text-gray-900 mb-1">Linha do tempo</h3>
-            <p className="text-xs text-gray-400 mb-5">Tudo que aconteceu com este cliente, do mais recente ao mais antigo.</p>
-            {events.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-8">Nenhum evento ainda.</p>
-            ) : (
-              <div className="relative pl-6">
-                <span className="absolute left-[9px] top-2 bottom-2 w-px bg-gray-200" aria-hidden />
-                <div className="flex flex-col gap-4">
-                  {events.map((ev, i) => (
-                    <div key={i} className="relative">
-                      <span className="absolute -left-6 top-0.5 w-[19px] h-[19px] rounded-full flex items-center justify-center text-[10px] bg-white border" style={{ borderColor: ev.color }}>
-                        {ev.icon}
-                      </span>
-                      <div className="flex items-baseline gap-2 flex-wrap">
-                        <span className="text-[13.5px] font-semibold text-gray-900">{ev.title}</span>
-                        <span className="text-[11px] text-gray-400 tabular-nums">{formatDateTime(ev.ts)}</span>
-                      </div>
-                      {ev.body && <p className="text-[12.5px] text-gray-500 mt-0.5 whitespace-pre-wrap max-w-[70ch]">{ev.body}</p>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      }
-
-      // ── Visão Geral ──
-      case "visao_geral":
-        return (
-          <div className="space-y-6">
-            {/* Status Card */}
-            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">Status do Lead</h3>
-              <div className="flex items-center gap-3 mb-4">
-                <span className={`w-2.5 h-2.5 rounded-full ${statusColor.dot}`} />
-                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${statusColor.bg} ${statusColor.text}`}>
-                  {STATUS_LABELS[lead.status]}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="p-3 rounded-lg bg-[#F8F9FA]">
-                  <p className="text-xs text-gray-500 mb-1">Criado em</p>
-                  <p className="text-sm font-medium text-gray-900">{formatDate(lead.created_at)}</p>
-                </div>
-                <div className="p-3 rounded-lg bg-[#F8F9FA]">
-                  <p className="text-xs text-gray-500 mb-1">Última atualização</p>
-                  <p className="text-sm font-medium text-gray-900">{formatDate(lead.updated_at)}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Details Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-gray-900">Cadência</h3>
-                  {lead.cadence_id && (
-                    <button
-                      onClick={removeFromCadence}
-                      disabled={removingCadence}
-                      className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      title="Limpa o vínculo com a cadência e encerra as atividades abertas do plano"
-                    >
-                      {removingCadence ? "Removendo..." : "Remover da cadência"}
-                    </button>
-                  )}
-                </div>
-                <p className="text-sm text-gray-700">{cadence?.name ?? "\u2014"}</p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Iniciada em {lead.cadence_started_at ? formatDate(lead.cadence_started_at) : "\u2014"}
-                </p>
-              </div>
-              <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-                <h3 className="text-sm font-semibold text-gray-900 mb-3">Responsável</h3>
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-[#0147FF]/10 flex items-center justify-center">
-                    <span className="text-xs font-bold text-[#0147FF]">
-                      {lead.owner?.name?.split(" ").map((n: string) => n[0]).join("").slice(0, 2) ?? "?"}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{lead.owner?.name ?? "Não atribuído"}</p>
-                    <p className="text-xs text-gray-400">{lead.owner?.email ?? ""}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Próximas atividades (Sprint 4) */}
-            {renderUpcomingTasksBox()}
-
-            {/* Dados do lead — fusão de "Informações Resumidas" + antiga aba
-                "Informações Pessoais" (sprint 2026-07-24): uma ficha única com o
-                que o fluxo real preenche. Campos raros (cargo/LinkedIn/valor) só
-                aparecem quando existem, pra ficha não virar lista de traços. */}
-            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Dados do Lead</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
-                <InfoRow label="Nome completo" value={lead.full_name} />
-                <InfoRow label="Telefone" value={lead.phone} />
-                <InfoRow label="E-mail" value={lead.email} />
-                <InfoRow label="Fonte / Produto" value={lead.segment} />
-                <InfoRow label="Temperatura" value={lead.lead_score} />
-                <InfoRow label="Origem" value={SOURCE_LABELS[lead.source]} />
-                <InfoRow label="Chegou em" value={lead.arrived_at ? formatDateTime(lead.arrived_at) : null} />
-                {(lead.city || lead.state) && (
-                  <InfoRow label="Cidade / UF" value={[lead.city, lead.state].filter(Boolean).join(" / ")} />
-                )}
-                {lead.job_title && <InfoRow label="Cargo" value={lead.job_title} />}
-                {lead.company_name && <InfoRow label="Empresa" value={lead.company_name} />}
-                {lead.linkedin_url && <InfoRow label="LinkedIn" value={lead.linkedin_url} />}
-                {lead.estimated_value != null && (
-                  <InfoRow label="Valor estimado" value={lead.estimated_value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
-                )}
-              </div>
-            </div>
-
-            {/* As respostas do formulário da LP (Bruno, 14/09). Elas moram no
-                card do Bitrix e nunca chegavam ao QS — o /api/lead-formulario
-                vai buscar. Logo abaixo da ficha porque é a continuação dela:
-                aqui é o que o próprio cliente contou, não o que o sistema sabe. */}
-            <RespostasDoFormulario leadId={lead.id} variante="ficha" />
-
-            {/* 0213: cadastro único do cliente (o mesmo do Rel/Ops) — o SDR já preenche. */}
-            <CadastroDoLead leadId={lead.id} />
-          </div>
-        );
-
-      // ── Anotações ──
-      case "anotacoes":
-        return (
-          <div className="space-y-4">
-            {/* Add Note */}
-            <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Nova Anotação</h3>
-              <textarea
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                rows={3}
-                placeholder="Escreva sua anotação..."
-                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] resize-none"
-              />
-              <div className="flex justify-end mt-3">
-                <button
-                  onClick={addNote}
-                  disabled={!newNote.trim() || savingNote}
-                  className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {savingNote ? "Salvando..." : "Adicionar Anotação"}
-                </button>
-              </div>
-            </div>
-
-            {/* Notes List */}
-            <div className="space-y-3">
-              {notes.map((note) => {
-                // Autor REAL da nota (antes exibia sempre o dono do lead — num
-                // handover, as notas antigas "mudavam" de autor).
-                const authorName = allUsers.find((u) => u.id === note.author_id)?.name ?? lead.owner?.name ?? "Autor";
-                // A RLS (0007: notes_update/delete) só aceita autor ou gestor —
-                // o menu segue a mesma regra pra não oferecer ação que o banco recusa.
-                const canManageNote =
-                  !!currentUser && (canSeeAllData(currentUser.role) || note.author_id === currentUser.id);
-                const isEditingThis = editingNoteId === note.id;
-                return (
-                <div key={note.id} className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-[#0147FF]/10 flex items-center justify-center">
-                        <span className="text-[10px] font-bold text-[#0147FF]">
-                          {authorName.split(" ").map((n: string) => n[0]).join("").slice(0, 2) || "?"}
-                        </span>
-                      </div>
-                      <span className="text-sm font-medium text-gray-900">{authorName}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400">{formatDateTime(note.created_at)}</span>
-                      {canManageNote && (
-                        <div className="relative">
-                          <button
-                            onClick={() => setNoteMenuId(noteMenuId === note.id ? null : note.id)}
-                            className="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                            title="Ações da anotação"
-                            aria-label="Ações da anotação"
-                          >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                              <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
-                            </svg>
-                          </button>
-                          {noteMenuId === note.id && (
-                            <>
-                              {/* backdrop transparente: clique fora fecha o menu */}
-                              <div className="fixed inset-0 z-10" onClick={() => setNoteMenuId(null)} />
-                              <div className="absolute right-0 top-7 z-20 w-32 rounded-lg border border-gray-100 bg-white shadow-lg py-1">
-                                <button
-                                  onClick={() => {
-                                    setNoteMenuId(null);
-                                    startEditNote(note);
-                                  }}
-                                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                                >
-                                  Editar
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setNoteMenuId(null);
-                                    handleDeleteNote(note);
-                                  }}
-                                  className="w-full text-left px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                                >
-                                  Excluir
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  {isEditingThis ? (
-                    <div>
-                      <textarea
-                        value={editingNoteBody}
-                        onChange={(e) => setEditingNoteBody(e.target.value)}
-                        rows={3}
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] resize-none"
-                      />
-                      <div className="flex items-center justify-end gap-2 mt-2">
-                        <button
-                          onClick={() => {
-                            setEditingNoteId(null);
-                            setEditingNoteBody("");
-                          }}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
-                        >
-                          Cancelar
-                        </button>
-                        <button
-                          onClick={saveNoteEdit}
-                          disabled={!editingNoteBody.trim() || savingNoteEdit}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-[#0147FF] hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                          {savingNoteEdit ? "Salvando..." : "Salvar"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-700 leading-relaxed">{note.body}</p>
-                  )}
-                </div>
-                );
-              })}
-              {notes.length === 0 && (
-                <div className="text-center py-12">
-                  <p className="text-sm text-gray-400">Nenhuma anotação registrada.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-
-      // ── Reuniões (Sprint 4: mostra o que foi coletado + ações de desfecho) ──
-      case "reunioes":
+  // ── Reuniões completas (chip "Reuniões"): o que foi coletado + desfecho ──
+  function renderReunioesCompletas() {
         return (
           <div className="space-y-3">
             {meetings.map((meeting) => {
@@ -1316,17 +1507,10 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             )}
           </div>
         );
+  }
 
-      // ── Venda: contrato e pagamento (mesmos blocos do cartão do closer) ──
-      // Áudio das ligações do webfone (0233).
-      case "ligacoes":
-        return <LigacoesDoLead leadId={lead.id} />;
-
-      case "venda":
-        return <ComCoresDoRel><VendaDoCliente leadId={lead.id} /></ComCoresDoRel>;
-
-      // ── Prospecção (Timeline) ──
-      case "prospeccao":
+  // ── Prospecção (era aba): a cadência dia a dia + próximas e realizadas ──
+  function renderProspeccao(lead: Lead) {
         return (
           <div className="bg-white border border-gray-100 rounded-xl shadow-none p-5">
             <h3 className="text-sm font-semibold text-gray-900 mb-2">Timeline de Prospecção</h3>
@@ -1456,33 +1640,28 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
             </div>
           </div>
         );
-
-      default:
-        return null;
-    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  const veAbaVenda = podeAbrirAreaCloser(currentUser);
+  const chipsExtras: { id: AbaAtividade; rotulo: string }[] = [
+    { id: "prospeccao", rotulo: "Prospecção" },
+    { id: "cadastro", rotulo: "Cadastro" },
+    ...(veAbaVenda ? [{ id: "venda" as AbaAtividade, rotulo: "Venda" }] : []),
+  ];
+
   return (
-    <div className="min-h-screen bg-[#F8F9FA] px-4 md:px-6 py-6" style={{ fontFamily: "inherit" }}>
-      {/* Back Button */}
-      <button
-        onClick={onBack}
-        className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900 mb-6 transition-colors"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-        </svg>
-        Voltar para Leads
-      </button>
+    <div className="fl">
+      <div className="fl__wrap">
+      <button type="button" className="fl-voltar" onClick={onBack}><IcVoltar />Voltar para Leads</button>
 
       {/* Oportunidade futura em aberto: aparece ANTES de tudo, pra ninguém
           ligar no meio da espera que o cliente pediu. */}
-      <div className="mb-4 empty:hidden">
+      <div className="empty:hidden">
         <FaixaOportunidadeFutura
           leadId={lead.id}
-          podeAgir={!!currentUser && (canSeeAllData(currentUser.role) || currentUser.role === "closer")}
+          podeAgir={podeOportunidade}
           versao={versaoOportunidade}
           onMudou={() => { void fetchLead(); void reloadTasks(); }}
         />
@@ -1496,315 +1675,199 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
         />
       )}
 
-      {/* Lead Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-[#0147FF]/10 flex items-center justify-center">
-            <span className="text-base font-bold text-[#0147FF]">
-              {/* Iniciais derivadas do full_name — first/last_name nunca chegam
-                  do Bitrix e deixavam o avatar em branco (fix 2026-07-24). */}
-              {(() => {
-                const parts = (lead.full_name ?? "").trim().split(/\s+/).filter(Boolean);
-                if (parts.length === 0) return "?";
-                const first = parts[0][0] ?? "";
-                const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
-                return (first + last).toUpperCase() || "?";
-              })()}
-            </span>
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-lg font-bold text-gray-900">{lead.full_name}</h1>
-              {/* Temperatura EDITÁVEL (Sprint 4): o badge deixou de ser só reflexo
-                  do Bitrix — o SDR classifica Quente/Morno/Frio aqui mesmo. */}
-              <div className="relative">
-                {(() => {
-                  const t = getLeadScore(lead);
-                  return (
-                    <button
-                      onClick={() => setShowScoreMenu(!showScoreMenu)}
-                      disabled={savingScore}
-                      title="Temperatura do lead — clique para classificar"
-                      className={
-                        t
-                          ? "text-xs font-bold px-2 py-0.5 rounded-md transition hover:opacity-80 disabled:opacity-50"
-                          : "text-xs font-medium px-2 py-0.5 rounded-md border border-dashed border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400 transition disabled:opacity-50"
-                      }
-                      style={t ? { background: t.bg, color: t.color } : undefined}
-                    >
-                      {savingScore ? "..." : t ? t.label : "Classificar"}
-                    </button>
-                  );
-                })()}
-                {showScoreMenu && (
-                  <>
-                    {/* backdrop transparente: clique fora fecha o menu */}
-                    <div className="fixed inset-0 z-10" onClick={() => setShowScoreMenu(false)} />
-                    <div className="absolute left-0 top-7 z-20 w-40 rounded-lg border border-gray-100 bg-white shadow-lg py-1">
-                      {TEMPERATURE_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.label}
-                          onClick={() => setTemperature(opt.label)}
-                          disabled={savingScore}
-                          className="w-full text-left px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                          style={{ color: opt.color }}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                      {lead.lead_score && (
-                        <button
-                          onClick={() => setTemperature(null)}
-                          disabled={savingScore}
-                          className="w-full text-left px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50 disabled:opacity-50 transition-colors border-t border-gray-100"
-                        >
-                          Sem classificação
-                        </button>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
+      {/* ── Cabeçalho ── */}
+      <header className="fl-cab">
+        <div className="fl-cab__quem">
+          {/* Iniciais derivadas do full_name — first/last_name nunca chegam do Bitrix. */}
+          <div className="fl-avatar" aria-hidden="true">{iniciaisDoNome(lead.full_name)}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+            <div className="fl-cab__nome">
+              <h1>{nomeDoLead}</h1>
+              {/* Temperatura EDITÁVEL (Sprint 4): o SDR classifica Quente/Morno/Frio aqui mesmo. */}
+              <MenuDaFicha alinhar="esquerda" rotuloAcessivel="Temperatura do lead — clique para classificar"
+                classeBotao={`fl-selo ${temperatura ? `fl-selo--${TOM_DA_TEMPERATURA[temperatura.level]}` : "fl-selo--tracejado"}`}
+                botao={savingScore ? "..." : temperatura ? temperatura.label : "Classificar"}
+                itens={[
+                  ...TEMPERATURE_OPTIONS.map((opt) => ({ rotulo: opt.label, cor: opt.color, disabled: savingScore, onClick: () => void setTemperature(opt.label) })),
+                  ...(lead.lead_score ? [{ separador: true } as ItemDoMenu, { rotulo: "Sem classificação", disabled: savingScore, onClick: () => void setTemperature(null) }] : []),
+                ]} />
+              <span className={`fl-selo${seloStatus.tom ? ` fl-selo--${seloStatus.tom}` : ""}`}>{seloStatus.texto}</span>
+            </div>
+            <div className="fl-cab__dados">
+              {/* Cargo/empresa quando existem (raros no fluxo do Bitrix). */}
+              {(lead.job_title || lead.company_name) && <span>{[lead.job_title, lead.company_name].filter(Boolean).join(" na ")}</span>}
+              {lead.segment && <span title="Fonte / Produto">{lead.segment}</span>}
+              {lead.phone && <span>{formatPhoneDisplay(lead.phone) || lead.phone}</span>}
+              {lead.email && <span style={{ overflowWrap: "anywhere" }}>{lead.email}</span>}
               {lead.bitrix_id && (
-                <button
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(lead.bitrix_id!);
-                      // Feedback visual (Sprint 4): antes o clique não dava sinal
-                      // nenhum de que o ID tinha ido pro clipboard.
-                      setBitrixCopied(true);
-                      setTimeout(() => setBitrixCopied(false), 1500);
-                    } catch {
-                      notifyError("Não foi possível copiar o ID — copie manualmente.");
-                    }
-                  }}
-                  title="ID do cliente (Bitrix) — clique para copiar"
-                  className={`text-xs font-bold tabular-nums px-2 py-0.5 rounded-md transition ${
-                    bitrixCopied
-                      ? "bg-green-100 text-green-700"
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}
-                >
+                <button type="button" onClick={() => void copiarIdBitrix()} title="ID do cliente (Bitrix) — clique para copiar">
                   {bitrixCopied ? "Copiado ✓" : `ID ${lead.bitrix_id}`}
                 </button>
               )}
             </div>
-            {/* Subtítulo: cargo/empresa quando existem; senão o telefone — pra
-                lead do Bitrix não sobrar um "na " solto (fix 2026-07-24). */}
-            {(lead.job_title || lead.company_name || lead.phone) && (
-              <p className="text-sm text-gray-500">
-                {lead.job_title || lead.company_name
-                  ? [lead.job_title, lead.company_name].filter(Boolean).join(" na ")
-                  : lead.phone}
-              </p>
-            )}
-            {lead.segment && (
-              <p className="text-[13px] font-semibold text-gray-600 mt-0.5">Fonte/Produto: <span className="text-gray-800">{lead.segment}</span></p>
-            )}
             <ComCoresDoRel>
-              <div className="mt-1"><StatusNoFinanceiro alvo={{ leadId: lead.id }} recarregar={sinalFin} compacto /></div>
+              <div className="empty:hidden"><StatusNoFinanceiro alvo={{ leadId: lead.id }} recarregar={sinalFin} compacto /></div>
             </ComCoresDoRel>
             <ComCoresDaCentral>
-              <div className="mt-2"><PedidosSobre alvo={{ leadId: lead.id }} recarregar={sinalPedidos} /></div>
+              <div className="empty:hidden"><PedidosSobre alvo={{ leadId: lead.id }} recarregar={sinalPedidos} /></div>
             </ComCoresDaCentral>
+            {/* Cotação de aéreo correndo: o cronômetro e o "Terminei" ficam à vista. */}
+            {cotandoAgora && <div><CotandoAereo leadId={lead.id} /></div>}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Editar lead (Sprint 4 — o maior buraco do app: nada era editável) */}
-          <button
-            onClick={openEditModal}
-            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
-            Editar
-          </button>
-          <button
-            onClick={() => setEnviarFin(true)}
-            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-            title="O Financeiro fala com o cliente pelo WhatsApp e resolve a dúvida; você acompanha o status aqui"
-          >
-            💰 Enviar ao Financeiro
-          </button>
-          <button
-            onClick={() => setPedirSetor(true)}
-            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-            title="Vira um pedido com dono e prazo na fila do outro setor; você acompanha aqui"
-          >
-            ↗ Pedir a outro setor
-          </button>
-          <button
-            onClick={() => setPedirPagamento(true)}
-            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-            title="Pix pra fornecedor, link de pagamento pro cliente, cartão da empresa ou provisão — já amarrado a este lead"
-          >
-            💸 Pedir pagamento
-          </button>
-          {/* Cotação de aéreo do SDR: cronômetro, não meta (0206) */}
-          {currentUser?.role === "sdr" || (currentUser && canSeeAllData(currentUser.role)) ? <CotandoAereo leadId={lead.id} /> : null}
-          <button
-            onClick={() => setShowHandoverModal(true)}
-            className="px-4 py-2 rounded-lg bg-[#2563EB] text-sm font-semibold text-white hover:bg-[#1D4ED8] transition-colors flex items-center gap-2"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-            Enviar para Closer
-          </button>
-          {/* Oportunidade futura: decisão do closer (ou da gestão) sobre o NEGÓCIO. */}
-          {!!currentUser && (canSeeAllData(currentUser.role) || currentUser.role === "closer") && (
-            <button
-              onClick={() => setMostrarOportunidade(true)}
-              className="px-4 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
-            >
-              Oportunidade futura
+
+        <div className="fl-cab__acoes">
+          {lead.phone && (
+            <button type="button" className="fl-btn fl-btn--icone" aria-label="Ligar" title="Ligar (webfone)" onClick={() => void ligar()}>
+              <IcTelefone />
             </button>
           )}
-          {/* Lead fechado esconde Ganho/Perdido (Sprint 4): re-clicar re-disparava
-              o evento no Bitrix e sobrescrevia o desfecho já dado. */}
-          {!isClosed && (
+          <button type="button" className="fl-btn fl-btn--whats" onClick={() => setShowWhatsApp(true)} title="Abrir WhatsApp">
+            <IcWhats />WhatsApp
+          </button>
+          {papel === "sdr" ? (
             <>
-              <button
-                onClick={openWonModal}
-                className="px-4 py-2 rounded-lg bg-green-600 text-sm font-medium text-white hover:bg-green-700 transition-colors"
-              >
-                Ganho
+              <button type="button" className="fl-btn" onClick={() => setShowMeetingModal(true)}>Agendar reunião</button>
+              <button type="button" className="fl-btn fl-btn--acao" onClick={() => setShowHandoverModal(true)}>Enviar para Closer</button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="fl-btn" onClick={() => setPedirPagamento(true)}
+                title="Pix pra fornecedor, link de pagamento pro cliente, cartão da empresa ou provisão — já amarrado a este lead">
+                Pedir pagamento
               </button>
-              <div className="relative inline-block">
-                <select
-                  value={selectedLossReason}
-                  onChange={(e) => {
-                    setSelectedLossReason(e.target.value);
-                    if (e.target.value) {
-                      markAsLost(e.target.value);
-                    } else {
-                      markAsLost();
-                    }
-                  }}
-                  className="px-4 py-2 rounded-lg bg-red-600 text-sm font-medium text-white hover:bg-red-700 transition-colors appearance-none cursor-pointer pr-8"
-                  style={{ backgroundImage: "none" }}
-                >
-                  <option value="">Perdido</option>
-                  {lossReasons.map((lr) => (
-                    <option key={lr.id} value={lr.id}>{lr.label}</option>
-                  ))}
-                </select>
-              </div>
+              {veVenda && (
+                <button type="button" className="fl-btn fl-btn--acao" onClick={abrirSubirVenda} disabled={venda.carregando}
+                  title="Abre a tela de venda (itens, valores e a proposta anexada)">
+                  Marcar como ganho
+                </button>
+              )}
             </>
           )}
-          <button
-            onClick={() => setShowMeetingModal(true)}
-            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            Agendar Reunião
-          </button>
-          <button
-            onClick={() => setShowWhatsApp(true)}
-            className="px-3 py-2 rounded-lg text-sm font-semibold text-white transition-colors flex items-center gap-2"
-            style={{ background: "#25D366" }}
-            title="Abrir WhatsApp"
-            aria-label="Abrir WhatsApp"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.29.173-1.414-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.002-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
-            </svg>
-            WhatsApp
-          </button>
-          {(lead.status === "ganho" || lead.status === "perdido") && (
-            <button
-              onClick={async () => {
-                if (reactivating) return;
-                if (!window.confirm(`Reativar ${lead.full_name ?? "este lead"}? As atividades da cadência serão recriadas do dia 1.`)) return;
-                setReactivating(true);
-                try {
-                  const { error } = await supabase.from("qs_leads").update({
-                    status: "em_prospeccao",
-                    loss_reason_id: null,
-                    cadence_started_at: new Date().toISOString(),
-                    arrived_at: new Date().toISOString(),
-                  }).eq("id", lead.id);
-                  if (error) {
-                    console.warn("Erro ao reativar lead:", error);
-                    notifyError("Não foi possível reativar o lead — tente novamente.");
-                    return;
-                  }
-
-                  // Recria as tarefas pela função única da cadência (a versão antiga
-                  // inseria uma coluna inexistente e falhava em silêncio: o lead
-                  // voltava a "em prospecção" com ZERO atividades e sumia da fila).
-                  if (lead.cadence_id) {
-                    await createCadenceTasks(lead.id, lead.cadence_id, lead.owner_id);
-                  }
-
-                  // Sprint 4: a reativação agora tem rastro no Bitrix — antes o
-                  // deal ficava em LOSE lá enquanto o QS trabalhava o lead de novo.
-                  // Whitelist do sync é perdido|ganho|reuniao|nota → vai como "nota".
-                  notifyBitrix("nota", {
-                    lead_id: lead.id,
-                    bitrix_id: lead.bitrix_id,
-                    body: `Lead REATIVADO no QS${currentUser?.name ? ` por ${currentUser.name}` : ""} — voltou pra prospecção com a cadência reiniciada do dia 1. Atualize a coluna do negócio no Bitrix se necessário.`,
-                  });
-
-                  setLead({ ...lead, status: "em_prospeccao" as LeadStatus, loss_reason_id: null });
-                  await reloadTasks();
-                } finally {
-                  setReactivating(false);
-                }
-              }}
-              disabled={reactivating}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-60"
-              style={{ background: "#0147FF" }}
-            >
-              {reactivating ? "Reativando..." : "↩ Reativar Lead"}
-            </button>
-          )}
-          {/* Excluir lead (Sprint 4 — só gestor/admin; RLS leads_delete confirma) */}
-          {canDeleteLead && (
-            <button
-              onClick={handleDeleteLead}
-              disabled={deletingLead}
-              className="px-4 py-2 rounded-lg border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-              title="Excluir o lead e todo o histórico (irreversível)"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-              {deletingLead ? "Excluindo..." : "Excluir"}
-            </button>
-          )}
+          <MenuDaFicha itens={itensMais} rotuloAcessivel="Mais ações" botao={<>Mais ações<IcSeta /></>} />
         </div>
-      </div>
+      </header>
 
-      {/* Tabs (clean underline style) */}
-      <div className="border-b border-gray-100 mb-6">
-        <div className="flex gap-0 -mb-px overflow-x-auto">
-          {(podeAbrirAreaCloser(currentUser) ? [...TABS, ABA_VENDA] : TABS).map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2 ${
-                activeTab === tab.key
-                  ? "border-[#0147FF] text-[#0147FF]"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {tab.label}
-              {tab.key === "anotacoes" && notes.length > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-[#0147FF]/15 text-[#0147FF] align-middle">
-                  {notes.length}
-                </span>
+      {avisoVenda && (
+        <div className={`fl-card`} role="status" style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 12, padding: "12px 16px",
+          borderColor: avisoVenda.tom === "ok" ? "var(--ok)" : "var(--warn)" }}>
+          <span style={{ flex: 1, minWidth: 0, color: avisoVenda.tom === "ok" ? "var(--ok)" : "var(--warn)", fontWeight: 600 }}>{avisoVenda.mensagem}</span>
+          <button type="button" className="fl-btn fl-btn--sm" onClick={() => setAvisoVenda(null)}>Fechar</button>
+        </div>
+      )}
+
+      {/* ── Próximo passo ── */}
+      {renderProximoPasso()}
+
+      <div className="fl-colunas">
+        {/* ── Coluna esquerda ── */}
+        <aside className="fl-lado">
+          {papel === "closer" ? (
+            <>
+              <PassagemDoSdr leadId={lead.id} interesse={lead.segment}
+                agendadoPor={[...meetings].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]?.scheduled_by ?? null} />
+              {veVenda && (
+                <VendaResumo venda={venda} reuniaoRealizada={reuniaoRealizada} pacoteDoLead={lead.segment} onAbrirVenda={() => setAba("venda")} />
               )}
-            </button>
-          ))}
-        </div>
+            </>
+          ) : (
+            <CadenciaSdr
+              cadence={cadence}
+              cadenceDays={cadenceDays}
+              iniciadaEm={lead.cadence_started_at}
+              tasks={tasks}
+              ocupadoId={tarefaOcupada}
+              temCadencia={!!lead.cadence_id}
+              removendo={removingCadence}
+              onRemover={() => void removeFromCadence()}
+              onVerCompleta={() => setAba("prospeccao")}
+              onMarcar={(t) => { if (t.status === "concluida") void desfazerTarefa(t); else void concluirTarefa(t); }}
+            />
+          )}
+          {renderSobre(lead)}
+          {/* As respostas do formulário da LP (14/09) — no closer já entram na Passagem do SDR. */}
+          {papel === "sdr" && <RespostasDoFormulario leadId={lead.id} variante="coluna" />}
+        </aside>
+
+        {/* ── Coluna principal: Atividade ── */}
+        <main className="fl-principal fl-card" style={{ gap: 16 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "space-between", alignItems: "center" }}>
+            <h2>Atividade</h2>
+            <div className="fl-chips" role="tablist" aria-label="Filtrar a atividade">
+              {CHIPS_FILTRO.map((c) => {
+                const n = c.id === "tudo" ? 0 : contagem(c.id);
+                return (
+                  <button key={c.id} type="button" role="tab" aria-selected={aba === c.id}
+                    className={`fl-chip${aba === c.id ? " fl-chip--on" : ""}`} onClick={() => setAba(c.id)}>
+                    {c.rotulo}{n > 0 && <span className="fl-chip__n">{n}</span>}
+                  </button>
+                );
+              })}
+              <span className="fl-chips__sep" aria-hidden="true" />
+              {chipsExtras.map((c) => (
+                <button key={c.id} type="button" role="tab" aria-selected={aba === c.id}
+                  className={`fl-chip${aba === c.id ? " fl-chip--on" : ""}`} onClick={() => setAba(c.id)}>
+                  {c.rotulo}
+                </button>
+              ))}
+            </div>
+          </div>
+          {renderAtividade(lead)}
+        </main>
+      </div>
       </div>
 
-      {/* Content */}
-      <div>{renderTabContent(lead)}</div>
+      {/* "Marcar como ganho" do closer: a tela ÚNICA de venda (proposta anexada obrigatória). */}
+      {subirVendaAberto && venda.negocio && (
+        <Suspense fallback={null}>
+          <ComCoresDoRel>
+            <SubirVenda origem="closer" negocio={venda.negocio} aberto={subirVendaAberto}
+              onFechar={() => setSubirVendaAberto(false)}
+              onSalvo={(r) => { setSubirVendaAberto(false); setAvisoVenda(r); venda.recarregar(); void fetchLead(); }} />
+          </ComCoresDoRel>
+        </Suspense>
+      )}
+
+      {/* Marcar como perdido (era um <select> vermelho no cabeçalho). */}
+      {mostrarPerdido && (
+        <div className="fl-modal-fundo" role="dialog" aria-modal="true" aria-labelledby="fl-perdido-t" onClick={() => setMostrarPerdido(false)}>
+          <div className="fl-modal" onClick={(e) => e.stopPropagation()}>
+            <h2 id="fl-perdido-t">Marcar {nomeDoLead} como perdido</h2>
+            <p className="fl-mudo">O lead sai da fila, as atividades abertas são encerradas e o negócio vai pra coluna de Perdido no Bitrix.</p>
+            <label className="fl-rotulo" htmlFor="fl-motivo">Motivo</label>
+            <select id="fl-motivo" className="fl-campo fl-campo--caixa" value={selectedLossReason} onChange={(e) => setSelectedLossReason(e.target.value)}>
+              <option value="">Sem motivo</option>
+              {lossReasons.map((lr) => <option key={lr.id} value={lr.id}>{lr.label}</option>)}
+            </select>
+            <div className="fl-modal__rodape">
+              <button type="button" className="fl-btn" onClick={() => setMostrarPerdido(false)}>Cancelar</button>
+              <button type="button" className="fl-btn" style={{ background: "var(--danger)", borderColor: "var(--danger)", color: "#FFFFFF" }}
+                onClick={() => { setMostrarPerdido(false); void markAsLost(selectedLossReason || undefined, true); }}>
+                Confirmar perdido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reagendar a atividade do "Próximo passo". */}
+      {tarefaReagendar && (
+        <div className="fl-modal-fundo" role="dialog" aria-modal="true" aria-labelledby="fl-reag-t" onClick={() => setTarefaReagendar(null)}>
+          <div className="fl-modal" onClick={(e) => e.stopPropagation()}>
+            <h2 id="fl-reag-t">Reagendar {CHANNEL_LABELS[tarefaReagendar.channel_type]?.toLowerCase() ?? "atividade"}</h2>
+            <p className="fl-mudo">Hoje: {quandoPorExtenso(tarefaReagendar.scheduled_at)}. Se cair fora do horário de trabalho, o QS encaixa no próximo horário livre.</p>
+            <label className="fl-rotulo" htmlFor="fl-reag-data">Nova data e hora</label>
+            <input id="fl-reag-data" type="datetime-local" className="fl-campo fl-campo--caixa" value={novaDataTarefa} onChange={(e) => setNovaDataTarefa(e.target.value)} />
+            <div className="fl-modal__rodape">
+              <button type="button" className="fl-btn" onClick={() => setTarefaReagendar(null)}>Cancelar</button>
+              <button type="button" className="fl-btn fl-btn--acao" disabled={!novaDataTarefa || salvandoReagendar} onClick={() => void salvarReagendarTarefa()}>
+                {salvandoReagendar ? "Salvando..." : "Reagendar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* Success Toast */}
       {handoverSuccess && (

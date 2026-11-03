@@ -1,0 +1,227 @@
+/* src/components/sdr/leads/ficha/ficha.css
+   ---------------------------------------------------------------------------
+   Ficha do lead (desenho do Bruno no Claude Design, 03/11 — variações SDR e
+   Closer). Só tokens do QS (src/styles/tokens.css): no tema escuro dá o visual
+   do desenho (#0A0C10 / #11141B / #171B24 / #252B38); no claro, o equivalente.
+   Os três tons que o sistema não tem como token entram aqui com nome próprio,
+   UMA vez: o azul da ação (o desenho pede azul, o --primary do QS é neutro), o
+   verde do WhatsApp e o azul-escuro da faixa "Próximo passo".
+   --------------------------------------------------------------------------- */
+
+.fl {
+  --fl-acao: #2563EB;          /* botão principal (branco por cima = 5,2:1) */
+  --fl-acao-hover: #1D4ED8;
+  --fl-acao-suave: color-mix(in srgb, var(--fl-acao) 14%, transparent);
+  --fl-whats: #15803D;         /* WhatsApp (branco por cima = 5:1) */
+  --fl-faixa-bg: var(--info-bg);
+  --fl-faixa-borda: color-mix(in srgb, var(--info) 38%, transparent);
+  --fl-faixa-icone: color-mix(in srgb, var(--info) 22%, transparent);
+
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  min-height: 100%;
+}
+.fl__wrap {
+  max-width: 1280px; margin: 0 auto; padding: 20px 24px 48px;
+  display: flex; flex-direction: column; gap: 20px; box-sizing: border-box;
+}
+@media (max-width: 640px) { .fl__wrap { padding: 16px 16px 40px; gap: 16px; } }
+
+.fl-voltar {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
+  min-height: 40px; padding: 0 4px; border: 0; background: transparent;
+  color: var(--muted); font: 500 13px/1 var(--font-sans); cursor: pointer;
+}
+.fl-voltar:hover { color: var(--text); }
+
+/* ── Cartões ──────────────────────────────────────────────────────────────── */
+.fl-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0;
+}
+.fl-card__topo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.fl-card h2 { margin: 0; font-size: 15px; font-weight: 700; color: var(--text); }
+.fl-card__meta { color: var(--muted); font-size: 12px; }
+.fl-rotulo { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.fl-linha { display: flex; justify-content: space-between; gap: 12px; }
+.fl-linha > span:first-child { color: var(--muted); flex-shrink: 0; }
+.fl-linha > span:last-child { font-weight: 600; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.fl-caixa { padding: 12px; background: var(--surface-2); border-radius: 10px; color: var(--text); margin: 0; }
+.fl-vazio { padding: 28px 16px; text-align: center; color: var(--muted); border: 1px dashed var(--border); border-radius: 12px; }
+.fl-mudo { color: var(--muted); font-size: 13px; margin: 0; }
+
+/* ── Botões (alvo de toque ≥ 40–44px) ─────────────────────────────────────── */
+.fl-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 0 16px; border-radius: 10px; white-space: nowrap;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  font: 600 14px/1.1 var(--font-sans); cursor: pointer; transition: background-color .12s, opacity .12s, border-color .12s;
+}
+.fl-btn:hover { border-color: var(--border-strong); }
+.fl-btn:disabled { opacity: .5; cursor: not-allowed; }
+.fl-btn--icone { width: 44px; padding: 0; }
+.fl-btn--acao { background: var(--fl-acao); border-color: var(--fl-acao); color: #FFFFFF; }
+.fl-btn--acao:hover { background: var(--fl-acao-hover); border-color: var(--fl-acao-hover); }
+.fl-btn--whats { background: var(--fl-whats); border-color: var(--fl-whats); color: #FFFFFF; }
+.fl-btn--whats:hover { opacity: .92; }
+.fl-btn--contorno { background: transparent; border-color: var(--fl-faixa-borda); color: var(--text); }
+.fl-btn--link {
+  min-height: 40px; padding: 0; border: 0; background: transparent; color: var(--info);
+  align-self: flex-start;
+}
+.fl-btn--link:hover { text-decoration: underline; }
+.fl-btn--sm { min-height: 40px; padding: 0 14px; font-size: 13px; }
+.fl-btn--perigo { color: var(--danger); }
+
+/* ── Selos ────────────────────────────────────────────────────────────────── */
+.fl-selo {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+  padding: 3px 9px; border-radius: 999px; border: 0; background: var(--surface-2); color: var(--muted);
+  white-space: nowrap; line-height: 1.4;
+}
+button.fl-selo { cursor: pointer; min-height: 26px; }
+.fl-selo--info { background: var(--info-bg); color: var(--info); }
+.fl-selo--warn { background: var(--warn-bg); color: var(--warn); }
+.fl-selo--danger { background: var(--danger-bg); color: var(--danger); }
+.fl-selo--ok { background: var(--ok-bg); color: var(--ok); }
+.fl-selo--tracejado { background: transparent; border: 1px dashed var(--border-strong); color: var(--muted); }
+
+/* ── Cabeçalho ────────────────────────────────────────────────────────────── */
+.fl-cab {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 24px;
+  display: flex; flex-wrap: wrap; gap: 20px; align-items: center; justify-content: space-between;
+}
+@media (max-width: 640px) { .fl-cab { padding: 16px; } }
+.fl-cab__quem { display: flex; gap: 16px; align-items: center; min-width: 0; flex: 1 1 360px; }
+.fl-avatar {
+  width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--info-bg); color: var(--info); font-weight: 700; font-size: 17px;
+}
+.fl-cab h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; color: var(--text); overflow-wrap: anywhere; }
+.fl-cab__nome { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fl-cab__dados { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 13px; align-items: center; }
+.fl-cab__dados button { border: 0; background: transparent; color: inherit; font: inherit; padding: 0; cursor: pointer; min-height: 24px; }
+.fl-cab__dados button:hover { color: var(--text); text-decoration: underline; }
+.fl-cab__acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+@media (max-width: 640px) { .fl-cab__acoes { width: 100%; } .fl-cab__acoes > .fl-btn:not(.fl-btn--icone) { flex: 1 1 auto; } }
+
+/* ── Menus (Mais ações, temperatura, nota) ────────────────────────────────── */
+.fl-menu { position: relative; }
+.fl-menu__pop {
+  position: absolute; right: 0; top: calc(100% + 8px); width: 260px; z-index: 30;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 6px;
+  display: flex; flex-direction: column; box-shadow: 0 12px 32px rgba(0,0,0,.35); max-height: 70vh; overflow-y: auto;
+}
+.fl-menu__pop--esq { right: auto; left: 0; width: 200px; }
+.fl-menu__i {
+  text-align: left; min-height: 40px; padding: 0 12px; border: 0; background: transparent; color: var(--text);
+  font: 500 14px/1.2 var(--font-sans); border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px;
+}
+.fl-menu__i:hover, .fl-menu__i:focus-visible { background: var(--surface); }
+.fl-menu__i:disabled { opacity: .5; cursor: not-allowed; }
+.fl-menu__i--perigo { color: var(--danger); }
+.fl-menu__sep { height: 1px; background: var(--border); margin: 6px 4px; }
+.fl-menu__g { padding: 8px 12px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--subtle); }
+
+/* ── Faixa "Próximo passo" ────────────────────────────────────────────────── */
+.fl-faixa {
+  background: var(--fl-faixa-bg); border: 1px solid var(--fl-faixa-borda); border-radius: 14px; padding: 20px 24px;
+  display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between;
+}
+@media (max-width: 640px) { .fl-faixa { padding: 16px; } .fl-faixa__botoes { width: 100%; } .fl-faixa__botoes > .fl-btn { flex: 1 1 auto; } }
+.fl-faixa__o-que { display: flex; gap: 16px; align-items: center; min-width: 0; }
+.fl-faixa__icone {
+  width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--fl-faixa-icone); color: var(--info);
+}
+.fl-faixa__rot { font-size: 12px; font-weight: 600; color: var(--info); text-transform: uppercase; letter-spacing: .06em; }
+.fl-faixa__titulo { font-size: 18px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.fl-faixa__quando { color: var(--muted); font-size: 14px; }
+.fl-faixa__botoes { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ── Colunas ──────────────────────────────────────────────────────────────── */
+.fl-colunas { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.fl-lado { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.fl-principal { flex: 999 1 560px; min-width: 0; }
+@media (max-width: 640px) { .fl-colunas, .fl-lado { gap: 16px; } .fl-principal { flex-basis: 100%; } }
+
+/* ── Barras (cadência e venda) ────────────────────────────────────────────── */
+.fl-barras { display: grid; gap: 6px; }
+.fl-barra { height: 6px; border-radius: 3px; background: var(--border); }
+.fl-barra--feito { background: var(--fl-acao); }
+.fl-barra--agora { background: color-mix(in srgb, var(--fl-acao) 45%, var(--border)); }
+.fl-barras__rot { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.fl-barras__rot .fl-ativo { color: var(--info); font-weight: 600; }
+
+/* ── Tarefas de hoje ──────────────────────────────────────────────────────── */
+.fl-tarefa {
+  min-height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 12px; width: 100%;
+  border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2);
+  font: inherit; color: var(--text); cursor: pointer; text-align: left;
+}
+.fl-tarefa:disabled { cursor: wait; opacity: .7; }
+.fl-tarefa--feita { color: var(--muted); text-decoration: line-through; }
+.fl-tarefa__caixa {
+  width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--border-strong); color: transparent;
+}
+.fl-tarefa--feita .fl-tarefa__caixa { background: var(--fl-acao); border-color: var(--fl-acao); color: #FFFFFF; }
+.fl-tarefa__hora { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.fl-tarefa__hora--atrasada { color: var(--danger); font-weight: 600; }
+
+/* ── Atividade ────────────────────────────────────────────────────────────── */
+.fl-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fl-chip {
+  min-height: 36px; padding: 0 14px; border-radius: 999px; font: 600 13px/1 var(--font-sans); cursor: pointer;
+  background: transparent; color: var(--text); border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px;
+}
+.fl-chip:hover { border-color: var(--border-strong); }
+.fl-chip--on { background: var(--text); color: var(--bg); border-color: var(--text); }
+.fl-chip__n { font-size: 11px; opacity: .75; font-variant-numeric: tabular-nums; }
+.fl-chips__sep { width: 1px; align-self: stretch; background: var(--border); margin: 4px 2px; }
+@media (pointer: coarse) { .fl-chip { min-height: 40px; } }
+
+.fl-nota { display: flex; flex-direction: column; gap: 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+.fl-nota label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.fl-nota textarea, .fl-campo {
+  background: transparent; border: 0; color: var(--text); font: inherit; resize: vertical; outline: none; width: 100%;
+}
+.fl-campo--caixa { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; min-height: 44px; box-sizing: border-box; }
+.fl-campo--caixa:focus { border-color: var(--fl-acao); }
+
+.fl-tempo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fl-tempo li { display: flex; gap: 14px; }
+.fl-tempo__eixo { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+.fl-tempo__ponto {
+  width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2); color: var(--muted);
+}
+.fl-tempo__ponto--reuniao { background: var(--fl-acao-suave); color: var(--info); }
+.fl-tempo__ponto--ligacao { background: var(--info-bg); color: var(--info); }
+.fl-tempo__ponto--nota { background: var(--warn-bg); color: var(--warn); }
+.fl-tempo__ponto--tarefa { background: var(--ok-bg); color: var(--ok); }
+.fl-tempo__ponto--perigo { background: var(--danger-bg); color: var(--danger); }
+.fl-tempo__fio { width: 2px; flex: 1; background: var(--border); min-height: 12px; }
+.fl-tempo__corpo { flex: 1; min-width: 0; padding-bottom: 20px; display: flex; flex-direction: column; gap: 8px; }
+.fl-tempo__titulo { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.fl-tempo__titulo strong { font-weight: 700; }
+.fl-tempo__titulo span { color: var(--muted); font-size: 13px; }
+.fl-tempo__texto { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+.fl-quadro {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px;
+  background: var(--surface-2); border-radius: 10px; padding: 12px 14px;
+}
+@media (max-width: 480px) { .fl-quadro { grid-template-columns: minmax(0, 1fr); } }
+.fl-quadro > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fl-quadro dt, .fl-quadro .k { color: var(--muted); font-size: 12px; }
+.fl-quadro dd, .fl-quadro .v { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.fl-quadro a { color: var(--info); }
+
+/* Modais próprios da ficha (os antigos seguem com as classes de sempre). */
+.fl-modal-fundo { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.5); padding: 16px; }
+.fl-modal { width: 100%; max-width: 440px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.fl-modal h2 { margin: 0; font-size: 17px; font-weight: 700; }
+.fl-modal__rodape { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
