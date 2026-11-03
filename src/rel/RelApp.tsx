@@ -74,7 +74,7 @@ const PropostasPage = lazy(() => import("@/propostas/PropostasPage"));
 // (as policies já barram a escrita — is_readonly) e decide inscrições.
 // Telas com prefixo "exp-" pra não bater com as do Rel ("clientes", "passageiros").
 const ExpedicoesArea = lazy(() => import("@/expedicoes/ExpedicoesArea"));
-const REL_EXP = { "exp-expedicoes": "expedicoes", "exp-pacotes": "pacotes", "exp-passageiros": "passageiros", "exp-inscricoes": "inscricoes", "exp-avisos": "avisos", "exp-receitas": "receitas", "exp-saude": "saude" } as const satisfies Record<string, TelaExp>;
+const REL_EXP = { "exp-expedicoes": "expedicoes", "exp-pacotes": "pacotes", "exp-passageiros": "passageiros", "exp-inscricoes": "inscricoes", "exp-avisos": "avisos", "exp-receitas": "receitas", "exp-saude": "saude", "exp-painel": "painel" } as const satisfies Record<string, TelaExp>;
 type TelaRelExp = keyof typeof REL_EXP;
 const ehRelExp = (t: string): t is TelaRelExp => t in REL_EXP;
 

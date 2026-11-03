@@ -65,6 +65,8 @@ export const ITENS_REL: ItemRel[] = [
   { id: "disparos", label: "Disparos e remarketing", icon: Icon.megafone, grupo: "posvenda", dica: "Mensagem em massa pra base", noCompleto: false },
   { id: "automacoes", label: "Automações", icon: Icon.cadencia, grupo: "posvenda", dica: "Mensagens que saem sozinhas", noCompleto: false },
   { id: "pesquisas", label: "Pesquisas", icon: Icon.pesquisa, grupo: "posvenda", dica: "Satisfação de quem voltou", noCompleto: false },
+  // 03/11 (docs/REL-UNIFICACAO.md): a porta de entrada — expedições + pacotes com as pendências de cada uma
+  { id: "exp-painel", label: "Painel das viagens", icon: Icon.grafico, grupo: "expedicoes", dica: "Quem embarca, quem está viajando e o que falta em cada viagem" },
   { id: "exp-expedicoes", label: "Expedições", icon: Icon.mapa, grupo: "expedicoes", dica: "Grupos das expedições (só leitura)" },
   { id: "exp-pacotes", label: "Pacotes", icon: Icon.carteira, grupo: "expedicoes", dica: "Pacotes vendidos" },
   { id: "exp-inscricoes", label: "Inscrições", icon: Icon.inscricao, grupo: "expedicoes", dica: "Fichas de inscrição pra decidir" },

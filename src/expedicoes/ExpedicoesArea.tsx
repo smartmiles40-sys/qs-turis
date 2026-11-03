@@ -31,6 +31,8 @@ const PAGINAS: Partial<Record<TelaExp, React.LazyExoticComponent<ComponentType>>
   receitas: lazy(() => import("./paginas/Receitas")),
   // 30/10: Saúde · fila do médico (laudos, acompanhamento, alimentação pra logística)
   saude: lazy(() => import("./paginas/Saude")),
+  // 03/11: Painel das viagens — expedições + pacotes com as pendências de cada uma (docs/REL-UNIFICACAO.md)
+  painel: lazy(() => import("./lista/painel/PainelViagens")),
 };
 
 export default function ExpedicoesArea({ tela, caminho, ir, setorRelacionamento = false }: {
