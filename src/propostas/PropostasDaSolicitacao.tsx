@@ -12,6 +12,8 @@ import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
 import { Botao, Etiqueta } from "@/rel/ui";
 import type { Solicitacao } from "@/solicitacoes/lib";
 import PropostaParaEnviar from "./PropostaParaEnviar";
+import { aplicarModelo } from "./ModeloEditor";
+import { modeloDaSolicitacao } from "./modelos";
 import { STATUS_PROPOSTA, TOM_PROPOSTA, listarPropostas, propostaVazia, salvarProposta, type PropostaResumo } from "./lib";
 
 export default function PropostasDaSolicitacao({ s, podeMontar, onAbrirEditor, onMudou }: {
@@ -35,11 +37,13 @@ export default function PropostasDaSolicitacao({ s, podeMontar, onAbrirEditor, o
     if (!onAbrirEditor) return;
     setCriando(true); setErro(null);
     try {
-      const id = await salvarProposta({
+      const base = {
         ...propostaVazia(s.para_setor),
         solicitacao_id: s.id, cliente_id: s.cliente_id, viagem_id: s.viagem_id, lead_id: s.lead_id,
         cliente_nome: (s.sobre_nome ?? "").split(" · ")[0] || "",
-      });
+      };
+      // 0280: o tipo da solicitação escolhe o modelo-padrão (pacote, serviços ou seguro)
+      const id = await salvarProposta({ ...base, ...aplicarModelo(base, modeloDaSolicitacao(s)) });
       onAbrirEditor(id);
     } catch (e) { setErro(e instanceof Error ? e.message : "Não criou."); setCriando(false); }
   }

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Setor } from "@/components/sdr/types";
 import { TIPOS_DE_VENDA } from "@/components/sdr/agenda/DesfechoVenda";
+import type { Conteudo, ExtraOpcao, ModeloProposta } from "./modelos";
 
 export type StatusProposta = "rascunho" | "pronta" | "enviada" | "aprovada" | "recusada" | "cancelada";
 export type TipoItem = "aereo" | "hospedagem" | "transfer" | "trem" | "passeio" | "seguro" | "carro" | "cruzeiro" | "visto" | "pacote" | "expedicao" | "concierge" | "outro";
@@ -274,6 +275,8 @@ export interface OpcaoProposta {
   desconto: number;
   pagamentos: Pagamento[];
   itens: ItemProposta[];
+  /** 0280: o que o cartão/plano do modelo tem a mais (fica em conteudo.opcoes_extra). */
+  extra?: ExtraOpcao;
 }
 export interface Proposta {
   id?: string;
@@ -297,6 +300,11 @@ export interface Proposta {
   viagem_id: string | null;
   lead_id: string | null;
   cliente_nome: string;
+  /** 0280: um dos 3 modelos-padrão (nulo = proposta antiga, no formato antigo). */
+  modelo: ModeloProposta | null;
+  conteudo: Conteudo;
+  /** O banco ainda não tem as colunas da 0280 (modelo/conteúdo não salvam). */
+  semColunaModelo?: boolean;
   criado_por?: string | null;
   criado_por_nome?: string | null;
   criado_em?: string;
@@ -341,6 +349,7 @@ export function propostaVazia(setor: Setor): Proposta {
     setor, status: "rascunho", titulo: "", destino: "", data_ida: "", data_volta: "", adultos: 2, criancas: 0, bebes: 0,
     apresentacao: "", observacoes: "", esconder_precos: false, capa_url: "",
     solicitacao_id: null, cliente_id: null, viagem_id: null, lead_id: null, cliente_nome: "",
+    modelo: null, conteudo: {},
     opcoes: [opcaoVazia()],
   };
 }
@@ -452,14 +461,18 @@ export async function carregarProposta(id: string): Promise<Proposta> {
     : { data: null };
   const nomes = await nomesDe([p.criado_por, p.enviada_por, sol?.criado_por ?? null]);
   const itens = (its ?? []) as Record<string, unknown>[];
+  const conteudo = (p.conteudo && typeof p.conteudo === "object" ? p.conteudo : {}) as Conteudo;
+  const extras = Array.isArray(conteudo.opcoes_extra) ? conteudo.opcoes_extra : [];
   return {
     ...(p as Proposta),
+    modelo: (p.modelo as ModeloProposta | null) ?? null, conteudo, semColunaModelo: !("modelo" in p),
     titulo: p.titulo ?? "", destino: p.destino ?? "", data_ida: p.data_ida ?? "", data_volta: p.data_volta ?? "",
     apresentacao: p.apresentacao ?? "", observacoes: p.observacoes ?? "", capa_url: p.capa_url ?? "", cliente_nome: p.cliente_nome ?? "",
     criado_por_nome: p.criado_por ? nomes.get(p.criado_por) ?? null : null,
     enviada_por_nome: p.enviada_por ? nomes.get(p.enviada_por) ?? null : null,
     sol: sol ? { ...(sol as Omit<NonNullable<Proposta["sol"]>, "criado_por_nome">), criado_por_nome: sol.criado_por ? nomes.get(sol.criado_por) ?? null : null } : null,
-    opcoes: ((ops ?? []) as Record<string, unknown>[]).map((o) => ({
+    opcoes: ((ops ?? []) as Record<string, unknown>[]).map((o, n) => ({
+      extra: extras[n] ?? {},
       id: o.id as string, k: o.id as string, titulo: (o.titulo as string) ?? "", descricao: (o.descricao as string) ?? "",
       recomendada: Boolean(o.recomendada), desconto: Number(o.desconto) || 0,
       pagamentos: Array.isArray(o.pagamentos) ? (o.pagamentos as Pagamento[]) : [],
@@ -494,6 +507,7 @@ export async function salvarProposta(p: Proposta): Promise<string> {
     adultos: p.adultos, criancas: p.criancas, bebes: p.bebes, apresentacao: p.apresentacao, observacoes: p.observacoes,
     esconder_precos: p.esconder_precos, capa_url: p.capa_url, solicitacao_id: p.solicitacao_id, cliente_id: p.cliente_id,
     viagem_id: p.viagem_id, lead_id: p.lead_id, cliente_nome: p.cliente_nome,
+    modelo: p.modelo, conteudo: p.modelo ? { ...p.conteudo, opcoes_extra: p.opcoes.map((o) => o.extra ?? {}) } : p.conteudo,
     opcoes: p.opcoes.map((o) => ({
       id: o.id ?? null, titulo: o.titulo, descricao: o.descricao, recomendada: o.recomendada, desconto: o.desconto, pagamentos: o.pagamentos,
       itens: o.itens.map((i) => ({
@@ -563,11 +577,19 @@ export interface PropostaVM {
   consultor: { nome: string; whatsapp: string | null } | null;
   aprovada_opcao_id: string | null;
   aprovada_em: string | null;
+  /** 0280 (podem faltar numa API antiga: tratar como nulo/vazio). */
+  modelo?: ModeloProposta | null;
+  conteudo?: Conteudo;
+  /** Data da proposta no rodapé ("Proposta de 19/10/2026"): enviada ou criada. */
+  data?: string;
   opcoes: {
-    id: string; titulo: string; descricao: string; recomendada: boolean; desconto: number; pagamentos: Pagamento[];
+    id: string; titulo: string; descricao: string; recomendada: boolean; desconto: number; pagamentos: Pagamento[]; extra?: ExtraOpcao;
     itens: { tipo: TipoItem; nome: string; descricao: string; data_inicio: string; data_fim: string; quantidade: number; valor_total: number; incluso: boolean; detalhes: Record<string, unknown> }[];
   }[];
 }
+
+/** "2026-10-19" do instante, no horário de Brasília (sem instante = hoje). */
+export const diaEmSP = (iso?: string | null) => new Date((iso ? Date.parse(iso) : Date.now()) - 3 * 3600_000).toISOString().slice(0, 10);
 
 /** Prévia dentro do QS: tira o que é interno, igual ao servidor. */
 export function paraVM(p: Proposta): PropostaVM {
@@ -577,7 +599,9 @@ export function paraVM(p: Proposta): PropostaVM {
     esconder_precos: p.esconder_precos, capa_url: p.capa_url, cliente_nome: p.cliente_nome,
     consultor: (p.enviada_por_nome || p.criado_por_nome) ? { nome: (p.enviada_por_nome || p.criado_por_nome)!, whatsapp: null } : null,
     aprovada_opcao_id: p.aprovada_opcao_id ?? null, aprovada_em: p.aprovada_em ?? null,
+    modelo: p.modelo, conteudo: p.conteudo, data: diaEmSP(p.enviada_em || p.criado_em),
     opcoes: p.opcoes.map((o) => ({
+      extra: o.extra ?? {},
       id: o.id ?? o.k, titulo: o.titulo, descricao: o.descricao, recomendada: o.recomendada, desconto: o.desconto, pagamentos: o.pagamentos,
       itens: o.itens.map((i) => ({
         tipo: i.tipo, nome: i.nome, descricao: i.descricao, data_inicio: i.data_inicio, data_fim: i.data_fim, quantidade: i.quantidade,

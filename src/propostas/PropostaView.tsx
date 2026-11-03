@@ -18,6 +18,7 @@ import {
   type PropostaVM, type Trecho,
 } from "./lib";
 import { aeroporto, duracaoVoo } from "./aeroportos";
+import ModeloView from "./ModeloView";
 
 const AGENCIA = "Se Tu For, Eu Vou · Viagens";
 const SELO = "/marca/selo-stfv.png";
@@ -320,7 +321,12 @@ function Selo({ tamanho }: { tamanho: number }) {
   return <img src={SELO} alt="Se Tu For, Eu Vou! Viagens" width={tamanho} height={tamanho} className="rounded-full" style={{ boxShadow: "0 0 0 1px rgba(255,255,255,.18)" }} />;
 }
 
-export default function PropostaView({ p, onEscolher, previa = false }: {
+/** 0280: proposta num dos 3 modelos-padrão abre no ModeloView; a antiga (sem modelo) segue aqui. */
+export default function PropostaView(props: { p: PropostaVM; onEscolher?: (opcaoId: string, nome: string) => Promise<void>; previa?: boolean }) {
+  return props.p.modelo ? <ModeloView {...props} /> : <PropostaAntiga {...props} />;
+}
+
+function PropostaAntiga({ p, onEscolher, previa = false }: {
   p: PropostaVM;
   /** Link público: o cliente escolhe uma opção (com o nome dele). */
   onEscolher?: (opcaoId: string, nome: string) => Promise<void>;

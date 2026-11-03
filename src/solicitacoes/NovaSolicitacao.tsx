@@ -31,7 +31,7 @@ import {
   TIPO_PAG_DO, anexarArquivo, descricaoDoPagamento, faltaNoPagamento, pagamentoVazio, paraBanco, tituloDoPagamento, type FormPagamento,
 } from "./pagamento";
 import {
-  COR_SETOR, NOME_SETOR, SETORES, horasDoTipo, criarSolicitacao, deInputLocal, listarTipos,
+  COR_SETOR, NOME_SETOR, setoresDaCentral, horasDoTipo, criarSolicitacao, deInputLocal, listarTipos,
   type AlvoSol, type PrioridadeSol, type Setor, type TipoSol,
 } from "./lib";
 
@@ -46,8 +46,11 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
   onFechar: () => void;
   onCriada: (id: string) => void;
 }) {
-  const destinos = soPagamento ? (["financeiro"] as Setor[]) : SETORES.filter((s) => s !== deSetor);
   const [tipos, setTipos] = useState<TipoSol[]>([]);
+  // Destinos: os setores da Central (o Marketing entra com a 0283) menos o meu.
+  // Com os tipos carregados, some o setor que não tem nenhum tipo ativo.
+  const destinos = soPagamento ? (["financeiro"] as Setor[]) : setoresDaCentral()
+    .filter((s) => s !== deSetor && (!tipos.length || tipos.some((t) => t.setor === s && t.ativo)));
   const [para, setPara] = useState<Setor>(soPagamento ? "financeiro" : paraInicial && paraInicial !== deSetor ? paraInicial : destinos.includes("operacional") ? "operacional" : destinos[0]);
   const [tipo, setTipo] = useState("");
   const [titulo, setTitulo] = useState("");

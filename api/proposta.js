@@ -40,7 +40,14 @@ async function montarVM(p) {
     (p.enviada_por || p.criado_por) ? rest(`qs_users?select=name,whatsapp_number&id=eq.${p.enviada_por || p.criado_por}&limit=1`).catch(() => null) : null,
   ]);
   const u = users?.[0] || null;
+  // 0280: modelo-padrão (pacote/serviços/seguro). O conteúdo é só texto que o
+  // cliente vê; opcoes_extra (selo/rótulo do cartão) vai pra cada opção.
+  const conteudo = p.conteudo && typeof p.conteudo === 'object' ? { ...p.conteudo } : {};
+  const extras = Array.isArray(conteudo.opcoes_extra) ? conteudo.opcoes_extra : [];
+  delete conteudo.opcoes_extra;
+  const dataSP = new Date(Date.parse(p.enviada_em || p.criado_em || new Date().toISOString()) - 3 * 3600_000).toISOString().slice(0, 10);
   return {
+    modelo: p.modelo || null, conteudo, data: dataSP,
     numero: p.numero, status: p.status, titulo: p.titulo || '', destino: p.destino || '',
     data_ida: p.data_ida || '', data_volta: p.data_volta || '',
     adultos: p.adultos, criancas: p.criancas, bebes: p.bebes,
@@ -48,7 +55,8 @@ async function montarVM(p) {
     capa_url: p.capa_url || '', cliente_nome: p.cliente_nome || '',
     consultor: u ? { nome: String(u.name || '').trim().split(/\s+/).slice(0, 2).join(' '), whatsapp: u.whatsapp_number || null } : null,
     aprovada_opcao_id: p.aprovada_opcao_id, aprovada_em: p.aprovada_em,
-    opcoes: (ops || []).map((o) => ({
+    opcoes: (ops || []).map((o, n) => ({
+      extra: extras[n] && typeof extras[n] === 'object' ? extras[n] : {},
       id: o.id, titulo: o.titulo || '', descricao: o.descricao || '', recomendada: !!o.recomendada,
       desconto: Number(o.desconto) || 0, pagamentos: Array.isArray(o.pagamentos) ? o.pagamentos : [],
       itens: (its || []).filter((i) => i.opcao_id === o.id).map((i) => {

@@ -2,7 +2,7 @@
 // Bolinhas do menu da Central (0149): novas no setor, atrasadas (pro gestor) e
 // novidades no que EU pedi (+ 0158: cotação esperando meu ajuste ou desfecho vencido). Recontagem a cada 30s com a aba aberta.
 import { useCallback, useEffect, useState } from "react";
-import { contarSolicitacoes, type Contagem, type Setor } from "./lib";
+import { aoMudarSolicitacao, contarSolicitacoes, type Contagem, type Setor } from "./lib";
 
 export function useContagemSolicitacoes(setor: Setor): [Contagem, () => void] {
   const [c, setC] = useState<Contagem>({ novas: 0, atrasadas: 0, comigo: 0, novidades: 0, ajustes: 0, desfechos: 0 });
@@ -10,7 +10,9 @@ export function useContagemSolicitacoes(setor: Setor): [Contagem, () => void] {
   useEffect(() => {
     contar();
     const t = setInterval(() => { if (!document.hidden) contar(); }, 30_000);
-    return () => clearInterval(t);
+    // Chegou aviso de solicitação (Realtime): reconta na hora (03/11).
+    const desliga = aoMudarSolicitacao(contar);
+    return () => { clearInterval(t); desliga(); };
   }, [contar]);
   return [c, contar];
 }
