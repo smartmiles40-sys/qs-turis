@@ -22,8 +22,6 @@ import {
   fetchClosers,
   fetchCloserConfigs,
   fetchMeetingsInRange,
-  configFor,
-  closerColor,
   startOfDay,
   addDays,
   chaveDoEspecialista,
@@ -41,11 +39,13 @@ import {
   MONTH_LONG,
 } from "@/lib/qs/calendarLayout";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
+import "./agenda.css";
+import { statusNaAgenda, ROTULO_STATUS, corDaPessoa } from "@/lib/qs/agendaStatus";
 import MeetingDetailModal from "./MeetingDetailModal";
-import { MEETING_STATUS_LABELS, type CloserConfig, type Meeting, type SdrUser } from "../types";
+import { type CloserConfig, type Meeting, type SdrUser } from "../types";
 
 /** Quantas reuniões cabem numa célula antes do "+N mais". */
-const MAX_POR_DIA = 3;
+const MAX_POR_DIA = 2;
 /** Pendências do SDR (atividades extras/retornos) por célula. */
 const MAX_PEND_POR_DIA = 2;
 
@@ -65,10 +65,8 @@ export function rotuloPendencia(p: Pick<Pendencia, "tags" | "notes">): string {
   if (p.tags?.includes("retorno")) return "Retorno";
   return "Atividade extra";
 }
-const COR_SEM_DONO = "#94A3B8";
+const COR_SEM_DONO = corDaPessoa(0, true);
 
-/** Azul QS — no escuro o #0147FF sobre carta escura fica ilegível. */
-const LINK = "text-[#0147FF] dark:text-[#86A9FF]";
 
 const ic = {
   viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
@@ -77,8 +75,6 @@ const ic = {
 const IcChevronL = ({ s = 18 }: { s?: number }) => (<svg width={s} height={s} {...ic}><path d="M15 18l-6-6 6-6" /></svg>);
 const IcChevronR = ({ s = 18 }: { s?: number }) => (<svg width={s} height={s} {...ic}><path d="M9 18l6-6-6-6" /></svg>);
 const IcPlus = ({ s = 15 }: { s?: number }) => (<svg width={s} height={s} {...ic}><path d="M12 5v14M5 12h14" /></svg>);
-const IcAlert = ({ s = 13 }: { s?: number }) => (<svg width={s} height={s} {...ic}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4M12 17h.01" /></svg>);
-const IcX = ({ s = 18 }: { s?: number }) => (<svg width={s} height={s} {...ic}><path d="M18 6L6 18M6 6l12 12" /></svg>);
 
 function chaveDoDia(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -114,9 +110,11 @@ interface AgendaMesProps {
   demo?: AgendaDemo;
   /** Id do usuário: põe as atividades extras em aberto dele na grade, junto das reuniões. */
   pendenciasDe?: string;
+  /** A página (Agenda) já tem o "+ Agendar reunião" no cabeçalho. */
+  semBotaoAgendar?: boolean;
 }
 
-export default function AgendaMes({ onOpenLead, onAbrirDia, demo, pendenciasDe }: AgendaMesProps) {
+export default function AgendaMes({ onOpenLead, onAbrirDia, demo, pendenciasDe, semBotaoAgendar }: AgendaMesProps) {
   const { currentUser } = useQsAuth();
   // Espectador (marketing): calendário só de leitura.
   const executa = podeExecutar(currentUser?.role);
@@ -133,7 +131,8 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo, pendenciasDe }
   /** Vazio = todos. Guarda a chave do especialista (ver chaveDoEspecialista). */
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
 
-  const [diaAberto, setDiaAberto] = useState<Date | null>(null);
+  // Dia selecionado no calendário (lateral "Dia selecionado"). Nasce hoje.
+  const [diaSel, setDiaSel] = useState<Date>(() => startOfDay(new Date()));
   const [detalhe, setDetalhe] = useState<Meeting | null>(null);
   const [agendarPara, setAgendarPara] = useState<{ closerId: string | null; date: Date } | null>(null);
   const [remarcando, setRemarcando] = useState<Meeting | null>(null);
@@ -205,14 +204,6 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo, pendenciasDe }
     };
   }, [load, demo]);
 
-  // Esc fecha o painel do dia — é o que a mão espera de um painel sobreposto.
-  useEffect(() => {
-    if (!diaAberto) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDiaAberto(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [diaAberto]);
-
   // ── Especialistas ──────────────────────────────────────────────────────────
   // Closers de verdade primeiro; depois os nomes que só existem como texto livre
   // em `meeting_owner`, pra tela servir mesmo antes de alguém ter o papel closer.
@@ -221,7 +212,7 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo, pendenciasDe }
       key: c.id,
       closerId: c.id,
       nome: c.name,
-      cor: closerColor(c.id, i, configFor(c.id, configs)),
+      cor: corDaPessoa(i),
     }));
 
     const extras = new Map<string, string>();
@@ -236,7 +227,7 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo, pendenciasDe }
         key,
         closerId: null,
         nome,
-        cor: key === "sem" ? COR_SEM_DONO : closerColor(key, i, null),
+        cor: corDaPessoa(i, key === "sem"),
       });
       i += 1;
     }
@@ -305,7 +296,6 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo, pendenciasDe }
     return mapa;
   }, [pendencias]);
 
-  const listaDoDiaAberto = diaAberto ? porDia.get(chaveDoDia(diaAberto)) ?? [] : [];
 
   // ── Ações ──────────────────────────────────────────────────────────────────
   function alternarEspecialista(key: string) {
@@ -337,286 +327,220 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo, pendenciasDe }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  const btnIcone = "p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors";
+  // Desenho do Bruno (agenda.html, aba Mês): o calendário à esquerda e, ao
+  // lado, o DIA SELECIONADO — clicar num dia mostra a lista dele aqui mesmo;
+  // "Abrir agenda deste dia" leva pra aba Agenda do dia.
+  const listaSel = porDia.get(chaveDoDia(diaSel)) ?? [];
+  const pendSel = pendPorDia.get(chaveDoDia(diaSel)) ?? [];
+  const maxNoDia = Math.max(1, ...dias.map((d) => (porDia.get(chaveDoDia(d)) ?? []).length));
 
   return (
-    <div className="space-y-3" style={{ fontFamily: "inherit" }}>
+    <div className="flex flex-col gap-4" style={{ fontFamily: "inherit" }}>
       {/* Barra de navegação */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => setMes(startOfDay(new Date()))}
-            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-          >
-            Hoje
-          </button>
-          <div className="flex items-center">
-            <button onClick={() => setMes(addMonths(mes, -1))} aria-label="Mês anterior" className={btnIcone}>
-              <IcChevronL />
-            </button>
-            <button onClick={() => setMes(addMonths(mes, 1))} aria-label="Próximo mês" className={btnIcone}>
-              <IcChevronR />
-            </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <button type="button" onClick={() => setMes(addMonths(mes, -1))} aria-label="Mês anterior" className="ag-icon-btn"><IcChevronL /></button>
+          <button type="button" onClick={() => setMes(addMonths(mes, 1))} aria-label="Próximo mês" className="ag-icon-btn"><IcChevronR /></button>
+          <div className="ml-1 flex flex-col">
+            {/* `capitalize` maiusculiza TODA palavra ("Agosto De 2026"): só a primeira sobe. */}
+            <span className="ag-titulo first-letter:uppercase">{periodLabel("mes", mes)}</span>
+            <span className="ag-muted" style={{ fontSize: 13 }}>
+              {loading ? "Carregando…" : `${doMes.length} ${doMes.length === 1 ? "reunião" : "reuniões"} no mês`}
+            </span>
           </div>
-          {/* `capitalize` do Tailwind maiusculiza TODA palavra e vira "Agosto De
-              2026". Só a primeira letra sobe. */}
-          <h2 className="ml-1 text-base font-bold text-gray-900 first-letter:uppercase">
-            {periodLabel("mes", mes)}
-          </h2>
-          {!loading && (
-            <span className="text-xs text-gray-400">
-              · {doMes.length} reunião{doMes.length === 1 ? "" : "s"}
-            </span>
+          {(mes.getMonth() !== agora.getMonth() || mes.getFullYear() !== agora.getFullYear()) && (
+            <button type="button" onClick={() => { setMes(startOfDay(new Date())); setDiaSel(startOfDay(new Date())); }} className="ag-btn ag-btn--sm ml-1">Hoje</button>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          {pendentesNaTela > 0 && (
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700"
-              title="Reuniões desta tela que já terminaram e continuam sem desfecho — abra o dia para resolver"
-            >
-              <IcAlert />
-              {pendentesNaTela} sem desfecho
-            </span>
-          )}
-          {executa && <button
-            onClick={() => agendarEm(new Date())}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#0147FF] px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0139D6]"
-          >
-            <IcPlus />
-            Agendar
-          </button>}
-        </div>
-      </div>
-
-      {/* Filtro por especialista — é a "lista de agendas" da Google Agenda */}
-      {especialistas.length > 1 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {especialistas.map((e) => {
+          {/* Filtro por especialista — a "lista de agendas" da Google Agenda */}
+          {especialistas.length > 1 && especialistas.map((e) => {
             const ativo = selecionados.size === 0 || selecionados.has(e.key);
             return (
-              <button
-                key={e.key}
-                onClick={() => alternarEspecialista(e.key)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors ${
-                  ativo ? "border-gray-200 bg-white text-gray-700" : "border-gray-100 bg-gray-50 text-gray-400"
-                }`}
-              >
-                <span className="h-2 w-2 rounded-full" style={{ background: ativo ? e.cor : "#CBD5E1" }} />
+              <button key={e.key} type="button" onClick={() => alternarEspecialista(e.key)}
+                aria-pressed={selecionados.has(e.key)}
+                title={ativo ? `Mostrando ${e.nome}` : `Escondendo ${e.nome}`}
+                className={`ag-pill ${ativo ? "" : "ag-pill--off"}`} style={selecionados.has(e.key) ? { background: "transparent", color: "var(--ag-text)", borderColor: "var(--ag-muted)" } : undefined}>
+                <span className="ag-dot" style={{ background: e.cor }} />
                 {e.nome}
               </button>
             );
           })}
           {selecionados.size > 0 && (
-            <button
-              onClick={() => setSelecionados(new Set())}
-              className={`px-1.5 text-xs font-semibold hover:underline ${LINK}`}
-            >
-              Mostrar todos
+            <button type="button" onClick={() => setSelecionados(new Set())} className="ag-pill">Mostrar todos</button>
+          )}
+          {pendentesNaTela > 0 && (
+            <span className="ag-pill ag-pill--static ag-pill--warn"
+              title="Reuniões desta tela que já terminaram e continuam sem desfecho — abra o dia para resolver">
+              {pendentesNaTela} sem desfecho
+            </span>
+          )}
+          {executa && !semBotaoAgendar && (
+            <button type="button" onClick={() => agendarEm(new Date())} className="ag-btn ag-btn--sm ag-btn--primary">
+              <IcPlus /> Agendar
             </button>
           )}
         </div>
-      )}
-
-      {/* Grade do mês */}
-      <div className="overflow-hidden rounded-xl border border-gray-100 bg-white">
-        <div className="grid grid-cols-7 border-b border-gray-100">
-          {WEEKDAY_SHORT.map((w) => (
-            <div key={w} className="px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-              {w}
-            </div>
-          ))}
-        </div>
-
-        {loading ? (
-          <div className="py-20 text-center">
-            <p className="text-sm text-gray-400">Carregando a agenda…</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-7">
-            {dias.map((d) => {
-              const noMes = d.getMonth() === mes.getMonth();
-              const hoje = isToday(d);
-              const lista = porDia.get(chaveDoDia(d)) ?? [];
-              const sobrando = Math.max(0, lista.length - MAX_POR_DIA);
-              const pend = pendPorDia.get(chaveDoDia(d)) ?? [];
-
-              return (
-                <div
-                  key={d.getTime()}
-                  className={`group relative min-h-[112px] border-b border-r border-gray-100 p-1.5 ${
-                    // Dia de outro mês: no claro é um cinza levíssimo; no escuro
-                    // tem que AFUNDAR (mais escuro que a carta), senão vira o
-                    // retângulo cinza claro que estraga a tela inteira.
-                    noMes ? "bg-gray-50 dark:bg-[#12181F]" : ""
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <button
-                      onClick={() => (onAbrirDia ? onAbrirDia(d) : setDiaAberto(d))}
-                      title={onAbrirDia ? "Abrir este dia em Reuniões" : "Ver o dia inteiro"}
-                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold transition-colors ${
-                        hoje
-                          ? "bg-[#0147FF] text-white"
-                          : noMes
-                            ? "text-gray-700 hover:bg-gray-100"
-                            : "text-gray-400 hover:bg-gray-100"
-                      }`}
-                    >
-                      {d.getDate()}
-                    </button>
-                    {executa && <button
-                      onClick={() => agendarEm(d)}
-                      title="Agendar neste dia"
-                      className="rounded p-0.5 text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-[#0147FF] focus:opacity-100 group-hover:opacity-100 dark:hover:text-[#86A9FF]"
-                      aria-label={`Agendar em ${d.getDate()}`}
-                    >
-                      <IcPlus s={13} />
-                    </button>}
-                  </div>
-
-                  <div className="mt-1 space-y-0.5">
-                    {lista.slice(0, MAX_POR_DIA).map((m) => {
-                      const inicio = new Date(m.scheduled_at);
-                      const cor = corDaChave.get(chaveDoEspecialista(m)) ?? COR_SEM_DONO;
-                      const pendencia = semDesfecho(m, agora);
-                      const nome = nomeDoLead(m);
-                      return (
-                        <button
-                          key={m.id}
-                          onClick={() => setDetalhe(m)}
-                          title={`${shortTime(inicio)} · ${nome} · ${nomeDoEspecialista(m)}${pendencia ? " · sem desfecho" : ""}`}
-                          className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left transition-colors hover:bg-gray-100 ${
-                            // Reunião já resolvida fica de lado, não apagada: no
-                            // escuro 50% de opacidade sobre carta escura já é
-                            // ilegível, então lá o desconto é menor.
-                            m.status === "agendada" || m.status === "confirmada" ? "" : "opacity-50 dark:opacity-65"
-                          }`}
-                        >
-                          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: cor }} />
-                          <span className="shrink-0 text-[10px] font-semibold text-gray-500">
-                            {shortTime(inicio)}
-                          </span>
-                          <span
-                            className={`truncate text-[10px] text-gray-700 ${
-                              m.status === "cancelada" ? "line-through" : ""
-                            }`}
-                          >
-                            {nome}
-                          </span>
-                          {pendencia && <span className="ml-auto shrink-0 text-amber-500"><IcAlert s={11} /></span>}
-                        </button>
-                      );
-                    })}
-                    {sobrando > 0 && (
-                      <button
-                        onClick={() => (onAbrirDia ? onAbrirDia(d) : setDiaAberto(d))}
-                        className={`w-full px-1 text-left text-[10px] font-semibold hover:underline ${LINK}`}
-                      >
-                        +{sobrando} mais
-                      </button>
-                    )}
-                    {/* Pendências do SDR: borda tracejada pra não confundir com reunião */}
-                    {pend.slice(0, MAX_PEND_POR_DIA).map((p) => {
-                      const quando = new Date(p.scheduled_at);
-                      const atrasada = quando.getTime() < agora.getTime();
-                      const nome = p.lead?.full_name || "Lead";
-                      return (
-                        <button
-                          key={p.id}
-                          onClick={() => onOpenLead?.(p.lead_id)}
-                          title={`${shortTime(quando)} · ${rotuloPendencia(p)} · ${nome}${atrasada ? " · atrasada" : ""}${p.notes ? ` — ${p.notes}` : ""}`}
-                          className={`flex w-full items-center gap-1 rounded border border-dashed px-1 py-0.5 text-left transition-colors hover:bg-gray-100 ${
-                            atrasada ? "border-red-300 dark:border-red-800" : "border-gray-300 dark:border-gray-600"
-                          }`}
-                        >
-                          <span className={`shrink-0 text-[10px] font-semibold ${atrasada ? "text-red-600 dark:text-red-400" : "text-gray-500"}`}>
-                            {shortTime(quando)}
-                          </span>
-                          <span className="truncate text-[10px] text-gray-700">{nome}</span>
-                        </button>
-                      );
-                    })}
-                    {pend.length > MAX_PEND_POR_DIA && (
-                      <span className="block px-1 text-[10px] text-gray-500">
-                        +{pend.length - MAX_PEND_POR_DIA} pendência{pend.length - MAX_PEND_POR_DIA === 1 ? "" : "s"}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <p className="px-3 py-2 text-[11px] text-gray-400">
-          Clique no número do dia para ver o dia inteiro por especialista. Passe o mouse sobre um dia para agendar nele.
-          {pendenciasDe && " Os itens com borda tracejada são as suas pendências (retornos e atividades extras); clique pra abrir o lead."}
-        </p>
       </div>
 
-      {/* Painel do dia — a lista completa daquele dia, sem sair da Agenda */}
-      {diaAberto && (
-        <div className="fixed inset-0 z-[65] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDiaAberto(null)} />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-xl border border-gray-100 bg-white">
-            <div className="sticky top-0 flex items-start justify-between gap-3 border-b border-gray-100 bg-white px-5 py-4">
-              <div>
-                <h3 className="text-base font-bold text-gray-900">
-                  {WEEKDAY_LONG[diaAberto.getDay()]}, {diaAberto.getDate()} de {MONTH_LONG[diaAberto.getMonth()]}
-                </h3>
-                <p className="text-xs text-gray-500">
-                  {listaDoDiaAberto.length === 0
-                    ? "Nenhuma reunião neste dia"
-                    : `${listaDoDiaAberto.length} reunião${listaDoDiaAberto.length === 1 ? "" : "s"}`}
-                </p>
-              </div>
-              <button onClick={() => setDiaAberto(null)} aria-label="Fechar" className={btnIcone}>
-                <IcX />
-              </button>
-            </div>
+      <div className="flex flex-wrap items-start gap-4">
+        {/* Grade do mês */}
+        <section aria-label="Calendário do mês" className="ag-card min-w-0 overflow-hidden" style={{ flex: "999 1 720px" }}>
+          <div className="grid grid-cols-7" style={{ borderBottom: "1px solid var(--ag-border)" }}>
+            {WEEKDAY_SHORT.map((w) => (
+              <span key={w} className="p-2.5 text-center text-[12px] font-bold uppercase ag-muted" style={{ letterSpacing: "0.06em" }}>{w}</span>
+            ))}
+          </div>
 
-            <div className="space-y-1.5 p-4">
-              {listaDoDiaAberto.map((m) => {
-                const inicio = new Date(m.scheduled_at);
-                const cor = corDaChave.get(chaveDoEspecialista(m)) ?? COR_SEM_DONO;
-                const pendencia = semDesfecho(m, agora);
+          {loading ? (
+            <div className="py-20 text-center ag-muted">Carregando a agenda…</div>
+          ) : (
+            <div className="grid grid-cols-7">
+              {dias.map((d) => {
+                const noMes = d.getMonth() === mes.getMonth();
+                const hoje = isToday(d);
+                const sel = chaveDoDia(d) === chaveDoDia(diaSel);
+                const lista = porDia.get(chaveDoDia(d)) ?? [];
+                const pend = pendPorDia.get(chaveDoDia(d)) ?? [];
+                const temPendencia = lista.some((m) => semDesfecho(m, agora));
+                const calor = noMes && lista.length ? Math.min(1, lista.length / maxNoDia) : 0;
+                const fundo = !noMes
+                  ? "var(--ag-surface-out)"
+                  : calor
+                    ? `color-mix(in srgb, var(--ag-text) ${(1.5 + calor * 6).toFixed(1)}%, var(--ag-surface))`
+                    : "var(--ag-surface)";
                 return (
-                  <button
-                    key={m.id}
-                    onClick={() => { setDiaAberto(null); setDetalhe(m); }}
-                    className="flex w-full items-start gap-2.5 rounded-lg border border-gray-100 p-2.5 text-left transition-colors hover:bg-gray-50"
+                  <div
+                    key={d.getTime()}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={sel}
+                    aria-label={`${d.getDate()} de ${MONTH_LONG[d.getMonth()]}: ${lista.length} ${lista.length === 1 ? "reunião" : "reuniões"}`}
+                    onClick={() => setDiaSel(startOfDay(d))}
+                    onDoubleClick={() => onAbrirDia?.(d)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDiaSel(startOfDay(d)); } }}
+                    className="flex min-h-[64px] cursor-pointer flex-col items-start gap-1 p-1.5 text-left sm:min-h-[112px] sm:p-2"
+                    style={{
+                      background: fundo,
+                      borderRight: "1px solid var(--ag-line)",
+                      borderBottom: "1px solid var(--ag-line)",
+                      boxShadow: sel ? "inset 0 0 0 2px var(--ag-muted)" : "none",
+                    }}
                   >
-                    <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: cor }} />
-                    <div className="min-w-0 flex-1">
-                      <p className={`truncate text-sm font-semibold text-gray-900 ${m.status === "cancelada" ? "line-through" : ""}`}>
-                        {nomeDoLead(m)}
-                      </p>
-                      <p className="truncate text-xs text-gray-500">
-                        {hhmm(inicio)} · {nomeDoEspecialista(m)} · {MEETING_STATUS_LABELS[m.status]}
-                      </p>
-                    </div>
-                    {pendencia && (
-                      <span className="shrink-0 text-amber-500" title="Já terminou e continua sem desfecho">
-                        <IcAlert s={15} />
+                    <div className="flex w-full items-center justify-between gap-1">
+                      <span className="flex h-[26px] w-[26px] items-center justify-center rounded-full text-[13px] font-bold"
+                        style={hoje ? { background: "var(--ag-primary)", color: "var(--ag-on-primary)" } : { color: noMes ? "var(--ag-text)" : "var(--ag-faint)" }}>
+                        {d.getDate()}
                       </span>
+                      {lista.length > 0 && (
+                        <span className="hidden rounded-full px-[7px] py-0.5 text-[11px] font-bold tabular sm:inline"
+                          style={{ background: "var(--ag-surface-3)", color: temPendencia ? "var(--ag-warn)" : "var(--ag-count)" }}
+                          title={temPendencia ? "Tem reunião sem desfecho" : undefined}>
+                          {lista.length}
+                        </span>
+                      )}
+                    </div>
+                    {/* celular: só um ponto dizendo que tem reunião (a lista fica ao lado/embaixo) */}
+                    {lista.length > 0 && (
+                      <span className="h-1.5 w-1.5 rounded-full sm:hidden" style={{ background: temPendencia ? "var(--ag-warn)" : "var(--ag-count)" }} aria-hidden />
                     )}
-                  </button>
+                    <div className="hidden w-full flex-col gap-1 sm:flex">
+                      {lista.slice(0, MAX_POR_DIA).map((m) => {
+                        const inicio = new Date(m.scheduled_at);
+                        const cor = corDaChave.get(chaveDoEspecialista(m)) ?? COR_SEM_DONO;
+                        const morta = m.status === "cancelada";
+                        return (
+                          <span key={m.id} title={`${shortTime(inicio)} · ${nomeDoLead(m)} · ${nomeDoEspecialista(m)}`}
+                            className="flex w-full items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12px]"
+                            style={{ color: morta ? "var(--ag-subtle)" : "var(--ag-text-2)", textDecoration: morta ? "line-through" : "none" }}>
+                            <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: cor }} />
+                            <span className="truncate">{hhmm(inicio)} {nomeDoLead(m).split(/\s+/)[0]}</span>
+                          </span>
+                        );
+                      })}
+                      {lista.length > MAX_POR_DIA && (
+                        <span className="text-[12px] font-semibold" style={{ color: "var(--ag-muted-2)" }}>+{lista.length - MAX_POR_DIA} mais</span>
+                      )}
+                      {/* Pendências do usuário: tracejado pra não confundir com reunião */}
+                      {pend.slice(0, MAX_PEND_POR_DIA).map((p) => (
+                        <span key={p.id} className="truncate rounded border border-dashed px-1 text-[11px]"
+                          style={{ borderColor: new Date(p.scheduled_at) < agora ? "var(--ag-now)" : "var(--ag-border-3)", color: "var(--ag-muted)" }}>
+                          {shortTime(new Date(p.scheduled_at))} {p.lead?.full_name || "Lead"}
+                        </span>
+                      ))}
+                      {pend.length > MAX_PEND_POR_DIA && (
+                        <span className="text-[11px] ag-muted">+{pend.length - MAX_PEND_POR_DIA} pendência{pend.length - MAX_PEND_POR_DIA === 1 ? "" : "s"}</span>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
-
-              <button
-                onClick={() => { const d = diaAberto; setDiaAberto(null); agendarEm(d); }}
-                className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-              >
-                <IcPlus s={14} />
-                Agendar neste dia
-              </button>
             </div>
+          )}
+          <p className="px-3 py-2 text-[11px] ag-subtle" style={{ borderTop: "1px solid var(--ag-border)" }}>
+            Clique num dia para ver as reuniões dele ao lado{onAbrirDia ? " (dois cliques abrem a Agenda do dia)" : ""}.
+            {pendenciasDe && " Itens tracejados são as suas pendências (retornos e atividades extras)."}
+          </p>
+        </section>
+
+        {/* Dia selecionado */}
+        <aside className="ag-card flex min-w-0 flex-col gap-3 p-[18px]" style={{ flex: "1 1 300px" }}>
+          <div className="flex flex-col">
+            <span className="ag-eyebrow">Dia selecionado</span>
+            <span className="text-[18px] font-bold">
+              {WEEKDAY_LONG[diaSel.getDay()]}, {diaSel.getDate()} de {MONTH_LONG[diaSel.getMonth()]}
+            </span>
           </div>
-        </div>
-      )}
+
+          {listaSel.length === 0 && <div className="ag-vazio" style={{ padding: 20 }}>Nenhuma reunião neste dia</div>}
+
+          {listaSel.map((m) => {
+            const inicio = new Date(m.scheduled_at);
+            const st = statusNaAgenda(m, agora);
+            const cor = corDaChave.get(chaveDoEspecialista(m)) ?? COR_SEM_DONO;
+            return (
+              <button key={m.id} type="button" onClick={() => setDetalhe(m)} data-st={st}
+                className="ag-linha flex w-full items-center gap-2.5 px-3 py-2.5 text-left">
+                <span className="w-11 shrink-0 font-bold tabular">{hhmm(inicio)}</span>
+                <span className="h-8 w-1 shrink-0 rounded-sm" style={{ background: cor }} />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-semibold" style={{ textDecoration: m.status === "cancelada" ? "line-through" : "none" }}>{nomeDoLead(m)}</span>
+                  <span className="truncate ag-muted" style={{ fontSize: 12 }}>{nomeDoEspecialista(m)}</span>
+                </span>
+                <span className="ag-badge">{ROTULO_STATUS[st]}</span>
+              </button>
+            );
+          })}
+
+          {pendSel.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <span className="ag-eyebrow">Suas pendências</span>
+              {pendSel.map((p) => (
+                <button key={p.id} type="button" onClick={() => onOpenLead?.(p.lead_id)}
+                  className="flex w-full items-center gap-2.5 rounded-[10px] border border-dashed px-3 py-2 text-left"
+                  style={{ borderColor: "var(--ag-border-3)" }}
+                  title={p.notes ?? undefined}>
+                  <span className="w-11 shrink-0 font-bold tabular">{shortTime(new Date(p.scheduled_at))}</span>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate font-semibold">{p.lead?.full_name || "Lead"}</span>
+                    <span className="ag-muted" style={{ fontSize: 12 }}>{rotuloPendencia(p)}{new Date(p.scheduled_at) < agora ? " · atrasada" : ""}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {executa && (
+            <button type="button" onClick={() => agendarEm(diaSel)} className={`ag-btn ${listaSel.length === 0 ? "ag-btn--primary" : ""}`}>
+              Agendar neste dia
+            </button>
+          )}
+          {listaSel.length > 0 && onAbrirDia && (
+            <button type="button" onClick={() => onAbrirDia(diaSel)} className="ag-btn ag-btn--md">Abrir agenda deste dia</button>
+          )}
+        </aside>
+      </div>
 
       {/* Modais */}
       <ScheduleMeetingModal

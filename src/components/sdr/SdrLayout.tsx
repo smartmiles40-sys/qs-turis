@@ -108,6 +108,7 @@ import { ComCoresDaCentral } from "@/solicitacoes/PedirOutroSetor";
 import { useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import { useAprovacoesNovas } from "@/propostas/lib";
 import { SELO_PROPOSTAS } from "@/propostas/disponivel";
+import { abaDoComercial, hashDaAgenda, type AbaAgendaBase } from "@/lib/qs/agendaStatus";
 
 export type SdrNav =
   | "minha-agenda"
@@ -205,11 +206,15 @@ export default function SdrLayout() {
   // fila do SDR. Só vale na PRIMEIRA renderização — depois quem manda é a
   // navegação do usuário.
   const [activeNav, setActiveNav] = useState<SdrNav>("painel");
+  // AGENDA EM 3 ABAS (desenho do Bruno, 03/11): #comercial/agenda/dia|time|mes.
+  // É o único endereço que o Comercial mantém na barra (o resto ele lê e limpa).
+  const [abaAgenda, setAbaAgenda] = useState<AbaAgendaBase>("dia");
   const landingAplicada = useRef(false);
   useEffect(() => {
     if (landingAplicada.current || !currentUser) return;
     landingAplicada.current = true;
     const inicial = telaInicial(currentUser.role) as SdrNav;
+    if (inicial === "minha-agenda" && currentUser.role !== "closer") setAbaAgenda("time");
     if (inicial !== "painel") setActiveNav(inicial === "minha-agenda" && currentUser.role !== "closer" ? "reunioes" : inicial);
   }, [currentUser]);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
@@ -331,6 +336,25 @@ export default function SdrLayout() {
 
   // AVISOS (0196): o aviso abre "#comercial/<tela>/<id>" — lead, solicitação,
   // painel ou agenda. O Comercial não navega por endereço, então lê e limpa.
+  const abrirAgenda = useRef<(h: string) => boolean>(() => false);
+  abrirAgenda.current = (h: string) => {
+    const aba = abaDoComercial(h);
+    if (!aba || !canAccessNav(userRole, "reunioes")) return false;
+    if (userRole === "closer" && /^#\/?comercial\/minha-agenda/.test(h)) return false;
+    setAbaAgenda(aba);
+    navigate("reunioes");
+    return true;
+  };
+  // O endereço acompanha a aba da agenda; fora dela, some.
+  useEffect(() => {
+    const h = window.location.hash;
+    if (activeNav === "reunioes") {
+      const alvo = hashDaAgenda("comercial", abaAgenda);
+      if (h !== alvo) history.replaceState(null, "", window.location.pathname + window.location.search + alvo);
+    } else if (/^#\/?comercial\/agenda/.test(h)) {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }, [activeNav, abaAgenda]);
   const abrirDoAviso = useRef<(h: string) => void>(() => undefined);
   abrirDoAviso.current = (h: string) => {
     const [, tela, id] = h.replace(/^#\/?/, "").split("/");
@@ -343,6 +367,9 @@ export default function SdrLayout() {
     const ler = () => {
       const h = window.location.hash;
       if (!h.startsWith("#comercial/")) return;
+      // Agenda: #comercial/agenda/<aba> e os antigos #comercial/reunioes e
+      // #comercial/minha-agenda (este, pro closer, segue na casa dele).
+      if (abrirAgenda.current(h)) return;
       history.replaceState(null, "", window.location.pathname + window.location.search);
       abrirDoAviso.current(h);
     };
@@ -563,7 +590,7 @@ export default function SdrLayout() {
         )}
         {activeNav === "reunioes" && (
           <PageErrorBoundary pageName="Reuniões">
-            <MeetingsPage onOpenLead={openLeadDetail} />
+            <MeetingsPage onOpenLead={openLeadDetail} aba={abaAgenda} onAba={(a) => setAbaAgenda(a as AbaAgendaBase)} />
           </PageErrorBoundary>
         )}
         {activeNav === "solicitacoes" && (

@@ -1,0 +1,140 @@
+/* src/components/sdr/agenda/agenda.css
+   -----------------------------------------------------------------------------
+   PALETA DA AGENDA (Bruno, 03/11): a Agenda usa as cores EXATAS do desenho
+   (qs-turis-design-ref/agenda/agenda.html), a paleta sóbria dele, mesmo onde
+   não bate com o tokens.css do resto do QS. Por isso as cores moram aqui, em
+   variáveis com escopo `.qs-agenda` — definidas UMA vez. Trocar a paleta da
+   agenda = mexer só neste bloco; nenhuma outra tela lê estas variáveis.
+   ----------------------------------------------------------------------------- */
+
+.qs-agenda {
+  /* superfícies */
+  --ag-bg: #0A0C10;          /* fundo da tela */
+  --ag-surface: #11141B;     /* cards, grade, seletor de abas */
+  --ag-surface-2: #171B24;   /* botão secundário, cartão elevado, linha da lista lateral */
+  --ag-surface-3: #1C212C;   /* chip de contagem, botão "Registrar" */
+  --ag-surface-out: #0D0F14; /* dia fora do mês */
+  --ag-border: #252B38;      /* bordas e divisórias */
+  --ag-border-2: #2A303D;    /* borda de cartão de destaque */
+  --ag-border-3: #3A4254;    /* borda de reunião agendada/cancelada */
+  --ag-line: #1A1E28;        /* linhas de hora e entre linhas da lista */
+
+  /* texto */
+  --ag-text: #ECEEF3;
+  --ag-text-2: #D5D9E2;      /* pílula desligada, prévia do mês */
+  --ag-count: #C9CFDA;       /* número de reuniões no dia */
+  --ag-muted-2: #B4BCCB;     /* rótulo de cartão de destaque, "+N mais" */
+  --ag-muted: #A0A8B8;       /* texto secundário */
+  --ag-subtle: #7C8598;      /* eixo de horas */
+  --ag-faint: #4B5568;       /* número de dia fora do mês */
+
+  /* ação */
+  --ag-primary: #ECEEF3;
+  --ag-on-primary: #0A0C10;
+  --ag-warn: #D4C397;        /* "falta registrar o desfecho" */
+  --ag-now: #C46A6A;         /* marcador de agora */
+  --ag-on-now: #FFFFFF;
+  --ag-sal-bg: #252B38;
+  --ag-sal-fg: #C4D3C8;
+  --ag-focus: #A0A8B8;
+
+  /* especialistas (avatar, bolinha do mês) — pela ordem da coluna */
+  --ag-pessoa-1: #8B93A5;
+  --ag-pessoa-2: #7E9C8A;
+  --ag-pessoa-3: #A08C7C;
+  --ag-pessoa-4: #A8976E;
+  --ag-pessoa-5: #9A93AE;
+  --ag-pessoa-6: #7F98A8;
+  --ag-pessoa-sem: #6B7280;
+
+  /* status (fundo, borda, texto, bolinha). O desenho define agendada,
+     realizada, sem desfecho, reagendada, cancelada e desistência; confirmada,
+     acontecendo, no-show e arquivada são derivados dessa mesma paleta. */
+  --ag-agendada-bg: #171B24;    --ag-agendada-bd: #3A4254;    --ag-agendada-fg: #C9CFDA;    --ag-agendada-dot: #8B93A5;
+  --ag-confirmada-bg: #171B24;  --ag-confirmada-bd: #3A4254;  --ag-confirmada-fg: #D5D9E2;  --ag-confirmada-dot: #B4BCCB;
+  --ag-acontecendo-bg: #1C212C; --ag-acontecendo-bd: #A0A8B8; --ag-acontecendo-fg: #ECEEF3; --ag-acontecendo-dot: #ECEEF3;
+  --ag-realizada-bg: #171B24;   --ag-realizada-bd: #2A303D;   --ag-realizada-fg: #A9C2B1;   --ag-realizada-dot: #7E9C8A;
+  --ag-sem-bg: #1C212C;         --ag-sem-bd: #2A303D;         --ag-sem-fg: #D4C397;         --ag-sem-dot: #A8976E;
+  --ag-reagendada-bg: #1C212C;  --ag-reagendada-bd: #2A303D;  --ag-reagendada-fg: #CFB29A;  --ag-reagendada-dot: #A08C7C;
+  --ag-cancelada-bg: #171B24;   --ag-cancelada-bd: #3A4254;   --ag-cancelada-fg: #A0A8B8;   --ag-cancelada-dot: #6B7280;
+  --ag-desistencia-bg: #1C212C; --ag-desistencia-bd: #2A303D; --ag-desistencia-fg: #D3A3A3; --ag-desistencia-dot: #C46A6A;
+  --ag-noshow-bg: #1C212C;      --ag-noshow-bd: #2A303D;      --ag-noshow-fg: #D3A3A3;      --ag-noshow-dot: #A86A6A;
+  --ag-arquivada-bg: #11141B;   --ag-arquivada-bd: #252B38;   --ag-arquivada-fg: #7C8598;   --ag-arquivada-dot: #4B5568;
+
+  background: var(--ag-bg);
+  color: var(--ag-text);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  border-radius: 16px;
+  padding: 24px;
+}
+@media (max-width: 640px) {
+  .qs-agenda { padding: 12px; border-radius: 12px; }
+}
+
+/* status → variáveis genéricas que badge, bolinha e cartão leem */
+.qs-agenda [data-st="agendada"]    { --st-bg: var(--ag-agendada-bg);    --st-bd: var(--ag-agendada-bd);    --st-fg: var(--ag-agendada-fg);    --st-dot: var(--ag-agendada-dot); }
+.qs-agenda [data-st="confirmada"]  { --st-bg: var(--ag-confirmada-bg);  --st-bd: var(--ag-confirmada-bd);  --st-fg: var(--ag-confirmada-fg);  --st-dot: var(--ag-confirmada-dot); }
+.qs-agenda [data-st="acontecendo"] { --st-bg: var(--ag-acontecendo-bg); --st-bd: var(--ag-acontecendo-bd); --st-fg: var(--ag-acontecendo-fg); --st-dot: var(--ag-acontecendo-dot); }
+.qs-agenda [data-st="realizada"]   { --st-bg: var(--ag-realizada-bg);   --st-bd: var(--ag-realizada-bd);   --st-fg: var(--ag-realizada-fg);   --st-dot: var(--ag-realizada-dot); }
+.qs-agenda [data-st="sem_desfecho"]{ --st-bg: var(--ag-sem-bg);         --st-bd: var(--ag-sem-bd);         --st-fg: var(--ag-sem-fg);         --st-dot: var(--ag-sem-dot); }
+.qs-agenda [data-st="reagendada"]  { --st-bg: var(--ag-reagendada-bg);  --st-bd: var(--ag-reagendada-bd);  --st-fg: var(--ag-reagendada-fg);  --st-dot: var(--ag-reagendada-dot); }
+.qs-agenda [data-st="cancelada"]   { --st-bg: var(--ag-cancelada-bg);   --st-bd: var(--ag-cancelada-bd);   --st-fg: var(--ag-cancelada-fg);   --st-dot: var(--ag-cancelada-dot); }
+.qs-agenda [data-st="desistencia"] { --st-bg: var(--ag-desistencia-bg); --st-bd: var(--ag-desistencia-bd); --st-fg: var(--ag-desistencia-fg); --st-dot: var(--ag-desistencia-dot); }
+.qs-agenda [data-st="no_show"]     { --st-bg: var(--ag-noshow-bg);      --st-bd: var(--ag-noshow-bd);      --st-fg: var(--ag-noshow-fg);      --st-dot: var(--ag-noshow-dot); }
+.qs-agenda [data-st="arquivada"]   { --st-bg: var(--ag-arquivada-bg);   --st-bd: var(--ag-arquivada-bd);   --st-fg: var(--ag-arquivada-fg);   --st-dot: var(--ag-arquivada-dot); }
+
+/* ── peças ─────────────────────────────────────────────────────────────────── */
+.qs-agenda .ag-h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; color: var(--ag-text); }
+.qs-agenda .ag-titulo { font-size: 20px; font-weight: 700; color: var(--ag-text); }
+.qs-agenda .ag-muted { color: var(--ag-muted); }
+.qs-agenda .ag-subtle { color: var(--ag-subtle); }
+.qs-agenda .ag-eyebrow { font-size: 12px; font-weight: 700; color: var(--ag-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+.qs-agenda .ag-seg { display: flex; gap: 4px; background: var(--ag-surface); border: 1px solid var(--ag-border); border-radius: 12px; padding: 4px; max-width: 100%; overflow-x: auto; }
+.qs-agenda .ag-seg button { height: 40px; padding: 0 16px; border-radius: 9px; border: none; font: inherit; font-weight: 600; cursor: pointer; background: transparent; color: var(--ag-text-2); white-space: nowrap; }
+.qs-agenda .ag-seg button[aria-selected="true"] { background: var(--ag-primary); color: var(--ag-on-primary); }
+
+.qs-agenda .ag-btn { height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--ag-border); background: var(--ag-surface-2); color: var(--ag-text); font: inherit; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; text-decoration: none; }
+.qs-agenda .ag-btn:disabled { opacity: .5; cursor: default; }
+.qs-agenda .ag-btn--primary { border-color: var(--ag-primary); background: var(--ag-primary); color: var(--ag-on-primary); }
+.qs-agenda .ag-btn--quiet { background: var(--ag-border); border-color: var(--ag-border); font-weight: 700; }
+.qs-agenda .ag-btn--warn { background: var(--ag-surface-3); border-color: var(--ag-border-2); color: var(--ag-warn); font-weight: 700; }
+.qs-agenda .ag-btn--sm { height: 36px; padding: 0 12px; border-radius: 8px; font-size: 13px; }
+.qs-agenda .ag-btn--md { height: 40px; padding: 0 14px; }
+.qs-agenda .ag-icon-btn { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--ag-border); background: var(--ag-surface); color: var(--ag-text); cursor: pointer; font: inherit; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.qs-agenda .ag-icon-btn--sm { width: 32px; height: 32px; border-radius: 8px; }
+
+.qs-agenda .ag-pill { height: 36px; padding: 0 14px; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; background: transparent; color: var(--ag-text-2); border: 1px solid var(--ag-border); white-space: nowrap; }
+.qs-agenda .ag-pill[aria-pressed="true"] { background: var(--ag-primary); color: var(--ag-on-primary); border-color: var(--ag-primary); }
+.qs-agenda .ag-pill .ag-qtd { opacity: .7; }
+.qs-agenda .ag-pill--static { cursor: default; }
+.qs-agenda .ag-pill--warn { background: var(--ag-surface-3); color: var(--ag-warn); border-color: var(--ag-surface-3); font-weight: 700; }
+.qs-agenda .ag-pill--off { opacity: .45; }
+
+.qs-agenda .ag-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--st-dot, var(--ag-muted)); }
+.qs-agenda .ag-barra { width: 4px; height: 36px; border-radius: 2px; flex-shrink: 0; background: var(--st-dot, var(--ag-muted)); }
+.qs-agenda .ag-badge { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; background: var(--st-bg); color: var(--st-fg); border: 1px solid var(--st-bd); }
+.qs-agenda .ag-sal { font-size: 11px; font-weight: 700; background: var(--ag-sal-bg); color: var(--ag-sal-fg); padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+.qs-agenda .ag-sal--off { color: var(--ag-muted); text-decoration: line-through; }
+
+.qs-agenda .ag-card { background: var(--ag-surface); border: 1px solid var(--ag-border); border-radius: 14px; }
+.qs-agenda .ag-card--destaque { border-color: var(--ag-border-2); }
+.qs-agenda .ag-card--alto { background: var(--ag-surface-2); border-color: var(--ag-border-2); }
+.qs-agenda .ag-linha { background: var(--ag-surface-2); border-radius: 10px; }
+.qs-agenda .ag-vazio { padding: 24px; text-align: center; color: var(--ag-muted); border: 1px dashed var(--ag-border); border-radius: 12px; }
+.qs-agenda .ag-faixa { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; background: var(--ag-surface); border: 1px solid var(--ag-border-2); border-radius: 12px; padding: 10px 10px 10px 16px; }
+
+.qs-agenda .ag-ev { position: absolute; box-sizing: border-box; border-radius: 10px; padding: 6px 10px; text-align: left; display: flex; flex-direction: column; gap: 2px; overflow: hidden; cursor: pointer; font: inherit; background: var(--st-bg); color: var(--st-fg); border: 1px solid var(--st-bd); }
+.qs-agenda .ag-ev:hover { filter: brightness(1.15); z-index: 10; }
+
+.qs-agenda .ag-select { color-scheme: dark; height: 40px; background: var(--ag-surface); color: var(--ag-text); border: 1px solid var(--ag-border); border-radius: 10px; padding: 0 12px; font: inherit; }
+
+.qs-agenda button:focus-visible, .qs-agenda a:focus-visible, .qs-agenda select:focus-visible { outline: 2px solid var(--ag-focus); outline-offset: 2px; }
+.qs-agenda .tabular { font-variant-numeric: tabular-nums; }
+
+/* Telas antigas encaixadas numa aba da agenda ("Meus desfechos", "Falta
+   agendar" do closer): continuam com o visual do resto do QS, num cartão com o
+   fundo do app — senão o texto escuro delas sumiria no fundo escuro da agenda. */
+.qs-agenda .ag-ponte { background: var(--bg); color: var(--text); border-radius: 14px; padding: 16px; }

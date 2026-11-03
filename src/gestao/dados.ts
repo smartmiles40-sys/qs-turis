@@ -96,7 +96,7 @@ const PAX_PENDENTE = "status_reserva.not.in.(Confirmado,Cancelado),pendente_apro
 const STATUS_ABERTA = ["agendada", "confirmada"];
 
 async function alertaSemDesfecho(): Promise<Alerta> {
-  const base: Alerta = { id: "sem-desfecho", setor: "closer", titulo: "Reuniões que já passaram e estão sem desfecho", n: null, tom: "danger", link: "#closer/reunioes/agenda", linkRotulo: "Abrir agenda e desfechos" };
+  const base: Alerta = { id: "sem-desfecho", setor: "closer", titulo: "Reuniões que já passaram e estão sem desfecho", n: null, tom: "danger", link: "#closer/agenda/desfechos", linkRotulo: "Abrir meus desfechos" };
   const agora = Date.now();
   const [{ data, error }, mapa] = await Promise.all([
     supabase.from("qs_meetings").select("id, closer_id, scheduled_at, ends_at").in("status", STATUS_ABERTA).lt("scheduled_at", new Date().toISOString()).limit(1000),
@@ -118,7 +118,7 @@ async function alertaSemDesfecho(): Promise<Alerta> {
 }
 
 async function alertaSemMeet(): Promise<Alerta> {
-  const base: Alerta = { id: "sem-meet", setor: "closer", titulo: "Reuniões futuras sem link do Meet", n: null, tom: "danger", link: "#closer/reunioes/todas", linkRotulo: "Abrir reuniões" };
+  const base: Alerta = { id: "sem-meet", setor: "closer", titulo: "Reuniões futuras sem link do Meet", n: null, tom: "danger", link: "#closer/agenda/dia", linkRotulo: "Abrir a agenda" };
   const { data, error } = await supabase.from("qs_meetings").select("id, meeting_link, calendar_error")
     .in("status", STATUS_ABERTA).gte("scheduled_at", new Date().toISOString()).limit(1000);
   checa(error);
@@ -129,7 +129,7 @@ async function alertaSemMeet(): Promise<Alerta> {
 }
 
 async function alertaReuniaoSemBitrix(): Promise<Alerta> {
-  const base: Alerta = { id: "reuniao-bitrix", setor: "closer", titulo: "Reuniões que não chegaram no Bitrix (últimos 30 dias)", n: null, tom: "warn", link: "#closer/reunioes/todas", linkRotulo: "Abrir reuniões" };
+  const base: Alerta = { id: "reuniao-bitrix", setor: "closer", titulo: "Reuniões que não chegaram no Bitrix (últimos 30 dias)", n: null, tom: "warn", link: "#closer/agenda/dia", linkRotulo: "Abrir a agenda" };
   const desde = new Date(Date.now() - 30 * 86_400_000).toISOString();
   const q = () => supabase.from("qs_meetings").select("id", { count: "exact", head: true })
     .not("status", "in", "(cancelada,arquivada)").gte("created_at", desde);

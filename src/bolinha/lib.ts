@@ -69,7 +69,7 @@ export function abrirNoQS(hash: string) {
 // ── Endereços (#…) das telas do QS ─────────────────────────────────────────
 // Os mesmos que o QS lê: RelApp (#rel/cliente/<id>, #rel/viagem/<id>),
 // CascaDeArea (#fin/…, #ops/…), CloserApp (#closer/…) e o SdrLayout, que lê
-// "#comercial/lead|solicitacoes|painel|minha-agenda".
+// "#comercial/lead|solicitacoes|painel|minha-agenda" e "#comercial/agenda/<aba>".
 
 const PREFIXO: Record<Setor, string> = { comercial: "comercial", relacionamento: "rel", financeiro: "fin", operacional: "ops", marketing: "mkt" };
 
@@ -87,7 +87,7 @@ export const rotas = {
   viagem: (id: string) => `#rel/viagem/${id}`,
   esteira: () => "#rel/esteira",
   lead: (id: string, u: Pick<SdrUser, "role"> | null | undefined) => `#${prefixoComercial(u)}/lead/${id}`,
-  agenda: (u: Pick<SdrUser, "role"> | null | undefined) => (u?.role === "closer" ? "#closer/agenda" : "#comercial/minha-agenda"),
+  agenda: (u: Pick<SdrUser, "role"> | null | undefined) => (u?.role === "closer" ? "#closer/agenda/desfechos" : "#comercial/agenda/time"),
   painel: (u: Pick<SdrUser, "role"> | null | undefined) => `#${prefixoComercial(u)}/painel`,
   /** A solicitação aberta pelo lado da pessoa: quem cuida (para_setor) ou quem pediu (de_setor). */
   solicitacao: (s: { id: string; para_setor: Setor; de_setor: Setor; responsavel_id?: string | null; criado_por?: string | null },

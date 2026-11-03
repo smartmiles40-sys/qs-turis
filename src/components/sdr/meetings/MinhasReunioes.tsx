@@ -27,7 +27,7 @@ import {
   SITUACOES, PERIODOS_REUNIOES, situacaoDaReuniao, intervaloReunioes, intervaloDoDia, dentroDoIntervalo,
   resumirReunioes, agruparPorDia, faixaDaSemana, valorDaVenda, type PeriodoReunioes, type Situacao,
 } from "@/lib/qs/reunioesDoSdr";
-import { StatCard, FilterPill, StatusChip, Card, Alert, EmptyState } from "@/components/ui";
+import "../agenda/agenda.css";
 import MeetingDetailModal from "../agenda/MeetingDetailModal";
 import ScheduleMeetingModal from "../agenda/ScheduleMeetingModal";
 import type { Meeting } from "../types";
@@ -52,6 +52,9 @@ const POR_PAGINA = 80;
 export default function MinhasReunioes({ onOpenLead, versao = 0 }: Props) {
   const { currentUser } = useQsAuth();
   const gestao = currentUser ? canSeeAllData(currentUser.role) : false;
+  // Closer (aba "Reuniões do time" da área dele, 03/11): as que ELE atende.
+  const ehCloser = !gestao && currentUser?.role === "closer";
+  const titulo = gestao ? "Reuniões marcadas pelo time" : ehCloser ? "Reuniões que você atende" : "Reuniões que você marcou";
 
   const [lista, setLista] = useState<Reuniao[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -76,7 +79,8 @@ export default function MinhasReunioes({ onOpenLead, versao = 0 }: Props) {
       const rows = await fetchAllRows<Reuniao>((from, to) => {
         let q = supabase.from("qs_meetings").select(SELECT).order("scheduled_at", { ascending: false }).order("id");
         // SDR: as que ELE marcou. Gestão: o time (filtra na tela).
-        if (!gestao) q = q.eq("owner_id", currentUser.id);
+        if (ehCloser) q = q.eq("closer_id", currentUser.id);
+        else if (!gestao) q = q.eq("owner_id", currentUser.id);
         return q.range(from, to) as unknown as PromiseLike<{ data: Reuniao[] | null; error: { message?: string } | null }>;
       });
       setLista(rows);
@@ -87,7 +91,7 @@ export default function MinhasReunioes({ onOpenLead, versao = 0 }: Props) {
     } finally {
       setCarregando(false);
     }
-  }, [currentUser, gestao]);
+  }, [currentUser, gestao, ehCloser]);
 
   useEffect(() => { void carregar(); }, [carregar, versao]);
   // "Sem desfecho" depende do relógio: relê a cada 2 min com a aba visível.
@@ -153,23 +157,36 @@ export default function MinhasReunioes({ onOpenLead, versao = 0 }: Props) {
 
   const nomeSdr = (id: string | null) => sdrs.find((s) => s.id === id)?.name ?? null;
   let restantes = mostrar;
+  const maxSemana = Math.max(1, ...semana.map((s) => s.total));
+  const barra = (n: number) => (resumo.total ? Math.round((n / resumo.total) * 100) : 0);
+  const kpis = [
+    { rotulo: "Reuniões no período", valor: resumo.total, sub: `${resumo.porSituacao.vai_acontecer} ainda ${resumo.porSituacao.vai_acontecer === 1 ? "vai" : "vão"} acontecer`, pct: resumo.total ? 100 : 0, st: "agendada", cor: "var(--ag-text)", onClick: () => setSituacao("todas") },
+    { rotulo: "Realizadas", valor: resumo.porSituacao.realizada, sub: `Comparecimento de ${pct(resumo.comparecimento)} · ${resumo.porSituacao.no_show} no-show`, pct: barra(resumo.porSituacao.realizada), st: "realizada", cor: "var(--ag-realizada-fg)", onClick: () => setSituacao("realizada") },
+    { rotulo: "SAL aceito", valor: resumo.salAceito, sub: resumo.porSituacao.realizada ? `${pct((resumo.salAceito / resumo.porSituacao.realizada) * 100)} das realizadas` : "nenhuma realizada", pct: barra(resumo.salAceito), st: "agendada", cor: "var(--ag-text-2)", onClick: () => setSoSal((v) => !v) },
+    { rotulo: "Vendas", valor: resumo.vendas, sub: resumo.vendas ? `${brl(resumo.valorVendido)} fechados` : "nenhuma no período", pct: barra(resumo.vendas), st: "sem_desfecho", cor: "var(--ag-warn)", onClick: () => setSoVenda((v) => !v) },
+  ];
 
   return (
-    <section aria-label="Reuniões que você marcou" className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-[19px] font-bold" style={{ color: "var(--text)" }}>
-            {gestao ? "Reuniões marcadas pelo time" : "Reuniões que você marcou"}
-          </h2>
-          <p className="text-[13px]" style={{ color: "var(--subtle)" }}>
-            O status de cada uma, do agendamento ao desfecho do closer.
-          </p>
+    <section aria-label={titulo} className="flex flex-col gap-4">
+      {/* Período + SDR (gestão) */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1.5">
+          {PERIODOS_REUNIOES.map((p) => (
+            <button key={p.id} type="button" className="ag-pill" aria-pressed={!diaEscolhido && periodo === p.id}
+              onClick={() => { setDiaEscolhido(null); setPeriodo(p.id); }}>
+              {p.rotulo}
+            </button>
+          ))}
+          {diaEscolhido && (
+            <button type="button" className="ag-pill" aria-pressed onClick={() => setDiaEscolhido(null)} title="Tirar o filtro do dia">
+              {WEEKDAY_SHORT[diaEscolhido.getDay()]}, {diaEscolhido.getDate()}/{diaEscolhido.getMonth() + 1} ✕
+            </button>
+          )}
         </div>
         {gestao && sdrs.length > 0 && (
-          <label className="flex items-center gap-2 text-[13px]" style={{ color: "var(--muted)" }}>
+          <label className="flex items-center gap-2 ag-muted">
             SDR
-            <select value={sdrFiltro} onChange={(e) => setSdrFiltro(e.target.value)}
-              className="h-9 px-3 rounded-lg border text-[13px]" style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}>
+            <select value={sdrFiltro} onChange={(e) => setSdrFiltro(e.target.value)} className="ag-select">
               <option value="">Todos</option>
               {sdrs.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
@@ -177,96 +194,91 @@ export default function MinhasReunioes({ onOpenLead, versao = 0 }: Props) {
         )}
       </div>
 
-      {erro && <Alert tone="danger">{erro}</Alert>}
+      <p className="ag-muted" style={{ fontSize: 13, marginTop: -6 }}>{titulo}: o status de cada uma, do agendamento ao desfecho do closer.</p>
 
-      {/* A cobrança vem antes de tudo, como na Minha agenda: é a única coisa
-          que já deveria ter sido feita. */}
-      {semDesfechoTotal > 0 && (
-        <Alert tone="warn" action={<button type="button" className="qs-btn qs-btn--sm" onClick={verSemDesfecho}>Ver quais</button>}>
-          {semDesfechoTotal === 1
-            ? `1 reunião ${gestao ? "do time" : "que você marcou"} já passou e o closer não registrou o desfecho.`
-            : `${semDesfechoTotal} reuniões ${gestao ? "do time" : "que você marcou"} já passaram e o closer não registrou o desfecho.`}
-          {!gestao && " Cobre quem atendeu."}
-        </Alert>
-      )}
+      {erro && <div className="ag-faixa" role="alert"><span style={{ color: "var(--ag-desistencia-fg)" }}>{erro}</span></div>}
 
-      {/* Semana: um dia por coluna, com quantas reuniões tem. Clicar filtra. */}
-      <div className="grid grid-cols-7 gap-1.5" role="group" aria-label="Esta semana">
-        {semana.map(({ dia, total, abertas }) => {
-          const ehHoje = dia.toDateString() === agora.toDateString();
-          const ativo = diaEscolhido?.toDateString() === dia.toDateString();
-          return (
-            <button key={dia.toISOString()} type="button"
-              onClick={() => setDiaEscolhido(ativo ? null : dia)}
-              aria-pressed={ativo}
-              title={`${WEEKDAY_LONG[dia.getDay()]}: ${total} ${total === 1 ? "reunião" : "reuniões"}${abertas ? `, ${abertas} em aberto` : ""}`}
-              className="rounded-xl border px-1 py-2 flex flex-col items-center gap-0.5 transition-colors"
-              style={{
-                borderColor: ativo ? "var(--text)" : "var(--border)",
-                background: ativo ? "var(--surface-2)" : "var(--surface)",
-              }}>
-              <span className="text-[11px] font-semibold uppercase" style={{ color: ehHoje ? "var(--info)" : "var(--subtle)" }}>
-                {ehHoje ? "Hoje" : WEEKDAY_SHORT[dia.getDay()]}
-              </span>
-              <span className="text-[13px] tabular-nums" style={{ color: "var(--muted)" }}>{dia.getDate()}</span>
-              <span className="text-[22px] font-semibold leading-none tabular-nums" style={{ color: total ? "var(--text)" : "var(--border)" }}>{total}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Período */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {PERIODOS_REUNIOES.map((p) => (
-          <FilterPill key={p.id} active={!diaEscolhido && periodo === p.id} onClick={() => { setDiaEscolhido(null); setPeriodo(p.id); }}>
-            {p.rotulo}
-          </FilterPill>
+      {/* Os números do período — poucos e grandes. Clicar filtra. */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {kpis.map((k) => (
+          <button key={k.rotulo} type="button" onClick={k.onClick} data-st={k.st}
+            className="ag-card flex flex-col gap-1.5 px-[18px] py-4 text-left">
+            <span className="ag-muted" style={{ fontSize: 13 }}>{k.rotulo}</span>
+            <span className="tabular" style={{ fontSize: 30, fontWeight: 700, lineHeight: 1.1, color: k.cor }}>{k.valor}</span>
+            <span className="block h-1.5 overflow-hidden rounded-[3px]" style={{ background: "var(--ag-border)" }}>
+              <span className="block h-full rounded-[3px]" style={{ width: `${k.pct}%`, background: "var(--st-dot)" }} />
+            </span>
+            <span className="ag-muted" style={{ fontSize: 12 }}>{k.sub}</span>
+          </button>
         ))}
-        {diaEscolhido && (
-          <FilterPill active onClick={() => setDiaEscolhido(null)}>
-            {WEEKDAY_SHORT[diaEscolhido.getDay()]}, {diaEscolhido.getDate()}/{diaEscolhido.getMonth() + 1} ✕
-          </FilterPill>
-        )}
       </div>
 
-      {/* Os números do período — poucos e grandes. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Reuniões no período" value={resumo.total}
-          sub={`${resumo.porSituacao.vai_acontecer} vão acontecer`} />
-        <StatCard label="Realizadas" value={resumo.porSituacao.realizada} tone={resumo.porSituacao.realizada ? "ok" : "default"}
-          sub={`comparecimento ${pct(resumo.comparecimento)} · ${resumo.porSituacao.no_show} no-show`}
-          onClick={() => setSituacao("realizada")} />
-        <StatCard label="SAL aceito" value={resumo.salAceito}
-          sub={resumo.porSituacao.realizada ? `${pct((resumo.salAceito / resumo.porSituacao.realizada) * 100)} das realizadas` : "nenhuma realizada"}
-          onClick={() => setSoSal((v) => !v)} />
-        <StatCard label="Vendas" value={resumo.vendas} tone={resumo.vendas ? "ok" : "default"}
-          sub={resumo.vendas ? brl(resumo.valorVendido) : "nenhuma no período"}
-          onClick={() => setSoVenda((v) => !v)} />
+      <div className="flex flex-wrap items-stretch gap-4">
+        {/* Semana: um dia por coluna, com quantas reuniões tem. Clicar filtra. */}
+        <section className="ag-card flex flex-col gap-3 px-[18px] py-4" style={{ flex: "1 1 420px" }} aria-label="Esta semana">
+          <span className="font-bold">Esta semana</span>
+          <div className="grid h-[110px] grid-cols-7 items-end gap-2">
+            {semana.map(({ dia, total, abertas }) => {
+              const ehHoje = dia.toDateString() === agora.toDateString();
+              const ativo = diaEscolhido?.toDateString() === dia.toDateString();
+              return (
+                <button key={dia.toISOString()} type="button" onClick={() => setDiaEscolhido(ativo ? null : dia)} aria-pressed={ativo}
+                  title={`${WEEKDAY_LONG[dia.getDay()]}, ${dia.getDate()}: ${total} ${total === 1 ? "reunião" : "reuniões"}${abertas ? `, ${abertas} em aberto` : ""}`}
+                  className="flex h-full flex-col items-center justify-end gap-1.5 rounded-lg"
+                  style={{ boxShadow: ativo ? "inset 0 0 0 1px var(--ag-muted)" : "none" }}>
+                  <span className="text-[13px] font-bold tabular">{total}</span>
+                  <span className="block w-full max-w-[44px] rounded-md"
+                    style={{ height: Math.max(4, Math.round((total / maxSemana) * 64)), background: ehHoje || ativo ? "var(--ag-pessoa-1)" : total ? "var(--ag-border-2)" : "var(--ag-border)" }} />
+                  <span className="text-[11px] font-bold uppercase" style={{ color: ehHoje ? "var(--ag-muted-2)" : "var(--ag-subtle)" }}>
+                    {ehHoje ? "Hoje" : WEEKDAY_SHORT[dia.getDay()]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* A cobrança: a única coisa que já deveria ter sido feita. */}
+        <section className="ag-card ag-card--destaque flex flex-col justify-between gap-3 px-[18px] py-4" style={{ flex: "1 1 320px" }}>
+          <div className="flex flex-col gap-1">
+            <span className="tabular" style={{ fontSize: 28, fontWeight: 700, color: semDesfechoTotal ? "var(--ag-warn)" : "var(--ag-realizada-fg)" }}>{semDesfechoTotal}</span>
+            <span>
+              {semDesfechoTotal === 1
+                ? `reunião ${gestao ? "do time" : ehCloser ? "sua" : "que você marcou"} já passou e o closer ainda não registrou o desfecho`
+                : `reuniões ${gestao ? "do time" : ehCloser ? "suas" : "que você marcou"} já passaram e o closer ainda não registrou o desfecho`}
+              {!gestao && !ehCloser && semDesfechoTotal > 0 && ". Cobre quem atendeu."}
+            </span>
+          </div>
+          {semDesfechoTotal > 0 && (
+            <button type="button" className="ag-btn ag-btn--md ag-btn--quiet self-start" onClick={verSemDesfecho}>Ver quais</button>
+          )}
+        </section>
       </div>
 
       {/* Status */}
       <div className="flex flex-wrap items-center gap-1.5" aria-label="Filtrar por status">
-        <FilterPill active={situacao === "todas"} count={resumo.total} onClick={() => setSituacao("todas")}>Todas</FilterPill>
+        <button type="button" className="ag-pill" aria-pressed={situacao === "todas"} onClick={() => setSituacao("todas")}>
+          Todas <span className="ag-qtd tabular">{resumo.total}</span>
+        </button>
         {SITUACOES.filter((s) => resumo.porSituacao[s.id] > 0 || situacao === s.id).map((s) => (
-          <FilterPill key={s.id} active={situacao === s.id} count={resumo.porSituacao[s.id]}
-            countTone={s.id === "sem_desfecho" ? "warn" : undefined}
+          <button key={s.id} type="button" className="ag-pill" aria-pressed={situacao === s.id} data-st={stDaSituacao(s.id)}
             onClick={() => setSituacao(situacao === s.id ? "todas" : s.id)}>
-            {s.rotulo}
-          </FilterPill>
+            <span className="ag-dot" />
+            {s.rotulo} <span className="ag-qtd tabular">{resumo.porSituacao[s.id]}</span>
+          </button>
         ))}
-        <span className="mx-1 h-5 w-px" style={{ background: "var(--border)" }} aria-hidden />
-        <FilterPill active={soSal} onClick={() => setSoSal((v) => !v)}>Com SAL</FilterPill>
-        <FilterPill active={soVenda} onClick={() => setSoVenda((v) => !v)}>Com venda</FilterPill>
+        <span className="mx-1 h-5 w-px" style={{ background: "var(--ag-border)" }} aria-hidden />
+        <button type="button" className="ag-pill" aria-pressed={soSal} onClick={() => setSoSal((v) => !v)}>Com SAL</button>
+        <button type="button" className="ag-pill" aria-pressed={soVenda} onClick={() => setSoVenda((v) => !v)}>Com venda</button>
       </div>
 
       {/* Lista por dia */}
       {carregando ? (
-        <div className="h-32 rounded-2xl animate-pulse" style={{ background: "var(--surface-2)" }} />
+        <div className="h-32 animate-pulse rounded-2xl" style={{ background: "var(--ag-surface-2)" }} />
       ) : grupos.length === 0 ? (
-        <Card>
-          <EmptyState title="Nenhuma reunião com esse filtro."
-            description={periodo === "proximas" && situacao === "todas" ? "Nada marcado de hoje em diante." : "Troque o período ou o status."} />
-        </Card>
+        <div className="ag-vazio" style={{ padding: 32 }}>
+          {periodo === "proximas" && situacao === "todas" && !diaEscolhido ? "Nada marcado de hoje em diante." : "Nenhuma reunião com esse status no período."}
+        </div>
       ) : (
         <div className="flex flex-col gap-3">
           {grupos.map((g) => {
@@ -275,26 +287,28 @@ export default function MinhasReunioes({ onOpenLead, versao = 0 }: Props) {
             restantes -= itens.length;
             const ehHoje = g.dia.toDateString() === agora.toDateString();
             return (
-              <div key={g.chave} className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-                <div className="px-4 py-2 text-[12.5px] font-semibold border-b" style={{ borderColor: "var(--border)", color: ehHoje ? "var(--info)" : "var(--muted)", background: "var(--surface-2)" }}>
-                  {ehHoje ? "Hoje · " : ""}{WEEKDAY_LONG[g.dia.getDay()]}, {g.dia.getDate()} de {MONTH_LONG[g.dia.getMonth()]}
-                  {g.dia.getFullYear() !== agora.getFullYear() ? ` de ${g.dia.getFullYear()}` : ""}
-                  <span className="ml-2 font-normal" style={{ color: "var(--subtle)" }}>{g.itens.length}</span>
+              <section key={g.chave} className="ag-card overflow-hidden">
+                <div className="flex items-baseline gap-2 px-[18px] py-3" style={{ borderBottom: "1px solid var(--ag-border)" }}>
+                  <span className="font-bold" style={{ color: ehHoje ? "var(--ag-muted-2)" : "var(--ag-text)" }}>
+                    {ehHoje ? "Hoje · " : ""}{WEEKDAY_LONG[g.dia.getDay()]}, {g.dia.getDate()} de {MONTH_LONG[g.dia.getMonth()]}
+                    {g.dia.getFullYear() !== agora.getFullYear() ? ` de ${g.dia.getFullYear()}` : ""}
+                  </span>
+                  <span className="ag-muted" style={{ fontSize: 13 }}>{g.itens.length} {g.itens.length === 1 ? "reunião" : "reuniões"}</span>
                 </div>
                 <ul>
                   {itens.map((m) => (
                     <LinhaReuniao key={m.id} m={m} agora={agora}
-                      sdr={gestao ? nomeSdr(m.owner_id) ?? m.scheduled_by ?? null : null}
+                      sdr={nomeSdr(m.owner_id) ?? m.scheduled_by ?? null}
                       gravacoes={gravacoes.get(m.lead_id) ?? 0}
                       onDetalhe={() => setDetalhe(m)}
                       onLead={() => onOpenLead(m.lead_id)} />
                   ))}
                 </ul>
-              </div>
+              </section>
             );
           })}
           {filtradas.length > mostrar && (
-            <button type="button" className="qs-btn self-center" onClick={() => setMostrar((n) => n + POR_PAGINA)}>
+            <button type="button" className="ag-btn self-center" onClick={() => setMostrar((n) => n + POR_PAGINA)}>
               Mostrar mais ({filtradas.length - mostrar})
             </button>
           )}
@@ -318,8 +332,10 @@ export default function MinhasReunioes({ onOpenLead, versao = 0 }: Props) {
   );
 }
 
-const TOM: Record<Situacao, "info" | "warn" | "ok" | "danger" | "neutral"> =
-  Object.fromEntries(SITUACOES.map((s) => [s.id, s.tom])) as Record<Situacao, "info" | "warn" | "ok" | "danger" | "neutral">;
+/** Situação da lista (reunioesDoSdr) → cor da paleta da agenda (agenda.css). */
+function stDaSituacao(s: Situacao): string {
+  return s === "vai_acontecer" ? "agendada" : s;
+}
 const ROTULO_UM: Record<Situacao, string> = {
   vai_acontecer: "Agendada", sem_desfecho: "Sem desfecho", realizada: "Realizada", no_show: "No-show",
   reagendada: "Reagendada", cancelada: "Cancelada", desistencia: "Desistência", arquivada: "Arquivada",
@@ -335,40 +351,49 @@ function LinhaReuniao({ m, agora, sdr, gravacoes, onDetalhe, onLead }: {
   const venda = valorDaVenda(m);
   const closer = m.closer?.name ?? m.meeting_owner ?? null;
   const apagada = s === "cancelada" || s === "arquivada" || s === "reagendada";
+  const st = agoraNela ? "acontecendo" : stDaSituacao(s);
+  // A ação principal muda com o status (desenho): Meet pra quem vai
+  // acontecer, desfecho pra quem passou sem, e o lead pro resto.
+  const acao = aberta && m.meeting_link
+    ? <a href={m.meeting_link} target="_blank" rel="noreferrer" className="ag-btn ag-btn--md ag-btn--primary">Entrar no Meet</a>
+    : s === "sem_desfecho"
+      ? <button type="button" className="ag-btn ag-btn--md ag-btn--warn" onClick={onDetalhe}>Registrar desfecho</button>
+      : <button type="button" className="ag-btn ag-btn--md" onClick={onLead}>Ver lead</button>;
   return (
-    <li className="flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-2 px-4 py-3 border-b last:border-b-0" style={{ borderColor: "var(--border)", opacity: apagada ? 0.65 : 1 }}>
+    <li data-st={st} className="flex flex-wrap items-center gap-x-4 gap-y-3 px-[18px] py-3" style={{ borderBottom: "1px solid var(--ag-line)", opacity: apagada ? 0.75 : 1 }}>
       <div className="w-14 shrink-0">
-        <div className="text-[17px] font-semibold tabular-nums leading-none" style={{ color: "var(--text)" }}>{hhmm(ini)}</div>
-        {agoraNela && <div className="text-[10.5px] font-bold uppercase mt-1" style={{ color: "var(--info)" }}>agora</div>}
+        <div className="text-[18px] font-bold tabular leading-none">{hhmm(ini)}</div>
+        {agoraNela && <div className="mt-1 text-[10.5px] font-bold uppercase" style={{ color: "var(--ag-muted-2)" }}>agora</div>}
       </div>
-      <div className="min-w-0 flex-1">
-        <button type="button" onClick={onDetalhe} className="text-left text-[14.5px] font-semibold truncate max-w-full hover:underline" style={{ color: "var(--text)" }}>
+      <span className="ag-barra" />
+      <div className="flex min-w-0 flex-col gap-0.5" style={{ flex: "1 1 240px" }}>
+        <button type="button" onClick={onDetalhe} className="max-w-full truncate text-left text-[15px] font-bold hover:underline">
           {m.lead?.full_name ?? m.lead_name ?? "Lead"}
         </button>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]" style={{ color: "var(--subtle)" }}>
-          {closer && <span>Closer: <b style={{ color: "var(--muted)", fontWeight: 600 }}>{primeiroNome(closer)}</b></span>}
-          {sdr && <span>SDR: <b style={{ color: "var(--muted)", fontWeight: 600 }}>{primeiroNome(sdr)}</b></span>}
-          {m.tipo === "retomada" && <span>· retomada</span>}
-          {m.origem === "autoagendamento" && <span>· o cliente marcou sozinho</span>}
+        <span className="ag-muted" style={{ fontSize: 13 }}>
+          {closer ? <>Closer {primeiroNome(closer)}</> : "Sem closer"}
+          {sdr && <> · SDR {primeiroNome(sdr)}</>}
+          {m.tipo === "retomada" && " · retomada"}
+          {m.origem === "autoagendamento" && " · marcou sozinho"}
           {gravacoes > 0 && (
             <button type="button" onClick={onLead} className="underline" title="Abre a ficha do lead — aba Ligações">
-              · {gravacoes} ligaç{gravacoes === 1 ? "ão gravada" : "ões gravadas"}
+              {" "}· {gravacoes} ligaç{gravacoes === 1 ? "ão gravada" : "ões gravadas"}
             </button>
           )}
-        </div>
+        </span>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-        <StatusChip tone={TOM[s]}>{ROTULO_UM[s]}</StatusChip>
-        {m.sal === "aceito" && <StatusChip tone="ok">SAL</StatusChip>}
-        {m.sal === "recusado" && <StatusChip>SAL recusado</StatusChip>}
-        {venda > 0 && <StatusChip tone="ok">{brl(venda)}</StatusChip>}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="ag-badge">{agoraNela ? "Acontecendo agora" : ROTULO_UM[s]}</span>
+        {m.sal === "aceito" && <span className="ag-sal" style={{ fontSize: 12, padding: "4px 9px" }}>SAL</span>}
+        {m.sal === "recusado" && <span className="ag-sal ag-sal--off" style={{ fontSize: 12, padding: "4px 9px" }}>SAL recusado</span>}
+        {venda > 0 && <span className="ag-badge" data-st="realizada">{brl(venda)}</span>}
       </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {aberta && m.meeting_link && (
-          <a href={m.meeting_link} target="_blank" rel="noreferrer" className="qs-btn qs-btn--sm qs-btn--primary">Entrar no Meet</a>
+      <div className="flex items-center gap-1.5">
+        {acao}
+        {!(s !== "sem_desfecho" && !(aberta && m.meeting_link)) && (
+          <button type="button" className="ag-btn ag-btn--md" onClick={onLead} title="Histórico do lead">Histórico</button>
         )}
-        <button type="button" className="qs-btn qs-btn--sm" onClick={onLead}>Histórico</button>
-        <button type="button" className="qs-btn qs-btn--sm" onClick={onDetalhe}>{s === "sem_desfecho" ? "Ver" : "Detalhes"}</button>
+        <button type="button" aria-label="Detalhes da reunião" title="Detalhes da reunião" className="ag-icon-btn" style={{ background: "var(--ag-surface-2)", fontWeight: 700 }} onClick={onDetalhe}>⋯</button>
       </div>
     </li>
   );

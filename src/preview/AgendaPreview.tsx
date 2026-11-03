@@ -14,6 +14,8 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../index.css";
 import AgendaMes, { type AgendaDemo } from "../components/sdr/agenda/AgendaMes";
+import AgendaDia from "../components/sdr/agenda/AgendaDia";
+import "../components/sdr/agenda/agenda.css";
 import type { Meeting, MeetingSal, MeetingStatus, SdrUser } from "../components/sdr/types";
 
 const hoje = new Date();
@@ -145,7 +147,11 @@ function Preview() {
         </p>
       </div>
 
-      <AgendaMes demo={DEMO_MES} onOpenLead={(id) => console.log("[preview] abrir lead", id)} />
+      {/* .qs-agenda: a paleta da agenda (agenda.css) — a página real põe isto no MeetingsPage. */}
+      <div className="qs-agenda flex flex-col gap-8">
+        <AgendaDia demo={{ ...DEMO, availability: [], blocks: [] }} onOpenLead={(id) => console.log("[preview] abrir lead", id)} />
+        <AgendaMes demo={DEMO_MES} onOpenLead={(id) => console.log("[preview] abrir lead", id)} onAbrirDia={(d) => console.log("[preview] abrir dia", d)} />
+      </div>
     </div>
   );
 }

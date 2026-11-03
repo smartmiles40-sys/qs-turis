@@ -1,17 +1,17 @@
 // src/closer/ReunioesCloser.tsx
 // -----------------------------------------------------------------------------
-// REUNIÕES DO CLOSER (Bruno, 26/10): "unificar atividades em reuniões". Uma
-// tela só, em abas (ordem do Bruno), no lugar de Minha agenda + Atividades + Reuniões:
+// AGENDA DO CLOSER. Desde 03/11 (desenho do Bruno, agenda.html) é a mesma
+// Agenda do Comercial — Agenda do dia, Reuniões do time (aqui: as que ele
+// atende) e Mês —, mais as duas abas que só a área do closer tinha:
 //
-//   Todas ......... a lista completa de reuniões (MeetingsPage). Abre nela.
-//   Agenda ........ a casa do closer de sempre (MinhaAgendaPage): primeiro o que
-//                   falta desfecho, depois hoje e o resto da semana.
-//   Falta agendar . cliente do pipeline antes da reunião (Aguardando reunião,
-//                   Reagendamento, No-show) sem reunião marcada pela frente.
-//   (Atividades saiu em 03/11 — Bruno: "dentro da pipeline de reuniões pode
-//   tirar as Atividades". #closer/painel e #closer/reunioes/atividades caem em Todas.)
+//   Meus desfechos . a casa do closer de sempre (MinhaAgendaPage): primeiro o
+//                    que falta desfecho, depois hoje e o resto da semana.
+//   Falta agendar .. cliente do pipeline antes da reunião (Aguardando reunião,
+//                    Reagendamento, No-show) sem reunião marcada pela frente.
 //
-// A aba vai no endereço: #closer/reunioes/<aba>.
+// A aba vai no endereço: #closer/agenda/<aba>. Os antigos (#closer/agenda,
+// #closer/painel, #closer/reunioes/<aba>) caem na aba certa — ver abaDoCloser
+// em src/lib/qs/agendaStatus.ts.
 // -----------------------------------------------------------------------------
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -20,56 +20,36 @@ import { lazyPagina } from "@/lib/qs/lazyPagina";
 import { Aviso, Botao, Etiqueta, Vazio } from "@/rel/ui";
 import ScheduleMeetingModal from "@/components/sdr/agenda/ScheduleMeetingModal";
 import type { Lead } from "@/components/sdr/types";
+import { ABAS_AGENDA_CLOSER, type AbaAgenda } from "@/lib/qs/agendaStatus";
 import { NOME_ETAPA, dataBr, nomeDoLead, type Etapa, type Negocio } from "./lib";
 
 const MinhaAgendaPage = lazyPagina(() => import("@/components/sdr/agenda/MinhaAgendaPage"));
 const MeetingsPage = lazyPagina(() => import("@/components/sdr/meetings/MeetingsPage"));
 
-export const ABAS_REUNIOES = [
-  { id: "todas", rotulo: "Todas as reuniões" },
-  { id: "agenda", rotulo: "Agenda e desfechos" },
-  { id: "falta-agendar", rotulo: "Falta agendar" },
-] as const;
-export type AbaReunioes = (typeof ABAS_REUNIOES)[number]["id"];
-
 const ANTES_DA_REUNIAO: Etapa[] = ["aguardando_reuniao", "reagendamento", "no_show"];
 
 export default function ReunioesCloser({ aba, onAba, onOpenLead }: {
-  aba: AbaReunioes;
-  onAba: (a: AbaReunioes) => void;
+  aba: AbaAgenda;
+  onAba: (a: AbaAgenda) => void;
   onOpenLead: (leadId: string) => void;
 }) {
   const [faltam, setFaltam] = useState<number | null>(null);
+  const carregando = <p className="text-sm" style={{ color: "var(--ink3)" }}>Carregando…</p>;
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-[22px] font-bold flex-1" style={{ color: "var(--ink)" }}>Reuniões</h1>
-      </div>
-      <div className="flex gap-1 overflow-x-auto border-b" style={{ borderColor: "var(--line)" }} role="tablist">
-        {ABAS_REUNIOES.map((a) => {
-          const on = a.id === aba;
-          return (
-            <button key={a.id} role="tab" aria-selected={on} onClick={() => onAba(a.id)}
-              className="px-3.5 py-2 text-[13px] font-semibold whitespace-nowrap -mb-px border-b-2"
-              style={{ borderColor: on ? "var(--rel)" : "transparent", color: on ? "var(--rel-ink)" : "var(--ink2)" }}>
-              {a.rotulo}
-              {a.id === "falta-agendar" && !!faltam && (
-                <span className="ml-1.5 inline-flex min-w-[18px] h-[18px] px-1 items-center justify-center rounded-full text-[11px] font-bold"
-                  style={{ background: "var(--rel-soft)", color: "var(--rel-ink)" }}>{faltam}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-      <Suspense fallback={<p className="text-sm" style={{ color: "var(--ink3)" }}>Carregando…</p>}>
-        {aba === "agenda" && <MinhaAgendaPage onOpenLead={onOpenLead} />}
-        {aba === "todas" && <MeetingsPage onOpenLead={onOpenLead} />}
-      </Suspense>
-      {/* Sempre montada (escondida fora da aba) pra contar o número da aba. */}
-      <div hidden={aba !== "falta-agendar"}>
-        <FaltaAgendar onOpenLead={onOpenLead} onContou={setFaltam} />
-      </div>
-    </div>
+    <Suspense fallback={carregando}>
+      <MeetingsPage
+        onOpenLead={onOpenLead}
+        aba={aba}
+        onAba={onAba}
+        extras={[
+          { id: "desfechos", rotulo: ABAS_AGENDA_CLOSER[0].rotulo,
+            conteudo: <Suspense fallback={carregando}><MinhaAgendaPage onOpenLead={onOpenLead} /></Suspense> },
+          // Sempre montada (escondida fora da aba) pra contar o número da aba.
+          { id: "falta-agendar", rotulo: ABAS_AGENDA_CLOSER[1].rotulo, badge: faltam, sempreMontada: true,
+            conteudo: <FaltaAgendar onOpenLead={onOpenLead} onContou={setFaltam} /> },
+        ]}
+      />
+    </Suspense>
   );
 }
 

@@ -33,7 +33,8 @@ import WebphoneWidget from "@/components/sdr/telefone/WebphoneWidget";
 import LigacaoOficialWidget from "@/components/sdr/telefone/LigacaoOficialWidget";
 import Presenca from "@/controle-comercial/Presenca";
 import PipelinePage from "./PipelinePage";
-import ReunioesCloser, { ABAS_REUNIOES, type AbaReunioes } from "./ReunioesCloser";
+import ReunioesCloser from "./ReunioesCloser";
+import { abaDoCloser, hashDaAgenda } from "@/lib/qs/agendaStatus";
 
 const WaPage = lazyPagina(() => import("@/components/sdr/wa/WaPage"));
 const LeadsPage = lazyPagina(() => import("@/components/sdr/leads/LeadsPage"));
@@ -97,6 +98,15 @@ export default function CloserApp() {
     if (!window.location.hash.startsWith(`#${PREFIXO}`)) history.replaceState(null, "", window.location.pathname + window.location.search + hashDaArea(PREFIXO, rota));
   }, [rota]);
 
+  // Endereço antigo da agenda (#closer/reunioes/…, #closer/painel, #closer/agenda
+  // sem aba) vira o novo (#closer/agenda/<aba>) sem empilhar no histórico.
+  useEffect(() => {
+    const aba = abaDoCloser(rota.tela, rota.id);
+    if (!aba) return;
+    const alvo = hashDaAgenda("closer", aba);
+    if (window.location.hash !== alvo) history.replaceState(null, "", window.location.pathname + window.location.search + alvo);
+  }, [rota]);
+
   const ir = useCallback((r: Rota) => {
     if (r.tela === "comercial") {
       // Gestão volta pro Comercial (SdrLayout): basta sair do endereço #closer.
@@ -118,19 +128,19 @@ export default function CloserApp() {
   if (!currentUser) return null;
   // Bruno, 26/10: a parte de Gestão do closer só abre pro master (admin).
   const gestao = currentUser.role === "admin";
-  // 26/10: Minha agenda, Atividades e Reuniões viraram UMA tela (abas). Os
-  // endereços antigos (#closer/agenda, #closer/painel) caem na aba certa.
+  // AGENDA (03/11, desenho do Bruno): #closer/agenda/<aba>. Os endereços
+  // antigos (#closer/agenda, #closer/painel, #closer/reunioes/<aba>) caem na
+  // aba certa (abaDoCloser) e o efeito lá em cima reescreve o endereço.
   const telaPedida = rota.tela === "inicio" ? "pipeline" : rota.tela;
-  const tela = telaPedida === "agenda" || telaPedida === "painel" ? "reunioes" : telaPedida;
-  // 03/11: a aba Atividades saiu; #closer/painel (endereço antigo) cai em Todas.
-  const abaReunioes: AbaReunioes = (ABAS_REUNIOES.some((a) => a.id === rota.id) && telaPedida === "reunioes" ? rota.id as AbaReunioes : telaPedida === "agenda" ? "agenda" : "todas");
-  const deOnde = origem.current.tela === "inicio" ? "pipeline" : origem.current.tela === "agenda" || origem.current.tela === "painel" ? "reunioes" : origem.current.tela;
+  const abaAgenda = abaDoCloser(telaPedida, rota.id);
+  const tela = abaAgenda ? "agenda" : telaPedida;
+  const deOnde = origem.current.tela === "inicio" ? "pipeline" : abaDoCloser(origem.current.tela, origem.current.id) ? "agenda" : origem.current.tela;
   const ativo = tela === "lead" ? deOnde : tela === "proposta-nova" ? "propostas" : tela;
 
   const grupos: GrupoDoMenu[] = [
     { id: "vendas", rotulo: "Vendas", icone: ICONES_AREA.dinheiro, itens: [
       { id: "pipeline", rotulo: "Pipeline" },
-      { id: "reunioes", rotulo: "Reuniões" },
+      { id: "agenda", rotulo: "Agenda" },
       { id: "whatsapp", rotulo: "WhatsApp" },
     ] },
     { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
@@ -172,9 +182,9 @@ export default function CloserApp() {
             <Cerca nome="o WhatsApp"><WaPage onOpenLead={abrirLead} /></Cerca>
           </div>
         )}
-        {tela === "reunioes" && (
-          <Cerca nome="as reuniões">
-            <ReunioesCloser aba={abaReunioes} onAba={(a) => ir({ tela: "reunioes", id: a })} onOpenLead={abrirLead} />
+        {tela === "agenda" && abaAgenda && (
+          <Cerca nome="a agenda">
+            <ReunioesCloser aba={abaAgenda} onAba={(a) => ir({ tela: "agenda", id: a })} onOpenLead={abrirLead} />
           </Cerca>
         )}
         {tela === "leads" && <Cerca nome="os leads"><LeadsPage onOpenLead={abrirLead} onOpenCadenceCreate={() => undefined} /></Cerca>}

@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
+import "../agenda/agenda.css";
+import { ABAS_AGENDA, type AbaAgenda } from "@/lib/qs/agendaStatus";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, podeExecutar } from "@/contexts/QsAuthContext";
 import type { Meeting, MeetingStatus, Lead, SdrUser } from "../types";
@@ -74,15 +76,37 @@ const STATUS_EDITAVEIS: MeetingStatus[] = ["agendada", "confirmada", "cancelada"
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
+/** Aba a mais que só uma área tem (a do closer: "Meus desfechos", "Falta agendar"). */
+export interface AbaExtraDaAgenda {
+  id: AbaAgenda;
+  rotulo: string;
+  badge?: number | null;
+  conteudo: ReactNode;
+  /** Fica montada mesmo fora da aba (ex.: pra contar o número da aba). */
+  sempreMontada?: boolean;
+}
+
 interface MeetingsPageProps {
   onOpenLead: (leadId: string) => void;
+  /** Aba aberta (vem do endereço: .../agenda/dia|time|mes). Sem ela, "dia". */
+  aba?: AbaAgenda;
+  /** Trocar de aba — quem tem endereço grava nele; sem isto a aba é estado local. */
+  onAba?: (a: AbaAgenda) => void;
+  extras?: AbaExtraDaAgenda[];
 }
 
 const inputClass =
   "w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] transition-colors";
 const labelClass = "block text-xs font-medium text-gray-700 mb-1";
 
-export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
+export default function MeetingsPage({ onOpenLead, aba: abaPedida, onAba, extras = [] }: MeetingsPageProps) {
+  // AGENDA EM 3 ABAS (desenho do Bruno, 03/11): Agenda do dia, Reuniões do
+  // time e Mês, cada uma num endereço (.../agenda/dia|time|mes). A aba vem do
+  // endereço quando a área tem um; senão vive aqui.
+  const [abaLocal, setAbaLocal] = useState<AbaAgenda>(abaPedida ?? "dia");
+  useEffect(() => { if (abaPedida) setAbaLocal(abaPedida); }, [abaPedida]);
+  const aba = abaPedida ?? abaLocal;
+  const irAba = (a: AbaAgenda) => { setAbaLocal(a); onAba?.(a); };
   const { currentUser } = useQsAuth();
   // Espectador (marketing) vê tudo e não muda nada. O banco recusa de verdade
   // (gatilho da 0036); aqui só evitamos oferecer botão que vai falhar.
@@ -92,7 +116,6 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   // por especialista); embaixo as pendências e o MÊS na grade da Google Agenda,
   // com as atividades extras do usuário junto das reuniões. Clicar num dia do
   // mês sobe pro dia.
-  const topoDoDia = useRef<HTMLDivElement>(null);
   // Agenda trancada do closer sem desfecho (Bruno, 21/09) — a faixa aparece
   // aqui também, porque é por esta aba que ele chega nas reuniões do dia.
   const { pendentes: atrasadasDoCloser } = useBloqueioDesfecho();
@@ -102,16 +125,12 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   const [diaReunioes, setDiaReunioes] = useState<Date | null>(null);
   // Relê "Reuniões que você marcou" quando se agenda por aqui.
   const [versao, setVersao] = useState(0);
-  // O closer tem a casa dele (CloserApp); a lista de "quem marcou" é do SDR e
-  // da gestão (e do espectador, que só lê).
-  const podeVerMinhas = currentUser?.role !== "closer";
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   // Closers ativos: sem eles a reunião nasce sem dono de horário e some do
   // calendário da aba "Agenda" (organizado por closer).
   const [closers, setClosers] = useState<SdrUser[]>([]);
-  const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
   // ── Um só jeito de agendar (27/10): "Agendar Reunião" abre o mesmo modal
@@ -188,15 +207,16 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
     }
   }, []);
 
+  // A lista inteira de leads (paginada) e a de reuniões só servem ao formulário
+  // de "Lançar reunião passada": são lidas quando ele abre, não a cada visita à
+  // agenda (antes a tela toda esperava por elas no "Carregando...").
+  const [jaCarregouForm, setJaCarregouForm] = useState(false);
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      await Promise.all([fetchMeetings(), fetchLeads()]);
-      setLoading(false);
-    }
-    load();
+    if (!showModal || jaCarregouForm) return;
+    setJaCarregouForm(true);
+    void Promise.all([fetchMeetings(), fetchLeads()]);
     void fetchClosers().then(setClosers);
-  }, [fetchMeetings, fetchLeads]);
+  }, [showModal, jaCarregouForm, fetchMeetings, fetchLeads]);
 
   // ── Modal openers ──
   function openCreate() {
@@ -413,6 +433,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
         await transferirLeadProCloser(fLeadId, fCloserId, closerName);
       }
       closeModal();
+      setVersao((v) => v + 1);
       await fetchMeetings();
       return;
     }
@@ -491,53 +512,75 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   // Distinto de "Cancelar" (que mantém o registro com status cancelada). Serve pra
   // reuniões criadas por engano/duplicadas. Reuniões "realizada" têm valor histórico
   // (aconteceram de fato), então a exclusão só é oferecida em não-realizada.
-  if (loading) {
-    return (
-      <div className="space-y-4" style={{ fontFamily: "inherit" }}>
-        <div className="flex items-center justify-center py-12">
-          <p className="text-sm text-gray-500">Carregando...</p>
-        </div>
-      </div>
-    );
-  }
+  const abas = [...ABAS_AGENDA.map((a) => ({ id: a.id as AbaAgenda, rotulo: a.rotulo as string, badge: null as number | null | undefined })), ...extras];
 
   return (
-    <div className="space-y-6" style={{ fontFamily: "inherit" }}>
-      {/* Header */}
-      <div className="flex flex-wrap gap-y-2 items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
-            Reuniões e agenda
-          </h1>
+    <>
+    <div className="qs-agenda flex flex-col gap-5">
+      {/* Cabeçalho do desenho: título + abas (segmentado) + as duas ações. */}
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-5">
+          <h1 className="ag-h1">Agenda</h1>
+          <nav aria-label="Seções da agenda" className="ag-seg" role="tablist">
+            {abas.map((t) => (
+              <button key={t.id} type="button" role="tab" aria-selected={t.id === aba} onClick={() => irAba(t.id)}>
+                {t.rotulo}
+                {!!t.badge && <span className="ml-1.5 tabular" style={{ opacity: 0.7 }}>{t.badge}</span>}
+              </button>
+            ))}
+          </nav>
         </div>
-        {executa && <div className="flex flex-wrap items-center gap-2">
-          {isManager && (
-            <button
-              onClick={openCreate}
-              title="Só para a gestão: registrar uma reunião com data no passado"
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
-            >
-              Lançar reunião que já aconteceu
+        {executa && (
+          <div className="flex flex-wrap gap-2">
+            {isManager && (
+              <button type="button" className="ag-btn" onClick={openCreate}
+                title="Só para a gestão: registrar uma reunião com data no passado">
+                Lançar reunião passada
+              </button>
+            )}
+            <button type="button" className="ag-btn ag-btn--primary" onClick={() => setAgendando(true)}>
+              + Agendar reunião
             </button>
-          )}
-          <button
-            onClick={() => setAgendando(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Agendar Reunião
-          </button>
-        </div>}
-      </div>
+          </div>
+        )}
+      </header>
+
+      {/* Page error banner */}
+      {pageError && (
+        <div className="ag-faixa" role="alert">
+          <span style={{ color: "var(--ag-desistencia-fg)" }}>{pageError}</span>
+          <button type="button" className="ag-btn ag-btn--sm" onClick={() => setPageError(null)}>Fechar</button>
+        </div>
+      )}
+
+      {/* Agenda trancada do closer sem desfecho (21/09): vale em toda aba. */}
+      <FaixaBloqueioDesfecho pendentes={atrasadasDoCloser} />
+
+      {aba === "dia" && (
+        <AgendaDia onOpenLead={onOpenLead} dataInicial={diaReunioes} semBotaoAgendar />
+      )}
+
+      {/* "Reuniões do time" = a lista de quem marcou (veio da Minha agenda em
+          03/11). SDR: as que ele marcou; gestão: o time, com filtro de SDR;
+          closer: as que ele atende. */}
+      {aba === "time" && <MinhasReunioes onOpenLead={onOpenLead} versao={versao} />}
+
+      {aba === "mes" && (
+        <div className="flex flex-col gap-4">
+          {currentUser && <MinhasPendencias ownerId={currentUser.id} onOpenLead={onOpenLead} />}
+          <AgendaMes
+            onOpenLead={onOpenLead}
+            pendenciasDe={currentUser?.id}
+            semBotaoAgendar
+            onAbrirDia={(d) => { setDiaReunioes(d); irAba("dia"); }}
+          />
+        </div>
+      )}
+
+      {extras.filter((x) => x.id === aba || x.sempreMontada).map((x) => (
+        <div key={x.id} hidden={x.id !== aba} className="ag-ponte">{x.conteudo}</div>
+      ))}
+    </div>
 
       {/* Agendar: o mesmo modal da Agenda (horários livres + SDR responsável). */}
       <ScheduleMeetingModal
@@ -549,54 +592,6 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
           void fetchMeetings();
         }}
       />
-
-      {/* Page error banner */}
-      {pageError && (
-        <div className="flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-          <p className="text-sm text-red-700">{pageError}</p>
-          <button
-            onClick={() => setPageError(null)}
-            className="text-red-400 hover:text-red-600 transition-colors"
-            title="Fechar"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-      )}
-
-      {/* A aba Reuniões é O DIA, uma coluna por especialista — o que cada um
-          tem HOJE, em vez de uma tabela com o histórico inteiro. A lista com
-          filtro por status saiu a pedido do Bruno; o mês fica na Agenda, logo
-          abaixo. O botão "Agendar Reunião" acima abre o mesmo modal da
-          Agenda (horários livres dos closers) desde 27/10. */}
-      <FaixaBloqueioDesfecho pendentes={atrasadasDoCloser} />
-
-      {/* UMA TELA SÓ (Bruno, 03/11): a "Minha agenda" do SDR veio pra cá. Em
-          cima, todas as reuniões que ele marcou com o status de cada uma
-          (filtro por período e status); embaixo, o dia por especialista e o
-          mês. Rota antiga "minha-agenda" cai aqui (SdrLayout). */}
-      {podeVerMinhas && <MinhasReunioes onOpenLead={onOpenLead} versao={versao} />}
-
-      <section className="space-y-3 border-t border-gray-100 pt-6" aria-label="Agenda do dia">
-        <h2 className="text-base font-bold text-gray-900">Agenda do dia</h2>
-      <div ref={topoDoDia} style={{ scrollMarginTop: 16 }}>
-        <AgendaDia onOpenLead={onOpenLead} dataInicial={diaReunioes} />
-      </div>
-      </section>
-
-      {/* Agenda: pendências + mês, embaixo das reuniões do dia */}
-      <section className="space-y-3 border-t border-gray-100 pt-6" aria-label="Agenda">
-        <h2 className="text-base font-bold text-gray-900">Agenda do mês</h2>
-        {currentUser && <MinhasPendencias ownerId={currentUser.id} onOpenLead={onOpenLead} />}
-        <AgendaMes
-          onOpenLead={onOpenLead}
-          pendenciasDe={currentUser?.id}
-          onAbrirDia={(d) => { setDiaReunioes(d); topoDoDia.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
-        />
-      </section>
 
       {/* ── Create / Edit Modal ─────────────────────────────────────────── */}
       {showModal && (
@@ -920,6 +915,6 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

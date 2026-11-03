@@ -68,35 +68,33 @@ export default function DesfechosNaoEnviados() {
 
   const ocupado = !!enviando || !!lote;
 
+  // Visual do desenho (agenda.html, 03/11); o comportamento é o de sempre:
+  // "Reenviar todos" pergunta antes e manda um por um, com pausa.
   return (
-    <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
-      <div className="flex flex-wrap items-center gap-2">
-        <b>⚠ {lista.length} desfecho{lista.length > 1 ? "s" : ""} não chegou{lista.length > 1 ? "aram" : ""} no Bitrix</b>
-        <button onClick={() => setAberto((a) => !a)} className="underline underline-offset-2 hover:text-amber-700">
-          {aberto ? "esconder" : "ver quais"}
-        </button>
-        <button
-          onClick={() => void reenviarTodos()}
-          disabled={ocupado}
-          className="ml-auto rounded-lg bg-amber-600 px-3 py-1 font-bold text-white hover:bg-amber-700 disabled:opacity-50"
-        >
-          {lote ? `Enviando ${lote.feitos}/${lote.total}…` : "Reenviar todos"}
-        </button>
+    <div className="flex flex-col gap-2">
+      <div className="ag-faixa">
+        <span style={{ color: "var(--ag-warn)" }}>
+          {lista.length} desfecho{lista.length > 1 ? "s" : ""} registrado{lista.length > 1 ? "s" : ""} aqui ainda não chegou{lista.length > 1 ? "aram" : ""} no Bitrix
+        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setAberto((a) => !a)} className="ag-btn ag-btn--sm">
+            {aberto ? "Esconder" : "Ver quais"}
+          </button>
+          <button type="button" onClick={() => void reenviarTodos()} disabled={ocupado} className="ag-btn ag-btn--sm ag-btn--quiet">
+            {lote ? `Enviando ${lote.feitos}/${lote.total}…` : "Reenviar todos"}
+          </button>
+        </div>
       </div>
       {aberto && (
-        <ul className="mt-2 max-h-64 divide-y divide-amber-200 overflow-auto rounded-lg border border-amber-200 bg-white">
+        <ul className="ag-card max-h-64 overflow-auto">
           {lista.map((m) => (
-            <li key={m.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-1.5">
-              <span className="font-semibold text-gray-800">{m.lead_name || m.lead?.full_name || "—"}</span>
-              <span className="text-gray-500">
+            <li key={m.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-4 py-2 text-[13px]" style={{ borderBottom: "1px solid var(--ag-line)" }}>
+              <span className="font-semibold">{m.lead_name || m.lead?.full_name || "—"}</span>
+              <span className="ag-muted">
                 {new Date(m.scheduled_at).toLocaleDateString("pt-BR")} · {MEETING_STATUS_LABELS[m.status]} · {m.meeting_owner || "sem closer"}
               </span>
-              <span className="text-red-600">{m.desfecho_erro || "nunca enviado"}</span>
-              <button
-                onClick={() => void reenviarUm(m)}
-                disabled={ocupado}
-                className="ml-auto rounded border border-amber-300 px-2 py-0.5 font-semibold hover:bg-amber-100 disabled:opacity-50"
-              >
+              <span style={{ color: "var(--ag-desistencia-fg)" }}>{m.desfecho_erro || "nunca enviado"}</span>
+              <button type="button" onClick={() => void reenviarUm(m)} disabled={ocupado} className="ag-btn ag-btn--sm ml-auto">
                 {enviando === m.id ? "Enviando…" : "Reenviar"}
               </button>
             </li>

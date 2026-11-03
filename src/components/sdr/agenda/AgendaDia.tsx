@@ -28,7 +28,6 @@ import {
   fetchBlocks,
   fetchMeetingsInRange,
   configFor,
-  closerColor,
   startOfDay,
   addDays,
   sameDay,
@@ -46,6 +45,11 @@ import { ReuniaoTrancada } from "./BloqueioDesfecho";
 import { useBloqueioDesfecho, ehPendenteDeDesfecho } from "@/lib/qs/bloqueioDesfecho";
 import { perguntarMotivoDesistencia } from "@/lib/qs/motivoDesistencia";
 import DesfechosNaoEnviados from "./DesfechosNaoEnviados";
+import "./agenda.css";
+import {
+  statusNaAgenda, chipsDaAgenda, filtrarPorStatus, acontecendoAgora, proximaReuniao, faltaDesfecho,
+  emQuantoTempo, ROTULO_STATUS, estaAberta, corDaPessoa, iniciais, type FiltroAgenda,
+} from "@/lib/qs/agendaStatus";
 import type {
   CloserAvailability,
   CloserBlock,
@@ -218,13 +222,17 @@ interface AgendaDiaProps {
   dataInicial?: Date | null;
   /** Em produção nunca é passado: liga o modo preview (sem banco, sem gravação). */
   demo?: AgendaDiaDemo;
+  /** A página (Agenda) já tem o "+ Agendar reunião" no cabeçalho. */
+  semBotaoAgendar?: boolean;
 }
 
-export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaProps) {
+export default function AgendaDia({ onOpenLead, dataInicial, demo, semBotaoAgendar }: AgendaDiaProps) {
   const { currentUser } = useQsAuth();
   // Espectador (marketing): a agenda é só de leitura. A recusa real é do banco
   // (gatilho da 0036) — aqui evitamos oferecer o que vai falhar.
   const executa = podeExecutar(currentUser?.role);
+  // Agenda trancada (21/09): a lateral não oferece o Meet de reunião trancada.
+  const { bloqueado: bloqueadoDia } = useBloqueioDesfecho();
 
   const [dia, setDia] = useState<Date>(() => startOfDay(dataInicial ?? new Date()));
 
@@ -236,7 +244,7 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
     if (dataInicialMs !== null) setDia(new Date(dataInicialMs));
   }, [dataInicialMs]);
   const [zoom, setZoom] = useState(1);
-  const [filtro, setFiltro] = useState<"todas" | "pendentes" | MeetingStatus>("todas");
+  const [filtro, setFiltro] = useState<FiltroAgenda>("todas");
   const [agora, setAgora] = useState(new Date());
   const [selecionada, setSelecionada] = useState<Meeting | null>(null);
 
@@ -352,21 +360,9 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
     [meetings, dia]
   );
 
-  const contagens = useMemo(() => {
-    const c: Record<string, number> = { todas: doDia.length, pendentes: 0 };
-    (Object.keys(STATUS) as MeetingStatus[]).forEach((k) => (c[k] = 0));
-    for (const m of doDia) {
-      c[m.status] = (c[m.status] ?? 0) + 1;
-      if (semDesfecho(m, agora)) c.pendentes += 1;
-    }
-    return c;
-  }, [doDia, agora]);
-
-  const visiveis = useMemo(() => {
-    if (filtro === "todas") return doDia;
-    if (filtro === "pendentes") return doDia.filter((m) => semDesfecho(m, agora));
-    return doDia.filter((m) => m.status === filtro);
-  }, [doDia, filtro, agora]);
+  // Chips do desenho: saem das regras de status (lib/qs/agendaStatus.ts).
+  const chips = useMemo(() => chipsDaAgenda(doDia, agora, filtro), [doDia, agora, filtro]);
+  const visiveis = useMemo(() => filtrarPorStatus(doDia, filtro, agora), [doDia, filtro, agora]);
 
   /** Closers de verdade + colunas herdadas do responsável em texto livre. */
   const colunas = useMemo<Coluna[]>(() => {
@@ -375,7 +371,7 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
       closerId: c.id,
       nome: c.name,
       papel: "Especialista",
-      cor: closerColor(c.id, i, configFor(c.id, configs)),
+      cor: corDaPessoa(i),
       agendavel: configFor(c.id, configs).is_bookable,
     }));
 
@@ -394,7 +390,7 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
         closerId: key.startsWith("nome:") || key === "sem" ? null : key,
         nome,
         papel: key === "sem" ? "não atribuída" : "responsável (texto)",
-        cor: key === "sem" ? "#94A3B8" : closerColor(key, i, null),
+        cor: corDaPessoa(i, key === "sem"),
         agendavel: false,
       });
       i += 1;
@@ -405,10 +401,10 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
   const porColuna = useMemo(() => {
     const mapa: Record<string, ComFaixa[]> = {};
     for (const col of colunas) {
-      mapa[col.key] = distribuirEmFaixas(visiveis.filter((m) => chaveDoEspecialista(m) === col.key));
+      mapa[col.key] = distribuirEmFaixas(doDia.filter((m) => chaveDoEspecialista(m) === col.key));
     }
     return mapa;
-  }, [colunas, visiveis]);
+  }, [colunas, doDia]);
 
   /** Janela de horas da grade: cobre o expediente configurado E o que já existe no dia. */
   const [horaInicio, horaFim] = useMemo(() => {
@@ -648,328 +644,335 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo }: AgendaDiaPr
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  const chips: { chave: "todas" | MeetingStatus; rotulo: string }[] = [
-    { chave: "todas", rotulo: "Todas" },
-    { chave: "agendada", rotulo: "Agendadas" },
-    { chave: "confirmada", rotulo: "Confirmadas" },
-    { chave: "realizada", rotulo: "Realizadas" },
-    { chave: "no_show", rotulo: "No-show" },
-    { chave: "reagendada", rotulo: "Reagendadas" },
-    { chave: "cancelada", rotulo: "Canceladas" },
-  ];
+  // Desenho do Bruno (agenda.html, 03/11): topo com ‹ › e os chips de status,
+  // a faixa do Bitrix, a grade por especialista e, ao lado, o que está
+  // acontecendo agora, a próxima e o que falta registrar. No celular a grade
+  // vira lista (a grade com N colunas não cabe numa tela de 375 px).
+  const nomeDaReuniao = (m: Meeting) => m.lead_name || m.lead?.full_name || m.title || "Reunião";
+  const nomeDaColuna = (m: Meeting) => colunas.find((c) => c.key === chaveDoEspecialista(m))?.nome || m.closer?.name || m.meeting_owner || "sem especialista";
+  const primeiro = (n: string) => n.trim().split(/\s+/)[0] || n;
+  const faixaHoras = (m: Meeting) => `${hhmm(new Date(m.scheduled_at))} às ${hhmm(fimDaReuniao(m))}`;
+  // Agenda trancada (21/09): o closer com desfecho atrasado não abre o Meet das próximas.
+  const trancadaPraMim = (m: Meeting) => bloqueadoDia && !ehPendenteDeDesfecho(m);
+
+  const rolandoAgora = ehHoje ? acontecendoAgora(doDia, agora) : [];
+  const proxima = proximaReuniao(doDia, agora);
+  const pendentesDoDia = faltaDesfecho(doDia, agora);
+  const especialistasNoDia = new Set(doDia.map((m) => chaveDoEspecialista(m))).size;
+  const listaCelular = [...visiveis].sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
 
   return (
-    <div
-      className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white"
-      style={{ fontFamily: "inherit", height: "calc(100vh - 210px)", minHeight: 520 }}
-    >
+    <div className="flex flex-col gap-4" style={{ fontFamily: "inherit" }}>
       {/* ── Topo ───────────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-gray-200 px-4 py-3">
-        <div className="flex items-center gap-1">
-          <button onClick={() => irPara(-1)} aria-label="Dia anterior" className={btnIcone}>
-            <IcChevronL />
-          </button>
-          <button onClick={() => irPara(1)} aria-label="Próximo dia" className={btnIcone}>
-            <IcChevronR />
-          </button>
-        </div>
-
-        <div>
-          <div className="text-[15px] font-bold text-gray-900">{dataLonga(dia)}</div>
-          <div className="text-xs text-gray-500">
-            {contagens.todas} {contagens.todas === 1 ? "reunião" : "reuniões"} no dia
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <button type="button" onClick={() => irPara(-1)} aria-label="Dia anterior" className="ag-icon-btn"><IcChevronL /></button>
+          <button type="button" onClick={() => irPara(1)} aria-label="Próximo dia" className="ag-icon-btn"><IcChevronR /></button>
+          <div className="ml-1 flex flex-col">
+            <span className="ag-titulo">{dataLonga(dia)}</span>
+            <span className="ag-muted" style={{ fontSize: 13 }}>
+              {doDia.length} {doDia.length === 1 ? "reunião" : "reuniões"} · {especialistasNoDia} {especialistasNoDia === 1 ? "especialista" : "especialistas"}
+            </span>
           </div>
-        </div>
-
-        <button
-          onClick={() => setDia(startOfDay(new Date()))}
-          className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
-        >
-          Hoje
-        </button>
-
-        {/* Pendentes: o número que expõe o funil furado */}
-        {contagens.pendentes > 0 && (
-          <button
-            onClick={() => setFiltro("pendentes")}
-            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${
-              filtro === "pendentes"
-                ? "border-red-600 bg-red-600 text-white"
-                : "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
-            }`}
-            title="Reuniões que já terminaram e continuam sem desfecho"
-          >
-            <IcAlert />
-            {contagens.pendentes} sem desfecho
-          </button>
-        )}
-
-        <div className="ml-auto flex items-center gap-1.5">
-          <button onClick={() => setZoom((z) => Math.max(0.6, +(z - 0.2).toFixed(1)))} aria-label="Diminuir zoom" className={btnIcone}>
-            <IcZoomOut />
-          </button>
-          <span className="w-10 text-center text-xs tabular-nums text-gray-400">{Math.round(zoom * 100)}%</span>
-          <button onClick={() => setZoom((z) => Math.min(2, +(z + 0.2).toFixed(1)))} aria-label="Aumentar zoom" className={btnIcone}>
-            <IcZoomIn />
-          </button>
-          {executa && (
-            <button
-              onClick={() => setAgendarPara({ closerId: null, date: startOfDay(dia) })}
-              className="ml-1 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/30"
-              style={{ background: "#0147FF" }}
-            >
-              <IcPlus /> Agendar reunião
-            </button>
+          {!ehHoje && (
+            <button type="button" onClick={() => setDia(startOfDay(new Date()))} className="ag-btn ag-btn--sm ml-1">Hoje</button>
           )}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5" aria-label="Filtrar por status">
+          {chips.map((c) => (
+            <button key={c.id} type="button" className="ag-pill" aria-pressed={filtro === c.id}
+              data-st={c.id === "todas" ? undefined : c.id}
+              onClick={() => setFiltro(filtro === c.id && c.id !== "todas" ? "todas" : c.id)}>
+              {c.id !== "todas" && <span className="ag-dot" />}
+              {c.rotulo} <span className="ag-qtd tabular">{c.qtd}</span>
+            </button>
+          ))}
         </div>
       </div>
 
       {/* Desfechos que não chegaram no Bitrix (22/09) — só pra gestão, que é
-          quem responde pelo número do Dashboard. */}
+          quem responde pelo número do Dashboard. Mesmo botão de sempre. */}
       {!demo && (currentUser?.role === "admin" || currentUser?.role === "gestor") && <DesfechosNaoEnviados />}
 
-      {/* ── Filtros ────────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-200 px-4 py-2">
-        {chips.map(({ chave, rotulo }) => {
-          const ativo = filtro === chave;
-          const qtd = contagens[chave] ?? 0;
-          return (
-            <button
-              key={chave}
-              onClick={() => setFiltro(chave)}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 ${
-                ativo ? "text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-              }`}
-              style={ativo ? { background: chave === "todas" ? "#0147FF" : STATUS[chave as MeetingStatus].cor } : undefined}
-            >
-              {chave !== "todas" && (
-                <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ background: ativo ? "rgba(255,255,255,.85)" : STATUS[chave as MeetingStatus].cor }}
-                />
-              )}
-              {rotulo}
-              <span className={ativo ? "text-white/75" : "text-gray-400"}>{qtd}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* ── Cabeçalho + grade ──────────────────────────────────────────────── */}
-      {/* Um contêiner de rolagem só: com muitos especialistas a grade rola pro
-          lado, e o cabeçalho PRECISA rolar junto — senão o nome do especialista
-          deixa de bater com a coluna dele, que é o erro mais caro desta tela. */}
-      <div ref={gradeRef} className="relative flex-1 overflow-auto">
-        {loading ? (
-          <div className="p-4">
-            <div className="h-full animate-pulse space-y-2">
-              {Array.from({ length: 8 }, (_, i) => (
-                <div key={i} className="h-10 rounded-lg bg-gray-100" />
-              ))}
-            </div>
-          </div>
-        ) : (
-        <div style={{ minWidth: LARGURA_EIXO + colunas.length * LARGURA_MIN_COLUNA }}>
-          <div ref={cabecalhoRef} className="sticky top-0 z-40 flex border-b border-gray-200 bg-gray-50">
-            <div style={{ width: LARGURA_EIXO }} className="sticky left-0 z-10 shrink-0 bg-gray-50" />
-            {colunas.map((col) => {
-              const dele = doDia.filter((m) => chaveDoEspecialista(m) === col.key);
-              const pend = dele.filter((m) => semDesfecho(m, agora)).length;
-              return (
-                <div
-                  key={col.key}
-                  style={{ minWidth: LARGURA_MIN_COLUNA }}
-                  className="flex flex-1 items-center gap-2 border-l border-gray-200 px-3 py-2.5"
-                >
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: col.cor }} />
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-bold text-gray-900">{col.nome}</div>
-                    <div className="truncate text-xs text-gray-500">
-                      {col.papel} · {dele.length} {dele.length === 1 ? "reunião" : "reuniões"}
-                      {pend > 0 && <span className="ml-1 font-semibold text-red-600">· {pend} semDesfecho(s)</span>}
+      <div className="flex flex-wrap items-start gap-4">
+        {/* ── Grade (computador) ───────────────────────────────────────────── */}
+        <section aria-label="Grade do dia" className="ag-card hidden min-w-0 overflow-hidden md:block" style={{ flex: "999 1 640px" }}>
+          <div ref={gradeRef} className="relative overflow-auto" style={{ maxHeight: "max(520px, calc(100vh - 300px))" }}>
+            {loading ? (
+              <div className="flex flex-col gap-2 p-4">
+                {Array.from({ length: 8 }, (_, i) => (
+                  <div key={i} className="h-10 animate-pulse rounded-lg" style={{ background: "var(--ag-surface-2)" }} />
+                ))}
+              </div>
+            ) : (
+            <div style={{ minWidth: LARGURA_EIXO + Math.max(1, colunas.length) * LARGURA_MIN_COLUNA }}>
+              {/* Cabeçalho mora DENTRO da rolagem (sticky): com muitos
+                  especialistas a grade rola pro lado e o nome tem que rolar junto. */}
+              <div ref={cabecalhoRef} className="sticky top-0 z-40 flex" style={{ background: "var(--ag-surface)", borderBottom: "1px solid var(--ag-border)" }}>
+                <div style={{ width: LARGURA_EIXO, background: "var(--ag-surface)" }} className="sticky left-0 z-10 shrink-0" />
+                {colunas.map((col) => {
+                  const dele = doDia.filter((m) => chaveDoEspecialista(m) === col.key);
+                  const pend = dele.filter((m) => semDesfecho(m, agora)).length;
+                  return (
+                    <div key={col.key} style={{ minWidth: LARGURA_MIN_COLUNA, borderLeft: "1px solid var(--ag-border)" }}
+                      className="flex min-w-0 flex-1 items-center gap-2.5 px-4 py-3.5">
+                      <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                        style={{ background: col.cor, color: "var(--ag-on-primary)" }}>{iniciais(col.nome)}</div>
+                      <div className="flex min-w-0 flex-col">
+                        <span className="truncate font-bold">{col.nome}</span>
+                        <span className="truncate ag-muted" style={{ fontSize: 12 }}>
+                          {dele.length} {dele.length === 1 ? "reunião" : "reuniões"}
+                          {pend > 0 && ` · ${pend} sem desfecho`}
+                          {col.papel !== "Especialista" && ` · ${col.papel}`}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              );
-            })}
-            {!colunas.length && (
-              <div className="flex-1 px-4 py-2.5 text-sm text-gray-400">Nenhuma reunião neste dia.</div>
-            )}
-          </div>
+                  );
+                })}
+                {!colunas.length && (
+                  <div className="flex-1 px-4 py-3.5 ag-muted">Nenhuma reunião neste dia.</div>
+                )}
+              </div>
 
-          <div className="relative flex" style={{ height: totalHoras * alturaHora }}>
-            {/* eixo de horas */}
-            <div style={{ width: LARGURA_EIXO }} className="sticky left-0 z-20 shrink-0 bg-white">
-              {Array.from({ length: totalHoras }, (_, i) => (
-                <div key={i} style={{ height: alturaHora }} className="relative border-b border-gray-100">
-                  <span className="absolute right-2 -top-2 bg-white px-0.5 text-xs tabular-nums text-gray-400">
-                    {dd(horaInicio + i)}:00
-                  </span>
+              <div className="relative flex" style={{ height: totalHoras * alturaHora }}>
+                {/* eixo de horas */}
+                <div style={{ width: LARGURA_EIXO, background: "var(--ag-surface)" }} className="sticky left-0 z-20 shrink-0">
+                  {Array.from({ length: totalHoras }, (_, i) => (
+                    <div key={i} style={{ height: alturaHora }} className="relative">
+                      <span className="absolute right-2.5 top-0.5 tabular" style={{ fontSize: 12, color: "var(--ag-subtle)" }}>
+                        {dd(horaInicio + i)}:00
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
 
-            {/* colunas */}
-            {colunas.map((col) => (
-              <div
-                key={col.key}
-                style={{ minWidth: LARGURA_MIN_COLUNA }}
-                className={`relative flex-1 border-l border-gray-200 ${col.agendavel ? "cursor-copy" : ""}`}
-                onClick={(e) => clicarVazio(col, e)}
-                onDragOver={(e) => {
-                  if (!drag || !colunaAceita(col, drag.m)) return;
-                  e.preventDefault(); // sem isto o navegador proíbe o drop
-                  e.dataTransfer.dropEffect = "move";
-                  const min = minutoDoEvento(e);
-                  // Só re-renderiza quando o fantasma muda de vaga.
-                  setDrag((d) => (d && (d.overCol !== col.key || d.overMin !== min) ? { ...d, overCol: col.key, overMin: min } : d));
-                }}
-                onDrop={(e) => void soltarReuniao(col, e)}
-                title={col.agendavel ? "Clique num horário livre para agendar" : undefined}
-              >
-                {/* fantasma do arrasto: onde a reunião vai cair se soltar aqui */}
-                {drag && drag.overCol === col.key && drag.overMin != null && (
+                {colunas.map((col) => (
                   <div
-                    className="pointer-events-none absolute inset-x-1 z-20 rounded-md border-2 border-dashed"
-                    style={{
-                      top: ((drag.overMin - horaInicio * 60) / 60) * alturaHora,
-                      height: Math.max(22, (((fimDaReuniao(drag.m).getTime() - new Date(drag.m.scheduled_at).getTime()) / 3_600_000) || 0.5) * alturaHora - 2),
-                      borderColor: "#0147FF",
-                      background: "rgba(1,71,255,0.08)",
+                    key={col.key}
+                    style={{ minWidth: LARGURA_MIN_COLUNA, borderLeft: "1px solid var(--ag-border)", cursor: col.agendavel && executa ? "copy" : undefined }}
+                    className="relative flex-1"
+                    onClick={(e) => { if (executa) clicarVazio(col, e); }}
+                    onDragOver={(e) => {
+                      if (!drag || !colunaAceita(col, drag.m)) return;
+                      e.preventDefault(); // sem isto o navegador proíbe o drop
+                      e.dataTransfer.dropEffect = "move";
+                      const min = minutoDoEvento(e);
+                      setDrag((d) => (d && (d.overCol !== col.key || d.overMin !== min) ? { ...d, overCol: col.key, overMin: min } : d));
                     }}
+                    onDrop={(e) => void soltarReuniao(col, e)}
+                    title={col.agendavel && executa ? "Clique num horário livre para agendar" : undefined}
                   >
-                    <span className="ml-1 rounded bg-[#0147FF] px-1 text-[11px] font-bold tabular-nums text-white">
-                      {`${dd(Math.floor(drag.overMin / 60))}:${dd(drag.overMin % 60)}`}
+                    {/* fantasma do arrasto: onde a reunião vai cair se soltar aqui */}
+                    {drag && drag.overCol === col.key && drag.overMin != null && (
+                      <div
+                        className="pointer-events-none absolute inset-x-1.5 z-20 rounded-[10px] border-2 border-dashed"
+                        style={{
+                          top: ((drag.overMin - horaInicio * 60) / 60) * alturaHora,
+                          height: Math.max(22, (((fimDaReuniao(drag.m).getTime() - new Date(drag.m.scheduled_at).getTime()) / 3_600_000) || 0.5) * alturaHora - 2),
+                          borderColor: "var(--ag-muted)",
+                          background: "var(--ag-surface-3)",
+                        }}
+                      >
+                        <span className="ml-1 rounded px-1 text-[11px] font-bold tabular" style={{ background: "var(--ag-primary)", color: "var(--ag-on-primary)" }}>
+                          {`${dd(Math.floor(drag.overMin / 60))}:${dd(drag.overMin % 60)}`}
+                        </span>
+                      </div>
+                    )}
+                    {/* linhas de hora */}
+                    {Array.from({ length: totalHoras }, (_, i) => (
+                      <div key={i} style={{ height: alturaHora, borderTop: "1px solid var(--ag-line)" }} />
+                    ))}
+
+                    {/* fora do expediente */}
+                    {forasDoExpediente(col).map((b, i) => (
+                      <div key={`f${i}`} className="pointer-events-none absolute inset-x-0"
+                        style={{ top: b.topo, height: b.altura, backgroundImage: "repeating-linear-gradient(45deg, var(--ag-line) 0 6px, transparent 6px 12px)" }} />
+                    ))}
+
+                    {/* bloqueios (férias, compromisso) */}
+                    {bloqueiosDe(col).map((b) => (
+                      <div key={b.id} className="pointer-events-none absolute inset-x-1.5 overflow-hidden rounded-[10px] border border-dashed px-2 py-0.5"
+                        style={{ top: b.topo, height: b.altura, background: "var(--ag-surface-2)", borderColor: "var(--ag-border-3)" }}>
+                        <span className="text-[11px] font-semibold ag-muted">{b.reason || "Indisponível"}</span>
+                      </div>
+                    ))}
+
+                    {/* reuniões */}
+                    {(porColuna[col.key] ?? []).map(({ m, faixa, totalFaixas }) => {
+                      const st = statusNaAgenda(m, agora);
+                      const ini = new Date(m.scheduled_at);
+                      const fim = fimDaReuniao(m);
+                      const topo = posicaoDe(ini);
+                      const altura = Math.max(22, ((fim.getTime() - ini.getTime()) / 3_600_000) * alturaHora - 4);
+                      const largura = 100 / totalFaixas;
+                      const morta = m.status === "cancelada";
+                      const apagada = filtro !== "todas" && st !== filtro;
+                      // Só o que ainda VAI acontecer se move: desfecho dado é história.
+                      const arrastavel = executa && !demo && estaAberta(m);
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          data-st={st}
+                          onClick={(e) => { e.stopPropagation(); setSelecionada(m); }}
+                          draggable={arrastavel}
+                          onDragStart={(e) => {
+                            e.stopPropagation();
+                            e.dataTransfer.effectAllowed = "move";
+                            e.dataTransfer.setData("text/plain", m.id); // exigido pelo Firefox
+                            setDrag({ m, overCol: null, overMin: null });
+                          }}
+                          onDragEnd={() => setDrag(null)}
+                          title={`${nomeDaReuniao(m)} · ${hhmm(ini)}–${hhmm(fim)} · ${ROTULO_STATUS[st]}${arrastavel ? " · arraste para mudar o horário ou o especialista" : ""}`}
+                          className="ag-ev"
+                          style={{
+                            top: topo + 2,
+                            height: altura,
+                            left: `calc(${faixa * largura}% + 6px)`,
+                            width: `calc(${largura}% - 12px)`,
+                            opacity: drag?.m.id === m.id ? 0.35 : apagada ? 0.25 : 1,
+                            cursor: arrastavel ? "grab" : "pointer",
+                          }}
+                        >
+                          <span className="truncate" style={{ fontWeight: 700, fontSize: 13, paddingRight: m.sal ? 36 : 0, textDecoration: morta ? "line-through" : "none" }}>
+                            {nomeDaReuniao(m)}
+                          </span>
+                          {altura > 34 && (
+                            <span className="flex items-center gap-1 tabular" style={{ fontSize: 12, opacity: 0.9 }}>
+                              {hhmm(ini)} – {hhmm(fim)} · {ROTULO_STATUS[st]}
+                              {m.meeting_link && estaAberta(m) && <span aria-label="tem link do Meet"><IcVideo s={11} /></span>}
+                            </span>
+                          )}
+                          {m.sal && (
+                            <span className={`ag-sal absolute right-2 top-2 ${m.sal === "recusado" ? "ag-sal--off" : ""}`}
+                              title={m.sal === "aceito" ? "SAL aceito" : `SAL recusado${m.sal_motivo ? `: ${m.sal_motivo}` : ""}`}>SAL</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+
+                {/* marcador de agora */}
+                {agoraVisivel && (
+                  <div className="pointer-events-none absolute inset-x-0 z-30" style={{ top: linhaAgora!, borderTop: "2px solid var(--ag-now)" }}>
+                    <span className="absolute left-1.5 -top-[11px] rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular"
+                      style={{ background: "var(--ag-now)", color: "var(--ag-on-now)" }}>
+                      {hhmm(agora)}
                     </span>
                   </div>
                 )}
-                {/* linhas de hora e meia hora */}
-                {Array.from({ length: totalHoras }, (_, i) => (
-                  <div key={i} style={{ height: alturaHora }} className="border-b border-gray-100">
-                    <div className="border-b border-dashed border-gray-100" style={{ height: alturaHora / 2 }} />
-                  </div>
-                ))}
-
-                {/* fora do expediente */}
-                {forasDoExpediente(col).map((b, i) => (
-                  <div
-                    key={`f${i}`}
-                    className="pointer-events-none absolute inset-x-0"
-                    style={{
-                      top: b.topo,
-                      height: b.altura,
-                      backgroundImage:
-                        "repeating-linear-gradient(45deg, rgba(148,163,184,0.10) 0 6px, transparent 6px 12px)",
-                    }}
-                  />
-                ))}
-
-                {/* bloqueios (férias, compromisso) */}
-                {bloqueiosDe(col).map((b) => (
-                  <div
-                    key={b.id}
-                    className="pointer-events-none absolute inset-x-1 overflow-hidden rounded-md border border-dashed border-gray-300 px-2 py-0.5"
-                    style={{ top: b.topo, height: b.altura, background: "rgba(148,163,184,0.14)" }}
-                  >
-                    <span className="text-[11px] font-semibold text-gray-500">{b.reason || "Indisponível"}</span>
-                  </div>
-                ))}
-
-                {/* reuniões */}
-                {(porColuna[col.key] ?? []).map(({ m, faixa, totalFaixas }) => {
-                  const st = STATUS[m.status] ?? STATUS.agendada;
-                  const ini = new Date(m.scheduled_at);
-                  const fim = fimDaReuniao(m);
-                  const topo = posicaoDe(ini);
-                  const altura = Math.max(22, ((fim.getTime() - ini.getTime()) / 3_600_000) * alturaHora - 2);
-                  const largura = 100 / totalFaixas;
-                  const atrasada = semDesfecho(m, agora);
-                  const morta = m.status === "cancelada";
-                  // Só o que ainda VAI acontecer se move: desfecho dado é
-                  // história, e história não se arrasta.
-                  const arrastavel = executa && !demo && (m.status === "agendada" || m.status === "confirmada");
-
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelecionada(m);
-                      }}
-                      draggable={arrastavel}
-                      onDragStart={(e) => {
-                        e.stopPropagation();
-                        e.dataTransfer.effectAllowed = "move";
-                        e.dataTransfer.setData("text/plain", m.id); // exigido pelo Firefox
-                        setDrag({ m, overCol: null, overMin: null });
-                      }}
-                      onDragEnd={() => setDrag(null)}
-                      title={arrastavel ? "Arraste para mudar o horário ou o especialista" : undefined}
-                      className="absolute overflow-hidden rounded-md px-2 py-1 text-left transition hover:z-10 hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/40"
-                      style={{
-                        top: topo,
-                        height: altura,
-                        left: `calc(${faixa * largura}% + 4px)`,
-                        width: `calc(${largura}% - 8px)`,
-                        background: st.fundo,
-                        borderLeft: `3px solid ${st.cor}`,
-                        boxShadow: atrasada ? "0 0 0 1.5px rgba(220,38,38,.55)" : "none",
-                        opacity: morta ? 0.55 : drag?.m.id === m.id ? 0.35 : 1,
-                        cursor: arrastavel ? "grab" : undefined,
-                      }}
-                    >
-                      <div className="flex items-center gap-1">
-                        <span
-                          className="truncate text-xs font-bold"
-                          style={{ color: st.texto, textDecoration: morta ? "line-through" : "none" }}
-                        >
-                          {m.lead_name || m.lead?.full_name || m.title || "Reunião"}
-                        </span>
-                        {atrasada && <span className="shrink-0 text-red-600"><IcAlert s={11} /></span>}
-                      </div>
-                      {altura > 34 && (
-                        <div className="mt-0.5 flex items-center gap-1 text-[11px] tabular-nums text-gray-500">
-                          {hhmm(ini)} – {hhmm(fim)}
-                          {m.meeting_link && <span className="text-emerald-600"><IcVideo s={10} /></span>}
-                          {m.sal && (
-                            <span className={`ml-auto font-bold ${m.sal === "aceito" ? "text-emerald-600" : "text-red-600"}`}>
-                              SAL
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
               </div>
-            ))}
-
-            {/* marcador de agora */}
-            {agoraVisivel && (
-              <div className="pointer-events-none absolute inset-x-0 z-30 flex items-center" style={{ top: linhaAgora! }}>
-                <span
-                  className="rounded px-1 text-[11px] font-bold tabular-nums text-white"
-                  style={{ background: "#DC2626", marginLeft: 4 }}
-                >
-                  {hhmm(agora)}
-                </span>
-                <div className="h-px flex-1" style={{ background: "#DC2626" }} />
-              </div>
+            </div>
             )}
           </div>
-        </div>
-        )}
-      </div>
 
-      {/* Aviso: sem closer cadastrado, as colunas vieram do texto livre */}
-      {!loading && !closers.length && colunas.length > 0 && (
-        <div className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
-          Nenhum usuário com papel <b>closer</b> cadastrado — as colunas vieram do
-          “Responsável pela reunião” gravado em cada reunião. Para clicar-e-agendar
-          direto na grade, crie os especialistas em Configurações → Usuários (papel
-          closer) e defina a agenda deles.
-        </div>
-      )}
+          {/* rodapé da grade: zoom e agendar no dia (quando a página não tem o botão) */}
+          <div className="flex flex-wrap items-center justify-end gap-1.5 px-3 py-2" style={{ borderTop: "1px solid var(--ag-border)" }}>
+            <button type="button" onClick={() => setZoom((z) => Math.max(0.6, +(z - 0.2).toFixed(1)))} aria-label="Diminuir zoom" className="ag-icon-btn ag-icon-btn--sm"><IcZoomOut /></button>
+            <span className="w-10 text-center text-xs tabular ag-subtle">{Math.round(zoom * 100)}%</span>
+            <button type="button" onClick={() => setZoom((z) => Math.min(2, +(z + 0.2).toFixed(1)))} aria-label="Aumentar zoom" className="ag-icon-btn ag-icon-btn--sm"><IcZoomIn /></button>
+            {executa && !semBotaoAgendar && (
+              <button type="button" onClick={() => setAgendarPara({ closerId: null, date: startOfDay(dia) })} className="ag-btn ag-btn--sm ag-btn--primary ml-1">
+                <IcPlus /> Agendar reunião
+              </button>
+            )}
+          </div>
+
+          {/* Aviso: sem closer cadastrado, as colunas vieram do texto livre */}
+          {!loading && !closers.length && colunas.length > 0 && (
+            <div className="px-4 py-2 text-xs" style={{ borderTop: "1px solid var(--ag-border)", color: "var(--ag-warn)" }}>
+              Nenhum usuário com papel <b>closer</b> cadastrado — as colunas vieram do
+              “Responsável pela reunião” gravado em cada reunião. Para clicar-e-agendar
+              direto na grade, crie os especialistas em Configurações → Usuários (papel
+              closer) e defina a agenda deles.
+            </div>
+          )}
+        </section>
+
+        {/* ── Lista (celular) ──────────────────────────────────────────────── */}
+        <section aria-label="Reuniões do dia" className="ag-card w-full overflow-hidden md:hidden">
+          {loading ? (
+            <div className="h-32 animate-pulse" style={{ background: "var(--ag-surface-2)" }} />
+          ) : listaCelular.length === 0 ? (
+            <div className="p-6 text-center ag-muted">{doDia.length ? "Nenhuma reunião com esse status." : "Nenhuma reunião neste dia."}</div>
+          ) : (
+            <ul>
+              {listaCelular.map((m) => {
+                const st = statusNaAgenda(m, agora);
+                return (
+                  <li key={m.id} data-st={st} style={{ borderBottom: "1px solid var(--ag-line)" }}>
+                    <button type="button" onClick={() => setSelecionada(m)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+                      <span className="w-12 shrink-0 text-[16px] font-bold tabular">{hhmm(new Date(m.scheduled_at))}</span>
+                      <span className="ag-barra" />
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate font-bold" style={{ textDecoration: m.status === "cancelada" ? "line-through" : "none" }}>{nomeDaReuniao(m)}</span>
+                        <span className="truncate ag-muted" style={{ fontSize: 13 }}>com {primeiro(nomeDaColuna(m))}</span>
+                      </span>
+                      <span className="flex shrink-0 flex-col items-end gap-1">
+                        <span className="ag-badge">{ROTULO_STATUS[st]}</span>
+                        {m.sal === "aceito" && <span className="ag-sal">SAL</span>}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        {/* ── Lateral: agora, próxima, falta registrar ─────────────────────── */}
+        <aside className="flex min-w-0 flex-col gap-4" style={{ flex: "1 1 300px" }}>
+          {rolandoAgora.map((m) => (
+            <section key={m.id} className="ag-card ag-card--alto flex flex-col gap-3 p-[18px]">
+              <span className="ag-eyebrow" style={{ color: "var(--ag-muted-2)" }}>Acontecendo agora</span>
+              <div className="flex flex-col gap-0.5">
+                <span className="truncate text-[18px] font-bold">{nomeDaReuniao(m)}</span>
+                <span style={{ color: "var(--ag-muted-2)" }}>{faixaHoras(m)} · com {primeiro(nomeDaColuna(m))}</span>
+              </div>
+              {m.meeting_link && !trancadaPraMim(m) ? (
+                <a href={m.meeting_link} target="_blank" rel="noreferrer" className="ag-btn ag-btn--primary">Entrar no Meet</a>
+              ) : (
+                <button type="button" className="ag-btn" onClick={() => setSelecionada(m)}>
+                  {trancadaPraMim(m) ? "Ver por que está trancada" : "Abrir reunião (sem link do Meet)"}
+                </button>
+              )}
+            </section>
+          ))}
+
+          {proxima ? (
+            <button type="button" onClick={() => setSelecionada(proxima)} className="ag-card flex flex-col gap-1.5 p-[18px] text-left">
+              <span className="ag-eyebrow">
+                Próxima · {ehHoje ? emQuantoTempo(agora, new Date(proxima.scheduled_at)) : `às ${hhmm(new Date(proxima.scheduled_at))}`}
+              </span>
+              <span className="truncate text-[16px] font-bold">{nomeDaReuniao(proxima)}</span>
+              <span className="ag-muted">{faixaHoras(proxima)} · com {primeiro(nomeDaColuna(proxima))}</span>
+            </button>
+          ) : !loading && rolandoAgora.length === 0 && (
+            <section className="ag-card flex flex-col gap-1.5 p-[18px]">
+              <span className="ag-eyebrow">Próxima</span>
+              <span className="ag-muted">Nenhuma reunião pela frente neste dia.</span>
+            </section>
+          )}
+
+          {pendentesDoDia.length > 0 && (
+            <section className="ag-card ag-card--destaque flex flex-col gap-2.5 p-[18px]">
+              <span className="ag-eyebrow" style={{ color: "var(--ag-warn)" }}>Falta registrar o desfecho · {pendentesDoDia.length}</span>
+              {pendentesDoDia.map((m) => (
+                <div key={m.id} className="ag-linha flex items-center justify-between gap-2.5 px-3 py-2.5">
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate font-semibold">{nomeDaReuniao(m)}</span>
+                    <span className="ag-muted" style={{ fontSize: 12 }}>{hhmm(new Date(m.scheduled_at))} · {primeiro(nomeDaColuna(m))}</span>
+                  </div>
+                  <button type="button" className="ag-btn ag-btn--sm ag-btn--warn" onClick={() => setSelecionada(m)}>
+                    {executa ? "Registrar" : "Ver"}
+                  </button>
+                </div>
+              ))}
+            </section>
+          )}
+        </aside>
+      </div>
 
       {/* ── Painel de detalhe ──────────────────────────────────────────────── */}
       {selecionada && (
