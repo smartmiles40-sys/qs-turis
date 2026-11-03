@@ -3,17 +3,18 @@
 import { useEffect, useState } from "react";
 import { listarGravacoesDoLead, linkDaGravacao, type GravacaoLigacao } from "@/lib/gravacaoLigacao";
 
-function duracao(seg: number): string {
+export function duracao(seg: number): string {
   const m = Math.floor(seg / 60);
   const s = seg % 60;
   return m ? `${m}min ${String(s).padStart(2, "0")}s` : `${s}s`;
 }
 
-function quando(iso: string): string {
+export function quando(iso: string): string {
   return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
-function Player({ g }: { g: GravacaoLigacao }) {
+/** Também usado no Desempenho (últimas ligações gravadas). */
+export function Player({ g }: { g: Pick<GravacaoLigacao, "storage_path"> }) {
   const [url, setUrl] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [falhou, setFalhou] = useState(false);

@@ -15,6 +15,7 @@ import AgendaDia from "../agenda/AgendaDia";
 import MinhasPendencias from "../agenda/MinhasPendencias";
 import { FaixaBloqueioDesfecho } from "../agenda/BloqueioDesfecho";
 import { useBloqueioDesfecho } from "@/lib/qs/bloqueioDesfecho";
+import MinhasReunioes from "./MinhasReunioes";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,11 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
   // Dia que a parte de cima mostra. Nasce nulo (= hoje) e só muda quando o
   // usuário clica num dia na Agenda do mês.
   const [diaReunioes, setDiaReunioes] = useState<Date | null>(null);
+  // Relê "Reuniões que você marcou" quando se agenda por aqui.
+  const [versao, setVersao] = useState(0);
+  // O closer tem a casa dele (CloserApp); a lista de "quem marcou" é do SDR e
+  // da gestão (e do espectador, que só lê).
+  const podeVerMinhas = currentUser?.role !== "closer";
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -507,7 +513,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
               <line x1="8" y1="2" x2="8" y2="6" />
               <line x1="3" y1="10" x2="21" y2="10" />
             </svg>
-            Reuniões
+            Reuniões e agenda
           </h1>
         </div>
         {executa && <div className="flex flex-wrap items-center gap-2">
@@ -539,6 +545,7 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
         onClose={() => setAgendando(false)}
         onSaved={() => {
           setAgendando(false);
+          setVersao((v) => v + 1);
           void fetchMeetings();
         }}
       />
@@ -566,13 +573,23 @@ export default function MeetingsPage({ onOpenLead }: MeetingsPageProps) {
           abaixo. O botão "Agendar Reunião" acima abre o mesmo modal da
           Agenda (horários livres dos closers) desde 27/10. */}
       <FaixaBloqueioDesfecho pendentes={atrasadasDoCloser} />
+
+      {/* UMA TELA SÓ (Bruno, 03/11): a "Minha agenda" do SDR veio pra cá. Em
+          cima, todas as reuniões que ele marcou com o status de cada uma
+          (filtro por período e status); embaixo, o dia por especialista e o
+          mês. Rota antiga "minha-agenda" cai aqui (SdrLayout). */}
+      {podeVerMinhas && <MinhasReunioes onOpenLead={onOpenLead} versao={versao} />}
+
+      <section className="space-y-3 border-t border-gray-100 pt-6" aria-label="Agenda do dia">
+        <h2 className="text-base font-bold text-gray-900">Agenda do dia</h2>
       <div ref={topoDoDia} style={{ scrollMarginTop: 16 }}>
         <AgendaDia onOpenLead={onOpenLead} dataInicial={diaReunioes} />
       </div>
+      </section>
 
       {/* Agenda: pendências + mês, embaixo das reuniões do dia */}
       <section className="space-y-3 border-t border-gray-100 pt-6" aria-label="Agenda">
-        <h2 className="text-base font-bold text-gray-900">Agenda</h2>
+        <h2 className="text-base font-bold text-gray-900">Agenda do mês</h2>
         {currentUser && <MinhasPendencias ownerId={currentUser.id} onOpenLead={onOpenLead} />}
         <AgendaMes
           onOpenLead={onOpenLead}

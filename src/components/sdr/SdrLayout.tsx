@@ -209,7 +209,7 @@ export default function SdrLayout() {
     if (landingAplicada.current || !currentUser) return;
     landingAplicada.current = true;
     const inicial = telaInicial(currentUser.role) as SdrNav;
-    if (inicial !== "painel") setActiveNav(inicial);
+    if (inicial !== "painel") setActiveNav(inicial === "minha-agenda" && currentUser.role !== "closer" ? "reunioes" : inicial);
   }, [currentUser]);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   // A tela de onde o lead foi aberto, pro "Voltar" devolver pra ela.
@@ -224,6 +224,12 @@ export default function SdrLayout() {
   }
 
   const userRole = currentUser?.role ?? "sdr";
+  // MINHA AGENDA + REUNIÕES = UMA TELA (Bruno, 03/11). Fora do closer, quem
+  // pedir "minha-agenda" (menu antigo, aviso "#comercial/minha-agenda",
+  // bolinha) cai em "reunioes", que agora tem as reuniões que a pessoa marcou
+  // com o status de cada uma. O closer segue com a casa dele.
+  const semMinhaAgenda = (nav: SdrNav): SdrNav =>
+    nav === "minha-agenda" && userRole !== "closer" && canAccessNav(userRole, "reunioes") ? "reunioes" : nav;
   const [central, recontarCentral] = useContagemSolicitacoes("comercial");
   const [solicitacaoAberta, setSolicitacaoAberta] = useState<string | null>(null);
   const [propostaAberta, setPropostaAberta] = useState<string | null>(null);
@@ -296,7 +302,7 @@ export default function SdrLayout() {
 
   // Preenchido por openLeadDetail; lido por voltarDoLead e pelo item aceso do menu.
   function navigate(nav: SdrNav) {
-    setActiveNav(nav);
+    setActiveNav(semMinhaAgenda(nav));
     setSelectedLeadId(null);
     setEditingCadenceId(null);
   }
@@ -393,14 +399,16 @@ export default function SdrLayout() {
     .concat(["painel", "minha-agenda", "whatsapp"])
     // SDR: "Reuniões" entra no lugar da "Minha agenda" (Bruno, 26/10) — ele
     // acompanha as reuniões que vão acontecer, não só quem vai entrar.
-    .map((id) => (ehSdr && id === "minha-agenda" ? "reunioes" : id))
+    // Desde 03/11 vale pra todo mundo menos o closer: as duas viraram uma tela.
+    .map((id) => (id === "minha-agenda" && permitido.has("reunioes") ? semMinhaAgenda(id) : id))
     .filter((id, i, arr) => arr.indexOf(id) === i && !FORA_DO_MENU.has(id as SdrNav)) as SdrNav[];
+  const reunioesNaExecucao = execucao.includes("reunioes");
   // Desempenho: Visão Geral, Análises & Metas e Distribuição viram ABAS de uma
   // tela só; o item do menu abre a primeira que o papel pode ver.
   const desempenhoAbas = (["dashboard", "analises", "monitor-leads"] as SdrNav[]).filter((id) => permitido.has(id));
   const grupos: ShellGroup[] = [
     { label: "Execução", items: execucao.map((id) => item(id, id)).filter(Boolean) as ShellItem[] },
-    { label: "Gestão", items: [item("leads", "Leads"), item("cobertura", "Minha carteira"), ...(ehSdr ? [] : [item("cadencias", "Cadências"), item("disparos", "Disparo em massa"), item("reunioes", "Reuniões")])].filter(Boolean) as ShellItem[] },
+    { label: "Gestão", items: [item("leads", "Leads"), item("cobertura", "Minha carteira"), ...(ehSdr ? [] : [item("cadencias", "Cadências"), item("disparos", "Disparo em massa"), ...(reunioesNaExecucao ? [] : [item("reunioes", "Reuniões")])])].filter(Boolean) as ShellItem[] },
     { label: "Com outros setores", items: [item("solicitacoes", "Solicitações"), item("propostas", "Propostas")].filter(Boolean) as ShellItem[] },
     { label: "Análise", items: [
       ...(desempenhoAbas.length ? [{ id: desempenhoAbas[0], label: "Desempenho", icon: Icon.grafico }] : []),
@@ -541,6 +549,7 @@ export default function SdrLayout() {
             <PipelineIAPage onOpenLead={openLeadDetail} />
           </PageErrorBoundary>
         )}
+        {/* Só o closer chega aqui; os outros papéis são levados a "reunioes". */}
         {activeNav === "minha-agenda" && (
           <PageErrorBoundary pageName="Minha Agenda">
             <MinhaAgendaPage onOpenLead={openLeadDetail} />
