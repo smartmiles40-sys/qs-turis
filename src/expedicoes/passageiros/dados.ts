@@ -8,7 +8,7 @@ import { avaliarProntidao, type ResultadoProntidao } from "../lib/prontidao/regr
 import { comprimirImagem } from "../lib/comprimir-imagem";
 import { MAX_UPLOAD_BYTES, MIME_ARQUIVO_PERMITIDOS, CAPACIDADE_QUARTO } from "../lib/constants";
 import type {
-  ArquivoRow, CategoriaArquivo, ExpedicaoRow, GrupoExpedicaoRow, PassageiroRequisitoRow, PassageiroRow,
+  ArquivoRow, CategoriaArquivo, ExpedicaoRow, GrupoExpedicaoRow, InscricaoPendenteRow, PassageiroRequisitoRow, PassageiroRow,
   QuartoRow, AlocacaoQuartoRow, StatusRequisito,
 } from "../lib/database";
 
@@ -74,15 +74,15 @@ export function prontidaoDe(exp: ExpedicaoRow, pax: PassageiroRow[], requisitos:
   return { porPax, resultado: out };
 }
 
-/** Regra do app antigo (PassageirosTabela L790-799). */
-export function preencheuFormulario(p: PassageiroRow): boolean {
-  const pv = p.perfil_viajante;
-  const temPerfil = !!pv && typeof pv === "object" && (
-    pv.confirmou_veracidade === true ||
-    [pv.profissao, pv.descricao_grupo, pv.anima_expedicao, pv.significado, pv.instagram, pv.camiseta, pv.musica]
-      .some((v) => v && String(v).trim() !== "")
-  );
-  return temPerfil || p.inscricao_origem === "Formulário público";
+/** Regra do app antigo (PassageirosTabela L790-799). 03/11: mora em lib/inscricaoPax.ts (lógica pura, testada). */
+export { preencheuFormulario } from "../lib/inscricaoPax";
+
+/** Inscrições do formulário público desta expedição (pendentes e recusadas) — pro selo no nome do passageiro. */
+export async function lerInscricoesDaExpedicao(expId: string): Promise<InscricaoPendenteRow[]> {
+  const { data, error } = await supabase.from("inscricoes_pendentes")
+    .select("id,cpf,status,expedicao_id,nome_completo,created_at").eq("expedicao_id", expId).limit(1000);
+  if (error) throw new Error(traduzirErro(error.message));
+  return (data ?? []) as InscricaoPendenteRow[];
 }
 
 // ── Quartos ─────────────────────────────────────────────────────────────────
