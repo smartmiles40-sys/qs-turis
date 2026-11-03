@@ -12,7 +12,7 @@
 //
 // O QUE TEM: o PIPELINE (0174) com a ficha de fechamento (0176) é o Início.
 // O resto REAPROVEITA as telas que o closer já usava no Comercial — agenda,
-// fila de atividades, WhatsApp, reuniões, leads, solicitações e propostas —
+// WhatsApp, reuniões, leads, solicitações e propostas —
 // sem reescrever nada. Desde 26/10 agenda, atividades e reuniões ficam numa
 // tela só, em abas (./ReunioesCloser).
 // -----------------------------------------------------------------------------
@@ -37,7 +37,8 @@ import ReunioesCloser, { ABAS_REUNIOES, type AbaReunioes } from "./ReunioesClose
 const WaPage = lazyPagina(() => import("@/components/sdr/wa/WaPage"));
 const LeadsPage = lazyPagina(() => import("@/components/sdr/leads/LeadsPage"));
 const LeadDetailPage = lazyPagina(() => import("@/components/sdr/leads/LeadDetailPage"));
-const SdrDashboard = lazyPagina(() => import("@/components/sdr/dashboard/SdrDashboard"));
+// 03/11: o desempenho do closer é dele (R.R., no-show, SAL, propostas, faturamento) — não mais o painel do SDR.
+const DesempenhoCloser = lazyPagina(() => import("./DesempenhoCloser"));
 const SolicitacoesPage = lazyPagina(() => import("@/solicitacoes/SolicitacoesPage"));
 const PropostasPage = lazyPagina(() => import("@/propostas/PropostasPage"));
 const PropostaEditor = lazyPagina(() => import("@/propostas/PropostaEditor"));
@@ -120,8 +121,8 @@ export default function CloserApp() {
   // endereços antigos (#closer/agenda, #closer/painel) caem na aba certa.
   const telaPedida = rota.tela === "inicio" ? "pipeline" : rota.tela;
   const tela = telaPedida === "agenda" || telaPedida === "painel" ? "reunioes" : telaPedida;
-  const abaReunioes: AbaReunioes = telaPedida === "painel" ? "atividades"
-    : (ABAS_REUNIOES.some((a) => a.id === rota.id) && telaPedida === "reunioes" ? rota.id as AbaReunioes : telaPedida === "agenda" ? "agenda" : "todas");
+  // 03/11: a aba Atividades saiu; #closer/painel (endereço antigo) cai em Todas.
+  const abaReunioes: AbaReunioes = (ABAS_REUNIOES.some((a) => a.id === rota.id) && telaPedida === "reunioes" ? rota.id as AbaReunioes : telaPedida === "agenda" ? "agenda" : "todas");
   const deOnde = origem.current.tela === "inicio" ? "pipeline" : origem.current.tela === "agenda" || origem.current.tela === "painel" ? "reunioes" : origem.current.tela;
   const ativo = tela === "lead" ? deOnde : tela === "proposta-nova" ? "propostas" : tela;
 
@@ -179,7 +180,7 @@ export default function CloserApp() {
         {tela === "lead" && rota.id && (
           <Cerca nome="o lead"><LeadDetailPage leadId={rota.id} onBack={() => ir(origem.current)} /></Cerca>
         )}
-        {tela === "desempenho" && <Cerca nome="o desempenho"><SdrDashboard /></Cerca>}
+        {tela === "desempenho" && <Cerca nome="o desempenho"><DesempenhoCloser /></Cerca>}
         {tela === "solicitacoes" && (
           <Cerca nome="as solicitações">
             <SolicitacoesPage setor="comercial" abrirId={rota.id ?? null} onMudou={recontarCentral}
