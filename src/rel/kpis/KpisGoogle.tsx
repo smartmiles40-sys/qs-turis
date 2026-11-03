@@ -1,8 +1,7 @@
 // src/rel/kpis/KpisGoogle.tsx
 // -----------------------------------------------------------------------------
-// Nota e nº de avaliações no Google (Bruno, 13/10/2026). Vem da Places API
-// quando há chave (GOOGLE_PLACES_API_KEY na Vercel) e Place ID (Configurações);
-// senão o admin/gestor digita os números à mão — e a tela diz de onde veio.
+// Nota e nº de avaliações no Google (Bruno, 13/10/2026). Digitados à mão pelo
+// admin/gestor do Rel: a Places API foi cortada em 03/11/2026 (custo).
 // -----------------------------------------------------------------------------
 import { useEffect, useState } from "react";
 import { useQsAuth, setoresDe } from "@/contexts/QsAuthContext";
@@ -59,19 +58,17 @@ export default function KpisGoogle() {
         <div>
           <h2 className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>Avaliações no Google</h2>
           <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
-            {g?.fonte === "google" ? `Lido do Google${g.nome ? ` (${g.nome})` : ""}${quando ? ` em ${quando}` : ""} — atualiza a cada 6 h.`
-              : g?.fonte === "manual" ? `Digitado à mão${quando ? ` em ${quando}` : ""}${g.temChave ? "" : " — pra vir sozinho, falta a chave do Google na Vercel"}${g.place_id ? "" : " e o Place ID em Configurações"}.`
-                : "Ainda sem dado: cole o Place ID em Configurações (com a chave do Google na Vercel) ou digite os números."}
+            {g?.fonte === "manual" ? `Digitado à mão${quando ? ` em ${quando}` : ""}. Confira no perfil da agência no Google e atualize quando mudar.`
+              : "Ainda sem dado: digite a nota e o número de avaliações que aparecem no perfil da agência no Google."}
           </p>
         </div>
-        {pode && g?.fonte !== "google" && !editando && (
+        {pode && !editando && (
           <Botao onClick={() => { setNota(g?.nota != null ? String(g.nota).replace(".", ",") : ""); setTotal(g?.total != null ? String(g.total) : ""); setEditando(true); }}>
             {g?.fonte === "manual" ? "Atualizar números" : "Digitar números"}
           </Botao>
         )}
       </div>
       {erro && <Aviso tom="erro">{erro}</Aviso>}
-      {g?.aviso && <Aviso>{g.aviso}</Aviso>}
       {g && g.nota != null && (
         <div className="flex flex-wrap items-end gap-6">
           <div>

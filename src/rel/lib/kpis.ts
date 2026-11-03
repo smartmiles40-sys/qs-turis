@@ -199,7 +199,7 @@ export function minutos(m: number | null | undefined): string {
 // ── Google ──────────────────────────────────────────────────────────────────
 export interface Google {
   nota: number | null; total: number | null; nome: string | null;
-  fonte: "google" | "manual" | null; em: string | null; place_id: string | null; temChave: boolean; aviso?: string | null;
+  fonte: "manual" | null; em: string | null;
 }
 
 async function apiGoogle<T>(metodo: "GET" | "POST", corpo?: Record<string, unknown>): Promise<T> {
@@ -215,5 +215,4 @@ async function apiGoogle<T>(metodo: "GET" | "POST", corpo?: Record<string, unkno
   return j as T;
 }
 export const lerGoogle = () => apiGoogle<Google>("GET");
-export const salvarPlaceId = (place_id: string) => apiGoogle<{ ok: boolean }>("POST", { acao: "place", place_id });
 export const salvarGoogleManual = (nota: string, total: number) => apiGoogle<{ ok: boolean }>("POST", { acao: "manual", nota, total });

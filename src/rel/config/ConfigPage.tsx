@@ -17,7 +17,6 @@ import {
 import { Aviso, Botao, Campo, Entrada, Etiqueta } from "../ui";
 import BotaoWhatsApp from "../whatsapp/BotaoWhatsApp";
 import CategoriasConfig from "./CategoriasConfig";
-import GoogleConfig from "./GoogleConfig";
 
 const DIAS = [
   { n: 1, r: "Seg" }, { n: 2, r: "Ter" }, { n: 3, r: "Qua" }, { n: 4, r: "Qui" },
@@ -211,10 +210,6 @@ export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () =
 
       <Bloco titulo="Categorias de cliente" sub="Bronze, Silver, Black e Green: quantas viagens (ou quanto gasto) cada uma pede, e de quantos em quantos dias o time deve falar com o cliente.">
         <CategoriasConfig pode={pode} />
-      </Bloco>
-
-      <Bloco titulo="Avaliações no Google" sub="A nota e o número de avaliações da agência no Google aparecem em KPIs → NPS & Google.">
-        <GoogleConfig pode={pode} />
       </Bloco>
 
       <Bloco titulo="Respostas prontas e modelos" sub="Mudaram de lugar: agora ficam em Atendimento → Modelos de mensagem, com atalho (/atalho), categoria e os modelos da Meta.">
