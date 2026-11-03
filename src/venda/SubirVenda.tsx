@@ -25,6 +25,11 @@
 //    risco. Dá pra concluir com pendência; aí a análise fica guardada na venda
 //    (status) e abre a solicitação "Emissões pendentes" pro Relacionamento.
 //    Ver src/venda/analise.ts e docs/ANALISE-POS-VENDA.md.
+//
+// 6. PROPOSTA ANEXADA (0295, Bruno 03/11/2026: "só pedirmos para anexar a
+//    proposta na hora da venda"): no passo 4, "Proposta enviada ao cliente" é
+//    OBRIGATÓRIO (1+ PDF/foto). Os arquivos sobem ANTES da venda_subir; se a
+//    venda falhar, são apagados; se der certo, ficam amarrados na venda.
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Stepper } from "@/components/ui";
@@ -47,6 +52,8 @@ import BlocoExpedicao from "./BlocoExpedicao";
 import CampoDoTipo from "./CampoDoTipo";
 import ExtratoAnalise from "./ExtratoAnalise";
 import { STATUS_ANALISE, abrirPedidoSem0230, analisarRascunho, analisarVendaGravada, type Analise } from "./analise";
+import { anexarPropostas, desfazerAnexos, faltaProposta, listarPropostasDaVenda, vincularPropostas, type PropostaAnexada } from "./propostaAnexo";
+import { CampoPropostaVenda } from "./PropostasAnexadas";
 
 const PASSOS = ["Quem comprou", "O que vendeu", "Detalhes", "Valores e pagamento", "Análise pós-venda"] as const;
 const PASSO_ANALISE = 4;
@@ -85,6 +92,9 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   const [analise, setAnalise] = useState<Analise | null>(null);
   const [analisando, setAnalisando] = useState(false);
   const [erroAnalise, setErroAnalise] = useState<string | null>(null);
+  // Proposta enviada ao cliente (0295): as já anexadas no cartão + as escolhidas agora
+  const [propostasJa, setPropostasJa] = useState<PropostaAnexada[]>([]);
+  const [propostasNovas, setPropostasNovas] = useState<File[]>([]);
 
   const ehCloser = origem === "closer" && !!negocio;
   const consolidada = !!negocio?.consolidada_em;
@@ -98,6 +108,8 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     setCarregando(true); setErro(null); setInfo(null); setPasso(0);
     setPag(pagamentoVendaVazio()); setEspecial(false); setEspecialObs(""); setObs("");
     setAnalise(null); setErroAnalise(null);
+    setPropostasJa([]); setPropostasNovas([]);
+    if (ehCloser) listarPropostasDaVenda({ negocioId: negocio!.id }).then((l) => vivo && setPropostasJa(l)).catch(() => undefined);
     const base = pessoaVazia();
     if (negocio?.lead) Object.assign(base, { nome: nomeDoLead(negocio.lead), telefone: negocio.lead.phone ?? "", email: negocio.lead.email ?? "" });
     if (cliente) Object.assign(base, Object.fromEntries(Object.entries(cliente).map(([k, v]) => [k, v ?? ""])), { id: cliente.id ?? null });
@@ -195,6 +207,8 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       if (pag.condicao === "entrada" && (!lerValor(pag.entrada) || !pag.entrada_data)) return "Entrada: coloque o valor e a data.";
       if (pag.condicao !== "avista" && !(Number(pag.parcelas) >= 1)) return "Quantas parcelas?";
       if (especial && especialObs.trim().length < 3) return "Condição especial: escreva qual é (ex.: ExpedAmigo, 10% off pago no Pix).";
+      const semProposta = faltaProposta(propostasJa.length, propostasNovas.length);
+      if (semProposta) return semProposta;
     }
     return null;
   }
@@ -265,20 +279,44 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     try {
       const final = itensFinais();
 
+      // 0295: a proposta sobe ANTES — se não subir, a venda não é registrada.
+      const novosIds = propostasNovas.length
+        ? await anexarPropostas(propostasNovas, { negocioId: ehCloser ? negocio!.id : null, clienteId: pessoa.id || null })
+        : [];
+      // gravou: o que subiu passa a contar como "já anexada" (tentar de novo não duplica)
+      const subiram = (vendaId?: string | null) => {
+        setPropostasNovas([]);
+        void listarPropostasDaVenda({ negocioId: ehCloser ? negocio!.id : null, vendaId }).then(setPropostasJa).catch(() => undefined);
+      };
+
       // Rascunho do closer: só os itens (não ocupa vaga, não cria passageiro).
       if (ehCloser && !marcar && !jaPreVenda && !consolidada) {
-        await salvarItensDaVenda(negocio!.id, final);
+        try { await salvarItensDaVenda(negocio!.id, final); }
+        catch (e) { await desfazerAnexos(novosIds).catch(() => undefined); throw e; }
+        subiram();
         onSalvo({ tom: "ok", mensagem: `Rascunho salvo (${brl(total)}). Ainda não conta como venda: quando fechar, abra de novo e use "Confirmar venda".` });
         return;
       }
 
-      const r = await subirVenda(montarPayload({
-        origem, negocio_id: ehCloser ? negocio!.id : null, viagem_id: viagemId ?? null,
-        cliente: pessoa, itens: final, viajantes, pagamento: pag,
-        condicao_especial: especial, condicao_obs: especialObs, observacoes: obs,
-      }, nomeSugerido));
+      let r: Awaited<ReturnType<typeof subirVenda>>;
+      try {
+        r = await subirVenda(montarPayload({
+          origem, negocio_id: ehCloser ? negocio!.id : null, viagem_id: viagemId ?? null,
+          cliente: pessoa, itens: final, viajantes, pagamento: pag,
+          condicao_especial: especial, condicao_obs: especialObs, observacoes: obs,
+        }, nomeSugerido));
+      } catch (e) {
+        await desfazerAnexos(novosIds).catch(() => undefined); // venda não gravou: não deixa a proposta solta
+        throw e;
+      }
+      let avisoProposta = "";
+      if (r.venda_id) {
+        const ids = [...novosIds, ...propostasJa.filter((a) => !a.venda_id).map((a) => a.id)];
+        await vincularPropostas(ids, r.venda_id).catch((e) => { avisoProposta = ` Atenção: a proposta anexada não ficou amarrada na venda (${(e as Error).message}).`; });
+      }
+      subiram(r.venda_id);
       const pax = (r.passageiros ? ` ${r.passageiros} passageiro(s) já estão na expedição (pré-reserva — o Operacional confirma).` : "")
-        + (r.venda_id ? await guardarAnalise(r.venda_id) : "");
+        + (r.venda_id ? await guardarAnalise(r.venda_id) : "") + avisoProposta;
 
       if (ehCloser && principal) {
         // Mesma regra do RegistrarVenda: marca (ou atualiza o valor/tipo) no Dashboard pela pré-venda da 0207.
@@ -494,6 +532,8 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
                 </Campo>
               </div>
             </div>
+
+            <CampoPropostaVenda jaAnexadas={propostasJa} novos={propostasNovas} onNovos={(f) => { setPropostasNovas(f); setErro(null); }} />
 
             {ehCloser && !consolidada && !jaPreVenda && (
               <Aviso><b>Confirmar venda</b> grava tudo e a venda já conta no Dashboard. Depois, no cartão, é só <b>Fechar: pagamento e contrato</b>.</Aviso>

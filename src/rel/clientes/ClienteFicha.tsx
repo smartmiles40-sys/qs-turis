@@ -53,6 +53,7 @@ import { categoriasDe } from "./KpisClientes";
 import { Aviso, Botao, Etiqueta, Modal } from "../ui";
 import ClienteForm from "./ClienteForm";
 import SubirVenda from "@/venda/SubirVenda";
+import { ListaPropostasAnexadas } from "@/venda/PropostasAnexadas";
 import type { ResultadoPreVenda } from "@/closer/vendaItens";
 import ModeloModal from "../atendimento/ModeloModal";
 import DocumentosPainel from "../viagens/DocumentosPainel";
@@ -195,6 +196,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [oportunidade, setOportunidade] = useState(false);
   const [subirVenda, setSubirVenda] = useState(false);
   const [avisoVenda, setAvisoVenda] = useState<ResultadoPreVenda | null>(null);
+  const [versaoAnexos, setVersaoAnexos] = useState(0); // 0295: recarrega as propostas anexadas
   const [sinalPedidos, setSinalPedidos] = useState(0);
   const [sinalFin, setSinalFin] = useState(0);
   const [versaoChamados, setVersaoChamados] = useState(0);
@@ -601,7 +603,11 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
                 onAbrirExpedicao={onAbrirExpedicao ? (exp, tipo) => onAbrirExpedicao(exp, tipo) : undefined} />
             </>}
 
-            {aba === "compras" && <ComprasDoCliente cliente={c} />}
+            {aba === "compras" && <>
+              <ComprasDoCliente cliente={c} />
+              {/* 0295: a proposta enviada ao cliente, anexada ao registrar cada venda */}
+              <Secao titulo="Propostas anexadas nas vendas"><ListaPropostasAnexadas clienteId={c.id} mostrarVazio versao={versaoAnexos} /></Secao>
+            </>}
 
             {aba === "documentos" && <>
               <Passaportes c={c} idas={idasC} voltaProxima={voltaRef} antigos={passAntigos} docsViagem={docsViagem?.lista ?? []} usuarios={usuarios}
@@ -779,7 +785,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
       {subirVenda && (
         <SubirVenda origem={ehRel ? "rel" : "ops"} aberto={subirVenda}
           cliente={{ id: c.id, nome: c.nome, telefone: c.telefone ?? "", email: c.email ?? "" }}
-          onFechar={() => setSubirVenda(false)} onSalvo={(r) => { setSubirVenda(false); setAvisoVenda(r); }} />
+          onFechar={() => setSubirVenda(false)} onSalvo={(r) => { setSubirVenda(false); setAvisoVenda(r); setVersaoAnexos((v) => v + 1); }} />
       )}
       {/* "Quem viaja junto" (cad_acompanhantes, 0213) — o mesmo cadastro que SDR, Closer e Ops preenchem */}
       <Modal aberto={viajaJunto} titulo={`Quem viaja junto com ${nome.split(" ")[0]}`} onFechar={() => { setViajaJunto(false); void carregar(); }} largura={640}>

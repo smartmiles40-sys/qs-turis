@@ -29,6 +29,9 @@ import ContratoBloco from "./ContratoBloco";
 import PagamentoBloco from "./PagamentoBloco";
 // 28/10 (0214): a venda do closer usa a tela única de venda (src/venda/SubirVenda.tsx).
 import SubirVenda from "@/venda/SubirVenda";
+import { ListaPropostasAnexadas } from "@/venda/PropostasAnexadas";
+import { PROPOSTAS_NO_QS } from "@/propostas/disponivel";
+import { SeloEmBreve } from "@/propostas/EmBreve";
 import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
 import ReunioesDoCliente from "@/controle-comercial/ReunioesDoCliente";
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
@@ -76,6 +79,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   // 0207: venda por itens + pré-venda
   const [itensVenda, setItensVenda] = useState<ItemVenda[]>([]);
   const [registrarAberto, setRegistrarAberto] = useState(false);
+  // 0295: recarrega a lista de propostas anexadas depois de subir a venda
+  const [versaoAnexos, setVersaoAnexos] = useState(0);
   // Motivo pedido ao mover pra Perdido ou Venda cancelada.
   const [perdendo, setPerdendo] = useState<{ etapa: Etapa; motivo: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -222,8 +227,14 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
             <ContratoBloco negocio={n} onMudou={() => void carregar()} />
           )}
 
-          {/* ── Propostas ── */}
-          <Bloco titulo="Propostas" acao={<Botao onClick={() => links.onNovaProposta(n.lead_id, nome)}>+ Nova proposta</Botao>}>
+          {/* ── 0295: a proposta enviada ao cliente, anexada ao registrar a venda ── */}
+          <Bloco titulo="Proposta enviada ao cliente">
+            <ListaPropostasAnexadas negocioId={n.id} mostrarVazio versao={versaoAnexos} />
+          </Bloco>
+
+          {/* ── Propostas montadas no QS (geração "Em breve": só aparecem as que já existem) ── */}
+          {(PROPOSTAS_NO_QS || propostas.length > 0) && (
+          <Bloco titulo="Propostas do QS" acao={PROPOSTAS_NO_QS ? <Botao onClick={() => links.onNovaProposta(n.lead_id, nome)}>+ Nova proposta</Botao> : <SeloEmBreve />}>
             {!propostas.length ? <Nada t="Nenhuma proposta ligada a este cliente." /> : (
               <ul className="divide-y" style={{ borderColor: "var(--line)" }}>
                 {propostas.map((p) => (
@@ -244,6 +255,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
               </ul>
             )}
           </Bloco>
+          )}
 
           {/* ── Reuniões ── */}
           <Bloco titulo="Reuniões (Google Meet)">
@@ -369,7 +381,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
 
       {registrarAberto && (
         <SubirVenda origem="closer" negocio={n} aberto={registrarAberto} onFechar={() => setRegistrarAberto(false)}
-          onSalvo={(r) => { setRegistrarAberto(false); setAviso({ tom: r.tom, t: r.mensagem }); void carregar(); }} />
+          onSalvo={(r) => { setRegistrarAberto(false); setAviso({ tom: r.tom, t: r.mensagem }); setVersaoAnexos((v) => v + 1); void carregar(); }} />
       )}
 
       {fichaAberta && (
