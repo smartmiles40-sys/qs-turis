@@ -179,7 +179,7 @@ export default function CloserApp() {
         )}
         {tela === "leads" && <Cerca nome="os leads"><LeadsPage onOpenLead={abrirLead} onOpenCadenceCreate={() => undefined} /></Cerca>}
         {tela === "lead" && rota.id && (
-          <Cerca nome="o lead"><LeadDetailPage leadId={rota.id} onBack={() => ir(origem.current)} /></Cerca>
+          <Cerca nome="o lead"><LeadDetailPage leadId={rota.id} papel="closer" onBack={() => ir(origem.current)} /></Cerca>
         )}
         {tela === "desempenho" && <Cerca nome="o desempenho"><DesempenhoCloser /></Cerca>}
         {tela === "solicitacoes" && (

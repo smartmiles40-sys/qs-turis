@@ -34,9 +34,10 @@ export interface RespostasDoFormularioProps {
   /**
    * "hero" = dentro do card da atividade, logo acima do botão de ligar. Compacto
    * e sem título grande: ali o SDR está lendo de relance, com o telefone na mão.
-   * "ficha" = a página do lead, onde o bloco é um card como os outros.
+   * "ficha" = card claro (painel do negócio do closer).
+   * "coluna" = card da coluna esquerda da ficha do lead (redesenho de 03/11).
    */
-  variante?: "hero" | "ficha";
+  variante?: "hero" | "ficha" | "coluna";
 }
 
 function IconeFormulario({ size = 13 }: { size?: number }) {
@@ -83,6 +84,24 @@ export default function RespostasDoFormulario({ leadId, variante = "hero" }: Res
           ))}
         </div>
       </div>
+    );
+  }
+
+  if (variante === "coluna") {
+    // Card da coluna da ficha do lead (desenho de 03/11): classes .fl-* de
+    // src/components/sdr/leads/ficha/ficha.css, só tokens.
+    return (
+      <section className="fl-card" aria-label="Respostas do formulário">
+        <div>
+          <h2>Respostas do formulário</h2>
+          <p className="fl-mudo" style={{ marginTop: 4 }}>O que o cliente preencheu na landing page antes de virar lead.</p>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {respostas.map((r) => (
+            <div key={r.campo} className="fl-linha"><span>{r.rotulo}</span><span>{r.valor}</span></div>
+          ))}
+        </div>
+      </section>
     );
   }
 
