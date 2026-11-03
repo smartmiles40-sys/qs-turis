@@ -641,7 +641,10 @@ async function candidatas() {
     if (!v.data_embarque) return '1|';                                         // sem data
     return `2|${String(99999999 - Number(String(v.data_embarque).replace(/-/g, '')))}`; // concluída: recente primeiro
   };
-  const primeiro = (nunca || []).sort((a, b) => peso(a).localeCompare(peso(b))).map((v) => v.id);
+  // 03/11 (Bruno): "só as futuras" — a fila de quem nunca foi lido pega só quem
+  // ainda vai viajar ou está viajando (as concluídas e as sem data ficam de fora).
+  const futura = (v) => { const fim = v.data_retorno || v.data_embarque; return Boolean(fim && fim >= hoje); };
+  const primeiro = (nunca || []).filter(futura).sort((a, b) => peso(a).localeCompare(peso(b))).map((v) => v.id);
   if (primeiro.length) return primeiro;
 
   const docs = await rest(

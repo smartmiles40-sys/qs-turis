@@ -615,6 +615,10 @@ export default async function handler(req, res) {
     const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!segredo || !segredoConfere(veio, segredo)) return res.status(401).json({ error: 'Sem autorização.' });
     if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE.' });
+    // 03/11 (Bruno, opção b): o reenvio dos pendentes fica DESLIGADO no deploy até
+    // conferirmos a lista (70 cartões parados desde 26/10). Liga com a env
+    // CLOSER_CRON_BITRIX_LIGADO=1 na Vercel + redeploy.
+    if (env('CLOSER_CRON_BITRIX_LIGADO') !== '1') return res.status(200).json({ pulado: 'Reenvio desligado (CLOSER_CRON_BITRIX_LIGADO).' });
     try { return res.status(200).json(await cronBitrix()); }
     catch (e) { console.error('[closer] cron-bitrix', e?.message); return res.status(500).json({ error: 'Falhou.' }); }
   }
