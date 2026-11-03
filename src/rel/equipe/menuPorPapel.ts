@@ -17,12 +17,13 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { PAPEIS, papeisDe, type Papel } from "@/solicitacoes/lib";
-import { BASE_REL } from "../menu";
+import { BASE_REL, IDS_REL } from "../menu";
 
 /** Padrão (código) quando o banco não tem linha pro papel. */
 export const MENU_PADRAO: Record<Papel, string[]> = {
   // CX: experiência da viagem — conversa, documentos, pré-embarque
-  cx: ["atendimento", "grupos", "clientes", "viagens", "alertas"],
+  // (03/11: "alertas" saiu do Rel; no lugar, o Painel das viagens)
+  cx: ["atendimento", "grupos", "clientes", "viagens", "exp-painel"],
   // CS: pós-venda — reclamação, chamados, satisfação
   cs: ["atendimento", "chamados", "clientes", "viagens", "pesquisas"],
   // Hunter: vende pra base
@@ -50,7 +51,8 @@ export async function lerMenuPorPapel(setor = "relacionamento"): Promise<MenuPor
   const personalizados: Papel[] = [];
   for (const r of (p.data ?? []) as { papel: Papel; itens: string[] | null }[]) {
     if (!PAPEIS.includes(r.papel) || !r.itens) continue;
-    mapa[r.papel] = r.itens;
+    // 03/11: item que saiu do catálogo (ex.: "alertas", "exp-inscricoes") some do papel
+    mapa[r.papel] = r.itens.filter((id) => IDS_REL.has(id));
     personalizados.push(r.papel);
   }
   return { ligado: !!(s.data as { por_papel?: boolean } | null)?.por_papel, mapa, personalizados };
