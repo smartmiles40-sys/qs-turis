@@ -11,8 +11,10 @@
 //   reunião — mesma regra do Dashboard (14/10).
 //   SAL ............. das realizadas de 1ª reunião (tipo 'primeira'), quantas
 //                     o closer marcou SAL aceito. Retomada não entra.
-//   Propostas ....... qs_propostas enviadas no período (enviada_em), por quem
-//                     enviou (enviada_por; sem ele, criado_por).
+//   Propostas ....... VENDAS COM PROPOSTA ANEXADA (Bruno, 03/11: a geração de
+//                     proposta pelo QS ficou "Em breve"; a proposta é anexada
+//                     na hora de registrar a venda — 0295, qs_venda_propostas).
+//                     Das vendas que contam abaixo, quantas têm 1+ anexo.
 //   Vendas .......... cartões do pipeline com pré-venda OU ficha de fechamento
 //                     no período (qs_closer_negocios), sem aéreo. Valor = ficha
 //                     → pré-venda → valor previsto. Uma venda por cartão.
@@ -45,7 +47,8 @@ export interface NegocioLido {
   etapa?: string | null;
   ficha: { valor_total?: number | string | null; tipo_bitrix?: string | null; servico?: string | null } | null;
 }
-export interface PropostaLida { enviada_por: string | null; criado_por: string | null; status: string }
+/** Um anexo de proposta da venda (qs_venda_propostas, 0295) — só importa o cartão. */
+export interface AnexoLido { negocio_id: string | null }
 
 export interface Metricas {
   id: string;
@@ -57,7 +60,7 @@ export interface Metricas {
   sal: number;                 // SAL aceito
   salSemResposta: number;      // 1ª reunião realizada sem SAL marcado
   taxaSal: number | null;
-  propostas: number;
+  propostas: number;           // vendas com proposta anexada (0295)
   vendas: number;
   faturamento: number;
   ticket: number | null;
@@ -79,7 +82,7 @@ export function vendaDeAereo(n: NegocioLido): boolean {
 export const valorDaVenda = (n: NegocioLido) => num(n.ficha?.valor_total ?? n.pre_venda_valor ?? n.valor_previsto);
 
 export function calcularDesempenho(
-  dados: { reunioes: ReuniaoLida[]; negocios: NegocioLido[]; propostas: PropostaLida[] },
+  dados: { reunioes: ReuniaoLida[]; negocios: NegocioLido[]; anexos: AnexoLido[] },
   closers: { id: string; nome: string }[],
 ): { porCloser: Metricas[]; time: Metricas } {
   const nomes = new Map(closers.map((c) => [c.id, c.nome]));
@@ -109,6 +112,7 @@ export function calcularDesempenho(
       l.noShow++;
     }
   }
+  const comAnexo = new Set(dados.anexos.map((a) => a.negocio_id).filter(Boolean) as string[]);
   const vistos = new Set<string>();
   for (const n of dados.negocios) {
     if (!n.closer_id || vistos.has(n.id) || vendaDeAereo(n)) continue;
@@ -117,11 +121,7 @@ export function calcularDesempenho(
     const l = linha(n.closer_id);
     l.vendas++;
     l.faturamento += valorDaVenda(n);
-  }
-  for (const p of dados.propostas) {
-    const quem = p.enviada_por || p.criado_por;
-    if (!quem || !linhas.has(quem)) continue; // só conta proposta de closer
-    linha(quem).propostas++;
+    if (comAnexo.has(n.id)) l.propostas++;
   }
 
   const fechar = (l: Metricas) => {

@@ -17,7 +17,7 @@ import { Aviso, Botao } from "@/rel/ui";
 import { brl, hojeISO } from "./lib";
 import {
   PRESETS, calcularDesempenho, datasDoPreset, intervaloIso,
-  type Metricas, type NegocioLido, type PresetPeriodo, type PropostaLida, type ReuniaoLida,
+  type AnexoLido, type Metricas, type NegocioLido, type PresetPeriodo, type ReuniaoLida,
 } from "./desempenho";
 
 const pct = (v: number | null) => (v == null ? "—" : `${Math.round(v * 100)}%`);
@@ -25,10 +25,21 @@ const int = (v: number) => v.toLocaleString("pt-BR");
 const brlCurto = (v: number) => (v >= 1_000_000 ? `R$ ${(v / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mi`
   : v >= 10_000 ? `R$ ${Math.round(v / 1000).toLocaleString("pt-BR")} mil` : brl(v));
 
-interface Dados { reunioes: ReuniaoLida[]; negocios: NegocioLido[]; propostas: PropostaLida[] }
+interface Dados { reunioes: ReuniaoLida[]; negocios: NegocioLido[]; anexos: AnexoLido[] }
+
+/** 0295: quais desses cartões têm a proposta anexada na venda. Sem a migration, nenhum (sem erro vermelho). */
+async function lerAnexos(negocioIds: string[]): Promise<AnexoLido[]> {
+  const fora: AnexoLido[] = [];
+  for (let i = 0; i < negocioIds.length; i += 150) {
+    const { data, error } = await supabase.from("qs_venda_propostas").select("negocio_id").in("negocio_id", negocioIds.slice(i, i + 150));
+    if (error) return fora;
+    fora.push(...((data ?? []) as AnexoLido[]));
+  }
+  return fora;
+}
 
 async function carregar(deIso: string, ateIso: string, closerId: string | null): Promise<Dados> {
-  const [reunioes, negocios, propostas] = await Promise.all([
+  const [reunioes, negocios] = await Promise.all([
     fetchAllRows<ReuniaoLida>((de, ate) => {
       let q = supabase.from("qs_meetings").select("id, closer_id, status, tipo, sal, venda_valor, venda_tipo")
         .in("status", ["realizada", "no_show"]).gte("scheduled_at", deIso).lt("scheduled_at", ateIso);
@@ -42,11 +53,9 @@ async function carregar(deIso: string, ateIso: string, closerId: string | null):
       if (closerId) q = q.eq("closer_id", closerId);
       return q.order("id").range(de, ate);
     }),
-    fetchAllRows<PropostaLida>((de, ate) => supabase.from("qs_propostas").select("id, enviada_por, criado_por, status")
-      .in("status", ["enviada", "aprovada", "recusada"]).gte("enviada_em", deIso).lt("enviada_em", ateIso)
-      .order("id").range(de, ate)),
   ]);
-  return { reunioes, negocios, propostas };
+  const anexos = await lerAnexos([...new Set(negocios.map((n) => n.id))]);
+  return { reunioes, negocios, anexos };
 }
 
 /** Todos os closers (inativo só aparece se tiver número no período). */
@@ -167,7 +176,8 @@ function Painel({ m }: { m: Metricas }) {
         <Cartao rotulo="No-show" valor={int(m.noShow)} dica={`${pct(m.taxaNoShow)} das reuniões`} tom={m.taxaNoShow != null && m.taxaNoShow >= 0.25 ? "erro" : undefined} barra={m.taxaNoShow} />
         <Cartao rotulo="Eram SAL" valor={pct(m.taxaSal)} barra={m.taxaSal}
           dica={`${int(m.sal)} de ${int(m.primeiras)} 1ªs reuniões${m.salSemResposta ? ` · ${int(m.salSemResposta)} sem SAL marcado` : ""}`} />
-        <Cartao rotulo="Propostas enviadas" valor={int(m.propostas)} dica="pelo QS, no período" />
+        <Cartao rotulo="Vendas com proposta anexada" valor={int(m.propostas)}
+          dica={m.vendas ? `${int(m.propostas)} de ${int(m.vendas)} vendas · a proposta anexada ao registrar a venda` : "a proposta anexada ao registrar a venda"} />
       </div>
       {m.emNegociacao > 0 && (
         <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>
@@ -206,7 +216,7 @@ const COLUNAS: { id: keyof Metricas; rotulo: string; fmt: (m: Metricas) => strin
   { id: "realizadas", rotulo: "R.R.", fmt: (m) => int(m.realizadas) },
   { id: "taxaNoShow", rotulo: "No-show", fmt: (m) => `${int(m.noShow)} · ${pct(m.taxaNoShow)}` },
   { id: "taxaSal", rotulo: "SAL", fmt: (m) => pct(m.taxaSal) },
-  { id: "propostas", rotulo: "Propostas", fmt: (m) => int(m.propostas) },
+  { id: "propostas", rotulo: "Com proposta", fmt: (m) => `${int(m.propostas)}/${int(m.vendas)}` },
 ];
 
 function Comparacao({ linhas, onAbrir }: { linhas: Metricas[]; onAbrir: (id: string) => void }) {

@@ -20,7 +20,8 @@ test("R.R., no-show, SAL e conversão por closer", () => {
       reuniao("b", "realizada"),
     ],
     negocios: [negocio("n1", "a"), negocio("n2", "a", { ficha: { valor_total: 20000 } })],
-    propostas: [{ enviada_por: "a", criado_por: "x", status: "enviada" }, { enviada_por: null, criado_por: "b", status: "aprovada" }, { enviada_por: "sdr", criado_por: "sdr", status: "enviada" }],
+    // 0295: "propostas" = vendas com proposta anexada (n1 tem 2 anexos = 1 venda; o de n9 não é venda contada)
+    anexos: [{ negocio_id: "n1" }, { negocio_id: "n1" }, { negocio_id: "n9" }, { negocio_id: null }],
   }, CLOSERS);
   const a = porCloser.find((l) => l.id === "a")!;
   assert.equal(a.realizadas, 3);
@@ -37,11 +38,11 @@ test("R.R., no-show, SAL e conversão por closer", () => {
   assert.equal(a.emNegociacao, 30000);
   const b = porCloser.find((l) => l.id === "b")!;
   assert.equal(b.salSemResposta, 1);
-  assert.equal(b.propostas, 1);
+  assert.equal(b.propostas, 0);
   assert.equal(b.conversao, 0);
   assert.equal(time.realizadas, 4);
   assert.equal(time.vendas, 2);
-  assert.equal(time.propostas, 2); // a do SDR não conta
+  assert.equal(time.propostas, 1); // só vendas contadas com anexo
 });
 
 test("venda de aéreo, perdida ou repetida não conta", () => {
@@ -53,14 +54,15 @@ test("venda de aéreo, perdida ou repetida não conta", () => {
       negocio("n3", "a", { etapa: "perdido" }),
       negocio("n4", "b"), negocio("n4", "b"),
     ],
-    propostas: [],
+    anexos: [{ negocio_id: "n1" }, { negocio_id: "n4" }],
   }, CLOSERS);
   assert.equal(time.vendas, 1);
   assert.equal(time.faturamento, 10000);
+  assert.equal(time.propostas, 1, "anexo de venda de aéreo não conta; repetida conta uma vez");
 });
 
 test("sem reunião: taxas ficam vazias, não zero", () => {
-  const { time } = calcularDesempenho({ reunioes: [], negocios: [], propostas: [] }, CLOSERS);
+  const { time } = calcularDesempenho({ reunioes: [], negocios: [], anexos: [] }, CLOSERS);
   assert.equal(time.taxaNoShow, null);
   assert.equal(time.conversao, null);
   assert.equal(time.ticket, null);
