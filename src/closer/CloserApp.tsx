@@ -37,7 +37,8 @@ import ReunioesCloser, { ABAS_REUNIOES, type AbaReunioes } from "./ReunioesClose
 const WaPage = lazyPagina(() => import("@/components/sdr/wa/WaPage"));
 const LeadsPage = lazyPagina(() => import("@/components/sdr/leads/LeadsPage"));
 const LeadDetailPage = lazyPagina(() => import("@/components/sdr/leads/LeadDetailPage"));
-const SdrDashboard = lazyPagina(() => import("@/components/sdr/dashboard/SdrDashboard"));
+// 03/11: o desempenho do closer é dele (R.R., no-show, SAL, propostas, faturamento) — não mais o painel do SDR.
+const DesempenhoCloser = lazyPagina(() => import("./DesempenhoCloser"));
 const SolicitacoesPage = lazyPagina(() => import("@/solicitacoes/SolicitacoesPage"));
 const PropostasPage = lazyPagina(() => import("@/propostas/PropostasPage"));
 const PropostaEditor = lazyPagina(() => import("@/propostas/PropostaEditor"));
@@ -179,7 +180,7 @@ export default function CloserApp() {
         {tela === "lead" && rota.id && (
           <Cerca nome="o lead"><LeadDetailPage leadId={rota.id} onBack={() => ir(origem.current)} /></Cerca>
         )}
-        {tela === "desempenho" && <Cerca nome="o desempenho"><SdrDashboard /></Cerca>}
+        {tela === "desempenho" && <Cerca nome="o desempenho"><DesempenhoCloser /></Cerca>}
         {tela === "solicitacoes" && (
           <Cerca nome="as solicitações">
             <SolicitacoesPage setor="comercial" abrirId={rota.id ?? null} onMudou={recontarCentral}
