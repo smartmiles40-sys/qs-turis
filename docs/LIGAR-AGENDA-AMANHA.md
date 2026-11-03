@@ -1,3 +1,5 @@
+> **03/11/2026: SUPERADO.** A agenda não passa mais pelo n8n. O QS fala direto com a Google Calendar API. Envs e passo a passo novos: [GOOGLE-AGENDA-SEM-N8N.md](./GOOGLE-AGENDA-SEM-N8N.md). Este documento fica como histórico.
+
 > **STATUS 05/08/2026 — A AGENDA ESTÁ LIGADA E VALIDADA DE PONTA A PONTA.**
 > Passos 1, 2, 5, 6 e 7 concluídos e provados: evento criado no Google, sala do
 > Meet gerada e convite entregue no e-mail do convidado.

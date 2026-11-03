@@ -1,5 +1,7 @@
 # Agenda do QS ↔ Google Meet
 
+> **03/11/2026: SUPERADO.** A agenda não passa mais pelo n8n. O QS fala direto com a Google Calendar API. Envs e passo a passo novos: [GOOGLE-AGENDA-SEM-N8N.md](./GOOGLE-AGENDA-SEM-N8N.md). Este documento fica como histórico.
+
 Implementa o briefing "Agenda de reuniões no QS". O Supabase é a fonte de verdade
 de disponibilidade, reserva e desfecho; o Google entra só para gerar a sala do
 Meet e disparar o convite.
