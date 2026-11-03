@@ -49,6 +49,8 @@ import TudoDaViagem from "./TudoDaViagem";
 import { SeloDaViagem } from "@/prioridades/SeloPrioridade";
 import VoosDaViagem from "./VoosDaViagem";
 import RoteiroCartoes, { type InfoVoo } from "./RoteiroCartoes";
+import { correcaoDisponivel, correcoesDaViagem, type Correcao } from "../lib/correcoes";
+import { conferidosDoHistorico, jaAconteceu } from "../lib/conferencia";
 import "./viagem-ficha.css";
 
 function Linha({ rotulo, children }: { rotulo: string; children: ReactNode }) {
@@ -346,7 +348,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const [docs, setDocs] = useState<DocResumo[] | null>(null);
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
   const [grupos, setGrupos] = useState<Grupo[] | null>(null);
-  const [verDocs, setVerDocs] = useState(false);
+  // 0227/0310: o histórico de correções — de onde sai quem conferiu cada voo
+  const [hist, setHist] = useState<Correcao[]>([]);
 
   const carregar = useCallback(async () => {
     try {
@@ -371,7 +374,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
     carregarComponentes(id).then((r) => setComps(r.itens)).catch(() => setComps([]));
     documentosDaViagem(id).then(setDocs).catch(() => setDocs([]));
     listarTarefas(id).then(setTarefas).catch(() => setTarefas([]));
+    correcoesDaViagem(id).then(setHist).catch(() => setHist([]));
   }, [id, versao]);
+  const conferidos = useMemo(() => conferidosDoHistorico(hist), [hist]);
   const chaveConf = v ? `${v.id}|${v.data_embarque}|${v.data_retorno}|${v.status}|${v.tipo}|${pass.length}|${versao}` : "";
   useEffect(() => {
     if (!v) return;
@@ -402,6 +407,10 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
   const pront = useMemo(() => {
     const trechos = analise?.trechos ?? [];
+    const agora = Date.now();
+    const hojeDia = hojeSP();
+    // o que já aconteceu (voado, chegada/check-out no passado) não é pendência
+    const passou = (t: Trecho) => jaAconteceu(t, agora, infoVoos.get(t.id)?.estado);
     const noites = mapaDasNoites(trechos.filter((t) => !(t.tipo === "voo_internacional" || t.tipo === "voo_interno") || (infoVoos.get(t.id)?.valido ?? true)));
     const nNoites = (t: Trecho) => {
       if (!t.chegada_em) return null;
@@ -413,11 +422,12 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
       voos: (resumo?.voos ?? []).map((x) => ({
         id: x.t.id, papel: x.papel, valido: x.valido, cancelado: x.estado === "cancelado", semHora: x.t.fonte === "bitrix",
         localizador: x.t.localizador, partida_em: x.t.partida_em, partida_fuso: x.t.partida_fuso,
+        conferido: conferidos.has(x.t.id), passou: passou(x.t),
         origem: codigoDe(x.t.origem_codigo, x.t.origem) || x.t.origem, destino: codigoDe(x.t.destino_codigo, x.t.destino) || x.t.destino,
       })),
       hoteis: trechos.filter((t) => t.tipo === "hospedagem").map((t) => ({ nome: tituloTrecho(t), noites: nNoites(t) })),
-      noitesSemHotel: noites.semHotel.size,
-      passeios: trechos.filter((t) => t.tipo === "passeio").map((t) => ({ nome: tituloTrecho(t), comVoucher: !!t.documento_id })),
+      noitesSemHotel: [...noites.semHotel].filter((d) => d >= hojeDia).length,
+      passeios: trechos.filter((t) => t.tipo === "passeio" && !passou(t)).map((t) => ({ nome: tituloTrecho(t), comVoucher: !!t.documento_id })),
       itens: (comps ?? []).filter((c) => c.fonte === "venda").map((c) => ({ tipo: c.tipo, status: c.status, nome: c.nome })),
       docs: docs ?? [],
       passageiros: pass.filter((p) => p.cliente).map((p) => ({ nome: p.cliente!.nome, passaporte: p.cliente!.passaporte, passaporte_validade: p.cliente!.passaporte_validade })),
@@ -425,7 +435,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
       dataReferencia: v ? v.data_retorno || v.data_embarque : null,
       sherpa: null, // a API do Sherpa ainda não está ligada (ConformidadeViagem → RequisitosEntrada)
     }, hojeSP());
-  }, [v, analise, resumo, infoVoos, comps, docs, pass]);
+  }, [v, analise, resumo, infoVoos, comps, docs, pass, conferidos]);
 
   if (erro && !v) return <div className="max-w-4xl mx-auto"><Aviso tom="erro">{erro}</Aviso></div>;
   if (!v) return <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando viagem…</p>;
@@ -466,8 +476,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const recompra = tarefaDe(/recompra|indica/i);
   const textoTarefa = (t?: Tarefa) => (!t ? "Nada agendado" : t.feita_em ? `feita em ${new Date(t.feita_em).toLocaleDateString("pt-BR")}` : t.prazo ? dataBR(t.prazo) : "sem prazo");
 
-  const irPara = (id: string, abrirDocs = false) => {
-    if (abrirDocs) setVerDocs(true);
+  const irPara = (id: string, _abrirDocs = false) => {
     setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
   };
 
@@ -605,7 +614,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
             {analise && v.fase === "em_viagem" && <AgoraEProximo trechos={analise.trechos} />}
             <RoteiroCartoes viagemId={v.id} trechos={analise ? analise.trechos : null} problemas={analise?.problemas ?? []} voos={infoVoos}
               quadros={carregandoPront ? [] : pront.quadros} dataIda={v.data_embarque} dataVolta={v.data_retorno} ativa={ativa} modo={aba}
-              onMudou={mudouTrecho} onAnexar={() => irPara("vf-arquivos", true)} />
+              onMudou={revisou} onAnexar={() => irPara("vf-arquivos", true)} conferidos={conferidos} correcao={correcaoDisponivel(v)} />
             {analise && analise.trechos.length > 0 && (
               <details className="mt-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
                 <summary className="cursor-pointer text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Linha do tempo completa (noites, dias livres, trechos fora das datas)</summary>
@@ -725,13 +734,15 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
       {/* 0208: itens da venda por tipo (aéreo, hotel, seguro, expedição…), o que falta e as próximas datas */}
       <div id="vf-tudo"><TudoDaViagem v={v} pass={pass} versao={versao} onMudou={revisou} onAbrirExpedicao={onAbrirExpedicao} /></div>
 
-      <section id="vf-arquivos" className="vf-card" aria-label="Arquivos da viagem">
-        <h2 className="vf-h2 mb-3">Arquivos da viagem</h2>
-        <ArquivosViagem viagemId={v.id} pessoas={pessoas} versao={versao} />
-        <details className="mt-4 pt-3" style={{ borderTop: "1px solid var(--border)" }} open={verDocs} onToggle={(e) => setVerDocs((e.target as HTMLDetailsElement).open)}>
-          <summary className="cursor-pointer text-[13px] font-semibold" style={{ color: "var(--text)" }}>Gerenciar documentos (enviar, aprovar, pedir ao cliente)</summary>
-          <div className="mt-3"><DocumentosPainel pessoas={pessoas} viagemId={v.id} /></div>
-        </details>
+      {/* 03/11: o envio e a revisão (Aprovar / Recusar no cartão) à vista; com a prontidão
+          incompleta, o topo vira "soltar arquivo" + "Ajustar a venda" (o mesmo Editar viagem) */}
+      <section id="vf-arquivos" className="vf-card flex flex-col gap-3" aria-label="Arquivos da viagem">
+        <h2 className="vf-h2">Arquivos da viagem</h2>
+        <DocumentosPainel pessoas={pessoas} viagemId={v.id} onMudou={() => setVersao((n) => n + 1)}
+          ficha={{ incompleto: !carregandoPront && pront.quadros.some((q) => q.estado === "atencao" || q.estado === "falta"), onAjustarVenda: () => setEditando(true) }} />
+        <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+          <ArquivosViagem viagemId={v.id} pessoas={pessoas} versao={versao} />
+        </div>
       </section>
 
       <details className="vf-mais">

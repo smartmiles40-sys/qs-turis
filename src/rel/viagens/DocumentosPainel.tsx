@@ -7,6 +7,14 @@
 //
 // Usado na viagem (vários passageiros) e na ficha do cliente (uma pessoa).
 // O bucket é PRIVADO: abrir um arquivo gera um link assinado de 5 minutos.
+//
+// 03/11 (Bruno: "caso não seja emitido tudo, nesse campo dar para adicionar mais
+// um arquivo e ajustar a venda; e quando passar o mouse em cima, ele deve Aprovar
+// e Recusar"): cada arquivo é um cartão — passando o mouse, focando (teclado) ou
+// tocando (celular) aparecem Aprovar (verde) e Recusar (vermelho); Recusar pede o
+// motivo; aprovado/recusado dá pra desfazer (volta a "a conferir"). Na ficha da
+// viagem (`ficha`), com a prontidão incompleta, o topo vira uma área de soltar
+// arquivo + "Ajustar a venda"; com tudo pronto, só um "+ Adicionar arquivo".
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
@@ -21,6 +29,7 @@ import {
   type DocumentoIa, type IaSugestao,
 } from "../lib/docsIa";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
+import "./viagem-ficha.css";
 
 export interface Pessoa { id: string; nome: string }
 
@@ -200,7 +209,7 @@ function SeloIa({ d, onAplicar }: { d: DocumentoIa; onAplicar: (s: IaSugestao) =
 
 // ── O painel ────────────────────────────────────────────────────────────────
 
-export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconder }: {
+export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconder, ficha, onMudou }: {
   /** Quem pode ter documento aqui (passageiros da viagem ou o próprio cliente). */
   pessoas: Pessoa[];
   viagemId?: string | null;
@@ -208,6 +217,10 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconde
   clienteId?: string;
   /** Ids de documentos pra não mostrar (cadastro único: cópias de 13/10 de arquivo que a ficha já mostra da expedição). */
   esconder?: ReadonlySet<string>;
+  /** Na ficha da viagem: a prontidão está incompleta? (mostra a área de soltar + "Ajustar a venda") */
+  ficha?: { incompleto: boolean; onAjustarVenda?: () => void };
+  /** Mudou algum documento (enviou, aprovou, recusou, apagou) — a página recalcula a prontidão. */
+  onMudou?: () => void;
 }) {
   const { currentUser } = useQsAuth();
   const [docsTodos, setDocs] = useState<Documento[] | null>(null);
@@ -220,6 +233,10 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconde
   const [motivo, setMotivo] = useState("");
   const [iaOcupado, setIaOcupado] = useState<string | null>(null); // id do doc, ou "lote"
   const [iaAviso, setIaAviso] = useState<string | null>(null);
+  // cartão com Aprovar/Recusar à mostra (toque no celular / Enter no teclado)
+  const [aberto, setAberto] = useState<string | null>(null);
+  const [sobre, setSobre] = useState(false);
+  const soltarRef = useRef<HTMLInputElement>(null);
 
   // Formulário de envio pelo time
   const [quem, setQuem] = useState("");
@@ -244,7 +261,7 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconde
 
   async function acao(fn: () => Promise<unknown>) {
     setErro(null);
-    try { await fn(); await carregar(); } catch (e) { setErro(e instanceof Error ? e.message : "Falhou."); }
+    try { await fn(); await carregar(); onMudou?.(); } catch (e) { setErro(e instanceof Error ? e.message : "Falhou."); }
   }
 
   async function abrir(d: Documento) {
@@ -266,8 +283,9 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconde
       await subirDocumento({ clienteId: quem, viagemId: viagemId || null, tipo, arquivo: f, validade: validade || null });
       setSubir(false); setValidade("");
       await carregar();
+      onMudou?.();
     } catch (e) { setErro(e instanceof Error ? e.message : "Não subiu."); }
-    finally { setEnviando(false); if (arquivoRef.current) arquivoRef.current.value = ""; }
+    finally { setEnviando(false); if (arquivoRef.current) arquivoRef.current.value = ""; if (soltarRef.current) soltarRef.current.value = ""; }
   }
 
   async function conferirUm(d: Documento) {
@@ -294,11 +312,63 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconde
   const vencendo = dataVencendo(docs);
   const pendentes = pedidos.filter((p) => !p.concluido_em && new Date(p.expira_em) > new Date());
 
+  const revisar = (d: Documento, status: "aprovado" | "recebido") => void acao(() => revisarDocumento(d.id, status, currentUser?.id ?? ""));
+  const alternar = (id: string) => setAberto((x) => (x === id ? null : id));
+  const seletores = (
+    <>
+      {pessoas.length > 1 && (
+        <Campo rotulo="De quem?">
+          <select className="rel-input" value={quem} onChange={(e) => setQuem(e.target.value)}>
+            {pessoas.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+          </select>
+        </Campo>
+      )}
+      <Campo rotulo="Tipo">
+        <select className="rel-input" value={tipo} onChange={(e) => setTipo(e.target.value as TipoDocumento)}>
+          {(Object.keys(TIPOS_DOC) as TipoDocumento[]).map((t) => <option key={t} value={t}>{TIPOS_DOC[t]}</option>)}
+        </select>
+      </Campo>
+    </>
+  );
+
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
-        <Botao variante="primario" onClick={() => setPedir(true)} disabled={!pessoas.length}>Pedir documentos ao cliente</Botao>
-        <Botao onClick={() => setSubir(true)} disabled={!pessoas.length}>Enviar arquivo</Botao>
+      {/* ficha da viagem, prontidão incompleta: soltar o arquivo que falta + ajustar a venda */}
+      {ficha?.incompleto && (
+        <div className={`vf-drop${sobre ? " vf-drop--sobre" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); if (!sobre) setSobre(true); }}
+          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSobre(false); }}
+          onDrop={(e) => { e.preventDefault(); setSobre(false); void enviarArquivo(e.dataTransfer.files?.[0]); }}>
+          <div className="vf-drop__linha">
+            <div className="flex flex-col gap-0.5">
+              <b>Falta coisa pra viagem ficar pronta</b>
+              <span className="vf-sub">Anexe o bilhete, voucher ou documento que falta — ou ajuste a venda se mudou o que foi vendido.</span>
+            </div>
+            {ficha.onAjustarVenda && <button type="button" className="vf-btn vf-btn--sm" onClick={ficha.onAjustarVenda}>Ajustar a venda</button>}
+          </div>
+          <button type="button" className="vf-drop__alvo" disabled={enviando || !quem} onClick={() => soltarRef.current?.click()}>
+            {enviando ? "Enviando…" : "Arraste o arquivo aqui ou clique pra escolher"}
+            <span>{!pessoas.length ? "Ponha um passageiro com ficha na viagem antes de anexar." : "Foto, PDF ou qualquer arquivo até 20 MB · enviado pelo time já entra como aprovado"}</span>
+          </button>
+          <div className="flex flex-wrap gap-3 items-end">
+            {seletores}
+            <Botao variante="fantasma" onClick={() => setPedir(true)} disabled={!pessoas.length}>Pedir ao cliente</Botao>
+          </div>
+          <input ref={soltarRef} type="file" hidden onChange={(e) => void enviarArquivo(e.target.files?.[0])} />
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2 items-center">
+        {ficha && !ficha.incompleto ? (
+          <>
+            <button type="button" className="vf-link" onClick={() => setSubir(true)} disabled={!pessoas.length}>+ Adicionar arquivo</button>
+            <button type="button" className="vf-link" onClick={() => setPedir(true)} disabled={!pessoas.length}>Pedir documentos ao cliente</button>
+          </>
+        ) : !ficha && (
+          <>
+            <Botao variante="primario" onClick={() => setPedir(true)} disabled={!pessoas.length}>Pedir documentos ao cliente</Botao>
+            <Botao onClick={() => setSubir(true)} disabled={!pessoas.length}>Enviar arquivo</Botao>
+          </>
+        )}
         {/* 27/10: "Conferir N pendentes com IA" só aparece quando a IA já leu algo
             aqui (a chave da OpenAI está faltando na Vercel desde 16/10) */}
         {pendentesIa > 0 && docsIa.some((d) => d.ia_em) && (
@@ -330,23 +400,41 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconde
       ) : docs.length === 0 ? (
         <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Nenhum documento ainda.</p>
       ) : (
-        <ul className="space-y-1.5">
+        <ul className="vf-docs">
           {docsIa.map((d) => (
-            <li key={d.id} className="flex flex-wrap items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--card2)", border: "1px solid var(--line)" }}>
-              <span className="flex-1 min-w-[180px]">
-                <span className="flex flex-wrap items-center gap-1.5">
-                  <b className="text-[13px]" style={{ color: "var(--ink)" }}>{TIPOS_DOC[d.tipo]}</b>
-                  {pessoas.length > 1 && <span className="text-[12px]" style={{ color: "var(--ink3)" }}>· {nomeDe(d.cliente_id)}</span>}
-                  <Etiqueta tom={TOM_STATUS[d.status]}>{ROTULO_STATUS[d.status]}</Etiqueta>
+            <li key={d.id} tabIndex={0} className={`vf-doc vf-doc--${d.status}${aberto === d.id ? " vf-doc--aberto" : ""}`}
+              aria-label={`${TIPOS_DOC[d.tipo]}${pessoas.length > 1 ? ` de ${nomeDe(d.cliente_id)}` : ""}: ${ROTULO_STATUS[d.status]}. Enter mostra Aprovar e Recusar.`}
+              onClick={(e) => { if (!(e.target as HTMLElement).closest("button, input, a, label, select")) alternar(d.id); }}
+              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); alternar(d.id); } }}>
+              <div className="vf-doc__top">
+                <span className="flex flex-col gap-1 min-w-0">
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <b className="text-[14px]" style={{ color: "var(--text)" }}>{TIPOS_DOC[d.tipo]}</b>
+                    {pessoas.length > 1 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>· {nomeDe(d.cliente_id)}</span>}
+                  </span>
+                  <span className="block text-[12px] truncate" style={{ color: "var(--muted)" }} title={d.arquivo_nome ?? undefined}>
+                    {d.arquivo_nome} {d.tamanho ? `· ${tamanhoLegivel(d.tamanho)}` : ""} · {new Date(d.enviado_em).toLocaleDateString("pt-BR")}
+                  </span>
+                </span>
+                <span className="flex flex-col items-end gap-1 flex-shrink-0">
+                  <Etiqueta tom={TOM_STATUS[d.status]}>{d.status === "aprovado" ? "Aprovado ✓" : d.status === "recusado" ? "Recusado ✕" : ROTULO_STATUS[d.status]}</Etiqueta>
                   {d.enviado_por === "cliente" && <Etiqueta>enviado pelo cliente</Etiqueta>}
                 </span>
-                <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>
-                  {d.arquivo_nome} {d.tamanho ? `· ${tamanhoLegivel(d.tamanho)}` : ""} · {new Date(d.enviado_em).toLocaleDateString("pt-BR")}
-                  {d.status === "recusado" && d.motivo_recusa ? ` · motivo: ${d.motivo_recusa}` : ""}
-                </span>
-                <span className="block mt-1"><SeloIa d={d} onAplicar={(s) => void acao(() => aplicarSugestao(d, s))} /></span>
-              </span>
-              <label className="flex items-center gap-1 text-[12px]" style={{ color: "var(--ink3)" }} title="Validade do documento">
+              </div>
+              {d.status === "recusado" && d.motivo_recusa && <span className="text-[12px]" style={{ color: "var(--danger)" }}>motivo: {d.motivo_recusa}</span>}
+              <SeloIa d={d} onAplicar={(s) => void acao(() => aplicarSugestao(d, s))} />
+              {/* a decisão: dois botões grandes (aprovado/recusado: desfazer volta a "a conferir") */}
+              <div className="vf-doc__decide" role="group" aria-label={`Revisar ${TIPOS_DOC[d.tipo]}`}>
+                {d.status === "aprovado"
+                  ? <button type="button" className="vf-doc__desfazer" onClick={() => revisar(d, "recebido")}>Desfazer aprovação</button>
+                  : <button type="button" className="vf-doc__aprovar" onClick={() => revisar(d, "aprovado")}>Aprovar</button>}
+                {d.status === "recusado"
+                  ? <button type="button" className="vf-doc__desfazer" onClick={() => revisar(d, "recebido")}>Desfazer recusa</button>
+                  : <button type="button" className="vf-doc__recusar" onClick={() => { setRecusando(d); setMotivo(""); }}>Recusar</button>}
+              </div>
+              <span className="vf-doc__dica">Passe o mouse ou toque pra aprovar ou recusar</span>
+              <div className="vf-doc__meta">
+              <label className="flex items-center gap-1 text-[12px]" style={{ color: "var(--muted)" }} title="Validade do documento">
                 validade
                 <input
                   type="date"
@@ -362,9 +450,8 @@ export default function DocumentosPainel({ pessoas, viagemId, clienteId, esconde
                   {iaOcupado === d.id ? "Conferindo…" : "Conferir de novo com IA"}
                 </Botao>
               )}
-              {d.status !== "aprovado" && <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => void acao(() => revisarDocumento(d.id, "aprovado", currentUser?.id ?? ""))}>Aprovar</Botao>}
-              {d.status !== "recusado" && <Botao variante="fantasma" onClick={() => { setRecusando(d); setMotivo(""); }}>Recusar</Botao>}
-              <Botao variante="fantasma" title="Apagar" onClick={() => { if (window.confirm(`Apagar ${TIPOS_DOC[d.tipo]} (${d.arquivo_nome})? Não dá para desfazer.`)) void acao(() => apagarDocumento(d)); }}>×</Botao>
+              <Botao variante="fantasma" title="Apagar" aria-label={`Apagar ${TIPOS_DOC[d.tipo]}`} onClick={() => { if (window.confirm(`Apagar ${TIPOS_DOC[d.tipo]} (${d.arquivo_nome})? Não dá para desfazer.`)) void acao(() => apagarDocumento(d)); }}>×</Botao>
+              </div>
             </li>
           ))}
         </ul>

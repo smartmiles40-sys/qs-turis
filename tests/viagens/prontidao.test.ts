@@ -23,13 +23,38 @@ test("são sempre os 8 quadrinhos, na ordem do desenho", () => {
   assert.deepEqual(r.quadros.map((q) => q.chave), ["ida", "volta", "internos", "hospedagem", "passeios", "documentos", "entrada", "seguro"]);
 });
 
-test("pacote com ida e volta emitidas: ok com o LOC e a hora local", () => {
-  const e = base({ voos: [voo("ida", "2026-11-15T23:45:00-03:00"), voo("nacional_ida", "2026-11-16T14:00:00-03:00"), voo("volta", "2026-11-25T11:40:00-03:00")] });
+test("pacote com ida e volta emitidas E conferidas: ok com o LOC e a hora local", () => {
+  const c = { conferido: true };
+  const e = base({ voos: [voo("ida", "2026-11-15T23:45:00-03:00", c), voo("nacional_ida", "2026-11-16T14:00:00-03:00", c), voo("volta", "2026-11-25T11:40:00-03:00", c)] });
   const ida = quadro(e, "ida");
   assert.equal(ida.estado, "ok");
-  assert.equal(ida.valor, "Emitido");
+  assert.equal(ida.valor, "Emitido e conferido");
+  assert.match(ida.detalhe, /2 de 2 voos conferidos/);
   assert.match(ida.detalhe, /LOC K7PQ2M · 15\/11 23:45/);
   assert.equal(quadro(e, "volta").estado, "ok");
+});
+
+test("voo emitido mas NÃO conferido por humano = atenção (nunca verde só pela IA/Bitrix)", () => {
+  const e = base({ voos: [voo("ida", "2026-11-15T23:45:00-03:00", { conferido: true }), voo("nacional_ida", "2026-11-16T14:00:00-03:00"), voo("volta", "2026-11-25T11:40:00-03:00")] });
+  const ida = quadro(e, "ida");
+  assert.equal(ida.estado, "atencao");
+  assert.equal(ida.valor, "Falta conferir");
+  assert.match(ida.detalhe, /1 de 2 voos conferidos/);
+  assert.equal(quadro(e, "volta").valor, "Falta conferir");
+  const r = prontidaoDaViagem(e, HOJE);
+  assert.ok(!r.quadros.filter((q) => q.chave === "ida" || q.chave === "volta").some((q) => q.estado === "ok"));
+});
+
+test("voo que já aconteceu não é pendência: sai da conta do aéreo", () => {
+  // ida já voada (sem conferir, sem LOC) não deixa o quadrinho em atenção
+  const e = base({ voos: [voo("ida", "2026-10-01T10:00:00-03:00", { passou: true, localizador: null }), voo("volta", "2026-11-25T11:40:00-03:00", { conferido: true })] });
+  assert.equal(quadro(e, "ida").estado, "ok");
+  assert.equal(quadro(e, "ida").valor, "Já voado");
+  assert.equal(quadro(e, "volta").estado, "ok");
+  // a conexão já voada não entra no "X de Y" de quem ainda vai voar
+  const e2 = base({ voos: [voo("ida", "2026-11-01T10:00:00-03:00", { passou: true }), voo("nacional_ida", "2026-11-15T10:00:00-03:00", { conferido: true })] });
+  assert.equal(quadro(e2, "ida").estado, "ok");
+  assert.match(quadro(e2, "ida").detalhe, /1 de 1 voo conferido/);
 });
 
 test("pacote sem nenhum voo: ida e volta FALTAM; voo interno fica neutro (o sistema não sabe se precisa)", () => {
@@ -66,7 +91,11 @@ test("item aéreo vendido e ainda sem voo = A emitir", () => {
 });
 
 test("voos internos com e sem localizador", () => {
-  assert.equal(quadro(base({ voos: [voo("interno", "2026-11-21T10:00:00+01:00", { origem: "MAD", destino: "BCN", partida_fuso: "+01:00" })] }), "internos").estado, "ok");
+  assert.equal(quadro(base({ voos: [voo("interno", "2026-11-21T10:00:00+01:00", { origem: "MAD", destino: "BCN", partida_fuso: "+01:00", conferido: true })] }), "internos").estado, "ok");
+  const semConferir = quadro(base({ voos: [voo("interno", "2026-11-21T10:00:00+01:00", { origem: "MAD", destino: "BCN" })] }), "internos");
+  assert.equal(semConferir.estado, "atencao");
+  assert.equal(semConferir.valor, "Falta conferir");
+  assert.equal(quadro(base({ voos: [voo("interno", "2026-10-21T10:00:00+01:00", { passou: true })] }), "internos").valor, "Já voados");
   assert.equal(quadro(base({ voos: [voo("interno", "2026-11-21T10:00:00+01:00", { localizador: null })] }), "internos").estado, "atencao");
 });
 
@@ -111,7 +140,7 @@ test("seguro: emitido / a emitir / anexado a conferir / não registrado", () => 
 
 test("a barra conta só os aplicáveis", () => {
   const e = base({
-    voos: [voo("ida", "2026-11-15T23:45:00-03:00"), voo("volta", "2026-11-25T11:40:00-03:00")],
+    voos: [voo("ida", "2026-11-15T23:45:00-03:00", { conferido: true }), voo("volta", "2026-11-25T11:40:00-03:00", { conferido: true })],
     hoteis: [{ nome: "A", noites: 9 }], itens: [{ tipo: "seguro", status: "emitido" }],
     docs: [{ tipo: "passaporte", status: "aprovado" }], passageiros: [{ nome: "R", passaporte: "X", passaporte_validade: "2033-01-01" }],
   });

@@ -38,6 +38,10 @@ export interface VooPront {
   partida_fuso?: string | null;
   origem?: string | null;
   destino?: string | null;
+  /** 0310: alguém do time conferiu este voo à mão ("Conferi ✓"). Sem isso, nunca é verde. */
+  conferido?: boolean;
+  /** já aconteceu (voado / chegada no passado): não é pendência */
+  passou?: boolean;
 }
 
 export interface EntradaProntidao {
@@ -116,21 +120,31 @@ export function estadoPassaporte(p: { passaporte: string | null; passaporte_vali
 }
 
 const VIVO = (s: string | null) => s !== "cancelado";
+/** "1 de 2 voos conferidos" */
+const conferidosTxt = (segs: VooPront[]) => `${segs.filter((s) => s.conferido).length} de ${plural(segs.length, "voo conferido", "voos conferidos")}`;
 
 // ── os quadrinhos ───────────────────────────────────────────────────────────
 
 function quadroDoAereo(chave: "ida" | "volta", e: EntradaProntidao, aereoVendido: boolean, itemAereoAEmitir: boolean): Quadro {
   const rotulo = chave === "ida" ? "Aéreo ida" : "Aéreo volta";
   const papeis = chave === "ida" ? ["ida", "nacional_ida"] : ["volta", "nacional_volta"];
-  const segs = e.voos.filter((v) => v.valido && !v.cancelado && papeis.includes(v.papel ?? ""))
+  const todos = e.voos.filter((v) => v.valido && !v.cancelado && papeis.includes(v.papel ?? ""))
     .sort((a, b) => a.partida_em.localeCompare(b.partida_em));
+  // o que já aconteceu não é pendência
+  const segs = todos.filter((v) => !v.passou);
+  if (todos.length && !segs.length) {
+    return { chave, rotulo, estado: "ok", valor: "Já voado", detalhe: diaHoraCurta(todos[0].partida_em, todos[0].partida_fuso, !!todos[0].semHora) };
+  }
   if (segs.length) {
     const quando = diaHoraCurta(segs[0].partida_em, segs[0].partida_fuso, !!segs[0].semHora);
-    if (segs.every((s) => s.semHora)) return { chave, rotulo, estado: "atencao", valor: "Só a data do Bitrix", detalhe: `${quando} · sem horário nem nº do voo` };
+    const conf = conferidosTxt(segs);
+    if (segs.every((s) => s.semHora)) return { chave, rotulo, estado: "atencao", valor: "Só a data do Bitrix", detalhe: `${quando} · sem horário nem nº do voo · ${conf}` };
     const semLoc = segs.filter((s) => !s.localizador).length;
-    if (semLoc) return { chave, rotulo, estado: "atencao", valor: "Sem localizador", detalhe: `${semLoc} de ${plural(segs.length, "trecho", "trechos")} sem LOC · ${quando}` };
+    if (semLoc) return { chave, rotulo, estado: "atencao", valor: "Sem localizador", detalhe: `${semLoc} de ${plural(segs.length, "trecho", "trechos")} sem LOC · ${quando} · ${conf}` };
     const locs = [...new Set(segs.map((s) => s.localizador!))].join(", ");
-    return { chave, rotulo, estado: "ok", valor: "Emitido", detalhe: `LOC ${locs} · ${quando}` };
+    // revisão manual: a IA / o Bitrix trazem o voo, mas só fica verde quando alguém confere
+    if (segs.some((s) => !s.conferido)) return { chave, rotulo, estado: "atencao", valor: "Falta conferir", detalhe: `${conf} · LOC ${locs} · ${quando}` };
+    return { chave, rotulo, estado: "ok", valor: "Emitido e conferido", detalhe: `LOC ${locs} · ${quando} · ${conf}` };
   }
   if (itemAereoAEmitir) return { chave, rotulo, estado: "atencao", valor: "A emitir", detalhe: "Vendido, sem voo no roteiro ainda" };
   if (aereoVendido) return { chave, rotulo, estado: "falta", valor: "Não cadastrado", detalhe: "Anexe o bilhete ou cadastre à mão" };
@@ -150,14 +164,20 @@ export function prontidaoDaViagem(e: EntradaProntidao, hoje: string): Prontidao 
 
   // voos internos — o sistema não sabe se o roteiro PRECISA de um; sem nenhum, fica neutro
   {
-    const segs = e.voos.filter((v) => v.valido && !v.cancelado && v.papel === "interno");
+    const todos = e.voos.filter((v) => v.valido && !v.cancelado && v.papel === "interno");
+    const segs = todos.filter((v) => !v.passou);
     const rotulo = "Voos internos";
-    if (segs.length) {
+    if (todos.length && !segs.length) {
+      q.push({ chave: "internos", rotulo, estado: "ok", valor: "Já voados", detalhe: plural(todos.length, "trecho", "trechos") });
+    } else if (segs.length) {
       const semLoc = segs.filter((s) => !s.localizador && !s.semHora).length;
       const rotas = segs.slice(0, 2).map((s) => [s.origem, s.destino].filter(Boolean).join(" → ")).filter(Boolean).join(" · ");
+      const conf = conferidosTxt(segs);
       q.push(semLoc
-        ? { chave: "internos", rotulo, estado: "atencao", valor: `${semLoc} sem localizador`, detalhe: rotas || plural(segs.length, "trecho", "trechos") }
-        : { chave: "internos", rotulo, estado: "ok", valor: plural(segs.length, "trecho", "trechos"), detalhe: rotas || "cadastrados" });
+        ? { chave: "internos", rotulo, estado: "atencao", valor: `${semLoc} sem localizador`, detalhe: `${rotas || plural(segs.length, "trecho", "trechos")} · ${conf}` }
+        : segs.some((s) => !s.conferido)
+          ? { chave: "internos", rotulo, estado: "atencao", valor: "Falta conferir", detalhe: `${conf}${rotas ? ` · ${rotas}` : ""}` }
+          : { chave: "internos", rotulo, estado: "ok", valor: plural(segs.length, "trecho", "trechos"), detalhe: `${rotas || "cadastrados"} · ${conf}` });
     } else {
       const algumVoo = e.voos.some((v) => v.valido && !v.cancelado);
       q.push({ chave: "internos", rotulo, estado: "neutro", valor: algumVoo ? "Nenhum" : "Sem voos", detalhe: algumVoo ? "Só ida e volta cadastradas" : "Nenhum voo no roteiro" });

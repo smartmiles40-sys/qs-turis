@@ -30,6 +30,7 @@ import {
   ignorarAlerta, oQueMudou, situacaoDoTrecho, statusManual, type CamposTrecho, type Correcao,
 } from "../lib/correcoes";
 import { usePode } from "../equipe/usePode";
+import { conferidosDoHistorico } from "../lib/conferencia";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 
 const COR_ESTADO: Record<EstadoTrecho, { bg: string; fg: string }> = {
@@ -73,7 +74,7 @@ function paraLocal(iso: string | null | undefined, fuso: string | null | undefin
 const deLocal = (v: string, fuso: string | null | undefined) => (v ? new Date(`${v}:00${/^[+-]\d{2}:\d{2}$/.test(fuso || "") ? fuso : "-03:00"}`).toISOString() : null);
 
 // ── modal: pedir o motivo ───────────────────────────────────────────────────
-function PedirMotivo({ titulo, explicacao, onConfirmar, onFechar, exigir = true, children }: {
+export function PedirMotivo({ titulo, explicacao, onConfirmar, onFechar, exigir = true, children }: {
   titulo: string; explicacao: string; exigir?: boolean; onConfirmar: (motivo: string) => Promise<void>; onFechar: () => void; children?: React.ReactNode;
 }) {
   const [motivo, setMotivo] = useState("");
@@ -99,7 +100,7 @@ function PedirMotivo({ titulo, explicacao, onConfirmar, onFechar, exigir = true,
 }
 
 // ── modal: corrigir um trecho ───────────────────────────────────────────────
-function CorrigirTrecho({ t, onFechar, onSalvo }: { t: Trecho; onFechar: () => void; onSalvo: () => void }) {
+export function CorrigirTrecho({ t, onFechar, onSalvo }: { t: Trecho; onFechar: () => void; onSalvo: () => void }) {
   const [f, setF] = useState({
     tipo: t.tipo, partida: paraLocal(t.partida_em, t.partida_fuso), chegada: paraLocal(t.chegada_em, t.chegada_fuso || t.partida_fuso),
     partida_fuso: t.partida_fuso ?? "", chegada_fuso: t.chegada_fuso ?? "", origem: t.origem ?? "", destino: t.destino ?? "",
@@ -196,7 +197,13 @@ export default function VoosDaViagem({ v, trechos, onMudou }: { v: Viagem; trech
   // desfazer: só a correção mais recente (valendo) de cada item
   const ultimaPorItem = new Set<string>();
   const vistos = new Set<string>();
-  for (const c of hist) { const k = c.trecho_id ?? "viagem"; if (c.desfeita_em || vistos.has(k)) continue; vistos.add(k); ultimaPorItem.add(c.id); }
+  // 0310: a conferência ("Conferi ✓") não restaura nada — cada uma se desfaz sozinha e não trava as outras
+  for (const c of hist) {
+    if (c.desfeita_em) continue;
+    if (c.acao === "trecho_conferido") { ultimaPorItem.add(c.id); continue; }
+    const k = c.trecho_id ?? "viagem"; if (vistos.has(k)) continue; vistos.add(k); ultimaPorItem.add(c.id);
+  }
+  const conferidos = conferidosDoHistorico(hist);
 
   return (
     <section className="rel-card p-4 space-y-3" aria-label="Voos e check-ins da viagem">
@@ -288,6 +295,7 @@ export default function VoosDaViagem({ v, trechos, onMudou }: { v: Viagem; trech
                     <b>{rota(t)}</b>{t.numero ? <span style={{ color: "var(--ink2)" }}> · {t.numero}</span> : null}
                     {t.localizador ? <span style={{ color: "var(--ink3)" }}> · {t.localizador}</span> : null}
                     {t.corrigido_em && <span className="ml-1 text-[10.5px] font-bold" style={{ color: "var(--warn-ink)" }}>corrigido à mão</span>}
+                    {conferidos.has(t.id) && <span className="ml-1 text-[10.5px] font-bold" style={{ color: "var(--rel-ink)" }}>conferido ✓ {conferidos.get(t.id)!.por ? `por ${conferidos.get(t.id)!.por!.replace(/\s*\|.*$/, "")}` : ""}</span>}
                     {!valido && motivoFora && <span className="block text-[11px]" style={{ color: "var(--err-ink)" }}>não conta: {motivoFora}</span>}
                     {t.status_manual_motivo && <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>motivo: {t.status_manual_motivo}</span>}
                   </td>

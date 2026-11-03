@@ -10,12 +10,13 @@
 import { supabase } from "@/lib/supabase";
 import type { FaseReal, SituacaoManualTrecho } from "./statusViagem";
 
-export type AcaoCorrecao = "trecho_editado" | "trecho_situacao" | "trecho_checkin" | "datas" | "status_manual" | "alerta_ignorado";
+export type AcaoCorrecao = "trecho_editado" | "trecho_situacao" | "trecho_checkin" | "trecho_conferido" | "datas" | "status_manual" | "alerta_ignorado";
 
 export const ROTULO_ACAO: Record<AcaoCorrecao, string> = {
   trecho_editado: "Trecho corrigido",
   trecho_situacao: "Situação do trecho",
   trecho_checkin: "Check-in",
+  trecho_conferido: "Voo conferido à mão",
   datas: "Datas da viagem",
   status_manual: "Status da viagem",
   alerta_ignorado: "Alerta",
@@ -93,6 +94,20 @@ export async function ignorarAlerta(viagemId: string, chave: string, motivo: str
   erro(error);
 }
 
+/** Mensagem de quando a função da 0310 (revisão manual dos voos) não está no banco. */
+export const FALTA_0310 = "O \"Conferi ✓\" ainda não está no banco (falta aplicar a migration 0310).";
+
+/**
+ * 0310: "Conferi ✓" (true) ou tirar a conferência (false) — grava no histórico
+ * (acao 'trecho_conferido', quem e quando). O estado sai de conferidosDoHistorico.
+ */
+export async function conferirTrecho(trechoId: string, conferido = true) {
+  const { error } = await supabase.rpc("rel_trecho_conferir", { p_trecho: trechoId, p_conferido: conferido });
+  if (!error) return;
+  if (semFuncao(error.message)) throw new Error(FALTA_0310);
+  throw new Error(error.message);
+}
+
 export async function desfazerCorrecao(id: string) {
   const { error } = await supabase.rpc("rel_desfazer_correcao", { p_correcao: id });
   erro(error);
@@ -108,13 +123,14 @@ const CAMPO_LEGIVEL: Record<string, string> = {
   tipo: "tipo", partida_em: "partida", chegada_em: "chegada", origem: "origem", destino: "destino", origem_codigo: "cód. origem",
   destino_codigo: "cód. destino", numero: "nº do voo", companhia: "companhia", localizador: "localizador", partida_fuso: "fuso da partida",
   chegada_fuso: "fuso da chegada", status_manual: "situação", checkin_feito_em: "check-in", data_embarque: "ida", data_retorno: "volta",
-  fase_manual: "status", fase_manual_ate: "status até", alertas_ignorados: "alertas ignorados",
+  fase_manual: "status", fase_manual_ate: "status até", alertas_ignorados: "alertas ignorados", conferido: "conferido",
 };
 const IGNORAR = new Set(["corrigido_em", "corrigido_por", "status_manual_por", "status_manual_em", "status_manual_motivo", "checkin_feito_por",
   "fase_manual_por", "fase_manual_em", "fase_manual_motivo", "datas_travadas"]);
 
 function valorLegivel(k: string, v: unknown): string {
   if (v == null || v === "") return "—";
+  if (typeof v === "boolean") return v ? "sim" : "não";
   if (k === "alertas_ignorados") return `${Object.keys(v as object).length} ignorado(s)`;
   if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
     return new Date(v).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });

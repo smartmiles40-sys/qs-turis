@@ -153,3 +153,46 @@ button.vf-quadro:hover { border-color: var(--border-strong); }
 .vf-mais > summary span { font-weight: 500; font-size: 13px; color: var(--muted); }
 .vf-mais__corpo { padding: 0 24px 20px; }
 @media (max-width: 640px) { .vf-mais > summary { padding: 14px 16px; } .vf-mais__corpo { padding: 0 16px 16px; } }
+
+/* revisão humana dos voos (03/11: Corrigir / Conferi ✓ / Tirar) */
+.vf-btn--ok { background: var(--ok); color: var(--on-primary); border-color: var(--ok); font-weight: 700; }
+.vf-btn--perigo { color: var(--danger); }
+.vf-btn--perigo:hover { border-color: var(--danger); }
+.vf-seg__rev { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; border-top: 1px dashed var(--border); padding-top: 10px; font-size: 12.5px; }
+.vf-seg__botoes { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.vf-conf { color: var(--warn); font-weight: 600; }
+.vf-conf--ok { color: var(--ok); }
+.vf-contagem { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; border-radius: 10px; padding: 10px 14px; font-size: 13px; border: 1px solid transparent; }
+.vf-contagem--ok { background: var(--ok-bg); color: var(--ok); }
+.vf-contagem--atencao { background: var(--warn-bg); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.vf-contagem span { color: var(--muted); }
+.vf-bloco { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.vf-bloco > summary { cursor: pointer; padding: 12px 16px; font-weight: 700; font-size: 14px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.vf-bloco > summary .vf-sub { font-weight: 500; font-size: 12.5px; }
+.vf-bloco > .vf-secao { padding: 0 12px 12px; }
+
+/* arquivos da viagem: soltar arquivo + cartões com Aprovar / Recusar (03/11) */
+.vf-drop { display: flex; flex-direction: column; gap: 12px; border: 2px dashed var(--border-strong); border-radius: 12px; padding: 16px; background: var(--surface-2); }
+.vf-drop--sobre { border-color: var(--info); background: var(--info-bg); }
+.vf-drop__alvo { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 96px; border-radius: 10px; cursor: pointer; text-align: center; font-weight: 600; color: var(--text); background: none; border: 0; font: inherit; width: 100%; }
+.vf-drop__alvo:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.vf-drop__alvo span { font-weight: 500; color: var(--muted); font-size: 12.5px; }
+.vf-drop__linha { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; justify-content: space-between; }
+.vf-docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; list-style: none; margin: 0; padding: 0; }
+.vf-doc { position: relative; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: var(--surface-2); min-width: 0; outline: none; }
+.vf-doc:focus-visible { border-color: var(--info); box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 35%, transparent); }
+.vf-doc--aprovado { border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.vf-doc--recusado { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.vf-doc__top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; min-width: 0; }
+.vf-doc__meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--muted); }
+/* a decisão: escondida até passar o mouse, focar (teclado) ou tocar (celular) */
+.vf-doc__decide { display: none; gap: 8px; }
+.vf-doc:hover .vf-doc__decide, .vf-doc:focus-within .vf-doc__decide, .vf-doc--aberto .vf-doc__decide { display: flex; }
+.vf-doc__decide > button { flex: 1 1 0; min-height: 48px; border-radius: 10px; font: inherit; font-weight: 700; font-size: 14px; cursor: pointer; border: 1px solid transparent; }
+.vf-doc__aprovar { background: var(--ok); color: var(--on-primary); }
+.vf-doc__recusar { background: var(--danger); color: var(--on-primary); }
+.vf-doc__desfazer { background: var(--surface); color: var(--text); border-color: var(--border) !important; }
+.vf-doc__decide > button:disabled { opacity: .5; cursor: not-allowed; }
+.vf-doc__dica { font-size: 11.5px; color: var(--subtle); }
+.vf-doc:hover .vf-doc__dica, .vf-doc:focus-within .vf-doc__dica, .vf-doc--aberto .vf-doc__dica { display: none; }
+@media (hover: none) { .vf-doc:hover .vf-doc__decide { display: none; } .vf-doc--aberto .vf-doc__decide, .vf-doc:focus-within .vf-doc__decide { display: flex; } }

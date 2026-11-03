@@ -509,9 +509,12 @@ export async function abrirDocumento(d: Documento): Promise<string> {
   return data.signedUrl;
 }
 
-export async function revisarDocumento(id: string, status: "aprovado" | "recusado", userId: string, motivo?: string) {
+/** Aprovar / recusar — ou "recebido" = desfazer a revisão (volta a "a conferir"). */
+export async function revisarDocumento(id: string, status: "aprovado" | "recusado" | "recebido", userId: string, motivo?: string) {
+  const desfazer = status === "recebido";
   const { error } = await supabase.from("rel_documentos").update({
-    status, motivo_recusa: status === "recusado" ? motivo || null : null, revisado_por: userId, revisado_em: new Date().toISOString(),
+    status, motivo_recusa: status === "recusado" ? motivo || null : null,
+    revisado_por: desfazer ? null : userId, revisado_em: desfazer ? null : new Date().toISOString(),
   }).eq("id", id);
   if (error) throw new Error(error.message);
 }
