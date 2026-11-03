@@ -69,7 +69,9 @@ export const ITENS_REL: ItemRel[] = [
   // 03/11 (docs/REL-UNIFICACAO.md): a porta de entrada — expedições + pacotes com as pendências de cada uma
   { id: "exp-painel", label: "Painel das viagens", icon: Icon.grafico, grupo: "expedicoes", dica: "Quem embarca, quem está viajando e o que falta em cada viagem" },
   { id: "exp-expedicoes", label: "Expedições", icon: Icon.mapa, grupo: "expedicoes", dica: "Grupos das expedições (só leitura)" },
-  { id: "exp-pacotes", label: "Pacotes", icon: Icon.carteira, grupo: "expedicoes", dica: "Pacotes vendidos" },
+  // 03/11 (Bruno: "pode juntar Viagens e Pacotes numa porta só"): "Pacotes" saiu — os
+  // pacotes são Viagens › Pacotes (#rel/viagens?tipo=pacote). #rel/exp-pacotes sem id
+  // cai lá; com id continua abrindo o cockpit do pacote cadastrado como expedição.
   // 03/11 (Bruno): Inscrições e Avisos saíram do menu e moram DENTRO da expedição —
   // a inscrição como selo no nome de cada passageiro (aba Passageiros, com aprovar/
   // recusar ali) e os avisos na Visão geral. #rel/exp-inscricoes e #rel/exp-avisos

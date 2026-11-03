@@ -40,6 +40,14 @@ export interface MenuPorPapel {
 
 const EVENTO = "qs-menu-papel-mudou";
 
+/** Itens que viraram outro (03/11: a lista de Pacotes agora é Viagens › Pacotes). */
+const ITEM_NOVO: Record<string, string> = { "exp-pacotes": "viagens" };
+
+/** Menu salvo antes: troca item que mudou de nome, tira o que saiu do catálogo e repetidos. */
+export function trocarItensAntigos(itens: string[]): string[] {
+  return [...new Set(itens.map((id) => ITEM_NOVO[id] ?? id))].filter((id) => IDS_REL.has(id));
+}
+
 /** null = a 0229 não está aplicada (ou a rede falhou): use o menu completo. */
 export async function lerMenuPorPapel(setor = "relacionamento"): Promise<MenuPorPapel | null> {
   const [s, p] = await Promise.all([
@@ -52,7 +60,8 @@ export async function lerMenuPorPapel(setor = "relacionamento"): Promise<MenuPor
   for (const r of (p.data ?? []) as { papel: Papel; itens: string[] | null }[]) {
     if (!PAPEIS.includes(r.papel) || !r.itens) continue;
     // 03/11: item que saiu do catálogo (ex.: "alertas", "exp-inscricoes") some do papel
-    mapa[r.papel] = r.itens.filter((id) => IDS_REL.has(id));
+    // 03/11: "exp-pacotes" virou Viagens › Pacotes — quem tinha Pacotes ganha Viagens
+    mapa[r.papel] = trocarItensAntigos(r.itens);
     personalizados.push(r.papel);
   }
   return { ligado: !!(s.data as { por_papel?: boolean } | null)?.por_papel, mapa, personalizados };

@@ -17,13 +17,22 @@
 // data de embarque, como no quadro do Painel) é UMA linha com o total de
 // pessoas; clicando, abre a lista de passageiros. Busca e as filas de
 // arrumação (sem data / classificar) seguem pessoa por pessoa.
+//
+// 03/11 (Bruno: "pode juntar Viagens e Pacotes numa porta só"): a Lista ganhou
+// a fileira de TIPO (Todos · Expedições · Pacotes · Aéreo · Hotel/Passeio ·
+// Seguro e outros, src/rel/lib/tiposViagem.ts), que combina com as filas de
+// situação e vai no endereço (#rel/viagens?tipo=pacote). Em Pacotes, embaixo,
+// os pacotes cadastrados como expedição (abrem o cockpit). O item "Pacotes" do
+// menu saiu; #rel/exp-pacotes sem id cai aqui.
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
-  FASES, SERVICOS, TIPOS_VIAGEM, criarViagem, dataBR, grupoDe, importarDoBitrix, listarEquipeRel, listarViagens, periodo, proximoVoo, quandoEmbarca, sincronizarBitrix,
-  type FiltroViagens, type ResultadoSync, type TipoViagem, type Viagem,
+  FASES, SERVICOS, TIPOS_VIAGEM, contarPorTipo, criarViagem, dataBR, grupoDe, importarDoBitrix, listarEquipeRel, listarViagens, pacotesDeExpedicao, periodo, proximoVoo, quandoEmbarca, sincronizarBitrix,
+  type FiltroViagens, type PacoteExpedicao, type ResultadoSync, type TipoViagem, type Viagem,
 } from "../lib/viagens";
+import { TIPOS_FILTRO, lerTipo, type TipoFiltro } from "../lib/tiposViagem";
+import { gravarParamNoHash, lerParamDoHash } from "@/lib/hashQuery";
 import { buscarClientes, type Cliente } from "../lib/clientes";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import { TOM_FASE } from "./ViagensDoCliente";
@@ -338,15 +347,65 @@ function LinhaGrupo({ g, aberto, onAlternar, children }: { g: Grupo; aberto: boo
 
 // ── Página ──────────────────────────────────────────────────────────────────
 
-export default function ViagensPage({ onAbrirViagem, onAbrirCliente, faxina }: {
+// ── Pacotes cadastrados como expedição (tipo = Pacotes) ─────────────────────
+
+function PacotesDeExpedicao({ onAbrir }: { onAbrir: (id: string) => void }) {
+  const [l, setL] = useState<PacoteExpedicao[] | null>(null);
+  useEffect(() => { pacotesDeExpedicao().then(setL).catch(() => setL([])); }, []);
+  if (!l?.length) return null;
+  return (
+    <section className="rel-card overflow-hidden mt-4" aria-label="Pacotes cadastrados como expedição">
+      <div className="px-4 pt-3 pb-2">
+        <h2 className="text-[12px] font-bold uppercase tracking-wide" style={{ color: "var(--ink2)" }}>
+          Pacotes cadastrados como expedição <span className="tabular-nums" style={{ color: "var(--ink3)" }}>{l.length}</span>
+        </h2>
+        <p className="text-[12px]" style={{ color: "var(--ink3)" }}>Com passageiros, rooming e ExpedAmigo — abrem o cockpit do pacote.</p>
+      </div>
+      <ul>
+        {l.map((p) => (
+          <li key={p.id} style={{ borderTop: "1px solid var(--line2)" }}>
+            <button type="button" className="rel-linha w-full text-left flex items-center gap-3 px-4 py-2.5" onClick={() => onAbrir(p.id)}>
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm font-semibold truncate" style={{ color: "var(--ink)" }}>{p.nome}</span>
+                <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>
+                  {[p.destino, periodo({ data_embarque: p.data_embarque, data_retorno: p.data_retorno })].filter(Boolean).join(" · ")}
+                </span>
+              </span>
+              {p.status && <Etiqueta>{p.status}</Etiqueta>}
+              <span className="text-[12px] flex-shrink-0" style={{ color: "var(--rel-ink)" }} aria-hidden>abrir ↗</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export default function ViagensPage({ onAbrirViagem, onAbrirCliente, onAbrirPacoteExpedicao, faxina }: {
   onAbrirViagem: (id: string) => void; onAbrirCliente: (id: string) => void;
+  /** pacote cadastrado como expedição (tabela expedicoes): abre o cockpit */
+  onAbrirPacoteExpedicao?: (id: string) => void;
   /** item "Faxina" do menu da supervisão: abre na lista com todas as filas à mostra */
   faxina?: boolean;
 }) {
   const { currentUser } = useQsAuth();
   const gestor = podeGerirRelacionamento(currentUser);
-  const [visao, setVisaoState] = useState<Visao>(() => (faxina ? "lista" : visaoSalva()));
+  // 03/11: o tipo mora no endereço (#rel/viagens?tipo=pacote) — link com tipo abre direto na Lista
+  const [tipo, setTipoState] = useState<TipoFiltro>(() => lerTipo(lerParamDoHash("tipo")));
+  const [visao, setVisaoState] = useState<Visao>(() => (faxina || lerParamDoHash("tipo") ? "lista" : visaoSalva()));
   const setVisao = (v: Visao) => { setVisaoState(v); try { localStorage.setItem(CHAVE_VISAO, v); } catch { /* sem localStorage */ } };
+  const setTipo = (t: TipoFiltro) => { setTipoState(t); gravarParamNoHash("tipo", t === "todos" ? null : t); };
+  useEffect(() => {
+    // #rel/exp-pacotes (ou um link com ?tipo=) aberto com a tela já montada
+    const aoMudar = () => {
+      const p = lerParamDoHash("tipo");
+      setTipoState(lerTipo(p));
+      if (p) setVisaoState("lista");
+    };
+    window.addEventListener("hashchange", aoMudar);
+    return () => window.removeEventListener("hashchange", aoMudar);
+  }, []);
+  const [contagem, setContagem] = useState<Record<TipoFiltro, number> | null>(null);
   const [filtro, setFiltro] = useState<FiltroViagens>("proximas");
   // o painel abre a lista já numa fila ("Precisa de data" / "Classificar")
   const verFila = (f: FiltroViagens) => { setFiltro(f); setVisao("lista"); };
@@ -364,7 +423,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, faxina }: {
   const [equipe, setEquipe] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => { listarEquipeRel().then(setEquipe).catch(() => setEquipe([])); }, []);
   const [sel, setSel] = useState<Set<string>>(new Set());
-  useEffect(() => { setSel(new Set()); }, [filtro, busca]);
+  useEffect(() => { setSel(new Set()); }, [filtro, busca, tipo]);
   const [arquivos, setArquivos] = useState<Map<string, Arquivada>>(new Map());
   useEffect(() => {
     if (filtro !== "arquivadas" || !lista?.length) { setArquivos(new Map()); return; }
@@ -396,7 +455,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, faxina }: {
     let vivo = true;
     setLista(null);
     const t = setTimeout(() => {
-      listarViagens(filtro, busca, currentUser?.id ?? "")
+      listarViagens(filtro, busca, currentUser?.id ?? "", tipo)
         .then((l) => {
           if (!vivo) return;
           setLista(l); setErro(null);
@@ -412,6 +471,17 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, faxina }: {
     }, busca ? 300 : 0);
     return () => { vivo = false; clearTimeout(t); };
     // o usuário pode chegar depois da 1ª carga: sem ele, "Minhas" vinha vazia
+  }, [filtro, busca, versao, visao, currentUser?.id, tipo]);
+
+  // Quantas de cada tipo a fila tem (não depende do tipo escolhido: os números não pulam)
+  useEffect(() => {
+    if (visao !== "lista") return;
+    let vivo = true;
+    setContagem(null);
+    const t = setTimeout(() => {
+      contarPorTipo(filtro, busca, currentUser?.id ?? "").then((c) => { if (vivo) setContagem(c); }).catch(() => { if (vivo) setContagem(null); });
+    }, busca ? 300 : 0);
+    return () => { vivo = false; clearTimeout(t); };
   }, [filtro, busca, versao, visao, currentUser?.id]);
 
   async function sincronizar() {
@@ -480,6 +550,19 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, faxina }: {
           <input type="checkbox" checked={porGrupo} onChange={(e) => setPorGrupo(e.target.checked)} /> Expedições por grupo
         </label>
       </div>
+      {/* 03/11: o tipo do que foi vendido — combina com a fila de cima */}
+      <div className="flex gap-1 rel-card p-1 overflow-x-auto mb-3 w-fit max-w-full" role="group" aria-label="Filtrar por tipo">
+        {TIPOS_FILTRO.map((t) => {
+          const n = contagem?.[t.id];
+          return (
+            <button key={t.id} onClick={() => setTipo(t.id)} aria-pressed={tipo === t.id} title={t.dica}
+              className="rel-linha px-3 py-1.5 rounded-lg text-[12px] font-semibold whitespace-nowrap"
+              style={tipo === t.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)" } : { color: "var(--ink2)" }}>
+              {t.rotulo}{n != null && <span className="ml-1 tabular-nums font-normal" style={{ color: "var(--ink3)" }}>{n}</span>}
+            </button>
+          );
+        })}
+      </div>
       <div className="mb-4">
         <Entrada value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar viagens" placeholder="Buscar por viagem, destino, expedição, cliente ou nº do Bitrix" />
       </div>
@@ -499,7 +582,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, faxina }: {
         <div className="rel-card">
           <Vazio
             titulo={busca ? "Nenhuma viagem encontrada" : "Nenhuma viagem aqui"}
-            texto={filtro === "proximas" && !busca ? "Clique em \"Sincronizar com o Bitrix\" para trazer as vendas — depois disso elas chegam sozinhas a cada 30 minutos." : undefined}
+            texto={tipo !== "todos" ? "Nenhuma deste tipo nesta fila — troque o tipo ou a fila." : filtro === "proximas" && !busca ?"Clique em \"Sincronizar com o Bitrix\" para trazer as vendas — depois disso elas chegam sozinhas a cada 30 minutos." : undefined}
           />
         </div>
       ) : (
@@ -527,6 +610,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, faxina }: {
       {lista && lista.length >= 500 && (
         <p className="text-[12px] mt-2" style={{ color: "var(--ink3)" }}>Mostrando as 500 primeiras — use a busca.</p>
       )}
+      {tipo === "pacote" && onAbrirPacoteExpedicao && <PacotesDeExpedicao onAbrir={onAbrirPacoteExpedicao} />}
       </>}
 
       <NovaViagem aberto={nova} onFechar={() => setNova(false)} onCriada={(id) => { setNova(false); onAbrirViagem(id); }} />
