@@ -479,11 +479,22 @@ async function enviarContrato(u, body) {
 
 /** Lê o documento no ZapSign e aplica o status (webhook e botão "Atualizar"). */
 async function conferirNoZapsign(contrato, autorId) {
-  const doc = await lerNoZapsign(contrato.zapsign_token);
+  let doc;
+  try {
+    doc = await lerNoZapsign(contrato.zapsign_token);
+  } catch (e) {
+    // Documento apagado no ZapSign (doc_deleted, ou o "Cancelar" do próprio QS):
+    // a leitura dá 404. Sem isto o webhook respondia 500 e o ZapSign reenviava
+    // pra sempre (03/11). Cancelado só vale se ainda não foi assinado (a RPC barra).
+    if (e?.status === 404) return registrarStatus(contrato.id, 'cancelado', { motivo: 'Documento apagado no ZapSign.' }, autorId);
+    throw e;
+  }
   const st = statusDoDocumento(doc, contrato.campos?.email);
   if (!st) return contrato.status;
   const extra = { ...(st.extra || {}) };
-  if (st.status === 'assinado' && !contrato.pdf_assinado_url && st.arquivo) {
+  // Arquiva a cópia assinada quando o cliente assina e DE NOVO quando o documento
+  // fecha (a agência assinou): senão o QS guardava o PDF sem a 2ª assinatura.
+  if (st.status === 'assinado' && st.arquivo && (!contrato.pdf_assinado_url || st.concluido)) {
     // Cópia assinada no Storage (o link do ZapSign expira em minutos).
     try {
       extra.pdf_assinado_url = await arquivarAssinado(st.arquivo, `${contrato.negocio_id}/${contrato.id}-assinado.pdf`);
@@ -506,8 +517,11 @@ async function webhookZapsign(req, res) {
   if (!segredo) return res.status(503).json({ error: 'ZAPSIGN_WEBHOOK_SECRET não configurado.' });
   // O painel do ZapSign nem sempre deixa pôr header: aceita o segredo também na URL (&s=...).
   // Seguro o bastante porque o status nunca vem do corpo — é reconsultado no ZapSign.
-  const recebido = req.headers['x-qs-secret'] || new URL(req.url || '', 'http://x').searchParams.get('s');
-  if (!segredoConfere(recebido, segredo)) return res.status(401).json({ error: 'Segredo inválido.' });
+  // Também aceita "Authorization: Bearer <segredo>" — é o header que a API de
+  // webhooks do ZapSign sugere (POST /api/v1/user/company/webhook/ com `headers`).
+  const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+  const candidatos = [req.headers['x-qs-secret'], bearer, new URL(req.url || '', 'http://x').searchParams.get('s')].filter(Boolean);
+  if (!candidatos.some((c) => segredoConfere(String(c), segredo))) return res.status(401).json({ error: 'Segredo inválido.' });
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const token = String(body.token || body.doc_token || body.document?.token || '').trim();
   const evento = String(body.event_type || body.event || '').slice(0, 60) || null;

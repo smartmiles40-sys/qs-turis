@@ -559,7 +559,10 @@ export function statusDoDocumento(doc, emailCliente) {
   const viu = Number(cli.times_viewed || 0);
   const extra = { visualizacoes: viu, link_assinatura: cli.sign_url || undefined };
   if (doc.status === 'refused' || cli.status === 'refused') return { status: 'recusado', extra };
-  if (doc.status === 'signed' || cli.status === 'signed') return { status: 'assinado', extra: { ...extra, quando: cli.signed_at || undefined }, arquivo: doc.signed_file || null };
+  // `concluido`: TODOS assinaram (status do documento). O doc_signed chega a cada
+  // assinatura; o PDF do cliente sai antes da agência assinar e precisa ser
+  // arquivado de novo quando o documento fecha (03/11).
+  if (doc.status === 'signed' || cli.status === 'signed') return { status: 'assinado', extra: { ...extra, quando: cli.signed_at || undefined }, arquivo: doc.signed_file || null, concluido: doc.status === 'signed' };
   if (viu > 0 || cli.last_view_at) return { status: 'visualizado', extra: { ...extra, quando: cli.last_view_at || undefined } };
   return { status: 'enviado', extra };
 }
