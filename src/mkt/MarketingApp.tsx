@@ -18,6 +18,9 @@ import { agruparRotas } from "./menu";
 import { irMkt, useRotaMkt } from "./navegacao";
 import { GRUPOS_MKT, ROTAS_MKT } from "./rotas";
 import { contarEmAprovacao } from "./conteudo/dados";
+import { ROTA_SOLICITACOES_MKT } from "./solicitacoes/rotas";
+import { centralTemMarketing } from "@/solicitacoes/lib";
+import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 
 /** Magenta escuro: #BE185D com texto branco = 6:1 (WCAG AA). */
 const MKT_CSS = `${REL_CSS}
@@ -53,21 +56,31 @@ function Area() {
     return () => { vivo = false; clearInterval(t); };
   }, [aprovador, rota.tela]);
 
+  // Central de Solicitações (0283): só entra no menu quando o banco aceita o
+  // Marketing (tem tipo de pedido dele). Bolinha = pedido novo pro Marketing +
+  // novidade no que eu pedi (recontagem a cada 30 s e na hora, pelo aviso).
+  const [comCentral, setComCentral] = useState(false);
+  useEffect(() => { void centralTemMarketing().then(setComCentral).catch(() => setComCentral(false)); }, []);
+  const [central] = useContagemSolicitacoes("marketing");
+  const bCentral = bolinhaDaCentral(central);
+  const rotas = comCentral ? [...ROTAS_MKT, ROTA_SOLICITACOES_MKT] : ROTAS_MKT;
+
   if (!currentUser) return null;
-  const grupos: GrupoDoMenu[] = agruparRotas(ROTAS_MKT, GRUPOS_MKT, meusPapeis, aprovador).map((g) => ({
+  const grupos: GrupoDoMenu[] = agruparRotas(rotas, GRUPOS_MKT, meusPapeis, aprovador).map((g) => ({
     id: g.id,
     rotulo: g.rotulo,
     icone: ICONE_GRUPO_MKT[g.id] ?? ICONES_MKT.lista,
     itens: g.rotas.map((r) => ({
       id: r.id, rotulo: r.rotulo, icone: r.icone ? ICONES_MKT[r.icone] : undefined,
-      badge: r.id === "aprovacoes" && pendentes ? pendentes : undefined,
+      badge: r.id === "aprovacoes" && pendentes ? pendentes : r.id === "solicitacoes" ? bCentral.badge : undefined,
+      ...(r.id === "solicitacoes" && bCentral.alerta ? { alerta: true } : {}),
     })),
   }));
 
   // Rota desconhecida (ou "inicio") cai no quadro. A rota existe mesmo escondida
   // do menu pelo papel: esconder não é trava (a trava é a RLS).
   const tela = rota.tela === "inicio" ? INICIO : rota.tela;
-  const atual = ROTAS_MKT.find((r) => r.id === tela) ?? ROTAS_MKT.find((r) => r.id === INICIO);
+  const atual = rotas.find((r) => r.id === tela) ?? rotas.find((r) => r.id === INICIO);
   const Tela = atual?.componente;
 
   return (

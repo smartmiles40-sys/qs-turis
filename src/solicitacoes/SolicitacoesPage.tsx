@@ -32,7 +32,7 @@ import SolicitacaoDetalhe, { type LinksSol } from "./SolicitacaoDetalhe";
 import TiposPrazos from "./TiposPrazos";
 import { rotuloStatus } from "./cotacao";
 import {
-  AGUARDANDO, NOME_SETOR, SETORES, buscar, contarEntregues, haQuanto, listarDoSetor, listarMinhas, primeiroNome, textoPrazo,
+  AGUARDANDO, NOME_SETOR, setoresDaCentral, aoMudarSolicitacao, buscar, contarEntregues, haQuanto, listarDoSetor, listarMinhas, primeiroNome, textoPrazo,
   type Entregues, type Setor, type Solicitacao,
 } from "./lib";
 import {
@@ -158,7 +158,9 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   useEffect(() => { void carregar(); }, [carregar]);
   useEffect(() => {
     const t = setInterval(() => { if (!document.hidden) void carregar(); }, 30_000);
-    return () => clearInterval(t);
+    // Aviso de solicitação chegou pelo Realtime (AvisosProvider): recarrega já.
+    const desliga = aoMudarSolicitacao(() => { void carregar(); });
+    return () => { clearInterval(t); desliga(); };
   }, [carregar]);
 
   // Histórico: busca no banco (número, cliente, assunto), esperando parar de digitar.
@@ -210,7 +212,7 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   /** Contadores do filtro de setor (abertas e atrasadas de cada um). */
   const porOrigem = useMemo(() => {
     const m = new Map<Setor, { abertas: number; atrasadas: number }>();
-    for (const s of SETORES) if (s !== setor) m.set(s, { abertas: 0, atrasadas: 0 });
+    for (const s of setoresDaCentral()) if (s !== setor) m.set(s, { abertas: 0, atrasadas: 0 });
     for (const s of doEscopo) {
       const o = m.get(outro(s)); if (!o || !s.aberta) continue;
       o.abertas++; if (atrasada(s, agora) || s.sem_dono_atrasada) o.atrasadas++;

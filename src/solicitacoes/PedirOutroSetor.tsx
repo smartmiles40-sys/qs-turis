@@ -12,7 +12,7 @@ import { Botao, Etiqueta } from "@/rel/ui";
 import NovaSolicitacao from "./NovaSolicitacao";
 import SolicitacaoDetalhe, { type LinksSol } from "./SolicitacaoDetalhe";
 import { rotuloStatus, tomStatus } from "./cotacao";
-import { COR_SETOR, SIGLA, primeiroNome, solicitacoesDe, textoPrazo, type AlvoSol, type Setor, type Solicitacao } from "./lib";
+import { COR_SETOR, SIGLA, aoMudarSolicitacao, primeiroNome, solicitacoesDe, textoPrazo, type AlvoSol, type Setor, type Solicitacao } from "./lib";
 
 export function BotaoPedirOutroSetor({ deSetor, alvo, onCriada, children, className }: {
   deSetor: Setor; alvo: AlvoSol; onCriada?: () => void; children?: ReactNode; className?: string;
@@ -54,7 +54,8 @@ export function PedidosSobre({ alvo, recarregar = 0, links, titulo = "Pedidos a 
   useEffect(() => {
     carregar();
     const t = setInterval(() => { if (!document.hidden) carregar(); }, 60_000);
-    return () => clearInterval(t);
+    const desliga = aoMudarSolicitacao(carregar);
+    return () => { clearInterval(t); desliga(); };
   }, [carregar]);
 
   const abertas = lista.filter((s) => s.aberta || (s.status === "concluida" && !s.confirmado_em));

@@ -14,13 +14,14 @@ import { useEffect, useState } from "react";
 import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Entrada, Modal } from "@/rel/ui";
 import {
-  NOME_PAPEL, NOME_SETOR, PAPEIS, SETORES, definirDistribuicao, horasDoTipo, lerDistribuicao, listarTipos, salvarTipo,
+  NOME_PAPEL, NOME_SETOR, PAPEIS, setoresDaCentral, definirDistribuicao, horasDoTipo, lerDistribuicao, listarTipos, salvarTipo,
   type Papel, type Setor, type TipoSol,
 } from "./lib";
 
 export default function TiposPrazos({ onFechar }: { onFechar: () => void }) {
   const { currentUser } = useQsAuth();
-  const meus: Setor[] = currentUser?.role === "admin" ? SETORES : setoresDe(currentUser).filter((s) => SETORES.includes(s));
+  const centrais = setoresDaCentral(); // o Marketing entra com a 0283
+  const meus: Setor[] = currentUser?.role === "admin" ? centrais : setoresDe(currentUser).filter((s) => centrais.includes(s));
   const [tipos, setTipos] = useState<TipoSol[]>([]);
   const [editado, setEditado] = useState<Record<string, Partial<TipoSol>>>({});
   const [novo, setNovo] = useState<Record<string, string>>({});

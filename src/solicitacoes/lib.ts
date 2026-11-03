@@ -17,10 +17,40 @@
 import { supabase } from "@/lib/supabase";
 import { NOME_SETOR, type Setor } from "@/components/sdr/types";
 
-// A Central de Solicitações é dos 4 setores de atendimento (o banco só aceita
-// esses em qs_solicitacoes). O Marketing (0240) tem o quadro próprio.
+// A Central de Solicitações nasceu dos 4 setores de atendimento (0149). O
+// Marketing entra com a 0283 (03/11): enquanto ela não estiver aplicada não há
+// tipo de pedido do Marketing, e ele fica de fora (setoresDaCentral()).
 export const SETORES: Setor[] = ["comercial", "relacionamento", "financeiro", "operacional"];
 export { NOME_SETOR, type Setor };
+
+let marketingNaCentral = false;
+/** Os setores da Central agora: os 4 + o Marketing, se a 0283 já está no banco. */
+export function setoresDaCentral(): Setor[] {
+  return marketingNaCentral ? [...SETORES, "marketing"] : SETORES;
+}
+/** O banco já aceita o Marketing na Central? (= tem tipo de pedido ativo dele — 0283). */
+export async function centralTemMarketing(): Promise<boolean> {
+  const { count, error } = await supabase.from("qs_solicitacao_tipos").select("id", { count: "exact", head: true })
+    .eq("setor", "marketing").eq("ativo", true);
+  if (!error) marketingNaCentral = (count ?? 0) > 0;
+  return marketingNaCentral;
+}
+
+// ── "Chegou/mudou solicitação" na hora ──────────────────────────────────────
+// O AvisosProvider recebe os avisos pelo Realtime (o gatilho do banco cria um
+// aviso pra cada pessoa do setor de destino no pedido novo, e pra quem pediu
+// quando o status muda). Ele repassa este evento, e a bolinha do menu e a lista
+// da Central recontam NA HORA, sem esperar o próximo ciclo de 30 s.
+export const EVENTO_SOLICITACAO = "qs:solicitacao-mudou";
+export function avisarSolicitacaoMudou(id?: string | null) {
+  window.dispatchEvent(new CustomEvent(EVENTO_SOLICITACAO, { detail: { id: id ?? null } }));
+}
+/** Escuta o evento acima; devolve o "desligar". */
+export function aoMudarSolicitacao(fn: () => void): () => void {
+  const on = () => fn();
+  window.addEventListener(EVENTO_SOLICITACAO, on);
+  return () => window.removeEventListener(EVENTO_SOLICITACAO, on);
+}
 
 export type StatusSol = "nova" | "em_andamento" | "aguardando" | "concluida" | "recusada" | "cancelada";
 export type AguardandoQuem = "cliente" | "fornecedor" | "solicitante" | "outro_setor";
@@ -192,7 +222,9 @@ export interface AlvoSol {
 export async function listarTipos(): Promise<TipoSol[]> {
   const { data, error } = await supabase.from("qs_solicitacao_tipos").select("*").order("ordem").order("rotulo");
   if (error) throw new Error(error.message);
-  return (data ?? []) as TipoSol[];
+  const tipos = (data ?? []) as TipoSol[];
+  marketingNaCentral = tipos.some((t) => t.setor === "marketing" && t.ativo);
+  return tipos;
 }
 
 /** Abertas de um setor (recebidas ou enviadas) + fechadas dos últimos `dias`. */

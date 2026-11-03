@@ -19,6 +19,7 @@ import {
   type Aviso, type PrefsAvisos,
 } from "./lib";
 import BolinhaFlutuante from "./BolinhaFlutuante";
+import { avisarSolicitacaoMudou } from "@/solicitacoes/lib";
 
 interface ValorAvisos {
   /** Não lidos, do mais novo pro mais velho (até LIMITE). */
@@ -138,6 +139,9 @@ export default function AvisosProvider({ children, modoBolinha, abrirFora }: {
         if (a.lido_em) return;
         setAvisos((l) => (l.some((x) => x.id === a.id) ? l : [a, ...l].slice(0, LIMITE + 1)));
         avisar(a);
+        // Pedido novo / status mudou numa solicitação: a bolinha do menu e a lista
+        // da Central recontam já (sem esperar os 30 s).
+        if (a.origem === "qs_solicitacoes" || a.tipo === "solicitacao") avisarSolicitacaoMudou(a.origem_id);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "qs_avisos", filter: `user_id=eq.${userId}` }, (p) => {
         const a = p.new as Aviso;
