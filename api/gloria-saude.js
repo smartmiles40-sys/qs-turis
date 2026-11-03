@@ -44,6 +44,8 @@ import { getSupabaseUserId } from './_wa.js';
 import { rest } from './_supabaseAdmin.js';
 import { saudeDaFila } from './_gloria.js';
 import { CHAVE_TEMPLATE, CHAVE_TETO, abordagensDeHoje } from './_abordagem.js';
+import { ENVS_GOOGLE, ErroGoogle, envsGoogleFaltando, obterTokenGoogle } from './_google.js';
+import { calendarioPadrao } from './_googleAgenda.js';
 
 const TIMEOUT_MS = 6_000;
 
@@ -107,34 +109,41 @@ async function bater_n8nGloria() {
 }
 
 /**
- * O n8n da agenda (Google Meet). Mesma família de erro, causa diferente: aqui o
- * que quebrou foi o NOME do header, não o valor.
+ * A agenda do Google (Meet + livre/ocupado dos closers). Desde 03/11/2026 sem
+ * n8n: o QS troca o refresh token por um access token e fala direto com a
+ * Calendar API. Bater na porta aqui = pedir o token e LER a agenda onde as
+ * reuniões nascem (calendars.get). Não cria evento nem convite.
  */
-async function bater_n8nAgenda() {
-  const url = String(process.env.N8N_AGENDA_URL || '').trim();
-  const seg = String(process.env.N8N_AGENDA_SECRET || '').trim();
-  if (!url) return porta('n8n — agenda / Meet', 'atencao', 'N8N_AGENDA_URL não configurada: a reunião é marcada, mas sem link do Meet.');
-  if (!seg) return porta('n8n — agenda / Meet', 'erro', 'N8N_AGENDA_SECRET não está configurada na Vercel.');
+async function bater_googleAgenda() {
+  const NOME = 'Google — agenda / Meet';
+  const faltam = envsGoogleFaltando();
+  if (faltam.length === ENVS_GOOGLE.length) {
+    return porta(NOME, 'atencao', `${faltam.join(', ')} não configuradas: a reunião é marcada, mas sem link do Meet.`,
+      { conserto: 'Passo a passo em docs/GOOGLE-AGENDA-SEM-N8N.md (OAuth client + refresh token da conta que organiza as reuniões).' });
+  }
+  if (faltam.length) return porta(NOME, 'erro', `Falta ${faltam.join(', ')} na Vercel.`);
 
   try {
-    const r = await comPrazo((signal) => fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-qs-agenda-secret': seg },
-      // Sem título e sem data: o objetivo é ver se a porta ABRE. Se abrir, o
-      // workflow recusa por falta de dados — que é a resposta que queremos.
-      body: JSON.stringify({ ping: true, origem: 'gloria-saude' }),
-      signal,
-    }));
+    const token = await obterTokenGoogle({ timeoutMs: TIMEOUT_MS });
+    const cal = calendarioPadrao();
+    const r = await comPrazo((signal) => fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal)}`,
+      { headers: { Authorization: `Bearer ${token}` }, signal },
+    ));
     if (r.status === 403) {
-      return porta('n8n — agenda / Meet', 'erro',
-        'O n8n RECUSOU (403). Foi este 403 que segurou o Meet por cinco dias.',
-        { conserto: 'n8n → credencial Header Auth da agenda. O campo Name é o NOME DO HEADER: x-qs-agenda-secret. Não é N8N_AGENDA_SECRET — esse é o nome da variável na Vercel, e ele vai no campo Value.' });
+      return porta(NOME, 'erro', 'O Google aceitou o token, mas recusou a agenda (403).',
+        { conserto: 'O refresh token foi gerado SEM o escopo https://www.googleapis.com/auth/calendar, ou a Calendar API não está ativada no projeto do Google Cloud.' });
     }
-    if (r.status === 404) return porta('n8n — agenda / Meet', 'erro', 'O n8n respondeu 404: workflow inativo ou URL errada.');
-    return porta('n8n — agenda / Meet', 'ok', `A porta abriu (HTTP ${r.status}) e o segredo bate.`);
+    if (r.status === 404) return porta(NOME, 'erro', `A agenda "${cal}" não existe pra esta conta (GOOGLE_CALENDAR_ID errado?).`);
+    if (!r.ok) return porta(NOME, 'atencao', `O Google respondeu HTTP ${r.status} ao ler a agenda.`);
+    return porta(NOME, 'ok', 'Token renovado e a agenda abriu.');
   } catch (e) {
-    return porta('n8n — agenda / Meet', 'erro',
-      e?.name === 'AbortError' ? 'O n8n não respondeu no prazo.' : `Não consegui alcançar: ${e?.message}`);
+    if (e instanceof ErroGoogle && e.codigo === 'google_auth') {
+      return porta(NOME, 'erro', `O Google recusou a credencial: ${e.message}`,
+        { conserto: 'Gere um refresh token novo (docs/GOOGLE-AGENDA-SEM-N8N.md) e troque GOOGLE_REFRESH_TOKEN na Vercel.' });
+    }
+    return porta(NOME, 'erro',
+      e?.name === 'AbortError' || e?.codigo === 'google_timeout' ? 'O Google não respondeu no prazo.' : `Não consegui alcançar o Google: ${e?.message}`);
   }
 }
 
@@ -273,8 +282,9 @@ async function retrato() {
     variaveis: {
       GLORIA_WEBHOOK_URL: posto(process.env.GLORIA_WEBHOOK_URL),
       GLORIA_SECRET: posto(process.env.GLORIA_SECRET),
-      N8N_AGENDA_URL: posto(process.env.N8N_AGENDA_URL),
-      N8N_AGENDA_SECRET: posto(process.env.N8N_AGENDA_SECRET),
+      GOOGLE_CLIENT_ID: posto(process.env.GOOGLE_CLIENT_ID),
+      GOOGLE_CLIENT_SECRET: posto(process.env.GOOGLE_CLIENT_SECRET),
+      GOOGLE_REFRESH_TOKEN: posto(process.env.GOOGLE_REFRESH_TOKEN),
       OPENAI_API_KEY: posto(process.env.OPENAI_API_KEY),
       BITRIX_WEBHOOK_BASE: posto(process.env.BITRIX_WEBHOOK_BASE),
       META_CALLS_TOKEN: posto(process.env.META_CALLS_TOKEN || process.env.META_WA_TOKEN),
@@ -324,7 +334,7 @@ export default async function handler(req, res) {
     // Em paralelo de propósito: seis portas em série passariam do prazo da
     // função, e a mais lenta (Bitrix) não pode segurar as outras cinco.
     const portas = await Promise.all([
-      bater_n8nGloria(), bater_n8nAgenda(), bater_openai(), bater_meta(), bater_bitrix(),
+      bater_n8nGloria(), bater_googleAgenda(), bater_openai(), bater_meta(), bater_bitrix(),
     ]);
     const pior = portas.some((p) => p.estado === 'erro') ? 'erro'
       : portas.some((p) => p.estado === 'atencao') ? 'atencao' : 'ok';

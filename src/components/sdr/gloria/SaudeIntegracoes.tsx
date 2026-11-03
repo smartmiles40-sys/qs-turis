@@ -56,8 +56,10 @@ const CORES: Record<Porta["estado"], { bg: string; ponto: string; texto: string 
 const O_QUE_QUEBRA: Record<string, string> = {
   GLORIA_WEBHOOK_URL: "sem isto ela não pensa: nenhuma resposta é gerada",
   GLORIA_SECRET: "sem isto o n8n recusa tudo com 403",
-  N8N_AGENDA_URL: "sem isto a reunião é marcada, mas sem link do Meet",
-  N8N_AGENDA_SECRET: "sem isto a agenda recusa com 403",
+  // Agenda/Meet direto no Google desde 03/11/2026 (sem n8n) — docs/GOOGLE-AGENDA-SEM-N8N.md
+  GOOGLE_CLIENT_ID: "sem isto a reunião é marcada, mas sem link do Meet (client OAuth do Google)",
+  GOOGLE_CLIENT_SECRET: "sem isto a reunião é marcada, mas sem link do Meet (segredo do client OAuth)",
+  GOOGLE_REFRESH_TOKEN: "sem isto a reunião é marcada, mas sem link do Meet e a grade ignora a agenda pessoal do closer",
   OPENAI_API_KEY: "sem isto áudio do cliente entra sem transcrição e ela não responde",
   BITRIX_WEBHOOK_BASE: "sem isto a reunião não vira atividade no card do Bitrix",
   META_CALLS_TOKEN: "sem isto nada sai no WhatsApp",
