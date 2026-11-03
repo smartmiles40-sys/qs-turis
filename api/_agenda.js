@@ -28,6 +28,8 @@
 
 import { rest, insert } from './_supabaseAdmin.js';
 import { moverNegocioParaReuniao, passarNegocioPara, comentarNoNegocio } from './_bitrixLead.js';
+import { googleConfigurado, motivoNaoConfigurado } from './_google.js';
+import { executarAcaoAgenda } from './_googleAgenda.js';
 
 const TZ = 'America/Sao_Paulo';
 
@@ -212,16 +214,17 @@ async function anotarAVez(closerId) {
 // reunião interna de terça) não bloqueava horário nenhum, e o cliente marcava
 // por cima. Era o último buraco do autoagendamento.
 //
-// Quem fala com o Google é o n8n, porque é lá que a credencial mora — o mesmo
-// webhook que já cria a sala do Meet, agora com `acao: 'ocupacao'`.
+// Quem fala com o Google, desde 03/11/2026, é o próprio QS
+// (api/_googleAgenda.js, ação 'ocupacao') — antes era o webhook do n8n que
+// criava a sala do Meet. Mesma conta, mesma resposta.
 //
 // USA freeBusy DE PROPÓSITO, e não a listagem de eventos: a API de freeBusy
 // devolve só intervalos ocupado/livre, sem título, sem convidado, sem
 // descrição. A agenda pessoal de quem trabalha aqui não precisa passear pelo
 // nosso servidor pra gente saber que às 15h tem alguém ocupado.
 //
-// FALHA ABERTA, sempre. Google fora do ar, n8n fora do ar, workflow ainda sem a
-// ação nova — tudo isso devolve "não sei" e a grade sai como saía antes. O
+// FALHA ABERTA, sempre. Google fora do ar, token recusado, env faltando —
+// tudo isso devolve "não sei" e a grade sai como saía antes. O
 // contrário (grade vazia porque o Google não respondeu) seria trocar um
 // problema raro por um prejuízo diário.
 
@@ -267,8 +270,7 @@ async function consultarGoogleLigado() {
  * ocupado" de propósito: ver o comentário acima sobre falhar aberto.
  */
 async function ocupacaoGoogle(closers, de, ate) {
-  const base = (process.env.N8N_AGENDA_URL || '').trim();
-  if (!base || !Array.isArray(closers) || !closers.length) return [];
+  if (!googleConfigurado() || !Array.isArray(closers) || !closers.length) return [];
   if (!(await consultarGoogleLigado())) return [];
 
   const comEmail = closers.filter((c) => c.email && String(c.email).includes('@'));
@@ -281,31 +283,20 @@ async function ocupacaoGoogle(closers, de, ate) {
     return freebusyCache.janelas;
   }
 
-  const secret = (process.env.N8N_AGENDA_SECRET || '').trim();
-  const alt = (process.env.N8N_SYNC_SECRET || '').trim();
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FREEBUSY_TIMEOUT_MS);
   try {
-    const r = await fetch(base, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(secret || alt ? { 'x-qs-agenda-secret': secret || alt, 'x-qs-sync-secret': alt || secret } : {}),
-      },
-      body: JSON.stringify({
-        acao: 'ocupacao',
-        de: de.toISOString(),
-        ate: ate.toISOString(),
-        timezone: TZ,
-        emails: comEmail.map((c) => c.email),
-      }),
-      signal: ctrl.signal,
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const resposta = await r.json().catch(() => null);
-    // Workflow antigo (sem a ação) responde "acao invalida" — e isso NÃO é
-    // erro: é o estado normal até o n8n novo ser importado.
-    if (!resposta || resposta.ok !== true || !resposta.ocupado) return [];
+    // Prazo TOTAL (token + freeBusy) = FREEBUSY_TIMEOUT_MS: a grade não pode
+    // esperar o Google mais do que isso.
+    const resposta = await executarAcaoAgenda({
+      acao: 'ocupacao',
+      de: de.toISOString(),
+      ate: ate.toISOString(),
+      timezone: TZ,
+      emails: comEmail.map((c) => c.email),
+    }, { prazoMs: FREEBUSY_TIMEOUT_MS, timeoutMs: FREEBUSY_TIMEOUT_MS });
+    if (!resposta || resposta.ok !== true || !resposta.ocupado) {
+      if (resposta && resposta.ok === false) throw new Error(`${resposta.codigo ?? ''} ${resposta.erro ?? ''}`.trim());
+      return [];
+    }
 
     // AGENDA QUE O GOOGLE RECUSOU não é o mesmo que agenda vazia, e a diferença
     // é invisível: nos dois casos o closer aparece livre o dia inteiro. Se o
@@ -333,8 +324,6 @@ async function ocupacaoGoogle(closers, de, ate) {
     // Um aviso, nunca um erro: a grade tem que sair.
     console.warn('[agenda] agenda do Google indisponível (seguindo só com o QS):', e?.message || e);
     return [];
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -773,65 +762,38 @@ async function transferirProCloser(lead, closer, origem = ORIGEM_GLORIA) {
 }
 
 /**
- * A sala do Meet, pelo mesmo caminho que a tela usa: o webhook da agenda no
- * n8n, que é quem tem a credencial do Google.
+ * A sala do Meet, pelo mesmo motor que a tela usa (api/_googleAgenda.js —
+ * desde 03/11/2026 direto na Calendar API, sem o webhook do n8n).
  *
  * Aqui NÃO passa por `/api/agenda-meet` de propósito: aquela rota exige o JWT
- * de um SDR logado, e a Glória não tem sessão nenhuma. Os dois nomes de header
- * vão juntos pelo mesmo motivo que lá — os webhooks do n8n dividem uma
- * credencial só e o nome dela muda conforme quem mexeu por último.
+ * de um SDR logado, e a Glória não tem sessão nenhuma.
  */
 // Exportada (27/10) pro reparo automático (api/agenda-reparo.js) tentar de novo
-// pelo MESMO caminho. Idempotente do lado do n8n: o id do evento no Google é
-// derivado do meeting_id, então o reenvio cai no 409 e devolve a MESMA sala.
+// pelo MESMO caminho. Idempotente: o id do evento no Google é derivado do
+// meeting_id (idEvento, idêntico ao do n8n), então o reenvio cai no 409 e
+// devolve a MESMA sala — inclusive das reuniões criadas pelo n8n.
 export async function criarSalaDoMeet(meeting, convidados, origem = ORIGEM_GLORIA) {
-  const base = (process.env.N8N_AGENDA_URL || '').trim();
-  const secret = (process.env.N8N_AGENDA_SECRET || '').trim();
-  const alt = (process.env.N8N_SYNC_SECRET || '').trim();
-  if (!base) return { ok: false, erro: 'agenda do Google não configurada (N8N_AGENDA_URL ausente)' };
+  if (!googleConfigurado()) return { ok: false, erro: motivoNaoConfigurado() };
 
   const inicio = new Date(meeting.scheduled_at);
   const fim = meeting.ends_at ? new Date(meeting.ends_at) : new Date(inicio.getTime() + (meeting.duration_min ?? 60) * 60_000);
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20_000);
-  try {
-    const r = await fetch(base, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(secret || alt ? { 'x-qs-agenda-secret': secret || alt, 'x-qs-sync-secret': alt || secret } : {}),
-      },
-      body: JSON.stringify({
-        acao: 'criar',
-        meeting_id: meeting.id,
-        inicio: inicio.toISOString(),
-        fim: fim.toISOString(),
-        timezone: TZ,
-        titulo: meeting.title || `Reunião · ${meeting.lead_name || 'cliente'}`,
-        descricao: `${origem.frase}.\nCliente ${meeting.lead_name || ''}`.trim(),
-        convidados: convidados.filter(Boolean),
-      }),
-      signal: ctrl.signal,
-    });
-    const texto = await r.text();
-    let resposta = null;
-    try { resposta = texto ? JSON.parse(texto) : null; } catch { /* corpo ilegível */ }
-    if (!r.ok) {
-      // Junto do erro, o que foi mandado — tamanho e origem, nunca o valor.
-      // "n8n HTTP 403" sozinho custou cinco dias na agenda do time.
-      const usou = secret ? 'N8N_AGENDA_SECRET' : (alt ? 'N8N_SYNC_SECRET (fallback)' : 'NENHUM SEGREDO');
-      return { ok: false, erro: `n8n HTTP ${r.status} · mandei x-qs-agenda-secret de ${usou} (${(secret || alt).length} caracteres)` };
-    }
-    if (!resposta || resposta.ok !== true) {
-      return { ok: false, erro: `${resposta?.codigo ?? ''} ${resposta?.erro ?? ''}`.trim() || 'falha no Google' };
-    }
-    return { ok: true, link: resposta.meet_link || null, eventId: resposta.event_id || null, htmlLink: resposta.html_link || null };
-  } catch (e) {
-    return { ok: false, erro: e?.name === 'AbortError' ? 'n8n não respondeu a tempo' : (e?.message || 'falha ao falar com o n8n') };
-  } finally {
-    clearTimeout(timer);
+  // Quem chama (gloria-agendar, agendar, agenda-reparo) tem maxDuration 60 s;
+  // 20 s de prazo total é o mesmo teto que o fetch ao n8n tinha.
+  const resposta = await executarAcaoAgenda({
+    acao: 'criar',
+    meeting_id: meeting.id,
+    inicio: inicio.toISOString(),
+    fim: fim.toISOString(),
+    timezone: TZ,
+    titulo: meeting.title || `Reunião · ${meeting.lead_name || 'cliente'}`,
+    descricao: `${origem.frase}.\nCliente ${meeting.lead_name || ''}`.trim(),
+    convidados: (convidados || []).filter(Boolean),
+  }, { prazoMs: 20_000, timeoutMs: 10_000 });
+  if (!resposta || resposta.ok !== true) {
+    return { ok: false, erro: `${resposta?.codigo ?? ''} ${resposta?.erro ?? ''}`.trim() || 'falha no Google' };
   }
+  return { ok: true, link: resposta.meet_link || null, eventId: resposta.event_id || null, htmlLink: resposta.html_link || null };
 }
 
 /**

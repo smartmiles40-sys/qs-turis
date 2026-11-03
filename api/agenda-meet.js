@@ -1,17 +1,21 @@
 // api/agenda-meet.js
 // -----------------------------------------------------------------------------
-// Ponte entre o QS e o Google Calendar (via webhook do n8n), nas três ações da
-// agenda: criar, reagendar e cancelar.
+// Ponte entre o QS e o Google Calendar, nas três ações da agenda: criar,
+// reagendar e cancelar.
 //
-// Por que passa pelo servidor: o segredo do webhook não pode existir no bundle —
-// quem abre o DevTools o encontra em dois segundos e passa a mexer na agenda da
-// operação. Por que vai pelo n8n: ele já tem a credencial OAuth do Google
-// conectada; a alternativa era gerenciar refresh token dentro da Vercel.
+// Por que passa pelo servidor: a credencial do Google não pode existir no
+// bundle — quem abre o DevTools a encontra em dois segundos e passa a mexer na
+// agenda da operação.
 //
-// CONTRATO, e é aqui que é fácil errar: o webhook responde **HTTP 200 SEMPRE**.
-// Quem diz se deu certo é o campo `ok` do corpo. Por isso esta rota repassa o
-// corpo do n8n quase como veio — o front precisa dos códigos (`nao_encontrado`,
-// `duplicado`, `sem_meet`) pra decidir o que fazer.
+// 03/11/2026: SEM n8n. Até aqui esta rota chamava o webhook `qs-agenda-meet` do
+// n8n, que tinha a credencial OAuth. Agora fala direto com a Calendar API
+// (api/_googleAgenda.js, refresh token em env — ver docs/GOOGLE-AGENDA-SEM-N8N.md).
+//
+// CONTRATO, e é aqui que é fácil errar: a rota responde **HTTP 200 SEMPRE**
+// (menos 400/401/403/404/501 de entrada). Quem diz se deu certo é o campo `ok`
+// do corpo. `executarAcaoAgenda` devolve o MESMO corpo que o n8n devolvia — o
+// front precisa dos códigos (`nao_encontrado`, `duplicado`, `sem_meet`) pra
+// decidir o que fazer.
 //
 // A RESERVA NO SUPABASE ACONTECE ANTES, no front. Aqui não se cria nem se apaga
 // reunião: só se conversa com o Google e se anota o resultado na linha que já
@@ -21,10 +25,17 @@
 // -----------------------------------------------------------------------------
 import { rest } from './_supabaseAdmin.js';
 import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
+import { googleConfigurado, motivoNaoConfigurado } from './_google.js';
+import { executarAcaoAgenda } from './_googleAgenda.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACOES = new Set(['criar', 'reagendar', 'cancelar']);
-const TIMEOUT_MS = 20_000;
+// Prazo TOTAL da conversa com o Google (token + insert + GET do 409). O
+// maxDuration desta rota é 30 s (vercel.json) e antes disto vêm a sessão, a
+// leitura da reunião e a permissão: 18 s deixa folga pro abort agir antes de
+// a Vercel matar a função.
+const PRAZO_GOOGLE_MS = 18_000;
+const TIMEOUT_CHAMADA_MS = 10_000;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -50,20 +61,13 @@ export default async function handler(req, res) {
     });
   }
 
-  const base = (process.env.N8N_AGENDA_URL || '').trim();
-  // O .trim() NÃO é decoração. Segredo colado no painel da Vercel vem com
-  // espaço ou quebra de linha invisível com frequência alta demais, e o sintoma
-  // é 403 em tudo — indistinguível de credencial errada no n8n. A `portaria()`
-  // da Glória já trimava desde o primeiro dia; esta rota, não, e foi por isso
-  // que 5 dias de conserto do lado do n8n não mudaram nada.
-  const secret = (process.env.N8N_AGENDA_SECRET || '').trim();
-  if (!base) {
+  if (!googleConfigurado()) {
     // Integração não ligada. NÃO é silêncio: em 05/08, três reuniões reais
     // nasceram sem evento no Google porque este caminho não deixava rastro — nem
     // na reunião, nem na tela. Agora fica gravado na própria reunião, e é por
     // isso que a checagem de envs desceu pra DEPOIS da validação do meeting_id:
     // sem um id válido não há onde escrever.
-    await marcarErro(meetingId, 'agenda do Google não configurada (N8N_AGENDA_URL ausente)');
+    await marcarErro(meetingId, motivoNaoConfigurado());
     return res.status(501).json({ ok: false, codigo: 'nao_configurado', erro: 'Agenda Google não configurada' });
   }
 
@@ -150,57 +154,11 @@ export default async function handler(req, res) {
     });
   }
 
-  // ── Fala com o n8n ────────────────────────────────────────────────────────
-  let resposta;
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-    try {
-      // Os DOIS nomes de header, mesmo motivo do /api/bitrix-sync: os webhooks do
-      // n8n dividem uma credencial só, e o nome dela muda conforme quem mexeu por
-      // último. Mandando os dois, sobra só o valor para acertar.
-      const alt = (process.env.N8N_SYNC_SECRET || '').trim();
-      const r = await fetch(base, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(secret || alt ? {
-            'x-qs-agenda-secret': secret || alt,
-            'x-qs-sync-secret': alt || secret,
-          } : {}),
-        },
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      });
-      const texto = await r.text();
-      try { resposta = texto ? JSON.parse(texto) : null; } catch { resposta = null; }
-      // O webhook responde 200 até em falha; status != 2xx aqui é o próprio n8n
-      // fora do ar, URL errada ou segredo recusado.
-      if (!r.ok) {
-        // O QUE FOI MANDADO, junto do erro. "n8n HTTP 403" sozinho custou cinco
-        // dias: não dava pra saber se o segredo estava vazio, com espaço no fim
-        // ou simplesmente diferente do que o n8n espera. Vai o tamanho e a
-        // origem do valor, NUNCA o valor.
-        const usou = secret ? 'N8N_AGENDA_SECRET' : (alt ? 'N8N_SYNC_SECRET (fallback)' : 'NENHUM SEGREDO');
-        const pista = `n8n HTTP ${r.status} · mandei x-qs-agenda-secret de ${usou} (${(secret || alt || '').length} caracteres)`;
-        console.error('[agenda-meet]', acao, pista);
-        await marcarErro(meeting.id, pista);
-        return res.status(200).json({ ok: false, acao, meeting_id: meeting.id, codigo: r.status, erro: pista });
-      }
-    } finally {
-      clearTimeout(timer);
-    }
-  } catch (e) {
-    const motivo = e?.name === 'AbortError' ? 'n8n não respondeu a tempo' : (e?.message || 'falha ao falar com o n8n');
-    console.error('[agenda-meet]', acao, motivo);
-    await marcarErro(meeting.id, motivo);
-    return res.status(200).json({ ok: false, acao, meeting_id: meeting.id, codigo: 'n8n', erro: motivo });
-  }
-
-  if (!resposta || typeof resposta !== 'object') {
-    await marcarErro(meeting.id, 'resposta do n8n ilegível');
-    return res.status(200).json({ ok: false, acao, meeting_id: meeting.id, codigo: 'resposta', erro: 'resposta do n8n ilegível' });
-  }
+  // ── Fala com o Google ─────────────────────────────────────────────────────
+  // Nunca lança: falha (token recusado, Google fora, prazo) volta como
+  // { ok: false, codigo, erro } — o mesmo formato que o webhook do n8n usava.
+  const resposta = await executarAcaoAgenda(payload, { prazoMs: PRAZO_GOOGLE_MS, timeoutMs: TIMEOUT_CHAMADA_MS });
+  if (resposta.ok !== true) console.error('[agenda-meet]', acao, resposta.codigo, resposta.erro);
 
   // ── Anota o resultado na reunião ──────────────────────────────────────────
   if (resposta.ok === true) {
@@ -228,7 +186,7 @@ export default async function handler(req, res) {
     await marcarErro(meeting.id, `${resposta.codigo ?? ''} ${resposta.erro ?? ''}`.trim() || 'falha no Google');
   }
 
-  // Repassa o corpo do n8n: o front precisa de `codigo`, `duplicado`,
+  // Repassa o corpo do Google já traduzido: o front precisa de `codigo`, `duplicado`,
   // `sem_meet` e `convidados_descartados` pra decidir o que mostrar.
   return res.status(200).json(resposta);
 }
