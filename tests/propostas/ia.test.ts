@@ -267,6 +267,17 @@ async function chamar(body: unknown, auth = "Bearer jwt") {
   return { status, corpo };
 }
 
+test("rota: geração desligada (sem PROPOSTAS_IA_LIGADA) → 503 em breve, sem tocar no banco", async () => {
+  delete process.env.PROPOSTAS_IA_LIGADA;
+  process.env.OPENAI_API_KEY = "sk-falsa";
+  chamadas = [];
+  const { status, corpo } = await chamar({ proposta_id: PID, modelo: "pacote", campos: camposParaIa("pacote") });
+  assert.equal(status, 503);
+  assert.match(String(corpo.error), /em breve/i);
+  assert.equal(chamadas.length, 0);
+  process.env.PROPOSTAS_IA_LIGADA = "1"; // os testes abaixo são da rota ligada
+});
+
 test("rota: sem chave da OpenAI → 503 claro", async () => {
   delete process.env.OPENAI_API_KEY;
   const { status, corpo } = await chamar({ proposta_id: PID, modelo: "pacote", campos: camposParaIa("pacote") });

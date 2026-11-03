@@ -19,6 +19,7 @@
 import type { ReactNode } from "react";
 import type { ShellGroup, ShellItem } from "@/components/ui/AppShell";
 import { Icon } from "@/components/ui/icons";
+import { SELO_PROPOSTAS } from "@/propostas/disponivel";
 
 export type GrupoRel = "topo" | "atendimento" | "entre" | "posvenda" | "expedicoes" | "carteira" | "acompanhamento" | "supervisao";
 
@@ -118,6 +119,7 @@ export function montarMenuRel(a: Acesso, filtro: Set<string> | null, cont: Conta
     items: itens.filter((i) => i.grupo === g.id).map((i): ShellItem => ({
       id: i.id, label: cont[i.id]?.label ?? i.label, icon: i.icon,
       count: cont[i.id]?.count || undefined, late: cont[i.id]?.late,
+      selo: i.id === "propostas" ? SELO_PROPOSTAS : undefined,
     })),
   })).filter((g) => g.items.length);
   if (filtro && itensDeFora(a, filtro).length) {

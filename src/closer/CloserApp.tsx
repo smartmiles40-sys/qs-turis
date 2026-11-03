@@ -23,6 +23,7 @@ import { REL_CSS } from "@/rel/ui";
 import { lazyPagina } from "@/lib/qs/lazyPagina";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import { useAprovacoesNovas } from "@/propostas/lib";
+import { SELO_PROPOSTAS } from "@/propostas/disponivel";
 import ErroDeParte from "@/components/sdr/ErroDeParte";
 import GlobalToasts from "@/components/sdr/GlobalToasts";
 import ConfirmDialog from "@/components/sdr/ConfirmDialog";
@@ -133,7 +134,7 @@ export default function CloserApp() {
       { id: "whatsapp", rotulo: "WhatsApp" },
     ] },
     { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
-      { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined },
+      { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined, selo: SELO_PROPOSTAS },
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
     ] },
     { id: "consulta", rotulo: "Consulta", icone: ICONES_AREA.lista, itens: [

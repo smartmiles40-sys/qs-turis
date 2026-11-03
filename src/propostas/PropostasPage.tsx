@@ -11,6 +11,8 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Entrada, Etiqueta, Vazio } from "@/rel/ui";
 import PropostaEditor from "./PropostaEditor";
 import { NOME_SETOR } from "@/solicitacoes/lib";
+import { PROPOSTAS_NO_QS } from "./disponivel";
+import { CartaoEmBreve, SeloEmBreve } from "./EmBreve";
 import { STATUS_PROPOSTA, TOM_PROPOSTA, dataBr, listarPropostas, type PropostaResumo, type StatusProposta } from "./lib";
 import type { Setor } from "@/components/sdr/types";
 
@@ -64,6 +66,15 @@ export default function PropostasPage({ setor, abrirId, onAbrirId, onMudou }: {
     return () => clearTimeout(t);
   }, [carregar, abrirId, busca]);
 
+  // Geração pelo QS desligada: "nova" vira o cartão "Em breve"; as já montadas abrem.
+  if (abrirId === "nova" && !PROPOSTAS_NO_QS) {
+    return (
+      <div className="max-w-[980px] space-y-4">
+        <Botao variante="fantasma" onClick={() => onAbrirId(null)}>← Propostas</Botao>
+        <CartaoEmBreve />
+      </div>
+    );
+  }
   if (abrirId) {
     return (
       <PropostaEditor key={abrirId} id={abrirId === "nova" ? null : abrirId} setor={setor}
@@ -74,9 +85,10 @@ export default function PropostasPage({ setor, abrirId, onAbrirId, onMudou }: {
   return (
     <div className="max-w-[980px] space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-[22px] font-bold flex-1" style={{ color: "var(--ink)" }}>Propostas</h1>
-        <Botao variante="primario" onClick={() => onAbrirId("nova")}>+ Nova proposta</Botao>
+        <h1 className="text-[22px] font-bold flex-1 flex items-center gap-2" style={{ color: "var(--ink)" }}>Propostas{!PROPOSTAS_NO_QS && <SeloEmBreve />}</h1>
+        {PROPOSTAS_NO_QS && <Botao variante="primario" onClick={() => onAbrirId("nova")}>+ Nova proposta</Botao>}
       </div>
+      {!PROPOSTAS_NO_QS && <CartaoEmBreve />}
 
       {novas.length > 0 && (
         <div className="rounded-xl p-3 space-y-1.5" style={{ background: "var(--rel-soft)" }}>
@@ -115,8 +127,8 @@ export default function PropostasPage({ setor, abrirId, onAbrirId, onMudou }: {
       {carregando ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>
         : lista.length === 0 ? (
           <Vazio titulo={busca ? "Nada encontrado" : "Nenhuma proposta aqui"}
-            texto={busca ? "Tente outro nome ou o número." : "Monte uma proposta nova ou abra uma solicitação de cotação e clique em \"Montar proposta\"."}
-            acao={!busca ? <Botao variante="primario" onClick={() => onAbrirId("nova")}>+ Nova proposta</Botao> : undefined} />
+            texto={busca ? "Tente outro nome ou o número." : !PROPOSTAS_NO_QS ? "As propostas já montadas pelo QS aparecem aqui." : "Monte uma proposta nova ou abra uma solicitação de cotação e clique em \"Montar proposta\"."}
+            acao={!busca && PROPOSTAS_NO_QS ? <Botao variante="primario" onClick={() => onAbrirId("nova")}>+ Nova proposta</Botao> : undefined} />
         ) : (
           <ul className="rel-card divide-y overflow-hidden" style={{ borderColor: "var(--line)" }}>
             {lista.map((x) => (

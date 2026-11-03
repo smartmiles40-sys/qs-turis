@@ -38,6 +38,7 @@ import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
 import { Avatar, Btn, Menu, SectorChip, StatusChip, Timeline, type ChipTone, type MenuGrupo, type TimelineItem } from "@/components/ui";
 import EscolherClienteVenda, { type Escolha } from "./EscolherClienteVenda";
 import PropostasDaSolicitacao from "@/propostas/PropostasDaSolicitacao";
+import { PROPOSTAS_NO_QS } from "@/propostas/disponivel";
 import FormCotacaoCampos, { VerCotacao } from "./FormCotacao";
 import FormPagamentoCampos, { PagamentoNoDetalhe, VerPagamento } from "./FormPagamento";
 import FormServicoCampos, { VerServico } from "./FormServico";
@@ -314,7 +315,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
       acoes.push(
         <Btn key="concluir" variant="positive" disabled={ocupado}
           onClick={() => pedir(ehCotacao
-            ? { acao: "concluir", titulo: "Como foi entregue a cotação?", dica: "Ex.: proposta nº 12 pronta aqui no QS com 2 opções.", obrigatorio: true, botao: "Entregar cotação" }
+            ? { acao: "concluir", titulo: "Como foi entregue a cotação?", dica: PROPOSTAS_NO_QS ? "Ex.: proposta nº 12 pronta aqui no QS com 2 opções." : "Ex.: proposta em PDF com 2 opções, enviada por e-mail.", obrigatorio: true, botao: "Entregar cotação" }
             : { acao: "concluir", titulo: "O que foi feito?", dica: "Quem pediu recebe isso. Ex.: cotação enviada no e-mail, 3 opções; emitido o localizador ABC123.", obrigatorio: true, botao: "Concluir" })}>
           {ehCotacao ? "Entregar cotação" : "Concluir solicitação"}
         </Btn>,

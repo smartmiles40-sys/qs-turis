@@ -39,6 +39,8 @@ import {
   type CondicaoPag, type FormaPag, type ItemProposta, type OpcaoProposta, type Pagamento, type Proposta, type TipoItem, type Trecho,
 } from "./lib";
 import type { Setor } from "@/components/sdr/types";
+import { PROPOSTAS_NO_QS } from "./disponivel";
+import { CartaoEmBreve } from "./EmBreve";
 
 const area = "rel-input";
 const numero = (v: string) => (v.trim() === "" ? 0 : Number(v.replace(",", ".")) || 0);
@@ -200,7 +202,7 @@ function EditorPagamentos({ pags, total, onChange }: { pags: Pagamento[]; total:
 }
 
 // ── A tela ──────────────────────────────────────────────────────────────────
-export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }: {
+type PropsEditor = {
   id: string | null;
   setor: Setor;
   /** Nova proposta já amarrada (veio de uma solicitação). */
@@ -208,7 +210,22 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
   onVoltar: () => void;
   /** Depois de salvar uma nova / duplicar: abre pelo id. */
   onAbrir: (id: string) => void;
-}) {
+};
+
+/** Geração pelo QS desligada (disponivel.ts): proposta NOVA vira o cartão "Em breve". */
+export default function PropostaEditor(props: PropsEditor) {
+  if (!props.id && !PROPOSTAS_NO_QS) {
+    return (
+      <div className="max-w-[980px] space-y-4">
+        <Botao variante="fantasma" onClick={props.onVoltar}>← Voltar</Botao>
+        <CartaoEmBreve />
+      </div>
+    );
+  }
+  return <EditorDaProposta {...props} />;
+}
+
+function EditorDaProposta({ id, setor, inicial, onVoltar, onAbrir }: PropsEditor) {
   const { currentUser } = useQsAuth();
   // 0280: proposta nova já nasce num modelo-padrão (pacote, se ninguém disse outro)
   const [p, setP] = useState<Proposta | null>(() => {
@@ -472,9 +489,10 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
       {aviso && <Aviso tom="ok">{aviso}</Aviso>}
-      {cancelada && <Aviso>Proposta cancelada — o link não abre mais pro cliente. Duplique pra fazer uma nova.</Aviso>}
+      {cancelada && <Aviso>Proposta cancelada — o link não abre mais pro cliente.{PROPOSTAS_NO_QS ? " Duplique pra fazer uma nova." : ""}</Aviso>}
 
-      {p.modelo ? fluxo : (<>
+      {/* Com a geração desligada não há fluxo de modelos/IA (0280/0290 podem não estar aplicadas). */}
+      {p.modelo && PROPOSTAS_NO_QS ? fluxo : (<>
       {/* Ações */}
       <div className="flex flex-wrap gap-2">
         <Botao variante="primario" onClick={() => void salvar(true)} disabled={salvando || cancelada}>{salvando ? "Salvando…" : "Salvar"}</Botao>
@@ -485,19 +503,19 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
         {p.id && !cancelada && p.status !== "aprovada" && (!outroTime || p.status === "enviada") && <Botao onClick={() => setMarcarAprov(true)}>Cliente aprovou (fora do link)</Botao>}
         {p.id && p.status === "enviada" && <Botao variante="fantasma" onClick={() => void acao(() => mudarStatus(p.id!, "recusada"), "Marcada como recusada.")}>Cliente recusou</Botao>}
         {p.id && (p.status === "aprovada" || p.status === "recusada" || p.status === "pronta") && <Botao variante="fantasma" onClick={() => { if (window.confirm("Voltar pra rascunho? A aprovação é desfeita e o link para de abrir até enviar de novo.")) void acao(() => mudarStatus(p.id!, "rascunho"), "Voltou pra rascunho."); }}>Voltar pra rascunho</Botao>}
-        {p.id && <Botao variante="fantasma" onClick={() => void duplicarProposta(p.id!).then(onAbrir).catch((e) => setErro(e.message))}>Duplicar proposta</Botao>}
+        {p.id && PROPOSTAS_NO_QS && <Botao variante="fantasma" onClick={() => void duplicarProposta(p.id!).then(onAbrir).catch((e) => setErro(e.message))}>Duplicar proposta</Botao>}
         {p.id && !cancelada && <Botao variante="fantasma" onClick={() => { if (window.confirm("Cancelar esta proposta? O link para de abrir pro cliente.")) void acao(() => mudarStatus(p.id!, "cancelada"), "Proposta cancelada."); }}>Cancelar proposta</Botao>}
       </div>
       {p.status === "aprovada" && <Aviso>Esta proposta já foi aprovada. Se mudar algo, o cliente vê a versão nova no mesmo link.</Aviso>}
       {outroTime && p.status === "rascunho" && <Aviso>Quem envia ao cliente é {quemPediu}. Quando terminar, clique em <b>Pronta</b> — {quemPediu.split(" ")[0]} recebe o aviso na solicitação, abre e envia.</Aviso>}
       {p.status === "pronta" && <Aviso>Liberada pra {quemPediu}. Se mudar algo e salvar, {quemPediu.split(" ")[0]} precisa abrir de novo antes de enviar.</Aviso>}
 
-      {/* 0280: modelo-padrão da proposta */}
-      <section className="rel-card p-4 space-y-2">
+      {/* 0280: modelo-padrão da proposta (só com a geração pelo QS ligada) */}
+      {PROPOSTAS_NO_QS && <section className="rel-card p-4 space-y-2">
         <h2 className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>Modelo da proposta</h2>
         <EscolherModelo atual={p.modelo} onEscolher={trocarModelo} />
         {p.modelo && p.semColunaModelo && <Aviso tom="erro">O banco ainda não tem a migration 0280: o modelo e os textos desta proposta NÃO ficam salvos. Peça pra aplicar a 0280 antes de usar.</Aviso>}
-      </section>
+      </section>}
 
       {/* Dados da viagem */}
       <section className="rel-card p-4 space-y-3">

@@ -14,6 +14,8 @@ import type { Solicitacao } from "@/solicitacoes/lib";
 import PropostaParaEnviar from "./PropostaParaEnviar";
 import { aplicarModelo } from "./ModeloEditor";
 import { modeloDaSolicitacao } from "./modelos";
+import { PROPOSTAS_NO_QS, TEXTO_EM_BREVE } from "./disponivel";
+import { SeloEmBreve } from "./EmBreve";
 import { STATUS_PROPOSTA, TOM_PROPOSTA, listarPropostas, propostaVazia, salvarProposta, type PropostaResumo } from "./lib";
 
 export default function PropostasDaSolicitacao({ s, podeMontar, onAbrirEditor, onMudou }: {
@@ -34,7 +36,7 @@ export default function PropostasDaSolicitacao({ s, podeMontar, onAbrirEditor, o
   useEffect(() => { carregar(); }, [carregar]);
 
   async function montar() {
-    if (!onAbrirEditor) return;
+    if (!onAbrirEditor || !PROPOSTAS_NO_QS) return;
     setCriando(true); setErro(null);
     try {
       const base = {
@@ -60,8 +62,10 @@ export default function PropostasDaSolicitacao({ s, podeMontar, onAbrirEditor, o
     <div className="rel-card p-3 space-y-2">
       <div className="flex items-center gap-2">
         <p className="flex-1 text-[13px] font-semibold" style={{ color: "var(--ink)" }}>Propostas{lista.length ? ` (${lista.length})` : ""}</p>
-        {podeMontar && <Botao variante={lista.length ? "secundario" : "primario"} onClick={() => void montar()} disabled={criando}>{criando ? "Criando…" : "Montar proposta"}</Botao>}
+        {podeMontar && PROPOSTAS_NO_QS && <Botao variante={lista.length ? "secundario" : "primario"} onClick={() => void montar()} disabled={criando}>{criando ? "Criando…" : "Montar proposta"}</Botao>}
+        {podeMontar && !PROPOSTAS_NO_QS && <span className="flex items-center gap-1.5 text-[12.5px]" style={{ color: "var(--ink3)" }}>Montar proposta <SeloEmBreve /></span>}
       </div>
+      {podeMontar && !PROPOSTAS_NO_QS && <p className="text-[12.5px]" style={{ color: "var(--ink2)" }}>{TEXTO_EM_BREVE}</p>}
       {erro && <p className="text-[12.5px]" style={{ color: "var(--err-ink)" }}>{erro}</p>}
       {lista.map((x) => {
         const euEnvio = x.de_outro_time && !monto(x);

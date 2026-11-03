@@ -16,6 +16,8 @@ import type { TipoItem } from "@/propostas/lib";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 import SubirVenda from "@/venda/SubirVenda";
+import { PROPOSTAS_NO_QS, TEXTO_EM_BREVE } from "@/propostas/disponivel";
+import { SeloEmBreve } from "@/propostas/EmBreve";
 
 /** Fechar como Ganho (valor) ou Perdido (motivo). Também usado pelo arrastar do quadro. */
 export function Fechamento({ op, etapa, onFechar, onFeito }: {
@@ -125,6 +127,7 @@ export default function OportunidadeModal({ id, onFechar, onMudou, onAbrirClient
   }
 
   async function montarProposta() {
+    if (!PROPOSTAS_NO_QS) return;
     if (!op) return;
     setErro(null);
     try { const pid = await criarPropostaDoCartao(op); onMudou(); onAbrirProposta(pid); }
@@ -210,7 +213,8 @@ export default function OportunidadeModal({ id, onFechar, onMudou, onAbrirClient
                 <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Nenhuma proposta ligada.</p>
               )}
               <div className="flex flex-wrap gap-2">
-                {!fechada && <Botao variante="primario" onClick={() => void montarProposta()}>Montar proposta</Botao>}
+                {!fechada && PROPOSTAS_NO_QS && <Botao variante="primario" onClick={() => void montarProposta()}>Montar proposta</Botao>}
+                {!fechada && !PROPOSTAS_NO_QS && <span className="flex items-center gap-1.5 text-[12.5px]" style={{ color: "var(--ink3)" }}>Montar proposta <SeloEmBreve /></span>}
                 {propostas.filter((p) => p.id !== op.proposta_id).length > 0 && (
                   <select className="rel-input" style={{ maxWidth: 320 }} value="" onChange={(e) => e.target.value && void mudar({ proposta_id: e.target.value })}>
                     <option value="">Ligar uma proposta que já existe…</option>
@@ -220,6 +224,7 @@ export default function OportunidadeModal({ id, onFechar, onMudou, onAbrirClient
                   </select>
                 )}
               </div>
+              {!fechada && !PROPOSTAS_NO_QS && <p className="text-[12.5px]" style={{ color: "var(--ink2)" }}>{TEXTO_EM_BREVE}</p>}
             </section>
 
             <div className="flex flex-wrap gap-2">

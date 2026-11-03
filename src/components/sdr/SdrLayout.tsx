@@ -107,6 +107,7 @@ import Presenca from "@/controle-comercial/Presenca";
 import { ComCoresDaCentral } from "@/solicitacoes/PedirOutroSetor";
 import { useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import { useAprovacoesNovas } from "@/propostas/lib";
+import { SELO_PROPOSTAS } from "@/propostas/disponivel";
 
 export type SdrNav =
   | "minha-agenda"
@@ -388,7 +389,7 @@ export default function SdrLayout() {
   const item = (id: SdrNav, label: string): ShellItem | null => {
     if (!permitido.has(id)) return null;
     const b = badgeDe(id);
-    return { id, label: ROTULO_NAV[id] ?? label, icon: ICONE_NAV[id], count: b?.badge, late: b?.alerta };
+    return { id, label: ROTULO_NAV[id] ?? label, icon: ICONE_NAV[id], count: b?.badge, late: b?.alerta, selo: id === "propostas" ? SELO_PROPOSTAS : undefined };
   };
   // Bruno, 26/10: "Minha agenda" é do closer (o SDR vê as reuniões em Gestão ›
   // Reuniões); "Atendimento IA" sai do menu até ser configurado; Cadências é da

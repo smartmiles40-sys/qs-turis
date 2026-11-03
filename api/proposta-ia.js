@@ -16,6 +16,10 @@
 // Mesmo padrão do api/rel-docs-ia.js: OPENAI_MODEL || 'gpt-4o-mini', sem
 // OPENAI_API_KEY → 503 claro, nunca loga conteúdo (só id, contagem e tokens).
 // Tudo acaba antes do maxDuration (60 s no vercel.json).
+//
+// "EM BREVE" (Bruno, 03/11/2026): a geração de propostas pelo QS ficou pra
+// depois (src/propostas/disponivel.ts). Sem PROPOSTAS_IA_LIGADA=1 na Vercel a
+// rota responde 503 "em breve" antes de tocar no banco ou na OpenAI.
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
@@ -32,6 +36,7 @@ export const LIMITES = {
   caracteresTexto: 40_000,        // textos colados + pedido
 };
 const ORCAMENTO_MS = 55_000;
+export const iaLigada = () => /^(1|true|sim|on)$/i.test(String(process.env.PROPOSTAS_IA_LIGADA || '').trim());
 const restaAte = (prazo, padrao) => Math.max(1_000, Math.min(padrao, prazo - Date.now() - 2_500));
 
 function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
@@ -122,6 +127,7 @@ async function chamarOpenAi({ modelo, campos, conteudoUsuario, prazo }) {
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Use POST' }); }
+  if (!iaLigada()) return res.status(503).json({ error: 'Montar proposta com IA pelo QS: em breve.', em_breve: true });
   const prazo = Date.now() + ORCAMENTO_MS;
   const body = (typeof req.body === 'string' ? safeParse(req.body) : req.body) || {};
   const propostaId = String(body.proposta_id || '');

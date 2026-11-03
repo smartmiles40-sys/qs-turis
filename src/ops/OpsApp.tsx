@@ -24,6 +24,7 @@ import SolicitacoesPage from "@/solicitacoes/SolicitacoesPage";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
 import PropostasPage from "@/propostas/PropostasPage";
 import { useAprovacoesNovas } from "@/propostas/lib";
+import { SELO_PROPOSTAS } from "@/propostas/disponivel";
 import { TELAS_EXP, type TelaExp } from "@/expedicoes/contexto";
 import { grupoExpedicoes } from "@/expedicoes/menu";
 import { useContagensExp } from "@/expedicoes/useContagensExp";
@@ -83,7 +84,7 @@ export default function OpsApp() {
     { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
       { id: "subir-venda", rotulo: "Subir venda" },
-      { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined },
+      { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined, selo: SELO_PROPOSTAS },
       { id: "prioridades", rotulo: "Prioridades" },
     ] },
     grupoExpedicoes({ ...contExp, saude: contSaude }),

@@ -29,6 +29,8 @@ export interface ShellItem {
   count?: number;
   /** O contador representa ATRASO → vai em --danger. */
   late?: boolean;
+  /** Selo à direita (ex.: "Em breve" nas Propostas, 03/11/2026). */
+  selo?: string;
 }
 export interface ShellGroup { label?: string; items: ShellItem[] }
 /** O Comercial tem duas portas, SDR e Closer (Bruno, 27/10): as duas viram
@@ -211,6 +213,7 @@ export default function AppShell({
               <button key={it.id} type="button" className="qs-nav" aria-current={active === it.id ? "page" : undefined} onClick={() => ir(it.id)}>
                 {it.icon}<span className="qs-nav__label">{it.label}</span>
                 {!!it.count && <span className={`qs-nav__n${it.late ? " qs-nav__n--danger" : ""}`}>{it.count}</span>}
+                {it.selo && <span className="qs-nav__selo">{it.selo}</span>}
               </button>
             ))}
           </div>
