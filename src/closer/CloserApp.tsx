@@ -12,7 +12,7 @@
 //
 // O QUE TEM: o PIPELINE (0174) com a ficha de fechamento (0176) é o Início.
 // O resto REAPROVEITA as telas que o closer já usava no Comercial — agenda,
-// fila de atividades, WhatsApp, reuniões, leads, solicitações e propostas —
+// WhatsApp, reuniões, leads, solicitações e propostas —
 // sem reescrever nada. Desde 26/10 agenda, atividades e reuniões ficam numa
 // tela só, em abas (./ReunioesCloser).
 // -----------------------------------------------------------------------------
@@ -120,8 +120,8 @@ export default function CloserApp() {
   // endereços antigos (#closer/agenda, #closer/painel) caem na aba certa.
   const telaPedida = rota.tela === "inicio" ? "pipeline" : rota.tela;
   const tela = telaPedida === "agenda" || telaPedida === "painel" ? "reunioes" : telaPedida;
-  const abaReunioes: AbaReunioes = telaPedida === "painel" ? "atividades"
-    : (ABAS_REUNIOES.some((a) => a.id === rota.id) && telaPedida === "reunioes" ? rota.id as AbaReunioes : telaPedida === "agenda" ? "agenda" : "todas");
+  // 03/11: a aba Atividades saiu; #closer/painel (endereço antigo) cai em Todas.
+  const abaReunioes: AbaReunioes = (ABAS_REUNIOES.some((a) => a.id === rota.id) && telaPedida === "reunioes" ? rota.id as AbaReunioes : telaPedida === "agenda" ? "agenda" : "todas");
   const deOnde = origem.current.tela === "inicio" ? "pipeline" : origem.current.tela === "agenda" || origem.current.tela === "painel" ? "reunioes" : origem.current.tela;
   const ativo = tela === "lead" ? deOnde : tela === "proposta-nova" ? "propostas" : tela;
 

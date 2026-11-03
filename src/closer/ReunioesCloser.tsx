@@ -8,7 +8,8 @@
 //                   falta desfecho, depois hoje e o resto da semana.
 //   Falta agendar . cliente do pipeline antes da reunião (Aguardando reunião,
 //                   Reagendamento, No-show) sem reunião marcada pela frente.
-//   Atividades .... a fila de atividades (TasksPanel).
+//   (Atividades saiu em 03/11 — Bruno: "dentro da pipeline de reuniões pode
+//   tirar as Atividades". #closer/painel e #closer/reunioes/atividades caem em Todas.)
 //
 // A aba vai no endereço: #closer/reunioes/<aba>.
 // -----------------------------------------------------------------------------
@@ -22,14 +23,12 @@ import type { Lead } from "@/components/sdr/types";
 import { NOME_ETAPA, dataBr, nomeDoLead, type Etapa, type Negocio } from "./lib";
 
 const MinhaAgendaPage = lazyPagina(() => import("@/components/sdr/agenda/MinhaAgendaPage"));
-const TasksPanel = lazyPagina(() => import("@/components/sdr/tasks/TasksPanel"));
 const MeetingsPage = lazyPagina(() => import("@/components/sdr/meetings/MeetingsPage"));
 
 export const ABAS_REUNIOES = [
   { id: "todas", rotulo: "Todas as reuniões" },
   { id: "agenda", rotulo: "Agenda e desfechos" },
   { id: "falta-agendar", rotulo: "Falta agendar" },
-  { id: "atividades", rotulo: "Atividades" },
 ] as const;
 export type AbaReunioes = (typeof ABAS_REUNIOES)[number]["id"];
 
@@ -64,7 +63,6 @@ export default function ReunioesCloser({ aba, onAba, onOpenLead }: {
       </div>
       <Suspense fallback={<p className="text-sm" style={{ color: "var(--ink3)" }}>Carregando…</p>}>
         {aba === "agenda" && <MinhaAgendaPage onOpenLead={onOpenLead} />}
-        {aba === "atividades" && <TasksPanel onOpenLead={onOpenLead} />}
         {aba === "todas" && <MeetingsPage onOpenLead={onOpenLead} />}
       </Suspense>
       {/* Sempre montada (escondida fora da aba) pra contar o número da aba. */}
