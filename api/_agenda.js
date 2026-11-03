@@ -28,6 +28,7 @@
 
 import { rest, insert } from './_supabaseAdmin.js';
 import { moverNegocioParaReuniao, passarNegocioPara, comentarNoNegocio } from './_bitrixLead.js';
+import { enviarReuniaoDireto } from './_bitrixSaida.js';
 
 const TZ = 'America/Sao_Paulo';
 
@@ -835,55 +836,36 @@ export async function criarSalaDoMeet(meeting, convidados, origem = ORIGEM_GLORI
 }
 
 /**
- * Manda a reunião pro card do Bitrix (webhook `qs-reuniao` do n8n) e DEVOLVE o
- * que aconteceu. O workflow é um `crm.deal.update` no negócio que o lead já
- * aponta (nunca cria card) + um comentário, e grava o resultado de volta na
- * reunião (bitrix_synced / bitrix_error).
+ * Manda a reunião pro card do Bitrix e DEVOLVE o que aconteceu. É um
+ * `crm.deal.update` no negócio que o lead já aponta (nunca cria card) + um
+ * comentário, e grava o resultado de volta na reunião (bitrix_synced /
+ * bitrix_error). Até 03/11 isso era o webhook `qs-reuniao` do n8n; agora é
+ * direto no Bitrix (api/_bitrixSaida.js), com a mesma lógica.
  *
  * Separada do `avisarBitrix` em 27/10 pro reparo automático usar o MESMO
  * payload — dois montadores divergem no primeiro campo novo.
  */
 export async function enviarReuniaoAoBitrix(meeting, lead, { timeoutMs = 8_000 } = {}) {
-  const base = (process.env.N8N_SYNC_BASE || '').trim().replace(/\/+$/, '');
-  const secret = (process.env.N8N_SYNC_SECRET || '').trim();
-  if (!base) return { ok: false, erro: 'N8N_SYNC_BASE ausente' };
   if (!lead?.bitrix_id) return { ok: false, erro: 'lead sem bitrix_id' };
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const r = await fetch(`${base}/qs-reuniao`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(secret ? { 'x-qs-sync-secret': secret, 'x-qs-agenda-secret': secret } : {}) },
-      body: JSON.stringify({
-        lead_id: meeting.lead_id,
-        meeting_id: meeting.id,
-        bitrix_id: lead.bitrix_id,
-        full_name: meeting.lead_name,
-        title: meeting.title,
-        scheduled_at: meeting.scheduled_at,
-        duration_min: meeting.duration_min,
-        location: meeting.location,
-        meeting_link: meeting.meeting_link,
-        notes: meeting.notes,
-        scheduled_by: meeting.scheduled_by,
-        meeting_owner: meeting.meeting_owner,
-        client_email: meeting.client_email,
-        booking_date: meeting.booking_date,
-      }),
-      signal: ctrl.signal,
-    });
-    const texto = await r.text().catch(() => '');
-    let corpo = null;
-    try { corpo = texto ? JSON.parse(texto) : null; } catch { /* corpo ilegível */ }
-    // 2xx = o card foi gravado (o caminho de erro do workflow responde 502).
-    // Não exige `ok: true` no corpo: uma versão antiga do workflow que responda
-    // 200 sem corpo faria o reparo reenviar — e comentar — à toa.
-    if (r.ok && corpo?.ok !== false) return { ok: true, resposta: corpo };
-    return { ok: false, status: r.status, erro: `n8n HTTP ${r.status}${corpo?.mensagem ? ` · ${corpo.mensagem}` : ''}`.slice(0, 200) };
+    return await enviarReuniaoDireto({
+      lead_id: meeting.lead_id,
+      meeting_id: meeting.id,
+      bitrix_id: lead.bitrix_id,
+      full_name: meeting.lead_name,
+      title: meeting.title,
+      scheduled_at: meeting.scheduled_at,
+      duration_min: meeting.duration_min,
+      location: meeting.location,
+      meeting_link: meeting.meeting_link,
+      notes: meeting.notes,
+      scheduled_by: meeting.scheduled_by,
+      meeting_owner: meeting.meeting_owner,
+      client_email: meeting.client_email,
+      booking_date: meeting.booking_date,
+    }, { timeoutMs });
   } catch (e) {
-    return { ok: false, erro: e?.name === 'AbortError' ? `n8n não respondeu em ${Math.round(timeoutMs / 1000)}s` : (e?.message || 'falha ao falar com o n8n') };
-  } finally {
-    clearTimeout(timer);
+    return { ok: false, erro: e?.name === 'AbortError' ? `o Bitrix não respondeu em ${Math.round(timeoutMs / 1000)}s` : (e?.message || 'falha ao falar com o Bitrix') };
   }
 }
 
