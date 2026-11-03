@@ -1522,7 +1522,7 @@ function AgendaSection() {
 
 // ── Integrações (status, read-only) ──────────────────────────────────────────
 // Mostra SE o Bitrix está configurado — sem expor nenhum segredo.
-//   • Bitrix: o webhook (N8N_SYNC_BASE) vive numa env do SERVIDOR (Vercel) e NÃO
+//   • Bitrix: o webhook (BITRIX_WEBHOOK_BASE) vive numa env do SERVIDOR (Vercel) e NÃO
 //     é legível pelo navegador. O sinal honesto que dá pra medir aqui é quantos
 //     leads já estão VINCULADOS ao Bitrix (qs_leads.bitrix_id) — se há vínculos,
 //     a integração está trazendo dados.
@@ -1558,7 +1558,7 @@ function IntegracoesSection() {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-semibold text-gray-900">Bitrix24</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Espelho de perdas/ganhos/reuniões via n8n. Webhook nas envs do servidor.</p>
+            <p className="text-xs text-gray-400 mt-0.5">Espelho de perdas/ganhos/reuniões/notas, direto do QS. Webhook nas envs do servidor.</p>
           </div>
           {bitrixLinked === null ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-400">
@@ -1578,7 +1578,7 @@ function IntegracoesSection() {
           {bitrixLinked === null
             ? "Não deu pra consultar os leads agora."
             : `${bitrixLinked} lead(s) vinculados ao Bitrix (com bitrix_id).`}
-          {" "}O webhook do QS→Bitrix fica na env <code className="text-gray-500">N8N_SYNC_BASE</code> (servidor) e não é visível aqui por segurança.
+          {" "}O webhook do QS→Bitrix fica na env <code className="text-gray-500">BITRIX_WEBHOOK_BASE</code> (servidor) e não é visível aqui por segurança.
         </p>
       </div>
     </div>

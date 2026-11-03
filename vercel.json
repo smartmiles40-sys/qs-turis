@@ -16,6 +16,9 @@
     "api/agenda-reparo.js": {
       "maxDuration": 60
     },
+    "api/bitrix-catalogo.js": {
+      "maxDuration": 60
+    },
     "api/wa-sync.js": {
       "maxDuration": 60
     },
@@ -181,6 +184,10 @@
     {
       "path": "/api/agenda-reparo",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/bitrix-catalogo",
+      "schedule": "10 9 * * *"
     },
     {
       "path": "/api/closer?acao=cron-bitrix",

@@ -61,7 +61,7 @@ const O_QUE_QUEBRA: Record<string, string> = {
   GOOGLE_CLIENT_SECRET: "sem isto a reunião é marcada, mas sem link do Meet (segredo do client OAuth)",
   GOOGLE_REFRESH_TOKEN: "sem isto a reunião é marcada, mas sem link do Meet e a grade ignora a agenda pessoal do closer",
   OPENAI_API_KEY: "sem isto áudio do cliente entra sem transcrição e ela não responde",
-  BITRIX_WEBHOOK_BASE: "sem isto a reunião não vira atividade no card do Bitrix",
+  BITRIX_WEBHOOK_BASE: "sem isto nada do QS chega no Bitrix (reunião, ganho, perdido, nota)",
   META_CALLS_TOKEN: "sem isto nada sai no WhatsApp",
   META_PHONE_NUMBER_ID: "sem isto nada sai no WhatsApp (é o id do número oficial na Meta)",
 };

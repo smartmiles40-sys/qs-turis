@@ -24,6 +24,7 @@
 // -----------------------------------------------------------------------------
 import { randomBytes } from 'node:crypto';
 import { rest } from './_supabaseAdmin.js';
+import { comentarNoNegocio, bitrixConfigurado } from './_bitrixLead.js';
 
 // Todo id que entra em filtro do PostgREST PRECISA passar por aqui. Sem isto,
 // `qs_users?id=eq.${user.id}` aceitava o ALVO escolhido pelo cliente: um id
@@ -360,10 +361,11 @@ function safeJson(s) {
 //      em `usuarios`. Papel nas Expedições: admin | operacional | relacionamento | leitura.
 //      No QS a pessoa entra em Operações (operacional) ou Relacionamento.
 //
-// action 'exp_inscricao_bitrix' { passageiro_id } → avisa o Bitrix (via n8n) que a
-//   inscrição foi aprovada — igual ao app antigo, melhor esforço. Precisa das envs
-//   EXP_N8N_BITRIX_OUTBOUND_URL e EXP_WEBHOOK_SECRET (as mesmas N8N_BITRIX_OUTBOUND_URL
-//   / WEBHOOK_SECRET do projeto antigo); sem elas responde enviado:false.
+// action 'exp_inscricao_bitrix' { passageiro_id } → avisa o Bitrix que a inscrição
+//   foi aprovada, melhor esforço: comentário na timeline do negócio do passageiro
+//   (bitrix_deal_id), direto pela env BITRIX_WEBHOOK_BASE. Até 03/11 ia pro n8n
+//   (EXP_N8N_BITRIX_OUTBOUND_URL + EXP_WEBHOOK_SECRET), que nunca foi configurado no
+//   QS. Sem a env ou sem negócio responde enviado:false.
 // =============================================================================
 const EXP_PAPEIS = new Set(['admin', 'operacional', 'relacionamento', 'leitura']);
 const ALFA_SENHA = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -467,11 +469,20 @@ async function expInscricaoBitrix(res, body, accessToken) {
   } catch {
     return res.status(500).json({ success: false, error: 'Falha ao validar permissão' });
   }
-  const url = process.env.EXP_N8N_BITRIX_OUTBOUND_URL;
-  if (!url) return res.status(200).json({ success: true, enviado: false, motivo: 'EXP_N8N_BITRIX_OUTBOUND_URL não configurada' });
+  // Direto no Bitrix desde 03/11 (antes: webhook EXP_N8N_BITRIX_OUTBOUND_URL do
+  // n8n). O workflow do n8n que recebia esta "cartinha" NUNCA foi exportado pro
+  // repo — o app antigo só diz que ele escrevia via crm.deal.update /
+  // crm.contact.update e anexava o passaporte, sem dizer em quais campos. Em vez
+  // de chutar UF_CRM_* (campo errado não dá erro, só suja o card), o QS deixa
+  // um COMENTÁRIO na timeline do negócio com o resumo da inscrição aprovada.
+  // Sem CPF, passaporte nem saúde: timeline é lida por todo o comercial.
+  if (!bitrixConfigurado()) return res.status(200).json({ success: true, enviado: false, motivo: 'BITRIX_WEBHOOK_BASE não configurada' });
   try {
     const p = (await rest(`passageiros?select=*&id=eq.${paxId}&limit=1`))?.[0];
     if (!p) return res.status(404).json({ success: false, error: 'Passageiro não encontrado' });
+    if (!/^\d+$/.test(String(p.bitrix_deal_id || ''))) {
+      return res.status(200).json({ success: true, enviado: false, motivo: 'passageiro sem negócio no Bitrix' });
+    }
     const exp = idValido(p.expedicao_id) ? (await rest(`expedicoes?select=codigo,nome&id=eq.${p.expedicao_id}&limit=1`))?.[0] : null;
     // expedições anteriores (não canceladas) da pessoa pelo CPF, sem contar a atual
     const cpf = String(p.cpf || '').replace(/\D/g, '');
@@ -483,47 +494,28 @@ async function expInscricaoBitrix(res, body, accessToken) {
         .filter((l) => l.expedicao_id && l.expedicao_id !== p.expedicao_id && l.status_reserva !== 'Cancelado')
         .map((l) => l.expedicao_id)).size;
     }
-    let passaporte_arquivo_url = null;
-    let passaporte_arquivo_nome = null;
-    if (idValido(p.passaporte_arquivo_id)) {
-      const a = (await rest(`arquivos?select=storage_path,nome&id=eq.${p.passaporte_arquivo_id}&limit=1`))?.[0];
-      if (a?.storage_path) {
-        const caminho = a.storage_path.split('/').map(encodeURIComponent).join('/');
-        const s = await fetch(`${base}/storage/v1/object/sign/arquivos-expedicoes/${caminho}`, {
-          method: 'POST',
-          headers: { apikey: SR(), Authorization: `Bearer ${SR()}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ expiresIn: 3600 }),
-        });
-        const sj = s.ok ? await s.json() : null;
-        if (sj?.signedURL) { passaporte_arquivo_url = `${base}/storage/v1${sj.signedURL}`; passaporte_arquivo_nome = a.nome; }
-      }
-    }
-    const payload = {
-      evento: 'inscricao_aprovada',
-      bitrix_deal_id: p.bitrix_deal_id, bitrix_contact_id: p.bitrix_contact_id,
-      expedicao_codigo: exp?.codigo ?? null, expedicao_nome: exp?.nome ?? null, expedicoes_anteriores: anteriores,
-      nome_completo: p.nome_completo, cpf: p.cpf, email: p.email, telefone: p.telefone, data_nascimento: p.data_nascimento,
-      passaporte: p.passaporte, validade_passaporte: p.validade_passaporte, status_reserva: p.status_reserva, observacoes: p.observacoes,
-      endereco: { cep: p.endereco_cep, rua: p.endereco_rua, numero: p.endereco_numero, complemento: p.endereco_complemento, bairro: p.endereco_bairro, cidade: p.endereco_cidade, estado: p.endereco_estado },
-      contato_emergencia_nome: p.contato_emergencia_nome, contato_emergencia_vinculo: p.contato_emergencia_vinculo, contato_emergencia_fone: p.contato_emergencia_fone,
-      pref_marcar_assento: p.pref_marcar_assento, pref_upgrade_classe: p.pref_upgrade_classe,
-      ja_viajou_internacional: p.ja_viajou_internacional, paises_visitados: p.paises_visitados,
-      saude: p.saude ?? null, passaporte_arquivo_url, passaporte_arquivo_nome,
-    };
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 7000);
-    let r;
-    try {
-      r = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-webhook-secret': process.env.EXP_WEBHOOK_SECRET || '' },
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      });
-    } finally { clearTimeout(t); }
-    return res.status(200).json({ success: true, enviado: r.ok, motivo: r.ok ? undefined : `n8n status ${r.status}` });
+    const comentario = montarComentarioInscricao(p, exp, anteriores);
+    const id = await comentarNoNegocio(p.bitrix_deal_id, comentario, 7_000);
+    return res.status(200).json({ success: true, enviado: !!id, motivo: id ? undefined : 'o Bitrix recusou o comentário' });
   } catch (err) {
     console.error('[admin-user] exp_inscricao_bitrix', err?.message || err);
     return res.status(200).json({ success: true, enviado: false, motivo: 'erro ao enviar' });
   }
+}
+
+/** Resumo da inscrição aprovada pra timeline do negócio (sem dado sensível). */
+export function montarComentarioInscricao(p, exp, anteriores) {
+  const sim = (v) => (v === true ? 'sim' : v === false ? 'não' : null);
+  const linhas = [
+    '✅ Inscrição APROVADA nas Expedições (QS).',
+    exp ? `Expedição: ${exp.nome || exp.codigo}${exp.codigo && exp.nome ? ` (${exp.codigo})` : ''}` : null,
+    p.nome_completo ? `Passageiro: ${p.nome_completo}` : null,
+    p.status_reserva ? `Status da reserva: ${p.status_reserva}` : null,
+    `Expedições anteriores com a agência: ${anteriores || 0}`,
+    sim(p.pref_marcar_assento) ? `Quer marcar assento: ${sim(p.pref_marcar_assento)}` : null,
+    p.pref_upgrade_classe ? `Upgrade de classe: ${p.pref_upgrade_classe}` : null,
+    sim(p.ja_viajou_internacional) ? `Já viajou pra fora: ${sim(p.ja_viajou_internacional)}` : null,
+    'Ficha completa (documentos, saúde, contato de emergência) no QS › Expedições.',
+  ];
+  return linhas.filter(Boolean).join('\n');
 }

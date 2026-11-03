@@ -619,7 +619,7 @@ export default function LeadDetailPage({ leadId, onBack }: LeadDetailPageProps) 
         notifyError("Lead ganho, mas as atividades abertas não foram encerradas — encerre-as no Painel.");
       }
       // Move o negócio pra coluna de Ganho no Bitrix. O evento continua "ganho"
-      // (whitelist); closed_value vai como campo extra — o n8n usa se souber.
+      // (whitelist); o servidor lê o closed_value do próprio lead (gravado acima).
       notifyBitrix("ganho", {
         lead_id: lead.id,
         bitrix_id: lead.bitrix_id,

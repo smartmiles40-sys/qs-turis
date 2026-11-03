@@ -17,7 +17,7 @@
 //   2. BITRIX — reuniões agendadas/confirmadas criadas nos últimos 30 dias com
 //      `bitrix_synced` falso, cujo lead tem bitrix_id e que são a reunião MAIS
 //      RECENTE do lead. Reenvia por `enviarReuniaoAoBitrix` (api/_agenda.js),
-//      o mesmo webhook `qs-reuniao` do agendamento.
+//      o mesmo caminho do agendamento (direto no Bitrix desde 03/11).
 //
 // POR QUE NÃO DUPLICA:
 //   • Meet: o evento nasce com um id DERIVADO do meeting_id (idEvento em
@@ -26,12 +26,12 @@
 //     MESMA sala — não nasce segundo evento nem segundo convite. E aqui só
 //     entra reunião SEM `calendar_event_id` (evento que já existe não é
 //     recriado; o PATCH de erro também só grava se continuar sem evento).
-//   • Bitrix: o `qs-reuniao` é um crm.deal.update no negócio que o lead JÁ
+//   • Bitrix: o envio da reunião é um crm.deal.update no negócio que o lead JÁ
 //     aponta — nunca cria card. Repetir só reescreve os mesmos campos. O único
 //     efeito repetível é o comentário na timeline, e por isso: só entra quem
 //     está com bitrix_synced falso; sucesso marca bitrix_synced=true aqui mesmo
-//     (sem depender do n8n escrever de volta); o erro só é gravado se a linha
-//     continuar não sincronizada (não apaga um sucesso que o n8n gravou).
+//     (além do que o próprio envio grava); o erro só é gravado se a linha
+//     continuar não sincronizada (não apaga um sucesso concorrente).
 //   • Ficam de FORA de propósito: realizada/no-show/reagendada/desistência
 //     (reenviar "Reunião agendada" num card que já andou puxaria a etapa pra
 //     trás e mentiria na timeline) e reunião que não é a mais nova do lead (a
@@ -47,13 +47,14 @@
 // onde alguém resolve à mão.
 //
 // Env: CRON_SECRET, GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_REFRESH_TOKEN
-// (Meet), N8N_SYNC_BASE (Bitrix). Sem a env de um lado, aquele lado é pulado
-// com recado, sem erro.
+// (Meet), BITRIX_WEBHOOK_BASE (Bitrix). Sem a env de um lado, aquele lado é
+// pulado com recado, sem erro.
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { criarSalaDoMeet, enviarReuniaoAoBitrix } from './_agenda.js';
 import { googleConfigurado, motivoNaoConfigurado } from './_google.js';
+import { bitrixConfigurado } from './_bitrixLead.js';
 
 const MAX_TENTATIVAS = 5;
 /** Espera (min) antes da tentativa n+1, onde n = tentativas já feitas. */
@@ -155,7 +156,7 @@ async function repararMeet(prazo) {
 // ─── 2. Bitrix ───────────────────────────────────────────────────────────────
 
 async function repararBitrix(prazo) {
-  if (!(process.env.N8N_SYNC_BASE || '').trim()) return { pulado: 'N8N_SYNC_BASE ausente' };
+  if (!bitrixConfigurado()) return { pulado: 'BITRIX_WEBHOOK_BASE ausente' };
   const agora = Date.now();
   const rows = await rest(
     'qs_meetings?select=*,lead:qs_leads(id,bitrix_id)' +
@@ -194,8 +195,8 @@ async function repararBitrix(prazo) {
 
     const r = await enviarReuniaoAoBitrix(m, m.lead, { timeoutMs: 12_000 });
     if (r.ok) {
-      // O n8n já grava isto; gravar aqui também cobre workflow que não grava de
-      // volta — sem isso o próximo ciclo reenviaria (e comentaria) de novo.
+      // O envio já grava isto; gravar aqui de novo garante — sem isso o
+      // próximo ciclo reenviaria (e comentaria) de novo.
       await rest(`qs_meetings?id=eq.${enc(m.id)}&bitrix_synced=not.is.true`, {
         method: 'PATCH', prefer: 'return=minimal',
         body: { bitrix_synced: true, bitrix_synced_at: new Date().toISOString(), bitrix_error: null },

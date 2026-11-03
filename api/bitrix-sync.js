@@ -1,29 +1,30 @@
 // api/bitrix-sync.js
 // -----------------------------------------------------------------------------
 // Rota serverless (Vercel): POST /api/bitrix-sync
-// PROXY autenticado do sync QS → Bitrix (webhooks do n8n).
+// Sync QS → Bitrix, autenticado, DIRETO no Bitrix (sem n8n desde 03/11/2026).
 //
 // Por que existe: antes o navegador chamava o n8n DIRETO (VITE_N8N_SYNC_BASE no
 // bundle + webhooks sem auth) — qualquer visitante podia extrair a URL e mover
-// negócios no Bitrix. Agora a URL do n8n e o segredo ficam SÓ no servidor.
+// negócios no Bitrix. Depois virou um proxy pro n8n; desde o corte do n8n, todos
+// os eventos falam com o Bitrix daqui mesmo (env BITRIX_WEBHOOK_BASE).
 //
-// Body (JSON): { "event": "perdido"|"ganho"|"reuniao"|"nota"|"primeiro-contato", "lead_id": uuid, ...payload }
-//   → encaminhado para `${N8N_SYNC_BASE}/qs-<event>` com o header
-//     x-qs-sync-secret = N8N_SYNC_SECRET (validar no nó Webhook do n8n).
+// Body (JSON): { "event": "perdido"|"ganho"|"reuniao"|"nota"|"primeiro-contato"|"reuniao-campos", "lead_id": uuid, ...payload }
 //   O `bitrix_id` é resolvido AQUI a partir do lead_id (qs_leads via service
 //   role) — o valor enviado pelo cliente é ignorado. Lead sem bitrix_id → skip
 //   silencioso ({ success: true, code: "skipped_no_bitrix_id" }).
+//   `ganho` e `reuniao` (o que o n8n fazia) moram em api/_bitrixSaida.js.
 //
 // Segurança (igual ao chatapp-send, fail-closed):
 //   1. Servidor-a-servidor: header x-internal-secret = INTERNAL_API_SECRET.
 //   2. Usuário logado no QS: Authorization: Bearer <access_token Supabase>.
 //
-// Env (Vercel): N8N_SYNC_BASE (sem barra final), N8N_SYNC_SECRET.
-// Sem N8N_SYNC_BASE → responde { code: "not_configured" } e o front ignora.
+// Env (Vercel): BITRIX_WEBHOOK_BASE (ex.: https://xxx.bitrix24.com.br/rest/23/token).
+// Sem ela → responde { code: "not_configured" } e o front ignora.
 // -----------------------------------------------------------------------------
 
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { bx, comentarNoNegocio, bitrixConfigurado } from './_bitrixLead.js';
+import { gravarGanhoNoBitrix, enviarReuniaoDireto } from './_bitrixSaida.js';
 
 // 'primeiro-contato' (2026-07-28): o SDR conclui a 1ª atividade no QS e o negócio
 // anda sozinho de "Novo lead" para "Follow-up 1" no Bitrix. Quem decide se move é
@@ -229,17 +230,16 @@ async function atualizarCamposBitrix(bitrixId, fields) {
 // pra divergir nem path pra disputar. É a mesma decisão (e o mesmo caminho) que
 // o `reuniao-campos` já usava desde 14/08.
 //
-// `ganho` e `reuniao` continuam no n8n de propósito: o ganho depende de uma
-// coluna que ninguém decidiu ainda (STAGE_GANHO vazio no fluxo) e a reunião
-// depende do catálogo de campos (0042), que é trabalho de workflow de verdade.
+// `ganho` e `reuniao` ficaram no n8n até 03/11, quando o n8n foi cortado: o
+// ganho segue sem mudar de coluna (STAGE_GANHO continua vazio, agora em
+// api/_bitrixSaidaRegras.js) e a reunião lê o catálogo de campos (0042), que
+// passou a ser alimentado pelo /api/bitrix-catalogo (cron).
 const PRE_VENDAS = {
   novo_lead:  'C25:PREPAYMENT_INVOIC',  // "Novo Lead - Aguardando resposta"
   follow_up1: 'C25:UC_271QUB',          // "Follow-up 1"
   perdido:    'C25:LOSE',               // "Leads perdidos"
   categoria:  '25',                     // funil "Pré-Vendas - Comercial"
 };
-
-const EVENTOS_DIRETOS = new Set(['primeiro-contato', 'nota', 'perdido']);
 
 /** Lê o negócio no Bitrix. `null` = recusou ou não existe (nunca estoura). */
 async function lerNegocio(bitrixId) {
@@ -454,7 +454,7 @@ export default async function handler(req, res) {
   let lead = null;
   try {
     const rows = await rest(
-      `qs_leads?select=owner_id,bitrix_id,bitrix_status_synced&id=eq.${encodeURIComponent(leadId)}&limit=1`
+      `qs_leads?select=owner_id,bitrix_id,bitrix_status_synced,closed_value,full_name&id=eq.${encodeURIComponent(leadId)}&limit=1`
     );
     lead = (rows && rows[0]) || null;
   } catch (err) {
@@ -551,102 +551,73 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true, code: etapaMantida ? 'etapa_mantida' : 'atualizado' });
   }
 
-  // ── Caminho DIRETO ao Bitrix (sem n8n) ────────────────────────────────────
-  // Só quando o Bitrix está configurado. Sem BITRIX_WEBHOOK_BASE, cai no n8n
-  // como antes — nada regride num ambiente que ainda não tem a env.
-  if (EVENTOS_DIRETOS.has(event) && bitrixConfigurado()) {
-    if (event === 'nota') {
-      const corpo = String(payload.body || '').trim();
-      if (!corpo) return res.status(400).json({ success: false, error: 'nota sem corpo' });
-      const id = await comentarNoNegocio(serverBitrixId, `📝 QS Turis: ${corpo}`, 6_000);
-      return id
-        ? res.status(200).json({ success: true, code: 'comentado' })
-        : res.status(502).json({ success: false, error: 'bitrix-recusou' });
+  // ── Tudo direto no Bitrix (o n8n foi cortado em 03/11) ────────────────────
+  // Sem BITRIX_WEBHOOK_BASE é integração desligada: no-op declarado, o front
+  // não mostra erro (o mesmo contrato do antigo "sem N8N_SYNC_BASE").
+  if (!bitrixConfigurado()) {
+    return res.status(200).json({ success: false, code: 'not_configured' });
+  }
+
+  if (event === 'nota') {
+    const corpo = String(payload.body || '').trim();
+    if (!corpo) return res.status(400).json({ success: false, error: 'nota sem corpo' });
+    const id = await comentarNoNegocio(serverBitrixId, `📝 QS Turis: ${corpo}`, 6_000);
+    return id
+      ? res.status(200).json({ success: true, code: 'comentado' })
+      : res.status(502).json({ success: false, error: 'bitrix-recusou' });
+  }
+
+  if (event === 'primeiro-contato') {
+    // Lead já espelhado nem consulta o Bitrix: é o que segura a rajada da
+    // conclusão em lote (um evento por tarefa) num CRM de ~2 req/s.
+    if (lead.bitrix_status_synced) {
+      return res.status(200).json({ success: true, code: 'ja_espelhado' });
     }
+    const r = await moverPrimeiroContato(serverBitrixId);
+    if (!r.ok) return res.status(502).json({ success: false, error: r.code });
 
-    if (event === 'primeiro-contato') {
-      // Lead já espelhado nem consulta o Bitrix: é o que segura a rajada da
-      // conclusão em lote (um evento por tarefa) num CRM de ~2 req/s.
-      if (lead.bitrix_status_synced) {
-        return res.status(200).json({ success: true, code: 'ja_espelhado' });
-      }
-      const r = await moverPrimeiroContato(serverBitrixId);
-      if (!r.ok) return res.status(502).json({ success: false, error: r.code });
-
-      if (r.code === 'movido') {
-        await comentarNoNegocio(serverBitrixId,
-          '🤖 1º CONTATO FEITO (QS Turis) — negócio movido de "Novo Lead" para "Follow-up 1".' +
-          `\nCanal: ${payload.canal || '-'}` +
-          `\nDesfecho: ${payload.desfecho || '-'}` +
-          `\nSDR: ${payload.sdr || '-'}`,
-          6_000);
-        await anotarNoLead(leadId,
-          '🤖 Bitrix: card movido de "Novo Lead" para "Follow-up 1" (1º contato).',
-          ['bitrix', 'primeiro-contato']);
-      }
-      // Carimba inclusive quando o card já tinha saído da coluna: a resposta do
-      // Bitrix não muda, e perguntar de novo a cada atividade é desperdício.
-      await marcarFunilSincronizado(leadId, 'primeiro-contato');
-      return res.status(200).json({ success: true, code: r.code });
+    if (r.code === 'movido') {
+      await comentarNoNegocio(serverBitrixId,
+        '🤖 1º CONTATO FEITO (QS Turis) — negócio movido de "Novo Lead" para "Follow-up 1".' +
+        `\nCanal: ${payload.canal || '-'}` +
+        `\nDesfecho: ${payload.desfecho || '-'}` +
+        `\nSDR: ${payload.sdr || '-'}`,
+        6_000);
+      await anotarNoLead(leadId,
+        '🤖 Bitrix: card movido de "Novo Lead" para "Follow-up 1" (1º contato).',
+        ['bitrix', 'primeiro-contato']);
     }
+    // Carimba inclusive quando o card já tinha saído da coluna: a resposta do
+    // Bitrix não muda, e perguntar de novo a cada atividade é desperdício.
+    await marcarFunilSincronizado(leadId, 'primeiro-contato');
+    return res.status(200).json({ success: true, code: r.code });
+  }
 
-    // perdido
+  if (event === 'perdido') {
     const r = await moverParaPerdido(serverBitrixId, payload.loss_reason);
     if (!r.ok) return res.status(502).json({ success: false, error: r.code });
     await marcarFunilSincronizado(leadId, 'perdido');
     return res.status(200).json({ success: true, code: r.code });
   }
 
-  const base = (process.env.N8N_SYNC_BASE || '').trim().replace(/\/+$/, '');
-  if (!base) {
-    // Integração ainda não configurada — no-op declarado (o front não mostra erro).
-    return res.status(200).json({ success: false, code: 'not_configured' });
+  if (event === 'ganho') {
+    // Valor e nome saem do BANCO, não do navegador: o front grava status e
+    // closed_value no lead ANTES de disparar o evento (LeadDetailPage), e o
+    // valor vindo do cliente era justamente o que dava pra forjar.
+    const r = await gravarGanhoNoBitrix({
+      bitrixId: serverBitrixId,
+      closedValue: lead.closed_value ?? payload.closed_value,
+      fullName: lead.full_name || payload.full_name,
+    }, { timeoutMs: 7_000 });
+    if (!r.ok) return res.status(502).json({ success: false, error: r.code });
+    await marcarFunilSincronizado(leadId, 'ganho');
+    return res.status(200).json({ success: true, code: r.code });
   }
 
-  // Manda os DOIS nomes de header, com o mesmo segredo.
-  //
-  // Por quê: o n8n valida NOME + valor. Como os sete webhooks dividem uma única
-  // credencial de Header Auth, o nome dela vira uma variável global — e em 07/08
-  // isso derrubou a integração quatro vezes seguidas, porque arrumar o
-  // sincronismo quebrava a agenda e vice-versa, dependendo de qual nome estava
-  // salvo naquele momento.
-  //
-  // Mandando os dois, o nome deixa de importar: qualquer que seja o configurado,
-  // a requisição carrega. Sobra uma única coisa para acertar — o VALOR. Header a
-  // mais é ignorado por quem não o espera, então não há custo.
-  const headers = { 'Content-Type': 'application/json' };
-  const sync = (process.env.N8N_SYNC_SECRET || '').trim();
-  const agenda = (process.env.N8N_AGENDA_SECRET || '').trim();
-  if (sync || agenda) {
-    headers['x-qs-sync-secret'] = sync || agenda;
-    headers['x-qs-agenda-secret'] = agenda || sync;
-  }
-
-  // Timeout: n8n lento não pode segurar a função até o limite da Vercel.
-  // 7s, não 10s: o maxDuration da rota É 10s e a autenticação que roda antes
-  // gasta até 5s — timeout igual ao teto significa que a Vercel mata a função
-  // ANTES do abort disparar (a regra de _wa.js: o timeout do fetch tem que ser
-  // MENOR que o maxDuration, senão ele nunca age).
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 7_000);
-  try {
-    const r = await fetch(`${base}/qs-${event}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ event, ...payload }),
-      signal: ctrl.signal,
-    });
-    if (!r.ok) {
-      console.error('[bitrix-sync] n8n respondeu', r.status, 'para', event);
-      return res.status(502).json({ success: false, error: `n8n HTTP ${r.status}` });
-    }
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    console.error('[bitrix-sync]', event, err?.name === 'AbortError' ? 'timeout 7s' : err?.message);
-    return res.status(502).json({ success: false, error: 'Falha ao falar com o n8n' });
-  } finally {
-    clearTimeout(timer);
-  }
+  // reuniao
+  const r = await enviarReuniaoDireto({ ...payload, lead_id: leadId }, { timeoutMs: 7_000 });
+  if (!r.ok) return res.status(r.status || 502).json({ success: false, error: r.erro || 'bitrix-recusou' });
+  return res.status(200).json({ success: true, code: 'gravado', nao_preenchidos: r.resposta?.nao_preenchidos || [] });
 }
 
 function safeJson(s) {
