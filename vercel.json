@@ -94,6 +94,9 @@
     "api/rel-docs-ia.js": {
       "maxDuration": 60
     },
+    "api/proposta-ia.js": {
+      "maxDuration": 60
+    },
     "api/rel-viagem-ia.js": {
       "maxDuration": 60
     },

@@ -201,6 +201,8 @@ export interface CampoModelo {
   dica?: string;
   exemplo?: string;
   linhas?: number;
+  /** "Montar com IA" preenche este campo (texto = a descrição que vai pra IA). */
+  ia?: true | string;
 }
 export interface SecaoModelo { titulo: string; dica?: string; campos: CampoModelo[] }
 
@@ -208,7 +210,7 @@ export const SECOES_PACOTE: SecaoModelo[] = [
   {
     titulo: "Capa", dica: "Título grande = o título da proposta; texto abaixo = a apresentação; foto = a foto da capa.",
     campos: [
-      { chave: "selo", rotulo: "Selo acima do título", tipo: "texto", exemplo: "ALL INCLUSIVE" },
+      { chave: "selo", rotulo: "Selo acima do título", tipo: "texto", exemplo: "ALL INCLUSIVE", ia: "Selo curto acima do título, ex.: ALL INCLUSIVE (só se os insumos disserem)" },
       { chave: "capa_quadros", rotulo: "Quadros da capa (Rótulo | valor | detalhe)", tipo: "tabela", linhas: 4,
         exemplo: "Saída | Fortaleza | Ter, 17/08 às 16:50\nChegada em Cancún | Qua, 18/08 | às 11:35\nVolta a Fortaleza | Seg, 23/08 | às 10:40\nCompanhia | GOL | econômica" },
       { chave: "rota", rotulo: "Rota do voo de ida (Código | Cidade | voo · hora até o próximo)", tipo: "tabela", linhas: 4,
@@ -220,7 +222,7 @@ export const SECOES_PACOTE: SecaoModelo[] = [
   {
     titulo: "Sumário e voos",
     campos: [
-      { chave: "sumario_sub", rotulo: "Linha abaixo de \"Sumário da viagem\"", tipo: "texto", exemplo: "Cancún all inclusive · 17 a 23 de agosto de 2027 · 4 noites no Hilton · quarto duplo ou single · saída de Fortaleza" },
+      { chave: "sumario_sub", rotulo: "Linha abaixo de \"Sumário da viagem\"", tipo: "texto", ia: "Resumo em uma linha: destino · datas · hotel · quarto · cidade de saída", exemplo: "Cancún all inclusive · 17 a 23 de agosto de 2027 · 4 noites no Hilton · quarto duplo ou single · saída de Fortaleza" },
       { chave: "sumario", rotulo: "Sumário (Data | o que acontece)", tipo: "tabela", linhas: 7, dica: "Vazio = usa a data e o título de cada dia do dia a dia.",
         exemplo: "17/08 | Embarque em Fortaleza, rumo ao Caribe\n18/08 | Chegada a Cancún e tarde livre no Hilton" },
       { chave: "voos_nota", rotulo: "Observação dos voos", tipo: "area", exemplo: "Horários em hora local de cada cidade. Cancún fica 2 horas atrás de Fortaleza em agosto." },
@@ -251,7 +253,7 @@ export const SECOES_PACOTE: SecaoModelo[] = [
     campos: [
       { chave: "documentos", rotulo: "Documentos necessários (Documento | Detalhe)", tipo: "tabela", linhas: 6, exemplo: "Passaporte | Válido por pelo menos 6 meses a partir da data de entrada no México." },
       { chave: "documentos_nota", rotulo: "Nota abaixo dos documentos", tipo: "texto" },
-      { chave: "cancelamento", rotulo: "Condições de cancelamento (Serviço | Cancelamento grátis até | Depois disso)", tipo: "tabela", linhas: 6,
+      { chave: "cancelamento", rotulo: "Condições de cancelamento (Serviço | Cancelamento grátis até | Depois disso)", tipo: "tabela", linhas: 6, ia: true,
         exemplo: "Hilton Cancun | 05/08/2027 | Multa de 20% até a chegada. Sem comparecimento, cobrança total." },
       { chave: "cancelamento_nota", rotulo: "Nota abaixo do cancelamento", tipo: "texto" },
     ],
@@ -267,9 +269,9 @@ export const SECOES_PACOTE: SecaoModelo[] = [
     titulo: "Taxas e opcionais",
     campos: [
       { chave: "taxas_sub", rotulo: "Texto abaixo de \"Taxas locais já inclusas\"", tipo: "area" },
-      { chave: "taxas", rotulo: "Taxas (Taxa | Quando | No pacote)", tipo: "tabela", linhas: 5, exemplo: "Taxa da hospedagem do Hilton | Check-in, 18/08 | Incluso" },
+      { chave: "taxas", rotulo: "Taxas (Taxa | Quando | No pacote)", tipo: "tabela", linhas: 5, ia: "Taxas locais citadas nos insumos (Taxa | Quando | No pacote: Incluso ou Não incluso)", exemplo: "Taxa da hospedagem do Hilton | Check-in, 18/08 | Incluso" },
       { chave: "taxas_nota", rotulo: "Nota abaixo das taxas", tipo: "texto" },
-      { chave: "opcionais", rotulo: "Opcionais (Categoria | Nome | Descrição | Valor por pessoa | Valor casal)", tipo: "tabela", linhas: 3,
+      { chave: "opcionais", rotulo: "Opcionais (Categoria | Nome | Descrição | Valor por pessoa | Valor casal)", tipo: "tabela", linhas: 3, ia: "Opcionais com preço nos insumos, ex.: mala de porão (Categoria | Nome | Descrição | + R$ por pessoa | Casal: + R$)",
         exemplo: "Bagagem | Mala de porão | Uma mala despachada por pessoa em todos os trechos, de ida e de volta. | + R$ 750 | Casal: + R$ 1.500" },
       { chave: "opcionais_aviso_titulo", rotulo: "Título do aviso dos opcionais", tipo: "texto" },
       { chave: "opcionais_aviso", rotulo: "Texto do aviso dos opcionais", tipo: "area" },
@@ -307,7 +309,7 @@ export const SECOES_SERVICOS: SecaoModelo[] = [
     titulo: "Capa", dica: "Título grande = o título da proposta (ex.: Família Sobreira); texto abaixo = a apresentação.",
     campos: [
       { chave: "selo", rotulo: "Selo no canto (opcional)", tipo: "texto", exemplo: "Proposta atualizada" },
-      { chave: "cidades", rotulo: "Cidades (acima do título)", tipo: "texto", exemplo: "Madri · Toledo · Barcelona" },
+      { chave: "cidades", rotulo: "Cidades (acima do título)", tipo: "texto", exemplo: "Madri · Toledo · Barcelona", ia: "Cidades da viagem separadas por · (ex.: Madri · Toledo · Barcelona)" },
     ],
   },
   {
@@ -324,7 +326,7 @@ export const SECOES_SERVICOS: SecaoModelo[] = [
   {
     titulo: "3 · Informações importantes",
     campos: [
-      { chave: "infos", rotulo: "Cartões (Rótulo | texto)", tipo: "tabela", linhas: 3, exemplo: "Transporte dos passeios | Ônibus de 30 lugares para o grupo.\nChegada e saída | Ônibus de 54 lugares." },
+      { chave: "infos", rotulo: "Cartões (Rótulo | texto)", tipo: "tabela", linhas: 3, ia: "Informações importantes dos serviços, ex.: transporte (Rótulo | texto)", exemplo: "Transporte dos passeios | Ônibus de 30 lugares para o grupo.\nChegada e saída | Ônibus de 54 lugares." },
       { chave: "infos_nota", rotulo: "Texto abaixo dos cartões", tipo: "area" },
     ],
   },
@@ -353,7 +355,7 @@ export const SECOES_SEGURO: SecaoModelo[] = [
     campos: [
       { chave: "comparativo", rotulo: "Coberturas lado a lado (Cobertura | plano 1 | plano 2 | …)", tipo: "tabela", linhas: 9,
         exemplo: "Assistência médica | 80.000 | 100.000 | 250.000 | 50.000 | 100.000 | 250.000\nCancelamento de viagem | 1.500 | 1.500 | 2.000 | — | — | 1.000" },
-      { chave: "comparativo_notas", rotulo: "Notas (uma por linha; **negrito** funciona)", tipo: "area", linhas: 4, exemplo: "**Hero Seguros:** câmbio de referência US$ 1 = R$ 5,01." },
+      { chave: "comparativo_notas", rotulo: "Notas (uma por linha; **negrito** funciona)", tipo: "area", linhas: 4, ia: "Notas da cotação, uma por linha, ex.: **Hero Seguros:** câmbio de referência US$ 1 = R$ 5,01.", exemplo: "**Hero Seguros:** câmbio de referência US$ 1 = R$ 5,01." },
     ],
   },
   {
@@ -365,7 +367,7 @@ export const SECOES_SEGURO: SecaoModelo[] = [
       { chave: "rec_alt_texto", rotulo: "Alternativa: texto (**negrito** funciona)", tipo: "area" },
     ],
   },
-  { titulo: "Rodapé", campos: [{ chave: "rodape", rotulo: "Rodapé de todas as páginas", tipo: "texto", exemplo: "Cotação Hero Seguros nº 403-14360-0-60-0 · Cotação Universal Assistance de 14/10/2026" }] },
+  { titulo: "Rodapé", campos: [{ chave: "rodape", rotulo: "Rodapé de todas as páginas", tipo: "texto", ia: "Número/data de cada cotação, ex.: Cotação Hero Seguros nº 403-14360 · Cotação Universal de 14/10/2026", exemplo: "Cotação Hero Seguros nº 403-14360-0-60-0 · Cotação Universal Assistance de 14/10/2026" }] },
 ];
 
 export const SECOES: Record<ModeloProposta, SecaoModelo[]> = { pacote: SECOES_PACOTE, servicos: SECOES_SERVICOS, seguro: SECOES_SEGURO };

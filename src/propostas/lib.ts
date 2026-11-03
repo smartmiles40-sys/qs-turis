@@ -599,7 +599,7 @@ export function paraVM(p: Proposta): PropostaVM {
     esconder_precos: p.esconder_precos, capa_url: p.capa_url, cliente_nome: p.cliente_nome,
     consultor: (p.enviada_por_nome || p.criado_por_nome) ? { nome: (p.enviada_por_nome || p.criado_por_nome)!, whatsapp: null } : null,
     aprovada_opcao_id: p.aprovada_opcao_id ?? null, aprovada_em: p.aprovada_em ?? null,
-    modelo: p.modelo, conteudo: p.conteudo, data: diaEmSP(p.enviada_em || p.criado_em),
+    modelo: p.modelo, conteudo: semIa(p.conteudo), data: diaEmSP(p.enviada_em || p.criado_em),
     opcoes: p.opcoes.map((o) => ({
       extra: o.extra ?? {},
       id: o.id ?? o.k, titulo: o.titulo, descricao: o.descricao, recomendada: o.recomendada, desconto: o.desconto, pagamentos: o.pagamentos,
@@ -609,6 +609,13 @@ export function paraVM(p: Proposta): PropostaVM {
       })),
     })),
   };
+}
+/** 0290: as marcas do "Montar com IA" (conteudo._ia) são só do time, como no api/proposta.js. */
+function semIa(c: Conteudo): Conteudo {
+  if (!c || !("_ia" in c)) return c;
+  const x = { ...c };
+  delete x._ia;
+  return x;
 }
 /** Campos de detalhe que são só do time (localizador). */
 export function semInternos(d: Record<string, unknown>): Record<string, unknown> {

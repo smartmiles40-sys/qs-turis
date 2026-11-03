@@ -45,6 +45,7 @@ async function montarVM(p) {
   const conteudo = p.conteudo && typeof p.conteudo === 'object' ? { ...p.conteudo } : {};
   const extras = Array.isArray(conteudo.opcoes_extra) ? conteudo.opcoes_extra : [];
   delete conteudo.opcoes_extra;
+  delete conteudo._ia; // 0290: marcas da IA e insumos são só do time
   const dataSP = new Date(Date.parse(p.enviada_em || p.criado_em || new Date().toISOString()) - 3 * 3600_000).toISOString().slice(0, 10);
   return {
     modelo: p.modelo || null, conteudo, data: dataSP,
