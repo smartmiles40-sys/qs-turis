@@ -43,6 +43,9 @@ const css = (rodape: string) => `
 .mp-pill { display: inline-block; background: ${C.limao}; color: ${C.escuro}; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 11px; border-radius: 999px; }
 .mp-painel { background: ${C.painel}; border-radius: 12px; }
 .mp-card { border: 1px solid ${C.borda}; border-radius: 12px; background: #fff; }
+/* Bloco sem caixa: só um fio de cor à esquerda (menos bordas no PDF). */
+.mp-leve { border-left: 3px solid ${C.limao}; padding: 2px 0 2px 16px; }
+.mp-fio { border-top: 1px solid ${C.borda}; border-bottom: 1px solid ${C.borda}; }
 .mp-tab { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mp-tab th { background: ${C.escuro}; color: #fff; text-align: left; font-weight: 700; padding: 10px 14px; }
 .mp-tab td { padding: 10px 14px; border-bottom: 1px solid ${C.borda}; vertical-align: top; }
@@ -65,7 +68,7 @@ const css = (rodape: string) => `
   .mp-folha:first-of-type { break-before: auto; }
   .mp-corpo { padding: 9mm 15mm 6mm; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
   .mp-nao-imprime, .mp-rodape { display: none !important; }
-  .mp-bloco, .mp-card, .mp-painel, .mp-tab tr { break-inside: avoid; }
+  .mp-bloco, .mp-card, .mp-painel, .mp-leve, .mp-tab tr { break-inside: avoid; }
   .mp * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 `;
@@ -138,12 +141,13 @@ function FotoLarga({ url }: { url: unknown }) {
   return /^https?:\/\//i.test(u) ? <img src={u} alt="" className="mp-foto mp-bloco" style={{ height: 270 }} /> : null;
 }
 /** Quadros lado a lado com fio entre eles (capa do pacote, datas do seguro). */
-function Quadros({ itens, grande }: { itens: { r: string; v: string; d?: string }[]; grande?: boolean }) {
+function Quadros({ itens: todos, grande }: { itens: { r: string; v: string; d?: string }[]; grande?: boolean }) {
+  const itens = todos.filter((q) => String(q.v ?? "").trim());
   if (!itens.length) return null;
   return (
-    <div className="mp-painel px-5 py-4 grid gap-y-3 mp-bloco" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${grande ? 150 : 120}px, 1fr))` }}>
+    <div className="mp-fio py-3 grid gap-y-3 mp-bloco" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${grande ? 150 : 120}px, 1fr))` }}>
       {itens.map((q, n) => (
-        <div key={n} className="px-3" style={n > 0 ? { borderLeft: `1px solid ${C.borda}` } : undefined}>
+        <div key={n} className={n > 0 ? "px-3" : "pr-3"} style={n > 0 ? { borderLeft: `1px solid ${C.borda}` } : undefined}>
           <p className="mp-rot">{q.r}</p>
           <p className="font-bold text-[15px] mt-1">{q.v}</p>
           {q.d && <p className="text-[12px]" style={{ color: C.suave }}>{q.d}</p>}
@@ -197,6 +201,15 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
   const recap = tabela(c.recap).filter((x) => x[1] || x[2]);
   const recapNotas = linhas(c.recap_notas);
   const temAntes = clima.some(Boolean) || tempo.length || mala.length;
+  // Capa com a hierarquia do cliente: destino → datas → o que inclui → investimento.
+  const temVolta = voos.some((l) => l.tipo === "grupo" && /^volta/i.test(l.cols[0] ?? ""));
+  const inclui = [
+    voos.length > 0 ? (temVolta ? "Aéreo ida e volta" : "Aéreo") : "",
+    ...hoteis.map((h) => [h.nome, (h.selo ?? "").toLowerCase()].filter(Boolean).join(" · ")),
+    dias.length > 0 ? "Roteiro dia a dia" : "",
+  ].filter(Boolean);
+  const menor = p.esconder_precos ? null : p.opcoes.map((o) => { const t = totaisDaOpcao(o); return { o, total: t.total, parc: parcelaDa(o, t.total) }; })
+    .filter((x) => x.total > 0).sort((a, b) => a.total - b.total)[0] ?? null;
 
   return (
     <>
@@ -210,7 +223,7 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
         </div>
         <Quadros itens={quadros} />
         {rota.length > 1 && (
-          <div className="mp-card px-6 py-4 flex items-center gap-2 overflow-x-auto mp-bloco">
+          <div className="py-1 flex items-center gap-2 overflow-x-auto mp-bloco">
             {rota.map((r, n) => (
               <div key={n} className="contents">
                 <div className="text-center flex-shrink-0">
@@ -228,6 +241,20 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
           </div>
         )}
         <Quadros itens={resumoCapa} grande />
+        {(inclui.length > 0 || menor) && (
+          <div className="grid sm:grid-cols-[1fr_auto] gap-6 items-end mp-bloco">
+            {inclui.length > 0 ? <div><p className="mp-rot mb-2">O que inclui</p><Bolinhas itens={inclui} /></div> : <div />}
+            {menor && (
+              <div className="sm:text-right">
+                <p className="mp-rot">{p.opcoes.length > 1 ? "A partir de" : FIXO.investimento}</p>
+                {menor.parc && menor.parc.n > 1 ? (
+                  <><p className="mp-serif text-[30px] leading-none mt-1" style={{ color: C.verde }}>{menor.parc.n}x {brl(menor.parc.valor)}</p>
+                    <p className="text-[12px] mt-1" style={{ color: C.suave }}>{(menor.o.extra?.total_rotulo || "Total")}: {brl(menor.total)}</p></>
+                ) : <p className="mp-serif text-[30px] leading-none mt-1" style={{ color: C.verde }}>{brl(menor.total)}</p>}
+              </div>
+            )}
+          </div>
+        )}
       </Folha>
 
       {/* 2 · Sumário e voos */}
@@ -275,7 +302,7 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
           </div>
           <Quadros grande itens={[h.checkin && { r: "Check-in", v: h.checkin }, h.checkout && { r: "Check-out", v: h.checkout }].filter(Boolean) as { r: string; v: string }[]} />
           {linhas(h.comodidades).length > 0 && (
-            <div className="mp-card px-5 py-4 mp-bloco">
+            <div className="mp-bloco">
               <p className="mp-rot mb-2">{h.comodidades_rotulo || "No hotel"}</p>
               <Bolinhas itens={linhas(h.comodidades)} cols={3} />
             </div>
@@ -316,7 +343,7 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
               <h2 className="mp-serif text-[24px]">Bom saber</h2>
               <div className="grid sm:grid-cols-2 gap-4">
                 {bom.map((b, n) => (
-                  <div key={n} className="mp-painel px-5 py-4 mp-bloco">
+                  <div key={n} className="mp-leve mp-bloco">
                     <p className="mp-serif text-[16px] mb-2">{b.titulo}</p>
                     <Bolinhas itens={b.itens} />
                   </div>
@@ -349,8 +376,8 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
           )}
           {(tempo.length > 0 || mala.length > 0) && (
             <div className="grid sm:grid-cols-2 gap-4">
-              {tempo.length > 0 && <div className="mp-card px-5 py-4"><p className="mp-serif text-[16px] mb-2">Como é o tempo</p><Bolinhas itens={tempo} /></div>}
-              {mala.length > 0 && <div className="mp-card px-5 py-4"><p className="mp-serif text-[16px] mb-2">O que levar na mala</p><Bolinhas itens={mala} /></div>}
+              {tempo.length > 0 && <div className="mp-leve"><p className="mp-serif text-[16px] mb-2">Como é o tempo</p><Bolinhas itens={tempo} /></div>}
+              {mala.length > 0 && <div className="mp-leve"><p className="mp-serif text-[16px] mb-2">O que levar na mala</p><Bolinhas itens={mala} /></div>}
             </div>
           )}
           <FotoLarga url={c.antes_foto} />
@@ -385,7 +412,7 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
           <h2 className="mp-serif text-[24px]">Dicas locais</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {dicas.map((d, n) => (
-              <div key={n} className="mp-painel px-5 py-4 mp-bloco">
+              <div key={n} className="mp-leve mp-bloco">
                 <p className="mp-serif text-[16px] mb-1.5">{d[0]}</p>
                 <p className="text-[13px]">{d.slice(1).join(" | ")}</p>
               </div>
@@ -428,7 +455,7 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
                 </div>
               ))}
               {tx(c, "opcionais_aviso") && (
-                <div className="mp-painel px-5 py-4 mp-bloco">
+                <div className="mp-leve mp-bloco">
                   <p className="mp-serif text-[16px] mb-1">{tx(c, "opcionais_aviso_titulo") || "Consulte antes de incluir"}</p>
                   <p className="text-[13.5px]">{tx(c, "opcionais_aviso")}</p>
                 </div>
@@ -448,7 +475,7 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
           </div>
           <div className="grid sm:grid-cols-2 gap-4">
             {exp.map((x, n) => (
-              <div key={n} className="mp-card px-5 py-4 mp-bloco">
+              <div key={n} className="mp-leve mp-bloco">
                 <p className="mp-serif text-[16px] mb-1">{x[0]}</p>
                 <p className="text-[13px]">{x.slice(1).join(" | ")}</p>
               </div>
@@ -463,8 +490,8 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
         </Folha>
       )}
 
-      {/* 10 · Recapitulando */}
-      {recap.length > 0 && (
+      {/* 10 · Recapitulando (só o cartão padrão não vale uma página) */}
+      {recap.length > 1 && (
         <Folha titulo={T} secao={FIXO.recapSelo} rodape={rodape}>
           <div className="space-y-2">
             <span className="mp-pill">{FIXO.recapSelo}</span>
@@ -524,7 +551,7 @@ function Pacote({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
           })}
         </div>
         {tx(c, "condicoes") && (
-          <div className="mp-painel px-5 py-4 mp-bloco">
+          <div className="mp-leve mp-bloco">
             <p className="mp-serif text-[16px] mb-1">Condições</p>
             <p className="text-[13.5px] whitespace-pre-wrap">{tx(c, "condicoes")}</p>
           </div>
@@ -635,7 +662,7 @@ function Servicos({ p, escolher }: { p: PropostaVM; escolher?: (o: Opcao) => voi
           <section>
             <Sec num={1} titulo={FIXO.servSec1} />
             <div className="space-y-4">
-              {tx(c, "nota_valores") && <div className="mp-card px-5 py-4 text-[14px]"><b>{FIXO.servValoresIndividuais}</b> {tx(c, "nota_valores")}</div>}
+              {tx(c, "nota_valores") && <div className="mp-leve text-[14px]"><b>{FIXO.servValoresIndividuais}</b> {tx(c, "nota_valores")}</div>}
               {itens.map((i, k) => {
                 const d = i.detalhes as DetalhesServico;
                 const alts = alternativas(d.alternativas);
@@ -715,7 +742,7 @@ function Servicos({ p, escolher }: { p: PropostaVM; escolher?: (o: Opcao) => voi
             <Sec num={3} titulo={FIXO.servSec3} />
             <div className="grid sm:grid-cols-2 gap-3">
               {infos.map((x, k) => (
-                <div key={k} className="mp-card px-5 py-4 mp-bloco">
+                <div key={k} className="mp-leve mp-bloco">
                   <p className="text-[11.5px] uppercase" style={{ color: C.suave, ...espaco(".2em") }}>{x[0]}</p>
                   <p className="text-[15px] mt-1">{x.slice(1).join(" | ")}</p>
                 </div>
@@ -828,7 +855,7 @@ function Seguro({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
           </div>
         ))}
         {(tx(c, "condicoes_pagamento") || tx(c, "validade")) && (
-          <div className="mp-painel px-5 py-4 mp-bloco">
+          <div className="mp-leve mp-bloco">
             <p className="font-bold text-[14px] mb-1">Condições</p>
             <p className="text-[13px]">
               {tx(c, "condicoes_pagamento") && <><b>Pagamento:</b> {tx(c, "condicoes_pagamento")} </>}
@@ -872,6 +899,9 @@ function Seguro({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
       {grupos.map(({ s, g, planos: ps }) => {
         const rows = tabelaComGrupos(s.coberturas).filter((l) => l.tipo === "linha" && l.cols[0]);
         if (!rows.length) return null;
+        // Sem nada além do comparativo? A página repetiria a mesma tabela — esconde.
+        const noComp = new Set(comp.map((r) => r[0].trim().toLowerCase()));
+        if (comp.length > 0 && rows.every((r) => noComp.has(r.cols[0].trim().toLowerCase()))) return null;
         return (
           <Folha key={g} titulo={T} secao={`${s.nome || "Seguradora"} · ${FIXO.seguroCompletasSec}`} rodape={rodape}>
             <div className="overflow-x-auto">
@@ -908,7 +938,7 @@ function Seguro({ p, rodape, escolher }: { p: PropostaVM; rodape: string; escolh
           </div>
           {motivos.length > 0 && <div className="space-y-3"><h3 className="mp-serif text-[19px]">{FIXO.seguroPorque}</h3><Bolinhas itens={motivos} /></div>}
           {(tx(c, "rec_alt_titulo") || tx(c, "rec_alt_texto")) && (
-            <div className="mp-painel px-6 py-5 mp-bloco">
+            <div className="mp-leve mp-bloco">
               {tx(c, "rec_alt_titulo") && <p className="font-bold text-[15px] mb-1">{tx(c, "rec_alt_titulo")}</p>}
               <p className="text-[13.5px]"><Negrito t={tx(c, "rec_alt_texto")} /></p>
             </div>
