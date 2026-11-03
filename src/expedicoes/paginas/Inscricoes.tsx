@@ -32,6 +32,8 @@ import { REQUISITOS_DE_COLUNA } from "../lib/prontidao/regras";
 import type { ExpedicaoRow, InscricaoPendenteRow } from "../lib/database";
 import { abrirArquivo, chamarRotaAdmin, nomeSeguro, rpc, useEhAdminExp } from "./_admin/comum";
 import ReceitasAEnviar from "@/rel/clientes/ficha/ReceitasAEnviar";
+import { gravarParamNoHash, lerParamDoHash } from "@/lib/hashQuery";
+import { dataSP } from "../lib/fase.ts";
 
 type Dados = Record<string, unknown>;
 type Decisao = { id: string; expedicao_id: string | null; cpf: string | null; nome_completo: string | null; acao: string; motivo: string | null; decidido_por_nome: string | null; created_at: string };
@@ -85,7 +87,17 @@ export default function Inscricoes() {
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [soSaude, setSoSaude] = useState(false);
   const [fechados, setFechados] = useState<Set<string>>(new Set());
-  const [aba, setAba] = useState<"falta" | "aprovacao">("falta");
+  // 03/11 (docs/REL-UNIFICACAO.md): a aba vai na query do hash (?aba=aprovacao), pra o
+  // Painel das viagens e o selo do menu caírem direto na fila. Sem ?aba, abre em
+  // "Aguardando aprovação" quando há fila — o número do menu é o que se vê ao clicar.
+  const [aba, setAba] = useState<"falta" | "aprovacao" | null>(() => {
+    const a = lerParamDoHash("aba");
+    return a === "falta" || a === "aprovacao" ? a : null;
+  });
+  // 03/11: só as inscrições de viagens que já embarcaram (fila velha, 26 de 41 em 03/11).
+  const [soSaiu, setSoSaiu] = useState(() => lerParamDoHash("saiu") === "1");
+  useEffect(() => { if (aba) gravarParamNoHash("aba", aba); }, [aba]);
+  useEffect(() => { gravarParamNoHash("saiu", soSaiu ? "1" : null); }, [soSaiu]);
 
   const carregar = useCallback(async () => {
     try {
@@ -108,7 +120,12 @@ export default function Inscricoes() {
   const ordenar = (a: InscricaoPendenteRow, b: InscricaoPendenteRow) => (b.recusada_em ?? b.created_at).localeCompare(a.recusada_em ?? a.created_at);
   const todasPendentes = useMemo(() => (linhas ?? []).filter((l) => l.status !== "recusada").sort(ordenar), [linhas]);
   const comAlerta = useMemo(() => todasPendentes.filter(temAlertaSaude), [todasPendentes]);
-  const pendentes = soSaude ? comAlerta : todasPendentes;
+  const hoje = dataSP(new Date());
+  const jaSaiu = useCallback((it: InscricaoPendenteRow) => { const emb = exps.get(it.expedicao_id)?.data_embarque; return !!emb && emb < hoje; }, [exps, hoje]);
+  const deViagemQueSaiu = useMemo(() => todasPendentes.filter(jaSaiu), [todasPendentes, jaSaiu]);
+  const pendentes = (soSaude ? comAlerta : todasPendentes).filter((it) => !soSaiu || jaSaiu(it));
+  // Sem ?aba: decide quando a fila chega (aprovação se tem alguém esperando).
+  useEffect(() => { if (aba === null && linhas) setAba(todasPendentes.length ? "aprovacao" : "falta"); }, [aba, linhas, todasPendentes.length]);
   // 0223 aplicada? (a coluna vem no select *)
   const temTriagem = (linhas ?? []).some((l) => "comentario_saude" in l);
   // Fila por expedição, a que embarca primeiro em cima.
@@ -271,7 +288,7 @@ export default function Inscricoes() {
     );
   };
 
-  const abaBotao = (id: typeof aba, rotulo: ReactNode) => (
+  const abaBotao = (id: "falta" | "aprovacao", rotulo: ReactNode) => (
     <button type="button" role="tab" aria-selected={aba === id} onClick={() => setAba(id)}
       className="px-3.5 py-2 text-[13.5px] font-bold border-b-2 -mb-px"
       style={aba === id ? { borderColor: "var(--rel)", color: "var(--ink)" } : { borderColor: "transparent", color: "var(--ink3)" }}>
@@ -305,7 +322,23 @@ export default function Inscricoes() {
           style={soSaude ? { background: "var(--warn-bg)", color: "var(--warn-ink)", border: "1px solid var(--warn-ink)" } : { background: "var(--card)", color: "var(--ink2)", border: "1px solid var(--line)" }}>
           Só com alerta de saúde ({comAlerta.length})
         </button>
+        {(deViagemQueSaiu.length > 0 || soSaiu) && (
+          <button type="button" onClick={() => setSoSaiu((v) => !v)} aria-pressed={soSaiu}
+            title="Inscrições esperando decisão de expedições que já embarcaram: aprovar, recusar ou excluir"
+            className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
+            style={soSaiu ? { background: "var(--danger-bg)", color: "var(--danger)", border: "1px solid var(--danger)" } : { background: "var(--card)", color: "var(--ink2)", border: "1px solid var(--line)" }}>
+            Viagem já saiu ({deViagemQueSaiu.length})
+          </button>
+        )}
       </header>
+
+      {deViagemQueSaiu.length > 0 && !soSaiu && (
+        <Aviso tom="erro">
+          <strong>{deViagemQueSaiu.length} {deViagemQueSaiu.length === 1 ? "inscrição é" : "inscrições são"} de viagens que já embarcaram.</strong>{" "}
+          Decida (aprovar, recusar ou excluir) pra fila mostrar só o que ainda dá tempo —{" "}
+          <Link onClick={() => setSoSaiu(true)}>ver só essas</Link>.
+        </Aviso>
+      )}
 
       {pendentes.length === 0
         ? <Vazio titulo={soSaude ? "Nenhuma inscrição com alerta de saúde." : "Nenhuma inscrição pendente no momento."} texto="As inscrições do formulário público aparecem aqui para aprovar ou recusar." />
@@ -322,6 +355,7 @@ export default function Inscricoes() {
                 <span className="text-[12px]" style={{ color: "var(--ink3)" }}>{exp?.data_embarque ? `embarque ${formatDate(exp.data_embarque)}` : "sem data"}</span>
                 <Selo tom="aviso">{its.length}</Selo>
                 {nSaude > 0 && <Selo tom="erro">{nSaude} com saúde</Selo>}
+                {exp?.data_embarque && exp.data_embarque < hoje && <Selo tom="erro" titulo="A expedição já embarcou — decidir ou excluir">já embarcou</Selo>}
               </button>
               {!fechado && <div className="grid gap-3 lg:grid-cols-2">{its.map((it) => card(it, false))}</div>}
             </section>
