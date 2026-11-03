@@ -46,7 +46,7 @@ export function aplicarModelo(p: Proposta, modelo: ModeloProposta | null): Parti
 }
 
 // ── Peças ───────────────────────────────────────────────────────────────────
-function CampoTexto({ c, valor, onChange }: { c: CampoModelo; valor: unknown; onChange: (v: string) => void }) {
+export function CampoTexto({ c, valor, onChange }: { c: CampoModelo; valor: unknown; onChange: (v: string) => void }) {
   const v = String(valor ?? "");
   return (
     <Campo rotulo={c.rotulo} dica={c.dica}>
@@ -57,12 +57,16 @@ function CampoTexto({ c, valor, onChange }: { c: CampoModelo; valor: unknown; on
   );
 }
 
-function Bloco({ titulo, dica, children, abertoInicial = false }: { titulo: string; dica?: string; children: React.ReactNode; abertoInicial?: boolean }) {
+/** Seção que abre e fecha. 0290: `resumo` (uma linha quando fechada), `ia` (marca discreta) e `alerta` (nº de itens pra conferir: borda âmbar). */
+export function Bloco({ titulo, dica, children, abertoInicial = false, resumo, ia, alerta = 0 }: { titulo: string; dica?: string; children: React.ReactNode; abertoInicial?: boolean; resumo?: string; ia?: boolean; alerta?: number }) {
   const [aberto, setAberto] = useState(abertoInicial);
   return (
-    <section className="rel-card">
+    <section className="rel-card" style={alerta > 0 ? { borderColor: "var(--warn-line)", boxShadow: "0 0 0 1px var(--warn-line)" } : undefined}>
       <button type="button" className="w-full flex items-center gap-2 px-4 py-3 text-left" onClick={() => setAberto((a) => !a)} aria-expanded={aberto}>
-        <span className="flex-1 text-[14.5px] font-bold" style={{ color: "var(--ink)" }}>{titulo}</span>
+        <span className="flex-1 min-w-0">
+          <span className="flex items-center gap-2 text-[14.5px] font-bold" style={{ color: "var(--ink)" }}>{titulo}{ia && <MarcaIa />}{alerta > 0 && <span className="text-[11px] font-semibold px-1.5 rounded-full" style={{ background: "var(--warn-bg)", color: "var(--warn-ink)" }}>{alerta} pra conferir</span>}</span>
+          {resumo && !aberto && <span className="block truncate text-[12.5px] font-normal" style={{ color: "var(--ink3)" }}>{resumo}</span>}
+        </span>
         <span className="text-[12px]" style={{ color: "var(--ink3)" }}>{aberto ? "▲" : "▼"}</span>
       </button>
       {aberto && (
@@ -73,6 +77,11 @@ function Bloco({ titulo, dica, children, abertoInicial = false }: { titulo: stri
       )}
     </section>
   );
+}
+
+/** "IA" pequeno ao lado do que veio do Montar com IA. */
+export function MarcaIa({ titulo = "Preenchido pela IA a partir dos insumos" }: { titulo?: string }) {
+  return <span title={titulo} aria-label={titulo} className="inline-flex items-center px-1.5 rounded text-[10px] font-bold tracking-wide" style={{ background: "var(--rel-soft)", color: "var(--rel-ink)" }}>IA</span>;
 }
 
 function Mover({ n, total, onMover, onTirar }: { n: number; total: number; onMover: (de: number, para: number) => void; onTirar: () => void }) {
@@ -101,7 +110,7 @@ function CamposInternos({ i, onChange }: { i: ItemProposta; onChange: (c: Partia
 }
 
 // ── Pacote ──────────────────────────────────────────────────────────────────
-function EditorHoteis({ hoteis, onChange }: { hoteis: HotelPacote[]; onChange: (h: HotelPacote[]) => void }) {
+export function EditorHoteis({ hoteis, onChange }: { hoteis: HotelPacote[]; onChange: (h: HotelPacote[]) => void }) {
   const mudar = (n: number, c: Partial<HotelPacote>) => onChange(hoteis.map((h, k) => (k === n ? { ...h, ...c } : h)));
   return (
     <div className="space-y-3">
@@ -129,7 +138,7 @@ function EditorHoteis({ hoteis, onChange }: { hoteis: HotelPacote[]; onChange: (
   );
 }
 
-function EditorDias({ dias, inicio, onChange }: { dias: DiaPacote[]; inicio: string; onChange: (d: DiaPacote[]) => void }) {
+export function EditorDias({ dias, inicio, onChange }: { dias: DiaPacote[]; inicio: string; onChange: (d: DiaPacote[]) => void }) {
   const mudar = (n: number, c: Partial<DiaPacote>) => onChange(dias.map((d, k) => (k === n ? { ...d, ...c } : d)));
   const proxima = () => {
     const ult = dias[dias.length - 1]?.data || "";
@@ -159,7 +168,7 @@ function EditorDias({ dias, inicio, onChange }: { dias: DiaPacote[]; inicio: str
   );
 }
 
-function CartoesPreco({ p, onOpcoes }: { p: Proposta; onOpcoes: (o: OpcaoProposta[]) => void }) {
+export function CartoesPreco({ p, onOpcoes }: { p: Proposta; onOpcoes: (o: OpcaoProposta[]) => void }) {
   const mudar = (n: number, c: Partial<OpcaoProposta>) => onOpcoes(p.opcoes.map((o, k) => (k === n ? { ...o, ...c } : o)));
   const extra = (n: number, c: Partial<ExtraOpcao>) => mudar(n, { extra: { ...p.opcoes[n].extra, ...c } });
   const mudarItem0 = (n: number, c: Partial<ItemProposta>) => mudar(n, { itens: p.opcoes[n].itens.map((i, k) => (k === 0 ? { ...i, ...c } : i)) });
@@ -205,7 +214,7 @@ function CartoesPreco({ p, onOpcoes }: { p: Proposta; onOpcoes: (o: OpcaoPropost
 }
 
 // ── Serviços ────────────────────────────────────────────────────────────────
-function EditorServicos({ p, onOpcoes }: { p: Proposta; onOpcoes: (o: OpcaoProposta[]) => void }) {
+export function EditorServicos({ p, onOpcoes }: { p: Proposta; onOpcoes: (o: OpcaoProposta[]) => void }) {
   const o = p.opcoes[0] ?? opcaoVazia("Serviços");
   const itens = o.itens;
   const setItens = (l: ItemProposta[]) => onOpcoes([{ ...o, itens: l }, ...p.opcoes.slice(1)]);
@@ -267,7 +276,7 @@ function EditorServicos({ p, onOpcoes }: { p: Proposta; onOpcoes: (o: OpcaoPropo
 }
 
 // ── Seguro ──────────────────────────────────────────────────────────────────
-function EditorSeguro({ p, onOpcoes, onConteudo }: { p: Proposta; onOpcoes: (o: OpcaoProposta[]) => void; onConteudo: (c: Partial<Conteudo>) => void }) {
+export function EditorSeguro({ p, onOpcoes, onConteudo }: { p: Proposta; onOpcoes: (o: OpcaoProposta[]) => void; onConteudo: (c: Partial<Conteudo>) => void }) {
   const segs = (Array.isArray(p.conteudo.seguradoras) && p.conteudo.seguradoras.length ? p.conteudo.seguradoras : [seguradoraVazia()]) as SeguradoraModelo[];
   const n = Math.max(1, pax(p));
   const mudarSeg = (g: number, c: Partial<SeguradoraModelo>) => onConteudo({ seguradoras: segs.map((s, k) => (k === g ? { ...s, ...c } : s)) });

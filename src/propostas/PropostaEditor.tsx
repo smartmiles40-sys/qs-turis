@@ -8,6 +8,16 @@
 // aparece quando cria a 2ª ("Duplicar esta" é o caso comum — troca o hotel);
 // duplicar sempre COPIA; desconto e pagamento são POR OPÇÃO; rascunho salva a
 // qualquer momento (nada obrigatório pra salvar).
+//
+// 0290 (Bruno 03/11/2026: "achei que a parte do PDF ficou com muita coisa… o
+// interessante é ter uma IA, que os Closers vão subindo informações"): proposta
+// num dos 3 modelos agora é um fluxo em 3 passos —
+//   1 · Insumos e IA  (MontarComIa: prints, PDFs, texto colado → preenche);
+//   2 · Revisar       (RevisarProposta: o que conferir em destaque, resumo por
+//                      seção, textos fixos recolhidos em "Mais opções");
+//   3 · Ver e enviar  (como o cliente vê + enviar). Nada vai pro cliente sem
+//                      o closer abrir e salvar. Proposta no formato antigo
+//                      (modelo nulo) continua na tela de antes.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
@@ -18,6 +28,10 @@ import EnviarAoCliente from "./EnviarAoCliente";
 import PropostaParaEnviar from "./PropostaParaEnviar";
 import ModeloEditor, { EscolherModelo, aplicarModelo } from "./ModeloEditor";
 import { MODELOS, type ModeloProposta } from "./modelos";
+import MontarComIa from "./MontarComIa";
+import RevisarProposta from "./RevisarProposta";
+import { marcasDe, mesclarExtracao, pendencias } from "./iaMescla";
+import type { RespostaIa } from "./ia";
 import {
   CONDICOES, FORMAS, ORDEM_TIPOS, STATUS_PROPOSTA, TIPOS, camposDoTipo, TOM_PROPOSTA, brl, carregarProposta, dataBr, duplicarOpcao, duplicarProposta,
   itemVazio, mudarStatus, opcaoVazia, pagamentoVazio, paraVM, propostaVazia, salvarProposta, textoPagamento,
@@ -214,12 +228,24 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
   const [addTipo, setAddTipo] = useState(false);
   const [abrirDepois, setAbrirDepois] = useState<string | null>(null);
   const [comoPediu, setComoPediu] = useState(false);
+  // 0290: passo do fluxo (proposta nova começa nos insumos; aberta de novo, na revisão)
+  const [passo, setPasso] = useState<1 | 2 | 3>(1);
+  const [leitura, setLeitura] = useState<string | null>(null);
+  const passoInicial = useRef(false);
+  // proposta nova salva no 1º insumo (sem trocar de endereço): recarrega pelo id dela
+  const idRef = useRef<string | null>(id);
 
   const carregar = useCallback(async () => {
-    if (!id) return;
+    const alvo = id ?? idRef.current;
+    if (!alvo) return;
     try {
-      const x = await carregarProposta(id);
+      const x = await carregarProposta(alvo);
       setP(x); setSujo(false);
+      if (!passoInicial.current) {
+        passoInicial.current = true;
+        const temAlgo = !!marcasDe(x) || x.opcoes.some((o) => o.itens.some((i) => i.valor_total > 0)) || !!x.destino;
+        setPasso(temAlgo ? 2 : 1);
+      }
       // quem montou abriu: o aviso de aprovação foi visto
       if (x.aprovada_em && !x.aprovacao_vista_em && x.criado_por === currentUser?.id) void mudarStatus(x.id!, "visto").catch(() => {});
     } catch (e) { setErro(e instanceof Error ? e.message : "Não abriu."); }
@@ -270,6 +296,7 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
   const nOpcao = p ? Math.min(aba, p.opcoes.length - 1) : 0;
   const totais = useMemo(() => (opcao ? totaisDaOpcao(opcao) : null), [opcao]);
 
+  idRef.current = p?.id ?? id;
   if (!p) return <p className="text-[14px]" style={{ color: "var(--ink3)" }}>{erro ?? "Carregando…"}</p>;
   // 0157: quem não é do time que monta (pediu a cotação) abre o lado de quem envia.
   const meusSetores = setoresDe(currentUser);
@@ -317,6 +344,102 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
     setAba(Math.max(0, n - 1));
   }
 
+  // ── 0290: fluxo em 3 passos (proposta num dos modelos) ──────────────────
+  const falta = p.modelo ? pendencias(p) : [];
+  const nConferir = marcasDe(p)?.conferir.length ?? 0;
+  const garantirId = async () => p.id ?? (await salvar(false));
+  function lido(r: RespostaIa, pedido: string) {
+    const m = mesclarExtracao(p!, r.extracao, r.conferir ?? [], { pedido });
+    setP(m.proposta); setSujo(true);
+    setLeitura(m.mudou
+      ? `A IA preencheu ${m.mudou} campo${m.mudou === 1 ? "" : "s"}${m.conferir.length ? ` e marcou ${m.conferir.length} pra conferir` : ""}. Confira e salve — nada vai pro cliente antes disso.`
+      : "A IA leu os insumos, mas não achou nada novo pra preencher (o que você editou à mão ficou como está).");
+    setPasso(2);
+  }
+  const PASSOS: [1 | 2 | 3, string][] = [[1, "Insumos e IA"], [2, "Revisar"], [3, "Ver e enviar"]];
+  const botaoSalvar = <Botao variante="primario" onClick={() => void salvar(true)} disabled={salvando || cancelada}>{salvando ? "Salvando…" : "Salvar"}</Botao>;
+  const fluxo = (
+    <>
+      <nav className="flex flex-wrap gap-1.5" aria-label="Passos da proposta">
+        {PASSOS.map(([n, rot]) => (
+          <button key={n} type="button" onClick={() => setPasso(n)} aria-current={passo === n ? "step" : undefined}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-full text-[13px] font-semibold border"
+            style={passo === n ? { background: "var(--rel)", color: "#fff", borderColor: "var(--rel)" } : { background: "var(--card)", color: "var(--ink2)", borderColor: "var(--line)" }}>
+            <span className="w-5 h-5 rounded-full grid place-items-center text-[11px]" style={{ background: passo === n ? "rgba(255,255,255,.22)" : "var(--card2)" }}>{n}</span>
+            {rot}
+            {n === 2 && nConferir + falta.length > 0 && <span className="text-[11px] px-1.5 rounded-full" style={{ background: "var(--warn-bg)", color: "var(--warn-ink)" }}>{nConferir + falta.length}</span>}
+          </button>
+        ))}
+      </nav>
+      {p.semColunaModelo && <Aviso tom="erro">O banco ainda não tem a migration 0280: o modelo e os textos desta proposta NÃO ficam salvos. Peça pra aplicar a 0280 antes de usar.</Aviso>}
+
+      {passo === 1 && (
+        <>
+          <div className="flex flex-wrap items-center gap-2 text-[13px]" style={{ color: "var(--ink2)" }}>
+            <span>Modelo:</span>
+            {(["pacote", "servicos", "seguro"] as ModeloProposta[]).map((m) => (
+              <button key={m} type="button" onClick={() => trocarModelo(m)} aria-pressed={p.modelo === m}
+                className="px-3 py-1 rounded-full border text-[12.5px] font-semibold"
+                style={p.modelo === m ? { background: "var(--rel-soft)", borderColor: "var(--rel)", color: "var(--rel-ink)" } : { borderColor: "var(--line)", color: "var(--ink2)" }}>
+                {MODELOS[m].rotulo}
+              </button>
+            ))}
+          </div>
+          <MontarComIa p={p} garantirId={garantirId} onLido={lido} onPular={() => setPasso(2)} />
+        </>
+      )}
+
+      {passo === 2 && (
+        <>
+          {leitura && <Aviso tom="ok">{leitura}</Aviso>}
+          <RevisarProposta p={p} mudar={mudar} trocarModelo={trocarModelo} />
+          <div className="flex flex-wrap gap-2 pb-10">
+            {botaoSalvar}
+            <Botao onClick={() => setPasso(3)}>Ver como o cliente vê →</Botao>
+            <Botao variante="fantasma" onClick={() => setPasso(1)}>← Subir mais insumos</Botao>
+          </div>
+        </>
+      )}
+
+      {passo === 3 && (
+        <>
+          <section className="rel-card p-4 space-y-3">
+            {falta.length > 0 && <Aviso>Ainda falta: <b>{falta.map((x) => x.texto).join(", ")}</b>. <button type="button" className="underline" onClick={() => setPasso(2)}>Completar</button></Aviso>}
+            {nConferir > 0 && <Aviso>{nConferir} item{nConferir === 1 ? "" : "s"} pra conferir no passo 2. <button type="button" className="underline" onClick={() => setPasso(2)}>Ver</button></Aviso>}
+            <div className="flex flex-wrap gap-2">
+              {botaoSalvar}
+              {!cancelada && outroTime && p.status === "rascunho" && <Botao onClick={() => void liberar()} disabled={salvando}>Pronta — avisar {quemPediu}</Botao>}
+              {!cancelada && outroTime && p.status === "pronta" && pedeTambem && <Botao onClick={() => setComoPediu(true)}>Abrir como quem pediu</Botao>}
+              {!cancelada && (!outroTime || !["rascunho", "pronta"].includes(p.status)) && (
+                <Botao variante={p.status === "rascunho" ? "primario" : "secundario"} disabled={salvando}
+                  onClick={() => { if (p.status === "rascunho" && falta.length && !window.confirm(`Ainda falta: ${falta.map((x) => x.texto).join(", ")}. Enviar mesmo assim?`)) return; void enviar(); }}>
+                  {p.status === "rascunho" ? "Salvar e enviar ao cliente" : "Link e mensagem"}
+                </Botao>
+              )}
+            </div>
+            {p.status === "aprovada" && <Aviso>Esta proposta já foi aprovada. Se mudar algo, o cliente vê a versão nova no mesmo link.</Aviso>}
+            {outroTime && p.status === "rascunho" && <Aviso>Quem envia ao cliente é {quemPediu}. Quando terminar, clique em <b>Pronta</b> — {quemPediu.split(" ")[0]} recebe o aviso na solicitação, abre e envia.</Aviso>}
+            {p.status === "pronta" && <Aviso>Liberada pra {quemPediu}. Se mudar algo e salvar, {quemPediu.split(" ")[0]} precisa abrir de novo antes de enviar.</Aviso>}
+            {p.id && (
+              <details>
+                <summary className="text-[12.5px] font-semibold cursor-pointer" style={{ color: "var(--ink3)" }}>Outras ações</summary>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {!cancelada && p.status !== "aprovada" && (!outroTime || p.status === "enviada") && <Botao onClick={() => setMarcarAprov(true)}>Cliente aprovou (fora do link)</Botao>}
+                  {p.status === "enviada" && <Botao variante="fantasma" onClick={() => void acao(() => mudarStatus(p.id!, "recusada"), "Marcada como recusada.")}>Cliente recusou</Botao>}
+                  {(p.status === "aprovada" || p.status === "recusada" || p.status === "pronta") && <Botao variante="fantasma" onClick={() => { if (window.confirm("Voltar pra rascunho? A aprovação é desfeita e o link para de abrir até enviar de novo.")) void acao(() => mudarStatus(p.id!, "rascunho"), "Voltou pra rascunho."); }}>Voltar pra rascunho</Botao>}
+                  <Botao variante="fantasma" onClick={() => void duplicarProposta(p.id!).then(onAbrir).catch((e) => setErro(e.message))}>Duplicar proposta</Botao>
+                  {!cancelada && <Botao variante="fantasma" onClick={() => { if (window.confirm("Cancelar esta proposta? O link para de abrir pro cliente.")) void acao(() => mudarStatus(p.id!, "cancelada"), "Proposta cancelada."); }}>Cancelar proposta</Botao>}
+                </div>
+              </details>
+            )}
+          </section>
+          <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>É assim que o cliente vê{sujo ? " (com as mudanças ainda não salvas)" : ""}. "Baixar PDF" imprime esta mesma página.</p>
+          <div className="rounded-xl overflow-hidden border mb-10" style={{ borderColor: "var(--line)" }}><PropostaView p={paraVM(p)} previa /></div>
+        </>
+      )}
+    </>
+  );
+
   return (
     <div className="max-w-[980px] space-y-5">
       {/* Topo */}
@@ -351,6 +474,7 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
       {aviso && <Aviso tom="ok">{aviso}</Aviso>}
       {cancelada && <Aviso>Proposta cancelada — o link não abre mais pro cliente. Duplique pra fazer uma nova.</Aviso>}
 
+      {p.modelo ? fluxo : (<>
       {/* Ações */}
       <div className="flex flex-wrap gap-2">
         <Botao variante="primario" onClick={() => void salvar(true)} disabled={salvando || cancelada}>{salvando ? "Salvando…" : "Salvar"}</Botao>
@@ -507,6 +631,7 @@ export default function PropostaEditor({ id, setor, inicial, onVoltar, onAbrir }
         <Botao variante="primario" onClick={() => void salvar(true)} disabled={salvando || cancelada}>{salvando ? "Salvando…" : "Salvar"}</Botao>
         <Botao onClick={() => setPrevia(true)}>Ver como o cliente vê</Botao>
       </div>
+      </>)}
 
       {/* Prévia */}
       {previa && (
