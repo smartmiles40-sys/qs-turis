@@ -14,8 +14,10 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { atribuirViagens, eventosDaViagem, type EventoViagem } from "../lib/operacao";
 import { SERVICOS, type Servico } from "../lib/viagens";
 
-export default function DonoViagem({ viagemId, responsavelId, equipe, onMudou, compacto = false }: {
+export default function DonoViagem({ viagemId, responsavelId, equipe, onMudou, compacto = false, soTrocar = false }: {
   viagemId: string; responsavelId: string | null; equipe: { id: string; name: string }[]; onMudou: () => void; compacto?: boolean;
+  /** 03/11: a ficha da viagem já mostra o nome e o "Assumir" — aqui só o "atribuir a / trocar" */
+  soTrocar?: boolean;
 }) {
   const { currentUser } = useQsAuth();
   const [ocupado, setOcupado] = useState(false);
@@ -32,7 +34,7 @@ export default function DonoViagem({ viagemId, responsavelId, equipe, onMudou, c
 
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-      {nome ? (
+      {soTrocar ? null : nome ? (
         <span className="text-[13px] font-semibold" style={{ color: souEu ? "var(--rel-ink)" : "var(--ink)" }}>{souEu ? (compacto ? "eu" : `${nome} (você)`) : compacto ? nome.split(" ")[0] : nome}</span>
       ) : (
         <>

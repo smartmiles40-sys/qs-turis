@@ -164,7 +164,7 @@ function CartaoTrecho({ t, ativa, onEditar, onMudou }: { t: Trecho; ativa: boole
 }
 
 /** O que o passageiro faz agora e nas próximas 48h — o "manual de bolso" de quem está viajando. */
-function AgoraEProximo({ trechos }: { trechos: Trecho[] }) {
+export function AgoraEProximo({ trechos }: { trechos: Trecho[] }) {
   const agora = Date.now();
   const itens = trechos
     .filter((t) => {
