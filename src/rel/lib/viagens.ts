@@ -8,6 +8,7 @@
 // pelo supabase-js e abre por link assinado de poucos minutos.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
+import { TIPOS_FILTRO, condicaoDoTipo, type TipoFiltro } from "./tiposViagem";
 
 export type TipoViagem = "expedicao" | "pacote" | "aereo" | "hospedagem" | "outro";
 export type FaseViagem = "antes" | "em_viagem" | "concluida" | "cancelada" | "sem_data";
@@ -296,8 +297,15 @@ export type FiltroViagens = "proximas" | "em_viagem" | "minhas" | "sem_dono" | "
 /** Tira o que quebraria o filtro `or=(...)` do PostgREST. */
 const limparBusca = (t: string) => t.replace(/[,()*%\\:"']/g, " ").trim();
 
-export async function listarViagens(filtro: FiltroViagens, busca = "", userId = ""): Promise<Viagem[]> {
-  let q = supabase.from("rel_viagens_v").select("*").limit(500);
+/**
+ * A consulta da lista (fila de situação + tipo + busca). `contar` = só a
+ * contagem (head), com os MESMOS filtros — é o número ao lado de cada tipo.
+ */
+function consultaViagens(filtro: FiltroViagens, busca: string, userId: string, tipo: TipoFiltro, contar: boolean) {
+  let q = supabase.from("rel_viagens_v").select("*", contar ? { count: "exact", head: true } : undefined);
+  // 03/11 (Viagens + Pacotes numa porta só): o tipo vai na consulta, nunca no navegador (limite de 500)
+  const c = condicaoDoTipo(tipo);
+  if (c) q = q.in(c.coluna, c.valores);
   // Próximas / Em viagem: só o que vai acontecer e pede acompanhamento (0148).
   // Sem data e sem classificação têm fila própria — não poluem a de trabalho.
   if (filtro === "proximas") q = q.eq("status", "ativa").eq("fase", "antes").in("acompanhamento", COM_ACOMPANHAMENTO).order("data_embarque", { ascending: true });
@@ -316,7 +324,11 @@ export async function listarViagens(filtro: FiltroViagens, busca = "", userId = 
   else q = q.order("data_embarque", { ascending: false, nullsFirst: false });
   const t = limparBusca(busca);
   if (t) q = q.or(`titulo.ilike.*${t}*,destino.ilike.*${t}*,expedicao.ilike.*${t}*,cliente_nome.ilike.*${t}*,bitrix_deal_id.eq.${t.replace(/\D/g, "") || "0"}`);
-  const { data, error } = await q;
+  return contar ? q : q.limit(500);
+}
+
+export async function listarViagens(filtro: FiltroViagens, busca = "", userId = "", tipo: TipoFiltro = "todos"): Promise<Viagem[]> {
+  const { data, error } = await consultaViagens(filtro, busca, userId, tipo, false);
   if (error) throw error;
   const l = (data ?? []) as Viagem[];
   // O que vai acontecer anda pelo PRÓXIMO VOO (0152): quem já está viajando e
@@ -324,6 +336,29 @@ export async function listarViagens(filtro: FiltroViagens, busca = "", userId = 
   return filtro === "proximas" || filtro === "em_viagem" || filtro === "classificar" || filtro === "sem_dono"
     ? l.sort((x, y) => momentoDoProximo(x) - momentoDoProximo(y))
     : l;
+}
+
+/** Quantas vendas de cada tipo a fila tem (com a busca): 5 contagens leves, em paralelo. */
+export async function contarPorTipo(filtro: FiltroViagens, busca = "", userId = ""): Promise<Record<TipoFiltro, number>> {
+  const tipos = TIPOS_FILTRO.map((t) => t.id).filter((t) => t !== "todos");
+  const rs = await Promise.all(tipos.map((t) => consultaViagens(filtro, busca, userId, t, true)));
+  const out = { todos: 0 } as Record<TipoFiltro, number>;
+  rs.forEach((r, i) => {
+    if (r.error) throw r.error;
+    out[tipos[i]] = r.count ?? 0;
+    out.todos += r.count ?? 0; // os 5 tipos não se sobrepõem e cobrem tudo
+  });
+  return out;
+}
+
+/** Os pacotes cadastrados como EXPEDIÇÃO (tabela expedicoes, tipo=pacote): têm cockpit próprio. */
+export interface PacoteExpedicao { id: string; nome: string; destino: string | null; data_embarque: string | null; data_retorno: string | null; status: string | null }
+
+export async function pacotesDeExpedicao(): Promise<PacoteExpedicao[]> {
+  const { data, error } = await supabase.from("expedicoes").select("id, nome, destino, data_embarque, data_retorno, status")
+    .eq("tipo", "pacote").order("data_embarque", { ascending: true, nullsFirst: false }).limit(200);
+  if (error) throw error;
+  return (data ?? []) as PacoteExpedicao[];
 }
 
 /** Quando a viagem "acontece" de novo: o próximo voo, senão o embarque (sem nada, por último). */

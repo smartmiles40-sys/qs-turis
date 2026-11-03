@@ -84,7 +84,7 @@ type Rota =
   | { tela: "inicio" }
   | { tela: "atendimento"; id?: string } | { tela: "grupos"; id?: string } | { tela: "chamados" } | { tela: "solicitacoes"; id?: string } | { tela: "propostas"; id?: string } | { tela: "modelos" } | { tela: "agenda" } | { tela: "prazo" } | { tela: "kpis" } | { tela: "whatsapp" } | { tela: "equipe" }
   | { tela: "clientes" } | { tela: "ficha"; id: string } | { tela: "duplicados" } | { tela: "cadastros" }
-  | { tela: "esteira" } | { tela: "viagens" } | { tela: "viagem"; id: string } | { tela: "prioridades" }
+  | { tela: "esteira" } | { tela: "viagens"; tipo?: string } | { tela: "viagem"; id: string } | { tela: "prioridades" }
   | { tela: "campanhas" } | { tela: "disparos" } | { tela: "automacoes" } | { tela: "pesquisas" } | { tela: "recompra" } | { tela: "vendas"; id?: string }
   | { tela: "config" } | { tela: "faxina" } | { tela: "mais" } | { tela: TelaRelExp; id?: string };
 type Tela = Rota["tela"];
@@ -111,6 +111,12 @@ function lerRota(): Rota {
   if (tela === "solicitacoes") return id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" };
   if (tela === "propostas") return id ? { tela: "propostas", id } : { tela: "propostas" };
   if (tela === "vendas") return id ? { tela: "vendas", id } : { tela: "vendas" };
+  // 03/11 (Viagens + Pacotes numa porta só): a lista de Pacotes virou Viagens › Pacotes.
+  // Com id (#rel/exp-pacotes/<id>…) continua abrindo o cockpit do pacote.
+  if (tela === "exp-pacotes" && !id) {
+    history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}${hashDe({ tela: "viagens", tipo: "pacote" })}`);
+    return { tela: "viagens", tipo: "pacote" };
+  }
   if (ehRelExp(tela)) return id ? { tela, id: decodeURIComponent(id) } : { tela };
   if ((SIMPLES as string[]).includes(tela)) return { tela } as Rota;
   return { tela: "inicio" };
@@ -119,6 +125,7 @@ function lerRota(): Rota {
 function hashDe(r: Rota) {
   if (r.tela === "ficha") return `#rel/cliente/${r.id}`;
   if (r.tela === "viagem") return `#rel/viagem/${r.id}`;
+  if (r.tela === "viagens" && r.tipo) return `#rel/viagens?tipo=${encodeURIComponent(r.tipo)}`;
   if (r.tela === "atendimento" && r.id) return `#rel/atendimento/${r.id}`;
   if (r.tela === "grupos" && r.id) return `#rel/grupos/${encodeURIComponent(r.id)}`;
   if (r.tela === "solicitacoes" && r.id) return `#rel/solicitacoes/${r.id}`;
@@ -264,7 +271,9 @@ export default function RelApp() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  const ir = useCallback((r: Rota) => {
+  const ir = useCallback((r0: Rota) => {
+    // a lista de Pacotes (sem id) mora em Viagens › Pacotes — "ver todos" do Painel e o "voltar" do cockpit caem lá
+    const r: Rota = r0.tela === "exp-pacotes" && !("id" in r0 && r0.id) ? { tela: "viagens", tipo: "pacote" } : r0;
     window.location.hash = hashDe(r);
     setRota(r);
     window.scrollTo(0, 0);
@@ -362,7 +371,7 @@ export default function RelApp() {
   // A tela de detalhe acende o item da lista dela.
   const ativo: Tela = rota.tela === "ficha" ? "clientes" : rota.tela === "duplicados" || rota.tela === "cadastros" ? "clientes" : rota.tela === "exp-passageiros" ? "clientes"
     // 03/11: Inscrições e Avisos saíram do menu (moram dentro da expedição): o link antigo acende Expedições
-    : rota.tela === "exp-inscricoes" || rota.tela === "exp-avisos" ? "exp-expedicoes" : rota.tela === "viagem" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
+    : rota.tela === "exp-inscricoes" || rota.tela === "exp-avisos" ? "exp-expedicoes" : rota.tela === "viagem" || rota.tela === "exp-pacotes" ? "viagens" : rota.tela === "prazo" ? "kpis" : rota.tela === "whatsapp" ? "config" : rota.tela;
   // Disparos/Automações/Pesquisas/Recompra abertos acendem "Campanhas" (se não estão soltos no menu).
   const ativoNoMenu = DENTRO_DE_CAMPANHAS.includes(ativo) && !noMenu.has(ativo) && noMenu.has("campanhas") ? "campanhas" : ativo;
   const navegar = (id: string) => ir({ tela: id === OUTROS_ID ? "mais" : id } as Rota);
@@ -437,7 +446,7 @@ export default function RelApp() {
           )}
           {rota.tela === "esteira" && <EsteiraPage onAbrirViagem={abrirViagem} />}
           {rota.tela === "prioridades" && <PrioridadesPage setor="relacionamento" />}
-          {rota.tela === "viagens" && <ViagensPage key="viagens" onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
+          {rota.tela === "viagens" && <ViagensPage key="viagens" onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} onAbrirPacoteExpedicao={(id) => ir({ tela: "exp-pacotes", id })} />}
           {/* Faxina (supervisão): a mesma lista de Viagens, com todas as filas à mostra */}
           {rota.tela === "faxina" && <ViagensPage key="faxina" faxina onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} />}
           {/* "Outros painéis" (#rel/mais, o endereço antigo do Mais): o que ficou fora do
