@@ -219,7 +219,7 @@ async function bater_meta() {
 /** O Bitrix, que recebe a reunião marcada. Falhar aqui não para a Glória. */
 async function bater_bitrix() {
   const base = String(process.env.BITRIX_WEBHOOK_BASE || '').trim().replace(/\/+$/, '');
-  if (!base) return porta('Bitrix', 'atencao', 'BITRIX_WEBHOOK_BASE não configurada: a reunião não vira atividade no card.');
+  if (!base) return porta('Bitrix', 'atencao', 'BITRIX_WEBHOOK_BASE não configurada: nada do QS chega no Bitrix (reunião, ganho, perdido, nota).');
   try {
     const r = await comPrazo((signal) => fetch(`${base}/profile.json`, { signal }));
     if (!r.ok) return porta('Bitrix', 'atencao', `O Bitrix respondeu HTTP ${r.status}.`);

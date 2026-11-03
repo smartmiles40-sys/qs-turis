@@ -741,7 +741,7 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
 
   notifyBitrix("reuniao", {
     lead_id: input.lead_id,
-    // O n8n grava o resultado de volta NESTA reunião (bitrix_synced / bitrix_error).
+    // O servidor grava o resultado de volta NESTA reunião (bitrix_synced / bitrix_error).
     // Sem o id ele teria que adivinhar a linha por lead + horário.
     meeting_id: meeting.id,
     bitrix_id: bitrixParaOSync,
@@ -768,7 +768,7 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
  * essa ordem que garante que o horário fica reservado mesmo se o Google falhar.
  * O efeito colateral é que o primeiro aviso ao Bitrix sai com o link vazio.
  *
- * O workflow do lado de lá é um `crm.deal.update` com os mesmos campos, então
+ * O envio (api/_bitrixSaida.js) é um `crm.deal.update` com os mesmos campos, então
  * repetir é inofensivo: o segundo disparo apenas preenche o que faltava.
  */
 export function avisarBitrixDaSala(

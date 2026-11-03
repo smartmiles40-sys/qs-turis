@@ -4,29 +4,29 @@
 //
 // Modelo: cada ação relevante (marcar Perdido/Ganho, agendar Reunião, salvar Nota)
 // chama a rota serverless /api/bitrix-sync, que valida o LOGIN do SDR (JWT do
-// Supabase) e encaminha pro n8n com um segredo server-side. O n8n acha o negócio
-// no Bitrix pelo `bitrix_id`, move a coluna / comenta na timeline.
+// Supabase), acha o negócio no Bitrix pelo `bitrix_id` do lead e move a coluna /
+// preenche campos / comenta na timeline DIRETO no Bitrix (sem n8n desde 03/11).
 //
 // Segurança (mudança 2026-07-13): antes o navegador chamava o n8n DIRETO com
 // VITE_N8N_SYNC_BASE no bundle e webhooks sem auth — qualquer visitante podia
-// extrair a URL e mover negócios arbitrários no Bitrix. Agora a URL e o segredo
-// vivem SÓ nas envs do servidor (N8N_SYNC_BASE / N8N_SYNC_SECRET na Vercel).
+// extrair a URL e mover negócios arbitrários no Bitrix. Agora o webhook do Bitrix
+// vive SÓ na env do servidor (BITRIX_WEBHOOK_BASE na Vercel).
 //
 // Regras de ouro:
 //  • Fire-and-forget: NUNCA trava a UI, NUNCA lança erro pro chamador. Se falhar,
 //    avisa por toast (o QS é a fonte da verdade; o Bitrix é espelho).
 //  • Sem `bitrix_id` não há o que sincronizar (lead que não veio do Bitrix) → pula.
-//  • Servidor sem N8N_SYNC_BASE → no-op silencioso (nada quebra antes de ligar).
+//  • Servidor sem BITRIX_WEBHOOK_BASE → no-op silencioso (nada quebra antes de ligar).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { supabase } from "@/lib/supabase";
 import { notifyError } from "@/lib/qs/notify";
 
 // "primeiro-contato" (2026-07-28): disparado quando o SDR conclui uma atividade
-// que NÃO encerra o lead. O n8n só move o negócio se ele AINDA estiver em "Novo
+// que NÃO encerra o lead. O servidor só move o negócio se ele AINDA estiver em "Novo
 // lead" — por isso podemos disparar em toda conclusão sem contador nem flag: da
 // 2ª em diante o evento chega, olha e não faz nada. Repetir é inofensivo, e se o
-// primeiro disparo se perder (rede/n8n fora) o próximo conserta sozinho.
+// primeiro disparo se perder (rede/Bitrix fora) o próximo conserta sozinho.
 // "reuniao-campos" (2026-08-14): desfecho da reunião preenche os CAMPOS do
 // negócio (Data da reunião realizada, Data de No Show, Reagendamento, SAL) —
 // o mapeamento desfecho→UF_CRM_* vive no servidor, nunca no navegador.
@@ -43,7 +43,7 @@ let warnedNotConfigured = false;
 /** O que o envio deu, para quem PRECISA saber (um botão, por exemplo). */
 export interface BitrixSyncResult {
   ok: boolean;
-  /** Servidor sem N8N_SYNC_BASE: não é falha, é integração desligada. */
+  /** Servidor sem BITRIX_WEBHOOK_BASE: não é falha, é integração desligada. */
   desligado?: boolean;
   /** O lead não tem card no Bitrix — não houve o que atualizar. */
   semCard?: boolean;
@@ -95,12 +95,8 @@ export async function enviarAoBitrix(
       const erro = String(json?.error ?? "");
       return {
         ok: false,
-        // Mesma distinção do notifyBitrix: dizer QUEM recusou. Culpar o Bitrix
-        // quando quem devolveu 403 foi o n8n já mandou o diagnóstico pro lugar
-        // errado uma vez (agosto/2026).
-        error: erro.startsWith("n8n ")
-          ? "A automação (n8n) recusou — o Bitrix não chegou a ser chamado."
-          : erro || `O Bitrix não aceitou (HTTP ${res.status}).`,
+        // Sem n8n no meio (03/11), quem recusa é o próprio Bitrix (ou a rede).
+        error: erro || `O Bitrix não aceitou (HTTP ${res.status}).`,
       };
     }
     return { ok: true };
@@ -111,7 +107,7 @@ export async function enviarAoBitrix(
 }
 
 /**
- * Dispara o evento pro n8n via /api/bitrix-sync (autenticado com o JWT da sessão).
+ * Dispara o evento pro Bitrix via /api/bitrix-sync (autenticado com o JWT da sessão).
  */
 export function notifyBitrix(event: BitrixSyncEvent, payload: BitrixSyncPayload): void {
   // O SERVIDOR resolve o bitrix_id a partir do lead_id (e ignora o do cliente).
@@ -140,29 +136,20 @@ export function notifyBitrix(event: BitrixSyncEvent, payload: BitrixSyncPayload)
       const json = (await res.json().catch(() => null)) as {
         success?: boolean;
         code?: string;
-        /** "n8n HTTP 403", "bitrix-recusou", … — é o que diz QUEM recusou. */
+        /** "bitrix-recusou", "bitrix-inacessivel", … — o que deu errado. */
         error?: string;
       } | null;
 
       if (json?.code === "not_configured") {
         if (!warnedNotConfigured) {
           warnedNotConfigured = true;
-          console.info("[bitrixSync] integração desligada no servidor (N8N_SYNC_BASE não configurado)");
+          console.info("[bitrixSync] integração desligada no servidor (BITRIX_WEBHOOK_BASE não configurado)");
         }
         return;
       }
       if (!res.ok || !json?.success) {
         console.warn(`[bitrixSync] "${event}" falhou:`, res.status, json);
-        // A mensagem diz QUEM recusou. A antiga culpava o Bitrix sempre — e em
-        // agosto o Bitrix estava bem: quem devolvia 403 era o n8n, com os
-        // endereços registrados num workflow antigo. Diagnóstico começou no
-        // lugar errado por causa deste texto.
-        const erro = String(json?.error ?? "");
-        notifyError(
-          erro.startsWith("n8n ")
-            ? "A automação recusou esta atualização (o Bitrix não chegou a ser chamado). O QS salvou normalmente — atualize o negócio no Bitrix manualmente."
-            : "O Bitrix não recebeu esta atualização. O QS salvou normalmente — atualize o negócio no Bitrix manualmente."
-        );
+        notifyError("O Bitrix não recebeu esta atualização. O QS salvou normalmente — atualize o negócio no Bitrix manualmente.");
       }
     } catch (err) {
       console.warn(`[bitrixSync] "${event}" falhou:`, err);

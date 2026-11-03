@@ -59,7 +59,7 @@ const O_QUE_QUEBRA: Record<string, string> = {
   N8N_AGENDA_URL: "sem isto a reunião é marcada, mas sem link do Meet",
   N8N_AGENDA_SECRET: "sem isto a agenda recusa com 403",
   OPENAI_API_KEY: "sem isto áudio do cliente entra sem transcrição e ela não responde",
-  BITRIX_WEBHOOK_BASE: "sem isto a reunião não vira atividade no card do Bitrix",
+  BITRIX_WEBHOOK_BASE: "sem isto nada do QS chega no Bitrix (reunião, ganho, perdido, nota)",
   META_CALLS_TOKEN: "sem isto nada sai no WhatsApp",
   META_PHONE_NUMBER_ID: "sem isto nada sai no WhatsApp (é o id do número oficial na Meta)",
 };
