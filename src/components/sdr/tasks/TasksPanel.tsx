@@ -21,7 +21,7 @@ import { carregarRespostasDoFormulario } from "@/lib/qs/formulario";
 import { confirmar } from "@/lib/qs/confirmar";
 import { criarEvento } from "@/lib/qs/agendaMeet";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityCountOnDay, fetchActivityGoals, fetchMeetingCounts, fetchMeetingKpis, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchQueueLeads, fetchNoteCountsByLead, fetchContactedLeadIds, fetchLossReasons, type CadenceScriptRow, type ContactBreakdownRow, type MeetingKpis, type DayActivityCount } from "@/lib/qs/queries";
+import { completeTask, skipTask, fetchQsUsers, transferLead, fetchActivityCounts, fetchActivityCountOnDay, fetchActivityGoals, fetchMeetingCounts, fetchMeetingKpis, fetchContactBreakdownToday, createCadenceTasks, undoCompleteTask, updateOpenTask, deleteExtraTask, fetchCadenceScripts, fetchAvailableCadences, fetchQueueTasks, fetchLeadsDaFila, fetchNoteCountsByLead, fetchContactedLeadIds, fetchLossReasons, type CadenceScriptRow, type ContactBreakdownRow, type MeetingKpis, type DayActivityCount } from "@/lib/qs/queries";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { useWhatsAppApp } from "@/lib/qs/waApp";
@@ -456,12 +456,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // do SDR que agendou. Filtrando por dono, o mapa vinha vazio e o card
     // renderizava "Lead desconhecido" — o mesmo sintoma que a 0052 matou no
     // WhatsApp, só que aqui quem escondia era o front, não o banco.
-    const leadsOwnerId = currentUser?.role === "closer" ? null : queueOwnerId;
+    // (04/11: o mapa de leads agora vem dos lead_id das próprias tarefas — resolve o closer sem recorte por dono.)
     try {
       // O selo "📝 N obs." conta só os leads que vieram pra tela (0195).
-      const leadsP = fetchQueueLeads(leadsOwnerId);   // paginado — leadsMap completo
+      // 04/11: só os leads que têm atividade na fila (antes: a base inteira pro
+      // admin/closer). Notas e "sem contato" perguntam só por esses mesmos ids.
+      const tasksP = fetchQueueTasks(queueOwnerId);
+      const leadsP = tasksP.then(fetchLeadsDaFila);
+      const idsP = tasksP.then((ts) => [...new Set(ts.map((t) => t.lead_id))]);
       const [queueTasks, queueLeads, cadencesRes, usersData, productsRes, notesRes, contactedRes, scriptsData, availableData] = await Promise.all([
-        fetchQueueTasks(queueOwnerId),   // paginado — nunca corta em 1000 (número real)
+        tasksP,   // paginado — nunca corta em 1000 (número real)
         leadsP,
         supabase.from("qs_cadences").select("*"),
         fetchQsUsers(),
@@ -469,8 +473,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         // Paginadas e filtradas por dono (revisão 28/07): sem isso o painel via
         // 1.000 de 6.269 concluídas e o selo "sem contato" reaparecia em lead já
         // trabalhado. Ver fetchNoteCountsByLead/fetchContactedLeadIds.
-        leadsP.then((ls) => fetchNoteCountsByLead(queueOwnerId, ls.map((l) => l.id))),
-        fetchContactedLeadIds(queueOwnerId),
+        idsP.then((ids) => fetchNoteCountsByLead(queueOwnerId, ids)),
+        idsP.then((ids) => fetchContactedLeadIds(queueOwnerId, ids)),
         fetchCadenceScripts(), // roteiros por atividade da cadência (item 6 — script_text)
         fetchAvailableCadences(), // só disponíveis — dropdown do Cadastrar Lead (item 12)
       ]);
@@ -529,14 +533,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const refreshQueue = useCallback(async () => {
     if (document.hidden || pollBusyRef.current) return;
     const queueOwnerId = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
-    const leadsOwnerId = currentUser?.role === "closer" ? null : queueOwnerId;  // ver loadData
     try {
-      const leadsP = fetchQueueLeads(leadsOwnerId);   // paginado
+      const tasksP = fetchQueueTasks(queueOwnerId);   // paginado (número real, sem teto de 1000)
+      const leadsP = tasksP.then(fetchLeadsDaFila);   // só os leads da fila (ver loadData)
+      const idsP = tasksP.then((ts) => [...new Set(ts.map((t) => t.lead_id))]);
       const [queueTasks, queueLeads, notesRes, contactedRes] = await Promise.all([
-        fetchQueueTasks(queueOwnerId),   // paginado (número real, sem teto de 1000)
+        tasksP,
         leadsP,
-        leadsP.then((ls) => fetchNoteCountsByLead(queueOwnerId, ls.map((l) => l.id))),
-        fetchContactedLeadIds(queueOwnerId),
+        idsP.then((ids) => fetchNoteCountsByLead(queueOwnerId, ids)),
+        idsP.then((ids) => fetchContactedLeadIds(queueOwnerId, ids)),
       ]);
       setTasks(queueTasks);
       setLeads(queueLeads);

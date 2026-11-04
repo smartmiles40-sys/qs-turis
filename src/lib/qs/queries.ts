@@ -427,6 +427,18 @@ export async function fetchQueueTasks(ownerId?: string | null): Promise<Task[]> 
 // Leads do Painel (para o mapa lead↔tarefa). Também paginado: com >1000 leads o
 // leadsMap ficava incompleto e as tarefas dos leads "extras" renderizavam sem
 // nome/telefone. RLS já restringe o SDR aos leads dele; o admin recebe todos.
+/**
+ * Só os leads que têm atividade na fila (04/11). O Painel baixava a BASE INTEIRA
+ * (~22 mil leads, select *) pro admin e pro closer — a cada minuto e a cada
+ * mudança no realtime — pra usar só os ~3.800 que aparecem nos cards.
+ */
+export async function fetchLeadsDaFila(tasks: Pick<Task, "lead_id">[]): Promise<Lead[]> {
+  return fetchPorIds<Lead>(
+    tasks.map((t) => t.lead_id as string),
+    (lote) => supabase.from("qs_leads").select("*").in("id", lote),
+  );
+}
+
 export async function fetchQueueLeads(ownerId?: string | null): Promise<Lead[]> {
   return fetchAllRows<Lead>((from, to) => {
     let q = supabase.from("qs_leads").select("*").order("id", { ascending: true });
@@ -1101,16 +1113,51 @@ export async function fetchAllRows<T>(
     to: number
   ) => PromiseLike<{ data: T[] | null; error: { message?: string } | null }>
 ): Promise<T[]> {
-  const all: T[] = [];
-  for (let page = 0; ; page++) {
+  // 04/11 (sistema pesado): as páginas iam UMA DE CADA VEZ — 22 páginas de
+  // 0,65 s = 14 s esperando em fila. Agora a 1ª vai sozinha (a maioria das
+  // consultas cabe nela) e, se veio cheia, o resto sai em ondas paralelas.
+  // Mesma ordem, mesmo resultado; no máximo ONDA-1 pedidos vazios a mais no fim.
+  const ONDA = 4;
+  const pagina = async (page: number): Promise<T[]> => {
     const from = page * POSTGREST_PAGE_SIZE;
     const { data, error } = await buildQuery(from, from + POSTGREST_PAGE_SIZE - 1);
     if (error) throw error;
-    const rows = data ?? [];
-    all.push(...rows);
-    if (rows.length < POSTGREST_PAGE_SIZE) break;
+    return data ?? [];
+  };
+  const all: T[] = [...(await pagina(0))];
+  if (all.length < POSTGREST_PAGE_SIZE) return all;
+  for (let inicio = 1; ; inicio += ONDA) {
+    const onda = await Promise.all(Array.from({ length: ONDA }, (_, i) => pagina(inicio + i)));
+    for (const rows of onda) {
+      all.push(...rows);
+      if (rows.length < POSTGREST_PAGE_SIZE) return all;
+    }
   }
-  return all;
+}
+
+/**
+ * Busca linhas por uma lista de ids, em lotes paralelos (URL curta e sem o
+ * teto de 1000). `limite` lotes ao mesmo tempo pra não afogar o banco.
+ */
+export async function fetchPorIds<T>(
+  ids: string[],
+  buildQuery: (lote: string[]) => PromiseLike<{ data: T[] | null; error: { message?: string; code?: string } | null }>,
+  tamanho = 150,
+  limite = 6,
+): Promise<T[]> {
+  const unicos = [...new Set(ids.filter(Boolean))];
+  const lotes: string[][] = [];
+  for (let i = 0; i < unicos.length; i += tamanho) lotes.push(unicos.slice(i, i + tamanho));
+  const out: T[] = [];
+  for (let i = 0; i < lotes.length; i += limite) {
+    const res = await Promise.all(lotes.slice(i, i + limite).map(async (l) => {
+      const { data, error } = await buildQuery(l);
+      if (error) throw error;
+      return data ?? [];
+    }));
+    for (const r of res) out.push(...r);
+  }
+  return out;
 }
 
 // ── Apoio do Painel: contagem de notas e "quem já foi contatado" ─────────────
@@ -1154,11 +1201,13 @@ export async function fetchNoteCountsByLead(ownerId: string | null, leadIds?: st
   if (leadIds) {
     if (leadIds.length === 0) return counts;
     try {
-      for (let i = 0; i < leadIds.length; i += 500) {
-        const { data, error } = await supabase.rpc("qs_note_counts_por_leads", { p_leads: leadIds.slice(i, i + 500) });
-        if (error) throw error;
-        for (const r of (data || []) as { lead_id: string; total: number }[]) counts.set(r.lead_id, r.total ?? 0);
-      }
+      const rows = await fetchPorIds<{ lead_id: string; total: number }>(
+        leadIds,
+        (lote) => supabase.rpc("qs_note_counts_por_leads", { p_leads: lote }) as unknown as PromiseLike<{ data: { lead_id: string; total: number }[] | null; error: { message?: string } | null }>,
+        500,
+        4,
+      );
+      for (const r of rows) counts.set(r.lead_id, r.total ?? 0);
     } catch {
       counts.clear();
     }
@@ -1200,8 +1249,26 @@ export async function fetchNoteCountsByLead(ownerId: string | null, leadIds?: st
  * Postgres a percorrer tudo de novo desde o começo, então a última custava mais
  * que a primeira. A visão da 0043 faz o DISTINCT no banco.
  */
-export async function fetchContactedLeadIds(ownerId: string | null): Promise<Set<string>> {
+export async function fetchContactedLeadIds(ownerId: string | null, leadIds?: string[]): Promise<Set<string>> {
   const ids = new Set<string>();
+
+  // 04/11: com os ids da fila, pergunta SÓ por eles (eram 21 páginas, uma por
+  // vez, com a base inteira pro admin).
+  if (leadIds) {
+    if (leadIds.length === 0) return ids;
+    try {
+      const rows = await fetchPorIds<{ lead_id: string | null }>(leadIds, (lote) => {
+        let q = supabase.from("qs_leads_contatados").select("lead_id").in("lead_id", lote);
+        if (ownerId) q = q.eq("owner_id", ownerId);
+        return q;
+      });
+      for (const r of rows) if (r.lead_id) ids.add(r.lead_id);
+      return ids;
+    } catch (error) {
+      if (!semVisao(error as { code?: string; message?: string })) throw error;
+      // sem a visão: cai no caminho geral abaixo
+    }
+  }
 
   // Paginado desde 13/08 — mesma razão da fetchNoteCountsByLead acima.
   try {
