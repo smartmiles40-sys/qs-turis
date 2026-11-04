@@ -1,7 +1,8 @@
 // src/mkt/conteudo/EquipeMktPage.tsx
 // -----------------------------------------------------------------------------
-// EQUIPE DO MARKETING (0240) — aba "Equipe" de Ajustes (AjustesPage.tsx) — aba "Equipe" de Ajustes (AjustesPage.tsx): quem é do Orgânico, do Tráfego e quem aprova.
-// Só o gestor de Marketing (ou admin) muda — a RPC mkt_definir_papeis confere.
+// EQUIPE DO MARKETING (0240) — aba "Equipe" de Ajustes (AjustesPage.tsx): quem é do Orgânico, do Tráfego e quem aprova.
+// Só quem aprova muda — a RPC mkt_definir_papeis confere. Com a 0266 (04/11/2026)
+// todo o time do Marketing aprova; o papel aqui só arruma o menu e os avisos.
 // Quem aparece aqui: quem tem a porta do Marketing (papel marketing, setor
 // Marketing marcado em Configurações › Usuários, gestor com a área, admin).
 // -----------------------------------------------------------------------------
@@ -28,7 +29,7 @@ export default function EquipeMktPage() {
   return (
     <div>
       <p className="text-[13px] mb-3" style={{ color: "var(--ink3)" }}>
-        Orgânico e Tráfego mudam o menu de cada um; Gestor aprova os conteúdos e configura o quadro. Pra pôr alguém novo na área, o admin marca “Marketing” na pessoa em Configurações › Usuários.
+        Orgânico e Tráfego mudam o menu de cada um (quem aprova vê tudo). Quem aprova está escrito em cada linha. Pra pôr alguém novo na área, o admin marca “Marketing” na pessoa em Configurações › Usuários.
       </p>
       {erro && <Aviso tom="erro">{erroDe(new Error(erro))}</Aviso>}
       {erroAcao && <div className="mb-3"><Aviso tom="erro">{erroAcao}</Aviso></div>}

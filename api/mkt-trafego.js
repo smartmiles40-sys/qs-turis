@@ -36,12 +36,15 @@ export function ehDoMarketing(u) {
   const s = Array.isArray(u.setores) ? u.setores : [];
   return u.role === 'admin' || u.role === 'marketing' || s.includes('marketing');
 }
-/** Mesma regra de mkt_trafego_pode_editar() (0265): tráfego ou quem aprova. */
+/**
+ * Mesma regra de mkt_trafego_pode_editar() (0265): tráfego ou quem aprova.
+ * 04/11/2026 (0266, acesso completo do time): quem aprova = TODO o Marketing
+ * (admin, papel marketing ou setor marketing) — ver mkt_eh_aprovador na 0266.
+ * Sem a 0266 aplicada o banco ainda recusa as travas pra quem não é gestor;
+ * o servidor já segue a regra nova.
+ */
 export function podeEditar(u) {
-  if (!ehDoMarketing(u)) return false;
-  const s = Array.isArray(u.setores) ? u.setores : [];
-  const aprovador = u.role === 'admin' || (u.role === 'gestor' && s.includes('marketing')) || u.papeis.includes('gestor');
-  return aprovador || u.papeis.includes('trafego');
+  return ehDoMarketing(u);
 }
 
 export default async function handler(req, res) {
@@ -89,7 +92,7 @@ export default async function handler(req, res) {
       const p = await montarPainel({ periodoId });
       return res.status(200).json({ ...p, podeEditar: podeEditar(u) });
     }
-    if (!podeEditar(u)) return res.status(403).json({ error: 'Só o Tráfego ou o gestor de Marketing faz isso.' });
+    if (!podeEditar(u)) return res.status(403).json({ error: 'Só o Marketing faz isso.' });
     if (acao === 'sincronizar') {
       if (faltaConfigurar().length) return res.status(400).json({ error: `Falta configurar na Vercel: ${faltaConfigurar().join(', ')}`, configurar: true });
       const leitura = await sincronizar({ orcamentoMs: 35_000 });

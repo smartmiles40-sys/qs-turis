@@ -9,7 +9,8 @@
 //   POST  { acao } com login (admin, marketing, gestor com área marketing):
 //     estado · previa · agendar · sincronizar · info_grupo · convite
 //     conversas · mensagens · enviar · reagir                (caixa "Celular")
-//     configurar · ligar_envio · qrcode · apontar_webhook · desconectar   (só admin)
+//     configurar · ligar_envio · desconectar   (só admin)
+//     qrcode · apontar_webhook   (time do Marketing, desde 04/11/2026)
 //
 // Ler grupos/tags/campanhas/fila a tela faz direto no banco (RLS 0243).
 // Tags, campanhas, cadências e recorrências a tela GRAVA direto (RLS + gatilho
@@ -265,14 +266,17 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true, envioAmbiente: envioLigadoNoAmbiente() });
       }
       case 'qrcode': {
-        soAdmin();
+        // 04/11/2026 (acesso completo do time): reconectar o chip que caiu é
+        // rotina do Marketing — ler o QR só reconecta a instância que o admin
+        // já configurou (a trava do banco segue valendo). Trocar a instância,
+        // ligar o envio e desconectar continuam só admin.
         const r = await evoMkt('instance/connect', { timeoutMs: 40_000 });
         const qr = r?.qrcode || r;
         const base64 = typeof qr?.base64 === 'string' ? (qr.base64.startsWith('data:') ? qr.base64 : `data:image/png;base64,${qr.base64}`) : null;
         return res.status(200).json({ base64, pairingCode: qr?.pairingCode || null, estado: r?.instance?.state || null });
       }
       case 'apontar_webhook': {
-        soAdmin();
+        // 04/11/2026: idempotente (só aponta a instância do Marketing pro QS) — o time pode.
         const segredo = String(process.env.MKT_GRUPOS_SECRET || '');
         if (segredo.length < 16) throw new Error('Defina MKT_GRUPOS_SECRET (16+ caracteres) na Vercel antes.');
         await evoMkt('webhook/set', {
