@@ -354,6 +354,37 @@ export async function vincularLeadAoBitrix(lead) {
 //
 // CATEGORY_ID e STAGE_ID vão SEMPRE juntos: mudar de funil sem mudar a coluna
 // deixa o negócio num estado que o Bitrix aceita e a interface não sabe mostrar.
+/**
+ * crm.deal.update que também sabe TROCAR DE FUNIL.
+ *
+ * 04/11: o crm.deal.update IGNORA o CATEGORY_ID, calado: responde `true` e o
+ * negócio fica onde estava. Foi assim que a reunião "movida" pro Comercial 1
+ * continuou em Pré-Vendas › Novo Lead. Trocar de funil é pelo crm.item.update
+ * (entityTypeId 2 = negócio), com categoryId e stageId juntos.
+ *
+ * Quando há troca de funil, relê o negócio e só devolve sucesso se ele estiver
+ * mesmo no funil pedido — "o Bitrix respondeu ok" não basta mais.
+ */
+export async function atualizarNegocioComFunil(dealId, fields, timeoutMs = 8_000) {
+  const id = Number(dealId);
+  const { CATEGORY_ID, STAGE_ID, ...resto } = fields || {};
+  if (CATEGORY_ID === undefined || CATEGORY_ID === null || CATEGORY_ID === '') {
+    await bx('crm.deal.update', { id, fields, params: { REGISTER_SONET_EVENT: 'Y' } }, timeoutMs);
+    return null;
+  }
+  const item = { categoryId: Number(CATEGORY_ID) };
+  if (STAGE_ID) item.stageId = String(STAGE_ID);
+  await bx('crm.item.update', { entityTypeId: 2, id, fields: item }, timeoutMs);
+  if (Object.keys(resto).length) {
+    await bx('crm.deal.update', { id, fields: resto, params: { REGISTER_SONET_EVENT: 'Y' } }, timeoutMs);
+  }
+  const d = await bx('crm.deal.get', { id }, 6_000);
+  if (String(d?.CATEGORY_ID ?? '') !== String(CATEGORY_ID) || (STAGE_ID && String(d?.STAGE_ID) !== String(STAGE_ID))) {
+    throw new Error(`o Bitrix aceitou, mas o negócio continua no funil ${d?.CATEGORY_ID ?? '?'} (coluna ${d?.STAGE_ID ?? '?'})`);
+  }
+  return d;
+}
+
 export async function moverNegocioParaReuniao(dealId, destino) {
   if (!bitrixConfigurado() || !dealId) return { movido: false, motivo: 'sem-bitrix' };
   if (!destino || destino.categoria == null || !destino.etapa) {
@@ -377,11 +408,7 @@ export async function moverNegocioParaReuniao(dealId, destino) {
   }
 
   try {
-    await bx('crm.deal.update', {
-      id: Number(dealId),
-      fields: { CATEGORY_ID: categoria, STAGE_ID: etapa },
-      params: { REGISTER_SONET_EVENT: 'Y' },   // aparece na timeline do card
-    });
+    await atualizarNegocioComFunil(dealId, { CATEGORY_ID: categoria, STAGE_ID: etapa });
     return { movido: true, categoria, etapa };
   } catch (e) {
     return { movido: false, motivo: e?.message || 'falha no crm.deal.update' };

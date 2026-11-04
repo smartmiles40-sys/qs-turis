@@ -55,7 +55,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
-import { bx, bitrixConfigurado, comentarNoNegocio } from './_bitrixLead.js';
+import { bx, bitrixConfigurado, comentarNoNegocio, atualizarNegocioComFunil } from './_bitrixLead.js';
 import { getSupabaseUserId } from './_wa.js';
 import {
   CAMPO_TIPO_VENDA, ETAPAS_DE_VENDA, FUNIL_COMERCIAL, FUNIL_PRE_VENDAS, NOME_ETAPA, emPreVenda, etapaParaColuna, planejarEspelho,
@@ -163,7 +163,9 @@ async function espelhar(negocioId, u, extra = {}) {
     if (!plano.ok) throw new Error(plano.motivo);
     const { fields, etapaAlvo, preVenda, valor } = plano;
     if (Object.keys(fields).length) {
-      await bx('crm.deal.update', { id: Number(dealId), fields, params: { REGISTER_SONET_EVENT: 'Y' } }, 8_000);
+      // atualizarNegocioComFunil: card ainda na Pré-Vendas troca de funil pelo
+      // crm.item.update (o crm.deal.update ignora CATEGORY_ID calado — 04/11).
+      await atualizarNegocioComFunil(dealId, fields, 8_000);
     }
     const marcas = { bitrix_status: 'ok', bitrix_erro: null, bitrix_etapa: etapaAlvo, bitrix_enviado_em: new Date().toISOString() };
     // Venda fechada pela ficha: o resumo vai pra timeline do negócio uma vez por

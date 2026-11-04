@@ -24,7 +24,7 @@
 
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
-import { bx, bitrixConfigurado, comentarNoNegocio, passarNegocioPara } from './_bitrixLead.js';
+import { bx, bitrixConfigurado, comentarNoNegocio, passarNegocioPara, atualizarNegocioComFunil } from './_bitrixLead.js';
 
 // Colunas lidas do portal em 21/09/2026 (crm.dealcategory.stage.list).
 // Se alguém recriar a coluna no Bitrix, o id muda: atualizar AQUI.
@@ -75,11 +75,8 @@ async function moverCard(dealId, destino) {
   if (!bitrixConfigurado()) return 'sem Bitrix configurado';
   if (!dealId) return 'lead sem card no Bitrix';
   try {
-    await bx('crm.deal.update', {
-      id: Number(dealId),
-      fields: { CATEGORY_ID: destino.categoria, STAGE_ID: destino.etapa },
-      params: { REGISTER_SONET_EVENT: 'Y' },
-    });
+    // crm.deal.update ignora CATEGORY_ID calado (04/11): troca de funil pelo crm.item.update.
+    await atualizarNegocioComFunil(dealId, { CATEGORY_ID: destino.categoria, STAGE_ID: destino.etapa });
     return `movido para ${destino.nome}`;
   } catch (e) {
     return `Bitrix recusou: ${String(e?.message || e).slice(0, 160)}`;
