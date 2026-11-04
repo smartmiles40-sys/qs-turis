@@ -6,6 +6,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>QS · by STFV</title>
 
+    <!-- TELA PRETA NO DEPLOY (04/11): a Vercel guarda por 1 ANO tudo em /assets/
+         (vercel.json, "immutable") — inclusive um 404. Se a aba pediu o JS novo
+         no instante da troca de versão, o navegador guardou o 404 e o QS abria
+         em branco até sair outro deploy. Aqui: se um script de /assets/ falhar,
+         busca de novo com ?r=… (endereço diferente = fura o cache), uma vez.
+         Fica no topo do <head> pra valer antes do script do app. -->
+    <script>
+      window.addEventListener("error", function (e) {
+        var s = e.target;
+        if (!s || s.tagName !== "SCRIPT" || !/\/assets\//.test(s.src || "") || s.getAttribute("data-qs-retry")) return;
+        var n = document.createElement("script");
+        n.type = "module";
+        n.crossOrigin = "anonymous";
+        n.setAttribute("data-qs-retry", "1");
+        n.src = s.src.split("?")[0] + "?r=" + Date.now();
+        document.head.appendChild(n);
+      }, true);
+    </script>
+
     <!-- Modo Noturno: aplica o tema salvo ANTES do React montar (sem piscar branco) -->
     <script>
       (function () {
@@ -44,6 +63,7 @@
   </head>
   <body>
     <div id="root"></div>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
