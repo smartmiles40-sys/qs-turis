@@ -290,7 +290,7 @@ create or replace function mkt_trafego_definir_destino(p_campanha text, p_destin
 language plpgsql security definer set search_path = public as $$
 begin
   if not mkt_trafego_pode_editar() then
-    raise exception 'Só o Tráfego ou o gestor de Marketing corrige o destino.' using errcode = '42501';
+    raise exception 'Só o Marketing corrige o destino.' using errcode = '42501';
   end if;
   update mkt_trafego_campanhas
      set destino_manual = nullif(btrim(lower(coalesce(p_destino, ''))), ''), atualizado_em = now()

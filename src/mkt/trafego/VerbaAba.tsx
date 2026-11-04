@@ -54,7 +54,7 @@ export default function VerbaAba() {
 
       {editando && (
         <EditorPeriodo inicial={editando === "novo" ? null : editando} onFechar={() => setEditando(null)}
-          onSalvo={async (id) => { setEditando(null); setPeriodoId(id); await recarregar(); }} />
+          onSalvo={async (id) => { setEditando(null); setPeriodoId(id || null); /* 04/11/2026: apagar devolve "" → volta pro período de hoje */ await recarregar(); }} />
       )}
     </div>
   );

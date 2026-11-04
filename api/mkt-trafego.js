@@ -7,12 +7,11 @@
 //   GET  ?cron=1   (Vercel Cron a cada 30 min, Bearer CRON_SECRET)
 //                  → lê a Meta, grava, avalia as travas e age.
 //   POST { acao: 'painel', periodoId? }   → tudo que a tela mostra (Marketing)
-//   POST { acao: 'sincronizar' }          → "Atualizar agora" (Tráfego/gestor)
-//   POST { acao: 'reativar', acaoId }     → reativa campanha que o QS pausou (Tráfego/gestor)
+//   POST { acao: 'sincronizar' }          → "Atualizar agora" (Marketing)
+//   POST { acao: 'reativar', acaoId }     → reativa campanha que o QS pausou (Marketing)
 //
 // Quem entra: Marketing (admin, papel marketing ou setor marketing). Quem
-// sincroniza/reativa: papel 'trafego' do Marketing, gestor de Marketing, admin
-// — a mesma regra de mkt_trafego_pode_editar() no banco.
+// sincroniza/reativa: 04/11/2026 — todo o Marketing (ver podeEditar abaixo).
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
