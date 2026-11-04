@@ -131,6 +131,9 @@
     "api/mkt-instagram.js": {
       "maxDuration": 60
     },
+    "api/mkt-trafego.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -215,6 +218,10 @@
     {
       "path": "/api/mkt-automacoes?cron=1",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/mkt-trafego?cron=1",
+      "schedule": "7,37 * * * *"
     }
   ],
   "headers": [
