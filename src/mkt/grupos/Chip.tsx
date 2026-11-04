@@ -180,7 +180,7 @@ function PainelChip() {
             </div>
           </form>
         </details>
-      ) : <Nota icone="ℹ️">Ler o QR Code (reconectar) qualquer pessoa do Marketing faz. Ligar/pausar o envio, trocar a instância e desconectar: só o admin.</Nota>}
+      ) : <Nota icone="ℹ️">Ler o QR Code (reconectar) e apontar o webhook qualquer pessoa do Marketing faz. Ligar/pausar o envio, trocar a instância e desconectar: só o admin.</Nota>}
     </div>
   );
 }

@@ -79,9 +79,11 @@ function useSituacao() {
   const [contas, setContas] = useState<Conta[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const carregar = useCallback(async () => {
-    carregarEstado().then(setEstado).catch(() => setEstado(null));
+    // 04/11/2026: a falha do estado era engolida e a aba Conexão ficava em "Carregando…" pra sempre.
+    const pEstado = carregarEstado().then((e) => { setEstado(e); return null; }).catch((e: unknown) => (e instanceof Error ? e.message : "Não consegui ler o estado."));
     const { data, error } = await supabase.from("mkt_ig_contas").select("id,ig_user_id,username,status,ultima_entrada_em,ultimo_erro").order("criado_em");
-    setErro(error ? semTabela(error.message) : null);
+    const erroEstado = await pEstado;
+    setErro(error ? semTabela(error.message) : erroEstado);
     setContas((data ?? []) as Conta[]);
   }, []);
   useEffect(() => { void carregar(); }, [carregar]);
@@ -193,7 +195,7 @@ function AbaAutomacoes() {
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <Botao onClick={() => setForm({ ...a, config: { ...a.config } })}>Editar</Botao>
-                    <Botao variante="fantasma" onClick={() => { if (window.confirm(`Apagar “${a.nome}”?`)) void supabase.from("mkt_ig_automacoes").delete().eq("id", a.id).then(() => carregar()); }}>Apagar</Botao>
+                    <Botao variante="fantasma" onClick={() => { if (window.confirm(`Apagar “${a.nome}”?`)) void supabase.from("mkt_ig_automacoes").delete().eq("id", a.id).then(({ error }) => { if (error) notifyError(semTabela(error.message)); void carregar(); }); }}>Apagar</Botao>{/* 04/11/2026: erro do apagar era ignorado */}
                     <span className="flex-1" />
                     <span className="text-[12px]" style={{ color: "var(--ink3)" }}>{a.disparos} disparos{a.ultimo_disparo_em ? ` · último ${quando(a.ultimo_disparo_em)}` : ""}</span>
                   </div>

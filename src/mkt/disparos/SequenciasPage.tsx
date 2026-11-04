@@ -20,7 +20,8 @@ import {
 import { ModeloEVariaveis, PublicoMktForm, useListasETags, variaveisOk } from "./pecasMkt";
 import { descreverSequencia, formatarTelefone } from "./regras";
 
-const dataHora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+// 04/11/2026: em Brasília (a hora dos passos é de Brasília), não no fuso do navegador.
+const dataHora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
 
 function Editor({ cfg, inicial, onFechar, onSalvo }: { cfg: ConfigDisparo; inicial: Sequencia | null; onFechar: () => void; onSalvo: () => void }) {
   const aprovados = cfg.modelos.filter((m) => m.status === "aprovado" && m.setor === "marketing");
@@ -110,11 +111,16 @@ function Inscrever({ s, onFechar, onFeito }: { s: Sequencia; onFechar: () => voi
 
 function Inscritos({ s, onFechar }: { s: Sequencia; onFechar: () => void }) {
   const [lista, setLista] = useState<Inscricao[] | null>(null);
-  const carregar = useCallback(() => { listarInscricoes(s.id).then(setLista).catch((e) => notifyError(e instanceof Error ? e.message : "Falhou.")); }, [s.id]);
+  // 04/11/2026: se a leitura falhava, o modal ficava em "Carregando…" pra sempre.
+  const [erro, setErro] = useState<string | null>(null);
+  const carregar = useCallback(() => {
+    listarInscricoes(s.id).then((l) => { setLista(l); setErro(null); })
+      .catch((e) => { const m = e instanceof Error ? e.message : "Falhou."; setErro(m); notifyError(m); });
+  }, [s.id]);
   useEffect(() => { carregar(); }, [carregar]);
   return (
     <Modal aberto titulo={`Quem está em · ${s.nome}`} onFechar={onFechar} largura={820}>
-      {lista === null ? <p className="text-[13px]" style={{ color: "var(--subtle)" }}>Carregando…</p> : lista.length === 0 ? <p className="text-[13px]" style={{ color: "var(--subtle)" }}>Ninguém ainda.</p> : (
+      {lista === null && erro ? <Alert tone="danger">Não consegui ler quem está na sequência: {erro}</Alert> : lista === null ? <p className="text-[13px]" style={{ color: "var(--subtle)" }}>Carregando…</p> : lista.length === 0 ? <p className="text-[13px]" style={{ color: "var(--subtle)" }}>Ninguém ainda.</p> : (
         <div className="qs-table-wrap"><table className="qs-table">
           <thead><tr><th>Nome</th><th>WhatsApp</th><th>Situação</th><th>Próximo</th><th></th></tr></thead>
           <tbody>{lista.map((i) => (

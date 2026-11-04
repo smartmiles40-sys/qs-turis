@@ -71,7 +71,12 @@ export default function AutomacoesPage() {
       setFluxos(f); setGatilhos(g); setErro(null);
     } catch (e) { setErro(erroMsg(e, "Não consegui carregar as automações.")); setFluxos([]); setGatilhos([]); }
   }, []);
-  const recarregarEstado = useCallback(() => { carregarEstado().then(setEstado).catch(() => setEstado(null)); }, []);
+  // 04/11/2026: a falha era engolida e "Configurações" ficava em "Carregando…" pra sempre.
+  const [erroEstado, setErroEstado] = useState<string | null>(null);
+  const recarregarEstado = useCallback(() => {
+    carregarEstado().then((e) => { setEstado(e); setErroEstado(null); })
+      .catch((e: unknown) => { setEstado(null); setErroEstado(erroMsg(e, "Não consegui ler o número e o robô.")); });
+  }, []);
   useEffect(() => { void recarregar(); recarregarEstado(); }, [recarregar, recarregarEstado]);
   const voltar = useCallback(() => { setEditando(null); void recarregar(); }, [recarregar]);
 
@@ -100,6 +105,7 @@ export default function AutomacoesPage() {
     <div className="mkt-raiz flex flex-col gap-5">
       <style>{MKT_CSS}</style>
       {erro && <Aviso tom="erro">{erro}</Aviso>}
+      {!erro && erroEstado && <Aviso tom="erro">{erroEstado}</Aviso>}
 
       <BarraSituacao estado={estado} onConfig={() => setConfig(true)} onMudou={recarregarEstado} />
 
@@ -164,7 +170,7 @@ export default function AutomacoesPage() {
       {config && (
         <Modal aberto titulo="Configurações das automações" onFechar={() => setConfig(false)} largura={760}>
           <div className="space-y-5">
-            <AbaNumero estado={estado} onMudou={recarregarEstado} />
+            {!estado && erroEstado ? <Aviso tom="erro">{erroEstado}</Aviso> : <AbaNumero estado={estado} onMudou={recarregarEstado} />}
             <div>
               <h2 className="mb-2 text-[14px] font-bold" style={{ color: "var(--ink)" }}>Campos personalizados</h2>
               <AbaCampos />
@@ -608,13 +614,17 @@ function ModalGatilho({ form, setForm, fluxos, estado, onSalvo }: {
   const setC = (patch: GatilhoConfig) => setForm({ ...form, config: { ...form.config, ...patch } });
   const novo = form.fluxo_id === NOVO;
   const tiposPossiveis = form.id ? [form.tipo] : DO_ZERO;
+  // 04/11/2026: sem trava, dois cliques em "Criar e abrir o editor" criavam dois fluxos.
+  const [salvando, setSalvando] = useState(false);
 
   async function salvar() {
+    if (salvando) return;
     if (novo && form.nomeNovo.trim().length < 2) { notifyError("Dê um nome para a automação."); return; }
     if (!novo && !form.fluxo_id) { notifyError("Escolha o fluxo."); return; }
     if (form.tipo === "palavra_chave" && !(c.palavras ?? []).length) { notifyError("Escreva pelo menos uma palavra."); return; }
     if (form.tipo === "link_ref" && !/^[a-z0-9_-]{2,40}$/i.test(c.codigo ?? "")) { notifyError("Código: 2 a 40 letras, números, - ou _."); return; }
     if (form.tipo === "tag_adicionada" && !c.tag?.trim()) { notifyError("Escreva a tag."); return; }
+    setSalvando(true);
     try {
       let fluxoId = form.fluxo_id;
       if (novo) fluxoId = (await criarFluxo(form.nomeNovo.trim(), grafoInicial())).id;
@@ -624,12 +634,12 @@ function ModalGatilho({ form, setForm, fluxos, estado, onSalvo }: {
     } catch (e) {
       const m = e instanceof Error ? e.message : "";
       notifyError(/duplicate|unique/i.test(m) ? "Esse código/token já existe em outro gatilho." : erroMsg(e, "Não consegui salvar."));
-    }
+    } finally { setSalvando(false); }
   }
 
   return (
     <Modal aberto titulo={form.id ? `Gatilho: ${ROTULO_GATILHO[form.tipo]}` : novo ? "Automação do zero" : "Novo gatilho"} onFechar={() => setForm(null)} largura={620}
-      rodape={<><Botao onClick={() => setForm(null)}>Cancelar</Botao><Botao variante="primario" onClick={() => void salvar()}>{novo ? "Criar e abrir o editor" : "Salvar"}</Botao></>}>
+      rodape={<><Botao onClick={() => setForm(null)}>Cancelar</Botao><Botao variante="primario" disabled={salvando} onClick={() => void salvar()}>{salvando ? "Salvando…" : novo ? "Criar e abrir o editor" : "Salvar"}</Botao></>}>
       <div className="space-y-3">
         {!form.id && (
           <Campo rotulo="Quando começa">

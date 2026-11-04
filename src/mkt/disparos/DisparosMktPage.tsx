@@ -42,9 +42,11 @@ const STATUS: Record<StatusCampanha, { rotulo: string; tom: "neutro" | "rel" | "
   concluida: { rotulo: "concluída", tom: "neutro" },
 };
 
-/** "2026-11-02T09:00" (input datetime-local, horário de quem usa) → ISO. */
-const localParaIso = (v: string) => (v ? new Date(v).toISOString() : "");
-const dataHora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+/** "2026-11-02T09:00" (input datetime-local) → ISO.
+ *  04/11/2026: o rótulo diz "horário de Brasília", então lê como Brasília (UTC-3 fixo, igual a
+ *  src/mkt/grupos/datas.ts) e não no fuso do navegador. */
+const localParaIso = (v: string) => (!v ? "" : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v) ? new Date(`${v}:00-03:00`).toISOString() : new Date(v).toISOString());
+const dataHora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
 const erroDe = (e: unknown, padrao: string) => (e instanceof Error ? e.message : padrao);
 
 type Tipo = "uma_vez" | "semanal" | "sequencia";
@@ -88,7 +90,7 @@ function NovoDisparo({ cfg, onFechar, onCriado, onSequencia }: { cfg: ConfigDisp
   const okMensagem = nome.trim().length >= 2 && variaveisOk(modelo, mapa);
   const okQuando = tipo === "semanal"
     ? dias.length > 0 && /^\d{2}:\d{2}$/.test(horaSemanal)
-    : quando !== "agendar" || (!!hora && new Date(hora).getTime() > Date.now() + 60_000);
+    : quando !== "agendar" || (!!hora && Date.parse(localParaIso(hora)) > Date.now() + 60_000);
   const pode = [okPublico, okMensagem, okQuando, true][passo];
 
   function escolherTipo(t: Tipo) {
@@ -485,7 +487,7 @@ export default function DisparosMktPage() {
         <Modal aberto titulo={`Agendar · ${agendando.nome}`} onFechar={() => setAgendando(null)} largura={460}
           rodape={<>
             <Botao variante="fantasma" onClick={() => setAgendando(null)}>Fechar</Botao>
-            <Botao variante="primario" disabled={!hora || new Date(hora).getTime() < Date.now() + 60_000} onClick={async () => {
+            <Botao variante="primario" disabled={!hora || Date.parse(localParaIso(hora)) < Date.now() + 60_000} onClick={async () => {
               try { await agendar(agendando.id, localParaIso(hora)); notifySuccess("Agendada."); setAgendando(null); void carregar(); }
               catch (e) { notifyError(erroDe(e, "Falhou.")); }
             }}>Agendar</Botao>
