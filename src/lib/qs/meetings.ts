@@ -640,6 +640,21 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
     idBitrix === "__nao_verificado__" ? input.lead_bitrix_id ?? null : idBitrix;
 
   const status: MeetingStatus = input.status ?? "agendada";
+
+  // ── SEM E-MAIL NÃO AGENDA (Bruno, 04/11) ───────────────────────────────────
+  // A coluna "Reunião de Vendas" do Bitrix exige "E-mail do cliente" e o
+  // Dashboard conta o agendamento pelo card completo. Vale pra todas as portas
+  // (Agenda, Reuniões, Ganho na atividade). Lançamento retroativo (realizada /
+  // no-show) não passa por aqui: é registro do que já houve.
+  const emailDoCliente = String(input.lead_email ?? "").trim();
+  if (status === "agendada" && !emailDoCliente) {
+    return {
+      ok: false,
+      error:
+        "Preencha o e-mail do cliente para agendar. Sem ele o card não fica completo no Bitrix " +
+        "e o agendamento não conta no Dashboard.",
+    };
+  }
   const row = {
     lead_id: input.lead_id,
     lead_name: input.lead_name ?? null,

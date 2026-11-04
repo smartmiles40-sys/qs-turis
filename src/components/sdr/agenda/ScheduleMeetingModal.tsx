@@ -236,8 +236,18 @@ export default function ScheduleMeetingModal({
       return;
     }
 
+    // E-MAIL OBRIGATÓRIO (Bruno, 04/11). A coluna "Reunião de Vendas" do
+    // Bitrix exige "E-mail do cliente", e o Dashboard conta o agendamento pelo
+    // card completo. Lead que chega pelo WhatsApp não tem e-mail em lugar
+    // nenhum (nem no contato do Bitrix: 27 de 30 numa amostra de 04/11) —
+    // então quem garante o dado é a SDR, aqui, na hora de marcar.
     const emailLimpo = email.trim();
-    if (emailLimpo && !emailValido(emailLimpo)) {
+    if (!emailLimpo) {
+      setError("Preencha o e-mail do cliente. Sem ele o card não fica completo no Bitrix e o agendamento não conta no Dashboard.");
+      setSaving(false);
+      return;
+    }
+    if (!emailValido(emailLimpo)) {
       setError("O e-mail do lead não parece válido — o Google recusaria o convite.");
       setSaving(false);
       return;
@@ -479,15 +489,17 @@ export default function ScheduleMeetingModal({
                 labelClassName={labelClass}
               />
 
-              {/* E-mail do cliente: é pra ELE que o Google manda o convite com o
-                  link. Sem e-mail a reunião acontece igual, mas o cliente só
-                  recebe o link se o SDR mandar no WhatsApp. */}
+              {/* E-mail do cliente: obrigatório (04/11). Vai pro convite do
+                  Google, pro campo "E-mail do cliente" do card no Bitrix (que a
+                  coluna Reunião de Vendas exige) e fica salvo no lead. */}
               <div>
                 <label className={labelClass}>
-                  E-mail do lead {selectedLead?.email && <span className="text-green-600 font-normal">· veio do cadastro</span>}
+                  E-mail do cliente <span className="text-red-500">*</span>{" "}
+                  {selectedLead?.email && <span className="text-green-600 font-normal">· veio do cadastro</span>}
                 </label>
                 <input
                   type="email"
+                  required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="cliente@email.com"
@@ -496,8 +508,8 @@ export default function ScheduleMeetingModal({
                 />
                 <p className="text-[11px] text-gray-400 mt-1">
                   {email.trim()
-                    ? "O convite do Google com o link vai pra este e-mail (e fica salvo no lead)."
-                    : "Sem e-mail o convite não é enviado — a sala é criada e o link fica aqui pra você mandar no WhatsApp."}
+                    ? "O convite do Google vai pra este e-mail, ele entra no card do Bitrix e fica salvo no lead."
+                    : "Obrigatório: peça o e-mail ao cliente. Ele vai pro card do Bitrix e conta o agendamento no Dashboard."}
                 </p>
               </div>
 
