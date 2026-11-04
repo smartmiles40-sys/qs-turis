@@ -17,7 +17,8 @@
 // -----------------------------------------------------------------------------
 import { useSyncExternalStore } from "react";
 import { supabase } from "@/lib/supabase";
-import { hojeSP, trechosDasViagens, type Trecho, type Viagem } from "@/rel/lib/viagens";
+import { hojeSP, trechosDasViagens, type Trecho, type Viagem } from "@/rel/lib/viagens";
+import { lotes } from "@/lib/lotes";
 
 export type Motivo = "vip" | "influenciador" | "grupo_grande" | "outro";
 export const MOTIVOS: Record<Motivo, string> = {
@@ -187,8 +188,8 @@ export type ViagemP = Pick<Viagem, "id" | "titulo" | "destino" | "cliente_id" | 
 
 async function viagensPorIds(ids: string[]): Promise<ViagemP[]> {
   const out: ViagemP[] = [];
-  for (let i = 0; i < ids.length; i += 150) {
-    const { data, error } = await supabase.from("rel_viagens_v").select(COLS_VIAGEM).in("id", ids.slice(i, i + 150));
+  const rs = await Promise.all(lotes(ids, 150).map((l) => supabase.from("rel_viagens_v").select(COLS_VIAGEM).in("id", l)));
+  for (const { data, error } of rs) {
     if (error) throw error;
     out.push(...((data ?? []) as ViagemP[]));
   }

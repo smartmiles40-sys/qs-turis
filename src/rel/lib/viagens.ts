@@ -8,7 +8,8 @@
 // pelo supabase-js e abre por link assinado de poucos minutos.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import { TIPOS_FILTRO, condicaoDoTipo, type TipoFiltro } from "./tiposViagem";
+import { TIPOS_FILTRO, condicaoDoTipo, type TipoFiltro } from "./tiposViagem";
+import { lotes } from "@/lib/lotes";
 
 export type TipoViagem = "expedicao" | "pacote" | "aereo" | "hospedagem" | "outro";
 export type FaseViagem = "antes" | "em_viagem" | "concluida" | "cancelada" | "sem_data";
@@ -696,8 +697,8 @@ export type TrechoInput = Partial<Pick<Trecho,
 /** Trechos de várias viagens (quadro de partidas: o voo de ida de cada pacote). */
 export async function trechosDasViagens(ids: string[]): Promise<Trecho[]> {
   const out: Trecho[] = [];
-  for (let i = 0; i < ids.length; i += 150) {
-    const { data, error } = await supabase.from("rel_trechos_v").select("*").in("viagem_id", ids.slice(i, i + 150)).order("partida_em");
+  const rs = await Promise.all(lotes(ids, 150).map((l) => supabase.from("rel_trechos_v").select("*").in("viagem_id", l).order("partida_em")));
+  for (const { data, error } of rs) {
     if (error) throw error;
     out.push(...((data ?? []) as Trecho[]));
   }
@@ -785,8 +786,8 @@ export interface Revisao { id: string; revisado_em: string | null; revisado_por:
 /** A view rel_viagens_v é anterior à 0106; a revisão vem direto da tabela. */
 export async function revisoesDe(ids: string[]): Promise<Map<string, Revisao>> {
   const m = new Map<string, Revisao>();
-  for (let i = 0; i < ids.length; i += 200) {
-    const { data, error } = await supabase.from("rel_viagens").select("id, revisado_em, revisado_por, revisao_obs").in("id", ids.slice(i, i + 200));
+  const rs = await Promise.all(lotes(ids, 200).map((l) => supabase.from("rel_viagens").select("id, revisado_em, revisado_por, revisao_obs").in("id", l)));
+  for (const { data, error } of rs) {
     if (error) throw error;
     for (const r of (data ?? []) as Revisao[]) m.set(r.id, r);
   }

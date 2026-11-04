@@ -25,7 +25,8 @@
 
 import { supabase } from "../supabase";
 import { authHeaders } from "./waInbox";
-import { normalizePhoneBR } from "../whatsapp";
+import { normalizePhoneBR } from "../whatsapp";
+import { lotes } from "@/lib/lotes";
 
 /** Como a Meta chama: `no_permission` | `temporary` | `permanent`. */
 export type StatusPermissao = "no_permission" | "temporary" | "permanent";
@@ -107,11 +108,12 @@ export async function carregarPermissoes(
   let leu = true;
   // Lotes de 200: um `in.()` com a fila inteira estoura o tamanho da URL, e o
   // erro que sai disso ("414") não se parece nem um pouco com a causa.
-  for (let i = 0; i < chaves.length; i += 200) {
-    const { data, error } = await supabase
-      .from("qs_call_permissions")
-      .select("wa_id,status,expira_em,pedido_em,respondido_em,fonte,confirmado")
-      .in("wa_id", chaves.slice(i, i + 200));
+  // 04/11: os lotes saem juntos (eram 8 em fila na abertura da Fila do admin).
+  const rs = await Promise.all(lotes(chaves, 200).map((l) => supabase
+    .from("qs_call_permissions")
+    .select("wa_id,status,expira_em,pedido_em,respondido_em,fonte,confirmado")
+    .in("wa_id", l)));
+  for (const { data, error } of rs) {
     if (error) { console.warn("[permissao] não carreguei:", error.message); leu = false; continue; }
     for (const r of data ?? []) mapa.set(String(r.wa_id), daLinha(r as Record<string, unknown>));
   }

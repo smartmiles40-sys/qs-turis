@@ -14,7 +14,8 @@
 // quando a venda aconteceu depois da data da checagem.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import { hojeSP, marcarRevisada, type Viagem } from "./viagens";
+import { hojeSP, marcarRevisada, type Viagem } from "./viagens";
+import { lotes } from "@/lib/lotes";
 
 export type EtapaId = "passagem" | "revisao" | "d30" | "d7" | "d3" | "checkin" | "em_viagem" | "retorno";
 
@@ -134,8 +135,8 @@ export function estadoDaEsteira(v: Pick<Viagem, "data_venda" | "data_embarque" |
 
 export async function etapasDe(ids: string[]): Promise<Map<string, RegistroEtapa[]>> {
   const m = new Map<string, RegistroEtapa[]>();
-  for (let i = 0; i < ids.length; i += 200) {
-    const { data, error } = await supabase.from("rel_viagem_etapas").select("*").in("viagem_id", ids.slice(i, i + 200));
+  const rs = await Promise.all(lotes(ids, 200).map((l) => supabase.from("rel_viagem_etapas").select("*").in("viagem_id", l)));
+  for (const { data, error } of rs) {
     if (error) throw error;
     for (const r of (data ?? []) as RegistroEtapa[]) m.set(r.viagem_id, [...(m.get(r.viagem_id) ?? []), r]);
   }

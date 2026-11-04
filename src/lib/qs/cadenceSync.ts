@@ -38,7 +38,8 @@
 
 import { supabase } from "@/lib/supabase";
 import { loadWorkHours, scheduleWeekdays, planCadenceDates, clampToWorkWindow, nextWorkMoment } from "@/lib/workHours";
-import type { CadenceActivity, CadenceDay, PriorityLevel, TaskStatus } from "../../components/sdr/types";
+import type { CadenceActivity, CadenceDay, PriorityLevel, TaskStatus } from "../../components/sdr/types";
+import { lotes } from "@/lib/lotes";
 
 /** O que a sincronização fez — vira a mensagem que o gestor lê no fim. */
 export interface ResultadoSync {
@@ -159,12 +160,12 @@ export async function aplicarPlanoNosLeads(
     // ── 3. O que esses leads já têm (uma leitura só, em blocos) ────────────
     const existentes: { id: string; lead_id: string; channel_type: string; status: string; tags: string[] | null; scheduled_at: string | null }[] = [];
     const ids = leads.map((l) => l.id);
-    for (let i = 0; i < ids.length; i += 200) {
-      const { data, error } = await supabase
-        .from("qs_tasks")
-        .select("id, lead_id, channel_type, status, tags, scheduled_at")
-        .in("lead_id", ids.slice(i, i + 200))
-        .eq("is_extra", false);
+    const rsTarefas = await Promise.all(lotes(ids, 200).map((l) => supabase
+      .from("qs_tasks")
+      .select("id, lead_id, channel_type, status, tags, scheduled_at")
+      .in("lead_id", l)
+      .eq("is_extra", false)));
+    for (const { data, error } of rsTarefas) {
       if (error) throw error;
       existentes.push(...((data ?? []) as typeof existentes));
     }

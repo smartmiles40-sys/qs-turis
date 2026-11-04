@@ -30,7 +30,8 @@ import {
 import "../agenda/agenda.css";
 import MeetingDetailModal from "../agenda/MeetingDetailModal";
 import ScheduleMeetingModal from "../agenda/ScheduleMeetingModal";
-import type { Meeting } from "../types";
+import type { Meeting } from "../types";
+import { lotes } from "@/lib/lotes";
 
 interface Props {
   onOpenLead: (leadId: string) => void;
@@ -133,8 +134,8 @@ export default function MinhasReunioes({ onOpenLead, versao = 0 }: Props) {
     let vivo = true;
     (async () => {
       const conta = new Map<string, number>();
-      for (let i = 0; i < leadsNaTela.length; i += 80) {
-        const { data, error } = await supabase.from("qs_ligacao_gravacoes").select("lead_id").in("lead_id", leadsNaTela.slice(i, i + 80)).limit(1000);
+      const rs = await Promise.all(lotes(leadsNaTela, 80).map((l) => supabase.from("qs_ligacao_gravacoes").select("lead_id").in("lead_id", l).limit(1000)));
+      for (const { data, error } of rs) {
         if (error) return; // tabela ausente/sem permissão: só não mostra o selo
         for (const r of (data ?? []) as { lead_id: string }[]) conta.set(r.lead_id, (conta.get(r.lead_id) ?? 0) + 1);
       }

@@ -22,7 +22,8 @@ import { supabase } from "@/lib/supabase";
 import { TIPOS_TRECHO, trechosDasViagens, type Trecho } from "../lib/viagens";
 import { diaBR, diaLocal, horaLocal } from "../lib/problemas";
 import { Aviso, Botao, Etiqueta, Vazio } from "../ui";
-import { EditarTrecho } from "./TrechosViagem";
+import { EditarTrecho } from "./TrechosViagem";
+import { lotes } from "@/lib/lotes";
 
 type Motivo = "fora" | "ida" | "volta";
 interface Item { viagem_id: string; motivos: Motivo[]; ida_voo: string | null; volta_voo: string | null }
@@ -44,8 +45,8 @@ async function carregar(viagemId?: string) {
   const ids = itens.map((i) => i.viagem_id);
   if (!ids.length) return { itens, viagens: new Map<string, V>(), voos: new Map<string, Trecho[]>() };
   const viagens = new Map<string, V>();
-  for (let i = 0; i < ids.length; i += 150) {
-    const r = await supabase.from("rel_viagens_v").select("id,titulo,expedicao,cliente_nome,data_embarque,data_retorno").in("id", ids.slice(i, i + 150));
+  const rsV = await Promise.all(lotes(ids, 150).map((l) => supabase.from("rel_viagens_v").select("id,titulo,expedicao,cliente_nome,data_embarque,data_retorno").in("id", l)));
+  for (const r of rsV) {
     if (r.error) throw r.error;
     for (const v of (r.data ?? []) as V[]) viagens.set(v.id, v);
   }

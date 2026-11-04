@@ -11,7 +11,8 @@
 // pessoa escreve só as notas.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import { ORDEM_TIPOS_VENDA, TIPOS, propostaVazia, salvarProposta, type TipoItem } from "@/propostas/lib";
+import { ORDEM_TIPOS_VENDA, TIPOS, propostaVazia, salvarProposta, type TipoItem } from "@/propostas/lib";
+import { lotes } from "@/lib/lotes";
 
 export type Etapa = "oportunidade" | "contato" | "proposta" | "negociacao" | "ganho" | "perdido";
 
@@ -111,8 +112,8 @@ export async function oportunidadesDoCliente(clienteId: string): Promise<Oportun
 /** Clientes com oportunidade ABERTA (pra lista de recompra marcar quem já está no pipeline). */
 export async function abertasPorCliente(ids: string[]): Promise<Map<string, Oportunidade>> {
   const out = new Map<string, Oportunidade>();
-  for (let i = 0; i < ids.length; i += 200) {
-    const { data } = await supabase.from("rel_oportunidades").select(SELECT).in("cliente_id", ids.slice(i, i + 200)).in("etapa", ETAPAS_ABERTAS);
+  const rs = await Promise.all(lotes(ids, 200).map((l) => supabase.from("rel_oportunidades").select(SELECT).in("cliente_id", l).in("etapa", ETAPAS_ABERTAS)));
+  for (const { data } of rs) {
     for (const o of (data ?? []) as Oportunidade[]) if (!out.has(o.cliente_id)) out.set(o.cliente_id, o);
   }
   return out;

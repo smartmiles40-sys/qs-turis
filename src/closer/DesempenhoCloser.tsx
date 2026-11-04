@@ -14,7 +14,8 @@ import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/qs/queries";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao } from "@/rel/ui";
-import { brl, hojeISO } from "./lib";
+import { brl, hojeISO } from "./lib";
+import { lotes } from "@/lib/lotes";
 import {
   PRESETS, calcularDesempenho, datasDoPreset, intervaloIso,
   type AnexoLido, type Metricas, type NegocioLido, type PresetPeriodo, type ReuniaoLida,
@@ -30,8 +31,8 @@ interface Dados { reunioes: ReuniaoLida[]; negocios: NegocioLido[]; anexos: Anex
 /** 0295: quais desses cartões têm a proposta anexada na venda. Sem a migration, nenhum (sem erro vermelho). */
 async function lerAnexos(negocioIds: string[]): Promise<AnexoLido[]> {
   const fora: AnexoLido[] = [];
-  for (let i = 0; i < negocioIds.length; i += 150) {
-    const { data, error } = await supabase.from("qs_venda_propostas").select("negocio_id").in("negocio_id", negocioIds.slice(i, i + 150));
+  const rs = await Promise.all(lotes(negocioIds, 150).map((l) => supabase.from("qs_venda_propostas").select("negocio_id").in("negocio_id", l)));
+  for (const { data, error } of rs) {
     if (error) return fora;
     fora.push(...((data ?? []) as AnexoLido[]));
   }

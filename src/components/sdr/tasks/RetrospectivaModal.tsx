@@ -16,7 +16,8 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
-import { loadWorkHours, workdaysInRange, isOverdue } from "@/lib/workHours";
+import { loadWorkHours, workdaysInRange, isOverdue } from "@/lib/workHours";
+import { lotes } from "@/lib/lotes";
 
 const BLUE = "#0147FF";
 const GREEN = "#0E7C6A";
@@ -144,8 +145,8 @@ async function loadRetro(uid: string): Promise<RetroData> {
   void rLeads;
   const idsAbertos = [...new Set(rowsOf<{ lead_id: string }>(rOpen).map((t) => t.lead_id).filter(Boolean))];
   const leadRows: { id: string; status: string | null }[] = [];
-  for (let i = 0; i < idsAbertos.length; i += 200) {
-    const { data } = await supabase.from("qs_leads").select("id, status").in("id", idsAbertos.slice(i, i + 200));
+  const rsLeads = await Promise.all(lotes(idsAbertos, 200).map((l) => supabase.from("qs_leads").select("id, status").in("id", l)));
+  for (const { data } of rsLeads) {
     leadRows.push(...((data ?? []) as { id: string; status: string | null }[]));
   }
   const closedLeadIds = new Set(

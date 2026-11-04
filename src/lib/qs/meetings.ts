@@ -233,7 +233,7 @@ export async function ensureOutcomeTask(input: OutcomeTaskInput): Promise<void> 
     // fila do closer entupida. A garantia de verdade é o índice único da 0044.
     const { data: existing, error: erroExistente } = await supabase
       .from("qs_tasks")
-      .select("id")
+      .select("id, scheduled_at, status, notes, owner_id")
       .contains("tags", [tag, "desfecho"])
       .in("status", ["pendente", "atrasada"])
       .limit(1);
@@ -244,6 +244,12 @@ export async function ensureOutcomeTask(input: OutcomeTaskInput): Promise<void> 
     }
 
     if (existing && existing.length > 0) {
+      // 04/11: igual ao que já está gravado → não grava. A varredura roda a cada
+      // abertura da Agenda e regravava as MESMAS tarefas; cada gravação acordava
+      // o realtime e fazia a Fila de todo o time recarregar.
+      const atual = existing[0] as { id: string; scheduled_at: string | null; status: string; notes: string | null; owner_id: string | null };
+      const mesmaHora = atual.scheduled_at && new Date(atual.scheduled_at).getTime() === when.getTime();
+      if (mesmaHora && atual.status === "pendente" && atual.notes === notes && atual.owner_id === dono) return;
       await supabase
         .from("qs_tasks")
         .update({ scheduled_at: when.toISOString(), status: "pendente", notes, owner_id: dono })
@@ -286,7 +292,9 @@ export async function sweepOutcomeTasks(): Promise<void> {
       .lt("ends_at", new Date().toISOString())
       .limit(50);
 
-    for (const m of vencidas ?? []) {
+    // 04/11: as reuniões são independentes — tratadas ao mesmo tempo (eram uma
+    // por vez: 6 reuniões × 3 idas ao banco ≈ 5 s de rede presa).
+    await Promise.all((vencidas ?? []).map(async (m) => {
       await ensureOutcomeTask({
         meetingId: m.id,
         leadId: m.lead_id,
@@ -302,7 +310,7 @@ export async function sweepOutcomeTasks(): Promise<void> {
       // de reuniões passadas). O que importa agora é o DESFECHO, garantido
       // logo acima. Idempotente: já encerrada, o update não acha linha.
       await closeConfirmTask(m.id, "Reunião já passou — confirmação perdeu o objeto");
-    }
+    }));
   } catch (e) {
     console.warn("[meetings] varredura de desfechos pendentes falhou:", e);
   }

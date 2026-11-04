@@ -15,7 +15,8 @@
 // telas continuam funcionando com o que já existia (0184).
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import { hojeSP, type Servico } from "./viagens";
+import { hojeSP, type Servico } from "./viagens";
+import { lotes } from "@/lib/lotes";
 
 export const FALTA_0208 = "Falta aplicar a atualização do banco (migration 0208). Avise o Bruno.";
 
@@ -78,9 +79,9 @@ export interface Sugestao { servico: Servico; regra: string; confianca: "alta" |
 
 export async function sugestoesDeServico(ids: string[]): Promise<Map<string, Sugestao>> {
   const m = new Map<string, Sugestao>();
-  for (let i = 0; i < ids.length; i += 200) {
-    const { data, error } = await supabase.from("rel_faxina_classificar_v").select("id, sugestao, regra, confianca")
-      .in("id", ids.slice(i, i + 200)).not("sugestao", "is", null);
+  const rs = await Promise.all(lotes(ids, 200).map((l) => supabase.from("rel_faxina_classificar_v").select("id, sugestao, regra, confianca")
+    .in("id", l).not("sugestao", "is", null)));
+  for (const { data, error } of rs) {
     if (error) { if (faltaMigration(error)) return m; throw error; }
     for (const r of (data ?? []) as { id: string; sugestao: Servico; regra: string; confianca: "alta" | "media" }[]) {
       m.set(r.id, { servico: r.sugestao, regra: r.regra, confianca: r.confianca });

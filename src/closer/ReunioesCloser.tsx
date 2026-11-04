@@ -21,7 +21,8 @@ import { Aviso, Botao, Etiqueta, Vazio } from "@/rel/ui";
 import ScheduleMeetingModal from "@/components/sdr/agenda/ScheduleMeetingModal";
 import type { Lead } from "@/components/sdr/types";
 import { ABAS_AGENDA_CLOSER, type AbaAgenda } from "@/lib/qs/agendaStatus";
-import { NOME_ETAPA, dataBr, nomeDoLead, type Etapa, type Negocio } from "./lib";
+import { NOME_ETAPA, dataBr, nomeDoLead, type Etapa, type Negocio } from "./lib";
+import { lotes } from "@/lib/lotes";
 
 const MinhaAgendaPage = lazyPagina(() => import("@/components/sdr/agenda/MinhaAgendaPage"));
 const MeetingsPage = lazyPagina(() => import("@/components/sdr/meetings/MeetingsPage"));
@@ -74,10 +75,11 @@ function FaltaAgendar({ onOpenLead, onContou }: { onOpenLead: (id: string) => vo
     // Quem já tem reunião marcada daqui pra frente não entra.
     const leads = cartoes.map((n) => n.lead_id);
     const comReuniao = new Set<string>();
-    for (let i = 0; i < leads.length; i += 200) {
-      const { data: ms } = await supabase.from("qs_meetings").select("lead_id")
-        .in("lead_id", leads.slice(i, i + 200)).in("status", ["agendada", "confirmada"])
-        .gte("scheduled_at", new Date().toISOString());
+    const agora = new Date().toISOString();
+    const rs = await Promise.all(lotes(leads, 200).map((l) => supabase.from("qs_meetings").select("lead_id")
+      .in("lead_id", l).in("status", ["agendada", "confirmada"])
+      .gte("scheduled_at", agora)));
+    for (const { data: ms } of rs) {
       for (const m of ms ?? []) comReuniao.add((m as { lead_id: string }).lead_id);
     }
     const faltam = cartoes.filter((n) => !comReuniao.has(n.lead_id));

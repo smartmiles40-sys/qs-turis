@@ -15,7 +15,8 @@
 // conferem quem está pedindo e gravam o histórico em rel_viagem_eventos.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import type { Servico, Viagem } from "./viagens";
+import type { Servico, Viagem } from "./viagens";
+import { lotes } from "@/lib/lotes";
 
 function erroLegivel(e: { message?: string } | null): Error {
   const m = e?.message || "Falhou.";
@@ -73,8 +74,8 @@ export interface Arquivada { id: string; arquivado_em: string | null; arquivado_
 /** Os dados do arquivamento (a view rel_viagens_v não tem essas colunas). */
 export async function arquivamentosDe(ids: string[]): Promise<Map<string, Arquivada>> {
   const m = new Map<string, Arquivada>();
-  for (let i = 0; i < ids.length; i += 200) {
-    const { data, error } = await supabase.from("rel_viagens").select("id, arquivado_em, arquivado_motivo, arquivado_lote, arquivado_por").in("id", ids.slice(i, i + 200));
+  const rs = await Promise.all(lotes(ids, 200).map((l) => supabase.from("rel_viagens").select("id, arquivado_em, arquivado_motivo, arquivado_lote, arquivado_por").in("id", l)));
+  for (const { data, error } of rs) {
     if (error) throw error;
     for (const r of (data ?? []) as Arquivada[]) m.set(r.id, r);
   }
@@ -124,8 +125,8 @@ export function preferenciasVazias(p: Preferencias | null | undefined, necessida
 /** As preferências de várias viagens (pra marcar "faltam preferências" nas listas). */
 export async function preferenciasDe(ids: string[]): Promise<Map<string, { preferencias: Preferencias; necessidades: string | null }>> {
   const m = new Map<string, { preferencias: Preferencias; necessidades: string | null }>();
-  for (let i = 0; i < ids.length; i += 200) {
-    const { data, error } = await supabase.from("rel_viagens").select("id, preferencias, necessidades").in("id", ids.slice(i, i + 200));
+  const rs = await Promise.all(lotes(ids, 200).map((l) => supabase.from("rel_viagens").select("id, preferencias, necessidades").in("id", l)));
+  for (const { data, error } of rs) {
     if (error) throw error;
     for (const r of (data ?? []) as { id: string; preferencias: Preferencias | null; necessidades: string | null }[]) m.set(r.id, { preferencias: r.preferencias ?? {}, necessidades: r.necessidades });
   }

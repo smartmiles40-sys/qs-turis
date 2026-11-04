@@ -7,7 +7,8 @@
 // (/api/rel-grupos), que só aceita endereço de grupo já conhecido.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import { limiteArquivoMB, subirParaEnvio } from "./whatsapp";
+import { limiteArquivoMB, subirParaEnvio } from "./whatsapp";
+import { lotes } from "@/lib/lotes";
 
 export interface Grupo {
   jid: string;
@@ -207,8 +208,8 @@ export async function participantesDoGrupo(jid: string): Promise<Participante[]>
   if (!lista.length) return [];
   const tels = lista.map((x) => x.telefone);
   const nomes = new Map<string, string>();
-  for (let i = 0; i < tels.length; i += 200) {
-    const { data: fichas } = await supabase.from("rel_clientes").select("nome, telefone").in("telefone", tels.slice(i, i + 200)).is("mesclado_em_id", null);
+  const rsFichas = await Promise.all(lotes(tels, 200).map((l) => supabase.from("rel_clientes").select("nome, telefone").in("telefone", l).is("mesclado_em_id", null)));
+  for (const { data: fichas } of rsFichas) {
     for (const f of (fichas ?? []) as { nome: string; telefone: string }[]) nomes.set(f.telefone, f.nome);
   }
   // sem ficha: o nome salvo na conversa do Relacionamento e, por último, o nome que a pessoa usa no WhatsApp (em qualquer grupo)
