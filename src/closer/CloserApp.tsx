@@ -52,6 +52,12 @@ const CLOSER_CSS = `${REL_CSS}
 :root { --rel: #6D28D9; --rel-hover: #5B21B6; --rel-ink: #5B21B6; --rel-soft: #F1EBFD; --closer: #6D28D9; }
 html.dark { --rel-ink: #C4B5FD; --rel-soft: rgba(167, 139, 250, .16); }
 .rel-input:focus, .rel-input:focus-visible { box-shadow: 0 0 0 3px rgba(109, 40, 217, .25); }
+/* Celular (04/11): o botão do WhatsApp e a bolinha de avisos ficam por cima do
+   fim da tela ("Anotar", "Salvar" do cartão). Folga no fim da rolagem; fora o
+   WhatsApp, que cuida da própria altura. Só abaixo de 768 px. */
+@media (max-width: 767px) {
+  .qs-area-conteudo:not(:has(.qs-closer-wa)) { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+}
 `;
 
 const PREFIXO = "closer";
@@ -178,7 +184,7 @@ export default function CloserApp() {
         )}
         {tela === "whatsapp" && (
           // O WhatsApp cuida da própria rolagem: ocupa a altura da tela inteira.
-          <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8 h-[calc(100dvh-56px)] lg:h-dvh">
+          <div className="qs-closer-wa -mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8 h-[calc(100dvh-56px)] lg:h-dvh">
             <Cerca nome="o WhatsApp"><WaPage onOpenLead={abrirLead} /></Cerca>
           </div>
         )}

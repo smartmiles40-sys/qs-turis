@@ -95,8 +95,32 @@ const notes = [
   { id: "n1", lead_id: "l1", author_id: "u1", body: "Assistiu a live do Japão inteira. Quer levar a filha de 9 anos.", tags: [], created_at: iso(-300) },
 ];
 
+// Pipeline do closer: um cartão por cliente, já com o lead "embutido" (o select usa join).
+const negocio = (id: string, leadId: string, etapa: string, valor: number | null, extra: Record<string, unknown> = {}) => {
+  const l = leads.find((x) => x.id === leadId)!;
+  return {
+    id, lead_id: leadId, closer_id: "u3", meeting_id: null, etapa, etapa_em: iso(-120), valor_previsto: valor,
+    proxima_acao: "Mandar a proposta revisada", proxima_acao_em: iso(60 * 24), motivo_perda: null,
+    status_contrato: null, contrato_enviado_em: null, contrato_assinado_em: null, status_pagamento: null,
+    pagamento_enviado_em: null, pago_em: null, pagamento_link: null, pagamento_link_em: null, pagamento_link_origem: null,
+    pagamento_obs: null, pagamento_solicitacao_id: null, proposta_id: null, ficha: null, viagem_id: null, consolidada_em: null,
+    bitrix_status: "ok", bitrix_erro: null, bitrix_enviado_em: iso(-100), bitrix_etapa: etapa, arquivado_em: null,
+    arquivado_motivo: null, criado_em: iso(-60 * 24 * 3), atualizado_em: iso(-60),
+    lead: { id: l.id, full_name: l.full_name, first_name: l.first_name, last_name: l.last_name, phone: l.phone, email: l.email, bitrix_id: "51234" },
+    closer: { name: "Talita Carvalho" }, ...extra,
+  };
+};
+const negocios = [
+  negocio("n1", "l5", "aguardando_reuniao", 34000),
+  negocio("n2", "l3", "em_cotacao", 98000),
+  negocio("n3", "l1", "em_negociacao", 52000, { status_contrato: "enviado" }),
+  negocio("n4", "l2", "em_negociacao", null, { bitrix_status: "erro" }),
+  negocio("n5", "l4", "no_show", 21000),
+];
+
 const BANCO: Record<string, Record<string, unknown>[]> = {
   qs_users: users, qs_leads: leads, qs_tasks: tasks, qs_meetings: meetings, qs_cadences: cadences, qs_notes: notes,
+  qs_closer_negocios: negocios,
 };
 
 // ── PostgREST de mentira (o mínimo de filtro pra ficha achar o lead certo) ───

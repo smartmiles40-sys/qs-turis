@@ -148,17 +148,18 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
         {config?.bitrix !== false && <Botao onClick={() => setTrazendo({ dealId: "", ocupado: false, erro: null })}>Trazer do Bitrix</Botao>}
       </div>
 
+      {/* Celular (04/11): busca na largura toda e os filtros lado a lado (eram 3 linhas). */}
       <div className="flex flex-wrap gap-2">
-        <input className="rel-input" style={{ maxWidth: 240 }} placeholder="Buscar cliente ou telefone" value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar cliente" />
-        <select className="rel-input" style={{ maxWidth: 180 }} value={periodo} onChange={(e) => setPeriodo(e.target.value)} aria-label="Período">
+        <input className="rel-input max-md:!max-w-none max-md:basis-full" style={{ maxWidth: 240 }} placeholder="Buscar cliente ou telefone" value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar cliente" />
+        <select className="rel-input max-md:!max-w-none max-md:flex-1 max-md:min-w-0" style={{ maxWidth: 180 }} value={periodo} onChange={(e) => setPeriodo(e.target.value)} aria-label="Período">
           {PERIODOS.map((p) => <option key={p.id} value={p.id}>{p.rotulo}</option>)}
         </select>
-        <select className="rel-input" style={{ maxWidth: 200 }} value={etapaFiltro} onChange={(e) => setEtapaFiltro(e.target.value as Etapa | "")} aria-label="Etapa">
+        <select className="rel-input max-md:!max-w-none max-md:flex-1 max-md:min-w-0" style={{ maxWidth: 200 }} value={etapaFiltro} onChange={(e) => setEtapaFiltro(e.target.value as Etapa | "")} aria-label="Etapa">
           <option value="">Todas as etapas</option>
           {ETAPAS.map((e) => <option key={e.id} value={e.id}>{e.rotulo}</option>)}
         </select>
         {gestao && (
-          <select className="rel-input" style={{ maxWidth: 200 }} value={closerFiltro} onChange={(e) => setCloserFiltro(e.target.value)} aria-label="Closer">
+          <select className="rel-input max-md:!max-w-none max-md:flex-1 max-md:min-w-0" style={{ maxWidth: 200 }} value={closerFiltro} onChange={(e) => setCloserFiltro(e.target.value)} aria-label="Closer">
             <option value="">Todos os closers</option>
             {closers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>

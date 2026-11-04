@@ -154,7 +154,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
     <div className="max-w-[1100px] space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <Botao variante="fantasma" onClick={onVoltar}>← Pipeline</Botao>
-        <h1 className="text-[22px] font-bold flex-1 min-w-0 truncate" style={{ color: "var(--ink)" }}>{nome}</h1>
+        {/* Celular (04/11): o nome cortava em "Mariana Albu…" — vai pra linha própria, inteiro. */}
+        <h1 className="text-[22px] font-bold flex-1 min-w-0 truncate max-md:order-last max-md:basis-full max-md:whitespace-normal" style={{ color: "var(--ink)" }}>{nome}</h1>
         {selo && <Etiqueta tom={selo.tom}>{selo.t}</Etiqueta>}
         <Etiqueta tom={encerrado ? "erro" : "neutro"}>{NOME_ETAPA[n.etapa]}</Etiqueta>
       </div>
