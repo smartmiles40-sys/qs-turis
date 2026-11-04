@@ -200,6 +200,35 @@ export function montarReuniao(body, { mapa = {}, opcoes = {} } = {}, { etapaReun
   };
 }
 
+/**
+ * A reunião leva o card da PRÉ-VENDAS pro funil do closer?
+ *
+ * 04/11: o corte do n8n (03/11, no ar às 19h24) tirou isso sem ninguém ver. O
+ * webhook `qs-reuniao` que rodava no n8n movia o card pra Comercial 1 ›
+ * "Reunião de Vendas" (a cópia do workflow no repositório estava com
+ * STAGE_REUNIAO vazio, diferente da que rodava). Medido no espelho do
+ * Dashboard: até 19h12 de 03/11 todo agendamento ia pro Comercial 1; depois
+ * das 19h24, 53599, 53825, 52959 e 54295 ficaram em "Novo Lead" com reunião
+ * marcada.
+ *
+ * Só sai quem AINDA está no funil 25. O mesmo evento é mandado de novo no
+ * reagendamento, e aí o card costuma já estar em "Em Negociação": movê-lo
+ * seria puxar pra trás. Destino é o MESMO do autoagendamento
+ * (qs_settings.bitrix_reuniao), pra os dois caminhos não divergirem.
+ */
+export const FUNIL_PRE_VENDAS = '25';
+
+export function deveLevarParaReuniao(deal, destino) {
+  if (!deal) return { mover: false, motivo: 'bitrix-inacessivel' };
+  if (!destino || destino.categoria == null || !destino.etapa) return { mover: false, motivo: 'sem-destino-configurado' };
+  const categoria = String(deal.CATEGORY_ID ?? '');
+  if (categoria !== FUNIL_PRE_VENDAS) return { mover: false, motivo: `fora-da-pre-vendas (funil ${categoria || '?'})` };
+  if (String(deal.CATEGORY_ID) === String(destino.categoria) && String(deal.STAGE_ID) === String(destino.etapa)) {
+    return { mover: false, motivo: 'ja-esta-la' };
+  }
+  return { mover: true, motivo: null };
+}
+
 /** O que vai em qs_meetings depois que o card foi gravado (igual ao n8n). */
 export function marcaDeSincronizada(pulados, agoraIso = new Date().toISOString()) {
   return {

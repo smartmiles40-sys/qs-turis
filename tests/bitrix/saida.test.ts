@@ -143,3 +143,24 @@ test("catálogo: rótulo do deal.fields, opções das listas, sem tocar no alias
   assert.equal(campos.some((c: Record<string, unknown>) => "alias" in c), false);
   assert.deepEqual(opcoes, [{ field_name: "UF_A", option_id: 7, value: "Sim", sort: 10, active: true, synced_at: "RUN" }]);
 });
+
+// 04/11: a reunião voltou a tirar o card da Pré-Vendas (o n8n fazia até 03/11).
+const DESTINO = { categoria: 0, etapa: "EXECUTING" };
+
+test("reunião: card na Pré-Vendas (funil 25) vai pra coluna de reunião", () => {
+  assert.deepEqual(R.deveLevarParaReuniao({ CATEGORY_ID: "25", STAGE_ID: "C25:PREPAYMENT_INVOIC" }, DESTINO), { mover: true, motivo: null });
+  assert.equal(R.deveLevarParaReuniao({ CATEGORY_ID: 25, STAGE_ID: "C25:UC_271QUB" }, DESTINO).mover, true);
+});
+
+test("reunião: reagendamento de card que já está no Comercial 1 NÃO puxa pra trás", () => {
+  const d = R.deveLevarParaReuniao({ CATEGORY_ID: "0", STAGE_ID: "PREPARATION" }, DESTINO);
+  assert.equal(d.mover, false);
+  assert.match(d.motivo, /fora-da-pre-vendas/);
+  assert.equal(R.deveLevarParaReuniao({ CATEGORY_ID: "0", STAGE_ID: "EXECUTING" }, DESTINO).mover, false);
+});
+
+test("reunião: sem destino configurado ou sem negócio legível, não mexe", () => {
+  assert.equal(R.deveLevarParaReuniao({ CATEGORY_ID: "25" }, null).motivo, "sem-destino-configurado");
+  assert.equal(R.deveLevarParaReuniao({ CATEGORY_ID: "25" }, { categoria: 0 }).motivo, "sem-destino-configurado");
+  assert.equal(R.deveLevarParaReuniao(null, DESTINO).motivo, "bitrix-inacessivel");
+});

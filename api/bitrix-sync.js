@@ -23,8 +23,9 @@
 // -----------------------------------------------------------------------------
 
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
-import { bx, comentarNoNegocio, bitrixConfigurado } from './_bitrixLead.js';
+import { bx, comentarNoNegocio, bitrixConfigurado, moverNegocioParaReuniao } from './_bitrixLead.js';
 import { gravarGanhoNoBitrix, enviarReuniaoDireto } from './_bitrixSaida.js';
+import { deveLevarParaReuniao } from './_bitrixSaidaRegras.js';
 
 // 'primeiro-contato' (2026-07-28): o SDR conclui a 1ª atividade no QS e o negócio
 // anda sozinho de "Novo lead" para "Follow-up 1" no Bitrix. Quem decide se move é
@@ -617,7 +618,31 @@ export default async function handler(req, res) {
   // reuniao
   const r = await enviarReuniaoDireto({ ...payload, lead_id: leadId }, { timeoutMs: 7_000 });
   if (!r.ok) return res.status(r.status || 502).json({ success: false, error: r.erro || 'bitrix-recusou' });
-  return res.status(200).json({ success: true, code: 'gravado', nao_preenchidos: r.resposta?.nao_preenchidos || [] });
+  // Campos gravados → o card sai da Pré-Vendas (o que o n8n fazia até 03/11).
+  // Best-effort: os campos já estão no card; falhar aqui não vira erro da reunião.
+  const mv = await levarParaReuniao(serverBitrixId);
+  return res.status(200).json({
+    success: true, code: 'gravado',
+    nao_preenchidos: r.resposta?.nao_preenchidos || [],
+    funil: mv.movido ? `movido para ${mv.etapa} (funil ${mv.categoria})` : `não mudou (${mv.motivo})`,
+  });
+}
+
+/** Pré-Vendas → coluna de reunião configurada. Ver deveLevarParaReuniao. */
+async function levarParaReuniao(bitrixId) {
+  try {
+    const rows = await rest('qs_settings?select=value&key=eq.bitrix_reuniao&limit=1');
+    const destino = rows?.[0]?.value ?? null;
+    const decisao = deveLevarParaReuniao(await lerNegocio(bitrixId), destino);
+    if (!decisao.mover) return { movido: false, motivo: decisao.motivo };
+    const mv = await moverNegocioParaReuniao(bitrixId, destino);
+    if (mv.movido) console.log(`[bitrix-sync] reunião: negócio ${bitrixId} → ${mv.etapa} (funil ${mv.categoria})`);
+    else console.warn(`[bitrix-sync] reunião: negócio ${bitrixId} não mudou de funil:`, mv.motivo);
+    return mv;
+  } catch (err) {
+    console.warn('[bitrix-sync] reunião: não deu pra mover o negócio', bitrixId, ':', err?.message);
+    return { movido: false, motivo: err?.message || 'falhou' };
+  }
 }
 
 function safeJson(s) {
