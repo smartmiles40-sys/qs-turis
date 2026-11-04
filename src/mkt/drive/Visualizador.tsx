@@ -113,6 +113,8 @@ export function Visualizador({ item: inicial, config, onFechar, onMudou, onIrPar
     setItem(inicial);
     setAviso(null);
     setConfirmarLixeira(false);
+    // 04/11/2026: sem isto a "Pasta" do arquivo anterior aparecia (e o clique ia pra ela).
+    setCaminho([]);
     if (!inicial) return;
     setNome(inicial.nome); setTags(inicial.tags); setExpedicaoId(inicial.expedicaoId || ""); setObservacao(inicial.observacao || "");
     let vivo = true;

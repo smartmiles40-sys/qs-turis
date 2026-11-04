@@ -33,7 +33,8 @@ export function DrivePicker({ aberto, onFechar, onEscolher, multiplo = false }: 
   useEffect(() => {
     if (!aberto) return;
     setSelecao(new Map());
-    if (!config) api.lerConfig().then(setConfig).catch((e) => setErro((e as Error).message));
+    // 04/11/2026: reabrir depois de um erro tentava de novo mas o erro velho ficava na tela.
+    if (!config) { setErro(null); api.lerConfig().then(setConfig).catch((e) => setErro((e as Error).message)); }
   }, [aberto, config]);
 
   const ids = useMemo(() => new Set(selecao.keys()), [selecao]);

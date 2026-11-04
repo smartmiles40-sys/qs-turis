@@ -129,16 +129,21 @@ export function Navegador({ modo, config, selecionados, onAlternar, onAbrir, ver
     }
   }, [pastaId, buscando]);
 
+  // 04/11/2026: o erro ia pra trás do modal (ninguém via) e 2 cliques criavam 2 pastas.
+  const [criandoPasta, setCriandoPasta] = useState(false);
+  const [erroPasta, setErroPasta] = useState<string | null>(null);
+  const fecharNovaPasta = () => { setNovaPasta(null); setErroPasta(null); };
   const criarPasta = async () => {
     const nome = (novaPasta || "").trim();
-    if (!nome) return;
+    if (!nome || criandoPasta) return;
+    setCriandoPasta(true); setErroPasta(null);
     try {
       const { item } = await api.criarPasta(nome, pastaId);
       setNovaPasta(null);
       setItens((v) => [item, ...v]);
     } catch (e) {
-      setErro((e as Error).message);
-    }
+      setErroPasta((e as Error).message);
+    } finally { setCriandoPasta(false); }
   };
 
   const clicar = (i: ItemDrive) => {
@@ -407,8 +412,9 @@ export function Navegador({ modo, config, selecionados, onAlternar, onAbrir, ver
         <div className="flex justify-center"><Botao onClick={() => void carregar(true)}>Carregar mais</Botao></div>
       )}
 
-      <Modal aberto={novaPasta !== null} titulo="Nova pasta" onFechar={() => setNovaPasta(null)} largura={420}
-        rodape={<><Botao onClick={() => setNovaPasta(null)}>Cancelar</Botao><Botao variante="primario" onClick={() => void criarPasta()} disabled={!novaPasta?.trim()}>Criar</Botao></>}>
+      <Modal aberto={novaPasta !== null} titulo="Nova pasta" onFechar={fecharNovaPasta} largura={420}
+        rodape={<><Botao onClick={fecharNovaPasta}>Cancelar</Botao><Botao variante="primario" onClick={() => void criarPasta()} disabled={!novaPasta?.trim() || criandoPasta}>{criandoPasta ? "Criando…" : "Criar"}</Botao></>}>
+        {erroPasta && <p className="text-[12.5px] mb-2" role="alert" style={{ color: "var(--err-ink)" }}>{erroPasta}</p>}
         <label className="block text-[12px] font-semibold" style={{ color: "var(--ink2)" }}>
           Nome da pasta (dentro de “{caminho[caminho.length - 1]?.nome || "Marketing"}”)
           <input autoFocus value={novaPasta ?? ""} onChange={(e) => setNovaPasta(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void criarPasta(); }}
