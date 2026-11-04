@@ -501,6 +501,11 @@ html.qs-app-narrow .qs-navbtn { display: flex !important; }
   .wa-composer-linha > .wa-send-btn { height: 40px; width: 40px; min-width: 40px; }
   .wa-composer { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
   html.qs-teclado .wa-composer { padding-bottom: 10px; }
+
+  /* A bolinha de avisos (z 80) ficava POR CIMA dos modais (z 50/60) e da
+     conversa em tela cheia: no celular ela caía bem em cima do "Confirmar
+     ganho" e do campo de escrever. Lá ela passa pra baixo deles. */
+  button.qs-bolinha-avisos { z-index: 44; }
 }
 
 /* Respeita quem pediu menos movimento (WCAG 2.3.3). */
