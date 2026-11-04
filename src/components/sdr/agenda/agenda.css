@@ -5,9 +5,72 @@
    não bate com o tokens.css do resto do QS. Por isso as cores moram aqui, em
    variáveis com escopo `.qs-agenda` — definidas UMA vez. Trocar a paleta da
    agenda = mexer só neste bloco; nenhuma outra tela lê estas variáveis.
+
+   MODO CLARO (04/11): o desenho só tinha a versão escura, e a agenda ficava
+   escura mesmo com o QS no claro. Agora o padrão é a paleta clara abaixo (o
+   mesmo tom sóbrio, invertido) e a do desenho vale com `html.dark`, a mesma
+   classe que o ThemeContext põe no <html> pro resto do app.
    ----------------------------------------------------------------------------- */
 
 .qs-agenda {
+  /* superfícies */
+  --ag-bg: #F6F7F9;
+  --ag-surface: #FFFFFF;
+  --ag-surface-2: #F1F3F6;
+  --ag-surface-3: #E9ECF1;
+  --ag-surface-out: #F3F4F6;
+  --ag-border: #E2E6EC;
+  --ag-border-2: #D5DAE2;
+  --ag-border-3: #C3CAD5;
+  --ag-line: #EDEFF3;
+
+  /* texto */
+  --ag-text: #151922;
+  --ag-text-2: #3A4250;
+  --ag-count: #3F4757;
+  --ag-muted-2: #4E5768;
+  --ag-muted: #5F6878;
+  --ag-subtle: #747D8E;
+  --ag-faint: #B4BAC5;
+
+  /* ação */
+  --ag-primary: #151922;
+  --ag-on-primary: #FFFFFF;
+  --ag-warn: #7A5D10;
+  --ag-now: #C24545;
+  --ag-on-now: #FFFFFF;
+  --ag-sal-bg: #E3EFE7;
+  --ag-sal-fg: #2F6B45;
+  --ag-focus: #5F6878;
+
+  /* especialistas */
+  --ag-pessoa-1: #6B7385;
+  --ag-pessoa-2: #5A7F69;
+  --ag-pessoa-3: #8A6F5C;
+  --ag-pessoa-4: #8C7A4B;
+  --ag-pessoa-5: #7A7299;
+  --ag-pessoa-6: #5E7F94;
+  --ag-pessoa-sem: #9CA3AF;
+
+  /* status (fundo, borda, texto, bolinha) */
+  --ag-agendada-bg: #FFFFFF;    --ag-agendada-bd: #C3CAD5;    --ag-agendada-fg: #3A4250;    --ag-agendada-dot: #6B7385;
+  --ag-confirmada-bg: #F7F8FA;  --ag-confirmada-bd: #AEB6C3;  --ag-confirmada-fg: #262C37;  --ag-confirmada-dot: #4E5768;
+  --ag-acontecendo-bg: #EEF0F4; --ag-acontecendo-bd: #5F6878; --ag-acontecendo-fg: #151922; --ag-acontecendo-dot: #151922;
+  --ag-realizada-bg: #F1F7F3;   --ag-realizada-bd: #CFE2D5;   --ag-realizada-fg: #2F6B45;   --ag-realizada-dot: #5A8F6C;
+  --ag-sem-bg: #FBF6E9;         --ag-sem-bd: #EADFC0;         --ag-sem-fg: #7A5D10;         --ag-sem-dot: #B39443;
+  --ag-reagendada-bg: #FAF3EE;  --ag-reagendada-bd: #EBD9CB;  --ag-reagendada-fg: #8A5A36;  --ag-reagendada-dot: #A9805F;
+  --ag-cancelada-bg: #F6F7F9;   --ag-cancelada-bd: #D5DAE2;   --ag-cancelada-fg: #6B7385;   --ag-cancelada-dot: #9CA3AF;
+  --ag-desistencia-bg: #FBF0F0; --ag-desistencia-bd: #EED2D2; --ag-desistencia-fg: #A33A3A; --ag-desistencia-dot: #C24545;
+  --ag-noshow-bg: #FBF0F0;      --ag-noshow-bd: #EED2D2;      --ag-noshow-fg: #A33A3A;      --ag-noshow-dot: #B05555;
+  --ag-arquivada-bg: #F6F7F9;   --ag-arquivada-bd: #E2E6EC;   --ag-arquivada-fg: #7A8394;   --ag-arquivada-dot: #C3CAD5;
+  --ag-hover: brightness(0.97);
+  --ag-scheme: light;
+}
+
+/* Modo noturno: a paleta exata do desenho. */
+html.dark .qs-agenda {
+  --ag-hover: brightness(1.15);
+  --ag-scheme: dark;
   /* superfícies */
   --ag-bg: #0A0C10;          /* fundo da tela */
   --ag-surface: #11141B;     /* cards, grade, seletor de abas */
@@ -60,7 +123,9 @@
   --ag-desistencia-bg: #1C212C; --ag-desistencia-bd: #2A303D; --ag-desistencia-fg: #D3A3A3; --ag-desistencia-dot: #C46A6A;
   --ag-noshow-bg: #1C212C;      --ag-noshow-bd: #2A303D;      --ag-noshow-fg: #D3A3A3;      --ag-noshow-dot: #A86A6A;
   --ag-arquivada-bg: #11141B;   --ag-arquivada-bd: #252B38;   --ag-arquivada-fg: #7C8598;   --ag-arquivada-dot: #4B5568;
+}
 
+.qs-agenda {
   background: var(--ag-bg);
   color: var(--ag-text);
   font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -127,9 +192,9 @@
 .qs-agenda .ag-faixa { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; background: var(--ag-surface); border: 1px solid var(--ag-border-2); border-radius: 12px; padding: 10px 10px 10px 16px; }
 
 .qs-agenda .ag-ev { position: absolute; box-sizing: border-box; border-radius: 10px; padding: 6px 10px; text-align: left; display: flex; flex-direction: column; gap: 2px; overflow: hidden; cursor: pointer; font: inherit; background: var(--st-bg); color: var(--st-fg); border: 1px solid var(--st-bd); }
-.qs-agenda .ag-ev:hover { filter: brightness(1.15); z-index: 10; }
+.qs-agenda .ag-ev:hover { filter: var(--ag-hover); z-index: 10; }
 
-.qs-agenda .ag-select { color-scheme: dark; height: 40px; background: var(--ag-surface); color: var(--ag-text); border: 1px solid var(--ag-border); border-radius: 10px; padding: 0 12px; font: inherit; }
+.qs-agenda .ag-select { color-scheme: var(--ag-scheme); height: 40px; background: var(--ag-surface); color: var(--ag-text); border: 1px solid var(--ag-border); border-radius: 10px; padding: 0 12px; font: inherit; }
 
 .qs-agenda button:focus-visible, .qs-agenda a:focus-visible, .qs-agenda select:focus-visible { outline: 2px solid var(--ag-focus); outline-offset: 2px; }
 .qs-agenda .tabular { font-variant-numeric: tabular-nums; }
@@ -137,4 +202,4 @@
 /* Telas antigas encaixadas numa aba da agenda ("Meus desfechos", "Falta
    agendar" do closer): continuam com o visual do resto do QS, num cartão com o
    fundo do app — senão o texto escuro delas sumiria no fundo escuro da agenda. */
-.qs-agenda .ag-ponte { background: var(--bg); color: var(--text); border-radius: 14px; padding: 16px; }
+.qs-agenda .ag-ponte { background: var(--bg); color: var(--ink); border-radius: 14px; padding: 16px; }
