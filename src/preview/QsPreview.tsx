@@ -131,6 +131,14 @@ window.fetch = (async (entrada: RequestInfo | URL, init?: RequestInit) => {
   const umSo = (headers.get("Accept") ?? "").includes("vnd.pgrst.object");
   const u = new URL(url, location.origin);
 
+  if (u.pathname.includes("/api/wa-sync")) {
+    // Resumo do atendimento (BriefingDoLead) — o formato que a tela espera.
+    const l = leads.find((x) => x.id === u.searchParams.get("leadId")) ?? leads[0];
+    return resposta({
+      lead: { nome: l.full_name, telefone: l.phone, email: l.email, fonte: "Live Japão", temperatura: "quente", status: l.status, dono: "Yanca Manuella", papelDono: "sdr" },
+      notas: notes.filter((n) => n.lead_id === l.id), tarefas: [], reunioes: [], conversa: [],
+    });
+  }
   if (u.pathname.includes("/api/")) return resposta({ ok: true, respostas: [], modelos: [], notas: [], tarefas: [], reunioes: [], conversa: [] });
   if (u.pathname.includes("/auth/v1/")) return resposta({});
   const m = u.pathname.match(/\/rest\/v1\/(rpc\/)?([a-z0-9_]+)/i);

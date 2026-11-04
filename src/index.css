@@ -506,6 +506,12 @@ html.qs-app-narrow .qs-navbtn { display: flex !important; }
      conversa em tela cheia: no celular ela caía bem em cima do "Confirmar
      ganho" e do campo de escrever. Lá ela passa pra baixo deles. */
   button.qs-bolinha-avisos { z-index: 44; }
+
+  /* O botão flutuante do WhatsApp (48 px + 24 px do rodapé) e a bolinha de
+     avisos logo acima dele cobriam pra sempre
+     o fim de cada tela: na Agenda, o "Lançar desfecho" da última reunião não
+     tinha como ser tocado. A rolagem ganha essa folga no fim. */
+  .qs-main-rola { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
 }
 
 /* Respeita quem pediu menos movimento (WCAG 2.3.3). */
