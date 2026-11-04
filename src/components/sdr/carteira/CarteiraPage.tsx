@@ -140,6 +140,16 @@ export default function CarteiraPage({ onOpenLead }: Props) {
       // (25/09): o PostgREST devolve no máximo 1000 linhas, em silêncio — a
       // Yanca via 536 dos 789 leads dela, e o gestor 1000 de 1.303 atividades
       // abertas (lead com atividade aparecia "livre" e o Iniciar duplicava).
+      // 04/11: nomes, cadências e atividades abertas não dependem da carteira —
+      // saem já, junto com ela (antes esperavam carteira e leads terminarem).
+      const extrasP = Promise.all([
+        supabase.from("qs_users").select("id, name"),
+        supabase.from("qs_cadences").select("id, name").neq("status", "congelada").order("name"),
+        fetchAllRows<{ lead_id: string }>((de, ate) =>
+          supabase.from("qs_tasks").select("lead_id").in("status", ["pendente", "atrasada"]).order("id").range(de, ate)
+        ),
+      ]);
+      extrasP.catch(() => { /* tratado no await lá embaixo */ });
       const linhas = await fetchAllRows<{
         chave_telefone: string; sdr_id: string;
         substituto_id: string | null; substituto_ate: string | null;
@@ -171,13 +181,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
           .range(de, ate)
       );
 
-      const [{ data: usuarios }, { data: cads }, abertas] = await Promise.all([
-        supabase.from("qs_users").select("id, name"),
-        supabase.from("qs_cadences").select("id, name").neq("status", "congelada").order("name"),
-        fetchAllRows<{ lead_id: string }>((de, ate) =>
-          supabase.from("qs_tasks").select("lead_id").in("status", ["pendente", "atrasada"]).order("id").range(de, ate)
-        ),
-      ]);
+      const [{ data: usuarios }, { data: cads }, abertas] = await extrasP;
 
       const nomeDe = new Map((usuarios ?? []).map((u: { id: string; name: string }) => [u.id, u.name]));
       const comAtividade = new Set((abertas ?? []).map((t: { lead_id: string }) => t.lead_id));
@@ -185,21 +189,23 @@ export default function CarteiraPage({ onOpenLead }: Props) {
 
       // O card MAIS RECENTE de cada dono+telefone. Sem a chave do banco aqui, o
       // casamento é pelo dono — que basta: a carteira é dele.
-      const porDono = new Map<string, typeof leads>();
+      // 04/11: índice dono+fim do telefone, montado UMA vez. Antes, cada linha
+      // da carteira varria todos os leads do dono (milhares × milhares no gestor).
+      // A lista vem do mais recente pro mais antigo: o 1º que entra no índice é
+      // o mesmo que o `find` achava.
+      const porDonoTel = new Map<string, LeadDaCarteira>();
       for (const l of (leads ?? [])) {
-        const arr = porDono.get(l.owner_id!) ?? [];
-        arr.push(l);
-        porDono.set(l.owner_id!, arr);
+        const k = `${l.owner_id}|${(l.phone ?? "").replace(/\D/g, "").slice(-8)}`;
+        if (!porDonoTel.has(k)) porDonoTel.set(k, l);
       }
 
       const montados: ItemCarteira[] = [];
       for (const c of chaves) {
         const dono = c.substituto_id ?? c.sdr_id;
-        const candidatos = porDono.get(dono) ?? [];
         // A chave da carteira são os 8 últimos dígitos (DDD+8). Comparar por aí
         // é o mesmo critério do banco, sem reimplementar qs_wa_key no navegador.
         const fim = c.chave_telefone.replace(/\D/g, "").slice(-8);
-        const lead = candidatos.find((l) => (l.phone ?? "").replace(/\D/g, "").slice(-8) === fim) ?? null;
+        const lead = porDonoTel.get(`${dono}|${fim}`) ?? null;
         montados.push({
           chave: c.chave_telefone,
           sdrId: c.sdr_id,
