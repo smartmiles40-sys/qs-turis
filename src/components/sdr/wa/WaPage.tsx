@@ -150,8 +150,10 @@ export default function WaPage({ onOpenLead }: Props) {
 
   return (
     <div className="qs-wa h-full flex flex-col overflow-hidden">
-      {/* Cabeçalho da página */}
-      <header className="shrink-0 flex items-center gap-3 px-4 sm:px-6 h-14"
+      {/* Cabeçalho da página. No celular, com uma conversa aberta, ele sai:
+          eram DUAS barras de 56 px empilhadas (mais a do menu do QS em cima),
+          e com o teclado aberto sobravam poucas linhas de conversa (04/11). */}
+      <header className={`shrink-0 items-center gap-3 px-4 sm:px-6 h-14 ${sel ? "hidden md:flex" : "flex"}`}
               style={{ background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
         <span style={{ color: "var(--wa)" }}><Icon d={P.chat} size={20} /></span>
         <div className="flex-1 min-w-0">
@@ -226,7 +228,7 @@ export default function WaPage({ onOpenLead }: Props) {
               <div className="shrink-0 flex items-center gap-2 px-2 sm:px-3 h-14"
                    style={{ background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
                 <button onClick={() => setSel(null)} aria-label="Voltar para as conversas"
-                        className="wa-icon-btn lg:hidden w-9 h-9 grid place-items-center rounded-lg shrink-0">
+                        className="wa-icon-btn lg:hidden w-10 h-10 md:w-9 md:h-9 grid place-items-center rounded-lg shrink-0">
                   <Icon d={P.back} />
                 </button>
                 <div className="hidden lg:block shrink-0">

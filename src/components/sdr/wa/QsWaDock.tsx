@@ -119,6 +119,8 @@ const P = {
   narrow: "M4 7l5 5-5 5M20 7l-5 5 5 5M12 4v16",
   bell: "M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0",
   bellOff: "M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0M3 3l18 18",
+  card: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM9 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6 16a3 3 0 0 1 6 0M15 10h3M15 14h3",
+  transferir: "M17 3l4 4-4 4M21 7H9M7 21l-4-4 4-4M3 17h12",
 };
 
 export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string) => void }) {
@@ -164,6 +166,9 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
   const { width, aplicar } = useDockWidth();
   const modo = modoDoDock(win);
   const duasColunas = isOpen && modo !== "fullscreen" && width >= DUAS_COLUNAS;
+  // Celular (04/11): em tela cheia a largura é a da tela. O minWidth guardado
+  // (340–440 px) passava da tela de 390 e cortava o X de fechar e o "Enviar".
+  const larguraMinima = modo === "split" ? width : undefined;
 
   // O QS ao lado só tem os breakpoints da JANELA, não da coluna: sem este aviso
   // o topo continua em modo desktop e corta os botões em vez de reorganizar.
@@ -318,10 +323,10 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
         {/* Cabeçalho — superfície do QS, não barra verde de outro produto.
             O verde ficou reservado pra ação (enviar) e pro contador. */}
         <div className="shrink-0 flex items-center gap-2 pl-4 pr-2 h-14"
-             style={{ background: "var(--card)", borderBottom: "1px solid var(--line)", minWidth: width }}>
+             style={{ background: "var(--card)", borderBottom: "1px solid var(--line)", minWidth: larguraMinima }}>
           {alvo && !duasColunas ? (
             <button onClick={() => setAlvo(null)} title="Voltar para as conversas" aria-label="Voltar"
-                    className="wa-icon-btn -ml-1.5 w-9 h-9 grid place-items-center rounded-lg">
+                    className="wa-icon-btn -ml-1.5 w-10 h-10 md:w-9 md:h-9 shrink-0 grid place-items-center rounded-lg">
               <Icon d={P.back} />
             </button>
           ) : (
@@ -337,12 +342,17 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
             </p>
           </div>
 
+          {/* No celular "Ver card" e "Transferir" viram ícone de 40 px: por
+              extenso eles comiam o nome do cliente (sobrava "Mariana Albuque…")
+              e empurravam o X de fechar pra fora da tela. */}
           {alvo && onOpenLead && (
             <button onClick={() => onOpenLead(alvo.leadId)}
                     title="Abrir o card deste cliente"
-                    className="wa-chip shrink-0 px-2.5 h-8 rounded-lg text-[12px] font-semibold"
+                    aria-label="Ver card"
+                    className="wa-chip shrink-0 w-10 h-10 md:w-auto md:h-8 md:px-2.5 grid place-items-center md:block rounded-lg text-[12px] font-semibold"
                     style={{ border: "1px solid var(--line)", color: "var(--ink2)" }}>
-              Ver card
+              <span className="md:hidden"><Icon d={P.card} size={17} /></span>
+              <span className="hidden md:inline">Ver card</span>
             </button>
           )}
           {alvo && (
@@ -350,9 +360,11 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
               <button onClick={() => setTransferindo((v) => !v)}
                       title="Transferir este lead para outro SDR"
                       aria-expanded={transferindo}
-                      className="wa-chip px-2.5 h-8 rounded-lg text-[12px] font-semibold"
+                      aria-label="Transferir"
+                      className="wa-chip w-10 h-10 md:w-auto md:h-8 md:px-2.5 grid place-items-center md:block rounded-lg text-[12px] font-semibold"
                       style={{ border: "1px solid var(--line)", color: "var(--ink2)" }}>
-                Transferir
+                <span className="md:hidden"><Icon d={P.transferir} size={17} /></span>
+                <span className="hidden md:inline">Transferir</span>
               </button>
               {transferindo && (
                 <div className="absolute right-0 top-10 z-30 w-56 rounded-xl border shadow-lg overflow-hidden"
@@ -388,7 +400,7 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
                   title={avisos ? "Desligar som e notificação" : "Ligar som e notificação"}
                   aria-label={avisos ? "Desligar avisos" : "Ligar avisos"}
                   aria-pressed={avisos}
-                  className="wa-icon-btn w-9 h-9 grid place-items-center rounded-lg">
+                  className={`wa-icon-btn w-9 h-9 place-items-center rounded-lg ${alvo ? "hidden md:grid" : "grid"}`}>
             <Icon d={avisos ? P.bell : P.bellOff} size={17} />
           </button>
           <button onClick={alternarLargura}
@@ -398,13 +410,13 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
             <Icon d={estaLargo ? P.narrow : P.widen} size={17} />
           </button>
           <button onClick={close} title="Fechar" aria-label="Fechar atendimento"
-                  className="wa-icon-btn w-9 h-9 grid place-items-center rounded-lg">
+                  className="wa-icon-btn w-10 h-10 md:w-9 md:h-9 shrink-0 grid place-items-center rounded-lg">
             <Icon d={P.close} />
           </button>
         </div>
 
         {/* Conteúdo — só monta aberto (não gasta query com o dock fechado) */}
-        <div className="flex-1 min-h-0 flex" style={{ minWidth: width }}>
+        <div className="flex-1 min-h-0 flex" style={{ minWidth: larguraMinima }}>
           {isOpen && (duasColunas ? (
             <>
               <div className="w-[292px] shrink-0 overflow-hidden"

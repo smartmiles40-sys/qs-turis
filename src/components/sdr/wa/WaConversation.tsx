@@ -26,6 +26,7 @@ import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
 import { loadSignatureName } from "@/lib/qs/waSignature";
 import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useCelular } from "@/lib/useCelular";
 import { useWhatsAppApp } from "@/lib/qs/waApp";
 import { WaAudio, WaAvatar } from "./WaBits";
 import { WaTexto, tamanhoEmojiSolto, waPlain } from "./waFormat";
@@ -190,6 +191,7 @@ function Anexo({ a, meu }: { a: { type: string; url: string }; meu: boolean }) {
 
 export default function WaConversation({ leadId, leadName, phone, initialText }: Props) {
   const { currentUser } = useQsAuth();
+  const celular = useCelular();
   // MODO APARELHO (SDR, desde 03/09): esta tela vira HISTÓRICO. Continua sendo
   // o lugar de ler tudo que já foi conversado — só o campo de escrever some,
   // porque o envio agora acontece no celular. Ver src/lib/qs/waApp.ts.
@@ -534,6 +536,18 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
   useLayoutEffect(() => {
     if (stickToBottom.current) bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
+
+  // Celular (04/11): o teclado subindo encolhe a área das mensagens (ver
+  // src/lib/tecladoCelular.ts) e a última mensagem ia parar atrás dele. Quem
+  // estava no fim da conversa continua no fim. No computador o visualViewport
+  // só muda ao redimensionar a janela — e aí "continuar no fim" é o certo.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const aoMudar = () => { if (stickToBottom.current) bottomRef.current?.scrollIntoView({ block: "end" }); };
+    vv.addEventListener("resize", aoMudar);
+    return () => vv.removeEventListener("resize", aoMudar);
+  }, []);
 
   // Cresce com o texto. Zera a altura antes de medir, senão o campo só aumenta
   // e nunca volta ao encolher.
@@ -1349,7 +1363,9 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
             </button>
           </div>
         ) : (
-          <div className="flex items-end gap-1.5">
+          // wa-composer-linha: no celular os ícones sobem e o texto ganha a
+          // linha toda (index.css, "WhatsApp no CELULAR").
+          <div className="wa-composer-linha flex items-end gap-1.5">
             <input ref={fileRef} type="file" className="hidden" onChange={escolherArquivo}
                    accept="image/*,audio/*,video/mp4,application/pdf" />
             <button onClick={alternarEmojis} disabled={sending}
@@ -1408,7 +1424,11 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
               onPaste={(e) => void aoColar(e)}
               onSelect={marcarCaret}
               rows={1}
-              placeholder={`Mensagem para ${leadName || formatPhoneDisplay(phone) || "o lead"}…  (/ para atalhos)`}
+              // No celular o placeholder longo quebrava em várias linhas e o
+              // campo nascia alto (ele cresce pelo scrollHeight). Lá vai curto.
+              placeholder={celular
+                ? `Mensagem para ${(leadName || "").trim().split(/\s+/)[0] || "o lead"}…`
+                : `Mensagem para ${leadName || formatPhoneDisplay(phone) || "o lead"}…  (/ para atalhos)`}
               className="flex-1 min-w-0 resize-none rounded-xl px-3 py-2 text-[14px] leading-[1.45] outline-none"
               style={{ border: "1px solid var(--line)", background: "var(--card2)", color: "var(--ink)", maxHeight: 128 }}
             />
