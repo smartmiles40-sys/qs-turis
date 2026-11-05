@@ -83,6 +83,32 @@ async function usuariosDoBitrix() {
   return porEmail;
 }
 
+/**
+ * O CAMINHO DE VOLTA (05/11): o responsável de um negócio do Bitrix → o
+ * usuário do QS (mesmo casamento por e-mail). Só devolve SDR ou closer ATIVO —
+ * gestor, admin, robô ou gente que saiu não recebe lead; aí quem chama cai no
+ * rodízio. É o que faz "quem já foi atendido volta pra quem atendeu" valer
+ * também para o cliente que o QS ainda não conhecia.
+ */
+export async function donoNoQsDoResponsavel(assignedById) {
+  if (!assignedById) return null;
+  try {
+    let email = null;
+    for (const [e, id] of await usuariosDoBitrix()) {
+      if (String(id) === String(assignedById)) { email = e; break; }
+    }
+    if (!email) return null;
+    const rows = await rest(
+      `qs_users?select=id,name,role&email=ilike.${encodeURIComponent(email)}` +
+      '&is_active=eq.true&role=in.(sdr,closer)&limit=1'
+    );
+    return rows?.[0] || null;
+  } catch (e) {
+    console.warn('[bitrix-lead] responsável do Bitrix sem par no QS:', e?.message);
+    return null;
+  }
+}
+
 async function responsavelNoBitrix(ownerId) {
   if (!ownerId) return null;
   try {

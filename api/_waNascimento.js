@@ -8,7 +8,7 @@
 
 import { waKey } from './_wa.js';
 import { insert, rest } from './_supabaseAdmin.js';
-import { procurarNegocioPorTelefone } from './_bitrixLead.js';
+import { procurarNegocioPorTelefone, donoNoQsDoResponsavel } from './_bitrixLead.js';
 import { createInboundLead } from './_leads.js';
 
 /**
@@ -103,6 +103,17 @@ export async function numerosIgnorados() {
  * um número solto — disparo do time, contato pessoal de alguém, teste —, criar
  * card seria inventar demanda: o time não perdeu ninguém, ele que iniciou.
  */
+/**
+ * Regra pura de quem fica com o lead que nasce do WhatsApp (testável).
+ * 1) quem já trabalhou o negócio no Bitrix; 2) o dono do número que recebeu;
+ * 3) ninguém → o gatilho do banco distribui (rodízio dos SDRs ativos).
+ */
+export function escolherDonoDoNascimento({ donoDoNumero = null, donoBitrix = null }) {
+  if (donoBitrix?.id) return { ownerId: donoBitrix.id, motivo: 'bitrix' };
+  if (donoDoNumero) return { ownerId: donoDoNumero, motivo: 'numero' };
+  return { ownerId: null, motivo: 'rodizio' };
+}
+
 export async function nascerDoWhatsApp({ phone, nome, direcao, inboxId, ownerId = null, canal = 'API oficial' }) {
   if (direcao !== 'in') return null;
 
@@ -125,6 +136,14 @@ export async function nascerDoWhatsApp({ phone, nome, direcao, inboxId, ownerId 
     return null;
   }
 
+  // QUEM FICA COM O LEAD (Bruno, 05/11): "o número da pessoa é tipo um CPF —
+  // se já foi trabalhado por alguém, volta pra essa pessoa, independente do
+  // número". O QS não conhecia o telefone, mas o Bitrix conhece: o responsável
+  // do negócio (SDR ou closer ativo) leva o lead, ganhando até do dono do chip
+  // por onde a pessoa escreveu. Ninguém trabalhou → dono do chip → rodízio.
+  const donoBitrix = await donoNoQsDoResponsavel(noBitrix?.deal?.ASSIGNED_BY_ID);
+  const dono = escolherDonoDoNascimento({ donoDoNumero: ownerId, donoBitrix });
+
   const payload = {
     full_name: nome || `WhatsApp ${String(phone).replace(/\D/g, '').slice(-8)}`,
     phone,
@@ -132,7 +151,7 @@ export async function nascerDoWhatsApp({ phone, nome, direcao, inboxId, ownerId 
     segment: `WhatsApp (${canal})`,
     // Escreveu pro chip de um SDR: o lead é DELE, sem rodízio. Foi pra ele
     // que a pessoa escreveu, e é pelo número dele que a conversa segue.
-    ...(ownerId ? { owner_id: ownerId } : {}),
+    ...(dono.ownerId ? { owner_id: dono.ownerId } : {}),
     // Achou negócio lá: o lead nasce colado nele. O createInboundLead entende
     // `bitrix_id` preenchido como "já tem card" e NÃO abre negócio novo — que é
     // justamente o que evita a duplicata que sujou o funil em 18/08.
@@ -163,6 +182,7 @@ export async function nascerDoWhatsApp({ phone, nome, direcao, inboxId, ownerId 
         // Qual LINHA recebeu importa: o time tem mais de uma (SDR na API
         // oficial, closer no número conectado por QR). Saber por onde a pessoa
         // entrou é o que permite responder pela linha certa depois.
+        + (dono.motivo === 'bitrix' ? `\nVoltou para ${donoBitrix.name}, responsável pelo negócio no Bitrix.` : '')
         + (inboxId ? `\nCaixa: ${inboxId}.` : ''),
       tags: ['whatsapp', 'origem'],
     }, { returning: false });
