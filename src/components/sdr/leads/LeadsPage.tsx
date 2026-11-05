@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData, podeExecutar } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
@@ -13,11 +13,12 @@ import type {
 } from "../types";
 import { STATUS_LABELS, SOURCE_LABELS } from "../types";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { createCadenceTasks, closeOpenCadenceTasks, transferLead, fetchAllRows, LEAD_SELECT } from "@/lib/qs/queries";
-import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
+import { createCadenceTasks, closeOpenCadenceTasks, transferLead, fetchAllRows, fetchPorIds, LEAD_SELECT } from "@/lib/qs/queries";
+import { aplicarFiltrosLeads, type FiltrosLeads } from "@/lib/qs/leadsFiltro";
+import type { LeadTemperature } from "@/lib/leadScore";
 import { dialViaSip } from "@/lib/sip";
 import { dialViaWebphone, isWebphoneConfigured } from "@/lib/webphone";
-import { casaFonte, lerFiltroDaUrl, useFiltrosNaUrl, useFontes } from "@/controle-comercial/filtroUrl";
+import { lerFiltroDaUrl, useFiltrosNaUrl, useFontes } from "@/controle-comercial/filtroUrl";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,9 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   // (gatilho da 0036); aqui só evitamos oferecer botão que vai falhar.
   const executa = podeExecutar(currentUser?.role);
   const [search, setSearch] = useState("");
+  // A busca vai pro BANCO desde 04/11 — espera a pessoa parar de digitar
+  // (300 ms) em vez de mandar uma consulta por tecla.
+  const [buscaAplicada, setBuscaAplicada] = useState("");
   const [filterSource, setFilterSource] = useState<LeadSource | "">("");
   const [filterStatus, setFilterStatus] = useState<LeadStatus | "">("");
   const [filterCadence, setFilterCadence] = useState("");
@@ -110,7 +114,19 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const [waLead, setWaLead] = useState<{ id: string; name: string | null; phone: string | null } | null>(null);
 
   // ── Data state ──
+  // `leads` = SÓ A PÁGINA da tela (10 linhas) desde 04/11. Antes era a base
+  // inteira; tudo que precisa do conjunto (exportar, ações em lote, handover
+  // por quantidade) agora busca no banco NA HORA da ação, com os mesmos filtros.
   const [leads, setLeads] = useState<Lead[]>([]);
+  // Quantos leads passam nos filtros (count "exact" da própria página).
+  const [totalFiltrado, setTotalFiltrado] = useState(0);
+  // Fonte de cada lead visível pra este usuário — alimenta o select "Fonte"
+  // com contagem e o "N leads cadastrados". Busca só a coluna segment, em
+  // segundo plano: a lista não espera por ela.
+  const [segmentos, setSegmentos] = useState<{ segment: string | null }[] | null>(null);
+  // Troca de página/filtro: a tabela continua na tela, só esmaece.
+  const [carregandoPagina, setCarregandoPagina] = useState(false);
+  const [exportando, setExportando] = useState(false);
   const [users, setUsers] = useState<SdrUser[]>([]);
   const [cadences, setCadences] = useState<Cadence[]>([]);
   const [lossReasons, setLossReasons] = useState<LossReason[]>([]);
@@ -139,23 +155,63 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const [criarNoBitrix, setCriarNoBitrix] = useState(false);
   const isManager = currentUser?.role === "admin" || currentUser?.role === "gestor";
 
+  // ── Filtros (vão pro banco) ──
+  // SDR/closer só veem a própria carteira nesta tela — era o filtro por papel
+  // que rodava no navegador; virou um eq no banco. A RLS continua sendo quem
+  // protege de verdade.
+  const somenteDoDono = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
+  const filtros = useMemo<FiltrosLeads>(() => ({
+    busca: buscaAplicada,
+    source: filterSource,
+    status: filterStatus,
+    cadenceId: filterCadence,
+    ownerId: filterOwner,
+    fonte: filterFonte,
+    lossReasonId: filterLossReason,
+    temp: filterTemp,
+    somenteDoDono,
+  }), [buscaAplicada, filterSource, filterStatus, filterCadence, filterOwner, filterFonte, filterLossReason, filterTemp, somenteDoDono]);
+
+  // Busca com espera: só consulta quando a pessoa para de digitar.
+  useEffect(() => {
+    if (search === buscaAplicada) return;
+    const t = setTimeout(() => { setBuscaAplicada(search); setCurrentPage(1); }, 300);
+    return () => clearTimeout(t);
+  }, [search, buscaAplicada]);
+
   // ── Fetch data ──
+  // Só a resposta da ÚLTIMA consulta vale: trocar de página/filtro rápido
+  // dispara várias, e uma lenta chegando depois não pode pintar a tela velha.
+  const ultimaConsulta = useRef(0);
   const fetchLeads = useCallback(async () => {
-    // Paginado desde 13/08: a base cruzou o teto de 1.000 do PostgREST (1.398
-    // leads medidos) e o select seco passou a ESCONDER ~400 leads do gestor —
-    // sem erro nenhum, a tela só mostrava menos. O `id` no order desempata
-    // created_at igual (lote de importação) pra nenhuma página repetir linha.
-    let rows: Lead[];
+    // PAGINADO NO SERVIDOR desde 04/11: antes baixava a base inteira (5.784
+    // leads × ~1 KB ≈ 6 MB, 2,7–3,3 s no ar) pra mostrar 10 linhas. Agora o
+    // banco filtra, ordena e conta (`count: "exact"`) e devolve só a página.
+    // O `id` no order desempata created_at igual (lote de importação) pra
+    // nenhuma página repetir ou pular linha.
+    const seq = ++ultimaConsulta.current;
+    setCarregandoPagina(true);
+    const from = (currentPage - 1) * ITEMS_PER_PAGE;
     try {
-      rows = await fetchAllRows<Lead>((from, to) =>
-        supabase
-          .from("qs_leads")
-          .select(LEAD_SELECT)
-          .order("created_at", { ascending: false })
-          .order("id")
-          .range(from, to) as unknown as PromiseLike<{ data: Lead[] | null; error: { message?: string } | null }>
-      );
+      const { data, error, count } = await aplicarFiltrosLeads(
+        supabase.from("qs_leads").select(LEAD_SELECT, { count: "exact" }),
+        filtros
+      )
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, from + ITEMS_PER_PAGE - 1);
+      if (seq !== ultimaConsulta.current) return;
+      if (error) {
+        // Página além do fim (exclusão/transferência encolheu a lista): o
+        // PostgREST responde 416. Não é erro pra mostrar — volta pra página 1.
+        if (error.code === "PGRST103" && currentPage > 1) { setCurrentPage(1); return; }
+        throw error;
+      }
+      setLoadError(null);
+      setLeads((data ?? []) as unknown as Lead[]);
+      setTotalFiltrado(count ?? 0);
     } catch (e) {
+      if (seq !== ultimaConsulta.current) return;
       const error = e as { code?: string; message?: string };
       console.warn("Erro ao buscar leads:", error);
       // Erro de rede NÃO pode virar "Nenhum lead encontrado" — a tela mostra o
@@ -169,23 +225,45 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           ? `Não foi possível carregar os leads (erro ${code}).`
           : "Não foi possível carregar os leads — verifique a conexão."
       );
-      return;
+    } finally {
+      if (seq === ultimaConsulta.current) {
+        setCarregandoPagina(false);
+        setLoading(false);
+      }
     }
-    setLoadError(null);
-    setLeads(rows);
+  }, [filtros, currentPage]);
+
+  // Página/filtro mudou → busca de novo (inclui a primeira carga).
+  useEffect(() => { void fetchLeads(); }, [fetchLeads]);
+
+  // Fontes + total da base, em segundo plano. Só a coluna segment (≈40 bytes
+  // por lead em vez de ~1 KB), paginada por id pra passar do teto de 1.000.
+  // Falhou? A lista segue funcionando; só o select "Fonte" fica sem opções.
+  const carregarSegmentos = useCallback(async () => {
+    try {
+      const rows = await fetchAllRows<{ segment: string | null }>((from, to) =>
+        supabase.from("qs_leads").select("segment").order("id").range(from, to) as unknown as
+          PromiseLike<{ data: { segment: string | null }[] | null; error: { message?: string } | null }>
+      );
+      setSegmentos(rows);
+    } catch (e) {
+      console.warn("Erro ao buscar as fontes dos leads:", e);
+    }
   }, []);
+
+  // Depois de cadastrar/excluir/importar: a página E o total/fontes mudam.
+  const recarregarTudo = useCallback(async () => {
+    await Promise.all([fetchLeads(), carregarSegmentos()]);
+  }, [fetchLeads, carregarSegmentos]);
 
   async function retryFetchLeads() {
     setLoading(true);
     await fetchLeads();
-    setLoading(false);
   }
 
   useEffect(() => {
+    void carregarSegmentos();
     async function loadAll() {
-      setLoading(true);
-      await fetchLeads();
-
       const [usersRes, cadencesRes, lossRes] = await Promise.all([
         supabase.from("qs_users").select("*").eq("is_active", true),
         // "status" incluso: o modal CSV filtra cadências "disponivel" — sem a
@@ -203,11 +281,11 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
       if (lossRes.error) console.warn("Erro ao buscar loss reasons:", lossRes.error);
       else setLossReasons((lossRes.data as LossReason[]) ?? []);
-
-      setLoading(false);
+      // O "Carregando..." agora sai quando a 1ª PÁGINA chega (fetchLeads), sem
+      // esperar estas listas — os selects se preenchem logo em seguida.
     }
     loadAll();
-  }, [fetchLeads]);
+  }, [carregarSegmentos]);
 
   // ── Create Lead ──
   // Checagem de duplicado ANTES do insert (auditoria 2026-07-14): dois SDRs podem
@@ -363,7 +441,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         notifySuccess(`Lead ${fullName} cadastrado${avisoBitrix}${dono}.`);
       }
 
-      await fetchLeads();
+      await recarregarTudo();
       setShowCreateModal(false);
       resetForm();
     }
@@ -402,7 +480,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     } else {
       notifySuccess(`${deletedIds.size} lead(s) excluído(s).`);
     }
-    await fetchLeads();
+    await recarregarTudo();
     // Mantém selecionados só os recusados (que continuam na lista).
     setSelectedIds(new Set(ids.filter((id) => !deletedIds.has(id))));
   }
@@ -443,10 +521,25 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   }
 
   // ── Handover por quantidade (item 6): tira N leads de um SDR e manda pra outro ──
-  const handoverPoolSize = useMemo(
-    () => leads.filter((l) => l.owner_id === handoverFromId && l.status !== "ganho" && l.status !== "perdido").length,
-    [leads, handoverFromId]
-  );
+  // Contagem no BANCO (head + count) desde 04/11 — a tela não tem mais a base
+  // inteira na memória. Mesma regra: leads do SDR de origem, fora ganho/perdido.
+  const [handoverPoolSize, setHandoverPoolSize] = useState<number | null>(null);
+  useEffect(() => {
+    setHandoverPoolSize(null);
+    if (!handoverFromId) return;
+    let vivo = true;
+    supabase
+      .from("qs_leads")
+      .select("id", { count: "exact", head: true })
+      .eq("owner_id", handoverFromId)
+      .not("status", "in", "(ganho,perdido)")
+      .then(({ count, error }) => {
+        if (!vivo) return;
+        if (error) console.warn("Erro ao contar leads do SDR de origem:", error);
+        else setHandoverPoolSize(count ?? 0);
+      });
+    return () => { vivo = false; };
+  }, [handoverFromId]);
 
   async function handleHandoverQuantity() {
     const qty = parseInt(handoverQty, 10);
@@ -455,9 +548,21 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     setHandoverSaving(true);
     setHandoverError(null);
     try {
-      // leads ativos do SDR de origem (ignora ganhos/perdidos), ordenados por chegada
-      const pool = leads
-        .filter((l) => l.owner_id === handoverFromId && l.status !== "ganho" && l.status !== "perdido")
+      // leads ativos do SDR de origem (ignora ganhos/perdidos), ordenados por chegada.
+      // Buscados AGORA no banco (só id + datas): a tela só tem a página atual.
+      // A ordenação segue no navegador porque é por arrived_at OU created_at
+      // (o PostgREST não ordena por coalesce).
+      type Candidato = { id: string; arrived_at: string | null; created_at: string };
+      const candidatos = await fetchAllRows<Candidato>((from, to) =>
+        supabase
+          .from("qs_leads")
+          .select("id, arrived_at, created_at")
+          .eq("owner_id", handoverFromId)
+          .not("status", "in", "(ganho,perdido)")
+          .order("id")
+          .range(from, to) as unknown as PromiseLike<{ data: Candidato[] | null; error: { message?: string } | null }>
+      );
+      const pool = candidatos
         .sort((a, b) => {
           const ta = new Date(a.arrived_at || a.created_at).getTime();
           const tb = new Date(b.arrived_at || b.created_at).getTime();
@@ -497,62 +602,101 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     }
   }
 
-  const fontes = useFontes(leads);
+  // Contagem por fonte sobre a base visível pra este usuário (como antes,
+  // quando `leads` era a base inteira). Vazia até a coluna segment chegar.
+  const fontes = useFontes(segmentos ?? []);
 
-  // ── Filtering (client-side) ──
-  const filteredLeads = useMemo(() => {
-    let result = [...leads];
-
-    // Role-based filtering: SDR and closer only see their own leads
-    if (currentUser && !canSeeAllData(currentUser.role)) {
-      result = result.filter((l) => l.owner_id === currentUser.id);
-    }
-
-    if (search) {
-      const q = search.toLowerCase();
-      // Telefone: compara só os DÍGITOS — "(85) 9…" precisa achar "5585…".
-      const qDigits = q.replace(/\D/g, "");
-      result = result.filter(
-        (l) =>
-          l.full_name?.toLowerCase().includes(q) ||
-          l.company_name?.toLowerCase().includes(q) ||
-          l.email?.toLowerCase().includes(q) ||
-          (qDigits.length >= 4 && (l.phone ?? "").replace(/\D/g, "").includes(qDigits)) ||
-          l.bitrix_id?.toLowerCase().includes(q)
-      );
-    }
-    if (filterSource) result = result.filter((l) => l.source === filterSource);
-    if (filterStatus) result = result.filter((l) => l.status === filterStatus);
-    if (filterCadence) result = result.filter((l) => l.cadence_id === filterCadence);
-    if (filterOwner) result = result.filter((l) => l.owner_id === filterOwner);
-    if (filterFonte) result = result.filter((l) => casaFonte(l.segment, filterFonte));
-    if (filterLossReason) result = result.filter((l) => l.loss_reason_id === filterLossReason);
-    // Temperatura: compara o rótulo NORMALIZADO (o Bitrix manda "Quente"/"hot"/etc.).
-    if (filterTemp) result = result.filter((l) => normalizeTemperature(l.lead_score) === filterTemp);
-    return result;
-  }, [leads, search, filterSource, filterStatus, filterCadence, filterOwner, filterLossReason, filterTemp, filterFonte, currentUser]);
+  // ── Filtering ──
+  // Desde 04/11 quem filtra é o BANCO (ver aplicarFiltrosLeads em
+  // src/lib/qs/leadsFiltro.ts, com a tradução regra a regra do que rodava aqui).
 
   // Seleção NÃO sobrevive a filtro/busca: mantém marcado só o que continua
   // VISÍVEL na lista filtrada — antes dava pra selecionar, trocar o filtro e as
   // ações em massa agiam sobre leads fora da tela (ninguém via o que ia junto).
+  // A lista filtrada não está mais na memória, então pergunta ao banco quais
+  // dos selecionados ainda passam nos filtros novos.
+  const selecionadosRef = useRef(selectedIds);
+  selecionadosRef.current = selectedIds;
   useEffect(() => {
-    setSelectedIds((prev) => {
-      if (prev.size === 0) return prev;
-      const visible = new Set(filteredLeads.map((l) => l.id));
-      const next = new Set(Array.from(prev).filter((id) => visible.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [filteredLeads]);
+    const ids = Array.from(selecionadosRef.current);
+    if (ids.length === 0) return;
+    let vivo = true;
+    fetchPorIds<{ id: string }>(ids, (lote) =>
+      aplicarFiltrosLeads(supabase.from("qs_leads").select("id"), filtros).in("id", lote) as unknown as
+        PromiseLike<{ data: { id: string }[] | null; error: { message?: string; code?: string } | null }>
+    )
+      .then((rows) => {
+        if (!vivo) return;
+        const visible = new Set(rows.map((r) => r.id));
+        setSelectedIds((prev) => {
+          const next = new Set(Array.from(prev).filter((id) => visible.has(id)));
+          return next.size === prev.size ? prev : next;
+        });
+      })
+      // Falhou a conferência: mantém a seleção (melhor que desmarcar às cegas);
+      // as ações em lote ainda medem lead a lead o que o banco aceitou.
+      .catch((e) => console.warn("Erro ao conferir a seleção com os filtros:", e));
+    return () => { vivo = false; };
+  }, [filtros]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / ITEMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(totalFiltrado / ITEMS_PER_PAGE));
   // Filtro/exclusão pode reduzir o total: sem o clamp a página atual fica vazia.
   useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages]);
-  const paginatedLeads = filteredLeads.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
-  );
+    if (!carregandoPagina && currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages, carregandoPagina]);
+  // A página já vem cortada do banco.
+  const paginatedLeads = leads;
+
+  // Leads selecionados com o que as ações em lote precisam (status e dono),
+  // lidos do banco NA HORA — a seleção pode atravessar páginas que não estão
+  // mais na memória. Lead que não voltou (excluído/sem acesso) fica de fora
+  // do mapa e cai no "recusado" medido pela própria ação.
+  async function lerSelecionados(ids: string[]): Promise<Map<string, { status: LeadStatus; owner_id: string | null }>> {
+    type Linha = { id: string; status: LeadStatus; owner_id: string | null };
+    const rows = await fetchPorIds<Linha>(ids, (lote) =>
+      supabase.from("qs_leads").select("id, status, owner_id").in("id", lote) as unknown as
+        PromiseLike<{ data: Linha[] | null; error: { message?: string; code?: string } | null }>
+    );
+    return new Map(rows.map((r) => [r.id, { status: r.status, owner_id: r.owner_id }]));
+  }
+
+  // ── Exportar: a LISTA FILTRADA inteira, buscada na hora com os mesmos filtros ──
+  async function exportarCsv() {
+    if (exportando) return;
+    setExportando(true);
+    try {
+      type LinhaCsv = Pick<Lead, "full_name" | "company_name" | "phone" | "email" | "segment" | "status" | "source" | "bitrix_id" | "estimated_value" | "created_at">;
+      const rows = await fetchAllRows<LinhaCsv>((from, to) =>
+        aplicarFiltrosLeads(
+          supabase.from("qs_leads").select("full_name, company_name, phone, email, segment, status, source, bitrix_id, estimated_value, created_at"),
+          filtros
+        )
+          .order("created_at", { ascending: false })
+          .order("id")
+          .range(from, to) as unknown as PromiseLike<{ data: LinhaCsv[] | null; error: { message?: string } | null }>
+      );
+      const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const header = ["Nome", "Empresa", "Telefone", "E-mail", "Fonte/Segmento", "Status", "Origem", "ID Bitrix", "Valor estimado", "Criado em"];
+      const lines = rows.map((l) => [
+        l.full_name, l.company_name, l.phone, l.email, l.segment,
+        STATUS_LABELS[l.status], SOURCE_LABELS[l.source] ?? l.source, l.bitrix_id,
+        l.estimated_value ?? "", l.created_at?.slice(0, 10),
+      ].map(esc).join(";"));
+      const csv = "﻿" + header.map(esc).join(";") + "\r\n" + lines.join("\r\n");
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `leads-qs-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.warn("Erro ao exportar leads:", e);
+      const code = (e as { code?: string })?.code;
+      notifyError(`Não foi possível exportar os leads${code ? ` (erro ${code})` : ""} — tente novamente.`);
+    } finally {
+      setExportando(false);
+    }
+  }
 
   // ── Selection ──
   const allOnPageSelected =
@@ -625,7 +769,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         <div>
           <h1 className="text-lg font-bold text-gray-900">Gerenciamento de Leads</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {leads.length} leads cadastrados &middot; {filteredLeads.length} visíveis
+            {segmentos ? <>{segmentos.length} leads cadastrados &middot; </> : null}{totalFiltrado} visíveis
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -636,30 +780,17 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             Transferir leads
           </button>
           <button
-            onClick={() => {
-              // Exporta a LISTA FILTRADA atual (o que está na tela) em CSV pro Excel.
-              const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-              const header = ["Nome", "Empresa", "Telefone", "E-mail", "Fonte/Segmento", "Status", "Origem", "ID Bitrix", "Valor estimado", "Criado em"];
-              const lines = filteredLeads.map((l) => [
-                l.full_name, l.company_name, l.phone, l.email, l.segment,
-                STATUS_LABELS[l.status], SOURCE_LABELS[l.source] ?? l.source, l.bitrix_id,
-                l.estimated_value ?? "", l.created_at?.slice(0, 10),
-              ].map(esc).join(";"));
-              const csv = "﻿" + header.map(esc).join(";") + "\r\n" + lines.join("\r\n");
-              const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = `leads-qs-${new Date().toISOString().slice(0, 10)}.csv`;
-              a.click();
-              URL.revokeObjectURL(url);
-            }}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-            title={`Exportar os ${filteredLeads.length} leads visíveis em CSV`}
+            // Exporta a LISTA FILTRADA inteira (não só a página) em CSV pro
+            // Excel — buscada no banco na hora do clique, com os mesmos filtros.
+            onClick={() => void exportarCsv()}
+            disabled={exportando}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-wait"
+            title={`Exportar os ${totalFiltrado} leads visíveis em CSV`}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Exportar
+            {exportando ? "Exportando..." : "Exportar"}
           </button>
           {/* Exportar continua acima para todos — é leitura. O que MUDA dado
               some para o espectador (marketing). */}
@@ -698,7 +829,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         <input
           type="text"
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
+          onChange={(e) => setSearch(e.target.value)}
           placeholder="Pesquise por ID, nome, empresa, e-mail ou telefone..."
           className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] transition-colors"
         />
@@ -829,12 +960,22 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 if (!cadId || cadenceLinking) return;
                 e.target.value = "";
                 const allIds = Array.from(selectedIds);
+                // Status e dono dos selecionados lidos do banco agora (a seleção
+                // pode estar em páginas que não estão mais na memória).
+                let infoSel: Map<string, { status: LeadStatus; owner_id: string | null }>;
+                try {
+                  infoSel = await lerSelecionados(allIds);
+                } catch (err) {
+                  console.warn("Erro ao ler os leads selecionados:", err);
+                  notifyError("Não foi possível ler os leads selecionados — tente novamente.");
+                  return;
+                }
                 // Leads FECHADOS (ganho/perdido) ficam FORA do vínculo em massa —
                 // antes o update virava todos pra em_prospeccao e RESSUSCITAVA
                 // lead fechado sem confirmação. Reativar é ato explícito no
                 // detalhe do lead, não efeito colateral de uma ação em lote.
                 const closedIds = allIds.filter((id) => {
-                  const st = leads.find((l) => l.id === id)?.status;
+                  const st = infoSel.get(id)?.status;
                   return st === "ganho" || st === "perdido";
                 });
                 const ids = allIds.filter((id) => !closedIds.includes(id));
@@ -873,7 +1014,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   // sumiam da fila de todo mundo.
                   let tasksFail = 0;
                   for (const id of linkedIds) {
-                    const leadOwner = leads.find((l) => l.id === id)?.owner_id ?? null;
+                    const leadOwner = infoSel.get(id)?.owner_id ?? null;
                     // Encerra o plano ANTIGO antes de criar o novo — sem isso, trocar
                     // o lead de cadência DUPLICAVA a carga (as duas sequências
                     // conviviam na fila e o SDR contatava em dobro). Se o encerramento
@@ -884,7 +1025,9 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     const created = await createCadenceTasks(id, cadId, leadOwner);
                     if (created === null) tasksFail++;
                   }
-                  setLeads(prev => prev.map(l => linkedIds.has(l.id) ? { ...l, cadence_id: cadId, status: "em_prospeccao" as LeadStatus } : l));
+                  // Recarrega a página do banco: com filtro de status/cadência
+                  // ativo, o lead vinculado pode sair (ou entrar) na lista.
+                  await fetchLeads();
                   // Mantém selecionados os recusados E os fechados pulados (pra
                   // ficar visível o que NÃO foi processado).
                   setSelectedIds(new Set(allIds.filter((id) => !linkedIds.has(id))));
@@ -910,13 +1053,23 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 e.target.value = "";
                 const ids = Array.from(selectedIds);
                 const owner = users.find(u => u.id === ownerId);
+                // Dono ATUAL de cada selecionado, lido do banco agora (a seleção
+                // pode estar em páginas que não estão mais na memória).
+                let infoSel: Map<string, { status: LeadStatus; owner_id: string | null }>;
+                try {
+                  infoSel = await lerSelecionados(ids);
+                } catch (err) {
+                  console.warn("Erro ao ler os leads selecionados:", err);
+                  notifyError("Não foi possível ler os leads selecionados — tente novamente.");
+                  return;
+                }
                 // Reusa o MESMO fluxo da transferência individual (transferLead):
                 // troca o dono, registra o histórico em qs_handovers e leva as
                 // tarefas abertas junto — e MEDE lead a lead o que o banco aceitou
                 // (RLS pode recusar em silêncio; antes a tela fingia sucesso total).
                 const okIds = new Set<string>();
                 for (const id of ids) {
-                  const fromId = leads.find((l) => l.id === id)?.owner_id ?? null;
+                  const fromId = infoSel.get(id)?.owner_id ?? null;
                   if (fromId === ownerId) { okIds.add(id); continue; } // já é o dono — nada a fazer
                   const ok = await transferLead(id, fromId, ownerId, "Atribuição em massa de responsável", { notify: false });
                   if (ok) okIds.add(id);
@@ -965,7 +1118,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
       {/* ── Table ───────────────────────────────────────────────────────── */}
       <div className="bg-white border border-gray-100 rounded-xl shadow-none overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Trocando página/filtro: a tabela antiga fica, esmaecida, até a nova chegar. */}
+        <div className={`overflow-x-auto transition-opacity ${carregandoPagina ? "opacity-60" : ""}`} aria-busy={carregandoPagina}>
           <table className="w-full min-w-[720px]">
             <thead>
               <tr className="border-b border-gray-100">
@@ -1121,8 +1275,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         {/* ── Pagination ──────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
           <span className="text-xs text-gray-500">
-            Mostrando {Math.min((currentPage - 1) * ITEMS_PER_PAGE + 1, filteredLeads.length)}-
-            {Math.min(currentPage * ITEMS_PER_PAGE, filteredLeads.length)} de {filteredLeads.length}
+            Mostrando {Math.min((currentPage - 1) * ITEMS_PER_PAGE + 1, totalFiltrado)}-
+            {Math.min(currentPage * ITEMS_PER_PAGE, totalFiltrado)} de {totalFiltrado}
           </span>
           <div className="flex items-center gap-1">
             <button
@@ -1367,7 +1521,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           users={users}
           cadences={cadences}
           onClose={() => setShowCsvModal(false)}
-          onImported={fetchLeads}
+          onImported={recarregarTudo}
         />
       )}
 
@@ -1419,7 +1573,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                       ))}
                     </select>
                     {handoverFromId && (
-                      <p className="text-[11px] text-gray-400 mt-1">{handoverPoolSize} lead(s) ativo(s) disponível(is) para transferir.</p>
+                      <p className="text-[11px] text-gray-400 mt-1">{handoverPoolSize ?? "…"} lead(s) ativo(s) disponível(is) para transferir.</p>
                     )}
                   </div>
                   <div>

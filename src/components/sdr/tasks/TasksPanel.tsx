@@ -3184,11 +3184,15 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          {/* Celular (04/11): os selos (FUP, tentativa, canal) desciam por cima dos
+              dados do lead e o telefone quebrava em 3 linhas. No celular e com o
+              WhatsApp aberto do lado (qs-app-narrow) eles vão pra uma linha
+              própria — regras .qsx-hero-linha/-info/-selos no <style> abaixo. */}
+          <div className="qsx-hero-linha flex items-center gap-4">
             <span className={`qsx-chan-ic ${CHANNEL_IC_CLASS[task.channel_type]}`} style={{ width: 46, height: 46, borderRadius: 14 }}>
               <ChannelIcon type={task.channel_type} size={20} />
             </span>
-            <div className="min-w-0">
+            <div className="qsx-hero-info min-w-0">
               {lead ? (
                 <button onClick={() => onOpenLead(lead.id)} className="qsx-name-btn" title="Ver informações do lead">
                   <h2 className="qsx-hln truncate">{lead.full_name || "Lead"}</h2>
@@ -3202,7 +3206,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               {/* Fonte do lead (campo Fonte do Bitrix) — sempre embaixo do nome pra
                   o SDR saber na hora de onde veio quem ele está atendendo. */}
               {lead?.segment && (
-                <div className="flex items-center gap-1.5 mt-1" title="Fonte do lead (Bitrix) ou produto de interesse (cadastro manual)">
+                <div className="qsx-hero-fonte flex items-center gap-1.5 mt-1" title="Fonte do lead (Bitrix) ou produto de interesse (cadastro manual)">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--ink3)" }}>
                     <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
                   </svg>
@@ -3241,7 +3245,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 </button>
               )}
             </div>
-            <div className="ml-auto flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            <div className="qsx-hero-selos ml-auto flex items-center gap-2 shrink-0 flex-wrap justify-end">
               {(() => {
                 const c = classifyTask(task);
                 const attempt = getAttemptCount(task);
@@ -3960,6 +3964,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         html.qs-app-narrow .qsx-hero-side { width: 100%; border-left: 0; border-top: 1px solid var(--border); }
         html.qs-app-narrow .qsx-fila-row { flex-direction: column; align-items: stretch; gap: 14px; }
         html.qs-app-narrow .qsx-fila-extras, html.qs-app-narrow .qsx-fila-main { width: 100%; }
+        html.qs-app-narrow .qsx-hero-linha { flex-wrap: wrap; }
+        html.qs-app-narrow .qsx-hero-info { flex: 1 1 0; }
+        html.qs-app-narrow .qsx-hero-fonte { flex-wrap: wrap; }
+        html.qs-app-narrow .qsx-hero-selos { width: 100%; margin-left: 0; justify-content: flex-start; }
 
         /* ── Celular (≤767px) ── */
         @media (max-width: 767px) {
@@ -3969,6 +3977,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           .qsx-hero-side { width: 100%; border-left: 0; border-top: 1px solid var(--border); }
           .qsx-fila-row { flex-direction: column; align-items: stretch; gap: 14px; }
           .qsx-fila-extras, .qsx-fila-main { width: 100%; }
+          /* o que fazer AGORA vem antes dos retornos (era: 7 extras pra rolar até o cartão) */
+          .qsx-fila-main { order: -1; }
+          .qsx-hero-linha { flex-wrap: wrap; }
+          .qsx-hero-info { flex: 1 1 0; }
+          .qsx-hero-fonte { flex-wrap: wrap; }
+          .qsx-hero-selos { width: 100%; margin-left: 0; justify-content: flex-start; }
           .qsx-meta { border-right: 0; border-bottom: 1px solid var(--border); }
           .qsx-meta:last-child { border-bottom: 0; }
         }
