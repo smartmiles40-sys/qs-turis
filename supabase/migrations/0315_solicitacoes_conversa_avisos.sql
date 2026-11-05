@@ -365,3 +365,4 @@ begin
   return n;
 end $$;
 revoke all on function public.qs_avisos_sol_sem_dono() from public, anon, authenticated;
+grant execute on function public.qs_avisos_sol_sem_dono() to service_role;
