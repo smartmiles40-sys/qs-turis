@@ -131,14 +131,14 @@
     "api/mkt-instagram.js": {
       "maxDuration": 60
     },
-    "api/*.js": {
-      "maxDuration": 10
-    },
     "api/dashboard-sync.js": {
       "maxDuration": 60
     },
     "api/meet-gravacoes.js": {
       "maxDuration": 60
+    },
+    "api/*.js": {
+      "maxDuration": 10
     }
   },
   "crons": [
