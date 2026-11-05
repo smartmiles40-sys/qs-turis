@@ -99,12 +99,26 @@ export function lerMensagemMeta(m) {
     const l = m.location || {};
     texto = `📍 Localização: https://maps.google.com/?q=${l.latitude},${l.longitude}`;
   } else if (tipo === 'contacts') {
-    texto = `👤 Contato: ${m.contacts?.[0]?.name?.formatted_name || ''}`.trim();
+    texto = (m.contacts || []).map((c) => {
+      const fone = c?.phones?.[0]?.phone || c?.phones?.[0]?.wa_id || '';
+      return `👤 Contato: ${c?.name?.formatted_name || ''}${fone ? ` (${fone})` : ''}`.trim();
+    }).join('\n') || '👤 Contato';
   } else if (tipo === 'template') {
     // Eco de um modelo mandado pelo app/API — o corpo nem sempre vem.
     texto = m.template?.name ? `📨 Modelo: ${m.template.name}` : null;
   }
-  if (!texto && !midia) return null;
+
+  // NADA SOME (05/11, Bruno: "absolutamente tudo tem que subir pro QS"). Até
+  // aqui, editar/apagar/tipo novo da Meta voltava null e a mensagem era jogada
+  // fora sem ninguém saber (4 "unsupported" de clientes em 05/11). Agora todo
+  // tipo vira bolha — no pior caso, um aviso pra abrir no celular.
+  let respondendoA = m.context?.id ? String(m.context.id) : null;
+  if (!texto && !midia) {
+    const especial = textoDoTipoEspecial(m);
+    if (especial === IGNORAR) return null;
+    texto = especial.texto;
+    if (especial.original) respondendoA = especial.original;
+  }
 
   const ts = Number(m.timestamp);
   return {
@@ -112,7 +126,44 @@ export function lerMensagemMeta(m) {
     texto: texto ? String(texto) : '',
     midia,
     enviadaEm: Number.isFinite(ts) && ts > 0 ? new Date(ts * 1000).toISOString() : new Date().toISOString(),
-    respondendoA: m.context?.id ? String(m.context.id) : null,
+    respondendoA,
+  };
+}
+
+const IGNORAR = Symbol('ignorar');
+
+/**
+ * Os tipos que não são texto/mídia. Reação é tratada antes (fica na bolha
+ * reagida); `request_welcome` é só "a pessoa abriu a conversa", sem conteúdo.
+ * Qualquer outro tipo — inclusive um que a Meta invente amanhã — vira aviso.
+ */
+export function textoDoTipoEspecial(m) {
+  const tipo = String(m?.type || '');
+  if (tipo === 'reaction' || tipo === 'request_welcome') return IGNORAR;
+  if (tipo === 'edit') {
+    const e = m.edit || {};
+    const novo = e.message?.text?.body ?? e.text?.body ?? e.body ?? e.message?.caption ?? null;
+    const original = e.original_message_id || e.message_id || e.id || null;
+    return { texto: novo ? `✏️ Editou a mensagem: ${novo}` : '✏️ Editou uma mensagem (abra no celular para ver)', original: original ? String(original) : null };
+  }
+  if (tipo === 'revoke' || tipo === 'delete') {
+    const original = m.revoke?.original_message_id || m.delete?.original_message_id || null;
+    return { texto: '🗑️ Apagou uma mensagem', original: original ? String(original) : null };
+  }
+  if (tipo === 'system') {
+    return { texto: `ℹ️ ${m.system?.body || 'Aviso do WhatsApp'}`, original: null };
+  }
+  if (tipo === 'order') {
+    const itens = (m.order?.product_items || []).length;
+    return { texto: `🛒 Pedido pelo catálogo${itens ? ` (${itens} ${itens === 1 ? 'item' : 'itens'})` : ''}${m.order?.text ? `: ${m.order.text}` : ''}`, original: null };
+  }
+  if (tipo === 'interactive' || tipo === 'button') {
+    return { texto: '↩️ Respondeu a uma mensagem interativa', original: null };
+  }
+  const qual = m?.unsupported?.type || (tipo && tipo !== 'unsupported' ? tipo : '') || '';
+  return {
+    texto: `⚠️ ${qual ? `Mensagem do tipo "${qual}"` : 'Mensagem'} que o WhatsApp não repassa ao sistema — abra no celular para ver.`,
+    original: null,
   };
 }
 
@@ -201,6 +252,15 @@ async function gravarUma({ numero, m, direcao, telefoneCliente, nomeCliente, aoV
   });
   if (novo !== true || !aoVivo) return { leadId: lead.id, novo: novo === true };
 
+  // CLIENTE DO REL NO CHIP DO COMERCIAL (05/11): 37 mensagens de 9 clientes em
+  // 7 dias ficaram só na caixa do SDR. Agora vai também uma cópia pra conversa
+  // do cliente no Relacionamento (como histórico: sem SLA, sem resposta
+  // automática), dizendo por qual número ele escreveu.
+  if (direcao === 'in') {
+    await copiarProRelacionamento({ telefoneCliente, nomeCliente, lida, texto, anexos, donoDoNumero })
+      .catch((e) => console.warn('[meta-entrada] cópia pro Rel falhou:', e?.message));
+  }
+
   // ── "PARAR" ──────────────────────────────────────────────────────────────
   // Antes de qualquer outra coisa que aconteça com uma mensagem que ENTRA: se a
   // pessoa pediu para sair, isso precisa valer a partir de agora, não a partir
@@ -243,6 +303,39 @@ async function gravarUma({ numero, m, direcao, telefoneCliente, nomeCliente, aoV
     }).catch((e) => console.warn('[meta-entrada] Glória não avisada:', e?.message));
   }
   return { leadId: lead.id, novo: true };
+}
+
+let cacheNumeroRel = { em: 0, v: null };
+async function numeroDoRelacionamento() {
+  if (Date.now() - cacheNumeroRel.em < 10 * 60_000) return cacheNumeroRel.v;
+  const r = await rest('qs_wa_numeros_meta?select=phone_number_id&setor=eq.relacionamento&order=conectado_em.desc.nullslast&limit=1');
+  cacheNumeroRel = { em: Date.now(), v: r?.[0]?.phone_number_id ? String(r[0].phone_number_id) : null };
+  return cacheNumeroRel.v;
+}
+
+async function copiarProRelacionamento({ telefoneCliente, nomeCliente, lida, texto, anexos, donoDoNumero }) {
+  const cliente = await rest('rpc/rel_cliente_do_telefone', { method: 'POST', body: { p_telefone: String(telefoneCliente) } });
+  if (!cliente) return false;
+  const phoneRel = await numeroDoRelacionamento();
+  if (!phoneRel) return false;
+  const quem = donoDoNumero ? `número de ${String((await nomeDoUsuario(donoDoNumero)) || 'um SDR').split(' ')[0]}` : 'número do Comercial';
+  const r = await rest('rpc/rel_wa_ingest', {
+    method: 'POST',
+    body: {
+      p_phone_id: phoneRel,
+      p_telefone: String(telefoneCliente),
+      p_nome: nomeCliente,
+      p_wamid: `copia-comercial:${lida.id}`,
+      p_direcao: 'in',
+      p_origem: 'historico',
+      p_texto: `📲 Escreveu no ${quem} (Comercial): ${texto || ''}`.trim(),
+      p_anexos: anexos || [],
+      p_enviada_em: lida.enviadaEm,
+      p_autor: null, p_autor_nome: null, p_status: null, p_resp: null,
+    },
+  });
+  if (r?.nova) console.log(`[meta-entrada] cliente do Rel …${String(telefoneCliente).slice(-4)} escreveu no Comercial — cópia na conversa do Rel`);
+  return r?.nova === true;
 }
 
 let cacheGloria = { em: 0, v: false };
@@ -292,6 +385,10 @@ async function reacaoDoCliente(m, nomeCliente) {
 }
 
 const STATUS_OK = new Set(['sent', 'delivered', 'read', 'failed']);
+
+/** Banco lento/fora (some com o tempo) → vale pedir à Meta que reenvie. */
+export const ehTransitorio = (e) => e?.code === 'TIMEOUT' || e?.status >= 500 || e?.status === 429
+  || /fetch failed|ECONNRESET|socket|timeout|não respondeu/i.test(String(e?.message || ''));
 
 /**
  * Pra onde vai a mudança de um número (30/10/2026, 0244). Só o setor
@@ -363,12 +460,20 @@ export async function processarMensagensDaMeta(changes) {
     try {
       if (ch.field === 'messages') {
         for (const m of value.messages || []) {
-          if (m.type === 'reaction') { if (await reacaoDoCliente(m, nomes.get(String(m.from)))) conta.reacoes++; continue; }
-          const r = await gravarUma({
-            numero, m, direcao: 'in', telefoneCliente: String(m.from || ''), nomeCliente: nomes.get(String(m.from)) || null, aoVivo: true,
-          });
-          if (r.novo) conta.recebidas++;
-          if (r.ignorada === 'sem-lead') conta.semLead++;
+          // Uma mensagem ruim não derruba as outras do mesmo lote (05/11).
+          try {
+            if (m.type === 'reaction') { if (await reacaoDoCliente(m, nomes.get(String(m.from)))) conta.reacoes++; continue; }
+            const r = await gravarUma({
+              numero, m, direcao: 'in', telefoneCliente: String(m.from || ''), nomeCliente: nomes.get(String(m.from)) || null, aoVivo: true,
+            });
+            if (r.novo) conta.recebidas++;
+            if (r.ignorada === 'sem-lead') conta.semLead++;
+            if (r.ignorada === 'sem-conteudo' && m.type !== 'request_welcome') console.warn(`[meta-entrada] mensagem sem conteúdo, tipo=${m.type} id=${m.id}`);
+          } catch (e) {
+            conta.erros++;
+            if (ehTransitorio(e)) conta.pendentes++;
+            console.error(`[meta-entrada] mensagem ${m?.id} (${m?.type}) não gravada:`, e?.message);
+          }
         }
         for (const st of value.statuses || []) {
           const s = String(st.status || '').toLowerCase();
@@ -380,12 +485,16 @@ export async function processarMensagensDaMeta(changes) {
 
       if (ch.field === 'smb_message_echoes') {
         for (const m of value.message_echoes || []) {
-          if (m.type === 'reaction') { if (await reacaoDoSdr(m, numero)) conta.reacoes++; continue; }
-          const r = await gravarUma({ numero, m, direcao: 'out', telefoneCliente: String(m.to || ''), nomeCliente: null, aoVivo: true });
-          if (r.novo) conta.ecos++;
-          // O que o celular faz e o QS ainda não entende (editar, apagar…) fica
-          // anotado no log, pra saber o que falta espelhar.
-          if (r.ignorada === 'sem-conteudo') console.log(`[meta-entrada] eco ignorado, tipo=${m.type}`);
+          try {
+            if (m.type === 'reaction') { if (await reacaoDoSdr(m, numero)) conta.reacoes++; continue; }
+            const r = await gravarUma({ numero, m, direcao: 'out', telefoneCliente: String(m.to || ''), nomeCliente: null, aoVivo: true });
+            if (r.novo) conta.ecos++;
+            if (r.ignorada === 'sem-conteudo') console.warn(`[meta-entrada] eco sem conteúdo, tipo=${m.type} id=${m.id}`);
+          } catch (e) {
+            conta.erros++;
+            if (ehTransitorio(e)) conta.pendentes++;
+            console.error(`[meta-entrada] eco ${m?.id} (${m?.type}) não gravado:`, e?.message);
+          }
         }
       }
 
@@ -408,7 +517,7 @@ export async function processarMensagensDaMeta(changes) {
     } catch (e) {
       conta.erros++;
       // banco lento/fora: pede reenvio à Meta (o wamid garante que nada duplica)
-      if (e?.code === 'TIMEOUT' || e?.status >= 500 || /fetch failed|ECONNRESET/i.test(String(e?.message))) conta.pendentes++;
+      if (ehTransitorio(e)) conta.pendentes++;
       console.error(`[meta-entrada] ${ch.field}:`, e?.message);
     }
   }

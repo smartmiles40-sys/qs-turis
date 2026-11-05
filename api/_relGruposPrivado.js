@@ -77,6 +77,15 @@ function contextoDe(d) {
   return d?.contextInfo || null;
 }
 
+/** Partes da mensagem do Baileys que não são conteúdo (não viram bolha). */
+const SEM_BOLHA = new Set([
+  'messageContextInfo', 'senderKeyDistributionMessage', 'reactionMessage', 'encReactionMessage',
+  'pollUpdateMessage', 'protocolMessage', 'keepInChatMessage', 'pinInChatMessage', 'deviceSentMessage',
+  'albumMessage', 'associatedChildMessage', 'messageHistoryBundle', 'callLogMesssage', 'call',
+  'base64', 'mediaUrl',
+  'templateMessage', // anúncio de outra empresa pro número do Rel (o modelo que o Rel manda vem pela Meta)
+]);
+
 const textoCitado = (q) => q?.conversation || q?.extendedTextMessage?.text || q?.imageMessage?.caption || q?.videoMessage?.caption
   || (q?.imageMessage ? '📷 foto' : q?.videoMessage ? '🎬 vídeo' : q?.audioMessage ? '🎤 áudio' : q?.documentMessage ? '📎 arquivo' : '');
 
@@ -108,8 +117,34 @@ export function lerPrivado(d) {
   } else if (m.locationMessage) {
     tipo = 'texto'; texto = `📍 Localização: https://maps.google.com/?q=${m.locationMessage.degreesLatitude},${m.locationMessage.degreesLongitude}`;
   } else if (m.contactMessage) { tipo = 'texto'; texto = `👤 Contato: ${m.contactMessage.displayName || ''}`.trim(); }
-  else if (m.pollCreationMessage || m.pollCreationMessageV3) { tipo = 'texto'; texto = `📊 ${(m.pollCreationMessage || m.pollCreationMessageV3).name || 'Enquete'}`; }
-  if (!tipo) return null; // reação, protocolo, templateMessage de outra empresa, cifrada…
+  else if (m.pollCreationMessage || m.pollCreationMessageV2 || m.pollCreationMessageV3) { tipo = 'texto'; texto = `📊 ${(m.pollCreationMessage || m.pollCreationMessageV2 || m.pollCreationMessageV3).name || 'Enquete'}`; }
+  // 05/11 — "absolutamente tudo sobe pro QS": os tipos que antes sumiam.
+  else if (m.ptvMessage) { tipo = 'video'; texto = m.ptvMessage.caption || ''; midia = 'video'; } // vídeo redondinho
+  else if (m.liveLocationMessage) {
+    tipo = 'texto'; texto = `📍 Localização em tempo real: https://maps.google.com/?q=${m.liveLocationMessage.degreesLatitude},${m.liveLocationMessage.degreesLongitude}`;
+  } else if (m.contactsArrayMessage) {
+    tipo = 'texto'; texto = (m.contactsArrayMessage.contacts || []).map((c) => `👤 Contato: ${c?.displayName || ''}`.trim()).join('\n') || '👤 Contatos';
+  } else if (m.buttonsResponseMessage || m.listResponseMessage || m.templateButtonReplyMessage || m.interactiveResponseMessage) {
+    const r = m.buttonsResponseMessage?.selectedDisplayText || m.listResponseMessage?.title || m.templateButtonReplyMessage?.selectedDisplayText
+      || m.interactiveResponseMessage?.body?.text;
+    tipo = 'texto'; texto = r ? `↩️ ${r}` : '↩️ Respondeu a uma mensagem interativa';
+  } else if (m.eventMessage) { tipo = 'texto'; texto = `📅 Evento: ${m.eventMessage.name || ''}`.trim(); }
+  else if (m.orderMessage || m.productMessage) { tipo = 'texto'; texto = '🛒 Pedido/produto do catálogo'; }
+  else if (m.groupInviteMessage) { tipo = 'texto'; texto = `👥 Convite para o grupo ${m.groupInviteMessage.groupName || ''}`.trim(); }
+  else if (m.editedMessage || m.protocolMessage?.type === 14 || m.protocolMessage?.type === 'MESSAGE_EDIT') {
+    const p = m.editedMessage?.message?.protocolMessage || m.protocolMessage || {};
+    const e = p.editedMessage || {};
+    const novo = e.conversation || e.extendedTextMessage?.text || e.imageMessage?.caption || e.videoMessage?.caption || '';
+    tipo = 'texto'; texto = novo ? `✏️ Editou a mensagem: ${novo}` : '✏️ Editou uma mensagem (abra no celular para ver)';
+  } else if (m.protocolMessage?.type === 0 || m.protocolMessage?.type === 'REVOKE') {
+    tipo = 'texto'; texto = '🗑️ Apagou uma mensagem';
+  } else {
+    // (cifrada/sem corpo NÃO vira aviso: chega de novo decifrada com o mesmo id,
+    // e o aviso ocuparia o lugar dela; a cópia da Meta cobre esse caso)
+    const chaves = Object.keys(m).filter((k) => !SEM_BOLHA.has(k));
+    if (chaves.length) { tipo = 'texto'; texto = `⚠️ Mensagem do tipo "${chaves[0].replace(/Message$/, '')}" que o sistema ainda não mostra — abra no celular para ver.`; }
+  }
+  if (!tipo) return null; // reação, voto de enquete, chaves de criptografia, protocolo…
 
   const ctx = contextoDe(d);
   const grupoCitado = ctx && ehGrupo(ctx.remoteJid)

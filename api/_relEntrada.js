@@ -179,7 +179,7 @@ export async function processarRelacionamento(ch, numero, nomes) {
   async function uma(m, { direcao, origem, telefone, nome, baixar }) {
     const lida = lerMensagemMeta(m);
     if (!lida?.id || !telefone) {
-      if (m?.type && m.type !== 'reaction') console.log(`[rel-entrada] tipo ignorado: ${m.type}`);
+      if (m?.type && m.type !== 'reaction' && m.type !== 'request_welcome') console.warn(`[rel-entrada] mensagem sem id/telefone, tipo=${m.type} id=${m?.id}`);
       return null;
     }
     const anexos = baixar ? await baixarMidiaMeta(lida.midia, pasta(telefone), phoneId) : [];
@@ -230,6 +230,7 @@ export async function processarRelacionamento(ch, numero, nomes) {
         for (const m of th.messages || []) {
           const daEmpresa = String(m.from || '') !== cliente;
           const r = await uma(m, { direcao: daEmpresa ? 'out' : 'in', origem: 'historico', telefone: cliente, nome: null, baixar: false });
+          if (r?.erro) conta.pendentes++;
           if (r?.nova) conta.historico++;
         }
       }
