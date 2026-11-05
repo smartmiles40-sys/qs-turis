@@ -23,6 +23,9 @@
 //   POST ?acao=onboarding-diario  → n8n (cron dele): lista quem comprou e ainda não recebeu
 //                                   o acesso ao portal do viajante, com link e mensagem prontos.
 //   GET  ?acao=health             → "estou vivo" (sem dados).
+//   GET  ?acao=espelho            → Vercel Cron a cada 5 min (Bearer CRON_SECRET). Espelho ao vivo
+//                                   antigo → QS enquanto o time valida (0317; lógica em _expEspelho.js).
+//                                   ?seco=1 só conta · ?limpar=1 força a limpeza de apagados.
 //
 // Diferenças de propósito em relação ao antigo (bugs que não foram copiados):
 //   - expedicao-sync, numa expedição que já existe, SÓ PREENCHE O QUE ESTÁ VAZIO
@@ -41,6 +44,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { montarChecklistPadrao } from './_expChecklist.js';
 import { bitrixConfigurado } from './_bitrixLead.js';
+import { rodarEspelho } from './_expEspelho.js';
 
 const PORTAL_PADRAO = 'https://sistema-expedicoes.vercel.app';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -557,6 +561,15 @@ export default async function handler(req, res) {
   const acao = String(req.query?.acao || '');
   try {
     if (acao === 'health') return res.status(200).json({ ok: true, service: 'qs-expedicoes', time: new Date().toISOString() });
+
+    // ── Espelho antigo → QS (05/11) — bloco próprio ──
+    if (acao === 'espelho') {
+      if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Método não permitido' });
+      if (!cronOk(req)) return res.status(401).json({ ok: false, error: 'Não autorizado' });
+      const r = await rodarEspelho({ seco: req.query?.seco === '1', limpar: req.query?.limpar === '1' });
+      console.log(`[expedicoes] espelho: ${JSON.stringify({ completo: r.completo, desligado: r.desligado, parou_em: r.parou_em, ms: r.ms, avisos: r.avisos?.length })}`);
+      return res.status(r.ok ? 200 : 500).json(r);
+    }
 
     if (acao === 'atualizar-status') {
       if (req.method === 'GET') {
