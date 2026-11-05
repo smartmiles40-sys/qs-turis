@@ -1,0 +1,137 @@
+/* Central de Solicitações — QUADRO + CONVERSA (05/11/2026, mockup "G · Quadro + conversa").
+   Mesma hierarquia do mockup escuro (página → coluna → cartão → cartão aberto), mas
+   em tokens: funciona no tema claro e no modo noite (.dark). */
+
+.solq {
+  --q-col: var(--surface-2);
+  --q-card: var(--surface);
+  --q-sel: var(--surface);
+  --q-fundo: var(--surface-2);   /* prévia da mensagem, pílulas, campo */
+  --q-azul: #1D4ED8;  --q-azul-bg: #EFF6FF;
+  --q-laranja: #C2410C; --q-laranja-bg: #FFEDD5;
+  --q-vermelho: var(--danger); --q-vermelho-bg: var(--danger-bg);
+  --q-verde: var(--ok); --q-verde-bg: var(--ok-bg);
+  display: flex; flex-direction: column; gap: 0; color: var(--text); font-family: var(--font-sans); font-size: 14px; line-height: 1.45; min-width: 0;
+}
+.dark .solq {
+  --q-col: var(--surface);          /* #111113 */
+  --q-card: #141416;
+  --q-sel: #1F1F23;
+  --q-fundo: #0B0B0C;
+  --q-azul: #93C5FD;  --q-azul-bg: rgba(147, 197, 253, .14);
+  --q-laranja: #FDBA74; --q-laranja-bg: rgba(253, 186, 116, .14);
+  --q-vermelho: #F87171; --q-vermelho-bg: rgba(248, 113, 113, .14);
+  --q-verde: #86EFAC; --q-verde-bg: rgba(134, 239, 172, .12);
+}
+
+/* ── Topo ── */
+.solq-top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 0 0 16px; border-bottom: 1px solid var(--border); }
+.solq-top__tx { flex: 1 1 280px; min-width: 0; }
+.solq-top h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+.solq-top p { margin: 0; font-size: 13px; color: var(--muted); }
+.solq-seg { display: flex; padding: 4px; border-radius: 10px; background: var(--q-col); border: 1px solid var(--border); }
+.solq-seg button { height: 36px; padding: 0 14px; border-radius: 7px; border: 0; background: transparent; color: var(--muted); font: 600 14px var(--font-sans); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.solq-seg button[aria-selected="true"] { background: var(--text); color: var(--bg); }
+.solq-seg__n { min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 999px; background: var(--q-azul); color: var(--bg); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.solq-filtros { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.solq-pill { height: 36px; padding: 0 12px; border-radius: 999px; font: 600 13px var(--font-sans); border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.solq-pill[aria-pressed="true"] { border-color: var(--text); background: var(--text); color: var(--bg); }
+.solq-pill__n { font-size: 11px; font-weight: 700; opacity: .75; }
+.solq-select { height: 36px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text); font: 600 13px var(--font-sans); }
+.solq-btn { height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--text); font: 600 14px var(--font-sans); cursor: pointer; white-space: nowrap; }
+.solq-btn--pri { border-color: var(--text); background: var(--text); color: var(--bg); }
+.solq-btn:disabled { opacity: .5; cursor: default; }
+.solq button:focus-visible, .solq input:focus-visible, .solq textarea:focus-visible, .solq select:focus-visible, .solq summary:focus-visible { outline: 2px solid var(--q-azul); outline-offset: 2px; }
+
+/* convite pra ligar a notificação do navegador */
+.solq-convite { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 14px; border-radius: 12px; background: var(--q-azul-bg); font-size: 13px; }
+.solq-convite span { flex: 1 1 260px; }
+
+/* ── Corpo: quadro + conversa ── */
+.solq-corpo { display: flex; flex-wrap: wrap; min-height: 0; align-items: stretch; }
+.solq-quadro { flex: 999 1 720px; min-width: 0; overflow-x: auto; padding: 20px 0; }
+.solq-grade { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 14px; min-width: 900px; align-items: start; }
+.solq-col { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 14px; background: var(--q-col); border: 1px solid var(--border); min-height: 520px; }
+.solq-col__h { display: flex; flex-direction: column; gap: 2px; padding: 2px 4px 6px; }
+.solq-col__t { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 700; }
+.solq-col__p { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+.solq-col__n { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--q-sel); color: var(--muted); }
+.solq-col__d { font-size: 12px; color: var(--muted); }
+.solq-vazio { margin: 0; padding: 18px 12px; border-radius: 10px; border: 1px dashed var(--border-strong); color: var(--muted); font-size: 13px; text-align: center; }
+.solq-hist { background: none; border: 0; padding: 4px; color: var(--q-azul); font: 500 12px var(--font-sans); cursor: pointer; text-align: left; }
+
+/* cartão */
+.solq-card { border-radius: 12px; background: var(--q-card); border: 1px solid var(--border); }
+.solq-card[data-sel] { background: var(--q-sel); border-color: var(--text); }
+.solq-card[data-feito]:not([data-sel]) { opacity: .7; }
+.solq-card__abrir { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 12px 12px 8px; border: 0; background: transparent; color: var(--text); width: 100%; font: inherit; cursor: pointer; border-radius: 12px; }
+.solq-card__l1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.solq-card__num { margin-left: auto; font-size: 11px; color: var(--muted); }
+.solq-card__titulo { font-size: 14px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.solq-card__cli { font-size: 12px; color: var(--muted); }
+.solq-card__cli[data-tem] { color: var(--text); opacity: .85; }
+.solq-card__msg { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; background: var(--q-fundo); font-size: 12px; color: var(--muted); }
+.solq-card__msg > span:first-of-type { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.solq-card__pe { display: flex; align-items: center; gap: 8px; padding: 0 12px 12px; }
+.solq-card__pe small { margin-left: auto; font-size: 11px; color: var(--muted); }
+.solq-card__pegar { flex: 1; height: 32px; border-radius: 8px; border: 1px solid var(--text); background: transparent; color: var(--text); font: 600 12px var(--font-sans); cursor: pointer; }
+.solq-card__pegar:disabled { opacity: .5; }
+
+.solq-chip { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.solq-chip[data-tom="r"] { background: var(--q-vermelho-bg); color: var(--q-vermelho); }
+.solq-chip[data-tom="o"] { background: var(--q-laranja-bg); color: var(--q-laranja); }
+.solq-chip[data-tom="ok"] { background: var(--q-verde-bg); color: var(--q-verde); }
+.solq-chip[data-tom="n"] { background: var(--q-sel); color: var(--muted); border: 1px solid var(--border); }
+.solq-urg { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; color: var(--q-laranja); }
+.solq-badge { min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 999px; background: var(--q-azul); color: var(--bg); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.solq-ava { width: 24px; height: 24px; border-radius: 999px; background: var(--q-sel); border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; }
+
+/* ── Conversa ── */
+.solq-conv { flex: 1 1 400px; max-width: 520px; min-width: 0; border-left: 1px solid var(--border); background: var(--q-col); display: flex; flex-direction: column; max-height: calc(100vh - 120px); position: sticky; top: 0; align-self: flex-start; }
+.solq-conv__h { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.solq-conv__l1 { display: flex; align-items: flex-start; gap: 10px; }
+.solq-conv__meta { margin: 0; font-size: 12px; color: var(--muted); }
+.solq-conv h2 { margin: 2px 0 0; font-size: 17px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.solq-conv__cli { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.solq-x { width: 32px; height: 32px; border-radius: 8px; border: 0; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.solq-conv__quem { font-size: 12px; color: var(--muted); }
+.solq-conv__acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+.solq-conv__acoes .solq-btn { flex: 1 1 auto; }
+.solq-pede { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--q-card); }
+.solq-pede label { font-size: 13px; font-weight: 600; }
+.solq-ta { width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: 14px var(--font-sans); padding: 8px 10px; resize: vertical; }
+.solq-erro { margin: 0; font-size: 13px; color: var(--danger); }
+
+.solq-det { border: 1px solid var(--border); border-radius: 10px; background: var(--q-card); }
+.solq-det > summary { cursor: pointer; padding: 8px 12px; font-size: 13px; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 6px; }
+.solq-det > summary::-webkit-details-marker { display: none; }
+.solq-det > summary::before { content: "▸"; font-size: 11px; color: var(--muted); transition: transform .15s; }
+.solq-det[open] > summary::before { transform: rotate(90deg); }
+.solq-det__corpo { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.solq-det__desc { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.solq-links { display: flex; flex-wrap: wrap; gap: 12px; }
+.solq-link { background: none; border: 0; padding: 0; color: var(--q-azul); font: 600 13px var(--font-sans); cursor: pointer; }
+
+.solq-tl { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 200px; }
+.solq-ev { margin: 0; align-self: center; font-size: 12px; color: var(--muted); padding: 4px 12px; border-radius: 999px; background: var(--q-card); border: 1px solid var(--border); text-align: center; }
+.solq-msg { display: flex; flex-direction: column; gap: 4px; max-width: 80%; align-self: flex-start; }
+.solq-msg[data-eu] { align-self: flex-end; align-items: flex-end; }
+.solq-msg > span { font-size: 12px; color: var(--muted); }
+.solq-msg > p { margin: 0; padding: 10px 13px; border-radius: 14px; background: var(--q-sel); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border); }
+.solq-msg[data-eu] > p { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+.solq-rodape { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.solq-rapidas { display: flex; gap: 6px; flex-wrap: wrap; }
+.solq-rapidas button { height: 30px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text); font: 12px var(--font-sans); cursor: pointer; }
+.solq-campo { display: flex; gap: 8px; align-items: center; min-height: 48px; padding: 0 6px 0 14px; border-radius: 24px; border: 1px solid var(--border); background: var(--q-card); }
+.solq-campo textarea { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: 14px var(--font-sans); outline: none; resize: none; padding: 12px 0; max-height: 120px; }
+.solq-enviar { width: 36px; height: 36px; border-radius: 999px; border: 0; background: var(--text); color: var(--bg); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.solq-enviar:disabled { opacity: .4; cursor: default; }
+.solq-seguir { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ── Celular: a conversa vira tela cheia ── */
+@media (max-width: 900px) {
+  .solq-conv { position: fixed; inset: 0; z-index: 80; max-width: none; max-height: none; border-left: 0; background: var(--bg); padding-bottom: env(safe-area-inset-bottom); }
+  .solq-top { padding-bottom: 12px; }
+  .solq-btn { flex: 1 1 auto; }
+}

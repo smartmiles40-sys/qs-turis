@@ -3,6 +3,7 @@
 // novidades no que EU pedi (+ 0158: cotação esperando meu ajuste ou desfecho vencido). Recontagem a cada 30s com a aba aberta.
 import { useCallback, useEffect, useState } from "react";
 import { aoMudarSolicitacao, contarSolicitacoes, type Contagem, type Setor } from "./lib";
+import { numeroDoMenu } from "./conversa";
 
 export function useContagemSolicitacoes(setor: Setor): [Contagem, () => void] {
   const [c, setC] = useState<Contagem>({ novas: 0, atrasadas: 0, comigo: 0, novidades: 0, ajustes: 0, desfechos: 0 });
@@ -19,6 +20,7 @@ export function useContagemSolicitacoes(setor: Setor): [Contagem, () => void] {
 
 /** Número da bolinha: o que chegou + o que mudou no que eu pedi + desfecho vencido. Vermelho se tem atrasada. */
 export function bolinhaDaCentral(c: Contagem): { badge?: number; alerta: boolean } {
-  const n = c.novas + c.novidades + c.desfechos;
+  // 0315: com as "não lidas" por pessoa, o selo é o que tem de novo nas conversas (ver conversa.ts).
+  const n = numeroDoMenu(c);
   return { badge: n || (c.atrasadas || undefined), alerta: c.atrasadas > 0 || c.desfechos > 0 };
 }

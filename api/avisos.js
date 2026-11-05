@@ -29,6 +29,13 @@ export default async function handler(req, res) {
     console.error('[avisos] tempo falhou:', String(e?.message || '').slice(0, 200));
     saida.erroTempo = String(e?.message || 'falhou').slice(0, 200);
   }
+  // 0315: pedido "Nova" há 2h úteis sem dono → aviso pro gestor do setor (1 vez por pedido).
+  // Antes da 0315 aplicada a função não existe: só registra e segue.
+  try {
+    saida.semDono = await rest('rpc/qs_avisos_sol_sem_dono', { method: 'POST', body: {} });
+  } catch (e) {
+    console.warn('[avisos] sem dono falhou:', String(e?.message || '').slice(0, 200));
+  }
   try {
     saida.apagados = await rest('rpc/qs_avisos_limpar', { method: 'POST', body: {} });
   } catch (e) {

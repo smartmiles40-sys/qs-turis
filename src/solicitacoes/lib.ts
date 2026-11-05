@@ -191,6 +191,23 @@ export interface Solicitacao {
   desfecho_por_nome: string | null;
   falta_desfecho: boolean;
   desfecho_atrasado: boolean;
+  // 0315 — quadro + conversa (opcionais: antes da 0315 aplicada não vêm)
+  pausado_em?: string | null;
+  prazo_pausado?: boolean;
+  seguindo?: boolean;
+  participo?: boolean;
+  nao_lidas?: number;
+  ultimo_evento?: UltimoEvento | null;
+}
+
+/** 0315: a última coisa que aconteceu no pedido (prévia no cartão). */
+export interface UltimoEvento {
+  tipo: EventoSol["tipo"];
+  texto: string | null;
+  para: string | null;
+  autor_id: string | null;
+  autor_nome: string | null;
+  criado_em: string;
 }
 
 export interface EventoSol {
@@ -292,12 +309,37 @@ export async function pessoasDoSetor(setor: Setor): Promise<Pessoa[]> {
   return ((data ?? []) as Pessoa[]).filter((p) => p.role === "admin" || (p.setores ?? []).includes(setor));
 }
 
-export interface Contagem { novas: number; atrasadas: number; comigo: number; novidades: number; ajustes: number; desfechos: number }
+/** naoLidas: 0315 (null = a 0315 ainda não foi aplicada → selo antigo). */
+export interface Contagem { novas: number; atrasadas: number; comigo: number; novidades: number; ajustes: number; desfechos: number; naoLidas?: number | null }
 export async function contarSolicitacoes(setor: Setor): Promise<Contagem> {
   const { data, error } = await supabase.rpc("qs_sol_contagem", { p_setor: setor });
   if (error) throw new Error(error.message);
-  const c = (data ?? {}) as Partial<Contagem>;
-  return { novas: c.novas ?? 0, atrasadas: c.atrasadas ?? 0, comigo: c.comigo ?? 0, novidades: c.novidades ?? 0, ajustes: c.ajustes ?? 0, desfechos: c.desfechos ?? 0 };
+  const c = (data ?? {}) as Partial<Contagem> & { nao_lidas?: number };
+  return {
+    novas: c.novas ?? 0, atrasadas: c.atrasadas ?? 0, comigo: c.comigo ?? 0, novidades: c.novidades ?? 0, ajustes: c.ajustes ?? 0, desfechos: c.desfechos ?? 0,
+    naoLidas: typeof c.nao_lidas === "number" ? c.nao_lidas : null,
+  };
+}
+
+// ── 0315: quem acompanha o pedido ───────────────────────────────────────────
+export interface Participante { user_id: string; nome: string; papel: "pediu" | "responsavel" | "acompanha" }
+/** Pediu · responsável · quem acompanha. [] antes da 0315. */
+export async function participantesDe(id: string): Promise<Participante[]> {
+  const { data, error } = await supabase.rpc("qs_sol_participantes", { p_id: id });
+  if (error) return [];
+  return (data ?? []) as Participante[];
+}
+export async function seguir(id: string, sim: boolean) {
+  const { error } = await supabase.rpc("qs_sol_seguir", { p_id: id, p_seguir: sim });
+  if (error) throw new Error(error.message.includes("qs_sol_seguir") ? "Acompanhar ainda não está liberado (falta a 0315 no banco)." : error.message);
+}
+
+// O pedido cuja conversa está aberta AGORA na tela: o aviso desse pedido não
+// vira toast (a pessoa já está vendo) — só recarrega a conversa.
+let pedidoEmFoco: string | null = null;
+export function definirPedidoEmFoco(id: string | null) { pedidoEmFoco = id; }
+export function pedidoEstaEmFoco(id: string | null | undefined): boolean {
+  return !!id && id === pedidoEmFoco && typeof document !== "undefined" && !document.hidden;
 }
 
 /** Cotações entregues de um setor, desde sempre (0158: "deve contabilizar todas"). */

@@ -24,7 +24,10 @@
 // Recusadas e canceladas saem do quadro e ficam no Histórico.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
+import { useAvisos } from "@/avisos/AvisosProvider";
+import { PainelConversa, QuadroQ } from "./QuadroConversa";
+import { passaNoFiltro, totalNaoLidas, type FiltroQ } from "./conversa";
 import { Avatar, Btn, FilterPill, SearchInput, SectorChip, SectorDot, StatCard, StatusChip, type ChipTone } from "@/components/ui";
 import { lerParamDoHash } from "@/lib/hashQuery";
 import NovaSolicitacao from "./NovaSolicitacao";
@@ -32,11 +35,11 @@ import SolicitacaoDetalhe, { type LinksSol } from "./SolicitacaoDetalhe";
 import TiposPrazos from "./TiposPrazos";
 import { rotuloStatus } from "./cotacao";
 import {
-  AGUARDANDO, NOME_SETOR, setoresDaCentral, aoMudarSolicitacao, buscar, contarEntregues, haQuanto, listarDoSetor, listarMinhas, primeiroNome, textoPrazo,
+  AGUARDANDO, NOME_SETOR, agir, setoresDaCentral, aoMudarSolicitacao, buscar, contarEntregues, haQuanto, listarDoSetor, listarMinhas, primeiroNome, textoPrazo,
   type Entregues, type Setor, type Solicitacao,
 } from "./lib";
 import {
-  atrasada, clienteDo, colunaDe, estadoInicial, faixaDe, gravarEstado, idDoCaminho, lembrarDono, lembrarOrigem, naRotaDaCentral,
+  atrasada, clienteDo, colunaDe, estadoInicial, faixaDe, gravarEstado, idDoCaminho, lembrar, lembrarDono, lembrarOrigem, naRotaDaCentral,
   ordenar, tirarIdDoCaminho, tomDoPrazo, venceHoje, type Coluna, type Dono, type Escopo, type EstadoTela, type Faixa, type Ver,
 } from "./visao";
 import "./solicitacoes.css";
@@ -281,6 +284,125 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const carregando = base === null;
   const rotuloOrigem = escopo === "recebidas" ? "Quem pediu" : escopo === "pedidas" ? "Pra quem" : "Setor";
 
+  // ── 05/11: QUADRO + CONVERSA (Recebidas e Pedidas por nós) ──
+  // O "Buscar" (escopo historico) continua com a tela antiga (quadro/lista/prazos
+  // + modal). No quadro, o cartão abre a CONVERSA ao lado; o modal completo
+  // (SolicitacaoDetalhe) abre pelo "Ver tudo e mais ações".
+  const modoQuadro = ehQuadro(escopo);
+  const meusSetores = setoresDe(currentUser);
+  const avisos = useAvisos();
+  const [filtroQ, setFiltroQEstado] = useState<FiltroQ>(() => {
+    try { const v = localStorage.getItem(`qs_sol_filtro_${setor}`); return v === "atrasados" || v === "comigo" ? v : "todos"; } catch { return "todos"; }
+  });
+  const setFiltroQ = (f: FiltroQ) => { setFiltroQEstado(f); lembrar(`qs_sol_filtro_${setor}`, f); };
+  const [detalhe, setDetalhe] = useState<string | null>(null);
+  const [conviteFechado, setConviteFechado] = useState(() => { try { return !!localStorage.getItem("qs_sol_convite_notif"); } catch { return false; } });
+  const fecharConvite = () => { setConviteFechado(true); lembrar("qs_sol_convite_notif", "1"); };
+
+  const doQuadro = useMemo(() => (base ?? []).filter((s) => origem === "todas" || outro(s) === origem),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [base, origem, setor]);
+  const noQuadro = useMemo(() => doQuadro.filter((s) => passaNoFiltro(s, filtroQ, meuId, agora)), [doQuadro, filtroQ, meuId, agora]);
+  const nAtrasadosQ = doQuadro.filter((s) => s.aberta && passaNoFiltro(s, "atrasados", meuId, agora)).length;
+  const nComigoQ = doQuadro.filter((s) => s.aberta && s.responsavel_id === meuId).length;
+  /** Selo das abas: não lidas (0315) — antes dela, o que já existia (novas / novidades). */
+  const temNaoLidas = (recebidas ?? []).some((s) => typeof s.nao_lidas === "number");
+  const seloRecebidas = temNaoLidas ? totalNaoLidas(recebidas ?? []) : ind.novas;
+  const seloPedidas = temNaoLidas ? totalNaoLidas(pedidasVisiveis) : novidadesPedidas + paraAjustar.length + paraDesfecho.length;
+
+  // Pedido aberto pelo aviso que só está em "Pedidas por nós": troca de aba sozinho.
+  useEffect(() => {
+    if (!aberta || escopo !== "recebidas" || !recebidas || !pedidas) return;
+    if (!recebidas.some((s) => s.id === aberta) && pedidas.some((s) => s.id === aberta)) muda({ escopo: "pedidas" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aberta, recebidas, pedidas]);
+
+  // Foi pro "Buscar" com uma conversa aberta: fecha a conversa (lá o pedido abre no modal).
+  const escopoAntes = useRef(escopo);
+  useEffect(() => {
+    const mudouDeAba = escopoAntes.current !== escopo;
+    escopoAntes.current = escopo;
+    if (mudouDeAba && escopo === "historico" && abertaRef.current) { empurrou.current = false; setAberta(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [escopo]);
+
+  const pegar = useCallback(async (id: string) => {
+    try { await agir(id, "aceitar"); mudou(); abrir(id); }
+    catch (e) { setErro(e instanceof Error ? e.message : "Não deu pra pegar."); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mudou]);
+
+  if (modoQuadro) {
+    return (
+      <div className="sol" style={{ maxWidth: "none", gap: 0 }}>
+        <div className="solq">
+          <header className="solq-top">
+            <div className="solq-top__tx">
+              <h1>Solicitações</h1>
+              <p>{NOME_SETOR[setor]} · clique num cartão para abrir a conversa do pedido</p>
+            </div>
+            <div className="solq-seg" role="tablist" aria-label="Escopo">
+              <button type="button" role="tab" aria-selected={escopo === "recebidas"} onClick={() => muda({ escopo: "recebidas" })}>
+                Recebidas{seloRecebidas > 0 && <span className="solq-seg__n" aria-label={`${seloRecebidas} não lidas`}>{seloRecebidas}</span>}
+              </button>
+              <button type="button" role="tab" aria-selected={escopo === "pedidas"} onClick={() => muda({ escopo: "pedidas" })}>
+                Pedidas por nós{seloPedidas > 0 && <span className="solq-seg__n" aria-label={`${seloPedidas} não lidas`}>{seloPedidas}</span>}
+              </button>
+              <button type="button" role="tab" aria-selected={false} onClick={() => muda({ escopo: "historico" })}>Buscar</button>
+            </div>
+            <div className="solq-filtros" role="group" aria-label="Filtro">
+              {([["todos", "Todos", 0], ["atrasados", "Atrasados", nAtrasadosQ], ["comigo", "Comigo", nComigoQ]] as [FiltroQ, string, number][]).map(([f, r, n]) => (
+                <button key={f} type="button" className="solq-pill" aria-pressed={filtroQ === f} onClick={() => setFiltroQ(f)}>
+                  {r}{n > 0 && <span className="solq-pill__n">{n}</span>}
+                </button>
+              ))}
+              <label className="sr-only" htmlFor={`solq-origem-${setor}`}>{rotuloOrigem}</label>
+              <select id={`solq-origem-${setor}`} className="solq-select" value={origem} onChange={(e) => setOrigem(e.target.value as EstadoTela["origem"])}>
+                <option value="todas">{escopo === "recebidas" ? "De todos os setores" : "Pra todos os setores"}</option>
+                {porOrigem.map(([s, o]) => (
+                  <option key={s} value={s}>{escopo === "recebidas" ? "Do " : "Pro "}{NOME_SETOR[s]}{o.abertas ? ` (${o.abertas})` : ""}</option>
+                ))}
+              </select>
+            </div>
+            {gestor && <button type="button" className="solq-btn" onClick={() => setTipos(true)}>Tipos e prazos</button>}
+            <button type="button" className="solq-btn solq-btn--pri" onClick={() => setNova(true)}>Pedir a outro setor</button>
+          </header>
+
+          {avisos && avisos.permissao === "default" && !conviteFechado && (
+            <div className="solq-convite" role="note">
+              <span>Quer um aviso do navegador quando responderem um pedido seu, mesmo com o QS em outra aba?</span>
+              <button type="button" className="solq-btn solq-btn--pri" onClick={() => { void avisos.pedirPermissao().finally(fecharConvite); }}>Ativar avisos</button>
+              <button type="button" className="solq-btn" onClick={fecharConvite}>Agora não</button>
+            </div>
+          )}
+          {erro && <p className="sol-erro" role="alert" style={{ marginTop: 12 }}>{erro}</p>}
+
+          {escopo === "pedidas" && (paraAjustar.length > 0 || paraDesfecho.length > 0 || paraConfirmar.length > 0) && (
+            <section className="sol-precisa" aria-label="Precisa de você" style={{ marginTop: 16 }}>
+              <h2>Precisa de você</h2>
+              {paraAjustar.length > 0 && <GrupoPrecisa titulo="Voltaram pra você — responda o que falta" itens={paraAjustar} abrir={abrir} setor={setor} agora={agora} />}
+              {paraDesfecho.length > 0 && <GrupoPrecisa titulo="Cotações entregues — conte se fechou ou por que não seguiu" itens={paraDesfecho} abrir={abrir} setor={setor} agora={agora} />}
+              {paraConfirmar.length > 0 && <GrupoPrecisa titulo="Concluídas — confira e clique em “Resolveu”" itens={paraConfirmar} abrir={abrir} setor={setor} agora={agora} />}
+            </section>
+          )}
+
+          <div className="solq-corpo">
+            {carregando ? <p className="sol-carregando" style={{ padding: "20px 0" }}>Carregando…</p> : (
+              <QuadroQ itens={noQuadro} meuId={meuId} recebo={(s) => meusSetores.includes(s.para_setor)} aberta={aberta} agora={agora}
+                onAbrir={abrir} onPegar={pegar} onHistorico={() => muda({ escopo: "historico" })} />
+            )}
+            {aberta && <PainelConversa key={aberta} id={aberta} onFechar={fechar} onMudou={mudou} onVerTudo={setDetalhe} links={links} />}
+          </div>
+        </div>
+
+        <NovaSolicitacao aberto={nova} deSetor={setor} onFechar={() => setNova(false)}
+          onCriada={(id) => { setNova(false); muda({ escopo: "pedidas" }); mudou(); abrir(id); }} />
+        <SolicitacaoDetalhe id={detalhe} onFechar={() => setDetalhe(null)} onMudou={mudou} links={links} />
+        {tipos && <TiposPrazos onFechar={() => setTipos(false)} />}
+      </div>
+    );
+  }
+
   return (
     <div className="sol">
       {/* 1. Cabeçalho */}
@@ -316,7 +438,7 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
           <div className="sol-seg" role="tablist" aria-label="Escopo">
             <BotaoSeg ativo={escopo === "recebidas"} onClick={() => muda({ escopo: "recebidas" })} n={ind.novas}>Recebidas</BotaoSeg>
             <BotaoSeg ativo={escopo === "pedidas"} onClick={() => muda({ escopo: "pedidas" })} n={novidadesPedidas + paraAjustar.length + paraDesfecho.length}>Pedidas por nós</BotaoSeg>
-            <BotaoSeg ativo={escopo === "historico"} onClick={() => muda({ escopo: "historico" })}>Histórico</BotaoSeg>
+            <BotaoSeg ativo={escopo === "historico"} onClick={() => muda({ escopo: "historico" })}>Buscar</BotaoSeg>
           </div>
           <div className="sol-ctrl__busca">
             <SearchInput value={q} onChange={(e) => muda({ q: e.target.value })} placeholder="Buscar por cliente, viagem ou número"
@@ -459,6 +581,9 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
 }
 
 // ── Peças ───────────────────────────────────────────────────────────────────
+
+/** Recebidas e Pedidas usam o quadro + conversa; o Buscar (historico), a tela antiga. */
+function ehQuadro(e: Escopo): boolean { return e !== "historico"; }
 
 function BotaoSeg({ ativo, onClick, n, children }: { ativo: boolean; onClick: () => void; n?: number; children: ReactNode }) {
   return (

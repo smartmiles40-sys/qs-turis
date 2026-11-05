@@ -19,7 +19,8 @@ import {
   type Aviso, type PrefsAvisos,
 } from "./lib";
 import BolinhaFlutuante from "./BolinhaFlutuante";
-import { avisarSolicitacaoMudou } from "@/solicitacoes/lib";
+import ToastsDeAvisos from "./ToastsDeAvisos";
+import { avisarSolicitacaoMudou, pedidoEstaEmFoco } from "@/solicitacoes/lib";
 
 interface ValorAvisos {
   /** Não lidos, do mais novo pro mais velho (até LIMITE). */
@@ -96,10 +97,26 @@ export default function AvisosProvider({ children, modoBolinha, abrirFora }: {
   }, [irPara, marcar]);
   const abrirRef = useRef(abrir);
   abrirRef.current = abrir;
+  const marcarRef = useRef(marcar);
+  marcarRef.current = marcar;
+
+  // ── Toast na tela (0315): "Antônio respondeu no pedido #45" ────────────────
+  const [toasts, setToasts] = useState<Aviso[]>([]);
+  const fecharToast = useCallback((id: number) => setToasts((l) => l.filter((x) => x.id !== id)), []);
+  const mostrarToast = useCallback((a: Aviso) => {
+    setToasts((l) => (l.some((x) => x.id === a.id) ? l : [...l.slice(-2), a]));
+    setTimeout(() => fecharToast(a.id), 8000);
+  }, [fecharToast]);
 
   // ── Chegou aviso novo ──────────────────────────────────────────────────────
   const avisar = useCallback((a: Aviso) => {
     setPulso((n) => n + 1);
+    const ehPedido = a.tipo === "solicitacao" || a.tipo === "prazo";
+    // A conversa desse pedido já está aberta na frente da pessoa: nada de toast
+    // nem bip — ela está vendo (marca o aviso como lido).
+    if (ehPedido && a.origem === "qs_solicitacoes" && pedidoEstaEmFoco(a.origem_id)) { marcarRef.current([a.id]); return; }
+    // Aba à vista: toast clicável (cada aba à vista mostra o seu).
+    if (ehPedido && !modoBolinha && !document.hidden) mostrarToast(a);
     if (!pegarVez(a.id)) return; // outra aba já tocou
     if (!prefsRef.current.semBip) bip();
     // A bolinha mora DENTRO do QS: com o QS escondido, quem avisa é o Windows.
@@ -111,7 +128,7 @@ export default function AvisosProvider({ children, modoBolinha, abrirFora }: {
         n.onclick = () => { window.focus(); abrirRef.current(a); n.close(); };
       } catch { /* alguns navegadores só deixam via service worker — fica o bip */ }
     }
-  }, [modoBolinha]);
+  }, [modoBolinha, mostrarToast]);
 
   // ── Carga inicial + Realtime filtrado ──────────────────────────────────────
   const recarregar = useCallback(() => {
@@ -202,6 +219,9 @@ export default function AvisosProvider({ children, modoBolinha, abrirFora }: {
     <Ctx.Provider value={valor}>
       {children}
       {userId && !prefs.semBolinha && !modoBolinha && <BolinhaFlutuante pulso={pulso} />}
+      {userId && !modoBolinha && (
+        <ToastsDeAvisos itens={toasts} onFechar={fecharToast} onAbrir={(a) => { fecharToast(a.id); abrir(a); }} />
+      )}
     </Ctx.Provider>
   );
 }
