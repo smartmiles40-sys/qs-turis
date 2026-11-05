@@ -225,3 +225,22 @@ button.fl-selo { cursor: pointer; min-height: 26px; }
 .fl-modal { width: 100%; max-width: 440px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 .fl-modal h2 { margin: 0; font-size: 17px; font-weight: 700; }
 .fl-modal__rodape { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+/* ── Celular (04/11) ─────────────────────────────────────────────────────────
+   O comercial passa a trabalhar a ficha pelo celular. Só ≤767px; computador igual.
+   1. Os menus ("Mais ações", temperatura, ⋯ da nota) abriam ancorados à direita
+      do botão — com o "Mais ações" na esquerda da tela, metade do menu ficava
+      FORA dela ("…cho da reunião"). No celular eles sobem como folha no rodapé,
+      largura da tela, acima dos botões flutuantes (WhatsApp e avisos).
+   2. O ⋯ da anotação caía numa linha própria, solto acima do texto: o título
+      ("Anotação · Hoje, 10:00 · Fulano") encolhe e ele fica na ponta direita. */
+@media (max-width: 767px) {
+  .fl-menu__pop, .fl-menu__pop--esq {
+    position: fixed; top: auto; left: 12px; right: 12px; width: auto;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    max-height: 70dvh; z-index: 85;
+  }
+  .fl-menu__i { min-height: 44px; }
+  .fl-tempo__corpo > .fl-tempo__titulo { flex-wrap: nowrap; align-items: flex-start; }
+  .fl-tempo__corpo > .fl-tempo__titulo > .fl-tempo__titulo { flex: 1 1 0; min-width: 0; }
+}

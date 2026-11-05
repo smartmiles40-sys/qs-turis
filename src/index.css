@@ -470,6 +470,50 @@ html.dark * { scrollbar-color: #39434F var(--bg); }
 html.qs-app-narrow .qs-topnav { display: none !important; }
 html.qs-app-narrow .qs-navbtn { display: flex !important; }
 
+/* ── WhatsApp no CELULAR (04/11) ─────────────────────────────────────────────
+   O comercial inteiro vai atender pelo QS, inclusive no iPhone. Tudo aqui fica
+   preso em max-width: 767px — no computador nada muda.
+
+   1. O painel em tela cheia acompanha o TECLADO: no iPhone o teclado não
+      encolhe a página, só empurra a vista; sem isto o cabeçalho (voltar, nome)
+      sumia pra cima. As variáveis vêm de src/lib/tecladoCelular.ts.
+   2. Mesma coisa pra aba WhatsApp do menu, só enquanto o teclado está aberto.
+   3. O campo de escrever ganha a linha inteira: com 5 ícones + enviar na mesma
+      linha sobravam ~70 px pro texto (cabia "Bom di") e o placeholder quebrava
+      em 6 linhas. Os ícones sobem pra uma linha própria, com alvo de 40 px.
+   4. Folga da barrinha do iPhone embaixo do campo (some com o teclado aberto,
+      que já cobre a barrinha). */
+@media (max-width: 767px) {
+  .qs-chatdock[data-modo="fullscreen"] {
+    top: var(--qs-vvtop, 0px);
+    bottom: auto;
+    height: var(--qs-vvh, 100%);
+  }
+  html.qs-teclado .qs-shell:has(.qs-main--comercial) {
+    position: fixed; left: 0; right: 0;
+    top: var(--qs-vvtop, 0px);
+    height: var(--qs-vvh, 100dvh);
+  }
+
+  .wa-composer-linha { flex-wrap: wrap; row-gap: 6px; }
+  .wa-composer-linha > textarea { flex: 1 1 calc(100% - 46px); }
+  .wa-composer-linha > .wa-icon-btn { width: 40px; height: 40px; }
+  .wa-composer-linha > .wa-send-btn { height: 40px; width: 40px; min-width: 40px; }
+  .wa-composer { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  html.qs-teclado .wa-composer { padding-bottom: 10px; }
+
+  /* A bolinha de avisos (z 80) ficava POR CIMA dos modais (z 50/60) e da
+     conversa em tela cheia: no celular ela caía bem em cima do "Confirmar
+     ganho" e do campo de escrever. Lá ela passa pra baixo deles. */
+  button.qs-bolinha-avisos { z-index: 44; }
+
+  /* O botão flutuante do WhatsApp (48 px + 24 px do rodapé) e a bolinha de
+     avisos logo acima dele cobriam pra sempre
+     o fim de cada tela: na Agenda, o "Lançar desfecho" da última reunião não
+     tinha como ser tocado. A rolagem ganha essa folga no fim. */
+  .qs-main-rola { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+}
+
 /* Respeita quem pediu menos movimento (WCAG 2.3.3). */
 @media (prefers-reduced-motion: reduce) {
   .qs-wa *, .qs-chatdock, .qs-chatdock::before {

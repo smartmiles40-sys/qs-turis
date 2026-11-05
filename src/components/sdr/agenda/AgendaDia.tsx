@@ -1067,7 +1067,7 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
   const { bloqueado, pendentes: atrasadasDoCloser } = useBloqueioDesfecho();
   if (bloqueado && !ehPendenteDeDesfecho(reuniao)) {
     return (
-      <div className="fixed inset-y-0 right-0 z-40 flex w-full flex-col justify-center border-l border-gray-200 bg-white p-5 shadow-2xl sm:w-96">
+      <div className="fixed inset-y-0 right-0 z-40 max-md:z-[50] flex w-full flex-col justify-center border-l border-gray-200 bg-white p-5 shadow-2xl sm:w-96">
         <ReuniaoTrancada pendentes={atrasadasDoCloser.length} onFechar={onFechar} />
       </div>
     );
@@ -1085,7 +1085,11 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
   };
 
   return (
-    <div className="fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-gray-200 bg-white shadow-2xl sm:w-96">
+    // Celular (04/11): o painel ocupa a tela toda e o botão flutuante do
+    // WhatsApp (z 45) ficava POR CIMA dele, tapando o "Recusado" do SAL e o
+    // texto do desfecho. Lá ele sobe pra z 50 e cobre os flutuantes; o
+    // rodapé respeita a barrinha do iPhone.
+    <div className="fixed inset-y-0 right-0 z-40 max-md:z-[50] max-md:pb-[env(safe-area-inset-bottom)] flex w-full flex-col border-l border-gray-200 bg-white shadow-2xl sm:w-96">
       <div className="flex items-start justify-between border-b border-gray-200 px-5 py-4">
         <div className="min-w-0">
           <span

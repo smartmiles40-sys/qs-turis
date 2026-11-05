@@ -768,6 +768,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // atividades. Uma por uma são 20 cliques no card + 20 confirmações. Aqui ele
   // marca as que já tratou e resolve todas de uma vez.
   const [modoSelecao, setModoSelecao] = useState(false);
+  // Celular (04/11): as 7 metas e os 6 filtros ocupavam quase DUAS telas antes
+  // do cartão "o que fazer agora". Lá eles nascem recolhidos atrás de um botão;
+  // no computador estes dois estados não mudam nada (a regra é só ≤767px).
+  const [metasNoCelular, setMetasNoCelular] = useState(false);
+  const [filtrosNoCelular, setFiltrosNoCelular] = useState(false);
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [massaRodando, setMassaRodando] = useState<{ feitas: number; total: number } | null>(null);
 
@@ -3969,6 +3974,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         html.qs-app-narrow .qsx-hero-fonte { flex-wrap: wrap; }
         html.qs-app-narrow .qsx-hero-selos { width: 100%; margin-left: 0; justify-content: flex-start; }
 
+        /* Fora do celular estes dois botões não existem. */
+        .qsx-metas-resumo, .qsx-filtros-btn { display: none; }
+
         /* ── Celular (≤767px) ── */
         @media (max-width: 767px) {
           .qsx-hero { flex-direction: column; }
@@ -3985,6 +3993,26 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           .qsx-hero-selos { width: 100%; margin-left: 0; justify-content: flex-start; }
           .qsx-meta { border-right: 0; border-bottom: 1px solid var(--border); }
           .qsx-meta:last-child { border-bottom: 0; }
+
+          /* Metas e filtros recolhidos (04/11): no celular eles empurravam o
+             cartão da próxima atividade pra quase duas telas abaixo. */
+          .qsx-metas-resumo { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 44px; padding: 8px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+          .qsx-metas-resumo b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+          .qsx-metas-resumo-acao { flex: none; font-weight: 600; color: var(--text); }
+          .qsx-metas:not(.aberta) { display: none; }
+          .qsx-mlab { flex-wrap: wrap; }
+          .qsx-filtros-btn { display: inline-flex; align-items: center; }
+          .qsx-filtros:not(.aberta) > select, .qsx-filtros:not(.aberta) > .qsx-limpar { display: none; }
+          .qsx-search { flex-basis: 100%; height: 40px; }
+
+          /* Alvo de toque: 32–36 px é pouco pro dedo (Apple pede 44). */
+          .qsx-btn { min-height: 40px; }
+          .qsx-fchip { height: 40px; }
+          .qsx-out, .qsx-out-primary { height: 40px; }
+          .qsx-out-mini { height: 36px; }
+          .qsx-pa { width: 40px; height: 40px; }
+          .qsx-icon-sm { width: 36px; height: 36px; }
+          .qsx-chan-chip { height: 36px; }
         }
 
         /* Desfecho — caminho positivo é o primário */
@@ -4162,8 +4190,19 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </div>
           </div>
 
+          {/* Celular: resumo de uma linha no lugar das metas (abre o quadro). */}
+          <button
+            type="button"
+            className="qsx-metas-resumo"
+            onClick={() => setMetasNoCelular((v) => !v)}
+            aria-expanded={metasNoCelular}
+          >
+            <span><b>{DAILY_DONE}</b> de {dailyGoal} hoje · <b>{meetingKpis.agendadasHoje}</b> {meetingKpis.agendadasHoje === 1 ? "reunião" : "reuniões"}</span>
+            <span className="qsx-metas-resumo-acao">{metasNoCelular ? "Esconder metas" : "Ver metas"}</span>
+          </button>
+
           {/* Faixa das metas */}
-          <div className="qsx-metas">
+          <div className={`qsx-metas${metasNoCelular ? " aberta" : ""}`}>
             <div className="qsx-meta">
               <span className="qsx-mlab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--warn)" }} aria-hidden><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></svg>Meta de hoje</span>
               <span className="qsx-mval">{DAILY_DONE}<small>de {dailyGoal}</small></span>
@@ -4300,7 +4339,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className={`qsx-filtros flex items-center gap-2 flex-wrap${filtrosNoCelular ? " aberta" : ""}`}>
             <div className="qsx-search">
               <IconSearch size={15} />
               <input
@@ -4319,6 +4358,16 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               title="Marcar várias atividades e concluir de uma vez"
             >
               {modoSelecao ? "Sair da seleção" : "Selecionar várias"}
+            </button>
+            {/* Só no celular: os selects abaixo ficam atrás deste botão. */}
+            <button
+              type="button"
+              onClick={() => setFiltrosNoCelular((v) => !v)}
+              className={`qsx-fchip qsx-filtros-btn${(statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter || ownerFilter) ? " on" : ""}`}
+              aria-expanded={filtrosNoCelular}
+            >
+              {filtrosNoCelular ? "Fechar filtros" : "Filtros"}
+              {(statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter || ownerFilter) ? " · ativos" : ""}
             </button>
             {/* Discador: liga pra N leads de uma vez (liga/desliga em Configurações). */}
             {discadorDisponivel && !discadorAberto && (
@@ -4413,7 +4462,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             {(statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter || ownerFilter) && (
               <button
                 onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setScoreFilter(null); setPeriodFilter(null); setOwnerFilter(null); }}
-                className="text-[13px] font-semibold hover:underline"
+                className="qsx-limpar text-[13px] font-semibold hover:underline"
                 style={{ color: "var(--muted)" }}
               >
                 Limpar
@@ -4893,7 +4942,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══ MODAL ATIVIDADE EXTRA ═════════════════════════════════════════════ */}
       {showExtraTaskModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
+          {/* Celular: com margem e rolagem própria — em tela baixa (iPhone SE)
+              ou com o teclado aberto o botão de salvar ficava fora do alcance. */}
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 md:p-6 max-md:mx-3 max-md:max-h-[88dvh] max-md:overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-base font-bold text-gray-900">{extraFromTaskId ? "Agendar retorno" : "Atividade Extra"}</h2>
               <button onClick={() => { setShowExtraTaskModal(false); setExtraFromTaskId(null); }} className="text-gray-400 hover:text-gray-600">
@@ -5014,7 +5065,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {/* ══ MODAL CADASTRAR LEAD ══════════════════════════════════════════════ */}
       {showNewLeadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
+          {/* Celular: com margem e rolagem própria — em tela baixa (iPhone SE)
+              ou com o teclado aberto o botão de salvar ficava fora do alcance. */}
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 md:p-6 max-md:mx-3 max-md:max-h-[88dvh] max-md:overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-base font-bold text-gray-900">Cadastrar Lead</h2>
               <button onClick={() => setShowNewLeadModal(false)} className="text-gray-400 hover:text-gray-600">

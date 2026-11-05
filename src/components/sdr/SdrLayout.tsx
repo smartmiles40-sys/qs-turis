@@ -501,7 +501,10 @@ export default function SdrLayout() {
       {/* A aba de WhatsApp gerencia a própria rolagem (lista e conversa rolam
           separadas). Deixar o overflow do <main> ligado criaria uma segunda
           barra e faria a conversa "escapar" da tela ao chegar mensagem. */}
-      <main className={`flex-1 min-h-0 ${activeNav === "whatsapp" ? "overflow-hidden" : "overflow-y-auto"}`}>
+      {/* qs-main-rola: no celular, folga no fim pra o último botão da tela
+          (ex.: "Lançar desfecho" na Agenda) não morar embaixo do botão
+          flutuante do WhatsApp — ver index.css (04/11). */}
+      <main className={`flex-1 min-h-0 ${activeNav === "whatsapp" ? "overflow-hidden" : "overflow-y-auto qs-main-rola"}`}>
         <Suspense
           fallback={
             <div className="flex items-center justify-center h-full py-24 text-sm text-gray-400">

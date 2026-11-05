@@ -166,6 +166,11 @@ a.qs-kpi:hover, button.qs-kpi:hover { background: var(--surface-2); }
 .qs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .qs-topbar { display: none; }
 
+/* Celular (04/11): o rodapé da gaveta (nome, sair) ficava embaixo da
+   barrinha do iPhone no app instalado. */
+@media (max-width: 767px) {
+  .qs-side--open { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+}
 @media (max-width: 1023px) {
   .qs-shell { flex-direction: column; }
   .qs-side { display: none; }

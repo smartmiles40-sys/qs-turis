@@ -119,7 +119,7 @@ export default function BolinhaFlutuante({ pulso }: { pulso: number }) {
         aria-label={n ? `${rotulo} avisos novos` : "Avisos: nenhum novo"}
         aria-expanded={aberta}
         title={n ? `${rotulo} avisos novos — clique pra ver, arraste pra mudar de lugar` : "Sem avisos novos — arraste pra mudar de lugar"}
-        className={`fixed z-[80] rounded-full flex items-center justify-center select-none touch-none ${pulso && n ? "qs-bol-vai" : ""}`}
+        className={`qs-bolinha-avisos fixed z-[80] rounded-full flex items-center justify-center select-none touch-none ${pulso && n ? "qs-bol-vai" : ""}`}
         style={{
           left: pos.x, top: pos.y, width: TAM, height: TAM, cursor: "grab",
           background: n ? "#0147FF" : "#334155", color: "#fff",

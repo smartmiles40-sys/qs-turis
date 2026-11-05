@@ -114,7 +114,8 @@ export default function CascaDeArea({
       <AppShell setor={setor} groups={grupos2} active={ativo} onNavigate={onIr} notifications={<SinoDeAvisos />}
         comercial={comercialDividido(currentUser, setor === "comercial" ? "closer" : "sdr")}
         onBeforeSwitch={limparHashDaArea} onSettings={temConfig ? () => onIr("config") : undefined} settingsActive={ativo === "config"}>
-        <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8">{children}</div>
+        {/* qs-area-conteudo (04/11): gancho pro CSS de cada área no celular; sem estilo próprio. */}
+        <div className="qs-area-conteudo px-4 sm:px-6 lg:px-8 py-6 lg:py-8">{children}</div>
       </AppShell>
     </>
   );
