@@ -15,8 +15,8 @@ import {
 } from "./dados";
 import { useVerArquivo } from "./pecas";
 import { soDigitosCpf } from "../lib/cpf";
-import { estadoSenhaCpf, gerarNovaSenhaCpf } from "../paginas/_globais/pessoaAcoes";
 import { SenhaExpedamigo } from "../paginas/_globais/PessoaGaveta";
+import BotaoWhatsAppAcesso from "../expedamigo/BotaoWhatsAppAcesso";
 
 export function Bloco({ titulo, children, dica }: { titulo: string; children: React.ReactNode; dica?: string }) {
   return (
@@ -202,8 +202,9 @@ export function MudarExpedicao({ exp, pax, onMovido }: { exp: ExpedicaoRow; pax:
 }
 
 /**
- * Liberação no portal do viajante (só admin) + senha (app antigo: ExpedamigoPainel).
- * Liberar já gera a senha provisória se a pessoa ainda não tem nenhuma (igual ao antigo).
+ * Liberação no portal do viajante (só admin) + acesso (app antigo: ExpedamigoPainel).
+ * 05/11 (porte do f6326c6): liberar NÃO gera mais senha provisória — o 1º acesso vai
+ * pelo LINK MÁGICO (botão WhatsApp/Copiar, gerado no servidor); reset no bloco abaixo.
  */
 export function LiberarExpedAmigo({ pax, onMudou }: { pax: PassageiroRow; onMudou: () => void }) {
   const { avisar } = useExp();
@@ -218,19 +219,20 @@ export function LiberarExpedAmigo({ pax, onMudou }: { pax: PassageiroRow; onMudo
           const v = !lib; setLib(v);
           try { await atualizarLiberado(pax.id, v); }
           catch (e) { setLib(!v); avisar(e instanceof Error ? e.message : "Erro", "erro"); return; }
-          // A liberação já foi gravada: se a senha falhar, avisa mas NÃO desfaz o "Liberado" na tela.
-          if (v && cpfOk) {
-            try {
-              const s = await estadoSenhaCpf(pax.cpf as string);
-              if (s.admin && !s.tem_hash && !s.senha_provisoria) await gerarNovaSenhaCpf(pax.cpf as string);
-            } catch (e) { avisar(`Liberado, mas a senha não foi gerada: ${e instanceof Error ? e.message : "erro"}`, "erro"); }
-          }
           setRecarga((n) => n + 1);
           onMudou();
         }}>{lib ? "Bloquear" : "Liberar ExpedAmigo"}</Botao>
       </div>
-      {cpfOk ? <SenhaExpedamigo cpf={pax.cpf} recarga={recarga} />
-        : <p className="text-[11.5px] mt-2" style={{ color: "var(--ink3)" }}>Sem CPF válido — a senha do portal só é gerada com CPF.</p>}
+      {cpfOk ? (
+        <>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px]">
+            <span style={{ color: "var(--ink2)" }}>Link de acesso (libera o portal e a pessoa cria a senha):</span>
+            <BotaoWhatsAppAcesso passageiroId={pax.id} nome={pax.nome_completo} telefone={pax.telefone}
+              onAviso={(t, tom) => avisar(t, tom)} onGerado={(r) => { if (r.liberado && !lib) { setLib(true); onMudou(); } setRecarga((n) => n + 1); }} />
+          </div>
+          <SenhaExpedamigo cpf={pax.cpf} recarga={recarga} />
+        </>
+      ) : <p className="text-[11.5px] mt-2" style={{ color: "var(--ink3)" }}>Sem CPF válido — o login do portal é o CPF.</p>}
     </Bloco>
   );
 }

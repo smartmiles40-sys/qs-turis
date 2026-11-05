@@ -23,6 +23,10 @@
 //   POST ?acao=onboarding-diario  → n8n (cron dele): lista quem comprou e ainda não recebeu
 //                                   o acesso ao portal do viajante, com link e mensagem prontos.
 //   GET  ?acao=health             → "estou vivo" (sem dados).
+//   POST ?acao=amigo-link         → link mágico do ExpedAmigo (/a/<codigo>), reset de acesso
+//                                   (token da sessão; lógica e permissão em _expAcesso.js).
+//                                   Com EXP_ESPELHO_LIGADO=1 responde 423 (modo validação).
+//   GET  ?acao=amigo-status       → { espelho, portal } pras telas desligarem o botão.
 //
 // Diferenças de propósito em relação ao antigo (bugs que não foram copiados):
 //   - expedicao-sync, numa expedição que já existe, SÓ PREENCHE O QUE ESTÁ VAZIO
@@ -41,6 +45,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { montarChecklistPadrao } from './_expChecklist.js';
 import { bitrixConfigurado } from './_bitrixLead.js';
+import { gerarLinkAmigo, statusAmigo } from './_expAcesso.js';
 
 const PORTAL_PADRAO = 'https://sistema-expedicoes.vercel.app';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -557,6 +562,12 @@ export default async function handler(req, res) {
   const acao = String(req.query?.acao || '');
   try {
     if (acao === 'health') return res.status(200).json({ ok: true, service: 'qs-expedicoes', time: new Date().toISOString() });
+    // Link mágico do ExpedAmigo (lógica em _expAcesso.js; permissão pelo token da sessão lá dentro).
+    if (acao === 'amigo-status') return statusAmigo(res);
+    if (acao === 'amigo-link') {
+      if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Método não permitido' });
+      return await gerarLinkAmigo(req, res);
+    }
 
     if (acao === 'atualizar-status') {
       if (req.method === 'GET') {

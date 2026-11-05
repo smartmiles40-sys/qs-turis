@@ -4,15 +4,21 @@
 // registro) e no passageiro de cada expedição (liberar/bloquear).
 //   · Login = CPF da ficha; a senha vale pra todas as viagens (acesso_senhas).
 //   · Liberar/bloquear é por viagem (passageiros.liberado_expedamigo).
-//   · Senha e link de 1º acesso: só admin das Expedições (o banco confere — 0164).
+//   · 05/11 (porte do f6326c6/e3816fa do antigo): 1º acesso e reset por LINK MÁGICO
+//     gerado no servidor (api/_expAcesso.js) — a senha provisória aleatória foi
+//     aposentada. Reset = só admin; gerar link/WhatsApp = admin ou quem decide inscrição.
+//     Modo validação (espelho ligado): gerar/resetar desligados.
 //   · Registro: os últimos acessos ao portal (expedamigo_acessos, por CPF).
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Aviso, Botao, Etiqueta } from "@/rel/ui";
 import type { IdaEmExpedicao } from "./cadastroUnico";
-import { PORTAL_ANTIGO_URL, copiar, rpc, useEhAdminExp } from "@/expedicoes/paginas/_admin/comum";
+import { copiar, rpc, useEhAdminExp } from "@/expedicoes/paginas/_admin/comum";
 import { montarMensagem } from "@/expedicoes/paginas/AcessosAmigo";
 import { formatDate, formatDateTime } from "@/expedicoes/lib/utils";
+import { pedirLinkAmigo, useModoValidacaoAmigo } from "@/expedicoes/expedamigo/servidor";
+import BotaoWhatsAppAcesso from "@/expedicoes/expedamigo/BotaoWhatsAppAcesso";
+import AvisoModoValidacao from "@/expedicoes/expedamigo/AvisoModoValidacao";
 
 const EVENTO: Record<string, string> = {
   primeiro_acesso: "1º acesso", login: "Entrou no portal", viagem_aberta: "Abriu a viagem",
@@ -27,13 +33,15 @@ export default function ExpedAmigoDoCliente({ nome, cpf, idas, telefone, onMudou
   nome: string; cpf: string | null; idas: IdaEmExpedicao[]; telefone: string | null; onMudou: () => void;
 }) {
   const admin = useEhAdminExp();
+  const validacao = useModoValidacaoAmigo();
+  const travado = validacao !== false;
   const digitos = (cpf ?? "").replace(/\D/g, "");
   const cpfOk = digitos.length === 11;
   const [estado, setEstado] = useState<Estado | null | undefined>(undefined);
   const [acessos, setAcessos] = useState<Acesso[] | null>(null);
   const [msg, setMsg] = useState<{ tom: "ok" | "erro"; texto: string } | null>(null);
   const [indo, setIndo] = useState<string | null>(null);
-  const [link, setLink] = useState<{ idaId: string; url: string; expira: string } | null>(null);
+  const [link, setLink] = useState<{ idaId: string; url: string; expira: string; viagem?: { nome: string; tipo?: string | null } | null } | null>(null);
   const [liberado, setLiberado] = useState<Record<string, boolean>>({});
 
   useEffect(() => { setLiberado(Object.fromEntries(idas.map((i) => [i.id, Boolean(i.liberado_expedamigo)]))); }, [idas]);
@@ -62,25 +70,28 @@ export default function ExpedAmigoDoCliente({ nome, cpf, idas, telefone, onMudou
     setIndo(null);
     if (error) { setMsg({ tom: "erro", texto: `Não consegui ${v ? "liberar" : "bloquear"}: só Operações e admin mudam isso.` }); return; }
     setLiberado((l) => ({ ...l, [ida.id]: v }));
-    // Liberou e a pessoa ainda não tem senha nenhuma: gera a provisória (igual ao passageiro).
-    if (v && admin && cpfOk && estado !== undefined && !estado?.tem_senha && !estado?.senha_provisoria) {
-      try { await rpc<string>("exp_amigo_nova_senha", { p_cpf: digitos }); await lerEstado(); } catch { /* a liberação vale mesmo assim */ }
-    }
+    // 05/11: liberar não gera mais senha provisória — o acesso vai pelo link mágico (botões abaixo).
     onMudou();
   }
 
-  async function novaSenha() {
+  /** Reset (admin): a senha atual cai na hora e sai um link novo da reserva mais recente do CPF. */
+  async function resetar() {
+    if (!window.confirm("A senha atual deixa de valer AGORA e a pessoa só volta a entrar criando outra pelo link novo. Resetar?")) return;
     setIndo("senha"); setMsg(null);
-    try { await rpc<string>("exp_amigo_nova_senha", { p_cpf: digitos }); await lerEstado(); setMsg({ tom: "ok", texto: "Senha provisória nova gerada." }); }
-    catch (e) { setMsg({ tom: "erro", texto: e instanceof Error ? e.message : "Não consegui gerar a senha." }); }
+    try {
+      const r = await pedirLinkAmigo({ cpf: digitos }, { resetar: true });
+      setLink({ idaId: r.passageiro.id, url: r.link, expira: r.expira_em, viagem: r.expedicao });
+      await lerEstado();
+      setMsg({ tom: "ok", texto: "Acesso resetado — mande o link novo (abaixo)." });
+    } catch (e) { setMsg({ tom: "erro", texto: e instanceof Error ? e.message : "Não consegui resetar." }); }
     finally { setIndo(null); }
   }
 
   async function gerarLink(ida: IdaEmExpedicao) {
     setIndo(`link-${ida.id}`); setMsg(null);
     try {
-      const r = await rpc<{ codigo: string; expira_em: string }>("exp_amigo_gerar_link", { p_passageiro_id: ida.id, p_liberar: true });
-      setLink({ idaId: ida.id, url: `${PORTAL_ANTIGO_URL}/a/${r.codigo}`, expira: r.expira_em });
+      const r = await pedirLinkAmigo({ passageiroId: ida.id });
+      setLink({ idaId: ida.id, url: r.link, expira: r.expira_em });
       setLiberado((l) => ({ ...l, [ida.id]: true }));
     } catch (e) { setMsg({ tom: "erro", texto: e instanceof Error ? e.message : "Não consegui gerar o link." }); }
     finally { setIndo(null); }
@@ -105,19 +116,23 @@ export default function ExpedAmigoDoCliente({ nome, cpf, idas, telefone, onMudou
                   {estado?.tem_senha ? <span>A pessoa <b>já criou a própria senha</b>.</span>
                     : estado?.senha_provisoria ? (
                       <>
-                        <span>Senha provisória:</span>
+                        <span>Senha provisória antiga:</span>
                         <code className="px-2 py-1 rounded-md font-bold" style={{ background: "var(--card2)" }}>{estado.senha_provisoria}</code>
                         <Botao onClick={() => copiarAviso(`Login: ${digitos}\nSenha: ${estado.senha_provisoria}`, "Login e senha copiados.")}>Copiar login e senha</Botao>
                       </>
-                    ) : <span>Ainda <b>sem senha</b>.</span>}
-                  <Botao variante="fantasma" disabled={indo === "senha"} style={{ color: "var(--rel-ink)" }}
-                    onClick={() => { if (!estado?.tem_senha && !estado?.senha_provisoria) { void novaSenha(); return; } if (window.confirm("A senha atual deixa de valer e a pessoa volta ao 1º acesso. Gerar outra?")) void novaSenha(); }}>
-                    {indo === "senha" ? "Gerando…" : estado?.tem_senha || estado?.senha_provisoria ? "Gerar senha provisória nova" : "Gerar senha provisória"}
-                  </Botao>
+                    ) : <span>Ainda <b>sem senha</b> — mande o link de acesso de uma viagem abaixo.</span>}
+                  {(estado?.tem_senha || estado?.senha_provisoria) && (
+                    <Botao variante="fantasma" disabled={indo === "senha" || travado} style={{ color: "var(--rel-ink)" }}
+                      title={travado ? "Modo validação: reset só pelo sistema antigo" : "Derruba a senha atual e gera um link novo"}
+                      onClick={() => void resetar()}>
+                      {indo === "senha" ? "Resetando…" : "Resetar acesso (link novo)"}
+                    </Botao>
+                  )}
                 </div>
               )}
           </div>
         )}
+        <AvisoModoValidacao />
       </section>
 
       <section className="rel-card p-4 sm:p-5">
@@ -134,7 +149,12 @@ export default function ExpedAmigoDoCliente({ nome, cpf, idas, telefone, onMudou
                 </span>
                 <Etiqueta tom={liberado[i.id] ? "rel" : "aviso"}>{liberado[i.id] ? "Liberado" : "Não liberado"}</Etiqueta>
                 <Botao disabled={indo === `lib-${i.id}`} onClick={() => void alternar(i)}>{liberado[i.id] ? "Bloquear" : "Liberar"}</Botao>
-                {admin && cpfOk && <Botao disabled={indo === `link-${i.id}`} onClick={() => void gerarLink(i)}>{indo === `link-${i.id}` ? "Gerando…" : "Link de 1º acesso"}</Botao>}
+                {admin && cpfOk && <Botao disabled={indo === `link-${i.id}` || travado} title={travado ? "Modo validação: link só pelo sistema antigo" : undefined}
+                  onClick={() => void gerarLink(i)}>{indo === `link-${i.id}` ? "Gerando…" : "Link de acesso"}</Botao>}
+                {cpfOk && <BotaoWhatsAppAcesso key={`${i.id}-${link?.idaId === i.id ? link.url : ""}`} passageiroId={i.id} nome={nome} telefone={telefone}
+                  viagem={i.expedicao ?? undefined} linkExistente={link?.idaId === i.id ? link.url : null}
+                  onGerado={(r) => { setLink({ idaId: i.id, url: r.link, expira: r.expira_em }); setLiberado((l) => ({ ...l, [i.id]: true })); }}
+                  onAviso={(texto, tom) => setMsg({ tom, texto })} />}
               </li>
             ))}
           </ol>
@@ -144,7 +164,7 @@ export default function ExpedAmigoDoCliente({ nome, cpf, idas, telefone, onMudou
             <div className="flex flex-wrap items-center gap-2">
               <code className="px-2 py-1 rounded-md text-[12.5px] break-all" style={{ background: "var(--card2)" }}>{link.url}</code>
               <Botao onClick={() => copiarAviso(link.url, "Link copiado.")}>Copiar link</Botao>
-              <Botao variante="primario" onClick={() => copiarAviso(montarMensagem(nome, idaDoLink?.expedicao ?? undefined, link.url), "Mensagem de boas-vindas copiada.")}>Copiar mensagem de boas-vindas</Botao>
+              <Botao variante="primario" onClick={() => copiarAviso(montarMensagem(nome, link.viagem ?? idaDoLink?.expedicao ?? undefined, link.url), "Mensagem de boas-vindas copiada.")}>Copiar mensagem de boas-vindas</Botao>
             </div>
             <p className="text-[11.5px]" style={{ color: "var(--ink3)" }}>
               Vale até {formatDateTime(link.expira)}. Nada é enviado daqui — mande pelo WhatsApp{telefone ? ` (${telefone})` : ""}.

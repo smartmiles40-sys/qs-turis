@@ -23,6 +23,7 @@ import { dataSP } from "../../lib/fase.ts";
 import { formatDate } from "../../lib/utils";
 import { soDigitosCpf } from "../../lib/cpf";
 import { PORTAL_ANTIGO_URL, copiar, rpc, useEhAdminExp } from "../_admin/comum";
+import { pedirLinkAmigo } from "../../expedamigo/servidor";
 import { diasAte, expedicoesFuturas, lerPassageiros, respondeuFormulario, textoDias, urgencia, type Pax } from "../../lib/saudeFila";
 import type { ExpedicaoRow } from "../../lib/database";
 
@@ -125,8 +126,9 @@ export default function QuemFalta() {
     if (ehAdmin) {
       setOcupado(p.id);
       try {
-        const r = await rpc<{ codigo: string }>("exp_amigo_gerar_link", { p_passageiro_id: p.id, p_liberar: true });
-        link = `${PORTAL_ANTIGO_URL}/a/${r.codigo}`;
+        // 05/11: o link mágico nasce no servidor (api/_expAcesso.js). No modo validação
+        // (espelho ligado) ele recusa — aí vai o endereço do portal, que sempre abre.
+        link = (await pedirLinkAmigo({ passageiroId: p.id })).link;
       } catch { /* sem o link curto: vai o do portal */ }
       finally { setOcupado(null); }
     }
