@@ -252,6 +252,8 @@ export async function chamarRotaExpedicoes<T = Record<string, unknown>>(acao: st
 export type ResultadoSyncBitrix = {
   coluna: string; negocios: number; criados: number; atualizados: number; limite?: boolean;
   sem_grupo: { deal: string; nome: string }[]; erros: { deal: string; erro: string }[];
+  /** 05/11: avulsos que entraram pelo nº do negócio (já somados em "criados") e negócios pulados (sem contato/sem nome). */
+  anexados?: number; pulados?: { deal: string; nome: string; motivo: string }[];
 };
 
 /**
@@ -269,6 +271,8 @@ export function resumoSyncBitrix(r: ResultadoSyncBitrix): string {
     const nomes = r.sem_grupo.slice(0, 5).map((x) => x.nome || x.deal).join(", ");
     partes.push(`${r.sem_grupo.length} sem grupo definido (a coluna é de mais de uma expedição — adicione pela tela): ${nomes}${r.sem_grupo.length > 5 ? "…" : ""}`);
   }
+  if (r.anexados) partes.push(`${r.anexados} estava(m) avulso(s) e entrou(aram) na expedição`);
+  if (r.pulados?.length) partes.push(`${r.pulados.length} negócio(s) sem contato/nome no Bitrix (pulados)`);
   if (r.erros?.length) partes.push(`${r.erros.length} com erro`);
   if (r.limite) partes.push("parou em 500 negócios");
   return partes.join(" · ");
