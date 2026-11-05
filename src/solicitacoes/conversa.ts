@@ -5,7 +5,8 @@
 //
 //   • em qual das 4 colunas o pedido fica
 //       Novas (ninguém pegou) · Com alguém · Voltou para quem pediu (falta
-//       informação, prazo pausado) · Concluídas (últimos 14 dias)
+//       informação, prazo pausado) · Concluídas (últimos 7 dias; recolhida
+//       por padrão — botão "Ver concluídas (N)")
 //   • o chip de prazo (vermelho venceu · laranja vence hoje · verde no prazo)
 //   • quem é PARTICIPANTE (recebe aviso e conta "não lida"): quem pediu, o
 //     responsável, quem acompanha e — enquanto ninguém pegou — o setor todo.
@@ -44,23 +45,31 @@ export const COLUNAS_Q: { id: ColunaQ; rotulo: string; dica: string; vazio: stri
   { id: "nova", rotulo: "Novas", dica: "ninguém pegou ainda", vazio: "Todos os pedidos já têm alguém cuidando", ponto: "var(--text)" },
   { id: "com_alguem", rotulo: "Com alguém", dica: "tem responsável trabalhando", vazio: "Ninguém está com pedido aberto", ponto: "var(--q-azul)" },
   { id: "voltou", rotulo: "Voltou para quem pediu", dica: "falta informação, prazo pausado", vazio: "Nenhum pedido esperando resposta", ponto: "var(--q-laranja)" },
-  { id: "concluida", rotulo: "Concluídas", dica: "últimos 14 dias", vazio: "Nada concluído ainda", ponto: "var(--ok)" },
+  { id: "concluida", rotulo: "Concluídas", dica: "últimos 7 dias", vazio: "Nada concluído nos últimos 7 dias", ponto: "var(--ok)" },
 ];
 
+/** Janela da coluna Concluídas (05/11: "as concluídas estão poluindo o quadro"). */
+export const DIAS_CONCLUIDAS = 7;
+
+/** Colunas que aparecem: Concluídas só quando a pessoa pede ("Ver concluídas"). */
+export function colunasVisiveis(verConcluidas: boolean): typeof COLUNAS_Q {
+  return verConcluidas ? COLUNAS_Q : COLUNAS_Q.filter((c) => c.id !== "concluida");
+}
+
 type SolMin = Pick<Solicitacao, "status" | "aguardando_quem" | "concluido_em">;
-const CATORZE_DIAS = 14 * 86_400_000;
+const JANELA_CONCLUIDAS = DIAS_CONCLUIDAS * 86_400_000;
 
 /**
  * Coluna do quadro. Esperando o cliente/fornecedor/outro setor continua "Com
  * alguém" (o responsável segue dono); só "aguardando quem pediu" volta.
- * Recusada, cancelada e concluída há mais de 14 dias saem do quadro (Buscar).
+ * Recusada, cancelada e concluída há mais de 7 dias saem do quadro (Buscar).
  */
 export function colunaDoQuadro(s: SolMin, agora = Date.now()): ColunaQ | null {
   switch (s.status) {
     case "nova": return "nova";
     case "em_andamento": return "com_alguem";
     case "aguardando": return s.aguardando_quem === "solicitante" ? "voltou" : "com_alguem";
-    case "concluida": return s.concluido_em && agora - new Date(s.concluido_em).getTime() <= CATORZE_DIAS ? "concluida" : null;
+    case "concluida": return s.concluido_em && agora - new Date(s.concluido_em).getTime() <= JANELA_CONCLUIDAS ? "concluida" : null;
     default: return null;
   }
 }
@@ -94,6 +103,34 @@ export function chipDePrazo(s: SolPrazo, agora = Date.now()): { tom: TomChip; te
   if (dif === 0) return { tom: "o", texto: `Hoje, ${hora(s.prazo)}` };
   if (dif === 1) return { tom: "ok", texto: `Amanhã, ${hora(s.prazo)}` };
   return { tom: "ok", texto: `${semana(s.prazo).replace(/^./, (c) => c.toUpperCase())}, ${FMT_DDMM.format(new Date(s.prazo))}` };
+}
+
+/** "2h 10min", "45 min", "3 dias" — distância legível entre dois instantes. */
+export function duracaoLegivel(ms: number): string {
+  const min = Math.max(1, Math.round(Math.abs(ms) / 60_000));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  if (h < 24) return m ? `${h}h ${m}min` : `${h}h`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? "1 dia" : `${d} dias`;
+}
+
+/**
+ * O prazo em destaque no pedido aberto: "Faltam 2h 10min" / "Atrasado há 1 dia"
+ * / "Prazo pausado" + a data por extenso embaixo.
+ */
+export function contagemDoPrazo(s: SolPrazo, agora = Date.now()): { tom: TomChip; grande: string; sub: string } {
+  const quando = s.prazo ? quandoCurto(s.prazo, agora) : "";
+  if (s.status === "concluida") {
+    const c = chipDePrazo(s, agora);
+    return { tom: c.tom, grande: c.texto, sub: s.concluido_em ? `concluída ${quandoCurto(s.concluido_em, agora)}` : "" };
+  }
+  if (s.status === "recusada" || s.status === "cancelada") return { tom: "n", grande: s.status === "recusada" ? "Recusada" : "Cancelada", sub: "" };
+  if (s.status === "aguardando" && s.aguardando_quem === "solicitante") return { tom: "n", grande: "Prazo pausado", sub: "volta a contar quando quem pediu responder" };
+  if (!s.prazo) return { tom: "n", grande: "Sem prazo", sub: "" };
+  const dif = new Date(s.prazo).getTime() - agora;
+  if (dif < 0) return { tom: "r", grande: `Atrasado há ${duracaoLegivel(dif)}`, sub: `venceu ${quando}` };
+  return { tom: chipDePrazo(s, agora).tom, grande: `Faltam ${duracaoLegivel(dif)}`, sub: `vence ${quando}` };
 }
 
 // ── Filtros do topo ─────────────────────────────────────────────────────────
@@ -150,7 +187,7 @@ export function numeroDoMenu(c: { novas: number; novidades: number; desfechos: n
 // ── Linha do tempo ──────────────────────────────────────────────────────────
 export type ItemConversa =
   | { tipo: "evento"; id: string; texto: string }
-  | { tipo: "msg"; id: string; quem: string; hora: string; texto: string; eu: boolean };
+  | { tipo: "msg"; id: string; quem: string; hora: string; texto: string; eu: boolean; evento: number; auto: boolean };
 
 const primeiro = (n: string | null | undefined) => (n ?? "").trim().split(/\s+/)[0] || "Alguém";
 
@@ -198,7 +235,9 @@ export function itensDaConversa(eventos: readonly EventoSol[], eu: string, opts:
     const texto = e.tipo === "criada" ? opts.descricaoInicial?.trim() || null : e.texto?.trim() || null;
     const ehDistribuicao = e.tipo === "passada" && !e.autor_id;
     if (texto && !ehDistribuicao && e.tipo !== "desfecho") {
-      out.push({ tipo: "msg", id: `m${e.id}`, quem: e.autor_id === eu ? "Você" : primeiro(e.autor_nome), hora: quando, texto, eu: !!eu && e.autor_id === eu });
+      // 0316: mensagem só com arquivos ("anexou X", para = 'anexos') — a tela mostra os arquivos no lugar do texto
+      const auto = e.tipo === "comentario" && e.para === "anexos";
+      out.push({ tipo: "msg", id: `m${e.id}`, quem: e.autor_id === eu ? "Você" : primeiro(e.autor_nome), hora: quando, texto, eu: !!eu && e.autor_id === eu, evento: e.id, auto });
     }
   }
   return out;
@@ -207,7 +246,10 @@ export function itensDaConversa(eventos: readonly EventoSol[], eu: string, opts:
 /** Prévia no cartão: "Antônio: Conseguiu achar?" ou a frase do último evento. */
 export function previaDoUltimo(u: UltimoEvento | null | undefined, eu: string, quemPediu?: string | null): string {
   if (!u) return "";
-  if (u.tipo === "comentario") return `${u.autor_id === eu ? "Você" : primeiro(u.autor_nome)}: ${u.texto ?? ""}`;
+  if (u.tipo === "comentario") {
+    const quem = u.autor_id === eu ? "Você" : primeiro(u.autor_nome);
+    return u.para === "anexos" ? `📎 ${quem} ${u.texto ?? "anexou um arquivo"}` : `${quem}: ${u.texto ?? ""}`;
+  }
   return fraseDoEvento(u, quemPediu) ?? "";
 }
 
@@ -225,3 +267,18 @@ export const RESPOSTAS_RAPIDAS: { rotulo: string; texto: string }[] = [
   { rotulo: "Preciso de mais informação", texto: "Preciso de mais informação para seguir. Pode me passar os detalhes?" },
   { rotulo: "Resolvido", texto: "Resolvido!" },
 ];
+
+/**
+ * Descrição em "Rótulo: valor" por linha vira cartões (o resto fica como texto).
+ * Linha sem ":" (ou com rótulo comprido) vai pro texto livre.
+ */
+export function camposDaDescricao(desc: string | null | undefined): { campos: [string, string][]; resto: string } {
+  const campos: [string, string][] = [];
+  const resto: string[] = [];
+  for (const linha of (desc ?? "").split(/\r?\n/)) {
+    const m = /^\s*([^:]{1,32}):\s+(\S.*)$/.exec(linha);
+    if (m && !/^https?$/i.test(m[1].trim())) campos.push([m[1].trim(), m[2].trim()]);
+    else resto.push(linha);
+  }
+  return { campos, resto: resto.join("\n").trim() };
+}

@@ -26,6 +26,8 @@ import FormCotacaoCampos, { EscolherPrioridade, textoHoras } from "./FormCotacao
 import FormPagamentoCampos, { EscolherArquivos, VinculoPagamento } from "./FormPagamento";
 import { PEDIDO_DO_TIPO, cotacaoVazia, descricaoDaCotacao, faltaNaCotacao, tituloDaCotacao, type FormCotacao } from "./cotacao";
 import FormServicoCampos from "./FormServico";
+import { BotaoClipe, FilaDeAnexos, ZonaDeSoltar, useFilaDeAnexos } from "./AnexosTela";
+import "./quadro.css";
 import { descricaoDoServico, faltaNoServico, servicoVazio, temFormServico, tituloDoServico, type FormServico } from "./servico";
 import {
   TIPO_PAG_DO, anexarArquivo, descricaoDoPagamento, faltaNoPagamento, pagamentoVazio, paraBanco, tituloDoPagamento, type FormPagamento,
@@ -66,12 +68,14 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
   const [arquivos, setArquivos] = useState<File[]>([]);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  // 0316: anexos que sobem depois que o qs_sol_criar devolve o id (pagamento segue com os dele)
+  const fila = useFilaDeAnexos();
 
   useEffect(() => {
     if (!aberto) return;
     setTitulo(""); setDescricao(""); setPrioridade("normal"); setOutroPrazo(false); setPrazo(""); setErro(null); setSemCliente(false);
     setCot(cotacaoVazia(alvo?.sobre ? alvo.sobre.split(" · ")[0] : ""));
-    setPag((p) => pagamentoVazio(p.tipo)); setArquivos([]); setServ(servicoVazio());
+    setPag((p) => pagamentoVazio(p.tipo)); setArquivos([]); setServ(servicoVazio()); fila.limpar();
     setEscolha(alvo?.clienteId ? { clienteId: alvo.clienteId, clienteNome: (alvo.sobre ?? "").split(" · ")[0] || "Cliente", viagemId: alvo.viagemId ?? null, vendaTexto: null } : null);
     setPara(soPagamento ? "financeiro" : paraInicial && paraInicial !== deSetor ? paraInicial : destinos.includes("operacional") ? "operacional" : destinos[0]);
     listarTipos().then(setTipos).catch(() => setTipos([]));
@@ -126,6 +130,10 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
         // com cliente, o banco monta "Fulana · Venda"; sem, vale o nome do lead/conversa
         sobre: escolha ? null : alvo?.sobre ?? null,
       });
+      if (fila.fila.length) {
+        const ok = await fila.enviar(id, null);
+        if (!ok) window.alert("O pedido foi enviado, mas os anexos não subiram.\n\nAbra o pedido e anexe de novo pelo clipe.");
+      }
       onCriada(id);
     } catch (e) { setErro(e instanceof Error ? e.message : "Não enviou."); }
     finally { setEnviando(false); }
@@ -163,7 +171,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
   return (
     <Modal aberto={aberto} titulo={ehCotacao ? `Pedir cotação a ${NOME_SETOR[para]}` : ehPagamento ? "Pedir pagamento ao Financeiro" : `Pedir a ${NOME_SETOR[para]}`} onFechar={onFechar} largura={ehCotacao || ehPagamento || ehServico ? 720 : 560}
       rodape={<><Botao onClick={onFechar} disabled={enviando}>Cancelar</Botao><Botao variante="primario" onClick={() => void enviar()} disabled={enviando}>{enviando ? "Enviando…" : `Enviar pra ${NOME_SETOR[para]}`}</Botao></>}>
-      <div className="space-y-4">
+      <div className="space-y-4" onPaste={ehPagamento ? undefined : fila.aoColar}>
         {!soPagamento && <div>
           <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Pra qual setor</p>
           <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Setor que recebe">
@@ -236,6 +244,15 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
           <textarea value={descricao} onChange={(e) => setDescricao(e.target.value)} rows={4} maxLength={4000} className="rel-input" />
         </Campo>
         </>)}
+
+        <ZonaDeSoltar api={fila} className="solq-vars sol-nova-anx">
+          <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Anexos <span style={{ color: "var(--ink3)", fontWeight: 400 }}>— opcional: prints, PDFs, planilhas (até 25 MB cada)</span></p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <BotaoClipe api={fila} disabled={enviando} className="solq-concl" rotulo="Anexar arquivos" texto="Anexar arquivos" />
+            <span className="text-[12.5px]" style={{ color: "var(--ink3)" }}>ou arraste aqui, ou cole um print (Ctrl+V)</span>
+          </div>
+          <div style={{ marginTop: fila.itens.length || fila.erros.length ? 8 : 0 }}><FilaDeAnexos api={fila} /></div>
+        </ZonaDeSoltar>
 
         <div className="flex flex-wrap items-end gap-4">
           {!ehCotacao && (

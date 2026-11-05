@@ -54,7 +54,11 @@ import {
   type AcaoSol, type AguardandoQuem, type EventoSol, type Pessoa, type PrioridadeSol, type Setor, type Solicitacao,
 } from "./lib";
 import { clienteDo, tomDoPrazo, venceHoje, atrasada } from "./visao";
+import { anexosPorEvento, podeApagarAnexo, tipoDePrevia, type AnexoSol } from "./anexos";
+import { apagarAnexo, listarAnexos } from "./anexosApi";
+import { AnexosDaMensagem, BotaoClipe, FilaDeAnexos, GaleriaAnexos, Visualizador, ZonaDeSoltar, useFilaDeAnexos, useLinks, useVisualizador } from "./AnexosTela";
 import "./solicitacoes.css";
+import "./quadro.css";
 
 export interface LinksSol {
   onAbrirViagem?: (id: string) => void;
@@ -89,8 +93,8 @@ function quando(iso: string) {
 /** 0222: o rodízio grava "passada" com autor "QS". */
 const ehDistribuicao = (e: EventoSol) => e.tipo === "passada" && !e.autor_id && e.autor_nome === "QS";
 
-/** Um evento do histórico no formato da Timeline. */
-function itemDoEvento(e: EventoSol): TimelineItem {
+/** Um evento do histórico no formato da Timeline. `anexos` = os arquivos que vieram nessa mensagem (0316). */
+function itemDoEvento(e: EventoSol, anexos?: ReactNode): TimelineItem {
   let extra = "";
   if (e.tipo === "passada" && e.para) extra = ` ${e.para}`;
   if (e.tipo === "status" && e.para?.startsWith("aguardando:")) extra = `: aguardando ${AGUARDANDO[e.para.split(":")[1] as AguardandoQuem] ?? ""}`;
@@ -103,7 +107,12 @@ function itemDoEvento(e: EventoSol): TimelineItem {
   const titulo = ehDistribuicao(e) ? `Distribuída automaticamente pra ${e.para ?? "alguém do setor"}` : `${e.autor_nome ?? "Alguém"} ${ROTULO_EVENTO[e.tipo]}${extra}`;
   return {
     id: String(e.id), when: quando(e.criado_em), title: titulo, tone,
-    sub: e.texto && !ehDistribuicao(e) ? <span className={e.tipo === "comentario" ? "sol-ev-texto" : undefined}>{e.texto}</span> : undefined,
+    sub: anexos ? (
+      <span className="sol-ev-texto solq-vars">
+        {!(e.tipo === "comentario" && e.para === "anexos") && e.texto && <span style={{ display: "block", marginBottom: 6 }}>{e.texto}</span>}
+        {anexos}
+      </span>
+    ) : e.texto && !ehDistribuicao(e) ? <span className={e.tipo === "comentario" ? "sol-ev-texto" : undefined}>{e.texto}{e.tipo === "comentario" && e.para === "anexos" ? " (arquivo removido)" : ""}</span> : undefined,
   };
 }
 
@@ -154,6 +163,11 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
   const [ocupado, setOcupado] = useState(false);
   const [zapDeQuemPediu, setZapDeQuemPediu] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  // 0316: anexos
+  const [anexos, setAnexos] = useState<AnexoSol[]>([]);
+  const fila = useFilaDeAnexos();
+  const vis = useVisualizador();
+  const linksAnx = useLinks(anexos.filter((a) => tipoDePrevia(a) === "imagem").map((a) => a.miniatura ?? a.path));
   // 0158
   const [ajustando, setAjustando] = useState<{ f: FormCotacao | null; p?: FormPagamento | null; sv?: FormServico | null; prioridade: PrioridadeSol; texto: string } | null>(null);
   const [desfechando, setDesfechando] = useState<{ tipo: "fechou" | "nao_seguiu" | null; motivo: string; texto: string } | null>(null);
@@ -166,12 +180,15 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
 
   const carregar = useCallback(async () => {
     if (!id) return;
-    try { const r = await carregarSolicitacao(id); setS(r.s); setEventos(r.eventos); }
+    try {
+      const [r, a] = await Promise.all([carregarSolicitacao(id), listarAnexos(id).catch(() => [] as AnexoSol[])]);
+      setS(r.s); setEventos(r.eventos); setAnexos(a);
+    }
     catch (e) { setErro(e instanceof Error ? e.message : "Não carregou."); }
   }, [id]);
   useEffect(() => {
     setS(null); setEventos([]); setComentario(""); setPedindo(null); setPessoas(null); setMudandoPrazo(false); setAmarrando(false); setErro(null);
-    setAjustando(null); setDesfechando(null);
+    setAjustando(null); setDesfechando(null); setAnexos([]); fila.limpar();
     if (id) { void carregar(); void marcarVisto(id).then(onMudou); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -207,7 +224,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
     if (!id) return;
     const tecla = (e: KeyboardEvent) => {
       // o Menu e os diálogos de dentro (proposta, avisos) fecham primeiro
-      if (caixa.current?.querySelector("[role=menu], [role=dialog]")) return;
+      if (caixa.current?.querySelector("[role=menu], [role=dialog]") || document.querySelector(".solq-lb")) return;
       if (e.key === "Escape") {
         e.preventDefault();
         if (painelRef.current) { painelRef.current(); return; } // com uma ação aberta, Esc volta (não perde o texto do modal todo)
@@ -225,6 +242,16 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
   const painelRef = useRef<(() => void) | null>(null);
   painelRef.current = temPainel ? () => { setPedindo(null); setPessoas(null); setAjustando(null); setDesfechando(null); setAmarrando(false); setMudandoPrazo(false); } : null;
   useEffect(() => { if (temPainel) painel.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [temPainel]);
+
+  /** Comentário (com ou sem arquivos). Com arquivos vira UMA mensagem (qs_sol_anexar). */
+  async function comentar() {
+    if (!s) return;
+    if (!fila.fila.length) { if (comentario.trim()) await rodar("comentar", comentario); return; }
+    setOcupado(true); setErro(null);
+    const ok = await fila.enviar(s.id, comentario.trim() || null);
+    if (ok) { setComentario(""); await carregar(); onMudou(); }
+    setOcupado(false);
+  }
 
   async function rodar(acao: AcaoSol, t?: string | null, extra?: string | null) {
     if (!s) return;
@@ -253,6 +280,8 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
   const distribuida = !!s?.responsavel_id && [...eventos].reverse().find((e) => e.tipo === "passada" || e.tipo === "aceita");
   const foiDistribuida = !!distribuida && ehDistribuicao(distribuida) && distribuida.para === s?.responsavel_nome;
   const cli = s ? clienteDo(s) : null;
+  const porEvento = anexosPorEvento(anexos);
+  const gestorDoPedido = !!s && (currentUser?.role === "admin" || (currentUser?.role === "gestor" && (meusSetores.includes(s.de_setor) || meusSetores.includes(s.para_setor))));
 
   const pedir = (p: Pedindo) => { setPedindo(p); setTexto(""); setErro(null); };
   const escolherQuem = () => { if (s) pessoasDoSetor(s.para_setor).then(setPessoas).catch(() => setPessoas([])); };
@@ -573,16 +602,22 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
               {/* ── Andamento ── */}
               <section aria-labelledby={`${tituloId}-and`}>
                 <h3 className="sol-rot" id={`${tituloId}-and`}>Andamento</h3>
-                <Timeline items={eventos.map(itemDoEvento)} />
-                <div className="sol-comentar">
+                <Timeline items={eventos.map((e) => {
+                  const anx = porEvento.get(e.id);
+                  return itemDoEvento(e, anx?.length ? <AnexosDaMensagem anexos={anx} links={linksAnx} onAbrir={vis.abrir} /> : undefined);
+                })} />
+                <ZonaDeSoltar api={fila} className="sol-comentar solq-vars" >
                   <label htmlFor={`${tituloId}-com`}>Comentário</label>
                   <div className="sol-comentar__l">
+                    <BotaoClipe api={fila} disabled={ocupado} />
                     <textarea id={`${tituloId}-com`} className="sol-ta" rows={2} value={comentario} onChange={(e) => setComentario(e.target.value)} maxLength={4000}
-                      placeholder={recebe ? `Pergunte ou avise ${primeiroNome(s.criado_por_nome) || "quem pediu"}…` : `Escreva pra ${NOME_SETOR[s.para_setor]}…`}
-                      onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && comentario.trim()) void rodar("comentar", comentario); }} />
-                    <Btn variant="primary" disabled={ocupado || !comentario.trim()} onClick={() => void rodar("comentar", comentario)}>Enviar</Btn>
+                      placeholder={fila.fila.length ? "Escreva algo sobre os arquivos (opcional)" : recebe ? `Pergunte ou avise ${primeiroNome(s.criado_por_nome) || "quem pediu"}…` : `Escreva pra ${NOME_SETOR[s.para_setor]}…`}
+                      onPaste={fila.aoColar}
+                      onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && (comentario.trim() || fila.fila.length)) void comentar(); }} />
+                    <Btn variant="primary" disabled={ocupado || fila.enviando || (!comentario.trim() && !fila.fila.length)} onClick={() => void comentar()}>Enviar</Btn>
                   </div>
-                </div>
+                  <FilaDeAnexos api={fila} />
+                </ZonaDeSoltar>
                 {erro && !temPainel && <div className="sol-aviso sol-aviso--danger" role="alert" style={{ marginTop: 8 }}>{erro}</div>}
               </section>
             </div>
@@ -609,6 +644,15 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
                   {s.cliente_id && (recebe || pediu || doSetorQuePediu) && !amarrando && <button type="button" className="sol-link sol-link--fraco" onClick={abrirAmarra}>Trocar cliente/venda</button>}
                 </div>
               </div>
+
+              <section className="sol-bloco solq-vars" aria-label="Anexos">
+                <h3 className="solq-rot">
+                  Anexos {anexos.length > 0 && <span className="solq-col__n">{anexos.length}</span>}
+                  <BotaoClipe api={fila} className="solq-rot__btn" rotulo="Anexar ao pedido" />
+                </h3>
+                <GaleriaAnexos anexos={anexos} links={linksAnx} onAbrir={vis.abrir}
+                  vazio={<p className="sol-tw" style={{ fontSize: 12.5, margin: 0 }}>Nenhum arquivo. Use o clipe, arraste no campo de comentário ou cole um print.</p>} />
+              </section>
 
               <dl className="sol-dl">
                 <dt>Prazo</dt>
@@ -653,6 +697,11 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
           </div>
         )}
       </div>
+      {vis.aberto && anexos.some((a) => a.id === vis.aberto) && (
+        <Visualizador anexos={anexos} inicial={vis.aberto} onFechar={vis.fechar}
+          podeApagar={(a) => podeApagarAnexo(a, meuId, gestorDoPedido)}
+          onApagar={async (a) => { await apagarAnexo(a.id); await carregar(); onMudou(); }} />
+      )}
     </div>
   );
 }

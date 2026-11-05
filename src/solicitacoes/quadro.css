@@ -2,7 +2,7 @@
    Mesma hierarquia do mockup escuro (página → coluna → cartão → cartão aberto), mas
    em tokens: funciona no tema claro e no modo noite (.dark). */
 
-.solq {
+.solq, .solq-vars {
   --q-col: var(--surface-2);
   --q-card: var(--surface);
   --q-sel: var(--surface);
@@ -11,9 +11,12 @@
   --q-laranja: #C2410C; --q-laranja-bg: #FFEDD5;
   --q-vermelho: var(--danger); --q-vermelho-bg: var(--danger-bg);
   --q-verde: var(--ok); --q-verde-bg: var(--ok-bg);
+}
+/* .solq-vars: só as cores do quadro (anexos no modal completo e na criação, 0316) */
+.solq {
   display: flex; flex-direction: column; gap: 0; color: var(--text); font-family: var(--font-sans); font-size: 14px; line-height: 1.45; min-width: 0;
 }
-.dark .solq {
+.dark .solq, .dark .solq-vars {
   --q-col: var(--surface);          /* #111113 */
   --q-card: #141416;
   --q-sel: #1F1F23;
@@ -51,6 +54,12 @@
 .solq-corpo { display: flex; flex-wrap: wrap; min-height: 0; align-items: stretch; }
 .solq-quadro { flex: 999 1 720px; min-width: 0; overflow-x: auto; padding: 20px 0; }
 .solq-grade { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 14px; min-width: 900px; align-items: start; }
+.solq-grade[data-cols="3"] { grid-template-columns: repeat(3, minmax(240px, 1fr)); min-width: 720px; }
+/* barra acima do quadro: "Ver concluídas (N)" (recolhidas por padrão) */
+.solq-quadro__barra { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: -6px 0 12px; }
+.solq-concl { height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); font: 600 12px var(--font-sans); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.solq-concl:hover { color: var(--text); border-color: var(--border-strong); }
+.solq-concl[aria-pressed="true"] { color: var(--text); }
 .solq-col { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 14px; background: var(--q-col); border: 1px solid var(--border); min-height: 520px; }
 .solq-col__h { display: flex; flex-direction: column; gap: 2px; padding: 2px 4px 6px; }
 .solq-col__t { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 700; }
@@ -64,6 +73,8 @@
 .solq-card { border-radius: 12px; background: var(--q-card); border: 1px solid var(--border); }
 .solq-card[data-sel] { background: var(--q-sel); border-color: var(--text); }
 .solq-card[data-feito]:not([data-sel]) { opacity: .7; }
+.solq-card__capa { display: block; width: calc(100% + 24px); height: 84px; margin: -12px -12px 2px; object-fit: cover; border-radius: 12px 12px 0 0; background: var(--q-fundo); }
+.solq-card__anx { display: inline-flex; align-items: center; gap: 2px; margin-left: 8px; padding: 1px 6px; border-radius: 999px; background: var(--q-fundo); color: var(--muted); font-size: 11px; font-weight: 700; vertical-align: middle; }
 .solq-card__abrir { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 12px 12px 8px; border: 0; background: transparent; color: var(--text); width: 100%; font: inherit; cursor: pointer; border-radius: 12px; }
 .solq-card__l1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .solq-card__num { margin-left: auto; font-size: 11px; color: var(--muted); }
@@ -86,52 +97,177 @@
 .solq-badge { min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 999px; background: var(--q-azul); color: var(--bg); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 .solq-ava { width: 24px; height: 24px; border-radius: 999px; background: var(--q-sel); border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; }
 
-/* ── Conversa ── */
-.solq-conv { flex: 1 1 400px; max-width: 520px; min-width: 0; border-left: 1px solid var(--border); background: var(--q-col); display: flex; flex-direction: column; max-height: calc(100vh - 120px); position: sticky; top: 0; align-self: flex-start; }
-.solq-conv__h { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
-.solq-conv__l1 { display: flex; align-items: flex-start; gap: 10px; }
+/* ── O pedido aberto: MODAL CENTRAL (05/11) ── */
+.solq-ov { position: fixed; inset: 0; z-index: 55; background: rgba(9, 9, 11, .55); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.solq-conv { --q-tipo: var(--q-azul); width: min(1180px, 100%); height: min(860px, calc(100vh - 48px)); min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 24px 64px rgba(0, 0, 0, .3); display: flex; flex-direction: column; overflow: hidden; font-family: var(--font-sans); font-size: 14px; line-height: 1.45; }
+.solq-conv__h { padding: 16px 22px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; border-top: 4px solid var(--q-tipo); }
+.solq-conv__l1 { display: flex; align-items: center; gap: 10px; }
+.solq-conv__tags { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .solq-conv__meta { margin: 0; font-size: 12px; color: var(--muted); }
-.solq-conv h2 { margin: 2px 0 0; font-size: 17px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
-.solq-conv__cli { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
-.solq-x { width: 32px; height: 32px; border-radius: 8px; border: 0; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
-.solq-conv__quem { font-size: 12px; color: var(--muted); }
+.solq-conv h2 { margin: 0; font-size: 20px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; letter-spacing: -.01em; }
+.solq-conv h2:focus { outline: none; }
+.solq-tipo { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; color: var(--q-tipo); background: color-mix(in srgb, var(--q-tipo) 12%, transparent); }
+.dark .solq-tipo { color: color-mix(in srgb, var(--q-tipo) 55%, white); }
+.solq-and { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--q-sel); border: 1px solid var(--border); }
+.solq-and[data-col="com_alguem"] { color: var(--q-azul); background: var(--q-azul-bg); border-color: transparent; }
+.solq-and[data-col="voltou"] { color: var(--q-laranja); background: var(--q-laranja-bg); border-color: transparent; }
+.solq-and[data-col="concluida"] { color: var(--q-verde); background: var(--q-verde-bg); border-color: transparent; }
+.solq-x { width: 36px; height: 36px; border-radius: 10px; border: 0; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.solq-x:hover { background: var(--q-sel); color: var(--text); }
+
+/* faixa: quem → quem · prazo · cliente */
+.solq-faixa { display: grid; grid-template-columns: 1.3fr 1fr 1.2fr; gap: 10px; }
+.solq-faixa__b { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+.solq-faixa__b > small { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.solq-faixa__b > b { font-size: 14px; overflow-wrap: anywhere; }
+.solq-faixa__b > span { font-size: 12px; color: var(--muted); }
+.solq-apagado { color: var(--muted); font-weight: 500 !important; }
+.solq-faixa__b > .solq-quem { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--text); }
+.solq-quem > span:not(.solq-ava):not(.solq-seta) { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.solq-quem small { font-size: 11px; color: var(--muted); font-weight: 600; }
+.solq-seta { color: var(--muted); font-weight: 700; }
+.solq-prazo > b { font-size: 18px; letter-spacing: -.01em; }
+.solq-prazo[data-tom="r"] { background: var(--q-vermelho-bg); border-color: transparent; }
+.solq-prazo[data-tom="r"] > b { color: var(--q-vermelho); }
+.solq-prazo[data-tom="o"] { background: var(--q-laranja-bg); border-color: transparent; }
+.solq-prazo[data-tom="o"] > b { color: var(--q-laranja); }
+.solq-prazo[data-tom="ok"] > b { color: var(--q-verde); }
 .solq-conv__acoes { display: flex; gap: 8px; flex-wrap: wrap; }
-.solq-conv__acoes .solq-btn { flex: 1 1 auto; }
 .solq-pede { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--q-card); }
 .solq-pede label { font-size: 13px; font-weight: 600; }
 .solq-ta { width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: 14px var(--font-sans); padding: 8px 10px; resize: vertical; }
 .solq-erro { margin: 0; font-size: 13px; color: var(--danger); }
 
-.solq-det { border: 1px solid var(--border); border-radius: 10px; background: var(--q-card); }
-.solq-det > summary { cursor: pointer; padding: 8px 12px; font-size: 13px; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 6px; }
-.solq-det > summary::-webkit-details-marker { display: none; }
-.solq-det > summary::before { content: "▸"; font-size: 11px; color: var(--muted); transition: transform .15s; }
-.solq-det[open] > summary::before { transform: rotate(90deg); }
-.solq-det__corpo { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
-.solq-det__desc { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* corpo: o pedido à esquerda, a conversa à direita */
+.solq-conv__corpo { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
+.solq-conv__info { overflow-y: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 22px; border-right: 1px solid var(--border); }
+.solq-conv__info > section { display: flex; flex-direction: column; gap: 10px; }
+.solq-rot { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.solq-rot__btn { margin-left: auto; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.solq-cards { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.solq-cardinho { margin: 0; padding: 9px 11px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); min-width: 0; }
+.solq-cardinho[data-largo] { grid-column: 1 / -1; }
+.solq-cardinho dt { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.solq-cardinho dd { margin: 2px 0 0; font-size: 14px; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.solq-texto { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); white-space: pre-wrap; overflow-wrap: anywhere; }
+.solq-resol { margin: 0; padding: 10px 12px; border-radius: 10px; display: flex; flex-direction: column; gap: 2px; white-space: pre-wrap; }
+.solq-resol[data-tom="ok"] { background: var(--q-verde-bg); }
+.solq-resol[data-tom="r"] { background: var(--q-vermelho-bg); }
+.solq-resol b { font-size: 12px; }
+.solq-vazio--anx { text-align: left; display: block; }
+.solq-vazio--anx svg { vertical-align: -2px; }
+.solq-part { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.solq-part li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.solq-part small { margin-left: auto; font-size: 11px; color: var(--muted); }
 .solq-links { display: flex; flex-wrap: wrap; gap: 12px; }
 .solq-link { background: none; border: 0; padding: 0; color: var(--q-azul); font: 600 13px var(--font-sans); cursor: pointer; }
 
-.solq-tl { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 200px; }
+/* galeria de anexos */
+.solq-gal { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
+.solq-gal__i { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.solq-gal__m { display: flex; align-items: center; justify-content: center; aspect-ratio: 4 / 3; width: 100%; border-radius: 10px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); }
+.solq-gal__i:hover .solq-gal__m { border-color: var(--text); }
+.solq-gal__n { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.solq-gal__i small { font-size: 11px; color: var(--muted); }
+.solq-mini__img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.solq-arq__ic { position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: var(--muted); flex-shrink: 0; }
+.solq-arq__ic b { font-size: 9px; font-weight: 800; letter-spacing: .03em; }
+.solq-arq__ic[data-pdf] { color: var(--q-vermelho); }
+
+/* conversa */
+.solq-conv__chat { position: relative; display: flex; flex-direction: column; min-height: 0; background: var(--q-col); }
+.solq-tl { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
 .solq-ev { margin: 0; align-self: center; font-size: 12px; color: var(--muted); padding: 4px 12px; border-radius: 999px; background: var(--q-card); border: 1px solid var(--border); text-align: center; }
 .solq-msg { display: flex; flex-direction: column; gap: 4px; max-width: 80%; align-self: flex-start; }
 .solq-msg[data-eu] { align-self: flex-end; align-items: flex-end; }
 .solq-msg > span { font-size: 12px; color: var(--muted); }
-.solq-msg > p { margin: 0; padding: 10px 13px; border-radius: 14px; background: var(--q-sel); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border); }
-.solq-msg[data-eu] > p { background: var(--text); color: var(--bg); border-color: var(--text); }
+.solq-bolha { display: flex; flex-direction: column; gap: 6px; padding: 10px 13px; border-radius: 14px; background: var(--q-sel); color: var(--text); border: 1px solid var(--border); max-width: 100%; }
+.solq-bolha > p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.solq-msg[data-eu] .solq-bolha { background: var(--text); color: var(--bg); border-color: var(--text); }
+.solq-anx { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.solq-anx__fotos { display: grid; gap: 4px; grid-template-columns: repeat(2, 120px); }
+.solq-anx__fotos[data-n="1"] { grid-template-columns: 220px; }
+.solq-anx__foto { position: relative; padding: 0; border: 0; border-radius: 10px; overflow: hidden; cursor: pointer; aspect-ratio: 4 / 3; background: var(--q-fundo); color: var(--muted); display: flex; align-items: center; justify-content: center; }
+.solq-anx__mais { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .5); color: #fff; font-size: 18px; font-weight: 700; }
+.solq-arq { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 200px; max-width: 100%; }
+.solq-arq:hover { border-color: var(--q-azul); }
+.solq-arq__tx { display: flex; flex-direction: column; min-width: 0; font-size: 13px; font-weight: 600; }
+.solq-arq__tx > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.solq-arq__tx small { font-size: 11px; color: var(--muted); font-weight: 500; }
+.solq-soltar { position: absolute; inset: 8px; z-index: 2; border: 2px dashed var(--q-azul); border-radius: 14px; background: var(--q-azul-bg); color: var(--q-azul); display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 700; pointer-events: none; opacity: .96; }
 
-.solq-rodape { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.solq-rodape { padding: 12px 20px 14px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; background: var(--surface); }
 .solq-rapidas { display: flex; gap: 6px; flex-wrap: wrap; }
 .solq-rapidas button { height: 30px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text); font: 12px var(--font-sans); cursor: pointer; }
-.solq-campo { display: flex; gap: 8px; align-items: center; min-height: 48px; padding: 0 6px 0 14px; border-radius: 24px; border: 1px solid var(--border); background: var(--q-card); }
+.solq-rapidas button:disabled { opacity: .45; cursor: default; }
+.solq-campo { display: flex; gap: 6px; align-items: center; min-height: 48px; padding: 0 6px; border-radius: 24px; border: 1px solid var(--border); background: var(--q-card); }
 .solq-campo textarea { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: 14px var(--font-sans); outline: none; resize: none; padding: 12px 0; max-height: 120px; }
+.solq-clipe { width: 36px; height: 36px; border-radius: 999px; border: 0; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.solq-clipe:hover { color: var(--text); background: var(--q-sel); }
+.solq-clipe:disabled { opacity: .4; cursor: default; }
 .solq-enviar { width: 36px; height: 36px; border-radius: 999px; border: 0; background: var(--text); color: var(--bg); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
 .solq-enviar:disabled { opacity: .4; cursor: default; }
 .solq-seguir { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-/* ── Celular: a conversa vira tela cheia ── */
+/* fila de envio (anexos esperando a mensagem) */
+.solq-fila { display: flex; flex-direction: column; gap: 6px; }
+.solq-fila__erro { margin: 0; display: flex; gap: 8px; align-items: flex-start; padding: 6px 10px; border-radius: 8px; background: var(--q-vermelho-bg); color: var(--q-vermelho); font-size: 12px; }
+.solq-fila__erro span { flex: 1; }
+.solq-fila__l { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.solq-fila__i { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 30px; padding: 0 4px 0 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--q-card); font-size: 12px; color: var(--text); }
+.solq-fila__i[data-estado="erro"] { border-color: var(--q-vermelho); color: var(--q-vermelho); }
+.solq-fila__i[data-estado="ok"] { border-color: var(--q-verde); }
+.solq-fila__n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.solq-fila__i small { color: var(--muted); font-size: 11px; padding-right: 6px; }
+.solq-fila__x { width: 22px; height: 22px; border-radius: 999px; border: 0; background: var(--q-sel); color: var(--text); cursor: pointer; font-size: 14px; line-height: 1; }
+.solq-fila__barra { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--q-azul); transition: width .2s; }
+.solq-prog { position: relative; height: 22px; border-radius: 999px; background: var(--q-fundo); border: 1px solid var(--border); overflow: hidden; }
+.solq-prog > span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--q-azul-bg); transition: width .2s; }
+.solq-prog > small { position: relative; display: block; padding: 0 10px; line-height: 20px; font-size: 11px; font-weight: 700; color: var(--q-azul); }
+
+/* visualizador em tela cheia (foto com setas, PDF embutido) */
+.solq-lb { position: fixed; inset: 0; z-index: 90; background: rgba(9, 9, 11, .92); color: #fff; display: flex; flex-direction: column; font-family: var(--font-sans); }
+.solq-lb:focus { outline: none; }
+.solq-lb__h { display: flex; align-items: center; gap: 8px; padding: 12px 16px; flex-wrap: wrap; }
+.solq-lb__t { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; }
+.solq-lb__t b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+.solq-lb__t small { font-size: 12px; opacity: .7; }
+.solq-lb__b { height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .25); background: transparent; color: #fff; font: 600 13px var(--font-sans); cursor: pointer; display: inline-flex; align-items: center; text-decoration: none; }
+.solq-lb__b[data-perigo] { border-color: rgba(248, 113, 113, .6); color: #FCA5A5; }
+.solq-lb__x { width: 36px; height: 36px; border-radius: 8px; border: 0; background: rgba(255, 255, 255, .1); color: #fff; font-size: 22px; cursor: pointer; }
+.solq-lb__corpo { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; padding: 0 64px 20px; }
+.solq-lb__img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
+.solq-lb__pdf { width: min(1000px, 100%); height: 100%; border: 0; border-radius: 6px; background: #fff; }
+.solq-lb__msg { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 0; color: #fff; }
+.solq-lb__msg .solq-arq__ic { color: #fff; transform: scale(2); margin-bottom: 14px; }
+.solq-lb__seta { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border-radius: 10px; border: 0; background: rgba(255, 255, 255, .12); color: #fff; font-size: 34px; cursor: pointer; }
+.solq-lb__seta[data-lado="e"] { left: 10px; }
+.solq-lb__seta[data-lado="d"] { right: 10px; }
+.solq-lb button:focus-visible, .solq-lb a:focus-visible { outline: 2px solid #93C5FD; outline-offset: 2px; }
+.solq-conv button:focus-visible, .solq-conv textarea:focus-visible { outline: 2px solid var(--q-azul); outline-offset: 2px; }
+
+/* ── Celular: o pedido aberto vira tela cheia ── */
 @media (max-width: 900px) {
-  .solq-conv { position: fixed; inset: 0; z-index: 80; max-width: none; max-height: none; border-left: 0; background: var(--bg); padding-bottom: env(safe-area-inset-bottom); }
+  .solq-ov { padding: 0; }
+  .solq-conv { width: 100%; height: 100%; border-radius: 0; border: 0; padding-bottom: env(safe-area-inset-bottom); overflow-y: auto; }
+  .solq-conv__h { padding: 12px 16px; }
+  .solq-faixa { grid-template-columns: 1fr; }
+  .solq-conv__corpo { display: flex; flex-direction: column; flex: none; }
+  .solq-conv__info { overflow: visible; border-right: 0; border-bottom: 1px solid var(--border); padding: 16px; }
+  .solq-conv__chat { min-height: 70vh; }
+  .solq-tl { overflow: visible; }
+  .solq-rodape { position: sticky; bottom: 0; padding: 10px 16px 12px; }
+  .solq-lb__corpo { padding: 0 8px 12px; }
+  .solq-lb__seta { width: 36px; height: 52px; }
   .solq-top { padding-bottom: 12px; }
   .solq-btn { flex: 1 1 auto; }
 }
+
+/* modal completo (SolicitacaoDetalhe): o campo de comentário aceita arquivo arrastado */
+.sol-comentar.solq-vars { position: relative; }
+.sol-comentar .solq-clipe { align-self: flex-start; margin-top: 4px; }
+.sol-comentar .solq-fila { margin-top: 8px; }
+
+/* criação do pedido (NovaSolicitacao): caixa de anexos */
+.sol-nova-anx { position: relative; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--line, var(--border)); }
+.sol-nova-anx .solq-concl { color: var(--ink, var(--text)); }

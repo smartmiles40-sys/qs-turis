@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   chipDePrazo, colunaDoQuadro, contarNaoLidas, ehParticipante, iniciais, itensDaConversa, numeroDoMenu, passaNoFiltro, podeAcompanhar,
-  previaDoUltimo, quandoCurto, totalNaoLidas,
+  previaDoUltimo, quandoCurto, totalNaoLidas, colunasVisiveis, contagemDoPrazo, duracaoLegivel, camposDaDescricao,
 } from "../../src/solicitacoes/conversa.ts";
 
 // quinta, 05/11/2026 15:00 em São Paulo
@@ -23,7 +23,8 @@ test("status → coluna do quadro", () => {
   assert.equal(colunaDoQuadro({ ...base, status: "aguardando", aguardando_quem: "cliente" }, AGORA), "com_alguem");
   assert.equal(colunaDoQuadro({ ...base, status: "aguardando", aguardando_quem: "fornecedor" }, AGORA), "com_alguem");
   assert.equal(colunaDoQuadro({ ...base, status: "concluida", concluido_em: sp("2026-11-01T10:00:00") }, AGORA), "concluida");
-  // concluída há mais de 14 dias sai do quadro (fica no Buscar)
+  // concluída há mais de 7 dias sai do quadro (fica no Buscar) — 05/11: janela encurtada de 14 pra 7
+  assert.equal(colunaDoQuadro({ ...base, status: "concluida", concluido_em: sp("2026-10-29T10:00:00") }, AGORA), null);
   assert.equal(colunaDoQuadro({ ...base, status: "concluida", concluido_em: sp("2026-10-20T10:00:00") }, AGORA), null);
   assert.equal(colunaDoQuadro({ ...base, status: "recusada" }, AGORA), null);
   assert.equal(colunaDoQuadro({ ...base, status: "cancelada" }, AGORA), null);
@@ -136,4 +137,35 @@ test("prévia do cartão, iniciais e datas curtas", () => {
   assert.equal(quandoCurto(sp("2026-11-05T09:00:00"), AGORA), "hoje, 09:00");
   assert.equal(quandoCurto(sp("2026-11-04T14:22:00"), AGORA), "ontem, 14:22");
   assert.match(quandoCurto(sp("2026-10-29T09:00:00"), AGORA), /29\/10 09:00$/);
+});
+
+test("concluídas recolhidas por padrão", () => {
+  assert.deepEqual(colunasVisiveis(false).map((c) => c.id), ["nova", "com_alguem", "voltou"]);
+  assert.deepEqual(colunasVisiveis(true).map((c) => c.id), ["nova", "com_alguem", "voltou", "concluida"]);
+});
+
+test("prazo em destaque no pedido aberto", () => {
+  const ab = (prazo: string | null, extra: object = {}) => ({ status: "em_andamento", aguardando_quem: null, prazo, concluido_em: null, ...extra }) as never;
+  assert.deepEqual(contagemDoPrazo(ab(sp("2026-11-05T17:10:00")), AGORA), { tom: "o", grande: "Faltam 2h 10min", sub: "vence hoje, 17:10" });
+  assert.equal(contagemDoPrazo(ab(sp("2026-11-03T15:00:00")), AGORA).grande, "Atrasado há 2 dias");
+  assert.equal(contagemDoPrazo(ab(sp("2026-11-05T14:15:00")), AGORA).tom, "r");
+  assert.equal(contagemDoPrazo(ab(null), AGORA).grande, "Sem prazo");
+  assert.equal(contagemDoPrazo(ab(sp("2026-11-03T15:00:00"), { status: "aguardando", aguardando_quem: "solicitante" }), AGORA).grande, "Prazo pausado");
+  assert.equal(duracaoLegivel(45 * 60_000), "45 min");
+  assert.equal(duracaoLegivel(3 * 3_600_000), "3h");
+  assert.equal(duracaoLegivel(26 * 3_600_000), "1 dia");
+});
+
+test("descrição em linhas 'Rótulo: valor' vira cartões", () => {
+  const r = camposDaDescricao("Passageiro: Ana Souza\nTrecho: GRU–LIS\nVer https://exemplo.com\nqualquer coisa");
+  assert.deepEqual(r.campos, [["Passageiro", "Ana Souza"], ["Trecho", "GRU–LIS"]]);
+  assert.equal(r.resto, "Ver https://exemplo.com\nqualquer coisa");
+  assert.deepEqual(camposDaDescricao(null), { campos: [], resto: "" });
+});
+
+test("mensagem só com arquivos (0316)", () => {
+  const ev = { id: 9, solicitacao_id: "s", tipo: "comentario", de: null, para: "anexos", texto: "anexou foto.png", autor_id: "lau", autor_nome: "Laura", criado_em: sp("2026-11-05T10:00:00") } as never;
+  const [m] = itensDaConversa([ev], "eu", { agora: AGORA });
+  assert.ok(m.tipo === "msg" && m.auto && m.evento === 9);
+  assert.equal(previaDoUltimo({ tipo: "comentario", texto: "anexou foto.png", para: "anexos", autor_id: "lau", autor_nome: "Laura", criado_em: sp("2026-11-05T10:00:00") }, "eu"), "📎 Laura anexou foto.png");
 });

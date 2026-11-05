@@ -286,7 +286,7 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
 
   // ── 05/11: QUADRO + CONVERSA (Recebidas e Pedidas por nós) ──
   // O "Buscar" (escopo historico) continua com a tela antiga (quadro/lista/prazos
-  // + modal). No quadro, o cartão abre a CONVERSA ao lado; o modal completo
+  // + modal). No quadro, o cartão abre o pedido num MODAL CENTRAL (0316); o completo
   // (SolicitacaoDetalhe) abre pelo "Ver tudo e mais ações".
   const modoQuadro = ehQuadro(escopo);
   const meusSetores = setoresDe(currentUser);
@@ -339,7 +339,7 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
           <header className="solq-top">
             <div className="solq-top__tx">
               <h1>Solicitações</h1>
-              <p>{NOME_SETOR[setor]} · clique num cartão para abrir a conversa do pedido</p>
+              <p>{NOME_SETOR[setor]} · clique num cartão para abrir o pedido</p>
             </div>
             <div className="solq-seg" role="tablist" aria-label="Escopo">
               <button type="button" role="tab" aria-selected={escopo === "recebidas"} onClick={() => muda({ escopo: "recebidas" })}>
