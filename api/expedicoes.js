@@ -53,7 +53,7 @@ import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { montarChecklistPadrao } from './_expChecklist.js';
 import { rodarEspelho } from './_expEspelho.js';
 import { sincronizarBitrixUma, sincronizarTodas } from './_expBitrixSync.js';
-import { gerarLinkAmigo, statusAmigo } from './_expAcesso.js';
+import { gerarLinkAmigo, statusAmigo, espelhoLigado } from './_expAcesso.js';
 
 const PORTAL_PADRAO = 'https://sistema-expedicoes.vercel.app';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -497,6 +497,8 @@ export default async function handler(req, res) {
 
     if (acao === 'sincronizar-bitrix') {
       if (!(await usuarioPodeEditar(req))) return res.status(403).json({ ok: false, error: 'Seu perfil é somente leitura nas Expedições.' });
+      // Modo validação: o banco antigo é a fonte e o espelho sobrescreveria o que o botão gravar.
+      if (espelhoLigado()) return res.status(423).json({ ok: false, error: "Em validação: atualize pelo sistema atual — os dados chegam aqui pelo espelho a cada 5 minutos." });
       return await sincronizarBitrixUma(req, res);
     }
 

@@ -9,11 +9,12 @@
 //  - "Conferir" tem desfazer; "Conferir todas" pede confirmação e respeita o filtro;
 //  - filtro por expedição e o quadro da última sync automática (no modo seco
 //    mostra o que ela FARIA quando for ligada).
-//  - o botão WhatsApp com link mágico (e3816fa) fica pro porte do ExpedAmigo.
+//  - botão WhatsApp com link mágico (e3816fa) vem de expedamigo/BotaoWhatsAppAcesso.
 // Somente leitura (perfil de leitura ou modo validação do espelho): botões desligados.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Botao, Modal, Vazio, Aviso } from "@/rel/ui";
 import { useExp } from "../contexto";
+import BotaoWhatsAppAcesso from "../expedamigo/BotaoWhatsAppAcesso";
 import { Busca, Carregando, Cartao, Selo, useAoVivo, type Tom } from "../ui";
 import { formatDate, formatDateTime } from "../lib/utils";
 import {
@@ -27,8 +28,8 @@ export default function NovasVendas() {
   const ctx = useExp();
   const { ir, avisar } = ctx;
   // O modo validação (espelho ligado) vem do contexto quando existir; o perfil de leitura sempre.
-  const bloqueado = ctx.somenteLeitura || Boolean((ctx as unknown as { modoValidacao?: boolean }).modoValidacao);
-  const motivoBloqueio = ctx.somenteLeitura ? "Seu perfil é só de leitura nas Expedições." : "Modo validação: as telas estão só leitura enquanto o espelho do sistema antigo está ligado.";
+  const bloqueado = ctx.somenteLeitura || ctx.emValidacao;
+  const motivoBloqueio = !ctx.emValidacao ? "Seu perfil é só de leitura nas Expedições." : "Modo validação: as telas estão só leitura enquanto o espelho do sistema antigo está ligado.";
 
   const [itens, setItens] = useState<NovaVenda[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -157,6 +158,9 @@ export default function NovasVendas() {
                 <Selo tom={tomStatus(r.status_reserva)}>{r.status_reserva}</Selo>
                 <span className="text-[12px] whitespace-nowrap" style={{ color: "var(--ink3)" }} title="Quando entrou na fila">{r.entrou_em ? formatDateTime(r.entrou_em) : "—"}</span>
                 <span className="flex gap-1.5 ml-auto">
+                  <BotaoWhatsAppAcesso passageiroId={r.passageiro_id} nome={r.nome} telefone={r.telefone}
+                    viagem={{ nome: r.expedicao_nome, tipo: r.expedicao_tipo }} modoValidacao={ctx.emValidacao}
+                    onAviso={(t, tom) => avisar(t, tom)} />
                   <Botao variante="fantasma" onClick={() => abrir(r)}>Abrir</Botao>
                   <Botao variante="primario" disabled={bloqueado || indo === r.passageiro_id} title={bloqueado ? motivoBloqueio : "Conferido — tirar da fila"}
                     onClick={() => void conferir(r)}>{indo === r.passageiro_id ? "…" : "✓ Conferir"}</Botao>

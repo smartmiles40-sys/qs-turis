@@ -60,7 +60,7 @@ export async function listarNovasVendas(): Promise<NovaVenda[]> {
     passageiro_id: p.id, nome: p.nome_completo, cpf: p.cpf, telefone: p.telefone, email: p.email,
     status_reserva: p.status_reserva, bitrix_deal_id: p.bitrix_deal_id, expedicao_id: p.expedicao_id,
     expedicao_codigo: p.expedicoes!.codigo, expedicao_nome: p.expedicoes!.nome,
-    expedicao_tipo: p.expedicoes!.tipo === "pacote" ? "pacote" : "expedicao",
+    expedicao_tipo: p.expedicoes!.tipo === "pacote" ? ("pacote" as const) : ("expedicao" as const),
     destino: p.expedicoes!.destino, data_embarque: p.expedicoes!.data_embarque,
     entrou_em: p.nova_venda_em ?? p.created_at ?? null,
   })).sort((a, b) => (b.entrou_em ?? "").localeCompare(a.entrou_em ?? ""));
