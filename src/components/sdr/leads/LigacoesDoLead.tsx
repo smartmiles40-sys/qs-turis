@@ -1,7 +1,7 @@
 // Aba "Ligações" da ficha do lead: o áudio das ligações atendidas pelo webfone
 // (0233). O SDR ouve as próprias; gestão comercial ouve todas (RLS).
 import { useEffect, useState } from "react";
-import { listarGravacoesDoLead, linkDaGravacao, type GravacaoLigacao } from "@/lib/gravacaoLigacao";
+import { listarGravacoesDoLead, linkDaGravacao, baixarGravacao, type GravacaoLigacao } from "@/lib/gravacaoLigacao";
 
 export function duracao(seg: number): string {
   const m = Math.floor(seg / 60);
@@ -14,7 +14,34 @@ export function quando(iso: string): string {
 }
 
 /** Também usado no Desempenho (últimas ligações gravadas). */
-export function Player({ g }: { g: Pick<GravacaoLigacao, "storage_path"> }) {
+export function Player({ g }: { g: Pick<GravacaoLigacao, "storage_path" | "inicio" | "telefone"> }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 min-w-0"><Ouvir g={g} /></div>
+      <Baixar g={g} />
+    </div>
+  );
+}
+
+function Baixar({ g }: { g: Pick<GravacaoLigacao, "storage_path" | "inicio" | "telefone"> }) {
+  const [estado, setEstado] = useState<"" | "baixando" | "erro">("");
+  async function baixar() {
+    setEstado("baixando");
+    setEstado((await baixarGravacao(g)) ? "" : "erro");
+  }
+  return (
+    <button
+      onClick={baixar}
+      disabled={estado === "baixando"}
+      title={estado === "erro" ? "Não deu pra baixar. Tente de novo." : "Baixar o áudio desta ligação"}
+      className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-60 ${estado === "erro" ? "border-red-300 text-red-600" : "border-gray-200 text-gray-700 hover:bg-gray-50"}`}
+    >
+      {estado === "baixando" ? "Baixando…" : estado === "erro" ? "Tentar de novo" : "⬇ Baixar"}
+    </button>
+  );
+}
+
+function Ouvir({ g }: { g: Pick<GravacaoLigacao, "storage_path"> }) {
   const [url, setUrl] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [falhou, setFalhou] = useState(false);

@@ -167,6 +167,34 @@ export async function listarGravacoesDoLead(leadId: string): Promise<GravacaoLig
   return (data ?? []) as unknown as GravacaoLigacao[];
 }
 
+/** Nome do arquivo baixado: "ligacao-2026-11-05-14h32-5531991133653.webm". */
+export function nomeDoArquivo(g: Pick<GravacaoLigacao, "storage_path" | "inicio" | "telefone">): string {
+  const ext = (g.storage_path.match(/\.([a-z0-9]+)$/i)?.[1] || "webm").toLowerCase();
+  const d = new Date(g.inicio);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const data = Number.isNaN(d.getTime()) ? "sem-data"
+    : `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}h${p(d.getMinutes())}`;
+  const fone = String(g.telefone || "").replace(/\D/g, "");
+  return `ligacao-${data}${fone ? `-${fone}` : ""}.${ext}`;
+}
+
+/**
+ * Baixar o áudio (05/11, Bruno: "os SDRs poderem baixar os áudios das gravações
+ * deles"). A RLS do bucket já limita: SDR só as próprias, gestão todas.
+ */
+export async function baixarGravacao(g: Pick<GravacaoLigacao, "storage_path" | "inicio" | "telefone">): Promise<boolean> {
+  const { data, error } = await supabase.storage.from(BUCKET)
+    .createSignedUrl(g.storage_path, 600, { download: nomeDoArquivo(g) });
+  if (error || !data?.signedUrl) { console.warn("[gravacao] baixar:", error); return false; }
+  const a = document.createElement("a");
+  a.href = data.signedUrl;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  return true;
+}
+
 /** Link temporário (1 h) pro player — o bucket é privado. */
 export async function linkDaGravacao(caminho: string): Promise<string | null> {
   const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(caminho, 3600);

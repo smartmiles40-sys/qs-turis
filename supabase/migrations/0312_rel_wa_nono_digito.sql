@@ -45,7 +45,9 @@ begin
       perform pg_advisory_xact_lock(hashtextextended('rel_wa_fone:' || p_phone_id || ':' || least(fone, alt), 0));
       select telefone into ja_fone from rel_wa_conversas
        where phone_number_id = p_phone_id and telefone in (fone, alt)
-       order by greatest(coalesce(ultima_entrada_em, '-infinity'), coalesce(ultima_saida_em, '-infinity')) desc, telefone = fone desc
+       order by (ultima_entrada_em is null and ultima_saida_em is null),  -- a esvaziada pela 0312 nunca ganha
+                greatest(coalesce(ultima_entrada_em, '-infinity'), coalesce(ultima_saida_em, '-infinity')) desc,
+                telefone = fone desc
        limit 1;
       if ja_fone is not null then fone := ja_fone; end if;
     end if;

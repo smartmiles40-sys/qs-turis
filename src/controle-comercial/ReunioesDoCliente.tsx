@@ -11,7 +11,9 @@
 // "Quem participou" = os convidados que o QS conhece: o SDR que marcou
 // (scheduled_by), o closer (meeting_owner/closer_id) e o e-mail do cliente.
 // Presença real na chamada só viria do Google (ver 0215, comentário da
-// gravação). A gravação é um link colado à mão (qs_reuniao_gravacao, 0215).
+// gravação). A gravação é um link colado à mão (qs_reuniao_gravacao, 0215) —
+// e, desde a 0314, o cron /api/meet-gravacoes acha sozinho no Drive o vídeo e
+// a transcrição (texto em qs_meeting_transcricoes, lido só ao abrir).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -38,6 +40,13 @@ export interface ReuniaoDoCliente {
   venda_valor?: number | null;
   venda_tipo?: string | null;
   gravacao_url?: string | null;
+  // 0314 — busca automática no Drive (podem não existir antes da migration).
+  gravacao_status?: "pendente" | "achada" | "sem_gravacao" | "erro" | null;
+  gravacao_erro?: string | null;
+  gravacao_buscada_em?: string | null;
+  transcricao_url?: string | null;
+  transcricao_tipo?: "transcricao" | "gemini" | null;
+  transcricao_chars?: number | null;
 }
 
 const STATUS: Record<string, string> = {
@@ -138,17 +147,33 @@ function Gravacao({ m, onMudou }: { m: ReuniaoDoCliente; onMudou?: () => void })
     } finally { setOcupado(false); }
   }
 
+  // 0314: o cron /api/meet-gravacoes procura sozinho no Drive. Antes da 0314 o campo não vem e nada disso aparece.
+  const st = m.gravacao_status;
+  const situacao = atual ? null
+    : st === "sem_gravacao" ? "sem gravação no Drive"
+    : (st === "pendente" || (("gravacao_status" in m) && !st && m.status === "realizada")) ? "buscando no Drive…"
+    : null;
+
   if (!editando) {
     return (
-      <span style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "baseline" }}>
-        <span style={{ fontWeight: 600, color: tx.fraco }}>Gravação:</span>
-        {atual
-          ? <a href={atual} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", wordBreak: "break-all" }}>abrir gravação</a>
-          : <span style={{ color: tx.fraco }}>sem link</span>}
-        <button type="button" onClick={() => { setUrl(atual); setEditando(true); }} style={{ fontSize: 12, textDecoration: "underline", color: tx.medio }}>
-          {atual ? "trocar" : "colar link"}
-        </button>
-      </span>
+      <>
+        <span style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "baseline" }}>
+          <span style={{ fontWeight: 600, color: tx.fraco }}>Gravação:</span>
+          {atual
+            ? <a href={atual} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", wordBreak: "break-all" }}>abrir gravação</a>
+            : <span style={{ color: tx.fraco }}>{situacao ?? "sem link"}</span>}
+          <button type="button" onClick={() => { setUrl(atual); setEditando(true); }} style={{ fontSize: 12, textDecoration: "underline", color: tx.medio }}>
+            {atual ? "trocar" : "colar link"}
+          </button>
+        </span>
+        {st === "erro" && m.gravacao_erro && (
+          <span style={{ fontSize: 12, color: "var(--danger)" }}>Busca no Drive: {m.gravacao_erro}</span>
+        )}
+        {st === "sem_gravacao" && m.gravacao_erro && !atual && (
+          <span style={{ fontSize: 12, color: tx.fraco }}>{m.gravacao_erro}</span>
+        )}
+        <Transcricao m={m} />
+      </>
     );
   }
   return (
@@ -159,5 +184,82 @@ function Gravacao({ m, onMudou }: { m: ReuniaoDoCliente; onMudou?: () => void })
       <button type="button" className="qs-btn qs-btn--sm qs-btn--ghost" onClick={() => setEditando(false)}>Cancelar</button>
       {msg && <span style={{ color: "var(--danger)", width: "100%" }}>{msg}</span>}
     </span>
+  );
+}
+
+/**
+ * Transcrição (ou Anotações do Gemini) da reunião, recolhida. O texto mora em
+ * qs_meeting_transcricoes (0314) e só é baixado quando a pessoa abre — a
+ * listagem de reuniões continua leve.
+ */
+function Transcricao({ m }: { m: ReuniaoDoCliente }) {
+  const [aberta, setAberta] = useState(false);
+  const [texto, setTexto] = useState<string | null>(null);
+  const [cortada, setCortada] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [busca, setBusca] = useState("");
+  const [copiado, setCopiado] = useState(false);
+
+  const temTexto = (m.transcricao_chars ?? 0) > 0;
+  const rotulo = m.transcricao_tipo === "gemini" ? "Anotações do Gemini" : "Transcrição";
+
+  useEffect(() => {
+    if (!aberta || texto !== null || !temTexto) return;
+    let vivo = true;
+    void (async () => {
+      const { data, error } = await supabase.from("qs_meeting_transcricoes").select("texto, cortada").eq("meeting_id", m.id).maybeSingle();
+      if (!vivo) return;
+      if (error) { setErro(error.message); return; }
+      if (!data) { setErro("texto ainda não chegou"); return; }
+      setTexto(String(data.texto ?? "")); setCortada(!!data.cortada);
+    })();
+    return () => { vivo = false; };
+  }, [aberta, texto, temTexto, m.id]);
+
+  if (!m.transcricao_url && !temTexto) return null;
+
+  const termo = busca.trim().toLowerCase();
+  const linhas = texto !== null && termo ? texto.split("\n").filter((l) => l.toLowerCase().includes(termo)) : null;
+
+  async function copiar() {
+    if (!texto) return;
+    try { await navigator.clipboard.writeText(texto); setCopiado(true); setTimeout(() => setCopiado(false), 1500); } catch { /* navegador sem permissão */ }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "baseline" }}>
+        <span style={{ fontWeight: 600, color: tx.fraco }}>{rotulo}:</span>
+        {temTexto && (
+          <button type="button" onClick={() => setAberta((v) => !v)} aria-expanded={aberta} style={{ fontSize: 12.5, textDecoration: "underline", color: "var(--info)" }}>
+            {aberta ? "recolher" : `ver texto (${Math.max(1, Math.round((m.transcricao_chars ?? 0) / 1000))} mil caracteres)`}
+          </button>
+        )}
+        {m.transcricao_url && (
+          <a href={m.transcricao_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: tx.medio, textDecoration: "underline" }}>abrir no Google Docs</a>
+        )}
+        {!temTexto && <span style={{ color: tx.fraco, fontSize: 12 }}>(texto não lido automaticamente)</span>}
+      </span>
+      {aberta && (
+        <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 8, display: "flex", flexDirection: "column", gap: 6, background: "var(--surface-2)" }}>
+          {erro && <span style={{ color: "var(--danger)" }}>Não carregou o texto: {erro}</span>}
+          {!erro && texto === null && <span style={{ color: tx.fraco }}>Carregando…</span>}
+          {texto !== null && (
+            <>
+              <span style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar na transcrição…" aria-label="Buscar na transcrição"
+                  style={{ ...estiloEntrada, flex: "1 1 200px", minHeight: 30, fontSize: 12.5 }} />
+                <button type="button" className="qs-btn qs-btn--sm qs-btn--ghost" onClick={() => void copiar()}>{copiado ? "Copiado" : "Copiar tudo"}</button>
+              </span>
+              {linhas && <span style={{ fontSize: 12, color: tx.fraco }}>{linhas.length} {linhas.length === 1 ? "trecho" : "trechos"} com “{busca.trim()}”</span>}
+              <pre style={{ margin: 0, maxHeight: 360, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "inherit", fontSize: 12.5, lineHeight: 1.5, color: tx.forte }}>
+                {linhas ? linhas.join("\n\n") : texto}
+              </pre>
+              {cortada && <span style={{ fontSize: 12, color: tx.fraco }}>Texto cortado em 200 mil caracteres — o completo está no Google Docs.</span>}
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

@@ -35,6 +35,7 @@ export interface GravacaoResumo {
   inicio: string;
   duracao_seg: number;
   storage_path: string;
+  telefone: string | null;
   sdr?: { name: string | null } | null;
   lead?: { full_name: string | null } | null;
 }
@@ -45,7 +46,7 @@ export interface Extras {
   /** completed_at das atividades concluídas — só quando há um SDR em foco. */
   atividades: string[] | null;
   kpis: MeetingKpis | null;
-  gravacoes: { total: number; segundos: number; recentes: GravacaoResumo[] } | null;
+  gravacoes: { total: number; segundos: number; recentes: GravacaoResumo[]; todas: GravacaoResumo[] } | null;
 }
 
 /**
@@ -77,13 +78,13 @@ export function useExtrasDesempenho(de: string, ate: string, sdrId: string | nul
           fetchMeetingKpis(sdrId),
           (async () => {
             let q = supabase.from("qs_ligacao_gravacoes")
-              .select("id,inicio,duracao_seg,storage_path,sdr:qs_users!qs_ligacao_gravacoes_sdr_id_fkey(name),lead:qs_leads(full_name)", { count: "exact" })
+              .select("id,inicio,duracao_seg,storage_path,telefone,sdr:qs_users!qs_ligacao_gravacoes_sdr_id_fkey(name),lead:qs_leads(full_name)", { count: "exact" })
               .gte("inicio", ini).lt("inicio", fim).order("inicio", { ascending: false }).limit(200);
             if (sdrId) q = q.eq("sdr_id", sdrId);
             const { data, count, error } = await q;
             if (error) return null; // 0233 fora do ar / sem permissão: o card some
             const lista = (data ?? []) as unknown as GravacaoResumo[];
-            return { total: count ?? lista.length, segundos: lista.reduce((s, g) => s + (g.duracao_seg || 0), 0), recentes: lista.slice(0, 4) };
+            return { total: count ?? lista.length, segundos: lista.reduce((s, g) => s + (g.duracao_seg || 0), 0), recentes: lista.slice(0, 4), todas: lista };
           })(),
         ]);
         if (!vivo) return;
@@ -311,6 +312,8 @@ export function RankingReunioes({ de, ate, extras, eu }: { de: string; ate: stri
 
 export function LigacoesGravadas({ extras, gestor }: { extras: Extras | null; gestor: boolean }) {
   const g = extras?.gravacoes;
+  // 05/11: o SDR vê (e baixa) TODAS as do período, não só as 4 últimas.
+  const [todas, setTodas] = useState(false);
   if (!g) return null; // sem a tabela / sem permissão: não ocupa espaço
   return (
     <Cartao className="flex flex-col gap-3">
@@ -325,7 +328,7 @@ export function LigacoesGravadas({ extras, gestor }: { extras: Extras | null; ge
         </p>
       ) : (
         <ul className="flex flex-col gap-2.5">
-          {g.recentes.map((r) => (
+          {(todas ? g.todas : g.recentes).map((r) => (
             <li key={r.id} className="flex flex-col gap-1">
               <div className="text-[12.5px] truncate" style={{ color: "var(--muted)" }}>
                 <b style={{ color: "var(--text)" }}>{r.lead?.full_name ?? "Sem lead"}</b> · {quando(r.inicio)} · {duracao(r.duracao_seg)}
@@ -334,6 +337,13 @@ export function LigacoesGravadas({ extras, gestor }: { extras: Extras | null; ge
               <Player g={r} />
             </li>
           ))}
+          {g.todas.length > g.recentes.length && (
+            <li>
+              <button onClick={() => setTodas((v) => !v)} className="text-[12.5px] font-semibold underline" style={{ color: "var(--text)" }}>
+                {todas ? "Mostrar só as últimas" : `Ver todas as ${g.todas.length} do período`}
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </Cartao>
