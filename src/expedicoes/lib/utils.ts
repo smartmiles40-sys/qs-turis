@@ -33,6 +33,8 @@ export function formatPercent(value: number | null | undefined, fractionDigits =
 export function formatDate(date: string | Date | null | undefined, fmt = "dd/MM/yyyy"): string {
   if (!date) return "—";
   const d = typeof date === "string" ? parseISO(date) : date;
+  // Data inválida (ex.: ano com dígito a mais) não pode derrubar a tela — "—" (antigo 676d1b5).
+  if (Number.isNaN(d.getTime())) return "—";
   return format(d, fmt, { locale: ptBR });
 }
 

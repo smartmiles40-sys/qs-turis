@@ -18,8 +18,10 @@ import { idadeDe } from "./excel";
 import BlocoFichaCliente from "@/clientes/BlocoFichaCliente";
 import { SaudeCampos } from "./SaudeCampos";
 import {
-  abrirArquivo, anexarPassaporte, estadoSenhaCpf, excluirPessoa, gerarNovaSenhaCpf, propagarPessoais, removerPassaporte, type EstadoSenha,
+  abrirArquivo, anexarPassaporte, estadoSenhaCpf, excluirPessoa, propagarPessoais, removerPassaporte, type EstadoSenha,
 } from "./pessoaAcoes";
+import { pedirLinkAmigo, useModoValidacaoAmigo } from "../../expedamigo/servidor";
+import AvisoModoValidacao from "../../expedamigo/AvisoModoValidacao";
 
 export const TOM_RESERVA: Record<StatusReserva, Tom> = { Confirmado: "ok", "Pré-reserva": "aviso", Lead: "neutro", Cancelado: "erro" };
 
@@ -273,6 +275,8 @@ export function SenhaExpedamigo({ cpf, recarga = 0 }: { cpf: string | null; reca
   const { avisar } = useExp();
   const [estado, setEstado] = useState<EstadoSenha | null>(null);
   const [indo, setIndo] = useState(false);
+  const [linkNovo, setLinkNovo] = useState<string | null>(null);
+  const travado = useModoValidacaoAmigo() !== false;
   useEffect(() => {
     let vivo = true;
     if (cpf) estadoSenhaCpf(cpf).then((s) => { if (vivo) setEstado(s); });
@@ -280,42 +284,60 @@ export function SenhaExpedamigo({ cpf, recarga = 0 }: { cpf: string | null; reca
   }, [cpf, recarga]);
   if (!cpf || !estado?.admin) return null;
 
-  const nova = async () => {
+  // 05/11 (porte do f6326c6): reset = derruba a senha atual NA HORA e gera um LINK
+  // MÁGICO novo (a pessoa cria outra senha por ele). Não existe mais "senha provisória nova".
+  const resetar = async () => {
+    if (!window.confirm("A senha atual deixa de valer AGORA e a pessoa só volta a entrar criando outra pelo link novo. Resetar?")) return;
     setIndo(true);
-    try { const s = await gerarNovaSenhaCpf(cpf); setEstado({ admin: true, tem_hash: false, senha_provisoria: s }); avisar("Nova senha provisória gerada"); }
-    catch (e) { avisar(e instanceof Error ? e.message : "Erro ao gerar senha", "erro"); }
+    try {
+      const r = await pedirLinkAmigo({ cpf }, { resetar: true });
+      setLinkNovo(r.link);
+      setEstado({ admin: true, tem_hash: false, senha_provisoria: null });
+      avisar("Acesso resetado — copie o link novo e mande pra pessoa");
+    } catch (e) { avisar(e instanceof Error ? e.message : "Erro ao resetar", "erro"); }
     finally { setIndo(false); }
   };
-  const copiar = async () => {
-    try { await navigator.clipboard.writeText(`Login: ${mascaraCpf(cpf)}\nSenha: ${estado.senha_provisoria}`); avisar("Login e senha copiados"); }
+  const copiar = async (t: string, ok: string) => {
+    try { await navigator.clipboard.writeText(t); avisar(ok); }
     catch { avisar("Não consegui copiar — selecione e copie à mão", "erro"); }
   };
+  const botaoReset = (
+    <Botao onClick={resetar} disabled={indo || travado} title={travado ? "Modo validação: reset só pelo sistema antigo" : undefined}>
+      {indo ? "Resetando…" : "↻ Resetar acesso (link novo)"}
+    </Botao>
+  );
 
   return (
     <section className="pt-4 border-t space-y-2" style={{ borderColor: "var(--line)" }}>
       <div>
         <h3 className="text-[13.5px] font-bold" style={{ color: "var(--ink)" }}>Acesso ao portal</h3>
-        <p className="text-[11.5px]" style={{ color: "var(--ink3)" }}>Senha do ExpedAmigo e da Área do Líder (por CPF). "Nova" gera uma senha provisória e faz a pessoa voltar ao 1º acesso.</p>
+        <p className="text-[11.5px]" style={{ color: "var(--ink3)" }}>Senha do ExpedAmigo e da Área do Líder (por CPF). O 1º acesso e o reset são por link mágico: a pessoa abre e cria a própria senha.</p>
       </div>
-      <div className="rounded-lg border p-2.5 text-[13px]" style={{ borderColor: "var(--line)", background: "var(--card2)" }}>
+      <div className="rounded-lg border p-2.5 text-[13px] space-y-2" style={{ borderColor: "var(--line)", background: "var(--card2)" }}>
         {estado.tem_hash ? (
           <div className="space-y-1.5">
             <p style={{ color: "var(--ink2)" }}>O viajante já criou a própria senha.</p>
-            <Botao onClick={nova} disabled={indo}>↻ Resetar senha</Botao>
-            <p className="text-[11px]" style={{ color: "var(--ink3)" }}>Gera uma nova senha provisória e faz a pessoa voltar ao 1º acesso.</p>
+            {botaoReset}
           </div>
         ) : estado.senha_provisoria ? (
           <>
             <div className="font-mono text-[13px] space-y-0.5" style={{ color: "var(--ink)" }}>
               <div>Login: <span className="tracking-wider">{mascaraCpf(cpf)}</span></div>
-              <div>Senha: <span className="tracking-wider">{estado.senha_provisoria}</span></div>
+              <div>Senha provisória antiga: <span className="tracking-wider">{estado.senha_provisoria}</span></div>
             </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Botao onClick={copiar}>Copiar login e senha</Botao>
-              <Botao variante="fantasma" onClick={nova} disabled={indo}>↻ Nova</Botao>
+            <div className="flex flex-wrap gap-2">
+              <Botao onClick={() => copiar(`Login: ${mascaraCpf(cpf)}\nSenha: ${estado.senha_provisoria}`, "Login e senha copiados")}>Copiar login e senha</Botao>
+              {botaoReset}
             </div>
           </>
-        ) : <p style={{ color: "var(--ink2)" }}>Libere o ExpedAmigo na página do passageiro (dentro da expedição) para gerar a senha.</p>}
+        ) : <p style={{ color: "var(--ink2)" }}>Ainda sem senha — mande o link de acesso (botão WhatsApp na reserva) e a pessoa cria a dela.</p>}
+        {linkNovo && (
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="px-2 py-1 rounded-md text-[12px] break-all" style={{ background: "var(--card)" }}>{linkNovo}</code>
+            <Botao onClick={() => copiar(linkNovo, "Link copiado")}>Copiar link</Botao>
+          </div>
+        )}
+        <AvisoModoValidacao />
       </div>
     </section>
   );

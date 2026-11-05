@@ -29,6 +29,10 @@
 //   GET  ?acao=espelho            → Vercel Cron a cada 5 min (Bearer CRON_SECRET). Espelho ao vivo
 //                                   antigo → QS enquanto o time valida (0317; lógica em _expEspelho.js).
 //                                   ?seco=1 só conta · ?limpar=1 força a limpeza de apagados.
+//   POST ?acao=amigo-link         → link mágico do ExpedAmigo (/a/<codigo>), reset de acesso
+//                                   (token da sessão; lógica e permissão em _expAcesso.js).
+//                                   Com EXP_ESPELHO_LIGADO=1 responde 423 (modo validação).
+//   GET  ?acao=amigo-status       → { espelho, portal } pras telas desligarem o botão.
 //
 // Diferenças de propósito em relação ao antigo (bugs que não foram copiados):
 //   - expedicao-sync, numa expedição que já existe, SÓ PREENCHE O QUE ESTÁ VAZIO
@@ -49,6 +53,7 @@ import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { montarChecklistPadrao } from './_expChecklist.js';
 import { rodarEspelho } from './_expEspelho.js';
 import { sincronizarBitrixUma, sincronizarTodas } from './_expBitrixSync.js';
+import { gerarLinkAmigo, statusAmigo } from './_expAcesso.js';
 
 const PORTAL_PADRAO = 'https://sistema-expedicoes.vercel.app';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -452,6 +457,12 @@ export default async function handler(req, res) {
   const acao = String(req.query?.acao || '');
   try {
     if (acao === 'health') return res.status(200).json({ ok: true, service: 'qs-expedicoes', time: new Date().toISOString() });
+    // Link mágico do ExpedAmigo (lógica em _expAcesso.js; permissão pelo token da sessão lá dentro).
+    if (acao === 'amigo-status') return statusAmigo(res);
+    if (acao === 'amigo-link') {
+      if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Método não permitido' });
+      return await gerarLinkAmigo(req, res);
+    }
 
     // ── Espelho antigo → QS (05/11) — bloco próprio ──
     if (acao === 'espelho') {

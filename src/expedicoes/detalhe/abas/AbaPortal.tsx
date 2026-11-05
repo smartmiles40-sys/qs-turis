@@ -195,8 +195,12 @@ export default function AbaPortal({ exp, cockpit }: PropsAba) {
         </>}
         rodape={voosIndividuais > 0 ? <p className="mt-2 text-[11.5px]" style={{ color: "var(--ink3)" }}>
           + {voosIndividuais} voo(s) individual(is) de passageiros — esses ficam no perfil de cada passageiro (quem tem voo próprio vê só os dele no portal).</p> : undefined}
-        extra={(item) => item ? <VoucherAnexo tabela="expedicao_voos" expedicaoId={exp.id} itemId={item.id}
-          arquivoId={c.voos.find((v) => v.id === item.id)?.arquivo_id ?? null} arquivo={arq(c.voos.find((v) => v.id === item.id)?.arquivo_id)} onMudou={carregar} /> : salveAntes("o voo")} />
+        extra={(item) => item ? <>
+          <VoucherAnexo tabela="expedicao_voos" expedicaoId={exp.id} itemId={item.id}
+            arquivoId={c.voos.find((v) => v.id === item.id)?.arquivo_id ?? null} arquivo={arq(c.voos.find((v) => v.id === item.id)?.arquivo_id)} onMudou={carregar} />
+          {/* antigo adf9d1a (05/11): voucher de voo de GRUPO tem valores do grupo todo — o portal não mostra pro viajante. */}
+          <p className="mt-1 text-[11px]" style={{ color: "var(--ink3)" }}>O voucher de voo de grupo fica só aqui (interno): o portal não mostra pro viajante, porque traz os valores do grupo.</p>
+        </> : salveAntes("o voo")} />
       </>}
       {atual === "hospedagem" && <>
       <div id="ck-portal-voucher" />
