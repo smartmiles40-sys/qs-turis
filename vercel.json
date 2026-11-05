@@ -191,6 +191,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/expedicoes?acao=sincronizar-todas",
+      "schedule": "0,15,30 12 * * *"
+    },
+    {
       "path": "/api/avisos",
       "schedule": "*/5 * * * *"
     },

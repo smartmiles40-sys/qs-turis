@@ -116,6 +116,8 @@ export type ExpedicaoRow = {
   /** Preço de referência por pessoa SEM aéreo (migration 0220). */
   preco_sem_aereo_brl?: number | null;
   bitrix_pipeline_id: string | null;
+  /** Etapa (coluna) do Bitrix desta expedição, ex. "C29:UC_F6M93I" (0317). Alimenta a sync de passageiros. */
+  bitrix_stage_id?: string | null;
   observacoes: string | null;
   ordem: number | null;
   /** 'expedicao' = viagem em grupo (padrão) · 'pacote' = pacote personalizado (migration 0060). */

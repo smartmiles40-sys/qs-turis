@@ -23,14 +23,16 @@ import { useAoVivo } from "./ui";
 import { calcularAlertas, carregarProntidaoAtivas } from "./paginas/_globais/prontidaoGlobal";
 import { listarReceitas, naJanela } from "./lib/receitas";
 import { dataSP } from "./lib/fase.ts";
+import { contarNovasVendas } from "./lib/novasVendas";
 
 const ESPERA_INICIAL_MS = 3000;
 const SOSSEGO_AVISOS_MS = 30_000;
 
-export function useContagensExp(): { avisos: number; inscricoes: number; receitas: number } {
+export function useContagensExp(): { avisos: number; inscricoes: number; receitas: number; novasVendas: number } {
   const [avisos, setAvisos] = useState(0);
   const [receitas, setReceitas] = useState(0);
   const [inscricoes, setInscricoes] = useState(0);
+  const [novasVendas, setNovasVendas] = useState(0);
   const vivo = useRef(true);
   useEffect(() => { vivo.current = true; return () => { vivo.current = false; }; }, []);
 
@@ -55,19 +57,27 @@ export function useContagensExp(): { avisos: number; inscricoes: number; receita
     } catch { /* sem 0223 ou sem acesso */ }
   }, []);
 
+  // Novas vendas (0317): passageiros com nova_venda=true. Sem a coluna, a conta dá 0.
+  const contarNovas = useCallback(async () => {
+    const n = await contarNovasVendas();
+    if (vivo.current) setNovasVendas(n);
+  }, []);
+
   useEffect(() => {
     void contarInscricoes();
+    void contarNovas();
     const primeiraReceita = setTimeout(() => { void contarReceitas(); }, ESPERA_INICIAL_MS);
     const primeira = setTimeout(() => { void contarAvisos(); }, ESPERA_INICIAL_MS);
-    const t = setInterval(() => { void contarAvisos(); void contarInscricoes(); void contarReceitas(); }, 30 * 60 * 1000);
+    const t = setInterval(() => { void contarAvisos(); void contarInscricoes(); void contarReceitas(); void contarNovas(); }, 30 * 60 * 1000);
     return () => { clearTimeout(primeira); clearTimeout(primeiraReceita); clearInterval(t); };
-  }, [contarAvisos, contarInscricoes, contarReceitas]);
+  }, [contarAvisos, contarInscricoes, contarReceitas, contarNovas]);
 
   useAoVivo([{ tabela: "passageiros" }, { tabela: "passageiro_requisitos" }, { tabela: "expedicoes" }], contarAvisos, SOSSEGO_AVISOS_MS);
   useAoVivo([{ tabela: "inscricoes_pendentes" }], contarInscricoes, 800);
   useAoVivo([{ tabela: "passageiros" }], contarReceitas, SOSSEGO_AVISOS_MS);
+  useAoVivo([{ tabela: "passageiros" }], contarNovas, 5000);
 
-  return { avisos, inscricoes, receitas };
+  return { avisos, inscricoes, receitas, novasVendas };
 }
 
 /** Só o número de Receitas (menu do Relacionamento, onde a Carol trabalha) — sem a conta pesada dos avisos. */

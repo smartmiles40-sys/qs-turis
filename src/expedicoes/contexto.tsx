@@ -8,7 +8,7 @@ import { esquecer } from "./lib/cache";
 import type { UsuarioRow } from "./lib/database";
 
 /** Telas das Expedições dentro da área (#ops/<tela>/<id>). */
-export const TELAS_EXP = ["exp-inicio", "avisos", "expedicoes", "pacotes", "passageiros", "clientes", "inscricoes", "fornecedores", "acessos-amigo", "exp-config", "checklist-padrao", "receitas", "saude", "painel"] as const;
+export const TELAS_EXP = ["exp-inicio", "avisos", "expedicoes", "pacotes", "passageiros", "clientes", "inscricoes", "fornecedores", "acessos-amigo", "exp-config", "checklist-padrao", "receitas", "saude", "painel", "novas-vendas"] as const;
 export type TelaExp = (typeof TELAS_EXP)[number];
 
 export interface ExpCtx {

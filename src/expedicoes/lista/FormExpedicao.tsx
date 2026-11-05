@@ -150,21 +150,27 @@ export function EditarExpedicao({ exp, onFechar, onSalva }: { exp: ExpedicaoRow 
       nome: exp.nome, destino: exp.destino, data_embarque: exp.data_embarque, data_retorno: exp.data_retorno, status: exp.status,
       pax_planejados: String(exp.pax_planejados ?? 0), pax_cortesia: String(exp.pax_cortesia ?? 0), preco_venda_brl: String(exp.preco_venda_brl ?? 0),
       observacoes: exp.observacoes ?? "", op: exp.responsavel_operacional_id ?? "", com: exp.responsavel_comercial_id ?? "",
+      etapa: exp.bitrix_stage_id ?? "",
     });
   }, [exp]);
   if (!exp) return null;
+  // 05/11: a coluna bitrix_stage_id (0317) só existe depois da migration — sem ela o campo some.
+  const temEtapa = "bitrix_stage_id" in exp;
   const salvar = async () => {
     if ((f.nome ?? "").trim().length < 3) return setErro("Nome: mínimo 3 caracteres.");
     if ((f.destino ?? "").trim().length < 2) return setErro("Informe o destino.");
     if (f.data_retorno < f.data_embarque) return setErro("O retorno não pode ser antes do embarque.");
     const nums = ["pax_planejados", "pax_cortesia", "preco_venda_brl"].map((k) => Number(String(f[k]).replace(",", ".")));
     if (nums.some((n) => Number.isNaN(n) || n < 0)) return setErro("Números não podem ser negativos.");
+    const etapa = (f.etapa ?? "").trim().toUpperCase();
+    if (temEtapa && etapa && !/^C\d+:[A-Z0-9_]+$/.test(etapa)) return setErro("Etapa do Bitrix no formato C29:UC_XXXXXX (funil:etapa).");
     setErro(null); setSalvando(true);
     try {
       const { error } = await supabase.from("expedicoes").update({
         nome: f.nome.trim(), destino: f.destino.trim(), data_embarque: f.data_embarque, data_retorno: f.data_retorno, status: f.status,
         pax_planejados: Math.trunc(nums[0]), pax_cortesia: Math.trunc(nums[1]), preco_venda_brl: nums[2],
         observacoes: f.observacoes.trim() || null, responsavel_operacional_id: f.op || null, responsavel_comercial_id: f.com || null,
+        ...(temEtapa ? { bitrix_stage_id: etapa || null } : {}),
       }).eq("id", exp.id);
       if (error) throw new Error(traduzirErro(error.message));
       if (f.status === "Concluída") await aoConcluir(exp.id);
@@ -189,6 +195,11 @@ export function EditarExpedicao({ exp, onFechar, onSalva }: { exp: ExpedicaoRow 
         </Campo>
         <div className="grid grid-cols-3 gap-3">{campo("pax_planejados", "Pax planejados", "number")}{campo("pax_cortesia", "Cortesias", "number")}{campo("preco_venda_brl", "Preço (R$)", "number")}</div>
         <SelectResponsaveis op={f.op ?? ""} com={f.com ?? ""} onOp={(v) => setF({ ...f, op: v })} onCom={(v) => setF({ ...f, com: v })} />
+        {temEtapa && (
+          <Campo rotulo="Etapa do Bitrix" dica="A coluna do funil onde ficam os negócios desta viagem (ex.: C29:UC_F6M93I). O “Atualizar do Bitrix” e a sync das 09:00 puxam os passageiros dela.">
+            <Entrada value={f.etapa ?? ""} onChange={(e) => setF({ ...f, etapa: e.target.value })} placeholder="C29:UC_XXXXXX" className="font-mono" />
+          </Campo>
+        )}
         <Campo rotulo="Observações"><textarea className="rel-input" rows={3} value={f.observacoes ?? ""} onChange={(e) => setF({ ...f, observacoes: e.target.value })} /></Campo>
         {f.status === "Concluída" && exp.status !== "Concluída" && (
           <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Ao concluir, todos os passageiros não cancelados viram “Confirmado”.</p>

@@ -7,13 +7,15 @@
 // Fica fora do ExpedicoesArea pra o menu não puxar as telas pro pacote principal.
 import { ICONES_AREA, type GrupoDoMenu } from "@/area/CascaDeArea";
 
-export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: number; receitas?: number; saude?: number } = {}): GrupoDoMenu {
+export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: number; receitas?: number; saude?: number; novasVendas?: number } = {}): GrupoDoMenu {
   return {
     id: "expedicoes", rotulo: "Expedições", icone: ICONES_AREA.aviao, itens: [
       // Redesign (out/2026): o "Início" das expedições virou o Início de Operações
       // (topo do menu) e a ordem segue o HANDOFF.md.
       { id: "expedicoes", rotulo: "Expedições" },
       { id: "pacotes", rotulo: "Pacotes" },
+      // 05/11: quem a sync do Bitrix trouxe novo pra uma expedição e ninguém conferiu ainda
+      { id: "novas-vendas", rotulo: "Novas vendas", badge: contagens.novasVendas || undefined },
       { id: "inscricoes", rotulo: "Inscrições", badge: contagens.inscricoes || undefined },
       { id: "avisos", rotulo: "Avisos", badge: contagens.avisos || undefined },
       // 30/10 (Bruno): "Receitas" saiu do menu — a receita mora na ficha do cliente (aba Saúde).

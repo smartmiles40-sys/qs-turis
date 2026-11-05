@@ -33,6 +33,8 @@ const PAGINAS: Partial<Record<TelaExp, React.LazyExoticComponent<ComponentType>>
   saude: lazy(() => import("./paginas/Saude")),
   // 03/11: Painel das viagens — expedições + pacotes com as pendências de cada uma (docs/REL-UNIFICACAO.md)
   painel: lazy(() => import("./lista/painel/PainelViagens")),
+  // 05/11: fila de vendas novas vindas da sync do Bitrix (antigo: /novas-vendas)
+  "novas-vendas": lazy(() => import("./paginas/NovasVendas")),
 };
 
 export default function ExpedicoesArea({ tela, caminho, ir, setorRelacionamento = false }: {
