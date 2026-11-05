@@ -30,6 +30,7 @@ import { transcrever, transcricaoConfigurada } from './_transcrever.js';
 import { guardarMidia, rotuloDaMidia, leadDoTelefone } from './_waMidia.js';
 import { avisarGloria } from './_gloria.js';
 import { processarRelacionamento } from './_relEntrada.js';
+import { motivoDaFalha, ehMidiaDoClienteQueNaoChegou } from './_waFalhas.js';
 
 const GRAPH = 'https://graph.facebook.com/v23.0';
 
@@ -214,6 +215,8 @@ async function gravarUma({ numero, m, direcao, telefoneCliente, nomeCliente, aoV
         canal: donoDoNumero ? `número ${nomeSdr ? 'de ' + nomeSdr.split(' ')[0] : 'do SDR'}` : 'API oficial',
       });
     } catch (e) {
+      // Falha passageira (Bitrix/banco fora): a Meta reenvia e a mensagem não se perde.
+      if (ehTransitorio(e)) throw e;
       console.warn('[meta-entrada] nascimento falhou (vai pra triagem):', e?.message);
     }
   }
@@ -281,6 +284,7 @@ async function gravarUma({ numero, m, direcao, telefoneCliente, nomeCliente, aoV
   let transcrito = null;
   if (direcao === 'in' && lida.midia?.tipo === 'audio' && !lida.texto && anexos[0]?.url && transcricaoConfigurada()) {
     const t = await transcrever(anexos[0].url);
+    if (!t?.texto) console.warn(`[meta-entrada] áudio ${lida.id} sem transcrição: ${t?.erro || 'sem resposta'}`);
     if (t?.texto) {
       transcrito = t.texto;
       await rest(`qs_wa_messages?source_id=eq.${encodeURIComponent(lida.id)}`, {
@@ -303,6 +307,48 @@ async function gravarUma({ numero, m, direcao, telefoneCliente, nomeCliente, aoV
     }).catch((e) => console.warn('[meta-entrada] Glória não avisada:', e?.message));
   }
   return { leadId: lead.id, novo: true };
+}
+
+/**
+ * Um recibo (✓ ✓✓ azul, falhou) do Comercial. 05/11: o "falhou" agora leva o
+ * MOTIVO (coluna erro, 0313) e, se chegar antes da bolha ter sido gravada
+ * (corrida com o envio), tenta de novo depois de 2 s em vez de se perder.
+ */
+async function reciboComercial(st, numero) {
+  const s = String(st?.status || '').toLowerCase();
+  if (!STATUS_OK.has(s) || !st?.id) return false;
+  const aplicar = () => rest('rpc/qs_wa_status_meta', { method: 'POST', body: { p_source: String(st.id), p_status: s } }).catch(() => false);
+  let mudou = await aplicar();
+  if (s !== 'failed') return mudou === true;
+
+  if (ehMidiaDoClienteQueNaoChegou(st) && mudou !== true) {
+    // Arquivo que o CLIENTE tentou mandar e a Meta não entregou (ex.: vídeo de 150 MB).
+    await avisoDeArquivoQueNaoChegou(st, numero).catch((e) => console.warn('[meta-entrada] aviso de arquivo:', e?.message));
+    return false;
+  }
+  if (mudou !== true) { await new Promise((r) => setTimeout(r, 2000)); mudou = await aplicar(); }
+  const erro = motivoDaFalha(st.errors);
+  console.warn(`[meta-entrada] Meta recusou ${st.id}: ${erro}`);
+  await rest('rpc/qs_wa_status_erro', { method: 'POST', body: { p_source: String(st.id), p_erro: erro } })
+    .catch((e) => console.warn('[meta-entrada] motivo da falha não gravado (0313?):', e?.message));
+  return mudou === true;
+}
+
+async function avisoDeArquivoQueNaoChegou(st, numero) {
+  const fone = String(st.recipient_id || '');
+  if (!fone) return;
+  const lead = await leadDoTelefone(fone, numero?.user_id || null);
+  if (!lead) return;
+  await rest('rpc/qs_wa_ingest_meta', {
+    method: 'POST',
+    body: {
+      p_lead: lead.id, p_linha: numero?.user_id || null, p_source: `falha-arquivo:${st.id}`,
+      p_direction: 'in', p_content: '⚠️ O cliente tentou mandar um arquivo que não chegou (grande demais, acima de 100 MB, ou expirou). Peça para mandar de novo, menor ou por link.',
+      p_attachments: [], p_sender: lead.first_name || lead.full_name || null,
+      p_sent_at: Number(st.timestamp) > 0 ? new Date(Number(st.timestamp) * 1000).toISOString() : new Date().toISOString(),
+      p_status: null, p_reply_to: null, p_reply_prev: null, p_inbox: numero?.cw_inbox_id ?? null,
+    },
+  });
 }
 
 let cacheNumeroRel = { em: 0, v: null };
@@ -387,7 +433,7 @@ async function reacaoDoCliente(m, nomeCliente) {
 const STATUS_OK = new Set(['sent', 'delivered', 'read', 'failed']);
 
 /** Banco lento/fora (some com o tempo) → vale pedir à Meta que reenvie. */
-export const ehTransitorio = (e) => e?.code === 'TIMEOUT' || e?.status >= 500 || e?.status === 429
+export const ehTransitorio = (e) => e?.code === 'TIMEOUT' || e?.code === 'BITRIX_INDISPONIVEL' || e?.status >= 500 || e?.status === 429
   || /fetch failed|ECONNRESET|socket|timeout|não respondeu/i.test(String(e?.message || ''));
 
 /**
@@ -476,10 +522,11 @@ export async function processarMensagensDaMeta(changes) {
           }
         }
         for (const st of value.statuses || []) {
-          const s = String(st.status || '').toLowerCase();
-          if (!STATUS_OK.has(s) || !st.id) continue;
-          const mudou = await rest('rpc/qs_wa_status_meta', { method: 'POST', body: { p_source: String(st.id), p_status: s } }).catch(() => false);
-          if (mudou === true) conta.recibos++;
+          try {
+            if (await reciboComercial(st, numero)) conta.recibos++;
+          } catch (e) {
+            console.warn('[meta-entrada] recibo:', st?.id, e?.message);
+          }
         }
       }
 

@@ -90,6 +90,8 @@ export interface Mensagem {
   autor_id: string | null;
   autor_nome: string | null;
   status: "sent" | "delivered" | "read" | "failed" | null;
+  /** Por que a Meta não entregou (0313, 05/11). */
+  erro?: string | null;
   respondendo_a: string | null;
   enviada_em: string;
   /** de = 'cliente' | 'celular' | id de quem reagiu no QS. */

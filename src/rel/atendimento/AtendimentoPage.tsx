@@ -362,7 +362,7 @@ function Bolha({ m, primeira, nomeCliente, citada, favorita, meuId, onAbrirFoto,
         ? <span style={{ fontStyle: "italic" }} title="A Meta não entregou esta mensagem; ela foi lida do aparelho (cópia de reserva). Não dá pra reagir nem citar.">veio pelo aparelho ·</span>
         : SELO[m.origem] && <span style={{ fontStyle: "italic" }}>{SELO[m.origem]} ·</span>}
       <span>{new Date(m.enviada_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
-      {minha && <Tiques status={m.status} />}
+      {minha && <Tiques status={m.status} erro={m.erro} />}
     </>
   );
   const autor = minha && primeira

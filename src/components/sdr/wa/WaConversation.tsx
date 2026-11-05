@@ -93,13 +93,13 @@ interface Props {
  * recusada (fora da janela de 24h no número oficial, por exemplo) fica na tela
  * exatamente igual a uma entregue.
  */
-function Recibo({ status }: { status?: string | null }) {
+function Recibo({ status, erro }: { status?: string | null; erro?: string | null }) {
   if (!status) return null;
 
   if (status === "failed") {
     return (
       <span className="inline-flex items-center gap-0.5 font-semibold" style={{ color: "var(--red)" }}
-            title="Não foi entregue. Fora da janela de 24h no número oficial é a causa mais comum.">
+            title={erro || "Não foi entregue (a Meta ainda não disse o motivo)."}>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              strokeWidth="2.4" strokeLinecap="round" aria-hidden>
           <path d="M12 8v5M12 17h.01M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />
@@ -1073,8 +1073,12 @@ export default function WaConversation({ leadId, leadName, phone, initialText }:
                         {hora(m.sent_at)}
                         {/* Só na nossa: no WhatsApp o recibo da mensagem do
                             outro não existe. Apagada também não tem recibo. */}
-                        {meu && !m.deleted_at && <Recibo status={m.status} />}
+                        {meu && !m.deleted_at && <Recibo status={m.status} erro={m.erro} />}
                       </p>
+                    )}
+                    {/* 05/11: o motivo da falha, à vista — antes ninguém refazia. */}
+                    {meu && m.status === "failed" && m.erro && (
+                      <p className="text-[11px] mt-1 text-right" style={{ color: "var(--red)" }}>⚠ {m.erro}</p>
                     )}
 
                     {/* Reações penduradas na bolha, como no WhatsApp. Clicar na

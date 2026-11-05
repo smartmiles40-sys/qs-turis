@@ -121,9 +121,9 @@ export function previa(txt: string | null): { icone: string | null; texto: strin
 
 // ── ✓ / ✓✓ ──────────────────────────────────────────────────────────────────
 
-export function Tiques({ status, cor }: { status: Mensagem["status"] | "sent" | null; cor?: string }) {
+export function Tiques({ status, cor, erro }: { status: Mensagem["status"] | "sent" | null; cor?: string; erro?: string | null }) {
   if (!status) return null;
-  if (status === "failed") return <span title="Não entregue" style={{ color: "#EA0038", fontWeight: 700 }}>!</span>;
+  if (status === "failed") return <span title={erro || "Não entregue"} style={{ color: "#EA0038", fontWeight: 700 }}>! {erro ? <span style={{ fontWeight: 500 }}>{erro}</span> : null}</span>;
   const lido = status === "read";
   const duplo = status === "delivered" || lido;
   const c = cor || (lido ? "var(--wa-blue)" : "currentColor");

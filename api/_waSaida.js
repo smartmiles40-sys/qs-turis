@@ -157,6 +157,8 @@ export async function registrarSaida({
   phoneId = null,
 }) {
   if (!leadId || !wamid) return false;
+  // 05/11: 3 tentativas — "enviada mas não gravada" some do QS e o SDR reenvia.
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
   try {
     const novo = await rest('rpc/qs_wa_ingest_meta', {
       method: 'POST',
@@ -177,9 +179,12 @@ export async function registrarSaida({
     });
     return novo === true;
   } catch (e) {
-    console.error('[wa-saida] enviada, mas não gravou no QS:', e?.message);
-    return false;
+    console.error(`[wa-saida] enviada, mas não gravou no QS (tentativa ${tentativa}, wamid ${wamid}, lead ${leadId}):`, e?.message);
+    if (tentativa === 3) return false;
+    await new Promise((r) => setTimeout(r, 1000 * tentativa));
   }
+  }
+  return false;
 }
 
 /**
@@ -208,6 +213,9 @@ export async function resolverModeloMeta(modelo, phoneId = null) {
     return String(v).trim();
   });
   if (faltando) return { error: 'modelo-variavel-vazia', variavel: faltando };
+  // 05/11: etiqueta de campanha no lugar do nome ("Oi, [V4]!") nunca sai pro cliente.
+  const etiqueta = Object.entries(params).find(([, v]) => /^\s*[[(][^\])]*[\])]\s*$/.test(String(v ?? '')));
+  if (etiqueta) return { error: 'modelo-variavel-vazia', variavel: etiqueta[0] };
 
   return {
     nome: t.nome,

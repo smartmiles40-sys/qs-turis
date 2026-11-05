@@ -132,8 +132,12 @@ export async function nascerDoWhatsApp({ phone, nome, direcao, inboxId, ownerId 
   // 13 em cada 18 já existiam lá. Cai na triagem, que é reversível; card
   // duplicado no funil do Comercial não é.
   if (noBitrix?.indisponivel) {
-    console.warn('[wa-webhook] Bitrix indisponível, mando pra triagem:', noBitrix.motivo);
-    return null;
+    // 05/11: a triagem não guarda o TEXTO (LGPD, 0038) — mandar pra lá era perder
+    // a mensagem. Agora a Meta reenvia (503) até o Bitrix voltar, e o lead nasce
+    // com a conversa inteira.
+    const e = new Error('Bitrix indisponível: ' + (noBitrix.motivo || '?'));
+    e.code = 'BITRIX_INDISPONIVEL';
+    throw e;
   }
 
   // QUEM FICA COM O LEAD (Bruno, 05/11): "o número da pessoa é tipo um CPF —

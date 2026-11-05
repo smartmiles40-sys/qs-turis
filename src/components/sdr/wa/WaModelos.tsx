@@ -15,6 +15,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { previewModelo, type WaModelo } from "../../../lib/qs/waInbox";
+import { nomeLimpo } from "../../ui/nomeCliente";
 import {
   ACEITA_DO_TOPO, ROTULO_DO_TOPO, TIPOS_CAMPO, carregarCampos, contextoDoLead, problemaDoArquivoDoTopo, rotuloDoCampo,
   trechoDaVariavel, valorDoCampo, variaveisVazias,
@@ -36,8 +37,9 @@ interface Props {
 /** Chute educado pro valor inicial de uma variável: nome do cliente quando o
  *  buraco parece pedir isso (primeira variável e variáveis chamadas nome/name). */
 function valorInicial(chave: string, indice: number, leadName?: string | null) {
-  const primeiro = (leadName || "").trim().split(/\s+/)[0] || "";
-  if (!primeiro) return "";
+  // 05/11: "[V4] (STFV) Fulana" virava "Oi, [V4]!" em 27 mensagens. Nome limpo primeiro.
+  const primeiro = nomeLimpo(leadName).split(/\s+/)[0] || "";
+  if (!primeiro || /^[[(]/.test(primeiro)) return "";
   const c = chave.toLowerCase();
   if (c === "nome" || c === "name" || c === "cliente" || (indice === 0 && /^\d+$/.test(chave))) return primeiro;
   return "";

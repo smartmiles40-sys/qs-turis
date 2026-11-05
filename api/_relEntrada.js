@@ -21,6 +21,7 @@ import { lerMensagemMeta, baixarMidiaMeta } from './_metaEntrada.js';
 import { rotuloDaMidia } from './_waMidia.js';
 import { ehPedidoDeParada } from './_waOptout.js';
 import { chaveDoWamid } from './_relGruposPrivado.js';
+import { motivoDaFalha, ehMidiaDoClienteQueNaoChegou } from './_waFalhas.js';
 
 const STATUS_OK = new Set(['sent', 'delivered', 'read', 'failed']);
 
@@ -208,9 +209,27 @@ export async function processarRelacionamento(ch, numero, nomes) {
     for (const st of value.statuses || []) {
       const s = String(st.status || '').toLowerCase();
       if (!STATUS_OK.has(s) || !st.id) continue;
-      const mudou = await rest('rpc/rel_wa_status', { method: 'POST', body: { p_wamid: String(st.id), p_status: s } }).catch(() => false);
+      const aplicar = () => rest('rpc/rel_wa_status', { method: 'POST', body: { p_wamid: String(st.id), p_status: s } }).catch(() => false);
+      let mudou = await aplicar();
+      if (s === 'failed') {
+        if (ehMidiaDoClienteQueNaoChegou(st) && mudou !== true) {
+          // 05/11: vídeo de 150 MB do cliente sumia calado — vira aviso na conversa.
+          if (st.recipient_id) {
+            await gravarRel({
+              phoneId, telefone: String(st.recipient_id), wamid: `falha-arquivo:${st.id}`, direcao: 'in', origem: 'cliente',
+              texto: '⚠️ O cliente tentou mandar um arquivo que não chegou (grande demais, acima de 100 MB, ou expirou). Peça para mandar de novo, menor ou por link.',
+              enviadaEm: Number(st.timestamp) > 0 ? new Date(Number(st.timestamp) * 1000).toISOString() : null,
+            });
+          }
+          continue;
+        }
+        if (mudou !== true) { await new Promise((r) => setTimeout(r, 2000)); mudou = await aplicar(); }
+        const erro = motivoDaFalha(st.errors);
+        console.warn(`[rel-entrada] Meta recusou ${st.id}: ${erro}`);
+        await rest('rpc/rel_wa_status_erro', { method: 'POST', body: { p_wamid: String(st.id), p_erro: erro } })
+          .catch((e) => console.warn('[rel-entrada] motivo da falha não gravado (0313?):', e?.message));
+      }
       if (mudou === true) conta.recibos++;
-      if (s === 'failed') console.warn(`[rel-entrada] Meta recusou ${st.id}: ${JSON.stringify(st.errors || []).slice(0, 300)}`);
     }
   }
 

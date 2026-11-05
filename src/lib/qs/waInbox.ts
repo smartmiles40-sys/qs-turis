@@ -37,6 +37,8 @@ export interface WaMessage {
   //    conversa segue funcionando exatamente como antes) ────────────────────
   /** Recibo do WhatsApp: sent | delivered | read | failed. Só em mensagem nossa. */
   status?: "sent" | "delivered" | "read" | "failed" | null;
+  /** Por que a Meta não entregou (0313, 05/11) — frase pronta com o código no fim. */
+  erro?: string | null;
   /** Carimbo de "não está mais no WhatsApp do cliente". O conteúdo FICA aqui. */
   deleted_at?: string | null;
   /** A mensagem que esta aqui está respondendo (id dela no WhatsApp). */
