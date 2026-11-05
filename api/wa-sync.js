@@ -50,7 +50,7 @@ export default async function handler(req, res) {
     if (!quem.ok) return res.status(quem.reason === 'lead-de-outro-sdr' ? 403 : 404).json({ error: 'Sem acesso' });
 
     try {
-      const [notas, tarefas, reunioes, dono, conversa] = await Promise.all([
+      const [notas, tarefas, reunioes, dono, conversa, tempSdr] = await Promise.all([
         rest(`qs_notes?lead_id=eq.${encodeURIComponent(leadId)}&select=body,tags,created_at&order=created_at.desc&limit=12`),
         rest(`qs_tasks?lead_id=eq.${encodeURIComponent(leadId)}&status=eq.concluida&select=channel_type,contact_result,completed_at,notes&order=completed_at.desc.nullslast&limit=10`),
         rest(`qs_meetings?lead_id=eq.${encodeURIComponent(leadId)}&select=title,scheduled_at,status,meeting_owner,sal&order=scheduled_at.desc&limit=5`),
@@ -62,6 +62,9 @@ export default async function handler(req, res) {
         // destino, a data, quantas pessoas, o orçamento. Sem isto o closer
         // reabre a mesma entrevista, que é justamente a reclamação dele.
         rest(`qs_wa_messages?lead_id=eq.${encodeURIComponent(leadId)}&deleted_at=is.null&select=content,direction,transcricao,sent_at&order=sent_at.desc&limit=40`),
+        // Temperatura do SDR (0311). Leitura à parte: sem a migration a coluna
+        // não existe e o resumo inteiro não pode cair por causa dela.
+        rest(`qs_leads?id=eq.${encodeURIComponent(leadId)}&select=temperatura_sdr&limit=1`).catch(() => []),
       ]);
       return res.status(200).json({
         lead: {
@@ -70,6 +73,7 @@ export default async function handler(req, res) {
           email: quem.lead.email ?? null,
           fonte: quem.lead.segment ?? null,
           temperatura: quem.lead.lead_score ?? null,
+          temperaturaSdr: Array.isArray(tempSdr) && tempSdr[0] ? tempSdr[0].temperatura_sdr ?? null : null,
           status: quem.lead.status ?? null,
           dono: Array.isArray(dono) && dono[0] ? dono[0].name : null,
           papelDono: Array.isArray(dono) && dono[0] ? dono[0].role : null,

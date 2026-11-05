@@ -133,6 +133,9 @@
     },
     "api/*.js": {
       "maxDuration": 10
+    },
+    "api/dashboard-sync.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
@@ -215,6 +218,10 @@
     {
       "path": "/api/mkt-automacoes?cron=1",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/dashboard-sync",
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [

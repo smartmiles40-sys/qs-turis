@@ -46,6 +46,7 @@ import { useBloqueioDesfecho, ehPendenteDeDesfecho } from "@/lib/qs/bloqueioDesf
 import { perguntarMotivoDesistencia } from "@/lib/qs/motivoDesistencia";
 import DesfechosNaoEnviados from "./DesfechosNaoEnviados";
 import "./agenda.css";
+import { getSdrTemperature } from "@/lib/leadScore";
 import {
   statusNaAgenda, chipsDaAgenda, filtrarPorStatus, acontecendoAgora, proximaReuniao, faltaDesfecho,
   emQuantoTempo, ROTULO_STATUS, estaAberta, corDaPessoa, iniciais, type FiltroAgenda,
@@ -648,7 +649,13 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo, semBotaoAgend
   // a faixa do Bitrix, a grade por especialista e, ao lado, o que está
   // acontecendo agora, a próxima e o que falta registrar. No celular a grade
   // vira lista (a grade com N colunas não cabe numa tela de 375 px).
-  const nomeDaReuniao = (m: Meeting) => m.lead_name || m.lead?.full_name || m.title || "Reunião";
+  // O emoji da temperatura do SDR (05/11) na frente do nome: na grade cheia, é
+  // o que diz ao closer quem é prioridade sem abrir a reunião.
+  const nomeDaReuniao = (m: Meeting) => {
+    const nome = m.lead_name || m.lead?.full_name || m.title || "Reunião";
+    const t = getSdrTemperature(m.temperatura_sdr);
+    return t ? `${t.emoji} ${nome}` : nome;
+  };
   const nomeDaColuna = (m: Meeting) => colunas.find((c) => c.key === chaveDoEspecialista(m))?.nome || m.closer?.name || m.meeting_owner || "sem especialista";
   const primeiro = (n: string) => n.trim().split(/\s+/)[0] || n;
   const faixaHoras = (m: Meeting) => `${hhmm(new Date(m.scheduled_at))} às ${hhmm(fimDaReuniao(m))}`;

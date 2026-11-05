@@ -50,3 +50,21 @@ export function getLeadScore(lead: Lead | undefined | null): LeadScore | null {
   if (!level) return null;
   return { level, ...TEMP_META[level] };
 }
+
+// ── Temperatura do SDR (05/11, migration 0311) ──────────────────────────────
+// A SEGUNDA temperatura: a leitura de quem conversou com o cliente. Obrigatória
+// ao agendar a 1ª reunião; é o que o closer usa pra decidir quem atender primeiro.
+// Fica em qs_leads.temperatura_sdr (atual) e qs_meetings.temperatura_sdr (foto
+// do agendamento). Gravada sempre em minúsculo: quente | morno | frio.
+
+export const TEMPERATURAS: LeadTemperature[] = ["quente", "morno", "frio"];
+
+export function chipDaTemperatura(level: LeadTemperature): LeadScore {
+  return { level, ...TEMP_META[level] };
+}
+
+/** Chip da temperatura do SDR, ou null se o SDR ainda não classificou. */
+export function getSdrTemperature(raw: string | null | undefined): LeadScore | null {
+  const level = normalizeTemperature(raw);
+  return level ? chipDaTemperatura(level) : null;
+}

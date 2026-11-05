@@ -14,11 +14,12 @@
 
 import { useEffect, useState } from "react";
 import { authHeaders } from "@/lib/qs/waInbox";
+import { getSdrTemperature } from "@/lib/leadScore";
 
 interface Briefing {
   lead: {
     nome: string | null; telefone: string | null; email: string | null;
-    fonte: string | null; temperatura: string | null; status: string | null;
+    fonte: string | null; temperatura: string | null; temperaturaSdr?: string | null; status: string | null;
     dono: string | null; papelDono: string | null;
   };
   notas: { body: string; tags: string[] | null; created_at: string }[];
@@ -81,6 +82,9 @@ export default function BriefingDoLead({ leadId }: { leadId: string }) {
   );
   const ligacoes = tarefas.filter((t) => t.contact_result);
   const conversa = dados.conversa ?? [];
+  // A temperatura do SDR (05/11) vem PRIMEIRO: é a leitura de quem conversou,
+  // e o que o closer usa pra decidir quem atender antes.
+  const tempSdr = getSdrTemperature(lead.temperaturaSdr);
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white">
@@ -98,6 +102,13 @@ export default function BriefingDoLead({ leadId }: { leadId: string }) {
         <div className="px-3.5 pb-3.5 space-y-3 text-sm">
           {/* A ficha: o que se sabe do cliente num relance. */}
           <div className="flex flex-wrap gap-1.5">
+            {tempSdr && (
+              <span className="rounded-full px-2 py-0.5 text-[11px] font-bold border"
+                    title="Temperatura dada pelo SDR que conversou com o cliente"
+                    style={{ background: tempSdr.bg, color: tempSdr.color, borderColor: tempSdr.color }}>
+                {tempSdr.emoji} SDR: {tempSdr.label}
+              </span>
+            )}
             {lead.temperatura && (
               <span className="rounded-full px-2 py-0.5 text-[11px] font-bold"
                     style={{

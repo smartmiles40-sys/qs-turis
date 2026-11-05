@@ -42,7 +42,7 @@ import {
   dataRelativa, ehLigacao, escolherProximoPasso, iniciaisDoNome, diaDaCadencia, passaNoFiltro, quandoCurto,
   quandoPorExtenso, reuniaoAberta as reuniaoEstaAberta, textoDeVazio, type FiltroAtividade, type PapelDaFicha, type TipoAtividade,
 } from "./ficha/regras";
-import { getLeadScore } from "@/lib/leadScore";
+import { getLeadScore, getSdrTemperature, TEMPERATURAS, chipDaTemperatura, type LeadTemperature } from "@/lib/leadScore";
 import { loadWorkHours, nextWorkMoment } from "@/lib/workHours";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
@@ -530,6 +530,26 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
 
   // ── Temperatura editável (Sprint 4) ──
   // O badge deixa de ser só reflexo do Bitrix: o SDR classifica Quente/Morno/Frio.
+  // ── Temperatura do SDR (05/11, migration 0311) ──
+  // A SEGUNDA temperatura: a leitura de quem conversou. Nasce no agendamento
+  // (obrigatória) e pode ser corrigida aqui. Não mexe na foto já gravada na
+  // reunião — essa é a que o agendamento registrou.
+  async function setTemperaturaSdr(level: LeadTemperature) {
+    if (!lead || savingScore) return;
+    setSavingScore(true);
+    try {
+      const updated = await updateQsLead(lead.id, {
+        temperatura_sdr: level,
+        temperatura_sdr_em: new Date().toISOString(),
+      });
+      if (!updated) return;
+      setLead(updated);
+      notifySuccess(`Temperatura do SDR: ${chipDaTemperatura(level).label}.`);
+    } finally {
+      setSavingScore(false);
+    }
+  }
+
   async function setTemperature(label: string | null) {
     if (!lead || savingScore) return;
     setSavingScore(true);
@@ -1078,6 +1098,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
   const agora = new Date();
   const nomeDoLead = lead.full_name || [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Sem nome";
   const temperatura = getLeadScore(lead);
+  const temperaturaSdr = getSdrTemperature(lead.temperatura_sdr);
   const totalDeDias = cadenceDays.reduce((m, d) => Math.max(m, d.day_number), 0);
   const diaCad = diaDaCadencia(lead.cadence_started_at, totalDeDias, agora);
   const reunioesAbertas = meetings.filter(reuniaoEstaAberta).sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
@@ -1354,6 +1375,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
       ...(lead.segment ? [["Fonte / Produto", lead.segment] as [string, React.ReactNode]] : []),
       ["Chegou em", lead.arrived_at ? formatDateTime(lead.arrived_at) : "—"],
       ["Temperatura", temperatura ? <span style={{ color: `var(--${TOM_DA_TEMPERATURA[temperatura.level]})` }}>{temperatura.label}</span> : "—"],
+      ["Temperatura do SDR", temperaturaSdr ? <span style={{ color: `var(--${TOM_DA_TEMPERATURA[temperaturaSdr.level]})` }}>{temperaturaSdr.emoji} {temperaturaSdr.label}</span> : "—"],
       ["Status", STATUS_LABELS[lead.status] + (lead.status === "perdido" && lead.loss_reason?.label ? ` · ${lead.loss_reason.label}` : "")],
       ...(papel === "closer" && lead.cadence_id ? [["Cadência", cadence?.name ?? "—"] as [string, React.ReactNode]] : []),
       ...(lead.cadence_started_at ? [["Cadência desde", formatDate(lead.cadence_started_at)] as [string, React.ReactNode]] : []),
@@ -1691,6 +1713,11 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                   ...TEMPERATURE_OPTIONS.map((opt) => ({ rotulo: opt.label, cor: opt.color, disabled: savingScore, onClick: () => void setTemperature(opt.label) })),
                   ...(lead.lead_score ? [{ separador: true } as ItemDoMenu, { rotulo: "Sem classificação", disabled: savingScore, onClick: () => void setTemperature(null) }] : []),
                 ]} />
+              {/* Temperatura do SDR (05/11): a segunda, dada por quem conversou. */}
+              <MenuDaFicha alinhar="esquerda" rotuloAcessivel="Temperatura do SDR — clique para mudar"
+                classeBotao={`fl-selo ${temperaturaSdr ? `fl-selo--${TOM_DA_TEMPERATURA[temperaturaSdr.level]}` : "fl-selo--tracejado"}`}
+                botao={savingScore ? "..." : temperaturaSdr ? `SDR: ${temperaturaSdr.emoji} ${temperaturaSdr.label}` : "SDR: classificar"}
+                itens={TEMPERATURAS.map((t) => ({ rotulo: chipDaTemperatura(t).label, cor: chipDaTemperatura(t).color, disabled: savingScore, onClick: () => void setTemperaturaSdr(t) }))} />
               <span className={`fl-selo${seloStatus.tom ? ` fl-selo--${seloStatus.tom}` : ""}`}>{seloStatus.texto}</span>
             </div>
             <div className="fl-cab__dados">

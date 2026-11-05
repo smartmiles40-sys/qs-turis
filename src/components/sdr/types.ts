@@ -92,6 +92,9 @@ export interface Lead {
   cadence_started_at: string | null;
   arrived_at: string | null;        // horário que o lead chegou
   lead_score: string | null;        // temperatura vinda do Bitrix (rótulo cru: Quente/Morno/Frio). NULL = sem score
+  /** Temperatura dada pelo SDR (quente/morno/frio) — migration 0311. */
+  temperatura_sdr?: string | null;
+  temperatura_sdr_em?: string | null;
   bitrix_id: string | null;         // vínculo com o negócio no Bitrix (APLICAR-PENDENTES.sql)
   closed_at?: string | null;        // data REAL do ganho/perda (migration 0012; trigger na transição de status)
   created_at: string;
@@ -218,6 +221,8 @@ export interface Meeting {
   /** Reunião que esta substitui, quando é remarcação (0032). Separa
    *  reagendamento (avisou) de no-show (sumiu). */
   reagendado_de?: string | null;
+  /** Temperatura do SDR no agendamento (foto) — migration 0311. */
+  temperatura_sdr?: string | null;
   /**
    * "primeira" (a call que qualifica) ou "retomada" (continuação da negociação,
    * típica de pacote — 3 calls ou mais). Migration 0054.

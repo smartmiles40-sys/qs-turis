@@ -178,6 +178,14 @@ export function montarReuniao(body, { mapa = {}, opcoes = {} } = {}, { etapaReun
     else pulados.push(alias + ' (nome "' + (nome || '—') + '" não bate com nenhuma opção)');
   }
 
+  // Temperatura do SDR (05/11): lista Quente/Morno/Frio no card. Opcional —
+  // enquanto o alias `temperatura_sdr` não estiver no de-para, não vira alerta.
+  if (mapa.temperatura_sdr && body.temperatura_sdr) {
+    const id = acharOpcao(opcoes.temperatura_sdr, body.temperatura_sdr);
+    if (id) fields[mapa.temperatura_sdr] = id;
+    else pulados.push('temperatura_sdr (nome "' + body.temperatura_sdr + '" não bate com nenhuma opção)');
+  }
+
   if (etapaReuniao) fields.STAGE_ID = String(etapaReuniao);
 
   if (!body.bitrix_id) return { ok: false, erro: 'payload sem bitrix_id' };

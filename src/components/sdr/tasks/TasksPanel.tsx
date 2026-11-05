@@ -26,7 +26,8 @@ import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { useWhatsAppApp } from "@/lib/qs/waApp";
 import { caronaDasOportunidades } from "@/lib/qs/oportunidadeFutura";
-import { getLeadScore, type LeadTemperature } from "@/lib/leadScore";
+import { getLeadScore, normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
+import TemperaturaSdrPicker from "@/components/sdr/agenda/TemperaturaSdrPicker";
 import { formatPhoneDisplay, fillTemplate, normalizePhoneBR } from "@/lib/whatsapp";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
 import { dialViaOficial, setOnCallEndedOficial } from "@/lib/qs/waCall";
@@ -742,7 +743,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Perguntar era pedir pro SDR digitar o que o sistema já sabe — e a lista fixa
   // nem tinha todo mundo (a Yanca não estava lá, e sem escolher não dava pra
   // confirmar o ganho).
-  const [meeting, setMeeting] = useState({ emailCliente: "", dataAgendamento: "", responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60, produto: "", bitrixId: "" });
+  const [meeting, setMeeting] = useState({ emailCliente: "", dataAgendamento: "", responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60, produto: "", bitrixId: "", temperaturaSdr: "" as LeadTemperature | "" });
   const [savingMeeting, setSavingMeeting] = useState(false);
 
   // New Lead Modal
@@ -1247,7 +1248,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const yyyy = hoje.getFullYear();
     const mm = String(hoje.getMonth() + 1).padStart(2, "0");
     const dd = String(hoje.getDate()).padStart(2, "0");
-    setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 , produto: "", bitrixId: "" });
+    setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 , produto: "", bitrixId: "", temperaturaSdr: normalizeTemperature(lead?.temperatura_sdr) ?? "" });
     setPendingResult(null);
     setMeetingFor({ taskId: task.id, leadId: task.lead_id, leadName: lead?.full_name ?? "Lead" });
   }
@@ -1355,6 +1356,12 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       notifyError("Informe o e-mail do cliente — é por ele que o convite do Google Meet é enviado.");
       return;
     }
+    // Temperatura do SDR (Bruno, 05/11): obrigatória — é por ela que o closer
+    // sabe quem atender primeiro.
+    if (!meeting.temperaturaSdr) {
+      notifyError("Escolha a temperatura do SDR (Quente, Morno ou Frio).");
+      return;
+    }
     // O ID DO BITRIX (Bruno, 01/09). Sem vínculo com o negócio a reunião nasce
     // órfã: fica no QS e o card nunca se mexe — foi o caso da Beatrice Bessa,
     // que não deu erro nenhum porque não houve tentativa. O `createMeeting`
@@ -1438,6 +1445,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         location: "Google Meet",
         notes: resumo,
         booking_date: meeting.dataAgendamento || null,
+        temperatura_sdr: meeting.temperaturaSdr || null,
       });
       // A REUNIÃO É O FATO CENTRAL DO GANHO — se ela não gravou, nada mais pode
       // acontecer. Antes o erro só entrava numa lista de avisos e o fluxo seguia:
@@ -4600,6 +4608,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   É por ele que o convite do Google Meet chega no cliente.
                 </p>
               </div>
+              <TemperaturaSdrPicker
+                value={meeting.temperaturaSdr}
+                onChange={(v) => setMeeting((m) => ({ ...m, temperaturaSdr: v }))}
+                disabled={savingMeeting}
+              />
               {/* O QUE É A REUNIÃO. Vai pro card do Bitrix ("Produto (Descritivo
                   da Reunião)") e pro convite do Google — é o que o especialista
                   lê pra saber do que se trata antes de entrar. */}
@@ -4690,7 +4703,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             <div className="shrink-0 border-t px-5 py-4" style={{ borderColor: "var(--line)" }}>
               <div className="flex gap-2">
                 <button onClick={() => cancelMeetingModal()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
-                <button onClick={handleConfirmMeeting} disabled={savingMeeting || !meeting.responsavelId || !meeting.dataHora || !emailValido(meeting.emailCliente)} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
+                <button onClick={handleConfirmMeeting} disabled={savingMeeting || !meeting.responsavelId || !meeting.dataHora || !emailValido(meeting.emailCliente) || !meeting.temperaturaSdr} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
                   {savingMeeting ? "Salvando..." : "Confirmar ganho"}
                 </button>
               </div>

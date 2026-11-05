@@ -12,6 +12,8 @@ import { notifySuccess, notifyError } from "@/lib/qs/notify";
 import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, vincularCardAoBitrix, somenteDigitos } from "@/lib/qs/meetings";
 import { fetchAllRows } from "@/lib/qs/queries";
 import CampoBitrixId from "./CampoBitrixId";
+import TemperaturaSdrPicker from "./TemperaturaSdrPicker";
+import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
 import type { Lead, Meeting, MeetingTipo } from "../types";
 
@@ -80,6 +82,9 @@ export default function ScheduleMeetingModal({
   // E-mail pra onde vai o convite do Google. Vem do cadastro quando existe; o
   // SDR completa quando não — e o que ele digitar volta pro cadastro do lead.
   const [email, setEmail] = useState("");
+  // Temperatura do SDR (05/11): obrigatória na 1ª reunião. Vem marcada com a
+  // última que o SDR deu pro lead, se já deu.
+  const [temperaturaSdr, setTemperaturaSdr] = useState<LeadTemperature | "">("");
   // Sala do Meet criada automaticamente. Desligar libera o campo de link manual
   // (reunião por Zoom/Teams, ou a sala fixa do especialista).
   const [gerarMeet, setGerarMeet] = useState(true);
@@ -103,6 +108,7 @@ export default function ScheduleMeetingModal({
     setNotes("");
     setLink(reschedule?.meeting_link ?? "");
     setEmail(lead?.email ?? "");
+    setTemperaturaSdr(normalizeTemperature(lead?.temperatura_sdr) ?? "");
     setGerarMeet(true);
     setBitrixId("");
     setSdrResp("");
@@ -253,6 +259,14 @@ export default function ScheduleMeetingModal({
       return;
     }
 
+    // TEMPERATURA DO SDR (Bruno, 05/11): a leitura de quem conversou, pro
+    // closer saber quem atender primeiro. Retomada é do closer: não pede.
+    if (tipo === "primeira" && !temperaturaSdr) {
+      setError("Escolha a temperatura do SDR (Quente, Morno ou Frio). É por ela que o closer sabe quem atender primeiro.");
+      setSaving(false);
+      return;
+    }
+
     // O ID DO BITRIX (Bruno, 01/09). Sem ele a reunião nasce órfã: fica gravada
     // no QS e o card do negócio nunca se mexe — foi o que aconteceu com a
     // Beatrice Bessa. O `createMeeting` recusa de qualquer jeito; a checagem
@@ -299,6 +313,7 @@ export default function ScheduleMeetingModal({
       meeting_link: gerarMeet ? null : link,
       notes,
       tipo,
+      temperatura_sdr: tipo === "primeira" ? temperaturaSdr || null : null,
     });
 
     if (!res.ok) {
@@ -512,6 +527,15 @@ export default function ScheduleMeetingModal({
                     : "Obrigatório: peça o e-mail ao cliente. Ele vai pro card do Bitrix e conta o agendamento no Dashboard."}
                 </p>
               </div>
+
+              {tipo === "primeira" && (
+                <TemperaturaSdrPicker
+                  value={temperaturaSdr}
+                  onChange={setTemperaturaSdr}
+                  disabled={saving}
+                  labelClassName={labelClass}
+                />
+              )}
 
               <div>
                 <label className={labelClass}>

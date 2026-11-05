@@ -8,6 +8,7 @@ import { CHANNEL_LABELS } from "../types";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import RankingPanel from "./RankingPanel";
 import { contaNoIndicador, colunaTipoPronta } from "@/lib/qs/meetings";
+import { taxasDeReuniao, type TaxasReuniao } from "@/lib/qs/metricasReuniao";
 import DailyFlowPanel from "./DailyFlowPanel";
 import PainelAereo from "../aereo/PainelAereo";
 
@@ -419,6 +420,48 @@ function SectionHeading({ title, hint, extra }: { title: string; hint?: string; 
 
 // Card de KPI do "hero" (rótulo + bolinha semântica + número grande + barra
 // opcional de meta + legenda). Cores semânticas ficam SEPARADAS do azul de marca.
+// ── Taxas de reunião (Bruno, 05/11) ──────────────────────────────────────────
+// Regra em src/lib/qs/metricasReuniao.ts. Cor: verde = bom, âmbar = atenção,
+// vermelho = ruim (limites provisórios, a calibrar com o histórico).
+function corDaTaxa(v: number | null, bom: number, ruim: number): string {
+  if (v == null) return "#8792A6";
+  return v <= bom ? "#059669" : v >= ruim ? "#D92D20" : "#C77700";
+}
+function fmtPct(v: number | null): ReactNode {
+  return <>{v != null ? v.toFixed(0) : "—"}<span className="text-[15px] font-bold text-gray-400">%</span></>;
+}
+function TaxasReuniaoCards({ taxas }: { taxas: TaxasReuniao | null }) {
+  const t = taxas;
+  return (
+    <>
+      <HeroCard
+        label="Taxa de remarcação"
+        dotColor="#7C3AED"
+        value={fmtPct(t?.taxaRemarcacao ?? null)}
+        valueColor={corDaTaxa(t?.taxaRemarcacao ?? null, 15, 30)}
+        sub={t ? `${t.remarcados} de ${t.agendamentos} agendamentos foram remarcados` : "sem dados"}
+        hint="Agendamentos que nasceram de um reagendamento ÷ agendamentos do período (sem retomada, cancelada e a linha antiga do reagendamento)."
+      />
+      <HeroCard
+        label="Remarcação → no-show"
+        dotColor="#D92D20"
+        value={fmtPct(t?.taxaRemarcacaoNoShow ?? null)}
+        valueColor={corDaTaxa(t?.taxaRemarcacaoNoShow ?? null, 10, 25)}
+        sub={t ? `${t.remarcadosNoShow} de ${t.remarcadosComDesfecho} remarcadas com desfecho` : "sem dados"}
+        hint="Das reuniões remarcadas que já têm desfecho (realizada, no-show ou desistência), quantas terminaram em no-show."
+      />
+      <HeroCard
+        label="Taxa de desistência"
+        dotColor="#C77700"
+        value={fmtPct(t?.taxaDesistencia ?? null)}
+        valueColor={corDaTaxa(t?.taxaDesistencia ?? null, 10, 20)}
+        sub={t ? `${t.desistencias} de ${t.comDesfecho} reuniões com desfecho` : "sem dados"}
+        hint="Desistências ÷ reuniões com desfecho (realizada + no-show + desistência)."
+      />
+    </>
+  );
+}
+
 function HeroCard({
   label, dotColor, value, valueColor, sub, barPct, barColor, hint,
 }: {
@@ -656,7 +699,7 @@ export default function SdrDashboard() {
   const [meetingGoalByOwner, setMeetingGoalByOwner] = useState<Record<string, number>>({});
 
   // KPIs de negócio (auditoria): reuniões do período, pipeline e conversão por fonte
-  const [meetingKpis, setMeetingKpis] = useState<{ agendadas: number; realizadas: number; noShow: number; desistencias: number; showRate: number | null; meta: number } | null>(null);
+  const [meetingKpis, setMeetingKpis] = useState<{ agendadas: number; realizadas: number; noShow: number; desistencias: number; showRate: number | null; meta: number; taxas: TaxasReuniao } | null>(null);
   const [pipelineOpen, setPipelineOpen] = useState<number | null>(null);
   const [revenueWon, setRevenueWon] = useState<number | null>(null);
   const [sourceRows, setSourceRows] = useState<{ source: string; total: number; ganhos: number; taxa: number }[]>([]);
@@ -1381,10 +1424,11 @@ export default function SdrDashboard() {
       // `tipo` só entra no select se a 0054 já estiver no banco — pedir coluna
       // inexistente derruba a consulta e deixa o dashboard em branco.
       const temTipo = await colunaTipoPronta();
-      const mPromise = fetchAllRows<{ status: string; tipo?: string | null }>((f, t) => {
+      const mPromise = fetchAllRows<{ status: string; tipo?: string | null; reagendado_de?: string | null }>((f, t) => {
         // O cast existe porque o select é montado em runtime: o supabase-js
         // valida a string de colunas em tempo de tipo e não aceita variável.
-        const cols = (temTipo ? "status, created_at, tipo" : "status, created_at") as "status, created_at";
+        // reagendado_de (0032) separa o agendamento remarcado — base da taxa de remarcação.
+        const cols = (temTipo ? "status, created_at, tipo, reagendado_de" : "status, created_at, reagendado_de") as "status, created_at";
         let q = supabase.from("qs_meetings").select(cols).order("id");
         if (ownerId) q = q.eq("owner_id", ownerId);
         if (from) q = q.gte("created_at", from);
@@ -1479,6 +1523,7 @@ export default function SdrDashboard() {
         agendadas, realizadas, noShow, desistencias,
         showRate: decididas > 0 ? (realizadas / decididas) * 100 : null,
         meta,
+        taxas: taxasDeReuniao(meetings),
       });
 
       // Pipeline / receita
@@ -1937,6 +1982,12 @@ export default function SdrDashboard() {
                   />
                 </div>
               )}
+              {/* Taxas de reunião (05/11): remarcação, remarcação → no-show, desistência. */}
+              {!(loadingKpis || loadingBusiness || loadingQueue) && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                  <TaxasReuniaoCards taxas={meetingKpis?.taxas ?? null} />
+                </div>
+              )}
             </div>
 
             {/* (2) Minha fila (FUP) + (3) Minha conversão */}
@@ -2078,6 +2129,7 @@ export default function SdrDashboard() {
                     valueColor={meetingKpis?.showRate == null ? "#8792A6" : meetingKpis.showRate >= 70 ? "#059669" : meetingKpis.showRate >= 50 ? "#C77700" : "#D92D20"}
                     sub="reuniões realizadas ÷ decididas"
                   />
+                  <TaxasReuniaoCards taxas={meetingKpis?.taxas ?? null} />
                   <HeroCard
                     label="1º contato (médio)"
                     dotColor="#7C3AED"

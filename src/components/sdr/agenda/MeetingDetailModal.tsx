@@ -24,6 +24,7 @@ import { googleCalendarUrl, downloadIcs, type CalendarEvent } from "@/lib/qs/cal
 import { getSetting } from "@/lib/qsSettings";
 import { MEETING_STATUS_LABELS, type Meeting, type MeetingSal, type MeetingStatus } from "../types";
 import { hhmm, WEEKDAY_LONG, MONTH_LONG } from "@/lib/qs/calendarLayout";
+import { getSdrTemperature } from "@/lib/leadScore";
 
 // Lista fechada, definida pelo comercial em qs_settings (0032) — a MESMA que a
 // AgendaDia usa. Trocar os motivos não exige deploy.
@@ -283,6 +284,17 @@ export default function MeetingDetailModal({
                   Retomada
                 </span>
               )}
+              {/* Temperatura do SDR (05/11): a leitura de quem conversou com o cliente. */}
+              {(() => {
+                const t = getSdrTemperature(meeting.temperatura_sdr);
+                return t ? (
+                  <span className="ml-1 inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold border"
+                        title="Temperatura dada pelo SDR"
+                        style={{ background: t.bg, color: t.color, borderColor: t.color }}>
+                    {t.emoji} SDR: {t.label}
+                  </span>
+                ) : null;
+              })()}
               <h2 className="mt-1.5 text-base font-bold text-gray-900 truncate">
                 {meeting.lead_name ?? meeting.lead?.full_name ?? "Reunião"}
               </h2>

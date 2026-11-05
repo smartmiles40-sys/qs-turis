@@ -164,3 +164,24 @@ test("reunião: sem destino configurado ou sem negócio legível, não mexe", ()
   assert.equal(R.deveLevarParaReuniao({ CATEGORY_ID: "25" }, { categoria: 0 }).motivo, "sem-destino-configurado");
   assert.equal(R.deveLevarParaReuniao(null, DESTINO).motivo, "bitrix-inacessivel");
 });
+
+test("reunião: temperatura do SDR vai pra lista do card só quando o alias existe", () => {
+  const base = { bitrix_id: "9", scheduled_at: "2026-11-05T17:00:00Z", temperatura_sdr: "Quente" };
+  // Sem o alias no de-para: não grava e não vira alerta.
+  const semAlias = R.montarReuniao(base, CATALOGO);
+  assert.equal(Object.values(semAlias.fields).includes(31), false);
+  assert.equal(semAlias.pulados.some((p: string) => p.startsWith("temperatura_sdr")), false);
+
+  const comAlias = R.montarCatalogo(
+    [{ alias: "datahora_meet", field_name: "UF_MEET" }, { alias: "temperatura_sdr", field_name: "UF_TEMP" }],
+    [
+      { alias: "temperatura_sdr", option_id: "30", value: "Frio" },
+      { alias: "temperatura_sdr", option_id: "31", value: "Quente" },
+    ],
+  );
+  const m = R.montarReuniao(base, comAlias);
+  assert.equal(m.fields.UF_TEMP, 31);
+  const torto = R.montarReuniao({ ...base, temperatura_sdr: "Fervendo" }, comAlias);
+  assert.equal("UF_TEMP" in torto.fields, false);
+  assert.ok(torto.pulados.some((p: string) => p.startsWith("temperatura_sdr")));
+});

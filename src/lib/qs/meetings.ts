@@ -26,6 +26,7 @@ import { notifyError } from "@/lib/qs/notify";
 import { cancelarEvento, criarEvento, reagendarEvento } from "@/lib/qs/agendaMeet";
 import { loadWorkHours, nextWorkMoment, clampToWorkWindow, type WorkHours } from "@/lib/workHours";
 import { recarregarBloqueio } from "@/lib/qs/bloqueioDesfecho";
+import { chipDaTemperatura, normalizeTemperature } from "@/lib/leadScore";
 import type { ChannelType, Meeting, MeetingSal, MeetingStatus, MeetingTipo } from "@/components/sdr/types";
 
 // ── Configuração da atividade de confirmação ────────────────────────────────
@@ -413,6 +414,11 @@ export interface CreateMeetingInput {
    * Padrão "primeira". Migration 0054.
    */
   tipo?: MeetingTipo;
+  /**
+   * Temperatura do SDR (quente/morno/frio) — migration 0311. Obrigatória pra
+   * agendar a 1ª reunião; vai pra reunião (foto), pro lead e pro Bitrix.
+   */
+  temperatura_sdr?: string | null;
 }
 
 export type MeetingResult =
@@ -655,6 +661,18 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
         "e o agendamento não conta no Dashboard.",
     };
   }
+
+  // ── TEMPERATURA DO SDR (Bruno, 05/11) ─────────────────────────────────────
+  // A segunda temperatura do lead, dada por quem conversou. Obrigatória na 1ª
+  // reunião agendada; retomada é conversa do closer, não passa pelo SDR.
+  const temperaturaSdr = normalizeTemperature(input.temperatura_sdr ?? null);
+  const tipoDaReuniao = input.tipo ?? "primeira";
+  if (status === "agendada" && tipoDaReuniao === "primeira" && !temperaturaSdr) {
+    return {
+      ok: false,
+      error: "Escolha a temperatura do SDR (Quente, Morno ou Frio). É por ela que o closer sabe quem atender primeiro.",
+    };
+  }
   const row = {
     lead_id: input.lead_id,
     lead_name: input.lead_name ?? null,
@@ -673,9 +691,18 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
     client_email: input.lead_email ?? null,
     booking_date: input.booking_date ?? new Date().toISOString().slice(0, 10),
     tipo: input.tipo ?? "primeira",
+    ...(temperaturaSdr ? { temperatura_sdr: temperaturaSdr } : {}),
   };
 
   let { data, error } = await supabase.from("qs_meetings").insert(row).select().single();
+
+  // A 0311 ainda não foi colada? Grava sem a temperatura do SDR: perder a foto
+  // é ruim, mas impedir o agendamento é pior.
+  if (error && /temperatura_sdr/i.test(error.message ?? "") && isMissingSchema(error)) {
+    console.warn("[meetings] 0311 ainda não aplicada; gravando sem temperatura_sdr:", error.message);
+    const { temperatura_sdr: _ts, ...semTemp } = row as typeof row & { temperatura_sdr?: string };
+    ({ data, error } = await supabase.from("qs_meetings").insert(semTemp).select().single());
+  }
 
   // A 0054 ainda não foi colada? Grava sem o tipo. Perder a marcação de retomada
   // é ruim (o indicador infla), mas impedir o agendamento é pior — e o deploy do
@@ -707,6 +734,20 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
   }
 
   const meeting = data as Meeting;
+
+  // A temperatura do SDR também fica no lead (a "atual", que a ficha mostra e
+  // deixa mudar). Best-effort: a reunião já está gravada com a foto.
+  if (temperaturaSdr) {
+    const { error: tErr } = await supabase
+      .from("qs_leads")
+      .update({
+        temperatura_sdr: temperaturaSdr,
+        temperatura_sdr_em: new Date().toISOString(),
+        temperatura_sdr_por: input.owner_id ?? null,
+      })
+      .eq("id", input.lead_id);
+    if (tErr && !isMissingSchema(tErr)) console.warn("[meetings] temperatura do SDR não foi pro lead:", tErr.message);
+  }
 
   // Reunião registrada já com desfecho (retroativa) não gera cobrança de confirmação.
   if (status === "agendada") {
@@ -779,6 +820,9 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
     meeting_owner: row.meeting_owner,
     client_email: row.client_email,
     booking_date: row.booking_date,
+    // Campo "Temperatura SDR" do card (lista Quente/Morno/Frio). Opcional no
+    // servidor: enquanto o alias não estiver cadastrado, só não é gravado.
+    temperatura_sdr: temperaturaSdr ? chipDaTemperatura(temperaturaSdr).label : null,
   });
 
   return { ok: true, meeting };
