@@ -203,3 +203,20 @@ test("reunião: Produto (0321) vai pra lista do card só quando o alias existe",
   assert.equal(R.montarReuniao(base, comAlias).fields.UF_PROD, 40);
   assert.equal(R.montarReuniao({ ...base, produto_tipo: "outros" }, comAlias).fields.UF_PROD, 43);
 });
+
+test("reunião: Produto também casa com os nomes do \"Tipo de venda\" do Bitrix", () => {
+  const tipoVenda = R.montarCatalogo(
+    [{ alias: "datahora_meet", field_name: "UF_MEET" }, { alias: "produto_tipo", field_name: "UF_TV" }],
+    [
+      { alias: "produto_tipo", option_id: "69", value: "Pacotes de Viagens" },
+      { alias: "produto_tipo", option_id: "70", value: "Expedições" },
+      { alias: "produto_tipo", option_id: "71", value: "Passagens aéreas" },
+      { alias: "produto_tipo", option_id: "72", value: "Seguro Viagem" },
+      { alias: "produto_tipo", option_id: "78", value: "Outros" },
+    ],
+  );
+  const base = { bitrix_id: "9", scheduled_at: "2026-11-06T17:00:00Z" };
+  assert.equal(R.montarReuniao({ ...base, produto_tipo: "expedicao" }, tipoVenda).fields.UF_TV, 70);
+  assert.equal(R.montarReuniao({ ...base, produto_tipo: "pacote" }, tipoVenda).fields.UF_TV, 69);
+  assert.equal(R.montarReuniao({ ...base, produto_tipo: "outros" }, tipoVenda).fields.UF_TV, 78);
+});

@@ -153,6 +153,16 @@ export function montarCatalogo(linhasCampos, linhasOpcoes) {
  */
 export const ROTULO_PRODUTO = { expedicao: 'Expedição', aereo: 'Aéreo', pacote: 'Pacote', outros: 'Outros' };
 
+// 06/11: o Bruno escolheu usar o campo que já existe, "Tipo de venda"
+// (UF_CRM_1743296167520), em vez de criar um "Produto". Os nomes lá são outros,
+// então cada produto tenta primeiro o nome do Tipo de venda e depois o nosso.
+export const OPCOES_PRODUTO = {
+  expedicao: ['Expedições', 'Expedição'],
+  aereo: ['Passagens aéreas', 'Aéreo'],
+  pacote: ['Pacotes de Viagens', 'Pacote'],
+  outros: ['Outros'],
+};
+
 export function montarReuniao(body, { mapa = {}, opcoes = {} } = {}, { etapaReuniao = '' } = {}) {
   body = body || {};
   const fields = {};
@@ -188,12 +198,16 @@ export function montarReuniao(body, { mapa = {}, opcoes = {} } = {}, { etapaReun
     else pulados.push('temperatura_sdr (nome "' + body.temperatura_sdr + '" não bate com nenhuma opção)');
   }
 
-  // Produto do Agendou (0321, spec 06/11): lista "Produto" no negócio com as
-  // 4 opções (Expedição, Aéreo, Pacote, Outros). Opcional como a temperatura:
-  // só grava depois que o alias `produto_tipo` entrar no de-para.
+  // Produto do Agendou (0321, spec 06/11) → "Tipo de venda" do negócio (alias
+  // produto_tipo). Opcional como a temperatura. Quem garante que não sobrescreve
+  // o que o closer escolheu é o enviarReuniaoDireto (só grava com o campo vazio).
   if (mapa.produto_tipo && body.produto_tipo) {
     const rotulo = ROTULO_PRODUTO[body.produto_tipo] || body.produto_tipo;
-    const id = acharOpcao(opcoes.produto_tipo, rotulo);
+    let id = null;
+    for (const nome of OPCOES_PRODUTO[body.produto_tipo] || [rotulo]) {
+      id = acharOpcao(opcoes.produto_tipo, nome);
+      if (id) break;
+    }
     if (id) fields[mapa.produto_tipo] = id;
     else pulados.push('produto_tipo (nome "' + rotulo + '" não bate com nenhuma opção)');
   }

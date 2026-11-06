@@ -118,8 +118,10 @@ export async function enviarReuniaoDireto(body, { timeoutMs = 8_000 } = {}) {
   // navegador/agenda precisa carregar o campo, e o navegador não decide o valor.
   if (catalogo?.mapa?.produto_tipo && body?.meeting_id && !body.produto_tipo) {
     try {
-      const [mt] = await rest(`qs_meetings?select=produto&id=eq.${enc(body.meeting_id)}&limit=1`);
-      if (mt?.produto) body = { ...body, produto_tipo: mt.produto };
+      const [mt] = await rest(`qs_meetings?select=produto,produto_inferido&id=eq.${enc(body.meeting_id)}&limit=1`);
+      // Inferido = reunião antiga que ficou "outros" por padrão, sem o SDR escolher:
+      // não vai pro Tipo de venda.
+      if (mt?.produto && !mt.produto_inferido) body = { ...body, produto_tipo: mt.produto };
     } catch (err) {
       console.warn('[bitrix-saida] produto da reunião ilegível:', err?.message);
     }
@@ -127,6 +129,21 @@ export async function enviarReuniaoDireto(body, { timeoutMs = 8_000 } = {}) {
 
   const m = montarReuniao(body, catalogo);
   if (!m.ok) return { ok: false, erro: m.erro };
+
+  // "Tipo de venda" é o campo que o closer preenche na venda (e o Dashboard lê):
+  // o QS só preenche quando está VAZIO. Se não der pra ler o card, não grava.
+  const campoProduto = catalogo?.mapa?.produto_tipo;
+  if (campoProduto && campoProduto in m.fields) {
+    let atual = ilegivel;
+    try {
+      const deal = await bx('crm.deal.get', { id: m.dealId }, Math.min(timeoutMs, 6_000));
+      atual = deal ? deal[campoProduto] : ilegivel;
+    } catch (err) {
+      console.warn('[bitrix-saida] Tipo de venda ilegível no card', m.dealId, ':', err?.message);
+    }
+    const vazio = atual === null || atual === undefined || atual === '' || atual === 0 || atual === '0' || (Array.isArray(atual) && !atual.length);
+    if (!vazio) delete m.fields[campoProduto];
+  }
 
   const meetingId = m.meetingId;
   const leadId = body?.lead_id || null;
