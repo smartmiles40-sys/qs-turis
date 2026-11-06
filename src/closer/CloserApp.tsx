@@ -46,6 +46,8 @@ const PropostasPage = lazyPagina(() => import("@/propostas/PropostasPage"));
 const PropostaEditor = lazyPagina(() => import("@/propostas/PropostaEditor"));
 const QsWaDock = lazyPagina(() => import("@/components/sdr/wa/QsWaDock"));
 const ContratoConfigPage = lazyPagina(() => import("./ContratoConfigPage"));
+// Minhas comissões (06/11, 0327): a planilha card a card só do closer logado.
+const MinhasComissoesPage = lazyPagina(() => import("@/fin/comissoes/MinhasComissoesPage"));
 
 /** Cor do Closer: violeta (#6D28D9 com texto branco = 7:1, WCAG AA). */
 const CLOSER_CSS = `${REL_CSS}
@@ -61,7 +63,7 @@ html.dark { --rel-ink: #C4B5FD; --rel-soft: rgba(167, 139, 250, .16); }
 `;
 
 const PREFIXO = "closer";
-const TELAS = ["inicio", "pipeline", "agenda", "painel", "whatsapp", "reunioes", "leads", "lead", "desempenho", "solicitacoes", "propostas", "proposta-nova", "contrato", "comercial"] as const;
+const TELAS = ["inicio", "pipeline", "agenda", "painel", "whatsapp", "reunioes", "leads", "lead", "desempenho", "solicitacoes", "propostas", "proposta-nova", "contrato", "comercial", "comissoes"] as const;
 type Tela = (typeof TELAS)[number];
 interface Rota { tela: Tela; id?: string }
 
@@ -156,6 +158,7 @@ export default function CloserApp() {
     { id: "consulta", rotulo: "Consulta", icone: ICONES_AREA.lista, itens: [
       { id: "leads", rotulo: "Leads" },
       { id: "desempenho", rotulo: "Desempenho" },
+      { id: "comissoes", rotulo: "Minhas comissões" },
     ] },
     ...(gestao ? [{ id: "outras", rotulo: "Gestão", icone: ICONES_AREA.equipe, itens: [
       { id: "contrato", rotulo: "Configurar contrato" },
@@ -198,6 +201,7 @@ export default function CloserApp() {
           <Cerca nome="o lead"><LeadDetailPage leadId={rota.id} papel="closer" onBack={() => ir(origem.current)} /></Cerca>
         )}
         {tela === "desempenho" && <Cerca nome="o desempenho"><DesempenhoCloser /></Cerca>}
+        {tela === "comissoes" && <Cerca nome="as comissões"><MinhasComissoesPage moldura={false} /></Cerca>}
         {tela === "solicitacoes" && (
           <Cerca nome="as solicitações">
             <SolicitacoesPage setor="comercial" abrirId={rota.id ?? null} onMudou={recontarCentral}

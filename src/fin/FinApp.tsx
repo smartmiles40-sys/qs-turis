@@ -33,6 +33,7 @@ const ContasReceberPage = lazy(() => import("./receber/ContasReceberPage"));
 const SolicitacoesPage = lazy(() => import("@/solicitacoes/SolicitacoesPage"));
 const EquipePage = lazy(() => import("@/rel/equipe/EquipePage"));
 const PagamentosPage = lazy(() => import("./pagamentos/PagamentosPage"));
+const ComissoesPage = lazy(() => import("./comissoes/ComissoesPage"));
 
 const PREFIXO = "fin";
 /** As telas do Financeiro. */
@@ -42,7 +43,8 @@ const PREFIXO = "fin";
 // 19/10: modelos (o próprio time manda os modelos fin_* pra aprovação da Meta).
 // 22/10: receber (Contas a receber — parcelas da venda consolidada pelo closer, 0175).
 // 22/10: pagamentos (pedidos de Pix, link, cartão e provisão dos outros setores, 0201).
-const TELAS = ["inicio", "atendimentos", "conversas", "solicitacoes", "receber", "pagamentos", "modelos", "equipe"] as const;
+// 06/11: comissoes (SDRs e closers card a card, fechamento do mês, 0327).
+const TELAS = ["inicio", "atendimentos", "conversas", "solicitacoes", "receber", "pagamentos", "comissoes", "modelos", "equipe"] as const;
 type Tela = (typeof TELAS)[number];
 interface Rota { tela: Tela; id?: string }
 
@@ -145,6 +147,7 @@ export default function FinApp() {
     { id: "financeiro", rotulo: "Financeiro", icone: ICONES_AREA.lista, itens: [
       { id: "receber", rotulo: "Contas a receber", badge: cont.atrasadas || undefined, alerta: true },
       { id: "pagamentos", rotulo: "Pedidos de pagamento", badge: cont.pagamentos || undefined },
+      { id: "comissoes", rotulo: "Comissões" },
     ] },
     { id: "gestao", rotulo: "Gestão", icone: ICONES_AREA.pedidos, itens: [
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
@@ -177,6 +180,7 @@ export default function FinApp() {
         <PagamentosPage abrirId={rota.id ?? null} onMudou={() => { void contar(); recontarCentral(); }}
           onAbrirId={(id) => ir(id ? { tela: "pagamentos", id } : { tela: "pagamentos" })} />
       )}
+      {rota.tela === "comissoes" && <ComissoesPage />}
       {rota.tela === "solicitacoes" && (
         <SolicitacoesPage setor="financeiro" abrirId={rota.id ?? null} onMudou={recontarCentral}
           onAbrirId={(id) => ir(id ? { tela: "solicitacoes", id } : { tela: "solicitacoes" })} />

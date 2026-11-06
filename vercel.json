@@ -137,6 +137,9 @@
     "api/meet-gravacoes.js": {
       "maxDuration": 60
     },
+    "api/fin-comissoes.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -237,6 +240,10 @@
     {
       "path": "/api/meet-gravacoes",
       "schedule": "7-59/15 * * * *"
+    },
+    {
+      "path": "/api/fin-comissoes",
+      "schedule": "11,41 * * * *"
     }
   ],
   "headers": [

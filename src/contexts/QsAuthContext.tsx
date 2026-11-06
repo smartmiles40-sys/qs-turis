@@ -90,10 +90,11 @@ const MENU_ACCESS: Record<UserRole, string[]> = {
   // reuniao e a unica pessoa sem como saber se ela virou alguma coisa.
   // "monitor-leads" (28/09): o SDR acompanha a distribuição — números do time
   // todo, lista só dos leads dele (0097).
-  sdr: ["painel", "minha-agenda", "whatsapp", "cobertura", "leads", "reunioes", "dashboard", "monitor-leads", "lead-detail", "solicitacoes", "propostas", "cotacoes"],
+  sdr: ["painel", "minha-agenda", "whatsapp", "cobertura", "leads", "reunioes", "dashboard", "monitor-leads", "lead-detail", "solicitacoes", "propostas", "cotacoes", "comissoes"],
   // O Painel entrou pro closer junto com a atividade de DESFECHO: sem ele, a
   // cobrança nasceria numa fila que o closer não enxerga.
-  closer: ["minha-agenda", "painel", "whatsapp", "leads", "reunioes", "dashboard", "lead-detail", "solicitacoes", "propostas", "cotacoes"],
+  // "comissoes" (06/11, 0327): "Minhas comissões" — a planilha card a card só da própria pessoa.
+  closer: ["minha-agenda", "painel", "whatsapp", "leads", "reunioes", "dashboard", "lead-detail", "solicitacoes", "propostas", "cotacoes", "comissoes"],
   // Espectador: enxerga o funil inteiro pra medir campanha. Fica de fora o
   // Painel e o WhatsApp (telas de EXECUÇÃO — quem não executa não atende) e as
   // Configurações (que só existem pra mudar coisa).

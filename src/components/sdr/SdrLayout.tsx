@@ -90,6 +90,8 @@ const PipelineIAPage = lazyPagina(() => import("./gloria/PipelineIAPage"));
 const SolicitacoesPage = lazyPagina(() => import("@/solicitacoes/SolicitacoesPage"));
 const PropostasPage = lazyPagina(() => import("@/propostas/PropostasPage"));
 const CotacoesPage = lazyPagina(() => import("./produto/CotacoesPage"));
+// Minhas comissões (06/11, 0327): a planilha card a card só da própria pessoa.
+const MinhasComissoesPage = lazyPagina(() => import("@/fin/comissoes/MinhasComissoesPage"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import { BotaoBolinhaDoMenu } from "@/avisos/SinoDeAvisos";
 import QsWaDock from "./wa/QsWaDock";
@@ -132,6 +134,7 @@ export type SdrNav =
   | "solicitacoes"
   | "propostas"
   | "cotacoes"
+  | "comissoes"
   | "configuracoes";
 
 // ── Dropdown Menu ────────────────────────────────────────────────────────────
@@ -193,6 +196,7 @@ const MENU: (MenuGroup | MenuItem)[] = [
       { id: "dashboard", label: "Visão Geral", description: "O funil de cada SDR: onde o lead se perde" },
       { id: "analises", label: "Análises & Metas", description: "Entrada, FUP, contatos, reunião, detalhamento e metas" },
       { id: "monitor-leads", label: "Distribuição de leads", description: "Quantos leads cada SDR recebeu — fim de semana, live e fonte" },
+      { id: "comissoes", label: "Minhas comissões", description: "Quanto você vai receber, card por card" },
     ],
   },
   { id: "configuracoes", label: "Configurações" },
@@ -412,7 +416,7 @@ export default function SdrLayout() {
   const ICONE_NAV: Partial<Record<SdrNav, ReactNode>> = {
     painel: Icon.fila, "minha-agenda": Icon.agenda, whatsapp: Icon.chat, "atendimento-ia": Icon.ia,
     leads: Icon.pessoas, cobertura: Icon.carteira, cadencias: Icon.cadencia, disparos: Icon.disparo, reunioes: Icon.video,
-    solicitacoes: Icon.inbox, propostas: Icon.doc, cotacoes: Icon.aviao, dashboard: Icon.grafico, configuracoes: Icon.config,
+    solicitacoes: Icon.inbox, propostas: Icon.doc, cotacoes: Icon.aviao, dashboard: Icon.grafico, configuracoes: Icon.config, comissoes: Icon.dinheiro,
   };
   const ROTULO_NAV: Partial<Record<SdrNav, string>> = {
     painel: "Fila de hoje", "minha-agenda": "Minha agenda", cobertura: "Minha carteira", reunioes: "Reuniões", whatsapp: "WhatsApp",
@@ -444,6 +448,7 @@ export default function SdrLayout() {
     { label: "Com outros setores", items: [item("solicitacoes", "Solicitações"), item("propostas", "Propostas")].filter(Boolean) as ShellItem[] },
     { label: "Análise", items: [
       ...(desempenhoAbas.length ? [{ id: desempenhoAbas[0], label: "Desempenho", icon: Icon.grafico }] : []),
+      item("comissoes", "Minhas comissões"),
       item("configuracoes", "Configurações"),
     ].filter(Boolean) as ShellItem[] },
   ].filter((g) => g.items.length > 0);
@@ -624,6 +629,11 @@ export default function SdrLayout() {
             <div className="px-4 sm:px-6 py-6">
               <CotacoesPage />
             </div>
+          </PageErrorBoundary>
+        )}
+        {activeNav === "comissoes" && (
+          <PageErrorBoundary pageName="Minhas comissões">
+            <MinhasComissoesPage />
           </PageErrorBoundary>
         )}
         {activeNav === "configuracoes" && (
