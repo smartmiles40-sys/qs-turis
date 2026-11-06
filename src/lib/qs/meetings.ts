@@ -419,6 +419,10 @@ export interface CreateMeetingInput {
    * agendar a 1ª reunião; vai pra reunião (foto), pro lead e pro Bitrix.
    */
   temperatura_sdr?: string | null;
+  /** Produto escolhido no Ganho (aereo/pacote/expedicao/outros) — migration 0321. */
+  produto_tipo?: string | null;
+  /** Expedição do Operacional, quando o produto é expedição (0321). */
+  expedicao_id?: string | null;
 }
 
 export type MeetingResult =
@@ -673,7 +677,7 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
       error: "Escolha a temperatura do SDR (Quente, Morno ou Frio). É por ela que o closer sabe quem atender primeiro.",
     };
   }
-  const row = {
+  let row = {
     lead_id: input.lead_id,
     lead_name: input.lead_name ?? null,
     owner_id: input.owner_id,
@@ -692,9 +696,20 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
     booking_date: input.booking_date ?? new Date().toISOString().slice(0, 10),
     tipo: input.tipo ?? "primeira",
     ...(temperaturaSdr ? { temperatura_sdr: temperaturaSdr } : {}),
+    ...(input.produto_tipo ? { produto_tipo: input.produto_tipo } : {}),
+    ...(input.expedicao_id ? { expedicao_id: input.expedicao_id } : {}),
   };
 
   let { data, error } = await supabase.from("qs_meetings").insert(row).select().single();
+
+  // A 0321 ainda não foi colada? Grava sem o produto: a métrica perde esta
+  // reunião, mas impedir o agendamento seria pior (o título ainda leva o produto).
+  if (error && /produto_tipo|expedicao_id/i.test(error.message ?? "") && isMissingSchema(error)) {
+    console.warn("[meetings] 0321 ainda não aplicada; gravando sem produto_tipo:", error.message);
+    const { produto_tipo: _p, expedicao_id: _e, ...semProduto } = row as typeof row & { produto_tipo?: string; expedicao_id?: string };
+    row = semProduto as typeof row;
+    ({ data, error } = await supabase.from("qs_meetings").insert(row).select().single());
+  }
 
   // A 0311 ainda não foi colada? Grava sem a temperatura do SDR: perder a foto
   // é ruim, mas impedir o agendamento é pior.

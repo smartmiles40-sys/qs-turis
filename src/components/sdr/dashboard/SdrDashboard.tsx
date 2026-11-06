@@ -11,6 +11,7 @@ import { contaNoIndicador, colunaTipoPronta } from "@/lib/qs/meetings";
 import { taxasDeReuniao, type TaxasReuniao } from "@/lib/qs/metricasReuniao";
 import DailyFlowPanel from "./DailyFlowPanel";
 import PainelAereo from "../aereo/PainelAereo";
+import PainelDemandaProduto from "../produto/PainelDemandaProduto";
 
 // Desfechos que contam como CONEXÃO (falou com a pessoa certa): o legado
 // "atendeu"/"ganho" + as classificações novas de ligação em que houve conversa
@@ -2514,6 +2515,12 @@ export default function SdrDashboard() {
           </div>
         )}
       </div>
+
+      {/* ── Demanda por produto: SDR → closer (0321, Bruno 06/11) ─────────── */}
+      {(() => {
+        const { from, to } = getDateRange(selectedPeriod, customStart, customEnd);
+        return <PainelDemandaProduto from={from} to={to} ownerId={selectedUser === "all" ? undefined : selectedUser} />;
+      })()}
 
       {/* ── Cotações de aéreo: tempo fora da fila (0206, Bruno 27/10) ─────── */}
       {(() => {

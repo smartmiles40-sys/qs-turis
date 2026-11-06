@@ -15,6 +15,8 @@ import CampoBitrixId from "./CampoBitrixId";
 import TemperaturaSdrPicker from "./TemperaturaSdrPicker";
 import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
+import ProdutoGanhoPicker from "../produto/ProdutoGanhoPicker";
+import { ESCOLHA_VAZIA, problemaDaEscolha, tituloDoProduto, type EscolhaProduto, type ExpedicaoAVenda } from "@/lib/qs/produtoGanho";
 import type { Lead, Meeting, MeetingTipo } from "../types";
 
 /**
@@ -72,7 +74,9 @@ export default function ScheduleMeetingModal({
   const [leadListOpen, setLeadListOpen] = useState(false);
 
   const [pick, setPick] = useState<SlotSelection | null>(null);
-  const [title, setTitle] = useState("");
+  // Produto (Bruno, 06/11): Aéreo · Pacote · Expedição · Outros. Monta o título.
+  const [produtoEsc, setProdutoEsc] = useState<EscolhaProduto>(ESCOLHA_VAZIA);
+  const [expedicoesAVenda, setExpedicoesAVenda] = useState<ExpedicaoAVenda[]>([]);
   const [notes, setNotes] = useState("");
   // Primeira call ou retomada (migration 0054). Retomada é a 2ª/3ª conversa de
   // um pacote: ocupa a agenda igual, mas não conta como reunião realizada nem
@@ -104,7 +108,7 @@ export default function ScheduleMeetingModal({
     setLeadId(lead?.id ?? reschedule?.lead_id ?? "");
     setLeadSearch(lead ? leadLabel(lead) : "");
     setPick(null);
-    setTitle(reschedule?.title ?? "");
+    setProdutoEsc(ESCOLHA_VAZIA);
     setNotes("");
     setLink(reschedule?.meeting_link ?? "");
     setEmail(lead?.email ?? "");
@@ -236,11 +240,14 @@ export default function ScheduleMeetingModal({
       return;
     }
 
-    if (!title.trim()) {
-      setError("Diga o que é a reunião — o produto/expedição que foi negociado. É isso que o especialista vê antes de entrar na call.");
+    // Produto pelo seletor (06/11): o título sai dele.
+    const problemaProduto = problemaDaEscolha(produtoEsc);
+    if (problemaProduto) {
+      setError(problemaProduto);
       setSaving(false);
       return;
     }
+    const tituloProduto = tituloDoProduto(produtoEsc, expedicoesAVenda);
 
     // E-MAIL OBRIGATÓRIO (Bruno, 04/11). A coluna "Reunião de Vendas" do
     // Bitrix exige "E-mail do cliente", e o Dashboard conta o agendamento pelo
@@ -306,7 +313,9 @@ export default function ScheduleMeetingModal({
       owner_name: responsavel.nome,
       closer_id: pick.closerId,
       closer_name: pick.closerName,
-      title: title || `Reunião — ${selectedLead?.full_name ?? "cliente"}`,
+      title: tituloProduto || `Reunião — ${selectedLead?.full_name ?? "cliente"}`,
+      produto_tipo: produtoEsc.tipo,
+      expedicao_id: produtoEsc.tipo === "expedicao" ? produtoEsc.expedicaoId : null,
       scheduled_at: pick.start,
       duration_min: pick.durationMin,
       location: gerarMeet ? "Google Meet" : link.trim() ? "Online" : null,
@@ -537,29 +546,19 @@ export default function ScheduleMeetingModal({
                 />
               )}
 
+              {/* Produto pelo seletor (06/11) — Aéreo · Pacote · Expedição · Outros.
+                  Aqui é sempre pro closer: o "eu mesmo emito" fica no painel de
+                  tarefas, que é onde o SDR dá o ganho. */}
               <div>
-                <label className={labelClass}>
-                  Produto — o que é a reunião <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Expedição Itália, Pacote Japão/China/Coreia…"
-                  list="produtos-frequentes"
-                  className={inputClass}
+                <ProdutoGanhoPicker
+                  value={produtoEsc}
+                  onChange={setProdutoEsc}
+                  onExpedicoes={setExpedicoesAVenda}
+                  disabled={saving}
+                  cor="#0147FF"
+                  labelClassName={labelClass}
+                  inputClassName={inputClass}
                 />
-                {/* Sugestões que espelham o que o comercial já escreve no campo
-                    "Produto (Descritivo da Reunião)" do Bitrix. É datalist, não
-                    select: o destino é texto livre e destino novo tem que caber. */}
-                <datalist id="produtos-frequentes">
-                  <option value="Expedição " />
-                  <option value="Pacote " />
-                  <option value="Personalizado " />
-                  <option value="Passagem aérea " />
-                  <option value="Concierge " />
-                </datalist>
                 <p className="text-[11px] text-gray-400 mt-1">
                   Vai pro card do Bitrix e pro convite do Google — é o que o especialista
                   lê pra saber do que se trata antes de entrar na reunião.

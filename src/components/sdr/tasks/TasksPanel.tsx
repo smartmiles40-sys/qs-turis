@@ -46,6 +46,12 @@ import { fetchCotacoesAereo, formatarDuracao, ouvirCotacaoAereo, resumir, type R
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, nextWorkMoment, clampToWorkWindow, scheduleWeekdays, isWithinHours, workdaysBetween, type WorkHours } from "@/lib/workHours";
 import type { SdrUser } from "../types";
 import RelogioPrimeiroContato, { type LeadEsperando } from "./RelogioPrimeiroContato";
+import ProdutoGanhoPicker from "@/components/sdr/produto/ProdutoGanhoPicker";
+import {
+  ESCOLHA_VAZIA, problemaDaEscolha, sdrFazSozinho, tituloDoProduto,
+  type EscolhaProduto, type ExpedicaoAVenda,
+} from "@/lib/qs/produtoGanho";
+import { registrarGanhoSdr } from "@/lib/qs/produtoGanhoDados";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -744,6 +750,10 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // nem tinha todo mundo (a Yanca não estava lá, e sem escolher não dava pra
   // confirmar o ganho).
   const [meeting, setMeeting] = useState({ emailCliente: "", dataAgendamento: "", responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60, produto: "", bitrixId: "", temperaturaSdr: "" as LeadTemperature | "" });
+  // PRODUTO DO GANHO (Bruno, 06/11): Aéreo · Pacote · Expedição · Outros. É ele
+  // que monta o título da reunião e alimenta a métrica de demanda por produto.
+  const [produtoEsc, setProdutoEsc] = useState<EscolhaProduto>(ESCOLHA_VAZIA);
+  const [expedicoesAVenda, setExpedicoesAVenda] = useState<ExpedicaoAVenda[]>([]);
   const [savingMeeting, setSavingMeeting] = useState(false);
 
   // New Lead Modal
@@ -1254,6 +1264,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const mm = String(hoje.getMonth() + 1).padStart(2, "0");
     const dd = String(hoje.getDate()).padStart(2, "0");
     setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 , produto: "", bitrixId: "", temperaturaSdr: normalizeTemperature(lead?.temperatura_sdr) ?? "" });
+    setProdutoEsc(ESCOLHA_VAZIA);
     setPendingResult(null);
     setMeetingFor({ taskId: task.id, leadId: task.lead_id, leadName: lead?.full_name ?? "Lead" });
   }
@@ -1351,9 +1362,71 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     refreshCounts();
   }
 
+  /**
+   * AÉREO QUE O PRÓPRIO SDR EMITE (Bruno, 06/11). Hoje o SDR também faz aéreo
+   * e só às vezes passa pro closer. Quando é ele quem faz: não abre agenda de
+   * ninguém, o lead FICA com ele (sem transferência), a tarefa fecha como
+   * ganho e o ganho fica registrado (qs_ganhos_sdr) pra contar na métrica de
+   * demanda. O card do Bitrix NÃO muda de coluna — o evento "ganho" leva pra
+   * "Reunião agendada", que aqui não existe; vai só a nota na timeline.
+   */
+  async function handleGanhoAereoSdr() {
+    if (!meetingFor || savingMeeting) return;
+    const problema = problemaDaEscolha(produtoEsc);
+    if (problema) { notifyError(problema); return; }
+    if (!currentUser?.id) { notifyError("Sessão expirada — entre de novo pra registrar o ganho."); return; }
+    const { taskId, leadId, leadName } = meetingFor;
+    setSavingMeeting(true);
+    const obs = obsText.trim();
+    const titulo = tituloDoProduto(produtoEsc, expedicoesAVenda);
+    const failures: string[] = [];
+    try {
+      const fechou = await completeTask(taskId, "ganho");
+      if (!fechou) {
+        setSavingMeeting(false);
+        return;
+      }
+      const gravou = await registrarGanhoSdr({ leadId, ownerId: currentUser.id, produtoTipo: "aereo", descricao: titulo });
+      if (!gravou) failures.push("o ganho não entrou na métrica de demanda (avise o gestor)");
+      const { data: wonRows, error: wonErr } = await supabase
+        .from("qs_leads").update({ status: "ganho" }).eq("id", leadId).select("id");
+      if (wonErr || !wonRows || wonRows.length === 0) {
+        console.warn("[QS] lead não marcado como ganho:", wonErr);
+        failures.push("o lead NÃO foi marcado como ganho — marque pelo perfil do lead");
+      }
+      const okClose = await closeRemainingLeadTasks(leadId, taskId, "Lead ganho — aéreo emitido pelo SDR");
+      if (!okClose) failures.push("as demais atividades do lead não foram encerradas");
+      await persistObservation(
+        leadId,
+        `Ganho — ${titulo}, emitido pelo próprio SDR${currentUser.name ? ` (${currentUser.name})` : ""}, sem reunião${obs ? `. Observações: ${obs}` : ""}`,
+        ["bitrix", "ganho", "aereo-sdr"]
+      );
+    } catch (e) {
+      console.warn("[QS] ganho de aéreo do SDR falhou:", e);
+      notifyError("Não foi possível registrar o ganho — tente de novo.");
+      setSavingMeeting(false);
+      return;
+    }
+    if (failures.length > 0) notifyError(`Ganho registrado com pendências: ${failures.join("; ")}.`);
+    else notifySuccess(`${leadName}: ganho de aéreo registrado — o lead continua com você.`);
+    setLeads((prev) => prev.map((l): Lead => (l.id === leadId ? { ...l, status: "ganho" } : l)));
+    setTasks((prev) => prev.filter((t) => t.lead_id !== leadId));
+    setActiveTaskId(null);
+    setObsText("");
+    setSavingMeeting(false);
+    setMeetingFor(null);
+    refreshCounts();
+  }
+
   async function handleConfirmMeeting() {
     if (!meetingFor) return;
     if (!meeting.responsavelId || !meeting.dataHora) return;
+    // Produto (Bruno, 06/11): obrigatório — é a métrica de demanda SDR → closer.
+    const problemaProduto = problemaDaEscolha(produtoEsc);
+    if (problemaProduto) {
+      notifyError(problemaProduto);
+      return;
+    }
     // O e-mail passou a ser obrigatório: sem ele o convite do Google não chega no
     // cliente, e o link do Meet fica só com o closer. Em 05/08 eram 6 das 17
     // reuniões da base sem e-mail nenhum.
@@ -1444,7 +1517,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         closer_name: meeting.responsavel || null,
         // O produto vira o titulo: e ele que vai pro card do Bitrix e pro
         // convite do Google. Sem produto, cai no nome generico de antes.
-        title: meeting.produto.trim() || `Reunião — ${leadName}`,
+        title: tituloDoProduto(produtoEsc, expedicoesAVenda) || `Reunião — ${leadName}`,
+        produto_tipo: produtoEsc.tipo,
+        expedicao_id: produtoEsc.tipo === "expedicao" ? produtoEsc.expedicaoId : null,
         scheduled_at: new Date(meeting.dataHora),
         duration_min: meeting.duracaoMin,
         location: "Google Meet",
@@ -4633,7 +4708,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
             <div className="flex shrink-0 items-center justify-between px-5 py-4" style={{ background: "var(--green)" }}>
               <div className="text-white">
-                <p className="text-sm font-bold leading-tight">Agendar reunião — Ganho</p>
+                <p className="text-sm font-bold leading-tight">
+                  {sdrFazSozinho(produtoEsc) ? "Ganho — aéreo emitido por você" : "Agendar reunião — Ganho"}
+                </p>
                 <p className="text-[11px] opacity-90 leading-tight">{meetingFor.leadName}</p>
               </div>
               <button onClick={() => cancelMeetingModal()} className="text-white/90 hover:text-white" aria-label="Fechar">
@@ -4648,6 +4725,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   {currentUser?.name ?? "—"}
                 </span>
               </div>
+              {/* PRODUTO primeiro (Bruno, 06/11): decide o resto do formulário —
+                  aéreo que o próprio SDR emite não agenda nada. */}
+              <ProdutoGanhoPicker
+                value={produtoEsc}
+                onChange={setProdutoEsc}
+                onExpedicoes={setExpedicoesAVenda}
+                permitirSdrFaz
+                disabled={savingMeeting}
+                cor="var(--green)"
+                inputClassName="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"
+              />
+              {!sdrFazSozinho(produtoEsc) && (<>
               {/* Sem o negócio do Bitrix a reunião nasce órfã: fica no QS e o
                   card nunca se mexe. Só aparece quando o lead não tem vínculo. */}
               <CampoBitrixId
@@ -4676,27 +4765,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 onChange={(v) => setMeeting((m) => ({ ...m, temperaturaSdr: v }))}
                 disabled={savingMeeting}
               />
-              {/* O QUE É A REUNIÃO. Vai pro card do Bitrix ("Produto (Descritivo
-                  da Reunião)") e pro convite do Google — é o que o especialista
-                  lê pra saber do que se trata antes de entrar. */}
-              <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Produto — o que é a reunião</label>
-                <input
-                  type="text"
-                  value={meeting.produto}
-                  onChange={(e) => setMeeting((m) => ({ ...m, produto: e.target.value }))}
-                  placeholder="Expedição Itália, Pacote Japão/China/Coreia…"
-                  list="qs-produtos-frequentes"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"
-                />
-                <datalist id="qs-produtos-frequentes">
-                  <option value="Expedição " />
-                  <option value="Pacote " />
-                  <option value="Personalizado " />
-                  <option value="Passagem aérea " />
-                  <option value="Concierge " />
-                </datalist>
-              </div>
+              {/* O "Produto — o que é a reunião" em texto livre saiu (06/11): o
+                  título agora vem do seletor de produto lá em cima (mesmo texto
+                  que vai pro card do Bitrix e pro convite do Google). */}
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Data do agendamento</label>
                 <input type="date" value={meeting.dataAgendamento} onChange={(e) => setMeeting((m) => ({ ...m, dataAgendamento: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400" />
@@ -4754,6 +4825,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   O horário é conferido contra a agenda do responsável antes de gravar.
                 </p>
               </div>
+              </>)}
 
               {/* Duração fixa de 1h (Bruno, 17/08): escolher o tempo era mais uma
                   decisão no meio do agendamento, e reunião de 30 ou 90 min
@@ -4764,12 +4836,21 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </div>
             </div>
             <div className="shrink-0 border-t px-5 py-4" style={{ borderColor: "var(--line)" }}>
+              {sdrFazSozinho(produtoEsc) ? (
+                <div className="flex gap-2">
+                  <button onClick={() => cancelMeetingModal()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
+                  <button onClick={() => void handleGanhoAereoSdr()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
+                    {savingMeeting ? "Salvando..." : "Concluir ganho — eu emito"}
+                  </button>
+                </div>
+              ) : (
               <div className="flex gap-2">
                 <button onClick={() => cancelMeetingModal()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
-                <button onClick={handleConfirmMeeting} disabled={savingMeeting || !meeting.responsavelId || !meeting.dataHora || !emailValido(meeting.emailCliente) || !meeting.temperaturaSdr} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
+                <button onClick={handleConfirmMeeting} disabled={savingMeeting || !produtoEsc.tipo || !meeting.responsavelId || !meeting.dataHora || !emailValido(meeting.emailCliente) || !meeting.temperaturaSdr} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
                   {savingMeeting ? "Salvando..." : "Confirmar ganho"}
                 </button>
               </div>
+              )}
               {/* Cliente que JÁ tem reunião marcada não precisa de outra: este
                   caminho fecha o ganho sem agendar nada (pedido dos SDRs, 14/08).
                   O rótulo diz "NÃO cria reunião" desde 19/08: três leads do
@@ -4777,14 +4858,14 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   agendamento estava sendo registrado, e ficaram sem reunião
                   nenhuma no QS. "Já tem reunião marcada" era lido como "acabei
                   de marcar com o cliente". */}
-              <button
+              {!sdrFazSozinho(produtoEsc) && <button
                 onClick={() => void handleGanhoSemReuniao()}
                 disabled={savingMeeting}
                 className="mt-2 w-full py-2 rounded-lg text-[13px] font-semibold border disabled:opacity-50"
                 style={{ borderColor: "var(--green)", color: "var(--green)", background: "transparent" }}
               >
                 Finalizar SEM criar reunião no QS
-              </button>
+              </button>}
             </div>
           </div>
         </div>
