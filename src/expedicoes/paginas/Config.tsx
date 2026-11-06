@@ -59,6 +59,19 @@ export default function Config() {
     finally { setOcupado(null); }
   }
 
+  // Quem veio do app antigo (espelho) sem login no QS: cria a conta com o mesmo id,
+  // sem senha e sem e-mail. A senha sai depois, pelo "Resetar senha".
+  async function criarLogin(u: UsuarioRow) {
+    setOcupado(u.id);
+    try {
+      await chamarRotaAdmin("exp_usuarios", { op: "criar_login", usuario_id: u.id });
+      avisar(`Login criado para ${u.nome}. Agora use “Resetar senha” para gerar a senha e entregar.`);
+      await carregarQs();
+      recarregarUsuarios();
+    } catch (e) { avisar(e instanceof Error ? e.message : "Não foi possível criar o login", "erro"); }
+    finally { setOcupado(null); }
+  }
+
   async function resetar(u: UsuarioRow) {
     setOcupado(u.id);
     try {
@@ -110,6 +123,12 @@ export default function Config() {
                     {opcoes.map((p) => <option key={p} value={p}>{PAPEL_LABEL[p]}</option>)}
                   </select>
                 ) : <Selo tom={u.papel === "admin" ? "lista" : "neutro"}>{PAPEL_LABEL[u.papel] ?? u.papel}</Selo>}
+                {ehAdmin && !souEu && !info && qs.size > 0 && (
+                  <Botao disabled={ocupado === u.id} onClick={() => criarLogin(u)}
+                    title="Cria o login no QS com o mesmo id, sem senha e sem mandar nada pra pessoa. Depois use “Resetar senha”.">
+                    {ocupado === u.id ? "…" : "Criar login no QS"}
+                  </Botao>
+                )}
                 {ehAdmin && !souEu && info && (confirmandoReset === u.id ? (
                   <span className="flex items-center gap-2 text-[12.5px]" style={{ color: "var(--ink2)" }}>
                     Resetar a senha de {u.nome.split(" ")[0]}?

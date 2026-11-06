@@ -368,7 +368,11 @@ function safeJson(s) {
 //   QS. Sem a env ou sem negócio responde enviado:false.
 // =============================================================================
 const EXP_PAPEIS = new Set(['admin', 'operacional', 'relacionamento', 'leitura']);
-const ALFA_SENHA = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+/** Papel no QS de quem entra pelas Expedições: relacionamento fica no Rel; o resto, Operações. */
+export function papelQsDaExp(papelExp) {
+  return papelExp === 'relacionamento' ? 'relacionamento' : 'operacional';
+}
+const ALFA_SENHA ='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
 
 /** Senha forte e fácil de ditar: 3 blocos de 4 (ex.: Xk7p-Rm2q-Tz9w), ~69 bits. */
 function senhaForte() {
@@ -444,6 +448,41 @@ async function expUsuarios(req, res, body, callerId) {
         throw e;
       }
       return res.status(200).json({ success: true, id: authUser.id, senha });
+    }
+
+    // op 'criar_login' { usuario_id } (06/11/2026): quem JÁ está em `usuarios`
+    // (veio do app antigo pelo espelho) mas ainda não tem login no QS. Cria a conta
+    // de auth com o MESMO id da linha de `usuarios` (assim tudo que aponta pra ela —
+    // responsável, verificado_por, audit — continua ligado, e o espelho mapeia pelo
+    // e-mail pro mesmo id) + perfil no QS (papel operacional, ou relacionamento se
+    // for o papel dela nas Expedições). SEM senha e SEM e-mail: ninguém recebe nada.
+    // Pra entrar, o admin usa "Resetar senha" (mostra a senha na tela) e entrega.
+    if (op === 'criar_login') {
+      const alvoId = body.usuario_id;
+      if (!idValido(alvoId)) return res.status(400).json({ success: false, error: 'Usuário inválido' });
+      const alvo = (await rest(`usuarios?select=id,nome,email,papel&id=eq.${alvoId}&limit=1`))?.[0];
+      if (!alvo) return res.status(404).json({ success: false, error: 'Usuário não encontrado nas Expedições.' });
+      const email = String(alvo.email || '').toLowerCase().trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ success: false, error: 'E-mail inválido nessa pessoa' });
+      const jaQs = (await rest(`qs_users?select=id&or=(id.eq.${alvoId},email.ilike.${encodeURIComponent(email)})&limit=1`))?.[0];
+      if (jaQs) return res.status(409).json({ success: false, error: 'Essa pessoa já tem perfil no QS.' });
+      const setor = papelQsDaExp(alvo.papel);
+      let criouAuth = false;
+      try {
+        await authAdmin('', { method: 'POST', body: { id: alvoId, email, email_confirm: true } });
+        criouAuth = true;
+      } catch (e) {
+        // 422 = e-mail já tem conta de auth (sem perfil): não mexe, pede pra olhar
+        if (e?.status === 422) return res.status(409).json({ success: false, error: 'Esse e-mail já tem conta de login (sem perfil no QS). Fale com o admin do QS.' });
+        throw e;
+      }
+      try {
+        await rest('qs_users', { method: 'POST', prefer: 'return=minimal', body: { id: alvoId, name: alvo.nome || email, email, role: setor, setores: [setor], is_active: true } });
+      } catch (e) {
+        if (criouAuth) { try { await authAdmin(`/${alvoId}`, { method: 'DELETE' }); } catch (r) { console.error('[admin-user] exp criar_login: rollback falhou', alvoId, r?.message); } }
+        throw e;
+      }
+      return res.status(200).json({ success: true, id: alvoId, papel_qs: setor });
     }
 
     return res.status(400).json({ success: false, error: 'Operação inválida' });
