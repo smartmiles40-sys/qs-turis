@@ -151,6 +151,8 @@ export function montarCatalogo(linhasCampos, linhasOpcoes) {
  * moverNegocioParaReuniao (qs_settings.bitrix_reuniao), e o desfecho é o
  * reuniao-campos, com as guardas de "nunca puxar pra trás".
  */
+export const ROTULO_PRODUTO = { expedicao: 'Expedição', aereo: 'Aéreo', pacote: 'Pacote', outros: 'Outros' };
+
 export function montarReuniao(body, { mapa = {}, opcoes = {} } = {}, { etapaReuniao = '' } = {}) {
   body = body || {};
   const fields = {};
@@ -184,6 +186,16 @@ export function montarReuniao(body, { mapa = {}, opcoes = {} } = {}, { etapaReun
     const id = acharOpcao(opcoes.temperatura_sdr, body.temperatura_sdr);
     if (id) fields[mapa.temperatura_sdr] = id;
     else pulados.push('temperatura_sdr (nome "' + body.temperatura_sdr + '" não bate com nenhuma opção)');
+  }
+
+  // Produto do Agendou (0321, spec 06/11): lista "Produto" no negócio com as
+  // 4 opções (Expedição, Aéreo, Pacote, Outros). Opcional como a temperatura:
+  // só grava depois que o alias `produto_tipo` entrar no de-para.
+  if (mapa.produto_tipo && body.produto_tipo) {
+    const rotulo = ROTULO_PRODUTO[body.produto_tipo] || body.produto_tipo;
+    const id = acharOpcao(opcoes.produto_tipo, rotulo);
+    if (id) fields[mapa.produto_tipo] = id;
+    else pulados.push('produto_tipo (nome "' + rotulo + '" não bate com nenhuma opção)');
   }
 
   if (etapaReuniao) fields.STAGE_ID = String(etapaReuniao);

@@ -185,3 +185,21 @@ test("reunião: temperatura do SDR vai pra lista do card só quando o alias exis
   assert.equal("UF_TEMP" in torto.fields, false);
   assert.ok(torto.pulados.some((p: string) => p.startsWith("temperatura_sdr")));
 });
+
+test("reunião: Produto (0321) vai pra lista do card só quando o alias existe", () => {
+  const base = { bitrix_id: "9", scheduled_at: "2026-11-06T17:00:00Z", produto_tipo: "expedicao" };
+  const semAlias = R.montarReuniao(base, CATALOGO);
+  assert.equal(semAlias.pulados.some((p: string) => p.startsWith("produto_tipo")), false);
+
+  const comAlias = R.montarCatalogo(
+    [{ alias: "datahora_meet", field_name: "UF_MEET" }, { alias: "produto_tipo", field_name: "UF_PROD" }],
+    [
+      { alias: "produto_tipo", option_id: "40", value: "Expedição" },
+      { alias: "produto_tipo", option_id: "41", value: "Aéreo" },
+      { alias: "produto_tipo", option_id: "42", value: "Pacote" },
+      { alias: "produto_tipo", option_id: "43", value: "Outros" },
+    ],
+  );
+  assert.equal(R.montarReuniao(base, comAlias).fields.UF_PROD, 40);
+  assert.equal(R.montarReuniao({ ...base, produto_tipo: "outros" }, comAlias).fields.UF_PROD, 43);
+});

@@ -69,7 +69,7 @@ import TasksPanel from "./tasks/TasksPanel";
 const SdrDashboard = lazyPagina(() => import("./dashboard/SdrDashboard"));
 const AnalisesPage = lazyPagina(() => import("./dashboard/AnalisesPage"));
 const MonitorLeadsPage = lazyPagina(() => import("./dashboard/MonitorLeadsPage"));
-const VisaoGeralFunil = lazyPagina(() => import("./dashboard/VisaoGeralFunil"));
+const DesempenhoSdr = lazyPagina(() => import("./desempenho/DesempenhoSdr"));
 const LeadsPage = lazyPagina(() => import("./leads/LeadsPage"));
 const LeadDetailPage = lazyPagina(() => import("./leads/LeadDetailPage"));
 const CadencesPage = lazyPagina(() => import("./cadences/CadencesPage"));
@@ -560,8 +560,8 @@ export default function SdrLayout() {
         )}
         {activeNav === "dashboard" && (
           <PageErrorBoundary pageName="Visão Geral">
-            {/* Funil (0095) pra gestor e SDR; o closer segue na tela anterior até ganhar a dele. */}
-            {userRole === "closer" ? <SdrDashboard /> : <VisaoGeralFunil onIrParaPainel={() => navigate("painel")} />}
+            {/* Desempenho SDR (0322/0323, spec 06/11) pra gestor e SDR; o closer segue na tela dele. */}
+            {userRole === "closer" ? <SdrDashboard /> : <DesempenhoSdr onIrParaPainel={() => navigate("painel")} />}
           </PageErrorBoundary>
         )}
         {activeNav === "analises" && (

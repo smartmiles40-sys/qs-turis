@@ -114,6 +114,17 @@ export async function enviarReuniaoDireto(body, { timeoutMs = 8_000 } = {}) {
     return { ok: false, erro: `catálogo de campos ilegível: ${err?.message || 'falhou'}`.slice(0, 200) };
   }
 
+  // O produto vem da PRÓPRIA reunião no banco (0321): nenhum dos avisos do
+  // navegador/agenda precisa carregar o campo, e o navegador não decide o valor.
+  if (catalogo?.mapa?.produto_tipo && body?.meeting_id && !body.produto_tipo) {
+    try {
+      const [mt] = await rest(`qs_meetings?select=produto&id=eq.${enc(body.meeting_id)}&limit=1`);
+      if (mt?.produto) body = { ...body, produto_tipo: mt.produto };
+    } catch (err) {
+      console.warn('[bitrix-saida] produto da reunião ilegível:', err?.message);
+    }
+  }
+
   const m = montarReuniao(body, catalogo);
   if (!m.ok) return { ok: false, erro: m.erro };
 
