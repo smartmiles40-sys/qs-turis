@@ -34,6 +34,9 @@
 //                                   Com EXP_ESPELHO_LIGADO=1 responde 423 (modo validação).
 //   GET  ?acao=amigo-status       → { espelho, portal } pras telas desligarem o botão.
 //
+// ROTAS DESATIVADAS (porte do antigo da4d0ba, 05/11 — decisão do operacional): onboarding-diario,
+// passageiro-sync, expedicao-sync e importar-compras respondem 403. Pra reativar: false + deploy.
+//
 // Diferenças de propósito em relação ao antigo (bugs que não foram copiados):
 //   - expedicao-sync, numa expedição que já existe, SÓ PREENCHE O QUE ESTÁ VAZIO
 //     (nome/destino/datas/preço curados pelo time não são sobrescritos pelo Bitrix);
@@ -445,6 +448,14 @@ async function onboardingDiario(req, res) {
 
 // ── Rota ────────────────────────────────────────────────────────────────────
 
+// Porte do antigo lib/feature-flags.ts (da4d0ba). sync-contato segue ATIVA.
+export const ROTA_DESATIVADA = {
+  'onboarding-diario': true,  // onboarding por WhatsApp (o acesso agora é link mágico pela tela)
+  'passageiro-sync': true,    // sync por EVENTO do Bitrix
+  'expedicao-sync': true,     // expedição por EVENTO do Bitrix
+  'importar-compras': true,   // base Clientes & compras
+};
+
 const WEBHOOKS = {
   'expedicao-sync': expedicaoSync,
   'sync-contato': syncContato,
@@ -504,6 +515,7 @@ export default async function handler(req, res) {
 
     const fn = WEBHOOKS[acao];
     if (!fn) return res.status(404).json({ ok: false, error: 'Ação desconhecida' });
+    if (ROTA_DESATIVADA[acao]) return res.status(403).json({ ok: false, disabled: true, error: 'Rota desativada no sistema.' });
     if (!webhookOk(req)) return res.status(401).json({ ok: false, error: 'Não autorizado' });
     return await fn(req, res);
   } catch (e) {
