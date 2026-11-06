@@ -305,6 +305,19 @@
 <div class="wrap">
   <main class="cartao" id="cartao">
 
+    <!-- ── Passo 0 (só ?com=sdr-semana): a pergunta ANTES do agendamento ──── -->
+    <section id="passo-motivo" hidden>
+      <h1>Antes de agendar, conta pra gente</h1>
+      <p class="sub">Assim o nosso time já chega na ligação sabendo o que você procura.</p>
+      <div class="campo" id="c-motivo">
+        <label for="motivo">Por que você quer fazer essa viagem?</label>
+        <textarea id="motivo" name="motivo" maxlength="500" rows="4" placeholder="Conte pra gente o que te faz querer essa viagem…"></textarea>
+        <span class="contador" id="contador-motivo" aria-live="polite">0/500 · mínimo 10</span>
+        <span class="erro" id="e-motivo"></span>
+      </div>
+      <button type="button" class="primario" id="motivo-continuar">Continuar para os horários</button>
+    </section>
+
     <!-- ── Passo 1: dia e hora ────────────────────────────────────────────── -->
     <section id="passo-horario">
       <h1 id="titulo">Agende sua conversa</h1>
@@ -370,14 +383,6 @@
           <label for="email">Seu melhor e-mail</label>
           <input id="email" name="email" type="email" autocomplete="email" required maxlength="160" placeholder="voce@email.com">
           <span class="erro" id="e-email">É pra onde vai o convite da reunião.</span>
-        </div>
-
-        <!-- Só no link ?com=sdr-semana: obrigatório, 10 a 500 caracteres. -->
-        <div class="campo" id="c-motivo" hidden>
-          <label for="motivo">Por que você quer fazer essa viagem?</label>
-          <textarea id="motivo" name="motivo" maxlength="500" placeholder="Conte pra gente o que te faz querer essa viagem…"></textarea>
-          <span class="contador" id="contador-motivo" aria-live="polite">0/500 · mínimo 10</span>
-          <span class="erro" id="e-motivo"></span>
         </div>
 
         <div class="campo" id="c-observacao">
@@ -533,7 +538,7 @@
   if (window.ResizeObserver) new ResizeObserver(avisarAltura).observe(document.body);
 
   function mostrarPasso(qual) {
-    ['passo-horario', 'passo-dados', 'passo-fim'].forEach(function (p) {
+    ['passo-motivo', 'passo-horario', 'passo-dados', 'passo-fim'].forEach(function (p) {
       el(p).hidden = (p !== qual);
     });
     avisarAltura();
@@ -756,8 +761,24 @@
     }
   });
 
+  // A pergunta vem ANTES da agenda (Bruno, 06/11): só passa pros horários com
+  // 10 a 500 caracteres. O servidor reconfere no envio.
+  function problemaDoMotivo() {
+    var n = el('motivo').value.trim().length;
+    if (n < 10) return 'Conte um pouco mais: pelo menos 10 caracteres.';
+    if (n > 500) return 'No máximo 500 caracteres, por favor.';
+    return null;
+  }
+  el('motivo-continuar').addEventListener('click', function () {
+    var p = problemaDoMotivo();
+    if (p) { marcarErro('motivo', p); avisarAltura(); el('motivo').focus(); return; }
+    el('c-motivo').classList.remove('ruim');
+    el('motivo').removeAttribute('aria-invalid');
+    mostrarPasso('passo-horario');
+  });
+
   function limparErros() {
-    ['nome', 'telefone', 'email', 'motivo'].forEach(function (c) {
+    ['nome', 'telefone', 'email'].forEach(function (c) {
       el('c-' + c).classList.remove('ruim');
       el(c).removeAttribute('aria-invalid');
     });
@@ -771,10 +792,11 @@
     if (el('telefone').value.replace(/\D/g, '').length < 10) { marcarErro('telefone', 'Confira o número com o DDD.'); ok = false; }
     var emailDigitado = el('email').value.trim();
     if ((!COM_SDR || emailDigitado) && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailDigitado)) { marcarErro('email', 'Confira o e-mail.'); ok = false; }
-    if (COM_MOTIVO) {
-      var n = el('motivo').value.trim().length;
-      if (n < 10) { marcarErro('motivo', 'Conte um pouco mais: pelo menos 10 caracteres.'); ok = false; }
-      else if (n > 500) { marcarErro('motivo', 'No máximo 500 caracteres, por favor.'); ok = false; }
+    if (COM_MOTIVO && problemaDoMotivo()) {
+      // Só acontece se alguém pular o passo 0 — volta pra pergunta.
+      marcarErro('motivo', problemaDoMotivo());
+      mostrarPasso('passo-motivo');
+      return false;
     }
     if (!ok) avisarAltura();
     return ok;
@@ -988,9 +1010,10 @@
     if (COM_MOTIVO) {
       // A pergunta toma o lugar do recado opcional: dois campos de texto
       // seguidos confundem, e o motivo já é o que o SDR precisa ler.
-      el('c-motivo').hidden = false;
       el('c-observacao').hidden = true;
-      el('motivo').setAttribute('required', '');
+      el('passo-horario').hidden = true;
+      el('passo-motivo').hidden = false;
+      // A grade carrega por trás enquanto a pessoa escreve.
     }
     estado.esperandoPreenchimento = true;
     setTimeout(function () {
