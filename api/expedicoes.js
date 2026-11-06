@@ -32,6 +32,9 @@
 //   POST ?acao=amigo-link         → link mágico do ExpedAmigo (/a/<codigo>), reset de acesso
 //                                   (token da sessão; lógica e permissão em _expAcesso.js).
 //                                   Com EXP_ESPELHO_LIGADO=1 responde 423 (modo validação).
+//   POST ?acao=amigo-liberar-todos → "Liberar portal para todos" da aba Portal: libera e devolve
+//                                   um LINK MÁGICO por pessoa sem senha (06/11; antes senha provisória).
+//                                   Com EXP_ESPELHO_LIGADO=1 responde 423 (modo validação).
 //   GET  ?acao=amigo-status       → { espelho, portal } pras telas desligarem o botão.
 //
 // ROTAS DESATIVADAS (porte do antigo da4d0ba, 05/11 — decisão do operacional): onboarding-diario,
@@ -51,12 +54,12 @@
 //       EXP_PORTAL_URL (opcional: onde estão os portais /a/ e /amigo; padrão o app antigo),
 //       EXP_BITRIX_AUTO_LIGADO=1 (opcional: a sync automática passa a GRAVAR; sem ela é modo seco).
 // -----------------------------------------------------------------------------
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { montarChecklistPadrao } from './_expChecklist.js';
 import { rodarEspelho } from './_expEspelho.js';
 import { sincronizarBitrixUma, sincronizarTodas } from './_expBitrixSync.js';
-import { gerarLinkAmigo, statusAmigo, espelhoLigado } from './_expAcesso.js';
+import { gerarLinkAmigo, liberarTodosAmigo, linkDoPassageiro, statusAmigo, espelhoLigado } from './_expAcesso.js';
 
 const PORTAL_PADRAO = 'https://sistema-expedicoes.vercel.app';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -389,32 +392,11 @@ function tokenAcesso(passageiroId) {
   return `${b64}.${sig}`;
 }
 
-function codigoCurto(n = 10) {
-  const alfa = 'abcdefghjkmnpqrstuvwxyz23456789';
-  const b = randomBytes(n);
-  let s = '';
-  for (let i = 0; i < n; i++) s += alfa[b[i] % alfa.length];
-  return s;
-}
-
-/** Link curto /a/<codigo> (acesso_links, 30 dias); cai no link longo se não gravar. */
-async function linkCurto(passageiroId, base) {
-  const expira_em = new Date(Date.now() + 30 * 86400000).toISOString();
-  for (let i = 0; i < 4; i++) {
-    const codigo = codigoCurto();
-    try {
-      await insert('acesso_links', [{ codigo, passageiro_id: passageiroId, expira_em }], { returning: false });
-      return `${base}/a/${codigo}`;
-    } catch (e) {
-      if (!/duplicate|unique/i.test(String(e?.message || ''))) break;
-    }
-  }
-  return `${base}/amigo/acesso?t=${tokenAcesso(passageiroId)}`;
-}
-
 async function onboardingDiario(req, res) {
   const b = req.body && typeof req.body === 'object' ? req.body : {};
   const dryRun = b.dryRun === true;
+  // Modo validação: o portal ainda lê o banco antigo — link gravado aqui não abriria.
+  if (!dryRun && espelhoLigado()) return res.status(423).json({ ok: false, modo_validacao: true, error: 'Modo validação: o onboarding roda pelo sistema antigo até a virada.' });
   const base = String(process.env.EXP_PORTAL_URL || PORTAL_PADRAO).replace(/\/$/, '');
   let q = `expedicoes?select=id,codigo,nome,tipo&status=neq.Cancelada&data_embarque=gte.${hojeBrasilia()}`;
   if (!vazio(b.expedicao_codigo)) q += `&codigo=eq.${enc(String(b.expedicao_codigo).trim())}`;
@@ -428,7 +410,8 @@ async function onboardingDiario(req, res) {
     if (/ACESSO TESTE/i.test(p.nome_completo)) continue;
     const exp = porId.get(p.expedicao_id);
     if (!exp) continue;
-    const link = dryRun ? `${base}/amigo/acesso?t=${tokenAcesso(p.id)}` : await linkCurto(p.id, base);
+    // Link mágico (/a/<codigo>), o mesmo do botão da tela: reaproveita o que ainda vale.
+    const link = dryRun ? `${base}/amigo/acesso?t=${tokenAcesso(p.id)}` : (await linkDoPassageiro(p.id)).link;
     const item = {
       passageiro_id: p.id, nome: p.nome_completo, telefone: p.telefone, cpf: p.cpf,
       expedicao_codigo: exp.codigo, expedicao_nome: exp.nome, link,
@@ -512,6 +495,8 @@ export default async function handler(req, res) {
       if (espelhoLigado()) return res.status(423).json({ ok: false, error: "Em validação: atualize pelo sistema atual — os dados chegam aqui pelo espelho a cada 5 minutos." });
       return await sincronizarBitrixUma(req, res);
     }
+
+    if (acao === 'amigo-liberar-todos') return await liberarTodosAmigo(req, res);
 
     const fn = WEBHOOKS[acao];
     if (!fn) return res.status(404).json({ ok: false, error: 'Ação desconhecida' });

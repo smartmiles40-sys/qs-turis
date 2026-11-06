@@ -1,0 +1,163 @@
+From 75e31ba680c2284b2cdb61c67e8193254b9dd957 Mon Sep 17 00:00:00 2001
+From: rshn447488-maker <rshn447488@privaterelay.appleid.com>
+Date: Fri, 6 Nov 2026 18:08:38 -0300
+Subject: [PATCH] =?UTF-8?q?feat(portal):=20masters=20do=20/amigo=20e=20/li?=
+ =?UTF-8?q?der=20leem=20exp=5Fmasters=5Fportal=20do=20banco=20quando=20exi?=
+ =?UTF-8?q?stir=20(sen=C3=A3o,=20lista=20fixa)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+No banco atual a função não existe -> segue a lista do código, sem mudança.
+Depois da virada do portal pro banco do QS, a tela Masters do QS passa a valer.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ app/amigo/actions.ts      |  7 +++--
+ app/lider/actions.ts      |  9 ++++--
+ lib/expedamigo/masters.ts | 60 +++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 71 insertions(+), 5 deletions(-)
+ create mode 100644 lib/expedamigo/masters.ts
+
+diff --git a/app/amigo/actions.ts b/app/amigo/actions.ts
+index ecdb635..362d584 100644
+--- a/app/amigo/actions.ts
++++ b/app/amigo/actions.ts
+@@ -11,6 +11,7 @@ import { fetchAllRows } from "@/lib/data/expedicoes";
+ import { ordenarVoosCronologico } from "@/lib/portal-voos";
+ import { listArquivosMock } from "@/lib/data/arquivos-mock";
+ import { soDigitosCpf } from "@/lib/cpf";
++import { mastersDoPortal } from "@/lib/expedamigo/masters";
+ import { hashSenhaAcesso, senhaNovaValida } from "@/lib/acesso-senha";
+ import { assinarTokenInscricao } from "@/lib/inscricao/token";
+ import { verificarTokenAcesso } from "@/lib/expedamigo/first-access-token";
+@@ -234,7 +235,9 @@ export async function entrarExpedAmigo(
+   const minhasRows = pax.filter(
+     (p) => soDigitosCpf(p.cpf ?? "") === cpf && !p.pendente_aprovacao,
+   );
+-  const ehAdmin = ADMINS_AMIGO[cpf] !== undefined;
++  // Masters: tabela do QS quando existir (exp_masters_portal); senão a lista fixa acima.
++  const admins = await mastersDoPortal(sb, "portal", ADMINS_AMIGO);
++  const ehAdmin = admins[cpf] !== undefined;
+   if (!ehAdmin && minhasRows.length === 0) {
+     return { ok: false, error: "Não encontramos seu cadastro com este CPF. Fale com a agência." };
+   }
+@@ -270,7 +273,7 @@ export async function entrarExpedAmigo(
+     }
+   }
+ 
+-  const nome = ehAdmin ? ADMINS_AMIGO[cpf] : (ordenadas[0]?.nome_completo ?? "Viajante");
++  const nome = ehAdmin ? admins[cpf] : (ordenadas[0]?.nome_completo ?? "Viajante");
+ 
+   // 3) Passageiro vê só as expedições LIBERADAS pelo operacional (`liberado_expedamigo`),
+   //    inclusive as antigas. Admin master continua vendo as futuras não-canceladas.
+diff --git a/app/lider/actions.ts b/app/lider/actions.ts
+index bb437fe..d49103a 100644
+--- a/app/lider/actions.ts
++++ b/app/lider/actions.ts
+@@ -5,6 +5,7 @@ import { mockPassageiros, mockExpedicoes, mockPassageiroRequisitos, mockQuartos,
+ import { listArquivosMock } from "@/lib/data/arquivos-mock";
+ import { fetchAllRows } from "@/lib/data/expedicoes";
+ import { soDigitosCpf } from "@/lib/cpf";
++import { mastersDoPortal } from "@/lib/expedamigo/masters";
+ import { hashSenhaAcesso, senhaNovaValida } from "@/lib/acesso-senha";
+ import { avaliarProntidao, type ChecagemProntidao } from "@/lib/prontidao/regras";
+ import { MARCADOR_DOC_LIDER } from "@/lib/constants";
+@@ -256,7 +257,9 @@ export async function buscarDadosLider(
+   const minhasRows = pax.filter(
+     (p) => soDigitosCpf(p.cpf ?? "") === cpf && !p.pendente_aprovacao,
+   );
+-  const ehMaster = MASTERS[cpf] !== undefined;
++  // Masters: tabela do QS quando existir (exp_masters_portal); senão a lista fixa acima.
++  const masters = DEV_USE_MOCK_DATA ? MASTERS : await mastersDoPortal(createServiceRoleClient(), "lider", MASTERS);
++  const ehMaster = masters[cpf] !== undefined;
+   const ehLider = minhasRows.some((p) => p.tipo === "Líder");
+   if (!ehMaster && !ehLider) {
+     return { ok: false, error: "Não encontramos expedições para este CPF. Confira com a equipe." };
+@@ -271,7 +274,7 @@ export async function buscarDadosLider(
+   let expIds: string[];
+   if (ehMaster) {
+     // Acesso Master: enxerga TODAS as expedições.
+-    nome = MASTERS[cpf];
++    nome = masters[cpf];
+     expIds = exps.map((e) => e.id);
+   } else {
+     // Foi líder ao menos 1 vez → enxerga TODAS as expedições que participa (só leitura).
+@@ -458,7 +461,7 @@ export async function linkAssinadoLider(
+   if (!a) return { ok: false, error: "Arquivo não encontrado" };
+ 
+   // Autoriza: Master vê tudo; senão o CPF tem que ser líder da expedição dona do arquivo.
+-  let autorizado = MASTERS[cpf] !== undefined;
++  let autorizado = (await mastersDoPortal(sb, "lider", MASTERS))[cpf] !== undefined;
+   if (!autorizado) {
+     const { data: liderRows } = await sb
+       .from("passageiros")
+diff --git a/lib/expedamigo/masters.ts b/lib/expedamigo/masters.ts
+new file mode 100644
+index 0000000..32f49d8
+--- /dev/null
++++ b/lib/expedamigo/masters.ts
+@@ -0,0 +1,60 @@
++/**
++ * Masters do portal (ExpedAmigo /amigo e Área do Líder /lider) — lidos do BANCO
++ * quando o banco tiver a configuração; senão, a lista fixa do código.
++ *
++ * Por quê (06/11/2026): no QS a lista virou uma tabela editável
++ * (`exp_acesso_masters`, migration 0319 do QS) com a função `exp_masters_portal(p_area)`
++ * (só service role). Este app passa a ler essa função QUANDO ELA EXISTE.
++ *
++ * Enquanto este app aponta pro banco ANTIGO (bnbpsuenlokhljrkvlke) a função NÃO
++ * existe lá → a chamada falha → vale a lista fixa do código, exatamente como hoje.
++ * Nada muda até a virada do portal pro banco do QS. Depois da virada, quem adicionar
++ * ou tirar um master na tela do QS (Acessos ExpedAmigo → Masters) já vale aqui, sem
++ * commit.
++ *
++ * Regra de segurança: se a função existir mas devolver lista VAZIA (tabela vazia ou
++ * todos desativados), também cai na lista fixa — ninguém perde o acesso por engano.
++ * Cache de 60 s por instância (o login não paga uma ida ao banco a cada tentativa).
++ */
++import "server-only";
++import type { createServiceRoleClient } from "@/lib/supabase/admin";
++
++type Sb = ReturnType<typeof createServiceRoleClient>;
++export type AreaMaster = "portal" | "lider";
++
++const CACHE_MS = 60_000;
++const cache = new Map<AreaMaster, { em: number; mapa: Record<string, string> }>();
++
++/** Converte as linhas da função num mapa CPF (11 dígitos) → nome. Linha inválida é ignorada. */
++export function mapaDeLinhas(linhas: unknown): Record<string, string> {
++  const mapa: Record<string, string> = {};
++  if (!Array.isArray(linhas)) return mapa;
++  for (const l of linhas as { cpf?: unknown; nome?: unknown }[]) {
++    const cpf = String(l?.cpf ?? "").replace(/\D/g, "");
++    const nome = String(l?.nome ?? "").trim();
++    if (cpf.length === 11 && nome) mapa[cpf] = nome;
++  }
++  return mapa;
++}
++
++export async function mastersDoPortal(
++  sb: Sb | null,
++  area: AreaMaster,
++  fixos: Record<string, string>,
++): Promise<Record<string, string>> {
++  if (!sb) return fixos;
++  const c = cache.get(area);
++  if (c && Date.now() - c.em < CACHE_MS) return c.mapa;
++  let mapa = fixos;
++  try {
++    const { data, error } = await sb.rpc("exp_masters_portal", { p_area: area });
++    if (!error) {
++      const doBanco = mapaDeLinhas(data);
++      if (Object.keys(doBanco).length > 0) mapa = doBanco;
++    }
++  } catch {
++    // banco antigo (sem a função) ou falha de rede: lista fixa
++  }
++  cache.set(area, { em: Date.now(), mapa });
++  return mapa;
++}
+-- 
+2.53.0.windows.1
+

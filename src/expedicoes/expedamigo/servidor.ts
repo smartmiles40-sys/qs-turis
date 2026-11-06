@@ -55,6 +55,33 @@ export function lerStatusAmigo(): Promise<{ espelho: boolean; portal: string | n
  * que já tem (ex.: o modo só-leitura do contexto useExp); sem ele, pergunta ao servidor.
  * undefined = ainda carregando.
  */
+export interface ResultadoLiberarTodos {
+  total: number;
+  ja_tinham_senha: number;
+  sem_cpf: number;
+  links: { passageiro_id: string; nome: string; cpf: string; telefone: string | null; link: string; expira_em: string }[];
+  expedicao: { id: string; nome: string; tipo: string };
+}
+
+/**
+ * "Liberar portal para todos" (06/11): libera a expedição e devolve UM link mágico por
+ * pessoa que ainda não criou senha (antes: senha provisória, 0170). Nada é enviado.
+ */
+export async function pedirLiberarTodos(expedicaoId: string): Promise<ResultadoLiberarTodos> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Sessão expirada. Entre de novo.");
+  const r = await fetch("/api/expedicoes?acao=amigo-liberar-todos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ expedicao_id: expedicaoId }),
+  });
+  let j: (ResultadoLiberarTodos & { ok: boolean; error?: string; modo_validacao?: boolean }) | null = null;
+  try { j = await r.json(); } catch { /* resposta vazia */ }
+  if (r.status === 423 || j?.modo_validacao) throw new ModoValidacaoErro(j?.error || "Modo validação: libere pelo sistema antigo.");
+  if (!r.ok || !j?.ok) throw new Error(j?.error || `Falha ao liberar (${r.status})`);
+  return j;
+}
+
 export function useModoValidacaoAmigo(forcado?: boolean): boolean | undefined {
   const [v, setV] = useState<boolean | undefined>(forcado);
   useEffect(() => {

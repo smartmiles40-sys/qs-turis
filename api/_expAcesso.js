@@ -166,6 +166,79 @@ export async function gerarLinkAmigo(req, res) {
   });
 }
 
+// ── "Liberar portal para todos" por LINK MÁGICO (06/11/2026) ────────────────
+// Antes (0170, exp_liberar_expedamigo_todos) gerava SENHA PROVISÓRIA aleatória pra
+// quem não tinha. No antigo (f6326c6) virou link mágico: marca todos como liberados
+// e devolve UM link por pessoa (CPF) que ainda não criou a própria senha. Quem já tem
+// senha própria só conta. NADA é enviado a ninguém: a lista volta pro admin repassar.
+// Em modo validação (EXP_ESPELHO_LIGADO=1) não grava nada (423), igual ao amigo-link.
+
+/**
+ * Quem recebe link: uma linha por CPF válido (a mais antiga), sem senha própria.
+ * @param pax  [{ id, nome_completo, cpf, telefone, created_at, status_reserva }]
+ * @param comSenha  Set de CPFs (11 dígitos) que já têm senha_hash
+ */
+export function quemRecebeLink(pax, comSenha) {
+  const ativos = (pax || []).filter((p) => p && p.status_reserva !== 'Cancelado');
+  const ordem = [...ativos].sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  const vistos = new Set();
+  const receber = [];
+  let jaTinham = 0;
+  for (const p of ordem) {
+    const cpf = soDig(p.cpf);
+    if (cpf.length !== 11 || vistos.has(cpf)) continue;
+    vistos.add(cpf);
+    if (comSenha.has(cpf)) { jaTinham++; continue; }
+    receber.push({ passageiro_id: p.id, nome: p.nome_completo, cpf, telefone: p.telefone ?? null });
+  }
+  return { total: ativos.length, ja_tinham_senha: jaTinham, receber, sem_cpf: ativos.filter((p) => soDig(p.cpf).length !== 11).length };
+}
+
+/** POST ?acao=amigo-liberar-todos  corpo: { expedicao_id }  (só admin das Expedições). */
+export async function liberarTodosAmigo(req, res) {
+  if (espelhoLigado()) {
+    return res.status(423).json({
+      ok: false, modo_validacao: true,
+      error: 'Modo validação: libere pelo sistema antigo até a virada (o link gerado aqui não abriria no portal).',
+    });
+  }
+  if (!(await permissao(req, 'exp_eh_admin'))) return res.status(403).json({ ok: false, error: 'Apenas admin pode liberar o ExpedAmigo.' });
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const expId = String(b.expedicao_id || '').trim();
+  if (!UUID.test(expId)) return res.status(400).json({ ok: false, error: 'Expedição inválida.' });
+
+  const exp = (await rest(`expedicoes?select=id,nome,tipo&id=eq.${expId}&limit=1`))?.[0];
+  if (!exp) return res.status(404).json({ ok: false, error: 'Expedição não encontrada.' });
+  const pax = (await rest(`passageiros?select=id,nome_completo,cpf,telefone,created_at,status_reserva&expedicao_id=eq.${expId}&status_reserva=neq.Cancelado&limit=1000`)) || [];
+  if (!pax.length) return res.status(200).json({ ok: true, total: 0, ja_tinham_senha: 0, sem_cpf: 0, links: [], expedicao: { id: exp.id, nome: exp.nome, tipo: exp.tipo || 'expedicao' } });
+
+  await rest(`passageiros?expedicao_id=eq.${expId}&status_reserva=neq.Cancelado`, { method: 'PATCH', body: { liberado_expedamigo: true }, prefer: 'return=minimal' });
+
+  const cpfs = [...new Set(pax.map((p) => soDig(p.cpf)).filter((c) => c.length === 11))];
+  const comSenha = new Set();
+  for (let i = 0; i < cpfs.length; i += 100) {
+    const parte = cpfs.slice(i, i + 100);
+    const filtro = parte.flatMap((c) => [c, fmtCpf(c)]).map((c) => `"${c}"`).join(',');
+    const creds = (await rest(`acesso_senhas?select=cpf,senha_hash&cpf=in.(${filtro})&senha_hash=not.is.null`)) || [];
+    for (const c of creds) comSenha.add(soDig(c.cpf));
+  }
+  const r = quemRecebeLink(pax, comSenha);
+  const base = basePortal();
+  const links = [];
+  for (const p of r.receber) {
+    const { codigo, expira_em } = (await linkValido(p.passageiro_id)) || (await novoLink(p.passageiro_id));
+    links.push({ ...p, link: `${base}/a/${codigo}`, expira_em });
+  }
+  console.log(`[expedicoes] amigo-liberar-todos: exp=${expId} total=${r.total} links=${links.length}`);
+  return res.status(200).json({ ok: true, total: r.total, ja_tinham_senha: r.ja_tinham_senha, sem_cpf: r.sem_cpf, links, expedicao: { id: exp.id, nome: exp.nome, tipo: exp.tipo || 'expedicao' } });
+}
+
+/** Link (reaproveita o válido > 7 dias, senão um novo) — usado também pelo onboarding diário. */
+export async function linkDoPassageiro(passageiroId) {
+  const { codigo, expira_em } = (await linkValido(passageiroId)) || (await novoLink(passageiroId));
+  return { link: `${basePortal()}/a/${codigo}`, codigo, expira_em };
+}
+
 /** GET ?acao=amigo-status → { espelho, portal } (sem dado nenhum de pessoa). */
 export function statusAmigo(res) {
   return res.status(200).json({ ok: true, espelho: espelhoLigado(), portal: basePortal() });

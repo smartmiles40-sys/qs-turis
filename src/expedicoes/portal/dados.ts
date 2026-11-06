@@ -132,15 +132,6 @@ export async function definirVoucherHospedagem(expedicaoId: string, arquivoId: s
   if (error) throw new Error(traduzirErro(error.message));
 }
 
-export interface ResultadoLiberar { total: number; ja_tinham_senha: number; senhas: { nome: string; cpf: string; senha: string }[] }
-
-/** "Liberar para todos" — função da 0170 (só admin; mexe em acesso_senhas, que não tem policy). */
-export async function liberarExpedamigoTodos(expedicaoId: string): Promise<ResultadoLiberar> {
-  const { data, error } = await supabase.rpc("exp_liberar_expedamigo_todos", { p_expedicao_id: expedicaoId });
-  if (error) throw new Error(traduzirErro(error.message));
-  return data as ResultadoLiberar;
-}
-
 /** Converte o valor do seletor "Faz parte de" nas duas colunas do contrato. */
 export function segmentoParaColunas(valor: string): { extensao_id: string | null; apenas_sem_extensao: boolean } {
   if (valor === SEG_BASE) return { extensao_id: null, apenas_sem_extensao: true };
