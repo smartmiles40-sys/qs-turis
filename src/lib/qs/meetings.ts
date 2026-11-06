@@ -27,6 +27,8 @@ import { cancelarEvento, criarEvento, reagendarEvento } from "@/lib/qs/agendaMee
 import { loadWorkHours, nextWorkMoment, clampToWorkWindow, type WorkHours } from "@/lib/workHours";
 import { recarregarBloqueio } from "@/lib/qs/bloqueioDesfecho";
 import { chipDaTemperatura, normalizeTemperature } from "@/lib/leadScore";
+import { ehProdutoTipo, rotuloDoProduto } from "@/lib/qs/produtoGanho";
+import { fetchRotas } from "@/lib/qs/produtoGanhoDados";
 import type { ChannelType, Meeting, MeetingSal, MeetingStatus, MeetingTipo } from "@/components/sdr/types";
 
 // ── Configuração da atividade de confirmação ────────────────────────────────
@@ -419,10 +421,13 @@ export interface CreateMeetingInput {
    * agendar a 1ª reunião; vai pra reunião (foto), pro lead e pro Bitrix.
    */
   temperatura_sdr?: string | null;
-  /** Produto escolhido no Ganho (aereo/pacote/expedicao/outros) — migration 0321. */
-  produto_tipo?: string | null;
+  /** Produto escolhido no desfecho do SDR (expedicao/pacote/outros) — 0321.
+   *  Sem produto, o banco grava 'outros' marcado como inferido. */
+  produto?: string | null;
   /** Expedição do Operacional, quando o produto é expedição (0321). */
   expedicao_id?: string | null;
+  /** 'agendou' quando a reunião nasce do desfecho do SDR (0321). */
+  desfecho_sdr?: "agendou" | "ganhou" | null;
 }
 
 export type MeetingResult =
@@ -669,6 +674,18 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
   // ── TEMPERATURA DO SDR (Bruno, 05/11) ─────────────────────────────────────
   // A segunda temperatura do lead, dada por quem conversou. Obrigatória na 1ª
   // reunião agendada; retomada é conversa do closer, não passa pelo SDR.
+  // ROTA DO PRODUTO (spec 06/11): produto de rota COTAÇÃO (aéreo) nunca vira
+  // reunião, venha de onde vier. A regra mora na produto_rota.
+  if (input.produto && ehProdutoTipo(input.produto)) {
+    const rotas = await fetchRotas();
+    if (rotas[input.produto] === "cotacao") {
+      return {
+        ok: false,
+        error: `${rotuloDoProduto(input.produto)} não gera reunião: registre como cotação pelo "Ganho / Agendou" na fila de atividades.`,
+      };
+    }
+  }
+
   const temperaturaSdr = normalizeTemperature(input.temperatura_sdr ?? null);
   const tipoDaReuniao = input.tipo ?? "primeira";
   if (status === "agendada" && tipoDaReuniao === "primeira" && !temperaturaSdr) {
@@ -696,17 +713,19 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
     booking_date: input.booking_date ?? new Date().toISOString().slice(0, 10),
     tipo: input.tipo ?? "primeira",
     ...(temperaturaSdr ? { temperatura_sdr: temperaturaSdr } : {}),
-    ...(input.produto_tipo ? { produto_tipo: input.produto_tipo } : {}),
+    ...(input.produto ? { produto: input.produto } : {}),
     ...(input.expedicao_id ? { expedicao_id: input.expedicao_id } : {}),
+    ...(input.desfecho_sdr ? { desfecho_sdr: input.desfecho_sdr, desfecho_em: new Date().toISOString() } : {}),
   };
 
   let { data, error } = await supabase.from("qs_meetings").insert(row).select().single();
 
   // A 0321 ainda não foi colada? Grava sem o produto: a métrica perde esta
   // reunião, mas impedir o agendamento seria pior (o título ainda leva o produto).
-  if (error && /produto_tipo|expedicao_id/i.test(error.message ?? "") && isMissingSchema(error)) {
-    console.warn("[meetings] 0321 ainda não aplicada; gravando sem produto_tipo:", error.message);
-    const { produto_tipo: _p, expedicao_id: _e, ...semProduto } = row as typeof row & { produto_tipo?: string; expedicao_id?: string };
+  if (error && /produto|expedicao_id|desfecho_/i.test(error.message ?? "") && isMissingSchema(error)) {
+    console.warn("[meetings] 0321 ainda não aplicada; gravando sem produto:", error.message);
+    const { produto: _p, expedicao_id: _e, desfecho_sdr: _d, desfecho_em: _de, ...semProduto } =
+      row as typeof row & { produto?: string; expedicao_id?: string; desfecho_sdr?: string; desfecho_em?: string };
     row = semProduto as typeof row;
     ({ data, error } = await supabase.from("qs_meetings").insert(row).select().single());
   }

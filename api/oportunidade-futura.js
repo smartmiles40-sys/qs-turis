@@ -266,7 +266,13 @@ export default async function handler(req, res) {
     if (!segredo || !segredoConfere(veio, segredo)) return res.status(401).json({ error: 'Não autorizado' });
     try {
       const r = await processarVencidas();
-      return res.status(200).json({ ok: true, processadas: r.length, resultado: r });
+      // Cotações de aéreo que passaram da validade sem resposta (0321): o
+      // responsável ganha uma atividade de FUP. Falha aqui não derruba o cron.
+      let cotacoesFup = null;
+      try {
+        cotacoesFup = await rest('rpc/cotacoes_fup_vencidas', { method: 'POST', body: { p_teto: 50 } });
+      } catch (e) { console.error('[of] cotacoes_fup_vencidas:', e?.message); }
+      return res.status(200).json({ ok: true, processadas: r.length, resultado: r, cotacoes_fup: cotacoesFup });
     } catch (e) {
       console.error('[of] cron:', e?.message);
       return res.status(500).json({ error: e?.message });

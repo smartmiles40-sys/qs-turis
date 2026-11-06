@@ -16,7 +16,8 @@ import TemperaturaSdrPicker from "./TemperaturaSdrPicker";
 import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
 import SlotPicker, { type SlotSelection } from "./SlotPicker";
 import ProdutoGanhoPicker from "../produto/ProdutoGanhoPicker";
-import { ESCOLHA_VAZIA, problemaDaEscolha, tituloDoProduto, type EscolhaProduto, type ExpedicaoAVenda } from "@/lib/qs/produtoGanho";
+import { ESCOLHA_VAZIA, ROTA_PADRAO, problemaDaEscolha, tituloDoProduto, type EscolhaProduto, type ExpedicaoAVenda, type ProdutoTipo, type Rota } from "@/lib/qs/produtoGanho";
+import { fetchRotas } from "@/lib/qs/produtoGanhoDados";
 import type { Lead, Meeting, MeetingTipo } from "../types";
 
 /**
@@ -77,6 +78,8 @@ export default function ScheduleMeetingModal({
   // Produto (Bruno, 06/11): Aéreo · Pacote · Expedição · Outros. Monta o título.
   const [produtoEsc, setProdutoEsc] = useState<EscolhaProduto>(ESCOLHA_VAZIA);
   const [expedicoesAVenda, setExpedicoesAVenda] = useState<ExpedicaoAVenda[]>([]);
+  const [rotasProduto, setRotasProduto] = useState<Record<ProdutoTipo, Rota>>(ROTA_PADRAO);
+  useEffect(() => { void fetchRotas().then(setRotasProduto); }, []);
   const [notes, setNotes] = useState("");
   // Primeira call ou retomada (migration 0054). Retomada é a 2ª/3ª conversa de
   // um pacote: ocupa a agenda igual, mas não conta como reunião realizada nem
@@ -314,7 +317,8 @@ export default function ScheduleMeetingModal({
       closer_id: pick.closerId,
       closer_name: pick.closerName,
       title: tituloProduto || `Reunião — ${selectedLead?.full_name ?? "cliente"}`,
-      produto_tipo: produtoEsc.tipo,
+      produto: produtoEsc.tipo,
+        desfecho_sdr: "agendou",
       expedicao_id: produtoEsc.tipo === "expedicao" ? produtoEsc.expedicaoId : null,
       scheduled_at: pick.start,
       duration_min: pick.durationMin,
@@ -547,13 +551,15 @@ export default function ScheduleMeetingModal({
               )}
 
               {/* Produto pelo seletor (06/11) — Aéreo · Pacote · Expedição · Outros.
-                  Aqui é sempre pro closer: o "eu mesmo emito" fica no painel de
-                  tarefas, que é onde o SDR dá o ganho. */}
+                  Aqui só aparecem os produtos que viram reunião: aéreo é cotação
+                  (spec 06/11), registrada pelo "Ganho / Agendou" da fila. */}
               <div>
                 <ProdutoGanhoPicker
                   value={produtoEsc}
                   onChange={setProdutoEsc}
                   onExpedicoes={setExpedicoesAVenda}
+                  rotas={rotasProduto}
+                  soRotaReuniao
                   disabled={saving}
                   cor="#0147FF"
                   labelClassName={labelClass}

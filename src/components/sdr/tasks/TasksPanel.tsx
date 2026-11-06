@@ -48,10 +48,11 @@ import type { SdrUser } from "../types";
 import RelogioPrimeiroContato, { type LeadEsperando } from "./RelogioPrimeiroContato";
 import ProdutoGanhoPicker from "@/components/sdr/produto/ProdutoGanhoPicker";
 import {
-  ESCOLHA_VAZIA, problemaDaEscolha, sdrFazSozinho, tituloDoProduto,
-  type EscolhaProduto, type ExpedicaoAVenda,
+  COTACAO_VAZIA, ESCOLHA_VAZIA, ROTA_PADRAO, problemaDaCotacao, problemaDaEscolha, rotaDoProduto, rotuloDoProduto, tituloDoProduto,
+  type DadosCotacao, type EscolhaProduto, type ExpedicaoAVenda, type ProdutoTipo, type Rota,
 } from "@/lib/qs/produtoGanho";
-import { registrarGanhoSdr } from "@/lib/qs/produtoGanhoDados";
+import { criarCotacao, fetchRotas } from "@/lib/qs/produtoGanhoDados";
+import FormularioCotacao from "@/components/sdr/produto/FormularioCotacao";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -754,6 +755,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // que monta o título da reunião e alimenta a métrica de demanda por produto.
   const [produtoEsc, setProdutoEsc] = useState<EscolhaProduto>(ESCOLHA_VAZIA);
   const [expedicoesAVenda, setExpedicoesAVenda] = useState<ExpedicaoAVenda[]>([]);
+  // Rota do produto (tabela produto_rota) e o pedido de cotação (rota COTACAO).
+  const [rotasProduto, setRotasProduto] = useState<Record<ProdutoTipo, Rota>>(ROTA_PADRAO);
+  const [cotacaoDados, setCotacaoDados] = useState<DadosCotacao>(COTACAO_VAZIA);
+  useEffect(() => { void fetchRotas().then(setRotasProduto); }, []);
+  const ehCotacao = rotaDoProduto(produtoEsc.tipo, rotasProduto) === "cotacao";
   const [savingMeeting, setSavingMeeting] = useState(false);
 
   // New Lead Modal
@@ -1265,6 +1271,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     const dd = String(hoje.getDate()).padStart(2, "0");
     setMeeting({ emailCliente: lead?.email ?? "", dataAgendamento: `${yyyy}-${mm}-${dd}`, responsavel: "", responsavelId: "", dataHora: "", duracaoMin: 60 , produto: "", bitrixId: "", temperaturaSdr: normalizeTemperature(lead?.temperatura_sdr) ?? "" });
     setProdutoEsc(ESCOLHA_VAZIA);
+    setCotacaoDados(COTACAO_VAZIA);
     setPendingResult(null);
     setMeetingFor({ taskId: task.id, leadId: task.lead_id, leadName: lead?.full_name ?? "Lead" });
   }
@@ -1363,52 +1370,64 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   }
 
   /**
-   * AÉREO QUE O PRÓPRIO SDR EMITE (Bruno, 06/11). Hoje o SDR também faz aéreo
-   * e só às vezes passa pro closer. Quando é ele quem faz: não abre agenda de
-   * ninguém, o lead FICA com ele (sem transferência), a tarefa fecha como
-   * ganho e o ganho fica registrado (qs_ganhos_sdr) pra contar na métrica de
-   * demanda. O card do Bitrix NÃO muda de coluna — o evento "ganho" leva pra
-   * "Reunião agendada", que aqui não existe; vai só a nota na timeline.
+   * ROTA COTAÇÃO (spec 06/11): aéreo (ou o produto que a produto_rota mandar)
+   * NUNCA gera reunião — gera uma COTAÇÃO. O SDR cota (padrão) ou repassa a um
+   * closer; a cotação vai pro quadro de Cotações. A tarefa fecha como ganho, o
+   * lead fica com o SDR (sem transferência: quem cota pode ser ele) e as demais
+   * atividades são encerradas — o acompanhamento passa a ser a cotação (com FUP
+   * automático se a validade vencer sem resposta). O card do Bitrix não muda de
+   * coluna (o evento "ganho" leva pra Reunião agendada); vai a nota na timeline.
    */
-  async function handleGanhoAereoSdr() {
+  async function handleGanhoCotacao() {
     if (!meetingFor || savingMeeting) return;
-    const problema = problemaDaEscolha(produtoEsc);
+    if (!produtoEsc.tipo) { notifyError("Escolha o produto."); return; }
+    const problema = problemaDaCotacao(cotacaoDados);
     if (problema) { notifyError(problema); return; }
-    if (!currentUser?.id) { notifyError("Sessão expirada — entre de novo pra registrar o ganho."); return; }
+    if (!currentUser?.id) { notifyError("Sessão expirada — entre de novo pra registrar a cotação."); return; }
     const { taskId, leadId, leadName } = meetingFor;
+    const lead = leads.find((l) => l.id === leadId);
     setSavingMeeting(true);
     const obs = obsText.trim();
-    const titulo = tituloDoProduto(produtoEsc, expedicoesAVenda);
     const failures: string[] = [];
+    // A cotação PRIMEIRO: é o fato central. Se ela não gravou, nada muda.
+    const cot = await criarCotacao({
+      leadId,
+      bitrixId: somenteDigitos(lead?.bitrix_id) || null,
+      produto: produtoEsc.tipo,
+      sdrId: currentUser.id,
+      dados: { ...cotacaoDados, observacoes: [cotacaoDados.observacoes, obs].filter((x) => x.trim()).join("\n") },
+    });
+    if (!cot.ok) {
+      setSavingMeeting(false);
+      notifyError(`A cotação não foi registrada (${cot.error}). Nada foi alterado — tente de novo.`);
+      return;
+    }
+    const resp = cotacaoDados.responsavelId ? closers.find((c) => c.id === cotacaoDados.responsavelId) : null;
     try {
-      const fechou = await completeTask(taskId, "ganho");
-      if (!fechou) {
-        setSavingMeeting(false);
-        return;
-      }
-      const gravou = await registrarGanhoSdr({ leadId, ownerId: currentUser.id, produtoTipo: "aereo", descricao: titulo });
-      if (!gravou) failures.push("o ganho não entrou na métrica de demanda (avise o gestor)");
+      await completeTask(taskId, "ganho");
       const { data: wonRows, error: wonErr } = await supabase
         .from("qs_leads").update({ status: "ganho" }).eq("id", leadId).select("id");
       if (wonErr || !wonRows || wonRows.length === 0) {
         console.warn("[QS] lead não marcado como ganho:", wonErr);
         failures.push("o lead NÃO foi marcado como ganho — marque pelo perfil do lead");
       }
-      const okClose = await closeRemainingLeadTasks(leadId, taskId, "Lead ganho — aéreo emitido pelo SDR");
+      const okClose = await closeRemainingLeadTasks(leadId, taskId, "Lead ganho — virou cotação");
       if (!okClose) failures.push("as demais atividades do lead não foram encerradas");
+      const d = cotacaoDados;
+      const pax = [d.adultos && `${d.adultos} adulto(s)`, d.criancas && `${d.criancas} criança(s)`, d.bebes && `${d.bebes} bebê(s)`].filter(Boolean).join(", ");
       await persistObservation(
         leadId,
-        `Ganho — ${titulo}, emitido pelo próprio SDR${currentUser.name ? ` (${currentUser.name})` : ""}, sem reunião${obs ? `. Observações: ${obs}` : ""}`,
-        ["bitrix", "ganho", "aereo-sdr"]
+        `Ganho — cotação de ${rotuloDoProduto(produtoEsc.tipo).toLowerCase()}: ${d.origem} → ${d.destino}, ida ${d.dataIda}${d.dataVolta ? `, volta ${d.dataVolta}` : " (só ida)"}, ${pax}. ` +
+          (resp ? `Repassada para ${resp.name}.` : `Cotada por ${currentUser.name ?? "SDR"}.`) +
+          (obs ? ` Observações: ${obs}` : ""),
+        ["bitrix", "ganho", "cotacao"]
       );
     } catch (e) {
-      console.warn("[QS] ganho de aéreo do SDR falhou:", e);
-      notifyError("Não foi possível registrar o ganho — tente de novo.");
-      setSavingMeeting(false);
-      return;
+      console.warn("[QS] pós-cotação falhou:", e);
+      failures.push("a cotação foi criada, mas a atividade/lead não foram atualizados — confira a fila");
     }
-    if (failures.length > 0) notifyError(`Ganho registrado com pendências: ${failures.join("; ")}.`);
-    else notifySuccess(`${leadName}: ganho de aéreo registrado — o lead continua com você.`);
+    if (failures.length > 0) notifyError(`Cotação registrada com pendências: ${failures.join("; ")}.`);
+    else notifySuccess(resp ? `Cotação de ${leadName} repassada para ${resp.name}.` : `Cotação de ${leadName} registrada — está no quadro de Cotações.`);
     setLeads((prev) => prev.map((l): Lead => (l.id === leadId ? { ...l, status: "ganho" } : l)));
     setTasks((prev) => prev.filter((t) => t.lead_id !== leadId));
     setActiveTaskId(null);
@@ -1518,7 +1537,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         // O produto vira o titulo: e ele que vai pro card do Bitrix e pro
         // convite do Google. Sem produto, cai no nome generico de antes.
         title: tituloDoProduto(produtoEsc, expedicoesAVenda) || `Reunião — ${leadName}`,
-        produto_tipo: produtoEsc.tipo,
+        produto: produtoEsc.tipo,
+        desfecho_sdr: "agendou",
         expedicao_id: produtoEsc.tipo === "expedicao" ? produtoEsc.expedicaoId : null,
         scheduled_at: new Date(meeting.dataHora),
         duration_min: meeting.duracaoMin,
@@ -4709,7 +4729,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             <div className="flex shrink-0 items-center justify-between px-5 py-4" style={{ background: "var(--green)" }}>
               <div className="text-white">
                 <p className="text-sm font-bold leading-tight">
-                  {sdrFazSozinho(produtoEsc) ? "Ganho — aéreo emitido por você" : "Agendar reunião — Ganho"}
+                  {ehCotacao ? `Ganho — cotação de ${rotuloDoProduto(produtoEsc.tipo).toLowerCase()}` : "Agendar reunião — Ganho"}
                 </p>
                 <p className="text-[11px] opacity-90 leading-tight">{meetingFor.leadName}</p>
               </div>
@@ -4731,12 +4751,22 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 value={produtoEsc}
                 onChange={setProdutoEsc}
                 onExpedicoes={setExpedicoesAVenda}
-                permitirSdrFaz
+                rotas={rotasProduto}
                 disabled={savingMeeting}
                 cor="var(--green)"
                 inputClassName="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"
               />
-              {!sdrFazSozinho(produtoEsc) && (<>
+              {ehCotacao && (
+                <FormularioCotacao
+                  value={cotacaoDados}
+                  onChange={setCotacaoDados}
+                  closers={closers}
+                  euId={currentUser?.id ?? null}
+                  disabled={savingMeeting}
+                  inputClassName="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"
+                />
+              )}
+              {!ehCotacao && (<>
               {/* Sem o negócio do Bitrix a reunião nasce órfã: fica no QS e o
                   card nunca se mexe. Só aparece quando o lead não tem vínculo. */}
               <CampoBitrixId
@@ -4836,11 +4866,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </div>
             </div>
             <div className="shrink-0 border-t px-5 py-4" style={{ borderColor: "var(--line)" }}>
-              {sdrFazSozinho(produtoEsc) ? (
+              {ehCotacao ? (
                 <div className="flex gap-2">
                   <button onClick={() => cancelMeetingModal()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
-                  <button onClick={() => void handleGanhoAereoSdr()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
-                    {savingMeeting ? "Salvando..." : "Concluir ganho — eu emito"}
+                  <button onClick={() => void handleGanhoCotacao()} disabled={savingMeeting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--green)" }}>
+                    {savingMeeting ? "Salvando..." : "Registrar cotação"}
                   </button>
                 </div>
               ) : (
@@ -4858,7 +4888,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   agendamento estava sendo registrado, e ficaram sem reunião
                   nenhuma no QS. "Já tem reunião marcada" era lido como "acabei
                   de marcar com o cliente". */}
-              {!sdrFazSozinho(produtoEsc) && <button
+              {!ehCotacao && <button
                 onClick={() => void handleGanhoSemReuniao()}
                 disabled={savingMeeting}
                 className="mt-2 w-full py-2 rounded-lg text-[13px] font-semibold border disabled:opacity-50"

@@ -89,6 +89,7 @@ const WaPage = lazyPagina(() => import("./wa/WaPage"));
 const PipelineIAPage = lazyPagina(() => import("./gloria/PipelineIAPage"));
 const SolicitacoesPage = lazyPagina(() => import("@/solicitacoes/SolicitacoesPage"));
 const PropostasPage = lazyPagina(() => import("@/propostas/PropostasPage"));
+const CotacoesPage = lazyPagina(() => import("./produto/CotacoesPage"));
 import NotificationsPanel from "./notifications/NotificationsPanel";
 import { BotaoBolinhaDoMenu } from "@/avisos/SinoDeAvisos";
 import QsWaDock from "./wa/QsWaDock";
@@ -130,6 +131,7 @@ export type SdrNav =
   | "atendimento-ia"
   | "solicitacoes"
   | "propostas"
+  | "cotacoes"
   | "configuracoes";
 
 // ── Dropdown Menu ────────────────────────────────────────────────────────────
@@ -170,6 +172,8 @@ const MENU: (MenuGroup | MenuItem)[] = [
       { id: "solicitacoes", label: "Solicitações", description: "Pedir e receber de Relacionamento, Operações e Financeiro" },
       // Propostas (0157): o Comercial monta as suas e envia as que pediu a Operações.
       { id: "propostas", label: "Propostas", description: "Cotações com link e PDF pro cliente escolher a opção" },
+      // Cotações de aéreo (0321, 06/11): aéreo não vira reunião, vira cotação.
+      { id: "cotacoes", label: "Cotações", description: "Quadro das cotações de aéreo" },
     ],
   },
   {
@@ -408,7 +412,7 @@ export default function SdrLayout() {
   const ICONE_NAV: Partial<Record<SdrNav, ReactNode>> = {
     painel: Icon.fila, "minha-agenda": Icon.agenda, whatsapp: Icon.chat, "atendimento-ia": Icon.ia,
     leads: Icon.pessoas, cobertura: Icon.carteira, cadencias: Icon.cadencia, disparos: Icon.disparo, reunioes: Icon.video,
-    solicitacoes: Icon.inbox, propostas: Icon.doc, dashboard: Icon.grafico, configuracoes: Icon.config,
+    solicitacoes: Icon.inbox, propostas: Icon.doc, cotacoes: Icon.aviao, dashboard: Icon.grafico, configuracoes: Icon.config,
   };
   const ROTULO_NAV: Partial<Record<SdrNav, string>> = {
     painel: "Fila de hoje", "minha-agenda": "Minha agenda", cobertura: "Minha carteira", reunioes: "Reuniões", whatsapp: "WhatsApp",
@@ -436,7 +440,7 @@ export default function SdrLayout() {
   const desempenhoAbas = (["dashboard", "analises", "monitor-leads"] as SdrNav[]).filter((id) => permitido.has(id));
   const grupos: ShellGroup[] = [
     { label: "Execução", items: execucao.map((id) => item(id, id)).filter(Boolean) as ShellItem[] },
-    { label: "Gestão", items: [item("leads", "Leads"), item("cobertura", "Minha carteira"), ...(ehSdr ? [] : [item("cadencias", "Cadências"), item("disparos", "Disparo em massa"), ...(reunioesNaExecucao ? [] : [item("reunioes", "Reuniões")])])].filter(Boolean) as ShellItem[] },
+    { label: "Gestão", items: [item("leads", "Leads"), item("cobertura", "Minha carteira"), item("cotacoes", "Cotações"), ...(ehSdr ? [] : [item("cadencias", "Cadências"), item("disparos", "Disparo em massa"), ...(reunioesNaExecucao ? [] : [item("reunioes", "Reuniões")])])].filter(Boolean) as ShellItem[] },
     { label: "Com outros setores", items: [item("solicitacoes", "Solicitações"), item("propostas", "Propostas")].filter(Boolean) as ShellItem[] },
     { label: "Análise", items: [
       ...(desempenhoAbas.length ? [{ id: desempenhoAbas[0], label: "Desempenho", icon: Icon.grafico }] : []),
@@ -613,6 +617,13 @@ export default function SdrLayout() {
                 <PropostasPage setor="comercial" abrirId={propostaAberta} onAbrirId={setPropostaAberta} onMudou={recontarAprovacoes} />
               </div>
             </ComCoresDaCentral>
+          </PageErrorBoundary>
+        )}
+        {activeNav === "cotacoes" && (
+          <PageErrorBoundary pageName="Cotações">
+            <div className="px-4 sm:px-6 py-6">
+              <CotacoesPage />
+            </div>
           </PageErrorBoundary>
         )}
         {activeNav === "configuracoes" && (
