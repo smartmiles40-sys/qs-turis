@@ -308,6 +308,11 @@ export default async function handler(req, res) {
   if (String(com || '') === 'sdr') {
     return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req) });
   }
+  // ?com=sdr-semana (06/11): a mesma ligação, só seg–sex e com o motivo da
+  // viagem obrigatório (10 a 500 caracteres).
+  if (String(com || '') === 'sdr-semana') {
+    return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req), perfil: 'semana' });
+  }
 
   if (cfg.ativo === false) {
     return res.status(200).json({ ok: false, motivo: 'desligado', recado: cfg.encerrado, dias: [] });
@@ -593,8 +598,9 @@ async function marcar(req, res, { cfg, regras, teto, maxDias }) {
 // A grade pelo dono vai por POST, não por GET: o telefone da pessoa não pode
 // morar em URL (fica em log e em histórico). Ver api/_ligacaoSdr.js.
 
-async function ligacaoComSdr(req, res, { teto, maxDias = null }) {
-  const cfg = await lerConfigSdr();
+async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null }) {
+  const cfg = await lerConfigSdr(perfil);
+  const exigeMotivo = perfil === 'semana';
   if (!cfg.ativo) {
     return res.status(200).json({ ok: false, motivo: 'desligado', recado: cfg.encerrado, dias: [] });
   }
@@ -604,7 +610,7 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null }) {
 
   if (req.method === 'GET' || (req.method === 'POST' && body.acao === 'grade')) {
     try {
-      const grade = await gradeSdr({ telefone: normPhone(body.telefone) || null, maxDias });
+      const grade = await gradeSdr({ telefone: normPhone(body.telefone) || null, maxDias, perfil });
       return res.status(200).json({
         ok: grade.ok,
         motivo: grade.motivo,
@@ -637,6 +643,8 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null }) {
   const expedicao = texto(body.expedicao, 80);
   const origemLp = texto(body.origem, 80);
   const observacao = texto(body.observacao, 400);
+  // Conta o que a pessoa escreveu de verdade: espaços nas pontas não valem.
+  const motivoBruto = typeof body.motivo === 'string' ? body.motivo.trim() : '';
   const agora = new Date();
 
   if (!nome || nome.length < 2) {
@@ -645,6 +653,13 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null }) {
   if (!telefone || telefone.length < 10) {
     return res.status(400).json({ ok: false, campo: 'telefone', error: 'Confira o número do WhatsApp com o DDD.' });
   }
+  if (exigeMotivo && (motivoBruto.length < 10 || motivoBruto.length > 500)) {
+    return res.status(400).json({
+      ok: false, campo: 'motivo',
+      error: motivoBruto.length < 10 ? 'Conte um pouco mais: pelo menos 10 caracteres.' : 'No máximo 500 caracteres, por favor.',
+    });
+  }
+  const motivo = exigeMotivo ? motivoBruto : null;
   // E-mail é OPCIONAL aqui: não existe convite do Google, a ligação é no
   // WhatsApp. Mas se veio, tem que ser válido — e-mail torto sujaria o lead.
   if (email && !emailValido(email)) {
@@ -658,7 +673,7 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null }) {
   // Janela curta (?dias): o dia tem que estar entre os que a grade mostrou.
   if (maxDias) {
     try {
-      const grade = await gradeSdr({ telefone, maxDias, agora });
+      const grade = await gradeSdr({ telefone, maxDias, agora, perfil });
       const primeiro = grade.dias[0]?.dia;
       const ultimo = grade.dias[grade.dias.length - 1]?.dia;
       const diaPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(inicio);
@@ -692,7 +707,7 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null }) {
     if (jaTem) return res.status(200).json(jaTem);
 
     // 1) Quem liga — ANTES de criar lead, pelo mesmo motivo da reunião.
-    const sdr = await escolherSdr({ inicio, telefone, fonte: origemLp, agora });
+    const sdr = await escolherSdr({ inicio, telefone, fonte: origemLp, agora, perfil });
     if (!sdr) {
       return res.status(409).json({
         ok: false, motivo: 'horario_ocupado',
@@ -722,7 +737,7 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null }) {
     if (jaTemLead) return res.status(200).json(jaTemLead);
 
     // 4) Marcar
-    const r = await marcarLigacao({ lead, sdr, inicio, expedicao, origemLp, observacao, email, telefone });
+    const r = await marcarLigacao({ lead, sdr, inicio, expedicao, origemLp, observacao, motivo, email, telefone, perfil });
     if (!r.ok) {
       // O lead NOVO nasceu sem atividades (semTarefas) contando com a ligação.
       // Não marcou? Então ganha a cadência normal agora — senão ficaria órfão,

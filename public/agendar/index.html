@@ -152,7 +152,9 @@
     border-color: var(--azul);
     box-shadow: 0 0 0 3px rgba(1,71,255,.12);
   }
-  .campo input[aria-invalid="true"] { border-color: var(--erro); }
+  .campo input[aria-invalid="true"], .campo textarea[aria-invalid="true"] { border-color: var(--erro); }
+  .campo .contador { display: block; text-align: right; font-size: 12px; color: var(--tinta3); margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .campo .contador.pronto { color: var(--ok); }
   .campo .erro { display: none; font-size: 12.5px; color: var(--erro); margin-top: 5px; }
   .campo.ruim .erro { display: block; }
 
@@ -370,6 +372,14 @@
           <span class="erro" id="e-email">É pra onde vai o convite da reunião.</span>
         </div>
 
+        <!-- Só no link ?com=sdr-semana: obrigatório, 10 a 500 caracteres. -->
+        <div class="campo" id="c-motivo" hidden>
+          <label for="motivo">Por que você quer fazer essa viagem?</label>
+          <textarea id="motivo" name="motivo" maxlength="500" placeholder="Conte pra gente o que te faz querer essa viagem…"></textarea>
+          <span class="contador" id="contador-motivo" aria-live="polite">0/500 · mínimo 10</span>
+          <span class="erro" id="e-motivo"></span>
+        </div>
+
         <div class="campo" id="c-observacao">
           <label for="observacao">Quer adiantar alguma coisa? <span style="font-weight:400;color:var(--tinta3)">(opcional)</span></label>
           <textarea id="observacao" name="observacao" maxlength="400" placeholder="Destino, quantas pessoas, datas que você tem em mente…"></textarea>
@@ -420,8 +430,12 @@
   // de propósito — preenchimento, altura, pulso e conferência já estão provados
   // aqui. O que muda: a rota, os textos, o e-mail (opcional, não há convite) e
   // a grade, que sai do dono do lead quando o telefone é conhecido.
-  var COM_SDR = params.get('com') === 'sdr';
-  var API = COM_SDR ? '/api/agendar?com=sdr' : '/api/agendar';
+  // ?com=sdr-semana (06/11): a mesma ligação com o SDR, só de segunda a sexta,
+  // e com "Por que você quer fazer essa viagem?" obrigatório (10 a 500).
+  var COM_PARAM = params.get('com');
+  var COM_MOTIVO = COM_PARAM === 'sdr-semana';
+  var COM_SDR = COM_PARAM === 'sdr' || COM_MOTIVO;
+  var API = COM_SDR ? '/api/agendar?com=' + (COM_MOTIVO ? 'sdr-semana' : 'sdr') : '/api/agendar';
   var expedicao = (params.get('expedicao') || '').slice(0, 80);
   var origem = (params.get('origem') || '').slice(0, 80);
   if (params.get('embed') === '1') document.body.classList.add('embed');
@@ -728,8 +742,22 @@
     if (mensagem) el('e-' + campo).textContent = mensagem;
   }
 
+  function contarMotivo() {
+    var n = el('motivo').value.trim().length;
+    var c = el('contador-motivo');
+    c.textContent = n + '/500' + (n < 10 ? ' · mínimo 10' : '');
+    c.classList.toggle('pronto', n >= 10);
+  }
+  el('motivo').addEventListener('input', function () {
+    contarMotivo();
+    if (el('c-motivo').classList.contains('ruim') && el('motivo').value.trim().length >= 10) {
+      el('c-motivo').classList.remove('ruim');
+      el('motivo').removeAttribute('aria-invalid');
+    }
+  });
+
   function limparErros() {
-    ['nome', 'telefone', 'email'].forEach(function (c) {
+    ['nome', 'telefone', 'email', 'motivo'].forEach(function (c) {
       el('c-' + c).classList.remove('ruim');
       el(c).removeAttribute('aria-invalid');
     });
@@ -743,6 +771,11 @@
     if (el('telefone').value.replace(/\D/g, '').length < 10) { marcarErro('telefone', 'Confira o número com o DDD.'); ok = false; }
     var emailDigitado = el('email').value.trim();
     if ((!COM_SDR || emailDigitado) && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailDigitado)) { marcarErro('email', 'Confira o e-mail.'); ok = false; }
+    if (COM_MOTIVO) {
+      var n = el('motivo').value.trim().length;
+      if (n < 10) { marcarErro('motivo', 'Conte um pouco mais: pelo menos 10 caracteres.'); ok = false; }
+      else if (n > 500) { marcarErro('motivo', 'No máximo 500 caracteres, por favor.'); ok = false; }
+    }
     if (!ok) avisarAltura();
     return ok;
   }
@@ -764,6 +797,7 @@
         telefone: el('telefone').value,
         email: el('email').value.trim(),
         observacao: el('observacao').value.trim(),
+        motivo: COM_MOTIVO ? el('motivo').value.trim() : undefined,
         inicio: estado.inicio,
         expedicao: expedicao,
         origem: origem,
@@ -951,6 +985,13 @@
     el('fim-titulo').textContent = 'Ligação marcada!';
     var rodape = document.querySelector('#formulario .rodape');
     if (rodape) rodape.textContent = 'Ao confirmar, você concorda em receber nossa ligação e mensagens pelo WhatsApp sobre esta conversa.';
+    if (COM_MOTIVO) {
+      // A pergunta toma o lugar do recado opcional: dois campos de texto
+      // seguidos confundem, e o motivo já é o que o SDR precisa ler.
+      el('c-motivo').hidden = false;
+      el('c-observacao').hidden = true;
+      el('motivo').setAttribute('required', '');
+    }
     estado.esperandoPreenchimento = true;
     setTimeout(function () {
       if (estado.esperandoPreenchimento) { estado.esperandoPreenchimento = false; carregar(); }

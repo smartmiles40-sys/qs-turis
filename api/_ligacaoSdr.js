@@ -48,7 +48,17 @@ export const CFG_SDR_PADRAO = {
   encerrado: 'No momento não temos horário disponível. Fale com a gente pelo WhatsApp que a gente te liga.',
 };
 
-let cache = { em: 0, cfg: null };
+/**
+ * PERFIL "semana" (06/11, Bruno): o link `/agendar/?com=sdr-semana` marca a
+ * MESMA ligação com o SDR, mas só em dia de semana (seg–sex) e pedindo o motivo
+ * da viagem. A agenda de `?com=sdr` segue com a regra dela (hoje qui/sex) —
+ * por isso os dias deste perfil NÃO vêm de `agendamento_sdr.dias`.
+ * Sobrescrita sem deploy: `qs_settings.agendamento_sdr_semana` (só as chaves
+ * que quiser trocar; o resto vem de `agendamento_sdr`).
+ */
+const PERFIL_SEMANA_PADRAO = { dias: [1, 2, 3, 4, 5], diasAFrente: 7 };
+
+const cache = new Map();
 
 /** "10:00" -> 600. Aceita número de hora cheia também (10 -> 600). */
 function emMinutos(v, padrao) {
@@ -57,13 +67,23 @@ function emMinutos(v, padrao) {
   return m ? Number(m[1]) * 60 + Number(m[2]) : padrao;
 }
 
-export async function lerConfigSdr() {
-  if (cache.cfg && Date.now() - cache.em < CACHE_MS) return cache.cfg;
-  let bruto = {};
+async function lerChave(chave) {
   try {
-    const rows = await rest('qs_settings?select=value&key=eq.agendamento_sdr&limit=1', { timeoutMs: 2500 });
-    if (rows?.[0]?.value && typeof rows[0].value === 'object') bruto = rows[0].value;
+    const rows = await rest(`qs_settings?select=value&key=eq.${chave}&limit=1`, { timeoutMs: 2500 });
+    if (rows?.[0]?.value && typeof rows[0].value === 'object') return rows[0].value;
   } catch { /* banco fora: segue com o padrão */ }
+  return {};
+}
+
+export async function lerConfigSdr(perfil = null) {
+  const chaveCache = perfil || 'padrao';
+  const guardado = cache.get(chaveCache);
+  if (guardado && Date.now() - guardado.em < CACHE_MS) return guardado.cfg;
+  let bruto = await lerChave('agendamento_sdr');
+  if (perfil === 'semana') {
+    const extra = await lerChave('agendamento_sdr_semana');
+    bruto = { ...bruto, ...PERFIL_SEMANA_PADRAO, ...extra, janela: { ...(bruto.janela || {}), ...(extra.janela || {}) } };
+  }
 
   const c = { ...CFG_SDR_PADRAO, ...bruto };
   const j = { ...CFG_SDR_PADRAO.janela, ...(bruto.janela || {}) };
@@ -81,7 +101,7 @@ export async function lerConfigSdr() {
     subtitulo: c.subtitulo,
     encerrado: c.encerrado,
   };
-  cache = { em: Date.now(), cfg };
+  cache.set(chaveCache, { em: Date.now(), cfg });
   return cfg;
 }
 
@@ -174,8 +194,8 @@ function horariosDaJanela(cfg, agora, desdeAmanha = false) {
  *
  * O SDR nunca sai na resposta: a página é pública.
  */
-export async function gradeSdr({ telefone = null, agora = new Date(), maxDias = null } = {}) {
-  const cfg = await lerConfigSdr();
+export async function gradeSdr({ telefone = null, agora = new Date(), maxDias = null, perfil = null } = {}) {
+  const cfg = await lerConfigSdr(perfil);
   const sdrs = await sdrsAtivos();
   if (!sdrs.length) return { ok: false, motivo: 'sem_sdr', dias: [], cfg };
 
@@ -239,8 +259,8 @@ export function horarioValidoSdr(inicio, cfg, agora = new Date()) {
  *   • sem dono, ou dono sem horário nenhum -> o SDR livre com MENOS ligações
  *     marcadas daqui pra frente (rodízio por carga, empate pelo nome).
  */
-export async function escolherSdr({ inicio, telefone, fonte = null, agora = new Date() }) {
-  const cfg = await lerConfigSdr();
+export async function escolherSdr({ inicio, telefone, fonte = null, agora = new Date(), perfil = null }) {
+  const cfg = await lerConfigSdr(perfil);
   const sdrs = await sdrsAtivos();
   if (!sdrs.length) return null;
 
@@ -320,8 +340,11 @@ export async function ligacaoQueJaExiste(leadId, agora = new Date()) {
  *      atividade extra criada pela tela ("ele fica só com a extra"). Sem isso
  *      o SDR ligaria pela cadência na véspera do horário que o cliente marcou.
  */
-export async function marcarLigacao({ lead, sdr, inicio, expedicao = null, origemLp = null, observacao = null, email = null, telefone = null }) {
-  const cfg = await lerConfigSdr();
+export async function marcarLigacao({ lead, sdr, inicio, expedicao = null, origemLp = null, observacao = null, motivo = null, email = null, telefone = null, perfil = null }) {
+  const cfg = await lerConfigSdr(perfil);
+  // O motivo da viagem (link `sdr-semana`) vai junto do recado na reserva: é o
+  // que o SDR lê antes de ligar.
+  const recado = [motivo ? `Por que quer fazer essa viagem: ${motivo}` : null, observacao].filter(Boolean).join('\n') || null;
   const fim = new Date(inicio.getTime() + cfg.passoMin * 60_000);
 
   // 1) Dono
@@ -343,7 +366,7 @@ export async function marcarLigacao({ lead, sdr, inicio, expedicao = null, orige
   try {
     const r = await insert('qs_ligacoes_sdr', {
       lead_id: lead.id, sdr_id: sdr.id, inicio: inicio.toISOString(), fim: fim.toISOString(),
-      expedicao, origem_lp: origemLp, observacao,
+      expedicao, origem_lp: origemLp, observacao: recado,
     });
     ligacao = Array.isArray(r) ? r[0] : r;
   } catch (e) {
@@ -373,6 +396,7 @@ export async function marcarLigacao({ lead, sdr, inicio, expedicao = null, orige
           ? 'Ligação rápida (5 min) pelo WhatsApp. Não assistiu a live (ou viu só parte): qualifique antes de marcar com o especialista.'
           : 'Ligação rápida (5 min) pelo WhatsApp. Acabou de preencher o formulário da LP e pediu a ligação: qualifique antes de marcar com o especialista.') +
         (expedicao ? `\nInteresse: ${expedicao}` : '') +
+        (motivo ? `\nPor que quer fazer essa viagem: ${motivo}` : '') +
         (observacao ? `\nRecado do cliente: ${observacao}` : ''),
       tags: ['ligacao-agendada', `ligacao:${ligacao.id}`, 'autoagendamento'],
     });
@@ -412,6 +436,7 @@ export async function marcarLigacao({ lead, sdr, inicio, expedicao = null, orige
       `Contato: ${telefone || '-'}${email ? ' · ' + email : ''}` +
       (expedicao ? `\nInteresse: ${expedicao}` : '') +
       (origemLp ? `\nOrigem: ${origemLp}` : '') +
+      (motivo ? `\n\nPor que quer fazer essa viagem: ${motivo}` : '') +
       (observacao ? `\n\nRecado do cliente: ${observacao}` : ''),
     tags: ['autoagendamento', 'ligacao-agendada'],
   }, { returning: false }).catch((e) => console.warn('[ligacao-sdr] nota não gravada:', e?.message));
