@@ -20,6 +20,10 @@ import {
 } from './_bitrixSaidaRegras.js';
 
 const enc = encodeURIComponent;
+// Marca "não deu pra ler o Tipo de venda do card" (≠ vazio): sem ler, o QS não grava o campo.
+// Faltava esta linha desde o 1a0bd1b (06/11 17h): toda reunião com produto caía em
+// "ilegivel is not defined" ANTES de gravar no card — e por isso o card não saía da Pré-Vendas.
+const ilegivel = Symbol('tipo-de-venda-ilegivel');
 
 /**
  * crm.deal.update com UMA nova tentativa quando a falha foi de rede/tempo.
