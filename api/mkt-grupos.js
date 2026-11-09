@@ -30,7 +30,7 @@ import { criarGrupo, editarGrupo, lerParticipantes, mudarParticipantes, renovarC
 import { rodadaLinks, criarProximoGrupo, lerLinksAtivos } from './_mktGruposLink.js';
 import { lerMovimento } from './_mktGruposLinkRegras.js';
 import {
-  ehGrupo, ehPessoa, resolverGrupos, validarCampanha, lerGrupo, lerConversas, lerMensagens,
+  ehGrupo, resolverGrupos, validarCampanha, lerGrupo, lerConversas, lerMensagens,
   montarEnvio, destinoDaCaixaPermitido, traduzirErro, digitos, semNono,
 } from './_mktGruposRegras.js';
 
@@ -249,12 +249,7 @@ async function caixaEnviar(b, u) {
   const texto = String(b.texto || '').trim();
   if (!texto) throw new Error('Escreva a mensagem.');
   if (texto.length > 4096) throw new Error('Texto longo demais.');
-  let pessoaJaEscreveu = false;
-  if (ehPessoa(jid) && String(process.env.MKT_GRUPOS_PRIVADO || '') === '1') {
-    const r = await evoMkt('chat/findMessages', { method: 'POST', body: { where: { key: { remoteJid: jid, fromMe: false } }, page: 1, offset: 1 } });
-    pessoaJaEscreveu = (r?.messages?.records || []).length > 0;
-  }
-  const bloqueio = destinoDaCaixaPermitido(jid, { privadoLigado: String(process.env.MKT_GRUPOS_PRIVADO || '') === '1', pessoaJaEscreveu });
+  const bloqueio = destinoDaCaixaPermitido(jid);
   if (bloqueio) throw new Error(bloqueio);
   if (ehGrupo(jid)) {
     const g = (await rest(`mkt_grupos?select=jid,saiu_em&jid=eq.${enc(jid)}&limit=1`))?.[0];
@@ -271,7 +266,7 @@ async function caixaEnviar(b, u) {
 
 async function caixaReagir(b) {
   const jid = String(b.jid || '');
-  if (!ehGrupo(jid) && !ehPessoa(jid)) throw new Error('Destino inválido.');
+  if (!ehGrupo(jid)) throw new Error('O chip do Marketing é só de grupos.');
   const id = String(b.msg?.id || '');
   if (!/^[A-Za-z0-9]{8,64}$/.test(id)) throw new Error('Mensagem inválida.');
   const emoji = String(b.emoji ?? '');
@@ -323,7 +318,7 @@ export default async function handler(req, res) {
             if (estado !== c.estado) await rest('mkt_grupos_conexao?id=eq.1', { method: 'PATCH', prefer: 'return=minimal', body: { estado, estado_em: new Date().toISOString() } }).catch(() => null);
           } catch (e) { erro = String(e?.message || e).slice(0, 200); }
         }
-        return res.status(200).json({ conexao: c, estado, erro, envioAmbiente: envioLigadoNoAmbiente(), privado: String(process.env.MKT_GRUPOS_PRIVADO || '') === '1', admin });
+        return res.status(200).json({ conexao: c, estado, erro, envioAmbiente: envioLigadoNoAmbiente(), privado: false, admin });
       }
       case 'configurar': {
         soAdmin();
@@ -388,7 +383,7 @@ export default async function handler(req, res) {
       }
       case 'mensagens': {
         const jid = String(b.jid || '');
-        if (!ehGrupo(jid) && !ehPessoa(jid)) throw new Error('Conversa inválida.');
+        if (!ehGrupo(jid)) throw new Error('O chip do Marketing é só de grupos.');
         const pagina = Math.max(1, Math.min(50, Number(b.pagina) || 1));
         const r = await evoMkt('chat/findMessages', { method: 'POST', body: { where: { key: { remoteJid: jid } }, page: pagina, offset: 40 }, timeoutMs: 30_000 });
         return res.status(200).json({ mensagens: lerMensagens(r?.messages?.records).reverse(), paginas: Number(r?.messages?.pages) || 1 });

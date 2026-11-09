@@ -83,7 +83,7 @@ Trocar a instância desliga o envio (`envio_ligado = false`) até alguém religa
      `/mkt`): `MKT_EVOLUTION_URL` e `MKT_EVOLUTION_APIKEY`. Sem elas, usa a mesma
      `EVOLUTION_URL`/`EVOLUTION_APIKEY` do QS;
    - `MKT_GRUPOS_ENVIO=1` **só quando for liberar o envio**;
-   - opcional `MKT_GRUPOS_PRIVADO=1` (ver "Celular").
+   - **Não existe mais** `MKT_GRUPOS_PRIVADO`: o chip é SÓ de grupos (09/11/2026).
 4. Push (deploy) e, logado como admin: **Marketing › Chip do Marketing** → nome da
    instância + número → Salvar → "Apontar webhook" → "Mostrar QR code" se
    desconectado.
@@ -122,7 +122,7 @@ coordenação (os dois motores não se enxergam; intervalo e janela viram a soma
 | Pausar / retomar / cancelar | Campanhas → clicar | — | cancelar tira da fila quem não recebeu |
 | Cadência (destino fixo + passos datados) | Cadências | — | cada passo é uma campanha |
 | Recorrência (dias da semana + hora, de/até) | Cadências | — | gera campanha 24 h antes; cancela-se em Campanhas |
-| Celular: conversas, mensagens, responder, citar, reagir | Celular do MKT | `chat/findChats`, `chat/findMessages`, `sendText` + `quoted`, `sendReaction` | resposta só em GRUPO; pessoa só com `MKT_GRUPOS_PRIVADO=1` e se ela escreveu primeiro |
+| Celular: conversas, mensagens, responder, citar, reagir | Celular do MKT | `chat/findChats`, `chat/findMessages`, `sendText` + `quoted`, `sendReaction` | SÓ GRUPO. Conversa particular do número (lead que manda mensagem) não sai do servidor, não aparece e não é respondida — pessoa vai pela API oficial |
 
 ### Comportamentos de segurança
 

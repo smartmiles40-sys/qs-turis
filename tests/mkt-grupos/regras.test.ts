@@ -6,7 +6,7 @@ import {
   motivoBloqueioInstancia, caminhoDaInstancia, destinoDaCaixaPermitido, validarCampanha,
   resolverGrupos, montarFila, resumirFila, campanhaTerminou, linhaPresa, sortearIntervaloMs,
   liberadaEm, dentroDaJanela, isoDeSP, ocorrencias, campanhaDaOcorrencia, montarEnvio, envioDaFila,
-  erroPermanente, lerGrupo, semNono, intervalo,
+  erroPermanente, lerGrupo, lerConversas, semNono, intervalo,
   // @ts-expect-error — módulo JS das funções da Vercel, sem tipos
 } from "../../api/_mktGruposRegras.js";
 
@@ -65,12 +65,25 @@ test("caminho da Evolution precisa terminar na instância do Marketing", () => {
   assert.equal(caminhoDaInstancia("/message/sendText/marketing-a", ""), false);
 });
 
-test("caixa: grupo sim; pessoa só com chave ligada e se ela escreveu primeiro", () => {
+test("caixa: só grupo — pessoa nunca, nem com a chave antiga ligada", () => {
   assert.equal(destinoDaCaixaPermitido(G1), null);
   assert.ok(destinoDaCaixaPermitido("5511999990000@s.whatsapp.net"));
-  assert.ok(destinoDaCaixaPermitido("5511999990000@s.whatsapp.net", { privadoLigado: true }));
-  assert.equal(destinoDaCaixaPermitido("5511999990000@s.whatsapp.net", { privadoLigado: true, pessoaJaEscreveu: true }), null);
+  process.env.MKT_GRUPOS_PRIVADO = "1";
+  assert.ok(destinoDaCaixaPermitido("5511999990000@s.whatsapp.net"));
+  delete process.env.MKT_GRUPOS_PRIVADO;
   assert.ok(destinoDaCaixaPermitido("status@broadcast"));
+});
+
+test("caixa: conversas particulares do chip não saem do servidor", () => {
+  const brutas = [
+    { remoteJid: G1, name: "Japão 2027 #1", updatedAt: "2026-11-09T10:00:00Z" },
+    { remoteJid: "5511999990000@s.whatsapp.net", pushName: "Lead curioso", updatedAt: "2026-11-09T11:00:00Z" },
+    { remoteJid: "status@broadcast" },
+  ];
+  const lista = lerConversas(brutas);
+  assert.equal(lista.length, 1);
+  assert.equal(lista[0].jid, G1);
+  assert.ok(lista.every((c: { grupo: boolean }) => c.grupo));
 });
 
 // ── CAMPANHA E FILA ─────────────────────────────────────────────────────────
