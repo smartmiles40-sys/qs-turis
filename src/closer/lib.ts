@@ -158,6 +158,7 @@ export function erroAmigavel(e: unknown): string {
     "contrato-ja-assinado": "Este contrato já foi assinado.",
     "sem-contrato": "Não tem contrato enviado pra cancelar.",
     "contrato-sendo-gerado": "O QS está gerando um contrato automático pra este cliente agora. Espere um minuto e tente de novo.",
+    "pessoa-nao-esta-na-venda": "Esta pessoa não está (mais) na venda — atualize a tela.",
     "negocio-nao-encontrado": "Cartão não encontrado (atualize a tela).",
     "acao-invalida": "Ação inválida.",
     "valor-invalido": "Informe um valor maior que zero.",

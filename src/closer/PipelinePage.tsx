@@ -15,6 +15,7 @@
 // Filtros: período (quando entrou no pipeline), etapa e closer (só a gestão).
 // Cada coluna mostra quantos cartões e quanto vale.
 // 0351: cartão com família vira PASTA — "Família · N pessoas" e, aberto, quem vai.
+// 0352: com contrato por pessoa, a pasta mostra "contratos 2/4 assinados".
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -23,7 +24,7 @@ import { Aviso, Botao, Etiqueta, Modal, Vazio } from "@/rel/ui";
 import { ETAPAS, ETAPAS_COM_MOTIVO, ETAPAS_FINAIS, NOME_ETAPA, bancoSemPipelineV2, brl, dataBr, emPreVenda, espelharNoBitrix, listarNegocios, moverNegocio, nomeDoLead, seloDaVenda, trazerDoBitrix, useConfigDaArea, type Etapa, type Negocio } from "./lib";
 import NegocioPainel, { type LinksDoPainel } from "./NegocioPainel";
 import { familiasDosNegocios } from "@/venda/familia";
-import { ativas, ehFamilia, linhaCurta, resumoFamilia, type FamiliaDaVenda } from "@/venda/familiaRegras";
+import { ativas, ehFamilia, linhaCurta, resumoContratosFamilia, resumoFamilia, type FamiliaDaVenda } from "@/venda/familiaRegras";
 
 const PERIODOS = [
   { id: "30", rotulo: "Últimos 30 dias" },
@@ -288,6 +289,8 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
                       </button>
                       {pasta && (() => {
                         const r = resumoFamilia(pasta);
+                        // 0352: um contrato por pessoa → "contratos 2/4 assinados".
+                        const rc = resumoContratosFamilia(pasta);
                         return (
                           <div className="px-2.5 pb-2 -mt-1 rounded-b-lg" style={{ background: "var(--card)", border: "1px solid var(--line)", borderTop: "none" }}>
                             <button type="button" aria-expanded={aberta} className="w-full text-left text-[12px] font-semibold pt-1.5 flex items-center gap-1.5"
@@ -296,6 +299,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
                               <span aria-hidden>{aberta ? "▾" : "▸"}</span> 👨‍👩‍👧 {r.texto}
                               {r.menores > 0 && <span style={{ color: "var(--ink3)", fontWeight: 400 }}> · {r.menores} menor{r.menores > 1 ? "es" : ""}</span>}
                               {r.incompletas > 0 && <span style={{ color: "var(--err-ink)", fontWeight: 400 }}> · {r.incompletas} sem dados</span>}
+                              {rc.texto && <span style={{ color: rc.assinados === rc.total ? "var(--rel-ink)" : "var(--ink3)", fontWeight: 400 }}> · {rc.texto}</span>}
                             </button>
                             {aberta && (
                               <ul className="mt-1 space-y-0.5">

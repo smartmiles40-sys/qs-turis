@@ -53,3 +53,13 @@ test("responsável do menor vai no json do item e volta ao reabrir (chave sumida
   const semMae = restaurarViajantes({ item: { valor: null, passageiros: [json[0], json[2]] } });
   assert.equal(semMae.viajantes.find((v) => v.nome === "Bia Lima")?.responsavel, "");
 });
+
+test("0352: o quadro mostra \"contratos 2/4 assinados\" (quem saiu da venda e quem não recebeu não contam)", () => {
+  const f = { pessoas: [
+    p({ comprador: true, contrato_status: "assinado" }), p({ contrato_status: "assinado" }), p({ contrato_status: "enviado" }),
+    p({ contrato_status: "visualizado" }), p({ contrato_status: null }), p({ contrato_status: "assinado", removida_em: "2026-11-09" }),
+  ] };
+  assert.deepEqual(R.resumoContratosFamilia(f), { total: 4, assinados: 2, texto: "contratos 2/4 assinados" });
+  assert.equal(R.resumoContratosFamilia({ pessoas: [p(), p()] }).texto, "");
+  assert.equal(R.situacaoContrato(p({ contrato_status: "recusado", menor: false })), "recusado");
+});

@@ -139,8 +139,56 @@ export interface Previa {
   clienteId?: string | null;
   /** Quem viaja na venda registrada (base do contrato por pessoa — fase 3). */
   viajantes?: { nome: string; valor: number | null; aereo_incluso: boolean | null }[];
+  /** 0352 — prévia de UMA pessoa: avisos, o que bloqueia e a linha dela. */
+  avisos?: string[];
+  bloqueios?: string[];
+  pessoa?: PessoaContrato;
 }
-export const previaDoContrato = (negocioId: string) => api<Previa>("contrato-previa", { negocioId });
+/** Sem `vendaPessoaId` = o contrato do cartão (como sempre). Com = o contrato DAQUELA pessoa (0352). */
+export const previaDoContrato = (negocioId: string, vendaPessoaId?: string | null) =>
+  api<Previa>("contrato-previa", { negocioId, ...(vendaPessoaId ? { vendaPessoaId } : {}) });
+
+// ── 0352: contrato POR PESSOA (família) ─────────────────────────────────────
+export interface ContratoDaPessoa {
+  id: string; status: StatusContrato; modo: "automatico" | "manual" | null; link_assinatura: string | null; erro: string | null;
+  zapsign_token: string | null; drive_pdf_url: string | null; pdf_assinado_url: string | null;
+  criado_em: string | null; enviado_em: string | null; assinado_em: string | null;
+}
+export interface PessoaContrato {
+  venda_pessoa_id: string; cliente_id: string; nome: string | null; comprador: boolean; vinculo: string | null;
+  menor: boolean; idade: number | null; valor: number | null; aereo_incluso: boolean | null; bitrix_deal_id: string | null;
+  /** Quem assina no ZapSign: o próprio, ou (menor) o responsável. */
+  assina: { cliente_id: string | null; proprio: boolean; nome: string | null; email: string | null; telefone: string | null };
+  /** O que impede o contrato desta pessoa (vazio = pode ir). */
+  bloqueios: string[];
+  /** O contrato que a tela mostra (vivo; sem vivo, o último). */
+  atual: ContratoDaPessoa | null;
+  /** O vivo (gerando/enviado/visto/assinado) — com ele, a pessoa não recebe outro. */
+  ativo: ContratoDaPessoa | null;
+}
+export interface FamiliaContrato {
+  familia: boolean;
+  modo?: "automatico" | "manual";
+  pessoas?: PessoaContrato[];
+  resumo?: { total: number; assinados: number; pendentes: number; recusados: number; texto: string; statusCartao: string | null };
+}
+/** familia=false (venda de 1 pessoa, ou banco sem a 0351/0352) → a tela segue exatamente como antes. */
+export async function familiaDoContrato(negocioId: string): Promise<FamiliaContrato> {
+  try { return await api<FamiliaContrato>("contrato-familia", { negocioId }); }
+  catch (e) {
+    // Servidor antigo (sem a ação) → como antes.
+    if ((e as { status?: number }).status === 400) return { familia: false };
+    throw e;
+  }
+}
+export interface ResultadoPessoa {
+  vendaPessoaId: string; nome: string | null;
+  resultado: "enviado" | "pulado" | "bloqueado" | "erro" | "adiado";
+  motivo?: string; contratoId?: string | null; link?: string | null;
+}
+/** Um contrato por pessoa marcada (o comprador sempre vai). Idempotente: quem já tem contrato é pulado. */
+export const enviarContratosDaFamilia = (negocioId: string, vendaPessoaIds: string[]) =>
+  api<{ ok: boolean; resultados: ResultadoPessoa[] }>("contrato-enviar", { negocioId, vendaPessoaIds });
 
 /** O que voltou pro cadastro do cliente (rel_clientes) depois de gerar/enviar. */
 export interface ResultadoCadastro { clienteId: string | null; gravados: string[]; aviso?: string | null }
@@ -149,11 +197,11 @@ type PreviaEnviada = Pick<Previa, "campos" | "origem">;
 const soPrevia = (p?: PreviaEnviada | null) => (p ? { campos: p.campos, origem: p.origem } : null);
 
 export interface ResultadoEnvio { ok: boolean; contratoId?: string; link?: string | null; erro?: string; cadastro?: ResultadoCadastro | null }
-export const enviarContrato = (negocioId: string, campos: CamposContrato, substituir = false, previa?: PreviaEnviada | null) =>
-  api<ResultadoEnvio>("contrato-enviar", { negocioId, campos, substituir, previa: soPrevia(previa) });
-/** O PDF como vai sair, pra abrir numa aba. Com o cartão, o que o closer corrigiu volta pro cadastro. */
-export async function pdfDeTeste(campos: CamposContrato, negocioId?: string, previa?: PreviaEnviada | null): Promise<{ blob: Blob; erros: string[]; avisos: string[]; cadastro: ResultadoCadastro | null }> {
-  const r = await api<{ base64: string; erros: string[]; avisos: string[]; cadastro?: ResultadoCadastro | null }>("contrato-pdf-teste", { campos, negocioId, previa: soPrevia(previa) });
+export const enviarContrato = (negocioId: string, campos: CamposContrato, substituir = false, previa?: PreviaEnviada | null, vendaPessoaId?: string | null) =>
+  api<ResultadoEnvio>("contrato-enviar", { negocioId, campos, substituir, previa: soPrevia(previa), ...(vendaPessoaId ? { vendaPessoaId } : {}) });
+/** O PDF como vai sair, pra abrir numa aba. Com o cartão, o que o closer corrigiu volta pro cadastro (0352: de quem assina). */
+export async function pdfDeTeste(campos: CamposContrato, negocioId?: string, previa?: PreviaEnviada | null, vendaPessoaId?: string | null): Promise<{ blob: Blob; erros: string[]; avisos: string[]; cadastro: ResultadoCadastro | null }> {
+  const r = await api<{ base64: string; erros: string[]; avisos: string[]; cadastro?: ResultadoCadastro | null }>("contrato-pdf-teste", { campos, negocioId, previa: soPrevia(previa), ...(vendaPessoaId ? { vendaPessoaId } : {}) });
   const bin = atob(r.base64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -197,9 +245,12 @@ export async function enviosDoCartao(negocioId: string): Promise<EnvioContrato[]
   return (data ?? []) as unknown as EnvioContrato[];
 }
 
-/** Modo manual: 'enviado' (link colado) | 'assinado' (link do PDF, opcional) | 'cancelar' (motivo). */
-export async function contratoManual(negocioId: string, acao: "enviado" | "assinado" | "cancelar", link?: string) {
-  const { error } = await supabase.rpc("contrato_manual", { p_negocio: negocioId, p_acao: acao, p_link: link ?? null });
+/** Modo manual: 'enviado' (link colado) | 'assinado' (link do PDF, opcional) | 'cancelar' (motivo).
+ *  0352: com `vendaPessoaId`, o contrato DAQUELA pessoa (sem = o do cartão, como sempre). */
+export async function contratoManual(negocioId: string, acao: "enviado" | "assinado" | "cancelar", link?: string, vendaPessoaId?: string | null) {
+  const { error } = await supabase.rpc("contrato_manual", {
+    p_negocio: negocioId, p_acao: acao, p_link: link ?? null, ...(vendaPessoaId ? { p_venda_pessoa: vendaPessoaId } : {}),
+  });
   if (error) throw new Error(erroAmigavel(error));
 }
 

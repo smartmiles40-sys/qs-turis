@@ -615,6 +615,14 @@ async function lerClientes(filtro) {
   return (await rest(`rel_clientes?select=${COLS_CLIENTE_BASE}&${filtro}`)) || [];
 }
 
+/** 0352: fichas (rel_clientes) por id, com RG e endereço → Map(id → ficha). */
+export async function fichasPorIds(ids) {
+  const lista = unicos(ids || []).filter((x) => UUID.test(String(x)));
+  if (!lista.length) return new Map();
+  const r = await lerClientes(`id=in.(${lista.join(',')})`);
+  return new Map((r || []).map((c) => [c.id, c]));
+}
+
 /**
  * A ficha da pessoa no cadastro único. Primeiro pelos vínculos (venda → lead
  * → viagem do Rel), seguindo a mescla; só depois por telefone/e-mail.
@@ -720,16 +728,17 @@ export function idadeEm(nascimento, referencia) {
  *   responsavel = a pessoa que assina pelo menor (mesmo formato)
  * Não liga em nada (ZapSign/banco): é a base da fase 3.
  */
-export function montarPreviaDaPessoa(base, viajante, { responsavel = null, totalDaVenda = null, nViajantes = null } = {}) {
+export function montarPreviaDaPessoa(base, viajante, { responsavel = null, totalDaVenda = null, nViajantes = null, menor: menorForcado = false } = {}) {
   const campos = { ...(base?.campos || {}) };
   const origem = { ...(base?.origem || {}) };
   const avisos = [];
   const v = viajante || {};
   const idade = idadeEm(v.nascimento, campos.data_venda);
-  const menor = idade != null && idade < 18;
+  // 0352: `menor: true` vem da venda (qs_venda_pessoas.menor = menor na data da VIAGEM).
+  const menor = menorForcado === true || (idade != null && idade < 18);
   const quemAssina = menor ? responsavel : v;
   if (menor && !responsavel) avisos.push(`${v.nome || 'O viajante'} é menor de idade: falta o responsável (pai/mãe) que assina.`);
-  if (idade == null) avisos.push(`Sem data de nascimento de ${v.nome || 'viajante'}: não dá pra saber se é menor.`);
+  if (idade == null && !menor) avisos.push(`Sem data de nascimento de ${v.nome || 'viajante'}: não dá pra saber se é menor.`);
 
   const fmt = {
     nome: (x) => String(x || '').replace(/\s+/g, ' ').trim(),
@@ -816,11 +825,19 @@ export function correcoesDoCliente(cliente, c, previa = null, { podeSobrescrever
  * envio e no "Gerar o PDF" do cartão. Nunca derruba o contrato: erro vira aviso.
  * CPF já usado por OUTRA ficha (índice único) → grava o resto e avisa.
  */
-export async function gravarNoCadastro({ negocio, campos, previa = null, userId = null }) {
+export async function gravarNoCadastro({ negocio, campos, previa = null, userId = null, clienteId = null }) {
   try {
-    const lead = (await rest(`qs_leads?select=email,phone,cliente_id&id=eq.${negocio.lead_id}&limit=1`).catch(() => null))?.[0] || {};
-    const venda = (await rest(`qs_vendas?select=cliente_id&negocio_id=eq.${negocio.id}&limit=1`).catch(() => null))?.[0] || null;
-    const { cliente, por } = await acharCliente(negocio, lead, venda);
+    let cliente = null;
+    let por = null;
+    if (clienteId && UUID.test(String(clienteId))) {
+      // 0352: contrato por pessoa — a ficha de QUEM ASSINA (o próprio ou o responsável), pelo vínculo da venda.
+      cliente = (await lerClientes(`id=eq.${clienteId}&limit=1`).catch(() => []))?.[0] || null;
+      por = cliente ? 'vinculo' : null;
+    } else {
+      const lead = (await rest(`qs_leads?select=email,phone,cliente_id&id=eq.${negocio.lead_id}&limit=1`).catch(() => null))?.[0] || {};
+      const venda = (await rest(`qs_vendas?select=cliente_id&negocio_id=eq.${negocio.id}&limit=1`).catch(() => null))?.[0] || null;
+      ({ cliente, por } = await acharCliente(negocio, lead, venda));
+    }
     if (!cliente) return { clienteId: null, gravados: [], aviso: 'Não achei a ficha do cliente no cadastro — nada foi gravado.' };
     const avisos = [];
     let patch = correcoesDoCliente(cliente, campos, previa, { podeSobrescrever: por === 'vinculo', avisos });

@@ -90,13 +90,25 @@ export function situacaoBitrix(p: Pick<PessoaFamilia, "comprador" | "bitrix_stat
   }
 }
 
-/** Contrato da pessoa (Fase 3 — por enquanto quase sempre vazio). */
+/** Contrato da pessoa (0352: um contrato por pessoa; qs_venda_pessoas.contrato_status). */
 export function situacaoContrato(p: Pick<PessoaFamilia, "contrato_status" | "menor" | "responsavel_nome">): string {
   const st: Record<string, string> = {
-    pendente: "a enviar", gerando: "gerando", enviado: "enviado", visualizado: "visto", assinado: "assinado", cancelado: "cancelado", erro: "erro",
+    pendente: "a enviar", gerando: "gerando", enviado: "enviado", visualizado: "visto", assinado: "assinado", recusado: "recusado", cancelado: "cancelado", erro: "erro",
   };
-  const base = p.contrato_status ? st[p.contrato_status] ?? p.contrato_status : "ainda não (contrato por pessoa vem na Fase 3)";
+  const base = p.contrato_status ? st[p.contrato_status] ?? p.contrato_status : "ainda não enviado";
   return p.menor ? `${base} · assina: ${p.responsavel_nome ?? "o titular"}` : base;
+}
+
+/**
+ * "contratos 2/4 assinados" no quadro (0352) — a mesma regra do servidor
+ * (api/_contratoFamilia.js resumoDosContratos) e do banco (contrato_resumo_cartao):
+ * conta quem já recebeu contrato (enviado/visto/assinado/recusado). Vazio = nenhum saiu.
+ */
+export function resumoContratosFamilia(f: Pick<FamiliaDaVenda, "pessoas"> | null | undefined): { total: number; assinados: number; texto: string } {
+  const st = ativas(f?.pessoas).map((p) => p.contrato_status);
+  const assinados = st.filter((s) => s === "assinado").length;
+  const total = st.filter((s) => s === "enviado" || s === "visualizado" || s === "assinado" || s === "recusado").length;
+  return { total, assinados, texto: total ? `contratos ${assinados}/${total} assinado${total === 1 ? "" : "s"}` : "" };
 }
 
 /** "Família · 4 pessoas" + quantos menores e quantas fichas incompletas. */

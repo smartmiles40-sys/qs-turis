@@ -18,14 +18,20 @@
 //   • O contrato é À PARTE da venda (29/10): sai a qualquer momento — antes de
 //     registrar, depois de consolidar. Cartão consolidado não muda de etapa
 //     (closer_recalcular_etapa ignora 'consolidada'); só o status do contrato.
+//   • 0352 (Bruno 09/11): venda com FAMÍLIA → UM CONTRATO POR PESSOA. O bloco
+//     lista quem vai com caixinhas "quem recebe contrato" (todos marcados; o
+//     comprador sempre), o valor de cada um, quem assina (o próprio ou o
+//     responsável, no menor), o que falta (bloqueia só aquela pessoa) e o
+//     status/link de cada contrato. Venda de 1 pessoa: exatamente como antes.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
-import { dataHoraBr, useConfigDaArea, type Negocio } from "./lib";
+import { brl, dataHoraBr, useConfigDaArea, type Negocio } from "./lib";
+import { rotuloVinculo } from "@/venda/familiaRegras";
 import {
   NOME_STATUS_CONTRATO, ROTULOS, TOM_STATUS_CONTRATO, atualizarContrato, cancelarContrato, contratoManual, enviarContrato,
-  enviosDoCartao, errosDoContrato, linkDoPdf, pdfDeTeste, previaDoContrato, textoDoCadastro,
-  type CamposContrato, type EnvioContrato, type Previa,
+  enviarContratosDaFamilia, enviosDoCartao, errosDoContrato, familiaDoContrato, linkDoPdf, pdfDeTeste, previaDoContrato, textoDoCadastro,
+  type CamposContrato, type EnvioContrato, type FamiliaContrato, type PessoaContrato, type Previa, type ResultadoPessoa,
 } from "./contrato";
 
 function LinkCopiavel({ rotulo, url }: { rotulo: string; url: string }) {
@@ -63,6 +69,8 @@ function BotaoPdf({ contratoId, qual, rotulo }: { contratoId: string; qual: "ger
 
 export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; onMudou: () => void }) {
   const [envios, setEnvios] = useState<EnvioContrato[] | null>(null);
+  // 0352: família → contrato por pessoa (familia=false: venda de 1 pessoa, o bloco de sempre).
+  const [familia, setFamilia] = useState<FamiliaContrato | null>(null);
   const config = useConfigDaArea();
   const [aviso, setAviso] = useState<{ tom: "ok" | "aviso" | "erro"; t: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -71,7 +79,9 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
   const [texto, setTexto] = useState("");
 
   const carregar = useCallback(async () => {
+    const fam = familiaDoContrato(negocio.id).catch(() => ({ familia: false }) as FamiliaContrato);
     try { setEnvios(await enviosDoCartao(negocio.id)); } catch (e) { setEnvios([]); setAviso({ tom: "erro", t: (e as Error).message }); }
+    setFamilia(await fam);
   }, [negocio.id]);
   useEffect(() => { void carregar(); }, [carregar, negocio.status_contrato]);
 
@@ -89,7 +99,14 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
     finally { setOcupado(false); }
   }
 
-  if (!config || envios === null) return null;
+  if (!config || envios === null || familia === null) return null;
+
+  if (familia.familia) {
+    return (
+      <ContratosDaFamilia negocio={negocio} fam={familia} automatico={familia.modo ? familia.modo === "automatico" : automatico} perdido={perdido}
+        onRecarregar={async () => { await carregar(); onMudou(); }} />
+    );
+  }
 
   return (
     <section className="rel-card p-4">
@@ -207,11 +224,192 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// 0352 — FAMÍLIA: UM CONTRATO POR PESSOA
+// ═════════════════════════════════════════════════════════════════════════════
+const NOME_RESULTADO: Record<ResultadoPessoa["resultado"], string> = {
+  enviado: "enviado", pulado: "já tinha", bloqueado: "bloqueado", erro: "falhou", adiado: "ficou pra depois",
+};
+
+function ContratosDaFamilia({ negocio, fam, automatico, perdido, onRecarregar }: {
+  negocio: Negocio; fam: FamiliaContrato; automatico: boolean; perdido: boolean; onRecarregar: () => Promise<void>;
+}) {
+  const pessoas = useMemo(() => fam.pessoas ?? [], [fam.pessoas]);
+  // Quem PODE receber agora: sem bloqueio e sem contrato vivo.
+  const podeReceber = (p: PessoaContrato) => p.bloqueios.length === 0 && !p.ativo;
+  // Todos marcados por padrão (guarda só quem o closer DESMARCOU); o comprador sempre (caixinha travada).
+  const [desmarcados, setDesmarcados] = useState<Set<string>>(() => new Set());
+  const [ocupado, setOcupado] = useState(false);
+  const [aviso, setAviso] = useState<{ tom: "ok" | "aviso" | "erro"; t: string } | null>(null);
+  const [resultados, setResultados] = useState<ResultadoPessoa[] | null>(null);
+  const [previaDe, setPreviaDe] = useState<PessoaContrato | null>(null);
+  const [manual, setManual] = useState<null | { acao: "enviado" | "assinado" | "cancelar"; p: PessoaContrato }>(null);
+  const [texto, setTexto] = useState("");
+
+  const aEnviar = pessoas.filter((p) => (p.comprador || !desmarcados.has(p.venda_pessoa_id)) && podeReceber(p));
+  const resumo = fam.resumo;
+
+  async function rodar(f: () => Promise<unknown>, ok?: string) {
+    setOcupado(true);
+    setAviso(null);
+    try { await f(); if (ok) setAviso({ tom: "ok", t: ok }); await onRecarregar(); }
+    catch (e) { setAviso({ tom: "erro", t: (e as Error).message }); }
+    finally { setOcupado(false); }
+  }
+
+  async function enviarTodos() {
+    setOcupado(true);
+    setAviso(null);
+    setResultados(null);
+    try {
+      const r = await enviarContratosDaFamilia(negocio.id, aEnviar.map((p) => p.venda_pessoa_id));
+      setResultados(r.resultados);
+      const env = r.resultados.filter((x) => x.resultado === "enviado").length;
+      setAviso(r.ok
+        ? { tom: "ok", t: `${env} contrato${env === 1 ? "" : "s"} enviado${env === 1 ? "" : "s"} pelo ZapSign — cada um recebe o seu por e-mail.` }
+        : { tom: "aviso", t: `${env} enviado${env === 1 ? "" : "s"}; veja abaixo quem ficou de fora e por quê. Os outros não foram afetados.` });
+      await onRecarregar();
+    } catch (e) {
+      setAviso({ tom: "erro", t: (e as Error).message });
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  return (
+    <section className="rel-card p-4">
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <h2 className="text-[14px] font-bold flex-1" style={{ color: "var(--ink)" }}>Contratos — um por pessoa</h2>
+        {resumo?.texto && <Etiqueta tom={resumo.assinados === resumo.total ? "rel" : "aviso"}>{resumo.texto}</Etiqueta>}
+      </div>
+      <p className="text-[12.5px] mb-2" style={{ color: "var(--ink2)" }}>
+        Cada pessoa recebe o contrato dela, com o valor dela. Menor de idade: quem assina é o responsável (pai/mãe).
+        {automatico ? " Marque quem recebe e envie — quem já tem contrato não recebe de novo." : " Monte o contrato de cada pessoa, mande por fora e marque aqui."}
+      </p>
+      {aviso && <div className="mb-2"><Aviso tom={aviso.tom}>{aviso.t}</Aviso></div>}
+
+      <ul className="space-y-2">
+        {pessoas.map((p) => {
+          const marcado = p.comprador || !desmarcados.has(p.venda_pessoa_id);
+          const bloqueado = p.bloqueios.length > 0;
+          const k = p.atual;
+          const res = resultados?.find((x) => x.vendaPessoaId === p.venda_pessoa_id);
+          return (
+            <li key={p.venda_pessoa_id} className="rounded-lg p-2.5" style={{ background: "var(--card2)", border: p.menor ? "1px solid var(--aviso, #d97706)" : "1px solid transparent" }}>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 flex-1 min-w-[180px] cursor-pointer">
+                  <input type="checkbox" checked={marcado && !bloqueado && !p.ativo} disabled={p.comprador || bloqueado || Boolean(p.ativo) || perdido}
+                    aria-label={`${p.nome ?? "Pessoa"} recebe contrato`}
+                    onChange={(e) => setDesmarcados((s) => { const c = new Set(s); if (e.target.checked) c.delete(p.venda_pessoa_id); else c.add(p.venda_pessoa_id); return c; })} />
+                  <span className="text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>{p.nome ?? "Sem nome"}</span>
+                </label>
+                <Etiqueta tom={p.comprador ? "rel" : "neutro"}>{rotuloVinculo(p)}</Etiqueta>
+                {p.menor && <Etiqueta tom="aviso">Menor{p.idade != null ? ` · ${p.idade} anos` : ""}</Etiqueta>}
+                <span className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{p.valor != null ? brl(p.valor) : "sem valor"}</span>
+              </div>
+              <p className="text-[12px] mt-1" style={{ color: "var(--ink2)" }}>
+                Assina: {p.assina.proprio ? <b>o próprio</b> : <>responsável: <b>{p.assina.nome ?? "—"}</b></>}
+                {p.assina.email ? ` · ${p.assina.email}` : ""}
+              </p>
+              {bloqueado && <p className="text-[12px] mt-1" style={{ color: "var(--err-ink)", fontWeight: 600 }}>Não dá pra gerar: {p.bloqueios.join(" ")}</p>}
+              <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[12.5px]">
+                {k ? (
+                  <>
+                    <Etiqueta tom={TOM_STATUS_CONTRATO[k.status]}>{NOME_STATUS_CONTRATO[k.status]}</Etiqueta>
+                    <span style={{ color: "var(--ink3)" }}>
+                      {k.modo === "manual" ? "por fora" : "ZapSign"}
+                      {k.enviado_em ? ` · enviado ${dataHoraBr(k.enviado_em)}` : ""}
+                      {k.assinado_em ? ` · assinou ${dataHoraBr(k.assinado_em)}` : ""}
+                    </span>
+                    {k.status === "erro" && k.erro && <span style={{ color: "var(--err-ink)" }}>{k.erro.slice(0, 160)}</span>}
+                    {p.ativo && k.link_assinatura && k.status !== "assinado" && <LinkCopiavel rotulo="Link de assinatura" url={k.link_assinatura} />}
+                    {k.drive_pdf_url && <BotaoPdf contratoId={k.id} qual="gerado" rotulo="PDF enviado" />}
+                    {k.pdf_assinado_url && <BotaoPdf contratoId={k.id} qual="assinado" rotulo="PDF assinado" />}
+                  </>
+                ) : <span style={{ color: "var(--ink3)" }}>Sem contrato ainda.</span>}
+                {res && res.resultado !== "enviado" && (
+                  <span style={{ color: res.resultado === "pulado" ? "var(--ink3)" : "var(--err-ink)" }}>
+                    Último envio: {NOME_RESULTADO[res.resultado]}{res.motivo ? ` — ${res.motivo}` : ""}
+                  </span>
+                )}
+              </div>
+              {!perdido && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {!bloqueado && k?.status !== "assinado" && (
+                    <Botao variante="fantasma" disabled={ocupado} onClick={() => setPreviaDe(p)}>
+                      {automatico ? (p.ativo ? "Reenviar / editar" : "Ver e editar") : "Montar contrato"}
+                    </Botao>
+                  )}
+                  {automatico && p.ativo?.zapsign_token && p.ativo.status !== "assinado" && (
+                    <Botao variante="fantasma" disabled={ocupado} onClick={() => void rodar(async () => { await atualizarContrato(p.ativo!.id); }, "Status conferido no ZapSign.")}>Atualizar status</Botao>
+                  )}
+                  {!p.ativo && (
+                    <Botao variante="fantasma" disabled={ocupado} onClick={() => { setTexto(""); setManual({ acao: "enviado", p }); }}>Mandei por fora</Botao>
+                  )}
+                  {p.ativo?.status !== "assinado" && (
+                    <Botao variante="fantasma" disabled={ocupado} onClick={() => { setTexto(""); setManual({ acao: "assinado", p }); }}>{p.ativo ? "Assinou por fora" : "Já está assinado"}</Botao>
+                  )}
+                  {p.ativo && p.ativo.status !== "assinado" && p.ativo.status !== "gerando" && (
+                    <Botao variante="perigo" disabled={ocupado} onClick={() => { setTexto(""); setManual({ acao: "cancelar", p }); }}>Cancelar</Botao>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {automatico && !perdido && (
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          <Botao variante="primario" disabled={ocupado || aEnviar.length === 0} onClick={() => void enviarTodos()}>
+            {ocupado ? "Gerando e enviando… (pode levar 1 min)" : aEnviar.length ? `Enviar ${aEnviar.length} contrato${aEnviar.length === 1 ? "" : "s"} pelo ZapSign` : "Ninguém a enviar"}
+          </Botao>
+          <span className="text-[12px]" style={{ color: "var(--ink3)" }}>
+            {aEnviar.length ? `Vai: ${aEnviar.map((p) => p.nome?.split(" ")[0] ?? "—").join(", ")}.` : "Todos já têm contrato ou estão bloqueados."}
+          </span>
+        </div>
+      )}
+
+      {previaDe && (
+        <PreviaContrato negocio={negocio} pessoa={previaDe} jaTemAtivo={Boolean(previaDe.ativo)} onFechar={() => setPreviaDe(null)}
+          onEnviado={(msg, tom) => { setPreviaDe(null); setAviso({ tom, t: msg }); void onRecarregar(); }} />
+      )}
+
+      <Modal aberto={manual !== null} onFechar={() => setManual(null)}
+        titulo={`${manual?.acao === "enviado" ? "Contrato enviado por fora" : manual?.acao === "assinado" ? "Contrato assinado" : "Cancelar contrato"}${manual ? ` — ${manual.p.nome ?? "viajante"}` : ""}`}
+        rodape={<>
+          <Botao variante="fantasma" onClick={() => setManual(null)}>Voltar</Botao>
+          <Botao variante={manual?.acao === "cancelar" ? "perigo" : "primario"} disabled={ocupado || (manual?.acao === "enviado" && !/^https?:\/\//i.test(texto.trim()))}
+            onClick={() => {
+              const m = manual!;
+              const t = texto.trim();
+              setManual(null);
+              if (m.acao === "cancelar" && m.p.ativo?.zapsign_token) void rodar(() => cancelarContrato(m.p.ativo!.id, t), "Contrato cancelado (e apagado no ZapSign).");
+              else void rodar(() => contratoManual(negocio.id, m.acao, t || undefined, m.p.venda_pessoa_id),
+                m.acao === "enviado" ? "Contrato marcado como enviado." : m.acao === "assinado" ? "Contrato marcado como assinado." : "Contrato cancelado.");
+            }}>
+            {manual?.acao === "enviado" ? "Marcar como enviado" : manual?.acao === "assinado" ? "Marcar assinado" : "Cancelar contrato"}
+          </Botao>
+        </>}>
+        <Campo rotulo={manual?.acao === "enviado" ? "Link de assinatura que você mandou" : manual?.acao === "assinado" ? "Link do PDF assinado (opcional)" : "Motivo (opcional)"}>
+          <Entrada value={texto} onChange={(e) => setTexto(e.target.value)} placeholder={manual?.acao === "cancelar" ? "Ex.: valores mudaram" : "https://"} autoFocus />
+        </Campo>
+        {manual?.acao === "assinado" && (
+          <p className="text-[12px] mt-2" style={{ color: "var(--ink3)" }}>O cartão só vai para "Contrato assinado" quando todos os contratos enviados estiverem assinados.</p>
+        )}
+      </Modal>
+    </section>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // PRÉVIA E ENVIO
 // ═════════════════════════════════════════════════════════════════════════════
-function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
+function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado, pessoa = null }: {
   negocio: Negocio; jaTemAtivo: boolean; onFechar: () => void; onEnviado: (msg: string, tom: "ok" | "aviso" | "erro") => void;
+  /** 0352: o contrato DESTA pessoa da família (sem = o contrato do cartão). */
+  pessoa?: PessoaContrato | null;
 }) {
+  const vpId = pessoa?.venda_pessoa_id ?? null;
   const [previa, setPrevia] = useState<Previa | null>(null);
   const [c, setC] = useState<CamposContrato | null>(null);
   const [erroCarga, setErroCarga] = useState<string | null>(null);
@@ -224,11 +422,11 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
 
   useEffect(() => {
     let vivo = true;
-    previaDoContrato(negocio.id)
+    previaDoContrato(negocio.id, vpId)
       .then((p) => { if (vivo) { setPrevia(p); setC(p.campos); } })
       .catch((e) => { if (vivo) setErroCarga((e as Error).message); });
     return () => { vivo = false; };
-  }, [negocio.id]);
+  }, [negocio.id, vpId]);
 
   const erros = useMemo(() => (c ? errosDoContrato(c) : {}), [c]);
   const temErro = Object.keys(erros).length > 0;
@@ -242,9 +440,10 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
     if (jaTemAtivo && !substituir) { setConfirmarSubstituir(true); return; }
     setEnviando(true);
     try {
-      const r = await enviarContrato(negocio.id, c, substituir, previa);
+      const r = await enviarContrato(negocio.id, c, substituir, previa, vpId);
       const cad = textoDoCadastro(r.cadastro);
-      if (r.ok) onEnviado(`Contrato enviado! O cliente recebe o link do ZapSign por e-mail. O cartão foi para "Contrato enviado".${cad ? ` ${cad}` : ""}`, "ok");
+      if (r.ok && pessoa) onEnviado(`Contrato de ${pessoa.nome ?? "viajante"} enviado! ${pessoa.menor ? `O responsável (${c.nome})` : "A pessoa"} recebe o link do ZapSign por e-mail.${cad ? ` ${cad}` : ""}`, "ok");
+      else if (r.ok) onEnviado(`Contrato enviado! O cliente recebe o link do ZapSign por e-mail. O cartão foi para "Contrato enviado".${cad ? ` ${cad}` : ""}`, "ok");
       else setErro([r.erro || "Não deu certo.", cad].filter(Boolean).join(" "));
     } catch (e) {
       const d = (e as Error & { dados?: { precisaConfirmar?: boolean } }).dados;
@@ -262,7 +461,7 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
     const aba = window.open("about:blank", "_blank");
     setGerandoPdf(true);
     try {
-      const r = await pdfDeTeste(c, negocio.id, previa);
+      const r = await pdfDeTeste(c, negocio.id, previa, vpId);
       setCadastroMsg(textoDoCadastro(r.cadastro) || null);
       const url = URL.createObjectURL(r.blob);
       if (aba) aba.location.href = url; else window.open(url, "_blank");
@@ -278,7 +477,7 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
   const mudar = (k: keyof CamposContrato, v: string) => setC((x) => (x ? { ...x, [k]: v } : x));
 
   return (
-    <Modal aberto titulo={previa && !automatico ? "Montar contrato" : "Enviar contrato"} onFechar={onFechar} largura={820}
+    <Modal aberto titulo={`${previa && !automatico ? "Montar contrato" : "Enviar contrato"}${pessoa ? ` — ${pessoa.nome ?? "viajante"}` : ""}`} onFechar={onFechar} largura={820}
       rodape={<>
         <Botao variante="fantasma" onClick={onFechar} disabled={enviando}>Fechar</Botao>
         <Botao variante={previa && !automatico ? "primario" : "secundario"} onClick={() => void verPdf()} disabled={enviando || gerandoPdf || !c}>
@@ -307,12 +506,23 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
           {confirmarSubstituir && <Aviso tom="erro">Este cliente já tem um contrato {negocio.status_contrato === "assinado" ? "ASSINADO" : "aguardando assinatura"}. Enviar de novo cancela o anterior (no ZapSign também).</Aviso>}
           {erro && <Aviso tom="erro">{erro}</Aviso>}
           {cadastroMsg && <Aviso tom="ok">{cadastroMsg}</Aviso>}
-          {(previa.viajantes?.length ?? 0) > 1 && (
+          {!pessoa && (previa.viajantes?.length ?? 0) > 1 && (
             <Aviso>
-              A venda tem {previa.viajantes!.length} viajantes ({previa.viajantes!.map((v) => v.nome).filter(Boolean).join(", ")}). Por enquanto sai
-              um contrato só, com o valor total — o contrato por pessoa vem na próxima etapa.
+              A venda tem {previa.viajantes!.length} viajantes ({previa.viajantes!.map((v) => v.nome).filter(Boolean).join(", ")}). Aqui sai
+              um contrato só, com o valor total. Pra um contrato por pessoa, a venda precisa da lista de quem vai ("Editar quem vai").
             </Aviso>
           )}
+          {pessoa && (
+            <Aviso>
+              Contrato de <b>{pessoa.nome ?? "viajante"}</b> com o valor dele(a){pessoa.valor != null ? ` (${brl(pessoa.valor)})` : ""}.
+              {pessoa.menor
+                ? <> É menor de idade: quem assina (e recebe o ZapSign) é o responsável{pessoa.assina.nome ? <> <b>{pessoa.assina.nome}</b></> : ""}; o menor sai como VIAJANTE no quadro.</>
+                : " Quem assina é a própria pessoa."}
+              {" "}O que você corrigir dos dados de quem assina volta pro cadastro dele(a).
+            </Aviso>
+          )}
+          {(previa.bloqueios?.length ?? 0) > 0 && <Aviso tom="erro">{previa.bloqueios!.join(" ")}</Aviso>}
+          {(previa.avisos?.length ?? 0) > 0 && <Aviso>{previa.avisos!.join(" ")}</Aviso>}
 
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-[13px] font-semibold" style={{ color: "var(--ink2)" }}>Modelo:</span>
@@ -331,7 +541,7 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
               const dica = msgErro ? undefined : [r.dica, origem ? `veio de: ${origem}` : c[r.k] ? undefined : r.obrigatorio ? "obrigatório" : "vazio sai \"-\" no contrato"].filter(Boolean).join(" · ");
               return (
                 <div key={r.k} className={r.longo ? "sm:col-span-2" : ""}>
-                  <Campo rotulo={`${r.rotulo}${r.obrigatorio ? " *" : ""}`} erro={msgErro} dica={dica}>
+                  <Campo rotulo={`${pessoa && r.k === "valor_total" ? `Valor de ${pessoa.nome?.split(" ")[0] ?? "esta pessoa"}` : pessoa && pessoa.menor && r.k === "nome" ? "Nome do responsável (contratante)" : r.rotulo}${r.obrigatorio ? " *" : ""}`} erro={msgErro} dica={dica}>
                     {r.longo ? (
                       <textarea className="rel-input" rows={r.k === "roteiro" ? 10 : r.k === "inclusos" ? 7 : r.k === "destino" || r.k === "nao_inclusos" ? 3 : 2} value={c[r.k]} onChange={(e) => mudar(r.k, e.target.value)} />
                     ) : (

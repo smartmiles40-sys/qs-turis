@@ -53,6 +53,14 @@
 //        (com o cartão, o que o closer corrigiu da pessoa volta pro rel_clientes — gravarNoCadastro)
 //        → gera o PDF no QS, guarda no Storage, cria no ZapSign, grava o envio
 //   POST { acao: 'contrato-pdf-link', contratoId, qual } → link de 10 min do PDF (gerado|assinado)
+//   CONTRATO POR PESSOA (0352, 09/11 — família; regras puras em api/_contratoFamilia.js):
+//   POST { acao: 'contrato-familia', negocioId } → { familia, pessoas[], resumo } (quem recebe,
+//        valor, quem assina, bloqueios, contrato de cada um). familia=false = venda de 1 pessoa (fluxo antigo)
+//   'contrato-previa' / 'contrato-pdf-teste' / 'contrato-enviar' aceitam vendaPessoaId (o contrato
+//        DAQUELA pessoa: valor dela; menor → o responsável assina e o menor sai como viajante)
+//   POST { acao: 'contrato-enviar', negocioId, vendaPessoaIds: [...] } → um contrato por pessoa
+//        (o comprador sempre vai junto); idempotente (quem já tem contrato ativo é pulado);
+//        erro numa pessoa não derruba as outras → { ok, resultados[] }
 //   POST { acao: 'contrato-atualizar', contratoId }→ relê o documento no ZapSign
 //   POST { acao: 'contrato-cancelar', contratoId, motivo } → apaga no ZapSign + cancela
 //   POST ?acao=zapsign-webhook                     → o ZapSign avisa (header X-QS-Secret ou &s=)
@@ -70,8 +78,11 @@ import { carregarFamilia, espelharFamilia, filhosAtivos, resumoDaFamilia, somaDo
 import {
   apagarNoZapsign, arquivarAssinado, criarNoZapsign, gerarPdf, gravarNoCadastro, guardarPdf, hashDoCorpo, lerConfig, lerNoZapsign,
   linkDoPdf, montarPrevia, nomesDoArquivo, normalizarCampos, oQueFalta, statusDoDocumento, testarZapsign, urlDoApp,
-  validarCampos,
+  validarCampos, fichasPorIds, hojeBr, montarPreviaDaPessoa,
 } from './_contrato.js';
+import {
+  ativasDaVenda, decidirEnvio, linhaParaTela, planoDaFamilia, responsavelDaLinha, resumoDosContratos, statusDasLinhas, viajanteDaLinha,
+} from './_contratoFamilia.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SERVICO = {
@@ -412,8 +423,59 @@ async function configParaTela(req, u) {
   };
 }
 
-async function contratoAtivo(negocioId) {
-  return (await rest(`qs_contratos?select=id,status,modo,zapsign_token&negocio_id=eq.${negocioId}&status=in.(enviado,visualizado,assinado)&order=criado_em.desc&limit=1`).catch(() => null))?.[0] || null;
+async function contratoAtivo(negocioId, linha = null) {
+  if (!linha) return (await rest(`qs_contratos?select=id,status,modo,zapsign_token&negocio_id=eq.${negocioId}&status=in.(enviado,visualizado,assinado)&order=criado_em.desc&limit=1`).catch(() => null))?.[0] || null;
+  // 0352: um ativo por (cartão, pessoa). O contrato "do cartão" (sem pessoa) conta como o do comprador.
+  // Sem .catch: se a leitura falhar, NÃO pode seguir e duplicar o contrato.
+  const id = linha.venda_pessoa_id;
+  const filtro = linha.comprador ? `or=(venda_pessoa_id.eq.${id},venda_pessoa_id.is.null)` : `venda_pessoa_id=eq.${id}`;
+  return (await rest(`qs_contratos?select=id,status,modo,zapsign_token&negocio_id=eq.${negocioId}&status=in.(enviado,visualizado,assinado)&${filtro}&order=criado_em.desc&limit=1`))?.[0] || null;
+}
+
+// ── 0352: a família do cartão, pessoa por pessoa ────────────────────────────
+const COLS_PESSOAS = 'id,cliente_id,comprador,vinculo,menor,responsavel_cliente_id,valor,aereo_incluso,removida_em,bitrix_deal_id';
+const COLS_PLANO = 'id,status,modo,erro,link_assinatura,zapsign_token,drive_pdf_url,pdf_assinado_url,criado_em,enviado_em,assinado_em';
+
+/** Venda + pessoas + fichas + contratos → o plano (uma linha por pessoa). null = sem venda/sem 0351. */
+async function planoDoCartao(n) {
+  const venda = (await rest(`qs_vendas?select=id,valor_total,cliente_id&negocio_id=eq.${n.id}&limit=1`).catch(() => null))?.[0];
+  if (!venda) return null;
+  let pessoas;
+  try {
+    pessoas = (await rest(`qs_venda_pessoas?select=${COLS_PESSOAS}&venda_id=eq.${venda.id}&order=criado_em.asc`)) || [];
+  } catch (e) {
+    if (/qs_venda_pessoas/.test(String(e?.message || ''))) return null; // banco sem a 0351
+    throw e;
+  }
+  const ativas = ativasDaVenda(pessoas);
+  if (!ativas.length) return null;
+  const fichas = await fichasPorIds([...ativas.map((p) => p.cliente_id), ...ativas.map((p) => p.responsavel_cliente_id)]);
+  let contratos;
+  try {
+    contratos = (await rest(`qs_contratos?select=${COLS_PLANO},venda_pessoa_id&negocio_id=eq.${n.id}&order=criado_em.desc&limit=200`)) || [];
+  } catch (e) {
+    if (!/venda_pessoa_id/.test(String(e?.message || ''))) throw e;
+    // Banco sem a 0352: tudo é contrato do cartão (= do comprador).
+    contratos = ((await rest(`qs_contratos?select=${COLS_PLANO}&negocio_id=eq.${n.id}&order=criado_em.desc&limit=200`)) || []).map((k) => ({ ...k, venda_pessoa_id: null }));
+  }
+  const linhas = planoDaFamilia({ pessoas, fichas, contratos, valorTotal: venda.valor_total, hoje: hojeBr() });
+  return { venda, linhas, familia: ativas.length > 1, compradorVpId: ativas.find((p) => p.comprador)?.id || null };
+}
+
+/** Os campos do contrato DAQUELA pessoa a partir da prévia da venda toda. */
+const previaDaLinha = (base, linha, plano) => montarPreviaDaPessoa(base, viajanteDaLinha(linha), {
+  responsavel: responsavelDaLinha(linha), totalDaVenda: plano.venda.valor_total, nViajantes: plano.linhas.length, menor: linha.menor,
+});
+
+/** body.vendaPessoaId → { plano, linha } (ou { erro }). Sem vendaPessoaId → tudo nulo (contrato do cartão). */
+async function linhaDoCorpo(n, body) {
+  const vp = String(body?.vendaPessoaId || '');
+  if (!vp) return { plano: null, linha: null };
+  if (!UUID_RE.test(vp)) return { erro: { status: 400, body: { error: 'Pessoa inválida.' } } };
+  const plano = await planoDoCartao(n);
+  const linha = plano?.linhas.find((l) => l.venda_pessoa_id === vp) || null;
+  if (!linha) return { erro: { status: 404, body: { error: 'Esta pessoa não está (mais) na venda.' } } };
+  return { plano, linha };
 }
 
 /** A prévia que a tela recebeu ({campos, origem}): diz o que o closer EDITOU (write-back). */
@@ -434,13 +496,27 @@ async function enviarContrato(u, body) {
   const { cfg, falta } = await situacaoDaConfig();
   if (falta.length) return { status: 409, body: { error: 'O envio automático ainda não está configurado.', falta } };
 
+  // 0352: lista de pessoas → um contrato por pessoa.
+  if (Array.isArray(body.vendaPessoaIds)) return enviarParaFamilia(u, n, cfg, body);
+
+  const { linha, erro } = await linhaDoCorpo(n, body);
+  if (erro) return erro;
+  if (linha?.bloqueios.length) return { status: 400, body: { error: linha.bloqueios.join(' '), bloqueios: linha.bloqueios } };
+
   const c = normalizarCampos(body.campos);
   const { erros } = validarCampos(c);
   if (erros.length) return { status: 400, body: { error: `Falta preencher: ${erros.join(' ')}`, erros } };
+  return enviarUm({ u, n, cfg, c, linha, previa: previaDoCorpo(body), substituir: Boolean(body.substituir) });
+}
 
-  const ativo = await contratoAtivo(n.id);
-  if (ativo && !body.substituir) {
-    return { status: 409, body: { error: ativo.status === 'assinado' ? 'Este cliente já assinou um contrato.' : 'Já tem um contrato enviado aguardando assinatura.', precisaConfirmar: true, statusAtual: ativo.status } };
+/** Gera, guarda e manda pro ZapSign UM contrato (do cartão, ou de uma pessoa com `linha`). */
+async function enviarUm({ u, n, cfg, c, linha = null, previa = null, substituir = false, gravarCadastro = true }) {
+  const ativo = await contratoAtivo(n.id, linha);
+  // Por pessoa, contrato ASSINADO não é substituído (cancelar não desfaz assinatura).
+  const travaAssinado = Boolean(linha) && ativo?.status === 'assinado';
+  if (ativo && (!substituir || travaAssinado)) {
+    const quem = linha?.nome ? linha.nome.split(' ')[0] : 'Este cliente';
+    return { status: 409, body: { error: ativo.status === 'assinado' ? `${quem} já assinou um contrato.` : 'Já tem um contrato enviado aguardando assinatura.', precisaConfirmar: !travaAssinado, statusAtual: ativo.status } };
   }
 
   // "gerando" esquecido (função que estourou o tempo) vira erro e libera o cartão.
@@ -451,43 +527,55 @@ async function enviarContrato(u, body) {
 
   // O que o closer corrigiu (CPF, nascimento, RG, endereço, e-mail) volta pro
   // cadastro único — antes de gerar, pra valer mesmo se o ZapSign falhar.
-  const cadastro = await gravarNoCadastro({ negocio: n, campos: c, previa: previaDoCorpo(body), userId: u.id });
+  // 0352: no contrato por pessoa, a ficha é a de QUEM ASSINA (o próprio ou o responsável).
+  const cadastro = gravarCadastro
+    ? await gravarNoCadastro({ negocio: n, campos: c, previa, userId: u.id, clienteId: linha?.assina?.cliente_id || null })
+    : null;
 
   const lead = (await rest(`qs_leads?select=bitrix_id&id=eq.${n.lead_id}&limit=1`))?.[0];
-  const dealId = String(lead?.bitrix_id || '').replace(/\D/g, '') || null;
-  let linha;
+  const dealLead = String(lead?.bitrix_id || '').replace(/\D/g, '') || null;
+  // A pessoa com card FILHO no Bitrix recebe o recado no card dela; o comprador, no do lead.
+  const dealId = String(linha?.bitrix_deal_id || '').replace(/\D/g, '') || dealLead;
+  // Colunas da 0352 só no contrato por pessoa (o contrato do cartão grava igual a antes).
+  const daPessoa = linha
+    ? { venda_pessoa_id: linha.venda_pessoa_id, cliente_id: linha.cliente_id, assinante_cliente_id: linha.assina?.cliente_id || null }
+    : {};
+  let reg;
   try {
-    linha = (await rest('qs_contratos', {
+    reg = (await rest('qs_contratos', {
       method: 'POST', prefer: 'return=representation',
-      body: { negocio_id: n.id, lead_id: n.lead_id, tipo: c.tipo, modo: 'automatico', status: 'gerando', campos: c, bitrix_deal_id: dealId, enviado_por: u.id },
+      body: { negocio_id: n.id, lead_id: n.lead_id, tipo: c.tipo, modo: 'automatico', status: 'gerando', campos: c, bitrix_deal_id: dealId, enviado_por: u.id, ...daPessoa },
     }))?.[0];
   } catch (e) {
-    if (e.status === 409) return { status: 409, body: { error: 'Já tem um contrato sendo gerado pra este cartão. Espere um pouco.' } };
+    if (e.status === 409) {
+      return { status: 409, body: { error: linha ? `Já tem um contrato de ${linha.nome || 'esta pessoa'} sendo gerado. Espere um pouco.` : 'Já tem um contrato sendo gerado pra este cartão. Espere um pouco.' } };
+    }
     throw e;
   }
 
-  const nomes = nomesDoArquivo(c, dealId, n.id);
+  // O arquivo leva o nome de quem VIAJA (no menor, quem assina — c.nome — é o responsável).
+  const nomes = nomesDoArquivo(linha?.nome ? { ...c, nome: linha.nome } : c, dealId, n.id);
   let guardado = null;
   try {
     const pdf = await gerarPdf(c);
     // Cópia do que foi enviado no Storage. Se o Storage falhar, segue: o ZapSign guarda o original.
     try {
-      guardado = await guardarPdf(`${n.id}/${linha.id}.pdf`, pdf);
-      await rest(`qs_contratos?id=eq.${linha.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { drive_pdf_id: guardado, drive_pdf_url: guardado } });
+      guardado = await guardarPdf(`${n.id}/${reg.id}.pdf`, pdf);
+      await rest(`qs_contratos?id=eq.${reg.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { drive_pdf_id: guardado, drive_pdf_url: guardado } });
     } catch (e) {
-      console.warn('[closer] PDF não guardado no Storage', linha.id, e?.message);
+      console.warn('[closer] PDF não guardado no Storage', reg.id, e?.message);
     }
     const zs = await criarNoZapsign({ c, cfg, nomes, pdf, negocioId: n.id });
     if (!zs.token) throw new Error('O ZapSign não devolveu o documento.');
-    await rest(`qs_contratos?id=eq.${linha.id}`, {
+    await rest(`qs_contratos?id=eq.${reg.id}`, {
       method: 'PATCH', prefer: 'return=minimal',
       body: { zapsign_token: zs.token, zapsign_open_id: zs.openId, link_assinatura: zs.link },
     });
-    await registrarStatus(linha.id, 'enviado', {}, u.id);
+    await registrarStatus(reg.id, 'enviado', {}, u.id);
   } catch (e) {
     const msg = String(e?.message || 'Falhou.').slice(0, 900);
     console.error('[closer] contrato', n.id, msg);
-    await registrarStatus(linha.id, 'erro', { erro: msg }, u.id).catch(() => null);
+    await registrarStatus(reg.id, 'erro', { erro: msg }, u.id).catch(() => null);
     return { status: 200, body: { ok: false, erro: msg, cadastro } };
   }
 
@@ -496,9 +584,53 @@ async function enviarContrato(u, body) {
     if (ativo.zapsign_token && ativo.status !== 'assinado') await apagarNoZapsign(ativo.zapsign_token).catch(() => null);
     await registrarStatus(ativo.id, 'cancelado', { motivo: 'Substituído por um contrato novo.' }, u.id).catch(() => null);
   }
-  if (dealId) await comentarNoNegocio(dealId, `📄 Contrato de ${c.tipo === 'expedicao' ? 'expedição' : 'pacote'} enviado pelo QS (ZapSign) para ${c.email}.`).catch(() => null);
-  const final = (await rest(`qs_contratos?select=id,link_assinatura&id=eq.${linha.id}&limit=1`))?.[0];
-  return { status: 200, body: { ok: true, contratoId: linha.id, link: final?.link_assinatura || null, cadastro } };
+  const deQuem = linha ? ` — contrato de ${linha.nome || 'viajante'}${linha.menor ? ` (menor de idade; assina o responsável ${c.nome})` : ''}` : '';
+  if (dealId) await comentarNoNegocio(dealId, `📄 Contrato de ${c.tipo === 'expedicao' ? 'expedição' : 'pacote'} enviado pelo QS (ZapSign) para ${c.email}${deQuem}.`).catch(() => null);
+  const final = (await rest(`qs_contratos?select=id,link_assinatura&id=eq.${reg.id}&limit=1`))?.[0];
+  return { status: 200, body: { ok: true, contratoId: reg.id, link: final?.link_assinatura || null, cadastro, vendaPessoaId: linha?.venda_pessoa_id || null } };
+}
+
+// 0352: o envio da família roda em sequência dentro dos 60 s da função (vercel.json);
+// passou do orçamento, o resto fica "adiado" (clicar de novo continua — é idempotente).
+const ORCAMENTO_FAMILIA_MS = 40_000;
+const MOTIVO_PULO = {
+  'pular-assinado': 'Já assinou.', 'pular-gerando': 'O contrato já está sendo gerado.', 'pular-ativo': 'Já tem contrato aguardando assinatura.',
+};
+
+/** Um contrato por pessoa marcada (o comprador sempre). Erro numa pessoa não derruba as outras. */
+async function enviarParaFamilia(u, n, cfg, body) {
+  const plano = await planoDoCartao(n);
+  if (!plano) return { status: 409, body: { error: 'Esta venda ainda não tem a lista de quem vai. Registre a venda primeiro.' } };
+  const pedidos = new Set(body.vendaPessoaIds.map(String).filter((x) => UUID_RE.test(x)));
+  if (plano.compradorVpId) pedidos.add(plano.compradorVpId);
+  const resultados = [];
+  for (const id of pedidos) {
+    if (!plano.linhas.some((l) => l.venda_pessoa_id === id)) resultados.push({ vendaPessoaId: id, nome: null, resultado: 'erro', motivo: 'Esta pessoa não está (mais) na venda.' });
+  }
+  const base = await montarPrevia(n);
+  const inicio = Date.now();
+  for (const l of plano.linhas) {
+    if (!pedidos.has(l.venda_pessoa_id)) continue;
+    const r0 = { vendaPessoaId: l.venda_pessoa_id, nome: l.nome };
+    try {
+      if (l.bloqueios.length) { resultados.push({ ...r0, resultado: 'bloqueado', motivo: l.bloqueios.join(' ') }); continue; }
+      const d = decidirEnvio(l.ativo);
+      if (d !== 'enviar') { resultados.push({ ...r0, resultado: 'pulado', motivo: MOTIVO_PULO[d], contratoId: l.ativo?.id || null }); continue; }
+      if (Date.now() - inicio > ORCAMENTO_FAMILIA_MS) { resultados.push({ ...r0, resultado: 'adiado', motivo: 'Faltou tempo — clique em enviar de novo para os que faltam.' }); continue; }
+      const c = normalizarCampos(previaDaLinha(base, l, plano).campos);
+      const { erros } = validarCampos(c);
+      if (erros.length) { resultados.push({ ...r0, resultado: 'erro', motivo: `Falta preencher: ${erros.join(' ')}` }); continue; }
+      const r = await enviarUm({ u, n, cfg, c, linha: l, substituir: false, gravarCadastro: false });
+      if (r.status === 200 && r.body.ok) resultados.push({ ...r0, resultado: 'enviado', contratoId: r.body.contratoId, link: r.body.link });
+      else if (r.status === 409 && r.body.statusAtual) resultados.push({ ...r0, resultado: 'pulado', motivo: r.body.error });
+      else resultados.push({ ...r0, resultado: 'erro', motivo: r.body.erro || r.body.error || 'Falhou.' });
+    } catch (e) {
+      console.error('[closer] contrato família', n.id, l.venda_pessoa_id, e?.message);
+      resultados.push({ ...r0, resultado: 'erro', motivo: String(e?.message || 'Falhou.').slice(0, 300) });
+    }
+  }
+  const ok = resultados.every((r) => r.resultado === 'enviado' || r.resultado === 'pulado');
+  return { status: 200, body: { ok, resultados } };
 }
 
 /** Lê o documento no ZapSign e aplica o status (webhook e botão "Atualizar"). */
@@ -560,6 +692,9 @@ async function webhookZapsign(req, res) {
   const marcar = (resultado) => rest(`qs_contrato_webhooks?chave=eq.${chave}`, { method: 'PATCH', prefer: 'return=minimal', body: { resultado } }).catch(() => null);
 
   if (!/^[0-9a-f-]{20,60}$/i.test(token)) { await marcar('sem token'); return res.status(200).json({ ok: true, ignorado: 'sem token' }); }
+  // O contrato é achado pelo TOKEN DO DOCUMENTO (único por contrato — índice qs_contratos_zapsign_token),
+  // nunca pelo e-mail: com contrato por pessoa (0352) a família pode dividir o e-mail e dois menores
+  // têm o mesmo responsável assinando — cada contrato é um documento próprio no ZapSign.
   const contrato = (await rest(`qs_contratos?select=${COLS_CONTRATO}&zapsign_token=eq.${token}&limit=1`))?.[0];
   if (!contrato) { await marcar('documento não é do QS'); return res.status(200).json({ ok: true, ignorado: 'documento desconhecido' }); }
 
@@ -615,7 +750,33 @@ async function acaoDeContrato(acao, req, u, body) {
     if (!n) return { status: 404, body: { error: 'Cartão não encontrado.' } };
     if (!podeMexer(u, n)) return { status: 403, body: { error: 'Sem permissão neste cartão.' } };
     const [previa, sit] = await Promise.all([montarPrevia(n), situacaoDaConfig()]);
-    return { status: 200, body: { ...previa, modo: sit.falta.length ? 'manual' : 'automatico', falta: sit.falta } };
+    const modo = { modo: sit.falta.length ? 'manual' : 'automatico', falta: sit.falta };
+    // 0352: a prévia de UMA pessoa (valor dela; menor → dados do responsável + menor como viajante).
+    const { plano, linha, erro } = await linhaDoCorpo(n, body);
+    if (erro) return erro;
+    if (linha) {
+      const p = previaDaLinha(previa, linha, plano);
+      return { status: 200, body: { ...previa, campos: p.campos, origem: p.origem, avisos: p.avisos, bloqueios: linha.bloqueios, pessoa: linhaParaTela(linha), ...modo } };
+    }
+    return { status: 200, body: { ...previa, ...modo } };
+  }
+
+  // 0352: quem recebe contrato na família (uma linha por pessoa) + o resumo.
+  if (acao === 'contrato-familia') {
+    const id = String(body.negocioId || '');
+    if (!UUID_RE.test(id)) return { status: 400, body: { error: 'Cartão inválido.' } };
+    const n = await carregarNegocio(id);
+    if (!n) return { status: 404, body: { error: 'Cartão não encontrado.' } };
+    if (!podeMexer(u, n)) return { status: 403, body: { error: 'Sem permissão neste cartão.' } };
+    const [plano, sit] = await Promise.all([planoDoCartao(n), situacaoDaConfig()]);
+    if (!plano?.familia) return { status: 200, body: { familia: false } };
+    return {
+      status: 200,
+      body: {
+        familia: true, modo: sit.falta.length ? 'manual' : 'automatico',
+        pessoas: plano.linhas.map(linhaParaTela), resumo: resumoDosContratos(statusDasLinhas(plano.linhas)),
+      },
+    };
   }
 
   if (acao === 'contrato-enviar') return enviarContrato(u, body);
@@ -630,7 +791,11 @@ async function acaoDeContrato(acao, req, u, body) {
     const negId = String(body.negocioId || '');
     if (UUID_RE.test(negId)) {
       const n = await carregarNegocio(negId);
-      if (n && podeMexer(u, n)) cadastro = await gravarNoCadastro({ negocio: n, campos: c, previa: previaDoCorpo(body), userId: u.id });
+      if (n && podeMexer(u, n)) {
+        // 0352: PDF de uma pessoa → a correção vai pra ficha de quem ASSINA (o próprio ou o responsável).
+        const { linha } = await linhaDoCorpo(n, body);
+        cadastro = await gravarNoCadastro({ negocio: n, campos: c, previa: previaDoCorpo(body), userId: u.id, clienteId: linha?.assina?.cliente_id || null });
+      }
     }
     return { status: 200, body: { ok: true, base64: pdf.toString('base64'), campos: c, cadastro, ...validarCampos(c) } };
   }
