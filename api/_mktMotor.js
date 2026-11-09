@@ -32,10 +32,24 @@ import {
   aplicarAcaoNaPessoa, escolherGatilho, janelaAberta, lerEntrada, lerIdDeResposta,
   montarTemplate, normalizarGrafo, personalizar, planoDoNo, prefixoDeResposta, previaDoCorpo,
   proximoNo, roboPausado, saidaLigada, saidasDoNo, telefoneCanonico, tipoDoCorpo,
-  validarResposta, variantesTelefone, pausaPorRespostaManual, podeSairForaDaJanela,
+  validarResposta, variantesTelefone, pausaPorRespostaManual, podeSairForaDaJanela, saidaPorTexto,
 } from './_mktAutoRegras.js';
+import {
+  corpoParaInstagram, destinoDaDm, escolherGatilhoIgDm, previaIg, privadaDisponivel, soTextoIg,
+} from './_mktIgRegras.js';
+import { enviarDm, instagramLigado } from './_mktInstagram.js';
 
 const enc = encodeURIComponent;
+
+// ── Canal (09/11/2026): o MESMO motor anda por fluxos do WhatsApp e do Instagram.
+// O ctx diz o canal; a conversa mora em mkt_wa_conversas OU mkt_ig_conversas, e a
+// execução aponta pra uma das duas (conversa_id / ig_conversa_id, 0343).
+const ehIg = (ctx) => ctx?.canal === 'instagram';
+const TAB = (ctx) => (ehIg(ctx) ? 'mkt_ig_conversas' : 'mkt_wa_conversas');
+const COL = (ctx) => (ehIg(ctx) ? 'ig_conversa_id' : 'conversa_id');
+const canalDoFluxo = (f) => (f?.canal === 'instagram' ? 'instagram' : 'whatsapp');
+/** A janela do canal: no Instagram, a resposta privada ao comentário também deixa sair (1 mensagem). */
+const janelaDe = (ctx) => janelaAberta(ctx.conversa.ultima_entrada_em) || (ehIg(ctx) && privadaDisponivel(ctx.privada));
 const agoraIso = () => new Date().toISOString();
 
 // ── Banco (pequeno adaptador sobre o PostgREST) ─────────────────────────────
@@ -170,10 +184,28 @@ export async function garantirConversa(phoneId, waId, nomePerfil, daMeta = false
   return { conversa: c, nova };
 }
 
-async function montarContexto(conversa, wamid = null) {
-  const ctx = { conversa, contato: null, ultimaEntradaWamid: wamid, profundidade: 0, fluxos: new Map() };
+async function montarContexto(conversa, wamid = null, canal = 'whatsapp', extra = {}) {
+  const ctx = { conversa, contato: null, ultimaEntradaWamid: wamid, profundidade: 0, fluxos: new Map(), canal, conta: null, privada: null, ...extra };
   await recarregarContato(ctx);
   return ctx;
+}
+
+/** O contato (mkt_contatos) de quem fala pelo Instagram: sem telefone, origem 'instagram'. */
+async function garantirContatoIg(conversa) {
+  if (conversa.contato_id) return conversa.contato_id;
+  const c = await inserir('mkt_contatos', {
+    nome: conversa.nome || conversa.username || null, origem: 'instagram', tags: [...(conversa.tags || [])],
+    campos: conversa.username ? { instagram: `@${conversa.username}` } : {},
+  }).catch(() => null);
+  if (!c?.id) return null;
+  conversa.contato_id = c.id;
+  await quieto(mudar(`mkt_ig_conversas?id=eq.${conversa.id}`, { contato_id: c.id }));
+  return c.id;
+}
+
+async function contextoIg(conversa, conta, privada = null) {
+  await garantirContatoIg(conversa).catch(() => null);
+  return montarContexto(conversa, null, 'instagram', { conta, privada });
 }
 
 async function recarregarContato(ctx) {
@@ -183,12 +215,19 @@ async function recarregarContato(ctx) {
 
 function pessoaDe(ctx) {
   const c = ctx.contato;
+  if (ehIg(ctx)) {
+    return {
+      nome: c?.nome || ctx.conversa.nome || ctx.conversa.username || null, email: c?.email ?? null, telefone: c?.telefone ?? null,
+      tags: c?.tags ?? [], campos: c?.campos ?? {}, usuario: ctx.conversa.username || null,
+    };
+  }
   return {
     nome: c?.nome || ctx.conversa.nome_perfil || null, email: c?.email ?? null, telefone: c?.telefone ?? ctx.conversa.wa_id,
     tags: c?.tags ?? [], campos: c?.campos ?? {},
   };
 }
-const descadastrado = (ctx) => Boolean(ctx.contato?.optout_whatsapp_em);
+// PARAR: no WhatsApp vale pro contato; no Instagram, pra conversa (optout_em, 0343).
+const descadastrado = (ctx) => (ehIg(ctx) ? Boolean(ctx.conversa.optout_em) : Boolean(ctx.contato?.optout_whatsapp_em));
 const pausada = (ctx) => roboPausado(ctx.conversa.automacao_pausada_ate);
 
 async function registrarEventoContato(ctx, tipo, dados) {
@@ -223,6 +262,7 @@ async function concluir(exec, estado, erro = null) {
 
 /** Manda um corpo e guarda na conversa. Devolve a frase do erro ou null. */
 async function mandar(ctx, corpo, origem = {}) {
+  if (ehIg(ctx)) return mandarIg(ctx, corpo, origem);
   const c = ctx.conversa;
   // Trava final da regra das 24 h: nada de texto livre fora da janela, venha de onde vier.
   if (!podeSairForaDaJanela(corpo) && !janelaAberta(c.ultima_entrada_em)) return 'Janela de 24 h fechada: só modelo (template) pode sair.';
@@ -238,6 +278,40 @@ async function mandar(ctx, corpo, origem = {}) {
   }));
   await quieto(mudar(`mkt_wa_conversas?id=eq.${c.id}`, { ultima_mensagem_em: agoraIso(), ultima_previa: previa.slice(0, 200) }));
   return r.erro || null;
+}
+
+/**
+ * Instagram: traduz o corpo e manda. Conversa aberta (24 h) → pro igsid; senão,
+ * se ainda não usou, a RESPOSTA PRIVADA ao comentário (1 mensagem, 7 dias);
+ * senão não sai — o fluxo segue pela saída "janela fechada" ou para.
+ */
+async function mandarIg(ctx, corpo, origem = {}) {
+  const c = ctx.conversa;
+  if (!ctx.conta) return 'Conta do Instagram não carregada.';
+  const t = corpoParaInstagram(corpo);
+  if (t.erro) return t.erro;
+  const origemIg = origem.tipo === 'teste' ? 'teste' : origem.tipo === 'manual' ? 'manual' : 'fluxo';
+  for (const message of t.mensagens) {
+    const destino = destinoDaDm({ igsid: c.igsid, janela: janelaAberta(c.ultima_entrada_em), privada: ctx.privada });
+    if (!destino) return 'Instagram: fora da janela de 24 h (a resposta ao comentário já foi usada). Só sai depois que a pessoa responder.';
+    const extra = { fluxoId: origem.fluxoId || null, noId: origem.noId || null };
+    try {
+      await enviarDm(ctx.conta, c.id, destino, message, origemIg, null, extra);
+    } catch (e) {
+      // Resposta privada com botões recusada: manda só o texto (a pessoa pode digitar o botão — saidaPorTexto).
+      const texto = destino.comment_id && (message.quick_replies || message.attachment) ? soTextoIg(message) : null;
+      if (!texto) return e?.message || 'O Instagram recusou.';
+      try { await enviarDm(ctx.conta, c.id, destino, texto, origemIg, null, extra); }
+      catch (e2) { return e2?.message || 'O Instagram recusou.'; }
+    }
+    if (destino.comment_id) {
+      ctx.privada = { ...ctx.privada, usada: true };
+      if (ctx.privada.execId) await quieto(mudar(`mkt_fluxo_execucoes?id=eq.${ctx.privada.execId}`, { ig_privada: ctx.privada }));
+      await quieto(mudar(`mkt_ig_comentarios?comment_id=eq.${enc(ctx.privada.comment_id)}`, { respondido_dm_em: agoraIso() }));
+    }
+  }
+  await quieto(mudar(`mkt_ig_conversas?id=eq.${c.id}`, { ultima_mensagem_em: agoraIso(), ultima_previa: previaIg(t.mensagens[t.mensagens.length - 1]).slice(0, 140) }));
+  return null;
 }
 
 // ── Ações ───────────────────────────────────────────────────────────────────
@@ -294,42 +368,54 @@ async function executarAcao(ctx, a, fluxo, exec) {
       return null;
     }
     case 'descadastrar':
+      if (ehIg(ctx)) {
+        await mudar(`mkt_ig_conversas?id=eq.${c.id}`, { optout_em: agoraIso() });
+        c.optout_em = agoraIso();
+        return null;
+      }
       if (!ctx.contato) return 'sem contato';
       await mudar(`mkt_contatos?id=eq.${ctx.contato.id}`, { optout_whatsapp_em: agoraIso() });
       ctx.contato.optout_whatsapp_em = agoraIso();
       await registrarEventoContato(ctx, 'optout_whatsapp', { origem: 'automacao', fluxo_id: fluxo.id });
       return null;
     case 'reinscrever':
+      if (ehIg(ctx)) {
+        await mudar(`mkt_ig_conversas?id=eq.${c.id}`, { optout_em: null });
+        c.optout_em = null;
+        return null;
+      }
       if (!ctx.contato) return 'sem contato';
       await mudar(`mkt_contatos?id=eq.${ctx.contato.id}`, { optout_whatsapp_em: null });
       ctx.contato.optout_whatsapp_em = null;
       return null;
     case 'pausar_automacao': {
       const ate = pausaPorRespostaManual(Math.max(1, Number(a.horas) || 24));
-      await mudar(`mkt_wa_conversas?id=eq.${c.id}`, { automacao_pausada_ate: ate });
+      await mudar(`${TAB(ctx)}?id=eq.${c.id}`, { automacao_pausada_ate: ate });
       c.automacao_pausada_ate = ate;
       return null;
     }
     case 'avisar_humano': {
       // Passa pra uma pessoa: pausa o robô, marca a conversa e avisa no sininho do QS.
       const ate = pausaPorRespostaManual(Math.max(1, Number(a.horas) || 24));
-      await mudar(`mkt_wa_conversas?id=eq.${c.id}`, { automacao_pausada_ate: ate, precisa_humano_em: agoraIso() });
+      await mudar(`${TAB(ctx)}?id=eq.${c.id}`, { automacao_pausada_ate: ate, precisa_humano_em: agoraIso() });
       c.automacao_pausada_ate = ate;
       const p = pessoaDe(ctx);
-      const texto = `${personalizar(a.mensagem || 'Um contato pediu atendimento.', p)} · ${p.nome || '+' + c.wa_id} · fluxo "${fluxo.nome}"`;
+      const quem = p.nome || (ehIg(ctx) ? `@${c.username || c.igsid}` : '+' + c.wa_id);
+      const texto = `${personalizar(a.mensagem || 'Um contato pediu atendimento.', p)} · ${quem} · ${ehIg(ctx) ? 'Instagram · ' : ''}fluxo "${fluxo.nome}"`;
       for (const uid of (Array.isArray(a.usuarios) ? a.usuarios : []).slice(0, 10)) {
         await quieto(rest('qs_avisos?on_conflict=user_id,chave', {
           method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal',
           body: {
             user_id: uid, tipo: 'mkt_humano', area: null, titulo: 'Marketing: conversa pede atendimento', texto: texto.slice(0, 300),
-            link: `#mkt/whatsapp?aba=conversas&c=${c.id}`, origem: 'mkt_automacao', origem_id: c.id, chave: `mkt-humano:${c.id}:${agoraIso().slice(0, 13)}`,
+            ...(ehIg(ctx) ? { link: `#mkt/instagram?aba=dms&c=${c.id}` } : { link: `#mkt/whatsapp?aba=conversas&c=${c.id}` }),
+            origem: 'mkt_automacao', origem_id: c.id, chave: `mkt-humano:${c.id}:${agoraIso().slice(0, 13)}`,
           },
         }));
       }
       return null;
     }
     case 'parar_outros_fluxos':
-      await mudar(`mkt_fluxo_execucoes?conversa_id=eq.${c.id}&id=neq.${exec.id}&estado=in.(rodando,aguardando_resposta,aguardando_tempo)`,
+      await mudar(`mkt_fluxo_execucoes?${COL(ctx)}=eq.${c.id}&id=neq.${exec.id}&estado=in.(rodando,aguardando_resposta,aguardando_tempo)`,
         { estado: 'cancelada', acordar_em: null, concluida_em: agoraIso(), erro: 'Parado por outro fluxo.' });
       return null;
     case 'webhook': {
@@ -338,7 +424,11 @@ async function executarAcao(ctx, a, fluxo, exec) {
       try {
         const r = await fetch(a.url, {
           method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(8000),
-          body: JSON.stringify({ evento: 'qs.mkt.fluxo', fluxo: { id: fluxo.id, nome: fluxo.nome }, contato: { id: ctx.contato?.id ?? null, nome: p.nome, telefone: c.wa_id, email: p.email, tags: p.tags, campos: p.campos }, quando: agoraIso() }),
+          body: JSON.stringify({
+            evento: 'qs.mkt.fluxo', canal: ctx.canal, fluxo: { id: fluxo.id, nome: fluxo.nome },
+            contato: { id: ctx.contato?.id ?? null, nome: p.nome, telefone: ehIg(ctx) ? p.telefone : c.wa_id, instagram: ehIg(ctx) ? c.username ?? null : undefined, email: p.email, tags: p.tags, campos: p.campos },
+            quando: agoraIso(),
+          }),
         });
         return r.ok ? null : `webhook respondeu ${r.status}`;
       } catch { return 'webhook não respondeu'; }
@@ -351,7 +441,7 @@ async function executarAcao(ctx, a, fluxo, exec) {
 /** "Tag adicionada" como gatilho: outra automação pode começar por causa da tag. */
 async function dispararPorTag(ctx, tag) {
   if (ctx.profundidade >= MAX_PROFUNDIDADE) return;
-  const gs = await gatilhosAtivos(['tag_adicionada']);
+  const gs = await gatilhosAtivos(['tag_adicionada'], ctx.canal);
   for (const g of gs) {
     if (String(g.config?.tag ?? '').trim().toLowerCase() !== tag.toLowerCase()) continue;
     await iniciarNoContexto({ ...ctx, profundidade: ctx.profundidade + 1 }, g.fluxo_id, g.id);
@@ -392,13 +482,28 @@ async function avancar(ctx, exec, noId) {
   await quieto(atualizarExecucao(exec.id, { no_atual: atual, estado: 'aguardando_tempo', acordar_em: agoraIso(), aguardando: { tipo: 'continuar' }, passos: exec.passos, travada_ate: null }));
 }
 
+/** O que conta como CONVERSÃO no relatório: tag, campo ou lista que o fluxo aplicou. */
+function conversaoDaAcao(a, p) {
+  if (a?.tipo === 'adicionar_tag') { const t = personalizar(a.tag, p).trim(); return t ? `tag:${t}` : null; }
+  if (a?.tipo === 'definir_campo') return a.chave ? `campo:${a.chave}` : null;
+  if (a?.tipo === 'adicionar_lista') { const l = personalizar(a.lista, p).trim(); return l ? `lista:${l}` : null; }
+  return null;
+}
+
 async function executarNo(ctx, fluxo, exec, no) {
-  const janela = janelaAberta(ctx.conversa.ultima_entrada_em);
+  const janela = janelaDe(ctx);
   const plano = planoDoNo(no, fluxo, { pessoa: pessoaDe(ctx), janela, inscrito: !descadastrado(ctx) });
   const origem = { fluxoId: fluxo.id, noId: no.id, tipo: exec.teste ? 'teste' : 'fluxo' };
   if (plano.aviso) await evento(fluxo.id, exec.id, no.id, 'erro', null, plano.aviso);
 
-  if (plano.tipo === 'template') return executarTemplate(ctx, fluxo, exec, no, plano.dados, origem);
+  if (plano.tipo === 'template') {
+    if (ehIg(ctx)) {
+      const erro = 'Bloco Template é só do WhatsApp — no Instagram use uma Mensagem.';
+      await evento(fluxo.id, exec.id, no.id, 'erro', null, erro);
+      return { tipo: 'fim', erro };
+    }
+    return executarTemplate(ctx, fluxo, exec, no, plano.dados, origem);
+  }
   if (plano.tipo === 'ir_para') {
     if (ctx.profundidade >= MAX_PROFUNDIDADE) return { tipo: 'fim', erro: 'Muitos "ir para" encadeados.' };
     await quieto(atualizarExecucao(exec.id, { passos: exec.passos, no_atual: no.id }));
@@ -412,7 +517,7 @@ async function executarNo(ctx, fluxo, exec, no) {
   }
   if (plano.enviar?.length) {
     for (let i = 0; i < plano.enviar.length; i++) {
-      if (i === 0 && no.dados?.digitando && ctx.ultimaEntradaWamid) await digitando(ctx.conversa.phone_number_id, ctx.ultimaEntradaWamid);
+      if (i === 0 && !ehIg(ctx) && no.dados?.digitando && ctx.ultimaEntradaWamid) await digitando(ctx.conversa.phone_number_id, ctx.ultimaEntradaWamid);
       const erro = await mandar(ctx, plano.enviar[i], origem);
       if (erro) {
         await evento(fluxo.id, exec.id, no.id, 'erro', null, erro);
@@ -424,6 +529,10 @@ async function executarNo(ctx, fluxo, exec, no) {
   for (const a of plano.acoes || []) {
     const erro = await executarAcao(ctx, a, fluxo, exec).catch((e) => String(e?.message || e));
     if (erro) await evento(fluxo.id, exec.id, no.id, 'erro', null, `${a.tipo}: ${erro}`);
+    else {
+      const conv = conversaoDaAcao(a, pessoaDe(ctx));
+      if (conv) await evento(fluxo.id, exec.id, no.id, 'acao', null, conv);
+    }
   }
   return plano;
 }
@@ -472,6 +581,7 @@ async function retomarComResposta(ctx, exec, entrada) {
       if (no.dados.salvarEm && ctx.contato) {
         const antes = pessoaDe(ctx);
         await salvarPessoa(ctx, antes, aplicarAcaoNaPessoa(antes, { tipo: 'definir_campo', chave: no.dados.salvarEm, valor }));
+        await evento(fluxo.id, exec.id, no.id, 'acao', null, `campo:${no.dados.salvarEm}`);
       }
       await evento(fluxo.id, exec.id, no.id, 'saida', 'respondeu');
       await avancar(ctx, exec, proximoNo(fluxo.grafo, no.id, 'respondeu'));
@@ -488,6 +598,13 @@ async function retomarComResposta(ctx, exec, entrada) {
     return true;
   }
   if (tipoEspera === 'botoes' || tipoEspera === 'template') {
+    // Digitou exatamente o texto de um botão: vale como clique.
+    const porTexto = tipoEspera === 'botoes' ? saidaPorTexto(no, entrada.texto) : null;
+    if (porTexto) {
+      await evento(fluxo.id, exec.id, no.id, 'saida', porTexto);
+      await avancar(ctx, exec, proximoNo(fluxo.grafo, no.id, porTexto));
+      return true;
+    }
     if (saidaLigada(fluxo.grafo, no.id, 'texto_livre')) {
       await evento(fluxo.id, exec.id, no.id, 'saida', 'texto_livre');
       await avancar(ctx, exec, proximoNo(fluxo.grafo, no.id, 'texto_livre'));
@@ -508,13 +625,15 @@ async function rotearClique(ctx, alvo) {
   if (!fluxo || !no) return false;
   // Sugestão de PERGUNTA (_s0) não é saída: é resposta, vai pro retomar normal.
   if (!saidasDoNo(no).some((s) => s.id === alvo.saida)) return false;
-  let exec = await um(`mkt_fluxo_execucoes?select=*&conversa_id=eq.${ctx.conversa.id}&fluxo_id=eq.${fluxo.id}&no_atual=eq.${enc(no.id)}&estado=eq.aguardando_resposta&order=iniciada_em.desc&limit=1`).catch(() => null);
+  if (canalDoFluxo(fluxo) !== ctx.canal) return false;
+  let exec = await um(`mkt_fluxo_execucoes?select=*&${COL(ctx)}=eq.${ctx.conversa.id}&fluxo_id=eq.${fluxo.id}&no_atual=eq.${enc(no.id)}&estado=eq.aguardando_resposta&order=iniciada_em.desc&limit=1`).catch(() => null);
   // Botão antigo de fluxo desligado não reabre nada (mas o teste que espera, segue).
   if (!exec && fluxo.status !== 'ativo') return false;
   if (!exec) {
-    exec = await inserir('mkt_fluxo_execucoes', { fluxo_id: fluxo.id, conversa_id: ctx.conversa.id, contato_id: ctx.conversa.contato_id, no_atual: no.id, estado: 'rodando' }).catch(() => null);
+    exec = await inserir('mkt_fluxo_execucoes', { fluxo_id: fluxo.id, [COL(ctx)]: ctx.conversa.id, contato_id: ctx.conversa.contato_id, no_atual: no.id, estado: 'rodando' }).catch(() => null);
     if (!exec) return false;
   }
+  if (exec.ig_privada) ctx.privada = { ...exec.ig_privada, execId: exec.id };
   await evento(fluxo.id, exec.id, no.id, 'saida', alvo.saida);
   await avancar(ctx, exec, proximoNo(fluxo.grafo, no.id, alvo.saida));
   return true;
@@ -522,8 +641,15 @@ async function rotearClique(ctx, alvo) {
 
 // ── Gatilhos ────────────────────────────────────────────────────────────────
 
-async function gatilhosAtivos(tipos) {
-  const r = await rest(`mkt_fluxo_gatilhos?select=*,mkt_fluxos!inner(status)&tipo=in.(${tipos.join(',')})&ativo=eq.true&mkt_fluxos.status=eq.ativo&order=prioridade.desc,criado_em.asc`).catch(() => []);
+/**
+ * Gatilhos ativos de fluxos ativos. Com `canal`, só fluxos daquele canal (0343).
+ * Banco ainda sem a 0343 (sem a coluna canal): o WhatsApp segue como antes.
+ */
+export async function gatilhosAtivos(tipos, canal = null) {
+  const base = `mkt_fluxo_gatilhos?tipo=in.(${tipos.join(',')})&ativo=eq.true&mkt_fluxos.status=eq.ativo&order=prioridade.desc,criado_em.asc`;
+  let r = null;
+  if (canal) r = await rest(`${base}&select=*,mkt_fluxos!inner(status,canal)&mkt_fluxos.canal=eq.${canal}`).catch(() => null);
+  if (!Array.isArray(r) && canal !== 'instagram') r = await rest(`${base}&select=*,mkt_fluxos!inner(status)`).catch(() => []);
   return Array.isArray(r) ? r : [];
 }
 
@@ -532,12 +658,18 @@ async function iniciarNoContexto(ctx, fluxoId, gatilhoId, { teste = false } = {}
   const fluxo = await carregarFluxo(ctx, fluxoId);
   const inicio = fluxo?.grafo.nos.find((n) => n.tipo === 'inicio');
   if (!inicio) return null;
-  await quieto(mudar(`mkt_fluxo_execucoes?conversa_id=eq.${ctx.conversa.id}&estado=eq.aguardando_resposta`,
+  // Fluxo do Instagram não roda numa conversa do WhatsApp (nem o contrário).
+  if (canalDoFluxo(fluxo) !== ctx.canal) return null;
+  await quieto(mudar(`mkt_fluxo_execucoes?${COL(ctx)}=eq.${ctx.conversa.id}&estado=eq.aguardando_resposta`,
     { estado: 'cancelada', acordar_em: null, concluida_em: agoraIso(), erro: 'Outro fluxo começou.' }));
+  // A resposta privada ao comentário vai junto com a execução (o "ir para" herda o que sobrou).
+  const privada = ehIg(ctx) && ctx.privada?.comment_id ? { comment_id: ctx.privada.comment_id, em: ctx.privada.em, usada: Boolean(ctx.privada.usada) } : null;
   const exec = await inserir('mkt_fluxo_execucoes', {
-    fluxo_id: fluxo.id, conversa_id: ctx.conversa.id, contato_id: ctx.conversa.contato_id, gatilho_id: gatilhoId, no_atual: inicio.id, estado: 'rodando', teste,
+    fluxo_id: fluxo.id, [COL(ctx)]: ctx.conversa.id, contato_id: ctx.conversa.contato_id, gatilho_id: gatilhoId, no_atual: inicio.id, estado: 'rodando', teste,
+    ...(privada ? { ig_privada: privada } : {}),
   }).catch(() => null);
   if (!exec) return null;
+  if (privada) ctx.privada = { ...privada, execId: exec.id };
   await quieto(rpc('mkt_auto_contar_disparo', { p_gatilho: gatilhoId, p_fluxo: fluxo.id }));
   await registrarEventoContato(ctx, 'fluxo_iniciado', { fluxo_id: fluxo.id, fluxo: fluxo.nome, gatilho_id: gatilhoId, teste });
   await avancar(ctx, exec, inicio.id);
@@ -630,11 +762,32 @@ export async function receberMensagem(phoneId, msg, nomePerfil) {
 /** Acorda quem chegou a hora: fim de "Aguardar", prazo de resposta, teto de passos. */
 export async function rodarAutomacoes(prazoMs) {
   const out = { acordadas: 0, erros: 0, adiadas: 0 };
-  if (!(await configRobo()).ligado) return { ...out, desligado: true };
+  const roboLigado = (await configRobo()).ligado;
+  // Robô do WhatsApp desligado e Instagram desligado: nada a fazer (nem reivindica).
+  const igLigado = await instagramLigado().catch(() => false);
+  if (!roboLigado && !igLigado) return { ...out, desligado: true };
   const execs = await rpc('mkt_auto_reivindicar', { p_limite: 50 }).catch(() => []);
   for (const exec of Array.isArray(execs) ? execs : []) {
     if (Date.now() > prazoMs) { await quieto(atualizarExecucao(exec.id, { travada_ate: null })); continue; }
     try {
+      if (exec.ig_conversa_id) {
+        const ctxIg = igLigado ? await contextoDaExecucaoIg(exec) : null;
+        if (!ctxIg) {
+          // Instagram desligado ou conta caída: adia 1 h em vez de queimar o passo.
+          await quieto(atualizarExecucao(exec.id, { acordar_em: new Date(Date.now() + 3_600_000).toISOString(), travada_ate: null }));
+          out.adiadas++;
+          continue;
+        }
+        if (ctxIg === 'sem-conversa') { await concluir(exec, 'cancelada', 'conversa apagada'); continue; }
+        await acordar(ctxIg, exec);
+        out.acordadas++;
+        continue;
+      }
+      if (!roboLigado) {
+        await quieto(atualizarExecucao(exec.id, { acordar_em: new Date(Date.now() + 600_000).toISOString(), travada_ate: null }));
+        out.adiadas++;
+        continue;
+      }
       const conversa = await um(`mkt_wa_conversas?select=*&id=eq.${exec.conversa_id}&limit=1`);
       if (!conversa) { await concluir(exec, 'cancelada', 'conversa apagada'); continue; }
       const cr = await credenciaisDaMeta(conversa.phone_number_id).catch(() => null);
@@ -676,6 +829,106 @@ async function acordar(ctx, exec) {
   if (!saidaLigada(fluxo.grafo, noId, saida)) return concluir(exec, 'concluida');
   await evento(fluxo.id, exec.id, noId, 'saida', saida);
   return avancar(ctx, exec, proximoNo(fluxo.grafo, noId, saida));
+}
+
+// ── Instagram: as mesmas portas, outro canal (09/11/2026, 0343) ─────────────
+
+async function contaIg(id) {
+  return um(`mkt_ig_contas?select=id,ig_user_id,username,status&id=eq.${enc(id)}&limit=1`).catch(() => null);
+}
+
+/** O ctx de uma execução do Instagram (cron). null = conta caída; 'sem-conversa' = apagada. */
+async function contextoDaExecucaoIg(exec) {
+  const conversa = await um(`mkt_ig_conversas?select=*&id=eq.${exec.ig_conversa_id}&limit=1`);
+  if (!conversa) return 'sem-conversa';
+  const conta = await contaIg(conversa.conta_id);
+  if (!conta || conta.status !== 'conectada') return null;
+  return contextoIg(conversa, conta, exec.ig_privada ? { ...exec.ig_privada, execId: exec.id } : null);
+}
+
+async function tomarConversaIg(id) {
+  for (let i = 0; i < 4; i++) {
+    if ((await rpc('mkt_ig_tomar_conversa', { p_conversa: id, p_segundos: 25 }).catch(() => false)) === true) return true;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  return false;
+}
+
+/**
+ * Chegou uma DM (já gravada por api/_mktInstagram.js). Decide quem responde:
+ *   PARAR → clique num botão de fluxo → resposta esperada → gatilho de fluxo
+ *   (link ig.me, menção, resposta ao story, palavra, boas-vindas).
+ * `consumida: false` = nenhum fluxo pegou; quem chamou tenta as regras simples antigas.
+ */
+export async function receberInstagram({ conta, conversa, nova = false, entrada }) {
+  const res = { consumida: false, fluxoIniciado: null, motivo: null };
+  if (!conta || !conversa?.id) return { ...res, motivo: 'sem-conversa' };
+  const ctx = await contextoIg(conversa, conta);
+  if (entrada.texto && ehPedidoDeParada(entrada.texto) && !conversa.optout_em) {
+    await quieto(mudar(`mkt_ig_conversas?id=eq.${conversa.id}`, { optout_em: agoraIso() }));
+    await quieto(mudar(`mkt_fluxo_execucoes?ig_conversa_id=eq.${conversa.id}&estado=in.(rodando,aguardando_resposta,aguardando_tempo)`,
+      { estado: 'cancelada', acordar_em: null, concluida_em: agoraIso(), erro: 'A pessoa pediu para sair.' }));
+    await registrarEventoContato(ctx, 'optout_instagram', { texto: entrada.texto.slice(0, 120) });
+    return { ...res, consumida: true, motivo: 'optout' };
+  }
+  if (descadastrado(ctx)) return { ...res, consumida: true, motivo: 'descadastrado' };
+  if (pausada(ctx)) return { ...res, consumida: true, motivo: 'robo-pausado' };
+  if (!(await tomarConversaIg(conversa.id))) return { ...res, consumida: true, motivo: 'conversa-ocupada' };
+  try {
+    const alvo = lerIdDeResposta(entrada.idResposta);
+    if (alvo && (await rotearClique(ctx, alvo))) return { ...res, consumida: true, motivo: 'clique' };
+
+    const esperando = await um(`mkt_fluxo_execucoes?select=*&ig_conversa_id=eq.${conversa.id}&estado=eq.aguardando_resposta&order=atualizada_em.desc&limit=1`).catch(() => null);
+    if (esperando) {
+      if (esperando.ig_privada) ctx.privada = { ...esperando.ig_privada, execId: esperando.id };
+      if (await retomarComResposta(ctx, esperando, entrada)) return { ...res, consumida: true, motivo: 'resposta-esperada' };
+    }
+
+    const gatilhos = await gatilhosAtivos(['ig_ref', 'ig_story_mencao', 'ig_story_resposta', 'ig_dm_palavra', 'ig_boas_vindas'], 'instagram');
+    const g = escolherGatilhoIgDm(gatilhos, entrada, { nova });
+    if (g) {
+      ctx.privada = null;
+      res.fluxoIniciado = await iniciarNoContexto(ctx, g.fluxo_id, g.id);
+      return { ...res, consumida: Boolean(res.fluxoIniciado), motivo: `gatilho:${g.tipo}` };
+    }
+    return { ...res, motivo: 'nenhum-gatilho' };
+  } catch (e) {
+    console.error('[mkt-motor] instagram: falhou ao tratar DM:', e?.message);
+    return { ...res, consumida: true, motivo: 'erro' };
+  } finally {
+    await quieto(rpc('mkt_ig_soltar_conversa', { p_conversa: conversa.id }));
+  }
+}
+
+/**
+ * Comentário que casou com um gatilho de fluxo: começa o fluxo com a RESPOSTA
+ * PRIVADA guardada (a 1ª DM vai pelo comment_id, sem precisar da janela).
+ */
+export async function iniciarPorComentario({ conta, conversa, gatilho, comentario }) {
+  if (!conta || !conversa?.id || !gatilho?.fluxo_id) return { execucaoId: null, erro: 'dados faltando' };
+  const ctx = await contextoIg(conversa, conta, { comment_id: String(comentario.id), em: comentario.em || agoraIso(), usada: false });
+  if (descadastrado(ctx)) return { execucaoId: null, erro: 'A pessoa pediu para não receber mensagens.' };
+  if (pausada(ctx)) return { execucaoId: null, erro: 'Robô pausado nesta conversa.' };
+  if (!(await tomarConversaIg(conversa.id))) return { execucaoId: null, erro: 'conversa ocupada' };
+  try {
+    const execucaoId = await iniciarNoContexto(ctx, gatilho.fluxo_id, gatilho.id);
+    return execucaoId ? { execucaoId, privadaUsada: Boolean(ctx.privada?.usada) } : { execucaoId: null, erro: 'O fluxo não começou (sem Início ou de outro canal).' };
+  } finally {
+    await quieto(rpc('mkt_ig_soltar_conversa', { p_conversa: conversa.id }));
+  }
+}
+
+/** Iniciar um fluxo do Instagram numa conversa (botão "Iniciar fluxo" nas DMs). Só com a janela aberta. */
+export async function iniciarFluxoIg({ conversaId, fluxoId }) {
+  const conversa = await um(`mkt_ig_conversas?select=*&id=eq.${enc(conversaId)}&limit=1`);
+  if (!conversa) return { execucaoId: null, erro: 'Conversa não encontrada.' };
+  const conta = await contaIg(conversa.conta_id);
+  if (!conta || conta.status !== 'conectada') return { execucaoId: null, erro: 'A conta do Instagram não está conectada.' };
+  if (!janelaAberta(conversa.ultima_entrada_em)) return { execucaoId: null, erro: 'Fora da janela de 24 h do Instagram.' };
+  const ctx = await contextoIg(conversa, conta);
+  if (descadastrado(ctx)) return { execucaoId: null, erro: 'A pessoa pediu para não receber mensagens.' };
+  const execucaoId = await iniciarNoContexto(ctx, fluxoId, null);
+  return execucaoId ? { execucaoId } : { execucaoId: null, erro: 'O fluxo não começou (sem Início ou é do WhatsApp).' };
 }
 
 // ── Porta 3: iniciar de fora ────────────────────────────────────────────────

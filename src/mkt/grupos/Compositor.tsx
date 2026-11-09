@@ -95,9 +95,12 @@ export function Compositor({ bases, editarId, copiarId, onPronto, onCancelar }: 
       try {
         const statusSemAgendar = original?.status === "pausada" ? "pausada" : "rascunho";
         const salva = await salvarCampanha(editando && !paraAgendar ? { ...base, status: statusSemAgendar } : base, original?.id);
+        // 04/11/2026: guarda já — se o agendar der exceção (rede), o próximo clique atualiza esta
+        // campanha em vez de criar outra igual.
+        setOriginal(salva);
         if (paraAgendar) {
           const e = await agendarNoServidor(salva.id);
-          if (e.length) { setErroGeral(e.join(" · ")); setOriginal(salva); return; }
+          if (e.length) { setErroGeral(e.join(" · ")); return; }
         }
         onPronto();
       } catch (e) { setErroGeral((e as Error).message); }

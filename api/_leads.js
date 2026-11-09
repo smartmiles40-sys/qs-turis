@@ -373,6 +373,35 @@ function normSource(v) {
 /** Formato geral de UUID — só pra conferir o que a RPC da carteira devolveu. */
 const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// ── UTM DO PRIMEIRO TOQUE (0265, 03/11/2026) ────────────────────────────────
+// Tráfego › Meta Ads casa o lead com a campanha da Meta pelo utm_campaign. A
+// entrada aceita utm_* (ou UTM_* do Bitrix) no payload. Grava DEPOIS do insert,
+// num PATCH à parte que nunca derruba a criação do lead (se a 0265 não estiver
+// aplicada, a coluna não existe e o PATCH só falha calado no log). Só preenche
+// o que está vazio: o primeiro toque não é sobrescrito por um retorno.
+const CAMPOS_UTM = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+export function utmDoPayload(payload) {
+  const out = {};
+  for (const k of CAMPOS_UTM) {
+    const v = payload?.[k] ?? payload?.[k.toUpperCase()];
+    const t = v == null ? '' : String(v).trim().slice(0, 300);
+    if (t) out[k] = t;
+  }
+  return out;
+}
+export async function gravarUtm(leadId, payload) {
+  const utm = utmDoPayload(payload);
+  if (!leadId || !Object.keys(utm).length) return false;
+  try {
+    // utm_campaign vazio = ainda sem primeiro toque.
+    await rest(`qs_leads?id=eq.${encodeURIComponent(leadId)}&utm_campaign=is.null`, { method: 'PATCH', body: utm, prefer: 'return=minimal' });
+    return true;
+  } catch (e) {
+    console.warn('[leads] utm não gravada (0265 aplicada?):', e?.message);
+    return false;
+  }
+}
+
 export async function createInboundLead(payload, opts = {}) {
   // Contato normalizado UMA vez — usado no dedupe, no patch e na gravação.
   const email = normEmail(payload.email);
@@ -410,6 +439,7 @@ export async function createInboundLead(payload, opts = {}) {
         if (Object.keys(patch).length > 0) {
           await rest(`qs_leads?id=eq.${existing[0].id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' });
         }
+        await gravarUtm(existing[0].id, payload);
         return { lead: existing[0], ownerId: existing[0].owner_id, cadenceId: existing[0].cadence_id, tasks: 0, deduped: true };
       }
     } catch (e) {
@@ -443,6 +473,7 @@ export async function createInboundLead(payload, opts = {}) {
           { const ls = pickLeadScore(payload); if (ls) patch.lead_score = ls; }
           await rest(`qs_leads?id=eq.${mesmo.id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' });
           console.log(`[leads] bitrix ${bitrixId} adotou o card existente ${mesmo.id} (mesmo telefone)`);
+          await gravarUtm(mesmo.id, payload);
           // `adotado`: o card ganhou o bitrix_id AGORA. Quem chamou pode ter
           // coisa a acertar no Bitrix (ex.: a reunião que a pessoa marcou antes
           // de o negócio existir — ver alcancarCardAdotado em _agenda.js).
@@ -622,6 +653,7 @@ export async function createInboundLead(payload, opts = {}) {
     }
   }
   const lead = Array.isArray(created) ? created[0] : created;
+  if (lead?.id) await gravarUtm(lead.id, payload);
 
   // O dono FINAL é o que o gatilho gravou (round-robin por cadência) — as tarefas
   // têm que ficar com o MESMO SDR do lead, senão o card não aparece pra ele.

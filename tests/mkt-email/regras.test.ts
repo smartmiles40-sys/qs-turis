@@ -122,3 +122,19 @@ test("remetente precisa ser do domínio verificado", () => {
   assert.equal(R.remetenteDoDominio("ola@gmail.com", "mail.stfv.com.br"), false);
   assert.equal(R.emailValido("a b@c.com"), false);
 });
+
+// 0340 — teto diário (aquecimento do domínio)
+test("teto diário: sem teto = infinito; com teto desconta o que já saiu; nunca negativo", () => {
+  assert.equal(R.calcularRestante(null, 50), Infinity);
+  assert.equal(R.calcularRestante(undefined, 50), Infinity);
+  assert.equal(R.calcularRestante(0, 0), Infinity);
+  assert.equal(R.calcularRestante(200, 0), 200);
+  assert.equal(R.calcularRestante(200, 150), 50);
+  assert.equal(R.calcularRestante(200, 200), 0);
+  assert.equal(R.calcularRestante(200, 350), 0);
+});
+
+test("409 (mesma Idempotency-Key em andamento) volta pra fila, não vira falha", () => {
+  const d = R.decidirAposErro({ status: 409, permanente: false }, 1);
+  assert.equal(d.status, "pendente");
+});

@@ -1,8 +1,9 @@
 // src/mkt/grupos/Chip.tsx — o chip do Marketing (instância Evolution PRÓPRIA) vira um selo
 // no canto da página ("Chip conectado ●" / "Envio pausado") que abre a configuração num Modal.
 // TRAVAS (não tirar): o Relacionamento e os SDRs nunca enviam por aqui (servidor + banco);
-// envio só com MKT_GRUPOS_ENVIO=1 na Vercel E "envio ligado" aqui; ligar/desligar e
-// mexer na conexão: só admin (o servidor recusa os outros).
+// envio só com MKT_GRUPOS_ENVIO=1 na Vercel E "envio ligado" aqui; ligar/desligar,
+// trocar a instância e desconectar: só admin (o servidor recusa os outros).
+// 04/11/2026: "Ler QR Code" (reconectar) e "Apontar webhook" passam pro time todo.
 import { useEffect, useState } from "react";
 import { Modal } from "@/rel/ui";
 import { api, quando } from "./lib";
@@ -104,10 +105,14 @@ function PainelChip() {
           </div>
           <div className="flex flex-wrap gap-2">
             <BotaoGrande variante="secundario" pequeno disabled={Boolean(ocupado)} onClick={() => void recarregar()}>Conferir</BotaoGrande>
-            {admin && c && (
+            {c && (
               <>
                 {!conectado && <BotaoGrande pequeno disabled={Boolean(ocupado)} onClick={() => void rodar("qrcode")}>{ocupado === "qrcode" ? "Gerando…" : "Ler QR Code"}</BotaoGrande>}
                 <BotaoGrande variante="secundario" pequeno disabled={Boolean(ocupado)} onClick={() => void rodar("apontar_webhook", {}, "Webhook apontado pro QS.")}>Apontar webhook</BotaoGrande>
+              </>
+            )}
+            {admin && c && (
+              <>
                 <BotaoGrande variante="secundario" pequeno disabled={Boolean(ocupado)}
                   onClick={() => void rodar("ligar_envio", { ligado: !c.envio_ligado }, c.envio_ligado ? "Envio pausado." : "Envio ligado.")}>
                   {c.envio_ligado ? "⏸ Pausar envios" : "▶ Ligar envios"}
@@ -175,7 +180,7 @@ function PainelChip() {
             </div>
           </form>
         </details>
-      ) : <Nota icone="ℹ️">Só o admin liga/desliga o envio e configura o chip.</Nota>}
+      ) : <Nota icone="ℹ️">Ler o QR Code (reconectar) e apontar o webhook qualquer pessoa do Marketing faz. Ligar/pausar o envio, trocar a instância e desconectar: só o admin.</Nota>}
     </div>
   );
 }

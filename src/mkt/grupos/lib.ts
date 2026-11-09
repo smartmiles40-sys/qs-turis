@@ -36,6 +36,8 @@ export interface Grupo {
   sincronizado_em: string | null;
   info_em: string | null;
   saiu_em: string | null;
+  /** 0342: quando os membros foram contados (link inteligente). */
+  contado_em?: string | null;
 }
 
 export interface Tag { id: string; nome: string; cor: string }
@@ -248,7 +250,8 @@ export function paraInputLocal(iso: string | null): string {
 export const deInputLocal = (v: string) => (v ? new Date(v).toISOString() : null);
 export function quando(iso: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  // 04/11/2026: sempre em Brasília (igual ao quandoSP) — sem isso, quem abre fora do fuso via outra hora.
+  return new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 /** Mesmo filtro do servidor (resolverGrupos), pra prévia instantânea na tela. */

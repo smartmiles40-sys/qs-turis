@@ -13,7 +13,7 @@
 // Bitrix com esse dono como responsável. Nenhuma página escolhe SDR.
 //
 //   POST /api/lead-site
-//   { nome, telefone, email?, destino, canal: 'Orgânico'|'Tráfego', origem?, site? }
+//   { nome, telefone, email?, destino, canal: 'Orgânico'|'Tráfego', origem?, site?, utm_*? }
 //   → { ok: true }
 //
 // Pública como o /api/lead, com as mesmas travas: CORS pela allowlist
@@ -79,6 +79,9 @@ export default async function handler(req, res) {
       email,
       segment: `[${destino}] - ${canal}`,
       source: 'integracao',
+      // UTM da página (0265): o formulário pode mandar utm_campaign etc.
+      utm_source: texto(body.utm_source, 300), utm_medium: texto(body.utm_medium, 300),
+      utm_campaign: texto(body.utm_campaign, 300), utm_content: texto(body.utm_content, 300), utm_term: texto(body.utm_term, 300),
     });
     console.log('[lead-site] lead', lead?.id || '-', deduped ? '(já existia)' : '(novo)', `[${destino}] - ${canal}`, texto(body.origem, 80) || '');
     return res.status(200).json({ ok: true });

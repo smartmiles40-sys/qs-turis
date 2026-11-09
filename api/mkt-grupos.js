@@ -9,7 +9,12 @@
 //   POST  { acao } com login (admin, marketing, gestor com área marketing):
 //     estado · previa · agendar · sincronizar · info_grupo · convite
 //     conversas · mensagens · enviar · reagir                (caixa "Celular")
-//     configurar · ligar_envio · qrcode · apontar_webhook · desconectar   (só admin)
+//     configurar · ligar_envio · desconectar   (só admin)
+//     qrcode · apontar_webhook   (time do Marketing, desde 04/11/2026)
+//   Gerenciar grupos e link inteligente (0342, 09/11/2026):
+//     criar_grupo · editar_grupo · participantes · participante · renovar_convite
+//     sair_grupo · link_contar · link_criar_grupo
+//   Link público /g/<slug>: api/mkt-grupos-link.js · contagem/criação: api/_mktGruposLink.js
 //
 // Ler grupos/tags/campanhas/fila a tela faz direto no banco (RLS 0243).
 // Tags, campanhas, cadências e recorrências a tela GRAVA direto (RLS + gatilho
@@ -21,9 +26,12 @@ import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { getSupabaseUserId } from './_wa.js';
 import { lerConexao, conferirCandidata, travaMkt, evoMkt, ehAInstancia } from './_mktGruposEvo.js';
 import { rodada, envioLigadoNoAmbiente, lerGruposETags } from './_mktGruposMotor.js';
+import { criarGrupo, editarGrupo, lerParticipantes, mudarParticipantes, renovarConvite, sairDoGrupo } from './_mktGruposGestao.js';
+import { rodadaLinks, criarProximoGrupo, lerLinksAtivos } from './_mktGruposLink.js';
+import { lerMovimento } from './_mktGruposLinkRegras.js';
 import {
-  ehGrupo, ehPessoa, resolverGrupos, validarCampanha, lerGrupo, lerConversas, lerMensagens,
-  montarEnvio, destinoDaCaixaPermitido, traduzirErro, digitos,
+  ehGrupo, resolverGrupos, validarCampanha, lerGrupo, lerConversas, lerMensagens,
+  montarEnvio, destinoDaCaixaPermitido, traduzirErro, digitos, semNono,
 } from './_mktGruposRegras.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -49,7 +57,7 @@ async function webhook(req, res) {
   const c = await lerConexao();
   // Sem instância no corpo ou de outra instância: ignora (nunca mexe em nada de outro setor).
   if (!ehAInstancia(c, body.instance)) return res.status(200).json({ ok: true, ignorado: 'instancia' });
-  const evento = String(body.event || '').toLowerCase().replace(/_/g, '.');
+  const evento = String(body.event || '').toLowerCase().replace(/[_-]/g, '.');
   const itens = Array.isArray(body.data) ? body.data : [body.data].filter(Boolean);
   try {
     if (evento === 'connection.update') {
@@ -76,6 +84,17 @@ async function webhook(req, res) {
         });
       }
       return res.status(200).json({ ok: true, chegou: ids.length });
+    }
+    // 0342: entrou/saiu gente do grupo -> entradas e saídas do dia (relatório do link).
+    if (evento === 'group.participants.update') {
+      let n = 0;
+      for (const d of itens) {
+        const m = lerMovimento(d);
+        if (!m) continue;
+        await rest('rpc/mkt_grupos_membros_mov', { method: 'POST', body: { p_grupo: m.grupo, p_entradas: m.entradas, p_saidas: m.saidas } }).catch(() => null);
+        n += 1;
+      }
+      return res.status(200).json({ ok: true, movimentos: n });
     }
     if (evento === 'groups.update' || evento === 'groups.upsert') {
       for (const g of itens) {
@@ -141,7 +160,7 @@ async function infoGrupo(jid) {
   return campos;
 }
 
-/** Link de convite: só LÊ (GET inviteCode). Gerar link novo (revoke) não existe aqui de propósito. */
+/** Link de convite: só LÊ (GET inviteCode). Gerar link novo: acao 'renovar_convite' (0342, com confirmação na tela). */
 async function convite(jid) {
   if (!ehGrupo(jid)) throw new Error('Não é grupo.');
   const r = await evoMkt('group/inviteCode', { sufixo: `?groupJid=${enc(jid)}` });
@@ -165,17 +184,72 @@ async function agendar(campanhaId) {
   return { ok: true };
 }
 
+// ── Gerenciar grupos (0342) ────────────────────────────────────────────────
+async function grupoDoMarketing(jid) {
+  if (!ehGrupo(jid)) throw new Error('Grupo inválido.');
+  const g = (await rest(`mkt_grupos?select=jid,nome,saiu_em&jid=eq.${enc(jid)}&limit=1`))?.[0];
+  if (!g) throw new Error('Grupo fora da lista do Marketing — puxe os grupos antes.');
+  if (g.saiu_em) throw new Error('O chip não está mais nesse grupo.');
+  return g;
+}
+
+async function acaoCriarGrupo(b, u) {
+  const c = await travaMkt();
+  const evo = (rota, o) => evoMkt(rota, { ...o, conexao: c });
+  const g = await criarGrupo(b, { evo });
+  const agora = new Date().toISOString();
+  await rest('mkt_grupos?on_conflict=jid', {
+    method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
+    body: {
+      jid: g.jid, nome: g.nome, descricao: g.descricao, foto_url: g.foto_url, participantes: g.participantes,
+      so_admins_enviam: g.so_admins_enviam, so_admins_editam: g.so_admins_editam, eu_admin: true,
+      link_convite: g.convite, link_em: g.convite ? agora : null, instancia: c.instancia, sincronizado_em: agora, contado_em: agora, saiu_em: null,
+    },
+  });
+  // já entra no link escolhido (opcional)
+  if (UUID.test(String(b.link_id || ''))) {
+    const atuais = await rest(`mkt_grupos_link_grupos?select=ordem&link_id=eq.${b.link_id}`).catch(() => []);
+    const ordem = Math.max(0, ...(atuais || []).map((x) => Number(x.ordem) || 0)) + 1;
+    await rest('mkt_grupos_link_grupos?on_conflict=link_id,grupo_jid', { method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal', body: { link_id: b.link_id, grupo_jid: g.jid, ordem } });
+  }
+  console.log(`[mkt-grupos] grupo criado por ${u.name}: ${g.jid}`);
+  return g;
+}
+
+async function acaoEditarGrupo(b) {
+  const jid = String(b.jid || '');
+  await grupoDoMarketing(jid);
+  const feito = await editarGrupo(jid, b);
+  await rest(`mkt_grupos?jid=eq.${enc(jid)}`, { method: 'PATCH', prefer: 'return=minimal', body: feito }).catch(() => null);
+  return { ok: true, feito };
+}
+
+async function acaoParticipantes(b) {
+  const jid = String(b.jid || '');
+  await grupoDoMarketing(jid);
+  const lista = await lerParticipantes(jid);
+  const c = await lerConexao();
+  const meu = semNono(c?.numero);
+  const eu = meu ? lista.find((p) => p.telefone && semNono(p.telefone) === meu) : null;
+  const agora = new Date().toISOString();
+  await rest(`mkt_grupos?jid=eq.${enc(jid)}`, {
+    method: 'PATCH', prefer: 'return=minimal',
+    body: {
+      participantes: lista.length, contado_em: agora, info_em: agora,
+      participantes_lista: lista.map(({ id, telefone, admin }) => ({ id, telefone, admin })),
+      admins: lista.filter((p) => p.admin).map(({ id, telefone, admin }) => ({ id, telefone, admin })),
+      ...(eu ? { eu_admin: Boolean(eu.admin) } : {}),
+    },
+  }).catch(() => null);
+  return { participantes: lista, eu_admin: eu ? Boolean(eu.admin) : null };
+}
+
 async function caixaEnviar(b, u) {
   const jid = String(b.jid || '');
   const texto = String(b.texto || '').trim();
   if (!texto) throw new Error('Escreva a mensagem.');
   if (texto.length > 4096) throw new Error('Texto longo demais.');
-  let pessoaJaEscreveu = false;
-  if (ehPessoa(jid) && String(process.env.MKT_GRUPOS_PRIVADO || '') === '1') {
-    const r = await evoMkt('chat/findMessages', { method: 'POST', body: { where: { key: { remoteJid: jid, fromMe: false } }, page: 1, offset: 1 } });
-    pessoaJaEscreveu = (r?.messages?.records || []).length > 0;
-  }
-  const bloqueio = destinoDaCaixaPermitido(jid, { privadoLigado: String(process.env.MKT_GRUPOS_PRIVADO || '') === '1', pessoaJaEscreveu });
+  const bloqueio = destinoDaCaixaPermitido(jid);
   if (bloqueio) throw new Error(bloqueio);
   if (ehGrupo(jid)) {
     const g = (await rest(`mkt_grupos?select=jid,saiu_em&jid=eq.${enc(jid)}&limit=1`))?.[0];
@@ -192,7 +266,7 @@ async function caixaEnviar(b, u) {
 
 async function caixaReagir(b) {
   const jid = String(b.jid || '');
-  if (!ehGrupo(jid) && !ehPessoa(jid)) throw new Error('Destino inválido.');
+  if (!ehGrupo(jid)) throw new Error('O chip do Marketing é só de grupos.');
   const id = String(b.msg?.id || '');
   if (!/^[A-Za-z0-9]{8,64}$/.test(id)) throw new Error('Mensagem inválida.');
   const emoji = String(b.emoji ?? '');
@@ -211,9 +285,13 @@ export default async function handler(req, res) {
     const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!segredo || veio !== segredo) return res.status(401).json({ error: 'Não autorizado' });
     try {
-      const r = await rodada({ prazoMs: 45_000 });
-      console.log(`[mkt-grupos] cron: ${JSON.stringify(r)}`);
-      return res.status(200).json(r);
+      // 0342: contagem de membros dos links (intervalo próprio por grupo) ANTES do
+      // motor — só lê a Evolution (e cria grupo se o link pedir + MKT_GRUPOS_LINK_AUTO=1).
+      // Não envia mensagem: o envio continua só no motor, com as duas chaves.
+      const links = await rodadaLinks({ prazoMs: 12_000 }).catch((e) => ({ erro: String(e?.message || e).slice(0, 200) }));
+      const r = await rodada({ prazoMs: 40_000 });
+      console.log(`[mkt-grupos] cron: ${JSON.stringify({ ...r, links })}`);
+      return res.status(200).json({ ...r, links });
     } catch (e) {
       console.error('[mkt-grupos] cron:', e?.message);
       return res.status(502).json({ error: 'falhou' });
@@ -240,7 +318,7 @@ export default async function handler(req, res) {
             if (estado !== c.estado) await rest('mkt_grupos_conexao?id=eq.1', { method: 'PATCH', prefer: 'return=minimal', body: { estado, estado_em: new Date().toISOString() } }).catch(() => null);
           } catch (e) { erro = String(e?.message || e).slice(0, 200); }
         }
-        return res.status(200).json({ conexao: c, estado, erro, envioAmbiente: envioLigadoNoAmbiente(), privado: String(process.env.MKT_GRUPOS_PRIVADO || '') === '1', admin });
+        return res.status(200).json({ conexao: c, estado, erro, envioAmbiente: envioLigadoNoAmbiente(), privado: false, admin });
       }
       case 'configurar': {
         soAdmin();
@@ -265,19 +343,22 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true, envioAmbiente: envioLigadoNoAmbiente() });
       }
       case 'qrcode': {
-        soAdmin();
+        // 04/11/2026 (acesso completo do time): reconectar o chip que caiu é
+        // rotina do Marketing — ler o QR só reconecta a instância que o admin
+        // já configurou (a trava do banco segue valendo). Trocar a instância,
+        // ligar o envio e desconectar continuam só admin.
         const r = await evoMkt('instance/connect', { timeoutMs: 40_000 });
         const qr = r?.qrcode || r;
         const base64 = typeof qr?.base64 === 'string' ? (qr.base64.startsWith('data:') ? qr.base64 : `data:image/png;base64,${qr.base64}`) : null;
         return res.status(200).json({ base64, pairingCode: qr?.pairingCode || null, estado: r?.instance?.state || null });
       }
       case 'apontar_webhook': {
-        soAdmin();
+        // 04/11/2026: idempotente (só aponta a instância do Marketing pro QS) — o time pode.
         const segredo = String(process.env.MKT_GRUPOS_SECRET || '');
         if (segredo.length < 16) throw new Error('Defina MKT_GRUPOS_SECRET (16+ caracteres) na Vercel antes.');
         await evoMkt('webhook/set', {
           method: 'POST',
-          body: { webhook: { enabled: true, url: `${BASE()}/api/mkt-grupos?webhook=1&t=${enc(segredo)}`, byEvents: false, base64: false, events: ['CONNECTION_UPDATE', 'MESSAGES_UPDATE', 'SEND_MESSAGE', 'GROUPS_UPSERT', 'GROUP_UPDATE'] } },
+          body: { webhook: { enabled: true, url: `${BASE()}/api/mkt-grupos?webhook=1&t=${enc(segredo)}`, byEvents: false, base64: false, events: ['CONNECTION_UPDATE', 'MESSAGES_UPDATE', 'SEND_MESSAGE', 'GROUPS_UPSERT', 'GROUP_UPDATE', 'GROUP_PARTICIPANTS_UPDATE'] } },
         });
         return res.status(200).json({ ok: true });
       }
@@ -302,12 +383,56 @@ export default async function handler(req, res) {
       }
       case 'mensagens': {
         const jid = String(b.jid || '');
-        if (!ehGrupo(jid) && !ehPessoa(jid)) throw new Error('Conversa inválida.');
+        if (!ehGrupo(jid)) throw new Error('O chip do Marketing é só de grupos.');
         const pagina = Math.max(1, Math.min(50, Number(b.pagina) || 1));
         const r = await evoMkt('chat/findMessages', { method: 'POST', body: { where: { key: { remoteJid: jid } }, page: pagina, offset: 40 }, timeoutMs: 30_000 });
         return res.status(200).json({ mensagens: lerMensagens(r?.messages?.records).reverse(), paginas: Number(r?.messages?.pages) || 1 });
       }
       case 'enviar': return res.status(200).json(await caixaEnviar(b, u));
+      // ── 0342: criar e gerenciar grupos ──
+      case 'criar_grupo': return res.status(200).json({ grupo: await acaoCriarGrupo(b, u) });
+      case 'editar_grupo': return res.status(200).json(await acaoEditarGrupo(b));
+      case 'participantes': return res.status(200).json(await acaoParticipantes(b));
+      case 'participante': {
+        const jid = String(b.jid || '');
+        await grupoDoMarketing(jid);
+        const r = await mudarParticipantes(jid, String(b.tipo || ''), b.pessoas);
+        console.log(`[mkt-grupos] participantes (${b.tipo}) por ${u.name} em ${jid}: ${r.resultado.length}`);
+        return res.status(200).json(r);
+      }
+      case 'renovar_convite': {
+        const jid = String(b.jid || '');
+        await grupoDoMarketing(jid);
+        const link = await renovarConvite(jid);
+        await rest(`mkt_grupos?jid=eq.${enc(jid)}`, { method: 'PATCH', prefer: 'return=minimal', body: { link_convite: link, link_em: new Date().toISOString() } });
+        return res.status(200).json({ link });
+      }
+      case 'sair_grupo': {
+        const jid = String(b.jid || '');
+        const g = await grupoDoMarketing(jid);
+        if (String(b.confirmar || '').trim().toLowerCase() !== 'sair') throw new Error('Para sair, digite SAIR na confirmação.');
+        await sairDoGrupo(jid);
+        await rest(`mkt_grupos?jid=eq.${enc(jid)}`, { method: 'PATCH', prefer: 'return=minimal', body: { saiu_em: new Date().toISOString() } });
+        console.log(`[mkt-grupos] chip saiu do grupo ${g.nome || jid} (pedido de ${u.name})`);
+        return res.status(200).json({ ok: true });
+      }
+      // ── 0342: link inteligente ──
+      case 'link_contar': {
+        // "Contar agora": zera o contado_em dos grupos do link e roda a contagem (mesmo limite do cron).
+        if (!UUID.test(String(b.link_id || ''))) throw new Error('Link inválido.');
+        const jids = ((await rest(`mkt_grupos_link_grupos?select=grupo_jid&link_id=eq.${b.link_id}`).catch(() => [])) || []).map((x) => x.grupo_jid);
+        if (jids.length) await rest(`mkt_grupos?jid=in.(${jids.map((j) => `"${j}"`).join(',')})`, { method: 'PATCH', prefer: 'return=minimal', body: { contado_em: null } });
+        return res.status(200).json(await rodadaLinks({ prazoMs: 40_000 }));
+      }
+      case 'link_criar_grupo': {
+        if (!UUID.test(String(b.link_id || ''))) throw new Error('Link inválido.');
+        const { links, itens } = await lerLinksAtivos();
+        const link = links.find((l) => l.id === b.link_id);
+        if (!link) throw new Error('Link não encontrado ou pausado.');
+        const c = await travaMkt();
+        const g = await criarProximoGrupo(link, itens.filter((i) => i.link_id === link.id), { conexao: c, automatico: false });
+        return res.status(200).json({ grupo: g });
+      }
       case 'reagir': return res.status(200).json(await caixaReagir(b));
       default: return res.status(400).json({ error: 'Ação desconhecida.' });
     }

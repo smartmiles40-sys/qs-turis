@@ -78,16 +78,15 @@ export function caminhoDaInstancia(caminho, instancia) {
 }
 
 /**
- * Pra onde a caixa "Celular" pode responder. Grupo sempre (se o número está
- * nele); pessoa só com MKT_GRUPOS_PRIVADO=1 e só se a pessoa já escreveu
- * (resposta, nunca primeira mensagem). Massa pra pessoa nunca passa por aqui.
+ * Pra onde a caixa "Celular" pode responder: SÓ GRUPO (Bruno, 09/11/2026).
+ * O chip do Marketing é só de grupos; conversa com pessoa (lead que manda
+ * mensagem no número) não aparece no QS e não é respondida por aqui — pessoa
+ * vai pela API oficial. Não há chave que libere.
  */
-export function destinoDaCaixaPermitido(jid, { privadoLigado = false, pessoaJaEscreveu = false } = {}) {
+export function destinoDaCaixaPermitido(jid) {
   if (ehGrupo(jid)) return null;
-  if (!ehPessoa(jid)) return 'Destino inválido.';
-  if (!privadoLigado) return 'Pelo chip do Marketing só sai mensagem em GRUPO. Conversa com pessoa vai pela API oficial.';
-  if (!pessoaJaEscreveu) return 'Só dá pra responder quem escreveu primeiro.';
-  return null;
+  if (ehPessoa(jid)) return 'O chip do Marketing é só de grupos. Conversa com pessoa vai pela API oficial.';
+  return 'Destino inválido.';
 }
 
 // ── CAMPANHA ────────────────────────────────────────────────────────────────
@@ -385,7 +384,8 @@ export function lerConversas(brutas) {
       ultima_em: c?.updatedAt || (ultima?.messageTimestamp ? new Date(Number(ultima.messageTimestamp) * 1000).toISOString() : null),
       previa: String(msg?.conversation || msg?.extendedTextMessage?.text || msg?.imageMessage?.caption || (msg?.imageMessage ? '📷 Foto' : '') || (msg?.audioMessage ? '🎤 Áudio' : '') || '').slice(0, 140),
     };
-  }).filter((c) => ehGrupo(c.jid) || ehPessoa(c.jid));
+  // Só grupos: conversas particulares do chip nunca saem do servidor (09/11/2026).
+  }).filter((c) => ehGrupo(c.jid));
 }
 
 /** findMessages → bolhas. */

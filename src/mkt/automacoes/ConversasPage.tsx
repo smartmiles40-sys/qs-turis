@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { janelaAberta, type Fluxo } from "./tipos";
+import { canalDo, janelaAberta, type Fluxo } from "./tipos";
 import { acao, listarFluxos, listarModelos, type ModeloMkt } from "./api";
 import { Aviso, Botao, COR, COR_SUAVE, Carregando, Chip, Entrada, MKT_CSS, Modal, Selecao, quando } from "./ui";
 
@@ -161,7 +161,7 @@ function Conversa({ c, onVoltar, onMudou }: { c: Conversa; onVoltar: () => void;
         ))}
         {tags.filter((t) => t.startsWith("lista:")).map((t) => <Chip key={t} cor="#0891B2">{t.slice(6)}</Chip>)}
         {c.contato_id && (
-          <form className="inline-flex gap-1" onSubmit={(e) => { e.preventDefault(); if (novaTag.trim()) void rodar({ acao: "tags", adicionar: [novaTag.trim()] }).then(() => setNovaTag("")); }}>
+          <form className="inline-flex gap-1" onSubmit={(e) => { e.preventDefault(); if (novaTag.trim()) void rodar({ acao: "tags", adicionar: [novaTag.trim()] }).then((ok) => { if (ok) setNovaTag(""); }); }}>{/* 04/11/2026: só limpa se gravou */}
             <input className="mkt-input !py-0.5 !w-32 !text-[12px]" value={novaTag} onChange={(e) => setNovaTag(e.target.value)} placeholder="+ tag" />
           </form>
         )}
@@ -205,7 +205,7 @@ function Conversa({ c, onVoltar, onMudou }: { c: Conversa; onVoltar: () => void;
 function ModalFluxo({ onFechar, onEscolher }: { onFechar: () => void; onEscolher: (id: string) => void }) {
   const [fluxos, setFluxos] = useState<Fluxo[] | null>(null);
   const [sel, setSel] = useState("");
-  useEffect(() => { listarFluxos().then((f) => { const a = f.filter((x) => x.status === "ativo"); setFluxos(a); setSel(a[0]?.id ?? ""); }).catch(() => setFluxos([])); }, []);
+  useEffect(() => { listarFluxos().then((f) => { const a = f.filter((x) => x.status === "ativo" && canalDo(x) === "whatsapp"); setFluxos(a); setSel(a[0]?.id ?? ""); }).catch(() => setFluxos([])); }, []);
   return (
     <Modal aberto titulo="Iniciar um fluxo nesta conversa" onFechar={onFechar}
       rodape={<><Botao onClick={onFechar}>Cancelar</Botao><Botao variante="primario" disabled={!sel} onClick={() => onEscolher(sel)}>Iniciar</Botao></>}>
@@ -221,12 +221,17 @@ function ModalModelo({ onFechar, onEnviar }: { onFechar: () => void; onEnviar: (
   const [modelos, setModelos] = useState<ModeloMkt[] | null>(null);
   const [sel, setSel] = useState("");
   const [vars, setVars] = useState<Record<string, string>>({});
-  useEffect(() => { listarModelos().then((r) => setModelos(r.modelos ?? [])).catch(() => setModelos([])); }, []);
+  // 04/11/2026: o erro da Meta (número sem WABA, token…) virava "Nenhum modelo aprovado" calado.
+  const [erroModelos, setErroModelos] = useState<string | null>(null);
+  useEffect(() => {
+    listarModelos().then((r) => { setModelos(r.modelos ?? []); setErroModelos(r.erro || r.aviso || null); })
+      .catch((e: unknown) => { setModelos([]); setErroModelos(e instanceof Error ? e.message : "Não consegui ler os modelos."); });
+  }, []);
   const m = modelos?.find((x) => `${x.nome}|${x.idioma}` === sel);
   return (
     <Modal aberto titulo="Mandar modelo aprovado" onFechar={onFechar}
       rodape={<><Botao onClick={onFechar}>Cancelar</Botao><Botao variante="primario" disabled={!m} onClick={() => m && onEnviar({ nome: m.nome, idioma: m.idioma, variaveis: vars })}>Enviar</Botao></>}>
-      {!modelos ? <Carregando /> : !modelos.length ? <Aviso tom="alerta">Nenhum modelo aprovado no número do Marketing.</Aviso> : (
+      {!modelos ? <Carregando /> : !modelos.length ? <Aviso tom="alerta">{erroModelos || "Nenhum modelo aprovado no número do Marketing."}</Aviso> : (
         <div className="space-y-2">
           <Selecao value={sel} onChange={(e) => { setSel(e.target.value); setVars({}); }}>
             <option value="">(escolha)</option>

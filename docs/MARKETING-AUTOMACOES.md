@@ -47,22 +47,32 @@ O webhook `/api/mkt-instagram` responde à Meta mas não grava nem responde nada
 2. App da Meta › produto **Instagram** › "API com login do Instagram":
    - Permissões: `instagram_business_basic`, `instagram_business_manage_messages`, `instagram_business_manage_comments`.
    - Webhook: URL `https://<domínio do QS>/api/mkt-instagram`, token de verificação = `MKT_IG_VERIFY_TOKEN`.
-   - Assinar: `comments`, `messages`, `messaging_postbacks`, `mentions`.
+   - Assinar: `comments`, `messages`, `messaging_postbacks`, `messaging_referral` (links ig.me), `mentions`.
    - A conta precisa ser Business ou Creator; em "Mensagens" do app do Instagram, ligar "Permitir acesso às mensagens".
 3. Gerar o token da conta e colar em Marketing › Instagram › Situação (vai pro Vault `qs_mkt_ig_<id>`, nunca volta pra tela).
 4. Criar as automações e clicar "Ligar o Instagram".
 
 Regras da Meta: resposta privada a comentário = 1 DM por comentário, em até 7 dias; DM fora da janela de 24 h não sai.
 
+### Fluxos no Instagram (09/11/2026, migration 0343)
+
+- Cada automação do Instagram é um **fluxo** (`mkt_fluxos.canal = 'instagram'`), no mesmo editor do WhatsApp. Gatilhos: `ig_comentario` (palavra ou qualquer, todos os posts ou os escolhidos, resposta pública opcional), `ig_dm_palavra`, `ig_story_resposta`, `ig_story_mencao`, `ig_boas_vindas`, `ig_ref` (link ig.me).
+- Tradução (`api/_mktIgRegras.js`): botões/lista → quick replies (até 13, título 20); link → button template (web_url); texto até 1000 bytes; mídia vira anexo (legenda vira 2ª mensagem). Template não existe no Instagram.
+- Comentário: a 1ª mensagem do fluxo vai como resposta privada (`recipient.comment_id`); o resto só sai quando a pessoa responder (janela de 24 h). Se a Meta recusar os botões na privada, sai só o texto e a pessoa pode digitar o título do botão.
+- As regras simples antigas (`mkt_ig_automacoes`) continuam como reserva quando nenhum fluxo combina; a tela tem "Converter em fluxo".
+- Token: o cron (`/api/mkt-automacoes?cron=1`) renova o token longo quando faltam < 15 dias (`ig_refresh_token`); a tela mostra aviso quando vence em < 7 dias, venceu ou deu erro, e tem "Renovar agora".
+- Links e QR: aba nas páginas WhatsApp e Instagram. O link divulgado é `<site>/e/<código>` (rewrite no `vercel.json` → `/api/mkt-automacoes?e=`), que conta o clique (robôs de prévia não contam; `?q=1` = veio do QR) e redireciona pro wa.me/ig.me.
+- Relatório por fluxo: menu "⋯ › Relatório" no cartão e botão no editor (`mkt_auto_relatorio`).
+
 ## Arquivos
 
 - Servidor: `api/_mktAutoRegras.js` (puro, testado), `api/_mktMotor.js`, `api/_mktAutoEntrada.js`, `api/_mktInstagram.js`, `api/mkt-automacoes.js`, `api/mkt-instagram.js`.
 - Tela: `src/mkt/automacoes/` — `rotas.ts` (`ROTAS_AUTOMACOES`), `AutomacoesPage.tsx`, `EditorFluxo.tsx` (canvas à mão; no celular vira lista), `PainelBloco.tsx`, `Simulacao.tsx`, `ConversasPage.tsx`, `InstagramPage.tsx`.
-- Testes: `tests/mkt/regras.test.ts`, `roteamento.test.ts`, `instagram.test.ts`.
+- Testes: `tests/mkt/regras.test.ts`, `roteamento.test.ts`, `instagram.test.ts`, `instagram-fluxos.test.ts`.
 - `saidasDoNo` existe em `api/_mktAutoRegras.js` **e** `src/mkt/automacoes/tipos.ts` — o teste de paridade quebra se divergirem.
 
 ## Limitações conhecidas
 
-- QR Code: o QS não tem biblioteca de QR (e não dava para instalar dependência); a tela dá o link wa.me para colar num gerador.
+- QR Code: gerado no navegador com `qrcode-generator` (PNG/SVG para baixar).
 - Conversas atualiza a cada 10 s (sem Realtime, de propósito, por egress).
 - O link do aviso "avisar humano" é `#mkt/whatsapp?aba=conversas&c=<id>` (desde 30/10: Automações e Conversas viraram abas da página WhatsApp).

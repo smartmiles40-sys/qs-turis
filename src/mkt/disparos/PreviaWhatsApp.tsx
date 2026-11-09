@@ -17,6 +17,8 @@ export interface BalaoPrevia {
   botoes?: string[];
   /** Mensagem que a PESSOA mandou (fica à esquerda, branca). */
   daPessoa?: boolean;
+  /** Mídia no topo do modelo (0341): IMAGE mostra a foto; VIDEO/DOCUMENT, um quadro. */
+  midia?: { tipo: string; link?: string };
 }
 
 /** {{primeiro_nome}} → "Ana" e {{1}} → "[1]", pra prévia ler como gente. */
@@ -61,6 +63,11 @@ export default function PreviaWhatsApp({ baloes, contato = "Se Tu For, Eu Vou!",
             <div key={i} className={`flex flex-col ${b.daPessoa ? "items-start" : "items-end"}`}>
               <div className="max-w-[88%] rounded-lg px-2.5 pb-1.5 pt-1.5 text-[13.5px] leading-[1.4] shadow-[0_1px_1px_rgba(0,0,0,.12)]"
                 style={{ background: b.daPessoa ? "#FFFFFF" : "#D9FDD3", color: "#111B21" }}>
+                {b.midia && (b.midia.tipo === "IMAGE" && b.midia.link
+                  ? <img src={b.midia.link} alt="" className="mb-1 max-h-[160px] w-full rounded-md object-cover" />
+                  : <div className="mb-1 flex h-[90px] items-center justify-center rounded-md text-[12px]" style={{ background: "#CFE9C9", color: "#4B5E52" }}>
+                      {b.midia.tipo === "VIDEO" ? "vídeo no topo" : b.midia.tipo === "DOCUMENT" ? "documento no topo" : "imagem no topo"}{b.midia.link ? "" : " (cole o link)"}
+                    </div>)}
                 {b.titulo && <p className="mb-0.5 font-semibold">{textoDeExemplo(b.titulo)}</p>}
                 <p className="whitespace-pre-wrap break-words">{formatar(textoDeExemplo(b.texto))}</p>
                 {b.rodape && <p className="mt-1 text-[11.5px]" style={{ color: "#667781" }}>{b.rodape}</p>}

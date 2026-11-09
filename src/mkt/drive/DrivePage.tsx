@@ -78,7 +78,8 @@ export default function DrivePage() {
 
       {erro && (
         <p className="text-[13px] rounded-lg px-3 py-2" role="alert" style={{ background: "var(--err-bg)", color: "var(--err-ink)" }}>
-          {erro} <button type="button" className="underline ml-1" onClick={() => setErro(null)}>ok</button>
+          {/* 04/11/2026: sem config, fechar o erro deixava "Carregando…" pra sempre; aí o botão tenta de novo. */}
+          {erro} <button type="button" className="underline ml-1" onClick={() => { setErro(null); if (!config) void lerConfig(); }}>{config ? "ok" : "tentar de novo"}</button>
         </p>
       )}
 

@@ -21,7 +21,12 @@ import {
 export default function TiposPrazos({ onFechar }: { onFechar: () => void }) {
   const { currentUser } = useQsAuth();
   const centrais = setoresDaCentral(); // o Marketing entra com a 0283
-  const meus: Setor[] = currentUser?.role === "admin" ? centrais : setoresDe(currentUser).filter((s) => centrais.includes(s));
+  // 0266 (04/11/2026): o papel marketing ajusta SÓ os tipos do Marketing (o
+  // banco recusa os outros setores dele) e não liga distribuição (RPC é do gestor).
+  const soMkt = currentUser?.role === "marketing";
+  const meus: Setor[] = currentUser?.role === "admin" ? centrais
+    : soMkt ? (centrais.includes("marketing" as Setor) ? ["marketing" as Setor] : [])
+    : setoresDe(currentUser).filter((s) => centrais.includes(s));
   const [tipos, setTipos] = useState<TipoSol[]>([]);
   const [editado, setEditado] = useState<Record<string, Partial<TipoSol>>>({});
   const [novo, setNovo] = useState<Record<string, string>>({});
@@ -32,7 +37,7 @@ export default function TiposPrazos({ onFechar }: { onFechar: () => void }) {
   const [distribEditada, setDistribEditada] = useState<Record<string, boolean>>({});
 
   const carregar = () => listarTipos().then(setTipos).catch((e) => setErro(e instanceof Error ? e.message : "Não carregou."));
-  useEffect(() => { void carregar(); void lerDistribuicao().then(setDistrib); }, []);
+  useEffect(() => { void carregar(); if (!soMkt) void lerDistribuicao().then(setDistrib); }, []);
 
   const mudar = (id: string, campo: Partial<TipoSol>) => { setOk(false); setEditado((e) => ({ ...e, [id]: { ...e[id], ...campo } })); };
 
@@ -50,7 +55,7 @@ export default function TiposPrazos({ onFechar }: { onFechar: () => void }) {
       }
       for (const [setor, ativo] of Object.entries(distribEditada)) await definirDistribuicao(setor as Setor, ativo);
       setEditado({}); setNovo({}); setDistribEditada({}); setOk(true); await carregar();
-      setDistrib(await lerDistribuicao());
+      if (!soMkt) setDistrib(await lerDistribuicao());
     } catch (e) { setErro(e instanceof Error ? e.message : "Não salvou."); }
     finally { setSalvando(false); }
   }

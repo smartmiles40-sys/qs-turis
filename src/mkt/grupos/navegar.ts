@@ -1,6 +1,7 @@
 // src/mkt/grupos/navegar.ts — estado das abas de Grupos no endereço, pra dar pra mandar o link:
 //   #mkt/grupos?aba=campanhas&campanha=<id>      (detalhe)   · &campanha=nova · &editar=<id>
 //   #mkt/grupos?aba=cadencias&cadencia=<id>      · &recorrencia=nova|<id> · &ver=recorrentes
+//   #mkt/grupos?aba=links&link=<id>            · &link=nova · &editar=<id>   (0342)
 //   #mkt/grupos?aba=celular&jid=<jid>            · #mkt/grupos?chip=1 (abre o chip)
 import { useCallback, useEffect, useState } from "react";
 import { gravarParamNoHash, lerParamDoHash } from "@/lib/hashQuery";
@@ -26,7 +27,7 @@ export function useParam(nome: string): [string | null, (v: string | null) => vo
 }
 
 /** Vai pra outra aba de Grupos já com um item aberto (dispara "hashchange": a aba troca). */
-export function irNaAba(aba: "campanhas" | "cadencias" | "grupos" | "celular", params: Record<string, string> = {}) {
+export function irNaAba(aba: "campanhas" | "cadencias" | "grupos" | "links" | "celular", params: Record<string, string> = {}) {
   const q = new URLSearchParams();
   if (aba !== "campanhas") q.set("aba", aba);
   for (const [k, v] of Object.entries(params)) q.set(k, v);

@@ -230,3 +230,50 @@ Telas (área de Marketing, `src/mkt/disparos/`):
   mas não responde.
 - Modelo com imagem/vídeo no topo (igual ao Comercial: só texto).
 - Score do contato: a coluna existe (contrato), mas ninguém calcula ainda.
+
+---
+
+# Marketing: envio OFICIAL pela Cloud API (0341, 09/11/2026)
+
+O Marketing tem rodada e travas próprias (`api/_mktDisparoOficial.js`, cron
+`/api/disparos?mkt=1` a cada 5 min). A rodada do Comercial/Rel não pega mais
+campanha do Marketing — o resto do Comercial não mudou (`ENVIO_REAL_PLUGADO`
+segue `false`, `disparo_simulacao` segue mandando lá).
+
+## As travas (TODAS precisam estar ligadas pro envio ser real)
+
+1. `MKT_DISPARO_ENVIO=1` nas variáveis da Vercel (só "1" liga).
+2. `qs_settings.mkt_disparo_simulacao = false` (nasce `true`).
+3. Número do Marketing em `qs_wa_numeros_meta` (setor `marketing`) **com token**
+   (conectado pelo painel de WhatsApp — o QS precisa ler `qs_meta_token`).
+4. Modelo **APPROVED** na WABA do número do Marketing, sincronizado no QS.
+
+Simulação ligada = a fila anda e nada sai. Simulação desligada com trava
+faltando = a fila PARA (nem simula, nem manda) e a tela diz o que falta.
+Qualidade VERMELHA do número = nada sai.
+
+## Ligar, passo a passo
+
+1. Aplicar `supabase/migrations/0341_mkt_disparo_oficial.sql`.
+2. WhatsApp Manager: adicionar o número do Marketing, registrar e conectar
+   pelo painel de WhatsApp (Meta) do QS escolhendo o setor Marketing (o
+   botão "Conectar" guarda o token no Vault — sem token, nada sai).
+3. Criar e aprovar os modelos NA WABA desse número (categoria Marketing ou
+   Utilidade). Na tela: "Sincronizar modelos da Meta".
+4. Admin: "Ritmo e custo" — mensagens/segundo (começar com 1–5), teto por
+   dia, % do limite da Meta e o preço por mensagem (tabela da Meta, Brasil).
+5. Teste com 1 contato: lista com só o seu telefone → "Enviar uma vez" →
+   Iniciar. Ainda em simulação, conferir "Ao vivo".
+6. Ligar: `MKT_DISPARO_ENVIO=1` na Vercel + redeploy, e
+   `update qs_settings set value = 'false'::jsonb where key = 'mkt_disparo_simulacao';`
+7. Desligar na hora: `update qs_settings set value = 'true'::jsonb where key = 'mkt_disparo_simulacao';`
+   (vale na próxima rodada, sem deploy).
+
+## O que a rodada faz com os erros da Meta
+
+- 131026, 131047, 131049 e erro sem código → erro só daquele contato.
+- 131050 (desligou o marketing) → pulado e opt-out no contato.
+- 130429, 131056, 80007, 4 → o envio volta pra fila; retoma na próxima rodada.
+- 131048, 132xxx, 368, 131031, 131053, 131009 → a campanha PAUSA com o motivo.
+- Envio real interrompido no meio (função morreu) NÃO é reenviado: vira erro
+  "pode ter saído" — melhor um a menos que duplicado.

@@ -19,6 +19,8 @@
 
 import { rest } from './_supabaseAdmin.js';
 import { avancarStatus, ehParadaMkt, textoDaMensagem, variantesTelefone, normalizarTelefoneMkt } from './_mktRegras.js';
+import { classificarErroMeta, cobrancaDoRecibo } from './_mktOficialRegras.js';
+import { patchEnvioMkt } from './_mktDisparoOficial.js';
 
 let cache = { id: null, em: 0 };
 
@@ -71,18 +73,41 @@ export async function processarMarketing(ch) {
   const agora = new Date().toISOString();
 
   // ── Recibos ──
+  // 0341: guarda também o código do erro e a cobrança (`pricing`) — é daí que
+  // saem "falhou por quê" e o custo estimado da campanha. O pricing vem no
+  // sent OU no delivered/read: grava mesmo quando o status não anda.
   for (const st of value.statuses || []) {
     if (!st?.id) continue;
     const e = (await rest(`qs_disparo_envios?select=id,status,contato_id,campanha_id&wamid=eq.${encodeURIComponent(String(st.id))}&limit=1`).catch(() => null))?.[0];
     if (!e) continue;
+    const cob = cobrancaDoRecibo(st);
     const novo = avancarStatus(e.status, st.status);
-    if (!novo) continue;
-    const patch = { status: novo };
+    if (!novo) {
+      if (cob) await patchEnvioMkt(e.id, cob);
+      continue;
+    }
+    const patch = { status: novo, ...(cob || {}) };
     if (novo === 'entregue') patch.entregue_em = agora;
     if (novo === 'lido') { patch.lido_em = agora; patch.entregue_em = patch.entregue_em || agora; }
-    if (novo === 'erro') patch.motivo = `a Meta não entregou${st.errors?.[0]?.code ? ` (código ${st.errors[0].code})` : ''}`.slice(0, 300);
-    await rest(`qs_disparo_envios?id=eq.${e.id}&status=eq.${e.status}`, { method: 'PATCH', prefer: 'return=minimal', body: patch }).catch(() => null);
+    let k = null;
+    if (novo === 'erro') {
+      const er = st.errors?.[0] || {};
+      k = classificarErroMeta(er.code, er.error_data?.details || er.title || er.message);
+      patch.motivo = k.motivo.slice(0, 300);
+      patch.erro_codigo = k.codigo;
+    }
+    await patchEnvioMkt(e.id, patch, `&status=eq.${e.status}`);
     await evento(e.contato_id, `disparo_${novo === 'erro' ? 'erro' : novo === 'lido' ? 'lido' : 'entregue'}`, { campanha_id: e.campanha_id, wamid: st.id, codigo: st.errors?.[0]?.code || null });
+    // Falha que é da CAMPANHA (modelo pausado, número restrito) pausa a fila;
+    // "desligou o marketing" (131050) tira a pessoa da base de envio.
+    if (k?.acao === 'parar' && e.campanha_id) {
+      await rest(`qs_disparo_campanhas?id=eq.${e.campanha_id}&status=eq.enviando`, {
+        method: 'PATCH', prefer: 'return=minimal', body: { status: 'pausada', pausada_em: agora, ultimo_erro: k.motivo.slice(0, 300) },
+      }).catch(() => null);
+    }
+    if (k?.acao === 'optout' && e.contato_id) {
+      await rest(`mkt_contatos?id=eq.${e.contato_id}&optout_whatsapp_em=is.null`, { method: 'PATCH', prefer: 'return=minimal', body: { optout_whatsapp_em: agora } }).catch(() => null);
+    }
     conta.recibos++;
   }
 

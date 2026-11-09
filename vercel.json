@@ -122,6 +122,9 @@
     "api/mkt-grupos.js": {
       "maxDuration": 60
     },
+    "api/mkt-grupos-link.js": {
+      "maxDuration": 10
+    },
     "api/mkt-email.js": {
       "maxDuration": 60
     },
@@ -144,6 +147,9 @@
       "maxDuration": 30
     },
     "api/cadencia-sweep.js": {
+      "maxDuration": 60
+    },
+    "api/mkt-trafego.js": {
       "maxDuration": 60
     },
     "api/*.js": {
@@ -174,6 +180,10 @@
     {
       "path": "/api/disparos",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/disparos?mkt=1",
+      "schedule": "2-59/5 * * * *"
     },
     {
       "path": "/api/rel-docs-ia",
@@ -258,6 +268,10 @@
     {
       "path": "/api/cadencia-sweep",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/mkt-trafego?cron=1",
+      "schedule": "7,37 * * * *"
     }
   ],
   "headers": [
@@ -341,6 +355,14 @@
     }
   ],
   "rewrites": [
+    {
+      "source": "/g/:slug",
+      "destination": "/api/mkt-grupos-link?slug=:slug"
+    },
+    {
+      "source": "/e/:codigo",
+      "destination": "/api/mkt-automacoes?e=:codigo"
+    },
     {
       "source": "/documentos/:token",
       "destination": "/index.html"

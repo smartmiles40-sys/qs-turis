@@ -21,6 +21,7 @@ export default function AprovacoesPage() {
   const { colunas, cards, carregando, erro, recarregar } = useQuadro();
   const [devolvendo, setDevolvendo] = useState<CardMkt | null>(null);
   const [erroAcao, setErroAcao] = useState<string | null>(null);
+  const [aprovando, setAprovando] = useState<string | null>(null);
   const hoje = hojeSP();
   const tipoDe = useMemo(() => new Map(colunas.map((k) => [k.id, k.tipo])), [colunas]);
   const pendentes = cards.filter((c) => tipoDe.get(c.coluna_id) === "aprovacao").sort((a, b) => a.atualizado_em.localeCompare(b.atualizado_em));
@@ -40,7 +41,11 @@ export default function AprovacoesPage() {
       </button>
       {acoes && aprovador && (
         <div className="flex gap-2">
-          <Botao variante="primario" onClick={async () => { setErroAcao(null); try { await aprovar(c.id); await recarregar(); } catch (e) { setErroAcao(erroDe(e)); } }}>Aprovar</Botao>
+          {/* 04/11/2026: trava o botão enquanto aprova (2 cliques = 2 chamadas; a 2ª falhava). */}
+          <Botao variante="primario" disabled={aprovando === c.id} onClick={async () => {
+            setErroAcao(null); setAprovando(c.id);
+            try { await aprovar(c.id); await recarregar(); } catch (e) { setErroAcao(erroDe(e)); } finally { setAprovando(null); }
+          }}>{aprovando === c.id ? "Aprovando…" : "Aprovar"}</Botao>
           <Botao variante="perigo" onClick={() => setDevolvendo(c)}>Devolver</Botao>
         </div>
       )}

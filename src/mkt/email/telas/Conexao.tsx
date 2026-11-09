@@ -88,7 +88,7 @@ export function PainelConexao() {
   const [chave, setChave] = useState("");
   const [dominio, setDominio] = useState("");
   const [whsec, setWhsec] = useState("");
-  const [rem, setRem] = useState({ remetente_nome: "", remetente_email: "", responder_para: "", rodape_texto: "", rodape_endereco: "", por_segundo: "4" });
+  const [rem, setRem] = useState({ remetente_nome: "", remetente_email: "", responder_para: "", rodape_texto: "", rodape_endereco: "", por_segundo: "4", limite_por_dia: "" });
 
   useEffect(() => {
     if (!s) return;
@@ -97,6 +97,7 @@ export function PainelConexao() {
       remetente_nome: s.config.remetente_nome ?? "", remetente_email: s.config.remetente_email ?? "",
       responder_para: s.config.responder_para ?? "", rodape_texto: s.config.rodape_texto ?? "",
       rodape_endereco: s.config.rodape_endereco ?? "", por_segundo: String(s.config.por_segundo ?? 4),
+      limite_por_dia: s.config.limite_por_dia == null ? "" : String(s.config.limite_por_dia),
     });
   }, [s]);
 
@@ -110,6 +111,16 @@ export function PainelConexao() {
   const registros: RegistroDns[] = s?.config.dominio_registros ?? [];
   const verificado = s?.config.dominio_status === "verified";
   const remetenteOk = Boolean(s?.config.remetente_email);
+  // O campo do teto só aparece (e só é enviado) depois da 0340 aplicada.
+  const temTeto = Boolean(s && "limite_por_dia" in s.config);
+  const salvarRemetente = () => {
+    const { limite_por_dia, ...resto } = rem;
+    return {
+      ...resto,
+      por_segundo: Number(rem.por_segundo),
+      ...(temTeto ? { limite_por_dia: limite_por_dia.trim() === "" ? null : Number(limite_por_dia) } : {}),
+    };
+  };
   const travado = !podeConectar;
 
   return (
@@ -165,10 +176,13 @@ export function PainelConexao() {
             <Campo rotulo="E-mail de envio" dica={s?.config.dominio ? `Precisa ser @${s.config.dominio}` : undefined}><Entrada type="email" value={rem.remetente_email} onChange={(e) => setRem({ ...rem, remetente_email: e.target.value })} /></Campo>
             <Campo rotulo="Responder para"><Entrada type="email" value={rem.responder_para} onChange={(e) => setRem({ ...rem, responder_para: e.target.value })} /></Campo>
             <Campo rotulo="Ritmo (e-mails por segundo)" dica="Plano grátis do Resend: 2/s. Pago: confira o seu."><Entrada type="number" min={1} max={50} value={rem.por_segundo} onChange={(e) => setRem({ ...rem, por_segundo: e.target.value })} /></Campo>
+            {temTeto && (
+              <Campo rotulo="Teto de e-mails por dia" dica="Aquecimento do domínio: comece em 200 e suba aos poucos (500 → 1.000 → 2.000 → 5.000) a cada 2–3 dias, se bounce < 2% e spam < 0,1%. O que passar do teto sai no dia seguinte. Vazio = sem teto."><Entrada type="number" min={1} max={100000} value={rem.limite_por_dia} onChange={(e) => setRem({ ...rem, limite_por_dia: e.target.value })} /></Campo>
+            )}
           </div>
           <Campo rotulo="Frase do rodapé"><Entrada value={rem.rodape_texto} onChange={(e) => setRem({ ...rem, rodape_texto: e.target.value })} /></Campo>
           <Campo rotulo="Dados da empresa (CNPJ e endereço)" dica="Vão no rodapé de todo e-mail, junto do link de descadastro (obrigatório)."><Entrada value={rem.rodape_endereco} onChange={(e) => setRem({ ...rem, rodape_endereco: e.target.value })} /></Campo>
-          <Botao variante="primario" onClick={() => void agir({ acao: "salvar_config", config: { ...rem, por_segundo: Number(rem.por_segundo) } }, "Remetente salvo.")}>Salvar remetente</Botao>
+          <Botao variante="primario" onClick={() => void agir({ acao: "salvar_config", config: salvarRemetente() }, "Remetente salvo.")}>Salvar remetente</Botao>
         </Passo>
       </fieldset>
 

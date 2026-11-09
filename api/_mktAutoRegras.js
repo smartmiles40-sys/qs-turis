@@ -104,6 +104,8 @@ export function personalizar(texto, p = {}) {
     primeiro_nome: primeiroNome(p.nome),
     email: String(p.email ?? ''),
     telefone: String(p.telefone ?? ''),
+    // Instagram: o @ da pessoa (só existe na conversa do Instagram).
+    usuario: p.usuario ? `@${String(p.usuario).replace(/^@/, '')}` : '',
   };
   for (const [k, v] of Object.entries(p.campos ?? {})) {
     if (v !== null && v !== undefined && typeof v !== 'object') mapa[k.toLowerCase()] = String(v);
@@ -315,6 +317,19 @@ export function tipoDoCorpo(c) {
     return it === 'button' ? 'botoes' : it === 'list' ? 'lista' : it === 'cta_url' ? 'link' : 'interativa';
   }
   return { image: 'imagem', video: 'video', audio: 'audio', document: 'documento', template: 'template' }[t] ?? t;
+}
+
+/**
+ * A pessoa DIGITOU o texto de um botão/opção em vez de clicar (ou o Instagram
+ * mandou só o texto)? Devolve a saída daquele botão. Sem acento e maiúscula.
+ */
+export function saidaPorTexto(no, texto) {
+  const alvo = normalizarTexto(texto);
+  if (!alvo || no?.tipo !== 'mensagem') return null;
+  const it = no.dados?.interacao || {};
+  const opcoes = it.tipo === 'botoes' ? (it.botoes || []) : it.tipo === 'lista' ? (it.secoes || []).flatMap((s) => s.itens || []) : [];
+  const achou = opcoes.find((o) => normalizarTexto(o.titulo) === alvo);
+  return achou ? achou.id : null;
 }
 
 // ── Id do clique ────────────────────────────────────────────────────────────

@@ -4,6 +4,10 @@
 //
 //   GET  ?cron=1          (Vercel Cron, Bearer CRON_SECRET, a cada minuto)
 //                         → acorda as esperas (Aguardar, prazo de resposta)
+//                         + renova o token do Instagram quando precisa (0343)
+//   GET  ?e=<código>[&q=1] (PÚBLICO) → link de entrada /e/<código> (vercel.json):
+//                         conta o clique e redireciona pro wa.me (link_ref) ou
+//                         ig.me (ig_ref). Robô de pré-visualização não conta.
 //   GET  ?estado=1        (logado) → número do Marketing + config do robô/Instagram
 //   POST ?lp=<token>      (PÚBLICO, o token é a senha) → webhook da LP / n8n:
 //                         { telefone, nome?, email?, tags?, campos? } inicia o fluxo
@@ -16,7 +20,9 @@
 //        tags       { conversaId, adicionar?:[], remover?:[] }
 //        lida       { conversaId }
 //        modelos    {}  — modelos aprovados da conta do número do Marketing
-//        ig-conectar { igUserId, token } · ig-responder { conversaId, texto }
+//        ig-conectar { igUserId?, token } — troca o token curto pelo longo (60 dias) quando dá
+//        ig-renovar { contaId } — renova o token agora · ig-responder { conversaId, texto }
+//        ig-iniciar { conversaId, fluxoId } — começa um fluxo do Instagram na DM (janela aberta)
 //
 // O que é só CRUD (fluxos, gatilhos, campos, config, automações do Instagram) a
 // tela grava direto no banco com RLS (mkt_auto_acesso, 0244).
@@ -26,10 +32,11 @@ import crypto from 'node:crypto';
 import { rest } from './_supabaseAdmin.js';
 import { getSupabaseUserId } from './_wa.js';
 import {
-  iniciarFluxo, modelosDoMarketing, numeroDoMarketing, responderManual, rodarAutomacoes, configRobo,
+  iniciarFluxo, iniciarFluxoIg, modelosDoMarketing, numeroDoMarketing, responderManual, rodarAutomacoes, configRobo,
 } from './_mktMotor.js';
 import { simularFluxo, telefoneCanonico, pausaPorRespostaManual } from './_mktAutoRegras.js';
-import { ig, enviarDm, montarMensagemIg, janelaIg, instagramLigado } from './_mktInstagram.js';
+import { ig, enviarDm, montarMensagemIg, janelaIg, instagramLigado, renovarTokensIg, trocarPorTokenLongo } from './_mktInstagram.js';
+import { codigoDoRef, destinoDaEntrada, ehRobo } from './_mktIgRegras.js';
 
 const enc = encodeURIComponent;
 
@@ -56,9 +63,32 @@ export default async function handler(req, res) {
     const segredo = String(process.env.CRON_SECRET || '').trim();
     const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!segredo || veio !== segredo) return res.status(401).json({ error: 'Não autorizado' });
-    const r = await rodarAutomacoes(Date.now() + 45_000).catch((e) => ({ erro: e?.message }));
-    if (r?.acordadas || r?.erros) console.log('[mkt-automacoes] cron:', JSON.stringify(r));
-    return res.status(200).json(r);
+    const r = await rodarAutomacoes(Date.now() + 40_000).catch((e) => ({ erro: e?.message }));
+    const tk = await renovarTokensIg().catch((e) => ({ erro: e?.message }));
+    if (r?.acordadas || r?.erros || tk?.renovadas || tk?.falhas) console.log('[mkt-automacoes] cron:', JSON.stringify({ ...r, token: tk }));
+    return res.status(200).json({ ...r, token: tk });
+  }
+
+  // ── Link de entrada (público): /e/<código> → conta o clique → wa.me / ig.me ──
+  if (req.method === 'GET' && q.e) {
+    res.setHeader('Cache-Control', 'no-store');
+    const codigo = codigoDoRef(String(q.e));
+    if (!codigo) return res.status(404).send('Link não encontrado.');
+    const robo = ehRobo(req.headers['user-agent']);
+    // Robô de pré-visualização: só descobre o destino (p_origem null = não conta).
+    const g = (await rest('rpc/mkt_entrada_clique', { method: 'POST', body: { p_codigo: codigo, p_origem: robo ? null : q.q ? 'qr' : 'link' } }).catch(() => null))?.[0];
+    if (!g) return res.status(404).send('Link não encontrado.');
+    let destino = null;
+    if (g.tipo === 'link_ref') {
+      const n = await numeroDoMarketing().catch(() => null);
+      destino = destinoDaEntrada(g, { numero: n?.numero || null });
+    } else {
+      const c = (await rest('mkt_ig_contas?select=username&status=eq.conectada&username=not.is.null&order=criado_em.asc&limit=1').catch(() => null))?.[0];
+      destino = destinoDaEntrada(g, { usuarioIg: c?.username || null });
+    }
+    if (!destino) return res.status(503).send('Este link ainda não está pronto (falta conectar o número ou a conta).');
+    res.setHeader('Location', destino);
+    return res.status(302).end();
   }
 
   // ── Webhook da LP / n8n (público; o token é a senha) ──
@@ -169,16 +199,42 @@ export default async function handler(req, res) {
     if (acao === 'ig-conectar') {
       const igUserId = String(b.igUserId || '').replace(/\D/g, '');
       const token = String(b.token || '').trim();
-      if (!igUserId || token.length < 20) return res.status(400).json({ error: 'Informe o ID da conta e o token.' });
+      if (token.length < 20) return res.status(400).json({ error: 'Cole o token da conta.' });
       let me;
       try { me = await ig('/me?fields=user_id,username,name', { token }); }
       catch (e) { return res.status(400).json({ error: `O Instagram recusou o token: ${e.message}` }); }
+      const idDaConta = String(me?.user_id || '').replace(/\D/g, '') || igUserId;
+      if (!idDaConta) return res.status(400).json({ error: 'Não consegui ler o ID da conta — informe o ID.' });
+      if (igUserId && me?.user_id && igUserId !== idDaConta) return res.status(400).json({ error: `Este token é da conta ${idDaConta}, não da ${igUserId}.` });
+      // Token curto (1 h) vira longo (60 dias) quando o segredo do app está na Vercel.
+      const longo = await trocarPorTokenLongo(token);
+      const agora = new Date().toISOString();
       const conta = (await rest('mkt_ig_contas?on_conflict=ig_user_id', {
         method: 'POST', prefer: 'resolution=merge-duplicates,return=representation',
-        body: { ig_user_id: igUserId, username: me?.username || null, nome: me?.name || null, status: 'conectada', ultimo_erro: null },
+        body: { ig_user_id: idDaConta, username: me?.username || null, nome: me?.name || null, status: 'conectada', ultimo_erro: null },
       }))?.[0];
-      await rest('rpc/mkt_ig_guardar_token', { method: 'POST', body: { p_conta: conta.id, p_token: token } });
-      return res.status(200).json({ ok: true, username: me?.username || null });
+      await rest('rpc/mkt_ig_guardar_token', { method: 'POST', body: { p_conta: conta.id, p_token: longo?.token || token } });
+      // Colunas da 0343: sem ela, segue (o token já está no cofre).
+      await rest(`mkt_ig_contas?id=eq.${conta.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { token_expira_em: longo?.expiraEm ?? null, token_renovado_em: agora, token_tentativa_em: null } }).catch(() => null);
+      return res.status(200).json({
+        ok: true, username: me?.username || null, longo: Boolean(longo),
+        aviso: longo ? null : 'Não deu pra saber a validade do token: o QS tenta renovar sozinho daqui a 24 h. Se ele for de curta duração (1 h), cadastre MKT_IG_APP_SECRET na Vercel e conecte de novo.',
+      });
+    }
+
+    if (acao === 'ig-renovar') {
+      const r = await renovarTokensIg({ forcar: true, contaId: String(b.contaId || '') || null });
+      if (!r.renovadas) {
+        const c = (await rest(`mkt_ig_contas?select=ultimo_erro&id=eq.${enc(b.contaId)}&limit=1`).catch(() => null))?.[0];
+        return res.status(422).json({ error: c?.ultimo_erro || 'Não renovou (o token precisa ter mais de 24 h de vida).' });
+      }
+      return res.status(200).json({ ok: true });
+    }
+
+    if (acao === 'ig-iniciar') {
+      const r = await iniciarFluxoIg({ conversaId: String(b.conversaId || ''), fluxoId: String(b.fluxoId || '') });
+      if (r.erro) return res.status(422).json({ error: r.erro });
+      return res.status(200).json({ ok: true, ...r });
     }
 
     if (acao === 'ig-responder') {

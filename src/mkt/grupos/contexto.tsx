@@ -1,6 +1,6 @@
 // src/mkt/grupos/contexto.tsx — o estado do chip do Marketing, lido UMA vez pela página
 // de Grupos e usado pelas abas (selo no canto, intervalo pra estimar o tempo do envio,
-// "pode responder no privado?" no Celular).
+// o chip, no Celular — que é só de grupos desde 09/11/2026).
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { lerEstado, type EstadoChip } from "./lib";
 

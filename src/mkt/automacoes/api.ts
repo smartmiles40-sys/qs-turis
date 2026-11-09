@@ -5,7 +5,8 @@
 // rota /api/mkt-automacoes (service_role).
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/qs/waInbox";
-import type { CampoPersonalizado, Fluxo, Gatilho, Grafo, TipoGatilho, GatilhoConfig } from "./tipos";
+import { canalDo, type Canal, type CampoPersonalizado, type Fluxo, type Gatilho, type Grafo, type TipoGatilho, type GatilhoConfig } from "./tipos";
+import type { DadosRelatorio } from "./relatorio";
 
 export async function acao<T = Record<string, unknown>>(body: Record<string, unknown>): Promise<T> {
   const r = await fetch("/api/mkt-automacoes", { method: "POST", headers: await authHeaders(), body: JSON.stringify(body) });
@@ -34,12 +35,14 @@ function ok<T>(r: { data: T | null; error: { message: string } | null }): T {
 
 export const listarFluxos = async () => ok(await supabase.from("mkt_fluxos").select("*").order("atualizado_em", { ascending: false })) as Fluxo[];
 export const lerFluxo = async (id: string) => ok(await supabase.from("mkt_fluxos").select("*").eq("id", id).maybeSingle()) as Fluxo | null;
-export const criarFluxo = async (nome: string, grafo: Grafo) => ok(await supabase.from("mkt_fluxos").insert({ nome, grafo }).select().single()) as Fluxo;
+// O canal só vai no insert quando é Instagram (banco sem a 0343 continua aceitando o WhatsApp).
+export const criarFluxo = async (nome: string, grafo: Grafo, canal: Canal = "whatsapp") =>
+  ok(await supabase.from("mkt_fluxos").insert({ nome, grafo, ...(canal === "instagram" ? { canal } : {}) }).select().single()) as Fluxo;
 export const salvarFluxo = async (id: string, patch: Partial<Pick<Fluxo, "nome" | "descricao" | "status" | "grafo" | "pasta">>) => {
   ok(await supabase.from("mkt_fluxos").update(patch).eq("id", id).select("id"));
 };
 export const apagarFluxo = async (id: string) => { ok(await supabase.from("mkt_fluxos").delete().eq("id", id).select("id")); };
-export const duplicarFluxo = async (f: Fluxo) => criarFluxo(`${f.nome} (cópia)`, f.grafo);
+export const duplicarFluxo = async (f: Fluxo) => criarFluxo(`${f.nome} (cópia)`, f.grafo, canalDo(f));
 
 export const listarGatilhos = async (tipos?: TipoGatilho[]) => {
   let q = supabase.from("mkt_fluxo_gatilhos").select("*").order("prioridade", { ascending: false }).order("criado_em");
@@ -86,4 +89,23 @@ export function novoToken(): string {
   const b = new Uint8Array(16);
   crypto.getRandomValues(b);
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+/** Relatório de um fluxo (0343, mkt_auto_relatorio): contado no banco. `desde` = ISO ou null (desde sempre). */
+export async function relatorioDoFluxo(fluxoId: string, desde: string | null): Promise<DadosRelatorio> {
+  const { data, error } = await supabase.rpc("mkt_auto_relatorio", { p_fluxo: fluxoId, p_desde: desde });
+  if (error) throw new Error(/function .*mkt_auto_relatorio|schema cache/i.test(error.message) ? "O relatório precisa da migration 0343 aplicada no banco." : error.message);
+  return (data ?? {}) as DadosRelatorio;
+}
+
+/** Cliques por dia num link de entrada (últimos 30 dias). */
+export async function cliquesPorDia(gatilhoId: string): Promise<{ dia: string; total: number }[]> {
+  const desde = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const { data } = await supabase.from("mkt_entrada_cliques").select("criado_em").eq("gatilho_id", gatilhoId).gte("criado_em", desde).order("criado_em").limit(5000);
+  const m = new Map<string, number>();
+  for (const l of (data ?? []) as { criado_em: string }[]) {
+    const dia = new Date(l.criado_em).toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" });
+    m.set(dia, (m.get(dia) ?? 0) + 1);
+  }
+  return [...m].map(([dia, total]) => ({ dia, total }));
 }

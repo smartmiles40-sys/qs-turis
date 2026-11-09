@@ -50,7 +50,8 @@ export default function NovoCard({ modo, colunas, colunaId, dataPublicacao, onFe
   async function criar() {
     if (!titulo.trim()) { setErro("Dê um título."); return; }
     const col = pedido ? entrada?.id : coluna;
-    if (!col) { setErro("O quadro ainda não tem coluna de entrada (o gestor cria em Colunas do quadro)."); return; }
+    // 04/11/2026: a tela "Colunas do quadro" virou a aba Ajustes › Colunas (30/10).
+    if (!col) { setErro("O quadro ainda não tem coluna de entrada (crie em Ajustes › Colunas)."); return; }
     setOcupado(true); setErro(null);
     try {
       const exp = destinos.find((d) => d.id === expedicao);

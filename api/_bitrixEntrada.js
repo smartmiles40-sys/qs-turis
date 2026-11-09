@@ -177,6 +177,13 @@ export function leadDoBitrix(mapa, opts = {}) {
     // `source` tem CHECK no banco; _leads.js já troca valor estranho por
     // 'integracao'. Mandamos o mesmo que os workflows mandavam.
     source: opts.resgate ? 'resgate' : 'integracao',
+    // UTM (0265): se o robô do Bitrix mandar na URL (&utm_campaign={{UTM_CAMPAIGN}}…),
+    // o QS grava no lead pra casar com a campanha da Meta (Tráfego › Meta Ads).
+    utm_source: pegar(mapa, 'utm_source', 'UTM_SOURCE'),
+    utm_medium: pegar(mapa, 'utm_medium', 'UTM_MEDIUM'),
+    utm_campaign: pegar(mapa, 'utm_campaign', 'UTM_CAMPAIGN'),
+    utm_content: pegar(mapa, 'utm_content', 'UTM_CONTENT'),
+    utm_term: pegar(mapa, 'utm_term', 'UTM_TERM'),
   };
   for (const k of Object.keys(lead)) if (lead[k] == null || lead[k] === '') delete lead[k];
   return lead;
@@ -207,6 +214,12 @@ export async function completarPeloNegocio(dealId, bx) {
     phone: contato?.PHONE?.[0]?.VALUE || undefined,
     email: contato?.EMAIL?.[0]?.VALUE || undefined,
     estimated_value: deal.OPPORTUNITY ? String(deal.OPPORTUNITY) : undefined,
+    // Campos padrão de UTM do negócio no Bitrix (0265).
+    utm_source: deal.UTM_SOURCE || undefined,
+    utm_medium: deal.UTM_MEDIUM || undefined,
+    utm_campaign: deal.UTM_CAMPAIGN || undefined,
+    utm_content: deal.UTM_CONTENT || undefined,
+    utm_term: deal.UTM_TERM || undefined,
   };
   for (const k of Object.keys(extra)) if (extra[k] == null || extra[k] === '') delete extra[k];
   return { deal, campos: extra };

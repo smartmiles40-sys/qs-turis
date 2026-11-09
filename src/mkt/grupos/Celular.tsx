@@ -1,20 +1,19 @@
 // src/mkt/grupos/Celular.tsx — aba "Celular": o que está no aparelho do chip do Marketing,
 // ao vivo, com a cara do WhatsApp Web (lista à esquerda, conversa à direita).
 // Lê direto da Evolution pelo servidor (conversas/mensagens). Responder e reagir saem pelo
-// chip — em grupo sempre; com pessoa só se o servidor liberar (MKT_GRUPOS_PRIVADO=1).
+// chip, SÓ em grupo: conversa particular do número não aparece aqui (09/11/2026).
 //   #mkt/grupos?aba=celular&jid=<jid>   → abre a conversa direto
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, gruposDoDestino, lerCampanhas, type Campanha } from "./lib";
 import { partesSP, quandoSP } from "./datas";
 import { useBases } from "./useBases";
-import { useChip } from "./contexto";
 import { irNaAba, useParam } from "./navegar";
 import { Avatar, DadosDoGrupo } from "./Grupos";
 import { BotaoGrande, Nota, SeloTag, cor } from "./pecas";
 
 interface Conversa { jid: string; grupo: boolean; nome: string; foto_url: string | null; nao_lidas: number; ultima_em: string | null; previa: string }
 interface Msg { id: string; de_mim: boolean; autor: string | null; autor_nome: string | null; tipo: string; texto: string; quando: string | null }
-type Filtro = "mkt" | "grupos" | "contatos" | "tudo";
+type Filtro = "mkt" | "grupos";
 
 const REACOES = ["👍", "❤️", "😂", "😮", "🙏", "🎉"];
 
@@ -32,7 +31,6 @@ function rotuloDia(iso: string): string {
 
 export default function CelularAba() {
   const bases = useBases();
-  const { estado } = useChip();
   const [jid, setJid] = useParam("jid");
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [filtro, setFiltro] = useState<Filtro>("mkt");
@@ -74,7 +72,6 @@ export default function CelularAba() {
   const contagem = useMemo(() => ({
     mkt: conversas.filter((c) => c.grupo && doMkt.has(c.jid)).length,
     grupos: conversas.filter((c) => c.grupo).length,
-    contatos: conversas.filter((c) => !c.grupo).length,
     tudo: conversas.length,
   }), [conversas, doMkt]);
   const lista = useMemo(() => {
@@ -82,7 +79,6 @@ export default function CelularAba() {
     return conversas.filter((c) => {
       if (filtro === "mkt" && !(c.grupo && doMkt.has(c.jid))) return false;
       if (filtro === "grupos" && !c.grupo) return false;
-      if (filtro === "contatos" && c.grupo) return false;
       if (jidsDaTag && !jidsDaTag.has(c.jid)) return false;
       return !b || c.nome.toLowerCase().includes(b);
     });
@@ -96,7 +92,7 @@ export default function CelularAba() {
     : null;
   const grupoDb = aberta ? bases.grupos.find((g) => g.jid === aberta.jid) || null : null;
   const tagsDoGrupo = aberta ? bases.tags.filter((t) => bases.links.some((l) => l.tag_id === t.id && l.grupo_jid === aberta.jid)) : [];
-  const podeResponder = aberta ? aberta.grupo || Boolean(estado?.privado) : false;
+  const podeResponder = aberta ? aberta.grupo : false;
   const agendadasAqui = useMemo(() => (aberta?.grupo
     ? agendadas.filter((c) => gruposDoDestino(c, bases.grupos, bases.links).some((g) => g.jid === aberta.jid))
       .sort((a, b) => String(a.enviar_em).localeCompare(String(b.enviar_em)))
@@ -119,7 +115,7 @@ export default function CelularAba() {
   }
 
   const FILTROS: { v: Filtro; r: string }[] = [
-    { v: "mkt", r: "Grupos do Marketing" }, { v: "grupos", r: "Todos os grupos" }, { v: "contatos", r: "Contatos" }, { v: "tudo", r: "Tudo" },
+    { v: "mkt", r: "Grupos do Marketing" }, { v: "grupos", r: "Todos os grupos" },
   ];
 
   return (

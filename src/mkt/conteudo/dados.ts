@@ -11,6 +11,12 @@ function falhou(error: { message: string } | null): void {
   if (error) throw new Error(traduzirErro(error.message));
 }
 
+// 04/11/2026: DELETE barrado pela RLS não dá erro — só apaga 0 linhas, e o botão
+// "Apagar" parecia não fazer nada. Pede as linhas apagadas de volta e avisa.
+function apagouAlgo(data: unknown[] | null): void {
+  if (!data || data.length === 0) throw new Error("Sem permissão para apagar isso no Marketing (ou já foi apagado).");
+}
+
 /** Erros do banco em frase de gente (a RLS responde em inglês). */
 export function traduzirErro(msg: string): string {
   if (/row-level security|permission denied/i.test(msg)) return "Sem permissão para isso no Marketing.";
@@ -36,8 +42,9 @@ export async function salvarColuna(c: Partial<Coluna> & { nome: string }): Promi
   falhou(error);
 }
 export async function apagarColuna(id: string): Promise<void> {
-  const { error } = await supabase.from("mkt_colunas").delete().eq("id", id);
+  const { data, error } = await supabase.from("mkt_colunas").delete().eq("id", id).select("id");
   falhou(error);
+  apagouAlgo(data);
 }
 export async function reordenarColunas(ids: string[]): Promise<void> {
   // Poucas colunas: um update por coluna é o mais simples e não pede RPC.
@@ -114,8 +121,9 @@ export async function moverCard(id: string, colunaId: string, ordem: number): Pr
   return editarCard(id, { coluna_id: colunaId, ordem });
 }
 export async function apagarCard(id: string): Promise<void> {
-  const { error } = await supabase.from("mkt_cards").delete().eq("id", id);
+  const { data, error } = await supabase.from("mkt_cards").delete().eq("id", id).select("id");
   falhou(error);
+  apagouAlgo(data);
 }
 
 // ── Aprovação ──────────────────────────────────────────────────────────────
@@ -149,8 +157,9 @@ export async function comentar(cardId: string, autorId: string, texto: string): 
   falhou(error);
 }
 export async function apagarComentario(id: string): Promise<void> {
-  const { error } = await supabase.from("mkt_comentarios").delete().eq("id", id);
+  const { data, error } = await supabase.from("mkt_comentarios").delete().eq("id", id).select("id");
   falhou(error);
+  apagouAlgo(data);
 }
 
 export async function listarAnexos(cardId: string): Promise<Anexo[]> {
@@ -168,8 +177,9 @@ export async function anexar(cardId: string, autorId: string, anexos: NovoAnexo[
   falhou(error);
 }
 export async function tirarAnexo(id: string): Promise<void> {
-  const { error } = await supabase.from("mkt_anexos").delete().eq("id", id);
+  const { data, error } = await supabase.from("mkt_anexos").delete().eq("id", id).select("id");
   falhou(error);
+  apagouAlgo(data);
 }
 
 export async function listarHistorico(cardId: string): Promise<Historico[]> {

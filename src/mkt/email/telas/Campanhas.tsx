@@ -212,8 +212,10 @@ function Assistente({ c, setC, onVoltar }: { c: Campanha; setC: SetCampanha; onV
       remetente_email: c.remetente_email?.trim().toLowerCase() || null, responder_para: c.responder_para?.trim() || null,
       assunto: c.assunto, preheader: c.preheader, blocos: c.blocos, html, modelo_id: c.modelo_id,
     };
-    const { error } = await supabase.from("mkt_email_campanhas").update(corpo).eq("id", c.id);
+    const { data, error } = await supabase.from("mkt_email_campanhas").update(corpo).eq("id", c.id).select("id");
     if (error) { setMsg({ tom: "erro", texto: erroDoBanco(error) }); return false; }
+    // 04/11/2026: a RLS só deixa mexer em rascunho e, fora dele, o update volta sem erro e sem linha — antes dizia "Salvo".
+    if (!data?.length) { setMsg({ tom: "erro", texto: "Não salvou: a campanha não é mais rascunho (foi agendada ou enviada em outra aba). Volte pra lista e abra de novo." }); return false; }
     setC((x) => ({ ...x, html })); setMexido(false);
     return true;
   };
