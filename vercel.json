@@ -346,6 +346,10 @@
       "destination": "/api/mkt-grupos-link?slug=:slug"
     },
     {
+      "source": "/e/:codigo",
+      "destination": "/api/mkt-automacoes?e=:codigo"
+    },
+    {
       "source": "/documentos/:token",
       "destination": "/index.html"
     },

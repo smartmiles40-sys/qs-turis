@@ -296,6 +296,12 @@ export function fraseDoGatilho(tipo: TipoGatilho, c: GatilhoConfig): string {
     case "anuncio": return (c.ad_ids ?? []).length ? `Quando alguém vier do anúncio ${juntarOu(c.ad_ids ?? [])}` : "Quando alguém vier de um anúncio";
     case "tag_adicionada": return c.tag ? `Quando a tag ${aspas(c.tag)} entrar no contato` : "Quando uma tag entrar no contato";
     case "webhook": return "Quando a LP ou o n8n chamar o endereço";
+    case "ig_comentario": return fraseInstagram("comentario", c).quando;
+    case "ig_dm_palavra": return fraseInstagram("dm_palavra", c).quando;
+    case "ig_story_resposta": return fraseInstagram("story_resposta", c).quando;
+    case "ig_story_mencao": return fraseInstagram("story_mencao", c).quando;
+    case "ig_boas_vindas": return fraseInstagram("boas_vindas", c).quando;
+    case "ig_ref": return c.codigo ? `Quando alguém abrir a DM pelo link ${aspas(c.codigo)}` : "Quando alguém abrir a DM pelo link";
   }
 }
 
@@ -349,4 +355,48 @@ export function fraseInstagram(g: GatilhoIg, c: ConfigIgFrase, max = 60): { quan
   if ((c.dm_botoes ?? []).filter((b) => b.titulo && b.url).length) extras.push("com botão de link");
   if (g === "comentario" && (c.respostas_publicas ?? []).length) extras.push("responde no post");
   return { quando, entao: [dm, ...extras].join(" e ").replace(/ e (com botão)/, " $1") };
+}
+
+// ── Instagram: regra simples → fluxo (09/11/2026) ────────────────────────────
+// Mesma conversão de api/_mktIgRegras.js (fluxoDaRegraIg; o teste confere que
+// as duas dão o mesmo grafo). Serve pro "Criar" dos cartões grandes e pro
+// "Converter em fluxo" das regras antigas (mkt_ig_automacoes).
+
+export const GATILHO_FLUXO_DA_REGRA: Record<GatilhoIg, TipoGatilho> = {
+  comentario: "ig_comentario", dm_palavra: "ig_dm_palavra", story_resposta: "ig_story_resposta", story_mencao: "ig_story_mencao", boas_vindas: "ig_boas_vindas",
+};
+export const REGRA_DO_GATILHO_FLUXO: Partial<Record<TipoGatilho, GatilhoIg>> = Object.fromEntries(
+  Object.entries(GATILHO_FLUXO_DA_REGRA).map(([k, v]) => [v, k as GatilhoIg]),
+);
+
+export interface RegraIgSimples { nome?: string; gatilho: GatilhoIg; config: ConfigIgFrase & { tags?: string[] } }
+
+export function fluxoDaRegraIg(regra: RegraIgSimples): { nome: string; grafo: Grafo; gatilho: { tipo: TipoGatilho; config: GatilhoConfig } } {
+  const tipo = GATILHO_FLUXO_DA_REGRA[regra.gatilho];
+  const c = regra.config ?? {};
+  const botoes = (c.dm_botoes ?? []).filter((b) => b?.titulo && /^https?:\/\//i.test(b.url ?? ""));
+  const extras = botoes.slice(1).map((b) => `${b.titulo}: ${b.url}`);
+  const texto = [String(c.dm_texto ?? "").trim(), ...extras].filter(Boolean).join("\n");
+  const nos: No[] = [{ id: "ini_1", tipo: "inicio", x: 40, y: 160, dados: {} }];
+  const ligacoes: Grafo["ligacoes"] = [];
+  let anterior = "ini_1";
+  if (texto) {
+    nos.push({
+      id: "men_1", tipo: "mensagem", x: 340, y: 120,
+      dados: { blocos: [{ tipo: "texto", texto }], interacao: botoes[0] ? { tipo: "link", rotulo: botoes[0].titulo.slice(0, 20), url: botoes[0].url } : { tipo: "nenhuma" }, digitando: false },
+    });
+    ligacoes.push({ id: "l_1", de: anterior, saida: "proximo", para: "men_1" });
+    anterior = "men_1";
+  }
+  const tags = (c.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
+  if (tags.length) {
+    nos.push({ id: "aca_1", tipo: "acao", x: 640, y: 160, dados: { acoes: tags.map((tag) => ({ tipo: "adicionar_tag" as const, tag })) } });
+    ligacoes.push({ id: "l_2", de: anterior, saida: "proximo", para: "aca_1" });
+  }
+  const config: GatilhoConfig = tipo === "ig_comentario"
+    ? { palavras: c.palavras ?? [], qualquer_palavra: Boolean(c.qualquer_palavra), posts: c.posts ?? [], respostas_publicas: c.respostas_publicas ?? [] }
+    : tipo === "ig_dm_palavra" ? { palavras: c.palavras ?? [], qualquer_palavra: Boolean(c.qualquer_palavra) }
+    : tipo === "ig_story_resposta" ? { palavras: c.qualquer_palavra ? [] : c.palavras ?? [] }
+    : {};
+  return { nome: regra.nome || "Automação do Instagram", grafo: { nos, ligacoes }, gatilho: { tipo, config } };
 }

@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { janelaAberta, type Fluxo } from "./tipos";
+import { canalDo, janelaAberta, type Fluxo } from "./tipos";
 import { acao, listarFluxos, listarModelos, type ModeloMkt } from "./api";
 import { Aviso, Botao, COR, COR_SUAVE, Carregando, Chip, Entrada, MKT_CSS, Modal, Selecao, quando } from "./ui";
 
@@ -205,7 +205,7 @@ function Conversa({ c, onVoltar, onMudou }: { c: Conversa; onVoltar: () => void;
 function ModalFluxo({ onFechar, onEscolher }: { onFechar: () => void; onEscolher: (id: string) => void }) {
   const [fluxos, setFluxos] = useState<Fluxo[] | null>(null);
   const [sel, setSel] = useState("");
-  useEffect(() => { listarFluxos().then((f) => { const a = f.filter((x) => x.status === "ativo"); setFluxos(a); setSel(a[0]?.id ?? ""); }).catch(() => setFluxos([])); }, []);
+  useEffect(() => { listarFluxos().then((f) => { const a = f.filter((x) => x.status === "ativo" && canalDo(x) === "whatsapp"); setFluxos(a); setSel(a[0]?.id ?? ""); }).catch(() => setFluxos([])); }, []);
   return (
     <Modal aberto titulo="Iniciar um fluxo nesta conversa" onFechar={onFechar}
       rodape={<><Botao onClick={onFechar}>Cancelar</Botao><Botao variante="primario" disabled={!sel} onClick={() => onEscolher(sel)}>Iniciar</Botao></>}>

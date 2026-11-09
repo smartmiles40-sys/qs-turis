@@ -6,6 +6,10 @@
 // assim, o webhook (/api/mkt-instagram) responde 200 e não grava nem responde
 // nada. O que o Bruno precisa fazer no painel da Meta: docs/MARKETING-AUTOMACOES.md.
 //
+// 09/11/2026 (0343): os gatilhos do Instagram agora começam FLUXOS do editor
+// (api/_mktMotor.js receberInstagram / iniciarPorComentario). As regras simples
+// abaixo (mkt_ig_automacoes) continuam valendo quando nenhum fluxo pegou.
+//
 //   comentário em post   → resposta pública no comentário + DM privada (Private Reply)
 //   resposta a story     → DM
 //   menção em story      → DM
@@ -18,6 +22,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
+import { escolherGatilhoIgComentario, lerEntradaIg, precisaRenovarToken } from './_mktIgRegras.js';
 
 export const IG_GRAPH = 'https://graph.instagram.com/v23.0';
 const enc = encodeURIComponent;
@@ -181,7 +186,7 @@ async function automacoesAtivas() {
 }
 
 async function garantirConversaIg(conta, igsid, dados = {}) {
-  const sel = 'id,nome,username,tags,automacao_pausada_ate,nao_lidas';
+  const sel = '*';
   const ja = (await rest(`mkt_ig_conversas?select=${sel}&conta_id=eq.${conta.id}&igsid=eq.${enc(igsid)}&limit=1`))?.[0];
   if (ja) return { ...ja, nova: false };
   let perfil = {};
@@ -193,15 +198,17 @@ async function garantirConversaIg(conta, igsid, dados = {}) {
   return { ...(r?.[0] || {}), nova: true };
 }
 
-export async function enviarDm(conta, conversaId, destino, message, origem, automacaoId = null) {
-  const previa = typeof message.text === 'string' ? message.text : String(message.attachment?.payload?.text ?? '[mensagem]');
+export async function enviarDm(conta, conversaId, destino, message, origem, automacaoId = null, extra = {}) {
+  const previa = typeof message.text === 'string' ? message.text : String(message.attachment?.payload?.text ?? (message.attachment ? `[${message.attachment.type}]` : '[mensagem]'));
+  // fluxo_id/no_id só existem depois da 0343 — só vão quando a mensagem é de um fluxo.
+  const doFluxo = extra.fluxoId ? { fluxo_id: extra.fluxoId, no_id: extra.noId ?? null } : {};
   try {
     const r = await ig(`/${conta.ig_user_id}/messages`, { method: 'POST', conta: conta.ig_user_id, body: { recipient: destino, message } });
-    await quieto(rest('mkt_ig_mensagens', { method: 'POST', prefer: 'return=minimal', body: { conversa_id: conversaId, direcao: 'saida', tipo: destino.comment_id ? 'resposta_privada' : 'texto', texto: previa, payload: message, mid: r.message_id ?? null, origem, automacao_id: automacaoId } }));
+    await quieto(rest('mkt_ig_mensagens', { method: 'POST', prefer: 'return=minimal', body: { conversa_id: conversaId, direcao: 'saida', tipo: destino.comment_id ? 'resposta_privada' : 'texto', texto: previa, payload: message, mid: r.message_id ?? null, origem, automacao_id: automacaoId, ...doFluxo } }));
     await quieto(rest(`mkt_ig_conversas?id=eq.${conversaId}`, { method: 'PATCH', prefer: 'return=minimal', body: { ultima_mensagem_em: new Date().toISOString(), ultima_previa: previa.slice(0, 140) } }));
     return r.message_id ?? null;
   } catch (e) {
-    await quieto(rest('mkt_ig_mensagens', { method: 'POST', prefer: 'return=minimal', body: { conversa_id: conversaId, direcao: 'saida', tipo: 'texto', texto: previa, payload: message, status: 'falha', erro: e?.message, origem, automacao_id: automacaoId } }));
+    await quieto(rest('mkt_ig_mensagens', { method: 'POST', prefer: 'return=minimal', body: { conversa_id: conversaId, direcao: 'saida', tipo: 'texto', texto: previa, payload: message, status: 'falha', erro: e?.message, origem, automacao_id: automacaoId, ...doFluxo } }));
     throw e;
   }
 }
@@ -211,18 +218,50 @@ async function aplicarTags(conversaId, atuais, novas = []) {
   await quieto(rest(`mkt_ig_conversas?id=eq.${conversaId}`, { method: 'PATCH', prefer: 'return=minimal', body: { tags: [...new Set([...(atuais ?? []), ...novas])] } }));
 }
 
+/** Já mandou DM desta regra de fluxo pra esta pessoa neste post nos últimos 7 dias? (1 DM por pessoa/post). */
+async function jaRespondeuComentario(fromId, gatilhoId, mediaId, commentId) {
+  const desde = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const r = await rest(`mkt_ig_comentarios?select=id&from_id=eq.${enc(fromId)}&gatilho_id=eq.${gatilhoId}${mediaId ? `&media_id=eq.${enc(mediaId)}` : ''}&respondido_dm_em=gte.${desde}&comment_id=neq.${enc(commentId)}&limit=1`).catch(() => null);
+  return Array.isArray(r) && r.length > 0;
+}
+
+/** Comentário que casou com um gatilho de FLUXO: resposta pública (opcional) + fluxo com a resposta privada. */
+async function comentarioNoFluxo(conta, v, g, r, { commentId, fromId, mediaId }) {
+  const motor = await import('./_mktMotor.js');
+  await quieto(rest(`mkt_ig_comentarios?comment_id=eq.${enc(commentId)}`, { method: 'PATCH', prefer: 'return=minimal', body: { gatilho_id: g.id } }));
+  const repetido = await jaRespondeuComentario(fromId, g.id, mediaId, commentId);
+  const pessoa = { username: v.from?.username ?? null, nome: null };
+  const publica = sortear(g.config?.respostas_publicas ?? []);
+  if (publica) {
+    try {
+      await ig(`/${commentId}/replies`, { method: 'POST', conta: conta.ig_user_id, body: { message: personalizarIg(publica, pessoa) } });
+      await quieto(rest(`mkt_ig_comentarios?comment_id=eq.${enc(commentId)}`, { method: 'PATCH', prefer: 'return=minimal', body: { respondido_publico_em: new Date().toISOString() } }));
+    } catch (e) { r.erros.push(`resposta pública: ${e?.message}`); }
+  }
+  if (repetido) return; // a pessoa comentou de novo: não manda a DM outra vez
+  const conv = await garantirConversaIg(conta, fromId, { username: v.from?.username ?? null });
+  const quando = v.created_time ? new Date(Number(v.created_time) * (String(v.created_time).length > 10 ? 1 : 1000)).toISOString() : new Date().toISOString();
+  const x = await motor.iniciarPorComentario({ conta, conversa: conv, gatilho: g, comentario: { id: commentId, em: quando } });
+  if (x.execucaoId) r.respostas++;
+  else if (x.erro) await quieto(rest(`mkt_ig_comentarios?comment_id=eq.${enc(commentId)}`, { method: 'PATCH', prefer: 'return=minimal', body: { erro: String(x.erro).slice(0, 300) } }));
+}
+
 async function tratarComentario(conta, v, r) {
-  const commentId = String(v.id ?? '');
+  const commentId = String(v.id ?? v.comment_id ?? '');
   const fromId = String(v.from?.id ?? '');
   if (!commentId || !fromId) return;
   if (fromId === conta.ig_user_id || (v.from?.username && v.from.username === conta.username)) return; // a própria conta
   const texto = String(v.text ?? '');
   const mediaId = v.media?.id ? String(v.media.id) : null;
-  const automacao = escolherParaComentario(await automacoesAtivas(), texto, mediaId);
+  // 1º os fluxos (0343); se nenhum casar, as regras simples antigas.
+  const motor = await import('./_mktMotor.js');
+  const gFluxo = escolherGatilhoIgComentario(await motor.gatilhosAtivos(['ig_comentario'], 'instagram'), texto, mediaId);
+  const automacao = gFluxo ? null : escolherParaComentario(await automacoesAtivas(), texto, mediaId);
   try {
     await rest('mkt_ig_comentarios', { method: 'POST', prefer: 'return=minimal', body: { conta_id: conta.id, comment_id: commentId, media_id: mediaId, from_id: fromId, from_username: v.from?.username ?? null, texto, automacao_id: automacao?.id ?? null } });
   } catch (e) { if (e?.status === 409) return; throw e; } // repetido
   r.comentarios++;
+  if (gFluxo) { await comentarioNoFluxo(conta, v, gFluxo, r, { commentId, fromId, mediaId }); return; }
   if (!automacao) return;
   const pessoa = { username: v.from?.username ?? null, nome: null };
   const cfg = automacao.config || {};
@@ -253,7 +292,10 @@ async function tratarComentario(conta, v, r) {
 async function tratarMensagem(conta, m, r) {
   const msg = m.message;
   const post = m.postback;
-  const mid = msg?.mid ?? post?.mid ?? null;
+  // Quem abre a conversa por um link ig.me numa conversa que já existia chega
+  // só como `referral` (messaging_referral), sem mid: o id vira o do evento.
+  const soReferral = !msg && !post && m.referral?.ref;
+  const mid = msg?.mid ?? post?.mid ?? (soReferral ? `ref:${m.sender?.id}:${m.timestamp ?? ''}` : null);
   if (!mid) return;
   if (msg?.is_echo) {
     const igsid = String(m.recipient?.id ?? '');
@@ -269,19 +311,23 @@ async function tratarMensagem(conta, m, r) {
   if (msg?.is_deleted) return;
   const igsid = String(m.sender?.id ?? '');
   if (!igsid || igsid === conta.ig_user_id) return;
-  const anexo = msg?.attachments?.[0];
-  const ehMencaoStory = anexo?.type === 'story_mention';
-  const ehRespostaStory = Boolean(msg?.reply_to?.story);
-  const texto = post ? String(post.title ?? post.payload ?? '') : String(msg?.text ?? '');
-  const tipo = ehMencaoStory ? 'story_mencao' : ehRespostaStory ? 'story_resposta' : post ? 'postback' : anexo ? (anexo.type ?? 'anexo') : 'texto';
+  const entrada = lerEntradaIg(m);
+  const { ehMencaoStory, ehRespostaStory, tipo } = entrada;
+  const texto = entrada.texto;
   const conv = await garantirConversaIg(conta, igsid);
   try {
-    await rest('mkt_ig_mensagens', { method: 'POST', prefer: 'return=minimal', body: { conversa_id: conv.id, direcao: 'entrada', tipo, texto: texto || (ehMencaoStory ? 'Mencionou você no story' : anexo ? `[${anexo.type}]` : ''), payload: m, mid, origem: 'cliente' } });
+    await rest('mkt_ig_mensagens', { method: 'POST', prefer: 'return=minimal', body: { conversa_id: conv.id, direcao: 'entrada', tipo, texto: entrada.previa, payload: m, mid, origem: 'cliente' } });
   } catch (e) { if (e?.status === 409) return; throw e; }
   r.mensagens++;
   const agora = new Date().toISOString();
-  await quieto(rest(`mkt_ig_conversas?id=eq.${conv.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { ultima_entrada_em: agora, ultima_mensagem_em: agora, ultima_previa: (texto || `[${tipo}]`).slice(0, 140), nao_lidas: Number(conv.nao_lidas ?? 0) + 1 } }));
+  await quieto(rest(`mkt_ig_conversas?id=eq.${conv.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { ultima_entrada_em: agora, ultima_mensagem_em: agora, ultima_previa: (entrada.previa || `[${tipo}]`).slice(0, 140), nao_lidas: Number(conv.nao_lidas ?? 0) + 1 } }));
   await quieto(rest(`mkt_ig_contas?id=eq.${conta.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { ultima_entrada_em: agora } }));
+  conv.ultima_entrada_em = agora;
+  // 1º os fluxos (0343): clique, resposta esperada, gatilhos. Nenhum pegou → regras simples.
+  const motor = await import('./_mktMotor.js');
+  const doFluxo = await motor.receberInstagram({ conta, conversa: conv, nova: conv.nova, entrada }).catch((e) => ({ consumida: false, motivo: e?.message }));
+  if (doFluxo.consumida) { if (doFluxo.fluxoIniciado) r.respostas++; return; }
+  if (conv.optout_em) return;
   if (conv.automacao_pausada_ate && Date.parse(conv.automacao_pausada_ate) > Date.now()) return;
   const automacao = escolherParaDm(await automacoesAtivas(), { texto, ehRespostaStory, ehMencaoStory, primeiraMensagem: conv.nova });
   if (!automacao?.config?.dm_texto) return;
@@ -310,4 +356,62 @@ export async function processarWebhookInstagram(payload) {
     }
   }
   return r;
+}
+
+// ── Token: troca (curto → longo) e renovação automática (0343) ──────────────
+// Docs: https://developers.facebook.com/docs/instagram-platform/reference/access_token
+//       https://developers.facebook.com/docs/instagram-platform/reference/refresh_access_token
+
+async function getToken(url) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j?.error || !j?.access_token) {
+    const err = new Error(traduzir(j?.error?.code ?? null, j?.error?.error_subcode ?? null, j?.error?.message || `erro ${r.status}`));
+    err.codigo = j?.error?.code ?? null;
+    throw err;
+  }
+  return { token: String(j.access_token), expiraEm: Number(j.expires_in) > 0 ? new Date(Date.now() + Number(j.expires_in) * 1000).toISOString() : null };
+}
+
+/** Token curto (1 h) → longo (60 dias). Precisa do segredo do app do Instagram. null = não deu (já era longo, ou sem segredo). */
+export async function trocarPorTokenLongo(token) {
+  const segredo = String(process.env.MKT_IG_APP_SECRET || '').trim();
+  if (!segredo) return null;
+  try {
+    return await getToken(`https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${enc(segredo)}&access_token=${enc(token)}`);
+  } catch { return null; }
+}
+
+/** Renova um token longo (precisa ter 24 h+ de vida). Lança com a mensagem da Meta. */
+export async function renovarToken(token) {
+  return getToken(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${enc(token)}`);
+}
+
+/**
+ * O cron chama a cada minuto; só renova quem precisa (precisaRenovarToken:
+ * vence em < 15 dias ou validade desconhecida, 24 h+ de vida, 12 h entre tentativas).
+ * `forcar` (botão "Renovar agora"): ignora o prazo, mas não a regra das 24 h da Meta.
+ */
+export async function renovarTokensIg({ forcar = false, contaId = null } = {}) {
+  const out = { renovadas: 0, falhas: 0 };
+  const sel = 'id,ig_user_id,status,token_expira_em,token_renovado_em,token_tentativa_em,criado_em';
+  const contas = await rest(`mkt_ig_contas?select=${sel}&status=neq.desconectada${contaId ? `&id=eq.${enc(contaId)}` : ''}`).catch(() => null);
+  for (const c of Array.isArray(contas) ? contas : []) {
+    if (!forcar && !precisaRenovarToken(c)) continue;
+    const agora = new Date().toISOString();
+    const atual = await rest('rpc/mkt_ig_token', { method: 'POST', body: { p_ig_user_id: c.ig_user_id } }).catch(() => null);
+    if (typeof atual !== 'string' || !atual) continue;
+    try {
+      const novo = await renovarToken(atual);
+      await rest('rpc/mkt_ig_guardar_token', { method: 'POST', body: { p_conta: c.id, p_token: novo.token } });
+      await rest(`mkt_ig_contas?id=eq.${c.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { token_expira_em: novo.expiraEm, token_renovado_em: agora, token_tentativa_em: agora, status: 'conectada', ultimo_erro: null } });
+      cacheToken.delete(c.ig_user_id);
+      out.renovadas++;
+    } catch (e) {
+      out.falhas++;
+      const vencido = e?.codigo === 190;
+      await quieto(rest(`mkt_ig_contas?id=eq.${c.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { token_tentativa_em: agora, ultimo_erro: `Renovação do token: ${String(e?.message || e).slice(0, 250)}`, ...(vencido ? { status: 'erro' } : {}) } }));
+    }
+  }
+  return out;
 }

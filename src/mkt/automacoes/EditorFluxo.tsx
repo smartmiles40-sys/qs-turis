@@ -11,13 +11,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import {
-  ROTULO_TIPO, novoId, noPadrao, saidasDoNo, validarGrafo,
+  ROTULO_TIPO, canalDo, novoId, noPadrao, saidasDoNo, validarGrafo,
   type Fluxo, type Grafo, type No, type TipoNo, type CampoPersonalizado,
 } from "./tipos";
 import { acao, estatisticas, lerFluxo, listarCampos, listarFluxos, listarModelos, listarUsuarios, salvarFluxo, type ModeloMkt } from "./api";
 import { Aviso, Botao, COR, COR_SUAVE, Carregando, Chip, Modal } from "./ui";
 import PainelBloco from "./PainelBloco";
 import Simulacao, { type ResultadoSimulacao } from "./Simulacao";
+import RelatorioFluxo from "./RelatorioFluxo";
 
 const LARGURA = 250;
 const TOPO = 64;      // cabeçalho + resumo do bloco
@@ -29,6 +30,8 @@ const COR_TIPO: Record<TipoNo, string> = {
   condicao: "#DB2777", acao: "#4B5563", randomizador: "#9333EA", ir_para: "#0D9488", fim: "#DC2626",
 };
 const TIPOS_NOVOS: TipoNo[] = ["mensagem", "pergunta", "template", "aguardar", "condicao", "acao", "randomizador", "ir_para", "fim"];
+// 09/11/2026: Instagram não tem Template (modelo aprovado da Meta é só do WhatsApp).
+const TIPOS_NOVOS_IG: TipoNo[] = TIPOS_NOVOS.filter((t) => t !== "template");
 
 export function resumoDoNo(no: No): string {
   switch (no.tipo) {
@@ -95,6 +98,7 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
   const [ocupado, setOcupado] = useState(false);
   const [simulacao, setSimulacao] = useState<ResultadoSimulacao | null>(null);
   const [ligando, setLigando] = useState<{ de: string; saida: string; x: number; y: number } | null>(null);
+  const [relatorio, setRelatorio] = useState(false);
   const papelRef = useRef<HTMLDivElement>(null);
   const arrasto = useRef<{ id: string; dx: number; dy: number } | null>(null);
 
@@ -107,7 +111,8 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
         if (!f) { notifyError("Fluxo não encontrado."); onVoltar(); return; }
         setFluxo(f);
         setGrafo({ nos: f.grafo?.nos ?? [], ligacoes: f.grafo?.ligacoes ?? [] });
-        setCampos(cs); setFluxos(fs.filter((x) => x.id !== fluxoId)); setUsuarios(us); setStats(st);
+        // ir_para só entre fluxos do MESMO canal (a conversa é de um canal só).
+        setCampos(cs); setFluxos(fs.filter((x) => x.id !== fluxoId && canalDo(x) === canalDo(f))); setUsuarios(us); setStats(st);
       } catch (e) {
         notifyError(e instanceof Error ? e.message : "Não consegui abrir o fluxo.");
         // 04/11/2026: sem isso o editor ficava em "Carregando…" pra sempre; volta pra lista.
@@ -125,7 +130,8 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
   }, [modelos]);
 
   const mudarGrafo = useCallback((f: (g: Grafo) => Grafo) => { setGrafo((g) => f(g)); setSujo(true); }, []);
-  const problemas = useMemo(() => validarGrafo(grafo), [grafo]);
+  const canal = canalDo(fluxo);
+  const problemas = useMemo(() => validarGrafo(grafo, canal), [grafo, canal]);
   const graves = problemas.filter((p) => p.grave);
   const noSel = grafo.nos.find((n) => n.id === sel) ?? null;
 
@@ -233,10 +239,12 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
       <Botao variante="fantasma" onClick={() => { if (!sujo || window.confirm("Sair sem salvar?")) onVoltar(); }}>← Fluxos</Botao>
       <strong className="text-[15px] mr-1" style={{ color: "var(--ink)" }}>{fluxo.nome}</strong>
       <Chip cor={fluxo.status === "ativo" ? "#059669" : fluxo.status === "pausado" ? "#D97706" : "#6B7280"}>{fluxo.status}</Chip>
+      {canal === "instagram" && <Chip cor="#C13584">Instagram</Chip>}
       {sujo && <Chip cor="#D97706">não salvo</Chip>}
       <div className="flex-1" />
       <Botao onClick={() => void simular()} disabled={ocupado} title="Anda pelo fluxo e mostra o que sairia — não manda nada">Simular</Botao>
-      <Botao onClick={() => void testarNoMeuWhatsApp()} disabled={ocupado}>Testar no meu WhatsApp</Botao>
+      <Botao onClick={() => setRelatorio(true)} title="Quantos começaram, onde param, cliques por botão">Relatório</Botao>
+      {canal === "whatsapp" && <Botao onClick={() => void testarNoMeuWhatsApp()} disabled={ocupado}>Testar no meu WhatsApp</Botao>}
       <Botao onClick={() => void salvar()} disabled={ocupado || !sujo}>Salvar</Botao>
       {fluxo.status === "ativo"
         ? <Botao onClick={() => void salvar("pausado")} disabled={ocupado}>Pausar</Botao>
@@ -246,7 +254,7 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
 
   const paleta = (
     <div className="flex flex-wrap gap-1.5 mb-2">
-      {TIPOS_NOVOS.map((t) => (
+      {(canal === "instagram" ? TIPOS_NOVOS_IG : TIPOS_NOVOS).map((t) => (
         <button key={t} type="button" onClick={() => adicionar(t)} className="px-2.5 py-1 rounded-md text-[12px] font-semibold" style={{ background: `${COR_TIPO[t]}18`, color: COR_TIPO[t] }}>
           + {ROTULO_TIPO[t]}
         </button>
@@ -260,6 +268,15 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
       )}
     </div>
   );
+
+  const ajudaIg = canal === "instagram" && (
+    <p className="mb-2 text-[12px]" style={{ color: "var(--ink3)" }}>
+      Instagram: até 13 respostas rápidas, botões só de link (até 3), texto até 1000 caracteres. Se o fluxo começou num comentário, a 1ª mensagem vai como
+      resposta privada (uma só, até 7 dias); o resto segue quando a pessoa responder.
+    </p>
+  );
+
+  const relatorioModal = relatorio && <RelatorioFluxo fluxoId={fluxo.id} nome={fluxo.nome} grafo={grafo} onFechar={() => setRelatorio(false)} />;
 
   const listaProblemas = problemas.length > 0 && (
     <details className="mb-2" open={graves.length > 0}>
@@ -289,7 +306,7 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
     const ordem = ordemDoFluxo(grafo);
     return (
       <div>
-        {barra}{paleta}{listaProblemas}
+        {barra}{paleta}{ajudaIg}{listaProblemas}
         <ol className="space-y-2">
           {ordem.map((no) => {
             const st = stats.get(no.id);
@@ -317,6 +334,7 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
         </ol>
         <Modal aberto={!!noSel} titulo={noSel ? ROTULO_TIPO[noSel.tipo] : ""} onFechar={() => setSel(null)} largura={640}>{painel}</Modal>
         <Simulacao resultado={simulacao} grafo={grafo} onFechar={() => setSimulacao(null)} />
+        {relatorioModal}
       </div>
     );
   }
@@ -324,7 +342,7 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
   // ── COMPUTADOR: canvas ──
   return (
     <div>
-      {barra}{paleta}{listaProblemas}
+      {barra}{paleta}{ajudaIg}{listaProblemas}
       <div className="flex gap-3" style={{ height: "calc(100vh - 230px)", minHeight: 460 }}>
         <div className="mkt-card flex-1 overflow-auto relative" style={{ background: "var(--bg)", backgroundImage: "radial-gradient(var(--line) 1px, transparent 1px)", backgroundSize: `${20 * zoom}px ${20 * zoom}px` }}
           onPointerDown={(e) => { if (e.target === e.currentTarget || e.target === papelRef.current) { setSel(null); setSetaSel(null); } }}>
@@ -404,13 +422,14 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
           <aside className="mkt-card w-[280px] shrink-0 p-4 text-[12.5px] space-y-2" style={{ color: "var(--ink2)" }}>
             <strong style={{ color: "var(--ink)" }}>Como usar</strong>
             <p>Arraste o bloco pelo topo. Para ligar, puxe a bolinha da saída até outro bloco. Clique numa seta para apagar.</p>
-            <p>Texto, botões e perguntas só saem com a <b>janela de 24 h aberta</b> (a pessoa escreveu nas últimas 24 h). Fluxo que começa pela LP deve começar por um <b>Template</b>.</p>
+            <p>Texto, botões e perguntas só saem com a <b>janela de 24 h aberta</b> (a pessoa escreveu nas últimas 24 h). {canal === "instagram" ? "No Instagram não existe Template: o fluxo só começa quando a pessoa comenta, manda DM ou abre o link." : <>Fluxo que começa pela LP deve começar por um <b>Template</b>.</>}</p>
             <Aviso>Os números em cima de cada bloco são quantas pessoas passaram por ele (desde a criação).</Aviso>
             <div style={{ background: COR_SUAVE }} className="rounded-lg p-2">Os gatilhos (palavra-chave, link, anúncio…) ficam nas outras abas e apontam para este fluxo.</div>
           </aside>
         )}
       </div>
       <Simulacao resultado={simulacao} grafo={grafo} onFechar={() => setSimulacao(null)} />
+      {relatorioModal}
     </div>
   );
 }
