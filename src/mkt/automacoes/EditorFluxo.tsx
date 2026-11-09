@@ -108,7 +108,11 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
         setFluxo(f);
         setGrafo({ nos: f.grafo?.nos ?? [], ligacoes: f.grafo?.ligacoes ?? [] });
         setCampos(cs); setFluxos(fs.filter((x) => x.id !== fluxoId)); setUsuarios(us); setStats(st);
-      } catch (e) { notifyError(e instanceof Error ? e.message : "Não consegui abrir o fluxo."); }
+      } catch (e) {
+        notifyError(e instanceof Error ? e.message : "Não consegui abrir o fluxo.");
+        // 04/11/2026: sem isso o editor ficava em "Carregando…" pra sempre; volta pra lista.
+        if (vivo) onVoltar();
+      }
     })();
     return () => { vivo = false; };
   }, [fluxoId, onVoltar]);

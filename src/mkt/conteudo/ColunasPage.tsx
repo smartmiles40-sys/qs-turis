@@ -25,7 +25,8 @@ export default function ColunasPage() {
 
   async function fazer(f: () => Promise<void>) {
     setOcupado(true); setErro(null);
-    try { await f(); await carregar(); } catch (e) { setErro(erroDe(e)); } finally { setOcupado(false); }
+    // 04/11/2026: no erro relê do banco — o ↑/↓ já tinha trocado a ordem na tela.
+    try { await f(); await carregar(); } catch (e) { setErro(erroDe(e)); void carregar(); } finally { setOcupado(false); }
   }
   function mover(i: number, d: -1 | 1) {
     const l = [...colunas];

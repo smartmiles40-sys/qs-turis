@@ -95,7 +95,8 @@ export default function QuadroPage({ verInicial }: { verInicial?: Ver }) {
       {erroAcao && <div className="mb-3"><Aviso tom="erro">{erroAcao}</Aviso></div>}
 
       {colunas.length === 0 ? (
-        <Vazio titulo="O quadro ainda não tem colunas" texto="Peça ao gestor de Marketing pra criar em Comum › Colunas do quadro (ou aplicar a migration 0240, que cria as 8 padrão)." />
+        // 04/11/2026: "Comum › Colunas do quadro" virou Ajustes › Colunas (30/10).
+        <Vazio titulo="O quadro ainda não tem colunas" texto="Crie as colunas em Ajustes › Colunas (ou aplique a migration 0240, que cria as 8 padrão)." />
       ) : ver === "quadro" ? (
         <Quadro colunas={ordenadas} cards={visiveis} todos={cards} hoje={hoje} onAbrir={abrir}
           onNovo={(colunaId) => setNovo({ colunaId })}

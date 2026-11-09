@@ -23,6 +23,7 @@ import { ROTAS_DISPAROS } from "./disparos/rotas";
 import { ROTAS_GRUPOS } from "./grupos/rotas";
 import { ROTAS_AUTOMACOES } from "./automacoes/rotas";
 import { ROTAS_EMAIL } from "./email/rotas";
+import { ROTAS_TRAFEGO } from "./trafego/rotas";
 import { instalarIdsAntigos } from "./conteudo/idsAntigos";
 import { registrarSeletorDrive } from "./conteudo/seletorDrive";
 import { SeletorDriveDoCard } from "./drive/seletorDoCard";
@@ -65,6 +66,7 @@ instalarIdsAntigos("mkt", {
 
 export const ROTAS_MKT: RotaMkt[] = [
   ...ROTAS_CONTEUDO,
+  ...ROTAS_TRAFEGO,
   ...ROTAS_DRIVE,
   ...ROTAS_GRUPOS,
   ...ROTAS_DISPAROS,

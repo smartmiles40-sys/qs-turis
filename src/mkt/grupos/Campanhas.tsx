@@ -165,7 +165,8 @@ function ListaCampanhas({ tags, erroBases }: { tags: Tag[]; erroBases: string | 
 
       <div className="gr-cartao overflow-hidden">
         {campanhas === null ? (
-          <div className="p-6 text-[14px]" style={{ color: cor.ink3 }}>Carregando campanhas…</div>
+          // 04/11/2026: se a leitura falha, não fica "Carregando…" pra sempre (o erro aparece acima).
+          <div className="p-6 text-[14px]" style={{ color: cor.ink3 }}>{erro ? "Não deu pra carregar as campanhas — a tela tenta de novo a cada 30 s." : "Carregando campanhas…"}</div>
         ) : linhas.length === 0 ? (
           todas.length === 0 ? <Vazio titulo="Nenhuma campanha ainda" texto="Crie a primeira em “Nova campanha”." /> : <div className="p-6 text-[14px]" style={{ color: cor.ink3 }}>{VAZIO[aba]}</div>
         ) : (

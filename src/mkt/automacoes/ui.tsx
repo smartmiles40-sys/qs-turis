@@ -101,7 +101,8 @@ export function Chip({ children, cor }: { children: ReactNode; cor?: string }) {
 export function quando(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  // 04/11/2026: sempre em Brasília, independente do fuso do navegador.
+  return d.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 export function Carregando() {

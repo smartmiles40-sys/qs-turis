@@ -58,7 +58,8 @@ function EditorAutomacao({ a, listas, modelos, onVoltar }: { a: Automacao; lista
       nome: x.nome.trim() || "Sem nome", ativo, gatilho_tipo: x.gatilho_tipo,
       gatilho_valor: x.gatilho_valor?.trim() || null, passos: x.passos,
     }).eq("id", x.id);
-    if (error) { setMsg({ tom: "erro", texto: /passos_chk/.test(error.message) ? "Confira os passos: todo e-mail precisa de modelo e toda espera vai de 1 minuto a 90 dias." : erroDoBanco(error) }); return false; }
+    // 04/11/2026: o CHECK do gatilho (lista/tag sem valor) voltava em inglês cru ao trocar de passo.
+    if (error) { setMsg({ tom: "erro", texto: /passos_chk/.test(error.message) ? "Confira os passos: todo e-mail precisa de modelo e toda espera vai de 1 minuto a 90 dias." : /automacoes_check/.test(error.message) ? "Ainda não salvou: escolha a lista (ou escreva a tag) de quem entra." : erroDoBanco(error) }); return false; }
     setX((v) => ({ ...v, ativo })); setMexido(false);
     setMsg({ tom: "ok", texto: ativo !== x.ativo ? (ativo ? "Automação LIGADA: quem entrar a partir de agora começa a sequência." : "Automação desligada: quem está no meio espera até religar.") : "Salvo." });
     return true;

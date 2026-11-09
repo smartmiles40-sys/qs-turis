@@ -15,7 +15,8 @@ import { apagarRecorrencia, listarRecorrencias, salvarRecorrencia, type PublicoM
 import { ModeloEVariaveis, PublicoMktForm, variaveisOk } from "./pecasMkt";
 import { DIAS_CURTOS, descreverRecorrencia } from "./regras";
 
-const dataHora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+// 04/11/2026: em Brasília (a hora da recorrência é de Brasília), não no fuso do navegador.
+const dataHora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
 
 function Editor({ cfg, inicial, onFechar, onSalvo }: { cfg: ConfigDisparo; inicial: Recorrencia | null; onFechar: () => void; onSalvo: () => void }) {
   const aprovados = cfg.modelos.filter((m) => m.status === "aprovado" && m.setor === "marketing");
@@ -84,7 +85,8 @@ export function SecaoRecorrencias({ cfg, versao, onContar }: { cfg: ConfigDispar
                   <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>{r.nome}</p>
                   <p className="text-[12.5px]" style={{ color: "var(--muted)" }}>{descreverRecorrencia(r.dias_semana, r.hora)} · {r.modelo_nome} · {descreverPublico("marketing", r.publico)}</p>
                   <p className="text-[12px]" style={{ color: "var(--subtle)" }}>
-                    {r.ativa && r.proxima_em ? `Próxima: ${dataHora(r.proxima_em)}` : "Pausada"}{r.ultima_em ? ` · última: ${dataHora(r.ultima_em)}` : ""}
+                    {/* 04/11/2026: ativa sem próxima calculada dizia "Pausada" (o selo ao lado dizia "ativa"). */}
+                    {!r.ativa ? "Pausada" : r.proxima_em ? `Próxima: ${dataHora(r.proxima_em)}` : "Próxima: ainda não calculada"}{r.ultima_em ? ` · última: ${dataHora(r.ultima_em)}` : ""}
                   </p>
                 </div>
                 <Badge tone={r.ativa ? "ok" : undefined} dot>{r.ativa ? "ativa" : "pausada"}</Badge>

@@ -16,9 +16,15 @@ export function LadoPrevia({ html, assunto, preheader, remetente, onTeste }: {
   const testar = async () => {
     if (!onTeste) return;
     setIndo(true); setRes(null);
-    const erro = await onTeste(para.trim());
-    setRes(erro ? { ok: false, texto: erro } : { ok: true, texto: `Teste enviado para ${para.trim()}. Abertura e clique do teste não contam no relatório.` });
-    setIndo(false);
+    // 04/11/2026: se o onTeste estourar, o botão não fica preso em "Enviando…".
+    try {
+      const erro = await onTeste(para.trim());
+      setRes(erro ? { ok: false, texto: erro } : { ok: true, texto: `Teste enviado para ${para.trim()}. Abertura e clique do teste não contam no relatório.` });
+    } catch (e) {
+      setRes({ ok: false, texto: (e as Error)?.message || "Não enviou." });
+    } finally {
+      setIndo(false);
+    }
   };
   return (
     <aside className="lg:sticky lg:top-4 self-start space-y-3">

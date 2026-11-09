@@ -96,6 +96,9 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const { currentUser } = useQsAuth();
   const meuId = currentUser?.id ?? "";
   const gestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  // 0266 (04/11/2026): no Marketing, o próprio time ajusta os tipos de pedido
+  // que o setor recebe (o banco libera só setor = 'marketing' pra ele).
+  const ajustaTipos = gestor || (setor === "marketing" && currentUser?.role === "marketing");
 
   // ── Estado da tela (vai pra URL) ──
   const [estado, setEstado] = useState<EstadoTela>(() => estadoInicial(setor));
@@ -412,7 +415,7 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
           <p>Pedidos entre setores, com dono e prazo. Você está em <span className="sol-setor"><SectorDot setor={setor} />{NOME_SETOR[setor]}</span></p>
         </div>
         <div className="sol-head__acts">
-          {gestor && <Btn onClick={() => setTipos(true)}>Tipos e prazos</Btn>}
+          {ajustaTipos && <Btn onClick={() => setTipos(true)}>Tipos e prazos</Btn>}
           <Btn variant="primary" onClick={() => setNova(true)}>Pedir a outro setor</Btn>
         </div>
       </header>

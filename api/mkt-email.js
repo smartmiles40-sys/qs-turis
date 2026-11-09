@@ -22,7 +22,7 @@
 // Modelos, segmentos, automações e campanhas em rascunho também (RLS + CHECK).
 // -----------------------------------------------------------------------------
 
-import { rest } from './_supabaseAdmin.js';
+import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { getSupabaseUserId } from './_wa.js';
 import {
   lerConfig, gravarConfig, guardarSegredo, apagarSegredo, chaveComFormatoOk, listarDominios, lerDominio,
@@ -49,8 +49,10 @@ async function lerCampanha(id) {
   return (await rest(`mkt_email_campanhas?select=*&id=eq.${id}&limit=1`).catch(() => null))?.[0] || null;
 }
 
+// 04/11/2026: id sem formato de UUID não chega no filtro do PostgREST (pausar/retomar/voltar não conferiam).
 const mudar = (id, de, body) =>
-  rest(`mkt_email_campanhas?id=eq.${id}&status=in.(${de.join(',')})`, { method: 'PATCH', body, prefer: 'return=representation' });
+  !UUID.test(String(id || '')) ? Promise.resolve([])
+    : rest(`mkt_email_campanhas?id=eq.${id}&status=in.(${de.join(',')})`, { method: 'PATCH', body, prefer: 'return=representation' });
 
 function statusPublico(cfg) {
   const faltando = [];
@@ -95,7 +97,8 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const segredo = String(process.env.CRON_SECRET || '').trim();
     const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
-    if (!segredo || veio !== segredo) return res.status(401).json({ error: 'Não autorizado' });
+    // 04/11/2026: comparação em tempo constante (igual à /api/mkt-trafego).
+    if (!segredo || !segredoConfere(veio, segredo)) return res.status(401).json({ error: 'Não autorizado' });
     try {
       return res.status(200).json({ ok: true, ...(await rodar({ orcamentoMs: 45_000 })) });
     } catch (e) {

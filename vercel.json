@@ -140,6 +140,9 @@
     "api/fin-comissoes.js": {
       "maxDuration": 60
     },
+    "api/mkt-trafego.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -244,6 +247,10 @@
     {
       "path": "/api/fin-comissoes",
       "schedule": "11,41 * * * *"
+    },
+    {
+      "path": "/api/mkt-trafego?cron=1",
+      "schedule": "7,37 * * * *"
     }
   ],
   "headers": [

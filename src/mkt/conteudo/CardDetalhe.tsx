@@ -26,7 +26,8 @@ const ACAO: Record<string, string> = {
 
 function quando(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  // 04/11/2026: fuso fixo de SP (igual ao hojeSP), não o do aparelho.
+  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
 }
 const novoId = () => Math.random().toString(36).slice(2, 10);
 
@@ -80,7 +81,12 @@ export default function CardDetalhe({ id, colunas, onFechar, onMudou, onAbrir }:
       await f();
       onMudou();
       if (fechar) onFechar(); else await carregar();
-    } catch (e) { setErro(erroDe(e)); }
+    } catch (e) {
+      setErro(erroDe(e));
+      // 04/11/2026: o checklist muda na tela antes de salvar; se o banco recusou,
+      // relê o card pra tela não mostrar como salvo o que não foi.
+      void carregar();
+    }
     finally { setOcupado(false); }
   }
   const salvar = (m: EdicaoCard) => c && fazer(() => editarCard(c.id, m));
@@ -93,7 +99,9 @@ export default function CardDetalhe({ id, colunas, onFechar, onMudou, onAbrir }:
     );
   }
   if (!c || !coluna) {
-    return <Modal aberto titulo="Card" onFechar={onFechar}><p className="text-[13px]" style={{ color: "var(--ink3)" }}>{erro ?? "Carregando…"}</p></Modal>;
+    // 04/11/2026: card lido mas a etapa dele não está na lista de colunas desta tela
+    // ficava em "Carregando…" pra sempre.
+    return <Modal aberto titulo="Card" onFechar={onFechar}><p className="text-[13px]" style={{ color: "var(--ink3)" }}>{erro ?? (c ? "A etapa deste card não apareceu no quadro. Recarregue a página." : "Carregando…")}</p></Modal>;
   }
 
   const hoje = hojeSP();
@@ -438,7 +446,8 @@ function Reaproveitar({ card, colunaEntradaOk, onFechar, onFeito }: { card: Card
         <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
           Cria um card novo do Tráfego, ligado a este conteúdo, com os mesmos anexos, destino e temas. O original não muda.
         </p>
-        {!colunaEntradaOk && <Aviso>O quadro precisa de uma coluna de entrada (o gestor configura em Colunas do quadro).</Aviso>}
+        {/* 04/11/2026: "Colunas do quadro" virou a aba Ajustes › Colunas (30/10). */}
+        {!colunaEntradaOk && <Aviso>O quadro precisa de uma coluna de entrada (configure em Ajustes › Colunas).</Aviso>}
         {erro && <Aviso tom="erro">{erro}</Aviso>}
         <Campo rotulo="Título"><Entrada value={titulo} onChange={(e) => setTitulo(e.target.value)} /></Campo>
         <Campo rotulo="Vai virar">

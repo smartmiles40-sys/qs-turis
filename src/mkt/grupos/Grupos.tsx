@@ -342,7 +342,8 @@ export function DadosDoGrupo({ jid, grupo, tags, onFechar, onMudou }: { jid: str
         {link && (
           <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: cor.card2, border: "1px solid var(--line)" }}>
             <code className="min-w-0 flex-1 truncate text-[13px]">{link}</code>
-            <BotaoGrande pequeno onClick={() => { void navigator.clipboard.writeText(link).then(() => { setCopiado(true); setTimeout(() => setCopiado(false), 1500); }); }}>{copiado ? "Copiado ✓" : "Copiar"}</BotaoGrande>
+            {/* 04/11/2026: clipboard bloqueado rejeitava calado — agora avisa. */}
+            <BotaoGrande pequeno onClick={() => { void navigator.clipboard.writeText(link).then(() => { setCopiado(true); setTimeout(() => setCopiado(false), 1500); }, () => setErro("Não consegui copiar — selecione o link e copie à mão.")); }}>{copiado ? "Copiado ✓" : "Copiar"}</BotaoGrande>
           </div>
         )}
         {erro && <Nota tom="erro" icone="⚠️">{erro}</Nota>}

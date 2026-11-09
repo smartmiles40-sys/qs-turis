@@ -18,7 +18,8 @@ import {
 } from "./api";
 import { formatarTelefone, lerCsvDeContatos, mapearColunas, normalizarEmail, normalizarTelefone, parseCsv, separarTags, type MapaColunas, type ResultadoCsv } from "./regras";
 
-const quando = (iso: string) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+// 04/11/2026: em Brasília, não no fuso do navegador.
+const quando = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
 
 // ── Importar CSV ────────────────────────────────────────────────────────────
 
@@ -339,7 +340,8 @@ export default function ContatosPage() {
 
           {linhas === null ? <p className="text-[13px]" style={{ color: "var(--subtle)" }}>Carregando…</p>
             : linhas.length === 0 ? (
-              <div className="qs-card"><EmptyState title={f.busca || f.lista || f.tag ? "Ninguém com esse filtro" : "A base está vazia"}
+              // 04/11/2026: filtro "Pediu pra parar"/"Recebe" sem ninguém dizia "A base está vazia".
+              <div className="qs-card"><EmptyState title={f.busca || f.lista || f.tag || f.optout ? "Ninguém com esse filtro" : "A base está vazia"}
                 description="Importe a planilha da live, do formulário ou de outro sistema. Telefone, e-mail e repetidos o QS acerta sozinho."
                 action={<Button variant="primary" onClick={() => setImportando(true)}>Importar CSV</Button>} /></div>
             ) : (
