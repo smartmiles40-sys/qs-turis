@@ -122,6 +122,9 @@
     "api/mkt-grupos.js": {
       "maxDuration": 60
     },
+    "api/mkt-grupos-link.js": {
+      "maxDuration": 10
+    },
     "api/mkt-email.js": {
       "maxDuration": 60
     },
@@ -338,6 +341,10 @@
     }
   ],
   "rewrites": [
+    {
+      "source": "/g/:slug",
+      "destination": "/api/mkt-grupos-link?slug=:slug"
+    },
     {
       "source": "/documentos/:token",
       "destination": "/index.html"

@@ -36,6 +36,8 @@ export interface Grupo {
   sincronizado_em: string | null;
   info_em: string | null;
   saiu_em: string | null;
+  /** 0342: quando os membros foram contados (link inteligente). */
+  contado_em?: string | null;
 }
 
 export interface Tag { id: string; nome: string; cor: string }
