@@ -103,7 +103,7 @@ test("modelo da Meta → linha e → tela", () => {
   assert.equal(t.origem, "meta");
   assert.equal(modeloParaTela({ ...m, status: "PENDING" }).status, "enviado");
   assert.equal(modeloParaTela({ ...m, status: "REJECTED" }).status, "recusado");
-  assert.equal(modeloParaTela({ ...m, status: "PAUSED" }).status, "pausado");
+  assert.equal(modeloParaTela({ ...m, status: "PAUSED" }).status, "recusado"); // a tela de modelos só conhece 4 estados
 });
 
 test("components: mídia no topo, corpo em ordem, botão de link codificado", () => {

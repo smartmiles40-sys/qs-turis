@@ -121,7 +121,7 @@ export function classificarErroMeta(codigo, detalhe = '') {
 
 // ── Modelos (message_templates) ─────────────────────────────────────────────
 
-const STATUS_TELA = { APPROVED: 'aprovado', PENDING: 'enviado', IN_APPEAL: 'enviado', REJECTED: 'recusado', PAUSED: 'pausado', DISABLED: 'recusado' };
+const STATUS_TELA = { APPROVED: 'aprovado', PENDING: 'enviado', IN_APPEAL: 'enviado', REJECTED: 'recusado', PAUSED: 'recusado', DISABLED: 'recusado' };
 
 /**
  * Um item de GET /{waba}/message_templates → a linha de mkt_wa_modelos.

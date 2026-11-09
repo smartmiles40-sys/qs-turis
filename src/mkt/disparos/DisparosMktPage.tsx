@@ -20,7 +20,7 @@ import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
   acaoCampanha, contagens, criarCampanha, descreverPublico, lerConfig, listarCampanhas, preverTexto, previa as pedirPrevia,
-  type Campanha, type ConfigDisparo, type MapaVariaveis, type ModeloDisparo, type Previa, type StatusCampanha, type StatusEnvio,
+  type Campanha, type ConfigDisparo, type MapaVariaveis, type Previa, type StatusCampanha, type StatusEnvio,
 } from "@/lib/qs/disparos";
 import ModelosDisparo from "@/components/sdr/disparos/ModelosDisparo";
 import { PainelCampanha } from "@/components/sdr/disparos/DisparosPage";
@@ -32,6 +32,8 @@ import { DIAS_CURTOS, descreverRecorrencia } from "./regras";
 import { SecaoRecorrencias } from "./RecorrenciasPage";
 import { SecaoSequencias } from "./SequenciasPage";
 import PreviaWhatsApp from "./PreviaWhatsApp";
+import { AoVivoModal, EnvioOficial, ExtrasDoModelo } from "./PainelOficial";
+import { criarCampanhaMkt, extrasOk, ROTULO_CATEGORIA, type EnvioExtra, type ModeloMkt } from "./oficial";
 
 const STATUS: Record<StatusCampanha, { rotulo: string; tom: "neutro" | "rel" | "aviso" | "erro" }> = {
   rascunho: { rotulo: "rascunho", tom: "neutro" },
@@ -61,11 +63,14 @@ const TIPOS: { id: Tipo; titulo: string; texto: string; exemplo: string }[] = [
 const PASSOS = ["Para quem", "Mensagem", "Quando", "Revisar"] as const;
 
 function NovoDisparo({ cfg, onFechar, onCriado, onSequencia }: { cfg: ConfigDisparo; onFechar: () => void; onCriado: (t: Tipo) => void; onSequencia: () => void }) {
-  const aprovados = cfg.modelos.filter((m) => m.status === "aprovado" && m.setor === "marketing");
+  const aprovados = cfg.modelos.filter((m) => m.status === "aprovado" && m.setor === "marketing") as ModeloMkt[];
   const [tipo, setTipo] = useState<Tipo | null>(null);
   const [passo, setPasso] = useState(0);
   const [nome, setNome] = useState("");
-  const [modeloNome, setModeloNome] = useState("");
+  const [modeloNome, setModeloNomeCru] = useState("");
+  // 0341: mídia do topo, título variável e final do link dos botões (modelo da Meta).
+  const [extra, setExtra] = useState<EnvioExtra>({});
+  const setModeloNome = (n: string) => { setModeloNomeCru(n); setExtra({}); };
   const [mapa, setMapa] = useState<MapaVariaveis>({});
   const [publico, setPublico] = useState<PublicoMkt>({ fonte: "contatos" });
   const [quando, setQuando] = useState<"rascunho" | "agora" | "agendar">("rascunho");
@@ -87,7 +92,10 @@ function NovoDisparo({ cfg, onFechar, onCriado, onSequencia }: { cfg: ConfigDisp
   }, [publico, tipo]);
 
   const okPublico = !!pv?.total;
-  const okMensagem = nome.trim().length >= 2 && variaveisOk(modelo, mapa);
+  // Modelo da Meta que pede mídia/título/botão: só "Enviar uma vez" leva esses extras por enquanto.
+  const pedeExtras = !!modelo && modelo.origem === "meta" && (!!modelo.precisaMidia || !!modelo.variaveisTopo?.length || !!modelo.botoes?.some((b) => b.tipo === "URL" && b.variavel));
+  const okExtras = !pedeExtras || (tipo === "uma_vez" && extrasOk(modelo, extra));
+  const okMensagem = nome.trim().length >= 2 && variaveisOk(modelo, mapa) && okExtras;
   const okQuando = tipo === "semanal"
     ? dias.length > 0 && /^\d{2}:\d{2}$/.test(horaSemanal)
     : quando !== "agendar" || (!!hora && Date.parse(localParaIso(hora)) > Date.now() + 60_000);
@@ -107,7 +115,9 @@ function NovoDisparo({ cfg, onFechar, onCriado, onSequencia }: { cfg: ConfigDisp
         notifySuccess(`Pronto: ${descreverRecorrencia(dias, horaSemanal).toLowerCase()}.`);
       } else {
         if (quando === "agora" && !window.confirm(`Iniciar "${nome.trim()}" agora? A fila começa a andar na próxima janela de envio.`)) { setSalvando(false); return; }
-        const { campanha } = await criarCampanha("marketing", { nome: nome.trim(), modelo_nome: modelo.nome, modelo_idioma: modelo.idioma, params: mapa, publico });
+        const { campanha } = pedeExtras
+          ? await criarCampanhaMkt({ nome: nome.trim(), modelo_nome: modelo.nome, modelo_idioma: modelo.idioma, params: mapa, publico, envio_extra: extra })
+          : await criarCampanha("marketing", { nome: nome.trim(), modelo_nome: modelo.nome, modelo_idioma: modelo.idioma, params: mapa, publico });
         if (quando === "agendar") { await agendar(campanha.id, localParaIso(hora)); notifySuccess(`Agendada pra ${dataHora(localParaIso(hora))}.`); }
         else if (quando === "agora") { const r = await acaoCampanha("iniciar", campanha.id); notifySuccess(`${r.total ?? 0} na fila${r.simulacao ? " (simulação)" : ""}.`); }
         else notifySuccess("Salvo como rascunho. Clique em Iniciar quando quiser.");
@@ -168,6 +178,8 @@ function NovoDisparo({ cfg, onFechar, onCriado, onSequencia }: { cfg: ConfigDisp
               </Campo>
               <p className="text-[12.5px] font-semibold" style={{ color: "var(--ink2)" }}>Modelo aprovado pela Meta</p>
               <ModeloEVariaveis aprovados={aprovados} modeloNome={modeloNome} setModeloNome={setModeloNome} mapa={mapa} setMapa={setMapa} fonte={publico.fonte} semBolha emCartoes />
+              {pedeExtras && tipo !== "uma_vez" && <Aviso>Este modelo tem mídia, título variável ou botão de link: por enquanto ele só sai em “Enviar uma vez”. Pra repetir toda semana, escolha um modelo só de texto.</Aviso>}
+              {tipo === "uma_vez" && <ExtrasDoModelo modelo={modelo} extra={extra} setExtra={setExtra} />}
             </>
           )}
           {passo === 2 && tipo === "uma_vez" && (
@@ -200,24 +212,27 @@ function NovoDisparo({ cfg, onFechar, onCriado, onSequencia }: { cfg: ConfigDisp
               <Linha rotulo="Tipo">{tituloTipo}</Linha>
               <Linha rotulo="Nome">{nome}</Linha>
               <Linha rotulo="Para quem">{descreverPublico("marketing", publico)} — <b>{pv?.total ?? 0}</b> pessoas hoje</Linha>
-              <Linha rotulo="Modelo">{modelo.nome}</Linha>
+              <Linha rotulo="Modelo">{modelo.nome} · {ROTULO_CATEGORIA[modelo.categoriaMeta ?? modelo.categoria] ?? modelo.categoria} · {modelo.idioma}</Linha>
               <Linha rotulo="Quando">{tipo === "semanal" ? descreverRecorrencia(dias, horaSemanal) : quando === "agendar" && hora ? dataHora(localParaIso(hora)) : quando === "agora" ? "Agora (próxima janela de envio)" : "Rascunho — inicio depois"}</Linha>
               <Linha rotulo="Número">{cfg.numeroMkt ? (cfg.numeroMkt.numero || cfg.numeroMkt.phone_number_id) : "ainda não definido — nada entra na fila"}</Linha>
             </dl>
           )}
           {passo === 3 && cfg.simulacao && <Aviso>Modo simulação: a fila anda e o funil mostra tudo, mas nenhuma mensagem sai.</Aviso>}
         </div>
-        <PreviaDoModelo modelo={modelo} mapa={mapa} />
+        <PreviaDoModelo modelo={modelo} mapa={mapa} extra={extra} />
       </div>
     </Modal>
   );
 }
 
-function PreviaDoModelo({ modelo, mapa }: { modelo: ModeloDisparo | null; mapa: MapaVariaveis }) {
+function PreviaDoModelo({ modelo, mapa, extra }: { modelo: ModeloMkt | null; mapa: MapaVariaveis; extra: EnvioExtra }) {
+  // Modelo da Meta: os botões de verdade; montado à mão: o "Parar de receber" de sempre.
+  const botoes = modelo?.origem === "meta" ? modelo.botoes?.map((b) => b.texto) : modelo?.botaoParar !== false ? ["Parar de receber"] : undefined;
+  const midia = modelo?.precisaMidia ? { tipo: modelo.cabecalhoFormato ?? "IMAGE", link: extra.midia?.link } : undefined;
   return (
     <div className="md:sticky md:top-0 md:self-start">
       <PreviaWhatsApp vazio="Escolha o modelo no passo Mensagem pra ver como chega."
-        baloes={modelo ? [{ titulo: modelo.cabecalho, texto: preverTexto(modelo.corpo, mapa), rodape: modelo.rodape, botoes: modelo.botaoParar !== false ? ["Parar de receber"] : undefined }] : []} />
+        baloes={modelo ? [{ titulo: modelo.cabecalho, texto: preverTexto(modelo.corpo, mapa), rodape: modelo.rodape, botoes: botoes?.length ? botoes : undefined, midia }] : []} />
     </div>
   );
 }
@@ -306,7 +321,7 @@ function NumeroForm({ cfg, ehAdmin, onSalvo }: { cfg: ConfigDisparo; ehAdmin: bo
       ) : <p className="text-[12px]" style={{ color: "var(--ink3)" }}>Só admin define o número.</p>}
       {conferido && <p className="break-all text-[12.5px]" style={{ color: "var(--ink2)" }}>{conferido}</p>}
       <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
-        O ritmo (por hora/dia, janela) é o mesmo do disparo do QS e vale POR NÚMERO: {cfg.ritmo.por_hora}/hora, {cfg.ritmo.por_dia}/dia, {cfg.ritmo.inicio}–{cfg.ritmo.fim}.
+        O Marketing tem ritmo próprio (mensagens por segundo, teto por dia e o limite do número na Meta) — veja “Ritmo e custo” no quadro do envio oficial.
         Número novo começa com limite baixo na Meta: não suba antes de a qualidade estar verde.
       </p>
     </div>
@@ -352,6 +367,7 @@ export default function DisparosMktPage() {
   const [nova, setNova] = useState(false);
   const [novaSequencia, setNovaSequencia] = useState(false);
   const [vendo, setVendo] = useState<Campanha | null>(null);
+  const [aoVivoDe, setAoVivoDe] = useState<Campanha | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [agendando, setAgendando] = useState<Campanha | null>(null);
   const [hora, setHora] = useState("");
@@ -391,9 +407,10 @@ export default function DisparosMktPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      {cfg?.simulacao && <Aviso>Modo simulação ligado: nada sai de verdade. Desligar é decisão do Bruno (docs/DISPARO-EM-MASSA.md).</Aviso>}
+      {cfg?.simulacao && <Aviso>Modo simulação do Marketing ligado: nada sai de verdade. Desligar é decisão do Bruno (docs/DISPARO-EM-MASSA.md).</Aviso>}
       {cfg && !cfg.simulacao && !cfg.envioRealPlugado && <Aviso>Simulação desligada, mas o envio real ainda não está plugado — a fila fica parada.</Aviso>}
       {erro && <Aviso tom="erro">{erro}</Aviso>}
+      {cfg && <EnvioOficial ehAdmin={ehAdmin} onModelosMudaram={() => void carregar()} />}
       {cfg && <OQueFalta cfg={cfg} aprovados={aprovados} onNumero={() => setModal("numero")} onModelos={() => setModal("modelos")} />}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -459,6 +476,7 @@ export default function DisparosMktPage() {
                     {c.status === "enviando" && <Botao disabled={!!ocupado} onClick={() => void agir("pausar", c)}>Pausar</Botao>}
                     {c.status === "pausada" && <Botao variante="primario" disabled={!!ocupado} onClick={() => void agir("retomar", c)}>Retomar</Botao>}
                     {["enviando", "pausada", "agendada"].includes(c.status) && <Botao variante="perigo" disabled={!!ocupado} onClick={() => void agir("cancelar", c)}>Cancelar</Botao>}
+                    {!["rascunho", "agendada"].includes(c.status) && <Botao onClick={() => setAoVivoDe(c)}>Ao vivo</Botao>}
                     {!["rascunho", "agendada"].includes(c.status) && <Botao variante="fantasma" onClick={() => setVendo(c)}>Ver funil</Botao>}
                     {c.status === "rascunho" && <Botao variante="fantasma" disabled={!!ocupado} onClick={() => void agir("apagar", c)}>Apagar</Botao>}
                   </div>
@@ -483,6 +501,7 @@ export default function DisparosMktPage() {
           onCriado={(t) => { setNova(false); setSecao(t); setVersao((v) => v + 1); void carregar(); }} />
       )}
       {vendo && <PainelCampanha c={vendo} onFechar={() => setVendo(null)} />}
+      {aoVivoDe && <AoVivoModal c={aoVivoDe} onFechar={() => setAoVivoDe(null)} onMudou={() => void carregar()} />}
       {agendando && (
         <Modal aberto titulo={`Agendar · ${agendando.nome}`} onFechar={() => setAgendando(null)} largura={460}
           rodape={<>

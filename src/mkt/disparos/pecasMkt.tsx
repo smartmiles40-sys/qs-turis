@@ -84,7 +84,7 @@ export function ModeloEVariaveis({ aprovados, modeloNome, setModeloNome, mapa, s
   const modelo = aprovados.find((m) => m.nome === modeloNome) ?? null;
   const vars = modelo ? variaveisDoCorpo(modelo.corpo) : [];
   const fontes = FONTES_MKT.filter((f) => f.id !== "campo" || !fonte || fonte === "contatos");
-  if (!aprovados.length) return <Alert tone="warn">Nenhum modelo aprovado do Marketing ainda. Monte em “Modelos”, aprove na Meta e marque como aprovado — disparo em massa só sai com modelo aprovado.</Alert>;
+  if (!aprovados.length) return <Alert tone="warn">Nenhum modelo aprovado do Marketing ainda. Aprove o modelo na Meta (WhatsApp Manager do número do Marketing) e clique em “Sincronizar modelos da Meta” — disparo em massa só sai com modelo aprovado.</Alert>;
   return (
     <div className="space-y-2">
       {emCartoes ? (
@@ -96,6 +96,7 @@ export function ModeloEVariaveis({ aprovados, modeloNome, setModeloNome, mapa, s
                 className="rounded-xl border p-3 text-left transition-colors"
                 style={on ? { borderColor: "var(--rel)", background: "var(--rel-soft)" } : { borderColor: "var(--line)", background: "var(--card)" }}>
                 <span className="block text-[13px] font-semibold" style={{ color: on ? "var(--rel-ink)" : "var(--ink)" }}>{m.nome}</span>
+                <span className="block text-[11.5px]" style={{ color: "var(--ink3)" }}>{m.categoria === "UTILITY" ? "Utilidade" : "Marketing"} · {m.idioma}</span>
                 <span className="mt-0.5 block text-[12px] leading-snug line-clamp-2" style={{ color: "var(--ink3)" }}>{m.corpo}</span>
               </button>
             );
@@ -105,7 +106,7 @@ export function ModeloEVariaveis({ aprovados, modeloNome, setModeloNome, mapa, s
         <Campo rotulo="Modelo aprovado">
           <select className={INPUT} style={INPUT_ESTILO} value={modeloNome} onChange={(e) => { setModeloNome(e.target.value); setMapa({}); }}>
             <option value="">Escolha…</option>
-            {aprovados.map((m) => <option key={`${m.nome}:${m.idioma}`} value={m.nome}>{m.nome}</option>)}
+            {aprovados.map((m) => <option key={`${m.nome}:${m.idioma}`} value={m.nome}>{m.nome} ({m.categoria === "UTILITY" ? "Utilidade" : "Marketing"} · {m.idioma})</option>)}
           </select>
         </Campo>
       )}
