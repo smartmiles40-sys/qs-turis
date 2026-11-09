@@ -72,6 +72,8 @@ function statusPublico(cfg) {
     config: {
       remetente_nome: cfg.remetente_nome, remetente_email: cfg.remetente_email, responder_para: cfg.responder_para,
       rodape_texto: cfg.rodape_texto, rodape_endereco: cfg.rodape_endereco, por_segundo: cfg.por_segundo,
+      // undefined (sai do JSON) enquanto a 0340 não for aplicada — a tela esconde o campo.
+      limite_por_dia: cfg.limite_por_dia,
       dominio: cfg.dominio, dominio_id: cfg.dominio_id, dominio_status: cfg.dominio_status,
       dominio_registros: cfg.dominio_registros, webhook_id: cfg.webhook_id,
       score_pesos: cfg.score_pesos, score_janela_dias: cfg.score_janela_dias, score_recalculado_em: cfg.score_recalculado_em,
@@ -193,6 +195,16 @@ export default async function handler(req, res) {
           const n = Number(c.por_segundo);
           if (!Number.isInteger(n) || n < 1 || n > 50) return res.status(400).json({ error: 'Ritmo entre 1 e 50 e-mails por segundo.' });
           campos.por_segundo = n;
+        }
+        if ('limite_por_dia' in c) {
+          // Vazio = sem teto. Precisa da 0340 (coluna limite_por_dia).
+          const bruto = c.limite_por_dia;
+          if (bruto === null || bruto === '') campos.limite_por_dia = null;
+          else {
+            const n = Number(bruto);
+            if (!Number.isInteger(n) || n < 1 || n > 100000) return res.status(400).json({ error: 'Teto por dia entre 1 e 100.000 (ou vazio para sem teto).' });
+            campos.limite_por_dia = n;
+          }
         }
         if ('score_pesos' in c) {
           const r = limparPesos(c.score_pesos);

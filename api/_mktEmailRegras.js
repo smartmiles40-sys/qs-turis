@@ -117,6 +117,17 @@ export function decidirAposErro(erro, tentativas) {
   return { status: 'pendente', tentativas, pausarMs: 0 };
 }
 
+/**
+ * Teto diário (0340, aquecimento do domínio): quantos e-mails ainda podem sair
+ * hoje. Sem teto válido → Infinity. Nunca negativo.
+ */
+export function calcularRestante(teto, enviadosHoje) {
+  const t = Number(teto);
+  if (!Number.isInteger(t) || t <= 0) return Infinity;
+  const h = Math.max(0, Number(enviadosHoje) || 0);
+  return Math.max(0, t - h);
+}
+
 /** Retry-After (segundos ou data HTTP) → ms. Sem cabeçalho: 5 s. */
 export function retryAfterMs(valor, agora = Date.now()) {
   if (valor === null || valor === undefined || valor === '') return 5_000;

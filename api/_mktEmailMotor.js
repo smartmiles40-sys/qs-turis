@@ -18,7 +18,7 @@ import { rest } from './_supabaseAdmin.js';
 import { lerConfig, enviarEmail, EmailError } from './_mktEmailResend.js';
 import { montarEmail } from './_mktEmailMontar.js';
 import {
-  decidirAposErro, criarOrcamento, planejarExecucao, precisaRecalcularScore, MAX_TENTATIVAS,
+  decidirAposErro, criarOrcamento, planejarExecucao, precisaRecalcularScore, calcularRestante, MAX_TENTATIVAS,
 } from './_mktEmailRegras.js';
 
 const dormir = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -131,15 +131,31 @@ async function devolver(itens) {
   }
 }
 
+// Teto diário (0340): quantos ainda cabem hoje. Sem teto (ou 0340 não aplicada) = sem limite.
+async function restanteHoje(cfg) {
+  const teto = Number(cfg.limite_por_dia);
+  if (!Number.isInteger(teto) || teto <= 0) return Infinity;
+  const hoje = await rest('rpc/mkt_email_enviados_hoje', { method: 'POST', body: {} }).catch(() => null);
+  // Se não der pra contar, NÃO envia: melhor parado que estourar o aquecimento.
+  if (typeof hoje !== 'number') return 0;
+  return calcularRestante(teto, hoje);
+}
+
 async function drenar(cfg, orcamento, res) {
   const parado = motivoParado(cfg);
   if (parado) { res.avisos.push(parado); return; }
+  let restante = await restanteHoje(cfg);
+  if (restante <= 0) {
+    res.avisos.push(`Teto do dia atingido (${cfg.limite_por_dia} e-mails): o resto da fila sai amanhã.`);
+    return;
+  }
   const intervalo = Math.ceil(1000 / Math.max(1, Number(cfg.por_segundo) || 4));
   const caches = { camp: new Map(), mod: new Map() };
   const CUSTO = 1500;
 
   while (orcamento.cabe(CUSTO * 3)) {
-    const lote = await rest('rpc/mkt_email_reivindicar', { method: 'POST', body: { p_limite: 20 } }).catch((e) => {
+    if (restante <= 0) { res.avisos.push(`Teto do dia atingido (${cfg.limite_por_dia}).`); return; }
+    const lote = await rest('rpc/mkt_email_reivindicar', { method: 'POST', body: { p_limite: Math.min(20, restante) } }).catch((e) => {
       res.avisos.push(`fila: ${e.message}`); return [];
     });
     if (!lote?.length) return;
@@ -175,9 +191,11 @@ async function drenar(cfg, orcamento, res) {
           html: montado.html,
           texto: montado.texto,
           urlDescadastro: montado.urlDescadastro,
+          idempotencia: item.token, // único por envio e estável entre tentativas
         });
         await patch(`mkt_email_envios?id=eq.${item.id}`, { status: 'enviado', provider_id: id, enviado_em: agoraIso(), erro: null });
         res.enviados += 1;
+        restante -= 1;
       } catch (e) {
         const erro = e instanceof EmailError ? e : new EmailError(String(e?.message || e));
         const d = decidirAposErro(erro, item.tentativas);

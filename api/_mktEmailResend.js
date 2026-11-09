@@ -75,12 +75,18 @@ export async function gravarConfig(campos) {
 
 // ── API do Resend ──────────────────────────────────────────────────────────
 
-async function chamar(chave, caminho, { method = 'GET', body } = {}) {
+async function chamar(chave, caminho, { method = 'GET', body, idempotencia } = {}) {
   let res;
   try {
     res = await fetch(`${API}${caminho}`, {
       method,
-      headers: { Authorization: `Bearer ${chave}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${chave}`,
+        'Content-Type': 'application/json',
+        // Mesmo pedido repetido (resposta perdida, função que morreu no meio)
+        // não vira um 2º e-mail: o Resend devolve o envio original por 24 h.
+        ...(idempotencia ? { 'Idempotency-Key': idempotencia } : {}),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     });
@@ -96,8 +102,9 @@ async function chamar(chave, caminho, { method = 'GET', body } = {}) {
       throw new EmailError('O Resend recusou a chave. Confira se copiou inteira (começa com re_).', { permanente: true, status: res.status });
     }
     throw new EmailError(`Resend ${res.status}: ${corpo?.message || corpo?.name || 'erro sem detalhe'}`, {
-      // 4xx (menos 429) é pedido errado — repetir não conserta.
-      permanente: res.status >= 400 && res.status < 500 && res.status !== 429,
+      // 4xx (menos 429) é pedido errado — repetir não conserta. 409 = o mesmo
+      // envio (mesma Idempotency-Key) ainda está em andamento: tentar de novo.
+      permanente: res.status >= 400 && res.status < 500 && res.status !== 429 && res.status !== 409,
       status: res.status,
       esperarMs: res.status === 429 ? retryAfterMs(res.headers.get('retry-after')) : 0,
     });
@@ -134,6 +141,7 @@ export async function enviarEmail(chave, msg) {
       headers: cabecalhosDescadastro(msg.urlDescadastro),
       ...(msg.tags ? { tags: msg.tags } : {}),
     },
+    idempotencia: msg.idempotencia ? `qs-mkt-${msg.idempotencia}` : undefined,
   });
   return corpo?.id ?? null;
 }

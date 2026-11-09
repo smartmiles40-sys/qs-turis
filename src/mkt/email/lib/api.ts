@@ -40,6 +40,8 @@ export interface StatusConexao {
   config: {
     remetente_nome: string; remetente_email: string | null; responder_para: string | null;
     rodape_texto: string | null; rodape_endereco: string | null; por_segundo: number;
+    /** Teto diário (0340). Ausente = migration não aplicada; null = sem teto. */
+    limite_por_dia?: number | null;
     dominio: string | null; dominio_id: string | null; dominio_status: string | null;
     dominio_registros: RegistroDns[] | null; webhook_id: string | null;
     score_pesos: Record<string, number>; score_janela_dias: number; score_recalculado_em: string | null;
