@@ -71,6 +71,48 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
       .then(({ data }) => setClosers((data ?? []) as { id: string; name: string }[]));
   }, [gestao]);
 
+  // ZUMBIS (09/11): cartão em Aguardando reunião/Reagendamento cuja reunião foi
+  // CANCELADA e o lead não tem reunião mais nova. Nada anda sozinho — o cartão
+  // só ganha um selo pro closer reagendar ou marcar perdido. Uma consulta pelos
+  // ids da lista (+1 só pros leads das canceladas).
+  const [zumbis, setZumbis] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const alvo = lista.filter((n) => (n.etapa === "aguardando_reuniao" || n.etapa === "reagendamento") && n.meeting_id);
+    if (!alvo.length) { setZumbis(new Set()); return; }
+    let vivo = true;
+    void (async () => {
+      try {
+        const ids = [...new Set(alvo.map((n) => n.meeting_id as string))];
+        const canceladas = new Map<string, { lead_id: string; created_at: string }>();
+        for (let i = 0; i < ids.length; i += 150) {
+          const { data, error } = await supabase.from("qs_meetings").select("id, lead_id, status, created_at")
+            .in("id", ids.slice(i, i + 150)).eq("status", "cancelada");
+          if (error) return;
+          for (const m of (data ?? []) as { id: string; lead_id: string; created_at: string }[]) canceladas.set(m.id, m);
+        }
+        const novas = new Map<string, string>(); // lead → created_at da reunião não cancelada mais nova
+        const leads = [...new Set([...canceladas.values()].map((m) => m.lead_id))];
+        for (let i = 0; i < leads.length; i += 150) {
+          const { data, error } = await supabase.from("qs_meetings").select("lead_id, created_at")
+            .in("lead_id", leads.slice(i, i + 150)).neq("status", "cancelada");
+          if (error) return;
+          for (const m of (data ?? []) as { lead_id: string; created_at: string }[]) {
+            if (!novas.has(m.lead_id) || m.created_at > (novas.get(m.lead_id) as string)) novas.set(m.lead_id, m.created_at);
+          }
+        }
+        const set = new Set<string>();
+        for (const n of alvo) {
+          const c = canceladas.get(n.meeting_id as string);
+          if (!c) continue;
+          const nova = novas.get(c.lead_id);
+          if (!nova || new Date(nova) <= new Date(c.created_at)) set.add(n.id);
+        }
+        if (vivo) setZumbis(set);
+      } catch { /* selo é extra: falhou, o quadro segue igual */ }
+    })();
+    return () => { vivo = false; };
+  }, [lista]);
+
   const filtrados = useMemo(() => {
     const b = busca.trim().toLowerCase();
     return lista.filter((n) => !b || nomeDoLead(n.lead).toLowerCase().includes(b) || (n.lead?.phone ?? "").includes(b));
@@ -219,6 +261,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
                         )}
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {(() => { const s = seloDaVenda(n); return s ? <Etiqueta tom={s.tom}>{s.t}</Etiqueta> : null; })()}
+                          {zumbis.has(n.id) && <Etiqueta tom="aviso">Reunião cancelada — reagende ou marque perdido</Etiqueta>}
                           {/* "Indo pro Bitrix" saiu (27/10): é automático, ninguém precisa ver. */}
                           {n.bitrix_status === "erro" && <Etiqueta tom="erro">Bitrix não atualizou</Etiqueta>}
                           {n.bitrix_status === "sem_card" && <Etiqueta>Sem card no Bitrix</Etiqueta>}

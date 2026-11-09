@@ -14,6 +14,11 @@
 //      decisão". Antes esse era o beco sem saída: lead "em prospecção" eterno,
 //      invisível na fila, sem ninguém saber que a cadência tinha acabado.
 //
+// O MOTOR PRINCIPAL AGORA É O SERVIDOR (09/11/2026): api/cadencia-sweep.js,
+// Cron da Vercel com service role — vê TODOS os leads, abra alguém o app ou
+// não. Esta versão do navegador fica como reforço (mesma regra, mesmas guardas
+// de corrida). Mudou a regra aqui? Mude lá também (decidirFimDeCadencia).
+//
 // Execução: no carregamento do app (SdrLayout), uma vez por sessão. Idempotente
 // e com guarda de corrida (updates condicionados ao estado atual — se outra
 // sessão tratou primeiro, o update afeta 0 linhas e nada duplica). O alcance

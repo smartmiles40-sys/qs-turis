@@ -140,6 +140,12 @@
     "api/fin-comissoes.js": {
       "maxDuration": 60
     },
+    "api/qs-alertas.js": {
+      "maxDuration": 30
+    },
+    "api/cadencia-sweep.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 10
     }
@@ -244,6 +250,14 @@
     {
       "path": "/api/fin-comissoes",
       "schedule": "11,41 * * * *"
+    },
+    {
+      "path": "/api/qs-alertas",
+      "schedule": "*/15 11-22 * * 1-6"
+    },
+    {
+      "path": "/api/cadencia-sweep",
+      "schedule": "*/30 * * * *"
     }
   ],
   "headers": [

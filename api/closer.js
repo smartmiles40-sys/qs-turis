@@ -207,28 +207,39 @@ async function espelhar(negocioId, u, extra = {}) {
  * uma vez por hora cada (o espelhar regrava o cartão, e o atualizado_em anda),
  * pra ninguém precisar clicar em "Reenviar". Para antes de 45 s pra não
  * estourar a função; o que sobrar vai na rodada seguinte (10 min).
+ *
+ * 09/11: também os 'sem_card' cujo lead JÁ TEM bitrix_id. O espelhar marca
+ * sem_card quando o lead ainda não tinha negócio; o card chega depois (adoção
+ * pelo lead-inbound, vínculo manual) e ninguém tentava de novo. Não vira laço:
+ * com o bitrix_id presente o espelhar sai em 'ok' ou 'erro', nunca em sem_card.
  */
-async function cronBitrix() {
+const CRON_LOTE = 25;
+export async function cronBitrix() {
   const umaHora = new Date(Date.now() - 60 * 60_000).toISOString();
-  const pend = (await rest('qs_closer_negocios?select=id&bitrix_status=eq.pendente&arquivado_em=is.null&order=atualizado_em.asc&limit=25')) || [];
-  const erros = pend.length >= 25 ? [] : (await rest(`qs_closer_negocios?select=id&bitrix_status=eq.erro&arquivado_em=is.null&atualizado_em=lt.${umaHora}&order=atualizado_em.asc&limit=${25 - pend.length}`).catch(() => null)) || [];
+  const pend = (await rest(`qs_closer_negocios?select=id&bitrix_status=eq.pendente&arquivado_em=is.null&order=atualizado_em.asc&limit=${CRON_LOTE}`)) || [];
+  const erros = pend.length >= CRON_LOTE ? [] : (await rest(`qs_closer_negocios?select=id&bitrix_status=eq.erro&arquivado_em=is.null&atualizado_em=lt.${umaHora}&order=atualizado_em.asc&limit=${CRON_LOTE - pend.length}`).catch(() => null)) || [];
+  const resta = CRON_LOTE - pend.length - erros.length;
+  const semCard = resta <= 0 ? [] : ((await rest(
+    'qs_closer_negocios?select=id,lead:qs_leads!inner(bitrix_id)&bitrix_status=eq.sem_card&arquivado_em=is.null' +
+    `&lead.bitrix_id=not.is.null&order=atualizado_em.asc&limit=${resta}`
+  ).catch(() => null)) || []).filter((c) => String(c.lead?.bitrix_id || '').replace(/\D/g, ''));
   const inicio = Date.now();
   let ok = 0, falhou = 0, sobrou = 0;
-  for (const p of [...pend, ...erros]) {
+  for (const p of [...pend, ...erros, ...semCard]) {
     if (Date.now() - inicio > 45_000) { sobrou++; continue; }
     const r = await espelhar(p.id, null).catch(() => null);
     if (r?.body?.ok) ok++; else falhou++;
   }
-  return { pendentes: pend.length, erros: erros.length, ok, falhou, sobrou };
+  return { pendentes: pend.length, erros: erros.length, sem_card_com_bitrix: semCard.length, ok, falhou, sobrou };
 }
 
 /**
  * CONFERIR (03/11): o que o cron mandaria pro Bitrix, SEM mandar. Lê cada card
  * (crm.deal.get) e devolve de onde → pra onde, ou por que não mexeria.
- * escopo 'fila' (padrão) = pendentes + erro; 'todos' = todo cartão aberto.
+ * escopo 'fila' (padrão) = pendentes + erro + sem_card; 'todos' = todo cartão aberto.
  */
 async function conferirBitrix(escopo = 'fila') {
-  const filtro = escopo === 'todos' ? 'bitrix_status=in.(pendente,erro,ok)' : 'bitrix_status=in.(pendente,erro)';
+  const filtro = escopo === 'todos' ? 'bitrix_status=in.(pendente,erro,ok,sem_card)' : 'bitrix_status=in.(pendente,erro,sem_card)';
   const cartoes = (await rest(`qs_closer_negocios?select=id,etapa,bitrix_status,lead:qs_leads(full_name,bitrix_id),closer:qs_users!qs_closer_negocios_closer_id_fkey(name)&${filtro}&arquivado_em=is.null&order=atualizado_em.asc&limit=150`)) || [];
   const inicio = Date.now();
   const itens = [];
