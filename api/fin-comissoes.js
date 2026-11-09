@@ -55,6 +55,8 @@ export function linhaDoCard(n) {
     responsavel_reuniao: txt(n.responsavel_reuniao),
     vendedor: txt(n.vendedor),
     data_reuniao_realizada: n.data_reuniao_realizada || null,
+    data_quando_agendou: n.data_quando_agendou || null,
+    custo: n.custo == null ? null : Number(n.custo),
     no_show: n.no_show ?? null,
     reuniao_realizada: n.reuniao_realizada ?? null,
     atualizado_no_bitrix: n.atualizado_no_bitrix || null,

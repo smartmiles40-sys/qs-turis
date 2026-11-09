@@ -8,13 +8,13 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Segmented } from "@/components/ui";
-import { SeletorDeMes, SeloStatus } from "./comuns";
+import { ResumoDaConta, SeletorDeMes, SeloStatus } from "./comuns";
 import { supabase } from "@/lib/supabase";
 import { Aviso, Campo, Entrada, Modal } from "../ui";
-import { csvDasLinhas, dataBr, resumoPorPessoa, type Linha, type Papel, type Regra } from "./calculo";
+import { csvDasLinhas, dataBr, resumoPorPessoa, type Faixa, type FaixaBonus, type Linha, type Papel, type Regra } from "./calculo";
 import {
   ajustarCard, apagarApelido, apagarRegra, atualizarAgora, baixarCsv, carregarMes, desfazerPago, fecharMes,
-  historicoDoCard, listarApelidos, marcarPago, mesAnterior, mesAtual, reabrir, rotuloMes, salvarApelido, salvarRegra,
+  historicoDoCard, listarApelidos, marcarPago, mesAnterior, mesAtual, reabrir, rotuloMes, salvarApelido, salvarLucro, salvarRegra,
   type Apelido, type DadosDoMes, type Fechamento,
 } from "./dados";
 import Planilha, { brl } from "./Planilha";
@@ -33,6 +33,7 @@ export default function ComissoesPage() {
   const [pessoas, setPessoas] = useState<Pessoa[]>([]);
   const [aberta, setAberta] = useState<string | null>(null);        // pessoa_id na planilha
   const [ajustando, setAjustando] = useState<Linha | null>(null);
+  const [lucrando, setLucrando] = useState<Linha | null>(null);
   const [acao, setAcao] = useState<{ tipo: "pagar" | "reabrir" | "fechar-todos"; f?: Fechamento } | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
@@ -62,7 +63,7 @@ export default function ComissoesPage() {
     const ids = new Set([...vivos.map((r) => r.pessoa_id!), ...dados.fechamentos.filter((f) => f.papel === papel).map((f) => f.pessoa_id)]);
     return [...ids].map((id) => {
       const f = fechamentoDe(id, papel);
-      const r = resumoPorPessoa(linhasDe(id, papel))[0] ?? { cards: 0, vendas: 0, soma_vendas: 0, rr: 0, total: 0 };
+      const r = resumoPorPessoa(linhasDe(id, papel))[0] ?? { cards: 0, vendas: 0, soma_vendas: 0, rr: 0, rr_faixa: 0, valor_por_rr: 0, falta_lucro: 0, total: 0 };
       const aoVivo = vivos.find((v) => v.pessoa_id === id)?.total ?? 0;
       return { id, nome: nomeDe(id), f, ...r, mudou: !!f && Math.abs(aoVivo - f.total) > 0.005, aoVivo };
     }).sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome));
@@ -97,7 +98,7 @@ export default function ComissoesPage() {
         <div>
           <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Comissões</h1>
           <p className="text-[13px]" style={{ color: "var(--ink3)" }}>
-            O que cada SDR e closer tem pra receber, card por card. Venda conta na data da venda; R.R na data da reunião realizada.
+            O que cada SDR e closer tem pra receber, card por card. Venda conta na data da venda; R.R na data da reunião realizada (a faixa do mês vale pra todas); bônus no dia do agendamento.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -136,7 +137,7 @@ export default function ComissoesPage() {
           <div className="qs-card" style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
               <thead style={{ background: "var(--card2)" }}>
-                <tr>{["Pessoa", "Cards", "Vendas", "Soma das vendas", ...(papel === "sdr" ? ["R.R"] : []), "A receber", "Status", ""].map((h) => (
+                <tr>{["Pessoa", "Cards", "Vendas", "Soma das vendas", ...(papel === "sdr" ? ["R.R × faixa"] : []), "A receber", "Status", ""].map((h) => (
                   <th key={h} style={{ padding: "8px 10px", fontSize: 11.5, textAlign: "left", color: "var(--ink2)" }}>{h}</th>
                 ))}</tr>
               </thead>
@@ -147,8 +148,11 @@ export default function ComissoesPage() {
                     <td style={{ padding: "9px 10px", borderTop: "1px solid var(--line)" }}>{r.cards}</td>
                     <td style={{ padding: "9px 10px", borderTop: "1px solid var(--line)" }}>{r.vendas}</td>
                     <td style={{ padding: "9px 10px", borderTop: "1px solid var(--line)", whiteSpace: "nowrap" }}>{brl(r.soma_vendas)}</td>
-                    {papel === "sdr" && <td style={{ padding: "9px 10px", borderTop: "1px solid var(--line)" }}>{r.rr}</td>}
-                    <td style={{ padding: "9px 10px", borderTop: "1px solid var(--line)", fontWeight: 700, whiteSpace: "nowrap" }}>{brl(r.total)}</td>
+                    {papel === "sdr" && <td style={{ padding: "9px 10px", borderTop: "1px solid var(--line)", whiteSpace: "nowrap" }}>{r.rr}{r.rr ? <span style={{ color: "var(--ink3)" }}> × {brl(r.valor_por_rr)}</span> : null}</td>}
+                    <td style={{ padding: "9px 10px", borderTop: "1px solid var(--line)", fontWeight: 700, whiteSpace: "nowrap" }}>
+                      {brl(r.total)}
+                      {!r.f && r.falta_lucro > 0 && <span style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--warn-ink, #B45309)" }}>{r.falta_lucro} sem lucro</span>}
+                    </td>
                     <td style={{ padding: "9px 10px", borderTop: "1px solid var(--line)" }}>
                       <SeloStatus f={r.f} />
                       {r.mudou && <span style={{ display: "block", fontSize: 11, color: "var(--warn-ink, #B45309)" }} title="Os cards mudaram depois do fechamento">ao vivo hoje: {brl(r.aoVivo)}</span>}
@@ -185,7 +189,8 @@ export default function ComissoesPage() {
                 {pessoaAberta.mudou && ` Hoje, ao vivo, daria ${brl(pessoaAberta.aoVivo)}. Para refazer, reabra com motivo e feche de novo.`}
               </p>
             )}
-            <Planilha linhas={linhas} papel={papel}
+            <ResumoDaConta r={resumoPorPessoa(linhas)[0]} papel={papel} regras={dados.regras} pessoaId={pessoaAberta.id} mes={mes} />
+            <Planilha linhas={linhas} papel={papel} onLucro={f ? undefined : setLucrando}
               acoes={f ? undefined : (l) => <Button size="sm" variant="ghost" onClick={() => setAjustando(l)}>Ajustar</Button>} />
             {dados.historico.filter((h) => h.pessoa_id === pessoaAberta.id && h.papel === papel).map((h) => (
               <p key={h.id} className="text-[12px]" style={{ color: "var(--ink3)" }}>
@@ -208,7 +213,7 @@ export default function ComissoesPage() {
             return (
               <div key={p} className="space-y-2">
                 <h2 className="text-[14px] font-bold" style={{ color: "var(--ink)" }}>{p === "sdr" ? "Como SDR" : "Como closer / sem responsável"}</h2>
-                <Planilha linhas={ls} papel={p} acoes={(l) => <span className="text-[12px]" style={{ color: "var(--ink2)" }}>Bitrix: {l.nome_bitrix}</span>} />
+                <Planilha linhas={ls} papel={p} onLucro={setLucrando} acoes={(l) => <span className="text-[12px]" style={{ color: "var(--ink2)" }}>Bitrix: {l.nome_bitrix}</span>} />
               </div>
             );
           })}
@@ -222,6 +227,10 @@ export default function ComissoesPage() {
       {ajustando && (
         <ModalAjuste linha={ajustando} mes={mes} nome={nomeDe(ajustando.pessoa_id)} nomeDe={nomeDe}
           onFechar={() => setAjustando(null)} onSalvo={() => { setAjustando(null); void carregar(); }} />
+      )}
+      {lucrando && (
+        <ModalLucro linha={lucrando} atual={dados?.lucros[lucrando.bitrix_id] ?? null} nomeDe={nomeDe}
+          onFechar={() => setLucrando(null)} onSalvo={() => { setLucrando(null); void carregar(); }} />
       )}
       {acao?.tipo === "pagar" && acao.f && (
         <ModalTexto titulo="Marcar como pago" rotulo="Data do pagamento" tipo="date" inicial={hoje()} onFechar={() => setAcao(null)}
@@ -251,6 +260,51 @@ function ModalTexto({ titulo, rotulo, tipo, inicial, onOk, onFechar }: { titulo:
     <Modal aberto titulo={titulo} onFechar={onFechar} largura={440}
       rodape={<><Button onClick={onFechar}>Cancelar</Button><Button variant="primary" disabled={!ok} onClick={() => onOk(v.trim())}>Confirmar</Button></>}>
       <Campo rotulo={rotulo}><Entrada type={tipo} value={v} onChange={(e) => setV(e.target.value)} autoFocus /></Campo>
+    </Modal>
+  );
+}
+
+function ModalLucro({ linha, atual, nomeDe, onFechar, onSalvo }: {
+  linha: Linha; atual: { lucro: number; obs: string | null; atualizado_por: string | null; atualizado_em: string } | null;
+  nomeDe: (id: string | null) => string; onFechar: () => void; onSalvo: () => void;
+}) {
+  const [valor, setValor] = useState(atual ? String(atual.lucro).replace(".", ",") : "");
+  const [obs, setObs] = useState(atual?.obs ?? "");
+  const [erro, setErro] = useState<string | null>(null);
+  const numero = Number(valor.replace(/\./g, "").replace(",", "."));
+  const ok = valor.trim() !== "" && Number.isFinite(numero) && numero >= 0;
+  const pct = linha.valor_venda > 0 && ok ? Math.round((numero / linha.valor_venda) * 1000) / 10 : null;
+
+  async function salvar(apagar = false) {
+    try { await salvarLucro(linha.bitrix_id, apagar ? null : numero, obs.trim() || null); onSalvo(); } catch (e) { setErro((e as Error).message); }
+  }
+
+  return (
+    <Modal aberto titulo={`Lucro do card ${linha.bitrix_id}`} onFechar={onFechar} largura={460}
+      rodape={<>
+        {atual && <Button variant="ghost" onClick={() => void salvar(true)}>Apagar</Button>}
+        <Button onClick={onFechar}>Cancelar</Button>
+        <Button variant="primary" disabled={!ok} onClick={() => void salvar()}>Salvar</Button>
+      </>}>
+      <div className="space-y-3">
+        <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
+          {linha.cliente} · {linha.tipo_venda ?? "Sem tipo"} · venda de <strong>{brl(linha.valor_venda)}</strong>
+        </p>
+        <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
+          A comissão de pacote, aéreo e demais produtos (closer) e de aéreo vendido pelo próprio SDR é % do lucro. O Bitrix não traz o custo,
+          então o lucro é digitado aqui. Vale pro SDR e pro closer do card.
+        </p>
+        {erro && <Aviso tom="erro">{erro}</Aviso>}
+        <Campo rotulo="Lucro da venda (R$)" dica={pct != null ? `${String(pct).replace(".", ",")}% do valor da venda` : undefined}>
+          <Entrada inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="Ex.: 1.250,00" autoFocus />
+        </Campo>
+        <Campo rotulo="Observação (opcional)"><Entrada value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: conforme fechamento do fornecedor" /></Campo>
+        {atual && (
+          <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
+            Última mudança: {new Date(atual.atualizado_em).toLocaleString("pt-BR")}{atual.atualizado_por ? ` por ${nomeDe(atual.atualizado_por)}` : ""}.
+          </p>
+        )}
+      </div>
     </Modal>
   );
 }
@@ -305,15 +359,23 @@ function ModalAjuste({ linha, mes, nome, nomeDe, onFechar, onSalvo }: { linha: L
   );
 }
 
-const vazioRegra = (papel: Papel): Omit<Regra, "id"> & { id?: string; obs?: string | null } => ({
-  papel, pessoa_id: null, vigente_desde: `${mesAtual()}-01`, valor_rr: null, valor_expedicao: null, pct_aereo: null, pct_pacote: null, obs: null,
+type FormRegra = Omit<Regra, "id"> & { id?: string; obs?: string | null };
+
+const FAIXAS_PDF: Faixa[] = [{ de: 0, valor: 8 }, { de: 41, valor: 12 }, { de: 60, valor: 16 }, { de: 90, valor: 20 }];
+const BONUS_PDF: FaixaBonus[] = [{ min: 6, valor: 20 }, { min: 10, valor: 40 }];
+
+const vazioRegra = (papel: Papel): FormRegra => ({
+  papel, pessoa_id: null, vigente_desde: `${mesAtual()}-01`, obs: null,
+  valor_exp_geral: null, valor_exp_peru: null, valor_exp_amazonia: null, valor_pacote: null, valor_outros: null,
+  pct_lucro: null, valor_cotacao: null, faixas_rr: papel === "sdr" ? FAIXAS_PDF : null, bonus_dia: papel === "sdr" ? BONUS_PDF : null,
 });
 
+const campoNum = (v: number | null | undefined) => (v == null ? "" : String(v).replace(".", ","));
+const lerNum = (s: string) => (s.trim() === "" ? null : Number(s.replace(/\./g, "").replace(",", ".")));
+
 function AbaRegras({ regras, pessoas, nomeDe, onMudou }: { regras: Regra[]; pessoas: Pessoa[]; nomeDe: (id: string | null, r?: string) => string; onMudou: () => void }) {
-  const [form, setForm] = useState<ReturnType<typeof vazioRegra> | null>(null);
+  const [form, setForm] = useState<FormRegra | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-  const campoNum = (v: number | null) => (v == null ? "" : String(v).replace(".", ","));
-  const lerNum = (s: string) => (s.trim() === "" ? null : Number(s.replace(/\./g, "").replace(",", ".")));
   const vendedores = pessoas.filter((p) => p.is_active && ["sdr", "closer", "gestor", "admin"].includes(p.role));
 
   async function salvar() {
@@ -321,13 +383,31 @@ function AbaRegras({ regras, pessoas, nomeDe, onMudou }: { regras: Regra[]; pess
     try { setErro(null); await salvarRegra(form); setForm(null); onMudou(); } catch (e) { setErro((e as Error).message); }
   }
 
-  const fmt = (v: number | null, pct?: boolean) => (v == null ? "—" : pct ? `${String(v).replace(".", ",")}%` : brl(v));
+  const fmt = (v: number | null | undefined, pct?: boolean) => (v == null ? "—" : pct ? `${String(v).replace(".", ",")}%` : brl(v));
+  const fmtFaixas = (f: Faixa[] | null | undefined) => (f?.length ? [...f].sort((a, b) => a.de - b.de).map((x) => `${x.de}+: ${brl(x.valor)}`).join(" · ") : "—");
+  const fmtBonus = (f: FaixaBonus[] | null | undefined) => (f?.length ? [...f].sort((a, b) => a.min - b.min).map((x) => `${x.min}: ${brl(x.valor)}`).join(" · ") : "—");
+  const td = { padding: "8px 10px", borderTop: "1px solid var(--line)", fontSize: 13, verticalAlign: "top" as const };
+  const COLS: Record<Papel, { h: string; v: (r: Regra) => string }[]> = {
+    sdr: [
+      { h: "Exp. geral", v: (r) => fmt(r.valor_exp_geral) }, { h: "Exp. Peru", v: (r) => fmt(r.valor_exp_peru) },
+      { h: "Exp. Amazônia", v: (r) => fmt(r.valor_exp_amazonia) }, { h: "Pacote", v: (r) => fmt(r.valor_pacote) },
+      { h: "Passagem/hosp./seguro/outros", v: (r) => fmt(r.valor_outros) }, { h: "Aéreo próprio (% lucro)", v: (r) => fmt(r.pct_lucro, true) },
+      { h: "Cotação", v: (r) => fmt(r.valor_cotacao) }, { h: "R.R por faixa", v: (r) => fmtFaixas(r.faixas_rr) },
+      { h: "Bônus do dia", v: (r) => fmtBonus(r.bonus_dia) },
+    ],
+    closer: [
+      { h: "Exp. geral", v: (r) => fmt(r.valor_exp_geral) }, { h: "Exp. Peru", v: (r) => fmt(r.valor_exp_peru) },
+      { h: "Exp. Amazônia", v: (r) => fmt(r.valor_exp_amazonia) }, { h: "Pacote, aéreo e demais (% lucro)", v: (r) => fmt(r.pct_lucro, true) },
+    ],
+  };
+
   return (
     <div className="space-y-3">
       <Aviso tom="aviso">
-        Valor fixo por R.R (só SDR) e por venda de Expedição; percentual do valor da venda para Aéreo e Pacote. Outros tipos (Seguro, Passeios,
-        Hospedagem…) e venda sem tipo ficam em R$ 0,00 — ajuste o card com motivo. A regra que vale é a mais nova com vigência até a data da
-        venda (ou da R.R). Exceção por pessoa: campo vazio usa a regra geral. Mês já fechado nunca muda.
+        SDR: fixo por venda originada (expedição por destino, pacote, demais produtos), % do lucro no aéreo que ela mesma vendeu, fixo por
+        cotação de aéreo entregue, R.R pela faixa do mês (vale pra todas as R.R) e bônus no dia em que bater os agendamentos.
+        Closer: fixo por expedição (por destino) e % do lucro no resto. Expedição que não é Peru nem Amazônia usa o "geral".
+        A regra que vale é a mais nova com vigência até a data do fato. Exceção por pessoa: campo vazio usa a regra geral. Mês fechado nunca muda.
       </Aviso>
       {erro && <Aviso tom="erro">{erro}</Aviso>}
       <div style={{ display: "flex", gap: 8 }}>
@@ -336,59 +416,116 @@ function AbaRegras({ regras, pessoas, nomeDe, onMudou }: { regras: Regra[]; pess
       </div>
       {(["sdr", "closer"] as Papel[]).map((p) => (
         <div key={p} className="qs-card" style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: p === "sdr" ? 1100 : 760 }}>
             <thead style={{ background: "var(--card2)" }}>
-              <tr>{[p === "sdr" ? "SDR" : "Closer", "Vale desde", ...(p === "sdr" ? ["Por R.R"] : []), "Por Expedição", "% Aéreo", "% Pacote", "Obs.", ""].map((h) => (
+              <tr>{[p === "sdr" ? "SDR" : "Closer", "Vale desde", ...COLS[p].map((c) => c.h), ""].map((h) => (
                 <th key={h} style={{ padding: "8px 10px", fontSize: 11.5, textAlign: "left", color: "var(--ink2)" }}>{h}</th>
               ))}</tr>
             </thead>
             <tbody>
               {regras.filter((r) => r.papel === p).map((r) => (
                 <tr key={r.id}>
-                  <td style={{ padding: "8px 10px", borderTop: "1px solid var(--line)", fontWeight: 600 }}>{r.pessoa_id ? `Exceção: ${nomeDe(r.pessoa_id)}` : "Geral"}</td>
-                  <td style={{ padding: "8px 10px", borderTop: "1px solid var(--line)" }}>{dataBr(r.vigente_desde)}</td>
-                  {p === "sdr" && <td style={{ padding: "8px 10px", borderTop: "1px solid var(--line)" }}>{fmt(r.valor_rr)}</td>}
-                  <td style={{ padding: "8px 10px", borderTop: "1px solid var(--line)" }}>{fmt(r.valor_expedicao)}</td>
-                  <td style={{ padding: "8px 10px", borderTop: "1px solid var(--line)" }}>{fmt(r.pct_aereo, true)}</td>
-                  <td style={{ padding: "8px 10px", borderTop: "1px solid var(--line)" }}>{fmt(r.pct_pacote, true)}</td>
-                  <td style={{ padding: "8px 10px", borderTop: "1px solid var(--line)", fontSize: 12, color: "var(--ink3)" }}>{r.obs ?? ""}</td>
-                  <td style={{ padding: "8px 10px", borderTop: "1px solid var(--line)", whiteSpace: "nowrap" }}>
+                  <td style={{ ...td, fontWeight: 600 }}>
+                    {r.pessoa_id ? `Exceção: ${nomeDe(r.pessoa_id)}` : "Geral"}
+                    {r.obs && <span style={{ display: "block", fontSize: 11.5, fontWeight: 400, color: "var(--ink3)", maxWidth: 220 }}>{r.obs}</span>}
+                  </td>
+                  <td style={td}>{dataBr(r.vigente_desde)}</td>
+                  {COLS[p].map((c) => <td key={c.h} style={td}>{c.v(r)}</td>)}
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>
                     <Button size="sm" variant="ghost" onClick={() => setForm({ ...r, obs: r.obs ?? null })}>Editar</Button>
                     <Button size="sm" variant="ghost" onClick={() => { if (window.confirm("Apagar esta regra? Meses em aberto passam a usar a regra anterior.")) void apagarRegra(r.id!).then(onMudou).catch((e) => setErro(e.message)); }}>Apagar</Button>
                   </td>
                 </tr>
               ))}
-              {!regras.some((r) => r.papel === p) && <tr><td colSpan={8} style={{ padding: 16, color: "var(--ink3)", fontSize: 13 }}>Nenhuma regra de {p === "sdr" ? "SDR" : "closer"} ainda: tudo sai R$ 0,00.</td></tr>}
+              {!regras.some((r) => r.papel === p) && <tr><td colSpan={COLS[p].length + 3} style={{ padding: 16, color: "var(--ink3)", fontSize: 13 }}>Nenhuma regra de {p === "sdr" ? "SDR" : "closer"} ainda: tudo sai R$ 0,00.</td></tr>}
             </tbody>
           </table>
         </div>
       ))}
       {form && (
-        <Modal aberto titulo={`${form.id ? "Editar" : "Nova"} regra de ${form.papel === "sdr" ? "SDR" : "closer"}`} onFechar={() => setForm(null)}
+        <Modal aberto titulo={`${form.id ? "Editar" : "Nova"} regra de ${form.papel === "sdr" ? "SDR" : "closer"}`} onFechar={() => setForm(null)} largura={640}
           rodape={<><Button onClick={() => setForm(null)}>Cancelar</Button><Button variant="primary" disabled={!/^\d{4}-\d{2}-\d{2}$/.test(form.vigente_desde)} onClick={() => void salvar()}>Salvar</Button></>}>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <Campo rotulo="Para quem">
-              <select className="rel-input" value={form.pessoa_id ?? ""} onChange={(e) => setForm({ ...form, pessoa_id: e.target.value || null })}>
-                <option value="">Todos ({form.papel === "sdr" ? "regra geral de SDR" : "regra geral de closer"})</option>
-                {vendedores.map((p) => <option key={p.id} value={p.id}>Exceção: {p.name}</option>)}
-              </select>
-            </Campo>
-            <Campo rotulo="Vale a partir de" dica="Não reescreve meses já fechados.">
-              <Entrada type="date" value={form.vigente_desde} onChange={(e) => setForm({ ...form, vigente_desde: e.target.value })} />
-            </Campo>
-            {form.papel === "sdr" && (
-              <Campo rotulo="Valor fixo por R.R (R$)"><Entrada inputMode="decimal" value={campoNum(form.valor_rr)} onChange={(e) => setForm({ ...form, valor_rr: lerNum(e.target.value) })} /></Campo>
-            )}
-            <Campo rotulo="Valor fixo por venda de Expedição (R$)"><Entrada inputMode="decimal" value={campoNum(form.valor_expedicao)} onChange={(e) => setForm({ ...form, valor_expedicao: lerNum(e.target.value) })} /></Campo>
-            <Campo rotulo="% da venda de Aéreo"><Entrada inputMode="decimal" value={campoNum(form.pct_aereo)} onChange={(e) => setForm({ ...form, pct_aereo: lerNum(e.target.value) })} /></Campo>
-            <Campo rotulo="% da venda de Pacote"><Entrada inputMode="decimal" value={campoNum(form.pct_pacote)} onChange={(e) => setForm({ ...form, pct_pacote: lerNum(e.target.value) })} /></Campo>
-            <div className="sm:col-span-2">
-              <Campo rotulo="Observação"><Entrada value={form.obs ?? ""} onChange={(e) => setForm({ ...form, obs: e.target.value || null })} placeholder="Ex.: planilha do Bruno de 06/11" /></Campo>
-            </div>
-          </div>
-          {form.pessoa_id && <p className="text-[12px] mt-2" style={{ color: "var(--ink3)" }}>Na exceção, deixe vazio o campo que deve seguir a regra geral.</p>}
+          <FormularioRegra form={form} setForm={setForm} vendedores={vendedores} />
         </Modal>
       )}
+    </div>
+  );
+}
+
+function FormularioRegra({ form, setForm, vendedores }: { form: FormRegra; setForm: (f: FormRegra) => void; vendedores: Pessoa[] }) {
+  const sdr = form.papel === "sdr";
+  const num = (k: "valor_exp_geral" | "valor_exp_peru" | "valor_exp_amazonia" | "valor_pacote" | "valor_outros" | "pct_lucro" | "valor_cotacao", rotulo: string, dica?: string) => (
+    <Campo rotulo={rotulo} dica={dica}>
+      <Entrada inputMode="decimal" value={campoNum(form[k])} onChange={(e) => setForm({ ...form, [k]: lerNum(e.target.value) })} />
+    </Campo>
+  );
+  const titulo = (t: string) => <h3 className="sm:col-span-3 text-[12.5px] font-bold mt-1" style={{ color: "var(--ink2)" }}>{t}</h3>;
+  return (
+    <div className="grid sm:grid-cols-3 gap-3">
+      <div className="sm:col-span-2">
+        <Campo rotulo="Para quem">
+          <select className="rel-input" value={form.pessoa_id ?? ""} onChange={(e) => setForm({ ...form, pessoa_id: e.target.value || null })}>
+            <option value="">Todos ({sdr ? "regra geral de SDR" : "regra geral de closer"})</option>
+            {vendedores.map((p) => <option key={p.id} value={p.id}>Exceção: {p.name}</option>)}
+          </select>
+        </Campo>
+      </div>
+      <Campo rotulo="Vale a partir de" dica="Não reescreve meses já fechados.">
+        <Entrada type="date" value={form.vigente_desde} onChange={(e) => setForm({ ...form, vigente_desde: e.target.value })} />
+      </Campo>
+
+      {titulo("Venda de expedição (valor fixo por venda, R$)")}
+      {num("valor_exp_geral", "Ásia, Europa, Egito e demais")}
+      {num("valor_exp_peru", "Peru")}
+      {num("valor_exp_amazonia", "Amazônia")}
+
+      {titulo(sdr ? "Demais vendas originadas" : "Demais vendas")}
+      {sdr && num("valor_pacote", "Pacote (R$ fixo)")}
+      {sdr && num("valor_outros", "Passagem, hospedagem, seguro e outros (R$ fixo)", "Passagem fechada pelo closer entra aqui.")}
+      {num("pct_lucro", sdr ? "Aéreo vendido pela própria SDR (% do lucro)" : "Pacotes, aéreo e demais (% do lucro)")}
+      {sdr && num("valor_cotacao", "Cotação de aéreo entregue (R$ por proposta)")}
+
+      {sdr && (
+        <>
+          {titulo("Reunião realizada: a faixa do mês vale pra todas as R.R")}
+          <div className="sm:col-span-3">
+            <EditorFaixas
+              linhas={(form.faixas_rr ?? []).map((f) => ({ n: f.de, valor: f.valor }))}
+              rotuloN="A partir de (R.R no mês)" rotuloValor="Valor por R.R (R$)"
+              onMudar={(ls) => setForm({ ...form, faixas_rr: ls.map((l) => ({ de: l.n, valor: l.valor })) })} />
+          </div>
+          {titulo("Bônus diário de agendamentos (vale a maior faixa batida no dia)")}
+          <div className="sm:col-span-3">
+            <EditorFaixas
+              linhas={(form.bonus_dia ?? []).map((f) => ({ n: f.min, valor: f.valor }))}
+              rotuloN="Agendamentos no dia" rotuloValor="Bônus do dia (R$)"
+              onMudar={(ls) => setForm({ ...form, bonus_dia: ls.map((l) => ({ min: l.n, valor: l.valor })) })} />
+          </div>
+        </>
+      )}
+
+      <div className="sm:col-span-3">
+        <Campo rotulo="Observação"><Entrada value={form.obs ?? ""} onChange={(e) => setForm({ ...form, obs: e.target.value || null })} placeholder="Ex.: planilha de comissão de outubro" /></Campo>
+      </div>
+      {form.pessoa_id && <p className="sm:col-span-3 text-[12px]" style={{ color: "var(--ink3)" }}>Na exceção, deixe vazio (ou sem faixas) o que deve seguir a regra geral.</p>}
+    </div>
+  );
+}
+
+function EditorFaixas({ linhas, rotuloN, rotuloValor, onMudar }: {
+  linhas: { n: number; valor: number }[]; rotuloN: string; rotuloValor: string; onMudar: (l: { n: number; valor: number }[]) => void;
+}) {
+  const mudar = (i: number, k: "n" | "valor", v: string) => onMudar(linhas.map((l, j) => (j === i ? { ...l, [k]: lerNum(v) ?? 0 } : l)));
+  return (
+    <div className="space-y-2">
+      {linhas.map((l, i) => (
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "end" }}>
+          <Campo rotulo={i === 0 ? rotuloN : ""}><Entrada inputMode="numeric" value={String(l.n)} onChange={(e) => mudar(i, "n", e.target.value)} /></Campo>
+          <Campo rotulo={i === 0 ? rotuloValor : ""}><Entrada inputMode="decimal" value={campoNum(l.valor)} onChange={(e) => mudar(i, "valor", e.target.value)} /></Campo>
+          <Button size="sm" variant="ghost" aria-label="Tirar faixa" onClick={() => onMudar(linhas.filter((_, j) => j !== i))}>×</Button>
+        </div>
+      ))}
+      <Button size="sm" onClick={() => onMudar([...linhas, { n: (linhas.at(-1)?.n ?? 0) + 1, valor: 0 }])}>+ Faixa</Button>
     </div>
   );
 }

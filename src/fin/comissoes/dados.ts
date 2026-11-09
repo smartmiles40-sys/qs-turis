@@ -5,7 +5,7 @@
 // ajustes, as exceções de regra e os fechamentos DELE; o financeiro recebe tudo.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import { linhasDoMes, type Ajuste, type Linha, type Papel, type Regra, type VendaCard } from "./calculo";
+import { linhasDoMes, type Ajuste, type Cotacao, type Linha, type Papel, type Regra, type VendaCard } from "./calculo";
 
 export interface Fechamento {
   id: string;
@@ -33,7 +33,10 @@ export interface DadosDoMes {
   fechamentos: Fechamento[];     // vivos (fechado/pago) do mês
   historico: Fechamento[];       // reabertos do mês
   sync: EstadoSync | null;
+  lucros: Record<string, LucroDigitado>;
 }
+
+export interface LucroDigitado { bitrix_id: string; lucro: number; obs: string | null; atualizado_por: string | null; atualizado_em: string }
 
 /** "2026-10" → ["2026-10-01", "2026-11-01"]. */
 export function limitesDoMes(mes: string): [string, string] {
@@ -61,32 +64,61 @@ export function rotuloMes(mes: string): string {
 
 const num = (v: unknown) => (v == null ? null : Number(v));
 
+const NUMS_REGRA = ["valor_exp_geral", "valor_exp_peru", "valor_exp_amazonia", "valor_pacote", "valor_outros", "pct_lucro", "valor_cotacao"] as const;
+
 export async function carregarMes(mes: string): Promise<DadosDoMes> {
   const [ini, fim] = limitesDoMes(mes);
-  const [v, r, a, f, s] = await Promise.all([
+  const [v, r, a, f, s, c] = await Promise.all([
     supabase.from("fin_com_vendas").select("*")
-      .or(`and(data_venda.gte.${ini},data_venda.lt.${fim}),and(data_reuniao_realizada.gte.${ini},data_reuniao_realizada.lt.${fim})`)
+      .or([
+        `and(data_venda.gte.${ini},data_venda.lt.${fim})`,
+        `and(data_reuniao_realizada.gte.${ini},data_reuniao_realizada.lt.${fim})`,
+        `and(data_quando_agendou.gte.${ini},data_quando_agendou.lt.${fim})`,
+      ].join(","))
       .limit(5000),
     supabase.from("fin_com_regras").select("*").order("vigente_desde", { ascending: false }),
     supabase.from("fin_com_ajustes").select("*").eq("mes", mes).order("criado_em"),
     supabase.from("fin_com_fechamentos").select("*").eq("mes", mes).order("fechado_em"),
     supabase.from("fin_com_sync").select("rodou_em,cards,erro").eq("id", 1).maybeSingle(),
+    supabase.rpc("fin_com_cotacoes", { p_ini: ini, p_fim: fim }),
   ]);
   const erro = v.error || r.error || a.error || f.error;
   if (erro) throw new Error(erro.message);
-  const vendas: VendaCard[] = (v.data ?? []).map((x) => ({ ...x, total: num(x.total) })) as VendaCard[];
-  const regras: Regra[] = (r.data ?? []).map((x) => ({
-    ...x, valor_rr: num(x.valor_rr), valor_expedicao: num(x.valor_expedicao), pct_aereo: num(x.pct_aereo), pct_pacote: num(x.pct_pacote),
-  })) as Regra[];
+  const vendas: VendaCard[] = (v.data ?? []).map((x) => ({ ...x, total: num(x.total), custo: num(x.custo) })) as VendaCard[];
+  const regras: Regra[] = (r.data ?? []).map((x) => {
+    const regra = { ...x } as Record<string, unknown>;
+    for (const k of NUMS_REGRA) regra[k] = num(x[k]);
+    return regra as unknown as Regra;
+  });
   const ajustes: Ajuste[] = (a.data ?? []).map((x) => ({ ...x, valor: num(x.valor) })) as Ajuste[];
   const todos = (f.data ?? []).map((x) => ({ ...x, total: Number(x.total) })) as Fechamento[];
+  // Lucros digitados dos cards do mês (em lotes, a URL não aguenta 1000 ids).
+  const lucros: Record<string, LucroDigitado> = {};
+  const ids = vendas.map((x) => x.bitrix_id);
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase.from("fin_com_lucros").select("*").in("bitrix_id", ids.slice(i, i + 200));
+    if (error) break;   // banco sem a 0328: segue sem lucro
+    for (const l of data ?? []) lucros[l.bitrix_id] = { ...l, lucro: Number(l.lucro) } as LucroDigitado;
+  }
+  const cotacoes = (c.error ? [] : (c.data ?? [])) as Cotacao[];
+  const lucroPorCard = Object.fromEntries(Object.values(lucros).map((l) => [l.bitrix_id, l.lucro]));
   return {
-    linhas: linhasDoMes(vendas, regras, ajustes, mes),
+    linhas: linhasDoMes(vendas, regras, ajustes, mes, { lucros: lucroPorCard, cotacoes }),
     regras, ajustes,
     fechamentos: todos.filter((x) => x.status !== "reaberto"),
     historico: todos.filter((x) => x.status === "reaberto"),
     sync: (s.data as EstadoSync | null) ?? null,
+    lucros,
   };
+}
+
+/** Lucro do card digitado pelo Financeiro (base do % de pacote/aéreo/demais). `null` apaga. */
+export async function salvarLucro(bitrixId: string, lucro: number | null, obs: string | null) {
+  const q = lucro == null
+    ? supabase.from("fin_com_lucros").delete().eq("bitrix_id", bitrixId)
+    : supabase.from("fin_com_lucros").upsert({ bitrix_id: bitrixId, lucro, obs }, { onConflict: "bitrix_id" });
+  const { error } = await q;
+  if (error) throw new Error(error.message);
 }
 
 /** Histórico de ajustes de um card (o financeiro vê quem mudou e por quê). */
@@ -124,7 +156,12 @@ export async function reabrir(id: string, motivo: string) {
 }
 
 export async function salvarRegra(r: Omit<Regra, "id"> & { id?: string; obs?: string | null }) {
-  const corpo = { papel: r.papel, pessoa_id: r.pessoa_id, vigente_desde: r.vigente_desde, valor_rr: r.valor_rr, valor_expedicao: r.valor_expedicao, pct_aereo: r.pct_aereo, pct_pacote: r.pct_pacote, obs: r.obs ?? null };
+  const corpo = {
+    papel: r.papel, pessoa_id: r.pessoa_id, vigente_desde: r.vigente_desde, obs: r.obs ?? null,
+    valor_exp_geral: r.valor_exp_geral ?? null, valor_exp_peru: r.valor_exp_peru ?? null, valor_exp_amazonia: r.valor_exp_amazonia ?? null,
+    valor_pacote: r.valor_pacote ?? null, valor_outros: r.valor_outros ?? null, pct_lucro: r.pct_lucro ?? null, valor_cotacao: r.valor_cotacao ?? null,
+    faixas_rr: r.faixas_rr?.length ? r.faixas_rr : null, bonus_dia: r.bonus_dia?.length ? r.bonus_dia : null,
+  };
   const q = r.id ? supabase.from("fin_com_regras").update(corpo).eq("id", r.id) : supabase.from("fin_com_regras").insert(corpo);
   const { error } = await q;
   if (error) throw new Error(error.code === "23505" ? "Já existe uma regra com essa vigência para esse papel/pessoa. Edite a existente." : error.message);

@@ -6,12 +6,11 @@
 // Mês fechado mostra os valores congelados no fechamento.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { KpiCard } from "@/components/ui";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { resumoPorPessoa, type Linha, type Papel } from "./calculo";
 import { carregarMes, mesAtual, rotuloMes, type DadosDoMes } from "./dados";
-import Planilha, { brl } from "./Planilha";
-import { SeletorDeMes, SeloStatus } from "./comuns";
+import Planilha from "./Planilha";
+import { ResumoDaConta, SeletorDeMes, SeloStatus } from "./comuns";
 
 /** `moldura`: no Comercial (SdrLayout) a tela põe o próprio respiro; na área do closer a casca já põe. */
 export default function MinhasComissoesPage({ moldura = true }: { moldura?: boolean }) {
@@ -46,7 +45,7 @@ export default function MinhasComissoesPage({ moldura = true }: { moldura?: bool
           <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Minhas comissões</h1>
           <p className="text-[13px]" style={{ color: "var(--ink3)" }}>
             Card por card, do jeito que o Financeiro vê. A venda conta no mês em que sobe no Bitrix
-            {papelDeCasa === "sdr" ? "; a R.R, no mês da reunião realizada" : ""}.
+            {papelDeCasa === "sdr" ? "; a R.R, no mês da reunião realizada (a faixa do mês vale pra todas); o bônus, no dia do agendamento" : ""}.
           </p>
         </div>
         <SeletorDeMes mes={mes} onMes={setMes} />
@@ -61,12 +60,8 @@ export default function MinhasComissoesPage({ moldura = true }: { moldura?: bool
       {blocos.map((b) => (
         <section key={b.papel} className="space-y-3">
           {blocos.length > 1 && <h2 className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>Como {b.papel === "sdr" ? "SDR" : "closer"}</h2>}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <KpiCard label="A receber" value={brl(b.r?.total ?? 0)} hint={<SeloStatus f={b.f} />} />
-            <KpiCard label="Cards" value={b.r?.cards ?? 0} />
-            <KpiCard label="Vendas" value={b.r?.vendas ?? 0} hint={brl(b.r?.soma_vendas ?? 0)} />
-            {b.papel === "sdr" && <KpiCard label="R.R no mês" value={b.r?.rr ?? 0} />}
-          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}><SeloStatus f={b.f} /></div>
+          <ResumoDaConta r={b.r} papel={b.papel} regras={dados?.regras ?? []} pessoaId={eu} mes={mes} />
           {b.f && (
             <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
               {b.f.status === "pago" ? "Mês fechado e pago" : "Mês fechado pelo Financeiro"} em {new Date(b.f.fechado_em).toLocaleDateString("pt-BR")}: estes valores não mudam mais.
