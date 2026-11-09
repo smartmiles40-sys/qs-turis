@@ -176,7 +176,8 @@ test("vercel.json manda /e/<código> para o redirecionador", () => {
   const r = (v.rewrites ?? []).find((x: { source: string }) => x.source === "/e/:codigo");
   assert.ok(r, "falta o rewrite /e/:codigo");
   assert.equal(r.destination, "/api/mkt-automacoes?e=:codigo");
-  assert.equal(v.rewrites.indexOf(r), 0, "precisa vir antes do rewrite do SPA");
+  const primeiroSpa = v.rewrites.findIndex((x: { destination: string }) => x.destination === "/index.html");
+  assert.ok(primeiroSpa === -1 || v.rewrites.indexOf(r) < primeiroSpa, "precisa vir antes do rewrite do SPA");
 });
 
 test("QR: matriz quadrada, com os 3 olhos, e caminho SVG com margem", () => {
