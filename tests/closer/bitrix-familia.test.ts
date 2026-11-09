@@ -102,16 +102,60 @@ test("diffDealFilho: só o que mudou; cron não tira da coluna um filho encerrad
   assert.equal(F.diffDealFilho({ atual: { ...igual, CATEGORY_ID: "3", STAGE_ID: "C3:NEW" }, desejado: des, lista: C1 }).STAGE_ID, undefined);
 });
 
-test("planejarFamilia: cria, reconhece pelo título (idempotente), avisa quem saiu, ignora o titular", () => {
+const filho = (o: Record<string, unknown>) => ({ CATEGORY_ID: "0", STAGE_ID: "UC_70BW8E", OPPORTUNITY: "10000", [F.CAMPO_ID_PAI]: "9001", ...o });
+const plano = (pessoas: any[], existentes: any[], extra: Record<string, unknown> = {}) =>
+  F.planejarFamilia({ pessoas, titularNome: "Carlos Silva", dealPai: PAI, para: PARA, lista: C1, existentes, ...extra });
+
+test("planejarFamilia: cria, avisa quem saiu, ignora o titular; título do QS sozinho NÃO casa", () => {
   const maria = pessoa();
   const joao = pessoa({ vinculo: "conjuge", cliente: { nome: "João Lima", telefone: null, email: null, cpf: null, nascimento: null } });
   const saiu = pessoa({ removida_em: "2026-11-09T10:00:00Z", bitrix_deal_id: "8000", bitrix_status: "removida" });
   const saiuSemCard = pessoa({ removida_em: "2026-11-09T10:00:00Z" });
-  const existentes = [{ ID: "8100", TITLE: "Família Silva — João (cônjuge)", CATEGORY_ID: "0", STAGE_ID: "UC_70BW8E", OPPORTUNITY: "10000", [F.CAMPO_ID_PAI]: "9001" }];
-  const a = F.planejarFamilia({ pessoas: [titular(), maria, joao, saiu, saiuSemCard], titularNome: "Carlos Silva", dealPai: PAI, para: PARA, lista: C1, existentes });
-  assert.deepEqual(a.map((x) => x.tipo), ["criar", "igual", "avisar_removida", "nada"]);
-  assert.equal(a[1].dealId, "8100");
+  // Card com o título "do padrão", mas de outra pessoa (sem contato/CPF/nome do João): não é dele.
+  const existentes = [filho({ ID: "8100", TITLE: "Família Silva — João (cônjuge)", CONTACT_ID: "999" })];
+  const a = plano([titular(), maria, joao, saiu, saiuSemCard], existentes, { nomesContato: { "999": "João Pedro Alves" } });
+  assert.deepEqual(a.map((x) => x.tipo), ["criar", "criar", "avisar_removida", "nada"]);
   assert.equal(a[2].dealId, "8000");
+});
+
+test("planejarFamilia: card feito à mão casa pelo contato (achado por telefone/e-mail), CPF ou nome", () => {
+  const maria = pessoa(); // CPF 123.456.789-09
+  const joao = pessoa({ vinculo: "conjuge", cliente: { nome: "João Lima", telefone: "11977776666", email: null, cpf: null, nascimento: null } });
+  const bia = pessoa({ cliente: { nome: "Beatriz  Souza", telefone: null, email: null, cpf: null, nascimento: null } });
+  const ana = pessoa({ cliente: { nome: "Ana Lúcia", telefone: null, email: null, cpf: null, nascimento: null } });
+  const existentes = [
+    filho({ ID: "1", TITLE: "Joaozinho - Japão", CONTACT_ID: "300" }),              // contato do João (achado pelo telefone)
+    filho({ ID: "2", TITLE: "Japão G1 cliente", CONTACT_ID: "301", [F.CAMPO_DEAL_CPF]: ["12345678909"] }), // CPF da Maria
+    filho({ ID: "3", TITLE: "venda japão", CONTACT_ID: "302" }),                    // contato chama "BEATRIZ SOUZA"
+    filho({ ID: "4", TITLE: "ana lucia", CONTACT_ID: "0" }),                        // título = nome (sem acento/caixa)
+  ];
+  const a = plano([titular(), maria, joao, bia, ana], existentes, {
+    contatos: { [joao.id]: "300" }, nomesContato: { "301": "Outra Pessoa", "302": "BEATRIZ SOUZA" },
+  });
+  assert.deepEqual(a.map((x) => [x.tipo, x.dealId]), [["atualizar", "2"], ["atualizar", "1"], ["atualizar", "3"], ["atualizar", "4"]]);
+  // O título feito à mão é trocado pelo do QS (o resto do card fica).
+  assert.equal(a[1].fields.TITLE, "Família Silva — João (cônjuge)");
+});
+
+test("planejarFamilia: título só desempata; dois cards casando = erro, não escolhe nem cria", () => {
+  const maria = pessoa({ bitrix_contato_id: "300" });
+  const dois = [filho({ ID: "11", TITLE: "Maria", CONTACT_ID: "300" }), filho({ ID: "12", TITLE: "Família Silva — Maria (filho(a))", CONTACT_ID: "300" })];
+  const d = plano([titular(), maria], dois);
+  assert.deepEqual([d[0].tipo, d[0].dealId], ["atualizar", "12"]); // só completa o CPF/nasc vazios
+  const empate = [filho({ ID: "11", TITLE: "Japão 1", CONTACT_ID: "300" }), filho({ ID: "12", TITLE: "Japão 2", CONTACT_ID: "300" })];
+  const e = plano([titular(), maria], empate);
+  assert.equal(e[0].tipo, "erro");
+  assert.equal(e[0].motivo, "dois cards filhos parecem ser de Maria Souza Silva (IDs 11 e 12) — confira no Bitrix");
+  // Card que já é de outra pessoa (id gravado) não conta como candidato.
+  const outra = pessoa({ bitrix_deal_id: "11", cliente: { nome: "Zé", telefone: null, email: null, cpf: null, nascimento: null } });
+  const f = plano([titular(), outra, maria], empate);
+  assert.deepEqual(f.map((x) => [x.tipo, x.dealId]), [["atualizar", "11"], ["atualizar", "12"]]);
+});
+
+test("acharFilhoExistente: id gravado vence; nome normalizado sem acento/caixa", () => {
+  assert.equal(F.normalizaNome("  José  da SILVA "), "jose da silva");
+  const p = pessoa({ bitrix_deal_id: "5" });
+  assert.equal(F.acharFilhoExistente([filho({ ID: "5", TITLE: "x" }), filho({ ID: "6", CONTACT_ID: "1" })], p, "t", { contatoId: "1" })?.deal?.ID, "5");
 });
 
 // ── Execução com fetch de mentira ──────────────────────────────────────────
@@ -119,6 +163,7 @@ function fetchDeMentira() {
   const chamadas: { url: string; body: any; method: string }[] = [];
   let proxDeal = 7000;
   const deals = new Map<string, any>();
+  const contatos = new Map<string, any>();
   const fn = async (url: string, init: any = {}) => {
     const body = init.body ? JSON.parse(init.body) : null;
     chamadas.push({ url, body, method: init.method || "GET" });
@@ -127,8 +172,12 @@ function fetchDeMentira() {
       const metodo = url.slice("https://bx.test/".length).replace(/\.json$/, "");
       if (metodo === "crm.deal.list") return ok([...deals.values()].filter((d) => d[F.CAMPO_ID_PAI] === body.filter[F.CAMPO_ID_PAI]));
       if (metodo === "crm.deal.get") return ok(deals.get(String(body.id)) ?? null);
-      if (metodo === "crm.duplicate.findbycomm") return ok({});
-      if (metodo === "crm.contact.add") return ok(500 + chamadas.filter((c) => c.url.endsWith("crm.contact.add.json")).length);
+      if (metodo === "crm.duplicate.findbycomm") {
+        const ids = [...contatos.values()].filter((c) => (c.PHONE || []).some((f: any) => body.values.includes(f.VALUE))).map((c) => Number(c.ID));
+        return ok(ids.length ? { CONTACT: ids } : {});
+      }
+      if (metodo === "crm.contact.add") { const id = String(500 + contatos.size); contatos.set(id, { ID: id, ...body.fields }); return ok(Number(id)); }
+      if (metodo === "crm.contact.list") return ok([...contatos.values()].filter((c) => body.filter["@ID"].includes(c.ID)));
       if (metodo === "crm.deal.add") { const id = String(proxDeal++); deals.set(id, { ID: id, ...body.fields, CATEGORY_ID: String(body.fields.CATEGORY_ID) }); return ok(Number(id)); }
       if (metodo === "crm.deal.update") { const d = deals.get(String(body.id)); Object.assign(d, body.fields); return ok(true); }
       if (metodo === "crm.timeline.comment.add") return ok(1);
@@ -167,12 +216,17 @@ test("espelharFamilia: cria os filhos uma vez só, grava o id, avisa no pai; rod
     // recado no pai
     assert.ok(fake.chamadas.some((c) => c.url.endsWith("crm.timeline.comment.add.json") && c.body.fields.ENTITY_ID === 9001 && /Família no QS: 3 pessoas/.test(c.body.fields.COMMENT)));
 
-    // 2ª rodada SEM o id gravado (o QS "perdeu"): acha pelo ID pai + título e não cria de novo.
+    // 2ª rodada SEM o id gravado (o QS "perdeu") e com os títulos trocados à mão:
+    // acha pelo ID pai + a pessoa (Maria pelo telefone→contato, João pelo nome do contato).
+    const titulosQS = new Map([...fake.deals.values()].map((d) => [d.ID, d.TITLE]));
+    for (const d of fake.deals.values()) d.TITLE = "card feito à mão " + d.ID;
     fake.chamadas.length = 0;
     const r2 = await F.espelharFamilia({ familia, titularNome: "Carlos Silva", dealPai: PAI, para: PARA, lista: C1 }, { bx, rest });
     assert.equal(r2.criados.length, 0);
-    assert.equal(r2.iguais, 2);
+    assert.equal(r2.atualizados, 2);
+    assert.equal(r2.erros.length, 0);
     assert.equal(fake.chamadas.filter((c) => c.url.endsWith("crm.deal.add.json")).length, 0);
+    assert.ok([...fake.deals.values()].every((d) => d.TITLE === titulosQS.get(d.ID)));
 
     // O João saiu da venda: não apaga o card; avisa no filho e no pai.
     fake.chamadas.length = 0;

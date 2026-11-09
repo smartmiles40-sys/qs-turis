@@ -15,8 +15,9 @@
 //     (total da venda − soma dos filhos) — senão o Dashboard conta em dobro.
 //
 // IDEMPOTENTE: o id do card filho fica em qs_venda_pessoas.bitrix_deal_id. Antes
-// de criar, procura no Bitrix um filho que já aponte pro pai com o mesmo contato
-// ou o mesmo título (o card pode ter nascido e o QS não ter gravado o id).
+// de criar, procura no Bitrix um filho que já aponte pro pai e case pela PESSOA
+// (contato → CPF → nome normalizado; título só desempata — o time faz card à
+// mão com qualquer título). Dois cards casando = erro pra conferir, não escolhe.
 // Pessoa que SAIU da venda: o card NÃO é apagado — o QS escreve na timeline do
 // filho e do pai e marca 'removida_avisada'.
 //
@@ -168,29 +169,77 @@ export function diffDealFilho({ atual, desejado, lista, porPessoa = false }) {
   return f;
 }
 
-/** Acha, entre os filhos que já apontam pro pai no Bitrix, o card desta pessoa. */
-export function acharFilhoExistente(existentes, pessoa, titulo) {
-  const lista = existentes || [];
-  const porId = pessoa?.bitrix_deal_id && lista.find((d) => String(d.ID) === String(pessoa.bitrix_deal_id));
-  if (porId) return porId;
-  const contato = pessoa?.bitrix_contato_id || pessoa?.cliente?.bitrix_contato_id;
+/** "José  da SILVA" → "jose da silva" (sem acento, sem caixa, espaço simples). */
+export const normalizaNome = (v) => limpa(v).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ');
+const primeiroValor = (v) => (Array.isArray(v) ? v[0] : v);
+const listaIds = (ids) => (ids.length <= 2 ? ids.join(' e ') : `${ids.slice(0, -1).join(', ')} e ${ids[ids.length - 1]}`);
+export const msgAmbiguo = (nome, ids) => `dois cards filhos parecem ser de ${limpa(nome) || 'acompanhante'} (IDs ${listaIds(ids)}) — confira no Bitrix`;
+
+/**
+ * Acha, entre os filhos que já apontam pro pai no Bitrix (ID pai = pai), o card
+ * desta pessoa. O time NÃO segue o padrão de título — o card pode ter sido feito
+ * à mão. Ordem: id que o QS já gravou → CONTATO do deal = contato da pessoa
+ * (bitrix_contato_id / telefone / e-mail, resolvido antes em `contatoId`) →
+ * CPF do deal → nome normalizado (do contato do deal ou o título inteiro = nome).
+ * Título só desempata dentro de um nível. Sobrou mais de um → não escolhe.
+ *   opts = { contatoId, nomesContato: {contactId: nome}, ocupados: Set(dealIds de outras pessoas) }
+ * Devolve { deal } | { ambiguos: [ids] } | null.
+ */
+export function acharFilhoExistente(existentes, pessoa, titulo, opts = {}) {
+  const todos = existentes || [];
+  const porId = pessoa?.bitrix_deal_id && todos.find((d) => String(d.ID) === String(pessoa.bitrix_deal_id));
+  if (porId) return { deal: porId };
+  const ocupados = opts.ocupados || new Set();
+  const lista = todos.filter((d) => !ocupados.has(String(d.ID)));
+  const c = pessoa?.cliente || {};
+  const nome = normalizaNome(c.nome);
+  const desempata = (cands) => {
+    if (cands.length <= 1) return cands[0] ? { deal: cands[0] } : null;
+    const t = normalizaNome(titulo);
+    let pelos = cands.filter((d) => normalizaNome(d.TITLE) === t);
+    if (pelos.length !== 1 && nome) pelos = cands.filter((d) => normalizaNome(d.TITLE).includes(nome));
+    return pelos.length === 1 ? { deal: pelos[0] } : { ambiguos: cands.map((d) => String(d.ID)) };
+  };
+  const contato = opts.contatoId || pessoa?.bitrix_contato_id || c.bitrix_contato_id;
   if (contato) {
-    const porContato = lista.find((d) => String(d.CONTACT_ID ?? '') === String(contato));
-    if (porContato) return porContato;
+    const r = desempata(lista.filter((d) => String(d.CONTACT_ID ?? '') === String(contato)));
+    if (r) return r;
   }
-  return lista.find((d) => limpa(d.TITLE) === limpa(titulo)) || null;
+  const cpf = soDigitos(c.cpf);
+  if (cpf.length === 11) {
+    const r = desempata(lista.filter((d) => soDigitos(primeiroValor(d[CAMPO_DEAL_CPF])) === cpf));
+    if (r) return r;
+  }
+  if (nome) {
+    const nomes = opts.nomesContato || {};
+    const r = desempata(lista.filter((d) =>
+      (d.CONTACT_ID && normalizaNome(nomes[String(d.CONTACT_ID)]) === nome) || normalizaNome(d.TITLE) === nome));
+    if (r) return r;
+  }
+  return null;
 }
 
 /**
  * O PLANO da família (sem rede): uma ação por pessoa.
- *   { tipo: 'criar' | 'atualizar' | 'igual' | 'avisar_removida' | 'nada', pessoa, dealId?, fields?, motivo? }
+ *   { tipo: 'criar' | 'atualizar' | 'igual' | 'avisar_removida' | 'nada' | 'erro', pessoa, dealId?, fields?, motivo? }
+ *   contatos     = { [pessoa.id]: contactId } achados antes (telefone/e-mail), sem criar
+ *   nomesContato = { [contactId]: "Nome Completo" } dos contatos dos filhos existentes
  */
-export function planejarFamilia({ pessoas, titularNome, dealPai, para, lista, existentes = [], porPessoa = false }) {
+export function planejarFamilia({ pessoas, titularNome, dealPai, para, lista, existentes = [], porPessoa = false, contatos = {}, nomesContato = {} }) {
   const acoes = [];
+  // Card que já é de alguém (id gravado) não serve pra outra pessoa.
+  const ocupados = new Set((pessoas || []).map((p) => p.bitrix_deal_id).filter(Boolean).map(String));
   for (const p of pessoas || []) {
     if (p.comprador) continue;
     const titulo = tituloFilho(titularNome, { ...p, nome: p?.cliente?.nome });
-    const achado = acharFilhoExistente(existentes, p, titulo);
+    const outros = new Set([...ocupados].filter((id) => id !== String(p.bitrix_deal_id ?? '')));
+    const r = acharFilhoExistente(existentes, p, titulo, { contatoId: contatos[p.id], nomesContato, ocupados: outros });
+    if (r?.ambiguos) {
+      acoes.push({ tipo: 'erro', pessoa: p, motivo: msgAmbiguo(p?.cliente?.nome, r.ambiguos) });
+      continue;
+    }
+    const achado = r?.deal || null;
+    if (achado) ocupados.add(String(achado.ID));
     if (p.removida_em) {
       const dealId = p.bitrix_deal_id || achado?.ID || null;
       if (dealId && p.bitrix_status !== 'removida_avisada') acoes.push({ tipo: 'avisar_removida', pessoa: p, dealId: String(dealId) });
@@ -229,7 +278,8 @@ export async function carregarFamilia(negocioId, { rest }) {
   return { venda, pessoas };
 }
 
-async function acharOuCriarContato(pessoa, titularNome, { bx }) {
+/** O contato da pessoa no Bitrix SEM criar: id guardado → telefone → e-mail. null = não achou. */
+async function acharContato(pessoa, { bx }) {
   const c = pessoa.cliente || {};
   const conhecido = pessoa.bitrix_contato_id || c.bitrix_contato_id;
   if (conhecido) return String(conhecido);
@@ -242,6 +292,12 @@ async function acharOuCriarContato(pessoa, titularNome, { bx }) {
     const dup = await bx('crm.duplicate.findbycomm', { entity_type: 'CONTACT', type: 'EMAIL', values: [limpa(c.email)] }).catch(() => null);
     if (Array.isArray(dup?.CONTACT) && dup.CONTACT[0]) return String(dup.CONTACT[0]);
   }
+  return null;
+}
+
+async function acharOuCriarContato(pessoa, titularNome, { bx }, jaAchado) {
+  const achado = jaAchado || await acharContato(pessoa, { bx });
+  if (achado) return String(achado);
   const id = await bx('crm.contact.add', { fields: montarContato(pessoa, titularNome), params: { REGISTER_SONET_EVENT: 'N' } });
   return id ? String(id) : null;
 }
@@ -275,7 +331,25 @@ export async function espelharFamilia({ familia, titularNome, dealPai, para, lis
     }
   }
 
-  const acoes = planejarFamilia({ pessoas, titularNome, dealPai, para, lista, existentes, porPessoa });
+  // Card feito à mão (sem o título do QS): casa pela pessoa. Só busca contato/nome
+  // de quem ainda não tem o card reconhecido pelo id (o cron não gasta chamada à toa).
+  const contatos = {};
+  const nomesContato = {};
+  const semCard = pessoas.filter((p) => !p.comprador
+    && !(p.bitrix_deal_id && existentes.some((d) => String(d.ID) === String(p.bitrix_deal_id))));
+  if (semCard.length && existentes.length) {
+    for (const p of semCard) {
+      const id = await acharContato(p, { bx }).catch(() => null);
+      if (id) contatos[p.id] = id;
+    }
+    const ids = [...new Set(existentes.map((d) => d.CONTACT_ID).filter((v) => v && String(v) !== '0').map(String))];
+    if (ids.length) {
+      const cs = await bx('crm.contact.list', { filter: { '@ID': ids }, select: ['ID', 'NAME', 'SECOND_NAME', 'LAST_NAME'] }).catch(() => []);
+      for (const c of cs || []) nomesContato[String(c.ID)] = [c.NAME, c.SECOND_NAME, c.LAST_NAME].map(limpa).filter(Boolean).join(' ');
+    }
+  }
+
+  const acoes = planejarFamilia({ pessoas, titularNome, dealPai, para, lista, existentes, porPessoa, contatos, nomesContato });
   const marcar = (p, campos) => rest(`qs_venda_pessoas?id=eq.${p.id}`, {
     method: 'PATCH', prefer: 'return=minimal', body: { ...campos, bitrix_em: agora(), atualizado_em: agora() },
   }).catch((e) => console.warn('[closer-familia] marcar', p.id, e?.message));
@@ -285,6 +359,7 @@ export async function espelharFamilia({ familia, titularNome, dealPai, para, lis
     const nome = p.cliente?.nome || 'acompanhante';
     try {
       if (a.tipo === 'nada') continue;
+      if (a.tipo === 'erro') throw new Error(a.motivo); // ambíguo: não cria nem escolhe
       if (a.tipo === 'avisar_removida') {
         const quando = String(p.removida_em || agora()).slice(0, 10).split('-').reverse().join('/');
         await bx('crm.timeline.comment.add', { fields: { ENTITY_ID: Number(a.dealId), ENTITY_TYPE: 'deal',
@@ -298,7 +373,7 @@ export async function espelharFamilia({ familia, titularNome, dealPai, para, lis
       let dealId = a.dealId || null;
       let contatoId = null;
       if (a.tipo === 'criar') {
-        contatoId = await acharOuCriarContato(p, titularNome, { bx });
+        contatoId = await acharOuCriarContato(p, titularNome, { bx }, contatos[p.id]);
         const fields = contatoId ? { ...a.fields, CONTACT_ID: contatoId } : a.fields;
         dealId = String(await bx('crm.deal.add', { fields, params: { REGISTER_SONET_EVENT: 'N' } }) || '');
         if (!dealId) throw new Error('o Bitrix não devolveu o id do card');
