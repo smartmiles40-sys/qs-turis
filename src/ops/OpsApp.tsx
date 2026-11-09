@@ -29,6 +29,7 @@ import { TELAS_EXP, type TelaExp } from "@/expedicoes/contexto";
 import { grupoExpedicoes } from "@/expedicoes/menu";
 import { useContagensExp } from "@/expedicoes/useContagensExp";
 import { useContagemSaude } from "@/expedicoes/useContagemSaude";
+import { useVendasSemRevisao } from "./useVendasSemRevisao";
 
 const ExpedicoesArea = lazy(() => import("@/expedicoes/ExpedicoesArea"));
 // 23/10 (cadastro único): a ficha do cliente é a MESMA do Relacionamento (0172/0173).
@@ -40,6 +41,8 @@ const SubirVendaOps = lazy(() => import("@/venda/SubirVendaOps"));
 // 29/10: Pacotes personalizados — a MESMA ficha da viagem do Relacionamento (só o Rel edita; o banco garante).
 const ViagemPage = lazy(() => import("@/rel/viagens/ViagemPage"));
 const PrioridadesPage = lazy(() => import("@/prioridades/PrioridadesPage")); // V2 (0226): pacotes prioritários
+// 09/11 (0338): o Ops REVISA as vendas dos closers (nunca aprova).
+const VendasParaRevisar = lazy(() => import("./VendasParaRevisar"));
 
 /** Cor de Operações: âmbar escuro (#B45309 com texto branco = 5:1, WCAG AA). */
 const OPS_CSS = `${REL_CSS}
@@ -49,7 +52,7 @@ html.dark { --rel-ink: #FDBA74; --rel-soft: rgba(251, 146, 60, .15); }
 `;
 
 const PREFIXO = "ops";
-const TELAS = ["inicio", "solicitacoes", "subir-venda", "propostas", "equipe", "fichas", "ficha", "arrumar", "viagem", "prioridades", ...TELAS_EXP] as const;
+const TELAS = ["inicio", "solicitacoes", "subir-venda", "revisar-vendas", "propostas", "equipe", "fichas", "ficha", "arrumar", "viagem", "prioridades", ...TELAS_EXP] as const;
 type Tela = (typeof TELAS)[number];
 const ehExp = (t: string): t is TelaExp => (TELAS_EXP as readonly string[]).includes(t);
 interface Rota { tela: Tela; id?: string }
@@ -66,6 +69,8 @@ export default function OpsApp() {
   const [aprovacoes, recontarAprovacoes] = useAprovacoesNovas(currentUser?.id, "operacional");
   const contExp = useContagensExp();
   const contSaude = useContagemSaude(); // 30/10: selo do "Saúde · médico"
+  const [versaoRevisao, setVersaoRevisao] = useState(0);
+  const semRevisao = useVendasSemRevisao(versaoRevisao);
 
   useEffect(() => {
     const onHash = () => setRota(lerRota());
@@ -84,6 +89,7 @@ export default function OpsApp() {
     { id: "demandas", rotulo: "Demandas", icone: ICONES_AREA.pedidos, itens: [
       { id: "solicitacoes", rotulo: "Solicitações", ...bolinhaDaCentral(central) },
       { id: "subir-venda", rotulo: "Subir venda" },
+      { id: "revisar-vendas", rotulo: "Vendas para revisar", badge: semRevisao || undefined },
       { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined, selo: SELO_PROPOSTAS },
       { id: "prioridades", rotulo: "Prioridades" },
     ] },
@@ -111,6 +117,12 @@ export default function OpsApp() {
           onAbrirId={(id) => ir(id ? { tela: "propostas", id } : { tela: "propostas" })} />
       )}
       {rota.tela === "subir-venda" && <Suspense fallback={null}><SubirVendaOps /></Suspense>}
+      {rota.tela === "revisar-vendas" && (
+        <Suspense fallback={null}>
+          <VendasParaRevisar onMudou={() => setVersaoRevisao((v) => v + 1)}
+            onAbrirExpedicao={(exp, tipo) => ir({ tela: tipo === "pacote" ? "pacotes" : "expedicoes", id: `${exp}/financeiro` })} />
+        </Suspense>
+      )}
       {rota.tela === "prioridades" && <Suspense fallback={null}><PrioridadesPage setor="operacional" /></Suspense>}
       {rota.tela === "equipe" && <EquipePage area="operacional" />}
       {rota.tela === "fichas" && <Suspense fallback={null}><ClientesPage onAbrir={(id) => ir({ tela: "ficha", id })} /></Suspense>}

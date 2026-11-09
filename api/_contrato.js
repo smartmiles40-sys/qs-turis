@@ -3,9 +3,11 @@
 // CONTRATO 100% EM CÓDIGO (0180, Bruno 22/10/2026: "eu não quero que seja nada
 // via n8n"; 27/10: "vamos parar de usar o console" — sem Google Docs/Drive).
 //
-//   1. MONTAR OS CAMPOS: venda consolidada (ficha) + proposta aprovada + ficha
-//      do cliente (rel_clientes) + Bitrix (negócio e contato) + lead. O closer
-//      confere e corrige tudo na prévia antes de mandar.
+//   1. MONTAR OS CAMPOS: venda registrada (qs_vendas/qs_venda_itens/expedicoes)
+//      → ficha/proposta → Bitrix; pessoa: último envio → cadastro único
+//      (rel_clientes, com RG e endereço) → lead → Bitrix. O closer confere e
+//      corrige na prévia, e o que ele corrigir volta pro cadastro
+//      (gravarNoCadastro, 09/11).
 //   2. GERAR: o próprio QS monta o PDF a partir dos modelos que moram no
 //      código (api/_contratoModelo.js — texto fiel aos contratos em uso).
 //   3. GUARDAR: o PDF gerado e o assinado vão pro Storage (bucket privado
@@ -252,9 +254,14 @@ function juntarNome(nome, sobrenome) {
 }
 
 // ── PRÉVIA: os campos que vão no contrato e de onde vieram ─────────────────
-export const CAMPOS = ['tipo', 'nome', 'cpf', 'rg', 'nascimento', 'endereco', 'email', 'telefone', 'expedicao', 'destino', 'tipo_pacote',
-  'inclusos', 'nao_inclusos', 'ida', 'volta', 'passagem', 'seguro', 'valor_total', 'forma_pagamento', 'vendedor', 'data_venda'];
-const LONGOS = { destino: 1500, inclusos: 4000, nao_inclusos: 1500, forma_pagamento: 1000, endereco: 500 };
+// 09/11 (Bruno: "digitar UMA VEZ no QS"): a VENDA REGISTRADA pelo closer
+// (qs_vendas + qs_venda_itens + passageiros + expedicoes) manda nos dados da
+// viagem; o cadastro único (rel_clientes) manda nos dados da pessoa; o Bitrix
+// só tapa buraco. A escolha é PURA (camposDasFontes) — a leitura do banco fica
+// em montarPrevia — pra dar pra testar a prioridade sem rede.
+export const CAMPOS = ['tipo', 'nome', 'cpf', 'rg', 'nascimento', 'endereco', 'email', 'telefone', 'viajante', 'expedicao', 'destino', 'tipo_pacote',
+  'inclusos', 'nao_inclusos', 'ida', 'volta', 'passagem', 'seguro', 'valor_total', 'forma_pagamento', 'vendedor', 'data_venda', 'roteiro'];
+const LONGOS = { destino: 1500, inclusos: 4000, nao_inclusos: 1500, forma_pagamento: 1000, endereco: 500, viajante: 500, roteiro: 30000 };
 // Rótulo do item da proposta quando ele não tem nome (cláusula 1.3 do pacote).
 const ROTULO_ITEM = {
   aereo: 'Aéreo', hospedagem: 'Hospedagem', transfer: 'Transfer', trem: 'Trens', passeio: 'Passeio', seguro: 'Seguro viagem',
@@ -262,43 +269,410 @@ const ROTULO_ITEM = {
 };
 // Dados da PESSOA: a correção do closer no último envio vale de novo.
 const DA_PESSOA = ['nome', 'cpf', 'rg', 'nascimento', 'endereco', 'email', 'telefone'];
+const DA_VENDA = 'venda registrada';
+const DO_CADASTRO = 'cadastro do cliente';
 
-export async function montarPrevia(negocio) {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const unicos = (xs) => [...new Set(xs.filter(Boolean))];
+const isoDe = (v) => (String(v ?? '').match(/^\d{4}-\d{2}-\d{2}/) || [])[0] || '';
+const num = (v) => {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const n = numeroDoValor(v);
+  return Number.isFinite(n) ? n : 0;
+};
+const centavos = (n) => Math.round(n * 100) / 100;
+
+// ── Endereço: colunas da 0213 ↔ texto do contrato ───────────────────────────
+/** "Rua X, 160, ap 12, Vila Olímpia, São Paulo/SP, CEP 04551-010" a partir das colunas endereco_*. */
+export function enderecoDoCliente(c) {
+  if (!c) return '';
+  const t = (k) => String(c[`endereco_${k}`] ?? '').trim();
+  const cep = soDigitos(t('cep'));
+  const cidadeUf = [t('cidade'), t('estado')].filter(Boolean).join('/');
+  return [
+    [t('rua'), t('numero')].filter(Boolean).join(', '),
+    t('complemento'), t('bairro'), cidadeUf,
+    cep.length === 8 ? `CEP ${cep.slice(0, 5)}-${cep.slice(5)}` : t('cep'),
+  ].filter(Boolean).join(', ');
+}
+const UFS = new Set(['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO']);
+const limparPontas = (s) => String(s || '').replace(/\s*,\s*,/g, ',').replace(/^[\s,–-]+|[\s,–-]+$/g, '').trim();
+/**
+ * Texto livre do contrato → colunas, de forma CONSERVADORA: só separa o que dá
+ * pra reconhecer com segurança — o CEP (regex) e "Cidade/UF" ou "Cidade - UF"
+ * no fim (UF válida). O resto vai inteiro em endereco_rua; número, complemento
+ * e bairro ficam vazios. Só é usado quando o cadastro NÃO tem endereço estruturado.
+ */
+export function enderecoParaColunas(texto) {
+  const s = String(texto ?? '').replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+  const m = s.match(/(?:CEP[:\s]*)?(\d{5})-?(\d{3})(?!\d)/i);
+  let resto = limparPontas(m ? s.replace(m[0], '') : s);
+  let cidade = null;
+  let estado = null;
+  const cu = resto.match(/(?:^|,)\s*([^,\/]*?[^\s,\/-])\s*(?:\/|\s[-–]\s)\s*([A-Za-z]{2})$/);
+  if (cu && UFS.has(cu[2].toUpperCase())) {
+    cidade = cu[1].trim();
+    estado = cu[2].toUpperCase();
+    resto = limparPontas(resto.slice(0, cu.index));
+  }
+  return {
+    endereco_rua: resto || null, endereco_numero: null, endereco_complemento: null, endereco_bairro: null,
+    endereco_cidade: cidade, endereco_estado: estado, endereco_cep: m ? `${m[1]}${m[2]}` : null,
+  };
+}
+/** O cadastro já tem endereço ESTRUTURADO (algo além da rua)? Aí o texto do contrato não entra. */
+export const temEnderecoEstruturado = (c) =>
+  ['numero', 'complemento', 'bairro', 'cidade', 'estado', 'cep'].some((k) => String(c?.[`endereco_${k}`] ?? '').trim() !== '');
+export const AVISO_ENDERECO = 'Endereço editado no contrato não foi copiado pro cadastro (cadastro já tem endereço estruturado).';
+
+// ── Pagamento da venda (qs_vendas.pagamento) em texto de contrato ───────────
+/**
+ * { forma, condicao: avista|parcelado|entrada, entrada, entrada_data, parcelas,
+ *   primeira_parcela, obs } → "Entrada de R$ 2.000,00 em 10/11/2026 e 10
+ * parcelas de R$ 2.499,00 (a 1ª em 10/12/2026), via cartão de crédito. Obs."
+ * Na condição "entrada", `parcelas` = parcelas DEPOIS da entrada (como na tela
+ * da venda). Aceita os nomes alternativos data_entrada / n_parcelas / peculiaridades.
+ */
+export function textoDoPagamentoDaVenda(pag, valorTotal, { condicaoEspecial = false, condicaoObs = '' } = {}) {
+  const p = pag && typeof pag === 'object' ? pag : {};
+  const total = num(valorTotal);
+  const forma = FORMA[p.forma] || String(p.forma || '').trim();
+  const entrada = num(p.entrada);
+  const n = Math.max(0, Math.trunc(Number(p.parcelas ?? p.n_parcelas ?? p.num_parcelas) || 0));
+  const dEnt = dataBr(isoDe(p.entrada_data ?? p.data_entrada) || (p.entrada_data ?? p.data_entrada ?? ''));
+  const d1 = dataBr(isoDe(p.primeira_parcela ?? p.data_primeira_parcela) || (p.primeira_parcela ?? p.data_primeira_parcela ?? ''));
+  const obs = String(p.obs ?? p.peculiaridades ?? '').replace(/\s+/g, ' ').trim();
+  const condicao = ['avista', 'parcelado', 'entrada'].includes(p.condicao) ? p.condicao
+    : entrada > 0 ? 'entrada' : n > 1 ? 'parcelado' : (forma || total ? 'avista' : '');
+  const parcelas = (qtd, base) => {
+    if (!qtd) return '';
+    const cada = base > 0 ? ` de ${brl(centavos(base / qtd))}` : '';
+    return `${qtd} ${qtd === 1 ? 'parcela' : 'parcelas'}${cada}${d1 ? ` (a 1ª em ${d1})` : ''}`;
+  };
+  let txt = '';
+  if (condicao === 'avista') txt = `À vista${total > 0 ? ` (${brl(total)})` : ''}${dEnt ? ` em ${dEnt}` : ''}`;
+  else if (condicao === 'parcelado') txt = parcelas(n, total) || 'Parcelado';
+  else if (condicao === 'entrada') {
+    const ent = entrada > 0 ? `Entrada de ${brl(entrada)}${dEnt ? ` em ${dEnt}` : ''}` : 'Entrada';
+    const resto = parcelas(n, total > entrada ? total - entrada : 0);
+    txt = resto ? `${ent} e ${resto}` : ent;
+  }
+  if (txt && forma) txt += `, via ${forma}`;
+  else if (!txt && forma) txt = `Via ${forma}`;
+  const extras = [];
+  if (obs) extras.push(obs);
+  if (condicaoEspecial && String(condicaoObs || '').trim()) extras.push(`Condição especial: ${String(condicaoObs).replace(/\s+/g, ' ').trim()}`);
+  return [txt, ...extras].filter(Boolean).map((s) => s.replace(/[.\s]+$/, '')).join('. ') + (txt || extras.length ? '.' : '');
+}
+
+// ── Viajantes da venda (tabela passageiros + json do item) ──────────────────
+const nomeChave = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const boolOuNulo = (v) => (v === true || v === false ? v : v === 'true' ? true : v === 'false' ? false : null);
+
+/**
+ * Quem viaja nesta venda, com o VALOR e o aéreo de cada um. Fonte principal:
+ * a tabela `passageiros` (venda_id = a venda; cancelado fica de fora); o json
+ * `qs_venda_itens.passageiros` completa quem não virou passageiro.
+ */
+export function viajantesDaVenda(vf) {
+  if (!vf) return [];
+  const out = [];
+  for (const p of vf.passageiros || []) {
+    if (/cancelad/i.test(String(p.status_reserva || ''))) continue;
+    out.push({
+      passageiro_id: p.id || null, cliente_id: p.cliente_id || null, item_id: p.venda_item_id || null, expedicao_id: p.expedicao_id || null,
+      nome: String(p.nome_completo || '').trim(), cpf: p.cpf || '', nascimento: p.data_nascimento || '', email: p.email || '', telefone: p.telefone || '',
+      valor: p.valor_contratado_brl == null || p.valor_contratado_brl === '' ? null : num(p.valor_contratado_brl),
+      aereo_incluso: boolOuNulo(p.aereo_incluso),
+    });
+  }
+  for (const it of vf.itens || []) {
+    for (const p of Array.isArray(it.passageiros) ? it.passageiros : []) {
+      const nome = String(p?.nome || '').trim();
+      if (!nome) continue;
+      const ja = out.find((o) => (p.cliente_id && o.cliente_id === p.cliente_id) || nomeChave(o.nome) === nomeChave(nome));
+      const valor = p.valor_contratado ?? p.valor_contratado_brl ?? p.valor;
+      const aereo = boolOuNulo(p.aereo_incluso);
+      if (ja) {
+        if (ja.valor == null && valor != null && valor !== '') ja.valor = num(valor);
+        if (ja.aereo_incluso == null && aereo != null) ja.aereo_incluso = aereo;
+        continue;
+      }
+      out.push({
+        passageiro_id: null, cliente_id: p.cliente_id || null, item_id: it.id || null, expedicao_id: it.dados?.expedicao_id || null,
+        nome, cpf: p.cpf || '', nascimento: p.nascimento || '', email: p.email || '', telefone: p.telefone || '',
+        valor: valor == null || valor === '' ? null : num(valor), aereo_incluso: aereo,
+      });
+    }
+  }
+  return out;
+}
+
+const listaDeNomes = (vs) => vs.map((v) => v.nome || 'viajante').join(', ');
+/**
+ * Passagem aérea a partir da venda: vale o `aereo_incluso` de CADA viajante
+ * (expedição com aéreo incluso sai "Inclusa" mesmo sem item de aéreo). Um item
+ * "aéreo" vendido junto também conta como incluso. '' = a venda não diz.
+ */
+export function passagemDaVenda(vf) {
+  if (!vf) return '';
+  const itens = vf.itens || [];
+  const temAereo = itens.some((i) => i.tipo === 'aereo');
+  const com = viajantesDaVenda(vf).filter((v) => v.aereo_incluso !== null);
+  if (com.length) {
+    const sim = com.filter((v) => v.aereo_incluso);
+    const nao = com.filter((v) => !v.aereo_incluso);
+    if (!nao.length || temAereo) return 'Inclusa';
+    if (!sim.length) return 'Não inclusa';
+    return `Inclusa para ${listaDeNomes(sim)}; não inclusa para ${listaDeNomes(nao)}`;
+  }
+  if (temAereo) return 'Inclusa';
+  if (itens.some((i) => i.tipo === 'expedicao')) return '';
+  return itens.length ? 'Não inclusa' : '';
+}
+
+/** Dias do roteiro (roteiro_dias, sem extensão) → texto do Anexo I. "Dia N" abre cada dia. */
+export function textoDoRoteiro(dias) {
+  const lista = (dias || []).slice().sort((a, b) => (Number(a.ordem) || 0) - (Number(b.ordem) || 0) || (Number(a.dia) || 0) - (Number(b.dia) || 0));
+  return lista.map((d, i) => {
+    const cab = [`Dia ${d.dia ?? i + 1}`, d.data ? dataBr(d.data) : '', String(d.cidade || '').trim()].filter(Boolean).join(' · ');
+    const titulo = String(d.titulo || '').replace(/\s+/g, ' ').trim();
+    const desc = String(d.descricao || '').replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{2,}/g, '\n').trim();
+    return [`${cab}${titulo ? ` — ${titulo}` : ''}`, desc].filter(Boolean).join('\n');
+  }).filter(Boolean).join('\n\n');
+}
+
+const linhaDoItem = (i) => {
+  const d = i.dados && typeof i.dados === 'object' ? i.dados : {};
+  const desc = String(i.descricao || d.descricao || d.detalhes || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+  const rot = String(i.nome || ROTULO_ITEM[i.tipo] || i.tipo || '').trim();
+  return rot && desc ? `${rot}: ${desc}` : rot || desc;
+};
+
+/** O que a venda registrada diz do contrato (null = não tem venda registrada). */
+export function resumoDaVenda(vf) {
+  if (!vf || (!vf.venda && !(vf.itens || []).length)) return null;
+  const itens = vf.itens || [];
+  const venda = vf.venda || {};
+  const exps = itens.filter((i) => i.tipo === 'expedicao');
+  const expDe = (i) => (vf.expedicoes || []).find((e) => e.id === i?.dados?.expedicao_id) || null;
+  const r = { tipo: exps.length ? 'expedicao' : itens.length ? 'pacote' : '' };
+  const datas = (lista, k) => lista.map((x) => isoDe(x[k])).filter(Boolean).sort();
+  if (exps.length) {
+    r.expedicao = unicos(exps.map((i) => String(expDe(i)?.nome || i.dados?.expedicao || i.nome || '').trim())).join(' + ');
+    r.destino = unicos(exps.map((i) => String(expDe(i)?.destino || '').trim())).join(' + ');
+    const ini = exps.map((i) => ({ d: i.data_inicio || expDe(i)?.data_embarque }));
+    const fim = exps.map((i) => ({ d: i.data_fim || expDe(i)?.data_retorno }));
+    r.ida = dataBr(datas(ini, 'd')[0] || '');
+    r.volta = dataBr(datas(fim, 'd').slice(-1)[0] || '');
+    const principal = expDe(exps[0]);
+    r.roteiro = textoDoRoteiro((vf.roteiro || []).filter((d) => !principal || d.expedicao_id === principal.id));
+  } else if (itens.length) {
+    r.inclusos = itens.map(linhaDoItem).filter(Boolean).join('\n');
+    const pac = itens.find((i) => i.tipo === 'pacote');
+    r.destino = String(pac?.dados?.destino || '').trim();
+    r.ida = dataBr(datas(itens, 'data_inicio')[0] || '');
+    r.volta = dataBr(datas(itens, 'data_fim').slice(-1)[0] || '');
+  }
+  const soma = centavos(itens.reduce((s, i) => s + num(i.valor), 0));
+  r.valor = num(venda.valor_total) > 0 ? num(venda.valor_total) : soma;
+  r.passagem = passagemDaVenda(vf);
+  r.seguro = itens.some((i) => i.tipo === 'seguro') ? 'Incluso' : '';
+  r.forma_pagamento = vf.venda ? textoDoPagamentoDaVenda(venda.pagamento, r.valor, { condicaoEspecial: venda.condicao_especial, condicaoObs: venda.condicao_obs }) : '';
+  return r;
+}
+
+/**
+ * A ESCOLHA dos campos (pura). Prioridade:
+ *   pessoa → último envio (o que o closer corrigiu) → cadastro do cliente
+ *            (rel_clientes, inclusive RG e endereço) → lead → Bitrix;
+ *   viagem → venda registrada → venda consolidada (ficha) / proposta aprovada
+ *            → Bitrix → valor previsto do cartão.
+ * f = { negocio, lead, ultimo, cliente, venda, proposta, bitrix: {deal, contato}, closerNome, hoje }
+ */
+export function camposDasFontes(f) {
   const campos = {};
   const origem = {};
   const por = (k, valor, de) => {
     const v = valor == null ? '' : String(valor).trim();
     if (!campos[k] && v) { campos[k] = v; origem[k] = de; }
   };
+  const negocio = f.negocio || {};
+  const lead = f.lead || {};
+  const ficha = negocio.ficha || null;
+  const proposta = f.proposta || null;
+  const cliente = f.cliente || null;
+  const d = f.bitrix?.deal || {};
+  const ct = f.bitrix?.contato || {};
+  const rv = resumoDaVenda(f.venda);
 
-  const lead = (await rest(`qs_leads?select=id,full_name,first_name,last_name,email,phone,bitrix_id&id=eq.${negocio.lead_id}&limit=1`))?.[0] || {};
+  // A correção do closer no último envio (só dados da pessoa).
+  if (f.ultimo) for (const k of DA_PESSOA) por(k, f.ultimo[k], 'último envio');
+
+  // ── Tipo: expedição × pacote ──
+  if (rv?.tipo) { campos.tipo = rv.tipo; origem.tipo = DA_VENDA; }
+  else {
+    campos.tipo = ficha?.servico === 'expedicao' || d.expedicao ? 'expedicao' : 'pacote';
+    origem.tipo = ficha?.servico ? 'venda consolidada' : d.expedicao ? 'Bitrix' : 'padrão';
+  }
+  const tipo = campos.tipo;
+
+  // ── Pessoa: cadastro único → lead → Bitrix ──
+  por('nome', cliente?.nome, DO_CADASTRO);
+  por('nome', d.nome && d.nome !== '.' ? d.nome : '', 'Bitrix (negócio)');
+  por('nome', juntarNome(ct.primeiro, ct.sobrenome), 'Bitrix (contato)');
+  por('nome', lead.full_name || juntarNome(lead.first_name, lead.last_name), 'lead');
+  por('cpf', cpfValido(cliente?.cpf) ? formatarCpf(cliente.cpf) : cliente?.cpf, DO_CADASTRO);
+  por('cpf', d.cpf, 'Bitrix (negócio)');
+  por('cpf', ct.cpf2, 'Bitrix (contato)');
+  por('cpf', ct.cpf, 'Bitrix (contato)');
+  por('rg', cliente?.rg, DO_CADASTRO);
+  por('rg', ct.rg, 'Bitrix (contato)');
+  por('nascimento', dataBr(cliente?.nascimento), DO_CADASTRO);
+  por('nascimento', d.nascimento, 'Bitrix (negócio)');
+  por('nascimento', ct.nascimento, 'Bitrix (contato)');
+  por('endereco', enderecoDoCliente(cliente), DO_CADASTRO);
+  por('endereco', d.endereco, 'Bitrix (negócio)');
+  por('endereco', ct.endereco, 'Bitrix (contato)');
+  por('email', cliente?.email, DO_CADASTRO);
+  por('email', lead.email, 'lead');
+  por('email', d.email, 'Bitrix (negócio)');
+  por('email', ct.email, 'Bitrix (contato)');
+  por('email', d.email2, 'Bitrix (negócio)');
+  por('telefone', formatarTelefone(cliente?.telefone), DO_CADASTRO);
+  por('telefone', formatarTelefone(lead.phone), 'lead');
+  por('telefone', formatarTelefone(ct.telefone), 'Bitrix (contato)');
+
+  // ── Viagem: venda registrada → ficha/proposta → Bitrix ──
+  const deFicha = ficha ? 'venda consolidada' : 'proposta aprovada';
+  if (tipo === 'expedicao') {
+    if (rv?.tipo === 'expedicao') por('expedicao', rv.expedicao, DA_VENDA);
+    // Nome da expedição: o Bitrix vem antes da ficha (a ficha guarda o DESTINO, não o nome da expedição).
+    por('expedicao', d.expedicao, 'Bitrix (negócio)');
+    por('expedicao', ficha?.destino, 'venda consolidada');
+  }
+  const itens = ficha?.itens?.length ? ficha.itens : proposta?.itens || [];
+  por('destino', rv?.destino, DA_VENDA);
+  const destinoBase = ficha?.destino || proposta?.destino || '';
+  if (destinoBase) por('destino', destinoBase, deFicha);
+  por('destino', d.destino, 'Bitrix (negócio)');
+  if (tipo === 'pacote') {
+    por('inclusos', rv?.inclusos, DA_VENDA);
+    if (itens.length) por('inclusos', itens.map(linhaDoItem).filter(Boolean).join('\n'), deFicha);
+  }
+  por('tipo_pacote', d.tipo_pacote, 'Bitrix (negócio)');
+  if (tipo === 'pacote') por('tipo_pacote', 'Personalizado', 'padrão');
+  por('ida', rv?.ida, DA_VENDA);
+  por('ida', dataBr(ficha?.data_ida || proposta?.data_ida), deFicha);
+  por('ida', d.ida, 'Bitrix (negócio)');
+  por('volta', rv?.volta, DA_VENDA);
+  por('volta', dataBr(ficha?.data_volta || proposta?.data_volta), deFicha);
+  por('volta', d.volta, 'Bitrix (negócio)');
+  por('passagem', rv?.passagem, DA_VENDA);
+  por('seguro', rv?.seguro, DA_VENDA);
+  const tiposItens = new Set(itens.map((i) => i.tipo));
+  if (itens.length) {
+    por('passagem', tiposItens.has('aereo') ? 'Inclusa' : '', deFicha);
+    por('seguro', tiposItens.has('seguro') ? 'Incluso' : '', deFicha);
+  }
+  por('passagem', d.passagem, 'Bitrix (negócio)');
+  por('seguro', d.seguro, 'Bitrix (negócio)');
+  if (itens.length) por('passagem', 'Não inclusa', deFicha);
+  por('valor_total', rv?.valor > 0 ? formatarValor(rv.valor) : '', DA_VENDA);
+  por('valor_total', ficha?.valor_total ? formatarValor(Number(ficha.valor_total)) : '', 'venda consolidada');
+  por('valor_total', proposta?.total ? formatarValor(Number(proposta.total)) : '', 'proposta aprovada');
+  por('valor_total', d.valor_total ? formatarValor(d.valor_total) : '', 'Bitrix (negócio)');
+  por('valor_total', negocio.valor_previsto ? formatarValor(Number(negocio.valor_previsto)) : '', 'valor previsto do cartão');
+  por('forma_pagamento', rv?.forma_pagamento, DA_VENDA);
+  por('forma_pagamento', textoDoPlano(ficha?.plano), 'venda consolidada');
+  por('forma_pagamento', d.forma_pagamento, 'Bitrix (negócio)');
+  if (tipo === 'expedicao') por('roteiro', rv?.roteiro, 'roteiro da expedição');
+  por('vendedor', f.closerNome, 'closer do cartão');
+  por('vendedor', d.vendedor, 'Bitrix (negócio)');
+  por('data_venda', f.hoje || hojeBr(), 'hoje');
+
+  for (const k of CAMPOS) if (campos[k] == null) campos[k] = '';
+  return { campos, origem };
+}
+
+// ── Leitura do banco (o que camposDasFontes recebe) ─────────────────────────
+const COLS_CLIENTE_BASE = 'id,nome,cpf,nascimento,email,telefone,mesclado_em_id,endereco_cep,endereco_rua,endereco_numero,endereco_complemento,endereco_bairro,endereco_cidade,endereco_estado';
+// rg chega com a 0339; até ela ser aplicada o select sem rg segue funcionando.
+let temColunaRg = null;
+async function lerClientes(filtro) {
+  if (temColunaRg !== false) {
+    try {
+      const r = await rest(`rel_clientes?select=${COLS_CLIENTE_BASE},rg&${filtro}`);
+      temColunaRg = true;
+      return r || [];
+    } catch (e) {
+      if (!/\brg\b/.test(String(e?.message || ''))) throw e;   // 'column rel_clientes.rg does not exist'
+      temColunaRg = false;
+    }
+  }
+  return (await rest(`rel_clientes?select=${COLS_CLIENTE_BASE}&${filtro}`)) || [];
+}
+
+/**
+ * A ficha da pessoa no cadastro único. Primeiro pelos vínculos (venda → lead
+ * → viagem do Rel), seguindo a mescla; só depois por telefone/e-mail.
+ * `por`: 'vinculo' | 'contato' (o write-back só sobrescreve quem veio por vínculo).
+ */
+export async function acharCliente(negocio, lead, venda) {
+  const ids = [venda?.cliente_id, lead?.cliente_id];
+  if (negocio?.viagem_id) {
+    const v = (await rest(`rel_viagens?select=cliente_id&id=eq.${negocio.viagem_id}&limit=1`).catch(() => null))?.[0];
+    ids.push(v?.cliente_id);
+  }
+  for (const id0 of unicos(ids).filter((x) => UUID.test(String(x)))) {
+    let id = id0;
+    for (let salto = 0; salto < 3; salto++) {
+      const c = (await lerClientes(`id=eq.${id}&limit=1`).catch(() => []))?.[0];
+      if (!c) break;
+      if (c.mesclado_em_id && UUID.test(c.mesclado_em_id)) { id = c.mesclado_em_id; continue; }
+      return { cliente: c, por: 'vinculo' };
+    }
+  }
+  let fone = soDigitos(lead?.phone);
+  if (fone.length === 10 || fone.length === 11) fone = `55${fone}`;
+  const filtros = [];
+  if (fone) filtros.push(`telefone.eq.${fone}`);
+  if (lead?.email) filtros.push(`email.eq.${encodeURIComponent(String(lead.email).trim().toLowerCase())}`);
+  if (!filtros.length) return { cliente: null, por: null };
+  const c = (await lerClientes(`mesclado_em_id=is.null&arquivado_em=is.null&or=(${filtros.join(',')})&order=criado_em.asc&limit=1`).catch(() => []))?.[0] || null;
+  return { cliente: c, por: c ? 'contato' : null };
+}
+
+/** A venda registrada do cartão: cabeçalho, itens vivos, expedições, roteiro e passageiros. */
+export async function carregarVenda(negocio) {
+  const venda = (await rest(`qs_vendas?select=id,cliente_id,valor_total,pagamento,condicao_especial,condicao_obs,observacoes&negocio_id=eq.${negocio.id}&limit=1`).catch(() => null))?.[0] || null;
+  const filtro = venda ? `or=(venda_id.eq.${venda.id},negocio_id.eq.${negocio.id})` : `negocio_id=eq.${negocio.id}`;
+  const itens = ((await rest(`qs_venda_itens?select=id,tipo,nome,data_inicio,data_fim,dados,passageiros,valor,status,ordem&${filtro}&order=ordem.asc`).catch(() => null)) || [])
+    .filter((i) => i.status !== 'cancelado');
+  if (!venda && !itens.length) return null;
+  const expIds = unicos(itens.filter((i) => i.tipo === 'expedicao').map((i) => i.dados?.expedicao_id)).filter((x) => UUID.test(String(x)));
+  const [expedicoes, roteiro, passageiros] = await Promise.all([
+    expIds.length ? rest(`expedicoes?select=id,codigo,nome,destino,data_embarque,data_retorno,preco_venda_brl,preco_sem_aereo_brl&id=in.(${expIds.join(',')})`).catch(() => []) : [],
+    expIds.length ? rest(`roteiro_dias?select=expedicao_id,dia,data,titulo,descricao,cidade,ordem&expedicao_id=in.(${expIds.join(',')})&extensao_id=is.null&order=ordem.asc,dia.asc`).catch(() => []) : [],
+    venda ? rest(`passageiros?select=id,cliente_id,venda_item_id,expedicao_id,nome_completo,cpf,email,telefone,data_nascimento,valor_contratado_brl,aereo_incluso,status_reserva&venda_id=eq.${venda.id}&order=created_at.asc`).catch(() => []) : [],
+  ]);
+  return { venda, itens, expedicoes: expedicoes || [], roteiro: roteiro || [], passageiros: passageiros || [] };
+}
+
+export async function montarPrevia(negocio) {
+  const lead = (await rest(`qs_leads?select=id,full_name,first_name,last_name,email,phone,bitrix_id,cliente_id&id=eq.${negocio.lead_id}&limit=1`))?.[0] || {};
   const dealId = soDigitos(lead.bitrix_id);
   const ficha = negocio.ficha || null;
 
-  // A correção do closer no último envio (só dados da pessoa).
-  const ultimo = (await rest(`qs_contratos?select=campos&negocio_id=eq.${negocio.id}&order=criado_em.desc&limit=1`).catch(() => null))?.[0];
-  if (ultimo?.campos) for (const k of DA_PESSOA) por(k, ultimo.campos[k], 'último envio');
+  const ultimo = (await rest(`qs_contratos?select=campos&negocio_id=eq.${negocio.id}&order=criado_em.desc&limit=1`).catch(() => null))?.[0]?.campos || null;
+  const venda = await carregarVenda(negocio).catch(() => null);
+  const { cliente } = await acharCliente(negocio, lead, venda?.venda);
 
-  // Ficha do cliente no Relacionamento.
-  let cliente = null;
-  if (negocio.viagem_id) {
-    const v = (await rest(`rel_viagens?select=cliente_id&id=eq.${negocio.viagem_id}&limit=1`).catch(() => null))?.[0];
-    if (v?.cliente_id) cliente = (await rest(`rel_clientes?select=nome,cpf,nascimento,email,telefone&id=eq.${v.cliente_id}&limit=1`).catch(() => null))?.[0];
-  }
-  if (!cliente) {
-    let fone = soDigitos(lead.phone);
-    if (fone.length === 10 || fone.length === 11) fone = `55${fone}`;
-    const filtros = [];
-    if (fone) filtros.push(`telefone.eq.${fone}`);
-    if (lead.email) filtros.push(`email.eq.${encodeURIComponent(String(lead.email).trim().toLowerCase())}`);
-    if (filtros.length) {
-      cliente = (await rest(`rel_clientes?select=nome,cpf,nascimento,email,telefone&mesclado_em_id=is.null&arquivado_em=is.null&or=(${filtros.join(',')})&order=criado_em.asc&limit=1`).catch(() => null))?.[0] || null;
-    }
-  }
-
-  // Proposta aprovada (quando não tem ficha).
+  // Proposta aprovada (só quando não há venda registrada nem ficha).
   let proposta = null;
-  if (!ficha) {
+  if (!ficha && !venda?.itens?.length) {
     const sols = await rest(`qs_solicitacoes?select=id&lead_id=eq.${negocio.lead_id}`).catch(() => []);
     const ors = [`lead_id.eq.${negocio.lead_id}`];
     if (sols?.length) ors.push(`solicitacao_id.in.(${sols.map((s) => s.id).join(',')})`);
@@ -317,83 +691,162 @@ export async function montarPrevia(negocio) {
   let avisoBitrix = null;
   try { bxd = await dadosDoBitrix(dealId); } catch (e) { avisoBitrix = `Bitrix não respondeu (${e.message}).`; }
   if (dealId && !bxd && !avisoBitrix) avisoBitrix = `Não consegui ler o negócio ${dealId} no Bitrix.`;
-  const d = bxd?.deal || {};
-  const ct = bxd?.contato || {};
 
-  // ── Tipo: expedição × pacote ──
-  const tipo = ficha?.servico === 'expedicao' || d.expedicao ? 'expedicao' : 'pacote';
-  campos.tipo = tipo;
-  origem.tipo = ficha?.servico ? 'venda consolidada' : d.expedicao ? 'Bitrix' : 'padrão';
+  let closerNome = '';
+  if (negocio.closer_id) closerNome = (await rest(`qs_users?select=name&id=eq.${negocio.closer_id}&limit=1`).catch(() => null))?.[0]?.name || '';
 
-  // ── Pessoa ──
-  por('nome', d.nome && d.nome !== '.' ? d.nome : '', 'Bitrix (negócio)');
-  por('nome', juntarNome(ct.primeiro, ct.sobrenome), 'Bitrix (contato)');
-  por('nome', cliente?.nome, 'ficha do cliente');
-  por('nome', lead.full_name || juntarNome(lead.first_name, lead.last_name), 'lead');
-  por('cpf', cliente?.cpf, 'ficha do cliente');
-  por('cpf', d.cpf, 'Bitrix (negócio)');
-  por('cpf', ct.cpf2, 'Bitrix (contato)');
-  por('cpf', ct.cpf, 'Bitrix (contato)');
-  por('rg', ct.rg, 'Bitrix (contato)');
-  por('nascimento', dataBr(cliente?.nascimento), 'ficha do cliente');
-  por('nascimento', d.nascimento, 'Bitrix (negócio)');
-  por('nascimento', ct.nascimento, 'Bitrix (contato)');
-  por('endereco', d.endereco, 'Bitrix (negócio)');
-  por('endereco', ct.endereco, 'Bitrix (contato)');
-  por('email', d.email, 'Bitrix (negócio)');
-  por('email', cliente?.email, 'ficha do cliente');
-  por('email', lead.email, 'lead');
-  por('email', ct.email, 'Bitrix (contato)');
-  por('email', d.email2, 'Bitrix (negócio)');
-  por('telefone', formatarTelefone(lead.phone), 'lead');
-  por('telefone', formatarTelefone(cliente?.telefone), 'ficha do cliente');
-  por('telefone', formatarTelefone(ct.telefone), 'Bitrix (contato)');
+  const { campos, origem } = camposDasFontes({ negocio, lead, ultimo, cliente, venda, proposta, bitrix: bxd, closerNome });
+  const viajantes = viajantesDaVenda(venda).map((v) => ({ nome: v.nome, valor: v.valor, aereo_incluso: v.aereo_incluso }));
+  return { campos, origem, dealId: dealId || null, avisoBitrix, clienteId: cliente?.id || null, viajantes };
+}
 
-  // ── Venda: o QS manda (ficha → proposta → Bitrix) ──
-  if (tipo === 'expedicao') {
-    por('expedicao', d.expedicao, 'Bitrix (negócio)');
-    por('expedicao', ficha?.destino, 'venda consolidada');
-  }
-  const itens = ficha?.itens?.length ? ficha.itens : proposta?.itens || [];
-  const destinoBase = ficha?.destino || proposta?.destino || '';
-  if (destinoBase) por('destino', destinoBase, ficha ? 'venda consolidada' : 'proposta aprovada');
-  por('destino', d.destino, 'Bitrix (negócio)');
-  // Cláusula 1.3 do pacote: um item por linha, "Rótulo: descrição".
-  const linhaDoItem = (i) => {
-    const desc = String(i.descricao || '').replace(/\s+/g, ' ').trim().slice(0, 400);
-    const rot = String(i.nome || ROTULO_ITEM[i.tipo] || i.tipo || '').trim();
-    return rot && desc ? `${rot}: ${desc}` : rot || desc;
+// ── FASE 3 (base): o contrato de UMA pessoa da venda ────────────────────────
+/** Idade em anos completos na data de referência (dd/mm/aaaa ou ISO). null = não sei. */
+export function idadeEm(nascimento, referencia) {
+  const n = dataDe(dataBr(isoDe(nascimento) || nascimento));
+  const r = dataDe(dataBr(isoDe(referencia) || referencia)) || dataDe(hojeBr());
+  if (!n || !r) return null;
+  let anos = r.getUTCFullYear() - n.getUTCFullYear();
+  if (r.getUTCMonth() < n.getUTCMonth() || (r.getUTCMonth() === n.getUTCMonth() && r.getUTCDate() < n.getUTCDate())) anos -= 1;
+  return anos;
+}
+
+/**
+ * Os campos do contrato de UM viajante (decisão do Bruno, 09/11): no contrato
+ * de cada um sai o VALOR DAQUELA PESSOA; menor de idade é assinado pelo pai/mãe
+ * (contratante = responsável) e o menor aparece como VIAJANTE no quadro.
+ *   base        = { campos, origem } de montarPrevia/camposDasFontes (a venda toda)
+ *   viajante    = item de viajantesDaVenda + dados do cadastro (rg, endereco…)
+ *   responsavel = a pessoa que assina pelo menor (mesmo formato)
+ * Não liga em nada (ZapSign/banco): é a base da fase 3.
+ */
+export function montarPreviaDaPessoa(base, viajante, { responsavel = null, totalDaVenda = null, nViajantes = null } = {}) {
+  const campos = { ...(base?.campos || {}) };
+  const origem = { ...(base?.origem || {}) };
+  const avisos = [];
+  const v = viajante || {};
+  const idade = idadeEm(v.nascimento, campos.data_venda);
+  const menor = idade != null && idade < 18;
+  const quemAssina = menor ? responsavel : v;
+  if (menor && !responsavel) avisos.push(`${v.nome || 'O viajante'} é menor de idade: falta o responsável (pai/mãe) que assina.`);
+  if (idade == null) avisos.push(`Sem data de nascimento de ${v.nome || 'viajante'}: não dá pra saber se é menor.`);
+
+  const fmt = {
+    nome: (x) => String(x || '').replace(/\s+/g, ' ').trim(),
+    cpf: (x) => (cpfValido(x) ? formatarCpf(x) : String(x || '').trim()),
+    rg: (x) => String(x || '').trim(),
+    nascimento: (x) => dataBr(isoDe(x) || x),
+    endereco: (x) => String(x || '').trim(),
+    email: (x) => String(x || '').trim().toLowerCase(),
+    telefone: (x) => (x ? formatarTelefone(x) : ''),
   };
-  if (tipo === 'pacote' && itens.length) por('inclusos', itens.map(linhaDoItem).filter(Boolean).join('\n'), ficha ? 'venda consolidada' : 'proposta aprovada');
-  por('tipo_pacote', d.tipo_pacote, 'Bitrix (negócio)');
-  if (tipo === 'pacote') por('tipo_pacote', 'Personalizado', 'padrão');
-  por('ida', dataBr(ficha?.data_ida || proposta?.data_ida), ficha ? 'venda consolidada' : 'proposta aprovada');
-  por('ida', d.ida, 'Bitrix (negócio)');
-  por('volta', dataBr(ficha?.data_volta || proposta?.data_volta), ficha ? 'venda consolidada' : 'proposta aprovada');
-  por('volta', d.volta, 'Bitrix (negócio)');
-  const tiposItens = new Set(itens.map((i) => i.tipo));
-  if (itens.length) {
-    por('passagem', tiposItens.has('aereo') ? 'Inclusa' : '', ficha ? 'venda consolidada' : 'proposta aprovada');
-    por('seguro', tiposItens.has('seguro') ? 'Incluso' : '', ficha ? 'venda consolidada' : 'proposta aprovada');
+  // Os dados da pessoa vêm SÓ de quem assina (nada da base, que é o comprador).
+  for (const k of DA_PESSOA) {
+    const val = quemAssina ? fmt[k](quemAssina[k] ?? (k === 'endereco' ? enderecoDoCliente(quemAssina) : '')) : '';
+    campos[k] = val;
+    origem[k] = val ? (menor ? 'responsável pelo menor' : 'viajante') : '';
   }
-  por('passagem', d.passagem, 'Bitrix (negócio)');
-  por('seguro', d.seguro, 'Bitrix (negócio)');
-  if (itens.length) por('passagem', 'Não inclusa', ficha ? 'venda consolidada' : 'proposta aprovada');
-  por('valor_total', ficha?.valor_total ? formatarValor(Number(ficha.valor_total)) : '', 'venda consolidada');
-  por('valor_total', proposta?.total ? formatarValor(Number(proposta.total)) : '', 'proposta aprovada');
-  por('valor_total', d.valor_total ? formatarValor(d.valor_total) : '', 'Bitrix (negócio)');
-  por('valor_total', negocio.valor_previsto ? formatarValor(Number(negocio.valor_previsto)) : '', 'valor previsto do cartão');
-  por('forma_pagamento', textoDoPlano(ficha?.plano), 'venda consolidada');
-  por('forma_pagamento', d.forma_pagamento, 'Bitrix (negócio)');
-  if (negocio.closer_id) {
-    const c = (await rest(`qs_users?select=name&id=eq.${negocio.closer_id}&limit=1`).catch(() => null))?.[0];
-    por('vendedor', c?.name, 'closer do cartão');
-  }
-  por('vendedor', d.vendedor, 'Bitrix (negócio)');
-  por('data_venda', hojeBr(), 'hoje');
+  campos.viajante = menor
+    ? [fmt.nome(v.nome), fmt.nascimento(v.nascimento) ? `nascido(a) em ${fmt.nascimento(v.nascimento)}` : '', cpfValido(v.cpf) ? `CPF ${formatarCpf(v.cpf)}` : '', 'menor de idade, representado(a) pelo(a) CONTRATANTE']
+      .filter(Boolean).join(', ')
+    : '';
+  if (menor) origem.viajante = 'viajante menor de idade';
 
-  for (const k of CAMPOS) if (campos[k] == null) campos[k] = '';
-  return { campos, origem, dealId: dealId || null, avisoBitrix };
+  if (v.valor != null && num(v.valor) > 0) {
+    campos.valor_total = formatarValor(num(v.valor));
+    origem.valor_total = 'valor do viajante';
+    const total = num(totalDaVenda);
+    if (total > 0 && Math.abs(total - num(v.valor)) >= 0.01 && campos.forma_pagamento) {
+      campos.forma_pagamento = `${campos.forma_pagamento.replace(/\.$/, '')}. Condições da venda total de ${brl(total)}${nViajantes > 1 ? ` (${nViajantes} viajantes)` : ''}.`;
+    }
+  } else {
+    avisos.push(`Sem valor contratado de ${v.nome || 'viajante'}: ficou o valor da venda toda.`);
+  }
+  if (v.aereo_incluso === true || v.aereo_incluso === false) {
+    campos.passagem = v.aereo_incluso ? 'Inclusa' : 'Não inclusa';
+    origem.passagem = 'viajante';
+  }
+  return { campos, origem, avisos, menor, idade };
+}
+
+// ── WRITE-BACK: o que o closer corrigiu no contrato volta pro cadastro ─────
+const EMAIL_OK = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+/**
+ * O que gravar em rel_clientes (puro). Completa o que está VAZIO; sobrescreve
+ * só o que o closer EDITOU de verdade: o valor enviado é diferente do que a
+ * prévia sugeriu (ou a prévia trouxe do "último envio", que já era correção dele).
+ * Sem `previa` = só completa vazios. `podeSobrescrever` = false quando a ficha
+ * foi achada só por telefone/e-mail (pode não ser a mesma pessoa).
+ */
+export function correcoesDoCliente(cliente, c, previa = null, { podeSobrescrever = true, avisos = null } = {}) {
+  if (!cliente?.id || !c) return {};
+  const orig = previa?.campos || {};
+  const origem = previa?.origem || {};
+  const editou = (k, novo, norm) => Boolean(previa) && podeSobrescrever && (novo !== norm(orig[k]) || origem[k] === 'último envio');
+  const patch = {};
+  const decidir = (k, coluna, novo, atual, norm) => {
+    if (!novo) return;
+    if (!atual) { patch[coluna] = novo; return; }
+    if (novo !== atual && editou(k, novo, norm)) patch[coluna] = novo;
+  };
+  const cpfN = (x) => soDigitos(x);
+  if (cpfValido(c.cpf)) decidir('cpf', 'cpf', cpfN(c.cpf), cpfN(cliente.cpf), cpfN);
+  const nascN = (x) => { const dd = dataDe(dataBr(isoDe(x) || x)); return dd ? dd.toISOString().slice(0, 10) : ''; };
+  decidir('nascimento', 'nascimento', nascN(c.nascimento), nascN(cliente.nascimento), nascN);
+  const mailN = (x) => { const s = String(x || '').trim().toLowerCase(); return EMAIL_OK.test(s) ? s : ''; };
+  decidir('email', 'email', mailN(c.email), mailN(cliente.email), mailN);
+  if ('rg' in cliente) {
+    const rgN = (x) => String(x || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+    decidir('rg', 'rg', rgN(c.rg), rgN(cliente.rg), rgN);
+  }
+  const endN = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+  const endNovo = endN(c.endereco);
+  const endAtual = endN(enderecoDoCliente(cliente));
+  // Endereço ESTRUTURADO no cadastro (número/bairro/cidade/UF/CEP…) nunca é
+  // trocado pelo texto livre do contrato — só avisa quando o closer mudou algo.
+  // Cadastro vazio (ou só com a rua) → quebra conservadora (enderecoParaColunas).
+  const querGravar = endNovo && (!endAtual || (endNovo !== endAtual && editou('endereco', endNovo, endN)));
+  if (querGravar && temEnderecoEstruturado(cliente)) { if (Array.isArray(avisos)) avisos.push(AVISO_ENDERECO); }
+  else if (querGravar) Object.assign(patch, enderecoParaColunas(endNovo));
+  return patch;
+}
+
+/**
+ * Grava no cadastro único (service role) o que o closer corrigiu — chamado no
+ * envio e no "Gerar o PDF" do cartão. Nunca derruba o contrato: erro vira aviso.
+ * CPF já usado por OUTRA ficha (índice único) → grava o resto e avisa.
+ */
+export async function gravarNoCadastro({ negocio, campos, previa = null, userId = null }) {
+  try {
+    const lead = (await rest(`qs_leads?select=email,phone,cliente_id&id=eq.${negocio.lead_id}&limit=1`).catch(() => null))?.[0] || {};
+    const venda = (await rest(`qs_vendas?select=cliente_id&negocio_id=eq.${negocio.id}&limit=1`).catch(() => null))?.[0] || null;
+    const { cliente, por } = await acharCliente(negocio, lead, venda);
+    if (!cliente) return { clienteId: null, gravados: [], aviso: 'Não achei a ficha do cliente no cadastro — nada foi gravado.' };
+    const avisos = [];
+    let patch = correcoesDoCliente(cliente, campos, previa, { podeSobrescrever: por === 'vinculo', avisos });
+    if (!Object.keys(patch).length) return { clienteId: cliente.id, gravados: [], aviso: avisos.join(' ') || null };
+    const gravar = (p) => rest(`rel_clientes?id=eq.${cliente.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { ...p, ...(userId ? { atualizado_por: userId } : {}) } });
+    let aviso = avisos.join(' ') || null;
+    try {
+      await gravar(patch);
+    } catch (e) {
+      const msg = String(e?.message || '');
+      if (patch.cpf && (e?.status === 409 || /rel_clientes_cpf_uq|duplicate/i.test(msg))) {
+        const { cpf, ...resto } = patch;
+        aviso = [aviso, `O CPF ${formatarCpf(cpf)} já está em outra ficha do cadastro — não gravei o CPF (vale juntar as fichas no Relacionamento).`].filter(Boolean).join(' ');
+        patch = resto;
+        if (Object.keys(patch).length) await gravar(patch);
+      } else if (patch.rg && /\brg\b/.test(msg)) {
+        const { rg, ...resto } = patch;
+        patch = resto;
+        if (Object.keys(patch).length) await gravar(patch);
+      } else throw e;
+    }
+    return { clienteId: cliente.id, gravados: Object.keys(patch).map((k) => (k.startsWith('endereco_') ? 'endereco' : k)).filter((k, i, a) => a.indexOf(k) === i), aviso };
+  } catch (e) {
+    console.warn('[contrato] cadastro não atualizado', negocio?.id, e?.message);
+    return { clienteId: null, gravados: [], aviso: `Não consegui atualizar o cadastro do cliente (${String(e?.message || 'erro').slice(0, 120)}).` };
+  }
 }
 
 // ── Validação (a mesma regra no front) ─────────────────────────────────────
@@ -408,7 +861,7 @@ export function normalizarCampos(entrada) {
   if (c.telefone) c.telefone = formatarTelefone(c.telefone);
   if (numeroDoValor(c.valor_total) > 0) c.valor_total = formatarValor(c.valor_total);
   for (const k of ['nascimento', 'ida', 'volta', 'data_venda']) c[k] = dataBr(c[k]);
-  for (const k of ['nome', 'expedicao', 'tipo_pacote']) c[k] = c[k].replace(/\s+/g, ' ');
+  for (const k of ['nome', 'rg', 'viajante', 'expedicao', 'tipo_pacote']) c[k] = c[k].replace(/\s+/g, ' ');
   return c;
 }
 
@@ -438,6 +891,7 @@ export function validarCampos(c) {
   if (c.tipo === 'pacote' && !c.nascimento) avisos.push('Data de nascimento vazia — sai "-" no contrato.');
   if (c.nascimento && !dataDe(c.nascimento)) avisos.push('Data de nascimento fora do padrão dd/mm/aaaa.');
   if (c.tipo === 'expedicao' && (!c.passagem || !c.seguro)) avisos.push('Passagem aérea ou seguro vazio — sai "-" no quadro resumo.');
+  if (c.tipo === 'expedicao' && !c.roteiro) avisos.push('Sem roteiro: o contrato sai sem o Anexo I (a cláusula 1.1 cita só o roteiro apresentado).');
   return { erros, avisos };
 }
 

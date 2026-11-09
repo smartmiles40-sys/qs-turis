@@ -43,8 +43,9 @@
 //   POST { acao: 'contrato-config-salvar', valor } → (gestão) assinante da agência
 //   POST { acao: 'zapsign-testar' }                → (gestão) confere o ZAPSIGN_API_TOKEN
 //   POST { acao: 'contrato-previa', negocioId }    → campos sugeridos + de onde vieram
-//   POST { acao: 'contrato-pdf-teste', campos }    → o PDF como vai sair (base64), sem enviar
-//   POST { acao: 'contrato-enviar', negocioId, campos, substituir? }
+//   POST { acao: 'contrato-pdf-teste', campos, negocioId?, previa? } → o PDF como vai sair (base64), sem enviar
+//   POST { acao: 'contrato-enviar', negocioId, campos, substituir?, previa? }
+//        (com o cartão, o que o closer corrigiu da pessoa volta pro rel_clientes — gravarNoCadastro)
 //        → gera o PDF no QS, guarda no Storage, cria no ZapSign, grava o envio
 //   POST { acao: 'contrato-pdf-link', contratoId, qual } → link de 10 min do PDF (gerado|assinado)
 //   POST { acao: 'contrato-atualizar', contratoId }→ relê o documento no ZapSign
@@ -61,7 +62,7 @@ import {
   CAMPO_TIPO_VENDA, ETAPAS_DE_VENDA, FUNIL_COMERCIAL, FUNIL_PRE_VENDAS, NOME_ETAPA, emPreVenda, etapaParaColuna, planejarEspelho,
 } from './_closerBitrixPlano.js';
 import {
-  apagarNoZapsign, arquivarAssinado, criarNoZapsign, gerarPdf, guardarPdf, hashDoCorpo, lerConfig, lerNoZapsign,
+  apagarNoZapsign, arquivarAssinado, criarNoZapsign, gerarPdf, gravarNoCadastro, guardarPdf, hashDoCorpo, lerConfig, lerNoZapsign,
   linkDoPdf, montarPrevia, nomesDoArquivo, normalizarCampos, oQueFalta, statusDoDocumento, testarZapsign, urlDoApp,
   validarCampos,
 } from './_contrato.js';
@@ -383,6 +384,13 @@ async function contratoAtivo(negocioId) {
   return (await rest(`qs_contratos?select=id,status,modo,zapsign_token&negocio_id=eq.${negocioId}&status=in.(enviado,visualizado,assinado)&order=criado_em.desc&limit=1`).catch(() => null))?.[0] || null;
 }
 
+/** A prévia que a tela recebeu ({campos, origem}): diz o que o closer EDITOU (write-back). */
+function previaDoCorpo(body) {
+  const p = body?.previa;
+  if (!p || typeof p !== 'object' || !p.campos || typeof p.campos !== 'object') return null;
+  return { campos: p.campos, origem: p.origem && typeof p.origem === 'object' ? p.origem : {} };
+}
+
 async function enviarContrato(u, body) {
   const id = String(body.negocioId || '');
   if (!UUID_RE.test(id)) return { status: 400, body: { error: 'Cartão inválido.' } };
@@ -408,6 +416,10 @@ async function enviarContrato(u, body) {
   await rest(`qs_contratos?negocio_id=eq.${n.id}&status=eq.gerando&criado_em=lt.${tresMin}`, {
     method: 'PATCH', prefer: 'return=minimal', body: { status: 'erro', erro: 'Tempo esgotado ao gerar.' },
   }).catch(() => null);
+
+  // O que o closer corrigiu (CPF, nascimento, RG, endereço, e-mail) volta pro
+  // cadastro único — antes de gerar, pra valer mesmo se o ZapSign falhar.
+  const cadastro = await gravarNoCadastro({ negocio: n, campos: c, previa: previaDoCorpo(body), userId: u.id });
 
   const lead = (await rest(`qs_leads?select=bitrix_id&id=eq.${n.lead_id}&limit=1`))?.[0];
   const dealId = String(lead?.bitrix_id || '').replace(/\D/g, '') || null;
@@ -444,7 +456,7 @@ async function enviarContrato(u, body) {
     const msg = String(e?.message || 'Falhou.').slice(0, 900);
     console.error('[closer] contrato', n.id, msg);
     await registrarStatus(linha.id, 'erro', { erro: msg }, u.id).catch(() => null);
-    return { status: 200, body: { ok: false, erro: msg } };
+    return { status: 200, body: { ok: false, erro: msg, cadastro } };
   }
 
   // O envio anterior (se o closer confirmou substituir) é cancelado — lá no ZapSign também.
@@ -454,7 +466,7 @@ async function enviarContrato(u, body) {
   }
   if (dealId) await comentarNoNegocio(dealId, `📄 Contrato de ${c.tipo === 'expedicao' ? 'expedição' : 'pacote'} enviado pelo QS (ZapSign) para ${c.email}.`).catch(() => null);
   const final = (await rest(`qs_contratos?select=id,link_assinatura&id=eq.${linha.id}&limit=1`))?.[0];
-  return { status: 200, body: { ok: true, contratoId: linha.id, link: final?.link_assinatura || null } };
+  return { status: 200, body: { ok: true, contratoId: linha.id, link: final?.link_assinatura || null, cadastro } };
 }
 
 /** Lê o documento no ZapSign e aplica o status (webhook e botão "Atualizar"). */
@@ -580,7 +592,15 @@ async function acaoDeContrato(acao, req, u, body) {
   if (acao === 'contrato-pdf-teste') {
     const c = normalizarCampos(body.campos);
     const pdf = await gerarPdf(c);
-    return { status: 200, body: { ok: true, base64: pdf.toString('base64'), campos: c, ...validarCampos(c) } };
+    // Gerado a partir do cartão (no modo manual é ESTE o contrato que vai pro
+    // cliente): o que o closer corrigiu volta pro cadastro, se ele pode mexer no cartão.
+    let cadastro = null;
+    const negId = String(body.negocioId || '');
+    if (UUID_RE.test(negId)) {
+      const n = await carregarNegocio(negId);
+      if (n && podeMexer(u, n)) cadastro = await gravarNoCadastro({ negocio: n, campos: c, previa: previaDoCorpo(body), userId: u.id });
+    }
+    return { status: 200, body: { ok: true, base64: pdf.toString('base64'), campos: c, cadastro, ...validarCampos(c) } };
   }
 
   if (acao === 'contrato-pdf-link') {

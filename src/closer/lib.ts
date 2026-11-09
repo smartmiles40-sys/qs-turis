@@ -343,11 +343,24 @@ export const dataBr = (iso: string | null | undefined) =>
 export const dataHoraBr = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 export const hojeISO = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-/** Soma N meses a uma data YYYY-MM-DD (dia 31 vira o último dia do mês). */
-export function somarMeses(iso: string, n: number): string {
-  const [a, m, d] = iso.split("-").map(Number);
-  const alvo = new Date(Date.UTC(a, m - 1 + n, 1));
-  const ultimo = new Date(Date.UTC(alvo.getUTCFullYear(), alvo.getUTCMonth() + 1, 0)).getUTCDate();
-  alvo.setUTCDate(Math.min(d, ultimo));
-  return alvo.toISOString().slice(0, 10);
+/** Soma N meses a uma data YYYY-MM-DD (0338: mora no planoDaVenda, lógica pura testada). */
+export { somarMeses } from "./planoDaVenda";
+
+// ── A venda registrada (0214/0338): a fonte do valor e do pagamento ─────────
+export interface VendaDoCartao {
+  id: string;
+  valor_total: number | null;
+  pagamento: import("./planoDaVenda").PagamentoDaVenda | null;
+  condicao_especial: boolean;
+  condicao_obs: string | null;
+  revisado_em: string | null;
+  revisao_obs: string | null;
+}
+/** O cabeçalho da venda do cartão (null = ainda não registrou pela tela de venda). */
+export async function vendaDoCartao(negocioId: string): Promise<VendaDoCartao | null> {
+  const { data, error } = await supabase.from("qs_vendas")
+    .select("id, valor_total, pagamento, condicao_especial, condicao_obs, revisado_em, revisao_obs")
+    .eq("negocio_id", negocioId).maybeSingle();
+  if (error) return null; // banco sem a 0214/0329: a ficha segue no modo antigo
+  return (data as VendaDoCartao | null) ?? null;
 }

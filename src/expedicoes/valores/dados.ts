@@ -31,7 +31,9 @@ export const TOM_STATUS: Record<StatusFin, "ok" | "aviso" | "erro" | "neutro"> =
 
 export type PaxValor = Pick<PassageiroRow,
   "id" | "nome_completo" | "tipo" | "status_reserva" | "cpf" | "cliente_id" | "valor_contratado_brl" | "valor_pago_brl" | "saldo_brl" | "status_financeiro"
-  | "condicao_pagamento" | "condicao_obs" | "valor_atualizado_em" | "valor_atualizado_por_nome" | "created_at">;
+  | "condicao_pagamento" | "condicao_obs" | "valor_atualizado_em" | "valor_atualizado_por_nome" | "created_at">
+  // 0214: passageiro que veio de uma venda do QS (o valor dele volta pra venda — 0338).
+  & { venda_id?: string | null };
 
 export type PlanoFin = {
   passageiro_id: string; plano_id: string; plano_total: number | null; recebido: number; a_receber: number;
@@ -43,7 +45,7 @@ export type Historico = {
 };
 
 const COLS_BASE = "id, nome_completo, tipo, status_reserva, cpf, cliente_id, valor_contratado_brl, valor_pago_brl, saldo_brl, status_financeiro, created_at";
-const COLS_0220 = ", condicao_pagamento, condicao_obs, valor_atualizado_em, valor_atualizado_por_nome";
+const COLS_0220 = ", condicao_pagamento, condicao_obs, valor_atualizado_em, valor_atualizado_por_nome, venda_id";
 
 /** Sem a 0220 aplicada as colunas novas não existem: lê as antigas e avisa. */
 export async function carregarValores(expId: string): Promise<{ pax: PaxValor[]; planos: Map<string, PlanoFin>; historico: Historico[]; migracao: boolean }> {

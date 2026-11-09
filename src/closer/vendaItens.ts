@@ -14,6 +14,7 @@ import {
   TIPOS, carregarProposta, novaChave, tipoVendaBitrix, totaisDaOpcao, type ItemProposta, type TipoItem, type Trecho,
 } from "@/propostas/lib";
 import { erroAmigavel, preVendaNoBitrix } from "./lib";
+import type { PaxJson } from "@/venda/vendaRegras";
 
 export type StatusItem = "vendido" | "emitido" | "cancelado";
 export interface ItemVenda {
@@ -25,7 +26,10 @@ export interface ItemVenda {
   data_inicio: string;
   data_fim: string;
   dados: Record<string, string>;
-  passageiros: { cliente_id?: string | null; nome: string }[];
+  /** Quem viaja. Na expedição o json guarda também valor, aéreo, quarto, CPF, nascimento,
+   *  e-mail e vínculo de cada um (src/venda/vendaRegras.ts › viajantesParaJson), pra
+   *  reabrir a venda sem perder nada. */
+  passageiros: PaxJson[];
   valor: number | null;
   custo: number | null;
   fornecedor: string;
@@ -61,7 +65,9 @@ export async function listarItensDaVenda(negocioId: string): Promise<ItemVenda[]
     id: r.id as string, k: r.id as string, tipo: r.tipo as TipoItem, nome: (r.nome as string) ?? "",
     data_inicio: (r.data_inicio as string) ?? "", data_fim: (r.data_fim as string) ?? "",
     dados: Object.fromEntries(Object.entries((r.dados as Record<string, unknown>) ?? {}).map(([k, v]) => [k, typeof v === "string" ? v : v == null ? "" : String(v)])),
-    passageiros: Array.isArray(r.passageiros) ? (r.passageiros as ItemVenda["passageiros"]) : [],
+    passageiros: Array.isArray(r.passageiros)
+      ? (r.passageiros as ItemVenda["passageiros"]).filter((p) => p && typeof p === "object").map((p) => ({ ...p, nome: p.nome ?? "" }))
+      : [],
     valor: numOuNulo(r.valor), custo: numOuNulo(r.custo), fornecedor: (r.fornecedor as string) ?? "",
     status: (r.status as StatusItem) ?? "vendido",
   }));

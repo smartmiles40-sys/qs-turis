@@ -43,10 +43,11 @@ import {
   salvarItensDaVenda, somaDosItens, type ItemVenda, type ResultadoPreVenda,
 } from "@/closer/vendaItens";
 import {
-  itemDoVoucher, lerValor, lerVoucher, listarExpedicoesParaVenda, montarPayload, mostrarValor, pagamentoVendaVazio,
-  pessoaVazia, subirVenda, viajanteNovo, type ExpedicaoVaga, type OrigemVenda, type PagamentoVenda, type PessoaVenda,
-  type Viajante,
+  fichaDoComprador, itemDoVoucher, lerValor, lerVoucher, listarExpedicoesParaVenda, montarPayload, mostrarValor,
+  pagamentoVendaVazio, passageirosDosItens, pessoaVazia, subirVenda, vendaDoNegocio, viajanteNovo,
+  type ExpedicaoVaga, type OrigemVenda, type PagamentoVenda, type PessoaVenda, type Viajante,
 } from "./api";
+import { completarPessoa, restaurarViajantes, viajantesParaJson, type AcompFicha } from "./vendaRegras";
 import DadosDaPessoaNaVenda from "./DadosDaPessoaNaVenda";
 import BlocoExpedicao from "./BlocoExpedicao";
 import CampoDoTipo from "./CampoDoTipo";
@@ -95,20 +96,26 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   // Proposta enviada ao cliente (0295): as já anexadas no cartão + as escolhidas agora
   const [propostasJa, setPropostasJa] = useState<PropostaAnexada[]>([]);
   const [propostasNovas, setPropostasNovas] = useState<File[]>([]);
+  // Campos de quem comprou que vieram da ficha única (só pra avisar "já veio preenchido").
+  const [daFicha, setDaFicha] = useState<string[]>([]);
 
   const ehCloser = origem === "closer" && !!negocio;
   const consolidada = !!negocio?.consolidada_em;
   const jaPreVenda = negocio ? emPreVenda(negocio) : false;
   const pessoaTravada = !ehCloser && !!cliente?.id;
 
-  // ── Abrir: closer traz o que já salvou (ou a proposta aprovada) ──
+  // ── Abrir: traz TUDO o que já foi digitado (Bruno 09/11: "digitar uma vez só") ──
+  //   • closer: itens salvos (ou a proposta aprovada) + a venda gravada (qs_vendas:
+  //     pagamento, condição especial, observações) — reabrir não zera nada;
+  //   • quem comprou: lead + ficha única (rel_clientes: CPF, nascimento…), só no vazio;
+  //   • viajantes da expedição: linhas de `passageiros` + json do item + acompanhantes da ficha.
   useEffect(() => {
     if (!aberto) return;
     let vivo = true;
     setCarregando(true); setErro(null); setInfo(null); setPasso(0);
     setPag(pagamentoVendaVazio()); setEspecial(false); setEspecialObs(""); setObs("");
     setAnalise(null); setErroAnalise(null);
-    setPropostasJa([]); setPropostasNovas([]);
+    setPropostasJa([]); setPropostasNovas([]); setDaFicha([]);
     if (ehCloser) listarPropostasDaVenda({ negocioId: negocio!.id }).then((l) => vivo && setPropostasJa(l)).catch(() => undefined);
     const base = pessoaVazia();
     if (negocio?.lead) Object.assign(base, { nome: nomeDoLead(negocio.lead), telefone: negocio.lead.phone ?? "", email: negocio.lead.email ?? "" });
@@ -116,17 +123,45 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     setPessoa(base);
     (async () => {
       let lista: ItemVenda[] = [];
+      const avisos: string[] = [];
+      const venda = ehCloser ? await vendaDoNegocio(negocio!.id).catch(() => null) : null;
       if (ehCloser) {
         lista = await listarItensDaVenda(negocio!.id);
         if (!lista.length) {
           const p = await itensDaPropostaAprovada(negocio!.lead_id).catch(() => null);
-          if (p) { lista = p.itens; if (vivo) setInfo({ tom: "ok", t: `Já trouxe os itens da ${p.origem}. Confira e ajuste o que mudou.` }); }
+          if (p) { lista = p.itens; avisos.push(`Já trouxe os itens da ${p.origem}. Confira e ajuste o que mudou.`); }
         }
       }
+      // Ficha única de quem comprou: a da venda gravada → a ligada ao lead → a do cliente aberto.
+      const ficha = await fichaDoComprador({ clienteId: venda?.cliente_id ?? cliente?.id ?? null, leadId: negocio?.lead_id ?? null });
+      const pessoaFinal = completarPessoa(base, ficha);
+      const veio = (["telefone", "email", "cpf", "nascimento"] as const)
+        .filter((k) => !String(base[k] ?? "").trim() && String(pessoaFinal[k] ?? "").trim());
+      // Viajantes: o mais completo que der pra ler.
+      const exps = lista.filter((i) => i.tipo === "expedicao");
+      const linhas = await passageirosDosItens(exps.map((i) => i.id).filter((x): x is string => !!x));
+      const acomps: AcompFicha[] = ficha?.acompanhantes ?? [];
+      let dividiu = false;
+      const vjs = Object.fromEntries(exps.map((i) => {
+        const r = restaurarViajantes({
+          item: i, linhas: i.id ? linhas[i.id] : [], compradorClienteId: venda?.cliente_id ?? ficha?.id ?? null,
+          nomeComprador: pessoaFinal.nome, acompanhantes: acomps,
+        });
+        dividiu ||= r.dividiuIgual;
+        return [i.k, r.viajantes];
+      }));
+      if (venda) avisos.push("Esta venda já foi registrada: pagamento, condição especial e observações vieram como estavam. Mude só o que precisar.");
+      if (dividiu) avisos.push("O valor de cada viajante não estava guardado: dividi o total da expedição igualmente. Confira o valor de cada um.");
       if (!vivo) return;
+      setPessoa(pessoaFinal);
+      setDaFicha([...veio]);
+      if (venda) {
+        setPag(venda.pagamento); setEspecial(venda.condicao_especial); setEspecialObs(venda.condicao_obs); setObs(venda.observacoes);
+      }
       setItens(lista);
       setValores(Object.fromEntries(lista.map((i) => [i.k, mostrarValor(i.valor)])));
-      setViajantes(Object.fromEntries(lista.filter((i) => i.tipo === "expedicao").map((i) => [i.k, viajantesDoItem(i)])));
+      setViajantes(vjs);
+      if (avisos.length) setInfo({ tom: dividiu ? "aviso" : "ok", t: avisos[0], lista: avisos.slice(1) });
     })().catch((e) => vivo && setErro((e as Error).message)).finally(() => vivo && setCarregando(false));
     listarExpedicoesParaVenda().then((l) => vivo && setExpedicoes(l)).catch((e) => vivo && (setExpedicoes([]), setErro((e as Error).message)));
     return () => { vivo = false; };
@@ -166,7 +201,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       if (!novos.length && !r.pessoas.length) { setInfo({ tom: "aviso", t: "A IA não achou nada pra preencher nesse arquivo. Siga no manual." }); return; }
       setItens((l) => [...l, ...novos]);
       setValores((v) => ({ ...v, ...Object.fromEntries(novos.map((i) => [i.k, mostrarValor(i.valor)])) }));
-      setViajantes((v) => ({ ...v, ...Object.fromEntries(novos.filter((i) => i.tipo === "expedicao").map((i) => [i.k, viajantesDoItem(i)])) }));
+      setViajantes((v) => ({ ...v, ...Object.fromEntries(novos.filter((i) => i.tipo === "expedicao").map((i) => [i.k, restaurarViajantes({ item: i, nomeComprador: pessoa.nome }).viajantes])) }));
       const p0 = r.pessoas[0];
       if (p0 && !pessoaTravada) setPessoa((p) => ({ ...p, nome: p.nome || p0.nome, cpf: p.cpf || p0.cpf || "", passaporte: p.passaporte || p0.passaporte || "", nascimento: p.nascimento || p0.nascimento || "" }));
       setInfo({ tom: r.avisos.length ? "aviso" : "ok", t: `O voucher preencheu ${novos.length} item(ns)${r.pessoas.length ? ` e ${r.pessoas.length} pessoa(s)` : ""}. Confira antes de confirmar.`, lista: r.avisos });
@@ -184,6 +219,8 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     if (ate >= 0 && pessoa.nome.trim().length < 3) return "Escreva o nome completo de quem comprou.";
     if (ate >= 0 && !pessoaTravada && !pessoa.telefone.trim() && !pessoa.email.trim() && !pessoa.cpf.trim())
       return "Coloque pelo menos WhatsApp, e-mail ou CPF — é assim que o QS acha a ficha do cliente.";
+    if (ate >= 0 && !pessoaTravada && pessoa.cpf.trim() && pessoa.cpf.replace(/\D/g, "").length !== 11)
+      return "CPF de quem comprou: são 11 números (ou deixe em branco).";
     if (ate >= 1 && !itens.length) return "Toque em pelo menos um cartão: o que o cliente comprou?";
     if (ate >= 2) {
       const errado = itens.find((i) => i.data_inicio && i.data_fim && i.data_fim < i.data_inicio);
@@ -197,6 +234,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
         if (vs.some((v) => !lerValor(v.valor_contratado))) return "Coloque o valor que cada pessoa paga na expedição.";
         if (vs.some((v) => v.valor_pago.trim() && lerValor(v.valor_pago) == null)) return "Valor pago que não entendi. Use só números, ex.: 2.500,00";
         if (vs.some((v) => v.divide === "t" && !v.divide_nome.trim())) return "Escreva o nome de quem divide o quarto.";
+        if (vs.some((v) => !v.comprador && v.cpf.trim() && v.cpf.replace(/\D/g, "").length !== 11)) return "CPF de quem viaja junto: são 11 números (ou deixe em branco).";
       }
     }
     if (ate >= 3) {
@@ -222,10 +260,10 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     if (prox === PASSO_ANALISE) void rodarAnalise();
   }
 
-  /** Itens como vão pro banco (expedição leva quem viaja; o resto, o comprador se vier vazio). */
+  /** Itens como vão pro banco (expedição leva quem viaja COM todos os detalhes — reabrir não perde nada; o resto, o comprador se vier vazio). */
   function itensFinais(): ItemVenda[] {
     return comValores.map((i) => (i.tipo === "expedicao"
-      ? { ...i, passageiros: (viajantes[i.k] ?? []).map((v) => ({ nome: v.comprador ? pessoa.nome : v.nome })) }
+      ? { ...i, passageiros: viajantesParaJson(viajantes[i.k] ?? [], pessoa.nome) }
       : { ...i, passageiros: i.passageiros.length ? i.passageiros : [{ nome: pessoa.nome }] }));
   }
 
@@ -240,7 +278,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       setAnalise(await analisarRascunho({
         origem, negocio_id: ehCloser ? negocio!.id : null, cliente_id: pessoa.id || null, viagem_id: viagemId ?? null,
         cliente: { nome: pessoa.nome },
-        itens: final.map((i) => ({ tipo: i.tipo, nome: i.nome.trim() || nomeSugerido(i), data_inicio: i.data_inicio || null, data_fim: i.data_fim || null, dados: i.dados, passageiros: i.passageiros, valor: i.valor, custo: i.custo, status: i.status ?? "vendido" })),
+        itens: final.map((i) => ({ tipo: i.tipo, nome: i.nome.trim() || nomeSugerido(i), data_inicio: i.data_inicio || null, data_fim: i.data_fim || null, dados: i.dados, passageiros: i.passageiros.map((x) => ({ nome: x.nome })), valor: i.valor, custo: i.custo, status: i.status ?? "vendido" })),
         viajantes: vjs,
         pagamento: { forma: pag.forma, condicao: pag.condicao, entrada: lerValor(pag.entrada), entrada_data: pag.entrada_data || null, parcelas: Number(pag.parcelas) || null },
         total,
@@ -378,7 +416,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
               </span>
               <Botao onClick={() => arquivo.current?.click()} disabled={lendoVoucher}>{lendoVoucher ? "Lendo o voucher…" : "📄 Preencher pelo voucher"}</Botao>
             </div>
-            <DadosDaPessoaNaVenda pessoa={pessoa} onMudar={setPessoa} travada={pessoaTravada} />
+            <DadosDaPessoaNaVenda pessoa={pessoa} onMudar={setPessoa} travada={pessoaTravada} daFicha={daFicha} />
           </div>
         )}
 
@@ -569,14 +607,6 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       </>}
     </Modal>
   );
-}
-
-/** Item de expedição já salvo → viajantes da tela (o 1º é o comprador). */
-function viajantesDoItem(i: ItemVenda): Viajante[] {
-  const nomes = i.passageiros.map((p) => p.nome).filter(Boolean);
-  const qtd = Math.max(nomes.length, 1);
-  const cada = i.valor ? String(Math.round((i.valor / qtd) * 100) / 100).replace(".", ",") : "";
-  return Array.from({ length: qtd }, (_, n) => ({ ...viajanteNovo(n === 0, n === 0 ? "" : nomes[n] ?? ""), valor_contratado: cada, quarto_desejado: n === 0 ? i.dados.quarto ?? "" : "" }));
 }
 
 /** Botão + modal, pra pendurar em qualquer tela (ficha do cliente, viagem, Ops). */

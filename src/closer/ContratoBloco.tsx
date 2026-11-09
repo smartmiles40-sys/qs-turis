@@ -3,8 +3,10 @@
 // O CONTRATO dentro do cartão do closer (0180, 22/10/2026 — sem n8n).
 //
 //   • "Enviar contrato" abre a PRÉVIA: os campos que vão no contrato, puxados
-//     da venda consolidada + proposta aprovada + ficha do cliente + Bitrix +
-//     lead (cada um diz de onde veio). O closer corrige o que faltar e manda.
+//     da venda registrada (09/11: manda na viagem) + cadastro do cliente (manda
+//     na pessoa, com RG e endereço) + ficha/proposta + lead + Bitrix (cada um
+//     diz de onde veio). O closer corrige o que faltar e manda; o que ele
+//     corrigir da pessoa volta pro cadastro (o servidor grava ao gerar/enviar).
 //   • O SERVIDOR monta o PDF pelo modelo do próprio QS (sem Google), guarda
 //     no Storage (bucket contratos, 0212) e cria no ZapSign.
 //     O webhook do ZapSign devolve: cliente abriu → assinou / recusou — e o
@@ -22,7 +24,7 @@ import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
 import { dataHoraBr, useConfigDaArea, type Negocio } from "./lib";
 import {
   NOME_STATUS_CONTRATO, ROTULOS, TOM_STATUS_CONTRATO, atualizarContrato, cancelarContrato, contratoManual, enviarContrato,
-  enviosDoCartao, errosDoContrato, linkDoPdf, pdfDeTeste, previaDoContrato,
+  enviosDoCartao, errosDoContrato, linkDoPdf, pdfDeTeste, previaDoContrato, textoDoCadastro,
   type CamposContrato, type EnvioContrato, type Previa,
 } from "./contrato";
 
@@ -218,6 +220,7 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
   const [enviando, setEnviando] = useState(false);
   const [confirmarSubstituir, setConfirmarSubstituir] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
+  const [cadastroMsg, setCadastroMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -239,9 +242,10 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
     if (jaTemAtivo && !substituir) { setConfirmarSubstituir(true); return; }
     setEnviando(true);
     try {
-      const r = await enviarContrato(negocio.id, c, substituir);
-      if (r.ok) onEnviado("Contrato enviado! O cliente recebe o link do ZapSign por e-mail. O cartão foi para \"Contrato enviado\".", "ok");
-      else setErro(r.erro || "Não deu certo.");
+      const r = await enviarContrato(negocio.id, c, substituir, previa);
+      const cad = textoDoCadastro(r.cadastro);
+      if (r.ok) onEnviado(`Contrato enviado! O cliente recebe o link do ZapSign por e-mail. O cartão foi para "Contrato enviado".${cad ? ` ${cad}` : ""}`, "ok");
+      else setErro([r.erro || "Não deu certo.", cad].filter(Boolean).join(" "));
     } catch (e) {
       const d = (e as Error & { dados?: { precisaConfirmar?: boolean } }).dados;
       if (d?.precisaConfirmar) setConfirmarSubstituir(true);
@@ -258,7 +262,8 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
     const aba = window.open("about:blank", "_blank");
     setGerandoPdf(true);
     try {
-      const r = await pdfDeTeste(c);
+      const r = await pdfDeTeste(c, negocio.id, previa);
+      setCadastroMsg(textoDoCadastro(r.cadastro) || null);
       const url = URL.createObjectURL(r.blob);
       if (aba) aba.location.href = url; else window.open(url, "_blank");
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -301,6 +306,13 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
           {previa.avisoBitrix && <Aviso>{previa.avisoBitrix} Os campos do Bitrix ficaram de fora — preencha à mão.</Aviso>}
           {confirmarSubstituir && <Aviso tom="erro">Este cliente já tem um contrato {negocio.status_contrato === "assinado" ? "ASSINADO" : "aguardando assinatura"}. Enviar de novo cancela o anterior (no ZapSign também).</Aviso>}
           {erro && <Aviso tom="erro">{erro}</Aviso>}
+          {cadastroMsg && <Aviso tom="ok">{cadastroMsg}</Aviso>}
+          {(previa.viajantes?.length ?? 0) > 1 && (
+            <Aviso>
+              A venda tem {previa.viajantes!.length} viajantes ({previa.viajantes!.map((v) => v.nome).filter(Boolean).join(", ")}). Por enquanto sai
+              um contrato só, com o valor total — o contrato por pessoa vem na próxima etapa.
+            </Aviso>
+          )}
 
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-[13px] font-semibold" style={{ color: "var(--ink2)" }}>Modelo:</span>
@@ -321,7 +333,7 @@ function PreviaContrato({ negocio, jaTemAtivo, onFechar, onEnviado }: {
                 <div key={r.k} className={r.longo ? "sm:col-span-2" : ""}>
                   <Campo rotulo={`${r.rotulo}${r.obrigatorio ? " *" : ""}`} erro={msgErro} dica={dica}>
                     {r.longo ? (
-                      <textarea className="rel-input" rows={r.k === "inclusos" ? 7 : r.k === "destino" || r.k === "nao_inclusos" ? 3 : 2} value={c[r.k]} onChange={(e) => mudar(r.k, e.target.value)} />
+                      <textarea className="rel-input" rows={r.k === "roteiro" ? 10 : r.k === "inclusos" ? 7 : r.k === "destino" || r.k === "nao_inclusos" ? 3 : 2} value={c[r.k]} onChange={(e) => mudar(r.k, e.target.value)} />
                     ) : (
                       <Entrada value={c[r.k]} onChange={(e) => mudar(r.k, e.target.value)} />
                     )}

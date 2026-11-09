@@ -11,11 +11,14 @@
 //   • "Pedir link ao Financeiro" (crédito recorrente / pagamento futuro) →
 //     solicitação na Central. Quando o Financeiro conclui colando o link na
 //     resolução, o link aparece aqui sozinho.
+//     09/11 (0338): o pedido já vem com valor, nº de parcelas e 1º vencimento
+//     do plano (Financeiro → ficha → pagamento da venda registrada).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
-import { FORMAS_PAGAMENTO, brl, dataBr, dataHoraBr, hojeISO, type FormaPagamento, type Negocio } from "./lib";
+import { FORMAS_PAGAMENTO, brl, dataBr, dataHoraBr, hojeISO, vendaDoCartao, type FormaPagamento, type Negocio, type VendaDoCartao } from "./lib";
+import { pedidoDeLinkDoPlano, planoDaVenda, type PlanoMontado } from "./planoDaVenda";
 import {
   MODALIDADES, pagamentoLimpar, pagamentoLink, pagamentoPago, parcelasDoCartao, pedirLinkAoFinanceiro,
   type Modalidade, type ParcelaAberta,
@@ -33,6 +36,7 @@ interface PedidoFin { id: string; numero: number; status: string; resolucao: str
 
 export default function PagamentoBloco({ negocio, onMudou, onAbrirSolicitacao }: { negocio: Negocio; onMudou: () => void; onAbrirSolicitacao: (id: string) => void }) {
   const [parcelas, setParcelas] = useState<ParcelaAberta[]>([]);
+  const [venda, setVenda] = useState<VendaDoCartao | null>(null);
   const [pedido, setPedido] = useState<PedidoFin | null>(null);
   const [aviso, setAviso] = useState<{ tom: "ok" | "aviso" | "erro"; t: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -43,6 +47,7 @@ export default function PagamentoBloco({ negocio, onMudou, onAbrirSolicitacao }:
 
   const carregar = useCallback(async () => {
     setParcelas(await parcelasDoCartao(negocio.id).catch(() => []));
+    setVenda(await vendaDoCartao(negocio.id).catch(() => null));
     if (negocio.pagamento_solicitacao_id) {
       const { data } = await supabase.from("qs_solicitacoes").select("id, numero, status, resolucao, prazo").eq("id", negocio.pagamento_solicitacao_id).maybeSingle();
       setPedido((data as PedidoFin | null) ?? null);
@@ -61,7 +66,31 @@ export default function PagamentoBloco({ negocio, onMudou, onAbrirSolicitacao }:
   const abertas = parcelas.filter((p) => p.status === "a_receber");
   const st = negocio.status_pagamento ? STATUS_PAG[negocio.status_pagamento] : null;
   const perdido = negocio.etapa === "perdido" || negocio.etapa === "venda_cancelada";
-  const valorBase = negocio.ficha?.valor_total ?? negocio.valor_previsto ?? null;
+  const valorBase = negocio.ficha?.valor_total ?? (venda?.valor_total || null) ?? negocio.valor_previsto ?? null;
+
+  /**
+   * O plano que vale pro pedido de link (0338), nesta ordem: as parcelas ABERTAS
+   * no Financeiro → o plano da ficha → o pagamento da venda registrada.
+   */
+  function planoParaOPedido(): { plano: PlanoMontado | null; origem: string } {
+    const abertasFin = parcelas.filter((p) => p.status === "a_receber");
+    if (abertasFin.length) {
+      const ent = abertasFin.find((p) => p.numero === 0);
+      return {
+        plano: {
+          entrada: ent ? { valor: Number(ent.valor), vencimento: ent.vencimento, forma: ent.forma as FormaPagamento } : null,
+          parcelas: abertasFin.filter((p) => p.numero !== 0).map((p) => ({ valor: Number(p.valor), vencimento: p.vencimento, forma: p.forma as FormaPagamento })),
+          observacao_financeiro: "",
+        },
+        origem: "parcelas em aberto no Financeiro",
+      };
+    }
+    const fp = negocio.ficha?.plano;
+    if (fp && (fp.entrada || fp.parcelas.length)) return { plano: { ...fp, observacao_financeiro: fp.observacao_financeiro ?? "" }, origem: "plano da ficha de fechamento" };
+    const total = Number(venda?.valor_total ?? valorBase ?? 0);
+    const m = planoDaVenda(total, venda?.pagamento ?? null, hojeISO());
+    return m ? { plano: m, origem: "pagamento da venda registrada" } : { plano: null, origem: "" };
+  }
   const pedidoAberto = pedido && ["nova", "em_andamento", "aguardando"].includes(pedido.status);
 
   return (
@@ -122,7 +151,19 @@ export default function PagamentoBloco({ negocio, onMudou, onAbrirSolicitacao }:
           )}
           {!pedidoAberto && (
             <Botao variante="fantasma" disabled={ocupado} onClick={() => {
-              setPed({ modalidade: "recorrente", valor: valorBase ? String(valorBase) : "", parcelas: "", vencimento: "", obs: "", prioridade: "normal" });
+              const { plano, origem } = planoParaOPedido();
+              const pd = pedidoDeLinkDoPlano(plano, valorBase);
+              const forma = plano?.parcelas[0]?.forma ?? plano?.entrada?.forma;
+              const notas = [
+                plano?.entrada && plano.parcelas.length ? `Entrada de ${brl(plano.entrada.valor)} em ${dataBr(plano.entrada.vencimento)} fica fora do link.` : "",
+                origem ? `Valores do ${origem}.` : "",
+                venda?.pagamento?.obs ? `Pagamento: ${venda.pagamento.obs}` : "",
+              ].filter(Boolean).join(" ");
+              setPed({
+                modalidade: forma === "cartao" && (pd.parcelas ?? 0) > 1 ? "recorrente" : pd.vencimento && pd.vencimento > hojeISO() ? "futuro" : "recorrente",
+                valor: pd.valor ? String(pd.valor) : "", parcelas: pd.parcelas ? String(pd.parcelas) : "", vencimento: pd.vencimento ?? "",
+                obs: notas, prioridade: "normal",
+              });
               setJanela("pedir");
             }}>Pedir link ao Financeiro</Botao>
           )}

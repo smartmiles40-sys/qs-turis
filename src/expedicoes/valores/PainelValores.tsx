@@ -245,7 +245,11 @@ function EditoresValor({ p, exp, plano, editavel, onSalvo, modo }: {
     <div className={modo === "linha" ? "text-right" : ""}>
       {editavel
         ? <CelulaEditavel tipo="number" valor={contratado || null} placeholder="R$ —" formatar={(v) => formatBRL(n(v))}
-            onSalvar={async (v) => salvar({ valor_contratado_brl: v == null ? 0 : n(v) })} />
+            onSalvar={async (v) => {
+              await salvar({ valor_contratado_brl: v == null ? 0 : n(v) });
+              // 0338: o valor volta pra venda do closer (item, total, ficha, viagem e Bitrix).
+              if (p.venda_id) avisar("Valor salvo — a venda do closer, a ficha e o Bitrix acompanham.");
+            }} />
         : <span>{contratado ? formatBRL(contratado) : "—"}</span>}
       {editavel && !contratado && sugerido && (
         <button className="block ml-auto text-[11px] underline" style={{ color: "var(--rel-ink)" }}

@@ -358,12 +358,18 @@ const tabelaQuadro = (linhas) => ({
   margin: [0, 0, 0, 16],
 });
 
+// RG e VIAJANTE (09/11) só aparecem quando preenchidos: o quadro dos contratos
+// de hoje não tem essas linhas e não deve ganhar um "-" à toa.
+const temTexto = (x) => String(x ?? '').trim() !== '';
+const linhaViajante = (c) => (temTexto(c.viajante) ? [linhaQuadro('VIAJANTE', v(c.viajante))] : []);
+
 function quadroExpedicao(c) {
   return tabelaQuadro([
     linhaQuadro('CONTRATANTE', [
-      `Nome: ${v(c.nome)}\n`, `CPF: ${v(formatarCpf(c.cpf))}\n`, `Endereço: ${v(c.endereco)}\n`,
+      `Nome: ${v(c.nome)}\n`, `CPF: ${v(formatarCpf(c.cpf))}\n`, ...(temTexto(c.rg) ? [`RG: ${v(c.rg)}\n`] : []), `Endereço: ${v(c.endereco)}\n`,
       `E-mail: ${v(c.email)}\n`, `Telefone: ${v(formatarTelefone(c.telefone))}`,
     ]),
+    ...linhaViajante(c),
     linhaQuadro('CONTRATADA', [{ text: 'SE TU FOR, EU VOU AGÊNCIA DE VIAGENS LTDA', bold: true }, `., ${CONTRATADA_EXPEDICAO}`]),
     linhaQuadro('EXPEDIÇÃO', v(c.expedicao), true),
     linhaQuadro('PERÍODO PREVISTO', periodo(c), true),
@@ -378,10 +384,11 @@ function quadroPacote(c) {
   const dado = (rot, val) => [`${rot}: `, { text: `${v(val)}\n`, bold: true }];
   return tabelaQuadro([
     linhaQuadro('CONTRATANTE', [
-      ...dado('Nome', c.nome), ...dado('CPF', formatarCpf(c.cpf)), ...dado('E-mail', c.email),
+      ...dado('Nome', c.nome), ...dado('CPF', formatarCpf(c.cpf)), ...(temTexto(c.rg) ? dado('RG', c.rg) : []), ...dado('E-mail', c.email),
       ...dado('Telefone', formatarTelefone(c.telefone)), ...dado('Data de nascimento', dataBr(c.nascimento)),
       'Endereço completo: ', { text: v(c.endereco), bold: true },
     ]),
+    ...linhaViajante(c),
     linhaQuadro('CONTRATADA', [{ text: 'SE TU FOR, EU VOU AGÊNCIA DE VIAGENS LTDA', bold: true }, `., ${CONTRATADA_PACOTE}`]),
     linhaQuadro('DESTINO', v(c.destino)),
     linhaQuadro('PERÍODO:', periodo(c)),
@@ -424,6 +431,44 @@ function assinaturasPacote(c) {
   };
 }
 
+// ── Anexo I: o roteiro da expedição (09/11) ─────────────────────────────────
+// A cláusula 1.1 da expedição cita o roteiro "como anexo I". Com roteiro (vem
+// de roteiro_dias pela prévia; o closer pode ajustar), o anexo sai numa página
+// nova depois das assinaturas. Sem roteiro, a 1.1 deixa de citar o anexo.
+const CITA_ANEXO = ', o qual é parte integrante deste contrato, como anexo I.';
+const SEM_ANEXO = ', o qual é parte integrante deste contrato.';
+export const temRoteiro = (c) => c.tipo === 'expedicao' && temTexto(c.roteiro);
+export function clausulasDe(c) {
+  if (c.tipo !== 'expedicao') return CLAUSULAS_PACOTE;
+  return temRoteiro(c) ? CLAUSULAS_EXPEDICAO : CLAUSULAS_EXPEDICAO.map((l) => (l.startsWith('1.1. ') ? l.replace(CITA_ANEXO, SEM_ANEXO) : l));
+}
+/** "Dia N …" abre um dia (sai em negrito); as linhas seguintes são a descrição. */
+export function blocosDoRoteiro(texto) {
+  const dias = [];
+  for (const bruta of String(texto || '').replace(/\r/g, '').split('\n')) {
+    const l = bruta.trim();
+    if (!l) continue;
+    if (/^dia\s+\d+/i.test(l) || !dias.length) dias.push({ titulo: l, linhas: [] });
+    else dias[dias.length - 1].linhas.push(l);
+  }
+  return dias;
+}
+function anexoRoteiro(c) {
+  const dias = blocosDoRoteiro(c.roteiro);
+  return [
+    { text: 'ANEXO I – ROTEIRO DA EXPEDIÇÃO', bold: true, alignment: 'center', pageBreak: 'before', margin: [0, 0, 0, 6] },
+    { text: v(c.expedicao), alignment: 'center', margin: [0, 0, 0, 16] },
+    ...dias.map((d) => ({
+      unbreakable: d.linhas.length < 12,
+      margin: [0, 0, 0, ESPACO],
+      stack: [
+        { text: limparTexto(d.titulo), bold: true, alignment: 'left', margin: [0, 0, 0, 3] },
+        ...d.linhas.map((l) => ({ text: limparTexto(l), alignment: 'left', fontSize: 11 })),
+      ],
+    })),
+  ];
+}
+
 // ── Documento ───────────────────────────────────────────────────────────────
 export function definicaoDoContrato(c) {
   preparar();
@@ -450,8 +495,9 @@ export function definicaoDoContrato(c) {
     content: [
       ...cabecalho,
       exp ? quadroExpedicao(c) : quadroPacote(c),
-      ...corpo(exp ? CLAUSULAS_EXPEDICAO : CLAUSULAS_PACOTE, c),
+      ...corpo(clausulasDe(c), c),
       exp ? assinaturasExpedicao(c) : assinaturasPacote(c),
+      ...(temRoteiro(c) ? anexoRoteiro(c) : []),
     ],
   };
 }

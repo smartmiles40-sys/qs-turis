@@ -16,6 +16,11 @@ import { supabase } from "@/lib/supabase";
 import { erroAmigavel } from "@/closer/lib";
 import { novaChave, type TipoItem } from "@/propostas/lib";
 import type { ItemVenda } from "@/closer/vendaItens";
+import { lerPessoa, pessoaDoLead, type Pessoa } from "@/clientes/cadastro/api";
+import {
+  lerValor, pagamentoDaVenda, viajanteVazio,
+  type PagamentoVenda, type PaxLinha, type PessoaVenda, type Viajante,
+} from "./vendaRegras";
 
 export type OrigemVenda = "closer" | "rel" | "ops";
 
@@ -27,7 +32,10 @@ export interface ExpedicaoVaga {
   data_embarque: string | null;
   data_retorno: string | null;
   status: string;
+  /** Preço de tabela por pessoa COM aéreo (o Operacional cadastra). */
   preco_venda_brl: number | null;
+  /** Preço de tabela por pessoa SEM aéreo (0220). A exp_vagas_para_venda ainda não devolve: ver listarExpedicoesParaVenda. */
+  preco_sem_aereo_brl?: number | null;
   pax_planejados: number;
   ocupados: number;
   vagas: number;
@@ -35,64 +43,88 @@ export interface ExpedicaoVaga {
 
 export interface PaxParaQuarto { id: string; nome: string; quarto_desejado: string | null; tem_par: boolean; venda_id: string | null }
 
-/** A pessoa que comprou (ou que viaja junto). */
-export interface PessoaVenda {
-  id?: string | null;
-  nome: string;
-  telefone: string;
-  email: string;
-  cpf: string;
-  nascimento: string;
-  passaporte: string;
-}
-export const pessoaVazia = (): PessoaVenda => ({ id: null, nome: "", telefone: "", email: "", cpf: "", nascimento: "", passaporte: "" });
+// Tipos e regras puras moram em ./vendaRegras (testadas no node); aqui só reexporta.
+export {
+  lerValor, mostrarValor, pagamentoVendaVazio, pessoaVazia,
+  type PagamentoVenda, type PessoaVenda, type Viajante, type VinculoViajante,
+} from "./vendaRegras";
 
-/** Quem viaja numa expedição (o comprador e quem vai junto). */
-export interface Viajante {
-  chave: string;
-  comprador: boolean;
-  nome: string;
-  telefone: string;
-  cpf: string;
-  valor_contratado: string;
-  valor_pago: string;
-  aereo_incluso: boolean;
-  quarto_desejado: string;
-  /** "" = não divide · "v:<chave>" = outro viajante desta venda · "p:<id>" = quem já comprou · "t" = só o nome */
-  divide: string;
-  divide_nome: string;
-}
-export const viajanteNovo = (comprador = false, nome = ""): Viajante => ({
-  chave: novaChave(), comprador, nome, telefone: "", cpf: "", valor_contratado: "", valor_pago: "",
-  aereo_incluso: true, quarto_desejado: "", divide: "", divide_nome: "",
-});
-
-export interface PagamentoVenda {
-  forma: string;
-  condicao: "avista" | "parcelado" | "entrada";
-  entrada: string;
-  entrada_data: string;
-  parcelas: string;
-  primeira_parcela: string;
-  obs: string;
-}
-export const pagamentoVendaVazio = (): PagamentoVenda =>
-  ({ forma: "", condicao: "avista", entrada: "", entrada_data: "", parcelas: "", primeira_parcela: "", obs: "" });
-
-/** "1.234,56" / "1234.56" / "1234" → número (ou null se vazio/inválido). */
-export function lerValor(t: string | number | null | undefined): number | null {
-  const s = String(t ?? "").trim().replace(/^R\$\s*/, "");
-  if (!s) return null;
-  const n = /^\d+\.\d{1,2}$/.test(s) ? Number(s) : Number(s.replace(/\./g, "").replace(",", "."));
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-export const mostrarValor = (v: number | null | undefined) => (v == null ? "" : String(v).replace(".", ","));
+/** Viajante novo na tela (o comprador ou quem vai junto). */
+export const viajanteNovo = (comprador = false, nome = ""): Viajante => viajanteVazio(comprador, nome, novaChave());
 
 // ── Leitura ────────────────────────────────────────────────────────────────
 export async function listarExpedicoesParaVenda(): Promise<ExpedicaoVaga[]> {
   const { data, error } = await supabase.rpc("exp_vagas_para_venda");
   if (error) throw new Error(/exp_vagas_para_venda/.test(error.message) ? "A lista de vagas ainda não está ligada no banco (falta aplicar a 0214)." : error.message);
-  return ((data ?? []) as ExpedicaoVaga[]).map((e) => ({ ...e, pax_planejados: Number(e.pax_planejados) || 0, ocupados: Number(e.ocupados) || 0, vagas: Number(e.vagas) || 0 }));
+  const lista = ((data ?? []) as ExpedicaoVaga[]).map((e) => ({ ...e, pax_planejados: Number(e.pax_planejados) || 0, ocupados: Number(e.ocupados) || 0, vagas: Number(e.vagas) || 0 }));
+  // Preço SEM aéreo (0220): a RPC da 0214 não devolve. Quem tem acesso às Expedições
+  // (Ops) lê direto; o closer não enxerga a tabela (RLS exp_tem_acesso) e fica sem —
+  // até a RPC passar a devolver a coluna (SQL proposto no relatório de 09/11).
+  const faltam = lista.filter((e) => !("preco_sem_aereo_brl" in e)).map((e) => e.id);
+  if (faltam.length) {
+    const { data: px } = await supabase.from("expedicoes").select("id, preco_sem_aereo_brl").in("id", faltam);
+    const mapa = new Map(((px ?? []) as { id: string; preco_sem_aereo_brl: number | string | null }[]).map((r) => [r.id, r.preco_sem_aereo_brl]));
+    for (const e of lista) if (!("preco_sem_aereo_brl" in e)) e.preco_sem_aereo_brl = mapa.get(e.id) != null ? Number(mapa.get(e.id)) : null;
+  }
+  for (const e of lista) {
+    e.preco_venda_brl = e.preco_venda_brl != null ? Number(e.preco_venda_brl) : null;
+    e.preco_sem_aereo_brl = e.preco_sem_aereo_brl != null ? Number(e.preco_sem_aereo_brl) : null;
+  }
+  return lista;
+}
+
+// ── Reabrir a venda: o que já foi gravado ──────────────────────────────────
+export interface VendaGravada {
+  id: string;
+  cliente_id: string | null;
+  pagamento: PagamentoVenda;
+  condicao_especial: boolean;
+  condicao_obs: string;
+  observacoes: string;
+}
+
+/** A venda (qs_vendas) já confirmada deste cartão do closer — pra reabrir sem zerar pagamento/condição/observações. */
+export async function vendaDoNegocio(negocioId: string): Promise<VendaGravada | null> {
+  const { data, error } = await supabase.from("qs_vendas")
+    .select("id, cliente_id, pagamento, condicao_especial, condicao_obs, observacoes")
+    .eq("negocio_id", negocioId).order("criado_em", { ascending: false }).limit(1).maybeSingle();
+  if (error) {
+    if (/qs_vendas/.test(error.message)) return null; // banco sem a 0214
+    throw new Error(error.message);
+  }
+  if (!data) return null;
+  const r = data as Record<string, unknown>;
+  return {
+    id: r.id as string, cliente_id: (r.cliente_id as string | null) ?? null,
+    pagamento: pagamentoDaVenda(r.pagamento),
+    condicao_especial: !!r.condicao_especial,
+    condicao_obs: (r.condicao_obs as string | null) ?? "",
+    observacoes: (r.observacoes as string | null) ?? "",
+  };
+}
+
+/**
+ * A ficha única de quem comprou (rel_clientes, via cad_ler_pessoa — que já checa
+ * quem pode ver: o closer vê a ficha ligada ao lead dele). Ordem: a ficha da venda
+ * gravada → a ficha ligada ao lead (qs_leads.cliente_id). Sem ficha ou sem acesso: null.
+ */
+export async function fichaDoComprador(p: { clienteId?: string | null; leadId?: string | null }): Promise<Pessoa | null> {
+  let id = p.clienteId ?? null;
+  if (!id && p.leadId) id = (await pessoaDoLead(p.leadId).catch(() => null))?.clienteId ?? null;
+  if (!id) return null;
+  return lerPessoa(id).catch(() => null);
+}
+
+/** Linhas de `passageiros` ligadas aos itens da venda (só quem tem acesso às Expedições enxerga; o resto recebe []). */
+export async function passageirosDosItens(itemIds: string[]): Promise<Record<string, PaxLinha[]>> {
+  if (!itemIds.length) return {};
+  const { data, error } = await supabase.from("passageiros")
+    .select("id, venda_item_id, cliente_id, nome_completo, telefone, email, cpf, data_nascimento, valor_contratado_brl, valor_pago_brl, aereo_incluso, quarto_desejado, quarto_par_id, acompanhante_dividir_com, status_reserva")
+    .in("venda_item_id", itemIds);
+  if (error) return {};
+  const out: Record<string, PaxLinha[]> = {};
+  for (const r of (data ?? []) as (PaxLinha & { venda_item_id: string })[]) (out[r.venda_item_id] ??= []).push(r);
+  return out;
 }
 
 export async function passageirosParaQuarto(expedicaoId: string): Promise<PaxParaQuarto[]> {
@@ -137,6 +169,10 @@ export function montarPayload(p: PayloadVenda, nomeDoItem: (i: ItemVenda) => str
   const viajantes = p.itens.flatMap((i, n) => i.tipo !== "expedicao" ? [] : (p.viajantes[i.k] ?? []).map((v) => ({
     chave: v.chave, item: n + 1, comprador: v.comprador,
     nome: v.comprador ? p.cliente.nome : v.nome, telefone: v.telefone || null, cpf: v.cpf || null,
+    // email/cpf: a venda_subir já completa a ficha (só o vazio). nascimento/vinculo: a 0214
+    // ainda ignora (SQL proposto em 09/11); vão no json do item enquanto isso.
+    email: v.comprador ? null : v.email.trim() || null, nascimento: v.comprador ? null : v.nascimento || null,
+    vinculo: v.comprador ? null : v.vinculo || null, cliente_id: v.comprador ? null : v.cliente_id || null,
     valor_contratado: lerValor(v.valor_contratado), valor_pago: lerValor(v.valor_pago) ?? 0,
     aereo_incluso: v.aereo_incluso, quarto_desejado: v.quarto_desejado || null,
     divide_com_chave: v.divide.startsWith("v:") ? v.divide.slice(2) : null,

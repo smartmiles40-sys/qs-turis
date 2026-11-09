@@ -397,6 +397,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
 
       {fichaAberta && (
         <FichaFechamento negocio={n} aberto={fichaAberta} onFechar={() => setFichaAberta(false)}
+          onCorrigirVenda={encerrado ? undefined : () => { setFichaAberta(false); setRegistrarAberto(true); }}
           onConsolidado={(msg) => { setFichaAberta(false); setAviso({ tom: msg.includes("Bitrix atualizado") ? "ok" : "aviso", t: msg }); void carregar(); }} />
       )}
 

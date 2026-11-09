@@ -38,9 +38,13 @@ export type TipoContrato = "pacote" | "expedicao";
 export interface CamposContrato {
   tipo: TipoContrato;
   nome: string; cpf: string; rg: string; nascimento: string; endereco: string; email: string; telefone: string;
+  /** Só no contrato de menor: quem viaja (o contratante é o pai/mãe). Vazio = o próprio contratante. */
+  viajante: string;
   expedicao: string; destino: string; tipo_pacote: string; inclusos: string; nao_inclusos: string;
   ida: string; volta: string; passagem: string; seguro: string;
   valor_total: string; forma_pagamento: string; vendedor: string; data_venda: string;
+  /** Anexo I (expedição): um dia por bloco, começando por "Dia N". Vazio = sem anexo. */
+  roteiro: string;
 }
 export type ChaveCampo = keyof CamposContrato;
 
@@ -48,10 +52,13 @@ export type ChaveCampo = keyof CamposContrato;
 export const ROTULOS: { k: ChaveCampo; rotulo: string; obrigatorio?: boolean; so?: TipoContrato; longo?: boolean; dica?: string }[] = [
   { k: "nome", rotulo: "Nome completo do cliente", obrigatorio: true },
   { k: "cpf", rotulo: "CPF", obrigatorio: true },
+  { k: "rg", rotulo: "RG", dica: "Sai no quadro só se preenchido" },
   { k: "nascimento", rotulo: "Data de nascimento", so: "pacote", dica: "dd/mm/aaaa" },
   { k: "email", rotulo: "E-mail (o ZapSign manda o contrato pra ele)", obrigatorio: true },
   { k: "telefone", rotulo: "Telefone", obrigatorio: true },
   { k: "endereco", rotulo: "Endereço", longo: true },
+  { k: "viajante", rotulo: "Viajante menor de idade (se o contratante for o pai/mãe)", longo: true,
+    dica: "Ex.: Ana Souza, nascida em 10/03/2015 — sai como linha VIAJANTE no quadro. Vazio = quem assina é quem viaja" },
   { k: "expedicao", rotulo: "Nome da expedição", obrigatorio: true, so: "expedicao" },
   { k: "destino", rotulo: "Destino (quadro resumo)", obrigatorio: true, so: "pacote", longo: true, dica: "Ex.: Itália dos Sonhos: Milão, Toscana e Roma." },
   { k: "tipo_pacote", rotulo: "Tipo de pacote", so: "pacote", dica: "Ex.: Personalizado" },
@@ -66,6 +73,8 @@ export const ROTULOS: { k: ChaveCampo; rotulo: string; obrigatorio?: boolean; so
   { k: "forma_pagamento", rotulo: "Forma de pagamento", obrigatorio: true, longo: true, dica: "Entrada, parcelas e datas. Ex.: Entrada de R$ 2.000,00 via Pix e 12 parcelas de R$ 2.000,00 no cartão" },
   { k: "vendedor", rotulo: "Vendedor" },
   { k: "data_venda", rotulo: "Data da venda", obrigatorio: true, dica: "dd/mm/aaaa" },
+  { k: "roteiro", rotulo: "Roteiro (Anexo I)", so: "expedicao", longo: true,
+    dica: "Vem do roteiro da expedição. Cada dia começa com \"Dia N\". Vazio = o contrato sai sem anexo" },
 ];
 
 const soDigitos = (s: string) => String(s || "").replace(/\D/g, "");
@@ -126,19 +135,37 @@ export interface Previa {
   avisoBitrix: string | null;
   modo: "automatico" | "manual";
   falta: string[];
+  /** Ficha do cliente no cadastro único (rel_clientes), se achada. */
+  clienteId?: string | null;
+  /** Quem viaja na venda registrada (base do contrato por pessoa — fase 3). */
+  viajantes?: { nome: string; valor: number | null; aereo_incluso: boolean | null }[];
 }
 export const previaDoContrato = (negocioId: string) => api<Previa>("contrato-previa", { negocioId });
 
-export interface ResultadoEnvio { ok: boolean; contratoId?: string; link?: string | null; erro?: string }
-export const enviarContrato = (negocioId: string, campos: CamposContrato, substituir = false) =>
-  api<ResultadoEnvio>("contrato-enviar", { negocioId, campos, substituir });
-/** O PDF como vai sair (sem enviar nada), pra abrir numa aba. */
-export async function pdfDeTeste(campos: CamposContrato): Promise<{ blob: Blob; erros: string[]; avisos: string[] }> {
-  const r = await api<{ base64: string; erros: string[]; avisos: string[] }>("contrato-pdf-teste", { campos });
+/** O que voltou pro cadastro do cliente (rel_clientes) depois de gerar/enviar. */
+export interface ResultadoCadastro { clienteId: string | null; gravados: string[]; aviso?: string | null }
+/** A prévia como chegou (sugestão + origem): o servidor compara pra saber o que o closer EDITOU. */
+type PreviaEnviada = Pick<Previa, "campos" | "origem">;
+const soPrevia = (p?: PreviaEnviada | null) => (p ? { campos: p.campos, origem: p.origem } : null);
+
+export interface ResultadoEnvio { ok: boolean; contratoId?: string; link?: string | null; erro?: string; cadastro?: ResultadoCadastro | null }
+export const enviarContrato = (negocioId: string, campos: CamposContrato, substituir = false, previa?: PreviaEnviada | null) =>
+  api<ResultadoEnvio>("contrato-enviar", { negocioId, campos, substituir, previa: soPrevia(previa) });
+/** O PDF como vai sair, pra abrir numa aba. Com o cartão, o que o closer corrigiu volta pro cadastro. */
+export async function pdfDeTeste(campos: CamposContrato, negocioId?: string, previa?: PreviaEnviada | null): Promise<{ blob: Blob; erros: string[]; avisos: string[]; cadastro: ResultadoCadastro | null }> {
+  const r = await api<{ base64: string; erros: string[]; avisos: string[]; cadastro?: ResultadoCadastro | null }>("contrato-pdf-teste", { campos, negocioId, previa: soPrevia(previa) });
   const bin = atob(r.base64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return { blob: new Blob([bytes], { type: "application/pdf" }), erros: r.erros, avisos: r.avisos };
+  return { blob: new Blob([bytes], { type: "application/pdf" }), erros: r.erros, avisos: r.avisos, cadastro: r.cadastro ?? null };
+}
+
+const NOME_CAMPO_CADASTRO: Record<string, string> = { cpf: "CPF", nascimento: "nascimento", email: "e-mail", rg: "RG", endereco: "endereço" };
+/** "Cadastro do cliente atualizado: CPF, endereço." (ou o aviso). Vazio = nada mudou. */
+export function textoDoCadastro(r: ResultadoCadastro | null | undefined): string {
+  if (!r) return "";
+  const feito = r.gravados?.length ? `Cadastro do cliente atualizado: ${r.gravados.map((k) => NOME_CAMPO_CADASTRO[k] ?? k).join(", ")}.` : "";
+  return [feito, r.aviso || ""].filter(Boolean).join(" ");
 }
 /** Link de 10 min do PDF guardado no QS (o enviado ou o assinado). */
 export const linkDoPdf = (contratoId: string, qual: "gerado" | "assinado") =>
