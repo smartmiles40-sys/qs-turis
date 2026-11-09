@@ -34,7 +34,13 @@ export interface DadosDoMes {
   historico: Fechamento[];       // reabertos do mês
   sync: EstadoSync | null;
   lucros: Record<string, LucroDigitado>;
+  /** De onde vieram os cards do mês: o espelho do Bitrix (até o corte) ou o próprio QS (0329). */
+  fonte: Fonte;
+  /** Mês a partir do qual conta pelo QS (fin_com_config.fonte_qs_desde); null = ainda pelo Bitrix. */
+  fonteQsDesde: string | null;
 }
+
+export type Fonte = "bitrix" | "qs";
 
 export interface LucroDigitado { bitrix_id: string; lucro: number; obs: string | null; atualizado_por: string | null; atualizado_em: string }
 
@@ -66,16 +72,39 @@ const num = (v: unknown) => (v == null ? null : Number(v));
 
 const NUMS_REGRA = ["valor_exp_geral", "valor_exp_peru", "valor_exp_amazonia", "valor_pacote", "valor_outros", "pct_lucro", "valor_cotacao"] as const;
 
+/** Mês (YYYY-MM) a partir do qual a comissão conta pelo QS. Sem a 0329 ou sem a chave: null. */
+export async function lerFonteQsDesde(): Promise<string | null> {
+  const { data, error } = await supabase.from("fin_com_config").select("valor").eq("chave", "fonte_qs_desde").maybeSingle();
+  if (error || !data) return null;
+  const mes = (data.valor as { mes?: string } | null)?.mes;
+  return typeof mes === "string" && /^\d{4}-\d{2}$/.test(mes) ? mes : null;
+}
+
+/** Liga (mes) ou desliga (null) a contagem pelo QS. Só o financeiro grava (RLS). */
+export async function salvarFonteQsDesde(mes: string | null) {
+  const q = mes == null
+    ? supabase.from("fin_com_config").delete().eq("chave", "fonte_qs_desde")
+    : supabase.from("fin_com_config").upsert({ chave: "fonte_qs_desde", valor: { mes } }, { onConflict: "chave" });
+  const { error } = await q;
+  if (error) throw new Error(error.message);
+}
+
+async function cardsDoBitrix(ini: string, fim: string) {
+  return supabase.from("fin_com_vendas").select("*")
+    .or([
+      `and(data_venda.gte.${ini},data_venda.lt.${fim})`,
+      `and(data_reuniao_realizada.gte.${ini},data_reuniao_realizada.lt.${fim})`,
+      `and(data_quando_agendou.gte.${ini},data_quando_agendou.lt.${fim})`,
+    ].join(","))
+    .limit(5000);
+}
+
 export async function carregarMes(mes: string): Promise<DadosDoMes> {
   const [ini, fim] = limitesDoMes(mes);
+  const fonteQsDesde = await lerFonteQsDesde();
+  const fonte: Fonte = fonteQsDesde && mes >= fonteQsDesde ? "qs" : "bitrix";
   const [v, r, a, f, s, c] = await Promise.all([
-    supabase.from("fin_com_vendas").select("*")
-      .or([
-        `and(data_venda.gte.${ini},data_venda.lt.${fim})`,
-        `and(data_reuniao_realizada.gte.${ini},data_reuniao_realizada.lt.${fim})`,
-        `and(data_quando_agendou.gte.${ini},data_quando_agendou.lt.${fim})`,
-      ].join(","))
-      .limit(5000),
+    fonte === "qs" ? supabase.rpc("fin_com_fonte_qs", { p_ini: ini, p_fim: fim }) : cardsDoBitrix(ini, fim),
     supabase.from("fin_com_regras").select("*").order("vigente_desde", { ascending: false }),
     supabase.from("fin_com_ajustes").select("*").eq("mes", mes).order("criado_em"),
     supabase.from("fin_com_fechamentos").select("*").eq("mes", mes).order("fechado_em"),
@@ -84,7 +113,8 @@ export async function carregarMes(mes: string): Promise<DadosDoMes> {
   ]);
   const erro = v.error || r.error || a.error || f.error;
   if (erro) throw new Error(erro.message);
-  const vendas: VendaCard[] = (v.data ?? []).map((x) => ({ ...x, total: num(x.total), custo: num(x.custo) })) as VendaCard[];
+  const vendas: VendaCard[] = ((v.data ?? []) as Record<string, unknown>[])
+    .map((x) => ({ ...x, total: num(x.total), custo: num(x.custo) })) as unknown as VendaCard[];
   const regras: Regra[] = (r.data ?? []).map((x) => {
     const regra = { ...x } as Record<string, unknown>;
     for (const k of NUMS_REGRA) regra[k] = num(x[k]);
@@ -108,7 +138,7 @@ export async function carregarMes(mes: string): Promise<DadosDoMes> {
     fechamentos: todos.filter((x) => x.status !== "reaberto"),
     historico: todos.filter((x) => x.status === "reaberto"),
     sync: (s.data as EstadoSync | null) ?? null,
-    lucros,
+    lucros, fonte, fonteQsDesde,
   };
 }
 
@@ -216,3 +246,6 @@ export function baixarCsv(nome: string, conteudo: string) {
 }
 
 export const linkBitrix = (id: string) => `https://agenciasetuforeuvou.bitrix24.com.br/crm/deal/details/${id}/`;
+
+/** Card do Bitrix (id numérico) × linha nascida no QS ("qs:", "rr:", "ag:", "cotv:"). */
+export const ehIdBitrix = (id: string) => /^\d+$/.test(id);

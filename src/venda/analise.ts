@@ -189,3 +189,24 @@ export async function marcarItemEmitido(itemId: string, localizador: string, obs
 
 /** "Pendente" = tudo que não está "Tudo emitido ✓". */
 export const ehPendente = (s: StatusAnalise) => s !== "tudo_emitido";
+
+// ── Revisão do Operacional (0329) ────────────────────────────────────────────
+// O Operacional REVISA toda venda, mas não aprova nada (Bruno, 09/11): a venda
+// já vale (vaga, pax, Rel, Fin, comissão) desde que subiu. A revisão só registra
+// quem conferiu, quando e o que anotou.
+export interface RevisaoDaVenda { id: string; revisado_em: string | null; revisado_por: string | null; revisao_obs: string | null }
+
+export async function revisoesDasVendas(ids: string[]): Promise<Record<string, RevisaoDaVenda>> {
+  const mapa: Record<string, RevisaoDaVenda> = {};
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase.from("qs_vendas").select("id,revisado_em,revisado_por,revisao_obs").in("id", ids.slice(i, i + 200));
+    if (error) return mapa;   // banco sem a 0329: segue sem revisão
+    for (const r of data ?? []) mapa[r.id] = r as RevisaoDaVenda;
+  }
+  return mapa;
+}
+
+export async function marcarVendaRevisada(vendaId: string, obs: string | null, desfazer = false) {
+  const { error } = await supabase.rpc("venda_marcar_revisada", { p_venda: vendaId, p_obs: obs, p_desfazer: desfazer });
+  if (error) throw new Error(/sem-permissao/.test(error.message) ? "Só o Operacional (ou gestor) marca a revisão." : error.message);
+}

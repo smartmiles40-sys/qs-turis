@@ -10,7 +10,7 @@
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui";
 import { dataBr, explicacao, numeroBr, ROTULO_DESTINO, type Linha, type Papel } from "./calculo";
-import { linkBitrix } from "./dados";
+import { ehIdBitrix, linkBitrix } from "./dados";
 
 export const brl = (n: number) => `R$ ${numeroBr(n)}`;
 
@@ -38,11 +38,12 @@ export default function Planilha({ linhas, papel, acoes, onLucro, vazio }: {
   const th = { padding: "8px 10px", fontSize: 11.5, fontWeight: 600, textAlign: "left" as const, color: "var(--ink2)", whiteSpace: "nowrap" as const };
   const dir = { textAlign: "right" as const, whiteSpace: "nowrap" as const, fontVariantNumeric: "tabular-nums" as const };
   const apagado = { color: "var(--ink3)" };
+  const ROTULO_QS: Record<string, string> = { qs: "Venda QS", rr: "R.R QS", ag: "Agend. QS", cotv: "Aéreo QS" };
 
   const celulaLucro = (l: Linha) => {
     if (l.tipo_linha !== "card" || !l.venda_no_mes || l.cancelada) return <span style={apagado}>—</span>;
     const texto = l.lucro != null ? brl(l.lucro) : l.usa_lucro ? "Falta" : "—";
-    const titulo = l.lucro_origem === "bitrix" ? "Total − custo do Bitrix" : l.lucro_origem === "digitado" ? "Digitado pelo Financeiro" : undefined;
+    const titulo = l.lucro_origem === "bitrix" ? (ehIdBitrix(l.bitrix_id) ? "Total − custo do Bitrix" : "Valor − custo registrados no QS") : l.lucro_origem === "digitado" ? "Digitado pelo Financeiro" : undefined;
     const cor = l.lucro == null && l.usa_lucro ? "var(--warn-ink, #B45309)" : l.lucro == null ? "var(--ink3)" : "var(--ink)";
     if (!onLucro) return <span style={{ color: cor }} title={titulo}>{texto}</span>;
     return (
@@ -78,7 +79,9 @@ export default function Planilha({ linhas, papel, acoes, onLucro, vazio }: {
               return (
                 <tr key={l.chave} style={card ? undefined : { background: "color-mix(in srgb, var(--card2) 55%, transparent)" }}>
                   <td style={td}>
-                    {card
+                    {card && !ehIdBitrix(l.bitrix_id)
+                      ? <span style={{ fontWeight: 600 }} title="Registrado no QS">{ROTULO_QS[l.bitrix_id.split(":")[0]] ?? "QS"}</span>
+                      : card
                       ? <a href={linkBitrix(l.bitrix_id)} target="_blank" rel="noreferrer" style={{ color: "var(--rel-ink, var(--accent))", fontWeight: 600 }} title="Abrir o card no Bitrix">{l.bitrix_id}</a>
                       : <span style={apagado}>{l.tipo_linha === "bonus_dia" ? "Bônus" : "Cotação"}</span>}
                   </td>

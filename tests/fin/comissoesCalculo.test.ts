@@ -228,3 +228,33 @@ test("supervisor fora da comissão some da conta", () => {
   assert.equal(closerDe(l).length, 0);
   assert.equal(sdrDe(l).length, 1);
 });
+
+test("fonte QS (0329): venda do closer, R.R, agendamento e aéreo da SDR viram a mesma conta", () => {
+  const qs = (p: Partial<VendaCard>): VendaCard => ({
+    bitrix_id: "qs:x", nome: "Cliente QS", pipeline: "QS", fase: "Vendido", tipo_venda: null, nome_expedicao: null,
+    total: null, data_venda: null, sdr: "Mariana Rodrigues", responsavel_reuniao: null, data_reuniao_realizada: null,
+    no_show: false, sdr_id: SDR, closer_id: null, data_quando_agendou: null, custo: null, ...p,
+  });
+  const vendas = [
+    // Item de expedição Peru vendido pela Talita, reunião agendada pela Mariana.
+    qs({ bitrix_id: "qs:i1", tipo_venda: "Expedições", nome_expedicao: "Peru/ Ago 2027", total: 20000, custo: 15000, data_venda: "2026-12-03", responsavel_reuniao: "Talita Carvalho", closer_id: CLOSER }),
+    // Item de pacote: closer ganha % do lucro (valor − custo registrados no QS).
+    qs({ bitrix_id: "qs:i2", tipo_venda: "Pacotes de Viagens", total: 10000, custo: 8000, data_venda: "2026-12-04", responsavel_reuniao: "Talita Carvalho", closer_id: CLOSER }),
+    // Item cancelado: não paga.
+    qs({ bitrix_id: "qs:i3", fase: "Cancelamento", tipo_venda: "Expedições", nome_expedicao: "Egito/ Set 2027", total: 30000, data_venda: "2026-12-05", responsavel_reuniao: "Talita Carvalho", closer_id: CLOSER }),
+    // Reunião realizada.
+    qs({ bitrix_id: "rr:m1", fase: "Reunião realizada", data_reuniao_realizada: "2026-12-02", responsavel_reuniao: "Talita Carvalho", closer_id: CLOSER }),
+    // Cotação de aéreo da própria SDR aprovada: 10% do lucro.
+    qs({ bitrix_id: "cotv:c1", fase: "Cotação aprovada", tipo_venda: "Passagens aéreas", total: 5000, custo: 4000, data_venda: "2026-12-06", responsavel_reuniao: "Não se aplica" }),
+    // 6 agendamentos no mesmo dia: bônus de R$ 20.
+    ...Array.from({ length: 6 }, (_, i) => qs({ bitrix_id: `ag:a${i}`, fase: "Agendamento", data_quando_agendou: "2026-12-01" })),
+  ];
+  const ls = linhasDoMes(vendas, regras, [], "2026-12");
+  const sdr = resumoPorPessoa(sdrDe(ls))[0];
+  // 25 (Peru) + 20 (pacote) + 8 (R.R faixa 1) + 100 (10% de 1.000 do aéreo) + 20 (bônus) = 173
+  assert.equal(sdr.total, 173);
+  const closer = resumoPorPessoa(closerDe(ls))[0];
+  // 250 (Peru) + 11% de 2.000 do pacote = 470; cancelada e aéreo da SDR não entram
+  assert.equal(closer.total, 470);
+  assert.ok(!closerDe(ls).some((l) => l.bitrix_id === "cotv:c1"));
+});

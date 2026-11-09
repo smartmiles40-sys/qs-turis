@@ -12,10 +12,11 @@ import { TIPOS, brl, dataBr } from "@/propostas/lib";
 import ExtratoAnalise, { EtiquetaStatus } from "./ExtratoAnalise";
 import {
   STATUS_ANALISE, analisarVendaGravada, ehPendente, historicoDaVenda, itensDaVendaGravada, listarVendasAnalise, marcarItemEmitido,
-  type Analise, type AnaliseGuardada, type ItemDaVenda, type StatusAnalise, type VendaAnaliseLinha,
+  marcarVendaRevisada, revisoesDasVendas,
+  type Analise, type AnaliseGuardada, type ItemDaVenda, type RevisaoDaVenda, type StatusAnalise, type VendaAnaliseLinha,
 } from "./analise";
 
-type Filtro = "pendentes" | "todas" | StatusAnalise;
+type Filtro = "pendentes" | "nao_revisadas" | "todas" | StatusAnalise;
 const ORIGEM: Record<string, string> = { closer: "Comercial", rel: "Relacionamento", ops: "Operacional" };
 
 export default function VendasComPendencia({ compacto = false }: { compacto?: boolean }) {
@@ -25,18 +26,24 @@ export default function VendasComPendencia({ compacto = false }: { compacto?: bo
   const [busca, setBusca] = useState("");
   const [aberta, setAberta] = useState<VendaAnaliseLinha | null>(null);
   const [recolhido, setRecolhido] = useState(compacto);
+  const [revisoes, setRevisoes] = useState<Record<string, RevisaoDaVenda>>({});
 
   const carregar = useCallback(() => {
-    listarVendasAnalise().then((l) => { setLista(l); setErro(null); }).catch((e) => { setLista([]); setErro((e as Error).message); });
+    listarVendasAnalise().then((l) => {
+      setLista(l); setErro(null);
+      void revisoesDasVendas(l.map((v) => v.id)).then(setRevisoes);
+    }).catch((e) => { setLista([]); setErro((e as Error).message); });
   }, []);
+  const revisada = useCallback((id: string) => !!revisoes[id]?.revisado_em, [revisoes]);
   useEffect(carregar, [carregar]);
 
   const pendentes = useMemo(() => (lista ?? []).filter((v) => ehPendente(v.analise_status)).length, [lista]);
+  const naoRevisadas = useMemo(() => (lista ?? []).filter((v) => !revisada(v.id)).length, [lista, revisada]);
   const vistas = useMemo(() => {
     const b = busca.trim().toLowerCase();
-    return (lista ?? []).filter((v) => (filtro === "todas" ? true : filtro === "pendentes" ? ehPendente(v.analise_status) : v.analise_status === filtro))
+    return (lista ?? []).filter((v) => (filtro === "todas" ? true : filtro === "pendentes" ? ehPendente(v.analise_status) : filtro === "nao_revisadas" ? !revisada(v.id) : v.analise_status === filtro))
       .filter((v) => !b || (v.cliente_nome ?? "").toLowerCase().includes(b) || String(v.solicitacao_numero ?? "").includes(b));
-  }, [lista, filtro, busca]);
+  }, [lista, filtro, busca, revisada]);
 
   const contar = (s: StatusAnalise) => (lista ?? []).filter((v) => v.analise_status === s).length;
 
@@ -54,11 +61,11 @@ export default function VendasComPendencia({ compacto = false }: { compacto?: bo
           Cada venda que sobe passa pela análise pós-venda: proposta apresentada × o que foi emitido. Abra pra ver o extrato, corrigir e reanalisar.
         </p>
         <div className="flex flex-wrap gap-2 items-center">
-          {(["pendentes", "faltam_emissoes", "divergencia", "risco_alto", "em_analise", "tudo_emitido", "todas"] as Filtro[]).map((f) => (
+          {(["pendentes", "nao_revisadas", "faltam_emissoes", "divergencia", "risco_alto", "em_analise", "tudo_emitido", "todas"] as Filtro[]).map((f) => (
             <button key={f} type="button" onClick={() => setFiltro(f)} aria-pressed={filtro === f}
               className="rounded-full px-3 py-1 text-[12.5px] font-semibold"
               style={{ border: `1px solid ${filtro === f ? "var(--rel)" : "var(--line)"}`, background: filtro === f ? "var(--rel-soft)" : "var(--card)", color: "var(--ink)" }}>
-              {f === "pendentes" ? `Pendentes (${pendentes})` : f === "todas" ? `Todas (${lista?.length ?? 0})` : `${STATUS_ANALISE[f].rotulo} (${contar(f)})`}
+              {f === "pendentes" ? `Pendentes (${pendentes})` : f === "nao_revisadas" ? `Não revisadas (${naoRevisadas})` : f === "todas" ? `Todas (${lista?.length ?? 0})` : `${STATUS_ANALISE[f].rotulo} (${contar(f)})`}
             </button>
           ))}
           <div className="flex-1 min-w-[180px]"><Entrada placeholder="Buscar cliente ou nº do pedido" value={busca} onChange={(e) => setBusca(e.target.value)} /></div>
@@ -75,6 +82,7 @@ export default function VendasComPendencia({ compacto = false }: { compacto?: bo
                     <button type="button" className="w-full text-left py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1" onClick={() => setAberta(v)}>
                       <span className="text-[13.5px] font-semibold flex-1 min-w-[180px]" style={{ color: "var(--ink)" }}>{v.cliente_nome || "Cliente sem nome"}</span>
                       <EtiquetaStatus status={v.analise_status} />
+                      {revisada(v.id) ? <Etiqueta tom="rel">Revisada ✓</Etiqueta> : <Etiqueta tom="aviso">Falta revisar</Etiqueta>}
                       {c && (c.falta > 0 || c.divergente + c.extra > 0) && (
                         <span className="text-[12px]" style={{ color: "var(--ink2)" }}>
                           {c.falta > 0 && `${c.falta} por emitir`}{c.falta > 0 && c.divergente + c.extra > 0 && " · "}{c.divergente + c.extra > 0 && `${c.divergente + c.extra} divergente(s)`}
@@ -92,12 +100,12 @@ export default function VendasComPendencia({ compacto = false }: { compacto?: bo
             </ul>
           )}
       </>}
-      {aberta && <DetalheDaVenda venda={aberta} onFechar={() => setAberta(null)} onMudou={carregar} />}
+      {aberta && <DetalheDaVenda venda={aberta} revisao={revisoes[aberta.id] ?? null} onFechar={() => setAberta(null)} onMudou={carregar} />}
     </section>
   );
 }
 
-function DetalheDaVenda({ venda, onFechar, onMudou }: { venda: VendaAnaliseLinha; onFechar: () => void; onMudou: () => void }) {
+function DetalheDaVenda({ venda, revisao, onFechar, onMudou }: { venda: VendaAnaliseLinha; revisao: RevisaoDaVenda | null; onFechar: () => void; onMudou: () => void }) {
   const [hist, setHist] = useState<AnaliseGuardada[] | null>(null);
   const [itens, setItens] = useState<ItemDaVenda[]>([]);
   const [agora, setAgora] = useState<Analise | null>(null);
@@ -151,6 +159,8 @@ function DetalheDaVenda({ venda, onFechar, onMudou }: { venda: VendaAnaliseLinha
               resumo={ultima.resumo} proposta={agora?.proposta ?? null} ia={ultima.ia} />
           ) : <Vazio titulo="Ainda sem análise guardada" texto="Toque em Reanalisar agora." />}
 
+        <RevisaoDoOperacional vendaId={venda.id} revisao={revisao} onMudou={onMudou} />
+
         {itens.length > 0 && (
           <section className="rel-card p-4">
             <h4 className="text-[13px] font-bold mb-2" style={{ color: "var(--ink)" }}>Corrigir: itens da venda</h4>
@@ -193,5 +203,38 @@ function DetalheDaVenda({ venda, onFechar, onMudou }: { venda: VendaAnaliseLinha
         )}
       </div>
     </Modal>
+  );
+}
+
+/** O Operacional confere a venda (tipo, expedição, valor, pax). Não é aprovação: a venda já vale desde que subiu. */
+function RevisaoDoOperacional({ vendaId, revisao, onMudou }: { vendaId: string; revisao: RevisaoDaVenda | null; onMudou: () => void }) {
+  const [obs, setObs] = useState(revisao?.revisao_obs ?? "");
+  const [feita, setFeita] = useState(revisao?.revisado_em ?? null);
+  const [ocupado, setOcupado] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  async function marcar(desfazer: boolean) {
+    setOcupado(true); setErro(null);
+    try {
+      await marcarVendaRevisada(vendaId, obs.trim() || null, desfazer);
+      setFeita(desfazer ? null : new Date().toISOString());
+      onMudou();
+    } catch (e) { setErro((e as Error).message); } finally { setOcupado(false); }
+  }
+  return (
+    <section className="rel-card p-4 space-y-2">
+      <h4 className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>Revisão do Operacional</h4>
+      <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>
+        Confira tipo, expedição, valor e passageiros. Se algo estiver errado, corrija o item abaixo; a comissão e o Financeiro acompanham. Revisar não aprova nem trava nada.
+      </p>
+      {feita
+        ? <p className="text-[13px]" style={{ color: "var(--ink2)" }}>Revisada em {new Date(feita).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}{obs.trim() ? ` · ${obs.trim()}` : ""}</p>
+        : <Campo rotulo="Anotação (opcional)" dica="Ex.: corrigi a expedição para Peru G2."><Entrada value={obs} onChange={(e) => setObs(e.target.value)} /></Campo>}
+      {erro && <Aviso tom="erro">{erro}</Aviso>}
+      <div className="flex gap-2">
+        {feita
+          ? <Botao variante="fantasma" disabled={ocupado} onClick={() => void marcar(true)}>Desfazer revisão</Botao>
+          : <Botao variante="primario" disabled={ocupado} onClick={() => void marcar(false)}>{ocupado ? "Salvando…" : "Marcar como revisada"}</Botao>}
+      </div>
+    </section>
   );
 }

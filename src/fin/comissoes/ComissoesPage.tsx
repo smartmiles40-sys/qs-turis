@@ -14,7 +14,7 @@ import { Aviso, Campo, Entrada, Modal } from "../ui";
 import { csvDasLinhas, dataBr, resumoPorPessoa, type Faixa, type FaixaBonus, type Linha, type Papel, type Regra } from "./calculo";
 import {
   ajustarCard, apagarApelido, apagarRegra, atualizarAgora, baixarCsv, carregarMes, desfazerPago, fecharMes,
-  historicoDoCard, listarApelidos, marcarPago, mesAnterior, mesAtual, reabrir, rotuloMes, salvarApelido, salvarLucro, salvarRegra,
+  historicoDoCard, listarApelidos, marcarPago, mesAnterior, mesAtual, reabrir, rotuloMes, salvarApelido, salvarFonteQsDesde, salvarLucro, salvarRegra,
   type Apelido, type DadosDoMes, type Fechamento,
 } from "./dados";
 import Planilha, { brl } from "./Planilha";
@@ -103,10 +103,14 @@ export default function ComissoesPage() {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <SeletorDeMes mes={mes} onMes={(m) => { setMes(m); setAberta(null); }} />
-          <Button size="sm" disabled={ocupado} onClick={() => rodar(atualizarAgora, "Cards atualizados do Bitrix (via Dashboard).")}>Atualizar agora</Button>
+          {dados?.fonte !== "qs" && <Button size="sm" disabled={ocupado} onClick={() => rodar(atualizarAgora, "Cards atualizados do Bitrix (via Dashboard).")}>Atualizar agora</Button>}
         </div>
       </div>
-      {dados?.sync && (
+      {dados && (
+        <FonteDoMes mes={mes} fonte={dados.fonte} desde={dados.fonteQsDesde} ocupado={ocupado}
+          onMudar={(m) => rodar(() => salvarFonteQsDesde(m), m ? `A partir de ${rotuloMes(m)} a comissão conta só pelo QS.` : "Comissão volta a contar pelo Bitrix.")} />
+      )}
+      {dados?.fonte !== "qs" && dados?.sync && (
         <p className="text-[12px]" style={{ color: dados.sync.erro ? "var(--err-ink)" : "var(--ink3)" }}>
           {dados.sync.rodou_em ? `Cards copiados do Bitrix em ${new Date(dados.sync.rodou_em).toLocaleString("pt-BR")}` : "Ainda não houve cópia do Bitrix."}
           {dados.sync.erro ? ` · Última tentativa falhou: ${dados.sync.erro}` : ""}
@@ -589,6 +593,36 @@ function AbaApelidos({ pessoas, sugestoes, onMudou }: { pessoas: Pessoa[]; suges
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/** De onde vêm as vendas do mês. O QS é a fonte única (Bruno, 09/11); o Bitrix só vale pros meses antes do corte. */
+function FonteDoMes({ mes, fonte, desde, ocupado, onMudar }: { mes: string; fonte: "bitrix" | "qs"; desde: string | null; ocupado: boolean; onMudar: (m: string | null) => void }) {
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState(desde ?? mes);
+  const texto = fonte === "qs"
+    ? `${rotuloMes(mes)} conta só pelo QS: vendas registradas pelo closer (tipo, expedição, valor e custo), reuniões realizadas, agendamentos e cotações de aéreo aprovadas.`
+    : desde
+      ? `${rotuloMes(mes)} ainda conta pelo Bitrix (antes do corte). A partir de ${rotuloMes(desde)}, só pelo QS.`
+      : `${rotuloMes(mes)} conta pelo Bitrix (cópia via Dashboard). O corte pro QS ainda não foi marcado.`;
+  return (
+    <div className="text-[12.5px]" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "8px 12px", borderRadius: 10,
+      background: fonte === "qs" ? "color-mix(in srgb, var(--ok-ink, #15803D) 10%, transparent)" : "var(--card2)", color: "var(--ink2, var(--ink))" }}>
+      <strong style={{ color: "var(--ink)" }}>Fonte: {fonte === "qs" ? "QS" : "Bitrix"}</strong>
+      <span style={{ flex: "1 1 320px" }}>{texto}</span>
+      {editando ? (
+        <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <label className="sr-only" htmlFor="fonte-qs-desde">Contar pelo QS a partir de</label>
+          <input id="fonte-qs-desde" type="month" value={valor} onChange={(e) => setValor(e.target.value)}
+            style={{ padding: "3px 6px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--card)", color: "var(--ink)" }} />
+          <Button size="sm" disabled={ocupado || !valor} onClick={() => { setEditando(false); onMudar(valor); }}>Salvar</Button>
+          {desde && <Button size="sm" variant="ghost" disabled={ocupado} onClick={() => { setEditando(false); onMudar(null); }}>Tirar o corte</Button>}
+          <Button size="sm" variant="ghost" onClick={() => setEditando(false)}>Cancelar</Button>
+        </span>
+      ) : (
+        <Button size="sm" variant="ghost" onClick={() => { setValor(desde ?? mes); setEditando(true); }}>{desde ? "Mudar o corte" : "Marcar o corte"}</Button>
+      )}
     </div>
   );
 }
