@@ -173,6 +173,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/disparos?mkt=1",
+      "schedule": "2-59/5 * * * *"
+    },
+    {
       "path": "/api/rel-docs-ia",
       "schedule": "15 */2 * * *"
     },

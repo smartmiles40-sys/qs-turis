@@ -21,6 +21,13 @@
 //   A regra mora em api/_mktDisparo.js. O cron também acorda as agendadas,
 //   as recorrências e as sequências antes da rodada.
 //
+// MARKETING OFICIAL (0341) — o envio das campanhas do Marketing tem rodada
+// e travas PRÓPRIAS (api/_mktDisparoOficial.js):
+//   GET  /api/disparos?mkt=1 (Vercel Cron, Bearer CRON_SECRET) → rodadaMkt
+//   POST { acao: 'mkt_oficial_estado' | 'mkt_sincronizar_modelos' | 'mkt_kpis' |
+//          'mkt_salvar_ritmo_oficial' | 'mkt_salvar_precos' }
+//   A rodada do Comercial/Rel (rodada()) não pega mais campanha do Marketing.
+//
 // Ler a lista de campanhas e de envios a tela faz direto no banco (RLS 0217).
 // Escrever é SÓ aqui (service_role). O interruptor da simulação NÃO tem botão:
 // desligar é uma decisão do Bruno, por SQL (ver docs/DISPARO-EM-MASSA.md).
@@ -34,6 +41,8 @@ import {
   lerConfig, montarPublico, montarFila, numerosDosSdrs, rodada, conciliar, MOTIVOS, ENVIO_REAL_PLUGADO,
 } from './_disparo.js';
 import { acaoMarketing, acordarAgendadas, lerNumeroMkt, rodarRecorrencias, rodarSequencias } from './_mktDisparo.js';
+import { acaoMktOficial, juntarModelosMkt, rodadaMkt } from './_mktDisparoOficial.js';
+import { conferirExtra } from './_mktOficialRegras.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SETORES = ['comercial', 'relacionamento', 'marketing'];
@@ -93,6 +102,12 @@ export default async function handler(req, res) {
     const segredo = String(process.env.CRON_SECRET || '').trim();
     const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!segredo || veio !== segredo) return res.status(401).json({ error: 'Não autorizado' });
+    // Marketing (0341): cron próprio, só a rodada do Marketing.
+    if (String(req.query?.mkt || '') === '1') {
+      const r = await rodadaMkt().catch((e) => ({ erro: e?.message }));
+      console.log('[disparos] cron mkt:', JSON.stringify(r).slice(0, 800));
+      return res.status(200).json({ marketingOficial: r });
+    }
     // Marketing (0242): recorrência → campanha agendada → fila; sequência → fila.
     // Cada passo isolado: um erro aqui não para a rodada do Comercial/Rel.
     const cfgCron = await lerConfig().catch(() => null);
@@ -128,10 +143,13 @@ export default async function handler(req, res) {
     if (acao.startsWith('mkt_')) setor = 'marketing';
     if (!(await podeDisparar(u, setor))) return res.status(403).json({ error: 'Seu cargo não permite disparos.' });
     const cfg = await lerConfig();
+    // Marketing (0341): os modelos sincronizados da WABA dele entram na lista.
+    if (setor === 'marketing') cfg.modelos = await juntarModelosMkt(cfg.modelos);
 
     // Marketing (0242): agendar, número, recorrências e sequências.
     if (acao.startsWith('mkt_') || acao === 'agendar' || acao === 'desagendar') {
-      const r = await acaoMarketing({ acao, body: { ...body, _campanha: campanha }, u, cfg, fontes: FONTES_MKT });
+      const r = (await acaoMarketing({ acao, body: { ...body, _campanha: campanha }, u, cfg, fontes: FONTES_MKT }))
+        || (await acaoMktOficial({ acao, body, u }));
       if (r) return res.status(r.status).json(r.json);
       return res.status(400).json({ error: 'Ação inválida.' });
     }
@@ -146,6 +164,11 @@ export default async function handler(req, res) {
         numeroRel: rel ? { numero: rel.numero, conectado: numeroConectado(rel) } : null,
         // Marketing (0242): o número dele (null = não envia).
         ...(setor === 'marketing' ? { numeroMkt: await lerNumeroMkt() } : {}),
+        // Marketing (0341): simulação e travas são DELE (mkt_disparo_simulacao + env).
+        ...(setor === 'marketing' ? await (async () => {
+          const est = (await acaoMktOficial({ acao: 'mkt_oficial_estado', body: {}, u }))?.json || {};
+          return { simulacao: est.simulacao !== false, envioRealPlugado: true, mktOficial: est };
+        })() : {}),
       });
     }
 
@@ -175,12 +198,21 @@ export default async function handler(req, res) {
       if (Object.values(params).some((x) => x.fonte === 'link_grupo') && !/^https:\/\/chat\.whatsapp\.com\//.test(String(body.grupo_link || ''))) {
         return res.status(400).json({ error: 'Cole o link de convite do grupo (https://chat.whatsapp.com/…).' });
       }
+      // Marketing (0341): modelo da Meta com mídia no topo, título variável ou
+      // botão de link dinâmico precisa dos extras. Só entra no insert quando há.
+      let extraMkt = null;
+      if (setor === 'marketing' && modelo.origem === 'meta') {
+        const ex = conferirExtra(modelo, body.envio_extra);
+        if (ex.erro) return res.status(400).json({ error: ex.erro });
+        extraMkt = { modelo_categoria: modelo.categoriaMeta || modelo.categoria, envio_extra: ex.extra };
+      }
       const nova = await rest('qs_disparo_campanhas', {
         method: 'POST', prefer: 'return=representation',
         body: {
           setor, nome, modelo_nome: modelo.nome, modelo_idioma: modelo.idioma || 'pt_BR', modelo_corpo: modelo.corpo,
           params, publico: body.publico || {}, cadence_id: setor === 'comercial' ? body.cadence_id : null,
           grupo_link: body.grupo_link || null, criado_por: u.id,
+          ...(extraMkt || {}),
         },
       });
       return res.status(200).json({ campanha: nova?.[0] });
