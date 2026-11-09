@@ -150,3 +150,116 @@ crons de 3 e 5 min, então o plano é pago (no Hobby o cron é 1x/dia). Rodada d
 curl -H "Authorization: Bearer $CRON_SECRET" "https://qs.setuforeuvouviagens.com.br/api/mkt-grupos"
 # → {"parado":"MKT_GRUPOS_ENVIO desligado na Vercel — nada sai.",...}  enquanto não liberar
 ```
+
+---
+
+# Link inteligente + criar/gerenciar grupos (0342) — 09/11/2026
+
+> Estado: **commits locais na branch `mkt-grupos-sendflow`, não pushados. 0342 NÃO
+> aplicada.** Nenhuma chamada real à Evolution foi feita (testes usam fetch falso).
+> O envio de campanhas continua DESLIGADO (nada aqui liga `MKT_GRUPOS_ENVIO` nem
+> `envio_ligado`).
+
+## O que é
+
+A função de lançamento do SendFlow: **um endereço só** pra divulgar
+(`https://qs.setuforeuvouviagens.com.br/g/japao-2027`). Cada pessoa cai no
+**primeiro grupo da fila que ainda tem vaga**; quando ele lota, o próximo começa
+a receber. Todos lotados: página "grupos lotados" (com a mensagem do link) **ou**,
+se o link estiver em "criar o próximo grupo sozinho", o QS cria o próximo grupo
+pela Evolution (nome numerado `Japão 2027 #{n}`, descrição, foto, admins, "só
+admins mandam/editam") e põe no fim da fila.
+
+Tela: **Marketing › Grupos › aba Links** (lista, editor e relatório) e, na aba
+**Grupos**, os botões **+ Criar grupo** e **⚙ Gerenciar** (dados, pessoas,
+convite, sair).
+
+## Onde está
+
+| Parte | Arquivo |
+|---|---|
+| Banco | `supabase/migrations/0342_mkt_grupos_link_inteligente.sql` |
+| Rota pública `/g/<slug>` (sem login) | `api/mkt-grupos-link.js` + rewrite no `vercel.json` |
+| Contagem de membros + criar o próximo grupo (cron) | `api/_mktGruposLink.js` |
+| Criar/editar grupo, participantes, convite, sair (Evolution) | `api/_mktGruposGestao.js` |
+| Regras puras | `api/_mktGruposLinkRegras.js` (espelho da tela: `src/mkt/grupos/linkRegras.ts`) |
+| Ações novas | `api/mkt-grupos.js`: `criar_grupo`, `editar_grupo`, `participantes`, `participante`, `renovar_convite`, `sair_grupo`, `link_contar`, `link_criar_grupo` |
+| Telas | `src/mkt/grupos/Links.tsx`, `GerenciarGrupo.tsx`, `linkLib.ts` |
+| Testes | `tests/mkt-grupos/link.test.ts`, `tests/mkt-grupos/gestao.test.ts` |
+
+## Como o "cheio" é calculado
+
+`ocupação = membros (última contagem) + pendentes` — pendentes são cliques
+**únicos** mandados pro grupo desde a última contagem. Superestima de propósito:
+numa enxurrada o próximo grupo abre um pouco antes; na contagem seguinte os
+pendentes zeram e o grupo volta a receber. Quem clica de novo (cookie de 24 h só
+com um hash do grupo, nunca o jid) volta pro mesmo grupo sem ocupar vaga nova.
+Robôs de prévia (WhatsApp, Instagram, Telegram…) não contam clique. A escolha é
+atômica no banco (RPC `mkt_grupos_link_escolher` com `for update` no link).
+
+## Contagem de membros (sem estourar a Evolution)
+
+No cron que já existe (`GET /api/mkt-grupos`, a cada minuto), **antes** do motor,
+com intervalo próprio por grupo (`mkt_grupos.contado_em`): link "quente" (clique
+nos últimos 15 min) a cada 2 min, os outros a cada `MKT_GRUPOS_LINK_CONTAGEM_MIN`
+(padrão 5); no máximo 8 grupos por rodada, uma chamada leve `group/participants`
+por grupo, 0,8 s entre elas. O link de convite é relido a cada 6 h (se alguém
+trocou no celular, o `/g/` não quebra). Tudo pela `evoMkt` (trava de instância).
+
+## Evolution API v2 — endpoints usados
+
+Conferidos no código-fonte oficial (github.com/EvolutionAPI/evolution-api:
+`src/api/routes/group.router.ts`, `src/validate/group.schema.ts`,
+`src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts`):
+
+| Função | Endpoint | Corpo / resposta |
+|---|---|---|
+| Criar | `POST group/create/{inst}` | `{ subject, description?, participants[] (mín. 1) }` → metadados (`id`). `profilePicture` é ignorado no create → foto vai depois |
+| Foto | `POST group/updateGroupPicture/{inst}?groupJid=` | `{ image: url https ou base64 }` |
+| Nome | `POST group/updateGroupSubject/{inst}?groupJid=` | `{ subject }` |
+| Descrição | `POST group/updateGroupDescription/{inst}?groupJid=` | `{ description }` (não aceita vazio) |
+| Regras | `POST group/updateSetting/{inst}?groupJid=` | `{ action: announcement \| not_announcement \| locked \| unlocked }` |
+| Pessoas | `POST group/updateParticipant/{inst}?groupJid=` | `{ action: add \| remove \| promote \| demote, participants[] }` → `{ updateParticipants: [{ status, jid }] }` (403 privacidade, 408 saiu há pouco, 409 já está) |
+| Listar pessoas | `GET group/participants/{inst}?groupJid=` | `{ participants: [{ id, phoneNumber?, admin }] }` |
+| Convite | `GET group/inviteCode/{inst}?groupJid=` | `{ inviteUrl, inviteCode }` |
+| Link novo | `POST group/revokeInviteCode/{inst}?groupJid=` | `{ revoked, inviteCode }` (o antigo morre) |
+| Sair | `DELETE group/leaveGroup/{inst}?groupJid=` | `{ groupJid, leave: true }` |
+| Entradas/saídas | webhook `GROUP_PARTICIPANTS_UPDATE` | `{ id, action: add \| remove \| promote \| demote, participants[] }` |
+
+## O que o Bruno precisa fazer
+
+1. **Aplicar a 0342** (depois da 0243) e rodar a "CONFERÊNCIA" do fim do arquivo.
+2. **Push/deploy** (o rewrite `/g/:slug` está no `vercel.json`).
+3. Logado no QS: **Grupos › Chip do Marketing › "Apontar webhook"** de novo — a
+   lista de eventos ganhou `GROUP_PARTICIPANTS_UPDATE` (sem isso, "Entraram/Saíram"
+   do relatório fica zerado; a ocupação continua certa pela contagem).
+4. Variáveis na Vercel (opcionais):
+   - `MKT_GRUPOS_LINK_AUTO=1` — só se quiser que o QS **crie grupos sozinho** quando
+     o link lotar (o link também precisa estar em "criar o próximo grupo"). Sem
+     ela, o botão "Criar o próximo pelo modelo" faz na mão;
+   - `MKT_GRUPOS_LINK_CONTAGEM_MIN` — intervalo da contagem (padrão 5, mínimo 2).
+5. O chip do Marketing precisa ser **admin** dos grupos do link (só admin lê o
+   link de convite). Hoje nenhum dos 24 grupos migrados tem `eu_admin` lido:
+   abra ⚙ Gerenciar › Pessoas (ou "Ler dados no WhatsApp") pra atualizar.
+
+## Como testar com segurança
+
+1. Crie um grupo de teste em **Grupos › + Criar grupo** com 1 admin (você).
+2. **Links › + Novo link** → `teste-link`, 2 vagas por grupo, "Mostrar grupos lotados".
+3. No link, adicione o grupo de teste; abra `…/g/teste-link` no celular: cai no
+   convite. Com "Contar membros agora" a ocupação aparece.
+4. Abra numa janela anônima mais vezes: ao passar de 2 (membros + cliques), vira
+   "Grupos lotados".
+5. "Link novo" (renovar convite) e "Sair do grupo" só no grupo de teste.
+
+Nada disso envia mensagem. Criar grupo e adicionar pessoa são ações do WhatsApp
+(a pessoa adicionada vê que entrou num grupo) — use números do time.
+
+## Limites conhecidos
+
+- Abuso (alguém clicando sem parar sem cookie) enche os pendentes e pode abrir o
+  próximo grupo antes; a contagem seguinte corrige. Criação automática tem teto
+  (`limite_auto`) e, se falhar, a tentativa conta no teto e trava 5 min.
+- A página "abrindo um grupo novo" recarrega a cada 30 s e cada recarga conta como
+  clique em "lotado".
+- Fora do escopo: rodízio entre chips, "lido por participante".

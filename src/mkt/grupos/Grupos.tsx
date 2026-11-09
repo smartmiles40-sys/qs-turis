@@ -1,13 +1,15 @@
 // src/mkt/grupos/Grupos.tsx — aba "Grupos": os grupos em que o chip do Marketing está,
 // com as TAGS (o jeito de escolher para quem vai). Igual à tela de Grupos do SendFlow:
 // busca, filtro por tag em pílulas, marcar vários e pôr/tirar tag de uma vez.
-// No QS os grupos vêm do WhatsApp ("Puxar grupos"); não se cadastra grupo à mão.
+// No QS os grupos vêm do WhatsApp ("Puxar grupos") ou são criados aqui ("+ Criar grupo",
+// 0342) — e cada um se gerencia no ⚙ (dados, pessoas, convite, sair).
 import { useMemo, useState } from "react";
 import { Modal, Vazio } from "@/rel/ui";
 import { api, aplicarTag, apagarTag, CORES, criarTag, mudarTag, quando, type Grupo, type Tag } from "./lib";
 import { useBases } from "./useBases";
 import { irNaAba } from "./navegar";
 import { BotaoGrande, Campo, Nota, SeloBolinha, SeloTag, cor } from "./pecas";
+import { CriarGrupoModal, GerenciarGrupoModal } from "./GerenciarGrupo";
 
 type Filtro = { tag: string | null; semTag: boolean; admin: boolean; sairam: boolean };
 
@@ -22,6 +24,8 @@ export default function GruposAba() {
   const [msg, setMsg] = useState<{ tom: "rel" | "erro"; texto: string } | null>(null);
   const [tagsDoGrupo, setTagsDoGrupo] = useState<string | null>(null);
   const [dados, setDados] = useState<string | null>(null);
+  const [gerenciar, setGerenciar] = useState<string | null>(null);
+  const [criando, setCriando] = useState(false);
 
   const tagsPorGrupo = useMemo(() => {
     const m = new Map<string, string[]>();
@@ -92,7 +96,10 @@ export default function GruposAba() {
             {ativos.length} grupos em que o chip do Marketing está. Ponha <b>tags</b> (ex.: “Live Japão”) para escolher rápido para quem cada campanha vai.
           </p>
         </div>
-        <BotaoGrande disabled={ocupado} onClick={() => void puxar()}>{ocupado ? "Lendo o WhatsApp…" : "🔄 Puxar grupos do WhatsApp"}</BotaoGrande>
+        <div className="flex flex-wrap gap-2">
+          <BotaoGrande variante="secundario" onClick={() => setCriando(true)}>+ Criar grupo</BotaoGrande>
+          <BotaoGrande disabled={ocupado} onClick={() => void puxar()}>{ocupado ? "Lendo o WhatsApp…" : "🔄 Puxar grupos do WhatsApp"}</BotaoGrande>
+        </div>
       </div>
 
       {(bases.erro || msg) && <div className="mb-5"><Nota tom={bases.erro || msg?.tom === "erro" ? "erro" : "rel"} icone={bases.erro || msg?.tom === "erro" ? "⚠️" : "✅"}>{bases.erro || msg?.texto}</Nota></div>}
@@ -124,7 +131,7 @@ export default function GruposAba() {
               onClick={() => setMarcados(todosMarcados ? new Set() : new Set(lista.map((g) => g.jid)))} />
             <span className="flex-1">{lista.length} grupo{lista.length === 1 ? "" : "s"}{marcados.size ? ` · ${marcados.size} marcados` : ""}</span>
             <span className="hidden w-[90px] text-right sm:block">Pessoas</span>
-            <span className="w-[108px]" />
+            <span className="w-[144px]" />
           </div>
           {lista.map((g) => {
             const ts = (tagsPorGrupo.get(g.jid) || []).map((id) => tagPorId.get(id)).filter(Boolean) as Tag[];
@@ -144,10 +151,11 @@ export default function GruposAba() {
                   </div>
                 </div>
                 <span className="hidden w-[90px] text-right text-[13px] tabular-nums sm:block" style={{ color: cor.ink2 }}>{g.participantes ?? "—"}</span>
-                <div className="flex w-[108px] justify-end gap-1">
+                <div className="flex w-[144px] justify-end gap-1">
                   <button type="button" className="gr-icone-btn" title="Tags do grupo" aria-label="Tags do grupo" onClick={() => setTagsDoGrupo(g.jid)}>🏷</button>
                   <button type="button" className="gr-icone-btn" title="Abrir a conversa no Celular" aria-label="Abrir a conversa" onClick={() => irNaAba("celular", { jid: g.jid })}>💬</button>
                   <button type="button" className="gr-icone-btn" title="Dados do grupo" aria-label="Dados do grupo" onClick={() => setDados(g.jid)}>ℹ</button>
+                  <button type="button" className="gr-icone-btn" title="Gerenciar: nome, foto, pessoas, convite" aria-label="Gerenciar o grupo" disabled={Boolean(g.saiu_em)} onClick={() => setGerenciar(g.jid)}>⚙</button>
                 </div>
               </div>
             );
@@ -175,6 +183,10 @@ export default function GruposAba() {
         <TagsDoGrupo grupo={grupoAberto(tagsDoGrupo) as Grupo} tags={tags} atuais={tagsPorGrupo.get(tagsDoGrupo) || []}
           onFechar={() => setTagsDoGrupo(null)} onMudou={recarregar} />
       )}
+      {gerenciar && grupoAberto(gerenciar) && (
+        <GerenciarGrupoModal grupo={grupoAberto(gerenciar) as Grupo} onFechar={() => setGerenciar(null)} onMudou={recarregar} />
+      )}
+      {criando && <CriarGrupoModal onCriado={recarregar} onFechar={() => setCriando(false)} />}
       {dados && <DadosDoGrupo grupo={grupoAberto(dados)} jid={dados} tags={(tagsPorGrupo.get(dados) || []).map((id) => tagPorId.get(id)).filter(Boolean) as Tag[]}
         onFechar={() => setDados(null)} onMudou={recarregar} />}
     </div>
@@ -362,7 +374,7 @@ export function DadosDoGrupo({ jid, grupo, tags, onFechar, onMudou }: { jid: str
           ) : <p className="text-[13px]" style={{ color: cor.ink3 }}>Toque em “Ler dados no WhatsApp” para ver a lista.</p>}
         </div>
         <p className="text-[12px]" style={{ color: cor.ink3 }}>
-          Lido em {quando(grupo?.info_em || null)} · sincronizado em {quando(grupo?.sincronizado_em || null)}. Nome, foto e descrição se mudam no próprio WhatsApp.
+          Lido em {quando(grupo?.info_em || null)} · sincronizado em {quando(grupo?.sincronizado_em || null)}. Nome, foto, descrição e pessoas se mudam no ⚙ Gerenciar (aba Grupos).
         </p>
       </div>
     </Modal>
