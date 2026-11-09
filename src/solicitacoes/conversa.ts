@@ -134,11 +134,13 @@ export function contagemDoPrazo(s: SolPrazo, agora = Date.now()): { tom: TomChip
 }
 
 // ── Filtros do topo ─────────────────────────────────────────────────────────
-export type FiltroQ = "todos" | "atrasados" | "comigo";
+export type FiltroQ = "todos" | "atrasados" | "comigo" | "time";
 export function passaNoFiltro(s: Pick<Solicitacao, "status" | "aguardando_quem" | "prazo" | "concluido_em" | "responsavel_id" | "criado_por" | "sem_dono_atrasada">,
-  f: FiltroQ, eu: string, agora = Date.now()): boolean {
+  f: FiltroQ, eu: string, agora = Date.now(), time?: ReadonlySet<string>): boolean {
   if (f === "todos") return true;
   if (f === "comigo") return s.responsavel_id === eu;
+  // 0336: "Meu time" = pedidas por alguém abaixo de mim ou com alguém abaixo de mim como responsável.
+  if (f === "time") return !!time && ((!!s.criado_por && time.has(s.criado_por)) || (!!s.responsavel_id && time.has(s.responsavel_id)));
   return (s.status !== "concluida" && chipDePrazo(s, agora).tom === "r") || !!s.sem_dono_atrasada;
 }
 

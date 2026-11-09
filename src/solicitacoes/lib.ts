@@ -265,6 +265,29 @@ export async function listarMinhas(userId: string, dias = 30): Promise<Solicitac
   return (data ?? []) as Solicitacao[];
 }
 
+// ── Hierarquia (0336): quem está acima acompanha as demandas de quem está abaixo ──
+export interface PessoaDoTime { id: string; name: string; is_active: boolean; superior_id: string | null }
+
+/** Todo mundo abaixo de mim (qualquer nível). Sem a 0336 no banco: lista vazia. */
+export async function meuTime(): Promise<PessoaDoTime[]> {
+  const { data, error } = await supabase.rpc("qs_meu_time");
+  if (error) return [];
+  return (data ?? []) as PessoaDoTime[];
+}
+
+/** Demandas que o meu time pediu ou de que é responsável (em qualquer setor): abertas + 30 dias. */
+export async function listarDoTime(ids: string[], dias = 30): Promise<Solicitacao[]> {
+  if (!ids.length) return [];
+  const desde = new Date(Date.now() - dias * 86_400_000).toISOString();
+  const lista = ids.join(",");
+  const { data, error } = await supabase.from("qs_solicitacoes_v").select("*")
+    .or(`criado_por.in.(${lista}),responsavel_id.in.(${lista})`)
+    .or(`aberta.eq.true,concluido_em.gte."${desde}"`)
+    .order("criado_em", { ascending: false }).limit(300);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Solicitacao[];
+}
+
 /** Busca no histórico (número, título, cliente). */
 export async function buscar(setor: Setor, termo: string): Promise<Solicitacao[]> {
   const t = termo.trim();

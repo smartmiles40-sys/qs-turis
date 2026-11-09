@@ -21,7 +21,7 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
-import { createQsAuthUser, listarEquipe, updateQsAuthUser, type AreaComTime, type MembroEquipe } from "@/lib/adminUsers";
+import { createQsAuthUser, definirSuperior, listarEquipe, superioresDe, updateQsAuthUser, type AreaComTime, type MembroEquipe } from "@/lib/adminUsers";
 import { Aviso, Avatar, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "../ui";
 import { podeGerirTime } from "./permissao";
 import { listarCargos, PERMISSOES, permissoesPadrao, salvarCargo, SETORES_CARGO, type Cargo, type SetorCargo } from "./cargos";
@@ -116,6 +116,8 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
   }, [ehRel, pode, carregarMenu]);
   const [papeis, setPapeis] = useState<Record<string, PapelNoSetor[]> | null>(null);
   const [cargos, setCargos] = useState<Cargo[]>([]);
+  // 0336: a quem cada um responde (null = coluna ainda não existe → some).
+  const [chefes, setChefes] = useState<Record<string, string | null> | null>(null);
   const carregarCargos = useCallback(() => { listarCargos().then(setCargos).catch(() => setCargos([])); }, []);
 
   const carregar = useCallback(async () => {
@@ -126,6 +128,7 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
       setErro(null);
       // 0222: papel de cada um (CX/CS/Hunter). null = migration não aplicada → some.
       setPapeis(await papeisDe((r.equipe ?? []).map((m) => m.id)));
+      setChefes(await superioresDe((r.equipe ?? []).map((m) => m.id)));
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Não consegui carregar o time.");
     }
@@ -231,6 +234,10 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
                   <div className="text-[12px] mt-0.5" style={{ color: "var(--ink3)" }}>
                     Assina no WhatsApp como <b style={{ color: "var(--ink2)" }}>{assinaturaDe(m.name)}</b>
                   </div>
+                )}
+                {chefes && m.role !== "admin" && (
+                  <RespondeA m={m} equipe={equipe} chefe={chefes[m.id] ?? null} podeMudar={podeMexer(m)}
+                    onMudou={(id) => setChefes((x) => ({ ...(x ?? {}), [m.id]: id }))} onErro={(t) => setAviso({ tom: "erro", texto: t })} />
                 )}
                 {papeis && m.role !== "admin" && (
                   <PapeisDaPessoa userId={m.id} papeis={papeis[m.id] ?? []} podeMudar={podeMexer(m)}
@@ -428,6 +435,35 @@ function CargosSecao({ cargos, ehAdmin, area, onMudou }: { cargos: Cargo[]; ehAd
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+/** "Responde a": quem está acima acompanha as solicitações (abertas e recentes) desta pessoa — 0336. */
+function RespondeA({ m, equipe, chefe, podeMudar, onMudou, onErro }: {
+  m: MembroEquipe; equipe: MembroEquipe[]; chefe: string | null; podeMudar: boolean;
+  onMudou: (id: string | null) => void; onErro: (t: string) => void;
+}) {
+  const [ocupado, setOcupado] = useState(false);
+  const opcoes = equipe.filter((x) => x.id !== m.id && x.is_active)
+    .sort((a, b) => (a.role === "gestor" ? 0 : 1) - (b.role === "gestor" ? 0 : 1) || a.name.localeCompare(b.name));
+  const nomeChefe = equipe.find((x) => x.id === chefe)?.name ?? (chefe ? "alguém de outra área" : null);
+  async function mudar(id: string) {
+    setOcupado(true);
+    try { await definirSuperior(m.id, id || null); onMudou(id || null); }
+    catch (e) { onErro((e as Error).message); } finally { setOcupado(false); }
+  }
+  return (
+    <div className="text-[12px] mt-1 flex flex-wrap items-center gap-2" style={{ color: "var(--ink3)" }}>
+      <span>Responde a</span>
+      {podeMudar ? (
+        <select className="rel-input py-0.5 text-[12px]" style={{ width: "auto" }} value={chefe ?? ""} disabled={ocupado}
+          onChange={(e) => void mudar(e.target.value)} title="Quem está acima acompanha as solicitações desta pessoa">
+          <option value="">ninguém</option>
+          {opcoes.map((x) => <option key={x.id} value={x.id}>{x.name}{x.role === "gestor" ? " (gestão)" : ""}</option>)}
+          {chefe && !opcoes.some((x) => x.id === chefe) && <option value={chefe}>{nomeChefe}</option>}
+        </select>
+      ) : <b style={{ color: "var(--ink2)" }}>{nomeChefe ?? "ninguém"}</b>}
     </div>
   );
 }

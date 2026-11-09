@@ -80,12 +80,12 @@ export function clienteDo(s: Pick<Solicitacao, "sobre_nome" | "cliente_id" | "vi
 // ── Estado na URL (#area/solicitacoes?escopo=…&ver=…&s=<id>) ────────────────
 export type Escopo = "recebidas" | "pedidas" | "historico";
 export type Ver = "quadro" | "lista" | "prazos";
-export type Dono = "todas" | "comigo" | "sem_dono";
+export type Dono = "todas" | "comigo" | "sem_dono" | "time";
 export interface EstadoTela { escopo: Escopo; ver: Ver; origem: "todas" | Setor; dono: Dono; q: string; minhas: boolean }
 
 const ESCOPOS: Escopo[] = ["recebidas", "pedidas", "historico"];
 const VERS: Ver[] = ["quadro", "lista", "prazos"];
-const DONOS: Dono[] = ["todas", "comigo", "sem_dono"];
+const DONOS: Dono[] = ["todas", "comigo", "sem_dono", "time"];
 const CHAVE_ORIGEM = "qs_sol_origem_"; // 0203: a aba de quem pediu, lembrada por setor
 const CHAVE_DONO = "qs_sol_dono_";     // 29/10: "Comigo" = minhas demandas, lembrado por setor
 

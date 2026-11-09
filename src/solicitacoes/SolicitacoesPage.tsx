@@ -35,7 +35,7 @@ import SolicitacaoDetalhe, { type LinksSol } from "./SolicitacaoDetalhe";
 import TiposPrazos from "./TiposPrazos";
 import { rotuloStatus } from "./cotacao";
 import {
-  AGUARDANDO, NOME_SETOR, agir, setoresDaCentral, aoMudarSolicitacao, buscar, contarEntregues, haQuanto, listarDoSetor, listarMinhas, primeiroNome, textoPrazo,
+  AGUARDANDO, NOME_SETOR, agir, setoresDaCentral, aoMudarSolicitacao, buscar, contarEntregues, haQuanto, listarDoSetor, listarDoTime, listarMinhas, meuTime, type PessoaDoTime, primeiroNome, textoPrazo,
   type Entregues, type Setor, type Solicitacao,
 } from "./lib";
 import {
@@ -145,19 +145,28 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const [tipos, setTipos] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [agora, setAgora] = useState(() => Date.now());
+  // 0336: quem está abaixo de mim na hierarquia (vazio = não sou chefe de ninguém).
+  const [time, setTime] = useState<PessoaDoTime[]>([]);
+  useEffect(() => { void meuTime().then(setTime); }, [meuId]);
+  const timeSet = useMemo(() => new Set(time.map((t) => t.id)), [time]);
 
   const carregar = useCallback(async () => {
     try {
-      const [r, p, m] = await Promise.all([listarDoSetor(setor, "para"), listarDoSetor(setor, "de"), meuId ? listarMinhas(meuId) : Promise.resolve([])]);
+      const [r, p, m, t] = await Promise.all([listarDoSetor(setor, "para"), listarDoSetor(setor, "de"), meuId ? listarMinhas(meuId) : Promise.resolve([]),
+        listarDoTime([...timeSet]).catch(() => [] as Solicitacao[])]);
       setRecebidas(r);
-      // Pedidas = do setor + as que EU pedi estando em outra área (admin/gestor de várias áreas).
-      const ids = new Set(p.map((x) => x.id));
-      setPedidas([...p, ...m.filter((x) => !ids.has(x.id) && x.para_setor !== setor)]);
+      // Pedidas = do setor + as que EU pedi estando em outra área (admin/gestor de várias áreas)
+      // + as do MEU TIME que não estão em nenhuma das duas (0336: ex.: pedidas em outro setor).
+      const ids = new Set([...p.map((x) => x.id), ...r.map((x) => x.id)]);
+      const extras = [...m.filter((x) => x.para_setor !== setor), ...t];
+      const juntas = [...p];
+      for (const x of extras) if (!ids.has(x.id)) { ids.add(x.id); juntas.push(x); }
+      setPedidas(juntas);
       if (r.some((x) => x.cotacao) || setor === "operacional") contarEntregues(setor).then(setEntregues).catch(() => undefined);
       setAgora(Date.now());
       setErro(null);
     } catch (e) { setErro(e instanceof Error ? e.message : "Não carregou."); }
-  }, [setor, meuId]);
+  }, [setor, meuId, timeSet]);
   useEffect(() => { void carregar(); }, [carregar]);
   useEffect(() => {
     const t = setInterval(() => { if (!document.hidden) void carregar(); }, 30_000);
@@ -204,7 +213,11 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   // ── O que entra no escopo ──
   /** O setor "do outro lado" do pedido, visto deste setor. */
   const outro = (s: Solicitacao): Setor => (s.para_setor === setor ? s.de_setor : s.para_setor);
-  const pedidasVisiveis = useMemo(() => (pedidas ?? []).filter((s) => !minhas || s.criado_por === meuId), [pedidas, minhas, meuId]);
+  const doMeuTime = useCallback((s: Solicitacao) => passaNoFiltro(s, "time", meuId, 0, timeSet), [meuId, timeSet]);
+  /** "Só as que eu pedi" não esconde o time quando o filtro "Meu time" está ligado. */
+  const vendoTime = dono === "time";
+  const pedidasVisiveis = useMemo(() => (pedidas ?? []).filter((s) => !minhas || s.criado_por === meuId || (vendoTime && doMeuTime(s))),
+    [pedidas, minhas, meuId, vendoTime, doMeuTime]);
   const base = useMemo<Solicitacao[] | null>(() => {
     if (escopo === "recebidas") return recebidas && recebidas.filter((s) => colunaDe(s) !== "encerrada");
     if (escopo === "pedidas") return pedidas && pedidasVisiveis.filter((s) => colunaDe(s) !== "encerrada");
@@ -229,8 +242,10 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const nComigo = daOrigem.filter((s) => s.aberta && s.responsavel_id === meuId).length;
   const nComigoAtrasadas = daOrigem.filter((s) => s.aberta && s.responsavel_id === meuId && atrasada(s, agora)).length;
   const nSemDono = daOrigem.filter((s) => s.aberta && !s.responsavel_id).length;
-  const itens = useMemo(() => daOrigem.filter((s) => dono === "todas" ? true : dono === "comigo" ? s.responsavel_id === meuId : !s.responsavel_id),
-    [daOrigem, dono, meuId]);
+  const nTime = daOrigem.filter((s) => s.aberta && doMeuTime(s)).length;
+  const itens = useMemo(() => daOrigem.filter((s) => dono === "todas" ? true : dono === "comigo" ? s.responsavel_id === meuId
+    : dono === "time" ? doMeuTime(s) : !s.responsavel_id),
+    [daOrigem, dono, meuId, doMeuTime]);
 
   // ── Indicadores do setor (sempre o que o setor RECEBE) ──
   const ind = useMemo(() => {
@@ -292,7 +307,7 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const meusSetores = setoresDe(currentUser);
   const avisos = useAvisos();
   const [filtroQ, setFiltroQEstado] = useState<FiltroQ>(() => {
-    try { const v = localStorage.getItem(`qs_sol_filtro_${setor}`); return v === "atrasados" || v === "comigo" ? v : "todos"; } catch { return "todos"; }
+    try { const v = localStorage.getItem(`qs_sol_filtro_${setor}`); return v === "atrasados" || v === "comigo" || v === "time" ? v : "todos"; } catch { return "todos"; }
   });
   const setFiltroQ = (f: FiltroQ) => { setFiltroQEstado(f); lembrar(`qs_sol_filtro_${setor}`, f); };
   const [detalhe, setDetalhe] = useState<string | null>(null);
@@ -302,7 +317,8 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
   const doQuadro = useMemo(() => (base ?? []).filter((s) => origem === "todas" || outro(s) === origem),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [base, origem, setor]);
-  const noQuadro = useMemo(() => doQuadro.filter((s) => passaNoFiltro(s, filtroQ, meuId, agora)), [doQuadro, filtroQ, meuId, agora]);
+  const noQuadro = useMemo(() => doQuadro.filter((s) => passaNoFiltro(s, filtroQ, meuId, agora, timeSet)), [doQuadro, filtroQ, meuId, agora, timeSet]);
+  const nTimeQ = doQuadro.filter((s) => s.aberta && doMeuTime(s)).length;
   const nAtrasadosQ = doQuadro.filter((s) => s.aberta && passaNoFiltro(s, "atrasados", meuId, agora)).length;
   const nComigoQ = doQuadro.filter((s) => s.aberta && s.responsavel_id === meuId).length;
   /** Selo das abas: não lidas (0315) — antes dela, o que já existia (novas / novidades). */
@@ -351,7 +367,8 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
               <button type="button" role="tab" aria-selected={false} onClick={() => muda({ escopo: "historico" })}>Buscar</button>
             </div>
             <div className="solq-filtros" role="group" aria-label="Filtro">
-              {([["todos", "Todos", 0], ["atrasados", "Atrasados", nAtrasadosQ], ["comigo", "Comigo", nComigoQ]] as [FiltroQ, string, number][]).map(([f, r, n]) => (
+              {([["todos", "Todos", 0], ["atrasados", "Atrasados", nAtrasadosQ], ["comigo", "Comigo", nComigoQ],
+                ...(time.length ? [["time", "Meu time", nTimeQ]] : [])] as [FiltroQ, string, number][]).map(([f, r, n]) => (
                 <button key={f} type="button" className="solq-pill" aria-pressed={filtroQ === f} onClick={() => setFiltroQ(f)}>
                   {r}{n > 0 && <span className="solq-pill__n">{n}</span>}
                 </button>
@@ -456,6 +473,9 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
             <FilterPill active={dono === "todas"} onClick={() => setDono("todas")}>Todas</FilterPill>
             <FilterPill active={dono === "comigo"} onClick={() => setDono("comigo")} count={nComigo} countTone={nComigoAtrasadas ? "danger" : undefined}>Comigo</FilterPill>
             <FilterPill active={dono === "sem_dono"} onClick={() => setDono("sem_dono")} count={nSemDono} countTone={nSemDono ? "warn" : undefined}>Sem dono</FilterPill>
+            {time.length > 0 && (
+              <FilterPill active={dono === "time"} onClick={() => setDono("time")} count={nTime}>Meu time</FilterPill>
+            )}
           </div>
           <span className="sol-ctrl__sep" aria-hidden />
           <span className="sol-ctrl__rot" id="sol-rot-setor">{rotuloOrigem}</span>

@@ -54,3 +54,22 @@ export const deleteQsAuthUser = (id: string) => callAdmin("delete", { id });
 export const listarEquipe = (setor: AreaComTime = "relacionamento") => callAdmin("listar_equipe", {}, setor);
 /** Time do Relacionamento (admin ou gestora do Relacionamento). */
 export const listarEquipeRel = () => listarEquipe("relacionamento");
+
+// ── Hierarquia (0336): a quem cada pessoa responde ──────────────────────────
+/** superior_id de cada pessoa. null = a coluna ainda não existe (0336 não aplicada). */
+export async function superioresDe(ids: string[]): Promise<Record<string, string | null> | null> {
+  if (!ids.length) return {};
+  const { data, error } = await supabase.from("qs_users").select("id, superior_id").in("id", ids);
+  if (error) return null;
+  return Object.fromEntries((data ?? []).map((r: { id: string; superior_id: string | null }) => [r.id, r.superior_id]));
+}
+
+/** Define a quem a pessoa responde (admin, ou gestor do mesmo setor). Quem está acima acompanha as demandas dela. */
+export async function definirSuperior(usuario: string, superior: string | null) {
+  const { error } = await supabase.rpc("qs_definir_superior", { p_usuario: usuario, p_superior: superior });
+  if (error) {
+    const m = error.message;
+    throw new Error(/superior-ciclo/.test(m) ? "Não dá: essa pessoa já está abaixo dela na hierarquia."
+      : /sem-permissao/.test(m) ? "Só o admin ou o gestor do setor define a hierarquia." : m);
+  }
+}
