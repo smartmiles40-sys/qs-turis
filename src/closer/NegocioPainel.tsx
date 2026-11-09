@@ -21,6 +21,7 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
 import { STATUS_PROPOSTA, TIPOS, TOM_PROPOSTA, type StatusProposta } from "@/propostas/lib";
 import FichaFechamento from "./FichaFechamento";
@@ -37,8 +38,8 @@ import ReunioesDoCliente from "@/controle-comercial/ReunioesDoCliente";
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
 import { desfazerPreVenda, listarItensDaVenda, nomeSugerido, somaDosItens, type ItemVenda } from "./vendaItens";
 import {
-  ETAPAS, ETAPAS_COM_MOTIVO, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, emPreVenda, espelharNoBitrix, eventosDoNegocio, moverNegocio,
-  nomeDoLead, notaNoNegocio, salvarNegocio, seloDaVenda, type Etapa, type EventoNegocio, type Negocio,
+  ETAPAS, ETAPAS_COM_MOTIVO, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, emPreVenda, espelharNoBitrix, eventosDoNegocio, listarClosersAtivos, moverNegocio,
+  nomeDoLead, notaNoNegocio, salvarNegocio, seloDaVenda, trocarCloser, type Etapa, type EventoNegocio, type Negocio,
 } from "./lib";
 
 export interface LinksDoPainel {
@@ -84,6 +85,9 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   // Motivo pedido ao mover pra Perdido ou Venda cancelada.
   const [perdendo, setPerdendo] = useState<{ etapa: Etapa; motivo: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  // 0334: trocar o responsável (gestor: qualquer cartão; closer: o próprio).
+  const { currentUser } = useQsAuth();
+  const [trocando, setTrocando] = useState(false);
 
   const carregar = useCallback(async () => {
     try {
@@ -134,6 +138,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   const preVenda = emPreVenda(n);
   const totalItens = somaDosItens(itensVenda);
   const selo = seloDaVenda(n);
+  const gestao = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const podeTrocar = gestao || (!!currentUser?.id && n.closer_id === currentUser.id);
   /** Venda registrada (pré-venda) ou fechada: daí em diante aparecem pagamento e contrato. */
   const vendaRegistrada = preVenda || consolidada;
   async function rodarPreVenda(f: () => Promise<{ tom: "ok" | "aviso"; mensagem: string }>) {
@@ -158,6 +164,10 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
         <h1 className="text-[22px] font-bold flex-1 min-w-0 truncate max-md:order-last max-md:basis-full max-md:whitespace-normal" style={{ color: "var(--ink)" }}>{nome}</h1>
         {selo && <Etiqueta tom={selo.tom}>{selo.t}</Etiqueta>}
         <Etiqueta tom={encerrado ? "erro" : "neutro"}>{NOME_ETAPA[n.etapa]}</Etiqueta>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-[13px]" style={{ color: "var(--ink2)" }}>
+        <span>Responsável: <b style={{ color: "var(--ink)" }}>{n.closer?.name ?? "ninguém"}</b></span>
+        {podeTrocar && <Botao variante="fantasma" disabled={ocupado} onClick={() => setTrocando(true)}>Trocar responsável</Botao>}
       </div>
       {aviso && <Aviso tom={aviso.tom}>{aviso.t}</Aviso>}
 
@@ -404,6 +414,60 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
         <label className="block text-[13px] font-semibold mb-1" style={{ color: "var(--ink2)" }} htmlFor="motivo-perda-painel">{perdendo?.etapa === "venda_cancelada" ? "Por que a venda foi cancelada?" : "Por que não fechou?"}</label>
         <textarea id="motivo-perda-painel" className="rel-input" rows={3} value={perdendo?.motivo ?? ""} onChange={(e) => perdendo && setPerdendo({ ...perdendo, motivo: e.target.value })} />
       </Modal>
+      {trocando && (
+        <TrocarResponsavel atual={n.closer_id} atualNome={n.closer?.name ?? null} onFechar={() => setTrocando(false)}
+          onTrocar={async (closerId, nomeNovo, motivo) => {
+            await trocarCloser(n.id, closerId, motivo);   // erro aparece dentro da janela
+            setTrocando(false);
+            setAviso({ tom: "ok", t: `Cartão passado pra ${nomeNovo}.` });
+            await carregar();
+          }} />
+      )}
     </div>
+  );
+}
+
+/** Escolhe o novo closer do cartão. O lead vai junto se estava com o closer antigo; fica no histórico. */
+function TrocarResponsavel({ atual, atualNome, onFechar, onTrocar }: {
+  atual: string | null; atualNome: string | null; onFechar: () => void;
+  onTrocar: (closerId: string, nome: string, motivo: string | null) => Promise<void>;
+}) {
+  const [closers, setClosers] = useState<{ id: string; name: string }[] | null>(null);
+  const [para, setPara] = useState("");
+  const [motivo, setMotivo] = useState("");
+  const [erro, setErro] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => {
+    listarClosersAtivos().then((l) => setClosers(l.filter((c) => c.id !== atual))).catch((e) => { setClosers([]); setErro((e as Error).message); });
+  }, [atual]);
+  const escolhido = closers?.find((c) => c.id === para);
+  async function salvar() {
+    if (!escolhido) return;
+    setOcupado(true); setErro(null);
+    try { await onTrocar(escolhido.id, escolhido.name, motivo.trim() || null); }
+    catch (e) { setErro((e as Error).message); } finally { setOcupado(false); }
+  }
+  return (
+    <Modal aberto titulo="Trocar responsável" onFechar={onFechar}
+      rodape={<>
+        <Botao variante="fantasma" onClick={onFechar}>Cancelar</Botao>
+        <Botao variante="primario" disabled={!escolhido || ocupado} onClick={() => void salvar()}>{ocupado ? "Passando…" : escolhido ? `Passar pra ${escolhido.name}` : "Passar"}</Botao>
+      </>}>
+      <div className="space-y-3">
+        <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
+          Hoje está com <b>{atualNome ?? "ninguém"}</b>. O cartão (e o lead, se estava com {atualNome ?? "ele"}) passa pro closer escolhido, com o histórico todo. Fica registrado quem trocou.
+        </p>
+        <Campo rotulo="Passar para">
+          <select className="rel-input" value={para} onChange={(e) => setPara(e.target.value)} autoFocus>
+            <option value="">{closers === null ? "Carregando…" : "Escolha o closer…"}</option>
+            {(closers ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Campo>
+        <Campo rotulo="Motivo (opcional)" dica="Ex.: a venda foi do Bruno; férias; redistribuição.">
+          <Entrada value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+        </Campo>
+        {erro && <Aviso tom="erro">{erro}</Aviso>}
+      </div>
+    </Modal>
   );
 }

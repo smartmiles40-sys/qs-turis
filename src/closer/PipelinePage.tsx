@@ -47,7 +47,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
   const [busca, setBusca] = useState("");
   const [arrastando, setArrastando] = useState<string | null>(null);
   const [perdendo, setPerdendo] = useState<{ id: string; etapa: Etapa; motivo: string } | null>(null);
-  const [trazendo, setTrazendo] = useState<{ dealId: string; ocupado: boolean; erro: string | null } | null>(null);
+  const [trazendo, setTrazendo] = useState<{ dealId: string; closerId?: string; ocupado: boolean; erro: string | null } | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const config = useConfigDaArea();
 
@@ -124,9 +124,11 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
     if (!trazendo?.dealId.trim() || trazendo.ocupado) return;
     setTrazendo({ ...trazendo, ocupado: true, erro: null });
     try {
-      const r = await trazerDoBitrix(trazendo.dealId, gestao ? closerFiltro || null : null);
+      const r = await trazerDoBitrix(trazendo.dealId, gestao ? trazendo.closerId || closerFiltro || null : null);
       setTrazendo(null);
-      setAviso(`${r.cliente || "Cliente"} entrou no quadro em “${NOME_ETAPA[r.etapa]}”.`);
+      setAviso(r.comOutro
+        ? `${r.cliente || "Esse cliente"} já está com ${r.com} (cartão em “${NOME_ETAPA[r.etapa]}”). Se for seu, peça pra ${r.com} ou pro gestor passar pra você em “Trocar responsável”.`
+        : `${r.cliente || "Cliente"} entrou no quadro em “${NOME_ETAPA[r.etapa]}”${r.com ? `, com ${r.com}` : ""}.`);
       void carregar();
     } catch (e) {
       setTrazendo((t) => (t ? { ...t, ocupado: false, erro: (e as Error).message } : t));
@@ -145,7 +147,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
           Em aberto: <b>{abertos.length}</b> · {brl(abertos.reduce((s, n) => s + valorDe(n), 0))}
           {"  "}· Vendas: <b>{vendas.length}</b> · {brl(vendas.reduce((s, n) => s + valorDe(n), 0))}
         </span>
-        {config?.bitrix !== false && <Botao onClick={() => setTrazendo({ dealId: "", ocupado: false, erro: null })}>Trazer do Bitrix</Botao>}
+        {config?.bitrix !== false && <Botao onClick={() => setTrazendo({ dealId: "", closerId: closerFiltro, ocupado: false, erro: null })}>Trazer do Bitrix</Botao>}
       </div>
 
       {/* Celular (04/11): busca na largura toda e os filtros lado a lado (eram 3 linhas). */}
@@ -249,14 +251,25 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
       <Modal aberto={!!trazendo} titulo="Trazer cliente do Bitrix" onFechar={() => setTrazendo(null)}
         rodape={<>
           <Botao variante="fantasma" onClick={() => setTrazendo(null)}>Cancelar</Botao>
-          <Botao variante="primario" disabled={!trazendo?.dealId.trim() || trazendo?.ocupado} onClick={() => void trazer()}>
+          <Botao variante="primario" disabled={!trazendo?.dealId.trim() || trazendo?.ocupado || (gestao && !trazendo?.closerId)} onClick={() => void trazer()}>
             {trazendo?.ocupado ? "Buscando…" : "Trazer"}
           </Botao>
         </>}>
         <p className="text-[13px] mb-3" style={{ color: "var(--ink2)" }}>
           Pra quem já tinha card no Bitrix antes do quadro novo. Cole o ID do negócio (o número no endereço do card).
-          O cartão entra na coluna em que o negócio está no Bitrix{gestao && closerFiltro ? ", em nome do closer filtrado" : ""}.
+          O cartão entra na coluna em que o negócio está no Bitrix.
         </p>
+        {gestao && (
+          <>
+            {/* 09/11: trazido pela conta Master sem escolher closer, o Fabrício ficou no nome do Master. */}
+            <label className="block text-[13px] font-semibold mb-1" style={{ color: "var(--ink2)" }} htmlFor="trazer-closer">Closer responsável</label>
+            <select id="trazer-closer" className="rel-input mb-3" value={trazendo?.closerId ?? ""}
+              onChange={(e) => trazendo && setTrazendo({ ...trazendo, closerId: e.target.value })}>
+              <option value="">Escolha o closer…</option>
+              {closers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </>
+        )}
         <label className="block text-[13px] font-semibold mb-1" style={{ color: "var(--ink2)" }} htmlFor="deal-id">ID do negócio no Bitrix</label>
         <input id="deal-id" className="rel-input" inputMode="numeric" autoFocus value={trazendo?.dealId ?? ""}
           onChange={(e) => trazendo && setTrazendo({ ...trazendo, dealId: e.target.value.replace(/\D/g, "") })}

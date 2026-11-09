@@ -275,7 +275,28 @@ async function chamarApi<T>(acao: string, corpo: Record<string, unknown>): Promi
 
 /** Traz pro quadro um cliente que já existe no Bitrix, pelo ID do negócio. */
 export function trazerDoBitrix(dealId: string, closerId?: string | null) {
-  return chamarApi<{ ok: boolean; negocioId: string; etapa: Etapa; cliente?: string }>("importar", { dealId, closerId: closerId ?? null });
+  return chamarApi<{ ok: boolean; negocioId: string; etapa: Etapa; cliente?: string; com?: string | null; comOutro?: boolean }>("importar", { dealId, closerId: closerId ?? null });
+}
+
+/**
+ * Passa o cartão (e o lead, se estava com o closer antigo) pra outro closer (0334).
+ * Gestor comercial/admin passa qualquer um; o closer passa o próprio pra um colega.
+ */
+export async function trocarCloser(negocioId: string, closerId: string, motivo: string | null) {
+  const { error } = await supabase.rpc("closer_negocio_trocar_closer", { p_negocio: negocioId, p_closer: closerId, p_motivo: motivo });
+  if (error) {
+    const m = error.message;
+    throw new Error(/sem-permissao/.test(m) ? "Só o gestor comercial ou o próprio closer do cartão podem trocar o responsável."
+      : /closer-invalido/.test(m) ? "Escolha um closer ativo."
+      : /closer_negocio_trocar_closer/.test(m) ? "Falta aplicar a 0334 no banco." : m);
+  }
+}
+
+/** Quem pode receber cartão: closers ativos (e gestores/admin, pra devolver ao time). */
+export async function listarClosersAtivos(): Promise<{ id: string; name: string; role: string }[]> {
+  const { data, error } = await supabase.from("qs_users").select("id, name, role").eq("is_active", true).in("role", ["closer"]).order("name");
+  if (error) throw new Error(error.message);
+  return (data ?? []) as { id: string; name: string; role: string }[];
 }
 
 /** Pré-venda (0207): leva o negócio pra coluna de venda no Bitrix (ou de volta, se desfeita). */

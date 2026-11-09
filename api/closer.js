@@ -320,7 +320,10 @@ async function importarDoBitrix(u, body) {
       texto: `No Bitrix o negócio estava em "${coluna}".${PERMITIDAS.includes(etapa) ? '' : ' Entrou em Em negociação: pra fechar a venda, preencha a ficha de fechamento.'}`,
     },
   }).catch(() => null);
-  return { status: 200, body: { ok: true, negocioId, leadId: lead.id, etapa: destino, cliente: lead.full_name } };
+  // 0334: se o cliente já estava com OUTRO closer ativo, o cartão continua com ele — a tela avisa.
+  const dono = (await rest(`qs_closer_negocios?select=closer_id,closer:qs_users!qs_closer_negocios_closer_id_fkey(name)&id=eq.${negocioId}&limit=1`).catch(() => []))?.[0];
+  const comOutro = Boolean(dono?.closer_id && dono.closer_id !== closerId);
+  return { status: 200, body: { ok: true, negocioId, leadId: lead.id, etapa: destino, cliente: lead.full_name, com: dono?.closer?.name || null, comOutro } };
 }
 
 function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
