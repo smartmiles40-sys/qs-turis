@@ -161,6 +161,7 @@ export async function salvarRegra(r: Omit<Regra, "id"> & { id?: string; obs?: st
     valor_exp_geral: r.valor_exp_geral ?? null, valor_exp_peru: r.valor_exp_peru ?? null, valor_exp_amazonia: r.valor_exp_amazonia ?? null,
     valor_pacote: r.valor_pacote ?? null, valor_outros: r.valor_outros ?? null, pct_lucro: r.pct_lucro ?? null, valor_cotacao: r.valor_cotacao ?? null,
     faixas_rr: r.faixas_rr?.length ? r.faixas_rr : null, bonus_dia: r.bonus_dia?.length ? r.bonus_dia : null,
+    sem_comissao: !!r.sem_comissao,
   };
   const q = r.id ? supabase.from("fin_com_regras").update(corpo).eq("id", r.id) : supabase.from("fin_com_regras").insert(corpo);
   const { error } = await q;

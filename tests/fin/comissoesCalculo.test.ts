@@ -221,3 +221,10 @@ test("resumo por pessoa e CSV com ; e número brasileiro", () => {
   assert.ok(csv.includes('"Ana; ""Bia"""'));
   assert.ok(csv.includes("1.234,50"));
 });
+
+test("supervisor fora da comissão some da conta", () => {
+  const fora: Regra[] = [...regras, { papel: "closer", pessoa_id: BRUNO, vigente_desde: "2026-10-01", sem_comissao: true }];
+  const l = linhasDoMes([card({ responsavel_reuniao: "Bruno Matheus", closer_id: BRUNO, data_reuniao_realizada: null })], fora, [], "2026-10");
+  assert.equal(closerDe(l).length, 0);
+  assert.equal(sdrDe(l).length, 1);
+});

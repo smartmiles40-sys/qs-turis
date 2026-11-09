@@ -83,6 +83,7 @@ export interface Regra {
   valor_cotacao?: number | null;        // SDR
   faixas_rr?: Faixa[] | null;           // SDR
   bonus_dia?: FaixaBonus[] | null;      // SDR
+  sem_comissao?: boolean | null;        // exceção: a pessoa não entra na conta (supervisor)
 }
 
 export interface Ajuste {
@@ -247,6 +248,13 @@ function campoDaRegra<K extends keyof Regra>(regras: Regra[], papel: Papel, pess
   }
   const geral = vs.find((r) => r.pessoa_id == null);
   return geral && geral[campo] != null ? geral[campo] : null;
+}
+
+/** A pessoa está fora da comissão nesse papel/dia (exceção "sem comissão" vigente)? */
+export function foraDaComissao(regras: Regra[], papel: Papel, pessoaId: string | null, dia: string): boolean {
+  if (!pessoaId) return false;
+  const daPessoa = vigentes(regras, papel, dia).find((r) => r.pessoa_id === pessoaId);
+  return !!daPessoa?.sem_comissao;
 }
 
 /** Campo numérico da regra (0 quando ninguém preencheu). */
@@ -440,6 +448,11 @@ export function linhasDoMes(vendas: VendaCard[], regras: Regra[], ajustes: Ajust
       fase: c.status, data_ref: dia, comissao_venda: valor,
     }));
   }
+
+  // Quem está fora da comissão (supervisor) some da conta.
+  const dentro = linhas.filter((l) => !foraDaComissao(regras, l.papel, l.pessoa_id, l.data_venda ?? l.rr_data ?? l.data_ref ?? `${mes}-01`));
+  linhas.length = 0;
+  linhas.push(...dentro);
 
   // Total calculado + ajuste do financeiro.
   for (const l of linhas) {

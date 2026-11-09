@@ -38,7 +38,9 @@ alter table fin_com_regras
   -- [{"de": 0, "valor": 8}, {"de": 41, "valor": 12}, …] — "de" = a partir de quantas R.R no mês
   add column if not exists faixas_rr          jsonb,
   -- [{"min": 6, "valor": 20}, {"min": 10, "valor": 40}] — vale a maior faixa batida no dia
-  add column if not exists bonus_dia          jsonb;
+  add column if not exists bonus_dia          jsonb,
+  -- Exceção de uma pessoa que NÃO entra na comissão (ex.: supervisor). As vendas dela somem da conta.
+  add column if not exists sem_comissao       boolean not null default false;
 
 comment on column fin_com_regras.valor_rr is 'SEM USO desde a 0328 (faixas_rr).';
 comment on column fin_com_regras.valor_expedicao is 'SEM USO desde a 0328 (valor_exp_*).';
@@ -116,4 +118,11 @@ on conflict do nothing;
 insert into fin_com_regras (papel, pessoa_id, vigente_desde, pct_lucro, obs, criado_por)
 select 'closer', u.id, '2026-10-01', 11, 'PDF: Talita 11% do lucro', null
   from qs_users u where u.name = 'Talita Carvalho' and u.role = 'closer'
+on conflict do nothing;
+
+-- John Italo é supervisor: não entra na conta (Bruno, 09/11).
+insert into fin_com_regras (papel, pessoa_id, vigente_desde, sem_comissao, obs, criado_por)
+select p.papel, u.id, '2026-10-01', true, 'Supervisor: não entra na comissão (Bruno, 09/11)', null
+  from qs_users u cross join (values ('sdr'), ('closer')) p(papel)
+ where u.name = 'John Italo' and u.is_active
 on conflict do nothing;

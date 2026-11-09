@@ -427,6 +427,7 @@ function AbaRegras({ regras, pessoas, nomeDe, onMudou }: { regras: Regra[]; pess
                 <tr key={r.id}>
                   <td style={{ ...td, fontWeight: 600 }}>
                     {r.pessoa_id ? `Exceção: ${nomeDe(r.pessoa_id)}` : "Geral"}
+                    {r.sem_comissao && <span style={{ display: "block", fontSize: 11.5, color: "var(--err-ink)" }}>Fora da comissão</span>}
                     {r.obs && <span style={{ display: "block", fontSize: 11.5, fontWeight: 400, color: "var(--ink3)", maxWidth: 220 }}>{r.obs}</span>}
                   </td>
                   <td style={td}>{dataBr(r.vigente_desde)}</td>
@@ -474,6 +475,12 @@ function FormularioRegra({ form, setForm, vendedores }: { form: FormRegra; setFo
         <Entrada type="date" value={form.vigente_desde} onChange={(e) => setForm({ ...form, vigente_desde: e.target.value })} />
       </Campo>
 
+      {form.pessoa_id && (
+        <label className="sm:col-span-3" style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: "var(--ink)" }}>
+          <input type="checkbox" checked={!!form.sem_comissao} onChange={(e) => setForm({ ...form, sem_comissao: e.target.checked })} />
+          Fora da comissão (ex.: supervisor): as vendas e R.R dessa pessoa não entram na conta
+        </label>
+      )}
       {titulo("Venda de expedição (valor fixo por venda, R$)")}
       {num("valor_exp_geral", "Ásia, Europa, Egito e demais")}
       {num("valor_exp_peru", "Peru")}
