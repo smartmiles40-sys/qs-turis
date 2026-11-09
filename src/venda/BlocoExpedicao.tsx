@@ -15,8 +15,8 @@
 // ajustar. A tela sugere o da tabela conforme "aéreo incluso", mostra os dois
 // valores do Operacional e marca quando o valor foi ajustado. Cada acompanhante
 // tem, opcional e recolhido, o que o contrato e o Ops vão precisar: vínculo com
-// o comprador, CPF, nascimento e e-mail (prepara a fase "família": contrato por
-// pessoa; menor de idade é assinado pelo pai/mãe).
+// o comprador, CPF, nascimento, e-mail e, se menor, quem assina por ele(a)
+// (DadosDoViajante — o mesmo dos outros itens; a família vira qs_venda_pessoas, 0351).
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import { Aviso, Botao, Campo, Entrada, Etiqueta } from "@/rel/ui";
@@ -24,7 +24,8 @@ import { QUARTOS_EXPEDICAO } from "@/propostas/lib";
 import type { ItemVenda } from "@/closer/vendaItens";
 import { brl, dataBr } from "@/closer/lib";
 import { lerValor, passageirosParaQuarto, viajanteNovo, type ExpedicaoVaga, type PaxParaQuarto, type Viajante } from "./api";
-import { VINCULOS_VIAJANTE, menorDeIdade, mostrarValor, precoTabela, sugerirValor, trocarAereo, valorAjustado, type VinculoViajante } from "./vendaRegras";
+import { mostrarValor, precoTabela, sugerirValor, trocarAereo, valorAjustado } from "./vendaRegras";
+import DadosDoViajante from "./DadosDoViajante";
 
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const mesAno = (iso: string | null) => (iso ? `${MESES[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : "");
@@ -108,15 +109,13 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
           const outros = viajantes.filter((x) => x.chave !== v.chave);
           const tab = precoTabela(exp, v.aereo_incluso);
           const ajustado = valorAjustado(v, exp);
-          const menor = !v.comprador ? menorDeIdade(v.nascimento, exp?.data_embarque) : null;
-          const faltaDoc = v.comprador ? [] : [!v.vinculo && "vínculo", !v.cpf.trim() && "CPF", !v.nascimento && "nascimento", !v.email.trim() && "e-mail"].filter((x): x is string => !!x);
           return (
             <div key={v.chave} className="rounded-xl p-3" style={{ border: "1px solid var(--line)", background: "var(--bg, transparent)" }}>
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-[13.5px] font-bold flex-1" style={{ color: "var(--ink)" }}>
                   {v.comprador ? `${nomeComprador || "Quem comprou"} (comprador)` : `Acompanhante ${n}`}
                 </span>
-                {!v.comprador && <Botao variante="fantasma" onClick={() => onViajantes(viajantes.filter((x) => x.chave !== v.chave).map((x) => (x.divide === `v:${v.chave}` ? { ...x, divide: "" } : x)))}>Tirar</Botao>}
+                {!v.comprador && <Botao variante="fantasma" onClick={() => onViajantes(viajantes.filter((x) => x.chave !== v.chave).map((x) => ({ ...x, divide: x.divide === `v:${v.chave}` ? "" : x.divide, responsavel: x.responsavel === v.chave ? "" : x.responsavel })))}>Tirar</Botao>}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {!v.comprador && <>
@@ -182,30 +181,8 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
                     <div className="mt-2"><Entrada placeholder="Nome de quem divide" value={v.divide_nome} onChange={(e) => mudar(v.chave, { divide_nome: e.target.value })} /></div>
                   )}
                 </div>
-                {!v.comprador && (
-                  <details className="sm:col-span-2 rounded-lg px-3 py-2" style={{ border: "1px dashed var(--line)" }} open={!!menor}>
-                    <summary className="text-[12.5px] font-semibold cursor-pointer" style={{ color: "var(--ink2)" }}>
-                      Dados pro contrato e pro Operacional (opcional)
-                      <span className="font-normal" style={{ color: "var(--ink3)" }}>
-                        {" — "}{faltaDoc.length ? `falta: ${faltaDoc.join(", ")}` : "completo"}
-                      </span>
-                    </summary>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-                      <Campo rotulo={`É o quê de ${nomeComprador || "quem comprou"}?`}>
-                        <select className="rel-input" value={v.vinculo} onChange={(e) => mudar(v.chave, { vinculo: e.target.value as VinculoViajante })}>
-                          <option value="">Escolha…</option>
-                          {Object.entries(VINCULOS_VIAJANTE).map(([k, r]) => <option key={k} value={k}>{r}</option>)}
-                        </select>
-                      </Campo>
-                      <Campo rotulo="CPF"><Entrada inputMode="numeric" placeholder="000.000.000-00" value={v.cpf} onChange={(e) => mudar(v.chave, { cpf: e.target.value })} /></Campo>
-                      <Campo rotulo="Nascimento"
-                        dica={menor ? "Menor de idade no embarque: o contrato dele(a) é assinado pelo pai/mãe ou responsável." : undefined}>
-                        <Entrada type="date" value={v.nascimento} onChange={(e) => mudar(v.chave, { nascimento: e.target.value })} />
-                      </Campo>
-                      <Campo rotulo="E-mail"><Entrada type="email" value={v.email} onChange={(e) => mudar(v.chave, { email: e.target.value })} /></Campo>
-                    </div>
-                  </details>
-                )}
+                <DadosDoViajante v={v} viajantes={viajantes} nomeComprador={nomeComprador} dataViagem={exp?.data_embarque}
+                  onMudar={(p) => mudar(v.chave, p)} />
               </div>
             </div>
           );

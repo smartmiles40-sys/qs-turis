@@ -14,6 +14,7 @@
 // O closer vê só os próprios cartões; a gestão filtra por closer.
 // Filtros: período (quando entrou no pipeline), etapa e closer (só a gestão).
 // Cada coluna mostra quantos cartões e quanto vale.
+// 0351: cartão com família vira PASTA — "Família · N pessoas" e, aberto, quem vai.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -21,6 +22,8 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Etiqueta, Modal, Vazio } from "@/rel/ui";
 import { ETAPAS, ETAPAS_COM_MOTIVO, ETAPAS_FINAIS, NOME_ETAPA, bancoSemPipelineV2, brl, dataBr, emPreVenda, espelharNoBitrix, listarNegocios, moverNegocio, nomeDoLead, seloDaVenda, trazerDoBitrix, useConfigDaArea, type Etapa, type Negocio } from "./lib";
 import NegocioPainel, { type LinksDoPainel } from "./NegocioPainel";
+import { familiasDosNegocios } from "@/venda/familia";
+import { ativas, ehFamilia, linhaCurta, resumoFamilia, type FamiliaDaVenda } from "@/venda/familiaRegras";
 
 const PERIODOS = [
   { id: "30", rotulo: "Últimos 30 dias" },
@@ -110,6 +113,17 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
         if (vivo) setZumbis(set);
       } catch { /* selo é extra: falhou, o quadro segue igual */ }
     })();
+    return () => { vivo = false; };
+  }, [lista]);
+
+  // 0351: a PASTA da família de cada cartão (venda_familia). Extra: falhou, o quadro segue igual.
+  const [familias, setFamilias] = useState<Map<string, FamiliaDaVenda>>(new Map());
+  const [pastaAberta, setPastaAberta] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const ids = lista.filter((n) => n.pre_venda_em || n.consolidada_em).map((n) => n.id);
+    if (!ids.length) { setFamilias(new Map()); return; }
+    let vivo = true;
+    familiasDosNegocios(ids).then((m) => vivo && setFamilias(m)).catch(() => undefined);
     return () => { vivo = false; };
   }, [lista]);
 
@@ -242,8 +256,12 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
                 <div className="px-2 pb-2 space-y-2 overflow-y-auto flex-1">
                   {itens.map((n) => {
                     const atrasada = n.proxima_acao_em && new Date(n.proxima_acao_em).getTime() < Date.now();
+                    const fam = familias.get(n.id);
+                    const pasta = fam && ehFamilia(fam) ? fam : null;
+                    const aberta = pastaAberta.has(n.id);
                     return (
-                      <button key={n.id} draggable
+                      <div key={n.id} className="rounded-lg" style={pasta ? { boxShadow: "3px 3px 0 0 var(--line)" } : undefined}>
+                      <button draggable
                         onDragStart={(e) => { e.dataTransfer.setData("text/plain", n.id); setArrastando(n.id); }}
                         onDragEnd={() => setArrastando(null)}
                         onClick={() => onAbrirId(n.id)}
@@ -268,6 +286,30 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
                           {ETAPAS_COM_MOTIVO.includes(n.etapa) && n.motivo_perda && <Etiqueta>{n.motivo_perda.slice(0, 30)}</Etiqueta>}
                         </div>
                       </button>
+                      {pasta && (() => {
+                        const r = resumoFamilia(pasta);
+                        return (
+                          <div className="px-2.5 pb-2 -mt-1 rounded-b-lg" style={{ background: "var(--card)", border: "1px solid var(--line)", borderTop: "none" }}>
+                            <button type="button" aria-expanded={aberta} className="w-full text-left text-[12px] font-semibold pt-1.5 flex items-center gap-1.5"
+                              style={{ color: "var(--rel-ink)" }}
+                              onClick={() => setPastaAberta((s) => { const c = new Set(s); if (c.has(n.id)) c.delete(n.id); else c.add(n.id); return c; })}>
+                              <span aria-hidden>{aberta ? "▾" : "▸"}</span> 👨‍👩‍👧 {r.texto}
+                              {r.menores > 0 && <span style={{ color: "var(--ink3)", fontWeight: 400 }}> · {r.menores} menor{r.menores > 1 ? "es" : ""}</span>}
+                              {r.incompletas > 0 && <span style={{ color: "var(--err-ink)", fontWeight: 400 }}> · {r.incompletas} sem dados</span>}
+                            </button>
+                            {aberta && (
+                              <ul className="mt-1 space-y-0.5">
+                                {ativas(pasta.pessoas).map((p) => (
+                                  <li key={p.id} className="text-[12px] truncate" style={{ color: p.comprador ? "var(--ink)" : "var(--ink2)" }} title={linhaCurta(p)}>
+                                    {p.comprador ? "★ " : "• "}{linhaCurta(p)}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })()}
+                      </div>
                     );
                   })}
                 </div>

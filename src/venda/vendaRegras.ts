@@ -38,6 +38,8 @@ export interface Viajante {
   /** "" = não divide · "v:<chave>" = outro viajante desta venda · "p:<id>" = quem já comprou · "t" = só o nome */
   divide: string;
   divide_nome: string;
+  /** 0351: menor de idade — quem assina por ele(a): "" = o comprador · chave de outro viajante desta venda. */
+  responsavel?: string;
   /** Ficha (rel_clientes) e linha de `passageiros`, quando já gravado. */
   cliente_id?: string | null;
   passageiro_id?: string | null;
@@ -173,6 +175,8 @@ export interface PaxJson {
   divide_nome?: string | null;
   /** Mesmo uuid = mesmo quarto (passageiros.quarto_par_id) — vem quando a venda_subir passar a gravar o json completo. */
   quarto_par_id?: string | null;
+  /** 0351: chave do viajante que responde pelo menor ("" / null = o comprador). */
+  responsavel_chave?: string | null;
 }
 
 /** Viajantes da tela → json do item (guarda tudo: reabrir o rascunho não perde nada). */
@@ -187,6 +191,7 @@ export function viajantesParaJson(vs: Viajante[], nomeComprador: string): PaxJso
     valor_contratado: lerValor(v.valor_contratado), valor_pago: lerValor(v.valor_pago),
     aereo_incluso: v.aereo_incluso, quarto_desejado: vazio(v.quarto_desejado),
     divide: v.divide || null, divide_nome: v.divide === "t" ? vazio(v.divide_nome) : null,
+    responsavel_chave: v.comprador ? null : v.responsavel || null,
   }));
 }
 
@@ -276,6 +281,7 @@ export function restaurarViajantes(p: {
       aereo_incluso: (l?.aereo_incluso ?? j?.aereo_incluso) ?? true,
       quarto_desejado: txt(l?.quarto_desejado ?? j?.quarto_desejado),
       divide: txt(j?.divide), divide_nome: txt(j?.divide_nome),
+      responsavel: txt(j?.responsavel_chave),
       cliente_id: cid, passageiro_id: l?.id ?? j?.passageiro_id ?? null,
       // marca do comprador vinda do json (as outras regras logo abaixo)
       comprador: j?.comprador === true,
@@ -319,6 +325,7 @@ export function restaurarViajantes(p: {
   // "v:<chave>" que aponta pra ninguém (chave perdida) vira "não divide".
   const chaves = new Set(vs.map((v) => v.chave));
   for (const v of vs) if (v.divide.startsWith("v:") && !chaves.has(v.divide.slice(2))) v.divide = "";
+  for (const v of vs) if (v.responsavel && !chaves.has(v.responsavel)) v.responsavel = "";
 
   // ── Valor por pessoa: só divide igual se NINGUÉM tem valor gravado ──
   let dividiuIgual = false;

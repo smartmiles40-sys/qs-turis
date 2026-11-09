@@ -108,11 +108,12 @@ const nomeDaColuna = (lista, id) => (lista || []).find((e) => String(e?.STATUS_I
  *   lista       = colunas do funil em que o card está
  *   listaComercial = colunas do funil 0 (só precisa se o card estiver na Pré-Vendas)
  *   porPessoa   = true quando alguém clicou (pode mais que o cron)
- * Devolve { ok, fields, etapaAlvo, preVenda, valor, de, para, motivo }.
+ *   valorFilhos = 0351: soma do que foi pros cards filhos da família (o pai leva o resto)
+ * Devolve { ok, fields, etapaAlvo, preVenda, valor, valorVenda, valorFilhos, de, para, motivo }.
  *   ok=false → não envia; `motivo` explica (vira o bitrix_erro do cartão).
  *   fields vazio → já está igual, nada a enviar.
  */
-export function planejarEspelho({ n, deal, lista, listaComercial = null, porPessoa = false }) {
+export function planejarEspelho({ n, deal, lista, listaComercial = null, porPessoa = false, valorFilhos = 0 }) {
   const etapaAlvo = etapaNoBitrix(n);
   const preVenda = emPreVenda(n);
   const funil = String(deal?.CATEGORY_ID ?? '0');
@@ -160,11 +161,16 @@ export function planejarEspelho({ n, deal, lista, listaComercial = null, porPess
     }
   }
 
-  const valor = Number(n.ficha?.valor_total ?? (preVenda ? n.pre_venda_valor : null) ?? n.valor_previsto ?? 0);
+  const valorVenda = Number(n.ficha?.valor_total ?? (preVenda ? n.pre_venda_valor : null) ?? n.valor_previsto ?? 0);
+  // 0351 (família): cada card = 1 venda com o próprio valor. Com cards filhos, o
+  // PAI leva só o que não foi pra eles (total − soma dos filhos), senão o
+  // Dashboard conta em dobro. Pode dar 0 (titular sem valor próprio) — e vai 0.
+  const filhos = Math.round(Number(valorFilhos || 0) * 100) / 100;
+  const valor = filhos > 0 ? Math.max(Math.round((valorVenda - filhos) * 100) / 100, 0) : valorVenda;
   const fields = {};
   if (mudaFunil) fields.CATEGORY_ID = Number(FUNIL_COMERCIAL);
   if (mudaFunil || atual !== alvo) fields.STAGE_ID = alvo;
-  if (valor > 0 && Math.abs(Number(deal?.OPPORTUNITY || 0) - valor) > 0.009) {
+  if ((valor > 0 || filhos > 0) && Math.abs(Number(deal?.OPPORTUNITY || 0) - valor) > 0.009) {
     fields.OPPORTUNITY = valor;
     fields.CURRENCY_ID = 'BRL';
   }
@@ -179,7 +185,7 @@ export function planejarEspelho({ n, deal, lista, listaComercial = null, porPess
     else if (!tipoPre && tipoFicha && !atualTipo) fields[CAMPO_TIPO_VENDA] = tipoFicha;
   }
   return {
-    ...base, ok: true, fields, valor,
+    ...base, ok: true, fields, valor, valorVenda, valorFilhos: filhos,
     para: { funil: mudaFunil ? FUNIL_COMERCIAL : funil, coluna: alvo, nome: nomeDaColuna(colunas, alvo) },
   };
 }

@@ -9,7 +9,8 @@
 //   2. O que vendeu — cartões do catálogo único (TIPOS em src/propostas/lib.ts);
 //   3. Detalhes — campos de cada tipo. EXPEDIÇÃO tem bloco próprio
 //      (BlocoExpedicao): só com vaga, quem viaja, valor de cada um, aéreo
-//      incluso, quarto e com quem divide;
+//      incluso, quarto e com quem divide. Venda SEM expedição ganha "Quem viaja"
+//      (QuemViaja, 0351) — a família vira qs_venda_pessoas e cards filhos no Bitrix;
 //   4. Valores e pagamento — valor de cada item, forma, entrada, parcelas,
 //      condição especial (ExpedAmigo…) e observações.
 //
@@ -47,7 +48,9 @@ import {
   pagamentoVendaVazio, passageirosDosItens, pessoaVazia, subirVenda, vendaDoNegocio, viajanteNovo,
   type ExpedicaoVaga, type OrigemVenda, type PagamentoVenda, type PessoaVenda, type Viajante,
 } from "./api";
-import { completarPessoa, restaurarViajantes, viajantesParaJson, type AcompFicha } from "./vendaRegras";
+import { completarPessoa, restaurarViajantes, viajantesParaJson, type AcompFicha, type PaxJson } from "./vendaRegras";
+import QuemViaja from "./QuemViaja";
+import { familiaDoNegocio } from "./familia";
 import DadosDaPessoaNaVenda from "./DadosDaPessoaNaVenda";
 import BlocoExpedicao from "./BlocoExpedicao";
 import CampoDoTipo from "./CampoDoTipo";
@@ -78,6 +81,8 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   const [itens, setItens] = useState<ItemVenda[]>([]);
   const [valores, setValores] = useState<Record<string, string>>({});
   const [viajantes, setViajantes] = useState<Record<string, Viajante[]>>({});
+  // 0351: quem viaja numa venda SEM expedição (vai no 1º item que não é expedição).
+  const [outros, setOutros] = useState<Viajante[]>([]);
   const [pag, setPag] = useState<PagamentoVenda>(pagamentoVendaVazio);
   const [especial, setEspecial] = useState(false);
   const [especialObs, setEspecialObs] = useState("");
@@ -115,7 +120,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     setCarregando(true); setErro(null); setInfo(null); setPasso(0);
     setPag(pagamentoVendaVazio()); setEspecial(false); setEspecialObs(""); setObs("");
     setAnalise(null); setErroAnalise(null);
-    setPropostasJa([]); setPropostasNovas([]); setDaFicha([]);
+    setPropostasJa([]); setPropostasNovas([]); setDaFicha([]); setOutros([]);
     if (ehCloser) listarPropostasDaVenda({ negocioId: negocio!.id }).then((l) => vivo && setPropostasJa(l)).catch(() => undefined);
     const base = pessoaVazia();
     if (negocio?.lead) Object.assign(base, { nome: nomeDoLead(negocio.lead), telefone: negocio.lead.phone ?? "", email: negocio.lead.email ?? "" });
@@ -150,6 +155,23 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
         dividiu ||= r.dividiuIgual;
         return [i.k, r.viajantes];
       }));
+      // 0351: quem viaja nos itens que não são expedição (o json do item guarda a lista com chave).
+      const comLista = lista.find((i) => i.tipo !== "expedicao" && (i.passageiros as PaxJson[]).some((x) => x?.chave));
+      let vOutros = comLista && !exps.length
+        ? restaurarViajantes({ item: { ...comLista, valor: null }, compradorClienteId: venda?.cliente_id ?? ficha?.id ?? null, nomeComprador: pessoaFinal.nome, acompanhantes: acomps }).viajantes
+        : [];
+      // Quem assina pelo menor: a pasta gravada (venda_familia) diz a ficha; a tela guarda a chave.
+      const fam = ehCloser && venda ? await familiaDoNegocio(negocio!.id).catch(() => null) : null;
+      if (fam) {
+        const resp = new Map(fam.pessoas.filter((x) => x.responsavel_cliente_id && !x.comprador).map((x) => [x.cliente_id, x.responsavel_cliente_id as string]));
+        const porFicha = (vs: Viajante[]) => vs.map((v) => {
+          const r = v.cliente_id ? resp.get(v.cliente_id) : undefined;
+          const chave = r ? vs.find((o) => !o.comprador && o.cliente_id === r)?.chave : undefined;
+          return !v.responsavel && chave ? { ...v, responsavel: chave } : v;
+        });
+        for (const k of Object.keys(vjs)) vjs[k] = porFicha(vjs[k]);
+        vOutros = porFicha(vOutros);
+      }
       if (venda) avisos.push("Esta venda já foi registrada: pagamento, condição especial e observações vieram como estavam. Mude só o que precisar.");
       if (dividiu) avisos.push("O valor de cada viajante não estava guardado: dividi o total da expedição igualmente. Confira o valor de cada um.");
       if (!vivo) return;
@@ -161,6 +183,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       setItens(lista);
       setValores(Object.fromEntries(lista.map((i) => [i.k, mostrarValor(i.valor)])));
       setViajantes(vjs);
+      setOutros(vOutros);
       if (avisos.length) setInfo({ tom: dividiu ? "aviso" : "ok", t: avisos[0], lista: avisos.slice(1) });
     })().catch((e) => vivo && setErro((e as Error).message)).finally(() => vivo && setCarregando(false));
     listarExpedicoesParaVenda().then((l) => vivo && setExpedicoes(l)).catch((e) => vivo && (setExpedicoes([]), setErro((e as Error).message)));
@@ -172,6 +195,10 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   const comValores = itens.map((i) => ({ ...i, valor: i.tipo === "expedicao" ? i.valor : lerValor(valores[i.k] ?? "") }));
   const total = somaDosItens(comValores);
   const principal = itemPrincipal(comValores);
+  // 0351: venda sem expedição → "Quem viaja" vale pra venda toda e vai no 1º item que não é expedição.
+  const pivo = itens.some((i) => i.tipo === "expedicao") ? null : itens.find((i) => i.tipo !== "expedicao") ?? null;
+  const acompOutros = pivo ? outros.filter((v) => !v.comprador) : [];
+  const dataViagem = itens.map((i) => i.data_inicio).filter(Boolean).sort()[0] ?? null;
 
   const mudarItem = (k: string, p: Partial<ItemVenda>) => setItens((l) => l.map((i) => (i.k === k ? { ...i, ...p } : i)));
   const mudarDado = (k: string, chave: string, v: string) => setItens((l) => l.map((i) => (i.k === k ? { ...i, dados: { ...i.dados, [chave]: v } } : i)));
@@ -236,6 +263,9 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
         if (vs.some((v) => v.divide === "t" && !v.divide_nome.trim())) return "Escreva o nome de quem divide o quarto.";
         if (vs.some((v) => !v.comprador && v.cpf.trim() && v.cpf.replace(/\D/g, "").length !== 11)) return "CPF de quem viaja junto: são 11 números (ou deixe em branco).";
       }
+      if (acompOutros.some((v) => v.nome.trim().length < 3)) return "Quem viaja: escreva o nome de cada acompanhante.";
+      if (acompOutros.some((v) => v.cpf.trim() && v.cpf.replace(/\D/g, "").length !== 11)) return "CPF de quem viaja junto: são 11 números (ou deixe em branco).";
+      if (acompOutros.some((v) => v.valor_contratado.trim() && lerValor(v.valor_contratado) == null)) return "Valor de acompanhante que não entendi. Use só números, ex.: 2.500,00";
     }
     if (ate >= 3) {
       const ruim = itens.find((i) => i.tipo !== "expedicao" && (valores[i.k] ?? "").trim() && lerValor(valores[i.k]) == null);
@@ -264,7 +294,18 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   function itensFinais(): ItemVenda[] {
     return comValores.map((i) => (i.tipo === "expedicao"
       ? { ...i, passageiros: viajantesParaJson(viajantes[i.k] ?? [], pessoa.nome) }
-      : { ...i, passageiros: i.passageiros.length ? i.passageiros : [{ nome: pessoa.nome }] }));
+      // 0351: o item "pivô" guarda quem viaja (reabrir não perde a família).
+      : pivo && i.k === pivo.k && acompOutros.length
+        ? { ...i, passageiros: viajantesParaJson(outrosComComprador(), pessoa.nome) }
+        : { ...i, passageiros: i.passageiros.length && !(i.passageiros as PaxJson[]).some((x) => x?.chave) ? i.passageiros : [{ nome: pessoa.nome }] }));
+  }
+  /** "Quem viaja" sempre com o comprador na frente (a venda_subir conta ele como titular). */
+  function outrosComComprador(): Viajante[] {
+    return outros.some((v) => v.comprador) ? outros : [viajanteNovo(true), ...outros];
+  }
+  /** Viajantes por item como vão pra venda_subir (expedição + o pivô dos outros itens). */
+  function viajantesFinais(): Record<string, Viajante[]> {
+    return pivo && acompOutros.length ? { ...viajantes, [pivo.k]: outrosComComprador() } : viajantes;
   }
 
   // ── 5. Análise pós-venda: a pessoa aguarda o extrato antes de concluir ──
@@ -340,7 +381,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       try {
         r = await subirVenda(montarPayload({
           origem, negocio_id: ehCloser ? negocio!.id : null, viagem_id: viagemId ?? null,
-          cliente: pessoa, itens: final, viajantes, pagamento: pag,
+          cliente: pessoa, itens: final, viajantes: viajantesFinais(), pagamento: pag,
           condicao_especial: especial, condicao_obs: especialObs, observacoes: obs,
         }, nomeSugerido));
       } catch (e) {
@@ -354,6 +395,8 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       }
       subiram(r.venda_id);
       const pax = (r.passageiros ? ` ${r.passageiros} passageiro(s) já estão na expedição (pré-reserva — o Operacional confirma).` : "")
+        + ((r.pessoas ?? 0) > 1 ? ` Família: ${r.pessoas} pessoas na pasta da venda (cada uma ganha o card dela no Bitrix).` : "")
+        + (r.familia_erro ? ` Atenção: a venda gravou, mas a lista da família não (${r.familia_erro}). Abra e salve de novo.` : "")
         + (r.venda_id ? await guardarAnalise(r.venda_id) : "") + avisoProposta;
 
       if (ehCloser && principal) {
@@ -497,6 +540,11 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
                 </section>
               );
             })}
+            {/* 0351: venda sem expedição também tem "quem viaja" (a família vira a pasta do cartão e os cards filhos no Bitrix). */}
+            {pivo && (
+              <QuemViaja viajantes={outros} nomeComprador={pessoa.nome} dataViagem={dataViagem} totalVenda={total}
+                onViajantes={setOutros} />
+            )}
           </div>
         )}
 

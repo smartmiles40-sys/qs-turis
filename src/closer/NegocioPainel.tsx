@@ -17,6 +17,7 @@
 //      com os itens) gera a viagem no Rel e o plano no Financeiro. Aqui também
 //      ficam o PAGAMENTO (0181) e o CONTRATO (0180 — some se o ZapSign/Google
 //      não estiverem ligados na Vercel). Selo: "Fechada".
+//   0351: "Família / Quem vai" (FamiliaDaVenda) — a pasta com todos da venda.
 // O Bitrix é automático (cron a cada 10 min); a tela só fala dele se falhar.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
@@ -31,6 +32,7 @@ import PagamentoBloco from "./PagamentoBloco";
 // 28/10 (0214): a venda do closer usa a tela única de venda (src/venda/SubirVenda.tsx).
 import SubirVenda from "@/venda/SubirVenda";
 import { ListaPropostasAnexadas } from "@/venda/PropostasAnexadas";
+import FamiliaDaVenda from "@/venda/FamiliaDaVenda";
 import { PROPOSTAS_NO_QS } from "@/propostas/disponivel";
 import { SeloEmBreve } from "@/propostas/EmBreve";
 import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
@@ -213,6 +215,9 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
               ) : null}
             </Bloco>
           )}
+
+          {/* ── 0351: a PASTA — quem vai nesta venda (família), com o card de cada um no Bitrix ── */}
+          <FamiliaDaVenda negocioId={n.id} versao={versaoAnexos} onEditar={encerrado ? undefined : () => setRegistrarAberto(true)} />
 
           {/* ── 2. Fechar: pagamento e contrato (ficha de fechamento) ── */}
           {(vendaRegistrada || encerrado) && (

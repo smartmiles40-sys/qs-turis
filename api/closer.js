@@ -26,6 +26,11 @@
 //          coluna de venda ("Em emissão") com "Tipo de venda" e valor — é o que
 //          o Dashboard conta; desfeita, volta pra coluna da etapa do cartão.
 //
+// FAMÍLIA (0351, 09/11): venda com mais de uma pessoa (qs_venda_pessoas) →
+// cada pessoa que não é o titular ganha um card FILHO (mesma coluna do pai,
+// "Número do ID pai" = negócio do lead, OPPORTUNITY = valor dela) e o PAI leva
+// só o resto do total. Regras e payloads: api/_closerBitrixFamilia.js.
+//
 // IDEMPOTENTE: lê o card antes; se valor e etapa já batem, não regrava nada.
 // O resumo da ficha vai pra timeline uma vez, quando o cartão entra na venda.
 // Mover o card no Bitrix dispara os robôs daquela coluna, como se fosse à mão.
@@ -61,6 +66,7 @@ import { getSupabaseUserId } from './_wa.js';
 import {
   CAMPO_TIPO_VENDA, ETAPAS_DE_VENDA, FUNIL_COMERCIAL, FUNIL_PRE_VENDAS, NOME_ETAPA, emPreVenda, etapaParaColuna, planejarEspelho,
 } from './_closerBitrixPlano.js';
+import { carregarFamilia, espelharFamilia, filhosAtivos, resumoDaFamilia, somaDosFilhos } from './_closerBitrixFamilia.js';
 import {
   apagarNoZapsign, arquivarAssinado, criarNoZapsign, gerarPdf, gravarNoCadastro, guardarPdf, hashDoCorpo, lerConfig, lerNoZapsign,
   linkDoPdf, montarPrevia, nomesDoArquivo, normalizarCampos, oQueFalta, statusDoDocumento, testarZapsign, urlDoApp,
@@ -158,9 +164,18 @@ async function espelhar(negocioId, u, extra = {}) {
     const lista = await colunasDoFunil(deal.CATEGORY_ID);
     // Card ainda na Pré-Vendas: o plano leva pro Comercial 1 (precisa das colunas de lá).
     const listaComercial = String(deal.CATEGORY_ID ?? '0') === FUNIL_PRE_VENDAS ? await colunasDoFunil(FUNIL_COMERCIAL) : null;
-    const plano = planejarEspelho({ n, deal, lista, listaComercial, porPessoa: Boolean(u) });
+    // 0351: a família da venda (qs_venda_pessoas). Com cards filhos, o pai leva só o resto.
+    const familia = await carregarFamilia(n.id, { rest }).catch((e) => { console.warn('[closer] família', n.id, e?.message); return null; });
+    const plano = planejarEspelho({ n, deal, lista, listaComercial, porPessoa: Boolean(u), valorFilhos: somaDosFilhos(familia?.pessoas) });
     // Modo CONFERIR (03/11): devolve o que seria enviado e não escreve nada.
-    if (extra.seco) return { status: 200, body: { seco: true, dealId, ...plano } };
+    if (extra.seco) {
+      const filhos = filhosAtivos(familia?.pessoas);
+      return { status: 200, body: { seco: true, dealId, ...plano, familia: familia ? {
+        pessoas: (familia.pessoas || []).filter((p) => !p.removida_em).length,
+        filhos: filhos.length, semCard: filhos.filter((p) => !p.bitrix_deal_id).length,
+        saidasSemAviso: (familia.pessoas || []).filter((p) => p.bitrix_status === 'removida').length,
+      } : null } };
+    }
     if (!plano.ok) throw new Error(plano.motivo);
     const { fields, etapaAlvo, preVenda, valor } = plano;
     if (Object.keys(fields).length) {
@@ -184,15 +199,32 @@ async function espelhar(negocioId, u, extra = {}) {
     }
     // Pré-venda marcada/desfeita pelo botão: um recado na timeline do negócio.
     if (extra.comentario && fields.STAGE_ID) await comentarNoNegocio(dealId, extra.comentario(n, valor)).catch(() => null);
-    const nota = Object.keys(fields).length
-      ? `Bitrix atualizado (negócio ${dealId}): ${[
+
+    // 0351: os cards FILHOS da família (mesma coluna do pai, ID pai, valor de cada um).
+    // Erro numa pessoa não desfaz o pai: o cartão fica em 'erro' e o cron tenta de novo.
+    let fam = null;
+    if (familia?.pessoas?.some((p) => !p.comprador)) {
+      const titularNome = familia.pessoas.find((p) => p.comprador)?.cliente?.nome || deal.TITLE || '';
+      const listaDoPai = String(plano.para.funil) === String(deal.CATEGORY_ID ?? '0') ? lista : listaComercial || lista;
+      fam = await espelharFamilia(
+        { familia, titularNome, dealPai: { ...deal, ID: dealId }, para: plano.para, lista: listaDoPai, porPessoa: Boolean(u) },
+        { bx, rest },
+      );
+    }
+    const notaFamilia = resumoDaFamilia(fam);
+    const nota = Object.keys(fields).length || notaFamilia
+      ? [Object.keys(fields).length ? `Bitrix atualizado (negócio ${dealId}): ${[
         fields.STAGE_ID ? `coluna "${preVenda ? 'venda (pré-venda)' : NOME_ETAPA[etapaAlvo]}"` : '',
-        fields.OPPORTUNITY ? `valor ${brl(valor)}` : '',
+        fields.OPPORTUNITY ? `valor ${brl(valor)}${plano.valorFilhos > 0 ? ` (titular; ${brl(plano.valorFilhos)} nos cards da família)` : ''}` : '',
         fields[CAMPO_TIPO_VENDA] ? 'tipo de venda' : '',
-      ].filter(Boolean).join(' + ')}.`
+      ].filter(Boolean).join(' + ')}.` : '', notaFamilia].filter(Boolean).join(' ')
       : null;
+    if (fam?.erros?.length) {
+      Object.assign(marcas, { bitrix_status: 'erro', bitrix_erro: `O card do titular foi atualizado, mas ${notaFamilia}`.slice(0, 500) });
+    }
     await marcar(n.id, marcas, nota, u?.id);
-    return { status: 200, body: { ok: true, status: 'ok', mudou: Object.keys(fields), dealId } };
+    if (fam?.erros?.length) return { status: 200, body: { ok: false, status: 'erro', mensagem: marcas.bitrix_erro, dealId, familia: fam } };
+    return { status: 200, body: { ok: true, status: 'ok', mudou: Object.keys(fields), dealId, familia: fam } };
   } catch (e) {
     const msg = String(e?.message || 'Falhou').slice(0, 500);
     console.error('[closer] espelhar', n.id, msg);

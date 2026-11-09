@@ -11,6 +11,10 @@
 // Valor errado numa expedição: o atalho abre a aba Financeiro (Valores) da
 // expedição; o valor que o Ops corrige lá volta pra venda, a ficha, a viagem e o
 // Bitrix sozinho (gatilho da 0338).
+// 0351: "Quem vai" — TODAS as pessoas da venda (qs_venda_pessoas): vínculo, idade
+// (menor + quem assina), CPF/nascimento/passaporte (falta em vermelho), valor,
+// aéreo e, por expedição, se a pessoa já está na lista de passageiros, se está
+// NA FILA do espelho do sistema antigo (exp_venda_pax_pendentes) ou FALTANDO.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -28,6 +32,15 @@ interface ItemRevisao {
   expedicao_id: string | null; expedicao_tipo: string | null; expedicao_nome: string | null;
   viajantes: Viajante[];
 }
+/** 0351: cada pessoa da venda (titular + família) e onde ela está em cada expedição. */
+interface PessoaRevisao {
+  id: string; cliente_id: string; comprador: boolean; vinculo: string | null;
+  nome: string | null; cpf: string | null; nascimento: string | null; telefone: string | null; email: string | null;
+  passaporte: string | null; passaporte_validade: string | null; idade: number | null; menor: boolean | null; responsavel_nome: string | null;
+  valor: number | null; aereo_incluso: boolean | null; removida_em: string | null;
+  bitrix_deal_id: string | null; bitrix_status: string; contrato_status: string | null; falta: string[];
+  expedicoes: { item_id: string; expedicao_id: string | null; expedicao_nome: string | null; passageiro_id: string | null; status_reserva: string | null; na_fila: boolean; situacao: "na_expedicao" | "na_fila" | "falta" }[];
+}
 interface VendaRevisao {
   id: string; origem: string; criado_em: string; atualizado_em: string; negocio_id: string | null;
   valor_total: number | null;
@@ -37,6 +50,9 @@ interface VendaRevisao {
   closer_nome: string | null; etapa: string | null; consolidada_em: string | null;
   cliente: { id: string | null; nome: string | null; cpf: string | null; nascimento: string | null; telefone: string | null; email: string | null };
   itens: ItemRevisao[];
+  /** 0351 (sem a 0351 no banco: undefined). */
+  pessoas?: PessoaRevisao[];
+  espelho_ligado?: boolean;
 }
 
 const CONDICAO: Record<string, string> = { avista: "À vista", parcelado: "Parcelado", entrada: "Entrada + parcelas" };
@@ -153,6 +169,8 @@ function CartaoVenda({ v, onMarcar, onAbrirExpedicao }: {
         </div>
       </div>
 
+      {v.pessoas && v.pessoas.length > 0 && <QuemVai pessoas={v.pessoas} espelho={!!v.espelho_ligado} />}
+
       <div className="space-y-2">
         {v.itens.map((i) => (
           <div key={i.id} className="rounded-lg p-3" style={{ background: "var(--card2)" }}>
@@ -239,5 +257,90 @@ function CartaoVenda({ v, onMarcar, onAbrirExpedicao }: {
         {v.revisado_em && <Botao variante="fantasma" disabled={ocupado} onClick={() => void rodar(true)}>Desfazer revisão</Botao>}
       </div>
     </section>
+  );
+}
+
+const VINCULO: Record<string, string> = { conjuge: "Cônjuge", filho: "Filho(a)", pai_mae: "Pai / Mãe", irmao: "Irmão(ã)", amigo: "Amigo(a)", outro: "Outro" };
+const SITUACAO: Record<string, { t: string; tom: "rel" | "aviso" | "erro" }> = {
+  na_expedicao: { t: "na expedição", tom: "rel" },
+  na_fila: { t: "na fila do espelho", tom: "aviso" },
+  falta: { t: "FALTA na expedição", tom: "erro" },
+};
+
+/** 0351: todas as pessoas da venda — o Ops confere uma por uma. */
+function QuemVai({ pessoas, espelho }: { pessoas: PessoaRevisao[]; espelho: boolean }) {
+  const ativas = pessoas.filter((p) => !p.removida_em);
+  const saiu = pessoas.filter((p) => p.removida_em);
+  const naFila = ativas.some((p) => p.expedicoes.some((e) => e.situacao === "na_fila" || e.na_fila));
+  const faltando = ativas.some((p) => p.expedicoes.some((e) => e.situacao === "falta"));
+  const vermelho = { color: "var(--err-ink)", fontWeight: 600 } as const;
+  return (
+    <div className="rounded-lg p-3" style={{ background: "var(--card2)" }}>
+      <p className="text-[13.5px] font-semibold mb-1" style={{ color: "var(--ink)" }}>
+        👨‍👩‍👧 Quem vai — {ativas.length} pessoa{ativas.length === 1 ? "" : "s"}
+      </p>
+      {espelho && naFila && (
+        <p className="text-[12px] mb-2" style={{ color: "var(--ink2)" }}>
+          O espelho do sistema antigo está <b>ligado</b>: quem está "na fila do espelho" ainda NÃO entrou na lista de passageiros da
+          expedição — entra quando o espelho for desligado (Aplicar fila). Confira os dados aqui.
+        </p>
+      )}
+      {faltando && (
+        <p className="text-[12px] mb-2" style={vermelho}>Tem gente da venda que não está na expedição nem na fila. Avise o closer ou inclua na expedição.</p>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12.5px]" style={{ color: "var(--ink)" }}>
+          <thead>
+            <tr style={{ color: "var(--ink3)" }}>
+              <th className="text-left font-semibold pr-2">Pessoa</th>
+              <th className="text-left font-semibold pr-2">Vínculo / idade</th>
+              <th className="text-left font-semibold pr-2">CPF</th>
+              <th className="text-left font-semibold pr-2">Nascimento</th>
+              <th className="text-left font-semibold pr-2">Passaporte</th>
+              <th className="text-right font-semibold pr-2">Valor</th>
+              <th className="text-left font-semibold pr-2">Aéreo</th>
+              <th className="text-left font-semibold">Expedição</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ativas.map((p) => (
+              <tr key={p.id} className="border-t align-top" style={{ borderColor: "var(--line)" }}>
+                <td className="pr-2 py-1">
+                  <b>{p.nome || "—"}</b>
+                  {p.comprador && <span style={{ color: "var(--ink3)" }}> (titular)</span>}
+                  {p.telefone || p.email ? <span className="block text-[11.5px]" style={{ color: "var(--ink3)" }}>{[p.telefone, p.email].filter(Boolean).join(" · ")}</span> : null}
+                </td>
+                <td className="pr-2 py-1">
+                  {p.comprador ? "Titular" : p.vinculo ? VINCULO[p.vinculo] ?? p.vinculo : <span style={vermelho}>falta</span>}
+                  {p.idade != null ? ` · ${p.idade} anos` : ""}
+                  {p.menor && <span className="block"><Etiqueta tom="aviso">Menor — assina: {p.responsavel_nome ?? "titular"}</Etiqueta></span>}
+                </td>
+                <td className="pr-2 py-1" style={p.cpf ? undefined : vermelho}>{p.cpf || "falta"}</td>
+                <td className="pr-2 py-1" style={p.nascimento ? undefined : vermelho}>{p.nascimento ? dataBr(p.nascimento) : "falta"}</td>
+                <td className="pr-2 py-1" style={{ color: p.passaporte ? undefined : "var(--ink3)" }}>
+                  {p.passaporte || "—"}{p.passaporte_validade ? ` (até ${dataBr(p.passaporte_validade)})` : ""}
+                </td>
+                <td className="pr-2 py-1 text-right">{p.valor != null ? brl(p.valor) : <span style={{ color: "var(--ink3)" }}>{p.comprador ? "o resto" : "no titular"}</span>}</td>
+                <td className="pr-2 py-1">{p.aereo_incluso == null ? "—" : p.aereo_incluso ? "incluso" : "sem aéreo"}</td>
+                <td className="py-1">
+                  {p.expedicoes.length === 0 ? <span style={{ color: "var(--ink3)" }}>—</span> : p.expedicoes.map((e) => (
+                    <span key={e.item_id} className="block">
+                      <Etiqueta tom={SITUACAO[e.situacao]?.tom ?? "aviso"}>{SITUACAO[e.situacao]?.t ?? e.situacao}</Etiqueta>
+                      {e.situacao === "na_expedicao" && e.na_fila ? <span style={{ color: "var(--ink3)" }}> · mudança na fila</span> : null}
+                      {e.status_reserva ? <span style={{ color: "var(--ink3)" }}> · {e.status_reserva}</span> : null}
+                    </span>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {saiu.length > 0 && (
+        <p className="text-[12px] mt-1" style={{ color: "var(--ink3)" }}>
+          Saíram da venda: {saiu.map((p) => `${p.nome ?? "—"} (${dataBr(p.removida_em)})`).join(", ")}.
+        </p>
+      )}
+    </div>
   );
 }

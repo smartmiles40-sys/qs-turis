@@ -155,7 +155,11 @@ export interface PayloadVenda {
   observacoes: string;
 }
 
-export interface ResultadoVenda { venda_id: string; cliente_id: string; itens: number; passageiros: number; total: number }
+export interface ResultadoVenda {
+  venda_id: string; cliente_id: string; itens: number; passageiros: number; total: number;
+  /** 0351: quantas pessoas a venda tem (titular + família) e, se a pasta falhou, o porquê (a venda gravou). */
+  pessoas?: number; familia_erro?: string | null;
+}
 
 /** Monta o jsonb que a venda_subir espera (ver o cabeçalho da 0214). */
 export function montarPayload(p: PayloadVenda, nomeDoItem: (i: ItemVenda) => string) {
@@ -166,7 +170,9 @@ export function montarPayload(p: PayloadVenda, nomeDoItem: (i: ItemVenda) => str
     dados: limpa(i.dados), passageiros: i.passageiros.filter((x) => x.nome.trim()),
     valor: i.valor, custo: i.custo, fornecedor: i.fornecedor,
   }));
-  const viajantes = p.itens.flatMap((i, n) => i.tipo !== "expedicao" ? [] : (p.viajantes[i.k] ?? []).map((v) => ({
+  // 0351: viajantes de QUALQUER item que tenha a lista (expedição sempre; os outros
+  // só quando o closer pôs "Quem viaja") — a venda_subir grava a família (qs_venda_pessoas).
+  const viajantes = p.itens.flatMap((i, n) => (i.tipo !== "expedicao" && !(p.viajantes[i.k]?.length)) ? [] : (p.viajantes[i.k] ?? []).map((v) => ({
     chave: v.chave, item: n + 1, comprador: v.comprador,
     nome: v.comprador ? p.cliente.nome : v.nome, telefone: v.telefone || null, cpf: v.cpf || null,
     // email/cpf: a venda_subir já completa a ficha (só o vazio). nascimento/vinculo: a 0214
@@ -174,10 +180,11 @@ export function montarPayload(p: PayloadVenda, nomeDoItem: (i: ItemVenda) => str
     email: v.comprador ? null : v.email.trim() || null, nascimento: v.comprador ? null : v.nascimento || null,
     vinculo: v.comprador ? null : v.vinculo || null, cliente_id: v.comprador ? null : v.cliente_id || null,
     valor_contratado: lerValor(v.valor_contratado), valor_pago: lerValor(v.valor_pago) ?? 0,
-    aereo_incluso: v.aereo_incluso, quarto_desejado: v.quarto_desejado || null,
+    aereo_incluso: i.tipo === "expedicao" ? v.aereo_incluso : null, quarto_desejado: v.quarto_desejado || null,
     divide_com_chave: v.divide.startsWith("v:") ? v.divide.slice(2) : null,
     divide_com_passageiro_id: v.divide.startsWith("p:") ? v.divide.slice(2) : null,
     divide_com_nome: v.divide === "t" ? v.divide_nome : null,
+    responsavel_chave: v.comprador ? null : v.responsavel || null,
   })));
   const pg = p.pagamento;
   return {
