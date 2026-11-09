@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { carregarPainelMeta, conectarPelaMeta } from "@/lib/qs/metaConexao";
 import {
-  ROTULO_GATILHO, grafoInicial, linkDeReferencia, validarGrafo,
+  ROTULO_GATILHO, canalDo, ehGatilhoIg, grafoInicial, linkDeReferencia, validarGrafo,
   type CampoPersonalizado, type Fluxo, type Gatilho, type GatilhoConfig, type Grafo, type TipoGatilho,
 } from "./tipos";
 import {
@@ -29,6 +29,7 @@ import {
 } from "./api";
 import { AreaTexto, Aviso, Botao, COR, COR_SUAVE, COR_TEXTO, Campo, Carregando, Chip, Entrada, MKT_CSS, Modal, Selecao } from "./ui";
 import EditorFluxo from "./EditorFluxo";
+import RelatorioFluxo from "./RelatorioFluxo";
 import {
   MODELOS_AUTOMACAO, faltandoNoModelo, fraseDaResposta, fraseDoGatilho, grafoDeRespostaSimples, lerRespostaSimples, montarModelo, paramsPadrao,
   type IdModelo, type ModeloAutomacao, type ParamsModelo, type RespostaSimples,
@@ -45,9 +46,9 @@ const BASICAS: TipoGatilho[] = ["boas_vindas", "padrao"];
 /** Gatilhos que dá pra criar "do zero" aqui. Webhook/LP fica de fora: seria primeiro contato automático com lead. */
 const DO_ZERO: TipoGatilho[] = ["palavra_chave", "link_ref", "anuncio", "tag_adicionada"];
 
-/** Liga uma automação: o fluxo precisa estar sem erro grave. */
-async function ligarAutomacao(fluxo: Fluxo, gatilho: Gatilho | null) {
-  const graves = validarGrafo(fluxo.grafo).filter((p) => p.grave);
+/** Liga uma automação: o fluxo precisa estar sem erro grave (regras do canal dele). */
+export async function ligarAutomacao(fluxo: Fluxo, gatilho: Gatilho | null) {
+  const graves = validarGrafo(fluxo.grafo, canalDo(fluxo)).filter((p) => p.grave);
   if (graves.length) throw new Error(`Antes de ligar, arrume no “Editar fluxo”: ${graves[0].mensagem}`);
   if (fluxo.status !== "ativo") await salvarFluxo(fluxo.id, { status: "ativo" });
   if (gatilho && !gatilho.ativo) await mudarGatilho(gatilho.id, { ativo: true });
@@ -68,7 +69,8 @@ export default function AutomacoesPage() {
   const recarregar = useCallback(async () => {
     try {
       const [f, g] = await Promise.all([listarFluxos(), listarGatilhos()]);
-      setFluxos(f); setGatilhos(g); setErro(null);
+      // 09/11/2026: fluxos/gatilhos do Instagram moram na página Instagram.
+      setFluxos(f.filter((x) => canalDo(x) === "whatsapp")); setGatilhos(g.filter((x) => !ehGatilhoIg(x.tipo))); setErro(null);
     } catch (e) { setErro(erroMsg(e, "Não consegui carregar as automações.")); setFluxos([]); setGatilhos([]); }
   }, []);
   // 04/11/2026: a falha era engolida e "Configurações" ficava em "Carregando…" pra sempre.
@@ -291,11 +293,12 @@ function CartaoBasica({ tipo, gatilho, fluxo, onEditar, onEditarFluxo, onMudou }
   );
 }
 
-function CartaoAutomacao({ gatilho, fluxo, estado, onEditarFluxo, onEditarGatilho, onMudou }: {
+export function CartaoAutomacao({ gatilho, fluxo, estado, onEditarFluxo, onEditarGatilho, onMudou }: {
   gatilho: Gatilho | null; fluxo: Fluxo | null; estado: EstadoMkt | null;
   onEditarFluxo: (id: string) => void; onEditarGatilho: () => void; onMudou: () => void;
 }) {
   const [ocupado, setOcupado] = useState(false);
+  const [relatorio, setRelatorio] = useState(false);
   const ligado = !!fluxo && fluxo.status === "ativo" && (gatilho ? gatilho.ativo : true);
   const quandoTxt = gatilho ? fraseDoGatilho(gatilho.tipo, gatilho.config) : "Sem gatilho: só começa pela Conversa (“Iniciar fluxo”) ou por outro fluxo";
   const entao = fluxo ? fraseDaResposta(fluxo.grafo) : "o fluxo foi apagado";
@@ -353,6 +356,7 @@ function CartaoAutomacao({ gatilho, fluxo, estado, onEditarFluxo, onEditarGatilh
           {gatilho ? `${gatilho.disparos ?? 0} disparos` : `${fluxo?.execucoes_total ?? 0} iniciados`}
         </span>
         <MenuMais itens={[
+          ...(fluxo ? [{ rotulo: "Relatório", acao: () => setRelatorio(true) }] : []),
           ...(fluxo ? [{ rotulo: "Duplicar", acao: () => void duplicarFluxo(fluxo).then(() => { notifySuccess("Duplicado (como rascunho)."); onMudou(); }).catch((e) => notifyError(erroMsg(e, "Falhou."))) }] : []),
           ...(gatilho ? [{ rotulo: "Apagar só o gatilho", acao: () => { if (window.confirm("Apagar este gatilho? O fluxo continua.")) void apagarGatilho(gatilho.id).then(onMudou).catch((e) => notifyError(erroMsg(e, "Falhou."))); } }] : []),
           ...(fluxo ? [{ rotulo: "Apagar automação", perigo: true, acao: () => {
@@ -361,6 +365,7 @@ function CartaoAutomacao({ gatilho, fluxo, estado, onEditarFluxo, onEditarGatilh
           } }] : []),
         ]} />
       </div>
+      {relatorio && fluxo && <RelatorioFluxo fluxoId={fluxo.id} nome={fluxo.nome} grafo={fluxo.grafo} onFechar={() => setRelatorio(false)} />}
     </article>
   );
 }

@@ -140,6 +140,17 @@ export const LIMITES = { botoes: 3, tituloBotao: 20, itensLista: 10, tituloItem:
 
 export interface ProblemaGrafo { noId: string | null; mensagem: string; grave: boolean }
 
+/** O canal do fluxo (0343). Fluxo sem canal = WhatsApp. */
+export type Canal = "whatsapp" | "instagram";
+export const canalDo = (f: { canal?: Canal | null } | null | undefined): Canal => (f?.canal === "instagram" ? "instagram" : "whatsapp");
+
+/**
+ * Limites do Instagram (api/_mktIgRegras.js): texto até 1000 bytes; botões de
+ * resposta viram "respostas rápidas" (até 13, 20 letras); documento só PDF.
+ */
+export const LIMITES_IG = { textoBytes: 1000, respostasRapidas: 13 } as const;
+const bytes = (s: string) => new TextEncoder().encode(s).length;
+
 export const ROTULO_TIPO: Record<TipoNo, string> = {
   inicio: "Início", mensagem: "Mensagem", template: "Template (fora das 24 h)", pergunta: "Pergunta", aguardar: "Aguardar",
   condicao: "Condição", acao: "Ações", randomizador: "Teste A/B", ir_para: "Ir para outro fluxo", fim: "Fim",
@@ -148,8 +159,9 @@ export const ROTULO_TIPO: Record<TipoNo, string> = {
 const nomeDo = (no: No) => no.titulo || ROTULO_TIPO[no.tipo];
 
 /** Confere o grafo antes de ATIVAR: erro (grave) impede; aviso não. */
-export function validarGrafo(g: Grafo): ProblemaGrafo[] {
+export function validarGrafo(g: Grafo, canal: Canal = "whatsapp"): ProblemaGrafo[] {
   const p: ProblemaGrafo[] = [];
+  if (canal === "instagram") p.push(...problemasDoInstagram(g));
   const ids = new Set(g.nos.map((n) => n.id));
   const inicio = g.nos.filter((n) => n.tipo === "inicio");
   if (inicio.length !== 1) p.push({ noId: null, mensagem: 'O fluxo precisa de exatamente um bloco "Início".', grave: true });
@@ -247,15 +259,54 @@ export function validarGrafo(g: Grafo): ProblemaGrafo[] {
   return p;
 }
 
-export const TIPOS_GATILHO = ["palavra_chave", "boas_vindas", "padrao", "link_ref", "anuncio", "tag_adicionada", "webhook"] as const;
+/** Instagram: o que o editor avisa antes de ativar (o motor recusaria). */
+function problemasDoInstagram(g: Grafo): ProblemaGrafo[] {
+  const p: ProblemaGrafo[] = [];
+  for (const no of g.nos) {
+    const nome = nomeDo(no);
+    if (no.tipo === "template") p.push({ noId: no.id, mensagem: `"${nome}": Template é só do WhatsApp — no Instagram use uma Mensagem.`, grave: true });
+    if (no.tipo === "mensagem") {
+      for (const b of no.dados.blocos) {
+        if (b.tipo === "texto" && bytes(b.texto) > LIMITES_IG.textoBytes) p.push({ noId: no.id, mensagem: `"${nome}": no Instagram o texto vai até ~1.000 caracteres (sem emoji demais).`, grave: true });
+        if (b.tipo === "documento" && !/\.pdf(\?|$)/i.test(b.url)) p.push({ noId: no.id, mensagem: `"${nome}": no Instagram, documento só PDF.`, grave: true });
+      }
+    }
+  }
+  // Comentário → DM: só UMA mensagem sai antes da pessoa responder.
+  const inicio = g.nos.find((n) => n.tipo === "inicio");
+  const prox = inicio && g.ligacoes.find((l) => l.de === inicio.id && l.saida === "proximo");
+  const primeiro = prox && g.nos.find((n) => n.id === prox.para);
+  if (primeiro?.tipo === "mensagem") {
+    const it = primeiro.dados.interacao;
+    const saem = primeiro.dados.blocos.filter((b) => b.tipo !== "texto").length * 2 + primeiro.dados.blocos.filter((b) => b.tipo === "texto").length;
+    if (saem > 1) p.push({ noId: primeiro.id, mensagem: `"${nomeDo(primeiro)}": vindo de COMENTÁRIO, só a 1ª bolha sai antes da pessoa responder. Deixe um texto só (com botões) e o resto depois do clique.`, grave: false });
+    else if (it.tipo === "nenhuma") p.push({ noId: primeiro.id, mensagem: `"${nomeDo(primeiro)}": vindo de COMENTÁRIO, ponha um botão — o clique abre a conversa e o resto do fluxo pode sair.`, grave: false });
+  }
+  return p;
+}
+
+export const TIPOS_GATILHO = [
+  "palavra_chave", "boas_vindas", "padrao", "link_ref", "anuncio", "tag_adicionada", "webhook",
+  "ig_comentario", "ig_dm_palavra", "ig_story_resposta", "ig_story_mencao", "ig_boas_vindas", "ig_ref",
+] as const;
 export type TipoGatilho = (typeof TIPOS_GATILHO)[number];
+export const GATILHOS_IG: TipoGatilho[] = ["ig_comentario", "ig_dm_palavra", "ig_story_resposta", "ig_story_mencao", "ig_boas_vindas", "ig_ref"];
+export const ehGatilhoIg = (t: TipoGatilho) => t.startsWith("ig_");
 export const ROTULO_GATILHO: Record<TipoGatilho, string> = {
   palavra_chave: "Palavra-chave", boas_vindas: "Boas-vindas (1ª mensagem)", padrao: "Resposta padrão", link_ref: "Link de referência (wa.me / QR)",
   anuncio: "Anúncio clique-para-WhatsApp", tag_adicionada: "Tag adicionada", webhook: "Webhook (LP, n8n)",
+  ig_comentario: "Comentário no post/reels", ig_dm_palavra: "Palavra na DM", ig_story_resposta: "Resposta ao story", ig_story_mencao: "Menção no story",
+  ig_boas_vindas: "Boas-vindas (1ª DM)", ig_ref: "Link ig.me / QR",
 };
-export interface GatilhoConfig { palavras?: string[]; modo?: "contem" | "exata" | "comeca"; codigo?: string; texto?: string; ad_ids?: string[]; tag?: string; intervalo_horas?: number; token?: string }
-export interface Gatilho { id: string; fluxo_id: string; tipo: TipoGatilho; config: GatilhoConfig; ativo: boolean; prioridade: number; disparos: number; criado_em: string }
-export interface Fluxo { id: string; nome: string; descricao: string | null; status: "rascunho" | "ativo" | "pausado"; grafo: Grafo; pasta: string | null; execucoes_total: number; concluidas_total: number; criado_em: string; atualizado_em: string }
+export interface GatilhoConfig {
+  palavras?: string[]; modo?: "contem" | "exata" | "comeca"; codigo?: string; texto?: string; ad_ids?: string[]; tag?: string; intervalo_horas?: number; token?: string;
+  /** Instagram: qualquer comentário/DM, só nestes posts, respostas públicas (sorteia uma). */
+  qualquer_palavra?: boolean; posts?: string[]; respostas_publicas?: string[];
+  /** Link de entrada: nome que só o time vê. */
+  nome?: string;
+}
+export interface Gatilho { id: string; fluxo_id: string; tipo: TipoGatilho; config: GatilhoConfig; ativo: boolean; prioridade: number; disparos: number; cliques?: number; criado_em: string }
+export interface Fluxo { id: string; nome: string; descricao: string | null; status: "rascunho" | "ativo" | "pausado"; grafo: Grafo; pasta: string | null; execucoes_total: number; concluidas_total: number; criado_em: string; atualizado_em: string; canal?: Canal }
 export interface CampoPersonalizado { id: string; chave: string; rotulo: string; tipo: "texto" | "numero" | "data" | "sim_nao" | "email" | "telefone"; descricao: string | null }
 
 export const JANELA_MS = 24 * 3_600_000;
@@ -291,7 +342,28 @@ export function grafoInicial(): Grafo {
   return { nos: [inicio, msg], ligacoes: [{ id: novoId("l"), de: inicio.id, saida: "proximo", para: msg.id }] };
 }
 
+/** ig.me/m/<conta>?ref=<código> — abre a DM e o código chega no webhook (gatilho ig_ref). */
+export function linkIgMe(usuario: string, codigo: string): string {
+  return `https://ig.me/m/${encodeURIComponent(String(usuario).replace(/^@/, "").trim())}?ref=${encodeURIComponent(codigo)}`;
+}
+
+/** O link curto do QS que conta o clique: <site>/e/<código> (QR leva ?q=1). */
+export function linkCurto(origem: string, codigo: string, qr = false): string {
+  return `${origem.replace(/\/+$/, "")}/e/${encodeURIComponent(codigo)}${qr ? "?q=1" : ""}`;
+}
+
 export function linkDeReferencia(numero: string, codigo: string, texto?: string): string {
   const frase = `${(texto ?? "").trim() || "Olá!"} [ref:${codigo}]`;
   return `https://wa.me/${String(numero).replace(/\D/g, "")}?text=${encodeURIComponent(frase)}`;
+}
+
+/** Token do Instagram (mesma regra de api/_mktIgRegras.js situacaoToken): ok / vence em < 7 dias / vencido / erro / desconhecido. */
+export type SituacaoToken = "ok" | "vence_logo" | "vencido" | "erro" | "desconhecido";
+export function situacaoToken(conta: { status?: string | null; token_expira_em?: string | null } | null | undefined, agora = Date.now()): SituacaoToken {
+  if (!conta) return "desconhecido";
+  if (conta.status === "erro") return "erro";
+  const expira = conta.token_expira_em ? Date.parse(conta.token_expira_em) : NaN;
+  if (!Number.isFinite(expira)) return "desconhecido";
+  if (expira <= agora) return "vencido";
+  return expira - agora < 7 * 86_400_000 ? "vence_logo" : "ok";
 }

@@ -335,6 +335,10 @@
   ],
   "rewrites": [
     {
+      "source": "/e/:codigo",
+      "destination": "/api/mkt-automacoes?e=:codigo"
+    },
+    {
       "source": "/documentos/:token",
       "destination": "/index.html"
     },

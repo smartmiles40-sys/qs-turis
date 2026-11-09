@@ -3,28 +3,42 @@
 // MARKETING › INSTAGRAM — no jeito ManyChat (Bruno, 30/10/2026): cartões grandes
 // "Comentou no post → manda DM", "Respondeu story", "Mencionou", "Palavra na DM"
 // e, embaixo, cada automação como um cartão com liga/desliga e a regra em
-// linguagem simples. Abas: Automações | DMs | Comentários | Conexão.
+// linguagem simples. Abas: Automações | Links e QR | DMs | Comentários | Conexão.
+// 09/11/2026: cada automação agora é um FLUXO (mesmo editor do WhatsApp, canal
+// "instagram"); as regras simples antigas (mkt_ig_automacoes) continuam valendo
+// como reserva e têm "Converter em fluxo".
 //
 // VEM DESLIGADO: o webhook (api/mkt-instagram) não grava nem responde nada até
 // o Bruno conectar a conta e ligar na aba Conexão. Passo a passo do painel da
 // Meta em docs/MARKETING-AUTOMACOES.md.
 // -----------------------------------------------------------------------------
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { lazy, useCallback, useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { PaginaComAbas } from "../Abas";
-import { acao, carregarEstado, salvarConfig, type EstadoMkt } from "./api";
+import { acao, carregarEstado, criarFluxo, criarGatilho, listarFluxos, listarGatilhos, mudarGatilho, salvarConfig, type EstadoMkt } from "./api";
+import { GATILHOS_IG, ROTULO_GATILHO, canalDo, situacaoToken, validarGrafo, type Fluxo, type Gatilho as GatilhoFluxo, type GatilhoConfig } from "./tipos";
+import EditorFluxo from "./EditorFluxo";
+import { CartaoAutomacao, ligarAutomacao } from "./AutomacoesPage";
 import { AreaTexto, Aviso, Botao, COR, COR_SUAVE, COR_TEXTO, Campo, Carregando, Chip, Entrada, MKT_CSS, Modal, quando } from "./ui";
-import { fraseInstagram, type GatilhoIg } from "./modelos";
+import { fluxoDaRegraIg, fraseDoGatilho, fraseInstagram, type GatilhoIg } from "./modelos";
+
+// 09/11/2026: links ig.me + QR (growth tools), mesma tela do WhatsApp com canal="instagram".
+const Entradas = lazy(() => import("./EntradasPage").then((m) => ({ default: () => <m.default canal="instagram" /> })));
 
 type Gatilho = GatilhoIg;
 interface ConfigIg { palavras?: string[]; qualquer_palavra?: boolean; posts?: string[]; respostas_publicas?: string[]; dm_texto?: string; dm_botoes?: { titulo: string; url: string }[]; tags?: string[] }
 interface AutoIg { id: string; nome: string; ativo: boolean; gatilho: Gatilho; config: ConfigIg; disparos: number; ultimo_disparo_em: string | null }
-interface Conta { id: string; ig_user_id: string; username: string | null; status: string; ultima_entrada_em: string | null; ultimo_erro: string | null }
+interface Conta { id: string; ig_user_id: string; username: string | null; status: string; ultima_entrada_em: string | null; ultimo_erro: string | null; token_expira_em: string | null; token_renovado_em?: string | null }
 
 const lista = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
 const semTabela = (m: string) => /does not exist|schema cache/i.test(m) ? "As tabelas ainda não existem no banco (migration 0244 não aplicada)." : m;
 const irPara = (aba: string) => { window.location.hash = `#mkt/instagram?aba=${aba}`; };
+const erroIg = (e: unknown, padrao: string) => {
+  const m = e instanceof Error ? e.message : "";
+  if (/canal|ig_comentario|ig_dm|ig_story|ig_boas|check constraint/i.test(m)) return "O banco ainda não tem a migration 0343 (fluxos do Instagram).";
+  return semTabela(m) || padrao;
+};
 
 /** Os 4 cartões grandes (+ boas-vindas) — o "começar" de cada tipo de regra. */
 const TIPOS: { id: Gatilho; titulo: string; texto: string; nome: string; config: ConfigIg; icone: ReactNode }[] = [
@@ -54,6 +68,7 @@ const TIPOS: { id: Gatilho; titulo: string; texto: string; nome: string; config:
     icone: <><circle cx="12" cy="12" r="9" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></>,
   },
 ];
+const ROTULO_TOKEN: Record<ReturnType<typeof situacaoToken>, string> = { ok: "em dia", vence_logo: "vence em menos de 7 dias", vencido: "vencido", erro: "com erro", desconhecido: "validade desconhecida" };
 const ROT: Record<Gatilho, string> = { comentario: "Comentário", dm_palavra: "Palavra na DM", story_resposta: "Resposta ao story", story_mencao: "Menção no story", boas_vindas: "Boas-vindas" };
 
 function Icone({ d }: { d: ReactNode }) {
@@ -81,7 +96,10 @@ function useSituacao() {
   const carregar = useCallback(async () => {
     // 04/11/2026: a falha do estado era engolida e a aba Conexão ficava em "Carregando…" pra sempre.
     const pEstado = carregarEstado().then((e) => { setEstado(e); return null; }).catch((e: unknown) => (e instanceof Error ? e.message : "Não consegui ler o estado."));
-    const { data, error } = await supabase.from("mkt_ig_contas").select("id,ig_user_id,username,status,ultima_entrada_em,ultimo_erro").order("criado_em");
+    const base = "id,ig_user_id,username,status,ultima_entrada_em,ultimo_erro,token_expira_em";
+    let r: { data: unknown[] | null; error: { message: string } | null } = await supabase.from("mkt_ig_contas").select(`${base},token_renovado_em`).order("criado_em");
+    if (r.error && /token_renovado_em/.test(r.error.message)) r = await supabase.from("mkt_ig_contas").select(base).order("criado_em");
+    const { data, error } = r;
     const erroEstado = await pEstado;
     setErro(error ? semTabela(error.message) : erroEstado);
     setContas((data ?? []) as Conta[]);
@@ -94,9 +112,10 @@ export default function InstagramPage() {
   return (
     <div className="mkt-raiz">
       <style>{MKT_CSS}</style>
-      <PaginaComAbas titulo="Instagram" subtitulo="Comentou, respondeu o story ou mandou a palavra na DM → a resposta sai sozinha."
+      <PaginaComAbas titulo="Instagram" subtitulo="Comentou, respondeu o story, mandou a palavra na DM ou abriu o link → o fluxo começa sozinho."
         abas={[
           { id: "automacoes", rotulo: "Automações", componente: AbaAutomacoes },
+          { id: "links", rotulo: "Links e QR", componente: Entradas },
           { id: "dms", rotulo: "DMs", componente: Dms },
           { id: "comentarios", rotulo: "Comentários", componente: Comentarios },
           { id: "conexao", rotulo: "Conexão", componente: Conexao },
@@ -125,37 +144,91 @@ function OQueFalta({ estado, contas }: { estado: EstadoMkt | null; contas: Conta
   );
 }
 
-type Form = Partial<AutoIg> & { gatilho: Gatilho; config: ConfigIg };
+/** Modo do formulário: "fluxo" cria um fluxo do Instagram (o jeito novo); "regra" edita uma regra simples antiga. */
+type Form = Partial<AutoIg> & { gatilho: Gatilho; config: ConfigIg; modo: "fluxo" | "regra" };
+
+function AvisoToken({ contas }: { contas: Conta[] | null }) {
+  const ruins = (contas ?? []).filter((c) => c.status !== "desconectada").map((c) => ({ c, s: situacaoToken(c) })).filter((x) => x.s === "vence_logo" || x.s === "vencido" || x.s === "erro");
+  if (!ruins.length) return null;
+  return (
+    <Aviso tom={ruins.some((x) => x.s !== "vence_logo") ? "erro" : "alerta"}>
+      {ruins.map(({ c, s }) => (
+        <span key={c.id} className="block">
+          Token de <b>@{c.username ?? c.ig_user_id}</b>{" "}
+          {s === "vence_logo" ? `vence ${quando(c.token_expira_em)}. O QS tenta renovar sozinho todo dia; se não conseguir, renove na aba Conexão.`
+            : s === "vencido" ? "VENCEU: as automações do Instagram pararam. Cole um token novo na aba Conexão."
+            : `com erro${c.ultimo_erro ? ` (${c.ultimo_erro})` : ""}. Confira na aba Conexão.`}
+        </span>
+      ))}
+      <button type="button" className="mt-1 text-[12.5px] font-semibold underline" onClick={() => irPara("conexao")}>Ir para Conexão</button>
+    </Aviso>
+  );
+}
 
 function AbaAutomacoes() {
   const { estado, contas, erro } = useSituacao();
   const [itens, setItens] = useState<AutoIg[] | null>(null);
+  const [fluxos, setFluxos] = useState<Fluxo[] | null>(null);
+  const [gatilhos, setGatilhos] = useState<GatilhoFluxo[]>([]);
   const [form, setForm] = useState<Form | null>(null);
+  const [formGatilho, setFormGatilho] = useState<GatilhoFluxo | null>(null);
+  const [editando, setEditando] = useState<string | null>(null);
   const carregar = useCallback(async () => {
     const { data, error } = await supabase.from("mkt_ig_automacoes").select("*").order("criado_em", { ascending: false });
     if (error) notifyError(semTabela(error.message));
     setItens((data ?? []) as AutoIg[]);
+    try {
+      const [f, g] = await Promise.all([listarFluxos(), listarGatilhos(GATILHOS_IG)]);
+      setFluxos(f.filter((x) => canalDo(x) === "instagram")); setGatilhos(g);
+    } catch (e) {
+      // Sem a 0343 o banco não conhece os gatilhos ig_* (e mkt_fluxos não tem "canal"): só as regras simples aparecem.
+      setFluxos([]); setGatilhos([]);
+      if (!/canal|invalid input|check/i.test(e instanceof Error ? e.message : "")) notifyError(e instanceof Error ? e.message : "Não consegui carregar os fluxos.");
+    }
   }, []);
   useEffect(() => { void carregar(); }, [carregar]);
+  const voltar = useCallback(() => { setEditando(null); void carregar(); }, [carregar]);
+
+  if (editando) return <EditorFluxo fluxoId={editando} onVoltar={voltar} />;
 
   const novo = (g: Gatilho) => {
     const t = TIPOS.find((x) => x.id === g)!;
-    setForm({ nome: t.nome, gatilho: g, ativo: true, config: JSON.parse(JSON.stringify(t.config)) as ConfigIg });
+    setForm({ nome: t.nome, gatilho: g, ativo: true, config: JSON.parse(JSON.stringify(t.config)) as ConfigIg, modo: "fluxo" });
   };
   async function ligar(a: AutoIg, v: boolean) {
     const { error } = await supabase.from("mkt_ig_automacoes").update({ ativo: v }).eq("id", a.id);
     if (error) notifyError(semTabela(error.message)); else void carregar();
   }
+  async function converter(a: AutoIg) {
+    if (!window.confirm(`Converter “${a.nome}” em fluxo? Vira um fluxo do Instagram (com editor, botões, perguntas e relatório) e a regra simples é desligada.`)) return;
+    try {
+      const r = fluxoDaRegraIg({ nome: a.nome, gatilho: a.gatilho, config: a.config });
+      const f = await criarFluxo(r.nome, r.grafo, "instagram");
+      const g = await criarGatilho({ fluxo_id: f.id, tipo: r.gatilho.tipo, config: r.gatilho.config, prioridade: 10 });
+      if (a.ativo) await ligarAutomacao(f, g);
+      const { error } = await supabase.from("mkt_ig_automacoes").update({ ativo: false }).eq("id", a.id);
+      if (error) throw new Error(error.message);
+      notifySuccess(a.ativo ? "Convertida e ligada como fluxo." : "Convertida (desligada, como estava).");
+      void carregar();
+    } catch (e) { notifyError(erroIg(e, "Não consegui converter.")); }
+  }
+
+  const porFluxo = new Map((fluxos ?? []).map((f) => [f.id, f]));
+  const cartoes: { key: string; gatilho: GatilhoFluxo | null; fluxo: Fluxo | null }[] = [
+    ...gatilhos.map((g) => ({ key: g.id, gatilho: g, fluxo: porFluxo.get(g.fluxo_id) ?? null })),
+    ...(fluxos ?? []).filter((f) => !gatilhos.some((g) => g.fluxo_id === f.id)).map((f) => ({ key: f.id, gatilho: null, fluxo: f })),
+  ];
 
   return (
     <div className="flex flex-col gap-5">
       {erro && <Aviso tom="erro">{erro}</Aviso>}
+      <AvisoToken contas={contas} />
       <OQueFalta estado={estado} contas={contas} />
 
       <section className="flex flex-col gap-3">
         <div>
           <h2 className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>Criar uma automação</h2>
-          <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Escolha o que a pessoa faz no Instagram. O texto já vem pronto pra ajustar.</p>
+          <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Escolha o que a pessoa faz no Instagram. Vira um fluxo: dá pra começar simples e depois pôr botões, perguntas e tags no editor.</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {TIPOS.filter((t) => t.id !== "boas_vindas").map((t) => (
@@ -174,9 +247,25 @@ function AbaAutomacoes() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>Suas automações</h2>
-        {!itens ? <Carregando /> : !itens.length ? (
+        {!fluxos ? <Carregando /> : !cartoes.length ? (
           <div className="mkt-card p-5 text-center text-[13px]" style={{ color: "var(--ink3)" }}>Nenhuma ainda. Comece pelo “Comentou no post → manda DM”: é o que mais traz contato.</div>
         ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {cartoes.map((c) => (
+              <CartaoAutomacao key={c.key} gatilho={c.gatilho} fluxo={c.fluxo} estado={null} onEditarFluxo={setEditando}
+                onEditarGatilho={() => { if (c.gatilho) setFormGatilho(c.gatilho); else notifyError("Este fluxo não tem gatilho: crie pelos cartões acima ou na aba Links e QR."); }}
+                onMudou={() => void carregar()} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {!!itens?.length && (
+        <section className="flex flex-col gap-3">
+          <div>
+            <h2 className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>Regras simples (antigas)</h2>
+            <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Continuam funcionando (quando nenhum fluxo combina). “Converter em fluxo” passa pro jeito novo, com relatório.</p>
+          </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {itens.map((a) => {
               const f = fraseInstagram(a.gatilho, a.config);
@@ -194,7 +283,8 @@ function AbaAutomacoes() {
                     <span style={{ color: "var(--ink2)" }}>{f.entao}</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <Botao onClick={() => setForm({ ...a, config: { ...a.config } })}>Editar</Botao>
+                    <Botao onClick={() => void converter(a)}>Converter em fluxo</Botao>
+                    <Botao variante="fantasma" onClick={() => setForm({ ...a, config: { ...a.config }, modo: "regra" })}>Editar</Botao>
                     <Botao variante="fantasma" onClick={() => { if (window.confirm(`Apagar “${a.nome}”?`)) void supabase.from("mkt_ig_automacoes").delete().eq("id", a.id).then(({ error }) => { if (error) notifyError(semTabela(error.message)); void carregar(); }); }}>Apagar</Botao>{/* 04/11/2026: erro do apagar era ignorado */}
                     <span className="flex-1" />
                     <span className="text-[12px]" style={{ color: "var(--ink3)" }}>{a.disparos} disparos{a.ultimo_disparo_em ? ` · último ${quando(a.ultimo_disparo_em)}` : ""}</span>
@@ -203,26 +293,95 @@ function AbaAutomacoes() {
               );
             })}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
-      {form && <ModalAutomacao form={form} setForm={setForm} onSalvo={() => { setForm(null); void carregar(); }} />}
+      {form && <ModalAutomacao form={form} setForm={setForm} onSalvo={(abrir) => { setForm(null); if (abrir) setEditando(abrir); else void carregar(); }} />}
+      {formGatilho && <ModalGatilhoIg gatilho={formGatilho} onFechar={() => setFormGatilho(null)} onSalvo={() => { setFormGatilho(null); void carregar(); }} />}
     </div>
   );
 }
 
-function ModalAutomacao({ form, setForm, onSalvo }: { form: Form; setForm: (f: Form | null) => void; onSalvo: () => void }) {
+/** "Mudar gatilho" de um fluxo do Instagram: palavras, qualquer, posts, respostas públicas. */
+function ModalGatilhoIg({ gatilho, onFechar, onSalvo }: { gatilho: GatilhoFluxo; onFechar: () => void; onSalvo: () => void }) {
+  const [c, setC] = useState<GatilhoConfig>({ ...gatilho.config });
+  const [salvando, setSalvando] = useState(false);
+  const t = gatilho.tipo;
+  const comPalavras = t === "ig_comentario" || t === "ig_dm_palavra" || t === "ig_story_resposta";
+  async function salvar() {
+    if ((t === "ig_comentario" || t === "ig_dm_palavra") && !c.qualquer_palavra && !(c.palavras ?? []).length) { notifyError("Escreva as palavras (ou marque “qualquer”)."); return; }
+    if ((c.posts ?? []).some((p) => !/^\d+$/.test(p))) { notifyError("ID de post é só número (ex.: 17895695668004550)."); return; }
+    setSalvando(true);
+    try { await mudarGatilho(gatilho.id, { config: { ...c, palavras: c.qualquer_palavra ? [] : c.palavras ?? [] } }); notifySuccess("Gatilho salvo."); onSalvo(); }
+    catch (e) { notifyError(erroIg(e, "Não consegui salvar.")); }
+    finally { setSalvando(false); }
+  }
+  return (
+    <Modal aberto titulo={`Gatilho: ${ROTULO_GATILHO[t]}`} onFechar={onFechar} largura={560}
+      rodape={<><Botao onClick={onFechar}>Cancelar</Botao><Botao variante="primario" disabled={salvando} onClick={() => void salvar()}>Salvar</Botao></>}>
+      <div className="space-y-3">
+        <div className="rounded-lg px-3 py-2 text-[13px]" style={{ background: COR_SUAVE, color: COR_TEXTO }}><b>{fraseDoGatilho(t, c)}</b></div>
+        {comPalavras && (
+          <>
+            <label className="flex items-center gap-2 text-[13px]" style={{ color: "var(--ink2)" }}>
+              <input type="checkbox" checked={!!c.qualquer_palavra} onChange={(e) => setC({ ...c, qualquer_palavra: e.target.checked })} />
+              Qualquer {t === "ig_comentario" ? "comentário" : t === "ig_dm_palavra" ? "mensagem" : "resposta"}
+            </label>
+            {!c.qualquer_palavra && (
+              <Campo rotulo="Palavras" dica="Separe por vírgula. Acento e maiúscula não importam.">
+                <Entrada value={(c.palavras ?? []).join(", ")} onChange={(e) => setC({ ...c, palavras: lista(e.target.value) })} />
+              </Campo>
+            )}
+          </>
+        )}
+        {t === "ig_comentario" && (
+          <>
+            <Campo rotulo="Só nestes posts (IDs, vírgula; vazio = todos)" dica="O ID aparece na aba Comentários quando alguém comenta no post.">
+              <Entrada value={(c.posts ?? []).join(", ")} onChange={(e) => setC({ ...c, posts: lista(e.target.value) })} />
+            </Campo>
+            <Campo rotulo="Resposta pública no comentário (uma por linha; sorteia)" dica="Vazio = só DM.">
+              <AreaTexto value={(c.respostas_publicas ?? []).join("\n")} onChange={(e) => setC({ ...c, respostas_publicas: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })} />
+            </Campo>
+            <Aviso>A 1ª mensagem do fluxo vai como resposta privada ao comentário (a Meta deixa UMA, em até 7 dias). O resto do fluxo segue quando a pessoa responder.</Aviso>
+          </>
+        )}
+        {(t === "ig_story_mencao" || t === "ig_boas_vindas") && <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Este gatilho não tem o que configurar.</p>}
+        {t === "ig_ref" && <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Links ig.me se editam na aba Links e QR.</p>}
+      </div>
+    </Modal>
+  );
+}
+
+function ModalAutomacao({ form, setForm, onSalvo }: { form: Form; setForm: (f: Form | null) => void; onSalvo: (abrirFluxo?: string) => void }) {
   const c = form.config;
+  const [salvando, setSalvando] = useState(false);
   const setC = (p: ConfigIg) => setForm({ ...form, config: { ...form.config, ...p } });
   const comPalavras = form.gatilho === "comentario" || form.gatilho === "dm_palavra" || form.gatilho === "story_resposta";
   const frase = fraseInstagram(form.gatilho, c);
 
-  async function salvar() {
+  async function salvar(abrirEditor = false) {
+    if (salvando) return;
     if (!form.nome?.trim()) { notifyError("Dê um nome."); return; }
     if (!c.dm_texto?.trim()) { notifyError("Escreva a DM."); return; }
     if ((form.gatilho === "comentario" || form.gatilho === "dm_palavra") && !c.qualquer_palavra && !(c.palavras ?? []).length) { notifyError("Escreva as palavras (ou marque “qualquer”)."); return; }
     if ((c.dm_botoes ?? []).some((b) => (b.titulo || b.url) && !/^https:\/\//i.test(b.url))) { notifyError("O botão de link precisa de um endereço https://."); return; }
     const config = { ...c, dm_botoes: (c.dm_botoes ?? []).filter((b) => b.titulo.trim() && b.url.trim()) };
+    if (form.modo === "fluxo") {
+      // O jeito novo: vira um fluxo do Instagram (mkt_fluxos canal=instagram) + o gatilho.
+      setSalvando(true);
+      try {
+        const r = fluxoDaRegraIg({ nome: form.nome.trim(), gatilho: form.gatilho, config });
+        const graves = validarGrafo(r.grafo, "instagram").filter((p) => p.grave);
+        if (graves.length) { notifyError(graves[0].mensagem); return; }
+        const f = await criarFluxo(r.nome, r.grafo, "instagram");
+        const g = await criarGatilho({ fluxo_id: f.id, tipo: r.gatilho.tipo, config: r.gatilho.config, prioridade: 10 });
+        if (form.ativo ?? true) await ligarAutomacao(f, g);
+        notifySuccess(form.ativo ?? true ? "Automação criada e ligada." : "Automação criada (desligada).");
+        onSalvo(abrirEditor ? f.id : undefined);
+      } catch (e) { notifyError(erroIg(e, "Não consegui salvar.")); }
+      finally { setSalvando(false); }
+      return;
+    }
     const linha = { nome: form.nome.trim(), gatilho: form.gatilho, ativo: form.ativo ?? true, config };
     const r = form.id ? await supabase.from("mkt_ig_automacoes").update(linha).eq("id", form.id) : await supabase.from("mkt_ig_automacoes").insert(linha);
     if (r.error) { notifyError(semTabela(r.error.message)); return; }
@@ -236,7 +395,9 @@ function ModalAutomacao({ form, setForm, onSalvo }: { form: Form; setForm: (f: F
         <label className="mr-auto flex items-center gap-2 text-[13px]" style={{ color: "var(--ink2)" }}>
           <Interruptor ligado={form.ativo ?? true} onMudar={(v) => setForm({ ...form, ativo: v })} rotulo="Ligada" /> Ligada
         </label>
-        <Botao onClick={() => setForm(null)}>Cancelar</Botao><Botao variante="primario" onClick={() => void salvar()}>Salvar</Botao>
+        <Botao onClick={() => setForm(null)}>Cancelar</Botao>
+        {form.modo === "fluxo" && <Botao disabled={salvando} onClick={() => void salvar(true)} title="Cria e abre o editor pra pôr botões, perguntas e tags">Salvar e abrir no editor</Botao>}
+        <Botao variante="primario" disabled={salvando} onClick={() => void salvar()}>Salvar</Botao>
       </>}>
       <div className="grid gap-5 md:grid-cols-[1fr_280px]">
         <div className="space-y-3">
@@ -317,13 +478,24 @@ function Conexao() {
   const [igId, setIgId] = useState("");
   const [token, setToken] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
   if (!estado || !contas) return erro ? <Aviso tom="erro">{erro}</Aviso> : <Carregando />;
   const conectada = contas.some((c) => c.status === "conectada");
 
   async function conectar() {
     setOcupado(true);
-    try { const r = await acao<{ username?: string }>({ acao: "ig-conectar", igUserId: igId, token }); notifySuccess(`Conta conectada${r.username ? `: @${r.username}` : ""}.`); setToken(""); void carregar(); }
+    try {
+      const r = await acao<{ username?: string; longo?: boolean; aviso?: string | null }>({ acao: "ig-conectar", igUserId: igId, token });
+      notifySuccess(`Conta conectada${r.username ? `: @${r.username}` : ""}${r.longo ? " (token de 60 dias)" : ""}.`);
+      setAviso(r.aviso ?? null); setToken(""); void carregar();
+    }
     catch (e) { notifyError(e instanceof Error ? e.message : "Falhou."); }
+    finally { setOcupado(false); }
+  }
+  async function renovar(contaId: string) {
+    setOcupado(true);
+    try { await acao({ acao: "ig-renovar", contaId }); notifySuccess("Token renovado por mais 60 dias."); void carregar(); }
+    catch (e) { notifyError(e instanceof Error ? e.message : "Não renovou."); }
     finally { setOcupado(false); }
   }
   async function ligar(ligado: boolean) {
@@ -347,25 +519,38 @@ function Conexao() {
       <section className="mkt-card space-y-2 p-4">
         <h2 className="text-[14px] font-bold" style={{ color: "var(--ink)" }}>Conta</h2>
         {!contas.length && <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhuma conta conectada ainda.</p>}
-        {contas.map((c) => (
-          <div key={c.id} className="text-[13px]" style={{ color: "var(--ink2)" }}>
-            <b>@{c.username ?? c.ig_user_id}</b> · <Chip cor={c.status === "conectada" ? "#059669" : "#DC2626"}>{c.status}</Chip> · última entrada {quando(c.ultima_entrada_em)}
-            {c.ultimo_erro && <div className="text-[12px]" style={{ color: "#B91C1C" }}>{c.ultimo_erro}</div>}
-          </div>
-        ))}
+        {contas.map((c) => {
+          const s = situacaoToken(c);
+          return (
+            <div key={c.id} className="space-y-1 text-[13px]" style={{ color: "var(--ink2)" }}>
+              <div><b>@{c.username ?? c.ig_user_id}</b> · <Chip cor={c.status === "conectada" ? "#059669" : "#DC2626"}>{c.status}</Chip> · última entrada {quando(c.ultima_entrada_em)}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span>Token:</span>
+                <Chip cor={s === "ok" ? "#059669" : s === "vence_logo" ? "#D97706" : s === "desconhecido" ? "#6B7280" : "#DC2626"}>{ROTULO_TOKEN[s]}</Chip>
+                {c.token_expira_em && <span className="text-[12px]" style={{ color: "var(--ink3)" }}>vence {new Date(c.token_expira_em).toLocaleDateString("pt-BR")}</span>}
+                {c.token_renovado_em && <span className="text-[12px]" style={{ color: "var(--ink3)" }}>· renovado {quando(c.token_renovado_em)}</span>}
+                <Botao variante="fantasma" disabled={ocupado} onClick={() => void renovar(c.id)} title="O QS já renova sozinho todo dia quando faltam menos de 15 dias">Renovar agora</Botao>
+              </div>
+              {c.ultimo_erro && <div className="text-[12px]" style={{ color: "#B91C1C" }}>{c.ultimo_erro}</div>}
+            </div>
+          );
+        })}
+        {aviso && <Aviso tom="alerta">{aviso}</Aviso>}
         <div className="grid items-end gap-2 sm:grid-cols-[1fr_2fr_auto]">
-          <Campo rotulo="ID da conta (IG user id)"><Entrada value={igId} onChange={(e) => setIgId(e.target.value.replace(/\D/g, ""))} /></Campo>
+          <Campo rotulo="ID da conta (opcional)" dica="O QS lê do token."><Entrada value={igId} onChange={(e) => setIgId(e.target.value.replace(/\D/g, ""))} /></Campo>
           <Campo rotulo="Token (vai para o cofre; não volta para a tela)"><Entrada type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" /></Campo>
-          <Botao onClick={() => void conectar()} disabled={ocupado || !igId || token.length < 20}>Conectar</Botao>
+          <Botao onClick={() => void conectar()} disabled={ocupado || token.length < 20}>Conectar</Botao>
         </div>
+        <p className="text-[12px]" style={{ color: "var(--ink3)" }}>Token curto (1 h) vira longo (60 dias) sozinho se <code>MKT_IG_APP_SECRET</code> estiver na Vercel. O QS renova antes de vencer.</p>
       </section>
       <details className="mkt-card p-4">
         <summary className="cursor-pointer text-[14px] font-bold" style={{ color: "var(--ink)" }}>Painel da Meta (uma vez, pelo Bruno)</summary>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-[13px]" style={{ color: "var(--ink2)" }}>
           <li>No app da Meta, produto <b>Instagram</b> › “API com login do Instagram”. Permissões: <code>instagram_business_basic</code>, <code>instagram_business_manage_messages</code>, <code>instagram_business_manage_comments</code>.</li>
           <li>Webhook: URL <code className="break-all">{estado.instagram.webhook ?? "https://<domínio do QS>/api/mkt-instagram"}</code> e o token de verificação = valor de <code>MKT_IG_VERIFY_TOKEN</code> na Vercel {estado.instagram.verifyToken ? <Chip cor="#059669">configurado</Chip> : <Chip cor="#DC2626">falta na Vercel</Chip>}.</li>
-          <li>Assinar os campos <code>comments</code>, <code>messages</code> e <code>mentions</code> (e <code>messaging_postbacks</code>).</li>
-          <li>Gerar o token da conta (Business/Creator) e colar acima junto com o ID da conta.</li>
+          <li>Assinar os campos <code>comments</code>, <code>messages</code>, <code>messaging_postbacks</code>, <code>messaging_referral</code> (links ig.me) e <code>mentions</code>.</li>
+          <li>Na Vercel: <code>MKT_IG_APP_SECRET</code> (segredo do app do Instagram: confere a assinatura do webhook e troca o token curto pelo longo).</li>
+          <li>Gerar o token da conta (Business/Creator) e colar acima.</li>
         </ol>
       </details>
     </div>
@@ -377,7 +562,7 @@ function Conexao() {
 function Comentarios() {
   const [itens, setItens] = useState<Record<string, any>[] | null>(null);
   useEffect(() => {
-    void supabase.from("mkt_ig_comentarios").select("id,from_username,texto,media_id,respondido_dm_em,respondido_publico_em,erro,criado_em,mkt_ig_automacoes(nome)").order("criado_em", { ascending: false }).limit(100)
+    void supabase.from("mkt_ig_comentarios").select("*,mkt_ig_automacoes(nome)").order("criado_em", { ascending: false }).limit(100)
       .then(({ data, error }) => { if (error) notifyError(semTabela(error.message)); setItens(data ?? []); });
   }, []);
   if (!itens) return <Carregando />;
@@ -389,7 +574,8 @@ function Comentarios() {
           <b>@{c.from_username ?? "?"}</b> <span style={{ color: "var(--ink3)" }}>{quando(c.criado_em)}</span>
           <div style={{ color: "var(--ink)" }}>{c.texto}</div>
           <div className="mt-0.5 flex flex-wrap gap-2 text-[12px]" style={{ color: "var(--ink3)" }}>
-            {c.mkt_ig_automacoes?.nome ? <span>regra: {c.mkt_ig_automacoes.nome}</span> : <span>nenhuma regra</span>}
+            {c.gatilho_id ? <span>começou um fluxo</span> : c.mkt_ig_automacoes?.nome ? <span>regra: {c.mkt_ig_automacoes.nome}</span> : <span>nenhuma regra</span>}
+            {c.media_id && <span>post {c.media_id}</span>}
             {c.respondido_publico_em && <Chip cor="#059669">respondido no post</Chip>}
             {c.respondido_dm_em && <Chip cor="#059669">DM enviada</Chip>}
             {c.erro && <span style={{ color: "#B91C1C" }}>{c.erro}</span>}
@@ -405,6 +591,18 @@ function Dms() {
   const [aberta, setAberta] = useState<Record<string, any> | null>(null);
   const [msgs, setMsgs] = useState<Record<string, any>[]>([]);
   const [texto, setTexto] = useState("");
+  const [fluxosIg, setFluxosIg] = useState<Fluxo[]>([]);
+  const [fluxoSel, setFluxoSel] = useState("");
+  useEffect(() => {
+    listarFluxos().then((f) => { const a = f.filter((x) => canalDo(x) === "instagram" && x.status === "ativo"); setFluxosIg(a); setFluxoSel(a[0]?.id ?? ""); }).catch(() => setFluxosIg([]));
+  }, []);
+  async function iniciarFluxo() {
+    if (!aberta || !fluxoSel) return;
+    const nome = fluxosIg.find((f) => f.id === fluxoSel)?.nome ?? "o fluxo";
+    if (!window.confirm(`Começar “${nome}” nesta conversa? As mensagens saem de verdade.`)) return;
+    try { await acao({ acao: "ig-iniciar", conversaId: aberta.id, fluxoId: fluxoSel }); notifySuccess("Fluxo iniciado."); setAberta({ ...aberta }); }
+    catch (e) { notifyError(e instanceof Error ? e.message : "Falhou."); }
+  }
   const carregar = useCallback(() => supabase.from("mkt_ig_conversas").select("id,username,nome,ultima_entrada_em,ultima_mensagem_em,ultima_previa,nao_lidas,automacao_pausada_ate").order("ultima_mensagem_em", { ascending: false, nullsFirst: false }).limit(200)
     .then(({ data, error }) => { if (error) notifyError(semTabela(error.message)); setConvs(data ?? []); }), []);
   useEffect(() => { void carregar(); }, [carregar]);
@@ -441,6 +639,15 @@ function Dms() {
               </div>
             ))}
           </div>
+          {janela && fluxosIg.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-t px-2 pt-2 text-[12.5px]" style={{ borderColor: "var(--line)", color: "var(--ink2)" }}>
+              <span>Iniciar fluxo:</span>
+              <select className="mkt-input !w-auto !py-1" value={fluxoSel} onChange={(e) => setFluxoSel(e.target.value)} aria-label="Fluxo para iniciar">
+                {fluxosIg.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+              </select>
+              <Botao variante="fantasma" onClick={() => void iniciarFluxo()}>Iniciar</Botao>
+            </div>
+          )}
           <form className="flex gap-2 border-t p-2" style={{ borderColor: "var(--line)" }} onSubmit={(e) => { e.preventDefault(); void enviar(); }}>
             <Entrada value={texto} onChange={(e) => setTexto(e.target.value)} disabled={!janela} placeholder={janela ? "Responder…" : "Fora da janela de 24 h do Instagram"} />
             <Botao type="submit" variante="primario" disabled={!janela || !texto.trim()}>Enviar</Botao>
