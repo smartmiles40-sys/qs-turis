@@ -136,7 +136,12 @@ function CentralDoSetor({ setor, links, abrirId, onAbrirId, onMudou, seletor = n
   const ajustaTipos = gestor || (setor === "marketing" && currentUser?.role === "marketing");
 
   // ── Estado da tela (vai pra URL) ──
-  const [estado, setEstado] = useState<EstadoTela>(() => estadoInicial(setor));
+  // 10/11 (Tainara): gestor/admin abre "Pedidas por nós" com TODO o setor, não só
+  // o que ele mesmo pediu (o link com ?minhas= continua valendo).
+  const [estado, setEstado] = useState<EstadoTela>(() => {
+    const e = estadoInicial(setor);
+    return gestor && !/[?&]minhas=/.test(window.location.hash) ? { ...e, minhas: false } : e;
+  });
   const muda = (p: Partial<EstadoTela>) => setEstado((e) => ({ ...e, ...p }));
   const setOrigem = (o: EstadoTela["origem"]) => { muda({ origem: o }); lembrarOrigem(setor, o); };
   const setDono = (d: Dono) => { muda({ dono: d }); lembrarDono(setor, d); };
@@ -412,6 +417,11 @@ function CentralDoSetor({ setor, links, abrirId, onAbrirId, onMudou, seletor = n
                   {r}{n > 0 && <span className="solq-pill__n">{n}</span>}
                 </button>
               ))}
+              {/* 10/11: no quadro não havia como desligar o "Só as que eu pedi" — quem
+                  não era o autor (ex.: a gestora) não via os pedidos do resto do setor. */}
+              {escopo === "pedidas" && (
+                <button type="button" className="solq-pill" aria-pressed={minhas} onClick={() => muda({ minhas: !minhas })}>Só as que eu pedi</button>
+              )}
               <label className="sr-only" htmlFor={`solq-origem-${setor}`}>{rotuloOrigem}</label>
               <select id={`solq-origem-${setor}`} className="solq-select" value={origem} onChange={(e) => setOrigem(e.target.value as EstadoTela["origem"])}>
                 <option value="todas">{escopo === "recebidas" ? "De todos os setores" : "Pra todos os setores"}</option>
