@@ -31,6 +31,7 @@ import {
 } from "@/lib/qs/closerAgenda";
 import type { CloserAvailability, CloserBlock, CloserConfig, Meeting, SdrUser } from "../types";
 import { WEEKDAY_SHORT, hhmm } from "@/lib/qs/calendarLayout";
+import { DIAS_UTEIS_A_FRENTE, diaForaDoLimite, rotuloDoLimite } from "@/lib/qs/limiteAgendamento";
 
 /** Quantos dias pra frente o seletor deixa navegar. */
 const HORIZON_DAYS = 56;
@@ -78,8 +79,13 @@ export default function SlotPicker({
   const [loading, setLoading] = useState(true);
 
   const [closerId, setCloserId] = useState<string | null>(initialCloserId ?? null);
-  const [day, setDay] = useState<Date>(startOfDay(initialDate ?? new Date()));
-  const [stripStart, setStripStart] = useState<Date>(startOfDay(initialDate ?? new Date()));
+  // 10/11 (Bruno): só até 3 dias úteis à frente. Clique numa célula além do
+  // limite (Agenda do mês) abre no dia de hoje em vez de num dia proibido.
+  const [day, setDay] = useState<Date>(() => {
+    const d = startOfDay(initialDate ?? new Date());
+    return diaForaDoLimite(d) || d.getTime() < startOfDay(new Date()).getTime() ? startOfDay(new Date()) : d;
+  });
+  const stripStart = startOfDay(new Date());
   const [manual, setManual] = useState(false);
   const [manualTime, setManualTime] = useState("");
   // Horário comercial da grade (09:00–19:30 por padrão, ajustável em qs_settings).
@@ -140,9 +146,11 @@ export default function SlotPicker({
     return computeDaySlots(slotInput, day, { ignoreMeetingId, janela, duracaoMin });
   }, [slotInput, day, ignoreMeetingId, janela, duracaoMin]);
 
+  // A régua vai de hoje até o último dia permitido (3 dias úteis à frente).
   const stripDays = useMemo(
-    () => Array.from({ length: STRIP_DAYS }, (_, i) => addDays(stripStart, i)),
-    [stripStart]
+    () => Array.from({ length: STRIP_DAYS }, (_, i) => addDays(stripStart, i)).filter((d) => !diaForaDoLimite(d)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stripStart.getTime()]
   );
 
   /** Inícios que NÃO comportam a duração escolhida. */
@@ -290,23 +298,9 @@ export default function SlotPicker({
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-xs font-medium text-gray-700">Dia</label>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setStripStart(addDays(stripStart, -7))}
-                  disabled={stripStart.getTime() <= startOfDay(new Date()).getTime()}
-                  className="px-2 py-0.5 rounded text-xs text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  ‹ semana
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStripStart(addDays(stripStart, 7))}
-                  className="px-2 py-0.5 rounded text-xs text-gray-500 hover:bg-gray-100"
-                >
-                  semana ›
-                </button>
-              </div>
+              <span className="text-[11px] text-gray-400">
+                Até {DIAS_UTEIS_A_FRENTE} dias úteis à frente ({rotuloDoLimite()})
+              </span>
             </div>
             <div className="flex gap-1.5 overflow-x-auto pb-1">
               {stripDays.map((d) => {

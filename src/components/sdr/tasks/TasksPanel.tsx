@@ -12,6 +12,7 @@ import { CHANNEL_LABELS } from "../types";
 import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { createMeeting, avisarBitrixDaSala, transferirLeadProCloser, vincularCardAoBitrix, somenteDigitos } from "@/lib/qs/meetings";
+import { ultimoDiaPermitido } from "@/lib/qs/limiteAgendamento";
 import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
 import { fetchClosers, fetchCloserConfigs, configFor, validarHorario } from "@/lib/qs/closerAgenda";
 import { getSetting } from "@/lib/qsSettings";
@@ -4847,6 +4848,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   // `min` = agora. Não substitui a conferência do confirmar (o
                   // navegador só sugere), mas evita o erro bobo de marcar no passado.
                   min={paraInputLocal(new Date())}
+                  // 10/11: só até 3 dias úteis à frente (o createMeeting também barra).
+                  max={`${ultimoDiaPermitido()}T23:59`}
                   value={meeting.dataHora}
                   onChange={(e) => setMeeting((m) => ({ ...m, dataHora: e.target.value }))}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-green-400"

@@ -34,6 +34,7 @@
 // que apague dado. E reunião falsa aparece na Agenda pro time cancelar.
 // -----------------------------------------------------------------------------
 import { createHash } from 'node:crypto';
+import { depoisDoLimite, RECADO_LIMITE } from './_limiteAgendamento.js';
 import { rest, insert } from './_supabaseAdmin.js';
 import { createInboundLead, generateCadenceTasks, normPhone } from './_leads.js';
 import {
@@ -244,6 +245,8 @@ function horarioValido(inicio, regras, agora) {
   }
   const maximo = agora.getTime() + (regras.diasAFrente + 1) * 86_400_000;
   if (inicio.getTime() > maximo) return 'Esse horário está longe demais.';
+  // 10/11: só até 3 dias úteis à frente (antes do prazo, pra dar o recado certo).
+  if (depoisDoLimite(inicio, agora)) return RECADO_LIMITE;
   // O prazo tambem e reconferido aqui: a grade e um palpite do navegador.
   if (depoisDoPrazo(regras, p.ano, p.mes, p.dia)) {
     return 'O prazo para agendar por aqui terminou. Fale com a gente pelo WhatsApp.';

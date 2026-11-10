@@ -31,6 +31,7 @@ import { moverNegocioParaReuniao, passarNegocioPara, comentarNoNegocio } from '.
 import { googleConfigurado, motivoNaoConfigurado } from './_google.js';
 import { executarAcaoAgenda } from './_googleAgenda.js';
 import { enviarReuniaoDireto } from './_bitrixSaida.js';
+import { ultimoDiaPermitido, menorData } from './_limiteAgendamento.js';
 
 const TZ = 'America/Sao_Paulo';
 
@@ -456,7 +457,12 @@ export function comRegras(regras) {
     // dias — "daqui a 5 dias" vira outro dia amanha, e o prazo de uma campanha
     // nao anda junto com o calendario. 'YYYY-MM-DD' em Sao Paulo; null = sem
     // prazo, que e como tudo funcionava antes.
-    ultimoDia: /^\d{4}-\d{2}-\d{2}$/.test(String(r.ultimoDia || '')) ? String(r.ultimoDia) : null,
+    // 10/11 (Bruno): "só 3 dias úteis a frente" — vale o prazo da campanha OU o
+    // limite de dias úteis, o que vier primeiro (ver _limiteAgendamento.js).
+    ultimoDia: menorData(
+      /^\d{4}-\d{2}-\d{2}$/.test(String(r.ultimoDia || '')) ? String(r.ultimoDia) : null,
+      ultimoDiaPermitido(),
+    ),
   };
 }
 

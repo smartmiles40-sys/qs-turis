@@ -29,6 +29,7 @@ import { recarregarBloqueio } from "@/lib/qs/bloqueioDesfecho";
 import { chipDaTemperatura, normalizeTemperature } from "@/lib/leadScore";
 import { ehProdutoTipo, rotuloDoProduto } from "@/lib/qs/produtoGanho";
 import { fetchRotas } from "@/lib/qs/produtoGanhoDados";
+import { depoisDoLimite, recadoDoLimite } from "@/lib/qs/limiteAgendamento";
 import type { ChannelType, Meeting, MeetingSal, MeetingStatus, MeetingTipo } from "@/components/sdr/types";
 
 // ── Configuração da atividade de confirmação ────────────────────────────────
@@ -655,6 +656,13 @@ export async function createMeeting(input: CreateMeetingInput): Promise<MeetingR
     idBitrix === "__nao_verificado__" ? input.lead_bitrix_id ?? null : idBitrix;
 
   const status: MeetingStatus = input.status ?? "agendada";
+
+  // ── SÓ ATÉ 3 DIAS ÚTEIS À FRENTE (Bruno, 10/11) ────────────────────────────
+  // Vale pra toda porta (Agenda, Reuniões, Ganho, closer). Registro retroativo
+  // (realizada / no-show) não é agendamento e passa direto.
+  if (status === "agendada" && depoisDoLimite(input.scheduled_at)) {
+    return { ok: false, error: recadoDoLimite() };
+  }
 
   // ── SEM E-MAIL NÃO AGENDA (Bruno, 04/11) ───────────────────────────────────
   // A coluna "Reunião de Vendas" do Bitrix exige "E-mail do cliente" e o
@@ -1576,6 +1584,10 @@ export async function reagendarReuniao(input: {
       ok: false,
       error: "Esta reunião já tem desfecho — pra falar de novo com o cliente, marque uma reunião nova (de retomada).",
     };
+  }
+  // 10/11 (Bruno): reagendar também só até 3 dias úteis à frente.
+  if (depoisDoLimite(input.scheduledAt)) {
+    return { ok: false, error: recadoDoLimite() };
   }
   const { data, error } = await supabase.rpc("qs_reagendar_reuniao", {
     p_meeting_id: meeting.id,
