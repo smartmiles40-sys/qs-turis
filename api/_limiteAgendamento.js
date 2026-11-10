@@ -2,9 +2,11 @@
 // -----------------------------------------------------------------------------
 // ATÉ ONDE DÁ PRA MARCAR (Bruno, 10/11/2026): "limitar a só 3 dias úteis a frente".
 //
-// Vale pra reunião com o closer E pra ligação com o SDR, em todas as portas
-// (link público /agendar/, Glória, e — pela cópia em src/lib/qs/limiteAgendamento.ts
-// — a Agenda, o Ganho da atividade e o reagendar dentro do QS).
+// Vale SÓ pro LINK de agendamento mandado pro cliente (/agendar/ do closer,
+// ?com=sdr / sdr-semana e os links do Marketing, que podem encurtar pra 1 ou 2).
+// Dentro do QS o time marca pra qualquer dia (Bruno, 10/11: "pros SDRs marcarem
+// pros closers não tem essa necessidade") — a Agenda, o Ganho e o reagendar
+// NÃO usam esta regra. src/lib/qs/limiteAgendamento.ts só serve à tela de links.
 //
 // A conta: hoje + os próximos 3 dias de SEG a SEX (sábado e domingo não contam).
 //   segunda → até quinta · quinta → até terça · sexta/sábado/domingo → até quarta.
