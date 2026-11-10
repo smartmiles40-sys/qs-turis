@@ -255,6 +255,12 @@ export async function listarDoSetor(setor: Setor, lado: "para" | "de", dias = 14
   return (data ?? []) as Solicitacao[];
 }
 
+/** 0355: vejo as solicitações de TODOS os setores? (admin ou a lista da visão geral). Sem a 0355: false. */
+export async function veTodasAsSolicitacoes(): Promise<boolean> {
+  const { data, error } = await supabase.rpc("qs_ve_todas_solicitacoes");
+  return !error && data === true;
+}
+
 /** As que eu pedi (de qualquer setor). */
 export async function listarMinhas(userId: string, dias = 30): Promise<Solicitacao[]> {
   const desde = new Date(Date.now() - dias * 86_400_000).toISOString();

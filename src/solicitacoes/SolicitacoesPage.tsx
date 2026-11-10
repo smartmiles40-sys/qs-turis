@@ -35,7 +35,7 @@ import SolicitacaoDetalhe, { type LinksSol } from "./SolicitacaoDetalhe";
 import TiposPrazos from "./TiposPrazos";
 import { rotuloStatus } from "./cotacao";
 import {
-  AGUARDANDO, NOME_SETOR, agir, setoresDaCentral, aoMudarSolicitacao, buscar, contarEntregues, haQuanto, listarDoSetor, listarDoTime, listarMinhas, meuTime, type PessoaDoTime, primeiroNome, textoPrazo,
+  AGUARDANDO, NOME_SETOR, agir, setoresDaCentral, veTodasAsSolicitacoes, aoMudarSolicitacao, buscar, contarEntregues, haQuanto, listarDoSetor, listarDoTime, listarMinhas, meuTime, type PessoaDoTime, primeiroNome, textoPrazo,
   type Entregues, type Setor, type Solicitacao,
 } from "./lib";
 import {
@@ -84,7 +84,42 @@ const FAIXAS: { id: Faixa; rotulo: string; cor: string; vazio: string }[] = [
   { id: "concluidas", rotulo: "Concluídas (14 dias)", cor: "var(--ok)", vazio: "Nada concluído nos últimos 14 dias." },
 ];
 
-export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onMudou }: {
+type PropsCentral = {
+  setor: Setor;
+  links?: LinksSol;
+  abrirId?: string | null;
+  onAbrirId?: (id: string | null) => void;
+  onMudou?: () => void;
+};
+
+/**
+ * VISÃO GERAL (0355, Bruno 10/11/2026): "a Tainara tem que ter a visão de todas
+ * as solicitações dos setores". Quem está em qs_settings.solicitacoes_visao_geral
+ * (e o admin) ganha um seletor de setor: vê a Central de qualquer setor como se
+ * estivesse lá. Fora do próprio setor é só acompanhamento (sem "Pedir a outro
+ * setor" nem "Tipos e prazos"; aceitar/concluir seguem as regras do banco).
+ */
+export default function SolicitacoesPage(props: PropsCentral) {
+  const [veTudo, setVeTudo] = useState(false);
+  const [visto, setVisto] = useState<Setor>(props.setor);
+  useEffect(() => { void veTodasAsSolicitacoes().then(setVeTudo); }, []);
+  useEffect(() => { setVisto(props.setor); }, [props.setor]);
+  const seletor = veTudo ? (
+    <label className="sol-visao">
+      <span className="sr-only">Ver o setor</span>
+      <select className="solq-select" value={visto} onChange={(e) => setVisto(e.target.value as Setor)} aria-label="Ver as solicitações do setor">
+        {setoresDaCentral().map((s) => <option key={s} value={s}>{s === props.setor ? `${NOME_SETOR[s]} (meu setor)` : `Ver: ${NOME_SETOR[s]}`}</option>)}
+      </select>
+    </label>
+  ) : null;
+  return <CentralDoSetor key={visto} {...props} setor={visto} seletor={seletor} soVer={visto !== props.setor} />;
+}
+
+function CentralDoSetor({ setor, links, abrirId, onAbrirId, onMudou, seletor = null, soVer = false }: {
+  /** 0355: o seletor de setor (só pra quem tem a visão geral). */
+  seletor?: ReactNode;
+  /** 0355: vendo outro setor — só acompanhamento. */
+  soVer?: boolean;
   setor: Setor;
   links?: LinksSol;
   /** Solicitação aberta pelo endereço (#area/solicitacoes/<id>) ou pelo aviso. */
@@ -358,7 +393,8 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
           <header className="solq-top">
             <div className="solq-top__tx">
               <h1>Solicitações</h1>
-              <p>{NOME_SETOR[setor]} · clique num cartão para abrir o pedido</p>
+              <p>{NOME_SETOR[setor]}{soVer ? " (acompanhamento)" : ""} · clique num cartão para abrir o pedido</p>
+              {seletor}
             </div>
             <div className="solq-seg" role="tablist" aria-label="Escopo">
               <button type="button" role="tab" aria-selected={escopo === "recebidas"} onClick={() => muda({ escopo: "recebidas" })}>
@@ -384,8 +420,8 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
                 ))}
               </select>
             </div>
-            {gestor && <button type="button" className="solq-btn" onClick={() => setTipos(true)}>Tipos e prazos</button>}
-            <button type="button" className="solq-btn solq-btn--pri" onClick={() => setNova(true)}>Pedir a outro setor</button>
+            {gestor && !soVer && <button type="button" className="solq-btn" onClick={() => setTipos(true)}>Tipos e prazos</button>}
+            {!soVer && <button type="button" className="solq-btn solq-btn--pri" onClick={() => setNova(true)}>Pedir a outro setor</button>}
           </header>
 
           {avisos && avisos.permissao === "default" && !conviteFechado && (
@@ -429,11 +465,12 @@ export default function SolicitacoesPage({ setor, links, abrirId, onAbrirId, onM
       <header className="sol-head">
         <div className="sol-head__tx">
           <h1>Solicitações</h1>
-          <p>Pedidos entre setores, com dono e prazo. Você está em <span className="sol-setor"><SectorDot setor={setor} />{NOME_SETOR[setor]}</span></p>
+          <p>Pedidos entre setores, com dono e prazo. {soVer ? "Acompanhando" : "Você está em"} <span className="sol-setor"><SectorDot setor={setor} />{NOME_SETOR[setor]}</span></p>
+          {seletor}
         </div>
         <div className="sol-head__acts">
-          {ajustaTipos && <Btn onClick={() => setTipos(true)}>Tipos e prazos</Btn>}
-          <Btn variant="primary" onClick={() => setNova(true)}>Pedir a outro setor</Btn>
+          {ajustaTipos && !soVer && <Btn onClick={() => setTipos(true)}>Tipos e prazos</Btn>}
+          {!soVer && <Btn variant="primary" onClick={() => setNova(true)}>Pedir a outro setor</Btn>}
         </div>
       </header>
 
