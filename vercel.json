@@ -1,29 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
-    "api/venda-voucher.js": {
-      "maxDuration": 60
-    },
-    "api/venda-analise.js": {
-      "maxDuration": 60
-    },
-    "api/wa-send-media.js": {
-      "maxDuration": 60
-    },
     "api/agenda-meet.js": {
       "maxDuration": 30
-    },
-    "api/agenda-reparo.js": {
-      "maxDuration": 60
-    },
-    "api/bitrix-catalogo.js": {
-      "maxDuration": 60
-    },
-    "api/wa-sync.js": {
-      "maxDuration": 60
-    },
-    "api/wa-bitrix-digest.js": {
-      "maxDuration": 60
     },
     "api/wa-send.js": {
       "maxDuration": 30
@@ -37,23 +16,8 @@
     "api/gloria-toques.js": {
       "maxDuration": 30
     },
-    "api/gloria-agendar.js": {
-      "maxDuration": 60
-    },
-    "api/agendar.js": {
-      "maxDuration": 60
-    },
     "api/gloria-abordar.js": {
       "maxDuration": 30
-    },
-    "api/lead-inbound.js": {
-      "maxDuration": 60
-    },
-    "api/bitrix-entrada.js": {
-      "maxDuration": 60
-    },
-    "api/primeiro-contato.js": {
-      "maxDuration": 60
     },
     "api/gloria-saude.js": {
       "maxDuration": 30
@@ -64,44 +28,11 @@
     "api/lead-formulario.js": {
       "maxDuration": 20
     },
-    "api/oportunidade-futura.js": {
-      "maxDuration": 60
-    },
-    "api/wa-calls.js": {
-      "maxDuration": 60
-    },
-    "api/wa-config.js": {
-      "maxDuration": 60
-    },
-    "api/rel-wa.js": {
-      "maxDuration": 60
-    },
-    "api/rel-viagens.js": {
-      "maxDuration": 60
-    },
-    "api/rel-disparos.js": {
-      "maxDuration": 60
-    },
-    "api/disparos.js": {
-      "maxDuration": 60
-    },
     "api/rel-docs.js": {
       "maxDuration": 30
     },
     "api/rel-recompra.js": {
       "maxDuration": 30
-    },
-    "api/rel-docs-ia.js": {
-      "maxDuration": 60
-    },
-    "api/proposta-ia.js": {
-      "maxDuration": 60
-    },
-    "api/rel-viagem-ia.js": {
-      "maxDuration": 60
-    },
-    "api/rel-bitrix-comentarios.js": {
-      "maxDuration": 60
     },
     "api/rel-grupos.js": {
       "maxDuration": 120
@@ -110,50 +41,17 @@
       "maxDuration": 60,
       "includeFiles": "api/_contrato_assets/**"
     },
-    "api/expedicoes.js": {
-      "maxDuration": 60
-    },
     "api/assistente.js": {
       "maxDuration": 30
-    },
-    "api/mkt-drive.js": {
-      "maxDuration": 60
-    },
-    "api/mkt-grupos.js": {
-      "maxDuration": 60
     },
     "api/mkt-grupos-link.js": {
       "maxDuration": 10
     },
-    "api/mkt-email.js": {
-      "maxDuration": 60
-    },
-    "api/mkt-automacoes.js": {
-      "maxDuration": 60
-    },
-    "api/mkt-instagram.js": {
-      "maxDuration": 60
-    },
-    "api/dashboard-sync.js": {
-      "maxDuration": 60
-    },
-    "api/meet-gravacoes.js": {
-      "maxDuration": 60
-    },
-    "api/fin-comissoes.js": {
-      "maxDuration": 60
-    },
     "api/qs-alertas.js": {
       "maxDuration": 30
     },
-    "api/cadencia-sweep.js": {
-      "maxDuration": 60
-    },
-    "api/mkt-trafego.js": {
-      "maxDuration": 60
-    },
     "api/*.js": {
-      "maxDuration": 10
+      "maxDuration": 60
     }
   },
   "crons": [
