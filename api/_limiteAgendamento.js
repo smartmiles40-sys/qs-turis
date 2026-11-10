@@ -48,3 +48,16 @@ export function depoisDoLimite(inicio, agora = new Date(), diasUteis = DIAS_UTEI
 }
 
 export const RECADO_LIMITE = `Só dá pra agendar até ${DIAS_UTEIS_A_FRENTE} dias úteis à frente.`;
+
+/**
+ * Links do Marketing (0354, Bruno 10/11): "colocar a data que vai ser feito, no
+ * caso 2 dias úteis, 3 dias úteis para frente". `?uteis=N` ENCURTA o limite
+ * (1 a 3); nunca passa dos 3 da regra geral. Inválido/vazio = os 3 de sempre.
+ */
+export function diasUteisDoLink(bruto) {
+  const n = Number(bruto);
+  return Number.isInteger(n) && n >= 1 && n <= DIAS_UTEIS_A_FRENTE ? n : DIAS_UTEIS_A_FRENTE;
+}
+export function recadoDoLimite(diasUteis = DIAS_UTEIS_A_FRENTE) {
+  return diasUteis === 1 ? 'Só dá pra agendar até o próximo dia útil.' : `Só dá pra agendar até ${diasUteis} dias úteis à frente.`;
+}

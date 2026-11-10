@@ -443,6 +443,12 @@
   var API = COM_SDR ? '/api/agendar?com=' + (COM_MOTIVO ? 'sdr-semana' : 'sdr') : '/api/agendar';
   var expedicao = (params.get('expedicao') || '').slice(0, 80);
   var origem = (params.get('origem') || '').slice(0, 80);
+  // 0354 (10/11): links do Marketing › Links de agendamento. As UTMs vão pro lead
+  // do QS e pro negócio do Bitrix; `l` é o código do link (conta o agendamento).
+  var UTM_CAMPOS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+  var utm = {};
+  UTM_CAMPOS.forEach(function (k) { var v = (params.get(k) || '').trim(); if (v) utm[k] = v.slice(0, 255); });
+  var codigoLink = (params.get('l') || '').trim().toLowerCase().slice(0, 60);
   if (params.get('embed') === '1') document.body.classList.add('embed');
   // ?tema=stfv: as cores do formulário das LPs (ver o CSS do tema).
   if (params.get('tema') === 'stfv') {
@@ -453,6 +459,10 @@
   // site usa 3; as lives seguem com a janela inteira). O servidor reconfere.
   var diasPedidos = parseInt(params.get('dias') || '', 10);
   if (!(diasPedidos >= 1 && diasPedidos <= 14)) diasPedidos = null;
+  // ?uteis=2 (0354): link do Marketing que só agenda até N dias úteis (1 a 3).
+  // O servidor é quem manda; aqui só repassa.
+  var uteisPedidos = parseInt(params.get('uteis') || '', 10);
+  if (!(uteisPedidos >= 1 && uteisPedidos <= 3)) uteisPedidos = null;
 
   var estado = { dias: [], diaAtivo: null, inicio: null, rotulo: '', duracao: 60, enviando: false, jaNoBitrix: false, veioDeFormulario: false };
 
@@ -511,6 +521,8 @@
     if (d.ja_no_bitrix) estado.jaNoBitrix = true;
     if (d.expedicao && !expedicao) expedicao = String(d.expedicao).slice(0, 80);
     if (d.origem && !origem) origem = String(d.origem).slice(0, 80);
+    // UTMs da página de fora (o formulário que embute): só preenche o que a URL não trouxe.
+    if (d.utm && typeof d.utm === 'object') UTM_CAMPOS.forEach(function (k) { if (d.utm[k] && !utm[k]) utm[k] = String(d.utm[k]).slice(0, 255); });
     // Com o telefone em mãos, a grade da ligação passa a ser a do DONO do lead.
     if (COM_SDR && d.telefone) {
       estado.telefoneGrade = String(d.telefone);
@@ -562,6 +574,7 @@
     // de UMA campanha ("Japao so ate 22/09") sem mexer nas outras lives.
     var rota = API + (expedicao ? (API.indexOf('?') === -1 ? '?' : '&') + 'expedicao=' + encodeURIComponent(expedicao) : '');
     if (diasPedidos) rota += (rota.indexOf('?') === -1 ? '?' : '&') + 'dias=' + diasPedidos;
+    if (uteisPedidos) rota += (rota.indexOf('?') === -1 ? '?' : '&') + 'uteis=' + uteisPedidos;
     var pedido = { headers: { Accept: 'application/json' } };
     // Grade pelo dono: o telefone vai no CORPO de um POST, nunca na URL.
     if (COM_SDR && estado.telefoneGrade) {
@@ -824,7 +837,11 @@
         expedicao: expedicao,
         origem: origem,
         dias: diasPedidos,
+        uteis: uteisPedidos || undefined,
         ja_no_bitrix: estado.jaNoBitrix,
+        utm_source: utm.utm_source, utm_medium: utm.utm_medium, utm_campaign: utm.utm_campaign,
+        utm_content: utm.utm_content, utm_term: utm.utm_term,
+        link: codigoLink || undefined,
         site: el('site').value
       })
     })

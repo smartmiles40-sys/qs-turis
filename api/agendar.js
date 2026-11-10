@@ -34,7 +34,7 @@
 // que apague dado. E reunião falsa aparece na Agenda pro time cancelar.
 // -----------------------------------------------------------------------------
 import { createHash } from 'node:crypto';
-import { depoisDoLimite, RECADO_LIMITE } from './_limiteAgendamento.js';
+import { depoisDoLimite, RECADO_LIMITE, diasUteisDoLink, recadoDoLimite } from './_limiteAgendamento.js';
 import { rest, insert } from './_supabaseAdmin.js';
 import { createInboundLead, generateCadenceTasks, normPhone } from './_leads.js';
 import {
@@ -59,6 +59,7 @@ import {
   ligacaoQueJaExiste,
   marcarLigacao,
 } from './_ligacaoSdr.js';
+import { utmDoCorpo, codigoDoCorpo, linhaDeRastro, lerLink, registrarUso, utmNoCardExistente } from './_linkAgendamento.js';
 
 // Mesma última linha de defesa do /api/lead: se qs_settings sumir ou vier
 // corrompido, a página não para de funcionar.
@@ -198,6 +199,13 @@ function body0(req) {
  * nao esta na lista simplesmente nao tem prazo.
  */
 /** `dias` da URL (GET) ou do corpo (POST), 1..14; qualquer outra coisa = null. */
+/** ?uteis=N (0354): até N dias úteis à frente (1..3); sem = os 3 de sempre (null). */
+function diasUteisPedidos(req) {
+  const bruto = req.query?.uteis ?? new URL(req.url || '/', 'http://x').searchParams.get('uteis') ?? body0(req).uteis;
+  if (bruto == null || bruto === '') return null;
+  return diasUteisDoLink(bruto);
+}
+
 function diasDaJanelaCurta(req) {
   const bruto = Number(
     req.query?.dias ?? new URL(req.url || '/', 'http://x').searchParams.get('dias') ?? body0(req).dias
@@ -246,7 +254,7 @@ function horarioValido(inicio, regras, agora) {
   const maximo = agora.getTime() + (regras.diasAFrente + 1) * 86_400_000;
   if (inicio.getTime() > maximo) return 'Esse horário está longe demais.';
   // 10/11: só até 3 dias úteis à frente (antes do prazo, pra dar o recado certo).
-  if (depoisDoLimite(inicio, agora)) return RECADO_LIMITE;
+  if (depoisDoLimite(inicio, agora, regras.diasUteis ?? undefined)) return regras.diasUteis ? recadoDoLimite(regras.diasUteis) : RECADO_LIMITE;
   // O prazo tambem e reconferido aqui: a grade e um palpite do navegador.
   if (depoisDoPrazo(regras, p.ano, p.mes, p.dia)) {
     return 'O prazo para agendar por aqui terminou. Fale com a gente pelo WhatsApp.';
@@ -309,12 +317,12 @@ export default async function handler(req, res) {
   // Lê da URL também: a ponte de /api do `vite dev` não monta `req.query`.
   const com = req.query?.com ?? new URL(req.url || '/', 'http://x').searchParams.get('com');
   if (String(com || '') === 'sdr') {
-    return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req) });
+    return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req), diasUteis: diasUteisPedidos(req) });
   }
   // ?com=sdr-semana (06/11): a mesma ligação, só seg–sex e com o motivo da
   // viagem obrigatório (10 a 500 caracteres).
   if (String(com || '') === 'sdr-semana') {
-    return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req), perfil: 'semana' });
+    return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req), perfil: 'semana', diasUteis: diasUteisPedidos(req) });
   }
 
   if (cfg.ativo === false) {
@@ -330,7 +338,7 @@ export default async function handler(req, res) {
     req.query?.expedicao ?? new URL(req.url || '/', 'http://x').searchParams.get('expedicao') ?? body0(req).expedicao,
     80
   );
-  const regras = comRegras(comPrazoDaExpedicao(cfg, expedicaoPedida));
+  const regras = comRegras({ ...comPrazoDaExpedicao(cfg, expedicaoPedida), diasUteis: diasUteisPedidos(req) });
 
   // ?dias=3 (18/09): os formulários do site (orgânico com o closer, tráfego com
   // o SDR) oferecem só os 3 próximos dias com horário, a partir de AMANHÃ. Vem
@@ -383,6 +391,9 @@ async function marcar(req, res, { cfg, regras, teto, maxDias }) {
   const expedicao = texto(body.expedicao, 80);
   const origemLp = texto(body.origem, 80);
   const observacao = texto(body.observacao, 400);
+  // 0354: UTMs e o código do link do Marketing (Links de agendamento).
+  const utm = utmDoCorpo(body);
+  const codigoLink = codigoDoCorpo(body);
   const agora = new Date();
 
   if (!nome || nome.length < 2) {
@@ -475,14 +486,17 @@ async function marcar(req, res, { cfg, regras, teto, maxDias }) {
     // alheio. Mentir nesta flag só deixa a própria pessoa sem card.
     const jaNoBitrix = body.ja_no_bitrix === true || body.ja_no_bitrix === 'true';
 
-    const { lead } = await createInboundLead({
+    const { lead, deduped } = await createInboundLead({
       full_name: nome,
       email,
       phone: telefone,
       source: 'integracao',
       segment: origemLp || 'Autoagendamento',
       lead_score: 'quente',   // quem escolhe horário e dá o e-mail não é frio
+      ...utm,                 // 0354: vira qs_leads.utm_* e os UTM_* do negócio novo
     }, { semBitrix: jaNoBitrix });
+    const link = await lerLink(codigoLink);
+    const rastro = linhaDeRastro(utm, link?.nome);
     if (!lead?.id) {
       return res.status(500).json({ ok: false, error: 'Não consegui registrar seus dados. Tente de novo.' });
     }
@@ -525,6 +539,7 @@ async function marcar(req, res, { cfg, regras, teto, maxDias }) {
       resumo: [
         origemLp ? `Origem: ${origemLp}` : null,
         expedicao ? `Interesse: ${expedicao}` : null,
+        rastro,
         observacao ? `Recado do cliente: ${observacao}` : null,
       ].filter(Boolean).join(' · ') || null,
       origem: ORIGEM_AUTOAGENDAMENTO,
@@ -566,10 +581,18 @@ async function marcar(req, res, { cfg, regras, teto, maxDias }) {
         `\nContato: ${email}${telefone ? ' · ' + telefone : ''}` +
         (expedicao ? `\nInteresse: ${expedicao}` : '') +
         (origemLp ? `\nOrigem: ${origemLp}` : '') +
+        (rastro ? `\n${rastro}` : '') +
         (observacao ? `\n\nRecado do cliente: ${observacao}` : '') +
         (r.avisos?.length ? `\n\n⚠️ ${r.avisos.join(' · ')}` : ''),
       tags: ['autoagendamento', 'reuniao'],
     }, { returning: false }).catch((e) => console.warn('[agendar] nota não gravada:', e?.message));
+
+    // 0354: o agendamento conta no link do Marketing; card que já existia
+    // ganha as UTMs nos campos vazios.
+    await Promise.all([
+      registrarUso({ link, tipo: 'closer', leadId: lead.id, meetingId: r.meeting_id, quando: r.quando_iso }),
+      utmNoCardExistente(lead, utm, deduped),
+    ]);
 
     return res.status(200).json({
       ok: true,
@@ -601,8 +624,9 @@ async function marcar(req, res, { cfg, regras, teto, maxDias }) {
 // A grade pelo dono vai por POST, não por GET: o telefone da pessoa não pode
 // morar em URL (fica em log e em histórico). Ver api/_ligacaoSdr.js.
 
-async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null }) {
+async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null, diasUteis = null }) {
   const cfg = await lerConfigSdr(perfil);
+  if (diasUteis) cfg.diasUteis = diasUteis;   // 0354: link do Marketing com N dias úteis
   const exigeMotivo = perfil === 'semana';
   if (!cfg.ativo) {
     return res.status(200).json({ ok: false, motivo: 'desligado', recado: cfg.encerrado, dias: [] });
@@ -613,7 +637,7 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null }) 
 
   if (req.method === 'GET' || (req.method === 'POST' && body.acao === 'grade')) {
     try {
-      const grade = await gradeSdr({ telefone: normPhone(body.telefone) || null, maxDias, perfil });
+      const grade = await gradeSdr({ telefone: normPhone(body.telefone) || null, maxDias, perfil, diasUteis });
       return res.status(200).json({
         ok: grade.ok,
         motivo: grade.motivo,
@@ -648,6 +672,8 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null }) 
   const observacao = texto(body.observacao, 400);
   // Conta o que a pessoa escreveu de verdade: espaços nas pontas não valem.
   const motivoBruto = typeof body.motivo === 'string' ? body.motivo.trim() : '';
+  const utm = utmDoCorpo(body);           // 0354
+  const codigoLink = codigoDoCorpo(body); // 0354
   const agora = new Date();
 
   if (!nome || nome.length < 2) {
@@ -676,7 +702,7 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null }) 
   // Janela curta (?dias): o dia tem que estar entre os que a grade mostrou.
   if (maxDias) {
     try {
-      const grade = await gradeSdr({ telefone, maxDias, agora, perfil });
+      const grade = await gradeSdr({ telefone, maxDias, agora, perfil, diasUteis });
       const primeiro = grade.dias[0]?.dia;
       const ultimo = grade.dias[grade.dias.length - 1]?.dia;
       const diaPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(inicio);
@@ -729,6 +755,7 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null }) 
       source: 'integracao',
       segment: origemLp || 'Ligação com SDR',
       owner_id: sdr.id,
+      ...utm,
     }, { semBitrix: jaNoBitrix, semTarefas: true });
     if (!lead?.id) {
       return res.status(500).json({ ok: false, error: 'Não consegui registrar seus dados. Tente de novo.' });
@@ -740,7 +767,12 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null }) 
     if (jaTemLead) return res.status(200).json(jaTemLead);
 
     // 4) Marcar
-    const r = await marcarLigacao({ lead, sdr, inicio, expedicao, origemLp, observacao, motivo, email, telefone, perfil });
+    const link = await lerLink(codigoLink);
+    const rastro = linhaDeRastro(utm, link?.nome);
+    const r = await marcarLigacao({
+      lead, sdr, inicio, expedicao, origemLp, motivo, email, telefone, perfil,
+      observacao: [observacao, rastro].filter(Boolean).join('\n') || null,
+    });
     if (!r.ok) {
       // O lead NOVO nasceu sem atividades (semTarefas) contando com a ligação.
       // Não marcou? Então ganha a cadência normal agora — senão ficaria órfão,
@@ -757,6 +789,11 @@ async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null }) 
           : 'Não consegui marcar agora. Tente de novo em instantes.',
       });
     }
+
+    await Promise.all([
+      registrarUso({ link, tipo: exigeMotivo ? 'sdr-semana' : 'sdr', leadId: lead.id, ligacaoId: r.ligacao_id || null, quando: r.quando_iso }),
+      utmNoCardExistente(lead, utm, deduped),
+    ]);
 
     return res.status(200).json({
       ok: true,

@@ -461,8 +461,10 @@ export function comRegras(regras) {
     // limite de dias úteis, o que vier primeiro (ver _limiteAgendamento.js).
     ultimoDia: menorData(
       /^\d{4}-\d{2}-\d{2}$/.test(String(r.ultimoDia || '')) ? String(r.ultimoDia) : null,
-      ultimoDiaPermitido(),
+      ultimoDiaPermitido(new Date(), r.diasUteis ?? undefined),
     ),
+    // 0354: o N do link do Marketing (1..3) — o horarioValido reconfere com ele.
+    diasUteis: r.diasUteis ?? null,
   };
 }
 

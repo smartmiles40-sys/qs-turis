@@ -695,8 +695,9 @@ export async function createInboundLead(payload, opts = {}) {
       // CONTATO mas não achou negócio nenhum. Passar o id evita que a criação
       // do negócio procure o contato de novo — e crie um duplicado quando o
       // telefone está lá em outro formato.
+      // utm_* do payload (0354): o negócio novo nasce com as UTMs do link.
       const novoId = await vincularLeadAoBitrix({
-        ...lead, owner_id: finalOwner, bitrix_contato_id: opts.bitrixContatoId || null,
+        ...lead, ...utmDoPayload(payload), owner_id: finalOwner, bitrix_contato_id: opts.bitrixContatoId || null,
       });
       if (novoId) lead.bitrix_id = novoId;
     } catch (e) {

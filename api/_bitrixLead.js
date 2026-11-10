@@ -257,6 +257,37 @@ export async function procurarNegocioPorTelefone(phone, timeoutMs = 4_000) {
 
 // ── O negócio ───────────────────────────────────────────────────────────────
 
+const UTM_BITRIX = { utm_source: 'UTM_SOURCE', utm_medium: 'UTM_MEDIUM', utm_campaign: 'UTM_CAMPAIGN', utm_content: 'UTM_CONTENT', utm_term: 'UTM_TERM' };
+
+/** utm_* do lead → { UTM_SOURCE: … } (só os preenchidos). Puro. */
+export function camposUtmBitrix(obj) {
+  const out = {};
+  for (const [k, campo] of Object.entries(UTM_BITRIX)) {
+    const v = obj?.[k] == null ? '' : String(obj[k]).trim().slice(0, 255);
+    if (v) out[campo] = v;
+  }
+  return out;
+}
+
+/**
+ * Card que JÁ existia (lead que voltou): grava as UTMs só nos campos VAZIOS do
+ * negócio — o primeiro toque não é sobrescrito. Best-effort, nunca levanta.
+ */
+export async function completarUtmNoNegocio(dealId, utm) {
+  const campos = camposUtmBitrix(utm);
+  if (!bitrixConfigurado() || !dealId || !Object.keys(campos).length) return false;
+  try {
+    const deal = await bx('crm.deal.get', { id: Number(dealId) });
+    const vazios = Object.fromEntries(Object.entries(campos).filter(([c]) => !String(deal?.[c] || '').trim()));
+    if (!Object.keys(vazios).length) return false;
+    await bx('crm.deal.update', { id: Number(dealId), fields: vazios, params: { REGISTER_SONET_EVENT: 'N' } });
+    return true;
+  } catch (e) {
+    console.warn(`[bitrix-lead] UTM no negócio ${dealId}:`, e?.message);
+    return false;
+  }
+}
+
 /**
  * Cria contato + negócio no Bitrix para um lead do QS e devolve o id do negócio.
  * Devolve null quando não deu — e isso NUNCA é motivo pra falhar a criação do
@@ -287,6 +318,9 @@ export async function criarNegocioParaLead(lead) {
     // uma mensagem no WhatsApp e não de um formulário.
     COMMENTS: `Criado pelo QS a partir de ${lead.segment || 'contato no WhatsApp'}.` +
       (lead.phone ? ` Telefone: ${lead.phone}.` : ''),
+    // UTMs (0354, links de agendamento do Marketing): campos PADRÃO do negócio,
+    // os mesmos que o Dashboard lê. Só vai o que veio.
+    ...camposUtmBitrix(lead),
   };
 
   try {

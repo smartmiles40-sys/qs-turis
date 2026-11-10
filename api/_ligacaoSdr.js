@@ -23,7 +23,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, insert } from './_supabaseAdmin.js';
-import { ultimoDiaPermitido, depoisDoLimite, RECADO_LIMITE } from './_limiteAgendamento.js';
+import { ultimoDiaPermitido, depoisDoLimite, RECADO_LIMITE, recadoDoLimite } from './_limiteAgendamento.js';
 import { emSP, instanteEmSP, comoOTimeFala, porExtenso } from './_agenda.js';
 
 const DIAS_SEMANA = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
@@ -168,7 +168,7 @@ function horariosDaJanela(cfg, agora, desdeAmanha = false) {
   const hoje = emSP(agora);
   const cedo = agora.getTime() + cfg.antecedenciaMin * 60_000;
   const dias = [];
-  const limite = ultimoDiaPermitido(agora);   // 10/11: só até 3 dias úteis à frente
+  const limite = ultimoDiaPermitido(agora, cfg.diasUteis ?? undefined);   // 10/11: só até 3 dias úteis à frente (0354: ou o N do link)
   for (let salto = desdeAmanha ? 1 : 0; salto <= cfg.diasAFrente; salto++) {
     const base = new Date(Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia) + salto * 86_400_000);
     if (base.toISOString().slice(0, 10) > limite) break;
@@ -197,8 +197,9 @@ function horariosDaJanela(cfg, agora, desdeAmanha = false) {
  *
  * O SDR nunca sai na resposta: a página é pública.
  */
-export async function gradeSdr({ telefone = null, agora = new Date(), maxDias = null, perfil = null } = {}) {
+export async function gradeSdr({ telefone = null, agora = new Date(), maxDias = null, perfil = null, diasUteis = null } = {}) {
   const cfg = await lerConfigSdr(perfil);
+  if (diasUteis) cfg.diasUteis = diasUteis;   // 0354: link do Marketing com N dias úteis
   const sdrs = await sdrsAtivos();
   if (!sdrs.length) return { ok: false, motivo: 'sem_sdr', dias: [], cfg };
 
@@ -250,7 +251,7 @@ export function horarioValidoSdr(inicio, cfg, agora = new Date()) {
   if (instanteEmSP(p.ano, p.mes, p.dia, p.hora, p.min).getTime() !== inicio.getTime()) return 'Data e hora inválidas.';
   if (inicio.getTime() < agora.getTime() + cfg.antecedenciaMin * 60_000) return 'Esse horário está perto demais. Escolha outro, por favor.';
   if (inicio.getTime() > agora.getTime() + (cfg.diasAFrente + 1) * 86_400_000) return 'Esse horário está longe demais.';
-  if (depoisDoLimite(inicio, agora)) return RECADO_LIMITE;
+  if (depoisDoLimite(inicio, agora, cfg.diasUteis ?? undefined)) return cfg.diasUteis ? recadoDoLimite(cfg.diasUteis) : RECADO_LIMITE;
   return null;
 }
 
