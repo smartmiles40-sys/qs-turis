@@ -9,7 +9,7 @@
 // resumo "Família · N pessoas". Os dados vêm de venda_familia (0351).
 // Menor de idade e vínculos: os mesmos códigos de vendaRegras.ts (não duplica).
 // -----------------------------------------------------------------------------
-import { VINCULOS_VIAJANTE } from "./vendaRegras";
+import { VINCULOS_VIAJANTE } from "./vendaRegras.ts";
 
 export interface PessoaFamilia {
   id: string;

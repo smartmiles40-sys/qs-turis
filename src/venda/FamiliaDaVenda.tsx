@@ -5,9 +5,13 @@
 //   vão na venda, cada um com vínculo, idade (menor em destaque + quem assina),
 //   CPF/nascimento faltando (em vermelho), valor, aéreo, o card dele no Bitrix
 //   (criado / a criar / erro) e a situação do contrato (Fase 3).
-// Lê venda_familia (0351). Editar = reabrir a venda (SubirVenda).
+// Lê venda_familia (0351).
+// Sprint final (11/11): o bloco "Quem vai" aparece SEMPRE no cartão (mesmo sem
+// venda ainda) e edita ali mesmo (EditarQuemVai → venda_familia_salvar → espelhar
+// no Bitrix). Quem vai junto pode ser cadastrado ainda em negociação.
 // -----------------------------------------------------------------------------
 import { useEffect, useState } from "react";
+import EditarQuemVai from "./EditarQuemVai";
 import { Aviso, Botao, Etiqueta } from "@/rel/ui";
 import { brl, dataBr } from "@/closer/lib";
 import { familiaDoNegocio } from "./familia";
@@ -16,23 +20,50 @@ import {
   type FamiliaDaVenda as Familia, type PessoaFamilia,
 } from "./familiaRegras";
 
-export default function FamiliaDaVenda({ negocioId, versao = 0, onEditar }: {
+export default function FamiliaDaVenda({ negocioId, versao = 0, nomeTitular = "", podeEditar = false, onMudou }: {
   negocioId: string;
   /** Muda depois de salvar a venda → relê. */
   versao?: number;
-  onEditar?: () => void;
+  /** Nome do cliente do cartão (o titular). */
+  nomeTitular?: string;
+  /** Cartão aberto (não perdido/cancelado): mostra "Editar quem vai". */
+  podeEditar?: boolean;
+  /** Depois de salvar quem vai: a mensagem pro aviso do cartão. */
+  onMudou?: (r: { tom: "ok" | "aviso"; t: string }) => void;
 }) {
   const [f, setF] = useState<Familia | null | undefined>(undefined);
   const [erro, setErro] = useState<string | null>(null);
+  const [editando, setEditando] = useState(false);
+  const [rel, setRel] = useState(0);
   useEffect(() => {
     let vivo = true;
     familiaDoNegocio(negocioId).then((x) => vivo && setF(x)).catch((e) => { if (vivo) { setErro((e as Error).message); setF(null); } });
     return () => { vivo = false; };
-  }, [negocioId, versao]);
+  }, [negocioId, versao, rel]);
 
+  const editor = editando && (
+    <EditarQuemVai negocioId={negocioId} titular={nomeTitular} pessoas={f?.pessoas ?? []} onFechar={() => setEditando(false)}
+      onSalvo={(r) => { setEditando(false); setRel((n) => n + 1); onMudou?.(r); }} />
+  );
   if (f === undefined) return null;
   if (erro) return <section className="rel-card p-4"><Aviso tom="erro">Família: {erro}</Aviso></section>;
-  if (!f) return null; // sem venda registrada ainda: a pasta nasce no "Confirmar venda"
+  if (!f) {
+    // Sem venda ainda: o closer já pode dizer quem vai (a venda nasce em "negociação").
+    if (!podeEditar) return null;
+    return (
+      <section className="rel-card p-4">
+        <div className="flex flex-wrap items-center gap-2 mb-1">
+          <h2 className="text-[14px] font-bold flex-1" style={{ color: "var(--ink)" }}>👨‍👩‍👧 Quem vai</h2>
+          <Botao variante="fantasma" onClick={() => setEditando(true)}>+ Adicionar quem vai</Botao>
+        </div>
+        <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>
+          Vai mais alguém além de {nomeTitular || "o cliente"} (cônjuge, filhos, amigos)? Cadastre já, mesmo em negociação: cada pessoa ganha o
+          card dela no Bitrix (ligado a este) e os dados vêm prontos no Subir venda e no contrato.
+        </p>
+        {editor}
+      </section>
+    );
+  }
 
   const pessoas = ativas(f.pessoas);
   const saiu = f.pessoas.filter((p) => p.removida_em);
@@ -46,12 +77,12 @@ export default function FamiliaDaVenda({ negocioId, versao = 0, onEditar }: {
         </h2>
         {r.menores > 0 && <Etiqueta tom="aviso">{r.menores} menor{r.menores > 1 ? "es" : ""}</Etiqueta>}
         {r.incompletas > 0 && <Etiqueta tom="erro">{r.incompletas} ficha{r.incompletas > 1 ? "s" : ""} incompleta{r.incompletas > 1 ? "s" : ""}</Etiqueta>}
-        {onEditar && <Botao variante="fantasma" onClick={onEditar}>Editar quem vai</Botao>}
+        {podeEditar && <Botao variante="fantasma" onClick={() => setEditando(true)}>Editar quem vai</Botao>}
       </div>
       {pessoas.length <= 1 && (
         <p className="text-[12.5px] mb-2" style={{ color: "var(--ink3)" }}>
-          Só o titular nesta venda. Vai mais alguém? Em "Editar quem vai", coloque cada pessoa — ela ganha o card dela no Bitrix
-          (ligado a este) e os dados chegam no Operacional.
+          Só o titular nesta venda. Vai mais alguém? Em "Editar quem vai", coloque cada pessoa com o vínculo — ela ganha o card
+          dela no Bitrix (ligado a este) e os dados chegam no Operacional.
         </p>
       )}
       <ul className="space-y-2">
@@ -76,6 +107,7 @@ export default function FamiliaDaVenda({ negocioId, versao = 0, onEditar }: {
           })}
         </div>
       )}
+      {editor}
     </section>
   );
 }

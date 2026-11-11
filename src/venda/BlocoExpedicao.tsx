@@ -17,6 +17,10 @@
 // tem, opcional e recolhido, o que o contrato e o Ops vão precisar: vínculo com
 // o comprador, CPF, nascimento, e-mail e, se menor, quem assina por ele(a)
 // (DadosDoViajante — o mesmo dos outros itens; a família vira qs_venda_pessoas, 0351).
+//
+// Sprint final (11/11): vagas livres PRA ESTA VENDA = vagas da expedição + quem
+// já é desta venda (tem linha em passageiros) — reabrir em expedição quase
+// lotada não trava mais.
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import { Aviso, Botao, Campo, Entrada, Etiqueta } from "@/rel/ui";
@@ -26,6 +30,7 @@ import { brl, dataBr } from "@/closer/lib";
 import { lerValor, passageirosParaQuarto, viajanteNovo, type ExpedicaoVaga, type PaxParaQuarto, type Viajante } from "./api";
 import { mostrarValor, precoTabela, sugerirValor, trocarAereo, valorAjustado } from "./vendaRegras";
 import DadosDoViajante from "./DadosDoViajante";
+import { jaOcupamVaga } from "./vendaFinal";
 
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const mesAno = (iso: string | null) => (iso ? `${MESES[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : "");
@@ -68,8 +73,11 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
   }
 
   const mudar = (chave: string, p: Partial<Viajante>) => onViajantes(viajantes.map((v) => (v.chave === chave ? { ...v, ...p } : v)));
-  const lotada = exp && exp.vagas <= 0;
-  const faltaVaga = exp && viajantes.length > exp.vagas;
+  // Quem já é desta venda já ocupa a vaga dele: não conta contra ela mesma.
+  const proprios = jaOcupamVaga(viajantes);
+  const livres = exp ? exp.vagas + proprios : 0;
+  const lotada = exp && livres <= 0;
+  const faltaVaga = exp && viajantes.length > livres;
 
   return (
     <div className="space-y-4">
@@ -78,18 +86,18 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
           onChange={(ev) => escolher(expedicoes?.find((x) => x.id === ev.target.value) ?? null)}>
           <option value="">{carregandoExp ? "Carregando…" : "Escolha a expedição e a data…"}</option>
           {(expedicoes ?? []).map((e) => (
-            <option key={e.id} value={e.id} disabled={e.vagas <= 0}>
+            <option key={e.id} value={e.id} disabled={e.vagas <= 0 && e.id !== expId}>
               {e.nome} — {dataBr(e.data_embarque)} · {e.vagas > 0 ? `${e.vagas} vaga${e.vagas > 1 ? "s" : ""}` : "LOTADA"}
             </option>
           ))}
         </select>
       </Campo>
-      {expedicoes && !expedicoes.some((e) => e.vagas > 0) && !carregandoExp && (
+      {expedicoes && !expedicoes.some((e) => e.vagas > 0) && !exp && !carregandoExp && (
         <Aviso>Nenhuma expedição com vaga agora. Peça pro <b>Operacional abrir vaga</b> (menu Operações › Subir venda › Vagas).</Aviso>
       )}
       {exp && (
         <p className="text-[12.5px] flex flex-wrap gap-1.5 items-center" style={{ color: "var(--ink3)" }}>
-          <Etiqueta tom={exp.vagas > 2 ? "rel" : "aviso"}>{exp.vagas} de {exp.pax_planejados} vagas livres</Etiqueta>
+          <Etiqueta tom={exp.vagas > 2 ? "rel" : "aviso"}>{exp.vagas} de {exp.pax_planejados} vagas livres{proprios ? ` (+ ${proprios} já desta venda)` : ""}</Etiqueta>
           {exp.codigo} · embarque {dataBr(exp.data_embarque)}{exp.data_retorno ? ` · volta ${dataBr(exp.data_retorno)}` : ""}
           {exp.preco_venda_brl || exp.preco_sem_aereo_brl
             ? ` · tabela do Operacional: ${exp.preco_venda_brl ? `${brl(exp.preco_venda_brl)} com aéreo` : "com aéreo não cadastrado"}${exp.preco_sem_aereo_brl ? ` / ${brl(exp.preco_sem_aereo_brl)} sem aéreo` : ""}`
@@ -98,7 +106,7 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
       )}
       {(lotada || faltaVaga) && (
         <Aviso tom="erro">
-          {lotada ? "Esta expedição está lotada." : `Só ${exp!.vagas} vaga${exp!.vagas === 1 ? "" : "s"} e você pôs ${viajantes.length} pessoas.`}{" "}
+          {lotada ? "Esta expedição está lotada." : `Só ${livres} vaga${livres === 1 ? "" : "s"} pra esta venda e você pôs ${viajantes.length} pessoas.`}{" "}
           <b>Peça pro Operacional abrir vaga</b> antes de fechar.{podeAbrirVaga ? " (Você é do Ops: abra em Subir venda › Vagas.)" : ""}
         </Aviso>
       )}

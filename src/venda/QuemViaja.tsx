@@ -12,15 +12,21 @@
 import { Botao, Campo, Entrada } from "@/rel/ui";
 import { brl } from "@/closer/lib";
 import { viajanteNovo } from "./api";
-import { lerValor, type Viajante } from "./vendaRegras";
+import { VINCULOS_VIAJANTE, lerValor, type Viajante, type VinculoViajante } from "./vendaRegras";
 import DadosDoViajante from "./DadosDoViajante";
 
-export default function QuemViaja({ viajantes, nomeComprador, dataViagem, totalVenda, onViajantes }: {
+export default function QuemViaja({ viajantes, nomeComprador, dataViagem, totalVenda, onViajantes, modo = "tudo" }: {
   viajantes: Viajante[];
   nomeComprador: string;
   dataViagem?: string | null;
   totalVenda: number;
   onViajantes: (v: Viajante[]) => void;
+  /**
+   * Sprint final (11/11): "pessoas" = passo 1 (quem vai, com vínculo à vista, sem valor);
+   * "valores" = passo 3 de venda sem expedição (só o valor de cada um, opcional);
+   * "tudo" = como era (pessoas + valor).
+   */
+  modo?: "tudo" | "pessoas" | "valores";
 }) {
   const lista = viajantes.some((v) => v.comprador) ? viajantes : [viajanteNovo(true), ...viajantes];
   const mudar = (chave: string, p: Partial<Viajante>) => onViajantes(lista.map((v) => (v.chave === chave ? { ...v, ...p } : v)));
@@ -30,14 +36,35 @@ export default function QuemViaja({ viajantes, nomeComprador, dataViagem, totalV
   const somaAcomp = Math.round(acomp.reduce((s, v) => s + (lerValor(v.valor_contratado) ?? 0), 0) * 100) / 100;
   const titular = Math.max(Math.round((totalVenda - somaAcomp) * 100) / 100, 0);
 
+  if (modo === "valores") {
+    if (!acomp.length) return null;
+    return (
+      <section className="rel-card p-4 space-y-2">
+        <h3 className="text-[14px] font-bold" style={{ color: "var(--ink)" }}>👨‍👩‍👧 Valor de cada pessoa (opcional)</h3>
+        <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Vira o valor do card de cada um no Bitrix. Sem valor, tudo fica no titular. Quem vai você muda no passo 1.</p>
+        <p className="text-[13px]" style={{ color: "var(--ink)" }}><b>{nomeComprador || "Quem comprou"}</b> (titular){totalVenda > 0 ? <> — fica com {brl(titular)}</> : null}</p>
+        {acomp.map((v) => (
+          <div key={v.chave} className="grid grid-cols-[1fr_160px] gap-2 items-center">
+            <span className="text-[13.5px] truncate" style={{ color: "var(--ink)" }}>{v.nome || "Sem nome"}</span>
+            <Entrada inputMode="decimal" placeholder="R$ 0,00" aria-label={`Valor de ${v.nome || "acompanhante"}`} value={v.valor_contratado}
+              onChange={(e) => mudar(v.chave, { valor_contratado: e.target.value })} />
+          </div>
+        ))}
+        {somaAcomp > totalVenda + 0.009 && (
+          <p className="text-[12.5px]" style={{ color: "var(--err-ink)" }}>Os valores dos acompanhantes ({brl(somaAcomp)}) passam do total da venda ({brl(totalVenda)}).</p>
+        )}
+      </section>
+    );
+  }
+
   return (
     <section className="rel-card p-4 space-y-3">
       <div>
         <h3 className="text-[14px] font-bold" style={{ color: "var(--ink)" }}>👨‍👩‍👧 Quem viaja</h3>
         <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>
           Vai mais alguém nesta venda (cônjuge, filhos, amigos)? Coloque aqui: o Operacional recebe os dados de cada um, cada
-          pessoa ganha o card dela no Bitrix (ligado ao do cliente) e o contrato sai por pessoa. Valor de cada um é opcional —
-          sem valor, tudo fica no titular.
+          pessoa ganha o card dela no Bitrix (ligado ao do cliente) e o contrato sai por pessoa.
+          {modo === "pessoas" ? " O valor de cada um você coloca nos próximos passos." : " Valor de cada um é opcional — sem valor, tudo fica no titular."}
         </p>
       </div>
       <p className="text-[13px]" style={{ color: "var(--ink)" }}>
@@ -52,10 +79,21 @@ export default function QuemViaja({ viajantes, nomeComprador, dataViagem, totalV
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Campo rotulo="Nome completo *"><Entrada value={v.nome} onChange={(e) => mudar(v.chave, { nome: e.target.value })} /></Campo>
             <Campo rotulo="WhatsApp" dica="Ajuda a achar a ficha dela."><Entrada inputMode="tel" value={v.telefone} onChange={(e) => mudar(v.chave, { telefone: e.target.value })} /></Campo>
-            <Campo rotulo="Valor desta pessoa (opcional)" dica="Vira o valor do card dela no Bitrix; sai do valor do titular.">
-              <Entrada inputMode="decimal" placeholder="R$ 0,00" value={v.valor_contratado} onChange={(e) => mudar(v.chave, { valor_contratado: e.target.value })} />
-            </Campo>
-            <DadosDoViajante v={v} viajantes={lista} nomeComprador={nomeComprador} dataViagem={dataViagem} onMudar={(p) => mudar(v.chave, p)} />
+            {modo === "pessoas" ? (
+              <Campo rotulo={`É o quê de ${nomeComprador || "quem comprou"}? *`}>
+                <select className="rel-input" value={v.vinculo} aria-invalid={!v.vinculo || undefined}
+                  onChange={(e) => mudar(v.chave, { vinculo: e.target.value as VinculoViajante })}>
+                  <option value="">Escolha…</option>
+                  {Object.entries(VINCULOS_VIAJANTE).map(([k, r]) => <option key={k} value={k}>{r}</option>)}
+                </select>
+              </Campo>
+            ) : (
+              <Campo rotulo="Valor desta pessoa (opcional)" dica="Vira o valor do card dela no Bitrix; sai do valor do titular.">
+                <Entrada inputMode="decimal" placeholder="R$ 0,00" value={v.valor_contratado} onChange={(e) => mudar(v.chave, { valor_contratado: e.target.value })} />
+              </Campo>
+            )}
+            <DadosDoViajante v={v} viajantes={lista} nomeComprador={nomeComprador} dataViagem={dataViagem} onMudar={(p) => mudar(v.chave, p)}
+              semVinculo={modo === "pessoas"} />
           </div>
         </div>
       ))}

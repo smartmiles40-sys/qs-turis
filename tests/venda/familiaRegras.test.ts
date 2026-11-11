@@ -2,8 +2,8 @@
 // + o que vai pra venda_subir (montarPayload / viajantesParaJson / restauro).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as R from "../../src/venda/familiaRegras";
-import { restaurarViajantes, viajanteVazio, viajantesParaJson } from "../../src/venda/vendaRegras";
+import * as R from "../../src/venda/familiaRegras.ts";
+import { restaurarViajantes, viajanteVazio, viajantesParaJson } from "../../src/venda/vendaRegras.ts";
 
 const p = (o: Partial<R.PessoaFamilia> = {}): R.PessoaFamilia => ({
   id: Math.random().toString(36), cliente_id: "c", comprador: false, vinculo: "filho", nome: "Maria Silva", cpf: "12345678909",

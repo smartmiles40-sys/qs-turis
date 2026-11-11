@@ -83,7 +83,11 @@ export default function ExtratoAnalise({ status, base, contagens, linhas, riscos
             {riscos.map((r, n) => (
               <li key={n} className="text-[13px] flex gap-2" style={{ color: "var(--ink)" }}>
                 <span className="font-bold shrink-0 w-14" style={{ color: NIVEL[r.nivel]?.cor }}>{NIVEL[r.nivel]?.rotulo ?? r.nivel}</span>
-                <span className="flex-1">{r.motivo}</span>
+                <span className="flex-1">
+                  {(r.pessoa || r.item) && <b>{[r.pessoa, r.item].filter(Boolean).join(" · ")} — </b>}
+                  {r.motivo}
+                  {r.o_que_fazer && <span style={{ color: "var(--ink2)" }}> — <i>o que fazer:</i> {r.o_que_fazer}</span>}
+                </span>
                 {r.fonte === "ia" && <span className="text-[11px] shrink-0" style={{ color: "var(--ink3)" }}>IA</span>}
               </li>
             ))}

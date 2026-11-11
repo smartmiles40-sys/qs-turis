@@ -14,7 +14,9 @@ export function faltaDoViajante(v: Viajante): string[] {
   return [!v.vinculo && "vínculo", !v.cpf.trim() && "CPF", !v.nascimento && "nascimento", !v.email.trim() && "e-mail"].filter((x): x is string => !!x);
 }
 
-export default function DadosDoViajante({ v, viajantes, nomeComprador, dataViagem, onMudar }: {
+export default function DadosDoViajante({ v, viajantes, nomeComprador, dataViagem, onMudar, semVinculo = false }: {
+  /** O vínculo já aparece fora (passo 1 do Subir venda): não repete aqui dentro. */
+  semVinculo?: boolean;
   v: Viajante;
   /** Todos da venda (pra escolher quem assina pelo menor). */
   viajantes: Viajante[];
@@ -36,12 +38,14 @@ export default function DadosDoViajante({ v, viajantes, nomeComprador, dataViage
         </span>
       </summary>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-        <Campo rotulo={`É o quê de ${nomeComprador || "quem comprou"}?`}>
-          <select className="rel-input" value={v.vinculo} onChange={(e) => onMudar({ vinculo: e.target.value as VinculoViajante })}>
-            <option value="">Escolha…</option>
-            {Object.entries(VINCULOS_VIAJANTE).map(([k, r]) => <option key={k} value={k}>{r}</option>)}
-          </select>
-        </Campo>
+        {!semVinculo && (
+          <Campo rotulo={`É o quê de ${nomeComprador || "quem comprou"}?`}>
+            <select className="rel-input" value={v.vinculo} onChange={(e) => onMudar({ vinculo: e.target.value as VinculoViajante })}>
+              <option value="">Escolha…</option>
+              {Object.entries(VINCULOS_VIAJANTE).map(([k, r]) => <option key={k} value={k}>{r}</option>)}
+            </select>
+          </Campo>
+        )}
         <Campo rotulo="CPF"><Entrada inputMode="numeric" placeholder="000.000.000-00" value={v.cpf} onChange={(e) => onMudar({ cpf: e.target.value })} /></Campo>
         <Campo rotulo="Nascimento"
           dica={menor ? "Menor de idade na viagem: o contrato dele(a) é assinado pelo pai/mãe ou responsável." : undefined}>
