@@ -399,3 +399,9 @@ export function itemDoVoucher(i: LeituraVoucher["itens"][number]): ItemVenda {
     valor: i.valor ?? null, custo: i.custo ?? null, fornecedor: i.fornecedor ?? "", status: "vendido",
   };
 }
+
+/** Rascunho da tela inteira no banco (0357 venda_rascunho_salvar): cria a venda em negociação se preciso. */
+export async function salvarRascunhoNoBanco(negocioId: string, rascunho: unknown): Promise<void> {
+  const { error } = await supabase.rpc("venda_rascunho_salvar", { p: { negocio_id: negocioId, rascunho } });
+  if (error) throw new Error(error.message);
+}

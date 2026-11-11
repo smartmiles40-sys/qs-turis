@@ -50,7 +50,7 @@ import {
 } from "@/closer/vendaItens";
 import {
   consolidarVenda, fichaDoComprador, itemDoVoucher, lerValor, lerVoucher, listarExpedicoesParaVenda, montarPayload, mostrarValor,
-  passageirosDosItens, pessoaVazia, subirVenda, temModeloNovo, vendaDoContrato, vendaDoNegocio, viajanteNovo,
+  passageirosDosItens, pessoaVazia, salvarRascunhoNoBanco, subirVenda, temModeloNovo, vendaDoContrato, vendaDoNegocio, viajanteNovo,
   type ExpedicaoVaga, type OrigemVenda, type PessoaVenda, type ResultadoVenda, type Viajante,
 } from "./api";
 import { completarPessoa, restaurarViajantes, viajantesParaJson, type AcompFicha, type PaxJson } from "./vendaRegras";
@@ -315,7 +315,13 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     const agora = JSON.stringify(sem);
     if (!fotoAoAbrir.current) { fotoAoAbrir.current = agora; return; }
     if (agora === fotoAoAbrir.current) return;
-    const t = window.setTimeout(() => lsGravar(chaveLocal, JSON.stringify(montarRascunho())), 1500);
+    const t = window.setTimeout(() => {
+      const r = montarRascunho();
+      lsGravar(chaveLocal, JSON.stringify(r));
+      // Closer com o banco novo (0357): o rascunho também vai pro qs_vendas.rascunho —
+      // sobrevive a trocar de computador. Falha aqui nunca atrapalha (o aparelho já guardou).
+      if (ehCloser && modeloNovo && negocio?.id) void salvarRascunhoNoBanco(negocio.id, r).catch(() => undefined);
+    }, 1500);
     return () => window.clearTimeout(t);
   }, [aberto, carregando, pronto, passo, pessoa, itens, valores, viajantes, outros, linhas, especial, especialObs, obs, obsFin]); // eslint-disable-line react-hooks/exhaustive-deps
 
