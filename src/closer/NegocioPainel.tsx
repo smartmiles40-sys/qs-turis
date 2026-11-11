@@ -18,6 +18,9 @@
 //      ficam o PAGAMENTO (0181) e o CONTRATO (0180 — some se o ZapSign/Google
 //      não estiverem ligados na Vercel). Selo: "Fechada".
 //   0351: "Família / Quem vai" (FamiliaDaVenda) — a pasta com todos da venda.
+//   Sprint final (11/11): "Quem vai" edita no próprio cartão, ainda em negociação
+//   (venda_familia_salvar → espelhar no Bitrix). O Subir venda vira: Salvar ·
+//   Reservar vaga (conta no Dashboard) · Consolidar venda.
 // O Bitrix é automático (cron a cada 10 min); a tela só fala dele se falhar.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
@@ -196,8 +199,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
                 </ul>
               ) : (
                 <p className="text-[13px] mb-1" style={{ color: "var(--ink2)" }}>
-                  Fechou? Registre o que o cliente comprou (aéreo, pacote, expedição, seguro…) em 3 passos. Ao salvar, a venda já
-                  conta no Dashboard. Depois vem o passo 2: pagamento e contrato.
+                  Registre o que o cliente comprou (aéreo, pacote, expedição, seguro…), quem vai e como paga. Dá pra salvar em
+                  negociação; "Reservar vaga" já conta no Dashboard e "Consolidar venda" fecha tudo.
                 </p>
               )}
               {preVenda ? (
@@ -210,14 +213,15 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
                 </p>
               ) : !consolidada && itensVenda.length ? (
                 <p className="text-[12.5px]" style={{ color: "var(--ink2)" }}>
-                  Rascunho: ainda não conta como venda. Clique em "Continuar registro" e use "Salvar e marcar como venda".
+                  Em negociação: ainda não conta como venda. Clique em "Continuar registro" e use "Reservar vaga" ou "Consolidar venda".
                 </p>
               ) : null}
             </Bloco>
           )}
 
           {/* ── 0351: a PASTA — quem vai nesta venda (família), com o card de cada um no Bitrix ── */}
-          <FamiliaDaVenda negocioId={n.id} versao={versaoAnexos} onEditar={encerrado ? undefined : () => setRegistrarAberto(true)} />
+          <FamiliaDaVenda negocioId={n.id} versao={versaoAnexos} nomeTitular={nome} podeEditar={!encerrado && !consolidada}
+            onMudou={(r) => { setAviso({ tom: r.tom, t: r.t }); void carregar(); }} />
 
           {/* ── 2. Fechar: pagamento e contrato (ficha de fechamento) ── */}
           {(vendaRegistrada || encerrado) && (

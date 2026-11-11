@@ -302,7 +302,7 @@ export async function listarClosersAtivos(): Promise<{ id: string; name: string;
 
 /** Pré-venda (0207): leva o negócio pra coluna de venda no Bitrix (ou de volta, se desfeita). */
 export function preVendaNoBitrix(negocioId: string) {
-  return chamarApi<{ ok: boolean; status?: string; mensagem?: string }>("pre-venda", { negocioId });
+  return chamarApi<{ ok: boolean; status?: string; mensagem?: string; jaConsolidada?: boolean }>("pre-venda", { negocioId });
 }
 
 /** Leva a etapa do cartão (e o valor) pro Bitrix agora. O cron faz o mesmo a cada 10 min. */

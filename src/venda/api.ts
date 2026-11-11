@@ -21,6 +21,7 @@ import {
   lerValor, pagamentoDaVenda, viajanteVazio,
   type PagamentoVenda, type PaxLinha, type PessoaVenda, type Viajante,
 } from "./vendaRegras";
+import { familiaParaPayload, lerVendaDoContrato, linhasParaPayload, type VendaDoContrato } from "./vendaFinal";
 
 export type OrigemVenda = "closer" | "rel" | "ops";
 
@@ -81,12 +82,46 @@ export interface VendaGravada {
   condicao_especial: boolean;
   condicao_obs: string;
   observacoes: string;
+  atualizado_em: string | null;
+  /** Sprint final (0356+): null = banco ainda sem a coluna (a tela deduz do cartão). */
+  estado: string | null;
+  obs_financeiro: string;
+  rascunho: unknown;
+  /** Linhas de qs_venda_pagamentos; null = tabela ainda não existe (usa o `pagamento` antigo). */
+  pagamentos: unknown[] | null;
+}
+
+/** O banco já tem o modelo da sprint final (qs_vendas.estado)? Uma consulta por sessão. */
+let modeloNovo: Promise<boolean> | null = null;
+export function temModeloNovo(): Promise<boolean> {
+  if (!modeloNovo) {
+    modeloNovo = Promise.resolve(supabase.from("qs_vendas").select("estado").limit(1))
+      .then(({ error }) => !error)
+      .catch(() => false);
+  }
+  return modeloNovo;
+}
+
+type Extras = Pick<VendaGravada, "estado" | "obs_financeiro" | "rascunho" | "pagamentos">;
+/** Colunas/tabelas novas da sprint final, lidas à parte: banco sem a migration devolve o "jeito antigo". */
+async function extrasDaVenda(vendaId: string): Promise<Extras> {
+  const out: Extras = { estado: null, obs_financeiro: "", rascunho: null, pagamentos: null };
+  const { data: v, error: e1 } = await supabase.from("qs_vendas").select("estado, obs_financeiro, rascunho").eq("id", vendaId).maybeSingle();
+  if (!e1 && v) {
+    const r = v as Record<string, unknown>;
+    out.estado = (r.estado as string | null) ?? null;
+    out.obs_financeiro = (r.obs_financeiro as string | null) ?? "";
+    out.rascunho = r.rascunho ?? null;
+  }
+  const { data: pg, error: e2 } = await supabase.from("qs_venda_pagamentos").select("ordem, forma, valor, data, parcelas, obs").eq("venda_id", vendaId).order("ordem");
+  if (!e2) out.pagamentos = (pg ?? []) as unknown[];
+  return out;
 }
 
 /** A venda (qs_vendas) já confirmada deste cartão do closer — pra reabrir sem zerar pagamento/condição/observações. */
 export async function vendaDoNegocio(negocioId: string): Promise<VendaGravada | null> {
   const { data, error } = await supabase.from("qs_vendas")
-    .select("id, cliente_id, pagamento, condicao_especial, condicao_obs, observacoes")
+    .select("id, cliente_id, pagamento, condicao_especial, condicao_obs, observacoes, atualizado_em")
     .eq("negocio_id", negocioId).order("criado_em", { ascending: false }).limit(1).maybeSingle();
   if (error) {
     if (/qs_vendas/.test(error.message)) return null; // banco sem a 0214
@@ -100,6 +135,8 @@ export async function vendaDoNegocio(negocioId: string): Promise<VendaGravada | 
     condicao_especial: !!r.condicao_especial,
     condicao_obs: (r.condicao_obs as string | null) ?? "",
     observacoes: (r.observacoes as string | null) ?? "",
+    atualizado_em: (r.atualizado_em as string | null) ?? null,
+    ...(await extrasDaVenda(r.id as string)),
   };
 }
 
@@ -153,12 +190,21 @@ export interface PayloadVenda {
   condicao_especial: boolean;
   condicao_obs: string;
   observacoes: string;
+  /** Sprint final: linhas de pagamento (soma = total), obs pro Financeiro, ação e o rascunho da tela. */
+  pagamentos?: ReturnType<typeof linhasParaPayload>;
+  obs_financeiro?: string;
+  acao?: "salvar" | "reservar";
+  rascunho?: unknown;
+  /** Rel/Ops: re-salvar na mesma janela atualiza a mesma venda (a RPC ignora se não souber). */
+  venda_id?: string | null;
 }
 
 export interface ResultadoVenda {
   venda_id: string; cliente_id: string; itens: number; passageiros: number; total: number;
   /** 0351: quantas pessoas a venda tem (titular + família) e, se a pasta falhou, o porquê (a venda gravou). */
   pessoas?: number; familia_erro?: string | null;
+  /** Sprint final: estado depois de gravar (negociacao/reservada/consolidada). Ausente = RPC antiga. */
+  estado?: string;
 }
 
 /** Monta o jsonb que a venda_subir espera (ver o cabeçalho da 0214). */
@@ -202,6 +248,12 @@ export function montarPayload(p: PayloadVenda, nomeDoItem: (i: ItemVenda) => str
     condicao_especial: p.condicao_especial,
     condicao_obs: p.condicao_especial ? p.condicao_obs.trim() : null,
     observacoes: p.observacoes.trim() || null,
+    // Sprint final (docs/SUBIR-VENDA-FINAL.md) — a venda_subir antiga ignora estes campos.
+    ...(p.pagamentos ? { pagamentos: p.pagamentos } : {}),
+    ...(p.obs_financeiro != null ? { obs_financeiro: p.obs_financeiro.trim() || null } : {}),
+    ...(p.acao ? { acao: p.acao } : {}),
+    ...(p.rascunho !== undefined ? { rascunho: p.rascunho } : {}),
+    ...(p.venda_id ? { venda_id: p.venda_id } : {}),
   };
 }
 
@@ -209,6 +261,69 @@ export async function subirVenda(payload: ReturnType<typeof montarPayload>): Pro
   const { data, error } = await supabase.rpc("venda_subir", { p: payload });
   if (error) throw new Error(erroDaVenda(error));
   return data as ResultadoVenda;
+}
+
+// ── Sprint final: família no cartão, consolidar, cancelar, blocos, contrato ──
+const FALTA_FINAL = "falta aplicar as migrations 0356–0358 da sprint final do Subir venda";
+const semFuncao = (m: string, nome: string) => m.includes(nome) && /does not exist|schema cache|Could not find|não existe/i.test(m);
+
+export interface ResultadoFamilia { venda_id: string; pessoas: number; ids: { chave: string; pessoa_id: string }[] }
+
+/** "Quem vai" no cartão do closer → venda_familia_salvar (cria a venda em negociação se não existir). */
+export async function salvarFamilia(payload: ReturnType<typeof familiaParaPayload>): Promise<ResultadoFamilia> {
+  const { data, error } = await supabase.rpc("venda_familia_salvar", { p: payload });
+  if (error) {
+    if (semFuncao(error.message, "venda_familia_salvar")) throw new Error(`Cadastrar quem vai pelo cartão ainda não está ligado no banco (${FALTA_FINAL}).`);
+    throw new Error(erroDaVenda(error));
+  }
+  const r = (data ?? {}) as Partial<ResultadoFamilia>;
+  return { venda_id: r.venda_id ?? "", pessoas: Number(r.pessoas) || 0, ids: Array.isArray(r.ids) ? r.ids : [] };
+}
+
+export interface ResultadoConsolidar { ok: boolean; faltas: string[] }
+
+export async function consolidarVenda(vendaId: string): Promise<ResultadoConsolidar> {
+  const { data, error } = await supabase.rpc("venda_consolidar", { p_venda: vendaId });
+  if (error) {
+    if (semFuncao(error.message, "venda_consolidar")) throw new Error(`Consolidar a venda ainda não está ligado no banco (${FALTA_FINAL}). A venda ficou salva.`);
+    throw new Error(erroDaVenda(error));
+  }
+  const r = (data ?? {}) as { ok?: boolean; faltas?: unknown };
+  const faltas = Array.isArray(r.faltas) ? r.faltas.map(String).filter(Boolean) : [];
+  return { ok: r.ok === true && !faltas.length, faltas };
+}
+
+export async function cancelarVenda(vendaId: string, motivo: string): Promise<void> {
+  const { error } = await supabase.rpc("venda_cancelar", { p_venda: vendaId, p_motivo: motivo });
+  if (error) {
+    if (semFuncao(error.message, "venda_cancelar")) throw new Error(`Cancelar a venda ainda não está ligado no banco (${FALTA_FINAL}).`);
+    throw new Error(erroDaVenda(error));
+  }
+}
+
+export interface BlocosVenda {
+  marketing: { origem?: string | null; utm_source?: string | null; utm_campaign?: string | null; utm_content?: string | null; lp?: string | null } | null;
+  sdr: { nome?: string | null; agendou_em?: string | null } | null;
+  closer: { nome?: string | null } | null;
+  pos_venda: { nome?: string | null } | null;
+}
+
+/** Os 4 blocos (Marketing / SDR / Closer / Pós-venda). null = banco sem a RPC (a tela só não mostra). */
+export async function blocosDaVenda(vendaId: string): Promise<BlocosVenda | null> {
+  const { data, error } = await supabase.rpc("venda_blocos", { p_venda: vendaId });
+  if (error) {
+    if (semFuncao(error.message, "venda_blocos")) return null;
+    throw new Error(error.message);
+  }
+  const o = (data ?? {}) as Partial<BlocosVenda>;
+  return { marketing: o.marketing ?? null, sdr: o.sdr ?? null, closer: o.closer ?? null, pos_venda: o.pos_venda ?? null };
+}
+
+/** O que os contratos já enviados do cartão dizem (pessoas e tipo). null = banco sem a RPC ou nada útil. */
+export async function vendaDoContrato(negocioId: string): Promise<VendaDoContrato | null> {
+  const { data, error } = await supabase.rpc("venda_do_contrato", { p_negocio: negocioId });
+  if (error) return null; // só não pré-preenche
+  return lerVendaDoContrato(data);
 }
 
 export function erroDaVenda(e: unknown): string {
@@ -219,6 +334,8 @@ export function erroDaVenda(e: unknown): string {
   if (ab) return `Não dá pra deixar menos que os ${ab[1]} lugares já vendidos.`;
   const mapa: Record<string, string> = {
     "venda_subir": "A tela de venda ainda não está ligada no banco (falta aplicar a 0214).",
+    "venda-cancelada": "Esta venda foi cancelada. Pra vender de novo, fale com a gestão.",
+    "venda-nao-encontrada": "Venda não encontrada (atualize a tela).",
     "exp_vagas_ajustar": "Abrir vaga ainda não está ligado no banco (falta aplicar a 0214).",
     "pessoa-sem-nome": "Escreva o nome de quem comprou (e de quem viaja junto).",
     "expedicao-obrigatoria": "Escolha qual expedição foi vendida.",

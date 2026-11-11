@@ -52,7 +52,8 @@ export interface LinhaExtrato {
   nota?: string;
   voo_interno?: boolean;
 }
-export interface Risco { nivel: NivelRisco; categoria: string; motivo: string; fonte: "regra" | "ia" }
+/** Sprint final: cada risco aponta a pessoa e/ou o item e o que fazer. Categorias novas: familia, datas, emissao. */
+export interface Risco { nivel: NivelRisco; categoria: string; motivo: string; fonte: "regra" | "ia"; pessoa?: string | null; item?: string | null; o_que_fazer?: string | null }
 export interface Analise {
   status: StatusAnalise;
   base: "proposta" | "venda";
@@ -87,6 +88,9 @@ export interface RascunhoAnalise {
   viajantes: { nome: string; valor_contratado: number | null; valor_pago: number | null }[];
   pagamento: Record<string, unknown> | null;
   total: number;
+  /** Sprint final: linhas de pagamento (soma = total) e a família da venda. */
+  pagamentos?: { forma: string; valor: number; data: string | null; parcelas: number; obs: string | null }[];
+  pessoas?: { chave: string; nome: string; vinculo: string | null; cpf: string | null; nascimento: string | null; comprador: boolean; responsavel: string | null; itens?: number[] }[];
 }
 
 async function postar(corpo: unknown): Promise<Analise> {

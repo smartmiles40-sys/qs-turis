@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   dividirEmParcelas, formaDoPlano, pedidoDeLinkDoPlano, planoBate, planoDaVenda, somaDoPlano, somarMeses,
-} from "../../src/closer/planoDaVenda";
+} from "../../src/closer/planoDaVenda.ts";
 
 const HOJE = "2026-11-09";
 

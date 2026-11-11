@@ -125,7 +125,8 @@ async function depoisDoBanco(negocioId: string, r: { bitrix?: boolean } | null, 
   if (r && r.bitrix === false) return { tom: "aviso", mensagem: `${ok.replace(" Já sobe pro Dashboard.", "")} Este cliente não tem card no Bitrix, então ficou só no QS (o Dashboard não vê).` };
   try {
     const b = await preVendaNoBitrix(negocioId);
-    if (b.ok) return { tom: "ok", mensagem: `${ok} Bitrix atualizado.` };
+    // Sprint final: venda já consolidada → o api/closer.js não mexe no Bitrix e devolve jaConsolidada (é sucesso).
+    if (b.ok || b.jaConsolidada) return { tom: "ok", mensagem: `${ok} Bitrix atualizado.` };
     return { tom: "aviso", mensagem: `${ok.replace(" Já sobe pro Dashboard.", "")} Gravado no QS, mas o Bitrix recusou: ${b.mensagem ?? "sem motivo"}. O QS tenta de novo sozinho a cada 10 min (ou use "Reenviar").` };
   } catch (e) {
     return { tom: "aviso", mensagem: `Gravado no QS. O Bitrix não respondeu (${(e as Error).message}) — o QS tenta de novo sozinho a cada 10 min.` };
