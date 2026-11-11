@@ -21,15 +21,21 @@
 //        esconder o que não está ligado na Vercel.
 //   POST { acao: 'importar', dealId, closerId? }
 //        → traz pro quadro um cliente que já tinha card no Bitrix.
-//   POST { acao: 'pre-venda', negocioId }  (0207)
-//        → depois da RPC closer_pre_venda: em pré-venda, o negócio vai pra
-//          coluna de venda ("Em emissão") com "Tipo de venda" e valor — é o que
-//          o Dashboard conta; desfeita, volta pra coluna da etapa do cartão.
+//   POST { acao: 'pre-venda', negocioId }  (0207; "Reservar vaga" — 11/11)
+//        → depois da RPC closer_pre_venda / venda_subir({acao:'reservar'}): em
+//          pré-venda ou venda RESERVADA, o negócio vai pra coluna de venda ("Em
+//          emissão") com "Tipo de venda" e valor — é o que o Dashboard conta;
+//          desfeita/cancelada, sai da coluna de venda. Venda já CONSOLIDADA →
+//          { ok:true, jaConsolidada:true } sem mexer (não é erro).
 //
-// FAMÍLIA (0351, 09/11): venda com mais de uma pessoa (qs_venda_pessoas) →
-// cada pessoa que não é o titular ganha um card FILHO (mesma coluna do pai,
-// "Número do ID pai" = negócio do lead, OPPORTUNITY = valor dela) e o PAI leva
-// só o resto do total. Regras e payloads: api/_closerBitrixFamilia.js.
+// FAMÍLIA (0351, 09/11; sprint final 11/11): venda com mais de uma pessoa
+// (qs_venda_pessoas) → cada pessoa que não é o titular ganha um card FILHO já
+// em NEGOCIAÇÃO (mesma coluna do pai, "Número do ID pai" = negócio do lead,
+// OPPORTUNITY = valor dela). Toda mudança de etapa do pai leva TODOS os filhos
+// junto. Ordem: FILHOS → PAI (o pai só desconta os filhos que existem no
+// Bitrix); erro ao ler a família = erro do cartão, nada enviado. A tela chama
+// 'espelhar' também depois de venda_familia_salvar. Execução:
+// api/_closerEspelho.js; regras e payloads: api/_closerBitrixFamilia.js.
 //
 // IDEMPOTENTE: lê o card antes; se valor e etapa já batem, não regrava nada.
 // O resumo da ficha vai pra timeline uma vez, quando o cartão entra na venda.
@@ -71,10 +77,8 @@
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { bx, bitrixConfigurado, comentarNoNegocio, atualizarNegocioComFunil } from './_bitrixLead.js';
 import { getSupabaseUserId } from './_wa.js';
-import {
-  CAMPO_TIPO_VENDA, ETAPAS_DE_VENDA, FUNIL_COMERCIAL, FUNIL_PRE_VENDAS, NOME_ETAPA, emPreVenda, etapaParaColuna, planejarEspelho,
-} from './_closerBitrixPlano.js';
-import { carregarFamilia, espelharFamilia, filhosAtivos, resumoDaFamilia, somaDosFilhos } from './_closerBitrixFamilia.js';
+import { NOME_ETAPA, emPreVenda, etapaParaColuna } from './_closerBitrixPlano.js';
+import { brl, espelharCartao } from './_closerEspelho.js';
 import {
   apagarNoZapsign, arquivarAssinado, criarNoZapsign, gerarPdf, gravarNoCadastro, guardarPdf, hashDoCorpo, lerConfig, lerNoZapsign,
   linkDoPdf, montarPrevia, nomesDoArquivo, normalizarCampos, oQueFalta, statusDoDocumento, testarZapsign, urlDoApp,
@@ -85,15 +89,6 @@ import {
 } from './_contratoFamilia.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SERVICO = {
-  expedicao: 'Expedição', pacote: 'Pacote', aereo: 'Aéreo', hospedagem: 'Hospedagem', passeio: 'Passeio',
-  cruzeiro: 'Cruzeiro', seguro: 'Seguro', concierge: 'Concierge', conta_liminar: 'Conta liminar', outro: 'Outro',
-};
-const FORMA = { pix: 'Pix', boleto: 'Boleto', cartao: 'Cartão', link: 'Link de pagamento', transferencia: 'Transferência', dinheiro: 'Dinheiro', outro: 'Outra' };
-
-const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const dataBr = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '—');
-
 async function quemChama(req) {
   const id = await getSupabaseUserId(req.headers['authorization']);
   if (!id || !UUID_RE.test(id)) return null;
@@ -106,32 +101,6 @@ function podeMexer(u, negocio) {
   if (u.role === 'admin') return true;
   if (u.role === 'gestor' && Array.isArray(u.setores) && u.setores.includes('comercial')) return true;
   return u.role === 'closer' && negocio.closer_id === u.id;
-}
-
-function resumoDaFicha(f, parcelas) {
-  const linhas = [
-    '✅ VENDA CONSOLIDADA no QS (o QS é a fonte da verdade desta venda).',
-    `Serviço: ${SERVICO[f?.servico] || f?.servico || '—'}${f?.destino ? ` — ${f.destino}` : ''}`,
-    `Datas: ${dataBr(f?.data_ida)} → ${dataBr(f?.data_volta)} · Passageiros: ${f?.qtd_passageiros || '—'}`,
-    `Valor total: ${brl(f?.valor_total)}`,
-  ];
-  if (parcelas.length) {
-    linhas.push('Plano de pagamento:');
-    for (const p of parcelas) {
-      linhas.push(`• ${p.numero === 0 ? 'Entrada' : `Parcela ${p.numero}`}: ${brl(p.valor)} — vence ${dataBr(p.vencimento)} — ${FORMA[p.forma] || p.forma}${p.recorrente ? ' (recorrente)' : ''}`);
-    }
-  }
-  return linhas.join('\n');
-}
-
-async function marcar(negocioId, campos, evento, autorId) {
-  await rest(`qs_closer_negocios?id=eq.${negocioId}`, { method: 'PATCH', body: campos, prefer: 'return=minimal' });
-  if (evento) {
-    await rest('qs_closer_negocio_eventos', {
-      method: 'POST', prefer: 'return=minimal',
-      body: { negocio_id: negocioId, tipo: 'bitrix', texto: evento, autor_id: autorId || null },
-    }).catch(() => null);
-  }
 }
 
 // ── Pipeline v2 (0205, 26/10): toda etapa do QS vai pro Bitrix ─────────────
@@ -153,96 +122,12 @@ async function colunasDoFunil(categoria) {
 // (no Comercial 1 é "Em Emissão / Pix Expedição", UC_70BW8E — a coluna que o
 // Dashboard conta como venda). Desfeita, o Bitrix volta pra etapa do cartão.
 
-/** Manda a etapa (e o valor) do cartão pro Bitrix. `u` = quem pediu; null = o cron. */
-async function espelhar(negocioId, u, extra = {}) {
-  // select=*: as colunas da 0207 (pre_venda_*, bitrix_resumo_em) entram quando existirem.
-  const n = (await rest(`qs_closer_negocios?select=*&id=eq.${negocioId}&limit=1`))?.[0];
-  if (!n) return { status: 404, body: { error: 'Cartão não encontrado.' } };
-  if (u && !podeMexer(u, n)) return { status: 403, body: { error: 'Sem permissão neste cartão.' } };
-  if (n.arquivado_em) return { status: 409, body: { error: 'O cartão está no arquivo.' } };
-
-  const lead = (await rest(`qs_leads?select=id,bitrix_id&id=eq.${n.lead_id}&limit=1`))?.[0];
-  const dealId = String(lead?.bitrix_id || '').replace(/\D/g, '');
-  if (!dealId) {
-    if (extra.seco) return { status: 200, body: { seco: true, ok: false, motivo: 'O lead não tem negócio no Bitrix.' } };
-    await marcar(n.id, { bitrix_status: 'sem_card', bitrix_erro: 'O lead não tem negócio no Bitrix.' });
-    return { status: 200, body: { ok: false, status: 'sem_card', mensagem: 'Este cliente não tem card no Bitrix — ficou só no QS.' } };
-  }
-
-  try {
-    const deal = await bx('crm.deal.get', { id: Number(dealId) }, 8_000);
-    if (!deal) throw new Error(`Negócio ${dealId} não encontrado no Bitrix.`);
-    const lista = await colunasDoFunil(deal.CATEGORY_ID);
-    // Card ainda na Pré-Vendas: o plano leva pro Comercial 1 (precisa das colunas de lá).
-    const listaComercial = String(deal.CATEGORY_ID ?? '0') === FUNIL_PRE_VENDAS ? await colunasDoFunil(FUNIL_COMERCIAL) : null;
-    // 0351: a família da venda (qs_venda_pessoas). Com cards filhos, o pai leva só o resto.
-    const familia = await carregarFamilia(n.id, { rest }).catch((e) => { console.warn('[closer] família', n.id, e?.message); return null; });
-    const plano = planejarEspelho({ n, deal, lista, listaComercial, porPessoa: Boolean(u), valorFilhos: somaDosFilhos(familia?.pessoas) });
-    // Modo CONFERIR (03/11): devolve o que seria enviado e não escreve nada.
-    if (extra.seco) {
-      const filhos = filhosAtivos(familia?.pessoas);
-      return { status: 200, body: { seco: true, dealId, ...plano, familia: familia ? {
-        pessoas: (familia.pessoas || []).filter((p) => !p.removida_em).length,
-        filhos: filhos.length, semCard: filhos.filter((p) => !p.bitrix_deal_id).length,
-        saidasSemAviso: (familia.pessoas || []).filter((p) => p.bitrix_status === 'removida').length,
-      } : null } };
-    }
-    if (!plano.ok) throw new Error(plano.motivo);
-    const { fields, etapaAlvo, preVenda, valor } = plano;
-    if (Object.keys(fields).length) {
-      // atualizarNegocioComFunil: card ainda na Pré-Vendas troca de funil pelo
-      // crm.item.update (o crm.deal.update ignora CATEGORY_ID calado — 04/11).
-      await atualizarNegocioComFunil(dealId, fields, 8_000);
-    }
-    const marcas = { bitrix_status: 'ok', bitrix_erro: null, bitrix_etapa: etapaAlvo, bitrix_enviado_em: new Date().toISOString() };
-    // Venda fechada pela ficha: o resumo vai pra timeline do negócio uma vez por
-    // consolidação. Com a 0207 a marca é bitrix_resumo_em (com a pré-venda o
-    // card já está na coluna de venda quando a ficha chega); sem ela, a regra antiga.
-    const temMarcaResumo = Object.prototype.hasOwnProperty.call(n, 'bitrix_resumo_em');
-    const falta = temMarcaResumo
-      ? !n.bitrix_resumo_em || new Date(n.bitrix_resumo_em) < new Date(n.consolidada_em)
-      : !ETAPAS_DE_VENDA.includes(n.bitrix_etapa || '');
-    if (n.consolidada_em && ETAPAS_DE_VENDA.includes(n.etapa) && falta) {
-      const parcelas = (await rest(`fin_planos?select=fin_parcelas(numero,valor,vencimento,forma,recorrente)&negocio_id=eq.${n.id}&limit=1`).catch(() => null))?.[0]?.fin_parcelas || [];
-      parcelas.sort((a, b) => a.numero - b.numero);
-      await comentarNoNegocio(dealId, resumoDaFicha(n.ficha, parcelas));
-      if (temMarcaResumo) marcas.bitrix_resumo_em = new Date().toISOString();
-    }
-    // Pré-venda marcada/desfeita pelo botão: um recado na timeline do negócio.
-    if (extra.comentario && fields.STAGE_ID) await comentarNoNegocio(dealId, extra.comentario(n, valor)).catch(() => null);
-
-    // 0351: os cards FILHOS da família (mesma coluna do pai, ID pai, valor de cada um).
-    // Erro numa pessoa não desfaz o pai: o cartão fica em 'erro' e o cron tenta de novo.
-    let fam = null;
-    if (familia?.pessoas?.some((p) => !p.comprador)) {
-      const titularNome = familia.pessoas.find((p) => p.comprador)?.cliente?.nome || deal.TITLE || '';
-      const listaDoPai = String(plano.para.funil) === String(deal.CATEGORY_ID ?? '0') ? lista : listaComercial || lista;
-      fam = await espelharFamilia(
-        { familia, titularNome, dealPai: { ...deal, ID: dealId }, para: plano.para, lista: listaDoPai, porPessoa: Boolean(u) },
-        { bx, rest },
-      );
-    }
-    const notaFamilia = resumoDaFamilia(fam);
-    const nota = Object.keys(fields).length || notaFamilia
-      ? [Object.keys(fields).length ? `Bitrix atualizado (negócio ${dealId}): ${[
-        fields.STAGE_ID ? `coluna "${preVenda ? 'venda (pré-venda)' : NOME_ETAPA[etapaAlvo]}"` : '',
-        fields.OPPORTUNITY ? `valor ${brl(valor)}${plano.valorFilhos > 0 ? ` (titular; ${brl(plano.valorFilhos)} nos cards da família)` : ''}` : '',
-        fields[CAMPO_TIPO_VENDA] ? 'tipo de venda' : '',
-      ].filter(Boolean).join(' + ')}.` : '', notaFamilia].filter(Boolean).join(' ')
-      : null;
-    if (fam?.erros?.length) {
-      Object.assign(marcas, { bitrix_status: 'erro', bitrix_erro: `O card do titular foi atualizado, mas ${notaFamilia}`.slice(0, 500) });
-    }
-    await marcar(n.id, marcas, nota, u?.id);
-    if (fam?.erros?.length) return { status: 200, body: { ok: false, status: 'erro', mensagem: marcas.bitrix_erro, dealId, familia: fam } };
-    return { status: 200, body: { ok: true, status: 'ok', mudou: Object.keys(fields), dealId, familia: fam } };
-  } catch (e) {
-    const msg = String(e?.message || 'Falhou').slice(0, 500);
-    console.error('[closer] espelhar', n.id, msg);
-    // O cron tenta de novo a cada rodada: só registra o evento se a mensagem mudou.
-    await marcar(n.id, { bitrix_status: 'erro', bitrix_erro: msg }, u ? `Bitrix recusou: ${msg}` : null, u?.id).catch(() => null);
-    return { status: 200, body: { ok: false, status: 'erro', mensagem: msg } };
-  }
+/**
+ * Manda a etapa (e o valor) do cartão pro Bitrix — pai e cards filhos da família.
+ * `u` = quem pediu; null = o cron. A execução mora em ./_closerEspelho.js.
+ */
+function espelhar(negocioId, u, extra = {}) {
+  return espelharCartao(negocioId, u, extra, { rest, bx, atualizarNegocioComFunil, comentarNoNegocio, colunasDoFunil, podeMexer });
 }
 
 /**
@@ -888,10 +773,12 @@ export default async function handler(req, res) {
       if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
       const id = String(body.negocioId || '');
       if (!UUID_RE.test(id)) return res.status(400).json({ error: 'Cartão inválido.' });
+      // Venda já consolidada → ok "já consolidada" (sem tocar no Bitrix) — ver _closerEspelho.js.
       const r = await espelhar(id, u, {
+        preVenda: true,
         comentario: (n, valor) => (emPreVenda(n)
-          ? `⚡ PRÉ-VENDA marcada no QS por ${u.name || 'closer'}: ${brl(valor)}. O cliente fechou; a ficha de fechamento (plano de pagamento) vem depois e não conta a venda de novo.`
-          : `↩️ Pré-venda DESFEITA no QS por ${u.name || 'closer'}. O negócio voltou pra "${NOME_ETAPA[n.etapa] || n.etapa}".`),
+          ? `⚡ VAGA RESERVADA (pré-venda) no QS por ${u.name || 'closer'}: ${brl(valor)}. O cliente fechou; a consolidação (pagamento) vem depois e não conta a venda de novo.`
+          : `↩️ Reserva/pré-venda DESFEITA no QS por ${u.name || 'closer'}. O negócio voltou pra "${NOME_ETAPA[n.etapa] || n.etapa}".`),
       });
       return res.status(r.status).json(r.body);
     }

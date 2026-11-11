@@ -25,11 +25,11 @@
 //   • funções PURAS (montar payload, decidir o que fazer) — testadas sem rede;
 //   • espelharFamilia(): a execução, com `bx`/`rest` injetáveis (o teste passa
 //     um fetch de mentira).
-// Quem chama: api/closer.js → espelhar() (o mesmo caminho do botão e do cron;
+// Quem chama: api/_closerEspelho.js (via api/closer.js → espelhar(), o mesmo caminho do botão e do cron;
 // o cron só roda com CLOSER_CRON_BITRIX_LIGADO=1 — trava de lá, não daqui).
 // -----------------------------------------------------------------------------
 
-import { CAMPO_TIPO_VENDA, ETAPAS_DE_VENDA, ETAPAS_ENCERRADAS, etapaParaColuna } from './_closerBitrixPlano.js';
+import { CAMPO_TIPO_VENDA, ETAPAS_ENCERRADAS, etapaParaColuna } from './_closerBitrixPlano.js';
 
 export const CAMPO_ID_PAI = 'UF_CRM_1790891281841';      // "Número do ID pai" (texto) — negócio
 export const CAMPO_DEAL_CPF = 'UF_CRM_1762288761917';    // CPF — negócio (api/rel-viagens.js)
@@ -143,8 +143,13 @@ export function montarDealFilho({ pessoa, titularNome, dealPai, para, contatoId 
 
 /**
  * O que mudar num card filho que já existe (só o necessário — idempotente).
- * Etapa: acompanha o pai SÓ no mesmo funil; e o cron (porPessoa=false) não tira
- * da coluna um filho que alguém encerrou ou levou pra venda à mão.
+ * Etapa — TODOS JUNTOS (Bruno, 11/11): o filho vai pra MESMA coluna do pai em
+ * toda mudança (negociação, pré-venda, ganho, perdido, cancelada). Duas exceções:
+ *   • o cron (porPessoa=false) não reabre um filho que alguém ENCERROU à mão
+ *     (Perdidos/Cancelamento) enquanto o pai segue aberto/em venda — quem saiu da
+ *     viagem sai pelo QS (remover a pessoa), não pelo Bitrix;
+ *   • filho levado à mão pra OUTRO funil: só a pessoa (botão) traz de volta —
+ *     aí vai CATEGORY_ID + STAGE_ID (a execução usa crm.item.update).
  */
 export function diffDealFilho({ atual, desejado, lista, porPessoa = false }) {
   const f = {};
@@ -160,11 +165,15 @@ export function diffDealFilho({ atual, desejado, lista, porPessoa = false }) {
     if (desejado[k] && !limpa(Array.isArray(atual[k]) ? atual[k][0] : atual[k])) f[k] = desejado[k];
   }
   const mesmoFunil = String(atual.CATEGORY_ID ?? '0') === String(desejado.CATEGORY_ID);
-  if (mesmoFunil && String(atual.STAGE_ID) !== String(desejado.STAGE_ID)) {
+  if (!mesmoFunil) {
+    if (porPessoa) { f.CATEGORY_ID = desejado.CATEGORY_ID; f.STAGE_ID = desejado.STAGE_ID; }
+    return f;
+  }
+  if (String(atual.STAGE_ID) !== String(desejado.STAGE_ID)) {
     const noBitrix = etapaParaColuna(lista, atual.STAGE_ID).etapa;
     const alvo = etapaParaColuna(lista, desejado.STAGE_ID).etapa;
-    const filhoMexidoAMao = ETAPAS_ENCERRADAS.includes(noBitrix) || (ETAPAS_DE_VENDA.includes(noBitrix) && !ETAPAS_DE_VENDA.includes(alvo));
-    if (porPessoa || !filhoMexidoAMao) f.STAGE_ID = desejado.STAGE_ID;
+    const encerradoAMao = ETAPAS_ENCERRADAS.includes(noBitrix) && !ETAPAS_ENCERRADAS.includes(alvo);
+    if (porPessoa || !encerradoAMao) f.STAGE_ID = desejado.STAGE_ID;
   }
   return f;
 }
@@ -263,9 +272,29 @@ const SELECT_PESSOAS = 'id,venda_id,cliente_id,comprador,vinculo,menor,valor,aer
   'cliente:rel_clientes!qs_venda_pessoas_cliente_id_fkey(id,nome,telefone,email,cpf,nascimento,bitrix_contato_id),' +
   'responsavel:rel_clientes!qs_venda_pessoas_responsavel_cliente_id_fkey(nome)';
 
-/** A venda do cartão + as pessoas (service_role). null = sem venda ou banco sem a 0351. */
+const COLS_VENDA = 'id,valor_total,cliente_id';
+const COLS_VENDA_ESTADO = `${COLS_VENDA},estado,reservada_em,consolidada_em,cancelada_em,cancelada_motivo`;
+
+/**
+ * A venda do cartão (com o `estado` da 0356 quando existir). null = o cartão não tem venda.
+ * Erro de leitura LANÇA (nunca vira null calado): sem a família o pai iria com o valor cheio.
+ */
+export async function carregarVenda(negocioId, { rest }) {
+  try {
+    return (await rest(`qs_vendas?select=${COLS_VENDA_ESTADO}&negocio_id=eq.${negocioId}&limit=1`))?.[0] || null;
+  } catch (e) {
+    // Banco ainda sem a 0356 (colunas de estado): lê do jeito de antes.
+    if (!/estado|reservada_em|cancelada_em|cancelada_motivo|consolidada_em/.test(String(e?.message || ''))) throw e;
+    return (await rest(`qs_vendas?select=${COLS_VENDA}&negocio_id=eq.${negocioId}&limit=1`))?.[0] || null;
+  }
+}
+
+/**
+ * A venda do cartão + as pessoas (service_role). null = sem venda ou banco sem a 0351.
+ * Qualquer outro erro LANÇA — quem chama (o espelho) trata como erro do cartão.
+ */
 export async function carregarFamilia(negocioId, { rest }) {
-  const venda = (await rest(`qs_vendas?select=id,valor_total,cliente_id&negocio_id=eq.${negocioId}&limit=1`))?.[0];
+  const venda = await carregarVenda(negocioId, { rest });
   if (!venda) return null;
   let pessoas;
   try {
@@ -302,15 +331,49 @@ async function acharOuCriarContato(pessoa, titularNome, { bx }, jaAchado) {
   return id ? String(id) : null;
 }
 
+/** Recado de VENDA CANCELADA (mesmo padrão da "pessoa que saiu": o card não é apagado). */
+export function textoVendaCancelada({ papel, nome, quando, motivo }) {
+  const d = quando ? String(quando).slice(0, 10).split('-').reverse().join('/') : 'hoje';
+  const pq = limpa(motivo) ? ` Motivo: ${limpa(motivo)}.` : '';
+  return papel === 'filho'
+    ? `⛔ VENDA CANCELADA no QS em ${d} (família — ${limpa(nome) || 'acompanhante'}).${pq} A pré-venda/reserva foi desfeita e a vaga voltou. Este card NÃO foi apagado: confira com o closer.`
+    : `⛔ VENDA CANCELADA no QS em ${d}.${pq} A pré-venda/reserva foi desfeita, a vaga voltou e o card saiu da coluna de venda. Os cards filhos da família receberam o mesmo aviso e a mesma coluna.`;
+}
+
+/** Soma do valor dos filhos ATIVOS que existem no Bitrix (o que o pai pode descontar). */
+export const somaNoBitrix = (noBitrix) => centavos((noBitrix || []).reduce((s, x) => s + (Number(x.valor) > 0 ? Number(x.valor) : 0), 0));
+
+/** crm.deal.update; com CATEGORY_ID (filho em outro funil) usa o crm.item.update. */
+async function atualizarFilho(dealId, fields, { bx }) {
+  const { CATEGORY_ID, STAGE_ID, ...resto } = fields;
+  if (CATEGORY_ID === undefined) {
+    await bx('crm.deal.update', { id: Number(dealId), fields, params: { REGISTER_SONET_EVENT: 'Y' } });
+    return;
+  }
+  await bx('crm.item.update', { entityTypeId: 2, id: Number(dealId), fields: { categoryId: Number(CATEGORY_ID), ...(STAGE_ID ? { stageId: String(STAGE_ID) } : {}) } });
+  if (Object.keys(resto).length) await bx('crm.deal.update', { id: Number(dealId), fields: resto, params: { REGISTER_SONET_EVENT: 'Y' } });
+}
+
 /**
- * Cria/atualiza os cards filhos do pai `dealPai` (já atualizado pelo espelhar).
- * Devolve { criados, atualizados, iguais, avisados, erros: [{nome, msg}], resumo }.
+ * Cria/atualiza os cards filhos do pai `dealPai`. Roda ANTES de o pai ser
+ * reduzido (api/_closerEspelho.js): o pai só desconta `valorNoBitrix`, a soma dos
+ * filhos que de fato EXISTEM no Bitrix depois desta rodada.
+ *   cancelada = { quando, motivo } → cada filho ativo ganha o recado de venda cancelada.
+ * Devolve { criados, atualizados, iguais, avisados, canceladasAvisadas, erros: [{nome, msg}],
+ *           noBitrix: [{pessoaId, dealId, valor}], valorNoBitrix }.
  * Nunca lança: erro de uma pessoa fica na linha dela (bitrix_status='erro').
  */
-export async function espelharFamilia({ familia, titularNome, dealPai, para, lista, porPessoa = false }, { bx, rest, agora = () => new Date().toISOString() }) {
-  const out = { criados: [], atualizados: 0, iguais: 0, avisados: 0, erros: [] };
+export async function espelharFamilia({ familia, titularNome, dealPai, para, lista, porPessoa = false, cancelada = null }, { bx, rest, agora = () => new Date().toISOString() }) {
+  const out = { criados: [], atualizados: 0, iguais: 0, avisados: 0, canceladasAvisadas: 0, erros: [], noBitrix: [], valorNoBitrix: 0 };
   const pessoas = familia?.pessoas || [];
   if (!pessoas.some((p) => !p.comprador)) return out;
+  // Card que já existe (id gravado) conta mesmo se esta rodada falhar nele.
+  const existe = new Map(filhosAtivos(pessoas).filter((p) => p.bitrix_deal_id).map((p) => [p.id, String(p.bitrix_deal_id)]));
+  const fechar = () => {
+    out.noBitrix = filhosAtivos(pessoas).filter((p) => existe.has(p.id)).map((p) => ({ pessoaId: p.id, dealId: existe.get(p.id), valor: Number(p.valor || 0) }));
+    out.valorNoBitrix = somaNoBitrix(out.noBitrix);
+    return out;
+  };
 
   // Filhos que já apontam pro pai (idempotência mesmo se o QS perdeu o id).
   let existentes = [];
@@ -321,7 +384,7 @@ export async function espelharFamilia({ familia, titularNome, dealPai, para, lis
     })) || [];
   } catch (e) {
     out.erros.push({ nome: 'família', msg: `não consegui listar os cards filhos (${e?.message || 'erro'})` });
-    return out;
+    return fechar();
   }
   // Card filho que o QS conhece mas não veio na lista (alguém mudou o ID pai): lê direto.
   for (const p of pessoas) {
@@ -385,10 +448,16 @@ export async function espelharFamilia({ familia, titularNome, dealPai, para, lis
           }).catch(() => null);
         }
       } else if (a.tipo === 'atualizar') {
-        await bx('crm.deal.update', { id: Number(dealId), fields: a.fields, params: { REGISTER_SONET_EVENT: 'Y' } });
+        await atualizarFilho(dealId, a.fields, { bx });
         out.atualizados++;
       } else {
         out.iguais++;
+      }
+      existe.set(p.id, String(dealId));
+      if (cancelada) {
+        const ok = await bx('crm.timeline.comment.add', { fields: { ENTITY_ID: Number(dealId), ENTITY_TYPE: 'deal',
+          COMMENT: textoVendaCancelada({ papel: 'filho', nome, quando: cancelada.quando, motivo: cancelada.motivo }) } }).catch(() => null);
+        if (ok) out.canceladasAvisadas++;
       }
       const existente = (existentes || []).find((d) => String(d.ID) === String(dealId));
       await marcar(p, {
@@ -398,6 +467,7 @@ export async function espelharFamilia({ familia, titularNome, dealPai, para, lis
     } catch (e) {
       const msg = String(e?.message || 'falhou').slice(0, 300);
       out.erros.push({ nome, msg });
+      if (a.dealId && !p.removida_em) existe.set(p.id, String(a.dealId));
       await marcar(p, { bitrix_status: 'erro', bitrix_erro: msg, ...(a.dealId ? { bitrix_deal_id: a.dealId } : {}) });
     }
   }
@@ -408,7 +478,7 @@ export async function espelharFamilia({ familia, titularNome, dealPai, para, lis
     await bx('crm.timeline.comment.add', { fields: { ENTITY_ID: Number(dealPai.ID), ENTITY_TYPE: 'deal',
       COMMENT: `👨‍👩‍👧 Família no QS: ${filhosAtivos(pessoas).length + 1} pessoas nesta venda. Cards filhos criados agora:\n${linhas.join('\n')}\nEste card (pai) passa a levar só o valor do titular.` } }).catch(() => null);
   }
-  return out;
+  return fechar();
 }
 
 /** Uma linha pro histórico do cartão / bitrix_erro. */
@@ -418,6 +488,7 @@ export function resumoDaFamilia(r) {
   if (r.criados?.length) partes.push(`${r.criados.length} card(s) filho(s) criado(s)`);
   if (r.atualizados) partes.push(`${r.atualizados} atualizado(s)`);
   if (r.avisados) partes.push(`${r.avisados} saída(s) avisada(s)`);
+  if (r.canceladasAvisadas) partes.push(`venda cancelada avisada em ${r.canceladasAvisadas} card(s) filho(s)`);
   if (r.erros?.length) partes.push(`falhou: ${r.erros.map((e) => `${e.nome} (${e.msg})`).join('; ')}`);
   return partes.length ? `Família: ${partes.join(', ')}.` : '';
 }
