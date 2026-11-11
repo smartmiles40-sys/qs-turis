@@ -109,11 +109,13 @@ const nomeDaColuna = (lista, id) => (lista || []).find((e) => String(e?.STATUS_I
  *   listaComercial = colunas do funil 0 (só precisa se o card estiver na Pré-Vendas)
  *   porPessoa   = true quando alguém clicou (pode mais que o cron)
  *   valorFilhos = 0351: soma do que foi pros cards filhos da família (o pai leva o resto)
+ *   vendaCancelada = qs_vendas.estado 'cancelada' (11/11): o cron PODE tirar o card da
+ *                 coluna de venda (foi o próprio QS que pôs lá com a reserva/pré-venda)
  * Devolve { ok, fields, etapaAlvo, preVenda, valor, valorVenda, valorFilhos, de, para, motivo }.
  *   ok=false → não envia; `motivo` explica (vira o bitrix_erro do cartão).
  *   fields vazio → já está igual, nada a enviar.
  */
-export function planejarEspelho({ n, deal, lista, listaComercial = null, porPessoa = false, valorFilhos = 0 }) {
+export function planejarEspelho({ n, deal, lista, listaComercial = null, porPessoa = false, valorFilhos = 0, vendaCancelada = false }) {
   const etapaAlvo = etapaNoBitrix(n);
   const preVenda = emPreVenda(n);
   const funil = String(deal?.CATEGORY_ID ?? '0');
@@ -153,7 +155,7 @@ export function planejarEspelho({ n, deal, lista, listaComercial = null, porPess
     const bitrixEncerrado = ETAPAS_ENCERRADAS.includes(noBitrix);
     const qsNaVenda = ETAPAS_DE_VENDA.includes(etapaAlvo);
     const qsEncerrado = ETAPAS_ENCERRADAS.includes(etapaAlvo);
-    if (bitrixNaVenda && !qsNaVenda && etapaAlvo !== 'venda_cancelada') {
+    if (bitrixNaVenda && !qsNaVenda && etapaAlvo !== 'venda_cancelada' && !vendaCancelada) {
       return { ...base, ok: false, fields: {}, motivo: `No Bitrix este negócio já está em "${de.nome}" (venda). O QS não tira de lá sozinho: se a venda é real, registre a venda no cartão; se não, use "Reenviar ao Bitrix".` };
     }
     if (bitrixEncerrado && !qsNaVenda && !qsEncerrado) {
