@@ -28,6 +28,9 @@ import MapaMundi, { COR_EXP, COR_PAC, MarcaTipo, type PontoMapa } from "./MapaMu
 import { lugaresDe } from "./destinos";
 import { conferirViagens, contar, type Analise } from "../lib/problemas";
 import { resumirVoos } from "../lib/statusViagem";
+import { ehVooQueVale } from "../lib/agendaServicos";
+// 0359: check-in só de voo de verdade (a data do Bitrix de venda de hotel não é voo); trem segue
+const pedeCheckin = (t: Trecho) => t.tipo === "trem" || ehVooQueVale(t);
 
 type Filtro = "todos" | "expedicao" | "pacote";
 const SEM_DESTINO = "\u0000sem-destino";
@@ -75,7 +78,7 @@ function diasAte(d: string | null): string {
 function montarPartidas(viagens: Viagem[], rev: Map<string, Revisao>, trechos: Trecho[]): Partida[] {
   const agora = Date.now();
   const checkinAberto = new Set(
-    trechos.filter((t) => t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.checkin_em).getTime() <= agora && new Date(t.partida_em).getTime() > agora)
+    trechos.filter((t) => pedeCheckin(t) && t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.checkin_em).getTime() <= agora && new Date(t.partida_em).getTime() > agora)
       .map((t) => t.viagem_id),
   );
   const hoje = hojeISO();
@@ -450,7 +453,7 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
   const trechosVale = trechos.filter((t) => vale(grupoTipo(t.viagem_tipo)));
   const proxVooInterno = trechosVale.find((t) => t.tipo === "voo_interno" && new Date(t.partida_em).getTime() >= agora);
   const proxCheckin = trechosVale
-    .filter((t) => t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.partida_em).getTime() > agora)
+    .filter((t) => pedeCheckin(t) && t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.partida_em).getTime() > agora)
     .sort((a, b) => a.checkin_em!.localeCompare(b.checkin_em!))[0];
   const contaRev = (t: "expedicao" | "pacote") => {
     const vs = (viagens ?? []).filter((v) => grupoDe(v) === t);

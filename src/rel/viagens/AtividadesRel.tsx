@@ -22,6 +22,7 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { ETAPA, concluirEtapa, desfazerEtapa, diasAte, type EstadoEtapa, type EtapaId, type RegistroEtapa } from "../lib/etapas";
 import { hojeSP, marcarCheckin, type Trecho, type Viagem } from "../lib/viagens";
 import { atribuirViagens } from "../lib/operacao";
+import { ehVooQueVale } from "../lib/agendaServicos";
 import { diaBR, diaLocal, horaLocal } from "../lib/problemas";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 import { Aviso, Botao } from "../ui";
@@ -34,7 +35,8 @@ type Vista = "minhas" | "sem_dono" | "todas";
 
 const CHAVE_VISTA = "rel_atividades_vista";
 const somaDias = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
-const ehVoo = (t: Trecho) => t.tipo === "voo_internacional" || t.tipo === "voo_interno";
+// 0359: só voo de verdade — a data do Bitrix de uma venda de hotel/seguro não é voo
+const ehVoo = (t: Trecho, v?: Viagem) => ehVooQueVale(t, v);
 const nomeDe = (v: Viagem) => v.cliente_nome || v.titulo;
 
 /** Em que grupo a etapa atual da viagem cai (ou fora da lista). */
@@ -85,7 +87,7 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
     const porPrazo = (a: ItemAtividade, b: ItemAtividade) => String(a.atual?.prazo ?? a.atual?.abre).localeCompare(String(b.atual?.prazo ?? b.atual?.abre)) || String(a.v.data_embarque).localeCompare(String(b.v.data_embarque));
     (Object.keys(g) as Grupo[]).forEach((k) => g[k].sort(porPrazo));
     const checkins = itens.filter(daVista).flatMap((it) => it.trechos
-      .filter((t) => ehVoo(t) && t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.checkin_em).getTime() <= agora + 24 * 3600_000 && new Date(t.partida_em).getTime() > agora)
+      .filter((t) => ehVoo(t, it.v) && t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.checkin_em).getTime() <= agora + 24 * 3600_000 && new Date(t.partida_em).getTime() > agora)
       .map((t) => ({ it, t }))).sort((a, b) => a.t.partida_em.localeCompare(b.t.partida_em));
     const feitasHoje = itens.filter(daVista).flatMap((it) => it.registros
       .filter((r) => r.concluida_em && new Date(r.concluida_em).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) === hoje)

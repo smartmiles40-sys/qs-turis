@@ -8,7 +8,8 @@
 // pelo supabase-js e abre por link assinado de poucos minutos.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import { TIPOS_FILTRO, condicaoDoTipo, type TipoFiltro } from "./tiposViagem";
+import { TIPOS_FILTRO, condicaoDoTipo, type TipoFiltro } from "./tiposViagem";
+
 import { lotes } from "@/lib/lotes";
 
 export type TipoViagem = "expedicao" | "pacote" | "aereo" | "hospedagem" | "outro";
@@ -85,6 +86,8 @@ export interface Viagem {
   volta_real?: string | null;
   voos_internos?: number;
   alertas_ignorados?: Record<string, { motivo?: string | null; por?: string | null; em?: string | null }> | null;
+  /** 0359: a venda tem aéreo? (serviço + "Passagem Aérea" do Bitrix) — a data do Bitrix só é voo se tiver. */
+  aereo_vendido?: boolean | null;
 }
 
 // ── Serviço vendido × acompanhamento (0148, Bruno 20/10) ───────────────────
@@ -670,6 +673,9 @@ export interface Trecho {
   status_manual_em?: string | null;
   corrigido_em?: string | null;
   corrigido_por?: string | null;
+  /** 0359 (view): a venda tem aéreo / o trecho é um voo que vale (aéreo de verdade, não a data do hotel). */
+  viagem_aereo_vendido?: boolean | null;
+  conta_como_voo?: boolean | null;
   // da view rel_trechos_v
   checkin_em: string | null;
   viagem_tipo: TipoViagem;

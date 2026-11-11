@@ -17,7 +17,8 @@
 // -----------------------------------------------------------------------------
 import { useSyncExternalStore } from "react";
 import { supabase } from "@/lib/supabase";
-import { hojeSP, trechosDasViagens, type Trecho, type Viagem } from "@/rel/lib/viagens";
+import { hojeSP, trechosDasViagens, type Trecho, type Viagem } from "@/rel/lib/viagens";
+
 import { lotes } from "@/lib/lotes";
 
 export type Motivo = "vip" | "influenciador" | "grupo_grande" | "outro";
@@ -428,7 +429,8 @@ export async function carregarPainel(): Promise<Painel> {
   const todos: Cartao[] = ativas.filter((p) => links.some((l) => l.prioridade_id === p.id)).map((p) => {
     const vs = links.filter((l) => l.prioridade_id === p.id).map((l) => vPorId.get(l.viagem_id)).filter((v): v is ViagemP => !!v);
     const meus = new Set(vs.map((v) => v.id));
-    const ts = semRepetir(trechos.filter((t) => meus.has(t.viagem_id)).sort((a, b) => a.partida_em.localeCompare(b.partida_em)));
+    // 0359: a data do Bitrix numa venda sem aéreo (hotel, seguro…) não é voo
+    const ts = semRepetir(trechos.filter((t) => meus.has(t.viagem_id) && !(t.tipo.startsWith("voo") && t.conta_como_voo === false)).sort((a, b) => a.partida_em.localeCompare(b.partida_em)));
     const checks = ((chk.data ?? []) as Check[]).filter((c) => c.prioridade_id === p.id);
     return {
       p,
