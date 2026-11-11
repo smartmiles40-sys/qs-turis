@@ -20,7 +20,8 @@ import { AgendarModal, EncaminharModal, FotoGrupo } from "./GrupoExtras";
 import { limiteArquivoMB, salvarFigurinha, salvarTranscricao, type Anexo } from "../lib/whatsapp";
 import {
   apagarNoGrupo, editarNoGrupo, enviarFigurinhaNoGrupo, enviarMidiaNoGrupo, enviarNoGrupo, enviarVozNoGrupo, mensagensDoGrupo,
-  participantesDoGrupo, reagirNoGrupo, telefoneDoAutor, type Grupo, type MensagemGrupo, type Participante,
+  participantesDoGrupo, reagirNoGrupo, respostasNoPrivado, telefoneDoAutor, type Grupo, type MensagemGrupo, type Participante,
+  type RespostaNoPrivado,
 } from "../lib/grupos";
 import PainelExpressoes from "./PainelExpressoes";
 import MenuContexto, { ICO, posicaoDoEvento, type ItemMenu, type PosicaoMenu } from "./MenuContexto";
@@ -53,8 +54,10 @@ function useRepetir(fn: () => unknown, ms: number) {
   }, [ms]);
 }
 
-export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado, agendadasLigadas = null }: {
+export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado, onAbrirConversa, agendadasLigadas = null }: {
   grupo: Grupo; onVoltar: () => void; onMudou: () => void;
+  /** Abre uma conversa 1:1 do Relacionamento pelo id (resposta no particular, 11/11). */
+  onAbrirConversa?: (id: string) => void;
   /** REL_GRUPOS_AGENDADAS ligado no servidor? (null = não sei ainda) */
   agendadasLigadas?: boolean | null;
   /** "Conversar no privado" (21/10): abre a conversa com a pessoa no número OFICIAL do Relacionamento — nunca pela ligação dos grupos. */
@@ -94,9 +97,17 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado, age
   const partes = useRef<Blob[]>([]);
   const descartar = useRef(false);
 
+  // "Responder em particular" (11/11): respostas no 1:1 que citam mensagens deste grupo
+  const [privadas, setPrivadas] = useState<RespostaNoPrivado[]>([]);
   const carregar = useCallback(async () => {
     try { setMsgs(await mensagensDoGrupo(grupo.jid)); } catch { /* mantém */ }
+    respostasNoPrivado(grupo.jid).then(setPrivadas).catch(() => { /* mantém */ });
   }, [grupo.jid]);
+  const privadasPorMsg = useMemo(() => {
+    const mapa = new Map<string, RespostaNoPrivado[]>();
+    for (const r of privadas) if (r.msg_id) mapa.set(r.msg_id, [...(mapa.get(r.msg_id) || []), r]);
+    return mapa;
+  }, [privadas]);
   useEffect(() => { void carregar(); }, [carregar]);
   useRepetir(carregar, 5000);
   const lerParticipantes = useCallback(() => { participantesDoGrupo(grupo.jid).then(setPart).catch(() => setPart([])); }, [grupo.jid]);
@@ -353,6 +364,23 @@ export default function ConversaGrupo({ grupo, onVoltar, onMudou, onPrivado, age
                   )}
                 </div>
               </div>
+              {(privadasPorMsg.get(m.msg_id) || []).map((r) => {
+                const quem = r.nome || (r.telefone && !r.telefone.startsWith("lid:") ? `+${r.telefone}` : "Cliente");
+                const abrirPrivado = onAbrirConversa ? () => onAbrirConversa(r.conversa_id) : onPrivado && r.telefone ? () => onPrivado(r.telefone!, quem) : null;
+                return (
+                  <div key={r.id} className={`flex mb-1.5 ${m.de_mim ? "justify-end" : "justify-start"}`}>
+                    <button type="button" disabled={!abrirPrivado} onClick={() => abrirPrivado?.()}
+                      className="wa-chip rounded-lg px-2.5 py-1 text-[12.5px] text-left max-w-[min(78%,540px)] disabled:cursor-default"
+                      title={abrirPrivado ? "Abrir a conversa no particular" : undefined}>
+                      <span className="font-semibold" style={{ color: "var(--wa-green-ink)" }}>
+                        ↪ {r.direcao === "out" ? `Relacionamento respondeu ${quem} no particular` : `${quem} respondeu no particular`}
+                      </span>
+                      {r.texto && <span className="block line-clamp-2" style={{ color: "var(--wa-meta)" }}>{r.texto}</span>}
+                      <span className="block text-[11px]" style={{ color: "var(--wa-meta)" }}>{rotuloDoDia(r.enviada_em)} · {hora(r.enviada_em)}{abrirPrivado ? " · abrir conversa" : ""}</span>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           );
         })}

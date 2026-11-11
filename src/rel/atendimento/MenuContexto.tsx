@@ -28,15 +28,15 @@ export default function MenuContexto({ pos, itens, onFechar, rotulo = "Opções"
   const [onde, setOnde] = useState<PosicaoMenu | null>(null);
   const [foco, setFoco] = useState(0);
 
-  // Encaixa na tela: se não cabe embaixo/à direita, abre pra cima/esquerda.
+  // Encaixa na tela: se não cabe embaixo/à direita, abre pra cima/esquerda — e
+  // NUNCA passa da borda (11/11: menu comprido aberto no meio da tela ia pra
+  // cima e saía cortado; agora fica preso na janela e rola por dentro).
   useLayoutEffect(() => {
     if (!pos) { setOnde(null); return; }
     const el = ref.current;
     const w = el?.offsetWidth ?? 240;
     const h = el?.offsetHeight ?? 300;
-    const x = pos.x + w > window.innerWidth - 8 ? Math.max(8, pos.x - w) : pos.x;
-    const y = pos.y + h > window.innerHeight - 8 ? Math.max(8, pos.y - h) : pos.y;
-    setOnde({ x, y });
+    setOnde(encaixar(pos, { w, h }, { w: window.innerWidth, h: window.innerHeight }));
     setFoco(0);
   }, [pos, itens.length]);
 
@@ -44,7 +44,8 @@ export default function MenuContexto({ pos, itens, onFechar, rotulo = "Opções"
 
   useEffect(() => {
     if (!pos) return;
-    const fora = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onFechar(); };
+    const dentro = (t: EventTarget | null) => t instanceof Node && !!ref.current?.contains(t);
+    const fora = (e: MouseEvent) => { if (!dentro(e.target)) onFechar(); };
     const tecla = (e: KeyboardEvent) => {
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onFechar(); return; }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -60,15 +61,19 @@ export default function MenuContexto({ pos, itens, onFechar, rotulo = "Opções"
         if (it && (!it.tipo || it.tipo === "item")) { e.preventDefault(); onFechar(); it.onClick(); }
       }
     };
-    const rolou = () => onFechar();
+    // rolar a PÁGINA/lista fecha (o menu ficaria solto no ar); rolar DENTRO do menu, não
+    const rolou = (e: Event) => { if (!dentro(e.target)) onFechar(); };
+    const saiu = () => onFechar();
     document.addEventListener("mousedown", fora, true);
     document.addEventListener("keydown", tecla, true);
-    window.addEventListener("resize", rolou);
+    window.addEventListener("resize", saiu);
+    window.addEventListener("blur", saiu);
     document.addEventListener("scroll", rolou, true);
     return () => {
       document.removeEventListener("mousedown", fora, true);
       document.removeEventListener("keydown", tecla, true);
-      window.removeEventListener("resize", rolou);
+      window.removeEventListener("resize", saiu);
+      window.removeEventListener("blur", saiu);
       document.removeEventListener("scroll", rolou, true);
     };
   }, [pos, onFechar, itens, foco, clicaveis]);
@@ -76,8 +81,16 @@ export default function MenuContexto({ pos, itens, onFechar, rotulo = "Opções"
   if (!pos) return null;
   return createPortal(
     <div ref={ref} role="menu" aria-label={rotulo}
-      className="wa wa-menu fixed z-[1000] min-w-[220px] max-w-[300px] py-2 rounded-lg"
-      style={{ left: onde?.x ?? pos.x, top: onde?.y ?? pos.y, visibility: onde ? "visible" : "hidden" }}
+      className="wa wa-menu fixed min-w-[220px] max-w-[300px] py-2 rounded-lg overflow-y-auto overscroll-contain"
+      // Fundo e sombra AQUI, não só na classe: o ".wa-menu" só existia no CSS da
+      // tela de Conversas (EXTRA_CSS do AtendimentoPage). Em Grupos o menu abria
+      // TRANSPARENTE, com os itens por cima da lista — o "menu bugado" (11/11).
+      style={{
+        left: onde?.x ?? pos.x, top: onde?.y ?? pos.y, visibility: onde ? "visible" : "hidden",
+        maxHeight: "calc(100vh - 16px)", zIndex: 2147483000,
+        background: "var(--wa-list, #fff)", color: "var(--wa-txt, #111B21)",
+        boxShadow: "0 2px 5px rgba(11,20,26,.26), 0 2px 10px rgba(11,20,26,.16)",
+      }}
       onContextMenu={(e) => e.preventDefault()}>
       {itens.map((it, i) => {
         if (it.tipo === "separador") return <div key={i} className="my-1.5 h-px" style={{ background: "var(--wa-line)" }} role="separator" />;
@@ -113,6 +126,17 @@ export default function MenuContexto({ pos, itens, onFechar, rotulo = "Opções"
     </div>,
     document.body,
   );
+}
+
+/**
+ * Onde o menu cabe: à direita/embaixo do ponto; se não cabe, vira pra
+ * esquerda/cima; e em qualquer caso fica inteiro dentro da janela (folga de 8px).
+ */
+export function encaixar(p: PosicaoMenu, menu: { w: number; h: number }, tela: { w: number; h: number }, folga = 8): PosicaoMenu {
+  const preso = (v: number, tam: number, max: number) => Math.max(folga, Math.min(v, max - tam - folga));
+  const x = p.x + menu.w > tela.w - folga ? p.x - menu.w : p.x;
+  const y = p.y + menu.h > tela.h - folga ? p.y - menu.h : p.y;
+  return { x: preso(x, menu.w, tela.w), y: preso(y, menu.h, tela.h) };
 }
 
 /** Abre o menu na posição do clique direito, ou embaixo do botão clicado. */
