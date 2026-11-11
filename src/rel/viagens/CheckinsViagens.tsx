@@ -11,7 +11,7 @@
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import { carregarVoosFuturos } from "../lib/agendaDados";
-import { ROTULO_SITUACAO_CHECKIN, TEXTO_ESTIMADO, filaDeCheckins, type ItemCheckin, type SituacaoCheckin, type TrechoAgenda, type ViagemAgenda } from "../lib/agendaServicos";
+import { ROTULO_SITUACAO_CHECKIN, TEXTO_ESTIMADO, filaDeCheckins, textoQuemFez, type ItemCheckin, type SituacaoCheckin, type TrechoAgenda, type ViagemAgenda } from "../lib/agendaServicos";
 import { checkinDoTrecho } from "../lib/correcoes";
 import { horaDoLugar, type Servico } from "../lib/viagens";
 import { TIPOS_FILTRO, tipoDoServico, type TipoFiltro } from "../lib/tiposViagem";
@@ -180,6 +180,12 @@ export default function CheckinsViagens({ onAbrirViagem, onAbrirCliente }: { onA
                           <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirViagem(it.viagem_id)}>{v?.titulo ?? "abrir viagem"}</button>
                           {v?.responsavel_nome ? <span style={{ color: "var(--ink3)" }}> · {v.responsavel_nome.replace(/\s*\|.*$/, "")}</span> : null}
                         </p>
+                        {/* 0360: quem marcou e de onde (Rel ou sistema de Expedições) */}
+                        {it.feito && (
+                          <p className="text-[11.5px] truncate" style={{ color: it.feito.origem === "expedicoes" ? "#7C3AED" : "#16A34A" }}>
+                            ✓ {textoQuemFez(it.feito, (iso) => dataHoraSP(new Date(iso).getTime()))}{it.situacao !== "feito" ? " — falta em outro bilhete desta viagem" : ""}
+                          </p>
+                        )}
                       </div>
                       {it.semBilhete ? (
                         <span className="text-[11.5px] flex-shrink-0 max-w-[160px]" style={{ color: "var(--ink3)" }}>cadastre o bilhete pra ter horário e check-in</span>

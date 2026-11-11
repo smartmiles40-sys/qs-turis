@@ -47,6 +47,9 @@ export interface TrechoAgenda {
   checkin_abre_em?: string | null;
   checkin_em?: string | null;
   checkin_feito_em?: string | null;
+  /** 0360: quem marcou e de onde (o Rel ou o sistema de Expedições) */
+  checkin_origem?: "rel" | "expedicoes" | null;
+  checkin_feito_por_nome?: string | null;
   status_manual?: "voado" | "cancelado" | null;
   /** 0359 (view): o trecho é um voo que vale. Ausente = migration ainda não aplicada. */
   conta_como_voo?: boolean | null;
@@ -108,6 +111,8 @@ export interface ItemCheckin {
   situacao: SituacaoCheckin;
   semBilhete: boolean;
   passageiros: string[];
+  /** quem marcou o check-in (do 1º bilhete marcado) — 0360 */
+  feito: { em: string; por: string | null; origem: "rel" | "expedicoes" | null } | null;
 }
 
 export interface OpcoesCheckin {
@@ -149,9 +154,20 @@ export function filaDeCheckins(trechos: TrechoAgenda[], viagens: Map<string, Via
     if (op.abreAte != null && abre > op.abreAte && !feito) continue;
     const situacao: SituacaoCheckin = feito ? "feito" : abre <= agora ? "aberto" : abre - agora <= 24 * H ? "abre_logo" : "futuro";
     const passageiros = [...new Set(ts.flatMap((x) => x.passageiros ?? []).map((p) => p.trim()).filter(Boolean))];
-    out.push({ chave, trechoIds: ts.map((x) => x.id), viagem_id: t.viagem_id, t, abre, estimado: !t.checkin_abre_em, situacao, semBilhete: sb, passageiros });
+    const m = ts.filter((x) => x.checkin_feito_em).sort((a, b) => a.checkin_feito_em!.localeCompare(b.checkin_feito_em!))[0];
+    const feitoPor = m ? { em: m.checkin_feito_em!, por: m.checkin_feito_por_nome ?? null, origem: m.checkin_origem ?? null } : null;
+    out.push({ chave, trechoIds: ts.map((x) => x.id), viagem_id: t.viagem_id, t, abre, estimado: !t.checkin_abre_em, situacao, semBilhete: sb, passageiros, feito: feitoPor });
   }
   return out.sort((a, b) => a.abre - b.abre || a.t.partida_em.localeCompare(b.t.partida_em) || a.chave.localeCompare(b.chave));
+}
+
+/** "Feito por Mariane no Relacionamento · 11/11 14:02" / "Feito no sistema de Expedições · …". */
+export function textoQuemFez(f: ItemCheckin["feito"], hora: (iso: string) => string): string {
+  if (!f) return "";
+  const onde = f.origem === "expedicoes" ? "no sistema de Expedições" : f.origem === "rel" ? "no Relacionamento" : "";
+  // "Mariane | Relacionamento" é a assinatura do WhatsApp, não o nome
+  const quem = f.por ? `por ${f.por.replace(/\s*\|.*$/, "")}` : "";
+  return ["Feito", quem, onde].filter(Boolean).join(" ") + ` · ${hora(f.em)}`;
 }
 
 export const TEXTO_ESTIMADO = `estimado: ${JANELA_CHECKIN_HORAS}h antes do voo (a cia não informou a abertura)`;

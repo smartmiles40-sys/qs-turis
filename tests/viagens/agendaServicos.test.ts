@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  acoesDaVenda, acoesDoTrecho, contarPorCategoria, ehVooQueVale, filaDeCheckins, montarAcoes,
+  acoesDaVenda, acoesDoTrecho, contarPorCategoria, ehVooQueVale, filaDeCheckins, montarAcoes, textoQuemFez,
   type TrechoAgenda, type ViagemAgenda,
 } from "../../src/rel/lib/agendaServicos.ts";
 import { resumirVoos, separarVoos, vendaTemAereo } from "../../src/rel/lib/statusViagem.ts";
@@ -168,4 +168,25 @@ test("montarAcoes: filtra por tipo, por data da ação e por embarque; ordena po
   assert.deepEqual(dia20.map((a) => a.evento), ["voo_parte", "hotel_checkin"]);
   const embDez = montarAcoes(ts, vs, { embarqueDe: "2026-12-01", embarqueAte: "2026-12-31" }, AGORA);
   assert.ok(embDez.length === 2 && embDez.every((a) => a.viagem_id === "v2"));
+});
+
+// ── 0360: quem marcou o check-in e de onde ──────────────────────────────────
+
+test("check-in feito mostra quem marcou e de onde (Rel × sistema de Expedições)", () => {
+  const vs = new Map([["v1", viagem({ servico: "expedicao" })]]);
+  const p = "2026-11-12T20:00:00-03:00";
+  const em = new Date("2026-11-11T09:00:00-03:00").toISOString();
+  const ts = [
+    tr("voo_internacional", p, { numero: "LA 9", checkin_feito_em: em, checkin_origem: "expedicoes", checkin_feito_por_nome: "Carla | Operações" }),
+    tr("voo_internacional", p, { numero: "LA 9" }),
+  ];
+  const [it] = filaDeCheckins(ts, vs, AGORA);
+  assert.equal(it.situacao, "aberto"); // falta o 2º bilhete
+  assert.deepEqual(it.feito, { em, por: "Carla | Operações", origem: "expedicoes" });
+  assert.equal(textoQuemFez(it.feito, () => "11/11 09:00"), "Feito por Carla no sistema de Expedições · 11/11 09:00");
+  const [it2] = filaDeCheckins([{ ...ts[1], checkin_feito_em: em, checkin_origem: "rel", checkin_feito_por_nome: "Mariane" }, ts[0]], vs, AGORA, { feitos: true });
+  assert.equal(it2.situacao, "feito");
+  assert.equal(textoQuemFez({ em, por: null, origem: "expedicoes" }, () => "x"), "Feito no sistema de Expedições · x");
+  assert.equal(textoQuemFez({ em, por: "Mariane", origem: "rel" }, () => "x"), "Feito por Mariane no Relacionamento · x");
+  assert.equal(filaDeCheckins([tr("voo_internacional", p, { numero: "LA 8" })], vs, AGORA)[0].feito, null);
 });

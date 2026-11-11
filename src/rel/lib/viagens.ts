@@ -676,6 +676,9 @@ export interface Trecho {
   /** 0359 (view): a venda tem aéreo / o trecho é um voo que vale (aéreo de verdade, não a data do hotel). */
   viagem_aereo_vendido?: boolean | null;
   conta_como_voo?: boolean | null;
+  /** 0360: de onde veio o check-in (o Rel ou o sistema de Expedições) e quem marcou */
+  checkin_origem?: "rel" | "expedicoes" | null;
+  checkin_feito_por_nome?: string | null;
   // da view rel_trechos_v
   checkin_em: string | null;
   viagem_tipo: TipoViagem;
